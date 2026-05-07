@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import Button from "primevue/button";
+import Checkbox from "primevue/checkbox";
 import InputText from "primevue/inputtext";
 import Textarea from "primevue/textarea";
 import ToggleButton from "primevue/togglebutton";
@@ -8,8 +9,15 @@ import Tag from "primevue/tag";
 import { api, type Message } from "../lib/api";
 import MarkdownView from "./MarkdownView.vue";
 
-const props = defineProps<{ message: Message }>();
-const emit = defineEmits<{ (e: "changed", m: Message): void }>();
+const props = defineProps<{
+    message: Message;
+    selectable?: boolean;
+    selected?: boolean;
+}>();
+const emit = defineEmits<{
+    (e: "changed", m: Message): void;
+    (e: "update:selected", v: boolean): void;
+}>();
 
 const editing = ref(false);
 const editTitle = ref("");
@@ -19,6 +27,7 @@ const noting = ref(false);
 const note = ref("");
 const busy = ref(false);
 const error = ref<string | null>(null);
+const expanded = ref(false);
 
 const displayTitle = computed(
     () => props.message.edited_title ?? props.message.title ?? "",
@@ -109,8 +118,22 @@ async function saveNote() {
 </script>
 
 <template>
-    <div class="message-card">
-        <div class="meta">
+    <div
+        class="message-card"
+        :class="{ 'is-selected': selectable && selected, 'is-expanded': expanded }"
+    >
+        <div class="meta" @click="expanded = !expanded" style="cursor: pointer">
+            <Checkbox
+                v-if="selectable"
+                :model-value="selected"
+                binary
+                @update:model-value="(v: boolean) => emit('update:selected', v)"
+                @click.stop
+            />
+            <i
+                class="pi expand-chevron"
+                :class="expanded ? 'pi-chevron-down' : 'pi-chevron-right'"
+            />
             <Tag :value="`#${message.id}`" severity="secondary" />
             <Tag :value="kindLabel" />
             <Tag :value="message.project" severity="info" />

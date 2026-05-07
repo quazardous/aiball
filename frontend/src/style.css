@@ -8,6 +8,16 @@
         sans-serif;
 }
 
+.w-full {
+    width: 100%;
+}
+.w-full input,
+.w-full textarea,
+.w-full .p-inputtext,
+.w-full .p-textarea {
+    width: 100%;
+}
+
 html,
 body,
 #app {
@@ -73,6 +83,63 @@ body,
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.message-card.is-selected {
+    border-color: var(--p-primary-color);
+    box-shadow: 0 0 0 2px var(--p-primary-300);
+}
+.message-card .expand-chevron {
+    color: var(--p-text-muted-color);
+    font-size: 0.75rem;
+}
+/* The expand chevron only matters in compact mode */
+.aiball-shell:not(.aiball-compact) .message-card .expand-chevron {
+    display: none;
+}
+
+/* ---- Compact mode ---- */
+.aiball-compact .message-card {
+    padding: 0.5rem 0.7rem;
+    gap: 0.3rem;
+}
+.aiball-compact .message-card:not(.is-expanded) .md-body,
+.aiball-compact .message-card:not(.is-expanded) .comment-note {
+    display: none;
+}
+.aiball-compact .message-card:not(.is-expanded) .title {
+    margin: 0;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.aiball-compact .message-card:not(.is-expanded) .actions {
+    margin-top: 0;
+}
+
+.aiball-compact .ticket-row {
+    padding: 0.45rem 0.7rem;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.aiball-compact .ticket-row .ticket-row-meta {
+    flex: 0 0 auto;
+    margin-right: 0.5rem;
+}
+.aiball-compact .ticket-row .ticket-row-title {
+    flex: 1 1 12rem;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0;
+}
+.aiball-compact .ticket-row .ticket-row-footer {
+    flex: 0 0 auto;
+    justify-content: flex-end;
 }
 
 .message-card .meta {

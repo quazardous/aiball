@@ -70,14 +70,16 @@ async function submit() {
                 size="small"
             />
         </div>
-        <div v-if="!preview">
+        <div v-if="!preview" class="reply-textarea-wrap">
             <Textarea
                 v-model="body"
-                :rows="4"
+                :rows="8"
                 class="w-full reply-textarea"
                 :placeholder="placeholder ?? 'Write a comment — markdown supported (gfm)'"
                 :disabled="sending"
                 autoResize
+                @keydown.ctrl.enter.prevent="submit"
+                @keydown.meta.enter.prevent="submit"
             />
         </div>
         <div v-else class="reply-preview">
@@ -135,9 +137,15 @@ async function submit() {
     padding: 0.8rem;
     min-height: 5rem;
 }
+.reply-textarea-wrap {
+    width: 100%;
+}
 .reply-textarea {
+    width: 100%;
+    min-height: 10rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.9rem;
+    resize: vertical;
 }
 .spacer { flex: 1; }
 </style>

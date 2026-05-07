@@ -73,11 +73,57 @@ const messages = ref<Message[]>([]);
 const loading = ref(false);
 const rulesOpen = ref(false);
 const dark = ref(localStorage.getItem("aiball.dark") === "1");
+const compact = ref(localStorage.getItem("aiball.compact") !== "0");
 const openTicketId = ref<number | null>(null);
 const ticketListRef = ref<InstanceType<typeof TicketList> | null>(null);
 const threadRef = ref<InstanceType<typeof ThreadView> | null>(null);
 
+const selectMode = ref(false);
+const selectedIds = ref<Set<number>>(new Set());
+const bulkBusy = ref(false);
+
 const isStatusList = computed(() => tab.value !== "tickets");
+
+function toggleSelected(id: number, v: boolean) {
+    const next = new Set(selectedIds.value);
+    if (v) next.add(id);
+    else next.delete(id);
+    selectedIds.value = next;
+}
+function clearSelection() {
+    selectedIds.value = new Set();
+}
+function selectAllVisible() {
+    selectedIds.value = new Set(messages.value.map((m) => m.id));
+}
+async function bulkDecide(action: "approve" | "reject") {
+    const ids = [...selectedIds.value];
+    if (!ids.length) return;
+    bulkBusy.value = true;
+    let ok = 0;
+    let failed = 0;
+    try {
+        for (const id of ids) {
+            try {
+                if (action === "approve") await api.approve(id);
+                else await api.reject(id);
+                ok++;
+            } catch {
+                failed++;
+            }
+        }
+        toast.add({
+            severity: failed ? "warn" : "success",
+            summary: `${action}d ${ok} message${ok === 1 ? "" : "s"}`,
+            detail: failed ? `${failed} failed` : undefined,
+            life: 3500,
+        });
+        clearSelection();
+        await loadMessages();
+    } finally {
+        bulkBusy.value = false;
+    }
+}
 
 watch(project, (v) => {
     if (v) localStorage.setItem("aiball.project", v);
@@ -90,6 +136,10 @@ watch(dark, (v) => {
     document.documentElement.classList.toggle("aiball-dark", v);
 });
 document.documentElement.classList.toggle("aiball-dark", dark.value);
+
+watch(compact, (v) => {
+    localStorage.setItem("aiball.compact", v ? "1" : "0");
+});
 
 async function loadProjects() {
     try {
@@ -252,6 +302,7 @@ function selectTab(v: Tab) {
     tab.value = v;
     openTicketId.value = null;
     tabBadges.value = { ...tabBadges.value, [v]: 0 };
+    clearSelection();
 }
 
 const projectListItems = computed(() => [
@@ -261,7 +312,7 @@ const projectListItems = computed(() => [
 </script>
 
 <template>
-    <div class="aiball-shell">
+    <div class="aiball-shell" :class="{ 'aiball-compact': compact }">
         <header class="aiball-header">
             <h1>aiball</h1>
             <span
@@ -270,6 +321,14 @@ const projectListItems = computed(() => [
                 :title="connected ? 'WebSocket live' : 'WebSocket offline'"
             />
             <span class="spacer" />
+            <Button
+                :icon="compact ? 'pi pi-th-large' : 'pi pi-bars'"
+                :title="compact ? 'switch to comfortable view' : 'switch to compact view'"
+                severity="secondary"
+                text
+                rounded
+                @click="compact = !compact"
+            />
             <Button
                 v-if="!notifAllowed && !notifMuted"
                 icon="pi pi-bell"
@@ -361,6 +420,59 @@ const projectListItems = computed(() => [
                 />
 
                 <template v-else>
+                    <div v-if="messages.length" class="bulk-bar">
+                        <Button
+                            :label="selectMode ? 'cancel select' : 'select'"
+                            :icon="selectMode ? 'pi pi-times' : 'pi pi-check-square'"
+                            size="small"
+                            severity="secondary"
+                            text
+                            @click="selectMode = !selectMode; clearSelection()"
+                        />
+                        <template v-if="selectMode">
+                            <Button
+                                label="all"
+                                icon="pi pi-list"
+                                size="small"
+                                severity="secondary"
+                                text
+                                @click="selectAllVisible"
+                            />
+                            <Button
+                                label="none"
+                                icon="pi pi-minus"
+                                size="small"
+                                severity="secondary"
+                                text
+                                :disabled="!selectedIds.size"
+                                @click="clearSelection"
+                            />
+                            <span class="bulk-count">
+                                <strong>{{ selectedIds.size }}</strong> selected
+                            </span>
+                            <span class="spacer" />
+                            <template v-if="tab === 'pending'">
+                                <Button
+                                    label="approve"
+                                    icon="pi pi-check"
+                                    severity="success"
+                                    size="small"
+                                    :loading="bulkBusy"
+                                    :disabled="!selectedIds.size"
+                                    @click="bulkDecide('approve')"
+                                />
+                                <Button
+                                    label="reject"
+                                    icon="pi pi-times"
+                                    severity="danger"
+                                    size="small"
+                                    :loading="bulkBusy"
+                                    :disabled="!selectedIds.size"
+                                    @click="bulkDecide('reject')"
+                                />
+                            </template>
+                        </template>
+                    </div>
                     <div v-if="loading && !messages.length" class="aiball-empty">
                         Loading…
                     </div>
@@ -374,6 +486,9 @@ const projectListItems = computed(() => [
                         v-for="m in messages"
                         :key="m.id"
                         :message="m"
+                        :selectable="selectMode"
+                        :selected="selectedIds.has(m.id)"
+                        @update:selected="(v: boolean) => toggleSelected(m.id, v)"
                         @changed="onMessageChanged"
                     />
                 </template>
@@ -493,6 +608,24 @@ const projectListItems = computed(() => [
     min-width: 1.1rem;
     text-align: center;
     line-height: 1.3rem;
+}
+
+.bulk-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.4rem;
+    background: var(--p-surface-50);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+.aiball-dark .bulk-bar { background: var(--p-surface-900); }
+.bulk-count {
+    font-size: 0.85rem;
+    color: var(--p-text-muted-color);
 }
 
 @media (max-width: 720px) {
