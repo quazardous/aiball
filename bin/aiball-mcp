@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# aiball MCP server — stdio transport.
+# Resolves the project root (where package.json lives) and execs `tsx src/mcp.ts`.
+# Honors AIBALL_URL / AIBALL_HOME / AIBALL_AGENT env vars (see README).
+set -euo pipefail
+
+# Resolve real path even through symlinks (e.g. ~/.local/bin/aiball-mcp).
+SELF="$0"
+while [[ -L "$SELF" ]]; do
+    target="$(readlink "$SELF")"
+    if [[ "$target" = /* ]]; then SELF="$target"; else SELF="$(dirname "$SELF")/$target"; fi
+done
+BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+ROOT="$(cd "$BIN_DIR/.." && pwd)"
+
+cd "$ROOT"
+exec npx --no-install tsx "$ROOT/src/mcp.ts" "$@"

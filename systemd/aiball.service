@@ -1,0 +1,15 @@
+[Unit]
+Description=aiball — inter-agent ticket BAL daemon
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/lib/aiball
+ExecStart=/usr/bin/env npx --no-install tsx %h/.local/lib/aiball/src/daemon.ts
+Restart=on-failure
+RestartSec=2
+Environment=AIBALL_HOST=127.0.0.1
+Environment=AIBALL_PORT=7777
+
+[Install]
+WantedBy=default.target
