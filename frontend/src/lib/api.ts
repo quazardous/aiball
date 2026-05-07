@@ -43,6 +43,31 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     return res.json() as Promise<T>;
 }
 
+export interface TicketSummary {
+    id: number;
+    project: string;
+    title: string | null;
+    body: string | null;
+    by_agent: string | null;
+    created_at: string;
+    closed: boolean;
+}
+
+export interface ThreadView {
+    ticket: TicketSummary;
+    comments: Message[];
+}
+
+export interface PostMessageInput {
+    project: string;
+    kind: "ticket_created" | "comment_added" | "ticket_closed";
+    title?: string;
+    body?: string;
+    by_agent?: string;
+    ticket_id?: number;
+    parent_id?: number;
+}
+
 export const api = {
     listProjects: () => req<string[]>("GET", "/api/projects"),
     listMessages: (params: {
@@ -58,6 +83,16 @@ export const api = {
         const q = qs.toString();
         return req<Message[]>("GET", `/api/messages${q ? "?" + q : ""}`);
     },
+    listTickets: (params: { project?: string; open?: boolean } = {}) => {
+        const qs = new URLSearchParams();
+        if (params.project) qs.set("project", params.project);
+        if (params.open) qs.set("open", "1");
+        const q = qs.toString();
+        return req<TicketSummary[]>("GET", `/api/tickets${q ? "?" + q : ""}`);
+    },
+    getTicket: (id: number) => req<ThreadView>("GET", `/api/tickets/${id}`),
+    postMessage: (body: PostMessageInput) =>
+        req<Message>("POST", "/api/messages", body),
     approve: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/approve`),
     reject: (id: number) =>

@@ -3,8 +3,10 @@ import { ref, computed } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Textarea from "primevue/textarea";
+import ToggleButton from "primevue/togglebutton";
 import Tag from "primevue/tag";
 import { api, type Message } from "../lib/api";
+import MarkdownView from "./MarkdownView.vue";
 
 const props = defineProps<{ message: Message }>();
 const emit = defineEmits<{ (e: "changed", m: Message): void }>();
@@ -12,6 +14,7 @@ const emit = defineEmits<{ (e: "changed", m: Message): void }>();
 const editing = ref(false);
 const editTitle = ref("");
 const editBody = ref("");
+const editPreview = ref(false);
 const noting = ref(false);
 const note = ref("");
 const busy = ref(false);
@@ -72,6 +75,7 @@ async function reject() {
 function startEdit() {
     editTitle.value = displayTitle.value;
     editBody.value = displayBody.value;
+    editPreview.value = false;
     editing.value = true;
 }
 async function saveEdit() {
@@ -121,18 +125,37 @@ async function saveNote() {
 
         <div v-if="!editing">
             <div v-if="displayTitle" class="title">{{ displayTitle }}</div>
-            <pre v-if="displayBody" class="body">{{ displayBody }}</pre>
+            <MarkdownView v-if="displayBody" :source="displayBody" />
         </div>
         <div v-else class="edit-form">
             <span class="field-label">Title</span>
             <InputText v-model="editTitle" class="w-full" :disabled="busy" />
-            <span class="field-label">Body</span>
+            <div style="display: flex; align-items: center; gap: 0.5rem">
+                <span class="field-label" style="margin: 0">Body (markdown)</span>
+                <span class="spacer" />
+                <ToggleButton
+                    v-model="editPreview"
+                    on-label="edit"
+                    off-label="preview"
+                    on-icon="pi pi-pencil"
+                    off-icon="pi pi-eye"
+                    size="small"
+                />
+            </div>
             <Textarea
+                v-if="!editPreview"
                 v-model="editBody"
-                :rows="4"
+                :rows="6"
                 class="w-full"
                 :disabled="busy"
+                style="font-family: ui-monospace, monospace; font-size: 0.9rem"
             />
+            <div v-else class="reply-preview">
+                <MarkdownView :source="editBody" />
+                <div v-if="!editBody.trim()" class="aiball-empty" style="padding: 1rem">
+                    Nothing to preview.
+                </div>
+            </div>
             <div class="actions">
                 <Button
                     label="save"

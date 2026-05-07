@@ -54,6 +54,11 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
  */
 export function submitMessage(input: NewMessage): Message {
     let msg = insertMessage(input);
+    // Always announce the message: every UI list (pending, approved, tickets,
+    // open thread) wants to know that a new row exists, regardless of how
+    // moderation will resolve it.
+    broadcast({ type: "message_created", data: msg });
+
     const decision = evaluate({
         project: input.project,
         kind: input.kind,
@@ -69,10 +74,10 @@ export function submitMessage(input: NewMessage): Message {
         if (updated) {
             msg = updated;
             deliverToOutbox(msg);
+            // …and announce the auto-approval so subscribers transition state
+            // (status: pending → approved) without polling.
             broadcast({ type: "message_decided", data: msg });
         }
-    } else {
-        broadcast({ type: "message_created", data: msg });
     }
     return msg;
 }

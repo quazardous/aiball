@@ -1,10 +1,12 @@
 import { ref, onBeforeUnmount } from "vue";
 
+import type { Message } from "./api";
+
 export type WsEvent =
-    | { type: "message_created"; data: unknown }
-    | { type: "message_decided"; data: unknown }
-    | { type: "message_edited"; data: unknown }
-    | { type: "message_noted"; data: unknown }
+    | { type: "message_created"; data: Message }
+    | { type: "message_decided"; data: Message }
+    | { type: "message_edited"; data: Message }
+    | { type: "message_noted"; data: Message }
     | { type: "rule_changed"; data: unknown };
 
 export function useWs(onEvent: (e: WsEvent) => void) {

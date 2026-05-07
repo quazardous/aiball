@@ -9,28 +9,45 @@ import { api, type Message } from "./lib/api";
 import { useWs } from "./lib/ws";
 import MessageCard from "./components/MessageCard.vue";
 import RulesPanel from "./components/RulesPanel.vue";
+import TicketList from "./components/TicketList.vue";
+import ThreadView from "./components/ThreadView.vue";
 
 const toast = useToast();
 
-type Tab = "pending" | "approved" | "rejected";
-const tab = ref<Tab>("pending");
+type Tab = "tickets" | "pending" | "approved" | "rejected";
+const tab = ref<Tab>("tickets");
 const tabOptions = [
-    { label: "Pending", value: "pending" },
-    { label: "Approved", value: "approved" },
-    { label: "Rejected", value: "rejected" },
+    { label: "Tickets", value: "tickets", icon: "pi pi-ticket" },
+    { label: "Pending", value: "pending", icon: "pi pi-clock" },
+    { label: "Approved", value: "approved", icon: "pi pi-check" },
+    { label: "Rejected", value: "rejected", icon: "pi pi-times" },
 ];
 
 const projects = ref<string[]>([]);
-const project = ref<string | null>(null);
+const project = ref<string | null>(
+    localStorage.getItem("aiball.project") || null,
+);
 const messages = ref<Message[]>([]);
 const loading = ref(false);
 const rulesOpen = ref(false);
-const dark = ref(false);
+const dark = ref(localStorage.getItem("aiball.dark") === "1");
+const openTicketId = ref<number | null>(null);
+const ticketListRef = ref<InstanceType<typeof TicketList> | null>(null);
+const threadRef = ref<InstanceType<typeof ThreadView> | null>(null);
 
-const filteredProjects = computed(() => [
-    { label: "all projects", value: null },
-    ...projects.value.map((p) => ({ label: p, value: p })),
-]);
+const isStatusList = computed(() => tab.value !== "tickets");
+
+watch(project, (v) => {
+    if (v) localStorage.setItem("aiball.project", v);
+    else localStorage.removeItem("aiball.project");
+    openTicketId.value = null;
+});
+
+watch(dark, (v) => {
+    localStorage.setItem("aiball.dark", v ? "1" : "0");
+    document.documentElement.classList.toggle("aiball-dark", v);
+});
+document.documentElement.classList.toggle("aiball-dark", dark.value);
 
 async function loadProjects() {
     try {
@@ -46,6 +63,7 @@ async function loadProjects() {
 }
 
 async function loadMessages() {
+    if (!isStatusList.value) return;
     loading.value = true;
     try {
         messages.value = await api.listMessages({
@@ -66,39 +84,89 @@ async function loadMessages() {
 }
 
 function refresh() {
-    return Promise.all([loadProjects(), loadMessages()]);
+    loadProjects();
+    if (openTicketId.value !== null) {
+        threadRef.value?.load();
+    } else if (tab.value === "tickets") {
+        ticketListRef.value?.load();
+    } else {
+        loadMessages();
+    }
 }
 
 function onMessageChanged(updated: Message) {
+    if (!isStatusList.value) {
+        if (openTicketId.value !== null) threadRef.value?.load();
+        else ticketListRef.value?.load();
+        return;
+    }
     const idx = messages.value.findIndex((m) => m.id === updated.id);
     if (updated.status === tab.value) {
         if (idx >= 0) messages.value[idx] = updated;
         else messages.value = [updated, ...messages.value];
-    } else {
-        if (idx >= 0) messages.value.splice(idx, 1);
+    } else if (idx >= 0) {
+        messages.value.splice(idx, 1);
     }
 }
 
 const { connected } = useWs((ev) => {
+    if (ev.type === "rule_changed") return;
     const data = ev.data as Message | undefined;
     if (!data || typeof data !== "object") return;
-    if (
-        ev.type === "message_decided" ||
-        ev.type === "message_edited" ||
-        ev.type === "message_noted"
-    ) {
+
+    // Tickets / Thread view: any creation or decision in the active scope
+    // forces a reload so the ticket list, comment count and timestamps stay
+    // consistent without manual refresh.
+    if (!isStatusList.value) {
+        const inScope =
+            !project.value || project.value === data.project;
+        if (!inScope) return;
+        if (openTicketId.value !== null) {
+            // Reload the open thread when a new comment lands on it
+            // (or a comment edit/note arrives).
+            const onThisThread =
+                data.id === openTicketId.value ||
+                data.ticket_id === openTicketId.value;
+            if (onThisThread) threadRef.value?.load();
+        } else {
+            ticketListRef.value?.load();
+        }
+        return;
+    }
+
+    // Pending / Approved / Rejected lists.
+    if (ev.type === "message_created") {
+        // A brand new pending row may have appeared.
+        if (
+            data.status === tab.value &&
+            (!project.value || project.value === data.project)
+        ) {
+            const idx = messages.value.findIndex((m) => m.id === data.id);
+            if (idx < 0) messages.value = [data, ...messages.value];
+            else messages.value[idx] = data;
+        }
+    } else {
         onMessageChanged(data);
     }
 });
 
-watch([tab, project], () => loadMessages());
+watch([tab, project], () => {
+    if (isStatusList.value) loadMessages();
+});
 
-function toggleDark() {
-    dark.value = !dark.value;
-    document.documentElement.classList.toggle("aiball-dark", dark.value);
+onMounted(() => {
+    loadProjects();
+    if (isStatusList.value) loadMessages();
+});
+
+function selectProject(p: string | null) {
+    project.value = p;
 }
 
-onMounted(refresh);
+const projectListItems = computed(() => [
+    { label: "All projects", value: null, icon: "pi pi-globe" },
+    ...projects.value.map((p) => ({ label: p, value: p, icon: "pi pi-folder" })),
+]);
 </script>
 
 <template>
@@ -111,21 +179,6 @@ onMounted(refresh);
                 :title="connected ? 'WebSocket live' : 'WebSocket offline'"
             />
             <span class="spacer" />
-            <Select
-                v-model="tab"
-                :options="tabOptions"
-                option-label="label"
-                option-value="value"
-            />
-            <Select
-                v-model="project"
-                :options="filteredProjects"
-                option-label="label"
-                option-value="value"
-                placeholder="all projects"
-                show-clear
-                style="min-width: 12rem"
-            />
             <Button
                 label="rules"
                 icon="pi pi-cog"
@@ -137,7 +190,7 @@ onMounted(refresh);
                 severity="secondary"
                 text
                 rounded
-                @click="toggleDark"
+                @click="dark = !dark"
             />
             <Button
                 icon="pi pi-refresh"
@@ -149,26 +202,183 @@ onMounted(refresh);
             />
         </header>
 
-        <main class="aiball-main">
-            <div v-if="loading && !messages.length" class="aiball-empty">
-                Loading…
-            </div>
-            <div v-else-if="!messages.length" class="aiball-empty">
-                <i class="pi pi-inbox" style="font-size: 1.6rem" />
-                <div>No {{ tab }} messages{{ project ? ` in ${project}` : "" }}.</div>
-            </div>
-            <MessageCard
-                v-for="m in messages"
-                :key="m.id"
-                :message="m"
-                @changed="onMessageChanged"
-            />
-        </main>
+        <div class="aiball-layout">
+            <aside class="aiball-sidebar">
+                <div class="sidebar-section-label">Projects</div>
+                <button
+                    v-for="p in projectListItems"
+                    :key="p.value ?? '__all__'"
+                    type="button"
+                    class="sidebar-item"
+                    :class="{ active: project === p.value }"
+                    @click="selectProject(p.value)"
+                >
+                    <i :class="p.icon" />
+                    <span>{{ p.label }}</span>
+                </button>
+            </aside>
 
-        <Drawer v-model:visible="rulesOpen" header="Moderation rules" position="right" :style="{ width: 'min(540px, 100vw)' }">
+            <main class="aiball-main">
+                <nav class="aiball-tabs">
+                    <button
+                        v-for="t in tabOptions"
+                        :key="t.value"
+                        type="button"
+                        class="tab-btn"
+                        :class="{ active: tab === t.value }"
+                        @click="tab = t.value as Tab; openTicketId = null"
+                    >
+                        <i :class="t.icon" />
+                        <span>{{ t.label }}</span>
+                    </button>
+                </nav>
+
+                <ThreadView
+                    v-if="openTicketId !== null"
+                    ref="threadRef"
+                    :ticket-id="openTicketId"
+                    @back="openTicketId = null"
+                />
+
+                <TicketList
+                    v-else-if="tab === 'tickets'"
+                    ref="ticketListRef"
+                    :project="project"
+                    @open="(id: number) => (openTicketId = id)"
+                />
+
+                <template v-else>
+                    <div v-if="loading && !messages.length" class="aiball-empty">
+                        Loading…
+                    </div>
+                    <div v-else-if="!messages.length" class="aiball-empty">
+                        <i class="pi pi-inbox" style="font-size: 1.6rem" />
+                        <div>
+                            No {{ tab }} messages{{ project ? ` in ${project}` : "" }}.
+                        </div>
+                    </div>
+                    <MessageCard
+                        v-for="m in messages"
+                        :key="m.id"
+                        :message="m"
+                        @changed="onMessageChanged"
+                    />
+                </template>
+            </main>
+        </div>
+
+        <Drawer
+            v-model:visible="rulesOpen"
+            header="Moderation rules"
+            position="right"
+            :style="{ width: 'min(540px, 100vw)' }"
+        >
             <RulesPanel />
         </Drawer>
 
         <Toast />
     </div>
 </template>
+
+<style>
+.aiball-layout {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+}
+.aiball-sidebar {
+    border-right: 1px solid var(--p-content-border-color);
+    padding: 0.8rem 0.6rem;
+    background: var(--p-surface-50);
+    overflow-y: auto;
+}
+.aiball-dark .aiball-sidebar {
+    background: var(--p-surface-900);
+}
+.sidebar-section-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--p-text-muted-color);
+    padding: 0.3rem 0.5rem 0.2rem;
+}
+.sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    padding: 0.45rem 0.6rem;
+    border-radius: 0.4rem;
+    color: var(--p-text-color);
+    cursor: pointer;
+    font: inherit;
+}
+.sidebar-item:hover {
+    background: var(--p-surface-100);
+}
+.aiball-dark .sidebar-item:hover {
+    background: var(--p-surface-800);
+}
+.sidebar-item.active {
+    background: var(--p-primary-color);
+    color: var(--p-primary-contrast-color);
+}
+.sidebar-item.active:hover {
+    background: var(--p-primary-color);
+}
+
+.aiball-main {
+    padding: 1rem;
+    max-width: 980px;
+    width: 100%;
+    margin: 0 auto;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+.aiball-tabs {
+    display: flex;
+    gap: 0.3rem;
+    border-bottom: 1px solid var(--p-content-border-color);
+    margin-bottom: 0.4rem;
+    overflow-x: auto;
+}
+.tab-btn {
+    background: transparent;
+    border: 0;
+    padding: 0.5rem 0.9rem;
+    cursor: pointer;
+    font: inherit;
+    color: var(--p-text-muted-color);
+    border-bottom: 2px solid transparent;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: -1px;
+}
+.tab-btn:hover {
+    color: var(--p-text-color);
+}
+.tab-btn.active {
+    color: var(--p-primary-color);
+    border-bottom-color: var(--p-primary-color);
+}
+
+@media (max-width: 720px) {
+    .aiball-layout {
+        grid-template-columns: 1fr;
+    }
+    .aiball-sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--p-content-border-color);
+        max-height: 30vh;
+    }
+}
+</style>
