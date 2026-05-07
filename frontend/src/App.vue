@@ -8,19 +8,19 @@ import { api, type Message } from "./lib/api";
 import { useWs } from "./lib/ws";
 import MessageCard from "./components/MessageCard.vue";
 import RulesPanel from "./components/RulesPanel.vue";
+import TagsPanel from "./components/TagsPanel.vue";
 import TicketList from "./components/TicketList.vue";
 import ThreadView from "./components/ThreadView.vue";
 
 const toast = useToast();
 
-type Tab = "tickets" | "pending" | "approved" | "rejected" | "rules";
+type Tab = "tickets" | "pending" | "approved" | "rejected";
 const tab = ref<Tab>("tickets");
 const tabOptions: { label: string; value: Tab; icon: string }[] = [
     { label: "Tickets", value: "tickets", icon: "pi pi-ticket" },
     { label: "Pending", value: "pending", icon: "pi pi-clock" },
     { label: "Approved", value: "approved", icon: "pi pi-check" },
     { label: "Rejected", value: "rejected", icon: "pi pi-times" },
-    { label: "Rules", value: "rules", icon: "pi pi-cog" },
 ];
 
 // Per-tab badge counters — incremented on WS push when the user isn't on
@@ -30,8 +30,11 @@ const tabBadges = ref<Record<Tab, number>>({
     pending: 0,
     approved: 0,
     rejected: 0,
-    rules: 0,
 });
+
+// Sidebar can route to a settings panel that replaces the lists entirely.
+type SettingsPanel = "rules" | "tags";
+const panel = ref<SettingsPanel | null>(null);
 
 // OS notifications: lazily ask permission on first interaction so we don't
 // spam the user with a permission popup at boot.
@@ -83,7 +86,7 @@ const selectedIds = ref<Set<number>>(new Set());
 const bulkBusy = ref(false);
 
 const isStatusList = computed(
-    () => tab.value !== "tickets" && tab.value !== "rules",
+    () => panel.value === null && tab.value !== "tickets",
 );
 
 function toggleSelected(id: number, v: boolean) {
@@ -299,6 +302,14 @@ onMounted(() => {
 
 function selectProject(p: string | null) {
     project.value = p;
+    panel.value = null;
+    openTicketId.value = null;
+}
+
+function openPanel(p: SettingsPanel) {
+    panel.value = p;
+    openTicketId.value = null;
+    clearSelection();
 }
 
 function selectTab(v: Tab) {
@@ -375,50 +386,74 @@ const projectListItems = computed(() => [
                     :key="p.value ?? '__all__'"
                     type="button"
                     class="sidebar-item"
-                    :class="{ active: project === p.value }"
+                    :class="{ active: panel === null && project === p.value }"
                     @click="selectProject(p.value)"
                 >
                     <i :class="p.icon" />
                     <span>{{ p.label }}</span>
                 </button>
+
+                <div class="sidebar-section-label" style="margin-top: 1rem">
+                    Settings
+                </div>
+                <button
+                    type="button"
+                    class="sidebar-item"
+                    :class="{ active: panel === 'rules' }"
+                    @click="openPanel('rules')"
+                >
+                    <i class="pi pi-cog" />
+                    <span>Rules</span>
+                </button>
+                <button
+                    type="button"
+                    class="sidebar-item"
+                    :class="{ active: panel === 'tags' }"
+                    @click="openPanel('tags')"
+                >
+                    <i class="pi pi-tag" />
+                    <span>Tags</span>
+                </button>
             </aside>
 
             <main class="aiball-main">
-                <nav class="aiball-tabs">
-                    <button
-                        v-for="t in tabOptions"
-                        :key="t.value"
-                        type="button"
-                        class="tab-btn"
-                        :class="{ active: tab === t.value }"
-                        @click="selectTab(t.value)"
-                    >
-                        <i :class="t.icon" />
-                        <span>{{ t.label }}</span>
-                        <span
-                            v-if="tabBadges[t.value] > 0 && tab !== t.value"
-                            class="tab-badge"
-                        >{{ tabBadges[t.value] }}</span>
-                    </button>
-                </nav>
-
-                <ThreadView
-                    v-if="openTicketId !== null"
-                    ref="threadRef"
-                    :ticket-id="openTicketId"
-                    @back="openTicketId = null"
-                />
-
-                <TicketList
-                    v-else-if="tab === 'tickets'"
-                    ref="ticketListRef"
-                    :project="project"
-                    @open="(id: number) => (openTicketId = id)"
-                />
-
-                <RulesPanel v-else-if="tab === 'rules'" />
+                <RulesPanel v-if="panel === 'rules'" />
+                <TagsPanel v-else-if="panel === 'tags'" />
 
                 <template v-else>
+                    <nav class="aiball-tabs">
+                        <button
+                            v-for="t in tabOptions"
+                            :key="t.value"
+                            type="button"
+                            class="tab-btn"
+                            :class="{ active: tab === t.value }"
+                            @click="selectTab(t.value)"
+                        >
+                            <i :class="t.icon" />
+                            <span>{{ t.label }}</span>
+                            <span
+                                v-if="tabBadges[t.value] > 0 && tab !== t.value"
+                                class="tab-badge"
+                            >{{ tabBadges[t.value] }}</span>
+                        </button>
+                    </nav>
+
+                    <ThreadView
+                        v-if="openTicketId !== null"
+                        ref="threadRef"
+                        :ticket-id="openTicketId"
+                        @back="openTicketId = null"
+                    />
+
+                    <TicketList
+                        v-else-if="tab === 'tickets'"
+                        ref="ticketListRef"
+                        :project="project"
+                        @open="(id: number) => (openTicketId = id)"
+                    />
+
+                    <template v-else>
                     <div v-if="messages.length" class="bulk-bar">
                         <Button
                             :label="selectMode ? 'cancel select' : 'select'"
@@ -490,6 +525,7 @@ const projectListItems = computed(() => [
                         @update:selected="(v: boolean) => toggleSelected(m.id, v)"
                         @changed="onMessageChanged"
                     />
+                    </template>
                 </template>
             </main>
         </div>

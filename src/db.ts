@@ -62,6 +62,38 @@ export interface NewRule {
     note?: string | null;
 }
 
+export interface Tag {
+    id: number;
+    name: string;
+    color: string | null;
+    position: number;
+    note: string | null;
+    created_at: string;
+}
+
+export interface NewTag {
+    name: string;
+    color?: string | null;
+    note?: string | null;
+    position?: number;
+}
+
+/**
+ * Closed-list initial tags. Created once, when the tags table is empty,
+ * so the user has something to start with. The human can then add/edit/
+ * remove freely from the UI.
+ */
+const DEFAULT_TAGS: NewTag[] = [
+    { name: "bug", color: "#ef4444", note: "something is broken", position: 1 },
+    { name: "feature", color: "#10b981", note: "new capability", position: 2 },
+    { name: "question", color: "#3b82f6", note: "needs clarification", position: 3 },
+    { name: "docs", color: "#8b5cf6", note: "documentation work", position: 4 },
+    { name: "urgent", color: "#f59e0b", note: "needs attention now", position: 5 },
+    { name: "discussion", color: "#6b7280", note: "design / architecture talk", position: 6 },
+    { name: "wontfix", color: "#9ca3af", note: "decided not to act", position: 7 },
+    { name: "done", color: "#22c55e", note: "completed", position: 8 },
+];
+
 let db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
@@ -135,6 +167,51 @@ function migrate(d: Database.Database): void {
     if (!cols.some((c) => c.name === "parent_id")) {
         d.exec("ALTER TABLE messages ADD COLUMN parent_id INTEGER");
         d.exec("CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id)");
+    }
+
+    // Tags (closed list, human-curated) + message ↔ tag join.
+    d.exec(`
+        CREATE TABLE IF NOT EXISTS tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            color TEXT,
+            position INTEGER NOT NULL DEFAULT 0,
+            note TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_tags_position ON tags(position);
+
+        CREATE TABLE IF NOT EXISTS message_tags (
+            message_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            set_at TEXT NOT NULL,
+            set_by TEXT,
+            PRIMARY KEY (message_id, tag_id),
+            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_message_tags_tag ON message_tags(tag_id);
+    `);
+
+    const haveTags = (d.prepare("SELECT COUNT(*) AS n FROM tags").get() as { n: number }).n;
+    if (haveTags === 0) {
+        const ins = d.prepare(`
+            INSERT INTO tags (name, color, position, note, created_at)
+            VALUES (@name, @color, @position, @note, @created_at)
+        `);
+        const insertAll = d.transaction((rows: NewTag[]) => {
+            const now = nowIso();
+            for (const r of rows) {
+                ins.run({
+                    name: r.name,
+                    color: r.color ?? null,
+                    position: r.position ?? 0,
+                    note: r.note ?? null,
+                    created_at: now,
+                });
+            }
+        });
+        insertAll(DEFAULT_TAGS);
     }
 }
 
@@ -402,4 +479,131 @@ export function markAllRead(
         `)
         .get(project) as { m: number }).m;
     return markRead(consumer_id, project, head);
+}
+
+// -------- tags ------------------------------------------------------------
+
+export function listTags(): Tag[] {
+    return getDb()
+        .prepare("SELECT * FROM tags ORDER BY position ASC, id ASC")
+        .all() as Tag[];
+}
+
+export function getTag(id: number): Tag | null {
+    return (getDb()
+        .prepare("SELECT * FROM tags WHERE id = ?")
+        .get(id) as Tag | undefined) ?? null;
+}
+
+export function getTagByName(name: string): Tag | null {
+    return (getDb()
+        .prepare("SELECT * FROM tags WHERE name = ?")
+        .get(name) as Tag | undefined) ?? null;
+}
+
+export function insertTag(t: NewTag): Tag {
+    return getDb()
+        .prepare(`
+            INSERT INTO tags (name, color, position, note, created_at)
+            VALUES (@name, @color, @position, @note, @created_at)
+            RETURNING *
+        `)
+        .get({
+            name: t.name,
+            color: t.color ?? null,
+            position: t.position ?? 0,
+            note: t.note ?? null,
+            created_at: nowIso(),
+        }) as Tag;
+}
+
+export function updateTag(
+    id: number,
+    fields: Partial<Pick<Tag, "name" | "color" | "position" | "note">>,
+): Tag | null {
+    const sets: string[] = [];
+    const args: Record<string, unknown> = { id };
+    for (const k of ["name", "color", "position", "note"] as const) {
+        if (fields[k] !== undefined) {
+            sets.push(`${k} = @${k}`);
+            args[k] = fields[k];
+        }
+    }
+    if (!sets.length) return getTag(id);
+    getDb().prepare(`UPDATE tags SET ${sets.join(", ")} WHERE id = @id`).run(args);
+    return getTag(id);
+}
+
+export function deleteTag(id: number): void {
+    getDb().prepare("DELETE FROM tags WHERE id = ?").run(id);
+}
+
+export function listMessageTags(messageId: number): Tag[] {
+    return getDb()
+        .prepare(`
+            SELECT t.* FROM tags t
+            JOIN message_tags mt ON mt.tag_id = t.id
+            WHERE mt.message_id = ?
+            ORDER BY t.position ASC, t.id ASC
+        `)
+        .all(messageId) as Tag[];
+}
+
+/** Bulk-fetch tags for a list of message ids; returned as a Map<id, Tag[]>. */
+export function tagsForMessages(messageIds: number[]): Map<number, Tag[]> {
+    const out = new Map<number, Tag[]>();
+    if (!messageIds.length) return out;
+    const placeholders = messageIds.map(() => "?").join(",");
+    const rows = getDb()
+        .prepare(`
+            SELECT mt.message_id, t.*
+            FROM message_tags mt
+            JOIN tags t ON t.id = mt.tag_id
+            WHERE mt.message_id IN (${placeholders})
+            ORDER BY t.position ASC, t.id ASC
+        `)
+        .all(...messageIds) as (Tag & { message_id: number })[];
+    for (const r of rows) {
+        const { message_id, ...tag } = r;
+        if (!out.has(message_id)) out.set(message_id, []);
+        out.get(message_id)!.push(tag as Tag);
+    }
+    return out;
+}
+
+export function addMessageTag(
+    messageId: number,
+    tagId: number,
+    setBy: string | null = null,
+): void {
+    getDb()
+        .prepare(`
+            INSERT OR IGNORE INTO message_tags (message_id, tag_id, set_at, set_by)
+            VALUES (?, ?, ?, ?)
+        `)
+        .run(messageId, tagId, nowIso(), setBy);
+}
+
+export function removeMessageTag(messageId: number, tagId: number): void {
+    getDb()
+        .prepare("DELETE FROM message_tags WHERE message_id = ? AND tag_id = ?")
+        .run(messageId, tagId);
+}
+
+export function setMessageTags(
+    messageId: number,
+    tagIds: number[],
+    setBy: string | null = null,
+): void {
+    const d = getDb();
+    const tx = d.transaction((ids: number[]) => {
+        d.prepare("DELETE FROM message_tags WHERE message_id = ?").run(messageId);
+        const ins = d.prepare(`
+            INSERT INTO message_tags (message_id, tag_id, set_at, set_by)
+            VALUES (?, ?, ?, ?)
+        `);
+        const now = nowIso();
+        for (const tid of ids) ins.run(messageId, tid, now, setBy);
+    });
+    tx([...new Set(tagIds)]);
 }

@@ -5,6 +5,7 @@ import Tag from "primevue/tag";
 import ToggleButton from "primevue/togglebutton";
 import { api, type Message, type TicketSummary } from "../lib/api";
 import ListRow from "./ListRow.vue";
+import TagBadge from "./TagBadge.vue";
 
 const props = defineProps<{ project: string | null }>();
 const emit = defineEmits<{ (e: "open", id: number): void }>();
@@ -141,6 +142,13 @@ const augmented = computed<Aug[]>(() => {
             <template #title>
                 <span class="ticket-id">#{{ t.id }}</span>
                 {{ t.title || "(no title)" }}
+                <TagBadge
+                    v-for="tg in t.tags"
+                    :key="tg.id"
+                    :tag="tg"
+                    size="sm"
+                    style="margin-left: 0.3rem"
+                />
                 <Tag
                     v-if="!project"
                     :value="t.project"

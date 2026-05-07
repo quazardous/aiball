@@ -9,6 +9,8 @@ import Tag from "primevue/tag";
 import { api, type Message } from "../lib/api";
 import MarkdownView from "./MarkdownView.vue";
 import ListRow from "./ListRow.vue";
+import TagBadge from "./TagBadge.vue";
+import TagPicker from "./TagPicker.vue";
 
 const props = defineProps<{
     message: Message;
@@ -176,6 +178,13 @@ async function saveNote() {
             <span v-else style="color: var(--p-text-muted-color); font-style: italic">
                 ({{ kindLabel }})
             </span>
+            <TagBadge
+                v-for="tg in message.tags"
+                :key="tg.id"
+                :tag="tg"
+                size="sm"
+                style="margin-left: 0.3rem"
+            />
         </template>
         <template v-if="bodySnippet" #snippet>{{ bodySnippet }}</template>
         <template #meta>
@@ -273,6 +282,14 @@ async function saveNote() {
         <div v-if="!editing">
             <div v-if="displayTitle" class="title">{{ displayTitle }}</div>
             <MarkdownView v-if="displayBody" :source="displayBody" />
+            <div v-if="message.tags.length" class="card-tags">
+                <TagBadge
+                    v-for="tg in message.tags"
+                    :key="tg.id"
+                    :tag="tg"
+                    size="sm"
+                />
+            </div>
         </div>
         <div v-else class="edit-form">
             <span class="field-label">Title</span>
@@ -397,6 +414,16 @@ async function saveNote() {
             />
         </div>
 
+        <div v-if="!editing && !noting" class="card-tag-picker">
+            <span class="field-label" style="margin: 0">tags</span>
+            <TagPicker
+                :message-id="message.id"
+                :tags="message.tags"
+                set-by="human"
+                @changed="(tags) => emit('changed', { ...message, tags })"
+            />
+        </div>
+
         <div v-if="error" class="meta" style="color: var(--p-red-500)">
             <i class="pi pi-exclamation-triangle" />
             {{ error }}
@@ -410,5 +437,19 @@ async function saveNote() {
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-size: 0.85em;
     margin-right: 0.4rem;
+}
+.card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.4rem;
+}
+.card-tag-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px dashed var(--p-content-border-color);
 }
 </style>

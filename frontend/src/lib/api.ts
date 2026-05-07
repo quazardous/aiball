@@ -1,3 +1,12 @@
+export interface Tag {
+    id: number;
+    name: string;
+    color: string | null;
+    position: number;
+    note: string | null;
+    created_at: string;
+}
+
 export interface Message {
     id: number;
     project: string;
@@ -15,6 +24,7 @@ export interface Message {
     human_note: string | null;
     edited_title: string | null;
     edited_body: string | null;
+    tags: Tag[];
 }
 
 export interface Rule {
@@ -51,6 +61,7 @@ export interface TicketSummary {
     by_agent: string | null;
     created_at: string;
     closed: boolean;
+    tags: Tag[];
 }
 
 export interface ThreadView {
@@ -113,4 +124,15 @@ export const api = {
     delRule: (id: number) => req<void>("DELETE", `/api/rules/${id}`),
     toggleRule: (id: number, enabled: boolean) =>
         req<Rule>("PATCH", `/api/rules/${id}`, { enabled }),
+
+    listTags: () => req<Tag[]>("GET", "/api/tags"),
+    addTag: (body: { name: string; color?: string; note?: string; position?: number }) =>
+        req<Tag>("POST", "/api/tags", body),
+    updateTag: (
+        id: number,
+        body: Partial<{ name: string; color: string | null; note: string | null; position: number }>,
+    ) => req<Tag>("PATCH", `/api/tags/${id}`, body),
+    delTag: (id: number) => req<void>("DELETE", `/api/tags/${id}`),
+    setMessageTags: (id: number, tag_ids: number[], set_by?: string) =>
+        req<Tag[]>("PUT", `/api/messages/${id}/tags`, { tag_ids, set_by }),
 };

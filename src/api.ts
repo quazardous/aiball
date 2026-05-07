@@ -17,8 +17,21 @@ import {
     unreadCount,
     markRead,
     markAllRead,
+    listTags,
+    getTag,
+    getTagByName,
+    insertTag,
+    updateTag,
+    deleteTag,
+    listMessageTags,
+    addMessageTag,
+    removeMessageTag,
+    setMessageTags,
+    tagsForMessages,
     type MessageKind,
     type MessageStatus,
+    type Tag,
+    type Message,
 } from "./db.js";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
@@ -33,6 +46,19 @@ function notFound(res: Response, msg = "not found"): Response {
     return res.status(404).json({ error: msg });
 }
 
+/**
+ * Decorate one or many messages with their tags so callers can render
+ * them without an N+1 round-trip. Uses one bulk SELECT regardless of
+ * the number of messages.
+ */
+function withTags<T extends { id: number }>(rows: T[]): (T & { tags: Tag[] })[] {
+    const map = tagsForMessages(rows.map((r) => r.id));
+    return rows.map((r) => ({ ...r, tags: map.get(r.id) ?? [] }));
+}
+function withTagsOne<T extends { id: number }>(row: T): T & { tags: Tag[] } {
+    return { ...row, tags: listMessageTags(row.id) };
+}
+
 export const api = Router();
 
 api.get("/health", (_req, res) => {
@@ -45,7 +71,7 @@ api.post("/messages", (req: Request, res: Response) => {
     const v = validateNewMessage(req.body);
     if ("error" in v) return badRequest(res, v.error);
     const msg = submitMessage(v);
-    return res.status(201).json(msg);
+    return res.status(201).json(withTagsOne(msg));
 });
 
 api.get("/messages", (req: Request, res: Response) => {
@@ -56,13 +82,13 @@ api.get("/messages", (req: Request, res: Response) => {
         kind: kind as MessageKind | undefined,
         limit: limit ? Number(limit) : undefined,
     });
-    res.json(list);
+    res.json(withTags(list));
 });
 
 api.get("/messages/:id", (req, res) => {
     const m = getMessage(Number(req.params.id));
     if (!m) return notFound(res);
-    res.json(m);
+    res.json(withTagsOne(m));
 });
 
 function decide(
@@ -81,8 +107,9 @@ function decide(
     if (status === "approved") {
         deliverToOutbox(updated);
     }
-    broadcast({ type: "message_decided", data: updated });
-    res.json(updated);
+    const decorated = withTagsOne(updated);
+    broadcast({ type: "message_decided", data: decorated });
+    res.json(decorated);
 }
 
 api.post("/messages/:id/approve", (req, res) => decide(req, res, "approved"));
@@ -98,8 +125,9 @@ api.post("/messages/:id/edit", (req, res) => {
     }
     const updated = editMessage(id, { title, body });
     if (!updated) return notFound(res);
-    broadcast({ type: "message_edited", data: updated });
-    res.json(updated);
+    const decorated = withTagsOne(updated);
+    broadcast({ type: "message_edited", data: decorated });
+    res.json(decorated);
 });
 
 api.post("/messages/:id/note", (req, res) => {
@@ -107,8 +135,9 @@ api.post("/messages/:id/note", (req, res) => {
     const { note } = req.body ?? {};
     const updated = noteMessage(id, typeof note === "string" ? note : null);
     if (!updated) return notFound(res);
-    broadcast({ type: "message_noted", data: updated });
-    res.json(updated);
+    const decorated = withTagsOne(updated);
+    broadcast({ type: "message_noted", data: decorated });
+    res.json(decorated);
 });
 
 // -------- tickets (derived view) -------------------------------------------
@@ -134,6 +163,7 @@ api.get("/tickets", (req, res) => {
     });
     const closedSet = new Set(closes.map((c) => c.ticket_id));
 
+    const tagsMap = tagsForMessages(created.map((m) => m.id));
     const tickets = created.map((m) => ({
         id: m.id,
         project: m.project,
@@ -142,6 +172,7 @@ api.get("/tickets", (req, res) => {
         by_agent: m.by_agent,
         created_at: m.created_at,
         closed: closedSet.has(m.id),
+        tags: tagsMap.get(m.id) ?? [],
     }));
 
     res.json(onlyOpen ? tickets.filter((t) => !t.closed) : tickets);
@@ -169,8 +200,9 @@ api.get("/tickets/:id", (req, res) => {
             by_agent: t.by_agent,
             created_at: t.created_at,
             closed,
+            tags: listMessageTags(t.id),
         },
-        comments,
+        comments: withTags(comments),
     });
 });
 
@@ -270,7 +302,7 @@ api.get("/unread", (req: Request, res: Response) => {
         consumer_id,
         project,
         count: unreadCount(consumer_id, project),
-        messages,
+        messages: withTags(messages),
     });
 });
 
@@ -289,4 +321,120 @@ api.post("/mark-read", (req: Request, res: Response) => {
     }
     if (!sub) return notFound(res, "subscription not found — call POST /subscriptions first");
     res.json(sub);
+});
+
+// -------- tags ------------------------------------------------------------
+
+function resolveTagRef(ref: unknown): Tag | null {
+    if (typeof ref === "number") return getTag(ref);
+    if (typeof ref === "string") {
+        return getTagByName(ref) ?? null;
+    }
+    return null;
+}
+
+api.get("/tags", (_req, res) => {
+    res.json(listTags());
+});
+
+api.post("/tags", (req: Request, res: Response) => {
+    const { name, color, note, position } = req.body ?? {};
+    if (typeof name !== "string" || !name.trim()) {
+        return badRequest(res, "name required");
+    }
+    if (getTagByName(name.trim())) {
+        return badRequest(res, `tag '${name}' already exists`);
+    }
+    const t = insertTag({
+        name: name.trim(),
+        color: typeof color === "string" ? color : null,
+        note: typeof note === "string" ? note : null,
+        position: typeof position === "number" ? position : 0,
+    });
+    broadcast({ type: "tag_changed", data: t });
+    res.status(201).json(t);
+});
+
+api.patch("/tags/:id", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const { name, color, note, position } = req.body ?? {};
+    if (name !== undefined && (typeof name !== "string" || !name.trim())) {
+        return badRequest(res, "name must be a non-empty string");
+    }
+    if (typeof name === "string") {
+        const conflict = getTagByName(name.trim());
+        if (conflict && conflict.id !== id) {
+            return badRequest(res, `tag '${name}' already exists`);
+        }
+    }
+    const updated = updateTag(id, {
+        name: typeof name === "string" ? name.trim() : undefined,
+        color: color === null || typeof color === "string" ? color : undefined,
+        note: note === null || typeof note === "string" ? note : undefined,
+        position: typeof position === "number" ? position : undefined,
+    });
+    if (!updated) return notFound(res);
+    broadcast({ type: "tag_changed", data: updated });
+    res.json(updated);
+});
+
+api.delete("/tags/:id", (req, res) => {
+    const id = Number(req.params.id);
+    if (!getTag(id)) return notFound(res);
+    deleteTag(id);
+    broadcast({ type: "tag_changed", data: { id, deleted: true } });
+    res.status(204).end();
+});
+
+api.get("/messages/:id/tags", (req, res) => {
+    const id = Number(req.params.id);
+    if (!getMessage(id)) return notFound(res);
+    res.json(listMessageTags(id));
+});
+
+api.put("/messages/:id/tags", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const m = getMessage(id);
+    if (!m) return notFound(res);
+    const { tag_ids, set_by } = req.body ?? {};
+    if (!Array.isArray(tag_ids)) {
+        return badRequest(res, "tag_ids must be an array of ids");
+    }
+    const ids: number[] = [];
+    for (const r of tag_ids) {
+        const tag = typeof r === "number" ? getTag(r) : getTagByName(String(r));
+        if (!tag) return badRequest(res, `unknown tag: ${r}`);
+        ids.push(tag.id);
+    }
+    setMessageTags(id, ids, typeof set_by === "string" ? set_by : null);
+    const tags = listMessageTags(id);
+    broadcast({ type: "message_tagged", data: { message_id: id, tags } });
+    res.json(tags);
+});
+
+api.post("/messages/:id/tags", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const m = getMessage(id);
+    if (!m) return notFound(res);
+    const { tag, set_by } = req.body ?? {};
+    const t = resolveTagRef(tag);
+    if (!t) return badRequest(res, `unknown tag: ${tag}`);
+    addMessageTag(id, t.id, typeof set_by === "string" ? set_by : null);
+    const tags = listMessageTags(id);
+    broadcast({ type: "message_tagged", data: { message_id: id, tags } });
+    res.status(201).json(tags);
+});
+
+api.delete("/messages/:id/tags/:tag", (req, res) => {
+    const id = Number(req.params.id);
+    const m = getMessage(id);
+    if (!m) return notFound(res);
+    const tagRef = req.params.tag;
+    const t =
+        /^\d+$/.test(tagRef) ? getTag(Number(tagRef)) : getTagByName(tagRef);
+    if (!t) return notFound(res, `unknown tag: ${tagRef}`);
+    removeMessageTag(id, t.id);
+    const tags = listMessageTags(id);
+    broadcast({ type: "message_tagged", data: { message_id: id, tags } });
+    res.json(tags);
 });
