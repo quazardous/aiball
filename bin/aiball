@@ -21,8 +21,12 @@ need sha256sum
 
 # Stable consumer id for the agent in the current working directory.
 # Override via AIBALL_AGENT env var if you want explicit naming.
+# When --human / -H is set, use the human label (AIBALL_HUMAN, default "human")
+# so a single CLI invocation can play either side of the BAL.
 consumer_id() {
-    if [[ -n "${AIBALL_AGENT:-}" ]]; then
+    if [[ "${HUMAN_MODE:-0}" == "1" ]]; then
+        printf '%s' "${AIBALL_HUMAN:-human}"
+    elif [[ -n "${AIBALL_AGENT:-}" ]]; then
         printf '%s' "$AIBALL_AGENT"
     else
         # printf without newline to match the TS client's hash
@@ -77,10 +81,15 @@ Usage:
   aiball status                       # daemon up? data dir? spool size?
   aiball drain                        # ask daemon to flush spool now (no-op if down)
 
+Global flags (anywhere in the command line):
+  -H, --human                         act as the human moderator
+                                      → consumer_id and default --by become $AIBALL_HUMAN ("human")
+
 Env:
   AIBALL_URL      default http://127.0.0.1:7777
   AIBALL_HOME     default ~/.local/share/aiball
   AIBALL_AGENT    consumer_id override (default sha256(pwd)[:12])
+  AIBALL_HUMAN    label used by --human / -H (default "human")
   AIBALL_PROJECT  default --project value (recommended in .mcp.json env)
   AIBALL_TIMEOUT  default 2 (seconds, HTTP attempts)
 EOF
@@ -295,9 +304,19 @@ cmd_feed_path() {
 }
 
 cmd_whoami() {
+    local source
+    if [[ "${HUMAN_MODE:-0}" == "1" ]]; then
+        source="--human flag (\$AIBALL_HUMAN)"
+    elif [[ -n "${AIBALL_AGENT:-}" ]]; then
+        source="\$AIBALL_AGENT env"
+    else
+        source="sha256(pwd)"
+    fi
     jq -nc --arg id "$(consumer_id)" --arg cwd "$(pwd -P)" \
         --arg project "${AIBALL_PROJECT:-}" \
-        '{consumer_id:$id, cwd:$cwd, source:(env.AIBALL_AGENT // "sha256(pwd)"),
+        --arg source "$source" \
+        --argjson human "${HUMAN_MODE:-0}" \
+        '{consumer_id:$id, cwd:$cwd, source:$source, human:($human==1),
           default_project:(if $project=="" then null else $project end)}'
 }
 
@@ -413,6 +432,22 @@ cmd_drain() {
 }
 
 # --- dispatcher ------------------------------------------------------------
+
+# Strip global flags (--human / -H) from anywhere in the command line so that
+# subcommands see a clean argv. Anything else is passed through.
+HUMAN_MODE=0
+_passthrough=()
+for arg in "$@"; do
+    case "$arg" in
+        --human|-H) HUMAN_MODE=1 ;;
+        *) _passthrough+=("$arg") ;;
+    esac
+done
+if ((${#_passthrough[@]})); then
+    set -- "${_passthrough[@]}"
+else
+    set --
+fi
 
 if [[ $# -eq 0 ]]; then usage; exit 0; fi
 
