@@ -295,12 +295,21 @@ frontend/           # Vue 3 + PrimeVue (Aura). Build → frontend/dist/.
 ```
 
 ```
-npm start         # tsx src/daemon.ts
-npm run dev       # tsx watch src/daemon.ts
-npm run typecheck # tsc --noEmit
+make dev           # HOT-RELOAD: daemon (background) + Vite, → http://127.0.0.1:5173
+make dev-stop      # stop both
+make dev-logs      # tail Vite logs
+
+make start         # daemon only, background, → http://127.0.0.1:7777 (static build)
+make stop          # stop background daemon
+make ui-build      # build frontend → frontend/dist/ (served by daemon in prod)
+
+npm run typecheck  # tsc --noEmit
 ```
 
-In dev, run `npm --prefix frontend run dev` for the Vite hot-reload server (proxy is configured to forward `/api` and `/ws` to `127.0.0.1:7777`).
+Hot-reload workflow:
+1. `make dev` — Vite serves the SPA on `:5173` and proxies `/api` + `/ws` to the daemon on `:7777`.
+2. Edit any `frontend/src/*.vue|ts|css` — the browser updates instantly.
+3. Edit `src/*.ts` (backend) — `systemctl --user restart aiball` (or `make restart` if you started the daemon via `make start`).
 
 ---
 
