@@ -13,6 +13,7 @@ export interface ClientOptions {
     home?: string;
     timeoutMs?: number;
     agentId?: string;
+    defaultProject?: string;
 }
 
 export interface SpoolResult {
@@ -27,6 +28,7 @@ export class AiballClient {
     readonly outboxDir: string;
     readonly timeoutMs: number;
     readonly agentId: string;
+    readonly defaultProject: string | null;
 
     constructor(opts: ClientOptions = {}) {
         this.url = opts.url ?? process.env.AIBALL_URL ?? "http://127.0.0.1:7777";
@@ -38,6 +40,22 @@ export class AiballClient {
         this.outboxDir = join(this.home, "outbox");
         this.timeoutMs = opts.timeoutMs ?? 2000;
         this.agentId = opts.agentId ?? resolveAgentId();
+        this.defaultProject =
+            opts.defaultProject ?? process.env.AIBALL_PROJECT ?? null;
+    }
+
+    /**
+     * Resolve a project name: explicit arg wins, otherwise fall back to the
+     * default project (env AIBALL_PROJECT). Throws if neither is set.
+     */
+    resolveProject(project?: string | null): string {
+        const p = project ?? this.defaultProject;
+        if (!p) {
+            throw new Error(
+                "project required: pass it explicitly or set AIBALL_PROJECT (e.g. in .mcp.json env)",
+            );
+        }
+        return p;
     }
 
     private async http<T = unknown>(

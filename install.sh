@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Install aiball into ~/.local (code + binaries + systemd user service).
 #
-#   ./install.sh                # full install
+#   ./install.sh                # full install (rsync source → ~/.local/lib/aiball)
+#   ./install.sh --symlink      # dev install: symlink ~/.local/lib/aiball → this checkout
+#                               # (edits in this repo are picked up immediately)
 #   ./install.sh --no-systemd   # skip systemd unit
 #   ./install.sh --uninstall    # remove everything we installed
 set -euo pipefail
@@ -14,11 +16,13 @@ SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 NO_SYSTEMD=false
 UNINSTALL=false
+SYMLINK=false
 
 for arg in "$@"; do
     case "$arg" in
         --no-systemd) NO_SYSTEMD=true ;;
         --uninstall)  UNINSTALL=true ;;
+        --symlink)    SYMLINK=true ;;
         -h|--help)
             sed -n '1,/^set -e/p' "$0" | sed 's/^# \?//'
             exit 0 ;;
@@ -39,7 +43,12 @@ uninstall() {
     fi
     rm -f "$SYSTEMD_DIR/$SERVICE_NAME"
     rm -f "$PREFIX_BIN/aiball" "$PREFIX_BIN/aiball-mcp"
-    rm -rf "$PREFIX_LIB"
+    if [[ -L "$PREFIX_LIB" ]]; then
+        # Symlinked install — drop the link, never touch the source it points to
+        rm -f "$PREFIX_LIB"
+    else
+        rm -rf "$PREFIX_LIB"
+    fi
     warn "Data preserved at \$AIBALL_HOME (~/.local/share/aiball). Remove manually if you want a clean slate."
     log "Done."
 }
@@ -55,19 +64,36 @@ command -v rsync >/dev/null 2>&1 || die "rsync is required."
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 [[ "$NODE_MAJOR" -ge 20 ]] || die "node >=20 required, found $(node --version)"
 
-# --- copy source -----------------------------------------------------------
+# --- deploy source ---------------------------------------------------------
 
-log "Installing code into $PREFIX_LIB"
-mkdir -p "$PREFIX_LIB"
-rsync -a --delete \
-    --exclude=node_modules --exclude=dist --exclude=.git \
-    --exclude='*.log' --exclude='.env' \
-    "$SRC_DIR/" "$PREFIX_LIB/"
+if $SYMLINK; then
+    log "Symlinking $PREFIX_LIB → $SRC_DIR (dev install)"
+    if [[ -L "$PREFIX_LIB" ]]; then
+        rm -f "$PREFIX_LIB"
+    elif [[ -e "$PREFIX_LIB" ]]; then
+        warn "$PREFIX_LIB exists as a real directory — replacing with a symlink (data dir is separate)"
+        rm -rf "$PREFIX_LIB"
+    fi
+    mkdir -p "$(dirname "$PREFIX_LIB")"
+    ln -sfn "$SRC_DIR" "$PREFIX_LIB"
+else
+    log "Installing code into $PREFIX_LIB"
+    if [[ -L "$PREFIX_LIB" ]]; then
+        warn "$PREFIX_LIB is currently a symlink — replacing with a real copy"
+        rm -f "$PREFIX_LIB"
+    fi
+    mkdir -p "$PREFIX_LIB"
+    rsync -a --delete \
+        --exclude=node_modules --exclude=dist --exclude=.git \
+        --exclude='*.log' --exclude='.env' --exclude='var' \
+        --exclude='frontend/node_modules' --exclude='frontend/dist' \
+        "$SRC_DIR/" "$PREFIX_LIB/"
+fi
 
 # --- install deps ----------------------------------------------------------
 
 log "Installing npm dependencies (this can take ~30s)"
-( cd "$PREFIX_LIB" && npm install --silent --omit=dev=false )
+( cd "$PREFIX_LIB" && npm install --silent )
 # Note: tsx is in devDependencies. We need it at runtime, so install everything.
 
 # --- symlink binaries ------------------------------------------------------
@@ -101,19 +127,26 @@ if ! command -v aiball >/dev/null 2>&1; then
     warn '    export PATH="$HOME/.local/bin:$PATH"'
 fi
 
+printf '\n────────────────────────────────────────────────────────────────────\n'
+printf "${c_green}aiball installed.${c_off}\n"
+if $SYMLINK; then
+    printf "${c_yellow}(dev install — code dir is a symlink to %s)${c_off}\n" "$SRC_DIR"
+fi
 cat <<EOF
-
-────────────────────────────────────────────────────────────────────
-${c_green}aiball installed.${c_off}
 
 Next steps:
   1. Verify the daemon:        aiball status
   2. Open the web UI:          http://127.0.0.1:7777
                                (UI requires the frontend build — see README)
-  3. Register the MCP server:  see "MCP setup" in README.md
+  3. Register the MCP server:  see AGENTS.md or README.md
+EOF
+if $SYMLINK; then
+    printf "  4. Iterate on backend:       edit src/, then 'systemctl --user restart %s'\n" "$SERVICE_NAME"
+fi
+cat <<EOF
 
 Data dir:    ~/.local/share/aiball
-Code dir:    $PREFIX_LIB
+Code dir:    $PREFIX_LIB$($SYMLINK && printf "  (→ %s)" "$SRC_DIR")
 Service:     systemctl --user status $SERVICE_NAME
 Uninstall:   $SRC_DIR/install.sh --uninstall
 ────────────────────────────────────────────────────────────────────

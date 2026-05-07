@@ -25,7 +25,8 @@ consumer_id() {
     if [[ -n "${AIBALL_AGENT:-}" ]]; then
         printf '%s' "$AIBALL_AGENT"
     else
-        pwd -P | sha256sum | cut -c1-12
+        # printf without newline to match the TS client's hash
+        printf '%s' "$(pwd -P)" | sha256sum | cut -c1-12
     fi
 }
 
@@ -33,6 +34,19 @@ consumer_id() {
 # is not set, so a CLI invocation always carries some identity.
 default_by() {
     consumer_id
+}
+
+# Resolve a project name from --project flag or $AIBALL_PROJECT, dying
+# with a useful message if neither is set.
+resolve_project() {
+    local p="${1:-}"
+    if [[ -n "$p" ]]; then
+        printf '%s' "$p"
+    elif [[ -n "${AIBALL_PROJECT:-}" ]]; then
+        printf '%s' "$AIBALL_PROJECT"
+    else
+        die "project required: pass --project P or set AIBALL_PROJECT"
+    fi
 }
 
 usage() {
@@ -67,6 +81,7 @@ Env:
   AIBALL_URL      default http://127.0.0.1:7777
   AIBALL_HOME     default ~/.local/share/aiball
   AIBALL_AGENT    consumer_id override (default sha256(pwd)[:12])
+  AIBALL_PROJECT  default --project value (recommended in .mcp.json env)
   AIBALL_TIMEOUT  default 2 (seconds, HTTP attempts)
 EOF
 }
@@ -163,11 +178,11 @@ parse_kvs() {
 
 cmd_ticket_new() {
     parse_kvs "$@"
-    [[ -n "${KV[project]:-}" ]] || die "ticket new: --project required"
-    [[ -n "${KV[title]:-}" ]]   || die "ticket new: --title required"
+    [[ -n "${KV[title]:-}" ]] || die "ticket new: --title required"
+    local project; project="$(resolve_project "${KV[project]:-}")"
     local body
     body="$(build_msg \
-        "${KV[project]}" "ticket_created" \
+        "$project" "ticket_created" \
         "${KV[title]}" "${KV[body]:-}" "${KV[by]:-$(default_by)}" "" "")"
     post_message_with_fallback "$body"
 }
@@ -182,8 +197,10 @@ cmd_ticket_comment() {
         # Try to infer from running daemon
         if t="$(http_get "/api/messages/${KV[id]}" 2>/dev/null)"; then
             project="$(jq -r '.project' <<<"$t")"
+        elif [[ -n "${AIBALL_PROJECT:-}" ]]; then
+            project="$AIBALL_PROJECT"
         else
-            die "ticket comment: --project required (daemon down, can't infer)"
+            die "ticket comment: --project required (daemon down, can't infer; or set AIBALL_PROJECT)"
         fi
     fi
     local parent="${KV[parent]:-${KV[id]}}"   # default reply target = ticket root
@@ -201,8 +218,10 @@ cmd_ticket_close() {
     if [[ -z "$project" ]]; then
         if t="$(http_get "/api/messages/${KV[id]}" 2>/dev/null)"; then
             project="$(jq -r '.project' <<<"$t")"
+        elif [[ -n "${AIBALL_PROJECT:-}" ]]; then
+            project="$AIBALL_PROJECT"
         else
-            die "ticket close: --project required (daemon down, can't infer)"
+            die "ticket close: --project required (daemon down, can't infer; or set AIBALL_PROJECT)"
         fi
     fi
     local body
@@ -277,7 +296,9 @@ cmd_feed_path() {
 
 cmd_whoami() {
     jq -nc --arg id "$(consumer_id)" --arg cwd "$(pwd -P)" \
-        '{consumer_id:$id, cwd:$cwd, source: (env.AIBALL_AGENT // "sha256(pwd)")}'
+        --arg project "${AIBALL_PROJECT:-}" \
+        '{consumer_id:$id, cwd:$cwd, source:(env.AIBALL_AGENT // "sha256(pwd)"),
+          default_project:(if $project=="" then null else $project end)}'
 }
 
 cmd_subscribe() {
@@ -289,7 +310,7 @@ cmd_subscribe() {
             *)         project="$1"; shift ;;
         esac
     done
-    [[ -n "$project" ]] || die "subscribe: <project> required"
+    project="$(resolve_project "$project")"
 
     local cid; cid="$(consumer_id)"
     local fp;  fp="$(cmd_feed_path "$project")"
@@ -318,13 +339,13 @@ cmd_subscribe() {
 }
 
 cmd_unsubscribe() {
-    [[ $# -eq 1 ]] || die "unsubscribe: <project> required"
+    local project; project="$(resolve_project "${1:-}")"
     local cid; cid="$(consumer_id)"
     local enc_cid enc_proj
     enc_cid="$(jq -rn --arg s "$cid" '$s|@uri')"
-    enc_proj="$(jq -rn --arg s "$1" '$s|@uri')"
+    enc_proj="$(jq -rn --arg s "$project" '$s|@uri')"
     http_send DELETE "/api/subscriptions?consumer_id=$enc_cid&project=$enc_proj"
-    jq -nc --arg cid "$cid" --arg project "$1" \
+    jq -nc --arg cid "$cid" --arg project "$project" \
         '{unsubscribed:true, consumer_id:$cid, project:$project}'
 }
 
@@ -336,11 +357,11 @@ cmd_subs() {
 
 cmd_unread() {
     parse_kvs "$@"
-    [[ -n "${KV[project]:-}" ]] || die "unread: --project required"
+    local project; project="$(resolve_project "${KV[project]:-}")"
     local cid; cid="$(consumer_id)"
     local enc_cid enc_proj
     enc_cid="$(jq -rn --arg s "$cid" '$s|@uri')"
-    enc_proj="$(jq -rn --arg s "${KV[project]}" '$s|@uri')"
+    enc_proj="$(jq -rn --arg s "$project" '$s|@uri')"
     local q="consumer_id=$enc_cid&project=$enc_proj"
     [[ -n "${KV[limit]:-}" ]] && q+="&limit=${KV[limit]}"
     http_get "/api/unread?$q"
@@ -348,14 +369,14 @@ cmd_unread() {
 
 cmd_mark_read() {
     parse_kvs "$@"
-    [[ -n "${KV[project]:-}" ]] || die "mark-read: --project required"
+    local project; project="$(resolve_project "${KV[project]:-}")"
     local cid; cid="$(consumer_id)"
     local body
     if [[ "${KV[all]:-}" == "true" || "${KV[all]:-}" == "1" ]]; then
-        body="$(jq -nc --arg cid "$cid" --arg p "${KV[project]}" \
+        body="$(jq -nc --arg cid "$cid" --arg p "$project" \
             '{consumer_id:$cid, project:$p, all:true}')"
     elif [[ -n "${KV[up_to]:-}" ]]; then
-        body="$(jq -nc --arg cid "$cid" --arg p "${KV[project]}" \
+        body="$(jq -nc --arg cid "$cid" --arg p "$project" \
             --arg upto "${KV[up_to]}" \
             '{consumer_id:$cid, project:$p, up_to_id:($upto|tonumber)}')"
     else

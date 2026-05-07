@@ -44,7 +44,12 @@ server.registerTool(
         description:
             "Create a new ticket in a project. Falls back to the file spool if the daemon is down.",
         inputSchema: {
-            project: z.string().describe("Project name (free-form, will be created on first use)"),
+            project: z
+                .string()
+                .optional()
+                .describe(
+                    "Project name (free-form). Defaults to $AIBALL_PROJECT if set.",
+                ),
             title: z.string().describe("Ticket title"),
             body: z.string().optional().describe("Ticket body / description"),
             by_agent: z
@@ -55,7 +60,7 @@ server.registerTool(
     },
     async ({ project, title, body, by_agent }) => {
         const res = await client.postMessage({
-            project,
+            project: client.resolveProject(project),
             kind: "ticket_created",
             title,
             body,
@@ -92,9 +97,12 @@ server.registerTool(
                 const t = (await client.getMessage(ticket_id)) as { project: string };
                 proj = t.project;
             } catch {
-                throw new Error(
-                    "project required (daemon unreachable, can't infer from ticket_id)",
-                );
+                proj = client.defaultProject ?? undefined;
+                if (!proj) {
+                    throw new Error(
+                        "project required (daemon unreachable, can't infer from ticket_id; set AIBALL_PROJECT or pass project)",
+                    );
+                }
             }
         }
         const res = await client.postMessage({
@@ -126,7 +134,12 @@ server.registerTool(
                 const t = (await client.getMessage(ticket_id)) as { project: string };
                 proj = t.project;
             } catch {
-                throw new Error("project required (daemon unreachable)");
+                proj = client.defaultProject ?? undefined;
+                if (!proj) {
+                    throw new Error(
+                        "project required (daemon unreachable; set AIBALL_PROJECT or pass project)",
+                    );
+                }
             }
         }
         const res = await client.postMessage({
@@ -181,7 +194,10 @@ server.registerTool(
         description:
             "Subscribe the current agent (consumer_id from cwd-hash or $AIBALL_AGENT) to a project. Returns the outbox file path so you can also tail it via Monitor for push delivery.",
         inputSchema: {
-            project: z.string(),
+            project: z
+                .string()
+                .optional()
+                .describe("Defaults to $AIBALL_PROJECT if set."),
             catchup: z
                 .boolean()
                 .optional()
@@ -191,11 +207,12 @@ server.registerTool(
         },
     },
     async ({ project, catchup }) => {
-        const sub = await client.subscribe(project, catchup === true);
-        const fp = await client.feedPath(project);
+        const proj = client.resolveProject(project);
+        const sub = await client.subscribe(proj, catchup === true);
+        const fp = await client.feedPath(proj);
         return asText({
             consumer_id: client.agentId,
-            project,
+            project: proj,
             subscription: sub,
             feed_path: fp.path,
             monitor_command: `tail -F -n 0 ${fp.path}`,
@@ -207,11 +224,17 @@ server.registerTool(
     "unsubscribe",
     {
         description: "Unsubscribe the current agent from a project.",
-        inputSchema: { project: z.string() },
+        inputSchema: {
+            project: z
+                .string()
+                .optional()
+                .describe("Defaults to $AIBALL_PROJECT if set."),
+        },
     },
     async ({ project }) => {
-        await client.unsubscribe(project);
-        return asText({ unsubscribed: true, project, consumer_id: client.agentId });
+        const proj = client.resolveProject(project);
+        await client.unsubscribe(proj);
+        return asText({ unsubscribed: true, project: proj, consumer_id: client.agentId });
     },
 );
 
@@ -230,12 +253,17 @@ server.registerTool(
         description:
             "Pull approved messages this agent hasn't seen yet for a given project. Does NOT mark them read — call mark_read after consuming.",
         inputSchema: {
-            project: z.string(),
+            project: z
+                .string()
+                .optional()
+                .describe("Defaults to $AIBALL_PROJECT if set."),
             limit: z.number().int().min(1).max(500).optional(),
         },
     },
     async ({ project, limit }) => {
-        return asText(await client.unread(project, limit ?? 100));
+        return asText(
+            await client.unread(client.resolveProject(project), limit ?? 100),
+        );
     },
 );
 
@@ -245,7 +273,10 @@ server.registerTool(
         description:
             "Mark messages as read for the current agent in a project. Provide either up_to_id (mark everything ≤ this id) or all=true.",
         inputSchema: {
-            project: z.string(),
+            project: z
+                .string()
+                .optional()
+                .describe("Defaults to $AIBALL_PROJECT if set."),
             up_to_id: z.number().int().optional(),
             all: z.boolean().optional(),
         },
@@ -255,7 +286,7 @@ server.registerTool(
             throw new Error("provide up_to_id or all=true");
         }
         return asText(
-            await client.markRead(project, {
+            await client.markRead(client.resolveProject(project), {
                 upToId: up_to_id,
                 all: all === true,
             }),
@@ -269,7 +300,7 @@ server.registerTool(
     "whoami",
     {
         description:
-            "Return the consumer_id this MCP uses, the cwd it derives it from, and whether $AIBALL_AGENT is overriding it.",
+            "Return the consumer_id this MCP uses, the cwd it derives it from, the default project (AIBALL_PROJECT) if any, and whether overrides are active.",
         inputSchema: {},
     },
     async () =>
@@ -277,6 +308,7 @@ server.registerTool(
             consumer_id: client.agentId,
             cwd: process.cwd(),
             source: process.env.AIBALL_AGENT ? "AIBALL_AGENT env" : "sha256(cwd)",
+            default_project: client.defaultProject,
         }),
 );
 

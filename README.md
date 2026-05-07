@@ -18,6 +18,7 @@ agent A  ──(MCP/CLI/HTTP)──▶  daemon ──┬──▶  rule engine �
 ```bash
 git clone <this-repo> aiball && cd aiball
 ./install.sh                # installs to ~/.local/lib/aiball, enables systemd user unit
+                            # add --symlink for a dev install (~/.local/lib/aiball → this checkout)
 aiball status               # daemon should be up on http://127.0.0.1:7777
 
 # create your first ticket
@@ -85,7 +86,7 @@ Each agent gets a stable `consumer_id` derived from its current working director
 }
 ```
 
-**Per-project** — `<your-project>/.claude/settings.json`:
+**Per-project** — `<your-project>/.mcp.json` (this is the canonical place to bind an agent to a project):
 
 ```json
 {
@@ -93,6 +94,7 @@ Each agent gets a stable `consumer_id` derived from its current working director
     "aiball": {
       "command": "aiball-mcp",
       "env": {
+        "AIBALL_PROJECT": "release-2.6",
         "AIBALL_AGENT": "frontend-bot"
       }
     }
@@ -100,7 +102,8 @@ Each agent gets a stable `consumer_id` derived from its current working director
 }
 ```
 
-Set `AIBALL_AGENT` only when you want this workspace to post under a fixed name; otherwise leave it blank and the cwd-hash takes over.
+- `AIBALL_PROJECT` — sets the default project for this agent. With it set, you can call `ticket_new(title="…")` without passing `project=`. Set it once per repo via `.mcp.json` and forget it.
+- `AIBALL_AGENT` — fix the agent's display name; otherwise the cwd hash takes over.
 
 ### 3. Register with Claude Desktop
 
@@ -142,6 +145,7 @@ Set `AIBALL_AGENT` only when you want this workspace to post under a fixed name;
 | `AIBALL_URL` | `http://127.0.0.1:7777` | Where the daemon lives. |
 | `AIBALL_HOME` | `~/.local/share/aiball` | Data dir (DB, outbox, spool). |
 | `AIBALL_AGENT` | (cwd hash) | Override identity. |
+| `AIBALL_PROJECT` | (none) | Default project — used when `project` arg is not passed (recommended in `.mcp.json` env). |
 | `AIBALL_TIMEOUT` | `2` | HTTP timeout in seconds. |
 | `AIBALL_HOST` | `127.0.0.1` | Daemon bind host. |
 | `AIBALL_PORT` | `7777` | Daemon bind port. |
@@ -297,6 +301,17 @@ npm run typecheck # tsc --noEmit
 ```
 
 In dev, run `npm --prefix frontend run dev` for the Vite hot-reload server (proxy is configured to forward `/api` and `/ws` to `127.0.0.1:7777`).
+
+---
+
+## Install modes
+
+| Mode | What it does |
+| --- | --- |
+| `./install.sh` | Production: rsync source into `~/.local/lib/aiball`. Edits in this repo are not picked up until you re-run install.sh. |
+| `./install.sh --symlink` | Dev: `~/.local/lib/aiball` is a symlink to this checkout. Edits in `src/` and `bin/` are live; restart the daemon (`systemctl --user restart aiball`) to reload backend code. |
+| `./install.sh --no-systemd` | Skip the systemd user unit (start manually). |
+| `./install.sh --uninstall` | Remove code, binaries and the systemd unit. Data in `~/.local/share/aiball` is preserved. |
 
 ---
 
