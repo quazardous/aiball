@@ -16,12 +16,54 @@ const toast = useToast();
 
 type Tab = "tickets" | "pending" | "approved" | "rejected";
 const tab = ref<Tab>("tickets");
-const tabOptions = [
+const tabOptions: { label: string; value: Tab; icon: string }[] = [
     { label: "Tickets", value: "tickets", icon: "pi pi-ticket" },
     { label: "Pending", value: "pending", icon: "pi pi-clock" },
     { label: "Approved", value: "approved", icon: "pi pi-check" },
     { label: "Rejected", value: "rejected", icon: "pi pi-times" },
 ];
+
+// Per-tab badge counters — incremented on WS push when the user isn't on
+// that tab; cleared when the tab becomes active.
+const tabBadges = ref<Record<Tab, number>>({
+    tickets: 0,
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+});
+
+// OS notifications: lazily ask permission on first interaction so we don't
+// spam the user with a permission popup at boot.
+const notifAllowed = ref(
+    typeof Notification !== "undefined" && Notification.permission === "granted",
+);
+const notifMuted = ref(localStorage.getItem("aiball.notifMuted") === "1");
+function toggleMute() {
+    notifMuted.value = !notifMuted.value;
+    localStorage.setItem("aiball.notifMuted", notifMuted.value ? "1" : "0");
+}
+async function ensureNotifPermission() {
+    if (typeof Notification === "undefined") return false;
+    if (Notification.permission === "granted") {
+        notifAllowed.value = true;
+        return true;
+    }
+    if (Notification.permission === "denied") return false;
+    const r = await Notification.requestPermission();
+    notifAllowed.value = r === "granted";
+    return notifAllowed.value;
+}
+function fireOsNotif(title: string, body: string) {
+    if (notifMuted.value) return;
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission !== "granted") return;
+    if (document.hasFocus()) return; // page already visible, toast is enough
+    try {
+        new Notification(title, { body, tag: "aiball" });
+    } catch {
+        /* ignore */
+    }
+}
 
 const projects = ref<string[]>([]);
 const project = ref<string | null>(
@@ -109,21 +151,65 @@ function onMessageChanged(updated: Message) {
     }
 }
 
+function shortKindLabel(m: Message): string {
+    switch (m.kind) {
+        case "ticket_created":
+            return "ticket";
+        case "comment_added":
+            return "comment";
+        case "ticket_closed":
+            return "ticket close";
+    }
+    return m.kind;
+}
+
+function bumpBadge(target: Tab) {
+    if (tab.value === target && openTicketId.value === null) return;
+    tabBadges.value = { ...tabBadges.value, [target]: tabBadges.value[target] + 1 };
+}
+
+function notifyArrival(m: Message) {
+    const inScope = !project.value || project.value === m.project;
+    if (!inScope) return;
+
+    const who = m.by_agent ?? "unknown";
+    const k = shortKindLabel(m);
+    const summary =
+        m.title ?? (m.body ? m.body.slice(0, 80) : `new ${k}`);
+    const detail = `${who} · #${m.id} · ${m.project}`;
+
+    toast.add({
+        severity: m.status === "pending" ? "warn" : "info",
+        summary: `${k}${m.status === "pending" ? " pending review" : ""}: ${summary}`,
+        detail,
+        life: 4000,
+    });
+    fireOsNotif(`aiball — ${k}`, `${summary}\n${detail}`);
+
+    if (m.status === "pending") bumpBadge("pending");
+    else if (m.status === "approved") {
+        bumpBadge("approved");
+        if (m.kind === "ticket_created") bumpBadge("tickets");
+    } else if (m.status === "rejected") bumpBadge("rejected");
+}
+
 const { connected } = useWs((ev) => {
     if (ev.type === "rule_changed") return;
     const data = ev.data as Message | undefined;
     if (!data || typeof data !== "object") return;
 
+    // Surface every arrival/transition with a toast and (off-tab) OS notif.
+    if (ev.type === "message_created" || ev.type === "message_decided") {
+        notifyArrival(data);
+    }
+
     // Tickets / Thread view: any creation or decision in the active scope
     // forces a reload so the ticket list, comment count and timestamps stay
     // consistent without manual refresh.
     if (!isStatusList.value) {
-        const inScope =
-            !project.value || project.value === data.project;
+        const inScope = !project.value || project.value === data.project;
         if (!inScope) return;
         if (openTicketId.value !== null) {
-            // Reload the open thread when a new comment lands on it
-            // (or a comment edit/note arrives).
             const onThisThread =
                 data.id === openTicketId.value ||
                 data.ticket_id === openTicketId.value;
@@ -136,7 +222,6 @@ const { connected } = useWs((ev) => {
 
     // Pending / Approved / Rejected lists.
     if (ev.type === "message_created") {
-        // A brand new pending row may have appeared.
         if (
             data.status === tab.value &&
             (!project.value || project.value === data.project)
@@ -163,6 +248,12 @@ function selectProject(p: string | null) {
     project.value = p;
 }
 
+function selectTab(v: Tab) {
+    tab.value = v;
+    openTicketId.value = null;
+    tabBadges.value = { ...tabBadges.value, [v]: 0 };
+}
+
 const projectListItems = computed(() => [
     { label: "All projects", value: null, icon: "pi pi-globe" },
     ...projects.value.map((p) => ({ label: p, value: p, icon: "pi pi-folder" })),
@@ -179,6 +270,24 @@ const projectListItems = computed(() => [
                 :title="connected ? 'WebSocket live' : 'WebSocket offline'"
             />
             <span class="spacer" />
+            <Button
+                v-if="!notifAllowed && !notifMuted"
+                icon="pi pi-bell"
+                label="enable alerts"
+                size="small"
+                severity="secondary"
+                text
+                @click="ensureNotifPermission"
+            />
+            <Button
+                v-else
+                :icon="notifMuted ? 'pi pi-bell-slash' : 'pi pi-bell'"
+                :title="notifMuted ? 'OS notifications muted' : 'OS notifications on'"
+                severity="secondary"
+                text
+                rounded
+                @click="toggleMute"
+            />
             <Button
                 label="rules"
                 icon="pi pi-cog"
@@ -226,10 +335,14 @@ const projectListItems = computed(() => [
                         type="button"
                         class="tab-btn"
                         :class="{ active: tab === t.value }"
-                        @click="tab = t.value as Tab; openTicketId = null"
+                        @click="selectTab(t.value)"
                     >
                         <i :class="t.icon" />
                         <span>{{ t.label }}</span>
+                        <span
+                            v-if="tabBadges[t.value] > 0 && tab !== t.value"
+                            class="tab-badge"
+                        >{{ tabBadges[t.value] }}</span>
                     </button>
                 </nav>
 
@@ -369,6 +482,17 @@ const projectListItems = computed(() => [
 .tab-btn.active {
     color: var(--p-primary-color);
     border-bottom-color: var(--p-primary-color);
+}
+.tab-badge {
+    background: var(--p-red-500);
+    color: white;
+    border-radius: 999px;
+    padding: 0 0.45rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    min-width: 1.1rem;
+    text-align: center;
+    line-height: 1.3rem;
 }
 
 @media (max-width: 720px) {
