@@ -4,6 +4,7 @@ import Button from "primevue/button";
 import Tag from "primevue/tag";
 import ToggleButton from "primevue/togglebutton";
 import { api, type Message, type TicketSummary } from "../lib/api";
+import ListRow from "./ListRow.vue";
 
 const props = defineProps<{ project: string | null }>();
 const emit = defineEmits<{ (e: "open", id: number): void }>();
@@ -46,6 +47,23 @@ defineExpose({ load });
 interface Aug extends TicketSummary {
     commentCount: number;
     lastActivity: string;
+    snippet: string;
+}
+
+function snippet(s: string | null | undefined, n = 120): string {
+    if (!s) return "";
+    const flat = s.replace(/\s+/g, " ").trim();
+    return flat.length > n ? flat.slice(0, n) + "…" : flat;
+}
+
+function relativeTime(iso: string): string {
+    const d = new Date(iso);
+    const diff = Date.now() - d.getTime();
+    const min = 60_000, hr = 3_600_000, day = 86_400_000;
+    if (diff < hr) return `${Math.max(1, Math.floor(diff / min))}m ago`;
+    if (diff < day) return `${Math.floor(diff / hr)}h ago`;
+    if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
+    return d.toLocaleDateString();
 }
 
 const augmented = computed<Aug[]>(() => {
@@ -65,6 +83,7 @@ const augmented = computed<Aug[]>(() => {
                 commentCount: c.count,
                 lastActivity:
                     c.last && c.last > t.created_at ? c.last : t.created_at,
+                snippet: snippet(t.body),
             };
         })
         .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
@@ -73,7 +92,7 @@ const augmented = computed<Aug[]>(() => {
 
 <template>
     <div class="ticket-list">
-        <div class="ticket-list-toolbar">
+        <div class="list-toolbar">
             <ToggleButton
                 v-model="onlyOpen"
                 on-label="open only"
@@ -105,38 +124,55 @@ const augmented = computed<Aug[]>(() => {
             </div>
         </div>
 
-        <div
+        <ListRow
             v-for="t in augmented"
             :key="t.id"
-            class="ticket-row"
-            :class="{ closed: t.closed }"
+            :closed="t.closed"
             @click="emit('open', t.id)"
         >
-            <div class="ticket-row-meta">
-                <Tag :value="`#${t.id}`" severity="secondary" />
-                <Tag :value="t.project" severity="info" />
-                <Tag v-if="t.closed" value="closed" severity="danger" />
-                <span v-if="t.by_agent">by {{ t.by_agent }}</span>
-                <span class="spacer" />
-                <span :title="t.lastActivity" style="font-size: 0.85rem">
-                    {{ new Date(t.lastActivity).toLocaleString() }}
+            <template #lead>
+                <i
+                    class="pi"
+                    :class="t.closed ? 'pi-lock' : 'pi-ticket'"
+                    style="color: var(--p-text-muted-color)"
+                />
+            </template>
+            <template v-if="t.by_agent" #from>{{ t.by_agent }}</template>
+            <template #title>
+                <span class="ticket-id">#{{ t.id }}</span>
+                {{ t.title || "(no title)" }}
+                <Tag
+                    v-if="!project"
+                    :value="t.project"
+                    severity="info"
+                    style="margin-left: 0.4rem; font-size: 0.7rem"
+                />
+                <Tag
+                    v-if="t.closed"
+                    value="closed"
+                    severity="danger"
+                    style="margin-left: 0.4rem; font-size: 0.7rem"
+                />
+            </template>
+            <template v-if="t.snippet" #snippet>{{ t.snippet }}</template>
+            <template #meta>
+                <span v-if="t.commentCount > 0">
+                    <i class="pi pi-comments" /> {{ t.commentCount }}
                 </span>
-            </div>
-            <div class="ticket-row-title">{{ t.title || "(no title)" }}</div>
-            <div class="ticket-row-footer">
-                <i class="pi pi-comments" />
-                <span>{{ t.commentCount }} comment{{ t.commentCount === 1 ? "" : "s" }}</span>
-                <span class="spacer" />
+            </template>
+            <template #time>{{ relativeTime(t.lastActivity) }}</template>
+            <template #actions>
                 <Button
-                    label="open"
                     icon="pi pi-arrow-right"
                     severity="secondary"
-                    size="small"
                     text
-                    @click.stop="emit('open', t.id)"
+                    rounded
+                    size="small"
+                    title="open thread"
+                    @click="emit('open', t.id)"
                 />
-            </div>
-        </div>
+            </template>
+        </ListRow>
     </div>
 </template>
 
@@ -144,48 +180,18 @@ const augmented = computed<Aug[]>(() => {
 .ticket-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0;
 }
-.ticket-list-toolbar {
+.list-toolbar {
     display: flex;
     align-items: center;
-}
-.ticket-row {
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
-    padding: 0.7rem 0.9rem;
-    background: var(--p-content-background);
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-    cursor: pointer;
-    transition: background 0.15s;
-}
-.ticket-row:hover {
-    background: var(--p-surface-100);
-}
-.aiball-dark .ticket-row:hover {
-    background: var(--p-surface-800);
-}
-.ticket-row.closed {
-    opacity: 0.6;
-}
-.ticket-row-meta {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    color: var(--p-text-muted-color);
-    font-size: 0.85rem;
-}
-.ticket-row-title {
-    font-weight: 600;
-    font-size: 1rem;
-}
-.ticket-row-footer {
-    display: flex;
-    align-items: center;
+    padding: 0.3rem 0;
     gap: 0.4rem;
-    font-size: 0.85rem;
+}
+.ticket-id {
     color: var(--p-text-muted-color);
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.85em;
+    margin-right: 0.4rem;
 }
 </style>

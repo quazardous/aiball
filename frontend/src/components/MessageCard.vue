@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { computed, inject, ref, type Ref } from "vue";
 import Button from "primevue/button";
 import Checkbox from "primevue/checkbox";
 import InputText from "primevue/inputtext";
@@ -8,6 +8,7 @@ import ToggleButton from "primevue/togglebutton";
 import Tag from "primevue/tag";
 import { api, type Message } from "../lib/api";
 import MarkdownView from "./MarkdownView.vue";
+import ListRow from "./ListRow.vue";
 
 const props = defineProps<{
     message: Message;
@@ -19,6 +20,8 @@ const emit = defineEmits<{
     (e: "update:selected", v: boolean): void;
 }>();
 
+const compactMode = inject<Ref<boolean>>("compact", ref(false));
+
 const editing = ref(false);
 const editTitle = ref("");
 const editBody = ref("");
@@ -29,6 +32,14 @@ const busy = ref(false);
 const error = ref<string | null>(null);
 const expanded = ref(false);
 
+// In comfortable mode the full card is always shown. In compact mode the
+// row collapses to a single Gmail-style line, but expands inline if the
+// user clicks it or starts editing/noting.
+const showFull = computed(() => {
+    if (!compactMode.value) return true;
+    return expanded.value || editing.value || noting.value;
+});
+
 const displayTitle = computed(
     () => props.message.edited_title ?? props.message.title ?? "",
 );
@@ -36,27 +47,46 @@ const displayBody = computed(
     () => props.message.edited_body ?? props.message.body ?? "",
 );
 
+function snippet(s: string, n = 120): string {
+    const flat = s.replace(/\s+/g, " ").trim();
+    return flat.length > n ? flat.slice(0, n) + "…" : flat;
+}
+const bodySnippet = computed(() => snippet(displayBody.value));
+
+function relativeTime(iso: string): string {
+    const d = new Date(iso);
+    const diff = Date.now() - d.getTime();
+    const min = 60_000, hr = 3_600_000, day = 86_400_000;
+    if (diff < hr) return `${Math.max(1, Math.floor(diff / min))}m`;
+    if (diff < day) return `${Math.floor(diff / hr)}h`;
+    if (diff < 7 * day) return `${Math.floor(diff / day)}d`;
+    return d.toLocaleDateString();
+}
+
 const statusSeverity = computed(() => {
     switch (props.message.status) {
-        case "approved":
-            return "success";
-        case "rejected":
-            return "danger";
-        default:
-            return "warn";
+        case "approved": return "success";
+        case "rejected": return "danger";
+        default:         return "warn";
     }
 });
 
 const kindLabel = computed(() => {
     switch (props.message.kind) {
-        case "ticket_created":
-            return "ticket";
-        case "comment_added":
-            return "comment";
-        case "ticket_closed":
-            return "close";
+        case "ticket_created": return "ticket";
+        case "comment_added":  return "comment";
+        case "ticket_closed":  return "close";
     }
     return props.message.kind;
+});
+
+const kindIcon = computed(() => {
+    switch (props.message.kind) {
+        case "ticket_created": return "pi pi-ticket";
+        case "comment_added":  return "pi pi-comment";
+        case "ticket_closed":  return "pi pi-lock";
+    }
+    return "pi pi-circle";
 });
 
 async function call<T>(fn: () => Promise<T>): Promise<T | null> {
@@ -118,11 +148,105 @@ async function saveNote() {
 </script>
 
 <template>
+    <!-- Compact (Gmail-style) row when collapsed -->
+    <ListRow
+        v-if="!showFull"
+        :selected="selectable && selected"
+        :unread="message.status === 'pending'"
+        :danger="message.status === 'rejected'"
+        @click="expanded = true"
+    >
+        <template #select>
+            <Checkbox
+                v-if="selectable"
+                :model-value="selected"
+                binary
+                @update:model-value="(v: boolean) => emit('update:selected', v)"
+            />
+        </template>
+        <template #lead>
+            <i :class="kindIcon" style="color: var(--p-text-muted-color)" />
+        </template>
+        <template v-if="message.by_agent" #from>
+            {{ message.by_agent }}
+        </template>
+        <template #title>
+            <span class="msg-id">#{{ message.id }}</span>
+            <span v-if="displayTitle">{{ displayTitle }}</span>
+            <span v-else style="color: var(--p-text-muted-color); font-style: italic">
+                ({{ kindLabel }})
+            </span>
+        </template>
+        <template v-if="bodySnippet" #snippet>{{ bodySnippet }}</template>
+        <template #meta>
+            <Tag
+                :value="message.status"
+                :severity="statusSeverity"
+                style="font-size: 0.7rem; padding: 0.05rem 0.35rem"
+            />
+        </template>
+        <template #time>{{ relativeTime(message.created_at) }}</template>
+        <template #actions>
+            <Button
+                v-if="message.status === 'pending'"
+                icon="pi pi-check"
+                severity="success"
+                size="small"
+                rounded
+                text
+                title="approve"
+                :loading="busy"
+                @click="approve"
+            />
+            <Button
+                v-if="message.status === 'pending'"
+                icon="pi pi-times"
+                severity="danger"
+                size="small"
+                rounded
+                text
+                title="reject"
+                :loading="busy"
+                @click="reject"
+            />
+            <Button
+                v-if="message.status === 'pending'"
+                icon="pi pi-pencil"
+                severity="secondary"
+                size="small"
+                rounded
+                text
+                title="edit"
+                @click="startEdit"
+            />
+            <Button
+                icon="pi pi-comment"
+                severity="secondary"
+                size="small"
+                rounded
+                text
+                :title="message.human_note ? 'edit note' : 'add note'"
+                @click="startNote"
+            />
+            <Button
+                icon="pi pi-arrow-down"
+                severity="secondary"
+                size="small"
+                rounded
+                text
+                title="expand"
+                @click="expanded = true"
+            />
+        </template>
+    </ListRow>
+
+    <!-- Full card when expanded or in comfortable mode -->
     <div
+        v-else
         class="message-card"
         :class="{ 'is-selected': selectable && selected, 'is-expanded': expanded }"
     >
-        <div class="meta" @click="expanded = !expanded" style="cursor: pointer">
+        <div class="meta" @click="compactMode && (expanded = !expanded)" :style="compactMode ? 'cursor: pointer' : ''">
             <Checkbox
                 v-if="selectable"
                 :model-value="selected"
@@ -131,8 +255,8 @@ async function saveNote() {
                 @click.stop
             />
             <i
-                class="pi expand-chevron"
-                :class="expanded ? 'pi-chevron-down' : 'pi-chevron-right'"
+                v-if="compactMode"
+                class="pi expand-chevron pi-chevron-down"
             />
             <Tag :value="`#${message.id}`" severity="secondary" />
             <Tag :value="kindLabel" />
@@ -168,10 +292,10 @@ async function saveNote() {
             <Textarea
                 v-if="!editPreview"
                 v-model="editBody"
-                :rows="6"
+                :rows="8"
                 class="w-full"
                 :disabled="busy"
-                style="font-family: ui-monospace, monospace; font-size: 0.9rem"
+                style="font-family: ui-monospace, monospace; font-size: 0.9rem; min-height: 10rem; resize: vertical"
             />
             <div v-else class="reply-preview">
                 <MarkdownView :source="editBody" />
@@ -204,7 +328,7 @@ async function saveNote() {
         </div>
         <div v-if="noting" class="edit-form">
             <span class="field-label">Moderator note</span>
-            <InputText v-model="note" :disabled="busy" />
+            <InputText v-model="note" class="w-full" :disabled="busy" />
             <div class="actions">
                 <Button
                     label="save"
@@ -261,6 +385,16 @@ async function saveNote() {
                 :disabled="busy"
                 @click="startNote"
             />
+            <span v-if="compactMode" class="spacer" />
+            <Button
+                v-if="compactMode"
+                label="collapse"
+                icon="pi pi-chevron-up"
+                size="small"
+                severity="secondary"
+                text
+                @click="expanded = false"
+            />
         </div>
 
         <div v-if="error" class="meta" style="color: var(--p-red-500)">
@@ -269,3 +403,12 @@ async function saveNote() {
         </div>
     </div>
 </template>
+
+<style>
+.msg-id {
+    color: var(--p-text-muted-color);
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.85em;
+    margin-right: 0.4rem;
+}
+</style>

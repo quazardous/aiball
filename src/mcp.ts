@@ -343,3 +343,17 @@ server.registerTool(
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+// If the agent has an explicit project (AIBALL_PROJECT, typically set in
+// .mcp.json env), auto-subscribe at startup so the agent's outbox feed
+// starts collecting messages immediately. upsertSubscription is idempotent,
+// so this is safe to call on every MCP launch. We intentionally do NOT pass
+// catchup=true: the agent should see new messages from now on, not the full
+// history of the project.
+if (client.defaultProject) {
+    client.subscribe(client.defaultProject, false).catch(() => {
+        // Daemon may be down at MCP startup; the agent will hit the spool
+        // path on its next post and the subscription registers later when
+        // the daemon comes back. Don't crash the MCP for this.
+    });
+}

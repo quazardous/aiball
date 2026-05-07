@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, provide, ref, watch } from "vue";
 import Button from "primevue/button";
 import Select from "primevue/select";
-import Drawer from "primevue/drawer";
 import Toast from "primevue/toast";
 import { useToast } from "primevue/usetoast";
 import { api, type Message } from "./lib/api";
@@ -14,13 +13,14 @@ import ThreadView from "./components/ThreadView.vue";
 
 const toast = useToast();
 
-type Tab = "tickets" | "pending" | "approved" | "rejected";
+type Tab = "tickets" | "pending" | "approved" | "rejected" | "rules";
 const tab = ref<Tab>("tickets");
 const tabOptions: { label: string; value: Tab; icon: string }[] = [
     { label: "Tickets", value: "tickets", icon: "pi pi-ticket" },
     { label: "Pending", value: "pending", icon: "pi pi-clock" },
     { label: "Approved", value: "approved", icon: "pi pi-check" },
     { label: "Rejected", value: "rejected", icon: "pi pi-times" },
+    { label: "Rules", value: "rules", icon: "pi pi-cog" },
 ];
 
 // Per-tab badge counters — incremented on WS push when the user isn't on
@@ -30,6 +30,7 @@ const tabBadges = ref<Record<Tab, number>>({
     pending: 0,
     approved: 0,
     rejected: 0,
+    rules: 0,
 });
 
 // OS notifications: lazily ask permission on first interaction so we don't
@@ -71,7 +72,6 @@ const project = ref<string | null>(
 );
 const messages = ref<Message[]>([]);
 const loading = ref(false);
-const rulesOpen = ref(false);
 const dark = ref(localStorage.getItem("aiball.dark") === "1");
 const compact = ref(localStorage.getItem("aiball.compact") !== "0");
 const openTicketId = ref<number | null>(null);
@@ -82,7 +82,9 @@ const selectMode = ref(false);
 const selectedIds = ref<Set<number>>(new Set());
 const bulkBusy = ref(false);
 
-const isStatusList = computed(() => tab.value !== "tickets");
+const isStatusList = computed(
+    () => tab.value !== "tickets" && tab.value !== "rules",
+);
 
 function toggleSelected(id: number, v: boolean) {
     const next = new Set(selectedIds.value);
@@ -140,6 +142,7 @@ document.documentElement.classList.toggle("aiball-dark", dark.value);
 watch(compact, (v) => {
     localStorage.setItem("aiball.compact", v ? "1" : "0");
 });
+provide("compact", compact);
 
 async function loadProjects() {
     try {
@@ -348,12 +351,6 @@ const projectListItems = computed(() => [
                 @click="toggleMute"
             />
             <Button
-                label="rules"
-                icon="pi pi-cog"
-                severity="secondary"
-                @click="rulesOpen = true"
-            />
-            <Button
                 :icon="dark ? 'pi pi-sun' : 'pi pi-moon'"
                 severity="secondary"
                 text
@@ -418,6 +415,8 @@ const projectListItems = computed(() => [
                     :project="project"
                     @open="(id: number) => (openTicketId = id)"
                 />
+
+                <RulesPanel v-else-if="tab === 'rules'" />
 
                 <template v-else>
                     <div v-if="messages.length" class="bulk-bar">
@@ -494,15 +493,6 @@ const projectListItems = computed(() => [
                 </template>
             </main>
         </div>
-
-        <Drawer
-            v-model:visible="rulesOpen"
-            header="Moderation rules"
-            position="right"
-            :style="{ width: 'min(540px, 100vw)' }"
-        >
-            <RulesPanel />
-        </Drawer>
 
         <Toast />
     </div>
