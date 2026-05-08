@@ -22,6 +22,7 @@ const toast = useToast();
 
 type StatusFilter = "all" | "pending" | "approved" | "rejected";
 type PriorityFilter = "all" | "panic" | "request" | "question" | "fyi";
+type SortBy = "activity" | "created_desc" | "created_asc";
 
 const statusFilter = ref<StatusFilter>(
     (localStorage.getItem("aiball.filter.status") as StatusFilter | null) ?? "pending",
@@ -30,6 +31,9 @@ const priorityFilter = ref<PriorityFilter>(
     (localStorage.getItem("aiball.filter.priority") as PriorityFilter | null) ?? "all",
 );
 const onlyOpen = ref(localStorage.getItem("aiball.filter.open") !== "0");
+const sortBy = ref<SortBy>(
+    (localStorage.getItem("aiball.filter.sort") as SortBy | null) ?? "activity",
+);
 
 const statusFilterOptions: { label: string; value: StatusFilter }[] = [
     { label: "All", value: "all" },
@@ -43,6 +47,11 @@ const priorityFilterOptions: { label: string; value: PriorityFilter }[] = [
     { label: "Request", value: "request" },
     { label: "Question", value: "question" },
     { label: "FYI", value: "fyi" },
+];
+const sortOptions: { label: string; value: SortBy }[] = [
+    { label: "Recent activity", value: "activity" },
+    { label: "Newest first", value: "created_desc" },
+    { label: "Oldest first", value: "created_asc" },
 ];
 
 // Sidebar can route to a settings panel that replaces the lists entirely.
@@ -104,6 +113,22 @@ function onComposed() {
     composeOpen.value = false;
     refresh();
 }
+
+// Auto-refresh: optional 60s heartbeat that triggers a refresh of the
+// current view. WS push already keeps things fresh; this is a fallback
+// for environments where the WS may have silently dropped.
+const autoRefresh = ref(localStorage.getItem("aiball.autoRefresh") === "1");
+let autoRefreshTimer: number | null = null;
+watch(autoRefresh, (v) => {
+    localStorage.setItem("aiball.autoRefresh", v ? "1" : "0");
+    if (autoRefreshTimer !== null) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+    }
+    if (v) {
+        autoRefreshTimer = window.setInterval(() => refresh(), 60_000);
+    }
+}, { immediate: true });
 
 const strategy = ref<Strategy>("auto-reply");
 const strategyOptions: { label: string; value: Strategy; hint: string }[] = [
@@ -327,6 +352,19 @@ watch([statusFilter, priorityFilter, onlyOpen, project], () => {
     if (inListView.value) loadRows();
 });
 
+watch(sortBy, (v) => localStorage.setItem("aiball.filter.sort", v));
+
+const sortedRows = computed(() => {
+    const r = [...rows.value];
+    if (sortBy.value === "created_desc") {
+        r.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    } else if (sortBy.value === "created_asc") {
+        r.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    }
+    // "activity" is the API default; rows already arrive sorted that way.
+    return r;
+});
+
 useRouting({
     panel,
     openTicketId,
@@ -505,6 +543,14 @@ const globalUnreadCount = computed(() =>
                 :loading="loading"
                 @click="refresh"
             />
+            <Button
+                :icon="autoRefresh ? 'pi pi-clock' : 'pi pi-stop-circle'"
+                :severity="autoRefresh ? 'success' : 'secondary'"
+                :title="autoRefresh ? 'Auto-refresh on (every 60s) — click to stop' : 'Auto-refresh off — click to enable (60s)'"
+                text
+                rounded
+                @click="autoRefresh = !autoRefresh"
+            />
         </header>
 
         <div class="aiball-layout">
@@ -604,6 +650,16 @@ const globalUnreadCount = computed(() =>
                             off-icon="pi pi-folder"
                             size="small"
                         />
+                        <Select
+                            :model-value="sortBy"
+                            :options="sortOptions"
+                            option-label="label"
+                            option-value="value"
+                            size="small"
+                            class="filter-select"
+                            title="Sort order"
+                            @update:model-value="(v: SortBy) => (sortBy = v)"
+                        />
                         <span class="spacer" />
                         <Button
                             v-if="!composeOpen"
@@ -642,7 +698,7 @@ const globalUnreadCount = computed(() =>
                     </div>
 
                     <ListRow
-                        v-for="r in rows"
+                        v-for="r in sortedRows"
                         :key="r.id"
                         :selected="selectedIds.has(r.id)"
                         :unread="r.pending_comment_count > 0"

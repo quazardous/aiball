@@ -412,13 +412,33 @@ cmd_status() {
     fi
     local spool_count=0
     [[ -d "$SPOOL_DIR" ]] && spool_count="$(find "$SPOOL_DIR" -maxdepth 1 -name '*.json' -type f 2>/dev/null | wc -l)"
+    local db_path="$AIBALL_HOME/aiball.db"
+    local db_size=0
+    [[ -f "$db_path" ]] && db_size="$(stat -c%s "$db_path" 2>/dev/null || echo 0)"
+    local outbox_dir="$AIBALL_HOME/outbox"
     jq -nc \
         --argjson up "$up" \
         --arg url "$URL" \
         --arg home "$AIBALL_HOME" \
+        --arg db_path "$db_path" \
+        --argjson db_size "$db_size" \
+        --arg outbox_dir "$outbox_dir" \
+        --arg spool_dir "$SPOOL_DIR" \
         --argjson spool "$spool_count" \
         --argjson info "$daemon_info" \
-        '{daemon_up:$up, url:$url, home:$home, spool_pending:$spool, daemon:$info}'
+        '{
+            daemon_up: $up,
+            url: $url,
+            paths: {
+                home: $home,
+                db: $db_path,
+                db_size: $db_size,
+                outbox_dir: $outbox_dir,
+                spool_dir: $spool_dir
+            },
+            spool_pending: $spool,
+            daemon: $info
+        }'
 }
 
 cmd_drain() {
