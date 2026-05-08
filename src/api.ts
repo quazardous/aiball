@@ -32,6 +32,8 @@ import {
     getStrategy,
     setStrategy,
     STRATEGIES,
+    PRIORITIES,
+    type Priority,
     insertPing,
     listPings,
     markPingsRead,
@@ -160,11 +162,16 @@ api.post("/messages/:id/edit", (req, res) => {
     const id = Number(req.params.id);
     const existing = getMessage(id);
     if (!existing) return notFound(res);
-    const { title, body } = req.body ?? {};
-    if (title === undefined && body === undefined) {
-        return badRequest(res, "provide title and/or body");
+    const { title, body, priority } = req.body ?? {};
+    if (title === undefined && body === undefined && priority === undefined) {
+        return badRequest(res, "provide title, body, and/or priority");
     }
-    const updated = editMessage(id, { title, body });
+    if (priority !== undefined && priority !== null) {
+        if (typeof priority !== "string" || !PRIORITIES.includes(priority as Priority)) {
+            return badRequest(res, `priority must be one of ${PRIORITIES.join(", ")}`);
+        }
+    }
+    const updated = editMessage(id, { title, body, priority });
     if (!updated) return notFound(res);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });

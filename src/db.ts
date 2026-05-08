@@ -415,13 +415,18 @@ export function updateMessageStatus(
 
 export function editMessage(
     id: number,
-    fields: { title?: string | null; body?: string | null },
+    fields: {
+        title?: string | null;
+        body?: string | null;
+        priority?: Priority | null;
+    },
 ): Message | null {
     const db = getDb();
-    // Try tickets first (only tickets have edited_title).
+    // Try tickets first — only tickets have edited_title and priority.
     const ticketPatch: Partial<schema.NewTicket> = {};
     if (fields.title !== undefined) ticketPatch.editedTitle = fields.title;
     if (fields.body !== undefined) ticketPatch.editedBody = fields.body;
+    if (fields.priority !== undefined) ticketPatch.priority = fields.priority;
     if (Object.keys(ticketPatch).length > 0) {
         const t = db.update(schema.tickets)
             .set(ticketPatch)
@@ -429,7 +434,8 @@ export function editMessage(
             .run();
         if (t.changes > 0) return getMessage(id);
     }
-    // Otherwise try messages — body only (no edited_title).
+    // Otherwise this is a non-ticket message — body only. priority is
+    // ticket-scoped and silently ignored on comments/lifecycle.
     if (fields.body !== undefined) {
         db.update(schema.messages)
             .set({ editedBody: fields.body })

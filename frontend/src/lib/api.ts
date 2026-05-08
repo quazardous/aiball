@@ -177,7 +177,7 @@ export const api = {
         req<Message>("POST", `/api/messages/${id}/approve`),
     reject: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/reject`),
-    edit: (id: number, body: { title?: string; body?: string }) =>
+    edit: (id: number, body: { title?: string; body?: string; priority?: Priority | null }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>
         req<Message>("POST", `/api/messages/${id}/note`, { note }),
