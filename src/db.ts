@@ -1,5 +1,29 @@
 import Database from "better-sqlite3";
+import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import {
+    and,
+    asc,
+    desc,
+    eq,
+    inArray,
+    isNull,
+    isNotNull,
+    lte,
+    ne,
+    or,
+    sql,
+} from "drizzle-orm";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
+import * as schema from "./schema.js";
 import { DB_PATH, ensureDirs } from "./paths.js";
+
+// =====================================================================
+// Public types — re-exported / aliased so consumers (api.ts, mcp.ts, …)
+// don't import from drizzle directly.
+// =====================================================================
 
 export type MessageKind =
     | "ticket_created"
@@ -15,14 +39,18 @@ export type Strategy = "manual" | "auto" | "auto-reply";
 export const STRATEGIES: readonly Strategy[] = ["manual", "auto", "auto-reply"];
 export const DEFAULT_STRATEGY: Strategy = "auto-reply";
 
+/** Drizzle row types (internal) re-exported for callers that handle the
+ *  split shapes natively. The legacy union JSON shape is `Message` below. */
+export type TicketRow = schema.Ticket;
+export type MessageRow = schema.Message;
+
 /**
- * Legacy union shape representing any row in the (now virtual) `messages`
- * stream. Backed by a SQL VIEW that UNIONs the physical `tickets` and
- * `_messages` tables. Ticket rows have project/title/edited_title/priority
- * populated and ticket_id/parent_id NULL; non-ticket rows have ticket_id
- * (always set), parent_id (mapped from parent_message_id; NULL collapses
- * to ticket_id for legacy callers), and project resolved via the parent
- * ticket. `display_seq` is per-project for tickets, per-thread for messages.
+ * Legacy union shape for JSON output. Tickets project as kind=ticket_created
+ * with title/priority populated and ticket_id/parent_id null; non-tickets
+ * carry ticket_id (always set), parent_id (= parent_message_id, defaulting
+ * to ticket_id for top-level), and inherit project from their parent ticket.
+ * This is the on-the-wire contract with api.ts and the frontend; the DB
+ * itself stores the two shapes in separate physical tables.
  */
 export interface Message {
     id: number;
@@ -100,11 +128,7 @@ export interface NewTag {
     position?: number;
 }
 
-/**
- * Closed-list initial tags. Created once, when the tags table is empty,
- * so the user has something to start with. The human can then add/edit/
- * remove freely from the UI.
- */
+/** Closed-list initial tags. Created once, when the tags table is empty. */
 const DEFAULT_TAGS: NewTag[] = [
     { name: "bug", color: "#ef4444", note: "something is broken", position: 1 },
     { name: "feature", color: "#10b981", note: "new capability", position: 2 },
@@ -116,226 +140,66 @@ const DEFAULT_TAGS: NewTag[] = [
     { name: "done", color: "#22c55e", note: "completed", position: 8 },
 ];
 
-let db: Database.Database | null = null;
+// =====================================================================
+// Connection + migrations (Drizzle drives the schema).
+// =====================================================================
 
-export function getDb(): Database.Database {
-    if (!db) {
+let sqlite: Database.Database | null = null;
+let dbInstance: BetterSQLite3Database<typeof schema> | null = null;
+
+function migrationsFolder(): string {
+    // db.ts compiles/runs from src/ at dev time (tsx) or dist/ if built.
+    // The drizzle/ folder lives at the repo root, two levels up from src/.
+    const here = dirname(fileURLToPath(import.meta.url));
+    const candidates = [
+        resolve(here, "..", "drizzle", "migrations"),
+        resolve(here, "..", "..", "drizzle", "migrations"),
+    ];
+    for (const c of candidates) {
+        if (existsSync(c)) return c;
+    }
+    return candidates[0];
+}
+
+export function getDb(): BetterSQLite3Database<typeof schema> {
+    if (!dbInstance) {
         ensureDirs();
-        db = new Database(DB_PATH);
-        db.pragma("journal_mode = WAL");
-        db.pragma("foreign_keys = ON");
-        migrate(db);
+        sqlite = new Database(DB_PATH);
+        sqlite.pragma("journal_mode = WAL");
+        sqlite.pragma("foreign_keys = ON");
+        dbInstance = drizzle(sqlite, { schema });
+        migrate(dbInstance, { migrationsFolder: migrationsFolder() });
+        bootstrap(dbInstance);
     }
-    return db;
+    return dbInstance;
 }
 
-/**
- * Stable schema. Idempotent — safe to run on every boot. The data model:
- *
- *   tickets          — root rows, one per ticket; display_seq is per-project
- *   _messages        — comments + lifecycle events, FK to tickets;
- *                      display_seq is per-ticket
- *   messages (VIEW)  — legacy union shape over (tickets, _messages) so all
- *                      `SELECT FROM messages` callers keep working
- *   tickets / _messages share the global id pool via settings.next_global_id
- *   so legacy refs (pings, etc.) remain unambiguous integer ids
- *
- *   ticket_tags      — tag join, FK to tickets only (tags are ticket-only)
- *   ticket_subscriptions / subscriptions — project- and per-ticket follows
- *   pings            — per-recipient, per-message delivery rows (no FK; the
- *                      target id may live in either tickets or _messages)
- *   rules / tags / settings — straightforward
- */
-function migrate(d: Database.Database): void {
-    d.pragma("foreign_keys = OFF");
-    d.exec(`
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        );
+function bootstrap(db: BetterSQLite3Database<typeof schema>): void {
+    // Ensure the global id counter exists (idempotent).
+    db.insert(schema.settings)
+        .values({ key: "next_global_id", value: "1" })
+        .onConflictDoNothing()
+        .run();
 
-        CREATE TABLE IF NOT EXISTS tickets (
-            id INTEGER PRIMARY KEY,
-            project TEXT NOT NULL,
-            display_seq INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            body TEXT,
-            by_agent TEXT,
-            priority TEXT,
-            status TEXT NOT NULL DEFAULT 'pending',
-            created_at TEXT NOT NULL,
-            decided_at TEXT,
-            decided_by TEXT,
-            matched_rule_id INTEGER,
-            human_note TEXT,
-            edited_title TEXT,
-            edited_body TEXT,
-            UNIQUE (project, display_seq)
-        );
-        CREATE INDEX IF NOT EXISTS idx_tickets_project ON tickets(project);
-        CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
-
-        CREATE TABLE IF NOT EXISTS _messages (
-            id INTEGER PRIMARY KEY,
-            ticket_id INTEGER NOT NULL,
-            display_seq INTEGER NOT NULL,
-            kind TEXT NOT NULL,
-            parent_message_id INTEGER,
-            body TEXT,
-            by_agent TEXT,
-            status TEXT NOT NULL DEFAULT 'pending',
-            created_at TEXT NOT NULL,
-            decided_at TEXT,
-            decided_by TEXT,
-            matched_rule_id INTEGER,
-            human_note TEXT,
-            edited_body TEXT,
-            FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
-            FOREIGN KEY (parent_message_id) REFERENCES _messages(id) ON DELETE SET NULL,
-            UNIQUE (ticket_id, display_seq)
-        );
-        CREATE INDEX IF NOT EXISTS idx_messages_ticket ON _messages(ticket_id);
-        CREATE INDEX IF NOT EXISTS idx_messages_kind ON _messages(kind);
-
-        CREATE TABLE IF NOT EXISTS rules (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            position INTEGER NOT NULL DEFAULT 0,
-            match_project TEXT,
-            match_kind TEXT,
-            match_by_agent TEXT,
-            decision TEXT NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            note TEXT,
-            created_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_rules_position
-            ON rules(position) WHERE enabled = 1;
-
-        CREATE TABLE IF NOT EXISTS tags (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            color TEXT,
-            position INTEGER NOT NULL DEFAULT 0,
-            note TEXT,
-            created_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_tags_position ON tags(position);
-
-        CREATE TABLE IF NOT EXISTS ticket_tags (
-            ticket_id INTEGER NOT NULL,
-            tag_id INTEGER NOT NULL,
-            set_at TEXT NOT NULL,
-            set_by TEXT,
-            PRIMARY KEY (ticket_id, tag_id),
-            FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
-            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_ticket_tags_tag ON ticket_tags(tag_id);
-
-        CREATE TABLE IF NOT EXISTS subscriptions (
-            consumer_id TEXT NOT NULL,
-            project TEXT NOT NULL,
-            subscribed_at TEXT NOT NULL,
-            last_seen_id INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (consumer_id, project)
-        );
-        CREATE INDEX IF NOT EXISTS idx_subscriptions_project ON subscriptions(project);
-
-        CREATE TABLE IF NOT EXISTS ticket_subscriptions (
-            consumer_id TEXT NOT NULL,
-            ticket_id INTEGER NOT NULL,
-            subscribed_at TEXT NOT NULL,
-            PRIMARY KEY (consumer_id, ticket_id),
-            FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_ticket_subs_ticket ON ticket_subscriptions(ticket_id);
-
-        CREATE TABLE IF NOT EXISTS pings (
-            recipient TEXT NOT NULL,
-            message_id INTEGER NOT NULL,
-            created_at TEXT NOT NULL,
-            seen_at TEXT,
-            PRIMARY KEY (recipient, message_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_pings_recipient_unread
-            ON pings(recipient) WHERE seen_at IS NULL;
-
-        CREATE VIEW IF NOT EXISTS messages AS
-        SELECT
-            t.id            AS id,
-            t.project       AS project,
-            'ticket_created' AS kind,
-            NULL            AS ticket_id,
-            NULL            AS parent_id,
-            t.title         AS title,
-            t.body          AS body,
-            t.by_agent      AS by_agent,
-            t.status        AS status,
-            t.created_at    AS created_at,
-            t.decided_at    AS decided_at,
-            t.decided_by    AS decided_by,
-            t.matched_rule_id AS matched_rule_id,
-            t.human_note    AS human_note,
-            t.edited_title  AS edited_title,
-            t.edited_body   AS edited_body,
-            t.priority      AS priority,
-            t.display_seq   AS display_seq
-        FROM tickets t
-        UNION ALL
-        SELECT
-            m.id            AS id,
-            p.project       AS project,
-            m.kind          AS kind,
-            m.ticket_id     AS ticket_id,
-            COALESCE(m.parent_message_id, m.ticket_id) AS parent_id,
-            NULL            AS title,
-            m.body          AS body,
-            m.by_agent      AS by_agent,
-            m.status        AS status,
-            m.created_at    AS created_at,
-            m.decided_at    AS decided_at,
-            m.decided_by    AS decided_by,
-            m.matched_rule_id AS matched_rule_id,
-            m.human_note    AS human_note,
-            NULL            AS edited_title,
-            m.edited_body   AS edited_body,
-            NULL            AS priority,
-            m.display_seq   AS display_seq
-        FROM _messages m
-        JOIN tickets p ON p.id = m.ticket_id;
-    `);
-    d.pragma("foreign_keys = ON");
-
-    // Bootstrap the shared id counter (next_global_id). Idempotent —
-    // INSERT OR IGNORE leaves an existing row alone, so a populated DB
-    // won't have its counter reset.
-    d.prepare(
-        "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
-    ).run("next_global_id", "1");
-
-    // Tag catalog seed: only on a fresh DB (haveTags === 0).
-    const haveTags = (d.prepare("SELECT COUNT(*) AS n FROM tags").get() as { n: number }).n;
-    if (haveTags === 0) {
-        const ins = d.prepare(`
-            INSERT INTO tags (name, color, position, note, created_at)
-            VALUES (@name, @color, @position, @note, @created_at)
-        `);
-        const insertAll = d.transaction((rows: NewTag[]) => {
-            const now = nowIso();
-            for (const r of rows) {
-                ins.run({
-                    name: r.name,
-                    color: r.color ?? null,
-                    position: r.position ?? 0,
-                    note: r.note ?? null,
-                    created_at: now,
-                });
-            }
-        });
-        insertAll(DEFAULT_TAGS);
+    // Seed the closed-list tag catalog on a fresh DB.
+    const haveTags = db.select({ n: sql<number>`COUNT(*)` }).from(schema.tags).get();
+    if ((haveTags?.n ?? 0) === 0) {
+        const now = nowIso();
+        for (const t of DEFAULT_TAGS) {
+            db.insert(schema.tags).values({
+                name: t.name,
+                color: t.color ?? null,
+                position: t.position ?? 0,
+                note: t.note ?? null,
+                createdAt: now,
+            }).run();
+        }
     }
 }
 
+// =====================================================================
+// Helpers
+// =====================================================================
 
 function nowIso(): string {
     return new Date().toISOString();
@@ -343,108 +207,139 @@ function nowIso(): string {
 
 /**
  * Allocate the next id from the shared counter so tickets and _messages stay
- * in a single id space (legacy refs in pings/etc continue to work).
+ * in a single id space (pings reference this single integer namespace).
+ * Must be called inside an active transaction for atomicity.
  */
-function nextGlobalId(d: Database.Database): number {
-    const row = d
-        .prepare("SELECT CAST(value AS INTEGER) AS v FROM settings WHERE key = ?")
-        .get("next_global_id") as { v: number } | undefined;
-    const id = row?.v ?? 1;
-    d.prepare(
-        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-    ).run("next_global_id", String(id + 1));
-    return id;
+function nextGlobalId(db: BetterSQLite3Database<typeof schema>): number {
+    const row = db.select().from(schema.settings)
+        .where(eq(schema.settings.key, "next_global_id"))
+        .get();
+    const current = row ? Number(row.value) : 1;
+    db.insert(schema.settings)
+        .values({ key: "next_global_id", value: String(current + 1) })
+        .onConflictDoUpdate({
+            target: schema.settings.key,
+            set: { value: String(current + 1) },
+        })
+        .run();
+    return current;
 }
 
-/**
- * Insert into the right physical table based on kind, allocate a global id,
- * compute display_seq (per-project for tickets, per-ticket for messages),
- * and return the row in the legacy union shape for backward compatibility
- * with all the existing call sites.
- */
+function ticketRowToMessage(t: schema.Ticket): Message {
+    return {
+        id: t.id,
+        project: t.project,
+        kind: "ticket_created",
+        ticket_id: null,
+        parent_id: null,
+        title: t.title,
+        body: t.body,
+        by_agent: t.byAgent,
+        status: t.status as MessageStatus,
+        created_at: t.createdAt,
+        decided_at: t.decidedAt,
+        decided_by: t.decidedBy,
+        matched_rule_id: t.matchedRuleId,
+        human_note: t.humanNote,
+        edited_title: t.editedTitle,
+        edited_body: t.editedBody,
+        priority: (t.priority as Priority | null) ?? null,
+        display_seq: t.displaySeq,
+    };
+}
+
+function messageRowToMessage(m: schema.Message, project: string): Message {
+    return {
+        id: m.id,
+        project,
+        kind: m.kind as MessageKind,
+        ticket_id: m.ticketId,
+        // Legacy callers expect parent_id == ticket_id for top-level replies;
+        // the new schema stores NULL for that case.
+        parent_id: m.parentMessageId ?? m.ticketId,
+        title: null,
+        body: m.body,
+        by_agent: m.byAgent,
+        status: m.status as MessageStatus,
+        created_at: m.createdAt,
+        decided_at: m.decidedAt,
+        decided_by: m.decidedBy,
+        matched_rule_id: m.matchedRuleId,
+        human_note: m.humanNote,
+        edited_title: null,
+        edited_body: m.editedBody,
+        priority: null,
+        display_seq: m.displaySeq,
+    };
+}
+
+// =====================================================================
+// Messages — public API (legacy signatures, internally routed to the
+// right physical table).
+// =====================================================================
+
 export function insertMessage(m: NewMessage): Message {
-    const d = getDb();
-    const tx = d.transaction(() => {
-        const id = nextGlobalId(d);
-        const created_at = nowIso();
+    const db = getDb();
+    return db.transaction((tx) => {
+        const id = nextGlobalId(tx);
+        const createdAt = nowIso();
         if (m.kind === "ticket_created") {
-            // display_seq = max for project + 1 (1 if first).
-            const r = d
-                .prepare(
-                    "SELECT COALESCE(MAX(display_seq), 0) + 1 AS n FROM tickets WHERE project = ?",
-                )
-                .get(m.project) as { n: number };
-            d.prepare(
-                `INSERT INTO tickets
-                    (id, project, display_seq, title, body, by_agent, priority, created_at)
-                 VALUES (@id, @project, @display_seq, @title, @body, @by_agent, @priority, @created_at)`,
-            ).run({
+            const seq = (tx.select({
+                n: sql<number>`COALESCE(MAX(${schema.tickets.displaySeq}), 0) + 1`,
+            }).from(schema.tickets).where(eq(schema.tickets.project, m.project)).get())?.n ?? 1;
+            const inserted = tx.insert(schema.tickets).values({
                 id,
                 project: m.project,
-                display_seq: r.n,
+                displaySeq: seq,
                 title: m.title ?? "",
                 body: m.body ?? null,
-                by_agent: m.by_agent ?? null,
+                byAgent: m.by_agent ?? null,
                 priority: m.priority ?? null,
-                created_at,
-            });
-            return id;
+                createdAt,
+            }).returning().get();
+            return ticketRowToMessage(inserted);
         }
-        // Non-ticket: comment_added | ticket_closed | ticket_reopened.
         if (!m.ticket_id) {
             throw new Error(`${m.kind} requires ticket_id`);
         }
-        const r = d
-            .prepare(
-                "SELECT COALESCE(MAX(display_seq), 0) + 1 AS n FROM _messages WHERE ticket_id = ?",
-            )
-            .get(m.ticket_id) as { n: number };
-        // parent_message_id: NULL when parent is the ticket itself (legacy
-        // callers pass parent_id == ticket_id for top-level).
+        const seq = (tx.select({
+            n: sql<number>`COALESCE(MAX(${schema.messages.displaySeq}), 0) + 1`,
+        }).from(schema.messages).where(eq(schema.messages.ticketId, m.ticket_id)).get())?.n ?? 1;
+        // Legacy callers pass parent_id == ticket_id for top-level replies;
+        // collapse that to NULL so the schema invariant ("NULL parent → ticket
+        // root") is upheld.
         const parentMessageId =
             m.parent_id !== undefined &&
             m.parent_id !== null &&
             m.parent_id !== m.ticket_id
                 ? m.parent_id
                 : null;
-        d.prepare(
-            `INSERT INTO _messages
-                (id, ticket_id, display_seq, kind, parent_message_id,
-                 body, by_agent, created_at)
-             VALUES (@id, @ticket_id, @display_seq, @kind, @parent_message_id,
-                     @body, @by_agent, @created_at)`,
-        ).run({
+        const inserted = tx.insert(schema.messages).values({
             id,
-            ticket_id: m.ticket_id,
-            display_seq: r.n,
+            ticketId: m.ticket_id,
+            displaySeq: seq,
             kind: m.kind,
-            parent_message_id: parentMessageId,
+            parentMessageId,
             body: m.body ?? null,
-            by_agent: m.by_agent ?? null,
-            created_at,
-        });
-        return id;
+            byAgent: m.by_agent ?? null,
+            createdAt,
+        }).returning().get();
+        // Resolve project via parent ticket for the legacy shape.
+        const parent = tx.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, m.ticket_id)).get();
+        return messageRowToMessage(inserted, parent?.project ?? m.project);
     });
-    const id = tx();
-    return getMessage(id) as Message;
-}
-
-/**
- * Internal: figures out which physical table holds an id. Returns null if
- * the id doesn't exist in either table.
- */
-function whichTable(d: Database.Database, id: number): "tickets" | "_messages" | null {
-    const t = d.prepare("SELECT 1 FROM tickets WHERE id = ?").get(id);
-    if (t) return "tickets";
-    const m = d.prepare("SELECT 1 FROM _messages WHERE id = ?").get(id);
-    if (m) return "_messages";
-    return null;
 }
 
 export function getMessage(id: number): Message | null {
-    return (getDb()
-        .prepare("SELECT * FROM messages WHERE id = ?")
-        .get(id) as Message | undefined) ?? null;
+    const db = getDb();
+    const t = db.select().from(schema.tickets).where(eq(schema.tickets.id, id)).get();
+    if (t) return ticketRowToMessage(t);
+    const m = db.select().from(schema.messages).where(eq(schema.messages.id, id)).get();
+    if (!m) return null;
+    const parent = db.select({ project: schema.tickets.project })
+        .from(schema.tickets).where(eq(schema.tickets.id, m.ticketId)).get();
+    return messageRowToMessage(m, parent?.project ?? "");
 }
 
 export function listMessages(filters: {
@@ -454,31 +349,48 @@ export function listMessages(filters: {
     by_agent?: string;
     limit?: number;
 } = {}): Message[] {
-    const where: string[] = [];
-    const params: Record<string, unknown> = {};
-    if (filters.status) {
-        where.push("status = @status");
-        params.status = filters.status;
+    const db = getDb();
+    const includeTickets = !filters.kind || filters.kind === "ticket_created";
+    const includeMessages = !filters.kind || filters.kind !== "ticket_created";
+
+    const out: Message[] = [];
+
+    if (includeTickets) {
+        const conds = [];
+        if (filters.status) conds.push(eq(schema.tickets.status, filters.status));
+        if (filters.project) conds.push(eq(schema.tickets.project, filters.project));
+        if (filters.by_agent) conds.push(eq(schema.tickets.byAgent, filters.by_agent));
+        let q = db.select().from(schema.tickets).$dynamic();
+        if (conds.length) q = q.where(and(...conds));
+        const rows = q.orderBy(desc(schema.tickets.id)).all();
+        for (const r of rows) out.push(ticketRowToMessage(r));
     }
-    if (filters.project) {
-        where.push("project = @project");
-        params.project = filters.project;
+
+    if (includeMessages) {
+        const conds = [];
+        if (filters.status) conds.push(eq(schema.messages.status, filters.status));
+        if (filters.kind && filters.kind !== "ticket_created")
+            conds.push(eq(schema.messages.kind, filters.kind));
+        if (filters.by_agent) conds.push(eq(schema.messages.byAgent, filters.by_agent));
+        // Project filter requires joining with tickets.
+        let q = db
+            .select({
+                m: schema.messages,
+                project: schema.tickets.project,
+            })
+            .from(schema.messages)
+            .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+            .$dynamic();
+        if (filters.project)
+            conds.push(eq(schema.tickets.project, filters.project));
+        if (conds.length) q = q.where(and(...conds));
+        const rows = q.orderBy(desc(schema.messages.id)).all();
+        for (const r of rows) out.push(messageRowToMessage(r.m, r.project));
     }
-    if (filters.kind) {
-        where.push("kind = @kind");
-        params.kind = filters.kind;
-    }
-    if (filters.by_agent) {
-        where.push("by_agent = @by_agent");
-        params.by_agent = filters.by_agent;
-    }
-    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-    const limitSql = filters.limit ? `LIMIT ${Number(filters.limit) | 0}` : "";
-    return getDb()
-        .prepare(
-            `SELECT * FROM messages ${whereSql} ORDER BY id DESC ${limitSql}`,
-        )
-        .all(params) as Message[];
+
+    out.sort((a, b) => b.id - a.id);
+    if (filters.limit) return out.slice(0, filters.limit);
+    return out;
 }
 
 export function updateMessageStatus(
@@ -487,14 +399,17 @@ export function updateMessageStatus(
     decidedBy: "human" | "auto" | "owner",
     matchedRuleId: number | null = null,
 ): Message | null {
-    const d = getDb();
-    const table = whichTable(d, id);
-    if (!table) return null;
-    d.prepare(
-        `UPDATE ${table}
-         SET status = ?, decided_at = ?, decided_by = ?, matched_rule_id = ?
-         WHERE id = ?`,
-    ).run(status, nowIso(), decidedBy, matchedRuleId, id);
+    const db = getDb();
+    const decidedAt = nowIso();
+    const t = db.update(schema.tickets)
+        .set({ status, decidedAt, decidedBy, matchedRuleId })
+        .where(eq(schema.tickets.id, id))
+        .run();
+    if (t.changes > 0) return getMessage(id);
+    db.update(schema.messages)
+        .set({ status, decidedAt, decidedBy, matchedRuleId })
+        .where(eq(schema.messages.id, id))
+        .run();
     return getMessage(id);
 }
 
@@ -502,41 +417,53 @@ export function editMessage(
     id: number,
     fields: { title?: string | null; body?: string | null },
 ): Message | null {
-    const d = getDb();
-    const table = whichTable(d, id);
-    if (!table) return null;
-    const sets: string[] = [];
-    const args: unknown[] = [];
-    // edited_title only exists on tickets; silently drop the field for
-    // non-ticket rows (comments don't have titles).
-    if (fields.title !== undefined && table === "tickets") {
-        sets.push("edited_title = ?");
-        args.push(fields.title);
+    const db = getDb();
+    // Try tickets first (only tickets have edited_title).
+    const ticketPatch: Partial<schema.NewTicket> = {};
+    if (fields.title !== undefined) ticketPatch.editedTitle = fields.title;
+    if (fields.body !== undefined) ticketPatch.editedBody = fields.body;
+    if (Object.keys(ticketPatch).length > 0) {
+        const t = db.update(schema.tickets)
+            .set(ticketPatch)
+            .where(eq(schema.tickets.id, id))
+            .run();
+        if (t.changes > 0) return getMessage(id);
     }
+    // Otherwise try messages — body only (no edited_title).
     if (fields.body !== undefined) {
-        sets.push("edited_body = ?");
-        args.push(fields.body);
+        db.update(schema.messages)
+            .set({ editedBody: fields.body })
+            .where(eq(schema.messages.id, id))
+            .run();
     }
-    if (!sets.length) return getMessage(id);
-    args.push(id);
-    d.prepare(`UPDATE ${table} SET ${sets.join(", ")} WHERE id = ?`).run(
-        ...args,
-    );
     return getMessage(id);
 }
 
 export function noteMessage(id: number, note: string | null): Message | null {
-    const d = getDb();
-    const table = whichTable(d, id);
-    if (!table) return null;
-    d.prepare(`UPDATE ${table} SET human_note = ? WHERE id = ?`).run(note, id);
+    const db = getDb();
+    const t = db.update(schema.tickets)
+        .set({ humanNote: note })
+        .where(eq(schema.tickets.id, id))
+        .run();
+    if (t.changes > 0) return getMessage(id);
+    db.update(schema.messages)
+        .set({ humanNote: note })
+        .where(eq(schema.messages.id, id))
+        .run();
     return getMessage(id);
 }
 
+// =====================================================================
+// Projects
+// =====================================================================
+
 export function listProjects(): string[] {
-    return (getDb()
-        .prepare("SELECT DISTINCT project FROM messages ORDER BY project")
-        .all() as { project: string }[]).map((r) => r.project);
+    const db = getDb();
+    const rows = db.selectDistinct({ project: schema.tickets.project })
+        .from(schema.tickets)
+        .orderBy(asc(schema.tickets.project))
+        .all();
+    return rows.map((r) => r.project);
 }
 
 export interface ProjectMeta {
@@ -548,427 +475,348 @@ export interface ProjectMeta {
 }
 
 export function listProjectsDetailed(): ProjectMeta[] {
-    return (getDb()
-        .prepare(
-            `SELECT
-                project AS name,
-                MAX(created_at) AS last_activity,
-                SUM(CASE WHEN kind = 'ticket_created' THEN 1 ELSE 0 END) AS ticket_count,
-                SUM(CASE WHEN kind = 'comment_added' THEN 1 ELSE 0 END) AS comment_count,
-                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count
-             FROM messages
-             GROUP BY project
-             ORDER BY last_activity DESC`,
-        )
-        .all() as ProjectMeta[]).map((r) => ({
-        name: r.name,
-        last_activity: r.last_activity,
-        ticket_count: Number(r.ticket_count),
-        comment_count: Number(r.comment_count),
-        pending_count: Number(r.pending_count),
-    }));
+    const db = getDb();
+    // Aggregates by project across tickets + messages. Two queries merged
+    // in JS — small data sizes, simpler than a SQL UNION/GROUP dance.
+    const ticketAgg = db.select({
+        project: schema.tickets.project,
+        last_activity: sql<string>`MAX(${schema.tickets.createdAt})`,
+        ticket_count: sql<number>`COUNT(*)`,
+        ticket_pending: sql<number>`SUM(CASE WHEN ${schema.tickets.status} = 'pending' THEN 1 ELSE 0 END)`,
+    }).from(schema.tickets).groupBy(schema.tickets.project).all();
+
+    const messageAgg = db.select({
+        project: schema.tickets.project,
+        last_activity: sql<string>`MAX(${schema.messages.createdAt})`,
+        comment_count: sql<number>`SUM(CASE WHEN ${schema.messages.kind} = 'comment_added' THEN 1 ELSE 0 END)`,
+        message_pending: sql<number>`SUM(CASE WHEN ${schema.messages.status} = 'pending' THEN 1 ELSE 0 END)`,
+    })
+        .from(schema.messages)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+        .groupBy(schema.tickets.project)
+        .all();
+
+    const byProject = new Map<string, ProjectMeta>();
+    for (const t of ticketAgg) {
+        byProject.set(t.project, {
+            name: t.project,
+            last_activity: t.last_activity ?? "",
+            ticket_count: Number(t.ticket_count),
+            comment_count: 0,
+            pending_count: Number(t.ticket_pending) || 0,
+        });
+    }
+    for (const m of messageAgg) {
+        const cur = byProject.get(m.project);
+        const lastActivity = m.last_activity ?? "";
+        if (cur) {
+            cur.comment_count = Number(m.comment_count) || 0;
+            cur.pending_count += Number(m.message_pending) || 0;
+            if (lastActivity > cur.last_activity) cur.last_activity = lastActivity;
+        } else {
+            byProject.set(m.project, {
+                name: m.project,
+                last_activity: lastActivity,
+                ticket_count: 0,
+                comment_count: Number(m.comment_count) || 0,
+                pending_count: Number(m.message_pending) || 0,
+            });
+        }
+    }
+    return [...byProject.values()].sort((a, b) =>
+        b.last_activity.localeCompare(a.last_activity),
+    );
 }
 
 /**
- * Hard-delete a project: every message in it (cascades to ticket_tags,
- * pings, ticket_subscriptions via FK), every project subscription. Returns
- * the count of deleted messages so the caller can decide whether to also
- * wipe the project's outbox file.
+ * Hard-delete a project: every ticket (cascades to _messages, ticket_tags,
+ * ticket_subscriptions via FK), every project subscription, every ping
+ * targeting any of those ids (no FK on pings; cleanup is explicit).
  */
 export function deleteProject(name: string): { deleted_messages: number } {
-    const d = getDb();
-    const tx = d.transaction((p: string) => {
-        // Count what's about to disappear (tickets + their messages) so the
-        // caller can report. _messages cascades via FK on tickets.
-        const ticketCount = (d
-            .prepare("SELECT COUNT(*) AS n FROM tickets WHERE project = ?")
-            .get(p) as { n: number }).n;
-        const messageCount = (d
-            .prepare(
-                "SELECT COUNT(*) AS n FROM _messages WHERE ticket_id IN (SELECT id FROM tickets WHERE project = ?)",
-            )
-            .get(p) as { n: number }).n;
-        // Pings reference ids in either table — clean them up explicitly
-        // since pings has no FK constraint anymore.
-        d.prepare(
-            `DELETE FROM pings
-             WHERE message_id IN (SELECT id FROM tickets WHERE project = ?)
-                OR message_id IN (
-                    SELECT id FROM _messages
-                    WHERE ticket_id IN (SELECT id FROM tickets WHERE project = ?)
-                )`,
-        ).run(p, p);
-        // Tickets DELETE cascades to _messages, ticket_subscriptions, ticket_tags via FK.
-        d.prepare("DELETE FROM tickets WHERE project = ?").run(p);
-        d.prepare("DELETE FROM subscriptions WHERE project = ?").run(p);
-        return { deleted_messages: ticketCount + messageCount };
+    const db = getDb();
+    return db.transaction((tx) => {
+        const ticketIds = tx.select({ id: schema.tickets.id })
+            .from(schema.tickets).where(eq(schema.tickets.project, name)).all()
+            .map((r) => r.id);
+        let messageIds: number[] = [];
+        if (ticketIds.length) {
+            messageIds = tx.select({ id: schema.messages.id })
+                .from(schema.messages)
+                .where(inArray(schema.messages.ticketId, ticketIds))
+                .all()
+                .map((r) => r.id);
+        }
+        const allIds = [...ticketIds, ...messageIds];
+        if (allIds.length) {
+            tx.delete(schema.pings).where(inArray(schema.pings.messageId, allIds)).run();
+        }
+        tx.delete(schema.tickets).where(eq(schema.tickets.project, name)).run();
+        tx.delete(schema.subscriptions).where(eq(schema.subscriptions.project, name)).run();
+        return { deleted_messages: ticketIds.length + messageIds.length };
     });
-    return tx(name);
 }
 
+// =====================================================================
+// Rules
+// =====================================================================
+
 export function insertRule(r: NewRule): Rule {
-    const d = getDb();
-    const stmt = d.prepare(`
-        INSERT INTO rules
-            (position, match_project, match_kind, match_by_agent,
-             decision, enabled, note, created_at)
-        VALUES (@position, @match_project, @match_kind, @match_by_agent,
-                @decision, 1, @note, @created_at)
-        RETURNING *
-    `);
-    return stmt.get({
+    const db = getDb();
+    const inserted = db.insert(schema.rules).values({
         position: r.position ?? 0,
-        match_project: r.match_project ?? null,
-        match_kind: r.match_kind ?? null,
-        match_by_agent: r.match_by_agent ?? null,
+        matchProject: r.match_project ?? null,
+        matchKind: r.match_kind ?? null,
+        matchByAgent: r.match_by_agent ?? null,
         decision: r.decision,
+        enabled: 1,
         note: r.note ?? null,
-        created_at: nowIso(),
-    }) as Rule;
+        createdAt: nowIso(),
+    }).returning().get();
+    return ruleRowToRule(inserted);
+}
+
+function ruleRowToRule(r: schema.Rule): Rule {
+    return {
+        id: r.id,
+        position: r.position,
+        match_project: r.matchProject,
+        match_kind: (r.matchKind as MessageKind | null) ?? null,
+        match_by_agent: r.matchByAgent,
+        decision: r.decision as RuleDecision,
+        enabled: r.enabled,
+        note: r.note,
+        created_at: r.createdAt,
+    };
 }
 
 export function listRules(opts: { enabledOnly?: boolean } = {}): Rule[] {
-    const where = opts.enabledOnly ? "WHERE enabled = 1" : "";
-    return getDb()
-        .prepare(`SELECT * FROM rules ${where} ORDER BY position ASC, id ASC`)
-        .all() as Rule[];
+    const db = getDb();
+    let q = db.select().from(schema.rules).$dynamic();
+    if (opts.enabledOnly) q = q.where(eq(schema.rules.enabled, 1));
+    return q.orderBy(asc(schema.rules.position), asc(schema.rules.id)).all().map(ruleRowToRule);
 }
 
 export function deleteRule(id: number): void {
-    getDb().prepare("DELETE FROM rules WHERE id = ?").run(id);
+    getDb().delete(schema.rules).where(eq(schema.rules.id, id)).run();
 }
 
 export function setRuleEnabled(id: number, enabled: boolean): Rule | null {
-    getDb()
-        .prepare("UPDATE rules SET enabled = ? WHERE id = ?")
-        .run(enabled ? 1 : 0, id);
-    return (getDb()
-        .prepare("SELECT * FROM rules WHERE id = ?")
-        .get(id) as Rule | undefined) ?? null;
+    const db = getDb();
+    db.update(schema.rules).set({ enabled: enabled ? 1 : 0 })
+        .where(eq(schema.rules.id, id)).run();
+    const r = db.select().from(schema.rules).where(eq(schema.rules.id, id)).get();
+    return r ? ruleRowToRule(r) : null;
 }
 
-// -------- subscriptions ----------------------------------------------------
+// =====================================================================
+// Project subscriptions
+// =====================================================================
 
 export function upsertSubscription(
     consumer_id: string,
     project: string,
-    catchup = false,
+    _catchup = false,
 ): Subscription {
-    const d = getDb();
-    const existing = d
-        .prepare("SELECT * FROM subscriptions WHERE consumer_id=? AND project=?")
-        .get(consumer_id, project) as Subscription | undefined;
-    if (existing) return existing;
-
-    // First time: optionally start at the current head so subscriber doesn't
-    // receive backlog. catchup=true → start at 0 so they see all approved msgs.
-    const head = catchup
-        ? 0
-        : ((d
-            .prepare(
-                "SELECT COALESCE(MAX(id), 0) AS m FROM messages WHERE project=? AND status='approved'",
-            )
-            .get(project) as { m: number }).m);
-
-    d.prepare(`
-        INSERT INTO subscriptions (consumer_id, project, subscribed_at, last_seen_id)
-        VALUES (?, ?, ?, ?)
-    `).run(consumer_id, project, nowIso(), head);
-
-    return d
-        .prepare("SELECT * FROM subscriptions WHERE consumer_id=? AND project=?")
-        .get(consumer_id, project) as Subscription;
+    const db = getDb();
+    const existing = db.select().from(schema.subscriptions)
+        .where(and(
+            eq(schema.subscriptions.consumerId, consumer_id),
+            eq(schema.subscriptions.project, project),
+        )).get();
+    if (existing) {
+        return {
+            consumer_id: existing.consumerId,
+            project: existing.project,
+            subscribed_at: existing.subscribedAt,
+            last_seen_id: existing.lastSeenId,
+        };
+    }
+    db.insert(schema.subscriptions).values({
+        consumerId: consumer_id,
+        project,
+        subscribedAt: nowIso(),
+        lastSeenId: 0, // dormant, kept for column compat
+    }).run();
+    const fresh = db.select().from(schema.subscriptions)
+        .where(and(
+            eq(schema.subscriptions.consumerId, consumer_id),
+            eq(schema.subscriptions.project, project),
+        )).get();
+    return {
+        consumer_id: fresh!.consumerId,
+        project: fresh!.project,
+        subscribed_at: fresh!.subscribedAt,
+        last_seen_id: fresh!.lastSeenId,
+    };
 }
 
 export function deleteSubscription(consumer_id: string, project: string): void {
-    getDb()
-        .prepare("DELETE FROM subscriptions WHERE consumer_id=? AND project=?")
-        .run(consumer_id, project);
+    getDb().delete(schema.subscriptions).where(and(
+        eq(schema.subscriptions.consumerId, consumer_id),
+        eq(schema.subscriptions.project, project),
+    )).run();
 }
 
 export function listSubscriptions(consumer_id?: string): Subscription[] {
-    if (consumer_id) {
-        return getDb()
-            .prepare("SELECT * FROM subscriptions WHERE consumer_id=? ORDER BY project")
-            .all(consumer_id) as Subscription[];
-    }
-    return getDb()
-        .prepare("SELECT * FROM subscriptions ORDER BY consumer_id, project")
-        .all() as Subscription[];
+    const db = getDb();
+    let q = db.select().from(schema.subscriptions).$dynamic();
+    if (consumer_id) q = q.where(eq(schema.subscriptions.consumerId, consumer_id));
+    return q.orderBy(asc(schema.subscriptions.consumerId), asc(schema.subscriptions.project))
+        .all()
+        .map((r) => ({
+            consumer_id: r.consumerId,
+            project: r.project,
+            subscribed_at: r.subscribedAt,
+            last_seen_id: r.lastSeenId,
+        }));
 }
 
-/**
- * Project-feed delivery is now backed by the `pings` table, same as ticket
- * pings: one row per (consumer_id, message_id), per-message `seen_at`.
- * Pending-then-approved messages reach every subscriber correctly because
- * fan-out runs at approval time, not at submission. Compare to the older
- * cursor model (last_seen_id), which silently dropped messages whose status
- * flipped to approved AFTER the cursor advanced past their id.
- */
+export function listProjectSubscribers(project: string): string[] {
+    return getDb()
+        .select({ consumer_id: schema.subscriptions.consumerId })
+        .from(schema.subscriptions)
+        .where(eq(schema.subscriptions.project, project))
+        .all()
+        .map((r) => r.consumer_id);
+}
+
+// =====================================================================
+// Inbox / unread (backed by pings, joined with messages or tickets)
+// =====================================================================
+
 export function listUnread(
     consumer_id: string,
     project: string,
     limit = 100,
 ): Message[] {
-    return getDb()
-        .prepare(`
-            SELECT m.* FROM pings p
-            JOIN messages m ON m.id = p.message_id
-            WHERE p.recipient = ? AND p.seen_at IS NULL AND m.project = ?
-            ORDER BY m.id ASC
-            LIMIT ?
-        `)
-        .all(consumer_id, project, limit) as Message[];
+    const db = getDb();
+    // A ping's message_id may live in either tickets or _messages. Two
+    // queries, merged in JS, ordered by id ASC so paginated mark_read
+    // advances monotonically.
+    const ticketHits = db.select({ t: schema.tickets, ping: schema.pings })
+        .from(schema.pings)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.messageId))
+        .where(and(
+            eq(schema.pings.recipient, consumer_id),
+            isNull(schema.pings.seenAt),
+            eq(schema.tickets.project, project),
+        ))
+        .all();
+
+    const messageHits = db.select({ m: schema.messages, project: schema.tickets.project })
+        .from(schema.pings)
+        .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.messageId))
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+        .where(and(
+            eq(schema.pings.recipient, consumer_id),
+            isNull(schema.pings.seenAt),
+            eq(schema.tickets.project, project),
+        ))
+        .all();
+
+    const merged: Message[] = [
+        ...ticketHits.map((r) => ticketRowToMessage(r.t)),
+        ...messageHits.map((r) => messageRowToMessage(r.m, r.project)),
+    ].sort((a, b) => a.id - b.id);
+
+    return merged.slice(0, limit);
 }
 
 export function unreadCount(consumer_id: string, project: string): number {
-    return (
-        (getDb()
-            .prepare(`
-                SELECT COUNT(*) AS n FROM pings p
-                JOIN messages m ON m.id = p.message_id
-                WHERE p.recipient = ? AND p.seen_at IS NULL AND m.project = ?
-            `)
-            .get(consumer_id, project) as { n: number }).n
-    );
+    const db = getDb();
+    const t = db.select({ n: sql<number>`COUNT(*)` })
+        .from(schema.pings)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.messageId))
+        .where(and(
+            eq(schema.pings.recipient, consumer_id),
+            isNull(schema.pings.seenAt),
+            eq(schema.tickets.project, project),
+        )).get();
+    const m = db.select({ n: sql<number>`COUNT(*)` })
+        .from(schema.pings)
+        .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.messageId))
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+        .where(and(
+            eq(schema.pings.recipient, consumer_id),
+            isNull(schema.pings.seenAt),
+            eq(schema.tickets.project, project),
+        )).get();
+    return Number(t?.n ?? 0) + Number(m?.n ?? 0);
 }
 
-export function listProjectSubscribers(project: string): string[] {
-    return (getDb()
-        .prepare("SELECT consumer_id FROM subscriptions WHERE project = ?")
-        .all(project) as { consumer_id: string }[]).map((r) => r.consumer_id);
-}
-
-/**
- * Mark a single message as seen by this consumer. The new contract: an agent
- * acks the messages it actually received, one id at a time. There is no
- * "advance my cursor past a span of unseen messages" footgun anymore.
- */
 export function markMessageSeen(
     consumer_id: string,
     message_id: number,
 ): { updated: number } {
-    const r = getDb()
-        .prepare(
-            `UPDATE pings SET seen_at = ?
-             WHERE recipient = ? AND message_id = ? AND seen_at IS NULL`,
-        )
-        .run(nowIso(), consumer_id, message_id);
+    const r = getDb().update(schema.pings)
+        .set({ seenAt: nowIso() })
+        .where(and(
+            eq(schema.pings.recipient, consumer_id),
+            eq(schema.pings.messageId, message_id),
+            isNull(schema.pings.seenAt),
+        )).run();
     return { updated: r.changes };
 }
 
-/**
- * Bulk-ack helper: mark every currently-delivered-but-unseen ping for this
- * (consumer, project) pair as seen. Safe by construction — a ping only
- * exists once the message reached the recipient via fan-out, so this can
- * never ack content the consumer didn't receive (unlike the old cursor
- * `markAllRead` which jumped to project HEAD).
- *
- * Used by the human moderator's CLI (`aiball mark-read --all`). The MCP
- * tool surface for agents only exposes per-slice acks via the `mark_read`
- * flag on `unread`, never this function.
- */
 export function markAllSeenForProject(
     consumer_id: string,
     project: string,
 ): { updated: number } {
-    const r = getDb()
-        .prepare(
-            `UPDATE pings SET seen_at = ?
-             WHERE recipient = ? AND seen_at IS NULL
-             AND message_id IN (SELECT id FROM messages WHERE project = ?)`,
-        )
-        .run(nowIso(), consumer_id, project);
+    const db = getDb();
+    // Collect ids in the project (tickets + messages), then mark pings.
+    const ticketIds = db.select({ id: schema.tickets.id })
+        .from(schema.tickets).where(eq(schema.tickets.project, project)).all().map((r) => r.id);
+    const messageIds = ticketIds.length
+        ? db.select({ id: schema.messages.id }).from(schema.messages)
+            .where(inArray(schema.messages.ticketId, ticketIds)).all().map((r) => r.id)
+        : [];
+    const allIds = [...ticketIds, ...messageIds];
+    if (!allIds.length) return { updated: 0 };
+    const r = db.update(schema.pings)
+        .set({ seenAt: nowIso() })
+        .where(and(
+            eq(schema.pings.recipient, consumer_id),
+            isNull(schema.pings.seenAt),
+            inArray(schema.pings.messageId, allIds),
+        )).run();
     return { updated: r.changes };
 }
 
-/**
- * Bulk-ack up to a given message id (CLI convenience). Safe under the
- * pings model: only acks rows that already exist in `pings` for this
- * recipient, so it can never invent a "seen" entry for content the
- * consumer didn't receive.
- */
 export function markSeenUpToForProject(
     consumer_id: string,
     project: string,
     upToId: number,
 ): { updated: number } {
-    const r = getDb()
-        .prepare(
-            `UPDATE pings SET seen_at = ?
-             WHERE recipient = ? AND seen_at IS NULL AND message_id <= ?
-             AND message_id IN (SELECT id FROM messages WHERE project = ?)`,
-        )
-        .run(nowIso(), consumer_id, upToId, project);
+    const db = getDb();
+    const ticketIds = db.select({ id: schema.tickets.id })
+        .from(schema.tickets).where(eq(schema.tickets.project, project)).all().map((r) => r.id);
+    const messageIds = ticketIds.length
+        ? db.select({ id: schema.messages.id }).from(schema.messages)
+            .where(inArray(schema.messages.ticketId, ticketIds)).all().map((r) => r.id)
+        : [];
+    const allIds = [...ticketIds, ...messageIds].filter((id) => id <= upToId);
+    if (!allIds.length) return { updated: 0 };
+    const r = db.update(schema.pings)
+        .set({ seenAt: nowIso() })
+        .where(and(
+            eq(schema.pings.recipient, consumer_id),
+            isNull(schema.pings.seenAt),
+            inArray(schema.pings.messageId, allIds),
+        )).run();
     return { updated: r.changes };
 }
 
-// -------- tags ------------------------------------------------------------
-
-export function listTags(): Tag[] {
-    return getDb()
-        .prepare("SELECT * FROM tags ORDER BY position ASC, id ASC")
-        .all() as Tag[];
-}
-
-export function getTag(id: number): Tag | null {
-    return (getDb()
-        .prepare("SELECT * FROM tags WHERE id = ?")
-        .get(id) as Tag | undefined) ?? null;
-}
-
-export function getTagByName(name: string): Tag | null {
-    return (getDb()
-        .prepare("SELECT * FROM tags WHERE name = ?")
-        .get(name) as Tag | undefined) ?? null;
-}
-
-export function insertTag(t: NewTag): Tag {
-    return getDb()
-        .prepare(`
-            INSERT INTO tags (name, color, position, note, created_at)
-            VALUES (@name, @color, @position, @note, @created_at)
-            RETURNING *
-        `)
-        .get({
-            name: t.name,
-            color: t.color ?? null,
-            position: t.position ?? 0,
-            note: t.note ?? null,
-            created_at: nowIso(),
-        }) as Tag;
-}
-
-export function updateTag(
-    id: number,
-    fields: Partial<Pick<Tag, "name" | "color" | "position" | "note">>,
-): Tag | null {
-    const sets: string[] = [];
-    const args: Record<string, unknown> = { id };
-    for (const k of ["name", "color", "position", "note"] as const) {
-        if (fields[k] !== undefined) {
-            sets.push(`${k} = @${k}`);
-            args[k] = fields[k];
-        }
-    }
-    if (!sets.length) return getTag(id);
-    getDb().prepare(`UPDATE tags SET ${sets.join(", ")} WHERE id = @id`).run(args);
-    return getTag(id);
-}
-
-export function deleteTag(id: number): void {
-    getDb().prepare("DELETE FROM tags WHERE id = ?").run(id);
-}
-
-// Tag operations are now ticket-only (post-split). Function names keep the
-// `Message` suffix for API compat — callers pass an id that must be a ticket
-// id. Non-ticket ids will simply not match any rows.
-
-export function listMessageTags(messageId: number): Tag[] {
-    return getDb()
-        .prepare(`
-            SELECT t.* FROM tags t
-            JOIN ticket_tags tt ON tt.tag_id = t.id
-            WHERE tt.ticket_id = ?
-            ORDER BY t.position ASC, t.id ASC
-        `)
-        .all(messageId) as Tag[];
-}
-
-/** Bulk-fetch tags for a list of message ids; returned as a Map<id, Tag[]>. */
-export function tagsForMessages(messageIds: number[]): Map<number, Tag[]> {
-    const out = new Map<number, Tag[]>();
-    if (!messageIds.length) return out;
-    const placeholders = messageIds.map(() => "?").join(",");
-    const rows = getDb()
-        .prepare(`
-            SELECT tt.ticket_id AS message_id, t.*
-            FROM ticket_tags tt
-            JOIN tags t ON t.id = tt.tag_id
-            WHERE tt.ticket_id IN (${placeholders})
-            ORDER BY t.position ASC, t.id ASC
-        `)
-        .all(...messageIds) as (Tag & { message_id: number })[];
-    for (const r of rows) {
-        const { message_id, ...tag } = r;
-        if (!out.has(message_id)) out.set(message_id, []);
-        out.get(message_id)!.push(tag as Tag);
-    }
-    return out;
-}
-
-export function addMessageTag(
-    messageId: number,
-    tagId: number,
-    setBy: string | null = null,
-): void {
-    getDb()
-        .prepare(`
-            INSERT OR IGNORE INTO ticket_tags (ticket_id, tag_id, set_at, set_by)
-            VALUES (?, ?, ?, ?)
-        `)
-        .run(messageId, tagId, nowIso(), setBy);
-}
-
-export function removeMessageTag(messageId: number, tagId: number): void {
-    getDb()
-        .prepare("DELETE FROM ticket_tags WHERE ticket_id = ? AND tag_id = ?")
-        .run(messageId, tagId);
-}
-
-export function setMessageTags(
-    messageId: number,
-    tagIds: number[],
-    setBy: string | null = null,
-): void {
-    const d = getDb();
-    const tx = d.transaction((ids: number[]) => {
-        d.prepare("DELETE FROM ticket_tags WHERE ticket_id = ?").run(messageId);
-        const ins = d.prepare(`
-            INSERT INTO ticket_tags (ticket_id, tag_id, set_at, set_by)
-            VALUES (?, ?, ?, ?)
-        `);
-        const now = nowIso();
-        for (const tid of ids) ins.run(messageId, tid, now, setBy);
-    });
-    tx([...new Set(tagIds)]);
-}
-
-// ---- settings (single-row k/v store) --------------------------------------
-
-export function getSetting(key: string): string | null {
-    const row = getDb()
-        .prepare("SELECT value FROM settings WHERE key = ?")
-        .get(key) as { value: string | null } | undefined;
-    return row?.value ?? null;
-}
-
-export function setSetting(key: string, value: string): void {
-    getDb()
-        .prepare(
-            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        )
-        .run(key, value);
-}
-
-export function getStrategy(): Strategy {
-    const v = getSetting("strategy");
-    if (v && (STRATEGIES as readonly string[]).includes(v)) return v as Strategy;
-    return DEFAULT_STRATEGY;
-}
-
-export function setStrategy(s: Strategy): void {
-    setSetting("strategy", s);
-}
-
-// ---- pings ----------------------------------------------------------------
+// =====================================================================
+// Pings (lineage + transition)
+// =====================================================================
 
 export function insertPing(recipient: string, messageId: number): void {
-    getDb()
-        .prepare(
-            "INSERT OR IGNORE INTO pings (recipient, message_id, created_at) VALUES (?, ?, ?)",
-        )
-        .run(recipient, messageId, nowIso());
+    getDb().insert(schema.pings).values({
+        recipient,
+        messageId,
+        createdAt: nowIso(),
+    }).onConflictDoNothing().run();
 }
 
 export interface Ping {
@@ -984,48 +832,46 @@ export function listPings(opts: {
     unreadOnly?: boolean;
     limit?: number;
 }): Ping[] {
-    const where = ["p.recipient = @recipient"];
-    if (opts.unreadOnly) where.push("p.seen_at IS NULL");
-    const lim = opts.limit ? `LIMIT ${Number(opts.limit) | 0}` : "";
-    const rows = getDb()
-        .prepare(
-            `SELECT p.recipient AS p_recipient,
-                    p.message_id AS p_message_id,
-                    p.created_at AS p_created_at,
-                    p.seen_at AS p_seen_at,
-                    m.*
-             FROM pings p JOIN messages m ON m.id = p.message_id
-             WHERE ${where.join(" AND ")}
-             ORDER BY p.created_at DESC
-             ${lim}`,
-        )
-        .all({ recipient: opts.recipient }) as Record<string, unknown>[];
-    return rows.map((row) => ({
-        recipient: row.p_recipient as string,
-        message_id: row.p_message_id as number,
-        created_at: row.p_created_at as string,
-        seen_at: (row.p_seen_at as string | null) ?? null,
-        message: {
-            id: row.id as number,
-            project: row.project as string,
-            kind: row.kind as MessageKind,
-            ticket_id: (row.ticket_id as number | null) ?? null,
-            parent_id: (row.parent_id as number | null) ?? null,
-            title: (row.title as string | null) ?? null,
-            body: (row.body as string | null) ?? null,
-            by_agent: (row.by_agent as string | null) ?? null,
-            status: row.status as MessageStatus,
-            created_at: row.created_at as string,
-            decided_at: (row.decided_at as string | null) ?? null,
-            decided_by: (row.decided_by as string | null) ?? null,
-            matched_rule_id: (row.matched_rule_id as number | null) ?? null,
-            human_note: (row.human_note as string | null) ?? null,
-            edited_title: (row.edited_title as string | null) ?? null,
-            edited_body: (row.edited_body as string | null) ?? null,
-            priority: (row.priority as Priority | null) ?? null,
-            display_seq: (row.display_seq as number | undefined) ?? 0,
-        },
-    }));
+    const db = getDb();
+    const conds = [eq(schema.pings.recipient, opts.recipient)];
+    if (opts.unreadOnly) conds.push(isNull(schema.pings.seenAt));
+
+    const ticketHits = db.select({ ping: schema.pings, t: schema.tickets })
+        .from(schema.pings)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.messageId))
+        .where(and(...conds))
+        .all();
+
+    const messageHits = db.select({
+        ping: schema.pings,
+        m: schema.messages,
+        project: schema.tickets.project,
+    })
+        .from(schema.pings)
+        .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.messageId))
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+        .where(and(...conds))
+        .all();
+
+    const out: Ping[] = [
+        ...ticketHits.map((r) => ({
+            recipient: r.ping.recipient,
+            message_id: r.ping.messageId,
+            created_at: r.ping.createdAt,
+            seen_at: r.ping.seenAt,
+            message: ticketRowToMessage(r.t),
+        })),
+        ...messageHits.map((r) => ({
+            recipient: r.ping.recipient,
+            message_id: r.ping.messageId,
+            created_at: r.ping.createdAt,
+            seen_at: r.ping.seenAt,
+            message: messageRowToMessage(r.m, r.project),
+        })),
+    ];
+    out.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    if (opts.limit) return out.slice(0, opts.limit);
+    return out;
 }
 
 export function markPingsRead(opts: {
@@ -1034,72 +880,227 @@ export function markPingsRead(opts: {
     all?: boolean;
 }): { updated: number } {
     if (!opts.upToId && !opts.all) return { updated: 0 };
-    const now = nowIso();
-    const where = ["recipient = @recipient", "seen_at IS NULL"];
-    if (opts.upToId) where.push("message_id <= @upToId");
-    const r = getDb()
-        .prepare(
-            `UPDATE pings SET seen_at = @now WHERE ${where.join(" AND ")}`,
-        )
-        .run({
-            recipient: opts.recipient,
-            upToId: opts.upToId ?? null,
-            now,
-        });
+    const conds = [
+        eq(schema.pings.recipient, opts.recipient),
+        isNull(schema.pings.seenAt),
+    ];
+    if (opts.upToId) conds.push(lte(schema.pings.messageId, opts.upToId));
+    const r = getDb().update(schema.pings)
+        .set({ seenAt: nowIso() })
+        .where(and(...conds))
+        .run();
     return { updated: r.changes };
 }
 
 export function unreadPingCount(recipient: string): number {
-    return (
-        (getDb()
-            .prepare(
-                "SELECT COUNT(*) AS n FROM pings WHERE recipient = ? AND seen_at IS NULL",
-            )
-            .get(recipient) as { n: number }).n
-    );
+    const r = getDb().select({ n: sql<number>`COUNT(*)` })
+        .from(schema.pings)
+        .where(and(
+            eq(schema.pings.recipient, recipient),
+            isNull(schema.pings.seenAt),
+        )).get();
+    return Number(r?.n ?? 0);
 }
 
-// ---- ticket subscriptions -------------------------------------------------
+// =====================================================================
+// Ticket subscriptions
+// =====================================================================
 
 export function upsertTicketSubscription(
     consumer_id: string,
     ticket_id: number,
 ): void {
-    getDb()
-        .prepare(
-            `INSERT INTO ticket_subscriptions (consumer_id, ticket_id, subscribed_at)
-             VALUES (?, ?, ?)
-             ON CONFLICT(consumer_id, ticket_id) DO NOTHING`,
-        )
-        .run(consumer_id, ticket_id, nowIso());
+    getDb().insert(schema.ticketSubscriptions).values({
+        consumerId: consumer_id,
+        ticketId: ticket_id,
+        subscribedAt: nowIso(),
+    }).onConflictDoNothing().run();
 }
 
 export function deleteTicketSubscription(
     consumer_id: string,
     ticket_id: number,
 ): void {
-    getDb()
-        .prepare(
-            "DELETE FROM ticket_subscriptions WHERE consumer_id = ? AND ticket_id = ?",
-        )
-        .run(consumer_id, ticket_id);
+    getDb().delete(schema.ticketSubscriptions).where(and(
+        eq(schema.ticketSubscriptions.consumerId, consumer_id),
+        eq(schema.ticketSubscriptions.ticketId, ticket_id),
+    )).run();
 }
 
 export function listTicketSubscribers(ticket_id: number): string[] {
-    return (getDb()
-        .prepare(
-            "SELECT consumer_id FROM ticket_subscriptions WHERE ticket_id = ?",
-        )
-        .all(ticket_id) as { consumer_id: string }[]).map((r) => r.consumer_id);
+    return getDb().select({ consumer_id: schema.ticketSubscriptions.consumerId })
+        .from(schema.ticketSubscriptions)
+        .where(eq(schema.ticketSubscriptions.ticketId, ticket_id))
+        .all()
+        .map((r) => r.consumer_id);
 }
 
 export function listTicketSubscriptions(consumer_id: string): {
     ticket_id: number;
     subscribed_at: string;
 }[] {
-    return getDb()
-        .prepare(
-            "SELECT ticket_id, subscribed_at FROM ticket_subscriptions WHERE consumer_id = ? ORDER BY subscribed_at DESC",
-        )
-        .all(consumer_id) as { ticket_id: number; subscribed_at: string }[];
+    return getDb().select({
+        ticket_id: schema.ticketSubscriptions.ticketId,
+        subscribed_at: schema.ticketSubscriptions.subscribedAt,
+    })
+        .from(schema.ticketSubscriptions)
+        .where(eq(schema.ticketSubscriptions.consumerId, consumer_id))
+        .orderBy(desc(schema.ticketSubscriptions.subscribedAt))
+        .all();
+}
+
+// =====================================================================
+// Tags + ticket_tags (tags are ticket-scoped only)
+// =====================================================================
+
+function tagRowToTag(t: schema.Tag): Tag {
+    return {
+        id: t.id,
+        name: t.name,
+        color: t.color,
+        position: t.position,
+        note: t.note,
+        created_at: t.createdAt,
+    };
+}
+
+export function listTags(): Tag[] {
+    return getDb().select().from(schema.tags)
+        .orderBy(asc(schema.tags.position), asc(schema.tags.id))
+        .all().map(tagRowToTag);
+}
+
+export function getTag(id: number): Tag | null {
+    const r = getDb().select().from(schema.tags).where(eq(schema.tags.id, id)).get();
+    return r ? tagRowToTag(r) : null;
+}
+
+export function getTagByName(name: string): Tag | null {
+    const r = getDb().select().from(schema.tags).where(eq(schema.tags.name, name)).get();
+    return r ? tagRowToTag(r) : null;
+}
+
+export function insertTag(t: NewTag): Tag {
+    const r = getDb().insert(schema.tags).values({
+        name: t.name,
+        color: t.color ?? null,
+        position: t.position ?? 0,
+        note: t.note ?? null,
+        createdAt: nowIso(),
+    }).returning().get();
+    return tagRowToTag(r);
+}
+
+export function updateTag(
+    id: number,
+    fields: Partial<Pick<Tag, "name" | "color" | "position" | "note">>,
+): Tag | null {
+    const patch: Partial<schema.NewTagRow> = {};
+    if (fields.name !== undefined) patch.name = fields.name;
+    if (fields.color !== undefined) patch.color = fields.color;
+    if (fields.position !== undefined) patch.position = fields.position;
+    if (fields.note !== undefined) patch.note = fields.note;
+    if (Object.keys(patch).length === 0) return getTag(id);
+    getDb().update(schema.tags).set(patch).where(eq(schema.tags.id, id)).run();
+    return getTag(id);
+}
+
+export function deleteTag(id: number): void {
+    getDb().delete(schema.tags).where(eq(schema.tags.id, id)).run();
+}
+
+/**
+ * Tag operations work on ticket ids only (tags are ticket-scoped).
+ * Function names keep the historical `Message` suffix for caller compat.
+ */
+export function listMessageTags(messageId: number): Tag[] {
+    return getDb().select({ t: schema.tags })
+        .from(schema.ticketTags)
+        .innerJoin(schema.tags, eq(schema.tags.id, schema.ticketTags.tagId))
+        .where(eq(schema.ticketTags.ticketId, messageId))
+        .orderBy(asc(schema.tags.position), asc(schema.tags.id))
+        .all()
+        .map((r) => tagRowToTag(r.t));
+}
+
+export function tagsForMessages(messageIds: number[]): Map<number, Tag[]> {
+    const out = new Map<number, Tag[]>();
+    if (!messageIds.length) return out;
+    const rows = getDb().select({ t: schema.tags, ticketId: schema.ticketTags.ticketId })
+        .from(schema.ticketTags)
+        .innerJoin(schema.tags, eq(schema.tags.id, schema.ticketTags.tagId))
+        .where(inArray(schema.ticketTags.ticketId, messageIds))
+        .orderBy(asc(schema.tags.position), asc(schema.tags.id))
+        .all();
+    for (const r of rows) {
+        if (!out.has(r.ticketId)) out.set(r.ticketId, []);
+        out.get(r.ticketId)!.push(tagRowToTag(r.t));
+    }
+    return out;
+}
+
+export function addMessageTag(
+    messageId: number,
+    tagId: number,
+    setBy: string | null = null,
+): void {
+    getDb().insert(schema.ticketTags).values({
+        ticketId: messageId,
+        tagId,
+        setAt: nowIso(),
+        setBy,
+    }).onConflictDoNothing().run();
+}
+
+export function removeMessageTag(messageId: number, tagId: number): void {
+    getDb().delete(schema.ticketTags).where(and(
+        eq(schema.ticketTags.ticketId, messageId),
+        eq(schema.ticketTags.tagId, tagId),
+    )).run();
+}
+
+export function setMessageTags(
+    messageId: number,
+    tagIds: number[],
+    setBy: string | null = null,
+): void {
+    const db = getDb();
+    db.transaction((tx) => {
+        tx.delete(schema.ticketTags).where(eq(schema.ticketTags.ticketId, messageId)).run();
+        const now = nowIso();
+        for (const tagId of [...new Set(tagIds)]) {
+            tx.insert(schema.ticketTags).values({
+                ticketId: messageId,
+                tagId,
+                setAt: now,
+                setBy,
+            }).run();
+        }
+    });
+}
+
+// =====================================================================
+// Settings (k/v) + Strategy
+// =====================================================================
+
+export function getSetting(key: string): string | null {
+    const r = getDb().select({ value: schema.settings.value })
+        .from(schema.settings).where(eq(schema.settings.key, key)).get();
+    return r?.value ?? null;
+}
+
+export function setSetting(key: string, value: string): void {
+    getDb().insert(schema.settings).values({ key, value })
+        .onConflictDoUpdate({ target: schema.settings.key, set: { value } })
+        .run();
+}
+
+export function getStrategy(): Strategy {
+    const v = getSetting("strategy");
+    if (v && (STRATEGIES as readonly string[]).includes(v)) return v as Strategy;
+    return DEFAULT_STRATEGY;
+}
+
+export function setStrategy(s: Strategy): void {
+    setSetting("strategy", s);
 }
