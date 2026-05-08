@@ -117,14 +117,6 @@ onMounted(load);
         <section class="rules-section">
             <div class="rules-section-head">
                 <h3>Active rules ({{ sortedRules.length }})</h3>
-                <Button
-                    icon="pi pi-refresh"
-                    severity="secondary"
-                    text
-                    rounded
-                    size="small"
-                    @click="load"
-                />
             </div>
 
             <div v-if="!sortedRules.length" class="aiball-empty">

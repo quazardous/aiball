@@ -123,9 +123,6 @@ export class AiballClient {
     listProjects() {
         return this.http("GET", "/api/projects");
     }
-    listRules() {
-        return this.http("GET", "/api/rules");
-    }
     feedPath(project: string) {
         return this.http<{ path: string }>(
             "GET",
@@ -165,13 +162,63 @@ export class AiballClient {
             `/api/unread?consumer_id=${encodeURIComponent(this.agentId)}&project=${encodeURIComponent(project)}&limit=${limit}`,
         );
     }
-    markRead(project: string, opts: { upToId?: number; all?: boolean }) {
+    markMessageSeen(message_id: number) {
         return this.http("POST", "/api/mark-read", {
             consumer_id: this.agentId,
-            project,
+            message_id,
+        });
+    }
+
+    // ---- ticket subscriptions + pings ------------------------------------
+
+    subscribeTicket(ticket_id: number) {
+        return this.http("POST", "/api/ticket-subscriptions", {
+            consumer_id: this.agentId,
+            ticket_id,
+        });
+    }
+    unsubscribeTicket(ticket_id: number) {
+        return this.http(
+            "DELETE",
+            `/api/ticket-subscriptions/${ticket_id}?consumer_id=${encodeURIComponent(this.agentId)}`,
+        );
+    }
+    myTicketSubs() {
+        return this.http(
+            "GET",
+            `/api/ticket-subscriptions?consumer_id=${encodeURIComponent(this.agentId)}`,
+        );
+    }
+    listPings(opts: { unreadOnly?: boolean; limit?: number } = {}) {
+        const qs = new URLSearchParams({ consumer_id: this.agentId });
+        if (opts.unreadOnly) qs.set("unread", "1");
+        if (opts.limit !== undefined) qs.set("limit", String(opts.limit));
+        return this.http("GET", `/api/pings?${qs.toString()}`);
+    }
+    markPingsRead(opts: { upToId?: number; all?: boolean }) {
+        return this.http("POST", "/api/pings/mark-read", {
+            consumer_id: this.agentId,
             up_to_id: opts.upToId,
             all: opts.all === true ? true : undefined,
         });
+    }
+    pingsCount() {
+        return this.http<{ unread: number }>(
+            "GET",
+            `/api/pings/count?consumer_id=${encodeURIComponent(this.agentId)}`,
+        );
+    }
+    unreadCount(project: string) {
+        return this.http<{ count: number }>(
+            "GET",
+            `/api/unread/count?consumer_id=${encodeURIComponent(this.agentId)}&project=${encodeURIComponent(project)}`,
+        );
+    }
+    myPendingTickets() {
+        return this.http(
+            "GET",
+            `/api/messages?kind=ticket_created&status=pending&by_agent=${encodeURIComponent(this.agentId)}`,
+        );
     }
 
     // ---- admin / decisions ------------------------------------------------

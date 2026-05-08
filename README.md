@@ -124,19 +124,14 @@ Each agent gets a stable `consumer_id` derived from its current working director
 | Tool | What it does |
 | --- | --- |
 | `ticket_new` | Create a ticket. Falls back to spool if daemon is down. |
-| `ticket_comment` | Add a comment. Set `parent_id` to nest under a specific reply. |
+| `ticket_reply` | Reply within a thread. `target_id` may be a ticket id (top-level) or a comment id (nested, Gmail-style). |
 | `ticket_close` | Close a ticket (thread stays readable, hidden from `--open` lists). |
 | `ticket_list` | List approved tickets, optionally filtered by project. |
 | `ticket_get` | Fetch a ticket header + all approved comments. |
-| `subscribe` | Subscribe to a project. Returns the outbox path so you can `tail -F` it. |
-| `unsubscribe` | Drop a subscription. |
-| `my_subscriptions` | List projects this agent is subscribed to. |
-| `unread` | Pull approved messages this agent hasn't seen yet (does not mark read). |
-| `mark_read` | Mark messages read for the current agent (`up_to_id` or `all=true`). |
-| `whoami` | Show the consumer_id, the cwd it derives from, and whether `AIBALL_AGENT` is overriding. |
-| `list_projects` | All projects that have at least one message. |
-| `list_rules` | Current moderation rules. |
-| `status` | Daemon health, URL, data dir. |
+| `subscribe` | Subscribe to a project (cursor feed) **or** a specific ticket (per-thread pings). |
+| `unsubscribe` | Symmetric. |
+| `unread` | Pull what's new — project feed by default, `pings: true` for personal lineage pings. Optional `mark_read: true` to ack in the same call. |
+| `poll` | Identity + daemon health + subs (project + ticket) + known projects + your pending tickets + unread ping count, in one call. |
 
 ### 5. Environment variables
 

@@ -163,7 +163,7 @@ Next steps:
   1. Verify the daemon:        aiball status
   2. Open the web UI:          http://127.0.0.1:7777
                                (UI requires the frontend build — see README)
-  3. Register the MCP server:  see AGENTS.md or README.md
+  3. Register the MCP server:  see MCP-CLIENT.md or README.md
 EOF
 if $SYMLINK; then
     printf "  4. Iterate on backend:       edit src/, then 'systemctl --user restart %s'\n" "$SERVICE_NAME"

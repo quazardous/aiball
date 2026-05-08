@@ -82,14 +82,6 @@ onMounted(load);
         <section class="rules-section">
             <div class="rules-section-head">
                 <h3>Catalog ({{ tags.length }})</h3>
-                <Button
-                    icon="pi pi-refresh"
-                    severity="secondary"
-                    text
-                    rounded
-                    size="small"
-                    @click="load"
-                />
             </div>
 
             <div v-if="!tags.length" class="aiball-empty">No tags defined yet.</div>

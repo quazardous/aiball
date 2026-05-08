@@ -4,36 +4,49 @@ import Button from "primevue/button";
 import Select from "primevue/select";
 import Toast from "primevue/toast";
 import { useToast } from "primevue/usetoast";
-import { api, type Message } from "./lib/api";
+import { api, STRATEGIES, type InboxRow, type Message, type Strategy } from "./lib/api";
+import { useRouting } from "./lib/router";
 import { useWs } from "./lib/ws";
-import MessageCard from "./components/MessageCard.vue";
+import ListRow from "./components/ListRow.vue";
+import MessageComposer from "./components/MessageComposer.vue";
+import ProjectsPanel from "./components/ProjectsPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
+import TagBadge from "./components/TagBadge.vue";
 import TagsPanel from "./components/TagsPanel.vue";
-import TicketList from "./components/TicketList.vue";
 import ThreadView from "./components/ThreadView.vue";
+import Tag from "primevue/tag";
+import Checkbox from "primevue/checkbox";
+import ToggleButton from "primevue/togglebutton";
 
 const toast = useToast();
 
-type Tab = "tickets" | "pending" | "approved" | "rejected";
-const tab = ref<Tab>("tickets");
-const tabOptions: { label: string; value: Tab; icon: string }[] = [
-    { label: "Tickets", value: "tickets", icon: "pi pi-ticket" },
-    { label: "Pending", value: "pending", icon: "pi pi-clock" },
-    { label: "Approved", value: "approved", icon: "pi pi-check" },
-    { label: "Rejected", value: "rejected", icon: "pi pi-times" },
+type StatusFilter = "all" | "pending" | "approved" | "rejected";
+type PriorityFilter = "all" | "panic" | "request" | "question" | "fyi";
+
+const statusFilter = ref<StatusFilter>(
+    (localStorage.getItem("aiball.filter.status") as StatusFilter | null) ?? "pending",
+);
+const priorityFilter = ref<PriorityFilter>(
+    (localStorage.getItem("aiball.filter.priority") as PriorityFilter | null) ?? "all",
+);
+const onlyOpen = ref(localStorage.getItem("aiball.filter.open") !== "0");
+
+const statusFilterOptions: { label: string; value: StatusFilter }[] = [
+    { label: "All", value: "all" },
+    { label: "Pending", value: "pending" },
+    { label: "Approved", value: "approved" },
+    { label: "Rejected", value: "rejected" },
+];
+const priorityFilterOptions: { label: string; value: PriorityFilter }[] = [
+    { label: "Any priority", value: "all" },
+    { label: "Panic", value: "panic" },
+    { label: "Request", value: "request" },
+    { label: "Question", value: "question" },
+    { label: "FYI", value: "fyi" },
 ];
 
-// Per-tab badge counters — incremented on WS push when the user isn't on
-// that tab; cleared when the tab becomes active.
-const tabBadges = ref<Record<Tab, number>>({
-    tickets: 0,
-    pending: 0,
-    approved: 0,
-    rejected: 0,
-});
-
 // Sidebar can route to a settings panel that replaces the lists entirely.
-type SettingsPanel = "rules" | "tags";
+type SettingsPanel = "rules" | "tags" | "projects";
 const panel = ref<SettingsPanel | null>(null);
 
 // OS notifications: lazily ask permission on first interaction so we don't
@@ -73,20 +86,66 @@ const projects = ref<string[]>([]);
 const project = ref<string | null>(
     localStorage.getItem("aiball.project") || null,
 );
-const messages = ref<Message[]>([]);
+const rows = ref<InboxRow[]>([]);
 const loading = ref(false);
 const dark = ref(localStorage.getItem("aiball.dark") === "1");
 const compact = ref(localStorage.getItem("aiball.compact") !== "0");
 const openTicketId = ref<number | null>(null);
-const ticketListRef = ref<InstanceType<typeof TicketList> | null>(null);
 const threadRef = ref<InstanceType<typeof ThreadView> | null>(null);
 
-const selectMode = ref(false);
 const selectedIds = ref<Set<number>>(new Set());
 const bulkBusy = ref(false);
 
-const isStatusList = computed(
-    () => panel.value === null && tab.value !== "tickets",
+const composeOpen = ref(false);
+function onComposed() {
+    composeOpen.value = false;
+    refresh();
+}
+
+const strategy = ref<Strategy>("auto-reply");
+const strategyOptions: { label: string; value: Strategy; hint: string }[] = [
+    {
+        label: "Manual approve",
+        value: "manual",
+        hint: "Every message goes to human review.",
+    },
+    {
+        label: "Auto approve",
+        value: "auto",
+        hint: "Everything is auto-approved (tickets and replies).",
+    },
+    {
+        label: "Auto approve replies",
+        value: "auto-reply",
+        hint: "Replies auto-approved; new tickets need human review.",
+    },
+];
+async function loadStrategy() {
+    try {
+        const r = await api.getStrategy();
+        strategy.value = r.strategy;
+    } catch {
+        /* ignore — daemon may be booting */
+    }
+}
+async function changeStrategy(v: Strategy) {
+    const prev = strategy.value;
+    strategy.value = v;
+    try {
+        await api.setStrategy(v);
+    } catch (e) {
+        strategy.value = prev;
+        toast.add({
+            severity: "error",
+            summary: "Failed to change strategy",
+            detail: (e as Error).message,
+            life: 8000,
+        });
+    }
+}
+
+const inListView = computed(
+    () => panel.value === null && openTicketId.value === null,
 );
 
 function toggleSelected(id: number, v: boolean) {
@@ -99,16 +158,18 @@ function clearSelection() {
     selectedIds.value = new Set();
 }
 function selectAllVisible() {
-    selectedIds.value = new Set(messages.value.map((m) => m.id));
+    selectedIds.value = new Set(rows.value.map((r) => r.id));
 }
 async function bulkDecide(action: "approve" | "reject") {
-    const ids = [...selectedIds.value];
-    if (!ids.length) return;
+    const pendingIds = rows.value
+        .filter((r) => selectedIds.value.has(r.id) && r.status === "pending")
+        .map((r) => r.id);
+    if (!pendingIds.length) return;
     bulkBusy.value = true;
     let ok = 0;
     let failed = 0;
     try {
-        for (const id of ids) {
+        for (const id of pendingIds) {
             try {
                 if (action === "approve") await api.approve(id);
                 else await api.reject(id);
@@ -119,12 +180,12 @@ async function bulkDecide(action: "approve" | "reject") {
         }
         toast.add({
             severity: failed ? "warn" : "success",
-            summary: `${action}d ${ok} message${ok === 1 ? "" : "s"}`,
+            summary: `${action}d ${ok} ticket${ok === 1 ? "" : "s"}`,
             detail: failed ? `${failed} failed` : undefined,
-            life: 3500,
+            life: 8000,
         });
         clearSelection();
-        await loadMessages();
+        await loadRows();
     } finally {
         bulkBusy.value = false;
     }
@@ -155,26 +216,27 @@ async function loadProjects() {
             severity: "error",
             summary: "Failed to load projects",
             detail: (e as Error).message,
-            life: 4000,
+            life: 8000,
         });
     }
 }
 
-async function loadMessages() {
-    if (!isStatusList.value) return;
+async function loadRows() {
+    if (!inListView.value) return;
     loading.value = true;
     try {
-        messages.value = await api.listMessages({
-            status: tab.value,
+        rows.value = await api.inbox({
+            status: statusFilter.value === "all" ? undefined : statusFilter.value,
+            priority: priorityFilter.value === "all" ? undefined : priorityFilter.value,
             project: project.value ?? undefined,
-            limit: 200,
+            open: onlyOpen.value,
         });
     } catch (e) {
         toast.add({
             severity: "error",
-            summary: "Failed to load messages",
+            summary: "Failed to load inbox",
             detail: (e as Error).message,
-            life: 4000,
+            life: 8000,
         });
     } finally {
         loading.value = false;
@@ -183,28 +245,8 @@ async function loadMessages() {
 
 function refresh() {
     loadProjects();
-    if (openTicketId.value !== null) {
-        threadRef.value?.load();
-    } else if (tab.value === "tickets") {
-        ticketListRef.value?.load();
-    } else {
-        loadMessages();
-    }
-}
-
-function onMessageChanged(updated: Message) {
-    if (!isStatusList.value) {
-        if (openTicketId.value !== null) threadRef.value?.load();
-        else ticketListRef.value?.load();
-        return;
-    }
-    const idx = messages.value.findIndex((m) => m.id === updated.id);
-    if (updated.status === tab.value) {
-        if (idx >= 0) messages.value[idx] = updated;
-        else messages.value = [updated, ...messages.value];
-    } else if (idx >= 0) {
-        messages.value.splice(idx, 1);
-    }
+    if (openTicketId.value !== null) threadRef.value?.load();
+    else loadRows();
 }
 
 function shortKindLabel(m: Message): string {
@@ -219,38 +261,40 @@ function shortKindLabel(m: Message): string {
     return m.kind;
 }
 
-function bumpBadge(target: Tab) {
-    if (tab.value === target && openTicketId.value === null) return;
-    tabBadges.value = { ...tabBadges.value, [target]: tabBadges.value[target] + 1 };
-}
-
 function notifyArrival(m: Message) {
     const inScope = !project.value || project.value === m.project;
     if (!inScope) return;
 
     const who = m.by_agent ?? "unknown";
     const k = shortKindLabel(m);
-    const summary =
-        m.title ?? (m.body ? m.body.slice(0, 80) : `new ${k}`);
+    const summary = m.title ?? (m.body ? m.body.slice(0, 80) : `new ${k}`);
     const detail = `${who} · #${m.id} · ${m.project}`;
 
     toast.add({
         severity: m.status === "pending" ? "warn" : "info",
         summary: `${k}${m.status === "pending" ? " pending review" : ""}: ${summary}`,
         detail,
-        life: 4000,
+        life: 8000,
     });
     fireOsNotif(`aiball — ${k}`, `${summary}\n${detail}`);
-
-    if (m.status === "pending") bumpBadge("pending");
-    else if (m.status === "approved") {
-        bumpBadge("approved");
-        if (m.kind === "ticket_created") bumpBadge("tickets");
-    } else if (m.status === "rejected") bumpBadge("rejected");
 }
 
 const { connected } = useWs((ev) => {
     if (ev.type === "rule_changed") return;
+    if (ev.type === "strategy_changed") {
+        const s = (ev.data as { strategy?: Strategy } | undefined)?.strategy;
+        if (s && (STRATEGIES as readonly string[]).includes(s)) strategy.value = s;
+        return;
+    }
+    if (ev.type === "project_deleted") {
+        const deleted = (ev.data as { project?: string } | undefined)?.project;
+        // If the user is currently scoped to the just-deleted project, fall
+        // back to "all projects" so the lists don't sit empty silently.
+        if (deleted && project.value === deleted) project.value = null;
+        loadProjects();
+        if (inListView.value) loadRows();
+        return;
+    }
     const data = ev.data as Message | undefined;
     if (!data || typeof data !== "object") return;
 
@@ -259,45 +303,40 @@ const { connected } = useWs((ev) => {
         notifyArrival(data);
     }
 
-    // Tickets / Thread view: any creation or decision in the active scope
-    // forces a reload so the ticket list, comment count and timestamps stay
-    // consistent without manual refresh.
-    if (!isStatusList.value) {
-        const inScope = !project.value || project.value === data.project;
-        if (!inScope) return;
-        if (openTicketId.value !== null) {
-            const onThisThread =
-                data.id === openTicketId.value ||
-                data.ticket_id === openTicketId.value;
-            if (onThisThread) threadRef.value?.load();
-        } else {
-            ticketListRef.value?.load();
-        }
+    // Open thread: refresh on any change touching this thread.
+    if (openTicketId.value !== null) {
+        const onThisThread =
+            data.id === openTicketId.value ||
+            data.ticket_id === openTicketId.value;
+        if (onThisThread) threadRef.value?.load();
         return;
     }
 
-    // Pending / Approved / Rejected lists.
-    if (ev.type === "message_created") {
-        if (
-            data.status === tab.value &&
-            (!project.value || project.value === data.project)
-        ) {
-            const idx = messages.value.findIndex((m) => m.id === data.id);
-            if (idx < 0) messages.value = [data, ...messages.value];
-            else messages.value[idx] = data;
-        }
-    } else {
-        onMessageChanged(data);
-    }
+    // Unified inbox view: any new or changed message can affect ticket-row
+    // aggregates (last activity, pending count, closed flag), so reload.
+    loadRows();
 });
 
-watch([tab, project], () => {
-    if (isStatusList.value) loadMessages();
+watch([statusFilter, priorityFilter, onlyOpen, project], () => {
+    localStorage.setItem("aiball.filter.status", statusFilter.value);
+    localStorage.setItem("aiball.filter.priority", priorityFilter.value);
+    localStorage.setItem("aiball.filter.open", onlyOpen.value ? "1" : "0");
+    if (inListView.value) loadRows();
+});
+
+useRouting({
+    panel,
+    openTicketId,
+    project,
+    statusFilter,
+    priorityFilter,
+    onlyOpen,
 });
 
 onMounted(() => {
     loadProjects();
-    if (isStatusList.value) loadMessages();
+    loadStrategy();
+    loadRows();
 });
 
 function selectProject(p: string | null) {
@@ -312,12 +351,48 @@ function openPanel(p: SettingsPanel) {
     clearSelection();
 }
 
-function selectTab(v: Tab) {
-    tab.value = v;
-    openTicketId.value = null;
-    tabBadges.value = { ...tabBadges.value, [v]: 0 };
-    clearSelection();
+function openThread(r: InboxRow) {
+    openTicketId.value = r.id;
 }
+
+function relativeTime(iso: string): string {
+    const d = new Date(iso);
+    const diff = Date.now() - d.getTime();
+    const min = 60_000, hr = 3_600_000, day = 86_400_000;
+    if (diff < hr) return `${Math.max(1, Math.floor(diff / min))}m ago`;
+    if (diff < day) return `${Math.floor(diff / hr)}h ago`;
+    if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
+    return d.toLocaleDateString();
+}
+
+function snippetOf(r: InboxRow): string {
+    const s = r.body ?? "";
+    const flat = s.replace(/\s+/g, " ").trim();
+    return flat.length > 140 ? flat.slice(0, 140) + "…" : flat;
+}
+
+function titleOf(r: InboxRow): string {
+    return r.title ?? "(no title)";
+}
+
+function statusSeverity(s: InboxRow["status"]) {
+    if (s === "pending") return "warn";
+    if (s === "approved") return "success";
+    return "danger";
+}
+
+function prioritySeverity(p: InboxRow["priority"]) {
+    if (p === "panic") return "danger";
+    if (p === "request") return "info";
+    if (p === "question") return "warn";
+    return "secondary";
+}
+
+const pendingSelectedCount = computed(() =>
+    rows.value.filter(
+        (r) => selectedIds.value.has(r.id) && r.status === "pending",
+    ).length,
+);
 
 const projectListItems = computed(() => [
     { label: "All projects", value: null, icon: "pi pi-globe" },
@@ -333,6 +408,16 @@ const projectListItems = computed(() => [
                 class="connection-dot"
                 :class="connected ? 'live' : 'offline'"
                 :title="connected ? 'WebSocket live' : 'WebSocket offline'"
+            />
+            <Select
+                :model-value="strategy"
+                :options="strategyOptions"
+                option-label="label"
+                option-value="value"
+                size="small"
+                class="strategy-select"
+                :title="strategyOptions.find(o => o.value === strategy)?.hint"
+                @update:model-value="(v: Strategy) => changeStrategy(v)"
             />
             <span class="spacer" />
             <Button
@@ -399,6 +484,15 @@ const projectListItems = computed(() => [
                 <button
                     type="button"
                     class="sidebar-item"
+                    :class="{ active: panel === 'projects' }"
+                    @click="openPanel('projects')"
+                >
+                    <i class="pi pi-folder" />
+                    <span>Projects</span>
+                </button>
+                <button
+                    type="button"
+                    class="sidebar-item"
                     :class="{ active: panel === 'rules' }"
                     @click="openPanel('rules')"
                 >
@@ -417,115 +511,180 @@ const projectListItems = computed(() => [
             </aside>
 
             <main class="aiball-main">
-                <RulesPanel v-if="panel === 'rules'" />
+                <ProjectsPanel v-if="panel === 'projects'" />
+                <RulesPanel v-else-if="panel === 'rules'" />
                 <TagsPanel v-else-if="panel === 'tags'" />
 
+                <ThreadView
+                    v-else-if="openTicketId !== null"
+                    ref="threadRef"
+                    :ticket-id="openTicketId"
+                    @back="openTicketId = null"
+                />
+
                 <template v-else>
-                    <nav class="aiball-tabs">
-                        <button
-                            v-for="t in tabOptions"
-                            :key="t.value"
-                            type="button"
-                            class="tab-btn"
-                            :class="{ active: tab === t.value }"
-                            @click="selectTab(t.value)"
-                        >
-                            <i :class="t.icon" />
-                            <span>{{ t.label }}</span>
-                            <span
-                                v-if="tabBadges[t.value] > 0 && tab !== t.value"
-                                class="tab-badge"
-                            >{{ tabBadges[t.value] }}</span>
-                        </button>
-                    </nav>
-
-                    <ThreadView
-                        v-if="openTicketId !== null"
-                        ref="threadRef"
-                        :ticket-id="openTicketId"
-                        @back="openTicketId = null"
-                    />
-
-                    <TicketList
-                        v-else-if="tab === 'tickets'"
-                        ref="ticketListRef"
-                        :project="project"
-                        @open="(id: number) => (openTicketId = id)"
-                    />
-
-                    <template v-else>
-                    <div v-if="messages.length" class="bulk-bar">
+                    <div class="filters-bar">
+                        <Select
+                            :model-value="statusFilter"
+                            :options="statusFilterOptions"
+                            option-label="label"
+                            option-value="value"
+                            size="small"
+                            class="filter-select"
+                            @update:model-value="(v: StatusFilter) => (statusFilter = v)"
+                        />
+                        <Select
+                            :model-value="priorityFilter"
+                            :options="priorityFilterOptions"
+                            option-label="label"
+                            option-value="value"
+                            size="small"
+                            class="filter-select"
+                            @update:model-value="(v: PriorityFilter) => (priorityFilter = v)"
+                        />
+                        <ToggleButton
+                            v-model="onlyOpen"
+                            on-label="open only"
+                            off-label="all"
+                            on-icon="pi pi-folder-open"
+                            off-icon="pi pi-folder"
+                            size="small"
+                        />
+                        <span class="spacer" />
                         <Button
-                            :label="selectMode ? 'cancel select' : 'select'"
-                            :icon="selectMode ? 'pi pi-times' : 'pi pi-check-square'"
+                            v-if="!composeOpen"
+                            :label="project ? `New ticket in ${project}` : 'New ticket'"
+                            icon="pi pi-plus"
+                            size="small"
+                            :disabled="!project"
+                            :title="project ? '' : 'Pick a project first'"
+                            @click="composeOpen = true"
+                        />
+                        <Button
+                            v-else
+                            label="cancel"
+                            icon="pi pi-times"
                             size="small"
                             severity="secondary"
                             text
-                            @click="selectMode = !selectMode; clearSelection()"
+                            @click="composeOpen = false"
                         />
-                        <template v-if="selectMode">
-                            <Button
-                                label="all"
-                                icon="pi pi-list"
-                                size="small"
-                                severity="secondary"
-                                text
-                                @click="selectAllVisible"
-                            />
-                            <Button
-                                label="none"
-                                icon="pi pi-minus"
-                                size="small"
-                                severity="secondary"
-                                text
-                                :disabled="!selectedIds.size"
-                                @click="clearSelection"
-                            />
-                            <span class="bulk-count">
-                                <strong>{{ selectedIds.size }}</strong> selected
-                            </span>
-                            <span class="spacer" />
-                            <template v-if="tab === 'pending'">
-                                <Button
-                                    label="approve"
-                                    icon="pi pi-check"
-                                    severity="success"
-                                    size="small"
-                                    :loading="bulkBusy"
-                                    :disabled="!selectedIds.size"
-                                    @click="bulkDecide('approve')"
-                                />
-                                <Button
-                                    label="reject"
-                                    icon="pi pi-times"
-                                    severity="danger"
-                                    size="small"
-                                    :loading="bulkBusy"
-                                    :disabled="!selectedIds.size"
-                                    @click="bulkDecide('reject')"
-                                />
-                            </template>
-                        </template>
                     </div>
-                    <div v-if="loading && !messages.length" class="aiball-empty">
+                    <MessageComposer
+                        v-if="composeOpen && project"
+                        mode="ticket"
+                        :project="project"
+                        @submitted="onComposed"
+                    />
+
+                    <div v-if="loading && !rows.length" class="aiball-empty">
                         Loading…
                     </div>
-                    <div v-else-if="!messages.length" class="aiball-empty">
+                    <div v-else-if="!rows.length" class="aiball-empty">
                         <i class="pi pi-inbox" style="font-size: 1.6rem" />
                         <div>
-                            No {{ tab }} messages{{ project ? ` in ${project}` : "" }}.
+                            No tickets match your filters{{ project ? ` in ${project}` : "" }}.
                         </div>
                     </div>
-                    <MessageCard
-                        v-for="m in messages"
-                        :key="m.id"
-                        :message="m"
-                        :selectable="selectMode"
-                        :selected="selectedIds.has(m.id)"
-                        @update:selected="(v: boolean) => toggleSelected(m.id, v)"
-                        @changed="onMessageChanged"
-                    />
-                    </template>
+
+                    <ListRow
+                        v-for="r in rows"
+                        :key="r.id"
+                        :selected="selectedIds.has(r.id)"
+                        :unread="r.status === 'pending' || r.pending_comment_count > 0"
+                        :closed="r.closed"
+                        @click="openThread(r)"
+                    >
+                        <template #select>
+                            <Checkbox
+                                :model-value="selectedIds.has(r.id)"
+                                binary
+                                @update:model-value="(v: boolean) => toggleSelected(r.id, v)"
+                            />
+                        </template>
+                        <template #lead>
+                            <i
+                                class="pi"
+                                :class="r.closed ? 'pi-lock' : 'pi-ticket'"
+                                style="color: var(--p-text-muted-color)"
+                            />
+                        </template>
+                        <template v-if="r.by_agent" #from>{{ r.by_agent }}</template>
+                        <template #title>
+                            <span class="ticket-id">#{{ r.id }}</span>
+                            {{ titleOf(r) }}
+                            <Tag
+                                v-if="r.status !== 'approved'"
+                                :value="r.status"
+                                :severity="statusSeverity(r.status)"
+                                style="margin-left: 0.4rem; font-size: 0.7rem"
+                            />
+                            <Tag
+                                v-if="r.priority"
+                                :value="r.priority"
+                                :severity="prioritySeverity(r.priority)"
+                                style="margin-left: 0.3rem; font-size: 0.7rem"
+                            />
+                            <TagBadge
+                                v-for="tg in r.tags"
+                                :key="tg.id"
+                                :tag="tg"
+                                size="sm"
+                                style="margin-left: 0.3rem"
+                            />
+                            <Tag
+                                v-if="!project"
+                                :value="r.project"
+                                severity="info"
+                                style="margin-left: 0.4rem; font-size: 0.7rem"
+                            />
+                        </template>
+                        <template v-if="snippetOf(r)" #snippet>{{ snippetOf(r) }}</template>
+                        <template #meta>
+                            <span v-if="r.pending_comment_count > 0" :title="`${r.pending_comment_count} pending comment${r.pending_comment_count > 1 ? 's' : ''}`">
+                                <i class="pi pi-clock" /> {{ r.pending_comment_count }}
+                            </span>
+                            <span v-else-if="r.comment_count > 0">
+                                <i class="pi pi-comments" /> {{ r.comment_count }}
+                            </span>
+                        </template>
+                        <template #time>{{ relativeTime(r.last_activity) }}</template>
+                    </ListRow>
+
+                    <div v-if="rows.length" class="bulk-bar bulk-bar--bottom">
+                        <Button
+                            :label="selectedIds.size ? 'clear' : 'select all'"
+                            :icon="selectedIds.size ? 'pi pi-minus' : 'pi pi-list'"
+                            size="small"
+                            severity="secondary"
+                            text
+                            @click="selectedIds.size ? clearSelection() : selectAllVisible()"
+                        />
+                        <span class="bulk-count" v-if="selectedIds.size">
+                            <strong>{{ selectedIds.size }}</strong> selected
+                        </span>
+                        <span class="spacer" />
+                        <Button
+                            label="approve"
+                            icon="pi pi-check"
+                            severity="success"
+                            size="small"
+                            :loading="bulkBusy"
+                            :disabled="!pendingSelectedCount"
+                            :title="pendingSelectedCount ? '' : 'Select pending tickets to approve'"
+                            @click="bulkDecide('approve')"
+                        />
+                        <Button
+                            label="reject"
+                            icon="pi pi-times"
+                            severity="danger"
+                            size="small"
+                            :loading="bulkBusy"
+                            :disabled="!pendingSelectedCount"
+                            :title="pendingSelectedCount ? '' : 'Select pending tickets to reject'"
+                            @click="bulkDecide('reject')"
+                        />
+                    </div>
                 </template>
             </main>
         </div>
@@ -597,43 +756,22 @@ const projectListItems = computed(() => [
     gap: 0.8rem;
 }
 
-.aiball-tabs {
-    display: flex;
-    gap: 0.3rem;
-    border-bottom: 1px solid var(--p-content-border-color);
-    margin-bottom: 0.4rem;
-    overflow-x: auto;
-}
-.tab-btn {
-    background: transparent;
-    border: 0;
-    padding: 0.5rem 0.9rem;
-    cursor: pointer;
-    font: inherit;
-    color: var(--p-text-muted-color);
-    border-bottom: 2px solid transparent;
+.filters-bar {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    margin-bottom: -1px;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--p-content-border-color);
+    margin-bottom: 0.4rem;
 }
-.tab-btn:hover {
-    color: var(--p-text-color);
+.filter-select {
+    min-width: 9rem;
 }
-.tab-btn.active {
-    color: var(--p-primary-color);
-    border-bottom-color: var(--p-primary-color);
-}
-.tab-badge {
-    background: var(--p-red-500);
-    color: white;
-    border-radius: 999px;
-    padding: 0 0.45rem;
-    font-size: 0.72rem;
-    font-weight: 600;
-    min-width: 1.1rem;
-    text-align: center;
-    line-height: 1.3rem;
+.ticket-id {
+    color: var(--p-text-muted-color);
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.85em;
+    margin-right: 0.4rem;
 }
 
 .bulk-bar {
@@ -649,6 +787,18 @@ const projectListItems = computed(() => [
     z-index: 5;
 }
 .aiball-dark .bulk-bar { background: var(--p-surface-900); }
+.bulk-bar--bottom {
+    position: sticky;
+    top: auto;
+    bottom: 0;
+    margin-top: 0.4rem;
+}
+.compose-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.2rem 0;
+}
 .bulk-count {
     font-size: 0.85rem;
     color: var(--p-text-muted-color);

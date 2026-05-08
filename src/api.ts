@@ -15,8 +15,9 @@ import {
     listSubscriptions,
     listUnread,
     unreadCount,
-    markRead,
-    markAllRead,
+    markMessageSeen,
+    markAllSeenForProject,
+    markSeenUpToForProject,
     listTags,
     getTag,
     getTagByName,
@@ -28,15 +29,29 @@ import {
     removeMessageTag,
     setMessageTags,
     tagsForMessages,
+    getStrategy,
+    setStrategy,
+    STRATEGIES,
+    insertPing,
+    listPings,
+    markPingsRead,
+    unreadPingCount,
+    upsertTicketSubscription,
+    deleteTicketSubscription,
+    listTicketSubscriptions,
+    listProjectsDetailed,
+    deleteProject,
     type MessageKind,
     type MessageStatus,
+    type Strategy,
     type Tag,
     type Message,
 } from "./db.js";
+import { existsSync, unlinkSync } from "node:fs";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
 import { outboxPath } from "./paths.js";
-import { submitMessage, validateNewMessage, VALID_KINDS } from "./messages.js";
+import { fanOutPings, submitMessage, validateNewMessage, VALID_KINDS } from "./messages.js";
 
 function badRequest(res: Response, msg: string): Response {
     return res.status(400).json({ error: msg });
@@ -65,6 +80,20 @@ api.get("/health", (_req, res) => {
     res.json({ ok: true, ts: new Date().toISOString() });
 });
 
+api.get("/strategy", (_req, res) => {
+    res.json({ strategy: getStrategy() });
+});
+
+api.patch("/strategy", (req: Request, res: Response) => {
+    const s = req.body?.strategy;
+    if (typeof s !== "string" || !(STRATEGIES as readonly string[]).includes(s)) {
+        return badRequest(res, `strategy must be one of ${STRATEGIES.join(", ")}`);
+    }
+    setStrategy(s as Strategy);
+    broadcast({ type: "strategy_changed", data: { strategy: s } });
+    res.json({ strategy: s });
+});
+
 // -------- messages ----------------------------------------------------------
 
 api.post("/messages", (req: Request, res: Response) => {
@@ -75,11 +104,12 @@ api.post("/messages", (req: Request, res: Response) => {
 });
 
 api.get("/messages", (req: Request, res: Response) => {
-    const { status, project, kind, limit } = req.query;
+    const { status, project, kind, by_agent, limit } = req.query;
     const list = listMessages({
         status: status as MessageStatus | undefined,
         project: project as string | undefined,
         kind: kind as MessageKind | undefined,
+        by_agent: typeof by_agent === "string" ? by_agent : undefined,
         limit: limit ? Number(limit) : undefined,
     });
     res.json(withTags(list));
@@ -106,6 +136,17 @@ function decide(
     if (!updated) return notFound(res);
     if (status === "approved") {
         deliverToOutbox(updated);
+        fanOutPings(updated);
+    }
+    // Transition ping: notify the message author that a moderator (human)
+    // decided their submission. Skip if the author IS the moderator (close
+    // the loop on bypass-humain posts that somehow ended up in the queue).
+    if (
+        updated.by_agent &&
+        updated.by_agent !== "human" &&
+        (status === "approved" || status === "rejected")
+    ) {
+        insertPing(updated.by_agent, updated.id);
     }
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_decided", data: decorated });
@@ -142,8 +183,130 @@ api.post("/messages/:id/note", (req, res) => {
 
 // -------- tickets (derived view) -------------------------------------------
 
-api.get("/projects", (_req, res) => {
+api.get("/projects", (req, res) => {
+    if (req.query.detailed === "1") {
+        return res.json(listProjectsDetailed());
+    }
     res.json(listProjects());
+});
+
+api.delete("/projects/:name", (req, res) => {
+    const name = req.params.name;
+    const { deleted_messages } = deleteProject(name);
+    // Best-effort outbox cleanup. If it fails (permission, race), we still
+    // return success — the DB is the source of truth.
+    try {
+        const path = outboxPath(name);
+        if (existsSync(path)) unlinkSync(path);
+    } catch {
+        /* ignore */
+    }
+    broadcast({ type: "project_deleted", data: { project: name, deleted_messages } });
+    res.json({ project: name, deleted_messages, ok: true });
+});
+
+/**
+ * Unified inbox view: one row per ticket, decorated with the latest activity
+ * timestamp (so a new pending comment bumps its parent ticket to the top) and
+ * with pending-comment counts so the moderator sees at a glance what needs
+ * attention. Filter by status:
+ *   - "pending"  → tickets that are themselves pending OR have ≥1 pending comment
+ *   - "approved" → tickets with status=approved
+ *   - "rejected" → tickets with status=rejected
+ *   - undefined  → every ticket regardless of status
+ */
+api.get("/inbox", (req, res) => {
+    const project = req.query.project as string | undefined;
+    const status = req.query.status as MessageStatus | undefined;
+    const onlyOpen = req.query.open === "1";
+    const priorityFilter = req.query.priority as string | undefined;
+
+    const tickets = listMessages({ kind: "ticket_created", project });
+    const otherMessages = listMessages({ project }).filter(
+        (m) => m.kind !== "ticket_created",
+    );
+
+    interface Agg {
+        commentCount: number;
+        pendingCount: number;
+        lastActivity: string;
+        // Track the latest approved lifecycle event (close or reopen) per
+        // ticket. The closed state is the kind of that latest event.
+        latestLifecycleId: number;
+        latestLifecycleKind: "ticket_closed" | "ticket_reopened" | null;
+    }
+    const byTicket = new Map<number, Agg>();
+    for (const m of otherMessages) {
+        if (!m.ticket_id) continue;
+        const cur =
+            byTicket.get(m.ticket_id) ??
+            ({
+                commentCount: 0,
+                pendingCount: 0,
+                lastActivity: "",
+                latestLifecycleId: 0,
+                latestLifecycleKind: null,
+            } as Agg);
+        if (m.kind === "comment_added") {
+            cur.commentCount++;
+            if (m.status === "pending") cur.pendingCount++;
+        }
+        if (
+            (m.kind === "ticket_closed" || m.kind === "ticket_reopened") &&
+            m.status === "approved" &&
+            m.id > cur.latestLifecycleId
+        ) {
+            cur.latestLifecycleId = m.id;
+            cur.latestLifecycleKind = m.kind;
+        }
+        if (m.created_at > cur.lastActivity) cur.lastActivity = m.created_at;
+        byTicket.set(m.ticket_id, cur);
+    }
+
+    const tagsMap = tagsForMessages(tickets.map((m) => m.id));
+    let rows = tickets.map((t) => {
+        const agg =
+            byTicket.get(t.id) ??
+            ({
+                commentCount: 0,
+                pendingCount: 0,
+                lastActivity: "",
+                latestLifecycleId: 0,
+                latestLifecycleKind: null,
+            } as Agg);
+        return {
+            id: t.id,
+            project: t.project,
+            title: t.edited_title ?? t.title,
+            body: t.edited_body ?? t.body,
+            by_agent: t.by_agent,
+            created_at: t.created_at,
+            status: t.status,
+            priority: t.priority,
+            closed: agg.latestLifecycleKind === "ticket_closed",
+            comment_count: agg.commentCount,
+            pending_comment_count: agg.pendingCount,
+            last_activity:
+                agg.lastActivity && agg.lastActivity > t.created_at
+                    ? agg.lastActivity
+                    : t.created_at,
+            tags: tagsMap.get(t.id) ?? [],
+        };
+    });
+
+    if (status === "pending") {
+        rows = rows.filter((r) => r.status === "pending" || r.pending_comment_count > 0);
+    } else if (status === "approved" || status === "rejected") {
+        rows = rows.filter((r) => r.status === status);
+    }
+    if (onlyOpen) rows = rows.filter((r) => !r.closed);
+    if (priorityFilter && priorityFilter !== "all") {
+        rows = rows.filter((r) => r.priority === priorityFilter);
+    }
+
+    rows.sort((a, b) => b.last_activity.localeCompare(a.last_activity));
+
+    res.json(rows);
 });
 
 api.get("/tickets", (req, res) => {
@@ -172,6 +335,7 @@ api.get("/tickets", (req, res) => {
         by_agent: m.by_agent,
         created_at: m.created_at,
         closed: closedSet.has(m.id),
+        priority: m.priority,
         tags: tagsMap.get(m.id) ?? [],
     }));
 
@@ -179,18 +343,47 @@ api.get("/tickets", (req, res) => {
 });
 
 api.get("/tickets/:id", (req, res) => {
-    const id = Number(req.params.id);
-    const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created" || t.status !== "approved") {
-        return notFound(res, "ticket not found or not approved");
+    const requestedId = Number(req.params.id);
+    const requested = getMessage(requestedId);
+    if (!requested) return notFound(res, "ticket not found");
+    // If the id is a comment (or close/reopen event), resolve up to its
+    // parent ticket and attach `focus_message_id` so the UI can scroll to
+    // the right place. Lets `#N` references in markdown be opened blindly.
+    let t = requested;
+    let focusMessageId: number | null = null;
+    if (t.kind !== "ticket_created") {
+        if (!t.ticket_id) return notFound(res, "ticket not found");
+        const parent = getMessage(t.ticket_id);
+        if (!parent || parent.kind !== "ticket_created") {
+            return notFound(res, "ticket not found");
+        }
+        focusMessageId = requestedId;
+        t = parent;
     }
-    const all = listMessages({ status: "approved", project: t.project });
+    const id = t.id;
+    // Return tickets in any status so the moderator can open pending or
+    // rejected ones from the inbox and act on them inline.
+    const all = listMessages({ project: t.project });
     const comments = all
-        .filter((m) => m.kind === "comment_added" && m.ticket_id === id)
+        .filter(
+            (m) =>
+                m.kind === "comment_added" &&
+                m.ticket_id === id &&
+                m.status !== "rejected",
+        )
         .reverse();
-    const closed = all.some(
-        (m) => m.kind === "ticket_closed" && m.ticket_id === id,
-    );
+    // Closed state: kind of the latest approved close-or-reopen event for
+    // this ticket, by id (events form an audit trail; the most recent one
+    // wins). No event → not closed.
+    const lifecycle = all
+        .filter(
+            (m) =>
+                (m.kind === "ticket_closed" || m.kind === "ticket_reopened") &&
+                m.ticket_id === id &&
+                m.status === "approved",
+        )
+        .sort((a, b) => b.id - a.id);
+    const closed = lifecycle.length > 0 && lifecycle[0].kind === "ticket_closed";
     res.json({
         ticket: {
             id: t.id,
@@ -199,10 +392,13 @@ api.get("/tickets/:id", (req, res) => {
             body: t.edited_body ?? t.body,
             by_agent: t.by_agent,
             created_at: t.created_at,
+            status: t.status,
             closed,
+            priority: t.priority,
             tags: listMessageTags(t.id),
         },
         comments: withTags(comments),
+        focus_message_id: focusMessageId,
     });
 });
 
@@ -306,21 +502,46 @@ api.get("/unread", (req: Request, res: Response) => {
     });
 });
 
-api.post("/mark-read", (req: Request, res: Response) => {
-    const { consumer_id, project, up_to_id, all } = req.body ?? {};
-    if (typeof consumer_id !== "string" || typeof project !== "string") {
+api.get("/unread/count", (req, res) => {
+    const consumer_id = req.query.consumer_id as string | undefined;
+    const project = req.query.project as string | undefined;
+    if (!consumer_id || !project) {
         return badRequest(res, "consumer_id and project required");
     }
-    let sub;
-    if (all === true) {
-        sub = markAllRead(consumer_id, project);
-    } else if (typeof up_to_id === "number") {
-        sub = markRead(consumer_id, project, up_to_id);
-    } else {
-        return badRequest(res, "provide up_to_id (number) or all:true");
+    res.json({
+        consumer_id,
+        project,
+        count: unreadCount(consumer_id, project),
+    });
+});
+
+api.post("/mark-read", (req: Request, res: Response) => {
+    const { consumer_id, project, message_id, up_to_id, all } = req.body ?? {};
+    if (typeof consumer_id !== "string") {
+        return badRequest(res, "consumer_id required");
     }
-    if (!sub) return notFound(res, "subscription not found — call POST /subscriptions first");
-    res.json(sub);
+    if (typeof message_id === "number") {
+        const r = markMessageSeen(consumer_id, message_id);
+        return res.json({ consumer_id, message_id, ...r });
+    }
+    if (typeof up_to_id === "number") {
+        if (typeof project !== "string") {
+            return badRequest(res, "project required when up_to_id is set");
+        }
+        const r = markSeenUpToForProject(consumer_id, project, up_to_id);
+        return res.json({ consumer_id, project, up_to_id, ...r });
+    }
+    if (all === true) {
+        if (typeof project !== "string") {
+            return badRequest(res, "project required when all:true");
+        }
+        const r = markAllSeenForProject(consumer_id, project);
+        return res.json({ consumer_id, project, ...r });
+    }
+    return badRequest(
+        res,
+        "provide message_id (single ack), up_to_id with project (bulk ack up to id), or all:true with project (ack everything delivered)",
+    );
 });
 
 // -------- tags ------------------------------------------------------------
@@ -437,4 +658,67 @@ api.delete("/messages/:id/tags/:tag", (req, res) => {
     const tags = listMessageTags(id);
     broadcast({ type: "message_tagged", data: { message_id: id, tags } });
     res.json(tags);
+});
+
+// -------- pings ------------------------------------------------------------
+
+api.get("/pings", (req, res) => {
+    const consumer = req.query.consumer_id as string | undefined;
+    if (!consumer) return badRequest(res, "consumer_id required");
+    const unreadOnly = req.query.unread === "1" || req.query.unread === "true";
+    const limit = req.query.limit ? Number(req.query.limit) : 100;
+    const pings = listPings({ recipient: consumer, unreadOnly, limit });
+    res.json({ consumer_id: consumer, count: pings.length, pings });
+});
+
+api.get("/pings/count", (req, res) => {
+    const consumer = req.query.consumer_id as string | undefined;
+    if (!consumer) return badRequest(res, "consumer_id required");
+    res.json({ consumer_id: consumer, unread: unreadPingCount(consumer) });
+});
+
+api.post("/pings/mark-read", (req: Request, res: Response) => {
+    const consumer = req.body?.consumer_id as string | undefined;
+    if (!consumer) return badRequest(res, "consumer_id required");
+    const all = req.body?.all === true;
+    const upToId = typeof req.body?.up_to_id === "number" ? req.body.up_to_id : undefined;
+    if (!all && upToId === undefined) {
+        return badRequest(res, "provide up_to_id or all=true");
+    }
+    const r = markPingsRead({ recipient: consumer, all, upToId });
+    res.json({ consumer_id: consumer, ...r });
+});
+
+// -------- ticket subscriptions ---------------------------------------------
+
+api.get("/ticket-subscriptions", (req, res) => {
+    const consumer = req.query.consumer_id as string | undefined;
+    if (!consumer) return badRequest(res, "consumer_id required");
+    res.json({
+        consumer_id: consumer,
+        subscriptions: listTicketSubscriptions(consumer),
+    });
+});
+
+api.post("/ticket-subscriptions", (req: Request, res: Response) => {
+    const consumer = req.body?.consumer_id as string | undefined;
+    const ticket_id = req.body?.ticket_id;
+    if (!consumer) return badRequest(res, "consumer_id required");
+    if (typeof ticket_id !== "number") {
+        return badRequest(res, "ticket_id required (number)");
+    }
+    const t = getMessage(ticket_id);
+    if (!t || t.kind !== "ticket_created") {
+        return notFound(res, "ticket not found");
+    }
+    upsertTicketSubscription(consumer, ticket_id);
+    res.status(201).json({ consumer_id: consumer, ticket_id });
+});
+
+api.delete("/ticket-subscriptions/:ticket_id", (req, res) => {
+    const ticket_id = Number(req.params.ticket_id);
+    const consumer = req.query.consumer_id as string | undefined;
+    if (!consumer) return badRequest(res, "consumer_id required");
+    deleteTicketSubscription(consumer, ticket_id);
+    res.json({ consumer_id: consumer, ticket_id, removed: true });
 });

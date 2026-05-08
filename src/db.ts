@@ -1,9 +1,19 @@
 import Database from "better-sqlite3";
 import { DB_PATH, ensureDirs } from "./paths.js";
 
-export type MessageKind = "ticket_created" | "comment_added" | "ticket_closed";
+export type MessageKind =
+    | "ticket_created"
+    | "comment_added"
+    | "ticket_closed"
+    | "ticket_reopened";
 export type MessageStatus = "pending" | "approved" | "rejected";
 export type RuleDecision = "auto" | "review";
+export type Priority = "panic" | "request" | "question" | "fyi";
+export const PRIORITIES: readonly Priority[] = ["panic", "request", "question", "fyi"];
+
+export type Strategy = "manual" | "auto" | "auto-reply";
+export const STRATEGIES: readonly Strategy[] = ["manual", "auto", "auto-reply"];
+export const DEFAULT_STRATEGY: Strategy = "auto-reply";
 
 export interface Message {
     id: number;
@@ -22,6 +32,7 @@ export interface Message {
     human_note: string | null;
     edited_title: string | null;
     edited_body: string | null;
+    priority: Priority | null;
 }
 
 export interface Subscription {
@@ -51,6 +62,7 @@ export interface NewMessage {
     title?: string | null;
     body?: string | null;
     by_agent?: string | null;
+    priority?: Priority | null;
 }
 
 export interface NewRule {
@@ -125,7 +137,8 @@ function migrate(d: Database.Database): void {
             matched_rule_id INTEGER,
             human_note TEXT,
             edited_title TEXT,
-            edited_body TEXT
+            edited_body TEXT,
+            priority TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_messages_status_project
@@ -160,6 +173,46 @@ function migrate(d: Database.Database): void {
 
         CREATE INDEX IF NOT EXISTS idx_subscriptions_project
             ON subscriptions(project);
+
+        /*
+         * Per-ticket subscriptions. Independent of project subscriptions:
+         * an agent can follow a ticket they don't own, in a project they
+         * don't subscribe to. Each subscriber's cursor lives in pings
+         * (one row per delivered message), so consuming on one consumer
+         * does not affect another.
+         */
+        CREATE TABLE IF NOT EXISTS ticket_subscriptions (
+            consumer_id TEXT NOT NULL,
+            ticket_id INTEGER NOT NULL,
+            subscribed_at TEXT NOT NULL,
+            PRIMARY KEY (consumer_id, ticket_id),
+            FOREIGN KEY (ticket_id) REFERENCES messages(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_ticket_subs_ticket
+            ON ticket_subscriptions(ticket_id);
+
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
+
+        /*
+         * Pings: lineage-based notifications. When a comment thread reaches a
+         * ticket whose creator is a different agent than the commenter, we
+         * insert a ping row so that creator can see the reply via /api/pings
+         * even if they never subscribed to the project. seen_at = NULL means
+         * unread.
+         */
+        CREATE TABLE IF NOT EXISTS pings (
+            recipient TEXT NOT NULL,
+            message_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            seen_at TEXT,
+            PRIMARY KEY (recipient, message_id),
+            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_pings_recipient_unread
+            ON pings(recipient) WHERE seen_at IS NULL;
     `);
 
     // Migration: add parent_id column to existing messages tables.
@@ -167,6 +220,34 @@ function migrate(d: Database.Database): void {
     if (!cols.some((c) => c.name === "parent_id")) {
         d.exec("ALTER TABLE messages ADD COLUMN parent_id INTEGER");
         d.exec("CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id)");
+    }
+    if (!cols.some((c) => c.name === "priority")) {
+        d.exec("ALTER TABLE messages ADD COLUMN priority TEXT");
+    }
+
+    // Migration: backfill pings for existing project subscriptions. The
+    // delivery model switched from cursor (subscriptions.last_seen_id) to
+    // per-message pings rows. Without this backfill, existing subscribers
+    // would see an empty `unread()` even though they had messages waiting.
+    // For each (consumer, project) sub, every approved message in that
+    // project authored by someone else gets a ping inserted (idempotent
+    // via the pings PK, so re-running is safe).
+    const cursorMigrationDone = d
+        .prepare("SELECT value FROM settings WHERE key = ?")
+        .get("ping_backfill_v1") as { value: string } | undefined;
+    if (!cursorMigrationDone) {
+        d.exec(`
+            INSERT OR IGNORE INTO pings (recipient, message_id, created_at)
+            SELECT s.consumer_id, m.id, m.created_at
+            FROM subscriptions s
+            JOIN messages m ON m.project = s.project
+            WHERE m.status = 'approved'
+              AND (m.by_agent IS NULL OR m.by_agent != s.consumer_id)
+              AND m.id > s.last_seen_id
+        `);
+        d.prepare(
+            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",
+        ).run("ping_backfill_v1", new Date().toISOString());
     }
 
     // Tags (closed list, human-curated) + message ↔ tag join.
@@ -223,9 +304,9 @@ export function insertMessage(m: NewMessage): Message {
     const d = getDb();
     const stmt = d.prepare(`
         INSERT INTO messages
-            (project, kind, ticket_id, parent_id, title, body, by_agent, created_at)
+            (project, kind, ticket_id, parent_id, title, body, by_agent, priority, created_at)
         VALUES
-            (@project, @kind, @ticket_id, @parent_id, @title, @body, @by_agent, @created_at)
+            (@project, @kind, @ticket_id, @parent_id, @title, @body, @by_agent, @priority, @created_at)
         RETURNING *
     `);
     return stmt.get({
@@ -236,6 +317,7 @@ export function insertMessage(m: NewMessage): Message {
         title: m.title ?? null,
         body: m.body ?? null,
         by_agent: m.by_agent ?? null,
+        priority: m.kind === "ticket_created" ? (m.priority ?? null) : null,
         created_at: nowIso(),
     }) as Message;
 }
@@ -250,6 +332,7 @@ export function listMessages(filters: {
     status?: MessageStatus;
     project?: string;
     kind?: MessageKind;
+    by_agent?: string;
     limit?: number;
 } = {}): Message[] {
     const where: string[] = [];
@@ -266,6 +349,10 @@ export function listMessages(filters: {
         where.push("kind = @kind");
         params.kind = filters.kind;
     }
+    if (filters.by_agent) {
+        where.push("by_agent = @by_agent");
+        params.by_agent = filters.by_agent;
+    }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const limitSql = filters.limit ? `LIMIT ${Number(filters.limit) | 0}` : "";
     return getDb()
@@ -278,7 +365,7 @@ export function listMessages(filters: {
 export function updateMessageStatus(
     id: number,
     status: MessageStatus,
-    decidedBy: "human" | "auto",
+    decidedBy: "human" | "auto" | "owner",
     matchedRuleId: number | null = null,
 ): Message | null {
     getDb()
@@ -324,6 +411,52 @@ export function listProjects(): string[] {
     return (getDb()
         .prepare("SELECT DISTINCT project FROM messages ORDER BY project")
         .all() as { project: string }[]).map((r) => r.project);
+}
+
+export interface ProjectMeta {
+    name: string;
+    last_activity: string;
+    ticket_count: number;
+    comment_count: number;
+    pending_count: number;
+}
+
+export function listProjectsDetailed(): ProjectMeta[] {
+    return (getDb()
+        .prepare(
+            `SELECT
+                project AS name,
+                MAX(created_at) AS last_activity,
+                SUM(CASE WHEN kind = 'ticket_created' THEN 1 ELSE 0 END) AS ticket_count,
+                SUM(CASE WHEN kind = 'comment_added' THEN 1 ELSE 0 END) AS comment_count,
+                SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count
+             FROM messages
+             GROUP BY project
+             ORDER BY last_activity DESC`,
+        )
+        .all() as ProjectMeta[]).map((r) => ({
+        name: r.name,
+        last_activity: r.last_activity,
+        ticket_count: Number(r.ticket_count),
+        comment_count: Number(r.comment_count),
+        pending_count: Number(r.pending_count),
+    }));
+}
+
+/**
+ * Hard-delete a project: every message in it (cascades to message_tags,
+ * pings, ticket_subscriptions via FK), every project subscription. Returns
+ * the count of deleted messages so the caller can decide whether to also
+ * wipe the project's outbox file.
+ */
+export function deleteProject(name: string): { deleted_messages: number } {
+    const d = getDb();
+    const tx = d.transaction((p: string) => {
+        const r = d.prepare("DELETE FROM messages WHERE project = ?").run(p);
+        d.prepare("DELETE FROM subscriptions WHERE project = ?").run(p);
+        return { deleted_messages: r.changes };
+    });
+    return tx(name);
 }
 
 export function insertRule(r: NewRule): Rule {
@@ -417,68 +550,110 @@ export function listSubscriptions(consumer_id?: string): Subscription[] {
         .all() as Subscription[];
 }
 
+/**
+ * Project-feed delivery is now backed by the `pings` table, same as ticket
+ * pings: one row per (consumer_id, message_id), per-message `seen_at`.
+ * Pending-then-approved messages reach every subscriber correctly because
+ * fan-out runs at approval time, not at submission. Compare to the older
+ * cursor model (last_seen_id), which silently dropped messages whose status
+ * flipped to approved AFTER the cursor advanced past their id.
+ */
 export function listUnread(
     consumer_id: string,
     project: string,
     limit = 100,
 ): Message[] {
-    const sub = getDb()
-        .prepare("SELECT last_seen_id FROM subscriptions WHERE consumer_id=? AND project=?")
-        .get(consumer_id, project) as { last_seen_id: number } | undefined;
-    const lastSeen = sub?.last_seen_id ?? 0;
     return getDb()
         .prepare(`
-            SELECT * FROM messages
-            WHERE project = ? AND status = 'approved' AND id > ?
-            ORDER BY id ASC
+            SELECT m.* FROM pings p
+            JOIN messages m ON m.id = p.message_id
+            WHERE p.recipient = ? AND p.seen_at IS NULL AND m.project = ?
+            ORDER BY m.id ASC
             LIMIT ?
         `)
-        .all(project, lastSeen, limit) as Message[];
+        .all(consumer_id, project, limit) as Message[];
 }
 
 export function unreadCount(consumer_id: string, project: string): number {
-    const sub = getDb()
-        .prepare("SELECT last_seen_id FROM subscriptions WHERE consumer_id=? AND project=?")
-        .get(consumer_id, project) as { last_seen_id: number } | undefined;
-    const lastSeen = sub?.last_seen_id ?? 0;
-    const r = getDb()
-        .prepare(`
-            SELECT COUNT(*) AS n FROM messages
-            WHERE project=? AND status='approved' AND id > ?
-        `)
-        .get(project, lastSeen) as { n: number };
-    return r.n;
+    return (
+        (getDb()
+            .prepare(`
+                SELECT COUNT(*) AS n FROM pings p
+                JOIN messages m ON m.id = p.message_id
+                WHERE p.recipient = ? AND p.seen_at IS NULL AND m.project = ?
+            `)
+            .get(consumer_id, project) as { n: number }).n
+    );
 }
 
-export function markRead(
+export function listProjectSubscribers(project: string): string[] {
+    return (getDb()
+        .prepare("SELECT consumer_id FROM subscriptions WHERE project = ?")
+        .all(project) as { consumer_id: string }[]).map((r) => r.consumer_id);
+}
+
+/**
+ * Mark a single message as seen by this consumer. The new contract: an agent
+ * acks the messages it actually received, one id at a time. There is no
+ * "advance my cursor past a span of unseen messages" footgun anymore.
+ */
+export function markMessageSeen(
+    consumer_id: string,
+    message_id: number,
+): { updated: number } {
+    const r = getDb()
+        .prepare(
+            `UPDATE pings SET seen_at = ?
+             WHERE recipient = ? AND message_id = ? AND seen_at IS NULL`,
+        )
+        .run(nowIso(), consumer_id, message_id);
+    return { updated: r.changes };
+}
+
+/**
+ * Bulk-ack helper: mark every currently-delivered-but-unseen ping for this
+ * (consumer, project) pair as seen. Safe by construction — a ping only
+ * exists once the message reached the recipient via fan-out, so this can
+ * never ack content the consumer didn't receive (unlike the old cursor
+ * `markAllRead` which jumped to project HEAD).
+ *
+ * Used by the human moderator's CLI (`aiball mark-read --all`). The MCP
+ * tool surface for agents only exposes per-slice acks via the `mark_read`
+ * flag on `unread`, never this function.
+ */
+export function markAllSeenForProject(
+    consumer_id: string,
+    project: string,
+): { updated: number } {
+    const r = getDb()
+        .prepare(
+            `UPDATE pings SET seen_at = ?
+             WHERE recipient = ? AND seen_at IS NULL
+             AND message_id IN (SELECT id FROM messages WHERE project = ?)`,
+        )
+        .run(nowIso(), consumer_id, project);
+    return { updated: r.changes };
+}
+
+/**
+ * Bulk-ack up to a given message id (CLI convenience). Safe under the
+ * pings model: only acks rows that already exist in `pings` for this
+ * recipient, so it can never invent a "seen" entry for content the
+ * consumer didn't receive.
+ */
+export function markSeenUpToForProject(
     consumer_id: string,
     project: string,
     upToId: number,
-): Subscription | null {
-    // Don't move backwards
-    getDb()
-        .prepare(`
-            UPDATE subscriptions
-            SET last_seen_id = ?
-            WHERE consumer_id=? AND project=? AND last_seen_id < ?
-        `)
-        .run(upToId, consumer_id, project, upToId);
-    return (getDb()
-        .prepare("SELECT * FROM subscriptions WHERE consumer_id=? AND project=?")
-        .get(consumer_id, project) as Subscription | undefined) ?? null;
-}
-
-export function markAllRead(
-    consumer_id: string,
-    project: string,
-): Subscription | null {
-    const head = (getDb()
-        .prepare(`
-            SELECT COALESCE(MAX(id), 0) AS m FROM messages
-            WHERE project=? AND status='approved'
-        `)
-        .get(project) as { m: number }).m;
-    return markRead(consumer_id, project, head);
+): { updated: number } {
+    const r = getDb()
+        .prepare(
+            `UPDATE pings SET seen_at = ?
+             WHERE recipient = ? AND seen_at IS NULL AND message_id <= ?
+             AND message_id IN (SELECT id FROM messages WHERE project = ?)`,
+        )
+        .run(nowIso(), consumer_id, upToId, project);
+    return { updated: r.changes };
 }
 
 // -------- tags ------------------------------------------------------------
@@ -606,4 +781,173 @@ export function setMessageTags(
         for (const tid of ids) ins.run(messageId, tid, now, setBy);
     });
     tx([...new Set(tagIds)]);
+}
+
+// ---- settings (single-row k/v store) --------------------------------------
+
+export function getSetting(key: string): string | null {
+    const row = getDb()
+        .prepare("SELECT value FROM settings WHERE key = ?")
+        .get(key) as { value: string | null } | undefined;
+    return row?.value ?? null;
+}
+
+export function setSetting(key: string, value: string): void {
+    getDb()
+        .prepare(
+            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .run(key, value);
+}
+
+export function getStrategy(): Strategy {
+    const v = getSetting("strategy");
+    if (v && (STRATEGIES as readonly string[]).includes(v)) return v as Strategy;
+    return DEFAULT_STRATEGY;
+}
+
+export function setStrategy(s: Strategy): void {
+    setSetting("strategy", s);
+}
+
+// ---- pings ----------------------------------------------------------------
+
+export function insertPing(recipient: string, messageId: number): void {
+    getDb()
+        .prepare(
+            "INSERT OR IGNORE INTO pings (recipient, message_id, created_at) VALUES (?, ?, ?)",
+        )
+        .run(recipient, messageId, nowIso());
+}
+
+export interface Ping {
+    recipient: string;
+    message_id: number;
+    created_at: string;
+    seen_at: string | null;
+    message: Message;
+}
+
+export function listPings(opts: {
+    recipient: string;
+    unreadOnly?: boolean;
+    limit?: number;
+}): Ping[] {
+    const where = ["p.recipient = @recipient"];
+    if (opts.unreadOnly) where.push("p.seen_at IS NULL");
+    const lim = opts.limit ? `LIMIT ${Number(opts.limit) | 0}` : "";
+    const rows = getDb()
+        .prepare(
+            `SELECT p.recipient AS p_recipient,
+                    p.message_id AS p_message_id,
+                    p.created_at AS p_created_at,
+                    p.seen_at AS p_seen_at,
+                    m.*
+             FROM pings p JOIN messages m ON m.id = p.message_id
+             WHERE ${where.join(" AND ")}
+             ORDER BY p.created_at DESC
+             ${lim}`,
+        )
+        .all({ recipient: opts.recipient }) as Record<string, unknown>[];
+    return rows.map((row) => ({
+        recipient: row.p_recipient as string,
+        message_id: row.p_message_id as number,
+        created_at: row.p_created_at as string,
+        seen_at: (row.p_seen_at as string | null) ?? null,
+        message: {
+            id: row.id as number,
+            project: row.project as string,
+            kind: row.kind as MessageKind,
+            ticket_id: (row.ticket_id as number | null) ?? null,
+            parent_id: (row.parent_id as number | null) ?? null,
+            title: (row.title as string | null) ?? null,
+            body: (row.body as string | null) ?? null,
+            by_agent: (row.by_agent as string | null) ?? null,
+            status: row.status as MessageStatus,
+            created_at: row.created_at as string,
+            decided_at: (row.decided_at as string | null) ?? null,
+            decided_by: (row.decided_by as string | null) ?? null,
+            matched_rule_id: (row.matched_rule_id as number | null) ?? null,
+            human_note: (row.human_note as string | null) ?? null,
+            edited_title: (row.edited_title as string | null) ?? null,
+            edited_body: (row.edited_body as string | null) ?? null,
+            priority: (row.priority as Priority | null) ?? null,
+        },
+    }));
+}
+
+export function markPingsRead(opts: {
+    recipient: string;
+    upToId?: number;
+    all?: boolean;
+}): { updated: number } {
+    if (!opts.upToId && !opts.all) return { updated: 0 };
+    const now = nowIso();
+    const where = ["recipient = @recipient", "seen_at IS NULL"];
+    if (opts.upToId) where.push("message_id <= @upToId");
+    const r = getDb()
+        .prepare(
+            `UPDATE pings SET seen_at = @now WHERE ${where.join(" AND ")}`,
+        )
+        .run({
+            recipient: opts.recipient,
+            upToId: opts.upToId ?? null,
+            now,
+        });
+    return { updated: r.changes };
+}
+
+export function unreadPingCount(recipient: string): number {
+    return (
+        (getDb()
+            .prepare(
+                "SELECT COUNT(*) AS n FROM pings WHERE recipient = ? AND seen_at IS NULL",
+            )
+            .get(recipient) as { n: number }).n
+    );
+}
+
+// ---- ticket subscriptions -------------------------------------------------
+
+export function upsertTicketSubscription(
+    consumer_id: string,
+    ticket_id: number,
+): void {
+    getDb()
+        .prepare(
+            `INSERT INTO ticket_subscriptions (consumer_id, ticket_id, subscribed_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(consumer_id, ticket_id) DO NOTHING`,
+        )
+        .run(consumer_id, ticket_id, nowIso());
+}
+
+export function deleteTicketSubscription(
+    consumer_id: string,
+    ticket_id: number,
+): void {
+    getDb()
+        .prepare(
+            "DELETE FROM ticket_subscriptions WHERE consumer_id = ? AND ticket_id = ?",
+        )
+        .run(consumer_id, ticket_id);
+}
+
+export function listTicketSubscribers(ticket_id: number): string[] {
+    return (getDb()
+        .prepare(
+            "SELECT consumer_id FROM ticket_subscriptions WHERE ticket_id = ?",
+        )
+        .all(ticket_id) as { consumer_id: string }[]).map((r) => r.consumer_id);
+}
+
+export function listTicketSubscriptions(consumer_id: string): {
+    ticket_id: number;
+    subscribed_at: string;
+}[] {
+    return getDb()
+        .prepare(
+            "SELECT ticket_id, subscribed_at FROM ticket_subscriptions WHERE consumer_id = ? ORDER BY subscribed_at DESC",
+        )
+        .all(consumer_id) as { ticket_id: number; subscribed_at: string }[];
 }

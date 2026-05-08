@@ -225,3 +225,7 @@ body,
 .connection-dot.offline {
     background: #ef4444;
 }
+.strategy-select {
+    min-width: 11rem;
+    margin-left: 0.4rem;
+}

@@ -58,7 +58,10 @@ const slots = useSlots();
     border-bottom: 1px solid var(--p-content-border-color);
     cursor: pointer;
     transition: background 0.1s;
-    min-height: 2.2rem;
+    /* reserve enough vertical room for the hover-revealed action buttons
+       (they are taller than the time/meta they replace) so the row does not
+       jump when the cursor enters or leaves it. */
+    min-height: 2.85rem;
 }
 .list-row:hover {
     background: var(--p-surface-100);

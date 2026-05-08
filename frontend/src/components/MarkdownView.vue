@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { marked } from "marked";
+import { marked, type Tokens } from "marked";
 import DOMPurify from "dompurify";
 
 const props = defineProps<{ source: string | null | undefined }>();
@@ -8,6 +8,42 @@ const props = defineProps<{ source: string | null | undefined }>();
 marked.setOptions({
     gfm: true,
     breaks: true,
+});
+
+interface TicketRefToken extends Tokens.Generic {
+    type: "ticketRef";
+    raw: string;
+    id: number;
+}
+
+// Linkify "#123" in body text → /t/123. Runs as an inline extension, so
+// codespans, fenced code, and existing markdown links are tokenized before
+// us and never reach this matcher. The trailing \b prevents matches inside
+// hex colors (#abc, #123abc) since alphanumerics don't form a word boundary
+// with digits.
+marked.use({
+    extensions: [
+        {
+            name: "ticketRef",
+            level: "inline",
+            start(src: string) {
+                return src.match(/#\d/)?.index;
+            },
+            tokenizer(src: string): TicketRefToken | undefined {
+                const m = /^#(\d+)\b/.exec(src);
+                if (!m) return undefined;
+                return {
+                    type: "ticketRef",
+                    raw: m[0],
+                    id: Number(m[1]),
+                };
+            },
+            renderer(token) {
+                const t = token as TicketRefToken;
+                return `<a href="/t/${t.id}" class="ticket-ref">#${t.id}</a>`;
+            },
+        },
+    ],
 });
 
 const html = computed(() => {
@@ -29,10 +65,24 @@ const html = computed(() => {
         ALLOW_DATA_ATTR: false,
     });
 });
+
+// Intercept clicks on internal links (any /t/N, /rules, /tags, /projects, etc.)
+// so the SPA router handles them instead of triggering a full reload.
+function onClick(ev: MouseEvent) {
+    if (ev.defaultPrevented || ev.button !== 0) return;
+    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return; // modifier → let browser do its thing
+    const target = (ev.target as HTMLElement | null)?.closest("a");
+    if (!target) return;
+    const href = target.getAttribute("href");
+    if (!href || !href.startsWith("/")) return;
+    ev.preventDefault();
+    history.pushState({}, "", href);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+}
 </script>
 
 <template>
-    <div class="md-body" v-html="html" />
+    <div class="md-body" @click="onClick" v-html="html" />
 </template>
 
 <style>

@@ -1,13 +1,17 @@
 import { ref, onBeforeUnmount } from "vue";
 
-import type { Message } from "./api";
+import type { Message, Strategy } from "./api";
 
 export type WsEvent =
     | { type: "message_created"; data: Message }
     | { type: "message_decided"; data: Message }
     | { type: "message_edited"; data: Message }
     | { type: "message_noted"; data: Message }
-    | { type: "rule_changed"; data: unknown };
+    | { type: "message_tagged"; data: Message }
+    | { type: "rule_changed"; data: unknown }
+    | { type: "tag_changed"; data: unknown }
+    | { type: "strategy_changed"; data: { strategy: Strategy } }
+    | { type: "project_deleted"; data: { project: string; deleted_messages: number } };
 
 export function useWs(onEvent: (e: WsEvent) => void) {
     const connected = ref(false);

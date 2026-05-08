@@ -7,10 +7,16 @@ export interface Tag {
     created_at: string;
 }
 
+export type Priority = "panic" | "request" | "question" | "fyi";
+export const PRIORITIES: readonly Priority[] = ["panic", "request", "question", "fyi"];
+
+export type Strategy = "manual" | "auto" | "auto-reply";
+export const STRATEGIES: readonly Strategy[] = ["manual", "auto", "auto-reply"];
+
 export interface Message {
     id: number;
     project: string;
-    kind: "ticket_created" | "comment_added" | "ticket_closed";
+    kind: "ticket_created" | "comment_added" | "ticket_closed" | "ticket_reopened";
     ticket_id: number | null;
     parent_id: number | null;
     title: string | null;
@@ -24,6 +30,7 @@ export interface Message {
     human_note: string | null;
     edited_title: string | null;
     edited_body: string | null;
+    priority: Priority | null;
     tags: Tag[];
 }
 
@@ -60,27 +67,67 @@ export interface TicketSummary {
     body: string | null;
     by_agent: string | null;
     created_at: string;
+    status: "pending" | "approved" | "rejected";
     closed: boolean;
+    priority: Priority | null;
+    tags: Tag[];
+}
+
+export interface InboxRow {
+    id: number;
+    project: string;
+    title: string | null;
+    body: string | null;
+    by_agent: string | null;
+    created_at: string;
+    status: "pending" | "approved" | "rejected";
+    priority: Priority | null;
+    closed: boolean;
+    comment_count: number;
+    pending_comment_count: number;
+    last_activity: string;
     tags: Tag[];
 }
 
 export interface ThreadView {
     ticket: TicketSummary;
     comments: Message[];
+    /**
+     * Set when the URL or query asked for a message id that wasn't a ticket
+     * (e.g. a comment): the API resolved up to the parent thread and tells
+     * the UI which message to scroll to.
+     */
+    focus_message_id?: number | null;
 }
 
 export interface PostMessageInput {
     project: string;
-    kind: "ticket_created" | "comment_added" | "ticket_closed";
+    kind: "ticket_created" | "comment_added" | "ticket_closed" | "ticket_reopened";
     title?: string;
     body?: string;
     by_agent?: string;
     ticket_id?: number;
     parent_id?: number;
+    priority?: Priority | null;
+}
+
+export interface ProjectMeta {
+    name: string;
+    last_activity: string;
+    ticket_count: number;
+    comment_count: number;
+    pending_count: number;
 }
 
 export const api = {
     listProjects: () => req<string[]>("GET", "/api/projects"),
+    listProjectsDetailed: () =>
+        req<ProjectMeta[]>("GET", "/api/projects?detailed=1"),
+    deleteProject: (name: string) =>
+        req<{ project: string; deleted_messages: number; ok: boolean }>(
+            "DELETE",
+            `/api/projects/${encodeURIComponent(name)}`,
+        ),
     listMessages: (params: {
         status?: string;
         project?: string;
@@ -100,6 +147,22 @@ export const api = {
         if (params.open) qs.set("open", "1");
         const q = qs.toString();
         return req<TicketSummary[]>("GET", `/api/tickets${q ? "?" + q : ""}`);
+    },
+    inbox: (
+        params: {
+            project?: string;
+            status?: string;
+            open?: boolean;
+            priority?: string;
+        } = {},
+    ) => {
+        const qs = new URLSearchParams();
+        if (params.project) qs.set("project", params.project);
+        if (params.status) qs.set("status", params.status);
+        if (params.open) qs.set("open", "1");
+        if (params.priority) qs.set("priority", params.priority);
+        const q = qs.toString();
+        return req<InboxRow[]>("GET", `/api/inbox${q ? "?" + q : ""}`);
     },
     getTicket: (id: number) => req<ThreadView>("GET", `/api/tickets/${id}`),
     postMessage: (body: PostMessageInput) =>
@@ -135,4 +198,8 @@ export const api = {
     delTag: (id: number) => req<void>("DELETE", `/api/tags/${id}`),
     setMessageTags: (id: number, tag_ids: number[], set_by?: string) =>
         req<Tag[]>("PUT", `/api/messages/${id}/tags`, { tag_ids, set_by }),
+
+    getStrategy: () => req<{ strategy: Strategy }>("GET", "/api/strategy"),
+    setStrategy: (s: Strategy) =>
+        req<{ strategy: Strategy }>("PATCH", "/api/strategy", { strategy: s }),
 };

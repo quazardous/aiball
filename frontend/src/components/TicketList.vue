@@ -102,15 +102,6 @@ const augmented = computed<Aug[]>(() => {
                 off-icon="pi pi-folder"
                 size="small"
             />
-            <span class="spacer" />
-            <Button
-                icon="pi pi-refresh"
-                severity="secondary"
-                text
-                rounded
-                :loading="loading"
-                @click="load"
-            />
         </div>
 
         <div v-if="error" class="aiball-empty" style="color: var(--p-red-500)">

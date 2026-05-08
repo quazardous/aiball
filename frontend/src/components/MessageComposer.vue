@@ -1,44 +1,86 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
+import Select from "primevue/select";
 import Textarea from "primevue/textarea";
 import ToggleButton from "primevue/togglebutton";
 import MarkdownView from "./MarkdownView.vue";
+import { PRIORITIES, type Priority } from "../lib/api";
+
+type Mode = "ticket" | "comment";
 
 const props = defineProps<{
+    mode: Mode;
     project: string;
-    ticketId: number;
+    ticketId?: number;
     parentId?: number | null;
     placeholder?: string;
+    submitLabel?: string;
 }>();
 const emit = defineEmits<{ (e: "submitted"): void }>();
 
+const title = ref("");
 const body = ref("");
 const byAgent = ref(localStorage.getItem("aiball.human_id") ?? "human");
+const priority = ref<Priority>("request");
 const preview = ref(false);
 const sending = ref(false);
 const error = ref<string | null>(null);
 
+const priorityOptions = PRIORITIES.map((p) => ({
+    label: p,
+    value: p,
+}));
+
+const isTicket = computed(() => props.mode === "ticket");
+const canSubmit = computed(() =>
+    isTicket.value
+        ? title.value.trim().length > 0
+        : body.value.trim().length > 0,
+);
+const submitLabel = computed(
+    () => props.submitLabel ?? (isTicket.value ? "post ticket" : "post comment"),
+);
+const placeholder = computed(
+    () =>
+        props.placeholder ??
+        (isTicket.value
+            ? "Ticket body (optional) — markdown supported"
+            : "Write a comment — markdown supported (gfm)"),
+);
+const roleLabel = computed(() => (isTicket.value ? "posting as" : "replying as"));
+
 async function submit() {
-    if (!body.value.trim()) return;
+    if (!canSubmit.value) return;
     sending.value = true;
     error.value = null;
     try {
         localStorage.setItem("aiball.human_id", byAgent.value);
-        const res = await fetch("/api/messages", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
+        const payload = isTicket.value
+            ? {
+                project: props.project,
+                kind: "ticket_created",
+                title: title.value.trim(),
+                body: body.value,
+                priority: priority.value,
+                by_agent: byAgent.value || "human",
+            }
+            : {
                 project: props.project,
                 kind: "comment_added",
                 ticket_id: props.ticketId,
                 parent_id: props.parentId ?? props.ticketId,
                 body: body.value,
                 by_agent: byAgent.value || "human",
-            }),
+            };
+        const res = await fetch("/api/messages", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+        title.value = "";
         body.value = "";
         preview.value = false;
         emit("submitted");
@@ -51,9 +93,9 @@ async function submit() {
 </script>
 
 <template>
-    <div class="reply-box">
-        <div class="reply-meta">
-            <span class="field-label" style="margin: 0">replying as</span>
+    <div class="composer">
+        <div class="composer-meta">
+            <span class="field-label" style="margin: 0">{{ roleLabel }}</span>
             <InputText
                 v-model="byAgent"
                 size="small"
@@ -70,25 +112,45 @@ async function submit() {
                 size="small"
             />
         </div>
-        <div v-if="!preview" class="reply-textarea-wrap">
+        <div v-if="isTicket && !preview" class="composer-title-row">
+            <InputText
+                v-model="title"
+                placeholder="Ticket title"
+                class="composer-title"
+                :disabled="sending"
+                @keydown.ctrl.enter.prevent="submit"
+                @keydown.meta.enter.prevent="submit"
+            />
+            <Select
+                v-model="priority"
+                :options="priorityOptions"
+                option-label="label"
+                option-value="value"
+                size="small"
+                :disabled="sending"
+                style="min-width: 9rem"
+            />
+        </div>
+        <div v-if="!preview" class="composer-textarea-wrap">
             <Textarea
                 v-model="body"
-                :rows="8"
-                class="w-full reply-textarea"
-                :placeholder="placeholder ?? 'Write a comment — markdown supported (gfm)'"
+                :rows="isTicket ? 6 : 8"
+                class="w-full composer-textarea"
+                :placeholder="placeholder"
                 :disabled="sending"
                 autoResize
                 @keydown.ctrl.enter.prevent="submit"
                 @keydown.meta.enter.prevent="submit"
             />
         </div>
-        <div v-else class="reply-preview">
+        <div v-else class="composer-preview">
+            <h3 v-if="isTicket && title" style="margin: 0 0 0.4rem">{{ title }}</h3>
             <MarkdownView :source="body" />
-            <div v-if="!body.trim()" class="aiball-empty" style="padding: 1rem">
+            <div v-if="!body.trim() && !title.trim()" class="aiball-empty" style="padding: 1rem">
                 Nothing to preview.
             </div>
         </div>
-        <div class="reply-actions">
+        <div class="composer-actions">
             <span style="font-size: 0.8rem; color: var(--p-text-muted-color)">
                 supports
                 <strong>**bold**</strong>, <em>*italic*</em>, <code>`code`</code>,
@@ -96,11 +158,11 @@ async function submit() {
             </span>
             <span class="spacer" />
             <Button
-                label="post comment"
+                :label="submitLabel"
                 icon="pi pi-send"
                 size="small"
                 :loading="sending"
-                :disabled="!body.trim()"
+                :disabled="!canSubmit"
                 @click="submit"
             />
         </div>
@@ -111,7 +173,7 @@ async function submit() {
 </template>
 
 <style>
-.reply-box {
+.composer {
     border: 1px solid var(--p-content-border-color);
     border-radius: 0.5rem;
     padding: 0.8rem;
@@ -120,27 +182,36 @@ async function submit() {
     gap: 0.6rem;
     background: var(--p-content-background);
 }
-.reply-meta {
+.composer-meta {
     display: flex;
     gap: 0.6rem;
     align-items: center;
 }
-.reply-actions {
+.composer-title-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+.composer-title {
+    flex: 1;
+    font-weight: 600;
+}
+.composer-actions {
     display: flex;
     gap: 0.6rem;
     align-items: center;
     flex-wrap: wrap;
 }
-.reply-preview {
+.composer-preview {
     border: 1px dashed var(--p-content-border-color);
     border-radius: 0.4rem;
     padding: 0.8rem;
     min-height: 5rem;
 }
-.reply-textarea-wrap {
+.composer-textarea-wrap {
     width: 100%;
 }
-.reply-textarea {
+.composer-textarea {
     width: 100%;
     min-height: 10rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
