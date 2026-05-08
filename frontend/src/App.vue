@@ -176,6 +176,15 @@ const inListView = computed(
     () => panel.value === null && openTicketId.value === null,
 );
 
+// Returning to the list view (after closing a panel or a thread) must
+// refresh the rows: while the user was in a thread, WS-driven loadRows
+// calls bail out (`if (!inListView.value) return`) to avoid wasted HTTP
+// when nothing is rendered. This watch picks the rows back up exactly
+// once when the list comes back on screen.
+watch(inListView, (now, prev) => {
+    if (now && !prev) loadRows();
+});
+
 function toggleSelected(id: number, v: boolean) {
     const next = new Set(selectedIds.value);
     if (v) next.add(id);
@@ -296,7 +305,13 @@ function notifyArrival(m: Message) {
     const who = m.by_agent ?? "unknown";
     const k = shortKindLabel(m);
     const summary = m.title ?? (m.body ? m.body.slice(0, 80) : `new ${k}`);
-    const detail = `${who} · #${m.id} · ${m.project}`;
+    // Tickets use their integer id as canonical ref; comments and lifecycle
+    // events use the hashid (#C<hashid>) backfilled by the 0003 migration.
+    const ref =
+        m.kind === "ticket_created"
+            ? `#B${m.id}`
+            : `#C${m.hashid ?? m.id}`;
+    const detail = `${who} · ${ref} · ${m.project}`;
 
     toast.add({
         severity: m.status === "pending" ? "warn" : "info",
@@ -331,17 +346,18 @@ const { connected } = useWs((ev) => {
         notifyArrival(data);
     }
 
-    // Open thread: refresh on any change touching this thread.
+    // Open thread: refresh thread state if the event touches it.
     if (openTicketId.value !== null) {
         const onThisThread =
             data.id === openTicketId.value ||
             data.ticket_id === openTicketId.value;
         if (onThisThread) threadRef.value?.load();
-        return;
     }
 
-    // Unified inbox view: any new or changed message can affect ticket-row
-    // aggregates (last activity, pending count, closed flag), so reload.
+    // Always reload the inbox aggregates too, even when a thread is open.
+    // Otherwise lifecycle events fired from inside the thread (close,
+    // resolve, broadcast flip) leave the list view stale and the user has
+    // to ctrl-r when they navigate back.
     loadRows();
 });
 
@@ -701,9 +717,11 @@ const globalUnreadCount = computed(() =>
                         v-for="r in sortedRows"
                         :key="r.id"
                         :selected="selectedIds.has(r.id)"
-                        :unread="r.pending_comment_count > 0"
+                        :unread="r.unread"
                         :pending="r.status === 'pending'"
                         :closed="r.closed"
+                        :resolution-proposed="r.pending_resolution"
+                        :broadcast="r.broadcast"
                         @click="openThread(r)"
                     >
                         <template #select>
@@ -715,14 +733,32 @@ const globalUnreadCount = computed(() =>
                         </template>
                         <template #lead>
                             <i
-                                class="pi"
-                                :class="r.closed ? 'pi-lock' : 'pi-ticket'"
+                                v-if="r.closed && r.resolved"
+                                class="pi pi-check-circle"
+                                title="closed (resolved)"
+                                style="color: var(--p-green-500)"
+                            />
+                            <i
+                                v-else-if="r.closed"
+                                class="pi pi-lock"
+                                title="closed without explicit resolution"
+                                style="color: var(--p-orange-500)"
+                            />
+                            <i
+                                v-else-if="r.resolved"
+                                class="pi pi-check-circle"
+                                title="resolved (pending close)"
+                                style="color: var(--p-green-500)"
+                            />
+                            <i
+                                v-else
+                                class="pi pi-ticket"
                                 style="color: var(--p-text-muted-color)"
                             />
                         </template>
                         <template v-if="r.by_agent" #from>{{ r.by_agent }}</template>
                         <template #title>
-                            <span class="ticket-id">#{{ r.id }}</span>
+                            <span class="ticket-id">#B{{ r.id }}</span>
                             {{ titleOf(r) }}
                             <Tag
                                 v-if="r.status !== 'approved'"

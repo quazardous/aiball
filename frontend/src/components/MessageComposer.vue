@@ -21,7 +21,10 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: "submitted"): void }>();
 
 const title = ref("");
-const body = ref("");
+// `body` is a v-model so the parent can attach extra-action buttons that
+// piggy-back on whatever the user has typed (e.g. "accept resolution and
+// close" reuses the body as the lifecycle event's comment).
+const body = defineModel<string>("body", { default: "" });
 const byAgent = ref(localStorage.getItem("aiball.human_id") ?? "human");
 const intent = ref<Intent>("request");
 const preview = ref(false);
@@ -150,13 +153,14 @@ async function submit() {
                 Nothing to preview.
             </div>
         </div>
+        <div class="composer-hint">
+            markdown:
+            <strong>**bold**</strong>, <em>*italic*</em>, <code>`code`</code>,
+            lists, links, fenced ```code blocks```
+        </div>
         <div class="composer-actions">
-            <span style="font-size: 0.8rem; color: var(--p-text-muted-color)">
-                supports
-                <strong>**bold**</strong>, <em>*italic*</em>, <code>`code`</code>,
-                lists, links, fenced ```code blocks```
-            </span>
             <span class="spacer" />
+            <slot name="extra-actions" :body="body" :sending="sending" />
             <Button
                 :label="submitLabel"
                 icon="pi pi-send"
@@ -198,9 +202,14 @@ async function submit() {
 }
 .composer-actions {
     display: flex;
-    gap: 0.6rem;
+    gap: 0.5rem;
     align-items: center;
     flex-wrap: wrap;
+}
+.composer-hint {
+    font-size: 0.78rem;
+    color: var(--p-text-muted-color);
+    line-height: 1.3;
 }
 .composer-preview {
     border: 1px dashed var(--p-content-border-color);

@@ -16,7 +16,7 @@ export const STRATEGIES: readonly Strategy[] = ["manual", "auto", "auto-reply"];
 export interface Message {
     id: number;
     project: string;
-    kind: "ticket_created" | "comment_added" | "ticket_closed" | "ticket_reopened";
+    kind: "ticket_created" | "comment_added" | "ticket_closed" | "ticket_reopened" | "ticket_resolved";
     ticket_id: number | null;
     parent_id: number | null;
     title: string | null;
@@ -31,6 +31,8 @@ export interface Message {
     edited_title: string | null;
     edited_body: string | null;
     intent: Intent | null;
+    /** Public ref for comments / lifecycle events. NULL for tickets. */
+    hashid?: string | null;
     tags: Tag[];
 }
 
@@ -46,10 +48,26 @@ export interface Rule {
     created_at: string;
 }
 
+/**
+ * The current consumer (the human moderator behind the UI). Stored in
+ * localStorage and propagated to the backend on EVERY request via the
+ * `X-Aiball-Consumer` header — that way per-consumer fields like the
+ * `unread` flag in /api/inbox and the scope of mark-read/mark-unread are
+ * resolved server-side without each call having to pass an explicit
+ * consumer id.
+ */
+function currentConsumer(): string {
+    return localStorage.getItem("aiball.human_id") ?? "human";
+}
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const headers: Record<string, string> = {
+        "x-aiball-consumer": currentConsumer(),
+    };
+    if (body) headers["content-type"] = "application/json";
     const res = await fetch(path, {
         method,
-        headers: body ? { "content-type": "application/json" } : undefined,
+        headers,
         body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
@@ -69,6 +87,10 @@ export interface TicketSummary {
     created_at: string;
     status: "pending" | "approved" | "rejected";
     closed: boolean;
+    resolved?: boolean;
+    resolved_by?: string | null;
+    resolved_at?: string | null;
+    broadcast?: boolean;
     intent: Intent | null;
     tags: Tag[];
 }
@@ -83,6 +105,12 @@ export interface InboxRow {
     status: "pending" | "approved" | "rejected";
     intent: Intent | null;
     closed: boolean;
+    resolved?: boolean;
+    /** Some agent has proposed this ticket as resolved, awaiting reporter's accept/reject. */
+    pending_resolution?: boolean;
+    broadcast?: boolean;
+    /** Per-consumer flag: ≥1 unseen ping on the thread for the requesting consumer. */
+    unread?: boolean;
     comment_count: number;
     pending_comment_count: number;
     last_activity: string;
@@ -102,7 +130,7 @@ export interface ThreadView {
 
 export interface PostMessageInput {
     project: string;
-    kind: "ticket_created" | "comment_added" | "ticket_closed" | "ticket_reopened";
+    kind: "ticket_created" | "comment_added" | "ticket_closed" | "ticket_reopened" | "ticket_resolved";
     title?: string;
     body?: string;
     by_agent?: string;
@@ -170,7 +198,21 @@ export const api = {
         const q = qs.toString();
         return req<InboxRow[]>("GET", `/api/inbox${q ? "?" + q : ""}`);
     },
+    markTicketRead: (id: number) =>
+        req<{ ticket_id: number; updated: number }>(
+            "POST",
+            `/api/tickets/${id}/mark-read`,
+            {},
+        ),
+    markTicketUnread: (id: number) =>
+        req<{ ticket_id: number; updated: number }>(
+            "POST",
+            `/api/tickets/${id}/mark-unread`,
+            {},
+        ),
     getTicket: (id: number) => req<ThreadView>("GET", `/api/tickets/${id}`),
+    setTicketBroadcast: (id: number, broadcast: boolean) =>
+        req<TicketSummary>("PATCH", `/api/tickets/${id}`, { broadcast }),
     postMessage: (body: PostMessageInput) =>
         req<Message>("POST", "/api/messages", body),
     approve: (id: number) =>

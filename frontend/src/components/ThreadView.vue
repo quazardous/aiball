@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import Select from "primevue/select";
 import Tag from "primevue/tag";
@@ -46,6 +46,29 @@ watch(() => props.ticketId, load);
 onMounted(load);
 defineExpose({ load });
 
+// Auto-mark this ticket as read after a short dwell on the detail view
+// (per #B91). Two seconds is short enough to feel natural when reading,
+// long enough to avoid marking pass-through scrolling. The timer cancels
+// on ticket switch (watch) and on unmount, so quick navigations don't
+// flip the read state.
+const AUTO_MARK_READ_MS = 2000;
+let autoMarkTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleAutoMarkRead() {
+    if (autoMarkTimer) clearTimeout(autoMarkTimer);
+    const id = props.ticketId;
+    autoMarkTimer = setTimeout(() => {
+        api.markTicketRead(id).catch(() => {/* silent — read state is best-effort */});
+        autoMarkTimer = null;
+    }, AUTO_MARK_READ_MS);
+}
+watch(() => props.ticketId, scheduleAutoMarkRead, { immediate: true });
+onBeforeUnmount(() => {
+    if (autoMarkTimer) {
+        clearTimeout(autoMarkTimer);
+        autoMarkTimer = null;
+    }
+});
+
 function statusSeverity(s: "pending" | "approved" | "rejected") {
     if (s === "pending") return "warn";
     if (s === "approved") return "success";
@@ -65,35 +88,6 @@ async function decide(action: "approve" | "reject") {
         decideBusy.value = false;
     }
 }
-
-const closeBusy = ref(false);
-async function postLifecycle(kind: "ticket_closed" | "ticket_reopened") {
-    if (!data.value) return;
-    const t = data.value.ticket;
-    closeBusy.value = true;
-    try {
-        const byAgent = localStorage.getItem("aiball.human_id") || "human";
-        const res = await fetch("/api/messages", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-                project: t.project,
-                kind,
-                ticket_id: t.id,
-                parent_id: t.id,
-                by_agent: byAgent,
-            }),
-        });
-        if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
-        await load();
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        closeBusy.value = false;
-    }
-}
-function closeTicket() { return postLifecycle("ticket_closed"); }
-function reopenTicket() { return postLifecycle("ticket_reopened"); }
 
 const editing = ref(false);
 const intentBusy = ref(false);
@@ -126,6 +120,186 @@ const flatComments = computed<Message[]>(() => {
     if (!data.value) return [];
     return [...data.value.comments].sort((a, b) => a.id - b.id);
 });
+
+// Only the most recent pending entry surfaces a "pending" tag — older
+// pending rows would just add noise once the moderator's attention is
+// already drawn to the latest one.
+const latestPendingId = computed<number | null>(() => {
+    let latest: number | null = null;
+    for (const c of flatComments.value) {
+        if (c.status === "pending") latest = c.id;
+    }
+    return latest;
+});
+
+// Latest pending resolution proposal — used to surface explicit
+// accept / not-resolved controls near the composer instead of inside
+// the comment card itself (per #C104). Once the ticket is closed the
+// proposal is moot, so we never surface a decision UI in that state.
+const pendingResolution = computed<Message | null>(() => {
+    if (!data.value || data.value.ticket.closed) return null;
+    const pending = data.value.comments
+        .filter((m) => m.kind === "ticket_resolved" && m.status === "pending")
+        .sort((a, b) => b.id - a.id);
+    return pending[0] ?? null;
+});
+
+// Body of the in-thread composer, exposed here so the resolution-decision
+// buttons can piggy-back on whatever the user has typed (e.g. closing the
+// ticket while explaining what was done in the textarea).
+const composerBody = ref("");
+
+const resolutionBusy = ref(false);
+async function postBodyAs(
+    kind:
+        | "comment_added"
+        | "ticket_closed"
+        | "ticket_resolved"
+        | "ticket_reopened",
+) {
+    if (!data.value) return;
+    const t = data.value.ticket;
+    const trimmed = composerBody.value.trim();
+    if (!trimmed && kind === "comment_added") return; // no-op
+    const byAgent = localStorage.getItem("aiball.human_id") || "human";
+    const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+            project: t.project,
+            kind,
+            ticket_id: t.id,
+            parent_id: t.id,
+            body: trimmed || null,
+            by_agent: byAgent,
+        }),
+    });
+    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+}
+async function acceptResolution() {
+    const msg = pendingResolution.value;
+    if (!msg || !data.value) return;
+    resolutionBusy.value = true;
+    try {
+        await api.approve(msg.id);
+        // The typed body (if any) rides along on the close event so the
+        // reporter's "yes, this is done" gets a single decorated card
+        // instead of being split between a comment and a bare close.
+        await postBodyAs("ticket_closed");
+        composerBody.value = "";
+        await load();
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        resolutionBusy.value = false;
+    }
+}
+async function rejectResolution() {
+    const msg = pendingResolution.value;
+    if (!msg) return;
+    resolutionBusy.value = true;
+    try {
+        if (composerBody.value.trim()) {
+            await postBodyAs("comment_added");
+        }
+        await api.reject(msg.id);
+        composerBody.value = "";
+        await load();
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        resolutionBusy.value = false;
+    }
+}
+
+async function commentAndMarkResolved() {
+    if (!data.value) return;
+    resolutionBusy.value = true;
+    try {
+        await postBodyAs("ticket_resolved");
+        composerBody.value = "";
+        await load();
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        resolutionBusy.value = false;
+    }
+}
+async function commentAndClose() {
+    if (!data.value) return;
+    resolutionBusy.value = true;
+    try {
+        await postBodyAs("ticket_closed");
+        composerBody.value = "";
+        await load();
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        resolutionBusy.value = false;
+    }
+}
+async function commentAndReopen() {
+    if (!data.value) return;
+    resolutionBusy.value = true;
+    try {
+        await postBodyAs("ticket_reopened");
+        composerBody.value = "";
+        await load();
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        resolutionBusy.value = false;
+    }
+}
+async function commentAndUndoReject() {
+    if (!data.value) return;
+    resolutionBusy.value = true;
+    try {
+        // Re-decide the rejected ticket as approved. If a body is typed, it
+        // is posted as a regular comment first so the trail of why we
+        // rolled back the rejection is preserved on the thread.
+        if (composerBody.value.trim()) {
+            await postBodyAs("comment_added");
+        }
+        await api.approve(data.value.ticket.id);
+        composerBody.value = "";
+        await load();
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        resolutionBusy.value = false;
+    }
+}
+const hasBody = computed(() => composerBody.value.trim().length > 0);
+
+const broadcastBusy = ref(false);
+async function toggleBroadcast() {
+    if (!data.value) return;
+    broadcastBusy.value = true;
+    try {
+        const next = !data.value.ticket.broadcast;
+        await api.setTicketBroadcast(data.value.ticket.id, next);
+        await load();
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        broadcastBusy.value = false;
+    }
+}
+
+const justCopiedTicket = ref(false);
+async function copyTicketRef() {
+    if (!data.value) return;
+    const ref_ = `#B${data.value.ticket.id}`;
+    try {
+        await navigator.clipboard.writeText(ref_);
+        justCopiedTicket.value = true;
+        setTimeout(() => (justCopiedTicket.value = false), 1500);
+    } catch {
+        /* clipboard write rejected — silent */
+    }
+}
+
 </script>
 
 <template>
@@ -141,22 +315,90 @@ const flatComments = computed<Message[]>(() => {
             />
             <span class="spacer" />
             <Button
-                v-if="data && data.ticket.status === 'approved' && !data.ticket.closed"
-                icon="pi pi-lock"
-                label="close ticket"
-                severity="secondary"
+                v-if="data && data.ticket.status === 'approved'"
+                icon="pi pi-megaphone"
+                :severity="data.ticket.broadcast ? 'success' : 'secondary'"
                 size="small"
-                :loading="closeBusy"
-                @click="closeTicket"
+                :text="!data.ticket.broadcast"
+                rounded
+                class="broadcast-toggle"
+                :class="{ 'broadcast-toggle--off': !data.ticket.broadcast }"
+                :loading="broadcastBusy"
+                :title="data.ticket.broadcast
+                    ? 'Broadcast ON: project followers receive pings on this thread. Click to make it internal-only.'
+                    : 'Broadcast OFF (default): only project owners and explicit thread followers receive pings. Click to broadcast to all project followers.'"
+                @click="toggleBroadcast"
             />
+            <template v-if="data && data.ticket.status === 'approved' && !data.ticket.closed">
+                <template v-if="pendingResolution">
+                    <Button
+                        icon="pi pi-times"
+                        severity="secondary"
+                        size="small"
+                        text
+                        rounded
+                        :loading="resolutionBusy"
+                        :disabled="!hasBody"
+                        :title="hasBody
+                            ? 'Reject the resolution proposal and post your note. Keeps the ticket open.'
+                            : 'Type an explanation in the composer first — rejecting needs a reason.'"
+                        @click="rejectResolution"
+                    />
+                    <Button
+                        icon="pi pi-verified"
+                        severity="success"
+                        size="small"
+                        rounded
+                        :loading="resolutionBusy"
+                        title="Accept the resolution and close. Embarks any text typed in the composer."
+                        @click="acceptResolution"
+                    />
+                </template>
+                <template v-else>
+                    <Button
+                        v-if="!data.ticket.resolved"
+                        icon="pi pi-check-circle"
+                        severity="success"
+                        size="small"
+                        text
+                        rounded
+                        :loading="resolutionBusy"
+                        title="Mark resolved (soft proposal — reporter validates by closing). Embarks any text typed in the composer."
+                        @click="commentAndMarkResolved"
+                    />
+                    <Button
+                        icon="pi pi-lock"
+                        severity="secondary"
+                        size="small"
+                        text
+                        rounded
+                        :loading="resolutionBusy"
+                        title="Close the ticket (only the reporter can close). Embarks any text typed in the composer."
+                        @click="commentAndClose"
+                    />
+                </template>
+            </template>
             <Button
                 v-else-if="data && data.ticket.status === 'approved' && data.ticket.closed"
                 icon="pi pi-unlock"
-                label="reopen"
-                severity="secondary"
+                severity="info"
                 size="small"
-                :loading="closeBusy"
-                @click="reopenTicket"
+                text
+                rounded
+                :loading="resolutionBusy"
+                title="Reopen this ticket. Embarks any text typed in the composer."
+                @click="commentAndReopen"
+            />
+            <Button
+                v-else-if="data && data.ticket.status === 'rejected'"
+                icon="pi pi-replay"
+                severity="warn"
+                size="small"
+                text
+                rounded
+                :loading="resolutionBusy"
+                title="Undo reject — bring this ticket back to approved. Embarks any text typed in the composer."
+                @click="commentAndUndoReject"
             />
         </div>
 
@@ -167,16 +409,39 @@ const flatComments = computed<Message[]>(() => {
         <template v-else-if="data">
             <article class="thread-ticket">
                 <header class="meta">
-                    <Tag :value="`#${data.ticket.id}`" severity="secondary" />
+                    <Tag
+                        :value="justCopiedTicket ? `copied #B${data.ticket.id}` : `#B${data.ticket.id}`"
+                        :severity="justCopiedTicket ? 'success' : 'secondary'"
+                        class="comment-ref-tag"
+                        role="button"
+                        tabindex="0"
+                        :title="`Click to copy this ticket's reference (#B${data.ticket.id}) — paste it in any markdown body to link back here.`"
+                        @click="copyTicketRef"
+                        @keydown.enter.prevent="copyTicketRef"
+                        @keydown.space.prevent="copyTicketRef"
+                    />
                     <Tag :value="data.ticket.project" severity="info" />
                     <Tag
                         :value="data.ticket.status"
                         :severity="statusSeverity(data.ticket.status)"
                     />
                     <Tag
-                        v-if="data.ticket.closed"
+                        v-if="data.ticket.closed && data.ticket.resolved"
+                        value="closed (resolved)"
+                        severity="success"
+                        icon="pi pi-check-circle"
+                    />
+                    <Tag
+                        v-else-if="data.ticket.closed"
                         value="closed"
-                        severity="danger"
+                        severity="warn"
+                        icon="pi pi-lock"
+                    />
+                    <Tag
+                        v-else-if="data.ticket.resolved"
+                        value="resolved (pending close)"
+                        severity="success"
+                        icon="pi pi-check-circle"
                     />
                     <span v-if="data.ticket.by_agent">by {{ data.ticket.by_agent }}</span>
                     <span class="spacer" />
@@ -185,6 +450,31 @@ const flatComments = computed<Message[]>(() => {
                     </span>
                 </header>
                 <h2 class="thread-title">{{ data.ticket.title }}</h2>
+                <div
+                    v-if="data.ticket.resolved && !data.ticket.closed"
+                    class="thread-resolved-banner"
+                    :title="data.ticket.resolved_at ?? ''"
+                >
+                    <i class="pi pi-check-circle" />
+                    Marked resolved<span v-if="data.ticket.resolved_by"> by <strong>{{ data.ticket.resolved_by }}</strong></span>
+                    — the reporter can close to confirm.
+                </div>
+                <div
+                    v-else-if="data.ticket.resolved && data.ticket.closed"
+                    class="thread-resolved-banner thread-resolved-banner--closed"
+                    :title="data.ticket.resolved_at ?? ''"
+                >
+                    <i class="pi pi-check-circle" />
+                    Resolved<span v-if="data.ticket.resolved_by"> by <strong>{{ data.ticket.resolved_by }}</strong></span>
+                    and closed.
+                </div>
+                <div
+                    v-else-if="data.ticket.closed"
+                    class="thread-closed-banner"
+                >
+                    <i class="pi pi-lock" />
+                    Closed without explicit resolution (wontfix / abandoned / duplicate).
+                </div>
                 <div class="thread-meta-extra">
                     <Tag
                         v-if="data.ticket.intent"
@@ -261,21 +551,97 @@ const flatComments = computed<Message[]>(() => {
                     :key="msg.id"
                     class="thread-comment"
                 >
-                    <CommentNode :msg="msg" @submitted="load" />
+                    <CommentNode
+                        :msg="msg"
+                        :show-pending-tag="msg.id === latestPendingId"
+                        @submitted="load"
+                    />
                 </li>
             </ul>
 
             <MessageComposer
-                v-if="!data.ticket.closed && data.ticket.status !== 'rejected'"
+                v-model:body="composerBody"
                 mode="comment"
                 :project="data.ticket.project"
                 :ticket-id="data.ticket.id"
                 :parent-id="data.ticket.id"
-                :placeholder="data.ticket.status === 'pending'
-                    ? 'Reply on this pending thread (markdown supported) — your comment goes through moderation unless you are human'
-                    : 'Reply on this thread (markdown supported, use > for quotes and #N to reference a comment)'"
+                :placeholder="pendingResolution
+                    ? `${pendingResolution.by_agent ?? 'someone'} proposes this is resolved — type WHY before rejecting, or pick an action below`
+                    : data.ticket.status === 'rejected'
+                        ? 'This ticket was rejected — comment for context, or undo the rejection to bring it back'
+                        : data.ticket.closed
+                            ? 'This ticket is closed but still commentable — type a note, or reopen the thread to keep working'
+                            : data.ticket.status === 'pending'
+                                ? 'Reply on this pending thread (markdown supported) — your comment goes through moderation unless you are human'
+                                : 'Reply on this thread (markdown supported, use > for quotes and #N to reference a comment)'"
                 @submitted="load"
-            />
+            >
+                <template #extra-actions>
+                    <template v-if="pendingResolution">
+                        <Button
+                            icon="pi pi-times"
+                            label="reject and keep open"
+                            severity="secondary"
+                            size="small"
+                            text
+                            :loading="resolutionBusy"
+                            :disabled="!hasBody"
+                            :title="hasBody
+                                ? 'Reject the resolution proposal and post your note explaining why.'
+                                : 'Type an explanation in the composer first — rejecting a proposal needs a reason.'"
+                            @click="rejectResolution"
+                        />
+                        <Button
+                            icon="pi pi-verified"
+                            label="accept resolution and close"
+                            severity="success"
+                            size="small"
+                            :loading="resolutionBusy"
+                            @click="acceptResolution"
+                        />
+                    </template>
+                    <template v-else-if="data.ticket.status === 'rejected'">
+                        <Button
+                            icon="pi pi-replay"
+                            :label="hasBody ? 'comment and undo reject' : 'undo reject'"
+                            severity="warn"
+                            size="small"
+                            :loading="resolutionBusy"
+                            @click="commentAndUndoReject"
+                        />
+                    </template>
+                    <template v-else-if="data.ticket.closed">
+                        <Button
+                            icon="pi pi-unlock"
+                            :label="hasBody ? 'comment and reopen' : 'reopen ticket'"
+                            severity="info"
+                            size="small"
+                            :loading="resolutionBusy"
+                            @click="commentAndReopen"
+                        />
+                    </template>
+                    <template v-else>
+                        <Button
+                            v-if="!data.ticket.resolved"
+                            icon="pi pi-check-circle"
+                            :label="hasBody ? 'comment and mark resolved' : 'mark resolved'"
+                            severity="success"
+                            size="small"
+                            text
+                            :loading="resolutionBusy"
+                            @click="commentAndMarkResolved"
+                        />
+                        <Button
+                            icon="pi pi-lock"
+                            :label="hasBody ? 'comment and close' : 'close ticket'"
+                            severity="secondary"
+                            size="small"
+                            :loading="resolutionBusy"
+                            @click="commentAndClose"
+                        />
+                    </template>
+                </template>
+            </MessageComposer>
         </template>
     </div>
 </template>
@@ -321,6 +687,45 @@ const flatComments = computed<Message[]>(() => {
     align-items: center;
     flex-wrap: wrap;
     font-size: 0.85rem;
+}
+.thread-resolved-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: 0.4rem;
+    background: color-mix(in srgb, var(--p-green-500) 15%, transparent);
+    border-left: 3px solid var(--p-green-500);
+    font-size: 0.88rem;
+}
+.aiball-dark .thread-resolved-banner {
+    background: color-mix(in srgb, var(--p-green-500) 25%, transparent);
+}
+.broadcast-toggle--off {
+    opacity: 0.45;
+    transition: opacity 0.12s ease;
+}
+.broadcast-toggle--off:hover {
+    opacity: 1;
+}
+.thread-resolved-banner--closed {
+    background: color-mix(in srgb, var(--p-green-500) 10%, transparent);
+    border-left-color: var(--p-green-600);
+    opacity: 0.92;
+}
+.thread-closed-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: 0.4rem;
+    background: color-mix(in srgb, var(--p-orange-500) 12%, transparent);
+    border-left: 3px solid var(--p-orange-500);
+    font-size: 0.88rem;
+    color: var(--p-text-color);
+}
+.aiball-dark .thread-closed-banner {
+    background: color-mix(in srgb, var(--p-orange-500) 22%, transparent);
 }
 .thread-tag {
     border-radius: 0.3rem;
@@ -384,6 +789,76 @@ const flatComments = computed<Message[]>(() => {
     font-size: 0.85rem;
     color: var(--p-text-muted-color);
 }
+.comment-ref-tag {
+    cursor: pointer;
+    user-select: none;
+    transition: transform 0.08s ease;
+}
+.comment-ref-tag:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.1);
+}
+.comment-date-copy {
+    cursor: pointer;
+    user-select: none;
+    border-radius: 0.25rem;
+    padding: 0.1rem 0.35rem;
+    transition: background 0.1s ease, color 0.1s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+.comment-date-copy:hover {
+    background: var(--p-surface-100);
+    color: var(--p-primary-color);
+}
+.aiball-dark .comment-date-copy:hover {
+    background: var(--p-surface-800);
+}
+.comment-date-copy-icon {
+    color: var(--p-green-500);
+}
+.pending-marker {
+    color: var(--p-orange-500);
+    font-weight: 700;
+    font-size: 1.1rem;
+    line-height: 1;
+}
+.md-body .comment-ref {
+    color: var(--p-text-muted-color);
+    text-decoration: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.92em;
+}
+.md-body .comment-ref:hover {
+    color: var(--p-primary-color);
+    text-decoration: underline;
+}
+.comment-lifecycle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 0.25rem 0.55rem;
+    border-radius: 0.3rem;
+    align-self: flex-start;
+}
+.comment-lifecycle[data-kind="ticket_resolved"] {
+    background: color-mix(in srgb, var(--p-green-500) 18%, transparent);
+    color: var(--p-green-700);
+}
+.comment-lifecycle[data-kind="ticket_closed"] {
+    background: color-mix(in srgb, var(--p-orange-500) 18%, transparent);
+    color: var(--p-orange-700);
+}
+.comment-lifecycle[data-kind="ticket_reopened"] {
+    background: color-mix(in srgb, var(--p-blue-500) 18%, transparent);
+    color: var(--p-blue-700);
+}
+.aiball-dark .comment-lifecycle[data-kind="ticket_resolved"] { color: var(--p-green-300); }
+.aiball-dark .comment-lifecycle[data-kind="ticket_closed"] { color: var(--p-orange-300); }
+.aiball-dark .comment-lifecycle[data-kind="ticket_reopened"] { color: var(--p-blue-300); }
 .comment-actions {
     display: flex;
     gap: 0.4rem;

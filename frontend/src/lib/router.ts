@@ -20,7 +20,7 @@ export function buildUrl(s: RouteState): string {
     if (s.panel === "rules") path = "/rules";
     else if (s.panel === "tags") path = "/tags";
     else if (s.panel === "projects") path = "/projects";
-    else if (s.openTicketId !== null) path = `/t/${s.openTicketId}`;
+    else if (s.openTicketId !== null) path = `/b/${s.openTicketId}`;
 
     const qs = new URLSearchParams();
     if (s.project) qs.set("p", s.project);
@@ -51,7 +51,9 @@ export function parseUrl(): Partial<RouteState> {
     } else if (path === "/projects") {
         out.panel = "projects";
         out.openTicketId = null;
-    } else if (path.startsWith("/t/")) {
+    } else if (path.startsWith("/b/") || path.startsWith("/t/")) {
+        // /b/N is canonical; /t/N is kept as a backward-compatible alias for
+        // older bookmarks and any markdown rendered before the rename.
         const id = parseInt(path.slice(3), 10);
         out.panel = null;
         out.openTicketId = Number.isNaN(id) ? null : id;

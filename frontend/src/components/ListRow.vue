@@ -7,6 +7,10 @@ defineProps<{
     pending?: boolean;
     closed?: boolean;
     danger?: boolean;
+    /** Row tint indicating an open ticket has a pending resolution proposal awaiting reporter decision. */
+    resolutionProposed?: boolean;
+    /** Row tint indicating broadcast=true (project-wide visibility for followers). */
+    broadcast?: boolean;
 }>();
 const emit = defineEmits<{
     (e: "click", ev: MouseEvent): void;
@@ -24,6 +28,8 @@ const slots = useSlots();
             'list-row--pending': pending,
             'list-row--closed': closed,
             'list-row--danger': danger,
+            'list-row--resolution-proposed': resolutionProposed,
+            'list-row--broadcast': broadcast,
         }"
         @click="emit('click', $event)"
     >
@@ -80,6 +86,19 @@ const slots = useSlots();
     font-weight: 600;
     color: var(--p-text-color);
 }
+/* Unread dot drawn via the lead column. The lead slot already shows the
+   lifecycle icon; we add a small colored disc in front of it for unread
+   rows so the eye lands on it before parsing the title. */
+.list-row--unread .list-row__lead::before {
+    content: "";
+    display: inline-block;
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 50%;
+    background: var(--p-primary-color);
+    margin-right: 0.15rem;
+    flex-shrink: 0;
+}
 .list-row--closed {
     opacity: 0.6;
 }
@@ -93,6 +112,31 @@ const slots = useSlots();
 }
 .aiball-dark .list-row--pending {
     background: color-mix(in srgb, var(--p-yellow-500) 18%, transparent);
+}
+.list-row--resolution-proposed {
+    background: color-mix(in srgb, var(--p-green-500) 10%, transparent);
+    border-left: 3px solid var(--p-green-500);
+    padding-left: calc(0.7rem - 3px);
+}
+.list-row--resolution-proposed:hover {
+    background: color-mix(in srgb, var(--p-green-500) 18%, transparent);
+}
+.aiball-dark .list-row--resolution-proposed {
+    background: color-mix(in srgb, var(--p-green-500) 16%, transparent);
+}
+/* Pending wins over resolution-proposed (older signal, more urgent for the moderator). */
+.list-row--pending.list-row--resolution-proposed {
+    background: color-mix(in srgb, var(--p-yellow-500) 12%, transparent);
+    border-left-color: var(--p-yellow-500);
+}
+.list-row--broadcast {
+    box-shadow: inset 3px 0 0 var(--p-blue-500);
+}
+.list-row--broadcast.list-row--pending,
+.list-row--broadcast.list-row--resolution-proposed {
+    /* Already has a colored left border; show broadcast as a thin
+       inset ring on the right side instead so the two cues coexist. */
+    box-shadow: inset -3px 0 0 var(--p-blue-500);
 }
 .list-row--danger .list-row__title {
     color: var(--p-red-500);

@@ -43,6 +43,11 @@ import {
     listTicketSubscriptions,
     listProjectsDetailed,
     deleteProject,
+    setTicketBroadcast,
+    getMessageByHashid,
+    markTicketSeen,
+    markTicketUnseen,
+    ticketUnreadFlags,
     type MessageKind,
     type MessageStatus,
     type Strategy,
@@ -78,6 +83,21 @@ function withTagsOne<T extends { id: number }>(row: T): T & { tags: Tag[] } {
 
 export const api = Router();
 
+/**
+ * Resolve the calling consumer from the `X-Aiball-Consumer` header. The UI
+ * sets this once globally (from `localStorage.aiball.human_id ?? "human"`),
+ * MCP/CLI clients can set it per-request, and we fall back to the
+ * `AIBALL_HUMAN` env value (default `"human"`) so the daemon always has a
+ * sensible default when nothing is provided. Per-consumer fields (read
+ * state, unread flags, mark-read scope) read from this without each
+ * handler having to ask for `consumer_id` in the query/body.
+ */
+function consumerOf(req: Request): string {
+    const headerVal = req.header("x-aiball-consumer");
+    if (typeof headerVal === "string" && headerVal.trim()) return headerVal.trim();
+    return process.env.AIBALL_HUMAN ?? "human";
+}
+
 api.get("/health", (_req, res) => {
     res.json({ ok: true, ts: new Date().toISOString() });
 });
@@ -101,8 +121,16 @@ api.patch("/strategy", (req: Request, res: Response) => {
 api.post("/messages", (req: Request, res: Response) => {
     const v = validateNewMessage(req.body);
     if ("error" in v) return badRequest(res, v.error);
-    const msg = submitMessage(v);
-    return res.status(201).json(withTagsOne(msg));
+    try {
+        const msg = submitMessage(v);
+        return res.status(201).json(withTagsOne(msg));
+    } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === "FORBIDDEN_CLOSE") {
+            return res.status(403).json({ error: (err as Error).message });
+        }
+        throw err;
+    }
 });
 
 api.get("/messages", (req: Request, res: Response) => {
@@ -228,6 +256,11 @@ api.get("/inbox", (req, res) => {
     const status = req.query.status as MessageStatus | undefined;
     const onlyOpen = req.query.open === "1";
     const intentFilter = req.query.intent as string | undefined;
+    // Read state is per-consumer — resolved from the X-Aiball-Consumer
+    // header (UI sets this once globally) with AIBALL_HUMAN fallback.
+    // Each row gets an `unread` boolean computed from the pings table
+    // (≥1 unseen ping on the thread for that consumer).
+    const consumerId = consumerOf(req);
 
     const tickets = listMessages({ kind: "ticket_created", project });
     const otherMessages = listMessages({ project }).filter(
@@ -238,12 +271,21 @@ api.get("/inbox", (req, res) => {
         commentCount: number;
         pendingCount: number;
         lastActivity: string;
-        // Track the latest approved lifecycle event (close or reopen) per
-        // ticket. The closed state is the kind of that latest event.
-        latestLifecycleId: number;
-        latestLifecycleKind: "ticket_closed" | "ticket_reopened" | null;
+        // Walk all approved lifecycle events in id order to derive the
+        // current closed/resolved flags. Order matters because reopen
+        // resets resolved.
+        closed: boolean;
+        resolved: boolean;
+        // Surface pending ticket_resolved proposals so the reporter sees
+        // in the list view that a thread is awaiting their accept/reject.
+        // Only counts non-stale ones (we ignore them once the ticket is
+        // closed since closing implicitly clears them).
+        pendingResolution: boolean;
     }
     const byTicket = new Map<number, Agg>();
+    // Sort lifecycle events for each ticket by id ASC so we can replay
+    // them in order. Comments are tallied independently.
+    const lifecycleByTicket = new Map<number, Message[]>();
     for (const m of otherMessages) {
         if (!m.ticket_id) continue;
         const cur =
@@ -252,26 +294,45 @@ api.get("/inbox", (req, res) => {
                 commentCount: 0,
                 pendingCount: 0,
                 lastActivity: "",
-                latestLifecycleId: 0,
-                latestLifecycleKind: null,
+                closed: false,
+                resolved: false,
+                pendingResolution: false,
             } as Agg);
         if (m.kind === "comment_added") {
             cur.commentCount++;
             if (m.status === "pending") cur.pendingCount++;
         }
+        if (m.kind === "ticket_resolved" && m.status === "pending") {
+            cur.pendingResolution = true;
+        }
         if (
-            (m.kind === "ticket_closed" || m.kind === "ticket_reopened") &&
-            m.status === "approved" &&
-            m.id > cur.latestLifecycleId
+            (m.kind === "ticket_closed" ||
+                m.kind === "ticket_reopened" ||
+                m.kind === "ticket_resolved") &&
+            m.status === "approved"
         ) {
-            cur.latestLifecycleId = m.id;
-            cur.latestLifecycleKind = m.kind;
+            const list = lifecycleByTicket.get(m.ticket_id) ?? [];
+            list.push(m);
+            lifecycleByTicket.set(m.ticket_id, list);
         }
         if (m.created_at > cur.lastActivity) cur.lastActivity = m.created_at;
         byTicket.set(m.ticket_id, cur);
     }
+    // Replay lifecycle events to compute final closed/resolved flags.
+    for (const [tid, events] of lifecycleByTicket) {
+        events.sort((a, b) => a.id - b.id);
+        const cur = byTicket.get(tid)!;
+        for (const ev of events) {
+            if (ev.kind === "ticket_closed") cur.closed = true;
+            else if (ev.kind === "ticket_reopened") {
+                cur.closed = false;
+                cur.resolved = false;
+            } else if (ev.kind === "ticket_resolved") cur.resolved = true;
+        }
+    }
 
     const tagsMap = tagsForMessages(tickets.map((m) => m.id));
+    const unreadMap = ticketUnreadFlags(consumerId, tickets.map((m) => m.id));
     let rows = tickets.map((t) => {
         const agg =
             byTicket.get(t.id) ??
@@ -279,8 +340,9 @@ api.get("/inbox", (req, res) => {
                 commentCount: 0,
                 pendingCount: 0,
                 lastActivity: "",
-                latestLifecycleId: 0,
-                latestLifecycleKind: null,
+                closed: false,
+                resolved: false,
+                pendingResolution: false,
             } as Agg);
         return {
             id: t.id,
@@ -291,9 +353,20 @@ api.get("/inbox", (req, res) => {
             created_at: t.created_at,
             status: t.status,
             intent: t.intent,
-            closed:
-                agg.latestLifecycleKind === "ticket_closed" ||
-                t.status === "rejected",
+            closed: agg.closed || t.status === "rejected",
+            // Same rationale as the /tickets/:id handler: resolved stays
+            // true after close so the UI can distinguish "closed because
+            // resolved" from "closed without explicit resolution".
+            resolved: agg.resolved,
+            // True iff there is a pending ticket_resolved on this ticket
+            // that the reporter still has to accept-and-close or reject.
+            // Stays false once the ticket is closed (the close auto-promotes
+            // any dangling pending resolved, see submitMessage).
+            pending_resolution: agg.pendingResolution && !(agg.closed || t.status === "rejected"),
+            broadcast: t.broadcast === 1,
+            // Per-consumer unread flag (≥1 unseen ping on the thread for
+            // the caller, resolved from the X-Aiball-Consumer header).
+            unread: unreadMap.get(t.id) ?? false,
             comment_count: agg.commentCount,
             pending_comment_count: agg.pendingCount,
             last_activity:
@@ -345,6 +418,7 @@ api.get("/tickets", (req, res) => {
         by_agent: m.by_agent,
         created_at: m.created_at,
         closed: closedSet.has(m.id),
+        broadcast: m.broadcast === 1,
         intent: m.intent,
         tags: tagsMap.get(m.id) ?? [],
     }));
@@ -352,9 +426,53 @@ api.get("/tickets", (req, res) => {
     res.json(onlyOpen ? tickets.filter((t) => !t.closed) : tickets);
 });
 
+api.post("/tickets/:id/mark-read", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    const r = markTicketSeen(consumerOf(req), id);
+    res.json({ ticket_id: id, ...r });
+});
+
+api.post("/tickets/:id/mark-unread", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    const r = markTicketUnseen(consumerOf(req), id);
+    res.json({ ticket_id: id, ...r });
+});
+
+api.patch("/tickets/:id", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    const { broadcast: bcast } = req.body ?? {};
+    if (typeof bcast !== "boolean") {
+        return badRequest(res, "broadcast (boolean) required");
+    }
+    const ok = setTicketBroadcast(id, bcast);
+    if (!ok) return notFound(res, "ticket not found");
+    const updated = getMessage(id);
+    if (updated) broadcast({ type: "message_edited", data: updated });
+    res.json(updated);
+});
+
 api.get("/tickets/:id", (req, res) => {
-    const requestedId = Number(req.params.id);
-    const requested = getMessage(requestedId);
+    // The :id param accepts either:
+    //   - an integer ticket id (#B<id>) → resolved directly,
+    //   - an integer comment id (legacy #C<id>) → resolved to parent thread
+    //     with focus_message_id set,
+    //   - a 6-char hashid string (canonical #C<hashid>) → looked up by
+    //     hashid then resolved like an integer comment.
+    const raw = req.params.id;
+    const numeric = /^\d+$/.test(raw) ? Number(raw) : null;
+    let requested: Message | null = null;
+    if (numeric !== null) {
+        requested = getMessage(numeric);
+    }
+    if (!requested) {
+        requested = getMessageByHashid(raw);
+    }
     if (!requested) return notFound(res, "ticket not found");
     // If the id is a comment (or close/reopen event), resolve up to its
     // parent ticket and attach `focus_message_id` so the UI can scroll to
@@ -367,35 +485,54 @@ api.get("/tickets/:id", (req, res) => {
         if (!parent || parent.kind !== "ticket_created") {
             return notFound(res, "ticket not found");
         }
-        focusMessageId = requestedId;
+        focusMessageId = requested.id;
         t = parent;
     }
     const id = t.id;
     // Return tickets in any status so the moderator can open pending or
     // rejected ones from the inbox and act on them inline.
     const all = listMessages({ project: t.project });
-    const comments = all
+    // Thread feed = comments + lifecycle events, inline. Lifecycle events
+    // (close / reopen / resolved) are rendered as system rows in the UI so
+    // the reader can see who flipped the state and when. Order: ASC by id.
+    const threadMessages = all
         .filter(
             (m) =>
-                m.kind === "comment_added" &&
                 m.ticket_id === id &&
+                (m.kind === "comment_added" ||
+                    m.kind === "ticket_closed" ||
+                    m.kind === "ticket_reopened" ||
+                    m.kind === "ticket_resolved") &&
                 m.status !== "rejected",
         )
-        .reverse();
-    // Closed state: kind of the latest approved close-or-reopen event for
-    // this ticket, by id (events form an audit trail; the most recent one
-    // wins). No event → not closed.
-    const lifecycle = all
-        .filter(
-            (m) =>
-                (m.kind === "ticket_closed" || m.kind === "ticket_reopened") &&
-                m.ticket_id === id &&
-                m.status === "approved",
-        )
-        .sort((a, b) => b.id - a.id);
-    const closed =
-        t.status === "rejected" ||
-        (lifecycle.length > 0 && lifecycle[0].kind === "ticket_closed");
+        .sort((a, b) => a.id - b.id);
+    // Lifecycle replay restricted to approved events for the header flags.
+    const lifecycle = threadMessages.filter(
+        (m) => m.kind !== "comment_added" && m.status === "approved",
+    );
+    let closedFlag = false;
+    let resolvedFlag = false;
+    let resolvedBy: string | null = null;
+    let resolvedAt: string | null = null;
+    for (const ev of lifecycle) {
+        if (ev.kind === "ticket_closed") closedFlag = true;
+        else if (ev.kind === "ticket_reopened") {
+            closedFlag = false;
+            resolvedFlag = false;
+            resolvedBy = null;
+            resolvedAt = null;
+        } else if (ev.kind === "ticket_resolved") {
+            resolvedFlag = true;
+            resolvedBy = ev.by_agent;
+            resolvedAt = ev.created_at;
+        }
+    }
+    const closed = closedFlag || t.status === "rejected";
+    // resolved stays true even after the ticket is closed — the UI uses the
+    // pair (closed, resolved) to distinguish "closed because resolved" from
+    // "closed without explicit resolution" (wontfix / abandoned / dup).
+    // Reopen still zeroes resolvedFlag inside the replay loop.
+    const resolved = resolvedFlag;
     res.json({
         ticket: {
             id: t.id,
@@ -406,10 +543,14 @@ api.get("/tickets/:id", (req, res) => {
             created_at: t.created_at,
             status: t.status,
             closed,
+            resolved,
+            resolved_by: resolved ? resolvedBy : null,
+            resolved_at: resolved ? resolvedAt : null,
+            broadcast: t.broadcast === 1,
             intent: t.intent,
             tags: listMessageTags(t.id),
         },
-        comments: withTags(comments),
+        comments: withTags(threadMessages),
         focus_message_id: focusMessageId,
     });
 });
@@ -473,14 +614,21 @@ api.get("/feed-path", (req, res) => {
 // -------- subscriptions ---------------------------------------------------
 
 api.post("/subscriptions", (req: Request, res: Response) => {
-    const { consumer_id, project, catchup } = req.body ?? {};
+    const { consumer_id, project, role } = req.body ?? {};
     if (typeof consumer_id !== "string" || !consumer_id) {
         return badRequest(res, "consumer_id required");
     }
     if (typeof project !== "string" || !project) {
         return badRequest(res, "project required");
     }
-    const sub = upsertSubscription(consumer_id, project, catchup === true);
+    let roleArg: "owner" | "follower" | undefined;
+    if (role !== undefined && role !== null) {
+        if (role !== "owner" && role !== "follower") {
+            return badRequest(res, "role must be 'owner' or 'follower'");
+        }
+        roleArg = role;
+    }
+    const sub = upsertSubscription(consumer_id, project, roleArg);
     res.status(201).json(sub);
 });
 

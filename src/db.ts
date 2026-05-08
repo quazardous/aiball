@@ -16,6 +16,7 @@ import {
 } from "drizzle-orm";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import * as schema from "./schema.js";
 import { DB_PATH, ensureDirs } from "./paths.js";
@@ -29,7 +30,8 @@ export type MessageKind =
     | "ticket_created"
     | "comment_added"
     | "ticket_closed"
-    | "ticket_reopened";
+    | "ticket_reopened"
+    | "ticket_resolved";
 export type MessageStatus = "pending" | "approved" | "rejected";
 export type RuleDecision = "auto" | "review";
 export type Intent = "panic" | "request" | "question" | "fyi";
@@ -71,13 +73,28 @@ export interface Message {
     edited_body: string | null;
     intent: Intent | null;
     display_seq: number;
+    /**
+     * Broadcast flag for tickets (1 = ticket is broadcast to project
+     * followers, 0 = internal-only). Always 0 for non-ticket rows.
+     */
+    broadcast: number;
+    /**
+     * Public-facing alphanumeric ref for comments and lifecycle events
+     * (#C<hashid>). NULL for tickets (which use their integer id directly
+     * as `#B<id>`). 6 chars from a Crockford-ish base32 alphabet, randomly
+     * chosen at insert time to never collide with ticket numbers.
+     */
+    hashid: string | null;
 }
+
+export type SubscriptionRole = "owner" | "follower";
 
 export interface Subscription {
     consumer_id: string;
     project: string;
     subscribed_at: string;
     last_seen_id: number;
+    role: SubscriptionRole;
 }
 
 export interface Rule {
@@ -195,6 +212,52 @@ function bootstrap(db: BetterSQLite3Database<typeof schema>): void {
             }).run();
         }
     }
+
+    // Backfill hashids for any pre-0003 _messages row that doesn't have one.
+    // Idempotent: rows that already have a hashid are skipped. Generates
+    // and persists in a single pass; collisions are vanishingly rare with
+    // 31^6 ≈ 8.8e8 keyspace.
+    const missing = db.select({ id: schema.messages.id })
+        .from(schema.messages)
+        .where(or(isNull(schema.messages.hashid), eq(schema.messages.hashid, "")))
+        .all();
+    for (const row of missing) {
+        const hashid = pickFreshHashid(db);
+        db.update(schema.messages)
+            .set({ hashid })
+            .where(eq(schema.messages.id, row.id))
+            .run();
+    }
+}
+
+/**
+ * Public-facing comment reference. 6 chars from a 31-char Crockford-ish
+ * alphabet (no `i`, `l`, `o`, `0`, `1` to avoid confusion). Random, not
+ * derived from internal id — that way the hashid leaks no ordering and
+ * stays stable across renumbering operations.
+ */
+const HASHID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
+const HASHID_LENGTH = 6;
+function generateHashid(): string {
+    const buf = randomBytes(8);
+    let out = "";
+    for (let i = 0; i < HASHID_LENGTH; i++) {
+        out += HASHID_ALPHABET[buf[i] % HASHID_ALPHABET.length];
+    }
+    return out;
+}
+function pickFreshHashid(db: BetterSQLite3Database<typeof schema>): string {
+    for (let attempts = 0; attempts < 8; attempts++) {
+        const candidate = generateHashid();
+        const clash = db.select({ id: schema.messages.id })
+            .from(schema.messages)
+            .where(eq(schema.messages.hashid, candidate))
+            .get();
+        if (!clash) return candidate;
+    }
+    // Shouldn't happen with 8.8e8 keyspace and a few tens of millions of
+    // rows, but if we somehow keep colliding throw rather than corrupt.
+    throw new Error("could not allocate a unique hashid after 8 attempts");
 }
 
 // =====================================================================
@@ -245,6 +308,8 @@ function ticketRowToMessage(t: schema.Ticket): Message {
         edited_body: t.editedBody,
         intent: (t.intent as Intent | null) ?? null,
         display_seq: t.displaySeq,
+        broadcast: t.broadcast ?? 0,
+        hashid: null,
     };
 }
 
@@ -270,6 +335,8 @@ function messageRowToMessage(m: schema.Message, project: string): Message {
         edited_body: m.editedBody,
         intent: null,
         display_seq: m.displaySeq,
+        broadcast: 0,
+        hashid: m.hashid ?? null,
     };
 }
 
@@ -314,6 +381,7 @@ export function insertMessage(m: NewMessage): Message {
             m.parent_id !== m.ticket_id
                 ? m.parent_id
                 : null;
+        const hashid = pickFreshHashid(tx);
         const inserted = tx.insert(schema.messages).values({
             id,
             ticketId: m.ticket_id,
@@ -323,6 +391,7 @@ export function insertMessage(m: NewMessage): Message {
             body: m.body ?? null,
             byAgent: m.by_agent ?? null,
             createdAt,
+            hashid,
         }).returning().get();
         // Resolve project via parent ticket for the legacy shape.
         const parent = tx.select({ project: schema.tickets.project })
@@ -336,6 +405,22 @@ export function getMessage(id: number): Message | null {
     const t = db.select().from(schema.tickets).where(eq(schema.tickets.id, id)).get();
     if (t) return ticketRowToMessage(t);
     const m = db.select().from(schema.messages).where(eq(schema.messages.id, id)).get();
+    if (!m) return null;
+    const parent = db.select({ project: schema.tickets.project })
+        .from(schema.tickets).where(eq(schema.tickets.id, m.ticketId)).get();
+    return messageRowToMessage(m, parent?.project ?? "");
+}
+
+/**
+ * Resolve a comment by its public hashid (`#C<hashid>`). Returns null if no
+ * row matches. Used by the API/router to honor `/c/<hashid>` and
+ * `#C<hashid>` markdown refs without ever exposing the internal numeric id.
+ */
+export function getMessageByHashid(hashid: string): Message | null {
+    const db = getDb();
+    const m = db.select().from(schema.messages)
+        .where(eq(schema.messages.hashid, hashid))
+        .get();
     if (!m) return null;
     const parent = db.select({ project: schema.tickets.project })
         .from(schema.tickets).where(eq(schema.tickets.id, m.ticketId)).get();
@@ -391,6 +476,33 @@ export function listMessages(filters: {
     out.sort((a, b) => b.id - a.id);
     if (filters.limit) return out.slice(0, filters.limit);
     return out;
+}
+
+/**
+ * List pending lifecycle proposals (ticket_resolved) on a given ticket.
+ * Used by submitMessage to auto-approve dangling proposals when the
+ * reporter closes the ticket: closing implicitly accepts any open
+ * "marked resolved" proposal, so they shouldn't keep showing up as
+ * pending in inboxes or in the UI.
+ */
+export function listPendingResolvedForTicket(ticketId: number): Message[] {
+    const db = getDb();
+    const rows = db.select().from(schema.messages)
+        .where(
+            and(
+                eq(schema.messages.ticketId, ticketId),
+                eq(schema.messages.kind, "ticket_resolved"),
+                eq(schema.messages.status, "pending"),
+            ),
+        )
+        .all();
+    if (rows.length === 0) return [];
+    const parent = db.select({ project: schema.tickets.project })
+        .from(schema.tickets)
+        .where(eq(schema.tickets.id, ticketId))
+        .get();
+    const project = parent?.project ?? "";
+    return rows.map((r) => messageRowToMessage(r, project));
 }
 
 export function updateMessageStatus(
@@ -668,10 +780,17 @@ export function setRuleEnabled(id: number, enabled: boolean): Rule | null {
 // Project subscriptions
 // =====================================================================
 
+/**
+ * Upsert a project subscription. If a row already exists and `role` is
+ * provided, the role is updated to the new value (so an agent can promote
+ * itself from follower to owner without unsubscribing first). Without an
+ * explicit role argument the existing row is left untouched, and new rows
+ * default to follower.
+ */
 export function upsertSubscription(
     consumer_id: string,
     project: string,
-    _catchup = false,
+    role?: SubscriptionRole,
 ): Subscription {
     const db = getDb();
     const existing = db.select().from(schema.subscriptions)
@@ -680,11 +799,21 @@ export function upsertSubscription(
             eq(schema.subscriptions.project, project),
         )).get();
     if (existing) {
+        if (role && role !== existing.role) {
+            db.update(schema.subscriptions)
+                .set({ role })
+                .where(and(
+                    eq(schema.subscriptions.consumerId, consumer_id),
+                    eq(schema.subscriptions.project, project),
+                )).run();
+            existing.role = role;
+        }
         return {
             consumer_id: existing.consumerId,
             project: existing.project,
             subscribed_at: existing.subscribedAt,
             last_seen_id: existing.lastSeenId,
+            role: (existing.role ?? "follower") as SubscriptionRole,
         };
     }
     db.insert(schema.subscriptions).values({
@@ -692,6 +821,7 @@ export function upsertSubscription(
         project,
         subscribedAt: nowIso(),
         lastSeenId: 0, // dormant, kept for column compat
+        role: role ?? "follower",
     }).run();
     const fresh = db.select().from(schema.subscriptions)
         .where(and(
@@ -703,6 +833,7 @@ export function upsertSubscription(
         project: fresh!.project,
         subscribed_at: fresh!.subscribedAt,
         last_seen_id: fresh!.lastSeenId,
+        role: (fresh!.role ?? "follower") as SubscriptionRole,
     };
 }
 
@@ -724,16 +855,57 @@ export function listSubscriptions(consumer_id?: string): Subscription[] {
             project: r.project,
             subscribed_at: r.subscribedAt,
             last_seen_id: r.lastSeenId,
+            role: (r.role ?? "follower") as SubscriptionRole,
         }));
 }
 
-export function listProjectSubscribers(project: string): string[] {
-    return getDb()
-        .select({ consumer_id: schema.subscriptions.consumerId })
+/**
+ * Project subscribers, optionally filtered by role. Without filter you get
+ * everyone; with `roles: ["owner"]` only the project maintainers; with
+ * `roles: ["follower"]` only the broadcast-only subscribers.
+ *
+ * fanOutPings uses this to send broadcast tickets to everyone but keep
+ * internal-only tickets visible to owners only.
+ */
+export function listProjectSubscribers(
+    project: string,
+    opts: { roles?: SubscriptionRole[] } = {},
+): string[] {
+    const db = getDb();
+    const filters = [eq(schema.subscriptions.project, project)];
+    if (opts.roles && opts.roles.length > 0) {
+        filters.push(inArray(schema.subscriptions.role, opts.roles));
+    }
+    return db.select({ consumer_id: schema.subscriptions.consumerId })
         .from(schema.subscriptions)
-        .where(eq(schema.subscriptions.project, project))
+        .where(and(...filters))
         .all()
         .map((r) => r.consumer_id);
+}
+
+/**
+ * Read the broadcast flag of a ticket. Returns false for missing rows,
+ * tolerates the column being absent on very old DBs that haven't run the
+ * 0002 migration yet (though such DBs shouldn't exist in practice — the
+ * migrator runs at boot).
+ */
+export function isTicketBroadcast(ticketId: number): boolean {
+    const row = getDb().select({ broadcast: schema.tickets.broadcast })
+        .from(schema.tickets)
+        .where(eq(schema.tickets.id, ticketId))
+        .get();
+    return row ? row.broadcast === 1 : false;
+}
+
+/**
+ * Update the broadcast flag of a ticket. Returns true if the row exists.
+ */
+export function setTicketBroadcast(ticketId: number, value: boolean): boolean {
+    const res = getDb().update(schema.tickets)
+        .set({ broadcast: value ? 1 : 0 })
+        .where(eq(schema.tickets.id, ticketId))
+        .run();
+    return res.changes > 0;
 }
 
 // =====================================================================
@@ -861,6 +1033,98 @@ export function markAllSeenForProject(
             inArray(schema.pings.messageId, allIds),
         )).run();
     return { updated: r.changes };
+}
+
+/**
+ * Mark every ping the consumer has on this ticket (and on every comment of
+ * the thread) as seen. Used by the UI auto-mark-read on the thread detail
+ * view (per #B91) and by the explicit "mark read" toggle in the list row
+ * (#C92). Idempotent — pings already seen are left alone.
+ */
+export function markTicketSeen(
+    consumer_id: string,
+    ticket_id: number,
+): { updated: number } {
+    const db = getDb();
+    const messageIds = db.select({ id: schema.messages.id })
+        .from(schema.messages)
+        .where(eq(schema.messages.ticketId, ticket_id))
+        .all()
+        .map((r) => r.id);
+    const allIds = [ticket_id, ...messageIds];
+    const r = db.update(schema.pings)
+        .set({ seenAt: nowIso() })
+        .where(and(
+            eq(schema.pings.recipient, consumer_id),
+            isNull(schema.pings.seenAt),
+            inArray(schema.pings.messageId, allIds),
+        )).run();
+    return { updated: r.changes };
+}
+
+/**
+ * Inverse of markTicketSeen: clear the seen_at on every ping the consumer
+ * has on this ticket and its comments. Used by the explicit "mark unread"
+ * toggle in the list row (#C92) so the thread re-surfaces in unread filters.
+ */
+export function markTicketUnseen(
+    consumer_id: string,
+    ticket_id: number,
+): { updated: number } {
+    const db = getDb();
+    const messageIds = db.select({ id: schema.messages.id })
+        .from(schema.messages)
+        .where(eq(schema.messages.ticketId, ticket_id))
+        .all()
+        .map((r) => r.id);
+    const allIds = [ticket_id, ...messageIds];
+    const r = db.update(schema.pings)
+        .set({ seenAt: null })
+        .where(and(
+            eq(schema.pings.recipient, consumer_id),
+            isNotNull(schema.pings.seenAt),
+            inArray(schema.pings.messageId, allIds),
+        )).run();
+    return { updated: r.changes };
+}
+
+/**
+ * For each ticket in `ticket_ids`, returns whether the consumer has at
+ * least one unseen ping anywhere on its thread (the ticket itself or any
+ * of its comments). Used by /api/inbox to surface the per-row unread flag
+ * in a single batched query.
+ */
+export function ticketUnreadFlags(
+    consumer_id: string,
+    ticket_ids: number[],
+): Map<number, boolean> {
+    const out = new Map<number, boolean>();
+    for (const id of ticket_ids) out.set(id, false);
+    if (ticket_ids.length === 0) return out;
+    const db = getDb();
+    // Pings on the ticket roots themselves.
+    const rootHits = db.select({
+        ticket_id: schema.pings.messageId,
+    }).from(schema.pings).where(and(
+        eq(schema.pings.recipient, consumer_id),
+        isNull(schema.pings.seenAt),
+        inArray(schema.pings.messageId, ticket_ids),
+    )).all();
+    for (const r of rootHits) out.set(r.ticket_id, true);
+    // Pings on comments → join _messages to map back to ticket_id.
+    const commentHits = db.select({
+        ticket_id: schema.messages.ticketId,
+    })
+        .from(schema.pings)
+        .innerJoin(schema.messages, eq(schema.pings.messageId, schema.messages.id))
+        .where(and(
+            eq(schema.pings.recipient, consumer_id),
+            isNull(schema.pings.seenAt),
+            inArray(schema.messages.ticketId, ticket_ids),
+        ))
+        .all();
+    for (const r of commentHits) out.set(r.ticket_id, true);
+    return out;
 }
 
 export function markSeenUpToForProject(

@@ -36,6 +36,17 @@ export const tickets = sqliteTable("tickets", {
     humanNote: text("human_note"),
     editedTitle: text("edited_title"),
     editedBody: text("edited_body"),
+    /**
+     * Boolean flag (0 = internal, 1 = broadcast). Internal tickets only ping
+     * project owners and explicit ticket subscribers. Broadcast tickets also
+     * ping followers (default project subscription level), so non-team
+     * agents stay aware of e.g. API changes without being spammed by
+     * internal dev chatter.
+     *
+     * Flipping this flag is NOT retroactive — followers only start getting
+     * pings on the *next* activity after the flag flips.
+     */
+    broadcast: integer("broadcast").notNull().default(0),
 }, (t) => [
     uniqueIndex("idx_tickets_project_display").on(t.project, t.displaySeq),
     index("idx_tickets_project").on(t.project),
@@ -59,10 +70,19 @@ export const messages = sqliteTable("_messages", {
     matchedRuleId: integer("matched_rule_id"),
     humanNote: text("human_note"),
     editedBody: text("edited_body"),
+    /**
+     * Public-facing comment reference (#C<hashid>). 6-char base32 string,
+     * randomly generated at insert time. Distinct from the internal numeric
+     * id so users never confuse a comment ref with a ticket number. NULL on
+     * legacy rows until the bootstrap backfill runs (then enforced unique
+     * by app-level checks at insert).
+     */
+    hashid: text("hashid"),
 }, (t) => [
     uniqueIndex("idx_messages_ticket_display").on(t.ticketId, t.displaySeq),
     index("idx_messages_ticket").on(t.ticketId),
     index("idx_messages_kind").on(t.kind),
+    index("idx_messages_hashid").on(t.hashid),
 ]);
 
 export const rules = sqliteTable("rules", {
@@ -107,6 +127,21 @@ export const subscriptions = sqliteTable("subscriptions", {
     /** Dormant since the cursor model was killed in 0.3.0; kept for data
      *  continuity but no longer read or written. */
     lastSeenId: integer("last_seen_id").notNull().default(0),
+    /**
+     * Subscription level:
+     *   - "owner"    : pings on every ticket movement in the project
+     *                  (internal + broadcast). For agents that maintain
+     *                  the project.
+     *   - "follower" : pings only on broadcast-flagged tickets. Default
+     *                  for external agents that subscribed to stay aware
+     *                  of public API / behavior changes without drowning
+     *                  in internal dev chatter.
+     *
+     * Ticket-level subscriptions (ticket_subscriptions) always override:
+     * if you explicitly follow a thread, you get every ping on it
+     * regardless of broadcast state.
+     */
+    role: text("role").notNull().default("follower"),
 }, (t) => [
     primaryKey({ columns: [t.consumerId, t.project] }),
     index("idx_subscriptions_project").on(t.project),

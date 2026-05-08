@@ -10,37 +10,75 @@ marked.setOptions({
     breaks: true,
 });
 
-interface TicketRefToken extends Tokens.Generic {
-    type: "ticketRef";
+interface MsgRefToken extends Tokens.Generic {
+    type: "msgRef";
     raw: string;
-    id: number;
+    kind: "ticket" | "comment";
+    label: string;
+    /** Backend lookup key — integer for tickets, string hashid for comments. */
+    ref: string;
 }
 
-// Linkify "#123" in body text → /t/123. Runs as an inline extension, so
-// codespans, fenced code, and existing markdown links are tokenized before
-// us and never reach this matcher. The trailing \b prevents matches inside
-// hex colors (#abc, #123abc) since alphanumerics don't form a word boundary
-// with digits.
+// Linkify cross-message refs in body text → /b/<ref>. The API resolves
+// either an integer (ticket id or legacy comment id) or a comment hashid;
+// in all three cases the route lands on the parent thread.
+//
+// Accepted source forms:
+//   - `#B123`            → ticket (canonical numeric, "B" for ball/bug).
+//   - `#C<hashid>`       → comment (canonical, 6-char base32, e.g. #Cxk7q3a).
+//   - `#C123`            → legacy numeric comment ref, still accepted for
+//                          old posts written before the hashid switch.
+//   - `#123`             → ticket (legacy, equivalent to `#B123`).
+//
+// Matching is case-insensitive on the sigil letter only. Runs as an inline
+// marked extension so codespans, fenced blocks, and existing markdown
+// links are tokenized first. The trailing \b prevents matches inside hex
+// colors (#abc, #123abc).
+const HASHID_CHARS = "a-hjkmnp-z2-9"; // matches src/db.ts HASHID_ALPHABET
 marked.use({
     extensions: [
         {
-            name: "ticketRef",
+            name: "msgRef",
             level: "inline",
             start(src: string) {
-                return src.match(/#\d/)?.index;
+                const m = src.match(new RegExp(`#(?:[bBcC])?[\\d${HASHID_CHARS}]`, "i"));
+                return m?.index;
             },
-            tokenizer(src: string): TicketRefToken | undefined {
-                const m = /^#(\d+)\b/.exec(src);
-                if (!m) return undefined;
+            tokenizer(src: string): MsgRefToken | undefined {
+                // Canonical comment hashid first: #C followed by 4-8 chars
+                // from the hashid alphabet (case-insensitive).
+                const hashMatch = new RegExp(
+                    `^#[Cc]([${HASHID_CHARS}]{4,8})\\b`,
+                    "i",
+                ).exec(src);
+                if (hashMatch) {
+                    const hash = hashMatch[1].toLowerCase();
+                    return {
+                        type: "msgRef",
+                        raw: hashMatch[0],
+                        kind: "comment",
+                        label: `#C${hash}`,
+                        ref: hash,
+                    };
+                }
+                // Numeric forms (ticket or legacy comment).
+                const numMatch = /^#([bBcC])?(\d+)\b/.exec(src);
+                if (!numMatch) return undefined;
+                const prefix = (numMatch[1] ?? "").toUpperCase();
+                const kind: "ticket" | "comment" = prefix === "C" ? "comment" : "ticket";
+                const letter = kind === "comment" ? "C" : "B";
                 return {
-                    type: "ticketRef",
-                    raw: m[0],
-                    id: Number(m[1]),
+                    type: "msgRef",
+                    raw: numMatch[0],
+                    kind,
+                    label: `#${letter}${numMatch[2]}`,
+                    ref: numMatch[2],
                 };
             },
             renderer(token) {
-                const t = token as TicketRefToken;
-                return `<a href="/t/${t.id}" class="ticket-ref">#${t.id}</a>`;
+                const t = token as MsgRefToken;
+                const cls = t.kind === "ticket" ? "ticket-ref" : "comment-ref";
+                return `<a href="/b/${t.ref}" class="${cls}">${t.label}</a>`;
             },
         },
     ],
@@ -66,9 +104,9 @@ const html = computed(() => {
     });
 });
 
-// Intercept clicks on internal links (any /t/N, /rules, /tags, /projects, etc.)
+// Intercept clicks on internal links (any /b/N, /rules, /tags, /projects, etc.)
 // so the SPA router handles them instead of triggering a full reload.
-function onClick(ev: MouseEvent) {
+async function onClick(ev: MouseEvent) {
     if (ev.defaultPrevented || ev.button !== 0) return;
     if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return; // modifier → let browser do its thing
     const target = (ev.target as HTMLElement | null)?.closest("a");
@@ -76,6 +114,29 @@ function onClick(ev: MouseEvent) {
     const href = target.getAttribute("href");
     if (!href || !href.startsWith("/")) return;
     ev.preventDefault();
+
+    // /b/<hashid> needs server-side resolution to the parent ticket id
+    // because the SPA router stores openTicketId as integer. We let the
+    // backend do the lookup, then redirect to the canonical /b/<intId>
+    // (with #cseq-N hash if a comment was the original target — future
+    // improvement; the focus_message_id is already returned by the API).
+    const match = /^\/b\/([^/?#]+)(.*)$/.exec(href);
+    if (match && !/^\d+$/.test(match[1])) {
+        try {
+            const res = await fetch(`/api/tickets/${encodeURIComponent(match[1])}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data?.ticket?.id) {
+                    history.pushState({}, "", `/b/${data.ticket.id}${match[2]}`);
+                    window.dispatchEvent(new PopStateEvent("popstate"));
+                    return;
+                }
+            }
+        } catch {
+            /* fall through to default navigation */
+        }
+    }
+
     history.pushState({}, "", href);
     window.dispatchEvent(new PopStateEvent("popstate"));
 }

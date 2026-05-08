@@ -6,6 +6,8 @@ import {
     listTicketSubscribers,
     listProjectSubscribers,
     upsertTicketSubscription,
+    listPendingResolvedForTicket,
+    isTicketBroadcast,
     INTENTS,
     type Message,
     type NewMessage,
@@ -21,6 +23,7 @@ export const VALID_KINDS: MessageKind[] = [
     "comment_added",
     "ticket_closed",
     "ticket_reopened",
+    "ticket_resolved",
 ];
 
 export interface ValidationError {
@@ -81,8 +84,14 @@ function autoSubscribeAuthor(msg: Message): void {
  * Fan out delivery rows (in the `pings` table) for every recipient that
  * should learn about this newly-approved message. Recipients are the union
  * of:
- *   - ticket subscribers (people following the thread directly)
- *   - project subscribers (people following the whole project)
+ *   - ticket subscribers (people following the thread directly — they always
+ *     get pings on threads they explicitly follow, regardless of broadcast).
+ *   - project owners (subscriptions.role = "owner" — agents that maintain
+ *     this project, they want to see every movement, internal or not).
+ *   - project followers (subscriptions.role = "follower"), but only when
+ *     the parent ticket has its `broadcast` flag set to 1. This keeps
+ *     internal dev chatter out of external agents' inboxes while still
+ *     letting public/API-impacting tickets reach them.
  * minus the message author themself (no self-ping).
  *
  * Each ping row is per-recipient with its own `seen_at`, so consumption is
@@ -94,16 +103,34 @@ function autoSubscribeAuthor(msg: Message): void {
  */
 export function fanOutPings(msg: Message): void {
     const recipients = new Set<string>();
-    // Ticket subscribers, except for ticket_created (no thread yet, the
-    // creator is auto-subbed to themselves and would be filtered as self).
+
+    const ticketId = msg.kind === "ticket_created"
+        ? msg.id
+        : msg.ticket_id;
+
+    // Ticket subscribers: explicit thread follow always wins regardless of
+    // broadcast state. Skip on ticket_created since there's no thread yet
+    // (the creator is auto-subbed to their own ticket and self-filtered).
     if (msg.kind !== "ticket_created" && msg.ticket_id !== null) {
         for (const sub of listTicketSubscribers(msg.ticket_id)) {
             recipients.add(sub);
         }
     }
-    for (const sub of listProjectSubscribers(msg.project)) {
+
+    // Project owners always see everything in their project.
+    for (const sub of listProjectSubscribers(msg.project, { roles: ["owner"] })) {
         recipients.add(sub);
     }
+
+    // Project followers only see broadcast-flagged tickets. We resolve the
+    // flag on the parent ticket — for ticket_created msg.id IS the ticket;
+    // for comments/lifecycle we look up via msg.ticket_id.
+    if (ticketId !== null && isTicketBroadcast(ticketId)) {
+        for (const sub of listProjectSubscribers(msg.project, { roles: ["follower"] })) {
+            recipients.add(sub);
+        }
+    }
+
     for (const r of recipients) {
         if (r === msg.by_agent) continue;
         insertPing(r, msg.id);
@@ -111,13 +138,21 @@ export function fanOutPings(msg: Message): void {
 }
 
 /**
- * Closing OR reopening your own ticket is not a moderation matter — the
- * original author already had authority over the thread. Skip rules/strategy
- * when the close/reopen event's by_agent matches the parent ticket's
- * by_agent.
+ * Lifecycle events authored by the ticket's original creator (close /
+ * reopen / resolved) skip moderation — the author already had authority
+ * over the thread. Other agents posting these events still go through the
+ * rule engine (rules + strategy + human bypass).
+ *
+ * Note: ticket_resolved is intentionally a "soft" signal that anyone can
+ * propose — when posted by a non-owner, it goes through review and shows
+ * up as a proposal in the UI. The reporter validates by closing.
  */
 function isOwnerLifecycleEvent(input: NewMessage): boolean {
-    if (input.kind !== "ticket_closed" && input.kind !== "ticket_reopened") {
+    if (
+        input.kind !== "ticket_closed" &&
+        input.kind !== "ticket_reopened" &&
+        input.kind !== "ticket_resolved"
+    ) {
         return false;
     }
     if (!input.by_agent || !input.ticket_id) return false;
@@ -129,10 +164,34 @@ function isOwnerLifecycleEvent(input: NewMessage): boolean {
 }
 
 /**
+ * Hard rule: only the ticket reporter (the agent who opened the thread) can
+ * close it. Anyone else who wants to signal "I think this is done" should
+ * post `ticket_resolved` (a soft proposal) — the reporter still validates
+ * by closing.
+ *
+ * This is enforced before the message is even inserted, so the database
+ * never holds a stray ticket_closed from a non-owner. Throws with a marker
+ * the HTTP layer maps to 403.
+ */
+function assertCloseAuthority(input: NewMessage): void {
+    if (input.kind !== "ticket_closed") return;
+    if (!input.ticket_id) return;
+    const parent = getMessage(input.ticket_id);
+    if (!parent || parent.kind !== "ticket_created") return;
+    if (input.by_agent && input.by_agent === parent.by_agent) return;
+    const err = new Error(
+        `only the ticket reporter (${parent.by_agent ?? "unknown"}) can close this ticket — post ticket_resolved instead to propose resolution`,
+    );
+    (err as Error & { code?: string }).code = "FORBIDDEN_CLOSE";
+    throw err;
+}
+
+/**
  * Single source of truth for "a new message arrived" — used by both the HTTP
  * API and the spool drainer so behavior is identical regardless of channel.
  */
 export function submitMessage(input: NewMessage): Message {
+    assertCloseAuthority(input);
     let msg = insertMessage(input);
     autoSubscribeAuthor(msg);
     // Always announce the message: every UI list (pending, approved, tickets,
@@ -162,6 +221,26 @@ export function submitMessage(input: NewMessage): Message {
             // …and announce the auto-approval so subscribers transition state
             // (status: pending → approved) without polling.
             broadcast({ type: "message_decided", data: msg });
+            // Closing a ticket is the canonical "yes, this is done" — any
+            // dangling `ticket_resolved` proposals on this ticket are no
+            // longer awaiting moderation, the close just validated them.
+            // Auto-approve them so the inbox / UI stop surfacing stale
+            // pending state.
+            if (msg.kind === "ticket_closed" && msg.ticket_id !== null) {
+                for (const stale of listPendingResolvedForTicket(msg.ticket_id)) {
+                    const promoted = updateMessageStatus(
+                        stale.id,
+                        "approved",
+                        "owner",
+                        null,
+                    );
+                    if (promoted) {
+                        deliverToOutbox(promoted);
+                        fanOutPings(promoted);
+                        broadcast({ type: "message_decided", data: promoted });
+                    }
+                }
+            }
         }
     }
     return msg;

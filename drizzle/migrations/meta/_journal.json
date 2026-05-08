@@ -15,6 +15,20 @@
       "when": 1778255000000,
       "tag": "0001_rename_priority_to_intent",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778335000000,
+      "tag": "0002_follow_levels",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1778338000000,
+      "tag": "0003_comment_hashids",
+      "breakpoints": true
     }
   ]
 }

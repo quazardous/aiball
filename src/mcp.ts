@@ -73,7 +73,7 @@ server.registerTool(
     "ticket_new",
     {
         description:
-            "Create a new ticket in a project. Falls back to the file spool if the daemon is down.",
+            "Create a new ticket in a project. Falls back to the file spool if the daemon is down. Pass `broadcast: true` to create the ticket already flagged as broadcast (project followers receive pings); default is internal-only (project owners + explicit ticket subscribers).",
         inputSchema: {
             project: z
                 .string()
@@ -89,21 +89,54 @@ server.registerTool(
                 .describe(
                     "panic = immediate blocker; question = needs an answer; request = action expected (default intent); fyi = informational, no action expected.",
                 ),
+            broadcast: z
+                .boolean()
+                .optional()
+                .describe(
+                    "If true, the ticket is broadcast at creation: project followers (subscriptions.role=follower) get pings on it, in addition to project owners and explicit ticket subscribers. Default false (internal-only).",
+                ),
             by_agent: z
                 .string()
                 .optional()
                 .describe("Author identity. Defaults to the resolved agent id."),
         },
     },
-    async ({ project, title, body, intent, by_agent }) => {
-        const res = await client.postMessage({
+    async ({ project, title, body, intent, broadcast, by_agent }) => {
+        const res = (await client.postMessage({
             project: client.resolveProject(project),
             kind: "ticket_created",
             title,
             body,
             intent,
             by_agent: by_agent ?? client.agentId,
-        });
+        })) as { id?: number };
+        if (broadcast === true && typeof res?.id === "number") {
+            await client.setTicketBroadcast(res.id, true);
+            return asText({ ...res, broadcast: 1 });
+        }
+        return asText(res);
+    },
+);
+
+server.registerTool(
+    "ticket_broadcast",
+    {
+        description:
+            "Flip a ticket's broadcast flag. ON = project followers receive pings on this thread alongside owners and explicit ticket subscribers. OFF = internal-only (default), only project owners and explicit subscribers see activity. Use this to promote a ticket to broadcast (e.g. an API change worth announcing to external agents) or to demote one back to internal.",
+        inputSchema: {
+            ticket_id: z
+                .number()
+                .int()
+                .describe("Ticket id (the integer in #B<id>) to flip."),
+            broadcast: z
+                .boolean()
+                .describe(
+                    "true to broadcast (notify project followers), false to make internal-only.",
+                ),
+        },
+    },
+    async ({ ticket_id, broadcast }) => {
+        const res = await client.setTicketBroadcast(ticket_id, broadcast);
         return asText(res);
     },
 );
@@ -112,7 +145,7 @@ server.registerTool(
     "ticket_reply",
     {
         description:
-            "Post a reply within a ticket thread. `target_id` is either a ticket id (→ top-level comment on the ticket) or a comment id (→ nested reply to that specific comment, Gmail-style). Both produce a comment_added; only parent_id differs.",
+            "Post a reply within a ticket thread. `target_id` is either a ticket id (→ top-level comment on the ticket) or a comment id (→ nested reply to that specific comment, Gmail-style). Both produce a comment_added; only parent_id differs.\n\nOptional `then` chains a lifecycle event right after the comment, in the same call:\n- `then: \"resolved\"` — propose-resolved (soft signal; the ticket reporter still validates by closing). Goes through moderation when posted by a non-owner.\n- `then: \"close\"` — close the ticket. Owner-bypass when posted by the reporter.\n- `then: \"reopen\"` — reopen a closed ticket (resets resolved too).\n\nUse this instead of separate reply + ticket_close calls when finishing work on someone else's ticket: post the explanation comment AND mark it resolved atomically.",
         inputSchema: {
             target_id: z
                 .number()
@@ -126,9 +159,15 @@ server.registerTool(
                 .optional()
                 .describe("Project name. Required for offline (spool) mode."),
             by_agent: z.string().optional(),
+            then: z
+                .enum(["resolved", "close", "reopen"])
+                .optional()
+                .describe(
+                    "Optional lifecycle event posted right after the comment. `resolved` = propose-resolved (banner in UI; reporter closes to validate). `close` = close the ticket. `reopen` = reopen a closed ticket. Owner-authored `close`/`reopen`/`resolved` skip moderation.",
+                ),
         },
     },
-    async ({ target_id, body, project, by_agent }) => {
+    async ({ target_id, body, project, by_agent, then }) => {
         const target = (await client.getMessage(target_id)) as {
             project: string;
             kind: string;
@@ -148,10 +187,21 @@ server.registerTool(
                 `target ${target_id} is not a valid reply target (kind=${target.kind})`,
             );
         }
+        // A state change is just a decorator on a comment: the same row
+        // carries the body AND flips the lifecycle flag. We post a single
+        // message whose kind reflects the chosen `then` (or comment_added
+        // if no state change is requested).
+        const kind = !then
+            ? "comment_added"
+            : then === "resolved"
+              ? "ticket_resolved"
+              : then === "close"
+                ? "ticket_closed"
+                : "ticket_reopened";
         const proj = project ?? target.project;
         const res = await client.postMessage({
             project: proj,
-            kind: "comment_added",
+            kind,
             ticket_id: ticketId,
             parent_id: parentId,
             body,
@@ -236,7 +286,7 @@ server.registerTool(
     "subscribe",
     {
         description:
-            "Subscribe to a project (default) or to a specific ticket. Project subscriptions deliver every approved message in that project to the outbox feed (cursor-based). Ticket subscriptions deliver pings (one per recipient, consumed independently). Posting a message auto-subscribes the author to that ticket; you only need this tool to follow threads you don't write in.",
+            "Subscribe to a project (default) or to a specific ticket. Project subscriptions have a `role`:\n- `owner` (project maintainer) → pings on every ticket movement, internal or broadcast.\n- `follower` (default, external) → pings only on broadcast-flagged tickets, so internal dev chatter doesn't leak.\n\nTicket subscriptions are independent of role: explicitly following a thread always pings you on that thread regardless of broadcast state. Posting a message auto-subscribes the author to that ticket; you only need this tool to follow threads or projects you don't write in. Calling subscribe again with a different role on an existing project subscription updates the role.",
         inputSchema: {
             project: z
                 .string()
@@ -257,15 +307,21 @@ server.registerTool(
                 .describe(
                     "Project subs only: include backlog (last_seen_id starts at 0). Ignored for ticket subs.",
                 ),
+            role: z
+                .enum(["owner", "follower"])
+                .optional()
+                .describe(
+                    "Project subs only: `owner` to receive every movement, `follower` (default) to receive only broadcast-flagged tickets. Pass this again to change role.",
+                ),
         },
     },
-    async ({ project, ticket_id, catchup }) => {
+    async ({ project, ticket_id, catchup, role }) => {
         if (ticket_id !== undefined) {
             const res = await client.subscribeTicket(ticket_id);
             return asText({ kind: "ticket", ...((res as object) ?? {}) });
         }
         const proj = client.resolveProject(project);
-        const sub = await client.subscribe(proj, catchup === true);
+        const sub = await client.subscribe(proj, catchup === true, role);
         const fp = await client.feedPath(proj);
         return asText({
             kind: "project",

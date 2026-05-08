@@ -95,6 +95,11 @@ export class AiballClient {
         }
     }
 
+    /** Flip a ticket's broadcast flag via the dedicated PATCH endpoint. */
+    setTicketBroadcast(ticket_id: number, broadcast: boolean) {
+        return this.http("PATCH", `/api/tickets/${ticket_id}`, { broadcast });
+    }
+
     private spoolDrop(msg: Record<string, unknown>): SpoolResult {
         mkdirSync(this.spoolDir, { recursive: true });
         const ts = process.hrtime.bigint().toString();
@@ -137,11 +142,12 @@ export class AiballClient {
 
     // ---- subscriptions ----------------------------------------------------
 
-    subscribe(project: string, catchup = false) {
+    subscribe(project: string, catchup = false, role?: "owner" | "follower") {
         return this.http("POST", "/api/subscriptions", {
             consumer_id: this.agentId,
             project,
             catchup,
+            role,
         });
     }
     unsubscribe(project: string) {
