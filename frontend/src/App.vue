@@ -21,14 +21,14 @@ import ToggleButton from "primevue/togglebutton";
 const toast = useToast();
 
 type StatusFilter = "all" | "pending" | "approved" | "rejected";
-type PriorityFilter = "all" | "panic" | "request" | "question" | "fyi";
+type IntentFilter = "all" | "panic" | "request" | "question" | "fyi";
 type SortBy = "activity" | "created_desc" | "created_asc";
 
 const statusFilter = ref<StatusFilter>(
     (localStorage.getItem("aiball.filter.status") as StatusFilter | null) ?? "pending",
 );
-const priorityFilter = ref<PriorityFilter>(
-    (localStorage.getItem("aiball.filter.priority") as PriorityFilter | null) ?? "all",
+const intentFilter = ref<IntentFilter>(
+    (localStorage.getItem("aiball.filter.intent") as IntentFilter | null) ?? "all",
 );
 const onlyOpen = ref(localStorage.getItem("aiball.filter.open") !== "0");
 const sortBy = ref<SortBy>(
@@ -41,8 +41,8 @@ const statusFilterOptions: { label: string; value: StatusFilter }[] = [
     { label: "Approved", value: "approved" },
     { label: "Rejected", value: "rejected" },
 ];
-const priorityFilterOptions: { label: string; value: PriorityFilter }[] = [
-    { label: "Any priority", value: "all" },
+const intentFilterOptions: { label: string; value: IntentFilter }[] = [
+    { label: "Any intent", value: "all" },
     { label: "Panic", value: "panic" },
     { label: "Request", value: "request" },
     { label: "Question", value: "question" },
@@ -255,7 +255,7 @@ async function loadRows() {
     try {
         rows.value = await api.inbox({
             status: statusFilter.value === "all" ? undefined : statusFilter.value,
-            priority: priorityFilter.value === "all" ? undefined : priorityFilter.value,
+            intent: intentFilter.value === "all" ? undefined : intentFilter.value,
             project: project.value ?? undefined,
             open: onlyOpen.value,
         });
@@ -345,9 +345,9 @@ const { connected } = useWs((ev) => {
     loadRows();
 });
 
-watch([statusFilter, priorityFilter, onlyOpen, project], () => {
+watch([statusFilter, intentFilter, onlyOpen, project], () => {
     localStorage.setItem("aiball.filter.status", statusFilter.value);
-    localStorage.setItem("aiball.filter.priority", priorityFilter.value);
+    localStorage.setItem("aiball.filter.intent", intentFilter.value);
     localStorage.setItem("aiball.filter.open", onlyOpen.value ? "1" : "0");
     if (inListView.value) loadRows();
 });
@@ -370,7 +370,7 @@ useRouting({
     openTicketId,
     project,
     statusFilter,
-    priorityFilter,
+    intentFilter,
     onlyOpen,
 });
 
@@ -422,7 +422,7 @@ function statusSeverity(s: InboxRow["status"]) {
     return "danger";
 }
 
-function prioritySeverity(p: InboxRow["priority"]) {
+function intentSeverity(p: InboxRow["intent"]) {
     if (p === "panic") return "danger";
     if (p === "request") return "info";
     if (p === "question") return "warn";
@@ -634,13 +634,13 @@ const globalUnreadCount = computed(() =>
                             @update:model-value="(v: StatusFilter) => (statusFilter = v)"
                         />
                         <Select
-                            :model-value="priorityFilter"
-                            :options="priorityFilterOptions"
+                            :model-value="intentFilter"
+                            :options="intentFilterOptions"
                             option-label="label"
                             option-value="value"
                             size="small"
                             class="filter-select"
-                            @update:model-value="(v: PriorityFilter) => (priorityFilter = v)"
+                            @update:model-value="(v: IntentFilter) => (intentFilter = v)"
                         />
                         <ToggleButton
                             v-model="onlyOpen"
@@ -731,9 +731,9 @@ const globalUnreadCount = computed(() =>
                                 style="margin-left: 0.4rem; font-size: 0.7rem"
                             />
                             <Tag
-                                v-if="r.priority"
-                                :value="r.priority"
-                                :severity="prioritySeverity(r.priority)"
+                                v-if="r.intent"
+                                :value="r.intent"
+                                :severity="intentSeverity(r.intent)"
                                 style="margin-left: 0.3rem; font-size: 0.7rem"
                             />
                             <TagBadge

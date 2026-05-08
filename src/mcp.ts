@@ -83,7 +83,7 @@ server.registerTool(
                 ),
             title: z.string().describe("Ticket title"),
             body: z.string().optional().describe("Ticket body / description"),
-            priority: z
+            intent: z
                 .enum(["panic", "request", "question", "fyi"])
                 .optional()
                 .describe(
@@ -95,13 +95,13 @@ server.registerTool(
                 .describe("Author identity. Defaults to the resolved agent id."),
         },
     },
-    async ({ project, title, body, priority, by_agent }) => {
+    async ({ project, title, body, intent, by_agent }) => {
         const res = await client.postMessage({
             project: client.resolveProject(project),
             kind: "ticket_created",
             title,
             body,
-            priority,
+            intent,
             by_agent: by_agent ?? client.agentId,
         });
         return asText(res);

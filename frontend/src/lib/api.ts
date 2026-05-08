@@ -7,8 +7,8 @@ export interface Tag {
     created_at: string;
 }
 
-export type Priority = "panic" | "request" | "question" | "fyi";
-export const PRIORITIES: readonly Priority[] = ["panic", "request", "question", "fyi"];
+export type Intent = "panic" | "request" | "question" | "fyi";
+export const INTENTS: readonly Intent[] = ["panic", "request", "question", "fyi"];
 
 export type Strategy = "manual" | "auto" | "auto-reply";
 export const STRATEGIES: readonly Strategy[] = ["manual", "auto", "auto-reply"];
@@ -30,7 +30,7 @@ export interface Message {
     human_note: string | null;
     edited_title: string | null;
     edited_body: string | null;
-    priority: Priority | null;
+    intent: Intent | null;
     tags: Tag[];
 }
 
@@ -69,7 +69,7 @@ export interface TicketSummary {
     created_at: string;
     status: "pending" | "approved" | "rejected";
     closed: boolean;
-    priority: Priority | null;
+    intent: Intent | null;
     tags: Tag[];
 }
 
@@ -81,7 +81,7 @@ export interface InboxRow {
     by_agent: string | null;
     created_at: string;
     status: "pending" | "approved" | "rejected";
-    priority: Priority | null;
+    intent: Intent | null;
     closed: boolean;
     comment_count: number;
     pending_comment_count: number;
@@ -108,7 +108,7 @@ export interface PostMessageInput {
     by_agent?: string;
     ticket_id?: number;
     parent_id?: number;
-    priority?: Priority | null;
+    intent?: Intent | null;
 }
 
 export interface ProjectMeta {
@@ -159,14 +159,14 @@ export const api = {
             project?: string;
             status?: string;
             open?: boolean;
-            priority?: string;
+            intent?: string;
         } = {},
     ) => {
         const qs = new URLSearchParams();
         if (params.project) qs.set("project", params.project);
         if (params.status) qs.set("status", params.status);
         if (params.open) qs.set("open", "1");
-        if (params.priority) qs.set("priority", params.priority);
+        if (params.intent) qs.set("intent", params.intent);
         const q = qs.toString();
         return req<InboxRow[]>("GET", `/api/inbox${q ? "?" + q : ""}`);
     },
@@ -177,7 +177,7 @@ export const api = {
         req<Message>("POST", `/api/messages/${id}/approve`),
     reject: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/reject`),
-    edit: (id: number, body: { title?: string; body?: string; priority?: Priority | null }) =>
+    edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>
         req<Message>("POST", `/api/messages/${id}/note`, { note }),

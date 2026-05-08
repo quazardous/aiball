@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import Select from "primevue/select";
 import Tag from "primevue/tag";
-import { api, PRIORITIES, type Message, type Priority, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
+import { api, INTENTS, type Message, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
 import MarkdownView from "./MarkdownView.vue";
 import MessageComposer from "./MessageComposer.vue";
 import CommentNode from "./CommentNode.vue";
@@ -96,21 +96,21 @@ function closeTicket() { return postLifecycle("ticket_closed"); }
 function reopenTicket() { return postLifecycle("ticket_reopened"); }
 
 const editing = ref(false);
-const priorityBusy = ref(false);
-const priorityOptions = [
-    { label: "(no priority)", value: null },
-    ...PRIORITIES.map((p) => ({ label: p, value: p })),
+const intentBusy = ref(false);
+const intentOptions = [
+    { label: "(no intent)", value: null },
+    ...INTENTS.map((p) => ({ label: p, value: p })),
 ];
-async function changePriority(v: Priority | null) {
+async function changeIntent(v: Intent | null) {
     if (!data.value) return;
-    priorityBusy.value = true;
+    intentBusy.value = true;
     try {
-        await api.edit(data.value.ticket.id, { priority: v });
+        await api.edit(data.value.ticket.id, { intent: v });
         await load();
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
-        priorityBusy.value = false;
+        intentBusy.value = false;
     }
 }
 function onTagsChanged(tags: TagType[]) {
@@ -187,9 +187,9 @@ const flatComments = computed<Message[]>(() => {
                 <h2 class="thread-title">{{ data.ticket.title }}</h2>
                 <div class="thread-meta-extra">
                     <Tag
-                        v-if="data.ticket.priority"
-                        :value="data.ticket.priority"
-                        :severity="data.ticket.priority === 'panic' ? 'danger' : 'info'"
+                        v-if="data.ticket.intent"
+                        :value="data.ticket.intent"
+                        :severity="data.ticket.intent === 'panic' ? 'danger' : 'info'"
                     />
                     <span
                         v-for="t in data.ticket.tags"
@@ -209,16 +209,16 @@ const flatComments = computed<Message[]>(() => {
                 </div>
                 <div v-if="editing" class="thread-edit-panel">
                     <div class="thread-edit-row">
-                        <span class="thread-edit-label">Priority</span>
+                        <span class="thread-edit-label">Intent</span>
                         <Select
-                            :model-value="data.ticket.priority"
-                            :options="priorityOptions"
+                            :model-value="data.ticket.intent"
+                            :options="intentOptions"
                             option-label="label"
                             option-value="value"
                             size="small"
-                            :disabled="priorityBusy"
+                            :disabled="intentBusy"
                             style="min-width: 9rem"
-                            @update:model-value="(v: Priority | null) => changePriority(v)"
+                            @update:model-value="(v: Intent | null) => changeIntent(v)"
                         />
                     </div>
                     <div class="thread-edit-row">

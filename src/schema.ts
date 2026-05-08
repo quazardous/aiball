@@ -27,7 +27,7 @@ export const tickets = sqliteTable("tickets", {
     title: text("title").notNull(),
     body: text("body"),
     byAgent: text("by_agent"),
-    priority: text("priority"),
+    intent: text("intent"),
     status: text("status").notNull().default("pending"),
     createdAt: text("created_at").notNull(),
     decidedAt: text("decided_at"),

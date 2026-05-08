@@ -6,7 +6,7 @@ import Select from "primevue/select";
 import Textarea from "primevue/textarea";
 import ToggleButton from "primevue/togglebutton";
 import MarkdownView from "./MarkdownView.vue";
-import { PRIORITIES, type Priority } from "../lib/api";
+import { INTENTS, type Intent } from "../lib/api";
 
 type Mode = "ticket" | "comment";
 
@@ -23,12 +23,12 @@ const emit = defineEmits<{ (e: "submitted"): void }>();
 const title = ref("");
 const body = ref("");
 const byAgent = ref(localStorage.getItem("aiball.human_id") ?? "human");
-const priority = ref<Priority>("request");
+const intent = ref<Intent>("request");
 const preview = ref(false);
 const sending = ref(false);
 const error = ref<string | null>(null);
 
-const priorityOptions = PRIORITIES.map((p) => ({
+const intentOptions = INTENTS.map((p) => ({
     label: p,
     value: p,
 }));
@@ -63,7 +63,7 @@ async function submit() {
                 kind: "ticket_created",
                 title: title.value.trim(),
                 body: body.value,
-                priority: priority.value,
+                intent: intent.value,
                 by_agent: byAgent.value || "human",
             }
             : {
@@ -122,8 +122,8 @@ async function submit() {
                 @keydown.meta.enter.prevent="submit"
             />
             <Select
-                v-model="priority"
-                :options="priorityOptions"
+                v-model="intent"
+                :options="intentOptions"
                 option-label="label"
                 option-value="value"
                 size="small"

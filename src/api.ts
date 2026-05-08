@@ -32,8 +32,8 @@ import {
     getStrategy,
     setStrategy,
     STRATEGIES,
-    PRIORITIES,
-    type Priority,
+    INTENTS,
+    type Intent,
     insertPing,
     listPings,
     markPingsRead,
@@ -162,16 +162,16 @@ api.post("/messages/:id/edit", (req, res) => {
     const id = Number(req.params.id);
     const existing = getMessage(id);
     if (!existing) return notFound(res);
-    const { title, body, priority } = req.body ?? {};
-    if (title === undefined && body === undefined && priority === undefined) {
-        return badRequest(res, "provide title, body, and/or priority");
+    const { title, body, intent } = req.body ?? {};
+    if (title === undefined && body === undefined && intent === undefined) {
+        return badRequest(res, "provide title, body, and/or intent");
     }
-    if (priority !== undefined && priority !== null) {
-        if (typeof priority !== "string" || !PRIORITIES.includes(priority as Priority)) {
-            return badRequest(res, `priority must be one of ${PRIORITIES.join(", ")}`);
+    if (intent !== undefined && intent !== null) {
+        if (typeof intent !== "string" || !INTENTS.includes(intent as Intent)) {
+            return badRequest(res, `intent must be one of ${INTENTS.join(", ")}`);
         }
     }
-    const updated = editMessage(id, { title, body, priority });
+    const updated = editMessage(id, { title, body, intent });
     if (!updated) return notFound(res);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });
@@ -227,7 +227,7 @@ api.get("/inbox", (req, res) => {
     const project = req.query.project as string | undefined;
     const status = req.query.status as MessageStatus | undefined;
     const onlyOpen = req.query.open === "1";
-    const priorityFilter = req.query.priority as string | undefined;
+    const intentFilter = req.query.intent as string | undefined;
 
     const tickets = listMessages({ kind: "ticket_created", project });
     const otherMessages = listMessages({ project }).filter(
@@ -290,7 +290,7 @@ api.get("/inbox", (req, res) => {
             by_agent: t.by_agent,
             created_at: t.created_at,
             status: t.status,
-            priority: t.priority,
+            intent: t.intent,
             closed:
                 agg.latestLifecycleKind === "ticket_closed" ||
                 t.status === "rejected",
@@ -310,8 +310,8 @@ api.get("/inbox", (req, res) => {
         rows = rows.filter((r) => r.status === status);
     }
     if (onlyOpen) rows = rows.filter((r) => !r.closed);
-    if (priorityFilter && priorityFilter !== "all") {
-        rows = rows.filter((r) => r.priority === priorityFilter);
+    if (intentFilter && intentFilter !== "all") {
+        rows = rows.filter((r) => r.intent === intentFilter);
     }
 
     rows.sort((a, b) => b.last_activity.localeCompare(a.last_activity));
@@ -345,7 +345,7 @@ api.get("/tickets", (req, res) => {
         by_agent: m.by_agent,
         created_at: m.created_at,
         closed: closedSet.has(m.id),
-        priority: m.priority,
+        intent: m.intent,
         tags: tagsMap.get(m.id) ?? [],
     }));
 
@@ -406,7 +406,7 @@ api.get("/tickets/:id", (req, res) => {
             created_at: t.created_at,
             status: t.status,
             closed,
-            priority: t.priority,
+            intent: t.intent,
             tags: listMessageTags(t.id),
         },
         comments: withTags(comments),

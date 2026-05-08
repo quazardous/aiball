@@ -6,11 +6,11 @@ import {
     listTicketSubscribers,
     listProjectSubscribers,
     upsertTicketSubscription,
-    PRIORITIES,
+    INTENTS,
     type Message,
     type NewMessage,
     type MessageKind,
-    type Priority,
+    type Intent,
 } from "./db.js";
 import { evaluate } from "./rules.js";
 import { deliverToOutbox } from "./outbox.js";
@@ -45,12 +45,12 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
     if (kind === "ticket_created" && (typeof o.title !== "string" || !o.title)) {
         return { error: "title required for ticket_created" };
     }
-    let priority: Priority | null = null;
-    if (o.priority !== undefined && o.priority !== null) {
-        if (typeof o.priority !== "string" || !PRIORITIES.includes(o.priority as Priority)) {
-            return { error: `priority must be one of ${PRIORITIES.join(", ")}` };
+    let intent: Intent | null = null;
+    if (o.intent !== undefined && o.intent !== null) {
+        if (typeof o.intent !== "string" || !INTENTS.includes(o.intent as Intent)) {
+            return { error: `intent must be one of ${INTENTS.join(", ")}` };
         }
-        priority = o.priority as Priority;
+        intent = o.intent as Intent;
     }
     return {
         project: o.project,
@@ -60,7 +60,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         title: typeof o.title === "string" ? o.title : null,
         body: typeof o.body === "string" ? o.body : null,
         by_agent: typeof o.by_agent === "string" ? o.by_agent : null,
-        priority: kind === "ticket_created" ? priority : null,
+        intent: kind === "ticket_created" ? intent : null,
     };
 }
 

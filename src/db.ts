@@ -32,8 +32,8 @@ export type MessageKind =
     | "ticket_reopened";
 export type MessageStatus = "pending" | "approved" | "rejected";
 export type RuleDecision = "auto" | "review";
-export type Priority = "panic" | "request" | "question" | "fyi";
-export const PRIORITIES: readonly Priority[] = ["panic", "request", "question", "fyi"];
+export type Intent = "panic" | "request" | "question" | "fyi";
+export const INTENTS: readonly Intent[] = ["panic", "request", "question", "fyi"];
 
 export type Strategy = "manual" | "auto" | "auto-reply";
 export const STRATEGIES: readonly Strategy[] = ["manual", "auto", "auto-reply"];
@@ -46,7 +46,7 @@ export type MessageRow = schema.Message;
 
 /**
  * Legacy union shape for JSON output. Tickets project as kind=ticket_created
- * with title/priority populated and ticket_id/parent_id null; non-tickets
+ * with title/intent populated and ticket_id/parent_id null; non-tickets
  * carry ticket_id (always set), parent_id (= parent_message_id, defaulting
  * to ticket_id for top-level), and inherit project from their parent ticket.
  * This is the on-the-wire contract with api.ts and the frontend; the DB
@@ -69,7 +69,7 @@ export interface Message {
     human_note: string | null;
     edited_title: string | null;
     edited_body: string | null;
-    priority: Priority | null;
+    intent: Intent | null;
     display_seq: number;
 }
 
@@ -100,7 +100,7 @@ export interface NewMessage {
     title?: string | null;
     body?: string | null;
     by_agent?: string | null;
-    priority?: Priority | null;
+    intent?: Intent | null;
 }
 
 export interface NewRule {
@@ -243,7 +243,7 @@ function ticketRowToMessage(t: schema.Ticket): Message {
         human_note: t.humanNote,
         edited_title: t.editedTitle,
         edited_body: t.editedBody,
-        priority: (t.priority as Priority | null) ?? null,
+        intent: (t.intent as Intent | null) ?? null,
         display_seq: t.displaySeq,
     };
 }
@@ -268,7 +268,7 @@ function messageRowToMessage(m: schema.Message, project: string): Message {
         human_note: m.humanNote,
         edited_title: null,
         edited_body: m.editedBody,
-        priority: null,
+        intent: null,
         display_seq: m.displaySeq,
     };
 }
@@ -294,7 +294,7 @@ export function insertMessage(m: NewMessage): Message {
                 title: m.title ?? "",
                 body: m.body ?? null,
                 byAgent: m.by_agent ?? null,
-                priority: m.priority ?? null,
+                intent: m.intent ?? null,
                 createdAt,
             }).returning().get();
             return ticketRowToMessage(inserted);
@@ -418,15 +418,15 @@ export function editMessage(
     fields: {
         title?: string | null;
         body?: string | null;
-        priority?: Priority | null;
+        intent?: Intent | null;
     },
 ): Message | null {
     const db = getDb();
-    // Try tickets first — only tickets have edited_title and priority.
+    // Try tickets first — only tickets have edited_title and intent.
     const ticketPatch: Partial<schema.NewTicket> = {};
     if (fields.title !== undefined) ticketPatch.editedTitle = fields.title;
     if (fields.body !== undefined) ticketPatch.editedBody = fields.body;
-    if (fields.priority !== undefined) ticketPatch.priority = fields.priority;
+    if (fields.intent !== undefined) ticketPatch.intent = fields.intent;
     if (Object.keys(ticketPatch).length > 0) {
         const t = db.update(schema.tickets)
             .set(ticketPatch)
@@ -434,7 +434,7 @@ export function editMessage(
             .run();
         if (t.changes > 0) return getMessage(id);
     }
-    // Otherwise this is a non-ticket message — body only. priority is
+    // Otherwise this is a non-ticket message — body only. intent is
     // ticket-scoped and silently ignored on comments/lifecycle.
     if (fields.body !== undefined) {
         db.update(schema.messages)
