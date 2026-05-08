@@ -117,12 +117,18 @@ export interface ProjectMeta {
     ticket_count: number;
     comment_count: number;
     pending_count: number;
+    /** Set when listProjectsDetailed is called with a consumer_id. */
+    unread_for_consumer?: number;
 }
 
 export const api = {
     listProjects: () => req<string[]>("GET", "/api/projects"),
-    listProjectsDetailed: () =>
-        req<ProjectMeta[]>("GET", "/api/projects?detailed=1"),
+    listProjectsDetailed: (consumer_id?: string) => {
+        const qs = consumer_id
+            ? `?detailed=1&consumer_id=${encodeURIComponent(consumer_id)}`
+            : "?detailed=1";
+        return req<ProjectMeta[]>("GET", `/api/projects${qs}`);
+    },
     deleteProject: (name: string) =>
         req<{ project: string; deleted_messages: number; ok: boolean }>(
             "DELETE",

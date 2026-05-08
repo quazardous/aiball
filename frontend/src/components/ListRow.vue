@@ -4,6 +4,7 @@ import { useSlots } from "vue";
 defineProps<{
     selected?: boolean;
     unread?: boolean;
+    pending?: boolean;
     closed?: boolean;
     danger?: boolean;
 }>();
@@ -20,6 +21,7 @@ const slots = useSlots();
         :class="{
             'list-row--selected': selected,
             'list-row--unread': unread,
+            'list-row--pending': pending,
             'list-row--closed': closed,
             'list-row--danger': danger,
         }"
@@ -80,6 +82,17 @@ const slots = useSlots();
 }
 .list-row--closed {
     opacity: 0.6;
+}
+.list-row--pending {
+    background: color-mix(in srgb, var(--p-yellow-500) 12%, transparent);
+    border-left: 3px solid var(--p-yellow-500);
+    padding-left: calc(0.7rem - 3px);
+}
+.list-row--pending:hover {
+    background: color-mix(in srgb, var(--p-yellow-500) 20%, transparent);
+}
+.aiball-dark .list-row--pending {
+    background: color-mix(in srgb, var(--p-yellow-500) 18%, transparent);
 }
 .list-row--danger .list-row__title {
     color: var(--p-red-500);

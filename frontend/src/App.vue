@@ -4,7 +4,7 @@ import Button from "primevue/button";
 import Select from "primevue/select";
 import Toast from "primevue/toast";
 import { useToast } from "primevue/usetoast";
-import { api, STRATEGIES, type InboxRow, type Message, type Strategy } from "./lib/api";
+import { api, STRATEGIES, type InboxRow, type Message, type ProjectMeta, type Strategy } from "./lib/api";
 import { useRouting } from "./lib/router";
 import { useWs } from "./lib/ws";
 import ListRow from "./components/ListRow.vue";
@@ -82,7 +82,10 @@ function fireOsNotif(title: string, body: string) {
     }
 }
 
-const projects = ref<string[]>([]);
+const projects = ref<ProjectMeta[]>([]);
+const myConsumerId = (() => {
+    return localStorage.getItem("aiball.human_id") || "human";
+})();
 const project = ref<string | null>(
     localStorage.getItem("aiball.project") || null,
 );
@@ -210,7 +213,7 @@ provide("compact", compact);
 
 async function loadProjects() {
     try {
-        projects.value = await api.listProjects();
+        projects.value = await api.listProjectsDetailed(myConsumerId);
     } catch (e) {
         toast.add({
             severity: "error",
@@ -394,10 +397,37 @@ const pendingSelectedCount = computed(() =>
     ).length,
 );
 
-const projectListItems = computed(() => [
-    { label: "All projects", value: null, icon: "pi pi-globe" },
-    ...projects.value.map((p) => ({ label: p, value: p, icon: "pi pi-folder" })),
+interface ProjectListItem {
+    label: string;
+    value: string | null;
+    icon: string;
+    pending: number;
+    unread: number;
+}
+const projectListItems = computed<ProjectListItem[]>(() => [
+    {
+        label: "All projects",
+        value: null,
+        icon: "pi pi-globe",
+        pending: projects.value.reduce((acc, p) => acc + (p.pending_count || 0), 0),
+        unread: projects.value.reduce((acc, p) => acc + (p.unread_for_consumer || 0), 0),
+    },
+    ...projects.value.map((p) => ({
+        label: p.name,
+        value: p.name,
+        icon: "pi pi-folder",
+        pending: p.pending_count || 0,
+        unread: p.unread_for_consumer || 0,
+    })),
 ]);
+
+// Global counts shown in the header (totals across all projects).
+const globalPendingCount = computed(() =>
+    projects.value.reduce((acc, p) => acc + (p.pending_count || 0), 0),
+);
+const globalUnreadCount = computed(() =>
+    projects.value.reduce((acc, p) => acc + (p.unread_for_consumer || 0), 0),
+);
 </script>
 
 <template>
@@ -409,6 +439,20 @@ const projectListItems = computed(() => [
                 :class="connected ? 'live' : 'offline'"
                 :title="connected ? 'WebSocket live' : 'WebSocket offline'"
             />
+            <span
+                v-if="globalPendingCount > 0"
+                class="header-badge header-badge--pending"
+                :title="`${globalPendingCount} pending moderation across all projects`"
+            >
+                <i class="pi pi-clock" /> {{ globalPendingCount }}
+            </span>
+            <span
+                v-if="globalUnreadCount > 0"
+                class="header-badge header-badge--unread"
+                :title="`${globalUnreadCount} unread for you across all projects`"
+            >
+                <i class="pi pi-envelope" /> {{ globalUnreadCount }}
+            </span>
             <Select
                 :model-value="strategy"
                 :options="strategyOptions"
@@ -475,7 +519,17 @@ const projectListItems = computed(() => [
                     @click="selectProject(p.value)"
                 >
                     <i :class="p.icon" />
-                    <span>{{ p.label }}</span>
+                    <span class="sidebar-item-label">{{ p.label }}</span>
+                    <span
+                        v-if="p.pending > 0"
+                        class="sidebar-badge sidebar-badge--pending"
+                        :title="`${p.pending} pending moderation`"
+                    >{{ p.pending }}</span>
+                    <span
+                        v-if="p.unread > 0"
+                        class="sidebar-badge sidebar-badge--unread"
+                        :title="`${p.unread} unread for you`"
+                    >{{ p.unread }}</span>
                 </button>
 
                 <div class="sidebar-section-label" style="margin-top: 1rem">
@@ -591,7 +645,8 @@ const projectListItems = computed(() => [
                         v-for="r in rows"
                         :key="r.id"
                         :selected="selectedIds.has(r.id)"
-                        :unread="r.status === 'pending' || r.pending_comment_count > 0"
+                        :unread="r.pending_comment_count > 0"
+                        :pending="r.status === 'pending'"
                         :closed="r.closed"
                         @click="openThread(r)"
                     >
@@ -743,6 +798,48 @@ const projectListItems = computed(() => [
 }
 .sidebar-item.active:hover {
     background: var(--p-primary-color);
+}
+.sidebar-item-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sidebar-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 0.05rem 0.4rem;
+    line-height: 1.2;
+}
+.sidebar-badge--pending {
+    background: var(--p-yellow-500);
+    color: black;
+}
+.sidebar-badge--unread {
+    background: var(--p-primary-color);
+    color: var(--p-primary-contrast-color);
+}
+.sidebar-item.active .sidebar-badge--unread {
+    background: var(--p-primary-contrast-color);
+    color: var(--p-primary-color);
+}
+.header-badge {
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 0.15rem 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+.header-badge--pending {
+    background: var(--p-yellow-500);
+    color: black;
+}
+.header-badge--unread {
+    background: var(--p-primary-color);
+    color: var(--p-primary-contrast-color);
 }
 
 .aiball-main {

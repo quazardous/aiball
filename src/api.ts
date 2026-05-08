@@ -185,7 +185,8 @@ api.post("/messages/:id/note", (req, res) => {
 
 api.get("/projects", (req, res) => {
     if (req.query.detailed === "1") {
-        return res.json(listProjectsDetailed());
+        const consumer = req.query.consumer_id as string | undefined;
+        return res.json(listProjectsDetailed(consumer));
     }
     res.json(listProjects());
 });
@@ -283,7 +284,9 @@ api.get("/inbox", (req, res) => {
             created_at: t.created_at,
             status: t.status,
             priority: t.priority,
-            closed: agg.latestLifecycleKind === "ticket_closed",
+            closed:
+                agg.latestLifecycleKind === "ticket_closed" ||
+                t.status === "rejected",
             comment_count: agg.commentCount,
             pending_comment_count: agg.pendingCount,
             last_activity:
@@ -383,7 +386,9 @@ api.get("/tickets/:id", (req, res) => {
                 m.status === "approved",
         )
         .sort((a, b) => b.id - a.id);
-    const closed = lifecycle.length > 0 && lifecycle[0].kind === "ticket_closed";
+    const closed =
+        t.status === "rejected" ||
+        (lifecycle.length > 0 && lifecycle[0].kind === "ticket_closed");
     res.json({
         ticket: {
             id: t.id,

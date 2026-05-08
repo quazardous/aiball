@@ -215,12 +215,14 @@ const tree = computed<NestedComment[]>(() => {
             </ul>
 
             <MessageComposer
-                v-if="!data.ticket.closed && data.ticket.status === 'approved' && replyTo === null"
+                v-if="!data.ticket.closed && data.ticket.status !== 'rejected' && replyTo === null"
                 mode="comment"
                 :project="data.ticket.project"
                 :ticket-id="data.ticket.id"
                 :parent-id="data.ticket.id"
-                placeholder="Reply on this thread (markdown supported)"
+                :placeholder="data.ticket.status === 'pending'
+                    ? 'Reply on this pending thread (markdown supported) — your comment goes through moderation unless you are human'
+                    : 'Reply on this thread (markdown supported)'"
                 @submitted="load"
             />
         </template>

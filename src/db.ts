@@ -472,9 +472,12 @@ export interface ProjectMeta {
     ticket_count: number;
     comment_count: number;
     pending_count: number;
+    /** Unread pings the given consumer has on this project. Set only when
+     *  listProjectsDetailed is called with a consumer_id. */
+    unread_for_consumer?: number;
 }
 
-export function listProjectsDetailed(): ProjectMeta[] {
+export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     const db = getDb();
     // Aggregates by project across tickets + messages. Two queries merged
     // in JS — small data sizes, simpler than a SQL UNION/GROUP dance.
@@ -523,6 +526,42 @@ export function listProjectsDetailed(): ProjectMeta[] {
             });
         }
     }
+    if (consumer_id) {
+        // Per-project unread for this consumer = pings (ticket OR message)
+        // joined to tickets to get the project. One query per source, merged.
+        const ticketUnread = db.select({
+            project: schema.tickets.project,
+            n: sql<number>`COUNT(*)`,
+        })
+            .from(schema.pings)
+            .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.messageId))
+            .where(and(
+                eq(schema.pings.recipient, consumer_id),
+                isNull(schema.pings.seenAt),
+            ))
+            .groupBy(schema.tickets.project)
+            .all();
+        const messageUnread = db.select({
+            project: schema.tickets.project,
+            n: sql<number>`COUNT(*)`,
+        })
+            .from(schema.pings)
+            .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.messageId))
+            .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+            .where(and(
+                eq(schema.pings.recipient, consumer_id),
+                isNull(schema.pings.seenAt),
+            ))
+            .groupBy(schema.tickets.project)
+            .all();
+        const counts = new Map<string, number>();
+        for (const r of ticketUnread) counts.set(r.project, (counts.get(r.project) ?? 0) + Number(r.n));
+        for (const r of messageUnread) counts.set(r.project, (counts.get(r.project) ?? 0) + Number(r.n));
+        for (const p of byProject.values()) {
+            p.unread_for_consumer = counts.get(p.name) ?? 0;
+        }
+    }
+
     return [...byProject.values()].sort((a, b) =>
         b.last_activity.localeCompare(a.last_activity),
     );
