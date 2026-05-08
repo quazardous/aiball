@@ -535,6 +535,8 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     if (consumer_id) {
         // Per-project unread for this consumer = pings (ticket OR message)
         // joined to tickets to get the project. One query per source, merged.
+        // Self-pings are filtered (the agent's own posts shouldn't count as
+        // unread to themselves — see listUnread for the rationale).
         const ticketUnread = db.select({
             project: schema.tickets.project,
             n: sql<number>`COUNT(*)`,
@@ -544,6 +546,10 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             .where(and(
                 eq(schema.pings.recipient, consumer_id),
                 isNull(schema.pings.seenAt),
+                or(
+                    isNull(schema.tickets.byAgent),
+                    ne(schema.tickets.byAgent, consumer_id),
+                ),
             ))
             .groupBy(schema.tickets.project)
             .all();
@@ -557,6 +563,10 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             .where(and(
                 eq(schema.pings.recipient, consumer_id),
                 isNull(schema.pings.seenAt),
+                or(
+                    isNull(schema.messages.byAgent),
+                    ne(schema.messages.byAgent, consumer_id),
+                ),
             ))
             .groupBy(schema.tickets.project)
             .all();
@@ -730,6 +740,15 @@ export function listProjectSubscribers(project: string): string[] {
 // Inbox / unread (backed by pings, joined with messages or tickets)
 // =====================================================================
 
+/**
+ * Self-pings (where the underlying message's by_agent matches the ping's
+ * recipient) are filtered out. They land in the table by way of transition
+ * pings — when a moderator decides on a pending post, the daemon inserts a
+ * ping for the author so the agent could in theory poll for "my own status
+ * changed". But surfacing those in the same `unread()` feed as activity
+ * pings clutters the inbox: the agent already knows what they posted. Data
+ * is preserved in the table; just hidden from the user-facing query.
+ */
 export function listUnread(
     consumer_id: string,
     project: string,
@@ -746,6 +765,10 @@ export function listUnread(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
             eq(schema.tickets.project, project),
+            or(
+                isNull(schema.tickets.byAgent),
+                ne(schema.tickets.byAgent, consumer_id),
+            ),
         ))
         .all();
 
@@ -757,6 +780,10 @@ export function listUnread(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
             eq(schema.tickets.project, project),
+            or(
+                isNull(schema.messages.byAgent),
+                ne(schema.messages.byAgent, consumer_id),
+            ),
         ))
         .all();
 
@@ -777,6 +804,10 @@ export function unreadCount(consumer_id: string, project: string): number {
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
             eq(schema.tickets.project, project),
+            or(
+                isNull(schema.tickets.byAgent),
+                ne(schema.tickets.byAgent, consumer_id),
+            ),
         )).get();
     const m = db.select({ n: sql<number>`COUNT(*)` })
         .from(schema.pings)
@@ -786,6 +817,10 @@ export function unreadCount(consumer_id: string, project: string): number {
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
             eq(schema.tickets.project, project),
+            or(
+                isNull(schema.messages.byAgent),
+                ne(schema.messages.byAgent, consumer_id),
+            ),
         )).get();
     return Number(t?.n ?? 0) + Number(m?.n ?? 0);
 }
@@ -878,13 +913,32 @@ export function listPings(opts: {
     limit?: number;
 }): Ping[] {
     const db = getDb();
-    const conds = [eq(schema.pings.recipient, opts.recipient)];
-    if (opts.unreadOnly) conds.push(isNull(schema.pings.seenAt));
+    const baseConds = [eq(schema.pings.recipient, opts.recipient)];
+    if (opts.unreadOnly) baseConds.push(isNull(schema.pings.seenAt));
+
+    // Filter self-pings out: a ping where the underlying message was authored
+    // by the recipient itself is not interesting (transition pings on the
+    // agent's own posts pollute the inbox). Each query gets the by_agent
+    // column from the appropriate table (tickets vs _messages).
+    const ticketConds = [
+        ...baseConds,
+        or(
+            isNull(schema.tickets.byAgent),
+            ne(schema.tickets.byAgent, opts.recipient),
+        ),
+    ];
+    const messageConds = [
+        ...baseConds,
+        or(
+            isNull(schema.messages.byAgent),
+            ne(schema.messages.byAgent, opts.recipient),
+        ),
+    ];
 
     const ticketHits = db.select({ ping: schema.pings, t: schema.tickets })
         .from(schema.pings)
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.messageId))
-        .where(and(...conds))
+        .where(and(...ticketConds))
         .all();
 
     const messageHits = db.select({
@@ -895,7 +949,7 @@ export function listPings(opts: {
         .from(schema.pings)
         .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.messageId))
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
-        .where(and(...conds))
+        .where(and(...messageConds))
         .all();
 
     const out: Ping[] = [
@@ -938,13 +992,31 @@ export function markPingsRead(opts: {
 }
 
 export function unreadPingCount(recipient: string): number {
-    const r = getDb().select({ n: sql<number>`COUNT(*)` })
+    const db = getDb();
+    // Self-pings filtered: split count over tickets + messages joins.
+    const t = db.select({ n: sql<number>`COUNT(*)` })
         .from(schema.pings)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.messageId))
         .where(and(
             eq(schema.pings.recipient, recipient),
             isNull(schema.pings.seenAt),
+            or(
+                isNull(schema.tickets.byAgent),
+                ne(schema.tickets.byAgent, recipient),
+            ),
         )).get();
-    return Number(r?.n ?? 0);
+    const m = db.select({ n: sql<number>`COUNT(*)` })
+        .from(schema.pings)
+        .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.messageId))
+        .where(and(
+            eq(schema.pings.recipient, recipient),
+            isNull(schema.pings.seenAt),
+            or(
+                isNull(schema.messages.byAgent),
+                ne(schema.messages.byAgent, recipient),
+            ),
+        )).get();
+    return Number(t?.n ?? 0) + Number(m?.n ?? 0);
 }
 
 // =====================================================================

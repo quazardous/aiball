@@ -310,7 +310,7 @@ server.registerTool(
     "unread",
     {
         description:
-            "Pull approved messages this agent hasn't seen yet. Default mode is the project feed (set with project, or $AIBALL_PROJECT). Pass pings=true to read personal pings (lineage-based notifications across every ticket you participated in or explicitly follow). Set mark_read=true to ack in the same call — only the messages returned in this very response are acked, never anything the agent didn't see. To paginate through a large backlog: keep calling with mark_read=true until the response comes back empty. There is no way to advance the cursor past unseen content from this tool — that would defeat the purpose of an inbox.",
+            "Pull approved messages this agent hasn't seen yet. Default mode is the project feed (set with project, or $AIBALL_PROJECT). Pass pings=true to read personal pings (lineage-based notifications across every ticket you participated in or explicitly follow). Set mark_read=true to ack in the same call — only the messages returned in this very response are acked, never anything the agent didn't see. To paginate through a large backlog: keep calling with mark_read=true until the response comes back empty. There is no way to advance the cursor past unseen content from this tool — that would defeat the purpose of an inbox. Pass peek=true to inspect without ever flipping seen state, even if mark_read is set (safe for scripts and dry runs). Self-pings (the agent's own posts) are filtered out of every variant — if you need to track your own pending posts, use poll().my_pending_tickets.",
         inputSchema: {
             project: z.string().optional(),
             pings: z
@@ -324,17 +324,24 @@ server.registerTool(
                 .boolean()
                 .optional()
                 .describe(
-                    "If true, mark the returned messages as read in the same call (= ack the slice you just received, derived from the max id in the response). Calling this with no messages returned is a no-op.",
+                    "If true, mark the returned messages as read in the same call (= ack the slice you just received, derived from the max id in the response). Calling this with no messages returned is a no-op. Suppressed when peek=true.",
+                ),
+            peek: z
+                .boolean()
+                .optional()
+                .describe(
+                    "Read-only inspection. Forces no state mutation regardless of mark_read. Useful for dry runs, scripts that snapshot state, or debugging the inbox.",
                 ),
         },
     },
-    async ({ project, pings, limit, mark_read }) => {
+    async ({ project, pings, limit, mark_read, peek }) => {
+        const shouldAck = mark_read === true && peek !== true;
         if (pings === true) {
             const data = (await client.listPings({
                 unreadOnly: true,
                 limit: limit ?? 100,
             })) as { pings?: Array<{ message_id: number }> } | undefined;
-            if (mark_read) {
+            if (shouldAck) {
                 // Per-message ack: only the rows we actually returned to the
                 // agent are marked seen. No way to skip-ahead past unseen
                 // content.
@@ -342,13 +349,13 @@ server.registerTool(
                     await client.markPingsRead({ upToId: p.message_id });
                 }
             }
-            return asText({ kind: "pings", ...((data as object) ?? {}) });
+            return asText({ kind: "pings", peek: peek === true, ...((data as object) ?? {}) });
         }
         const proj = client.resolveProject(project);
         const data = (await client.unread(proj, limit ?? 100)) as
             | { messages?: Array<{ id: number }> }
             | undefined;
-        if (mark_read) {
+        if (shouldAck) {
             // Per-message ack: each id received is marked seen on its own
             // row in the pings table. Pending-then-approved messages still
             // reach this agent on a later call because pings are inserted at
@@ -357,7 +364,7 @@ server.registerTool(
                 await client.markMessageSeen(m.id);
             }
         }
-        return asText({ kind: "project", ...((data as object) ?? {}) });
+        return asText({ kind: "project", peek: peek === true, ...((data as object) ?? {}) });
     },
 );
 
