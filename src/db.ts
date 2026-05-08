@@ -15,6 +15,15 @@ export type Strategy = "manual" | "auto" | "auto-reply";
 export const STRATEGIES: readonly Strategy[] = ["manual", "auto", "auto-reply"];
 export const DEFAULT_STRATEGY: Strategy = "auto-reply";
 
+/**
+ * Legacy union shape representing any row in the (now virtual) `messages`
+ * stream. Backed by a SQL VIEW that UNIONs the physical `tickets` and
+ * `_messages` tables. Ticket rows have project/title/edited_title/priority
+ * populated and ticket_id/parent_id NULL; non-ticket rows have ticket_id
+ * (always set), parent_id (mapped from parent_message_id; NULL collapses
+ * to ticket_id for legacy callers), and project resolved via the parent
+ * ticket. `display_seq` is per-project for tickets, per-thread for messages.
+ */
 export interface Message {
     id: number;
     project: string;
@@ -33,6 +42,7 @@ export interface Message {
     edited_title: string | null;
     edited_body: string | null;
     priority: Priority | null;
+    display_seq: number;
 }
 
 export interface Subscription {
@@ -119,17 +129,39 @@ export function getDb(): Database.Database {
     return db;
 }
 
+/**
+ * Stable schema. Idempotent — safe to run on every boot. The data model:
+ *
+ *   tickets          — root rows, one per ticket; display_seq is per-project
+ *   _messages        — comments + lifecycle events, FK to tickets;
+ *                      display_seq is per-ticket
+ *   messages (VIEW)  — legacy union shape over (tickets, _messages) so all
+ *                      `SELECT FROM messages` callers keep working
+ *   tickets / _messages share the global id pool via settings.next_global_id
+ *   so legacy refs (pings, etc.) remain unambiguous integer ids
+ *
+ *   ticket_tags      — tag join, FK to tickets only (tags are ticket-only)
+ *   ticket_subscriptions / subscriptions — project- and per-ticket follows
+ *   pings            — per-recipient, per-message delivery rows (no FK; the
+ *                      target id may live in either tickets or _messages)
+ *   rules / tags / settings — straightforward
+ */
 function migrate(d: Database.Database): void {
+    d.pragma("foreign_keys = OFF");
     d.exec(`
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS tickets (
+            id INTEGER PRIMARY KEY,
             project TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            ticket_id INTEGER,
-            parent_id INTEGER,
-            title TEXT,
+            display_seq INTEGER NOT NULL,
+            title TEXT NOT NULL,
             body TEXT,
             by_agent TEXT,
+            priority TEXT,
             status TEXT NOT NULL DEFAULT 'pending',
             created_at TEXT NOT NULL,
             decided_at TEXT,
@@ -138,15 +170,32 @@ function migrate(d: Database.Database): void {
             human_note TEXT,
             edited_title TEXT,
             edited_body TEXT,
-            priority TEXT
+            UNIQUE (project, display_seq)
         );
+        CREATE INDEX IF NOT EXISTS idx_tickets_project ON tickets(project);
+        CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
 
-        CREATE INDEX IF NOT EXISTS idx_messages_status_project
-            ON messages(status, project);
-        CREATE INDEX IF NOT EXISTS idx_messages_kind_ticket
-            ON messages(kind, ticket_id);
-        CREATE INDEX IF NOT EXISTS idx_messages_parent
-            ON messages(parent_id);
+        CREATE TABLE IF NOT EXISTS _messages (
+            id INTEGER PRIMARY KEY,
+            ticket_id INTEGER NOT NULL,
+            display_seq INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            parent_message_id INTEGER,
+            body TEXT,
+            by_agent TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            decided_at TEXT,
+            decided_by TEXT,
+            matched_rule_id INTEGER,
+            human_note TEXT,
+            edited_body TEXT,
+            FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+            FOREIGN KEY (parent_message_id) REFERENCES _messages(id) ON DELETE SET NULL,
+            UNIQUE (ticket_id, display_seq)
+        );
+        CREATE INDEX IF NOT EXISTS idx_messages_ticket ON _messages(ticket_id);
+        CREATE INDEX IF NOT EXISTS idx_messages_kind ON _messages(kind);
 
         CREATE TABLE IF NOT EXISTS rules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,99 +208,9 @@ function migrate(d: Database.Database): void {
             note TEXT,
             created_at TEXT NOT NULL
         );
-
         CREATE INDEX IF NOT EXISTS idx_rules_position
             ON rules(position) WHERE enabled = 1;
 
-        CREATE TABLE IF NOT EXISTS subscriptions (
-            consumer_id TEXT NOT NULL,
-            project TEXT NOT NULL,
-            subscribed_at TEXT NOT NULL,
-            last_seen_id INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (consumer_id, project)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_subscriptions_project
-            ON subscriptions(project);
-
-        /*
-         * Per-ticket subscriptions. Independent of project subscriptions:
-         * an agent can follow a ticket they don't own, in a project they
-         * don't subscribe to. Each subscriber's cursor lives in pings
-         * (one row per delivered message), so consuming on one consumer
-         * does not affect another.
-         */
-        CREATE TABLE IF NOT EXISTS ticket_subscriptions (
-            consumer_id TEXT NOT NULL,
-            ticket_id INTEGER NOT NULL,
-            subscribed_at TEXT NOT NULL,
-            PRIMARY KEY (consumer_id, ticket_id),
-            FOREIGN KEY (ticket_id) REFERENCES messages(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_ticket_subs_ticket
-            ON ticket_subscriptions(ticket_id);
-
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        );
-
-        /*
-         * Pings: lineage-based notifications. When a comment thread reaches a
-         * ticket whose creator is a different agent than the commenter, we
-         * insert a ping row so that creator can see the reply via /api/pings
-         * even if they never subscribed to the project. seen_at = NULL means
-         * unread.
-         */
-        CREATE TABLE IF NOT EXISTS pings (
-            recipient TEXT NOT NULL,
-            message_id INTEGER NOT NULL,
-            created_at TEXT NOT NULL,
-            seen_at TEXT,
-            PRIMARY KEY (recipient, message_id),
-            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_pings_recipient_unread
-            ON pings(recipient) WHERE seen_at IS NULL;
-    `);
-
-    // Migration: add parent_id column to existing messages tables.
-    const cols = d.prepare("PRAGMA table_info(messages)").all() as { name: string }[];
-    if (!cols.some((c) => c.name === "parent_id")) {
-        d.exec("ALTER TABLE messages ADD COLUMN parent_id INTEGER");
-        d.exec("CREATE INDEX IF NOT EXISTS idx_messages_parent ON messages(parent_id)");
-    }
-    if (!cols.some((c) => c.name === "priority")) {
-        d.exec("ALTER TABLE messages ADD COLUMN priority TEXT");
-    }
-
-    // Migration: backfill pings for existing project subscriptions. The
-    // delivery model switched from cursor (subscriptions.last_seen_id) to
-    // per-message pings rows. Without this backfill, existing subscribers
-    // would see an empty `unread()` even though they had messages waiting.
-    // For each (consumer, project) sub, every approved message in that
-    // project authored by someone else gets a ping inserted (idempotent
-    // via the pings PK, so re-running is safe).
-    const cursorMigrationDone = d
-        .prepare("SELECT value FROM settings WHERE key = ?")
-        .get("ping_backfill_v1") as { value: string } | undefined;
-    if (!cursorMigrationDone) {
-        d.exec(`
-            INSERT OR IGNORE INTO pings (recipient, message_id, created_at)
-            SELECT s.consumer_id, m.id, m.created_at
-            FROM subscriptions s
-            JOIN messages m ON m.project = s.project
-            WHERE m.status = 'approved'
-              AND (m.by_agent IS NULL OR m.by_agent != s.consumer_id)
-              AND m.id > s.last_seen_id
-        `);
-        d.prepare(
-            "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",
-        ).run("ping_backfill_v1", new Date().toISOString());
-    }
-
-    // Tags (closed list, human-curated) + message ↔ tag join.
-    d.exec(`
         CREATE TABLE IF NOT EXISTS tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
@@ -262,18 +221,99 @@ function migrate(d: Database.Database): void {
         );
         CREATE INDEX IF NOT EXISTS idx_tags_position ON tags(position);
 
-        CREATE TABLE IF NOT EXISTS message_tags (
-            message_id INTEGER NOT NULL,
+        CREATE TABLE IF NOT EXISTS ticket_tags (
+            ticket_id INTEGER NOT NULL,
             tag_id INTEGER NOT NULL,
             set_at TEXT NOT NULL,
             set_by TEXT,
-            PRIMARY KEY (message_id, tag_id),
-            FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+            PRIMARY KEY (ticket_id, tag_id),
+            FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
             FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
         );
-        CREATE INDEX IF NOT EXISTS idx_message_tags_tag ON message_tags(tag_id);
-    `);
+        CREATE INDEX IF NOT EXISTS idx_ticket_tags_tag ON ticket_tags(tag_id);
 
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            consumer_id TEXT NOT NULL,
+            project TEXT NOT NULL,
+            subscribed_at TEXT NOT NULL,
+            last_seen_id INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (consumer_id, project)
+        );
+        CREATE INDEX IF NOT EXISTS idx_subscriptions_project ON subscriptions(project);
+
+        CREATE TABLE IF NOT EXISTS ticket_subscriptions (
+            consumer_id TEXT NOT NULL,
+            ticket_id INTEGER NOT NULL,
+            subscribed_at TEXT NOT NULL,
+            PRIMARY KEY (consumer_id, ticket_id),
+            FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_ticket_subs_ticket ON ticket_subscriptions(ticket_id);
+
+        CREATE TABLE IF NOT EXISTS pings (
+            recipient TEXT NOT NULL,
+            message_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            seen_at TEXT,
+            PRIMARY KEY (recipient, message_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pings_recipient_unread
+            ON pings(recipient) WHERE seen_at IS NULL;
+
+        CREATE VIEW IF NOT EXISTS messages AS
+        SELECT
+            t.id            AS id,
+            t.project       AS project,
+            'ticket_created' AS kind,
+            NULL            AS ticket_id,
+            NULL            AS parent_id,
+            t.title         AS title,
+            t.body          AS body,
+            t.by_agent      AS by_agent,
+            t.status        AS status,
+            t.created_at    AS created_at,
+            t.decided_at    AS decided_at,
+            t.decided_by    AS decided_by,
+            t.matched_rule_id AS matched_rule_id,
+            t.human_note    AS human_note,
+            t.edited_title  AS edited_title,
+            t.edited_body   AS edited_body,
+            t.priority      AS priority,
+            t.display_seq   AS display_seq
+        FROM tickets t
+        UNION ALL
+        SELECT
+            m.id            AS id,
+            p.project       AS project,
+            m.kind          AS kind,
+            m.ticket_id     AS ticket_id,
+            COALESCE(m.parent_message_id, m.ticket_id) AS parent_id,
+            NULL            AS title,
+            m.body          AS body,
+            m.by_agent      AS by_agent,
+            m.status        AS status,
+            m.created_at    AS created_at,
+            m.decided_at    AS decided_at,
+            m.decided_by    AS decided_by,
+            m.matched_rule_id AS matched_rule_id,
+            m.human_note    AS human_note,
+            NULL            AS edited_title,
+            m.edited_body   AS edited_body,
+            NULL            AS priority,
+            m.display_seq   AS display_seq
+        FROM _messages m
+        JOIN tickets p ON p.id = m.ticket_id;
+    `);
+    d.pragma("foreign_keys = ON");
+
+    // Bootstrap the shared id counter (next_global_id). Idempotent —
+    // INSERT OR IGNORE leaves an existing row alone, so a populated DB
+    // won't have its counter reset.
+    d.prepare(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+    ).run("next_global_id", "1");
+
+    // Tag catalog seed: only on a fresh DB (haveTags === 0).
     const haveTags = (d.prepare("SELECT COUNT(*) AS n FROM tags").get() as { n: number }).n;
     if (haveTags === 0) {
         const ins = d.prepare(`
@@ -296,30 +336,109 @@ function migrate(d: Database.Database): void {
     }
 }
 
+
 function nowIso(): string {
     return new Date().toISOString();
 }
 
+/**
+ * Allocate the next id from the shared counter so tickets and _messages stay
+ * in a single id space (legacy refs in pings/etc continue to work).
+ */
+function nextGlobalId(d: Database.Database): number {
+    const row = d
+        .prepare("SELECT CAST(value AS INTEGER) AS v FROM settings WHERE key = ?")
+        .get("next_global_id") as { v: number } | undefined;
+    const id = row?.v ?? 1;
+    d.prepare(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+    ).run("next_global_id", String(id + 1));
+    return id;
+}
+
+/**
+ * Insert into the right physical table based on kind, allocate a global id,
+ * compute display_seq (per-project for tickets, per-ticket for messages),
+ * and return the row in the legacy union shape for backward compatibility
+ * with all the existing call sites.
+ */
 export function insertMessage(m: NewMessage): Message {
     const d = getDb();
-    const stmt = d.prepare(`
-        INSERT INTO messages
-            (project, kind, ticket_id, parent_id, title, body, by_agent, priority, created_at)
-        VALUES
-            (@project, @kind, @ticket_id, @parent_id, @title, @body, @by_agent, @priority, @created_at)
-        RETURNING *
-    `);
-    return stmt.get({
-        project: m.project,
-        kind: m.kind,
-        ticket_id: m.ticket_id ?? null,
-        parent_id: m.parent_id ?? null,
-        title: m.title ?? null,
-        body: m.body ?? null,
-        by_agent: m.by_agent ?? null,
-        priority: m.kind === "ticket_created" ? (m.priority ?? null) : null,
-        created_at: nowIso(),
-    }) as Message;
+    const tx = d.transaction(() => {
+        const id = nextGlobalId(d);
+        const created_at = nowIso();
+        if (m.kind === "ticket_created") {
+            // display_seq = max for project + 1 (1 if first).
+            const r = d
+                .prepare(
+                    "SELECT COALESCE(MAX(display_seq), 0) + 1 AS n FROM tickets WHERE project = ?",
+                )
+                .get(m.project) as { n: number };
+            d.prepare(
+                `INSERT INTO tickets
+                    (id, project, display_seq, title, body, by_agent, priority, created_at)
+                 VALUES (@id, @project, @display_seq, @title, @body, @by_agent, @priority, @created_at)`,
+            ).run({
+                id,
+                project: m.project,
+                display_seq: r.n,
+                title: m.title ?? "",
+                body: m.body ?? null,
+                by_agent: m.by_agent ?? null,
+                priority: m.priority ?? null,
+                created_at,
+            });
+            return id;
+        }
+        // Non-ticket: comment_added | ticket_closed | ticket_reopened.
+        if (!m.ticket_id) {
+            throw new Error(`${m.kind} requires ticket_id`);
+        }
+        const r = d
+            .prepare(
+                "SELECT COALESCE(MAX(display_seq), 0) + 1 AS n FROM _messages WHERE ticket_id = ?",
+            )
+            .get(m.ticket_id) as { n: number };
+        // parent_message_id: NULL when parent is the ticket itself (legacy
+        // callers pass parent_id == ticket_id for top-level).
+        const parentMessageId =
+            m.parent_id !== undefined &&
+            m.parent_id !== null &&
+            m.parent_id !== m.ticket_id
+                ? m.parent_id
+                : null;
+        d.prepare(
+            `INSERT INTO _messages
+                (id, ticket_id, display_seq, kind, parent_message_id,
+                 body, by_agent, created_at)
+             VALUES (@id, @ticket_id, @display_seq, @kind, @parent_message_id,
+                     @body, @by_agent, @created_at)`,
+        ).run({
+            id,
+            ticket_id: m.ticket_id,
+            display_seq: r.n,
+            kind: m.kind,
+            parent_message_id: parentMessageId,
+            body: m.body ?? null,
+            by_agent: m.by_agent ?? null,
+            created_at,
+        });
+        return id;
+    });
+    const id = tx();
+    return getMessage(id) as Message;
+}
+
+/**
+ * Internal: figures out which physical table holds an id. Returns null if
+ * the id doesn't exist in either table.
+ */
+function whichTable(d: Database.Database, id: number): "tickets" | "_messages" | null {
+    const t = d.prepare("SELECT 1 FROM tickets WHERE id = ?").get(id);
+    if (t) return "tickets";
+    const m = d.prepare("SELECT 1 FROM _messages WHERE id = ?").get(id);
+    if (m) return "_messages";
+    return null;
 }
 
 export function getMessage(id: number): Message | null {
@@ -368,13 +487,14 @@ export function updateMessageStatus(
     decidedBy: "human" | "auto" | "owner",
     matchedRuleId: number | null = null,
 ): Message | null {
-    getDb()
-        .prepare(`
-            UPDATE messages
-            SET status = ?, decided_at = ?, decided_by = ?, matched_rule_id = ?
-            WHERE id = ?
-        `)
-        .run(status, nowIso(), decidedBy, matchedRuleId, id);
+    const d = getDb();
+    const table = whichTable(d, id);
+    if (!table) return null;
+    d.prepare(
+        `UPDATE ${table}
+         SET status = ?, decided_at = ?, decided_by = ?, matched_rule_id = ?
+         WHERE id = ?`,
+    ).run(status, nowIso(), decidedBy, matchedRuleId, id);
     return getMessage(id);
 }
 
@@ -382,9 +502,14 @@ export function editMessage(
     id: number,
     fields: { title?: string | null; body?: string | null },
 ): Message | null {
+    const d = getDb();
+    const table = whichTable(d, id);
+    if (!table) return null;
     const sets: string[] = [];
     const args: unknown[] = [];
-    if (fields.title !== undefined) {
+    // edited_title only exists on tickets; silently drop the field for
+    // non-ticket rows (comments don't have titles).
+    if (fields.title !== undefined && table === "tickets") {
         sets.push("edited_title = ?");
         args.push(fields.title);
     }
@@ -394,16 +519,17 @@ export function editMessage(
     }
     if (!sets.length) return getMessage(id);
     args.push(id);
-    getDb()
-        .prepare(`UPDATE messages SET ${sets.join(", ")} WHERE id = ?`)
-        .run(...args);
+    d.prepare(`UPDATE ${table} SET ${sets.join(", ")} WHERE id = ?`).run(
+        ...args,
+    );
     return getMessage(id);
 }
 
 export function noteMessage(id: number, note: string | null): Message | null {
-    getDb()
-        .prepare("UPDATE messages SET human_note = ? WHERE id = ?")
-        .run(note, id);
+    const d = getDb();
+    const table = whichTable(d, id);
+    if (!table) return null;
+    d.prepare(`UPDATE ${table} SET human_note = ? WHERE id = ?`).run(note, id);
     return getMessage(id);
 }
 
@@ -444,7 +570,7 @@ export function listProjectsDetailed(): ProjectMeta[] {
 }
 
 /**
- * Hard-delete a project: every message in it (cascades to message_tags,
+ * Hard-delete a project: every message in it (cascades to ticket_tags,
  * pings, ticket_subscriptions via FK), every project subscription. Returns
  * the count of deleted messages so the caller can decide whether to also
  * wipe the project's outbox file.
@@ -452,9 +578,30 @@ export function listProjectsDetailed(): ProjectMeta[] {
 export function deleteProject(name: string): { deleted_messages: number } {
     const d = getDb();
     const tx = d.transaction((p: string) => {
-        const r = d.prepare("DELETE FROM messages WHERE project = ?").run(p);
+        // Count what's about to disappear (tickets + their messages) so the
+        // caller can report. _messages cascades via FK on tickets.
+        const ticketCount = (d
+            .prepare("SELECT COUNT(*) AS n FROM tickets WHERE project = ?")
+            .get(p) as { n: number }).n;
+        const messageCount = (d
+            .prepare(
+                "SELECT COUNT(*) AS n FROM _messages WHERE ticket_id IN (SELECT id FROM tickets WHERE project = ?)",
+            )
+            .get(p) as { n: number }).n;
+        // Pings reference ids in either table — clean them up explicitly
+        // since pings has no FK constraint anymore.
+        d.prepare(
+            `DELETE FROM pings
+             WHERE message_id IN (SELECT id FROM tickets WHERE project = ?)
+                OR message_id IN (
+                    SELECT id FROM _messages
+                    WHERE ticket_id IN (SELECT id FROM tickets WHERE project = ?)
+                )`,
+        ).run(p, p);
+        // Tickets DELETE cascades to _messages, ticket_subscriptions, ticket_tags via FK.
+        d.prepare("DELETE FROM tickets WHERE project = ?").run(p);
         d.prepare("DELETE FROM subscriptions WHERE project = ?").run(p);
-        return { deleted_messages: r.changes };
+        return { deleted_messages: ticketCount + messageCount };
     });
     return tx(name);
 }
@@ -713,12 +860,16 @@ export function deleteTag(id: number): void {
     getDb().prepare("DELETE FROM tags WHERE id = ?").run(id);
 }
 
+// Tag operations are now ticket-only (post-split). Function names keep the
+// `Message` suffix for API compat — callers pass an id that must be a ticket
+// id. Non-ticket ids will simply not match any rows.
+
 export function listMessageTags(messageId: number): Tag[] {
     return getDb()
         .prepare(`
             SELECT t.* FROM tags t
-            JOIN message_tags mt ON mt.tag_id = t.id
-            WHERE mt.message_id = ?
+            JOIN ticket_tags tt ON tt.tag_id = t.id
+            WHERE tt.ticket_id = ?
             ORDER BY t.position ASC, t.id ASC
         `)
         .all(messageId) as Tag[];
@@ -731,10 +882,10 @@ export function tagsForMessages(messageIds: number[]): Map<number, Tag[]> {
     const placeholders = messageIds.map(() => "?").join(",");
     const rows = getDb()
         .prepare(`
-            SELECT mt.message_id, t.*
-            FROM message_tags mt
-            JOIN tags t ON t.id = mt.tag_id
-            WHERE mt.message_id IN (${placeholders})
+            SELECT tt.ticket_id AS message_id, t.*
+            FROM ticket_tags tt
+            JOIN tags t ON t.id = tt.tag_id
+            WHERE tt.ticket_id IN (${placeholders})
             ORDER BY t.position ASC, t.id ASC
         `)
         .all(...messageIds) as (Tag & { message_id: number })[];
@@ -753,7 +904,7 @@ export function addMessageTag(
 ): void {
     getDb()
         .prepare(`
-            INSERT OR IGNORE INTO message_tags (message_id, tag_id, set_at, set_by)
+            INSERT OR IGNORE INTO ticket_tags (ticket_id, tag_id, set_at, set_by)
             VALUES (?, ?, ?, ?)
         `)
         .run(messageId, tagId, nowIso(), setBy);
@@ -761,7 +912,7 @@ export function addMessageTag(
 
 export function removeMessageTag(messageId: number, tagId: number): void {
     getDb()
-        .prepare("DELETE FROM message_tags WHERE message_id = ? AND tag_id = ?")
+        .prepare("DELETE FROM ticket_tags WHERE ticket_id = ? AND tag_id = ?")
         .run(messageId, tagId);
 }
 
@@ -772,9 +923,9 @@ export function setMessageTags(
 ): void {
     const d = getDb();
     const tx = d.transaction((ids: number[]) => {
-        d.prepare("DELETE FROM message_tags WHERE message_id = ?").run(messageId);
+        d.prepare("DELETE FROM ticket_tags WHERE ticket_id = ?").run(messageId);
         const ins = d.prepare(`
-            INSERT INTO message_tags (message_id, tag_id, set_at, set_by)
+            INSERT INTO ticket_tags (ticket_id, tag_id, set_at, set_by)
             VALUES (?, ?, ?, ?)
         `);
         const now = nowIso();
@@ -872,6 +1023,7 @@ export function listPings(opts: {
             edited_title: (row.edited_title as string | null) ?? null,
             edited_body: (row.edited_body as string | null) ?? null,
             priority: (row.priority as Priority | null) ?? null,
+            display_seq: (row.display_seq as number | undefined) ?? 0,
         },
     }));
 }
