@@ -357,6 +357,28 @@ function shortTime(iso: string): string {
     return d.toLocaleDateString();
 }
 
+/**
+ * Sub-tickets panel collapse state (per #B.62 reopen — accordion).
+ * Auto-collapse when the list has more than 5 children so the header
+ * stays compact; small lists stay open by default. The user can
+ * always toggle via the chevron.
+ */
+const subTicketsExpanded = ref(false);
+watch(
+    () => data.value?.ticket.sub_tickets?.length ?? 0,
+    (n) => { subTicketsExpanded.value = n > 0 && n <= 5; },
+    { immediate: true },
+);
+function onSubTicketsToggle(ev: Event) {
+    subTicketsExpanded.value = (ev.target as HTMLDetailsElement).open;
+}
+const subTicketsPendingCount = computed(() =>
+    (data.value?.ticket.sub_tickets ?? []).filter((s) => s.status === "pending").length,
+);
+const subTicketsClosedCount = computed(() =>
+    (data.value?.ticket.sub_tickets ?? []).filter((s) => s.closed).length,
+);
+
 // Only the most recent pending entry surfaces a "pending" tag — older
 // pending rows would just add noise once the moderator's attention is
 // already drawn to the latest one.
@@ -829,15 +851,28 @@ async function copyTicketRef() {
                         #B.{{ data.ticket.parent_ticket_id }}
                     </a>
                 </div>
-                <div
+                <details
                     v-if="data.ticket.sub_tickets && data.ticket.sub_tickets.length > 0"
                     class="thread-sub-tickets"
-                    :title="`This ticket has ${data.ticket.sub_tickets.length} sub-ticket${data.ticket.sub_tickets.length > 1 ? 's' : ''}.`"
+                    :open="subTicketsExpanded"
+                    @toggle="onSubTicketsToggle"
                 >
-                    <div class="thread-sub-tickets__header">
+                    <summary class="thread-sub-tickets__header">
+                        <i
+                            class="pi thread-sub-tickets__chevron"
+                            :class="subTicketsExpanded ? 'pi-chevron-down' : 'pi-chevron-right'"
+                        />
                         <i class="pi pi-sitemap" />
                         <span>{{ data.ticket.sub_tickets.length }} sub-ticket{{ data.ticket.sub_tickets.length > 1 ? 's' : '' }}</span>
-                    </div>
+                        <!-- Surface counts inline so the user doesn't have to
+                             expand just to see "how much pending?". -->
+                        <span v-if="subTicketsPendingCount" class="thread-sub-tickets__hint">
+                            · {{ subTicketsPendingCount }} pending
+                        </span>
+                        <span v-if="subTicketsClosedCount" class="thread-sub-tickets__hint">
+                            · {{ subTicketsClosedCount }} closed
+                        </span>
+                    </summary>
                     <ul class="thread-sub-tickets__list">
                         <li
                             v-for="sub in data.ticket.sub_tickets"
@@ -854,7 +889,7 @@ async function copyTicketRef() {
                             <span v-else-if="sub.closed" class="thread-sub-tickets__tag thread-sub-tickets__tag--closed">closed</span>
                         </li>
                     </ul>
-                </div>
+                </details>
                 <h2 class="thread-title">{{ data.ticket.title }}</h2>
                 <div
                     v-if="data.ticket.resolved && !data.ticket.closed"
@@ -1239,7 +1274,27 @@ async function copyTicketRef() {
     gap: 0.3rem;
     font-weight: 600;
     color: var(--p-text-color);
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+}
+/* Hide the native disclosure triangle so our chevron is the only
+ * affordance — consistent across browsers. */
+.thread-sub-tickets__header::-webkit-details-marker { display: none; }
+.thread-sub-tickets > .thread-sub-tickets__header {
+    margin-bottom: 0;
+}
+.thread-sub-tickets[open] > .thread-sub-tickets__header {
     margin-bottom: 0.3rem;
+}
+.thread-sub-tickets__chevron {
+    font-size: 0.75em;
+    color: var(--p-text-muted-color);
+}
+.thread-sub-tickets__hint {
+    font-weight: 400;
+    color: var(--p-text-muted-color);
+    font-size: 0.92em;
 }
 .thread-sub-tickets__list {
     list-style: none;
