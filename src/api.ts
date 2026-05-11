@@ -45,6 +45,7 @@ import {
     listTicketSubscriptions,
     listProjectsDetailed,
     deleteProject,
+    getProjectStatsRich,
     setTicketBroadcast,
     setTicketPostpone,
     getTicketPostpone,
@@ -423,6 +424,16 @@ api.get("/projects", (req, res) => {
 
 api.get("/projects/:name/stats", (req, res) => {
     res.json(getProjectStats(req.params.name));
+});
+
+/**
+ * Mantis-style rich stats for the per-project page. Distinct from
+ * /projects/:name/stats (the lightweight subscriber-count hint used
+ * by ticket_new) — this one bundles pulse + live + top-N aggregates
+ * for a dashboard view.
+ */
+api.get("/projects/:name/stats-rich", (req, res) => {
+    res.json(getProjectStatsRich(req.params.name));
 });
 
 /**

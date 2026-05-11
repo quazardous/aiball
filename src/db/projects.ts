@@ -284,3 +284,218 @@ export function deleteProject(name: string): { deleted_messages: number } {
         return { deleted_messages: ticketIds.length + messageIds.length };
     });
 }
+
+/**
+ * Mantis-style rich stats for a project — surfaced on the per-project
+ * page (per #B.60). Different from `getProjectStats` (which is a
+ * lightweight "Nobody is listening" hint for ticket_new): this one
+ * powers a dedicated dashboard, so it bundles multiple aggregates in
+ * one response. Computed via several small SELECTs assembled in JS;
+ * fast enough for the inbox sizes we see today.
+ */
+export interface ProjectStatsRich {
+    project: string;
+
+    // Pulse
+    ticket_count: number;             // approved tickets total
+    comment_count: number;            // approved comments total
+    open_count: number;               // approved + not closed + not snoozed
+    closed_count: number;             // closed tickets (regardless of resolved)
+    resolved_count: number;           // closed-and-resolved tickets
+    pending_mod: number;              // tickets in moderation queue
+    pending_resolution: number;       // open tickets with a pending ticket_resolved proposal
+    resolved_pct: number;             // resolved / (closed) — 0..100, rounded to 1 decimal
+
+    // Live tickets
+    oldest_open: { id: number; title: string; by_agent: string | null; created_at: string; age_days: number } | null;
+    avg_age_open_days: number;        // arithmetic mean across open tickets, 1 decimal
+
+    // Top N (5 each, sorted desc by count)
+    top_reporters: { agent: string; count: number }[];
+    top_tags: { name: string; count: number }[];
+    top_intents: { intent: string; count: number }[];
+
+    // Throughput
+    auto_approved_pct: number;        // auto-decided / total decided (approved), 0..100
+}
+
+export function getProjectStatsRich(project: string): ProjectStatsRich {
+    const db = getDb();
+    const nowStr = nowIso();
+    const nowMs = Date.now();
+
+    // ---- Pulse ----
+    const tickets = db.select({
+        id: schema.tickets.id,
+        status: schema.tickets.status,
+        decidedBy: schema.tickets.decidedBy,
+        byAgent: schema.tickets.byAgent,
+        title: schema.tickets.title,
+        editedTitle: schema.tickets.editedTitle,
+        intent: schema.tickets.intent,
+        createdAt: schema.tickets.createdAt,
+        postponedUntil: schema.tickets.postponedUntil,
+    }).from(schema.tickets).where(eq(schema.tickets.project, project)).all();
+
+    const ticketCount = tickets.filter((t) => t.status === "approved").length;
+    const pendingMod = tickets.filter((t) => t.status === "pending").length;
+
+    // Lifecycle replay for closed/resolved flags on each ticket.
+    const ticketIds = tickets.map((t) => t.id);
+    const lifecycle = ticketIds.length ? db.select({
+        ticket_id: schema.messages.ticketId,
+        kind: schema.messages.kind,
+        id: schema.messages.id,
+        status: schema.messages.status,
+    })
+        .from(schema.messages)
+        .where(and(
+            inArray(schema.messages.ticketId, ticketIds),
+            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened", "ticket_resolved"]),
+        ))
+        .orderBy(asc(schema.messages.id))
+        .all() : [];
+
+    const closedById = new Map<number, boolean>();
+    const resolvedById = new Map<number, boolean>();
+    const pendingResolvedById = new Set<number>();
+    for (const ev of lifecycle) {
+        if (ev.status === "pending" && ev.kind === "ticket_resolved") {
+            pendingResolvedById.add(ev.ticket_id);
+            continue;
+        }
+        if (ev.status !== "approved") continue;
+        if (ev.kind === "ticket_closed") closedById.set(ev.ticket_id, true);
+        else if (ev.kind === "ticket_reopened") {
+            closedById.set(ev.ticket_id, false);
+            resolvedById.set(ev.ticket_id, false);
+        } else if (ev.kind === "ticket_resolved") resolvedById.set(ev.ticket_id, true);
+    }
+
+    let closedCount = 0;
+    let resolvedCount = 0;
+    let openCount = 0;
+    let pendingResolutionCount = 0;
+    let ageSumMs = 0;
+    let oldestOpen: typeof tickets[number] | null = null;
+    for (const t of tickets) {
+        if (t.status !== "approved") continue;
+        const closed = closedById.get(t.id) === true;
+        const resolved = resolvedById.get(t.id) === true;
+        const snoozed = !!t.postponedUntil && t.postponedUntil > nowStr;
+        if (closed) {
+            closedCount++;
+            if (resolved) resolvedCount++;
+            continue;
+        }
+        if (snoozed) continue;
+        openCount++;
+        if (pendingResolvedById.has(t.id)) pendingResolutionCount++;
+        const ageMs = nowMs - new Date(t.createdAt).getTime();
+        ageSumMs += ageMs;
+        if (!oldestOpen || t.createdAt < oldestOpen.createdAt) oldestOpen = t;
+    }
+
+    const dayMs = 86_400_000;
+    const oldestOpenSummary = oldestOpen ? {
+        id: oldestOpen.id,
+        title: oldestOpen.editedTitle ?? oldestOpen.title ?? "",
+        by_agent: oldestOpen.byAgent,
+        created_at: oldestOpen.createdAt,
+        age_days: Math.round((nowMs - new Date(oldestOpen.createdAt).getTime()) / dayMs * 10) / 10,
+    } : null;
+    const avgAgeOpenDays = openCount > 0
+        ? Math.round(ageSumMs / openCount / dayMs * 10) / 10
+        : 0;
+
+    const resolvedPct = closedCount > 0
+        ? Math.round(resolvedCount / closedCount * 1000) / 10
+        : 0;
+
+    // ---- Comments ----
+    const commentRow = db.select({ n: sql<number>`COUNT(*)` })
+        .from(schema.messages)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+        .where(and(
+            eq(schema.tickets.project, project),
+            eq(schema.messages.kind, "comment_added"),
+            eq(schema.messages.status, "approved"),
+        )).get();
+    const commentCount = Number(commentRow?.n ?? 0);
+
+    // ---- Top reporters (5) ----
+    const reporterAgg = db.select({
+        agent: schema.tickets.byAgent,
+        n: sql<number>`COUNT(*)`,
+    }).from(schema.tickets)
+        .where(and(
+            eq(schema.tickets.project, project),
+            eq(schema.tickets.status, "approved"),
+        ))
+        .groupBy(schema.tickets.byAgent)
+        .all();
+    const topReporters = reporterAgg
+        .filter((r) => r.agent !== null && r.agent !== undefined)
+        .map((r) => ({ agent: r.agent as string, count: Number(r.n) }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+    // ---- Top intents (4 — there are only 4 possible values) ----
+    const intentAgg = db.select({
+        intent: schema.tickets.intent,
+        n: sql<number>`COUNT(*)`,
+    }).from(schema.tickets)
+        .where(and(
+            eq(schema.tickets.project, project),
+            eq(schema.tickets.status, "approved"),
+        ))
+        .groupBy(schema.tickets.intent)
+        .all();
+    const topIntents = intentAgg
+        .filter((r) => r.intent !== null && r.intent !== undefined)
+        .map((r) => ({ intent: r.intent as string, count: Number(r.n) }))
+        .sort((a, b) => b.count - a.count);
+
+    // ---- Top tags (5) ----
+    const tagAgg = ticketIds.length ? db.select({
+        name: schema.tags.name,
+        n: sql<number>`COUNT(*)`,
+    }).from(schema.ticketTags)
+        .innerJoin(schema.tags, eq(schema.tags.id, schema.ticketTags.tagId))
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.ticketTags.ticketId))
+        .where(and(
+            eq(schema.tickets.project, project),
+            eq(schema.tickets.status, "approved"),
+        ))
+        .groupBy(schema.tags.name)
+        .all() : [];
+    const topTags = tagAgg
+        .map((r) => ({ name: r.name, count: Number(r.n) }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+    // ---- Throughput (auto-approved %) ----
+    const decided = tickets.filter((t) => t.status === "approved");
+    const auto = decided.filter((t) => t.decidedBy === "auto" || t.decidedBy === "owner").length;
+    const autoApprovedPct = decided.length > 0
+        ? Math.round(auto / decided.length * 1000) / 10
+        : 0;
+
+    return {
+        project,
+        ticket_count: ticketCount,
+        comment_count: commentCount,
+        open_count: openCount,
+        closed_count: closedCount,
+        resolved_count: resolvedCount,
+        pending_mod: pendingMod,
+        pending_resolution: pendingResolutionCount,
+        resolved_pct: resolvedPct,
+        oldest_open: oldestOpenSummary,
+        avg_age_open_days: avgAgeOpenDays,
+        top_reporters: topReporters,
+        top_tags: topTags,
+        top_intents: topIntents,
+        auto_approved_pct: autoApprovedPct,
+    };
+}

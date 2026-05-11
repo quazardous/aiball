@@ -83,9 +83,11 @@ export {
 
 export {
     type ProjectMeta,
+    type ProjectStatsRich,
     listProjects,
     listProjectsDetailed,
     deleteProject,
+    getProjectStatsRich,
 } from "./db/projects.js";
 
 export {

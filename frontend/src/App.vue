@@ -21,9 +21,10 @@ import InboxList from "./components/InboxList.vue";
 import InboxToolbar from "./components/InboxToolbar.vue";
 import PaginationBar from "./components/PaginationBar.vue";
 import NewTicketPage from "./components/NewTicketPage.vue";
+import ProjectStatsPage from "./components/ProjectStatsPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
-import Sidebar, { type ProjectListItem, type SettingsPanel } from "./components/Sidebar.vue";
+import Sidebar, { type ProjectListItem, type ProjectPage, type SettingsPanel } from "./components/Sidebar.vue";
 import TagsPanel from "./components/TagsPanel.vue";
 import ThreadView from "./components/ThreadView.vue";
 
@@ -103,6 +104,21 @@ const rows = ref<InboxRow[]>([]);
 const loading = ref(false);
 const dark = ref(localStorage.getItem("aiball.dark") === "1");
 const openTicketId = ref<number | null>(null);
+
+/**
+ * Per-project sub-page (per #B.60). Default null = inbox view. When
+ * set to "stats", the main area renders the ProjectStatsPage for the
+ * currently selected project. Requires `project !== null` — switching
+ * to "All projects" resets it. ProjectPage type lives in Sidebar.vue.
+ */
+const projectPage = ref<ProjectPage | null>(null);
+watch(project, () => { projectPage.value = null; });
+function openProjectPage(p: string, page: ProjectPage) {
+    project.value = p;
+    projectPage.value = page;
+    panel.value = null;
+    openTicketId.value = null;
+}
 
 const selectedIds = ref<Set<number>>(new Set());
 const bulkBusy = ref(false);
@@ -730,8 +746,10 @@ watch(showSnoozed, (v) => {
                 :items="projectListItems"
                 :panel="panel"
                 :project="project"
+                :project-page="projectPage"
                 @select="selectProject"
                 @open-panel="openPanel"
+                @open-project-page="openProjectPage"
             />
 
             <main class="aiball-main">
@@ -750,6 +768,11 @@ watch(showSnoozed, (v) => {
                     v-else-if="openTicketId !== null"
                     :ticket-id="openTicketId"
                     @back="openTicketId = null"
+                />
+
+                <ProjectStatsPage
+                    v-else-if="projectPage === 'stats' && project !== null"
+                    :project="project"
                 />
 
                 <template v-else>

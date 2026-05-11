@@ -228,6 +228,11 @@ export const api = {
             "DELETE",
             `/api/projects/${encodeURIComponent(name)}`,
         ),
+    projectStatsRich: (name: string) =>
+        req<unknown>(
+            "GET",
+            `/api/projects/${encodeURIComponent(name)}/stats-rich`,
+        ),
     mentionSuggestions: () =>
         req<{ projects: string[]; agents: string[] }>(
             "GET",
