@@ -287,6 +287,76 @@ const flatComments = computed<Message[]>(() => {
     return [...data.value.comments].sort((a, b) => a.id - b.id);
 });
 
+/**
+ * Relation events (`ticket_sub_added` / `ticket_referenced`) render
+ * compact — they're machine-generated notifications, not authored
+ * content. Consecutive same-kind same-author events within a 60s
+ * window collapse into one row: "added 8 sub-tickets: #B.66, #B.67, …"
+ * (per user feedback on #B.62: "gère la factorisation en front si
+ * plusieurs relation se suivent").
+ */
+type ThreadItem =
+    | { kind: "comment"; msg: Message }
+    | { kind: "relation_group"; msgs: Message[] };
+
+function isRelationKind(k: Message["kind"]): boolean {
+    return k === "ticket_sub_added" || k === "ticket_referenced";
+}
+
+const RELATION_LABELS: Record<string, { icon: string; verbOne: string; verbMany: string }> = {
+    ticket_sub_added: {
+        icon: "pi pi-sitemap",
+        verbOne: "added sub-ticket",
+        verbMany: "added sub-tickets",
+    },
+    ticket_referenced: {
+        icon: "pi pi-link",
+        verbOne: "referenced from",
+        verbMany: "referenced from",
+    },
+};
+
+const threadItems = computed<ThreadItem[]>(() => {
+    const items = flatComments.value;
+    const out: ThreadItem[] = [];
+    let i = 0;
+    while (i < items.length) {
+        const m = items[i];
+        if (!isRelationKind(m.kind)) {
+            out.push({ kind: "comment", msg: m });
+            i++;
+            continue;
+        }
+        // Collect a run of same-kind same-author events within 60s.
+        const group: Message[] = [m];
+        let j = i + 1;
+        while (j < items.length) {
+            const n = items[j];
+            if (n.kind !== m.kind) break;
+            if (n.by_agent !== m.by_agent) break;
+            const dt = Math.abs(
+                new Date(n.created_at).getTime() - new Date(m.created_at).getTime(),
+            );
+            if (dt > 60_000) break;
+            group.push(n);
+            j++;
+        }
+        out.push({ kind: "relation_group", msgs: group });
+        i = j;
+    }
+    return out;
+});
+
+function shortTime(iso: string): string {
+    const d = new Date(iso);
+    const diff = Date.now() - d.getTime();
+    const min = 60_000, hr = 3_600_000, day = 86_400_000;
+    if (diff < hr) return `${Math.max(1, Math.floor(diff / min))}m ago`;
+    if (diff < day) return `${Math.floor(diff / hr)}h ago`;
+    if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
+    return d.toLocaleDateString();
+}
+
 // Only the most recent pending entry surfaces a "pending" tag — older
 // pending rows would just add noise once the moderator's attention is
 // already drawn to the latest one.
@@ -908,16 +978,40 @@ async function copyTicketRef() {
             </div>
 
             <ul v-else class="thread-comments">
-                <li
-                    v-for="msg in flatComments"
-                    :key="msg.id"
-                    class="thread-comment"
-                >
-                    <CommentNode
-                        :msg="msg"
-                        :show-pending-tag="msg.id === latestPendingId"
-                    />
-                </li>
+                <template v-for="(item, idx) in threadItems" :key="idx">
+                    <li
+                        v-if="item.kind === 'comment'"
+                        class="thread-comment"
+                    >
+                        <CommentNode
+                            :msg="item.msg"
+                            :show-pending-tag="item.msg.id === latestPendingId"
+                        />
+                    </li>
+                    <li
+                        v-else
+                        class="thread-relation-row"
+                        :data-kind="item.msgs[0].kind"
+                    >
+                        <i :class="RELATION_LABELS[item.msgs[0].kind].icon" />
+                        <span class="thread-relation-row__verb">{{
+                            item.msgs.length > 1
+                                ? RELATION_LABELS[item.msgs[0].kind].verbMany
+                                : RELATION_LABELS[item.msgs[0].kind].verbOne
+                        }}</span>
+                        <span class="thread-relation-row__refs">
+                            <a
+                                v-for="(m, i2) in item.msgs"
+                                :key="m.id"
+                                :href="`/b/${m.source_ticket_id}`"
+                                class="thread-relation-row__ref"
+                            >
+                                #B.{{ m.source_ticket_id }}<template v-if="i2 < item.msgs.length - 1">,</template>
+                            </a>
+                        </span>
+                        <span class="thread-relation-row__meta">by {{ item.msgs[0].by_agent ?? "?" }} · {{ shortTime(item.msgs[0].created_at) }}</span>
+                    </li>
+                </template>
             </ul>
 
             <MessageComposer
@@ -1309,6 +1403,54 @@ async function copyTicketRef() {
 }
 .comment-lifecycle__ref:hover {
     text-decoration: underline;
+}
+/*
+ * Compact, single-line rendering for machine-generated relation
+ * events (ticket_sub_added / ticket_referenced). They don't get the
+ * full comment-card visual — they're notifications, not authored
+ * content.
+ */
+.thread-relation-row {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.4rem;
+    padding: 0.2rem 0.7rem;
+    font-size: 0.82rem;
+    color: var(--p-text-muted-color);
+    border-left: 2px solid transparent;
+}
+.thread-relation-row[data-kind="ticket_sub_added"] {
+    border-left-color: var(--p-indigo-300);
+}
+.thread-relation-row[data-kind="ticket_referenced"] {
+    border-left-color: var(--p-surface-300);
+}
+.thread-relation-row i {
+    color: var(--p-text-muted-color);
+    font-size: 0.85em;
+}
+.thread-relation-row__verb {
+    color: var(--p-text-color);
+}
+.thread-relation-row__refs {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+}
+.thread-relation-row__ref {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    color: var(--p-primary-color);
+    text-decoration: none;
+}
+.thread-relation-row__ref:hover {
+    text-decoration: underline;
+}
+.thread-relation-row__meta {
+    margin-left: auto;
+    font-size: 0.78rem;
+    opacity: 0.8;
 }
 .comment-actions {
     display: flex;

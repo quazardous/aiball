@@ -223,10 +223,12 @@ function extractTicketRefs(
         .replace(/```[\s\S]*?```/g, "")
         .replace(/`[^`]*`/g, "");
     const refs = new Set<number>();
-    // Accept #123, #B123, #B.123. Boundary on the left: start of input,
-    // whitespace, or punctuation that's NOT word/slash (so a URL like
-    // /foo#3 doesn't match). Boundary on the right: \b.
-    const re = /(?:^|[^\w/])#B?\.?(\d+)\b/g;
+    // Only the canonical letter-prefixed form: #B.NN, #B-NN, #B_NN,
+    // #B/NN, #BNN. Bare `#NN` is intentionally NOT matched — it
+    // produced too many false positives ("item #9", "step #2", …) per
+    // user feedback on #B.62. Boundary on the left: start of input
+    // or a non-word non-slash char (so /foo#3 doesn't match).
+    const re = /(?:^|[^\w/])#B[._/-]?(\d+)\b/gi;
     for (const m of stripped.matchAll(re)) {
         const n = Number(m[1]);
         if (!Number.isFinite(n) || n <= 0) continue;

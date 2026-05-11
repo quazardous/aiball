@@ -31,7 +31,10 @@ interface MsgRefToken extends Tokens.Generic {
 //   - `#B_123` / `#C_xk7q3a` (underscore)
 //   - `#B-123` / `#C-xk7q3a` (dash)
 //   - `#B123`  / `#Cxk7q3a`  (legacy, no separator)
-//   - `#123`              → ticket (legacy bare, equivalent to `#B.123`).
+//
+// The bare `#123` form is NOT matched: it produced too many false
+// positives in prose ("item #9", "step #2") per #B.62 follow-up.
+// Authors must type the sigil letter to get a linkified ref.
 //
 // Matching is case-insensitive on the sigil letter only. Runs as an inline
 // marked extension so codespans, fenced blocks, and existing markdown
@@ -65,10 +68,12 @@ marked.use({
                         ref: hash,
                     };
                 }
-                // Numeric forms (ticket or legacy comment).
-                const numMatch = new RegExp(`^#([bBcC])?${SEP}(\\d+)\\b`).exec(src);
+                // Numeric forms — letter REQUIRED (bare `#NN` no longer
+                // linkifies per #B.62 follow-up: too many prose false
+                // positives like "item #9").
+                const numMatch = new RegExp(`^#([bBcC])${SEP}(\\d+)\\b`).exec(src);
                 if (!numMatch) return undefined;
-                const prefix = (numMatch[1] ?? "").toUpperCase();
+                const prefix = numMatch[1].toUpperCase();
                 const kind: "ticket" | "comment" = prefix === "C" ? "comment" : "ticket";
                 const letter = kind === "comment" ? "C" : "B";
                 return {
