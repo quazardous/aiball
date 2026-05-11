@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import Button from "primevue/button";
 import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
@@ -69,33 +69,55 @@ const LIFECYCLE_LABELS: Record<string, { icon: string; verb: string; severity: "
 };
 
 // Body edit (per #B.94). Toggle reveals a textarea seeded with the
-// current body; save on blur or Ctrl/Cmd+Enter posts to api.edit and
-// emits "submitted" so the thread reloads.
+// current body. The draft is persisted to `sessionStorage` on each
+// keystroke so a page refresh mid-edit doesn't drop the typing —
+// when the user clicks `edit` again, the saved draft takes priority
+// over the current body. The draft is cleared on save (success) and
+// on cancel. Cleanup-on-id-change: when the underlying message id
+// rotates (which only happens if the parent reuses the slot, e.g.
+// thread reload), we DON'T touch the storage for the previous id.
 const editing = ref(false);
 const bodyDraft = ref("");
 const saveBusy = ref(false);
+
+const draftKey = computed(() => `aiball.draft.comment.${props.msg.id}`);
+
 function startEdit() {
-    bodyDraft.value = props.msg.edited_body ?? props.msg.body ?? "";
+    const saved = sessionStorage.getItem(draftKey.value);
+    bodyDraft.value = saved !== null
+        ? saved
+        : (props.msg.edited_body ?? props.msg.body ?? "");
     editing.value = true;
 }
 function cancelEdit() {
+    sessionStorage.removeItem(draftKey.value);
     editing.value = false;
 }
 async function saveEdit() {
     const current = props.msg.edited_body ?? props.msg.body ?? "";
     if (bodyDraft.value === current) {
+        sessionStorage.removeItem(draftKey.value);
         editing.value = false;
         return;
     }
     saveBusy.value = true;
     try {
         await api.edit(props.msg.id, { body: bodyDraft.value });
+        sessionStorage.removeItem(draftKey.value);
         editing.value = false;
         broadcastRefresh();
     } finally {
         saveBusy.value = false;
     }
 }
+
+// Mirror the draft into sessionStorage on every change while the
+// edit panel is open. Skip when not editing so we don't write while
+// the panel is closed.
+watch(bodyDraft, (v) => {
+    if (!editing.value) return;
+    sessionStorage.setItem(draftKey.value, v);
+});
 </script>
 
 <template>

@@ -149,21 +149,49 @@ function onTagsChanged(tags: TagType[]) {
     if (data.value) data.value.ticket.tags = tags;
 }
 
-// Title + body edit (per #B.94): buffered drafts so we save on blur or
-// Ctrl/Cmd+Enter rather than fire api.edit on every keystroke. Drafts
-// reset every time the edit panel is reopened, or when the ticket id
-// changes, so we never leak a draft from one thread onto another.
+// Title + body edit (per #B.94): buffered drafts, save on explicit
+// "save" button or Ctrl/Cmd+Enter, cancel reverts. Drafts persist
+// to sessionStorage per ticket id so a page refresh mid-edit doesn't
+// lose typing — when the panel reopens, the saved draft takes
+// priority over the current DB values. Cleared on save (success)
+// and on cancel.
 const titleDraft = ref("");
 const bodyDraft = ref("");
 const bodyBusy = ref(false);
+
+function draftKey(ticketId: number): string {
+    return `aiball.draft.ticket.${ticketId}`;
+}
+
 watch(
     [() => props.ticketId, editing, () => data.value?.ticket.id],
     () => {
         if (!editing.value || !data.value) return;
+        const tid = data.value.ticket.id;
+        const saved = sessionStorage.getItem(draftKey(tid));
+        if (saved !== null) {
+            try {
+                const { title, body } = JSON.parse(saved) as { title?: string; body?: string };
+                titleDraft.value = typeof title === "string" ? title : (data.value.ticket.title ?? "");
+                bodyDraft.value = typeof body === "string" ? body : (data.value.ticket.body ?? "");
+                return;
+            } catch {
+                // Corrupted draft — fall through to DB values.
+            }
+        }
         titleDraft.value = data.value.ticket.title ?? "";
         bodyDraft.value = data.value.ticket.body ?? "";
     },
 );
+
+// Mirror drafts into sessionStorage on every change while editing.
+watch([titleDraft, bodyDraft], ([t, b]) => {
+    if (!editing.value || !data.value) return;
+    sessionStorage.setItem(
+        draftKey(data.value.ticket.id),
+        JSON.stringify({ title: t, body: b }),
+    );
+});
 /**
  * Save any pending title + body changes and close the edit panel.
  * Title and body draft mutations are buffered (no auto-save on blur),
@@ -188,6 +216,7 @@ async function saveAndCloseEdit() {
         if (titleChanged) patch.title = titleDraft.value;
         if (bodyChanged) patch.body = bodyDraft.value;
         await api.edit(tid, patch);
+        sessionStorage.removeItem(draftKey(tid));
         broadcastRefresh(tid);
         editing.value = false;
     } catch (e) {
@@ -203,10 +232,12 @@ async function saveAndCloseEdit() {
 /**
  * Drop any unsaved title/body edits and close the panel. Intent and
  * tags changes made during the session aren't reverted — those saved
- * live the moment the user changed them.
+ * live the moment the user changed them. Also clears the
+ * sessionStorage draft so the next open re-seeds from the DB.
  */
 function cancelEdit() {
     if (data.value) {
+        sessionStorage.removeItem(draftKey(data.value.ticket.id));
         titleDraft.value = data.value.ticket.title ?? "";
         bodyDraft.value = data.value.ticket.body ?? "";
     }
