@@ -124,12 +124,14 @@ export class AiballClient {
         open?: boolean;
         intent?: string;
         limit?: number;
+        include_postponed?: boolean;
     }) {
         const q: Record<string, string | undefined> = { q: opts.query };
         if (opts.project) q.project = opts.project;
         if (opts.open) q.open = "1";
         if (opts.intent) q.intent = opts.intent;
         if (opts.limit !== undefined) q.limit = String(opts.limit);
+        if (opts.include_postponed) q.include_postponed = "1";
         return this.http("GET", `/api/search${query(q)}`);
     }
     listMessages(q: Record<string, string | number | undefined> = {}) {
@@ -179,6 +181,7 @@ export class AiballClient {
             comment_count: number;
             pending_count: number;
             open_count?: number;
+            snoozed_count?: number;
             resolved_count?: number;
         }>>("GET", "/api/projects?detailed=1");
     }

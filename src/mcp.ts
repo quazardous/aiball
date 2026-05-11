@@ -349,19 +349,24 @@ server.registerTool(
     "ticket_list",
     {
         description:
-            "List approved tickets, optionally filtered by project. Use ticket_get to fetch comments of one ticket.",
+            "List approved tickets, optionally filtered by project. Snoozed tickets (postponed_until > now, per #B.329) are excluded by default when `open: true` — pass `include_snoozed: true` to surface them. Use ticket_get to fetch comments of one ticket.",
         inputSchema: {
             project: z.string().optional(),
             open: z
                 .boolean()
                 .optional()
                 .describe("If true, only tickets that have not been closed."),
+            include_snoozed: z
+                .boolean()
+                .optional()
+                .describe("If true (and open=true), include tickets currently snoozed in the result. Default false."),
         },
     },
-    async ({ project, open }) => {
+    async ({ project, open, include_snoozed }) => {
         const list = await client.listTickets({
             project,
             open: open ? "1" : undefined,
+            include_postponed: include_snoozed ? "1" : undefined,
         });
         return asText(list);
     },
@@ -371,11 +376,15 @@ server.registerTool(
     "search",
     {
         description:
-            "Full-text search over ticket titles, ticket bodies, and comment / lifecycle bodies. Backed by SQLite FTS5: case-insensitive, accent-insensitive, whitespace-separated tokens are AND-ed (so `search('hashid broadcast')` finds rows containing both). Returns at most `limit` hits sorted by FTS5 relevance (more relevant first). Each hit carries a `snippet` with `<mark>…</mark>` around the match, plus enough context (project, by_agent, created_at, kind=ticket|comment, hashid for comments) to render without an extra round-trip. Use this instead of scrolling `ticket_list` when you remember a keyword but not a number.",
+            "Full-text search over ticket titles, ticket bodies, and comment / lifecycle bodies. Backed by SQLite FTS5: case-insensitive, accent-insensitive, whitespace-separated tokens are AND-ed (so `search('hashid broadcast')` finds rows containing both). Returns at most `limit` hits sorted by FTS5 relevance (more relevant first). Each hit carries a `snippet` with `<mark>…</mark>` around the match, plus enough context (project, by_agent, created_at, kind=ticket|comment, hashid for comments) to render without an extra round-trip. Snoozed parent tickets are filtered out by default — pass `include_snoozed: true` to surface their hits. Use this instead of scrolling `ticket_list` when you remember a keyword but not a number.",
         inputSchema: {
             query: z.string().describe("Free-form text to look up. Special FTS5 syntax characters are stripped — pass plain words."),
             project: z.string().optional().describe("Scope to one project (default: all projects the consumer can see)."),
             open: z.boolean().optional().describe("If true, exclude rejected tickets from the hit list."),
+            include_snoozed: z
+                .boolean()
+                .optional()
+                .describe("If true, include hits whose parent ticket is currently snoozed. Default false."),
             intent: z
                 .enum(["panic", "request", "question", "fyi"])
                 .optional()
@@ -383,8 +392,15 @@ server.registerTool(
             limit: z.number().int().min(1).max(200).optional().describe("Max hits to return. Default 50, hard cap 200."),
         },
     },
-    async ({ query, project, open, intent, limit }) => {
-        const hits = await client.search({ query, project, open, intent, limit });
+    async ({ query, project, open, intent, limit, include_snoozed }) => {
+        const hits = await client.search({
+            query,
+            project,
+            open,
+            intent,
+            limit,
+            include_postponed: include_snoozed,
+        });
         return asText(hits);
     },
 );
@@ -569,15 +585,22 @@ server.registerTool(
         // Reduce the detailed project list to a `{ name: open_count }`
         // map — agents care about "is there work waiting on this
         // project?" more than the full meta blob. `known_projects` stays
-        // a bare string[] for back-compat.
+        // a bare string[] for back-compat. Snoozed tickets are reported
+        // separately so an agent that wants to see them must opt in via
+        // `ticket_list({include_snoozed: true})` (per #B.329).
         const stats = Array.isArray(projectStats) ? projectStats : [];
         const knownProjects = stats.map((p) => p.name);
         const openTickets: Record<string, number> = {};
+        const snoozedTickets: Record<string, number> = {};
         let openTicketsTotal = 0;
+        let snoozedTicketsTotal = 0;
         for (const p of stats) {
             const n = typeof p.open_count === "number" ? p.open_count : 0;
+            const s = typeof p.snoozed_count === "number" ? p.snoozed_count : 0;
             openTickets[p.name] = n;
+            snoozedTickets[p.name] = s;
             openTicketsTotal += n;
+            snoozedTicketsTotal += s;
         }
         return asText({
             consumer_id: client.agentId,
@@ -594,10 +617,15 @@ server.registerTool(
                 (ticketSubs as { subscriptions?: unknown[] }).subscriptions ?? ticketSubs,
             known_projects: knownProjects,
             /** Per-project count of approved, currently-open tickets
-             *  (i.e. not closed, not rejected). The default-project entry
-             *  is the agent's primary workload indicator. */
+             *  (i.e. not closed, not rejected, not snoozed). The default-
+             *  project entry is the agent's primary workload indicator. */
             open_tickets: openTickets,
             open_tickets_total: openTicketsTotal,
+            /** Per-project count of tickets currently snoozed (postponed_until
+             *  > now). Hidden from `open_tickets`. Use
+             *  `ticket_list({include_snoozed: true})` to retrieve them. */
+            snoozed_tickets: snoozedTickets,
+            snoozed_tickets_total: snoozedTicketsTotal,
             my_pending_tickets: myPending,
             unread_pings: (pingCount as { unread?: number }).unread ?? 0,
         });

@@ -792,13 +792,14 @@ watch(showSnoozed, (v) => {
                 <i class="pi pi-envelope" /> {{ globalUnreadCount }}
             </span>
             <button
-                v-if="globalSnoozedCount > 0 || showSnoozed"
                 type="button"
                 class="header-badge header-badge--snoozed"
                 :class="{ 'header-badge--snoozed-on': showSnoozed }"
                 :title="showSnoozed
-                    ? `Showing snoozed tickets in the open inbox (${globalSnoozedCount}). Click to hide them again.`
-                    : `${globalSnoozedCount} ticket${globalSnoozedCount > 1 ? 's' : ''} currently snoozed (hidden). Click to surface them in the open inbox.`"
+                    ? `Showing snoozed tickets in the open inbox (${globalSnoozedCount}). Click to hide them.`
+                    : globalSnoozedCount > 0
+                        ? `${globalSnoozedCount} ticket${globalSnoozedCount > 1 ? 's' : ''} currently snoozed (hidden). Click to surface them in the open inbox.`
+                        : `No tickets currently snoozed. Click to surface any future snooze in the open inbox.`"
                 @click="showSnoozed = !showSnoozed"
             >
                 <i class="pi pi-history" /> {{ globalSnoozedCount }}

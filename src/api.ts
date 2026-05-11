@@ -453,6 +453,7 @@ api.get("/search", (req: Request, res: Response) => {
     }
     const project = typeof req.query.project === "string" ? req.query.project : undefined;
     const open = req.query.open === "1";
+    const includePostponed = req.query.include_postponed === "1";
     const intentRaw = typeof req.query.intent === "string" ? req.query.intent : undefined;
     const intent = intentRaw && INTENTS.includes(intentRaw as Intent)
         ? (intentRaw as Intent)
@@ -461,7 +462,25 @@ api.get("/search", (req: Request, res: Response) => {
         ? Number(req.query.limit) || undefined
         : undefined;
     const hits = searchMessages(q, { project, open, intent, limit });
-    res.json(hits);
+    // Filter out hits whose parent ticket is currently snoozed, unless
+    // the caller explicitly asked to see them. Cheap secondary pass.
+    if (!includePostponed) {
+        const nowStr = new Date().toISOString();
+        const postponedTicketIds = new Set<number>();
+        for (const h of hits) {
+            const t = getMessage(h.ticket_id);
+            if (
+                t?.kind === "ticket_created" &&
+                t.postponed_until &&
+                t.postponed_until > nowStr
+            ) {
+                postponedTicketIds.add(h.ticket_id);
+            }
+        }
+        res.json(hits.filter((h) => !postponedTicketIds.has(h.ticket_id)));
+    } else {
+        res.json(hits);
+    }
 });
 
 api.get("/inbox", (req, res) => {
@@ -627,6 +646,9 @@ api.get("/inbox", (req, res) => {
 api.get("/tickets", (req, res) => {
     const project = req.query.project as string | undefined;
     const onlyOpen = req.query.open === "1";
+    // Default: when `open=1`, snoozed tickets are hidden (same rule as
+    // the inbox). Pass `include_postponed=1` to surface them anyway.
+    const includePostponed = req.query.include_postponed === "1";
 
     const created = listMessages({
         status: "approved",
@@ -640,22 +662,35 @@ api.get("/tickets", (req, res) => {
         project,
     });
     const closedSet = new Set(closes.map((c) => c.ticket_id));
+    const nowStr = new Date().toISOString();
 
     const tagsMap = tagsForMessages(created.map((m) => m.id));
-    const tickets = created.map((m) => ({
-        id: m.id,
-        project: m.project,
-        title: m.edited_title ?? m.title,
-        body: m.edited_body ?? m.body,
-        by_agent: m.by_agent,
-        created_at: m.created_at,
-        closed: closedSet.has(m.id),
-        broadcast: m.broadcast === 1,
-        intent: m.intent,
-        tags: tagsMap.get(m.id) ?? [],
-    }));
+    const tickets = created.map((m) => {
+        const postponedUntil = m.postponed_until ?? null;
+        const postponed = !!postponedUntil && postponedUntil > nowStr;
+        return {
+            id: m.id,
+            project: m.project,
+            title: m.edited_title ?? m.title,
+            body: m.edited_body ?? m.body,
+            by_agent: m.by_agent,
+            created_at: m.created_at,
+            closed: closedSet.has(m.id),
+            broadcast: m.broadcast === 1,
+            postponed,
+            postponed_until: postponedUntil,
+            intent: m.intent,
+            tags: tagsMap.get(m.id) ?? [],
+        };
+    });
 
-    res.json(onlyOpen ? tickets.filter((t) => !t.closed) : tickets);
+    if (onlyOpen) {
+        res.json(
+            tickets.filter((t) => !t.closed && (includePostponed || !t.postponed)),
+        );
+    } else {
+        res.json(tickets);
+    }
 });
 
 api.post("/tickets/:id/mark-read", (req: Request, res: Response) => {
