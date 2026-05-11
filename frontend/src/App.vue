@@ -100,7 +100,6 @@ const project = ref<string | null>(
 const rows = ref<InboxRow[]>([]);
 const loading = ref(false);
 const dark = ref(localStorage.getItem("aiball.dark") === "1");
-const compact = ref(localStorage.getItem("aiball.compact") !== "0");
 const openTicketId = ref<number | null>(null);
 
 const selectedIds = ref<Set<number>>(new Set());
@@ -239,9 +238,12 @@ watch(dark, (v) => {
 });
 document.documentElement.classList.toggle("aiball-dark", dark.value);
 
-watch(compact, (v) => {
-    localStorage.setItem("aiball.compact", v ? "1" : "0");
-});
+// Compact layout is now the only layout (#B.312 ripped out the toggle).
+// Clean up the persisted preference so the localStorage stays tidy.
+// Keep the provide() so consumers (MessageCard, future opt-in compact
+// users) still see a reactive ref — it just never flips anymore.
+localStorage.removeItem("aiball.compact");
+const compact = ref(true);
 provide("compact", compact);
 
 async function loadProjects() {
@@ -629,7 +631,7 @@ const globalResolvedCount = computed(() =>
 </script>
 
 <template>
-    <div class="aiball-shell" :class="{ 'aiball-compact': compact }">
+    <div class="aiball-shell aiball-compact">
         <header class="aiball-header">
             <h1>aiball</h1>
             <span
@@ -669,14 +671,6 @@ const globalResolvedCount = computed(() =>
                 @update:model-value="(v: Strategy) => changeStrategy(v)"
             />
             <span class="spacer" />
-            <Button
-                :icon="compact ? 'pi pi-th-large' : 'pi pi-bars'"
-                :title="compact ? 'switch to comfortable view' : 'switch to compact view'"
-                severity="secondary"
-                text
-                rounded
-                @click="compact = !compact"
-            />
             <Button
                 v-if="!notifAllowed && !notifMuted"
                 icon="pi pi-bell"
