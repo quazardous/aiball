@@ -188,35 +188,118 @@ function clearSelection() {
 function selectAllVisible() {
     selectedIds.value = new Set(rows.value.map((r) => r.id));
 }
-async function bulkDecide(action: "approve" | "reject") {
-    const pendingIds = rows.value
-        .filter((r) => selectedIds.value.has(r.id) && r.status === "pending")
-        .map((r) => r.id);
-    if (!pendingIds.length) return;
+type BulkAction =
+    | "approve"
+    | "reject"
+    | "close"
+    | "reopen"
+    | "mark_read"
+    | "mark_unread";
+
+const BULK_LABELS: Record<BulkAction, string> = {
+    approve: "approve",
+    reject: "reject",
+    close: "close",
+    reopen: "reopen",
+    mark_read: "mark read",
+    mark_unread: "mark unread",
+};
+
+/**
+ * Per-row applicability test for each bulk action. Rows that don't
+ * pass are silently skipped (no API call, no error), per #B.327: a
+ * bulk action should never refuse the whole batch because some rows
+ * weren't eligible — it just acts on the ones it can.
+ */
+function bulkApplicable(action: BulkAction, r: InboxRow): boolean {
+    switch (action) {
+        case "approve":
+        case "reject":
+            return r.status === "pending";
+        case "close":
+            return r.status === "approved" && !r.closed;
+        case "reopen":
+            return r.closed;
+        case "mark_read":
+            return r.unread === true;
+        case "mark_unread":
+            return r.unread !== true;
+    }
+}
+
+async function bulkAction(action: BulkAction) {
+    const selected = rows.value.filter((r) => selectedIds.value.has(r.id));
+    if (!selected.length) return;
     bulkBusy.value = true;
-    let ok = 0;
-    let failed = 0;
+    let ok = 0, skipped = 0, failed = 0;
     try {
-        for (const id of pendingIds) {
+        for (const r of selected) {
+            if (!bulkApplicable(action, r)) {
+                skipped++;
+                continue;
+            }
             try {
-                if (action === "approve") await api.approve(id);
-                else await api.reject(id);
+                switch (action) {
+                    case "approve":
+                        await api.approve(r.id);
+                        break;
+                    case "reject":
+                        await api.reject(r.id);
+                        break;
+                    case "close":
+                        await api.postMessage({
+                            project: r.project,
+                            kind: "ticket_closed",
+                            ticket_id: r.id,
+                            parent_id: r.id,
+                        });
+                        break;
+                    case "reopen":
+                        await api.postMessage({
+                            project: r.project,
+                            kind: "ticket_reopened",
+                            ticket_id: r.id,
+                            parent_id: r.id,
+                        });
+                        break;
+                    case "mark_read":
+                        await api.markTicketRead(r.id);
+                        break;
+                    case "mark_unread":
+                        await api.markTicketUnread(r.id);
+                        break;
+                }
                 ok++;
             } catch {
                 failed++;
             }
         }
+        const label = BULK_LABELS[action];
+        let detail = "";
+        if (skipped) detail += `${skipped} skipped (not applicable)`;
+        if (failed) detail += `${detail ? ", " : ""}${failed} failed`;
         toast.add({
             severity: failed ? "warn" : "success",
-            summary: `${action}d ${ok} ticket${ok === 1 ? "" : "s"}`,
-            detail: failed ? `${failed} failed` : undefined,
-            life: 8000,
+            summary: `${label}: ${ok} ticket${ok === 1 ? "" : "s"}`,
+            detail: detail || undefined,
+            life: 6000,
         });
         clearSelection();
-        await loadRows();
+        bus.emit("inbox.refresh");
+        bus.emit("projects.refresh");
     } finally {
         bulkBusy.value = false;
     }
+}
+
+/** Count how many selected rows would actually be touched by `action`.
+ *  Used to disable the bulk button when no row is eligible. */
+function bulkApplicableCount(action: BulkAction): number {
+    let n = 0;
+    for (const r of rows.value) {
+        if (selectedIds.value.has(r.id) && bulkApplicable(action, r)) n++;
+    }
+    return n;
 }
 
 watch(project, (v) => {
@@ -575,11 +658,14 @@ function intentSeverity(p: InboxRow["intent"]) {
     return "secondary";
 }
 
-const pendingSelectedCount = computed(() =>
-    rows.value.filter(
-        (r) => selectedIds.value.has(r.id) && r.status === "pending",
-    ).length,
-);
+const bulkCounts = computed(() => ({
+    approve: bulkApplicableCount("approve"),
+    reject: bulkApplicableCount("reject"),
+    close: bulkApplicableCount("close"),
+    reopen: bulkApplicableCount("reopen"),
+    mark_read: bulkApplicableCount("mark_read"),
+    mark_unread: bulkApplicableCount("mark_unread"),
+}));
 
 interface ProjectListItem {
     label: string;
@@ -1010,24 +1096,59 @@ const globalResolvedCount = computed(() =>
                         </span>
                         <span class="spacer" />
                         <Button
-                            label="approve"
+                            v-if="bulkCounts.mark_read || bulkCounts.mark_unread"
+                            :icon="bulkCounts.mark_read >= bulkCounts.mark_unread ? 'pi pi-envelope-open' : 'pi pi-envelope'"
+                            :label="bulkCounts.mark_read >= bulkCounts.mark_unread ? `read (${bulkCounts.mark_read})` : `unread (${bulkCounts.mark_unread})`"
+                            severity="secondary"
+                            text
+                            size="small"
+                            :loading="bulkBusy"
+                            :title="bulkCounts.mark_read >= bulkCounts.mark_unread
+                                ? 'Mark the selected unread tickets as read (others skipped)'
+                                : 'Mark the selected read tickets as unread (others skipped)'"
+                            @click="bulkAction(bulkCounts.mark_read >= bulkCounts.mark_unread ? 'mark_read' : 'mark_unread')"
+                        />
+                        <Button
+                            v-if="bulkCounts.close"
+                            icon="pi pi-lock"
+                            :label="`close (${bulkCounts.close})`"
+                            severity="warn"
+                            text
+                            size="small"
+                            :loading="bulkBusy"
+                            title="Close the selected open tickets (others skipped). Only the reporter / human can close."
+                            @click="bulkAction('close')"
+                        />
+                        <Button
+                            v-if="bulkCounts.reopen"
+                            icon="pi pi-unlock"
+                            :label="`reopen (${bulkCounts.reopen})`"
+                            severity="info"
+                            text
+                            size="small"
+                            :loading="bulkBusy"
+                            title="Reopen the selected closed tickets (others skipped)."
+                            @click="bulkAction('reopen')"
+                        />
+                        <Button
+                            v-if="bulkCounts.approve"
+                            :label="`approve (${bulkCounts.approve})`"
                             icon="pi pi-check"
                             severity="success"
                             size="small"
                             :loading="bulkBusy"
-                            :disabled="!pendingSelectedCount"
-                            :title="pendingSelectedCount ? '' : 'Select pending tickets to approve'"
-                            @click="bulkDecide('approve')"
+                            title="Approve the selected pending tickets (others skipped)."
+                            @click="bulkAction('approve')"
                         />
                         <Button
-                            label="reject"
+                            v-if="bulkCounts.reject"
+                            :label="`reject (${bulkCounts.reject})`"
                             icon="pi pi-times"
                             severity="danger"
                             size="small"
                             :loading="bulkBusy"
-                            :disabled="!pendingSelectedCount"
-                            :title="pendingSelectedCount ? '' : 'Select pending tickets to reject'"
-                            @click="bulkDecide('reject')"
+                            title="Reject the selected pending tickets (others skipped)."
+                            @click="bulkAction('reject')"
                         />
                     </div>
                 </template>
