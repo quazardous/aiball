@@ -36,25 +36,26 @@ const slots = useSlots();
         }"
         @click="emit('click', $event)"
     >
-        <div class="list-row__lead" @click.stop>
-            <slot name="select" />
-            <slot name="lead" />
+        <div class="list-row__line list-row__line--title">
+            <span v-if="slots.from" class="list-row__from"><slot name="from" /></span>
+            <span class="list-row__title"><slot name="title" /></span>
+            <span v-if="slots.snippet" class="list-row__snippet">
+                <slot name="snippet" />
+            </span>
         </div>
-        <div v-if="slots.from" class="list-row__from">
-            <slot name="from" />
-        </div>
-        <div class="list-row__main">
-            <div class="list-row__line list-row__line--title">
-                <span class="list-row__title"><slot name="title" /></span>
-                <span v-if="slots.snippet" class="list-row__snippet">
-                    <slot name="snippet" />
-                </span>
-            </div>
-            <div v-if="slots.chips" class="list-row__line list-row__line--chips">
-                <slot name="chips" />
-            </div>
-        </div>
-        <div class="list-row__tail">
+        <div class="list-row__line list-row__line--chips">
+            <span
+                v-if="slots.select"
+                class="list-row__select"
+                @click.stop
+            ><slot name="select" /></span>
+            <span
+                v-if="slots.lead"
+                class="list-row__lead"
+                @click.stop
+            ><slot name="lead" /></span>
+            <slot name="chips" />
+            <span class="list-row__spacer" />
             <div v-if="slots['always-actions']" class="list-row__always-actions" @click.stop>
                 <slot name="always-actions" />
             </div>
@@ -69,17 +70,17 @@ const slots = useSlots();
 
 <style>
 .list-row {
-    display: grid;
-    grid-template-columns: auto auto minmax(0, 1fr) auto;
-    gap: 0.7rem;
-    align-items: center;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
     padding: 0.4rem 0.7rem;
     border-bottom: 1px solid var(--p-content-border-color);
     cursor: pointer;
     transition: background 0.1s;
-    /* Reserve enough vertical room for two-line rows (title + chips)
-       plus the hover-revealed action buttons. Rows without a chips slot
-       collapse naturally — the second line just isn't rendered. */
+    /* Two-line rows: the title line takes the FULL row width (ref +
+       title + snippet), the chip strip below carries the checkbox,
+       the read toggle, the lifecycle icon, the tags, and the
+       meta/time/actions on the right. */
     min-height: 3.4rem;
 }
 .list-row:hover {
@@ -154,30 +155,21 @@ const slots = useSlots();
 }
 
 .list-row__lead {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    min-width: 1rem;
+}
+.list-row__select {
+    display: inline-flex;
+    align-items: center;
 }
 .list-row__from {
-    flex-shrink: 0;
-    width: 9rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     color: var(--p-text-color);
     font-size: 0.92rem;
-}
-.list-row__main {
-    min-width: 0;
-    font-size: 0.92rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    /* Cap the row at two visual lines: the first one (title + snippet)
-       still ellipses if needed, the second one (chips: status, intent,
-       tags, project) wraps within the row's available width so chips
-       are never cropped behind the time/meta column. */
+    margin-right: 0.4rem;
+    /* No fixed width — the from name flows inline with the title on
+       line 1, separated by a trailing space. Truncation is handled by
+       the line's overall ellipsis when the title runs long. */
 }
 .list-row__line {
     display: flex;
@@ -188,10 +180,8 @@ const slots = useSlots();
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    /* `display: block` would also work but flex keeps title + snippet
-       on the same baseline. We rely on the inner spans being inline
-       for the ellipsis to actually clip. */
     display: block;
+    font-size: 0.92rem;
 }
 .list-row__line--chips {
     flex-wrap: wrap;
@@ -209,13 +199,8 @@ const slots = useSlots();
 .list-row__snippet::before {
     content: "— ";
 }
-.list-row__tail {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-shrink: 0;
-    min-width: 6rem;
-    justify-content: flex-end;
+.list-row__spacer {
+    flex: 1;
 }
 .list-row__meta {
     font-size: 0.8rem;
