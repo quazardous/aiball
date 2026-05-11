@@ -19,6 +19,7 @@ import {
 import HeaderBar from "./components/HeaderBar.vue";
 import InboxList from "./components/InboxList.vue";
 import InboxToolbar from "./components/InboxToolbar.vue";
+import PaginationBar from "./components/PaginationBar.vue";
 import NewTicketPage from "./components/NewTicketPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
@@ -171,7 +172,11 @@ function clearSelection() {
     selectedIds.value = new Set();
 }
 function selectAllVisible() {
-    selectedIds.value = new Set(rows.value.map((r) => r.id));
+    // "Visible" = the current page's rows. With pagination on, selecting
+    // "all" across every page would be surprising; the user sees 25 rows
+    // and expects the button to act on those. To select across pages,
+    // they can paginate + select-all again — selectedIds persists.
+    selectedIds.value = new Set(pagedRows.value.map((r) => r.id));
 }
 const BULK_LABELS: Record<BulkAction, string> = {
     approve: "approve",
@@ -512,6 +517,35 @@ const sortedRows = computed(() => {
     return r;
 });
 
+// Client-side pagination of the inbox (#B.74). Server still returns
+// everything because the "unread" filter is computed client-side from
+// the per-row flag — paginating before that filter would yield ragged
+// pages. With ~63 rows total today, paying the bandwidth is trivial.
+const DEFAULT_PAGE_SIZE = 25;
+const pageSize = ref<number>(
+    Number(localStorage.getItem("aiball.page_size")) || DEFAULT_PAGE_SIZE,
+);
+const page = ref(1);
+const totalPages = computed(() =>
+    Math.max(1, Math.ceil(sortedRows.value.length / pageSize.value)),
+);
+const pagedRows = computed(() =>
+    sortedRows.value.slice(
+        (page.value - 1) * pageSize.value,
+        page.value * pageSize.value,
+    ),
+);
+
+// Any change to the filter set resets the cursor — otherwise a page-2
+// view followed by tightening the filter could leave the user staring
+// at an empty page.
+watch([statusFilter, onlyOpen, project, showSnoozed, sortBy, searchQuery],
+    () => { page.value = 1; });
+watch(pageSize, (v) => {
+    localStorage.setItem("aiball.page_size", String(v));
+    page.value = 1;
+});
+
 useRouting({
     panel,
     openTicketId,
@@ -724,7 +758,7 @@ watch(showSnoozed, (v) => {
 
                     <InboxList
                         :loading="loading"
-                        :rows="sortedRows"
+                        :rows="pagedRows"
                         :project="project"
                         :selected-ids="selectedIds"
                         :search-active="searchActive"
@@ -734,6 +768,15 @@ watch(showSnoozed, (v) => {
                         @open-hit="openSearchHit"
                         @toggle-read="toggleRead"
                         @toggle-selected="toggleSelected"
+                    />
+
+                    <PaginationBar
+                        v-if="!searchActive && sortedRows.length > 0"
+                        :page="page"
+                        :page-size="pageSize"
+                        :total="sortedRows.length"
+                        @update:page="page = $event"
+                        @update:page-size="pageSize = $event"
                     />
 
                     <BulkBar
