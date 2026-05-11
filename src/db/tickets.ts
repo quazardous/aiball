@@ -6,7 +6,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { and, asc, eq, isNotNull, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, lte } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 
@@ -24,6 +24,85 @@ export interface SubTicketSummary {
     title: string;
     status: "pending" | "approved" | "rejected";
     closed: boolean;
+    /** Lifecycle stage (open / closed / resolved / snoozed / …). */
+    stage: TicketStage;
+}
+
+/**
+ * Six-way enum describing a ticket's currently-displayed state, suitable
+ * for a small visual badge. Computed via lifecycle replay + status +
+ * postpone deadline.
+ */
+export type TicketStage =
+    | "rejected"
+    | "closed-resolved"
+    | "closed"
+    | "resolved"
+    | "snoozed"
+    | "pending"
+    | "open";
+
+/**
+ * Compute the lifecycle stage of a set of tickets in one DB roundtrip
+ * per kind of state — used by the thread API to enrich
+ * ticket_referenced / ticket_sub_added pseudo-comments with the target
+ * ticket's current stage (per #B.70 follow-up).
+ */
+export function getTicketStages(ids: number[]): Map<number, TicketStage> {
+    const out = new Map<number, TicketStage>();
+    if (ids.length === 0) return out;
+    const db = getDb();
+    const rows = db.select({
+        id: schema.tickets.id,
+        status: schema.tickets.status,
+        postponedUntil: schema.tickets.postponedUntil,
+    }).from(schema.tickets).where(inArray(schema.tickets.id, ids)).all();
+    const idsByStatus = new Map(rows.map((r) => [r.id, r]));
+    const events = db.select({
+        ticket_id: schema.messages.ticketId,
+        kind: schema.messages.kind,
+        id: schema.messages.id,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.status, "approved"),
+            inArray(schema.messages.ticketId, ids),
+        ))
+        .orderBy(asc(schema.messages.id))
+        .all();
+    const closedById = new Map<number, boolean>();
+    const resolvedById = new Map<number, boolean>();
+    for (const ev of events) {
+        if (ev.kind === "ticket_closed") closedById.set(ev.ticket_id, true);
+        else if (ev.kind === "ticket_reopened") {
+            closedById.set(ev.ticket_id, false);
+            resolvedById.set(ev.ticket_id, false);
+        } else if (ev.kind === "ticket_resolved") resolvedById.set(ev.ticket_id, true);
+    }
+    const nowStr = nowIso();
+    for (const r of rows) {
+        const closed = closedById.get(r.id) === true;
+        const resolved = resolvedById.get(r.id) === true;
+        if (r.status === "rejected") {
+            out.set(r.id, "rejected");
+        } else if (closed && resolved) {
+            out.set(r.id, "closed-resolved");
+        } else if (closed) {
+            out.set(r.id, "closed");
+        } else if (resolved) {
+            out.set(r.id, "resolved");
+        } else if (r.postponedUntil && r.postponedUntil > nowStr) {
+            out.set(r.id, "snoozed");
+        } else if (r.status === "pending") {
+            out.set(r.id, "pending");
+        } else {
+            out.set(r.id, "open");
+        }
+    }
+    // Tickets we couldn't find at all (deleted etc.) get "open" as a
+    // safe default — keeps the frontend rendering consistent.
+    for (const id of ids) if (!out.has(id)) out.set(id, "open");
+    return out;
 }
 
 /**
@@ -44,32 +123,18 @@ export function listSubTickets(parentId: number): SubTicketSummary[] {
         .orderBy(asc(schema.tickets.id))
         .all();
     if (rows.length === 0) return [];
-    // Lifecycle replay across closed/reopened events to compute the
-    // `closed` flag for each child. Same pattern as the inbox handler.
-    const events = db.select({
-        ticket_id: schema.messages.ticketId,
-        kind: schema.messages.kind,
-        id: schema.messages.id,
-    })
-        .from(schema.messages)
-        .where(eq(schema.messages.status, "approved"))
-        .orderBy(asc(schema.messages.id))
-        .all();
-    const ids = new Set(rows.map((r) => r.id));
-    const closedById = new Map<number, boolean>();
-    for (const ev of events) {
-        if (!ids.has(ev.ticket_id)) continue;
-        if (ev.kind === "ticket_closed") closedById.set(ev.ticket_id, true);
-        else if (ev.kind === "ticket_reopened") closedById.set(ev.ticket_id, false);
-    }
-    return rows
-        .filter((r) => r.status !== "rejected")
-        .map((r) => ({
+    const filtered = rows.filter((r) => r.status !== "rejected");
+    const stages = getTicketStages(filtered.map((r) => r.id));
+    return filtered.map((r) => {
+        const stage = stages.get(r.id) ?? "open";
+        return {
             id: r.id,
             title: r.editedTitle ?? r.title ?? "(no title)",
             status: r.status as "pending" | "approved" | "rejected",
-            closed: closedById.get(r.id) ?? false,
-        }));
+            closed: stage === "closed" || stage === "closed-resolved",
+            stage,
+        };
+    });
 }
 
 // =====================================================================

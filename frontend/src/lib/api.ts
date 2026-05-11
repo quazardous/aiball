@@ -43,8 +43,21 @@ export interface Message {
     /** Set on `ticket_sub_added` / `ticket_referenced` pseudo-comments —
      *  the source ticket that triggered the relation event. */
     source_ticket_id?: number | null;
+    /** Lifecycle stage of the source ticket, populated server-side for
+     *  ticket_referenced / ticket_sub_added rows so the UI can render a
+     *  small "where is this relation pointing now?" badge. */
+    source_ticket_stage?: TicketStage;
     tags: Tag[];
 }
+
+export type TicketStage =
+    | "rejected"
+    | "closed-resolved"
+    | "closed"
+    | "resolved"
+    | "snoozed"
+    | "pending"
+    | "open";
 
 export interface Rule {
     id: number;
@@ -119,6 +132,7 @@ export interface SubTicketSummary {
     title: string;
     status: "pending" | "approved" | "rejected";
     closed: boolean;
+    stage: TicketStage;
 }
 
 export interface SearchHit {

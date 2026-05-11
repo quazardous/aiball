@@ -316,6 +316,21 @@ const RELATION_LABELS: Record<string, { icon: string; verbOne: string; verbMany:
     },
 };
 
+/**
+ * Compact one-word labels for the lifecycle stage badge rendered next
+ * to ticket refs in relation rows and sub-ticket recap items (per
+ * #B.70 follow-up). `open` is intentionally NOT in the table — it's
+ * the default, no badge needed.
+ */
+const STAGE_LABELS: Record<string, string> = {
+    rejected: "rejected",
+    "closed-resolved": "closed ✓",
+    closed: "closed",
+    resolved: "resolved",
+    snoozed: "snoozed",
+    pending: "pending",
+};
+
 const threadItems = computed<ThreadItem[]>(() => {
     const items = flatComments.value;
     const out: ThreadItem[] = [];
@@ -901,14 +916,16 @@ async function copyTicketRef() {
                             :key="sub.id"
                             class="thread-sub-tickets__item"
                             :class="{
-                                'thread-sub-tickets__item--closed': sub.closed,
-                                'thread-sub-tickets__item--pending': sub.status === 'pending',
+                                'thread-sub-tickets__item--closed': sub.stage === 'closed' || sub.stage === 'closed-resolved' || sub.stage === 'rejected',
                             }"
                         >
                             <a :href="`/b/${sub.id}`" class="thread-sub-tickets__id">#B.{{ sub.id }}</a>
                             <span class="thread-sub-tickets__title">{{ sub.title }}</span>
-                            <span v-if="sub.status === 'pending'" class="thread-sub-tickets__tag">pending</span>
-                            <span v-else-if="sub.closed" class="thread-sub-tickets__tag thread-sub-tickets__tag--closed">closed</span>
+                            <span
+                                v-if="sub.stage !== 'open' && STAGE_LABELS[sub.stage]"
+                                class="thread-sub-tickets__tag"
+                                :data-stage="sub.stage"
+                            >{{ STAGE_LABELS[sub.stage] }}</span>
                         </li>
                     </ul>
                 </details>
@@ -1100,7 +1117,11 @@ async function copyTicketRef() {
                                 :href="`/b/${m.source_ticket_id}`"
                                 class="thread-relation-row__ref"
                             >
-                                #B.{{ m.source_ticket_id }}<template v-if="i2 < item.msgs.length - 1">,</template>
+                                #B.{{ m.source_ticket_id }}<span
+                                    v-if="m.source_ticket_stage && m.source_ticket_stage !== 'open'"
+                                    class="thread-relation-row__stage"
+                                    :data-stage="m.source_ticket_stage"
+                                >{{ STAGE_LABELS[m.source_ticket_stage] }}</span><template v-if="i2 < item.msgs.length - 1">,</template>
                             </a>
                         </span>
                         <span class="thread-relation-row__meta">by {{ item.msgs[0].by_agent ?? "?" }} · {{ shortTime(item.msgs[0].created_at) }}</span>
@@ -1355,12 +1376,29 @@ async function copyTicketRef() {
     font-size: 0.72rem;
     padding: 0.05rem 0.4rem;
     border-radius: 0.25rem;
+    background: color-mix(in srgb, var(--p-surface-500) 18%, transparent);
+    color: var(--p-text-color);
+}
+.thread-sub-tickets__tag[data-stage="pending"] {
     background: color-mix(in srgb, var(--p-yellow-500) 25%, transparent);
     color: var(--p-yellow-700);
 }
-.thread-sub-tickets__tag--closed {
+.thread-sub-tickets__tag[data-stage="closed"],
+.thread-sub-tickets__tag[data-stage="closed-resolved"] {
     background: color-mix(in srgb, var(--p-orange-500) 20%, transparent);
     color: var(--p-orange-700);
+}
+.thread-sub-tickets__tag[data-stage="resolved"] {
+    background: color-mix(in srgb, var(--p-green-500) 22%, transparent);
+    color: var(--p-green-700);
+}
+.thread-sub-tickets__tag[data-stage="snoozed"] {
+    background: color-mix(in srgb, var(--p-indigo-500) 22%, transparent);
+    color: var(--p-indigo-700);
+}
+.thread-sub-tickets__tag[data-stage="rejected"] {
+    background: color-mix(in srgb, var(--p-red-500) 20%, transparent);
+    color: var(--p-red-700);
 }
 .thread-no-comments { padding: 1rem; }
 .thread-decide {
@@ -1649,6 +1687,36 @@ async function copyTicketRef() {
 }
 .thread-relation-row__ref:hover {
     text-decoration: underline;
+}
+.thread-relation-row__stage {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.7rem;
+    margin-left: 0.2rem;
+    padding: 0 0.3rem;
+    border-radius: 0.2rem;
+    background: color-mix(in srgb, var(--p-surface-500) 20%, transparent);
+    color: var(--p-text-muted-color);
+}
+.thread-relation-row__stage[data-stage="pending"] {
+    background: color-mix(in srgb, var(--p-yellow-500) 25%, transparent);
+    color: var(--p-yellow-700);
+}
+.thread-relation-row__stage[data-stage="closed"],
+.thread-relation-row__stage[data-stage="closed-resolved"] {
+    background: color-mix(in srgb, var(--p-orange-500) 20%, transparent);
+    color: var(--p-orange-700);
+}
+.thread-relation-row__stage[data-stage="resolved"] {
+    background: color-mix(in srgb, var(--p-green-500) 22%, transparent);
+    color: var(--p-green-700);
+}
+.thread-relation-row__stage[data-stage="snoozed"] {
+    background: color-mix(in srgb, var(--p-indigo-500) 22%, transparent);
+    color: var(--p-indigo-700);
+}
+.thread-relation-row__stage[data-stage="rejected"] {
+    background: color-mix(in srgb, var(--p-red-500) 20%, transparent);
+    color: var(--p-red-700);
 }
 .thread-relation-row__meta {
     margin-left: auto;

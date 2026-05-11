@@ -116,7 +116,9 @@ export {
     getTicketPostpone,
     listExpiredPostpones,
     listSubTickets,
+    getTicketStages,
     type SubTicketSummary,
+    type TicketStage,
 } from "./db/tickets.js";
 
 export {
