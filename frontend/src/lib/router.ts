@@ -5,13 +5,11 @@ export type RouteState = {
     openTicketId: number | null;
     project: string | null;
     statusFilter: "all" | "unread" | "pending" | "approved" | "rejected";
-    intentFilter: "all" | "panic" | "request" | "question" | "fyi";
     onlyOpen: boolean;
 };
 
 const DEFAULTS = {
     statusFilter: "pending" as const,
-    intentFilter: "all" as const,
     onlyOpen: true,
 };
 
@@ -25,7 +23,6 @@ export function buildUrl(s: RouteState): string {
     const qs = new URLSearchParams();
     if (s.project) qs.set("p", s.project);
     if (s.statusFilter !== DEFAULTS.statusFilter) qs.set("status", s.statusFilter);
-    if (s.intentFilter !== DEFAULTS.intentFilter) qs.set("intent", s.intentFilter);
     if (s.onlyOpen !== DEFAULTS.onlyOpen) qs.set("open", s.onlyOpen ? "1" : "0");
     const query = qs.toString();
     return path + (query ? "?" + query : "");
@@ -73,10 +70,6 @@ export function parseUrl(): Partial<RouteState> {
     ) {
         out.statusFilter = st;
     }
-    const pr = qs.get("intent");
-    if (pr === "panic" || pr === "request" || pr === "question" || pr === "fyi" || pr === "all") {
-        out.intentFilter = pr;
-    }
     if (qs.has("open")) out.onlyOpen = qs.get("open") === "1";
     return out;
 }
@@ -95,7 +88,6 @@ export function useRouting(refs: {
     openTicketId: Ref<number | null>;
     project: Ref<string | null>;
     statusFilter: Ref<RouteState["statusFilter"]>;
-    intentFilter: Ref<RouteState["intentFilter"]>;
     onlyOpen: Ref<boolean>;
 }) {
     let applying = false;
@@ -106,7 +98,6 @@ export function useRouting(refs: {
             openTicketId: refs.openTicketId.value,
             project: refs.project.value,
             statusFilter: refs.statusFilter.value,
-            intentFilter: refs.intentFilter.value,
             onlyOpen: refs.onlyOpen.value,
         };
     }
@@ -118,8 +109,6 @@ export function useRouting(refs: {
         if ("project" in state) refs.project.value = state.project ?? null;
         if ("statusFilter" in state && state.statusFilter)
             refs.statusFilter.value = state.statusFilter;
-        if ("intentFilter" in state && state.intentFilter)
-            refs.intentFilter.value = state.intentFilter;
         if ("onlyOpen" in state && typeof state.onlyOpen === "boolean")
             refs.onlyOpen.value = state.onlyOpen;
         // Release the lock on next microtask so watchers see the change without pushing.
@@ -143,7 +132,6 @@ export function useRouting(refs: {
             refs.openTicketId,
             refs.project,
             refs.statusFilter,
-            refs.intentFilter,
             refs.onlyOpen,
         ],
         pushIfChanged,

@@ -25,14 +25,10 @@ import InputText from "primevue/inputtext";
 const toast = useToast();
 
 type StatusFilter = "all" | "unread" | "pending" | "approved" | "rejected";
-type IntentFilter = "all" | "panic" | "request" | "question" | "fyi";
 type SortBy = "activity" | "created_desc" | "created_asc";
 
 const statusFilter = ref<StatusFilter>(
     (localStorage.getItem("aiball.filter.status") as StatusFilter | null) ?? "pending",
-);
-const intentFilter = ref<IntentFilter>(
-    (localStorage.getItem("aiball.filter.intent") as IntentFilter | null) ?? "all",
 );
 const onlyOpen = ref(localStorage.getItem("aiball.filter.open") !== "0");
 const sortBy = ref<SortBy>(
@@ -50,13 +46,6 @@ const statusFilterOptions: { label: string; value: StatusFilter }[] = [
     { label: "Pending", value: "pending" },
     { label: "Approved", value: "approved" },
     { label: "Rejected", value: "rejected" },
-];
-const intentFilterOptions: { label: string; value: IntentFilter }[] = [
-    { label: "Any intent", value: "all" },
-    { label: "Panic", value: "panic" },
-    { label: "Request", value: "request" },
-    { label: "Question", value: "question" },
-    { label: "FYI", value: "fyi" },
 ];
 const sortOptions: { label: string; value: SortBy }[] = [
     { label: "Recent activity", value: "activity" },
@@ -279,7 +268,6 @@ async function loadRows() {
                 q: searchQuery.value.trim(),
                 project: project.value ?? undefined,
                 open: onlyOpen.value,
-                intent: intentFilter.value === "all" ? undefined : intentFilter.value,
                 limit: 100,
             });
             rows.value = []; // we render searchHits in this mode
@@ -296,7 +284,6 @@ async function loadRows() {
                 : statusFilter.value;
         let fetched = await api.inbox({
             status: apiStatus,
-            intent: intentFilter.value === "all" ? undefined : intentFilter.value,
             project: project.value ?? undefined,
             open: onlyOpen.value,
         });
@@ -437,12 +424,14 @@ useBus("project.deleted", ({ project: deleted }) => {
 // ticket id and reloads when the bus event matches), so we don't need to
 // poke it through a ref from here.
 
-watch([statusFilter, intentFilter, onlyOpen, project], () => {
+watch([statusFilter, onlyOpen, project], () => {
     localStorage.setItem("aiball.filter.status", statusFilter.value);
-    localStorage.setItem("aiball.filter.intent", intentFilter.value);
     localStorage.setItem("aiball.filter.open", onlyOpen.value ? "1" : "0");
     if (inListView.value) loadRows();
 });
+// Legacy intent filter removed (#B.300). Clean up the localStorage key
+// so it doesn't linger after the upgrade.
+localStorage.removeItem("aiball.filter.intent");
 
 watch(sortBy, (v) => localStorage.setItem("aiball.filter.sort", v));
 
@@ -473,7 +462,6 @@ useRouting({
     openTicketId,
     project,
     statusFilter,
-    intentFilter,
     onlyOpen,
 });
 
@@ -821,15 +809,6 @@ const globalResolvedCount = computed(() =>
                             size="small"
                             class="filter-select"
                             @update:model-value="(v: StatusFilter) => (statusFilter = v)"
-                        />
-                        <Select
-                            :model-value="intentFilter"
-                            :options="intentFilterOptions"
-                            option-label="label"
-                            option-value="value"
-                            size="small"
-                            class="filter-select"
-                            @update:model-value="(v: IntentFilter) => (intentFilter = v)"
                         />
                         <ToggleButton
                             v-model="onlyOpen"
