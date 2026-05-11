@@ -818,6 +818,17 @@ async function copyTicketRef() {
                         {{ new Date(data.ticket.created_at).toLocaleString() }}
                     </span>
                 </header>
+                <div
+                    v-if="data.ticket.parent_ticket_id"
+                    class="thread-parent-ref"
+                    title="This ticket is a sub-ticket — click to open the parent thread."
+                >
+                    <i class="pi pi-sitemap" />
+                    <span>Sub-ticket of</span>
+                    <a :href="`/b/${data.ticket.parent_ticket_id}`" class="thread-parent-ref__link">
+                        #B.{{ data.ticket.parent_ticket_id }}
+                    </a>
+                </div>
                 <h2 class="thread-title">{{ data.ticket.title }}</h2>
                 <div
                     v-if="data.ticket.resolved && !data.ticket.closed"
@@ -1158,6 +1169,33 @@ async function copyTicketRef() {
     margin: 0;
     font-size: 1.3rem;
     font-weight: 600;
+}
+/* Sub-ticket lineage indicator, shown above the title when
+ * data.ticket.parent_ticket_id is set. Subtle so the title stays
+ * dominant — this is structural metadata, not a banner. */
+.thread-parent-ref {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    align-self: flex-start;
+    padding: 0.15rem 0.5rem;
+    border-left: 2px solid var(--p-indigo-300);
+    background: color-mix(in srgb, var(--p-indigo-500) 10%, transparent);
+    border-radius: 0 0.25rem 0.25rem 0;
+    font-size: 0.82rem;
+    color: var(--p-text-muted-color);
+}
+.thread-parent-ref i {
+    font-size: 0.85em;
+}
+.thread-parent-ref__link {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    color: var(--p-primary-color);
+    text-decoration: none;
+    font-weight: 600;
+}
+.thread-parent-ref__link:hover {
+    text-decoration: underline;
 }
 .thread-no-comments { padding: 1rem; }
 .thread-decide {

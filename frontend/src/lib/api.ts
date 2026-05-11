@@ -105,6 +105,9 @@ export interface TicketSummary {
      *  hidden from the open inbox until that timestamp. */
     postponed_until?: string | null;
     intent: Intent | null;
+    /** Parent ticket id when this ticket is a sub-ticket. Rendered as
+     *  "Sub-ticket of #B.NN" metadata in the thread header. */
+    parent_ticket_id?: number | null;
     tags: Tag[];
 }
 

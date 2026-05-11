@@ -875,6 +875,13 @@ api.get("/tickets/:id", (req, res) => {
             broadcast: t.broadcast === 1,
             postponed_until: t.postponed_until ?? null,
             intent: t.intent,
+            /**
+             * Sub-ticket lineage (per #B.61 / #B.62 follow-up): exposed
+             * here so the UI can render "Sub-ticket of #B.NN" as
+             * metadata in the header rather than expecting the author
+             * to repeat it in the body.
+             */
+            parent_ticket_id: t.parent_ticket_id ?? null,
             tags: listMessageTags(t.id),
         },
         comments: withTags(threadMessages),
