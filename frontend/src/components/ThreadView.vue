@@ -751,6 +751,17 @@ async function copyTicketRef() {
                         @click="commentAndMarkResolved"
                     />
                     <Button
+                        v-else
+                        icon="pi pi-undo"
+                        severity="secondary"
+                        size="small"
+                        text
+                        rounded
+                        :loading="resolutionBusy"
+                        title="Undo resolved — clear the resolution and bring the ticket back to plain open. Embarks any text typed in the composer."
+                        @click="commentAndReopen"
+                    />
+                    <Button
                         icon="pi pi-lock"
                         severity="secondary"
                         size="small"
