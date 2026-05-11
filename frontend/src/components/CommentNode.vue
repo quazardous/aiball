@@ -64,10 +64,21 @@ async function copyRef() {
     }
 }
 
-const LIFECYCLE_LABELS: Record<string, { icon: string; verb: string; severity: "success" | "warn" | "info" }> = {
+interface LifecycleLabel {
+    icon: string;
+    verb: string;
+    severity: "success" | "warn" | "info" | "secondary";
+    /** When set, render the `source_ticket_id` of the message as a
+     *  clickable ref after the verb. */
+    showSource?: boolean;
+}
+
+const LIFECYCLE_LABELS: Record<string, LifecycleLabel> = {
     ticket_closed: { icon: "pi pi-lock", verb: "closed this ticket", severity: "warn" },
     ticket_reopened: { icon: "pi pi-unlock", verb: "reopened this ticket", severity: "info" },
     ticket_resolved: { icon: "pi pi-check-circle", verb: "marked this ticket resolved", severity: "success" },
+    ticket_sub_added: { icon: "pi pi-sitemap", verb: "added sub-ticket", severity: "info", showSource: true },
+    ticket_referenced: { icon: "pi pi-link", verb: "referenced this ticket from", severity: "secondary", showSource: true },
 };
 
 // Body edit (per #B.94). Toggle reveals a textarea seeded with the
@@ -188,6 +199,11 @@ onBeforeUnmount(() => detachPaste?.());
         >
             <i :class="LIFECYCLE_LABELS[msg.kind].icon" />
             <span>{{ LIFECYCLE_LABELS[msg.kind].verb }}</span>
+            <a
+                v-if="LIFECYCLE_LABELS[msg.kind].showSource && msg.source_ticket_id"
+                :href="`/b/${msg.source_ticket_id}`"
+                class="comment-lifecycle__ref"
+            >#B.{{ msg.source_ticket_id }}</a>
         </div>
         <div v-if="editing" class="comment-edit">
             <Textarea

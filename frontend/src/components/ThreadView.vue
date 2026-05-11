@@ -1289,9 +1289,27 @@ async function copyTicketRef() {
     background: color-mix(in srgb, var(--p-blue-500) 18%, transparent);
     color: var(--p-blue-700);
 }
+.comment-lifecycle[data-kind="ticket_sub_added"] {
+    background: color-mix(in srgb, var(--p-indigo-500) 18%, transparent);
+    color: var(--p-indigo-700);
+}
+.comment-lifecycle[data-kind="ticket_referenced"] {
+    background: color-mix(in srgb, var(--p-surface-500) 18%, transparent);
+    color: var(--p-text-muted-color);
+}
 .aiball-dark .comment-lifecycle[data-kind="ticket_resolved"] { color: var(--p-green-300); }
 .aiball-dark .comment-lifecycle[data-kind="ticket_closed"] { color: var(--p-orange-300); }
 .aiball-dark .comment-lifecycle[data-kind="ticket_reopened"] { color: var(--p-blue-300); }
+.aiball-dark .comment-lifecycle[data-kind="ticket_sub_added"] { color: var(--p-indigo-300); }
+.comment-lifecycle__ref {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-weight: 600;
+    color: inherit;
+    text-decoration: none;
+}
+.comment-lifecycle__ref:hover {
+    text-decoration: underline;
+}
 .comment-actions {
     display: flex;
     gap: 0.4rem;

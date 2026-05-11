@@ -16,7 +16,14 @@ export const STRATEGIES: readonly Strategy[] = ["manual", "auto", "auto-reply"];
 export interface Message {
     id: number;
     project: string;
-    kind: "ticket_created" | "comment_added" | "ticket_closed" | "ticket_reopened" | "ticket_resolved";
+    kind:
+        | "ticket_created"
+        | "comment_added"
+        | "ticket_closed"
+        | "ticket_reopened"
+        | "ticket_resolved"
+        | "ticket_sub_added"
+        | "ticket_referenced";
     ticket_id: number | null;
     parent_id: number | null;
     title: string | null;
@@ -33,6 +40,9 @@ export interface Message {
     intent: Intent | null;
     /** Public ref for comments / lifecycle events. NULL for tickets. */
     hashid?: string | null;
+    /** Set on `ticket_sub_added` / `ticket_referenced` pseudo-comments —
+     *  the source ticket that triggered the relation event. */
+    source_ticket_id?: number | null;
     tags: Tag[];
 }
 

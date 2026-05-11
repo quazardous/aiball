@@ -273,6 +273,54 @@ export function editMessage(
     return getMessage(id);
 }
 
+/**
+ * Insert a relation-event pseudo-comment (`ticket_sub_added` or
+ * `ticket_referenced`) on the target thread. These rows are not user
+ * input — the daemon auto-emits them when:
+ *   - a sub-ticket is created with parent_id set (kind=ticket_sub_added)
+ *   - a body mentions another ticket via `#B.NN` (kind=ticket_referenced)
+ *
+ * Always inserted as `approved` with `decided_by=auto` since they
+ * shouldn't go through moderation (they're informational lifecycle
+ * events, not user-authored content).
+ *
+ * Returns the new pseudo-comment as a Message (so the caller can fan
+ * out pings + WS broadcast through the normal channels).
+ */
+export function insertRelationEvent(opts: {
+    target_ticket_id: number;
+    source_ticket_id: number;
+    kind: "ticket_sub_added" | "ticket_referenced";
+    by_agent: string | null;
+}): Message | null {
+    const db = getDb();
+    return db.transaction((tx) => {
+        const id = nextMessageId(tx);
+        const seq = (tx.select({
+            n: sql<number>`COALESCE(MAX(${schema.messages.displaySeq}), 0) + 1`,
+        }).from(schema.messages).where(eq(schema.messages.ticketId, opts.target_ticket_id)).get())?.n ?? 1;
+        const createdAt = nowIso();
+        const hashid = pickFreshHashid(tx);
+        const inserted = tx.insert(schema.messages).values({
+            id,
+            ticketId: opts.target_ticket_id,
+            displaySeq: seq,
+            kind: opts.kind,
+            body: "",
+            byAgent: opts.by_agent ?? null,
+            status: "approved",
+            decidedAt: createdAt,
+            decidedBy: "auto",
+            createdAt,
+            hashid,
+            sourceTicketId: opts.source_ticket_id,
+        }).returning().get();
+        const parent = tx.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, opts.target_ticket_id)).get();
+        return messageRowToMessage(inserted, parent?.project ?? "");
+    });
+}
+
 export function noteMessage(id: number, note: string | null): Message | null {
     const db = getDb();
     const t = db.update(schema.tickets)

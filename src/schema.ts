@@ -98,11 +98,20 @@ export const messages = sqliteTable("_messages", {
      * by app-level checks at insert).
      */
     hashid: text("hashid"),
+    /**
+     * For `ticket_sub_added` and `ticket_referenced` pseudo-comments,
+     * points at the source ticket that triggered the relation. NULL on
+     * regular comments and other lifecycle events. ON DELETE CASCADE
+     * with the source so deleting the source also wipes its pseudo
+     * notifications elsewhere.
+     */
+    sourceTicketId: integer("source_ticket_id").references(() => tickets.id, { onDelete: "cascade" }),
 }, (t) => [
     uniqueIndex("idx_messages_ticket_display").on(t.ticketId, t.displaySeq),
     index("idx_messages_ticket").on(t.ticketId),
     index("idx_messages_kind").on(t.kind),
     index("idx_messages_hashid").on(t.hashid),
+    index("idx_messages_source").on(t.sourceTicketId),
 ]);
 
 export const rules = sqliteTable("rules", {

@@ -826,7 +826,9 @@ api.get("/tickets/:id", (req, res) => {
                 (m.kind === "comment_added" ||
                     m.kind === "ticket_closed" ||
                     m.kind === "ticket_reopened" ||
-                    m.kind === "ticket_resolved") &&
+                    m.kind === "ticket_resolved" ||
+                    m.kind === "ticket_sub_added" ||
+                    m.kind === "ticket_referenced") &&
                 m.status !== "rejected",
         )
         .sort((a, b) => a.id - b.id);

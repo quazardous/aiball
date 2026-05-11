@@ -70,6 +70,7 @@ export {
 
 export {
     insertMessage,
+    insertRelationEvent,
     getMessage,
     getMessageByHashid,
     listMessages,

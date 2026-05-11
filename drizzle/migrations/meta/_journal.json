@@ -64,6 +64,13 @@
       "when": 1778590000000,
       "tag": "0008_ticket_parent",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1778600000000,
+      "tag": "0009_ticket_relations",
+      "breakpoints": true
     }
   ]
 }

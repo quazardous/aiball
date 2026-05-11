@@ -30,7 +30,9 @@ export type MessageKind =
     | "comment_added"
     | "ticket_closed"
     | "ticket_reopened"
-    | "ticket_resolved";
+    | "ticket_resolved"
+    | "ticket_sub_added"
+    | "ticket_referenced";
 export type MessageStatus = "pending" | "approved" | "rejected";
 export type RuleDecision = "auto" | "review";
 export type Intent = "panic" | "request" | "question" | "fyi";
@@ -92,6 +94,14 @@ export interface Message {
      * non-ticket rows and for top-level tickets.
      */
     parent_ticket_id?: number | null;
+    /**
+     * Set on `ticket_sub_added` and `ticket_referenced` pseudo-comments:
+     * points at the source ticket that triggered the relation (the child
+     * for sub_added; the mentioning ticket for referenced). NULL on any
+     * other kind. Lets the UI render a clickable link without parsing
+     * the body.
+     */
+    source_ticket_id?: number | null;
 }
 
 export type SubscriptionRole = "owner" | "follower";
@@ -329,6 +339,7 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         hashid: null,
         postponed_until: t.postponedUntil ?? null,
         parent_ticket_id: t.parentTicketId ?? null,
+        source_ticket_id: null,
     };
 }
 
@@ -356,5 +367,6 @@ export function messageRowToMessage(m: schema.Message, project: string): Message
         display_seq: m.displaySeq,
         broadcast: 0,
         hashid: m.hashid ?? null,
+        source_ticket_id: m.sourceTicketId ?? null,
     };
 }

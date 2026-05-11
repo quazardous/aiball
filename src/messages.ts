@@ -1,6 +1,7 @@
 import {
     getMessage,
     insertMessage,
+    insertRelationEvent,
     updateMessageStatus,
     insertPing,
     listTicketSubscribers,
@@ -204,6 +205,92 @@ function assertCloseAuthority(input: NewMessage): void {
 }
 
 /**
+ * Extract every `#NN` / `#B.NN` / `#BNN` ticket reference from a body,
+ * **outside** of code fences and inline-backtick spans (so `#123` inside
+ * a code block stays inert, per #B.62). Returns unique numeric refs.
+ *
+ * `selfTicketId` is excluded so a body that mentions its own ticket
+ * (e.g. "see also #B.42") doesn't trigger a self-referenced event.
+ */
+function extractTicketRefs(
+    body: string | null | undefined,
+    selfTicketId: number,
+): number[] {
+    if (!body) return [];
+    // Strip code fences (triple-backtick) and inline-backtick spans so
+    // refs inside them don't get linkified into events.
+    const stripped = body
+        .replace(/```[\s\S]*?```/g, "")
+        .replace(/`[^`]*`/g, "");
+    const refs = new Set<number>();
+    // Accept #123, #B123, #B.123. Boundary on the left: start of input,
+    // whitespace, or punctuation that's NOT word/slash (so a URL like
+    // /foo#3 doesn't match). Boundary on the right: \b.
+    const re = /(?:^|[^\w/])#B?\.?(\d+)\b/g;
+    for (const m of stripped.matchAll(re)) {
+        const n = Number(m[1]);
+        if (!Number.isFinite(n) || n <= 0) continue;
+        if (n === selfTicketId) continue;
+        refs.add(n);
+    }
+    return [...refs];
+}
+
+/**
+ * Auto-emit cross-reference pseudo-comments triggered by a freshly
+ * inserted message:
+ *   - `ticket_sub_added` on parent thread when the message is a
+ *     ticket_created with a parent_ticket_id.
+ *   - `ticket_referenced` on each ticket mentioned in the message body.
+ *
+ * Each pseudo-comment is also fanned out + broadcast like a normal
+ * message so subscribers to the target thread receive a ping (per
+ * #B.61 follow-up + #B.62).
+ */
+function postRelationEvents(msg: Message, input: NewMessage): void {
+    // Source ticket = the ticket the relation originates from. For a
+    // ticket_created, the source IS the new ticket (its id). For a
+    // comment_added, the source is the comment's parent thread.
+    const sourceTicketId =
+        msg.kind === "ticket_created" ? msg.id : msg.ticket_id;
+    if (sourceTicketId === null) return;
+
+    // 1. Sub-ticket lineage.
+    if (msg.kind === "ticket_created" && input.parent_id) {
+        const parent = getMessage(input.parent_id);
+        if (parent && parent.kind === "ticket_created") {
+            const pseudo = insertRelationEvent({
+                target_ticket_id: parent.id,
+                source_ticket_id: msg.id,
+                kind: "ticket_sub_added",
+                by_agent: msg.by_agent,
+            });
+            if (pseudo) {
+                fanOutPings(pseudo);
+                broadcast({ type: "message_created", data: pseudo });
+            }
+        }
+    }
+
+    // 2. Body cross-references (#B.NN in body, outside backticks).
+    const refs = extractTicketRefs(msg.body, sourceTicketId);
+    for (const refId of refs) {
+        const target = getMessage(refId);
+        if (!target || target.kind !== "ticket_created") continue;
+        const pseudo = insertRelationEvent({
+            target_ticket_id: target.id,
+            source_ticket_id: sourceTicketId,
+            kind: "ticket_referenced",
+            by_agent: msg.by_agent,
+        });
+        if (pseudo) {
+            fanOutPings(pseudo);
+            broadcast({ type: "message_created", data: pseudo });
+        }
+    }
+}
+
+/**
  * Single source of truth for "a new message arrived" — used by both the HTTP
  * API and the spool drainer so behavior is identical regardless of channel.
  */
@@ -222,6 +309,15 @@ export function submitMessage(input: NewMessage): Message {
     // open thread) wants to know that a new row exists, regardless of how
     // moderation will resolve it.
     broadcast({ type: "message_created", data: msg });
+
+    // Cross-reference pseudo-comments (`ticket_sub_added` + `ticket_referenced`)
+    // — auto-emitted on the target threads. Side-effect only; the
+    // returned msg refers to the original message. Run at insertion so
+    // the pseudo-comments land in the thread even if moderation is
+    // still pending; rejection cleanup is a future iteration if needed.
+    if (msg.kind === "ticket_created" || msg.kind === "comment_added") {
+        postRelationEvents(msg, input);
+    }
 
     const ownerLifecycle = isOwnerLifecycleEvent(input);
     const decision = ownerLifecycle
