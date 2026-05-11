@@ -7,7 +7,8 @@ import { useRouting } from "./lib/router";
 import { useWs } from "./lib/ws";
 import { bus, useBus } from "./lib/bus";
 import { isPeek } from "./lib/peek";
-import BulkBar, { type BulkAction } from "./components/BulkBar.vue";
+import BulkBar from "./components/BulkBar.vue";
+import { type BulkAction, canDo } from "./lib/ticket-actions";
 import HeaderBar from "./components/HeaderBar.vue";
 import InboxList from "./components/InboxList.vue";
 import InboxToolbar, { type SortBy, type StatusFilter } from "./components/InboxToolbar.vue";
@@ -209,26 +210,6 @@ const BULK_SNOOZE_DEFAULT_MS = 3 * 86_400_000;
  * bulk action should never refuse the whole batch because some rows
  * weren't eligible — it just acts on the ones it can.
  */
-function bulkApplicable(action: BulkAction, r: InboxRow): boolean {
-    switch (action) {
-        case "approve":
-        case "reject":
-            return r.status === "pending";
-        case "close":
-            return r.status === "approved" && !r.closed;
-        case "reopen":
-            return r.closed;
-        case "mark_read":
-            return r.unread === true;
-        case "mark_unread":
-            return r.unread !== true;
-        case "snooze":
-            return r.status === "approved" && !r.closed && !r.postponed;
-        case "unsnooze":
-            return r.postponed === true;
-    }
-}
-
 async function bulkAction(action: BulkAction) {
     const selected = rows.value.filter((r) => selectedIds.value.has(r.id));
     if (!selected.length) return;
@@ -236,7 +217,7 @@ async function bulkAction(action: BulkAction) {
     let ok = 0, skipped = 0, failed = 0;
     try {
         for (const r of selected) {
-            if (!bulkApplicable(action, r)) {
+            if (!canDo(action, r)) {
                 skipped++;
                 continue;
             }
@@ -308,7 +289,7 @@ async function bulkAction(action: BulkAction) {
 function bulkApplicableCount(action: BulkAction): number {
     let n = 0;
     for (const r of rows.value) {
-        if (selectedIds.value.has(r.id) && bulkApplicable(action, r)) n++;
+        if (selectedIds.value.has(r.id) && canDo(action, r)) n++;
     }
     return n;
 }

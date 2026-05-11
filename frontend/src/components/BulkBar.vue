@@ -1,15 +1,6 @@
 <script setup lang="ts">
 import Button from "primevue/button";
-
-export type BulkAction =
-    | "approve"
-    | "reject"
-    | "close"
-    | "reopen"
-    | "mark_read"
-    | "mark_unread"
-    | "snooze"
-    | "unsnooze";
+import { type BulkAction } from "../lib/ticket-actions";
 
 export type BulkCounts = Record<BulkAction, number>;
 
