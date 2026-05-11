@@ -56,11 +56,21 @@ export const tickets = sqliteTable("tickets", {
      * pings fire (the user explicitly put it aside).
      */
     postponedUntil: text("postponed_until"),
+    /**
+     * Optional parent ticket — when set, this ticket is a sub-ticket of
+     * `parentTicketId`. Used to split a large request into actionable
+     * children while keeping the lineage explicit (per #B.61 follow-up).
+     *
+     * ON DELETE SET NULL: deleting the parent leaves children as
+     * top-level rather than cascading (kids may still be relevant).
+     */
+    parentTicketId: integer("parent_ticket_id").references((): any => tickets.id, { onDelete: "set null" }),
 }, (t) => [
     uniqueIndex("idx_tickets_project_display").on(t.project, t.displaySeq),
     index("idx_tickets_project").on(t.project),
     index("idx_tickets_status").on(t.status),
     index("idx_tickets_postponed").on(t.postponedUntil),
+    index("idx_tickets_parent").on(t.parentTicketId),
 ]);
 
 export const messages = sqliteTable("_messages", {

@@ -57,6 +57,13 @@
       "when": 1778580000000,
       "tag": "0007_split_pings_renumber_tickets",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1778590000000,
+      "tag": "0008_ticket_parent",
+      "breakpoints": true
     }
   ]
 }

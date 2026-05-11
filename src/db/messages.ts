@@ -32,6 +32,9 @@ export function insertMessage(m: NewMessage): Message {
             const seq = (tx.select({
                 n: sql<number>`COALESCE(MAX(${schema.tickets.displaySeq}), 0) + 1`,
             }).from(schema.tickets).where(eq(schema.tickets.project, m.project)).get())?.n ?? 1;
+            // For ticket_created, NewMessage.parent_id (when set) is the
+            // parent TICKET id (sub-ticket lineage, per #B.61 follow-up).
+            // For non-ticket kinds, parent_id is the parent message id.
             const inserted = tx.insert(schema.tickets).values({
                 id,
                 project: m.project,
@@ -41,6 +44,7 @@ export function insertMessage(m: NewMessage): Message {
                 byAgent: m.by_agent ?? null,
                 intent: m.intent ?? null,
                 createdAt,
+                parentTicketId: m.parent_id ?? null,
             }).returning().get();
             return ticketRowToMessage(inserted);
         }

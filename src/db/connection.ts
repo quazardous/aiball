@@ -87,6 +87,11 @@ export interface Message {
      * rows and for tickets that aren't currently snoozed.
      */
     postponed_until?: string | null;
+    /**
+     * Set when this ticket is a sub-ticket of another ticket. NULL for
+     * non-ticket rows and for top-level tickets.
+     */
+    parent_ticket_id?: number | null;
 }
 
 export type SubscriptionRole = "owner" | "follower";
@@ -323,6 +328,7 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         broadcast: t.broadcast ?? 0,
         hashid: null,
         postponed_until: t.postponedUntil ?? null,
+        parent_ticket_id: t.parentTicketId ?? null,
     };
 }
 

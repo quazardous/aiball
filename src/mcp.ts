@@ -114,9 +114,16 @@ server.registerTool(
                 .string()
                 .optional()
                 .describe("Author identity. Defaults to the resolved agent id."),
+            parent_id: z
+                .number()
+                .int()
+                .optional()
+                .describe(
+                    "Optional parent ticket id (sub-ticket). When set, the new ticket is a child of the named ticket — useful to split a large request (a multi-item CR) into actionable children while keeping the lineage explicit. The parent's thread surfaces a list of its sub-tickets in the UI.",
+                ),
         },
     },
-    async ({ project, title, body, intent, broadcast, by_agent }) => {
+    async ({ project, title, body, intent, broadcast, by_agent, parent_id }) => {
         const proj = client.resolveProject(project);
         const res = (await client.postMessage({
             project: proj,
@@ -125,6 +132,7 @@ server.registerTool(
             body,
             intent,
             by_agent: by_agent ?? client.agentId,
+            parent_id,
         })) as { id?: number };
         if (broadcast === true && typeof res?.id === "number") {
             await client.setTicketBroadcast(res.id, true);
