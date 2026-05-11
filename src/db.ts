@@ -1,6 +1,3 @@
-import Database from "better-sqlite3";
-import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import {
     and,
     asc,
@@ -9,361 +6,101 @@ import {
     inArray,
     isNull,
     isNotNull,
-    like,
     lte,
     ne,
     or,
     sql,
 } from "drizzle-orm";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
 import * as schema from "./schema.js";
-import { DB_PATH, ensureDirs } from "./paths.js";
+import {
+    getDb,
+    nowIso,
+    nextGlobalId,
+    pickFreshHashid,
+    ticketRowToMessage,
+    messageRowToMessage,
+    type Message,
+    type MessageKind,
+    type MessageStatus,
+    type RuleDecision,
+    type Intent,
+    type SubscriptionRole,
+    type Subscription,
+    type Rule,
+    type NewMessage,
+    type NewRule,
+} from "./db/connection.js";
 
 // =====================================================================
-// Public types — re-exported / aliased so consumers (api.ts, mcp.ts, …)
-// don't import from drizzle directly.
+//                  Re-exports — public API surface
 // =====================================================================
+//
+// db.ts started life as a monolith holding both the DB plumbing and
+// every domain-specific helper. Phase A of #B.332 split it: connection
+// + types live in ./db/connection.ts, the catalog tables (tags,
+// settings, uploads) live in their own modules. The rest stays here
+// until later phases extract them too. The re-exports below keep the
+// public API stable for callers (api.ts, mcp.ts, messages.ts, …) that
+// import everything from "./db.js".
 
-export type MessageKind =
-    | "ticket_created"
-    | "comment_added"
-    | "ticket_closed"
-    | "ticket_reopened"
-    | "ticket_resolved";
-export type MessageStatus = "pending" | "approved" | "rejected";
-export type RuleDecision = "auto" | "review";
-export type Intent = "panic" | "request" | "question" | "fyi";
-export const INTENTS: readonly Intent[] = ["panic", "request", "question", "fyi"];
+export {
+    getDb,
+    getRawSqlite,
+    nowIso,
+    INTENTS,
+    type Message,
+    type MessageKind,
+    type MessageStatus,
+    type RuleDecision,
+    type Intent,
+    type TicketRow,
+    type MessageRow,
+    type SubscriptionRole,
+    type Subscription,
+    type Rule,
+    type NewMessage,
+    type NewRule,
+} from "./db/connection.js";
 
-export type Strategy = "manual" | "auto" | "auto-reply";
-export const STRATEGIES: readonly Strategy[] = ["manual", "auto", "auto-reply"];
-export const DEFAULT_STRATEGY: Strategy = "auto-reply";
+export {
+    DEFAULT_STRATEGY,
+    STRATEGIES,
+    type Strategy,
+    getSetting,
+    setSetting,
+    getStrategy,
+    setStrategy,
+    UPLOAD_HARD_CAP_BYTES,
+    DEFAULT_UPLOAD_MAX_BYTES,
+    getUploadMaxBytes,
+    setUploadMaxBytes,
+} from "./db/settings.js";
 
-/** Drizzle row types (internal) re-exported for callers that handle the
- *  split shapes natively. The legacy union JSON shape is `Message` below. */
-export type TicketRow = schema.Ticket;
-export type MessageRow = schema.Message;
+export {
+    type UploadRow,
+    type UploadInsert,
+    type UploadStats,
+    insertUpload,
+    uploadStats,
+    listOrphanUploads,
+    deleteUploadRow,
+} from "./db/uploads.js";
 
-/**
- * Legacy union shape for JSON output. Tickets project as kind=ticket_created
- * with title/intent populated and ticket_id/parent_id null; non-tickets
- * carry ticket_id (always set), parent_id (= parent_message_id, defaulting
- * to ticket_id for top-level), and inherit project from their parent ticket.
- * This is the on-the-wire contract with api.ts and the frontend; the DB
- * itself stores the two shapes in separate physical tables.
- */
-export interface Message {
-    id: number;
-    project: string;
-    kind: MessageKind;
-    ticket_id: number | null;
-    parent_id: number | null;
-    title: string | null;
-    body: string | null;
-    by_agent: string | null;
-    status: MessageStatus;
-    created_at: string;
-    decided_at: string | null;
-    decided_by: string | null;
-    matched_rule_id: number | null;
-    human_note: string | null;
-    edited_title: string | null;
-    edited_body: string | null;
-    intent: Intent | null;
-    display_seq: number;
-    /**
-     * Broadcast flag for tickets (1 = ticket is broadcast to project
-     * followers, 0 = internal-only). Always 0 for non-ticket rows.
-     */
-    broadcast: number;
-    /**
-     * Public-facing alphanumeric ref for comments and lifecycle events
-     * (#C<hashid>). NULL for tickets (which use their integer id directly
-     * as `#B<id>`). 6 chars from a Crockford-ish base32 alphabet, randomly
-     * chosen at insert time to never collide with ticket numbers.
-     */
-    hashid: string | null;
-    /**
-     * Snooze / postpone timestamp (per #B.329). When set to an ISO8601
-     * date in the future, the ticket is hidden from the open inbox until
-     * the daemon's reveal cron clears the field. NULL for non-ticket
-     * rows and for tickets that aren't currently snoozed.
-     */
-    postponed_until?: string | null;
-}
-
-export type SubscriptionRole = "owner" | "follower";
-
-export interface Subscription {
-    consumer_id: string;
-    project: string;
-    subscribed_at: string;
-    last_seen_id: number;
-    role: SubscriptionRole;
-}
-
-export interface Rule {
-    id: number;
-    position: number;
-    match_project: string | null;
-    match_kind: MessageKind | null;
-    match_by_agent: string | null;
-    decision: RuleDecision;
-    enabled: number;
-    note: string | null;
-    created_at: string;
-}
-
-export interface NewMessage {
-    project: string;
-    kind: MessageKind;
-    ticket_id?: number | null;
-    parent_id?: number | null;
-    title?: string | null;
-    body?: string | null;
-    by_agent?: string | null;
-    intent?: Intent | null;
-}
-
-export interface NewRule {
-    position?: number;
-    match_project?: string | null;
-    match_kind?: MessageKind | null;
-    match_by_agent?: string | null;
-    decision: RuleDecision;
-    note?: string | null;
-}
-
-export interface Tag {
-    id: number;
-    name: string;
-    color: string | null;
-    position: number;
-    note: string | null;
-    created_at: string;
-}
-
-export interface NewTag {
-    name: string;
-    color?: string | null;
-    note?: string | null;
-    position?: number;
-}
-
-/** Closed-list initial tags. Created once, when the tags table is empty. */
-const DEFAULT_TAGS: NewTag[] = [
-    { name: "bug", color: "#ef4444", note: "something is broken", position: 1 },
-    { name: "feature", color: "#10b981", note: "new capability", position: 2 },
-    { name: "question", color: "#3b82f6", note: "needs clarification", position: 3 },
-    { name: "docs", color: "#8b5cf6", note: "documentation work", position: 4 },
-    { name: "urgent", color: "#f59e0b", note: "needs attention now", position: 5 },
-    { name: "discussion", color: "#6b7280", note: "design / architecture talk", position: 6 },
-    { name: "wontfix", color: "#9ca3af", note: "decided not to act", position: 7 },
-    { name: "done", color: "#22c55e", note: "completed", position: 8 },
-];
-
-// =====================================================================
-// Connection + migrations (Drizzle drives the schema).
-// =====================================================================
-
-let sqlite: Database.Database | null = null;
-let dbInstance: BetterSQLite3Database<typeof schema> | null = null;
-
-function migrationsFolder(): string {
-    // db.ts compiles/runs from src/ at dev time (tsx) or dist/ if built.
-    // The drizzle/ folder lives at the repo root, two levels up from src/.
-    const here = dirname(fileURLToPath(import.meta.url));
-    const candidates = [
-        resolve(here, "..", "drizzle", "migrations"),
-        resolve(here, "..", "..", "drizzle", "migrations"),
-    ];
-    for (const c of candidates) {
-        if (existsSync(c)) return c;
-    }
-    return candidates[0];
-}
-
-export function getDb(): BetterSQLite3Database<typeof schema> {
-    if (!dbInstance) {
-        ensureDirs();
-        sqlite = new Database(DB_PATH);
-        sqlite.pragma("journal_mode = WAL");
-        sqlite.pragma("foreign_keys = ON");
-        dbInstance = drizzle(sqlite, { schema });
-        migrate(dbInstance, { migrationsFolder: migrationsFolder() });
-        bootstrap(dbInstance);
-    }
-    return dbInstance;
-}
-
-/**
- * Raw better-sqlite3 handle. Exposed for modules that need to issue
- * prepared statements bypassing Drizzle — currently only the FTS5
- * search service in `search.ts`, which talks to virtual tables and
- * uses SQLite-specific functions (`snippet()`, `MATCH`, `rank`) that
- * Drizzle has no first-class binding for.
- */
-export function getRawSqlite(): Database.Database {
-    if (!sqlite) {
-        // Force initialization via getDb to run migrations / bootstrap.
-        getDb();
-    }
-    if (!sqlite) throw new Error("sqlite handle not initialized after getDb()");
-    return sqlite;
-}
-
-function bootstrap(db: BetterSQLite3Database<typeof schema>): void {
-    // Ensure the global id counter exists (idempotent).
-    db.insert(schema.settings)
-        .values({ key: "next_global_id", value: "1" })
-        .onConflictDoNothing()
-        .run();
-
-    // Seed the closed-list tag catalog on a fresh DB.
-    const haveTags = db.select({ n: sql<number>`COUNT(*)` }).from(schema.tags).get();
-    if ((haveTags?.n ?? 0) === 0) {
-        const now = nowIso();
-        for (const t of DEFAULT_TAGS) {
-            db.insert(schema.tags).values({
-                name: t.name,
-                color: t.color ?? null,
-                position: t.position ?? 0,
-                note: t.note ?? null,
-                createdAt: now,
-            }).run();
-        }
-    }
-
-    // Backfill hashids for any pre-0003 _messages row that doesn't have one.
-    // Idempotent: rows that already have a hashid are skipped. Generates
-    // and persists in a single pass; collisions are vanishingly rare with
-    // 31^6 ≈ 8.8e8 keyspace.
-    const missing = db.select({ id: schema.messages.id })
-        .from(schema.messages)
-        .where(or(isNull(schema.messages.hashid), eq(schema.messages.hashid, "")))
-        .all();
-    for (const row of missing) {
-        const hashid = pickFreshHashid(db);
-        db.update(schema.messages)
-            .set({ hashid })
-            .where(eq(schema.messages.id, row.id))
-            .run();
-    }
-}
-
-/**
- * Public-facing comment reference. 6 chars from a 31-char Crockford-ish
- * alphabet (no `i`, `l`, `o`, `0`, `1` to avoid confusion). Random, not
- * derived from internal id — that way the hashid leaks no ordering and
- * stays stable across renumbering operations.
- */
-const HASHID_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
-const HASHID_LENGTH = 6;
-function generateHashid(): string {
-    const buf = randomBytes(8);
-    let out = "";
-    for (let i = 0; i < HASHID_LENGTH; i++) {
-        out += HASHID_ALPHABET[buf[i] % HASHID_ALPHABET.length];
-    }
-    return out;
-}
-function pickFreshHashid(db: BetterSQLite3Database<typeof schema>): string {
-    for (let attempts = 0; attempts < 8; attempts++) {
-        const candidate = generateHashid();
-        const clash = db.select({ id: schema.messages.id })
-            .from(schema.messages)
-            .where(eq(schema.messages.hashid, candidate))
-            .get();
-        if (!clash) return candidate;
-    }
-    // Shouldn't happen with 8.8e8 keyspace and a few tens of millions of
-    // rows, but if we somehow keep colliding throw rather than corrupt.
-    throw new Error("could not allocate a unique hashid after 8 attempts");
-}
-
-// =====================================================================
-// Helpers
-// =====================================================================
-
-function nowIso(): string {
-    return new Date().toISOString();
-}
-
-/**
- * Allocate the next id from the shared counter so tickets and _messages stay
- * in a single id space (pings reference this single integer namespace).
- * Must be called inside an active transaction for atomicity.
- */
-function nextGlobalId(db: BetterSQLite3Database<typeof schema>): number {
-    const row = db.select().from(schema.settings)
-        .where(eq(schema.settings.key, "next_global_id"))
-        .get();
-    const current = row ? Number(row.value) : 1;
-    db.insert(schema.settings)
-        .values({ key: "next_global_id", value: String(current + 1) })
-        .onConflictDoUpdate({
-            target: schema.settings.key,
-            set: { value: String(current + 1) },
-        })
-        .run();
-    return current;
-}
-
-function ticketRowToMessage(t: schema.Ticket): Message {
-    return {
-        id: t.id,
-        project: t.project,
-        kind: "ticket_created",
-        ticket_id: null,
-        parent_id: null,
-        title: t.title,
-        body: t.body,
-        by_agent: t.byAgent,
-        status: t.status as MessageStatus,
-        created_at: t.createdAt,
-        decided_at: t.decidedAt,
-        decided_by: t.decidedBy,
-        matched_rule_id: t.matchedRuleId,
-        human_note: t.humanNote,
-        edited_title: t.editedTitle,
-        edited_body: t.editedBody,
-        intent: (t.intent as Intent | null) ?? null,
-        display_seq: t.displaySeq,
-        broadcast: t.broadcast ?? 0,
-        hashid: null,
-        postponed_until: t.postponedUntil ?? null,
-    };
-}
-
-function messageRowToMessage(m: schema.Message, project: string): Message {
-    return {
-        id: m.id,
-        project,
-        kind: m.kind as MessageKind,
-        ticket_id: m.ticketId,
-        // Legacy callers expect parent_id == ticket_id for top-level replies;
-        // the new schema stores NULL for that case.
-        parent_id: m.parentMessageId ?? m.ticketId,
-        title: null,
-        body: m.body,
-        by_agent: m.byAgent,
-        status: m.status as MessageStatus,
-        created_at: m.createdAt,
-        decided_at: m.decidedAt,
-        decided_by: m.decidedBy,
-        matched_rule_id: m.matchedRuleId,
-        human_note: m.humanNote,
-        edited_title: null,
-        edited_body: m.editedBody,
-        intent: null,
-        display_seq: m.displaySeq,
-        broadcast: 0,
-        hashid: m.hashid ?? null,
-    };
-}
+export {
+    type Tag,
+    type NewTag,
+    listTags,
+    getTag,
+    getTagByName,
+    insertTag,
+    updateTag,
+    deleteTag,
+    listMessageTags,
+    tagsForMessages,
+    addMessageTag,
+    removeMessageTag,
+    setMessageTags,
+} from "./db/tags.js";
 
 // =====================================================================
 // Messages — public API (legacy signatures, internally routed to the
@@ -1630,337 +1367,4 @@ export function listTicketSubscriptions(consumer_id: string): {
         .where(eq(schema.ticketSubscriptions.consumerId, consumer_id))
         .orderBy(desc(schema.ticketSubscriptions.subscribedAt))
         .all();
-}
-
-// =====================================================================
-// Tags + ticket_tags (tags are ticket-scoped only)
-// =====================================================================
-
-function tagRowToTag(t: schema.Tag): Tag {
-    return {
-        id: t.id,
-        name: t.name,
-        color: t.color,
-        position: t.position,
-        note: t.note,
-        created_at: t.createdAt,
-    };
-}
-
-export function listTags(): Tag[] {
-    return getDb().select().from(schema.tags)
-        .orderBy(asc(schema.tags.position), asc(schema.tags.id))
-        .all().map(tagRowToTag);
-}
-
-export function getTag(id: number): Tag | null {
-    const r = getDb().select().from(schema.tags).where(eq(schema.tags.id, id)).get();
-    return r ? tagRowToTag(r) : null;
-}
-
-export function getTagByName(name: string): Tag | null {
-    const r = getDb().select().from(schema.tags).where(eq(schema.tags.name, name)).get();
-    return r ? tagRowToTag(r) : null;
-}
-
-export function insertTag(t: NewTag): Tag {
-    const r = getDb().insert(schema.tags).values({
-        name: t.name,
-        color: t.color ?? null,
-        position: t.position ?? 0,
-        note: t.note ?? null,
-        createdAt: nowIso(),
-    }).returning().get();
-    return tagRowToTag(r);
-}
-
-export function updateTag(
-    id: number,
-    fields: Partial<Pick<Tag, "name" | "color" | "position" | "note">>,
-): Tag | null {
-    const patch: Partial<schema.NewTagRow> = {};
-    if (fields.name !== undefined) patch.name = fields.name;
-    if (fields.color !== undefined) patch.color = fields.color;
-    if (fields.position !== undefined) patch.position = fields.position;
-    if (fields.note !== undefined) patch.note = fields.note;
-    if (Object.keys(patch).length === 0) return getTag(id);
-    getDb().update(schema.tags).set(patch).where(eq(schema.tags.id, id)).run();
-    return getTag(id);
-}
-
-export function deleteTag(id: number): void {
-    getDb().delete(schema.tags).where(eq(schema.tags.id, id)).run();
-}
-
-/**
- * Tag operations work on ticket ids only (tags are ticket-scoped).
- * Function names keep the historical `Message` suffix for caller compat.
- */
-export function listMessageTags(messageId: number): Tag[] {
-    return getDb().select({ t: schema.tags })
-        .from(schema.ticketTags)
-        .innerJoin(schema.tags, eq(schema.tags.id, schema.ticketTags.tagId))
-        .where(eq(schema.ticketTags.ticketId, messageId))
-        .orderBy(asc(schema.tags.position), asc(schema.tags.id))
-        .all()
-        .map((r) => tagRowToTag(r.t));
-}
-
-export function tagsForMessages(messageIds: number[]): Map<number, Tag[]> {
-    const out = new Map<number, Tag[]>();
-    if (!messageIds.length) return out;
-    const rows = getDb().select({ t: schema.tags, ticketId: schema.ticketTags.ticketId })
-        .from(schema.ticketTags)
-        .innerJoin(schema.tags, eq(schema.tags.id, schema.ticketTags.tagId))
-        .where(inArray(schema.ticketTags.ticketId, messageIds))
-        .orderBy(asc(schema.tags.position), asc(schema.tags.id))
-        .all();
-    for (const r of rows) {
-        if (!out.has(r.ticketId)) out.set(r.ticketId, []);
-        out.get(r.ticketId)!.push(tagRowToTag(r.t));
-    }
-    return out;
-}
-
-export function addMessageTag(
-    messageId: number,
-    tagId: number,
-    setBy: string | null = null,
-): void {
-    getDb().insert(schema.ticketTags).values({
-        ticketId: messageId,
-        tagId,
-        setAt: nowIso(),
-        setBy,
-    }).onConflictDoNothing().run();
-}
-
-export function removeMessageTag(messageId: number, tagId: number): void {
-    getDb().delete(schema.ticketTags).where(and(
-        eq(schema.ticketTags.ticketId, messageId),
-        eq(schema.ticketTags.tagId, tagId),
-    )).run();
-}
-
-export function setMessageTags(
-    messageId: number,
-    tagIds: number[],
-    setBy: string | null = null,
-): void {
-    const db = getDb();
-    db.transaction((tx) => {
-        tx.delete(schema.ticketTags).where(eq(schema.ticketTags.ticketId, messageId)).run();
-        const now = nowIso();
-        for (const tagId of [...new Set(tagIds)]) {
-            tx.insert(schema.ticketTags).values({
-                ticketId: messageId,
-                tagId,
-                setAt: now,
-                setBy,
-            }).run();
-        }
-    });
-}
-
-// =====================================================================
-// Settings (k/v) + Strategy
-// =====================================================================
-
-export function getSetting(key: string): string | null {
-    const r = getDb().select({ value: schema.settings.value })
-        .from(schema.settings).where(eq(schema.settings.key, key)).get();
-    return r?.value ?? null;
-}
-
-export function setSetting(key: string, value: string): void {
-    getDb().insert(schema.settings).values({ key, value })
-        .onConflictDoUpdate({ target: schema.settings.key, set: { value } })
-        .run();
-}
-
-export function getStrategy(): Strategy {
-    const v = getSetting("strategy");
-    if (v && (STRATEGIES as readonly string[]).includes(v)) return v as Strategy;
-    return DEFAULT_STRATEGY;
-}
-
-export function setStrategy(s: Strategy): void {
-    setSetting("strategy", s);
-}
-
-// =====================================================================
-//                  Upload settings
-// =====================================================================
-
-/** Hard cap regardless of the configured `upload_max_bytes` (50 MB).
- *  Keeps the daemon out of trouble even if the setting is corrupted
- *  or a malicious caller sets it absurdly high. */
-export const UPLOAD_HARD_CAP_BYTES = 50 * 1024 * 1024;
-/** Default cap shipped at install. 10 MB matches the user's preference
- *  (#B.76) and is comfortably above a typical screenshot. */
-export const DEFAULT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
-
-export function getUploadMaxBytes(): number {
-    const v = getSetting("upload_max_bytes");
-    if (!v) return DEFAULT_UPLOAD_MAX_BYTES;
-    const n = Number(v);
-    if (!Number.isFinite(n) || n <= 0) return DEFAULT_UPLOAD_MAX_BYTES;
-    return Math.min(n, UPLOAD_HARD_CAP_BYTES);
-}
-
-export function setUploadMaxBytes(bytes: number): void {
-    if (!Number.isFinite(bytes) || bytes <= 0) {
-        throw new Error("upload_max_bytes must be a positive integer");
-    }
-    setSetting("upload_max_bytes", String(Math.min(bytes, UPLOAD_HARD_CAP_BYTES)));
-}
-
-// =====================================================================
-//                  Uploads tracking (per #B.76)
-// =====================================================================
-
-export interface UploadRow {
-    sha: string;
-    ext: string;
-    content_type: string;
-    bytes: number;
-    by_agent: string | null;
-    original_name: string | null;
-    created_at: string;
-}
-
-export interface UploadInsert {
-    sha: string;
-    ext: string;
-    content_type: string;
-    bytes: number;
-    by_agent?: string | null;
-    original_name?: string | null;
-}
-
-/**
- * Idempotent insert — if the row already exists (same content hash),
- * the existing row stays untouched. The caller relies on the file on
- * disk being identical (content-addressable), so the metadata of the
- * first writer is preserved.
- */
-export function insertUpload(input: UploadInsert): UploadRow {
-    const row = {
-        sha: input.sha,
-        ext: input.ext,
-        contentType: input.content_type,
-        bytes: input.bytes,
-        byAgent: input.by_agent ?? null,
-        originalName: input.original_name ?? null,
-        createdAt: nowIso(),
-    };
-    getDb().insert(schema.uploads).values(row).onConflictDoNothing().run();
-    const fresh = getDb().select().from(schema.uploads)
-        .where(eq(schema.uploads.sha, input.sha)).get();
-    if (!fresh) throw new Error(`upload row vanished after insert: ${input.sha}`);
-    return {
-        sha: fresh.sha,
-        ext: fresh.ext,
-        content_type: fresh.contentType,
-        bytes: fresh.bytes,
-        by_agent: fresh.byAgent,
-        original_name: fresh.originalName,
-        created_at: fresh.createdAt,
-    };
-}
-
-export interface UploadStats {
-    count: number;
-    total_bytes: number;
-    orphan_count: number;
-    orphan_bytes: number;
-}
-
-/**
- * Compute storage stats by joining `uploads` against the union of
- * `tickets.body` + `_messages.body` (with `edited_body` fallback).
- * Orphan = no body anywhere contains the upload URL pattern.
- *
- * The LIKE pattern is `%/uploads/<sha>.%` which is anchored on the
- * URL the frontend writes (`/uploads/<sha>.<ext>`). Good enough for
- * normal usage; tampered bodies (rewritten URLs) would slip through.
- */
-export function uploadStats(graceMinutes = 5): UploadStats {
-    const db = getDb();
-    const all = db.select().from(schema.uploads).all();
-    let count = 0, totalBytes = 0, orphanCount = 0, orphanBytes = 0;
-    const graceMs = graceMinutes * 60_000;
-    const cutoff = Date.now() - graceMs;
-    for (const u of all) {
-        count += 1;
-        totalBytes += u.bytes;
-        if (Date.parse(u.createdAt) > cutoff) continue; // still in grace window
-        if (!isUploadReferenced(u.sha)) {
-            orphanCount += 1;
-            orphanBytes += u.bytes;
-        }
-    }
-    return {
-        count,
-        total_bytes: totalBytes,
-        orphan_count: orphanCount,
-        orphan_bytes: orphanBytes,
-    };
-}
-
-function isUploadReferenced(sha: string): boolean {
-    const db = getDb();
-    const pattern = `%/uploads/${sha}.%`;
-    // tickets.body OR tickets.edited_body
-    const t = db.select({ id: schema.tickets.id })
-        .from(schema.tickets)
-        .where(
-            or(
-                like(schema.tickets.body, pattern),
-                like(schema.tickets.editedBody, pattern),
-            ),
-        )
-        .limit(1)
-        .get();
-    if (t) return true;
-    const m = db.select({ id: schema.messages.id })
-        .from(schema.messages)
-        .where(
-            or(
-                like(schema.messages.body, pattern),
-                like(schema.messages.editedBody, pattern),
-            ),
-        )
-        .limit(1)
-        .get();
-    return !!m;
-}
-
-/**
- * Return the shas of uploads not referenced anywhere AND created more
- * than `graceMinutes` ago. The caller deletes the files + rows.
- */
-export function listOrphanUploads(graceMinutes = 5): UploadRow[] {
-    const db = getDb();
-    const cutoff = Date.now() - graceMinutes * 60_000;
-    const rows = db.select().from(schema.uploads).all();
-    const out: UploadRow[] = [];
-    for (const u of rows) {
-        if (Date.parse(u.createdAt) > cutoff) continue;
-        if (isUploadReferenced(u.sha)) continue;
-        out.push({
-            sha: u.sha,
-            ext: u.ext,
-            content_type: u.contentType,
-            bytes: u.bytes,
-            by_agent: u.byAgent,
-            original_name: u.originalName,
-            created_at: u.createdAt,
-        });
-    }
-    return out;
-}
-
-export function deleteUploadRow(sha: string): void {
-    getDb().delete(schema.uploads).where(eq(schema.uploads.sha, sha)).run();
 }
