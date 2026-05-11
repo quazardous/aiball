@@ -681,6 +681,12 @@ api.get("/tickets", (req, res) => {
     // Default: when `open=1`, snoozed tickets are hidden (same rule as
     // the inbox). Pass `include_postponed=1` to surface them anyway.
     const includePostponed = req.query.include_postponed === "1";
+    // Tag filter — comma-separated names. AND semantics: a ticket must
+    // carry EVERY listed tag to match. Unknown tag names are ignored
+    // silently rather than 400'ing — keeps the URL lenient.
+    const tagsFilter = typeof req.query.tags === "string"
+        ? req.query.tags.split(",").map((s) => s.trim()).filter(Boolean)
+        : null;
 
     const created = listMessages({
         status: "approved",
@@ -716,13 +722,19 @@ api.get("/tickets", (req, res) => {
         };
     });
 
+    let result = tickets;
     if (onlyOpen) {
-        res.json(
-            tickets.filter((t) => !t.closed && (includePostponed || !t.postponed)),
-        );
-    } else {
-        res.json(tickets);
+        result = result.filter((t) => !t.closed && (includePostponed || !t.postponed));
     }
+    if (tagsFilter && tagsFilter.length > 0) {
+        const requiredSet = new Set(tagsFilter.map((s) => s.toLowerCase()));
+        result = result.filter((t) => {
+            const have = new Set((t.tags as { name: string }[]).map((tag) => tag.name.toLowerCase()));
+            for (const need of requiredSet) if (!have.has(need)) return false;
+            return true;
+        });
+    }
+    res.json(result);
 });
 
 api.post("/tickets/:id/mark-read", (req: Request, res: Response) => {

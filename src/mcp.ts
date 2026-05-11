@@ -121,9 +121,15 @@ server.registerTool(
                 .describe(
                     "Optional parent ticket id (sub-ticket). When set, the new ticket is a child of the named ticket — useful to split a large request (a multi-item CR) into actionable children while keeping the lineage explicit. The parent's thread surfaces a list of its sub-tickets in the UI.",
                 ),
+            tags: z
+                .array(z.string())
+                .optional()
+                .describe(
+                    "Optional tag names to apply to the new ticket. Resolved server-side (case-sensitive match on name). Unknown tag names fail the request — pre-create the tag via the tags settings panel first.",
+                ),
         },
     },
-    async ({ project, title, body, intent, broadcast, by_agent, parent_id }) => {
+    async ({ project, title, body, intent, broadcast, by_agent, parent_id, tags }) => {
         const proj = client.resolveProject(project);
         const res = (await client.postMessage({
             project: proj,
@@ -136,6 +142,13 @@ server.registerTool(
         })) as { id?: number };
         if (broadcast === true && typeof res?.id === "number") {
             await client.setTicketBroadcast(res.id, true);
+        }
+        if (tags && tags.length > 0 && typeof res?.id === "number") {
+            // PUT /api/messages/:id/tags accepts tag NAMES alongside ids
+            // — it resolves via getTagByName server-side. Unknown names
+            // bubble up as 400; let the error propagate to the agent so
+            // it knows the tag was wrong rather than silently swallow.
+            await client.setMessageTags(res.id, tags);
         }
         // « Nobody is listening » hint (per #B.215): show the agent how
         // many owners / followers exist on the target project, and flag
@@ -432,7 +445,7 @@ server.registerTool(
     "ticket_list",
     {
         description:
-            "List approved tickets, optionally filtered by project. Snoozed tickets (postponed_until > now) are excluded by default when `open: true` — pass `include_snoozed: true` to surface them. Use ticket_get to fetch comments of one ticket.",
+            "List approved tickets, optionally filtered by project and tags. Snoozed tickets (postponed_until > now) are excluded by default when `open: true` — pass `include_snoozed: true` to surface them. Tag filter is AND-semantic: a ticket must carry every listed tag. Use ticket_get to fetch comments of one ticket.",
         inputSchema: {
             project: z.string().optional(),
             open: z
@@ -443,13 +456,20 @@ server.registerTool(
                 .boolean()
                 .optional()
                 .describe("If true (and open=true), include tickets currently snoozed in the result. Default false."),
+            tags: z
+                .array(z.string())
+                .optional()
+                .describe(
+                    "Restrict to tickets carrying every named tag (AND). Case-sensitive match on tag name. Unknown tags silently match nothing.",
+                ),
         },
     },
-    async ({ project, open, include_snoozed }) => {
+    async ({ project, open, include_snoozed, tags }) => {
         const list = await client.listTickets({
             project,
             open: open ? "1" : undefined,
             include_postponed: include_snoozed ? "1" : undefined,
+            tags: tags && tags.length > 0 ? tags.join(",") : undefined,
         });
         return asText(list);
     },

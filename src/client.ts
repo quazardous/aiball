@@ -328,6 +328,17 @@ export class AiballClient {
     edit(id: number, fields: { title?: string | null; body?: string | null; intent?: string | null }) {
         return this.http("POST", `/api/messages/${id}/edit`, fields);
     }
+    /**
+     * Overwrite the tag set on a message (ticket or comment). Pass
+     * tag NAMES — the daemon resolves to ids via getTagByName.
+     * Unknown names bubble up as 400.
+     */
+    setMessageTags(id: number, tag_names: string[], set_by?: string) {
+        return this.http("PUT", `/api/messages/${id}/tags`, {
+            tag_ids: tag_names,
+            set_by: set_by ?? null,
+        });
+    }
     note(id: number, note: string | null) {
         return this.http("POST", `/api/messages/${id}/note`, { note });
     }
