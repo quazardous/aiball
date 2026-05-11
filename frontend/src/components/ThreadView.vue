@@ -1201,6 +1201,16 @@ async function copyTicketRef() {
                             @click="commentAndMarkResolved"
                         />
                         <Button
+                            v-else
+                            icon="pi pi-undo"
+                            :label="hasBody ? 'comment and undo resolved' : 'undo resolved'"
+                            severity="secondary"
+                            size="small"
+                            text
+                            :loading="resolutionBusy"
+                            @click="commentAndReopen"
+                        />
+                        <Button
                             icon="pi pi-lock"
                             :label="hasBody ? 'comment and close' : 'close ticket'"
                             severity="secondary"
