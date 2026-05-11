@@ -954,33 +954,37 @@ const globalResolvedCount = computed(() =>
                                 style="margin-left: 0.35rem; color: var(--p-blue-500); font-size: 0.85rem"
                                 title="broadcast: project followers receive pings on this thread"
                             />
+                        </template>
+                        <template v-if="snippetOf(r)" #snippet>{{ snippetOf(r) }}</template>
+                        <template
+                            v-if="r.status !== 'approved' || r.intent || r.tags.length || !project"
+                            #chips
+                        >
                             <Tag
                                 v-if="r.status !== 'approved'"
                                 :value="r.status"
                                 :severity="statusSeverity(r.status)"
-                                style="margin-left: 0.4rem; font-size: 0.7rem"
+                                style="font-size: 0.7rem"
                             />
                             <Tag
                                 v-if="r.intent"
                                 :value="r.intent"
                                 :severity="intentSeverity(r.intent)"
-                                style="margin-left: 0.3rem; font-size: 0.7rem"
+                                style="font-size: 0.7rem"
                             />
                             <TagBadge
                                 v-for="tg in r.tags"
                                 :key="tg.id"
                                 :tag="tg"
                                 size="sm"
-                                style="margin-left: 0.3rem"
                             />
                             <Tag
                                 v-if="!project"
                                 :value="r.project"
                                 severity="info"
-                                style="margin-left: 0.4rem; font-size: 0.7rem"
+                                style="font-size: 0.7rem"
                             />
                         </template>
-                        <template v-if="snippetOf(r)" #snippet>{{ snippetOf(r) }}</template>
                         <template #meta>
                             <span v-if="r.pending_comment_count > 0" :title="`${r.pending_comment_count} pending comment${r.pending_comment_count > 1 ? 's' : ''}`">
                                 <i class="pi pi-clock" /> {{ r.pending_comment_count }}

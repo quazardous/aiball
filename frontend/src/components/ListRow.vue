@@ -44,10 +44,15 @@ const slots = useSlots();
             <slot name="from" />
         </div>
         <div class="list-row__main">
-            <span class="list-row__title"><slot name="title" /></span>
-            <span v-if="slots.snippet" class="list-row__snippet">
-                <slot name="snippet" />
-            </span>
+            <div class="list-row__line list-row__line--title">
+                <span class="list-row__title"><slot name="title" /></span>
+                <span v-if="slots.snippet" class="list-row__snippet">
+                    <slot name="snippet" />
+                </span>
+            </div>
+            <div v-if="slots.chips" class="list-row__line list-row__line--chips">
+                <slot name="chips" />
+            </div>
         </div>
         <div class="list-row__tail">
             <div v-if="slots['always-actions']" class="list-row__always-actions" @click.stop>
@@ -72,10 +77,10 @@ const slots = useSlots();
     border-bottom: 1px solid var(--p-content-border-color);
     cursor: pointer;
     transition: background 0.1s;
-    /* reserve enough vertical room for the hover-revealed action buttons
-       (they are taller than the time/meta they replace) so the row does not
-       jump when the cursor enters or leaves it. */
-    min-height: 2.85rem;
+    /* Reserve enough vertical room for two-line rows (title + chips)
+       plus the hover-revealed action buttons. Rows without a chips slot
+       collapse naturally — the second line just isn't rendered. */
+    min-height: 3.4rem;
 }
 .list-row:hover {
     background: var(--p-surface-100);
@@ -164,11 +169,35 @@ const slots = useSlots();
     font-size: 0.92rem;
 }
 .list-row__main {
+    min-width: 0;
+    font-size: 0.92rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    /* Cap the row at two visual lines: the first one (title + snippet)
+       still ellipses if needed, the second one (chips: status, intent,
+       tags, project) wraps within the row's available width so chips
+       are never cropped behind the time/meta column. */
+}
+.list-row__line {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+.list-row__line--title {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    min-width: 0;
-    font-size: 0.92rem;
+    /* `display: block` would also work but flex keeps title + snippet
+       on the same baseline. We rely on the inner spans being inline
+       for the ellipsis to actually clip. */
+    display: block;
+}
+.list-row__line--chips {
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    row-gap: 0.25rem;
+    font-size: 0.78rem;
 }
 .list-row__title {
     color: var(--p-text-color);
