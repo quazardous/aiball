@@ -88,11 +88,23 @@ marked.use({
     ],
 });
 
+// Patterns to linkify `#B.NNN` / `#C.<hashid>` refs that ended up inside
+// a `<code>` span because the author wrapped them in backticks. The
+// inline marked extension above intentionally skips codespans (per
+// Markdown semantics, backticks mean "literal, don't interpret") — but
+// in practice writers reach for backticks to *style* a ref while still
+// wanting the link. Compromise: keep the codespan styling and wrap it
+// in an anchor so the eye sees `#B.276` and the cursor opens the
+// thread. Outside-of-code refs are still handled by the marked
+// extension as before.
+const TICKET_CODE_RE = /<code>#([Bb])([._/-]?)(\d+)<\/code>/g;
+const COMMENT_CODE_RE = /<code>#([Cc])([._/-]?)([a-hjkmnp-z2-9]{4,8})<\/code>/gi;
+
 const html = computed(() => {
     const src = props.source ?? "";
     if (!src) return "";
     const raw = marked.parse(src, { async: false }) as string;
-    return DOMPurify.sanitize(raw, {
+    const sanitized = DOMPurify.sanitize(raw, {
         ALLOWED_TAGS: [
             "h1", "h2", "h3", "h4", "h5", "h6",
             "p", "br", "hr",
@@ -106,6 +118,14 @@ const html = computed(() => {
         ALLOWED_ATTR: ["href", "title", "alt", "src", "type", "checked", "disabled", "class"],
         ALLOW_DATA_ATTR: false,
     });
+    return sanitized
+        .replace(TICKET_CODE_RE, (_, _letter, sep, id) =>
+            `<a class="ticket-ref ticket-ref--code" href="/b/${id}"><code>#B${sep}${id}</code></a>`,
+        )
+        .replace(COMMENT_CODE_RE, (_, _letter, sep, hash) => {
+            const h = hash.toLowerCase();
+            return `<a class="comment-ref comment-ref--code" href="/b/${h}"><code>#C${sep}${hash}</code></a>`;
+        });
 });
 
 // Intercept clicks on internal links (any /b/N, /rules, /tags, /projects, etc.)
