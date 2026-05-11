@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
@@ -60,6 +60,76 @@ const placeholder = computed(
 );
 const roleLabel = computed(() => (isTicket.value ? "posting as" : "replying as"));
 
+// Per-thread / per-project draft persistence (per #B.94). The composer
+// preserves what's been typed across page refreshes and thread
+// navigation: a reply on `#B.42` keeps its own draft, a reply on
+// `#B.43` keeps its own, and the new-ticket modal in `aiball` keeps
+// its own. Cleared on successful submit.
+const draftKey = computed(() => {
+    if (isTicket.value) return `aiball.draft.composer.ticket.${props.project}`;
+    const tid = props.ticketId ?? "untargeted";
+    return `aiball.draft.composer.comment.${tid}`;
+});
+
+function loadDraft() {
+    const saved = sessionStorage.getItem(draftKey.value);
+    if (saved === null) {
+        // No draft for this scope → start with a clean slate.
+        title.value = "";
+        body.value = "";
+        return;
+    }
+    if (isTicket.value) {
+        try {
+            const parsed = JSON.parse(saved) as {
+                title?: string;
+                body?: string;
+                intent?: Intent;
+            };
+            title.value = typeof parsed.title === "string" ? parsed.title : "";
+            body.value = typeof parsed.body === "string" ? parsed.body : "";
+            if (parsed.intent && (INTENTS as readonly string[]).includes(parsed.intent)) {
+                intent.value = parsed.intent;
+            }
+        } catch {
+            // Corrupted draft — start fresh.
+            title.value = "";
+            body.value = "";
+        }
+    } else {
+        // Comment mode: stored as plain string (body only).
+        body.value = saved;
+    }
+}
+
+// Re-run on mount AND whenever the scope (project / ticketId / mode)
+// changes. Vue reuses the same component instance across thread
+// navigation, so a watch is the right hook for "the composer now
+// belongs to a different conversation, reload its draft".
+watch(
+    [() => props.mode, () => props.project, () => props.ticketId],
+    loadDraft,
+    { immediate: true },
+);
+
+// Mirror typing into sessionStorage. Cleared (instead of stored with
+// empty values) when both fields are empty so we don't leave
+// zero-content keys around.
+watch([title, body, intent], () => {
+    const key = draftKey.value;
+    if (isTicket.value) {
+        const empty = !title.value && !body.value && intent.value === "request";
+        if (empty) sessionStorage.removeItem(key);
+        else sessionStorage.setItem(
+            key,
+            JSON.stringify({ title: title.value, body: body.value, intent: intent.value }),
+        );
+    } else {
+        if (!body.value) sessionStorage.removeItem(key);
+        else sessionStorage.setItem(key, body.value);
+    }
+});
+
 async function submit() {
     if (!canSubmit.value) return;
     sending.value = true;
@@ -89,6 +159,8 @@ async function submit() {
             body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+        // Successful post → drop the persisted draft, reset local state.
+        sessionStorage.removeItem(draftKey.value);
         title.value = "";
         body.value = "";
         preview.value = false;
