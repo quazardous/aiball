@@ -29,12 +29,18 @@ const server = new McpServer({
 /**
  * Lightweight "is anything waiting for me" probe injected into every tool
  * response so the agent always sees, in passing, whether they should call
- * `unread` / `unread({ pings: true })`. Two cheap GETs (one count each).
- * Failures degrade silently — the tool result is still valid.
+ * `unread` / `unread({ pings: true })` or check on their own pending
+ * tickets. Three cheap GETs (one count each). Failures degrade silently —
+ * the tool result is still valid.
  */
-async function microStatus(): Promise<{ unread_project: number; unread_pings: number; project: string | null }> {
+async function microStatus(): Promise<{
+    unread_project: number;
+    unread_pings: number;
+    my_pending: number;
+    project: string | null;
+}> {
     const proj = client.defaultProject;
-    const [pjCount, pgCount] = await Promise.all([
+    const [pjCount, pgCount, mpCount] = await Promise.all([
         proj
             ? client
                 .unreadCount(proj)
@@ -45,8 +51,17 @@ async function microStatus(): Promise<{ unread_project: number; unread_pings: nu
             .pingsCount()
             .then((r) => r.unread ?? 0)
             .catch(() => 0),
+        client
+            .myPendingCount()
+            .then((r) => r.count ?? 0)
+            .catch(() => 0),
     ]);
-    return { unread_project: pjCount, unread_pings: pgCount, project: proj };
+    return {
+        unread_project: pjCount,
+        unread_pings: pgCount,
+        my_pending: mpCount,
+        project: proj,
+    };
 }
 
 async function asText(v: unknown) {

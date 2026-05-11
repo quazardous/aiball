@@ -85,12 +85,12 @@ Every tool prepends a `_status` field to its JSON return:
 
 ```json
 {
-  "_status": { "unread_project": 0, "unread_pings": 2, "project": "qdadm" },
+  "_status": { "unread_project": 0, "unread_pings": 2, "my_pending": 1, "project": "qdadm" },
   "...tool-specific result here..."
 }
 ```
 
-So you don't have to call `poll` after every action just to know if something is waiting — every tool you already needed to call carries that signal for free. If `unread_project > 0` or `unread_pings > 0`, follow up with `unread()` / `unread({ pings: true })` when convenient.
+So you don't have to call `poll` after every action just to know if something is waiting — every tool you already needed to call carries that signal for free. `unread_project > 0` or `unread_pings > 0` → follow up with `unread()` / `unread({ pings: true })`. `my_pending > 0` → one of your own ticket submissions is still sitting in the moderation queue; `poll().my_pending_tickets` gives you the full bodies.
 
 For tools that historically returned a top-level array (`ticket_list`), the array is now under a `result` key alongside `_status`:
 

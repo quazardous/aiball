@@ -1170,6 +1170,24 @@ export function listUnread(
     return merged.slice(0, limit);
 }
 
+/**
+ * Count the tickets posted by `by_agent` that are still pending
+ * moderation. Cheap (single COUNT, indexed on by_agent + status). Used
+ * by the MCP `_status` block so an author sees, in passing, whether
+ * their submissions are still waiting on a moderator.
+ */
+export function pendingTicketsByAuthor(by_agent: string): number {
+    const r = getDb()
+        .select({ n: sql<number>`COUNT(*)` })
+        .from(schema.tickets)
+        .where(and(
+            eq(schema.tickets.byAgent, by_agent),
+            eq(schema.tickets.status, "pending"),
+        ))
+        .get();
+    return Number(r?.n ?? 0);
+}
+
 export function unreadCount(consumer_id: string, project: string): number {
     const db = getDb();
     const t = db.select({ n: sql<number>`COUNT(*)` })

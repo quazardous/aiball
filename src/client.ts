@@ -261,6 +261,12 @@ export class AiballClient {
             `/api/messages?kind=ticket_created&status=pending&by_agent=${encodeURIComponent(this.agentId)}`,
         );
     }
+    myPendingCount() {
+        return this.http<{ count: number }>(
+            "GET",
+            `/api/my-pending/count?by_agent=${encodeURIComponent(this.agentId)}`,
+        );
+    }
 
     // ---- admin / decisions ------------------------------------------------
 

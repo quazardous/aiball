@@ -15,6 +15,7 @@ import {
     listSubscriptions,
     listUnread,
     unreadCount,
+    pendingTicketsByAuthor,
     markMessageSeen,
     markAllSeenForProject,
     markSeenUpToForProject,
@@ -703,6 +704,12 @@ api.get("/unread/count", (req, res) => {
         project,
         count: unreadCount(consumer_id, project),
     });
+});
+
+api.get("/my-pending/count", (req, res) => {
+    const by_agent = req.query.by_agent as string | undefined;
+    if (!by_agent) return badRequest(res, "by_agent required");
+    res.json({ by_agent, count: pendingTicketsByAuthor(by_agent) });
 });
 
 api.post("/mark-read", (req: Request, res: Response) => {
