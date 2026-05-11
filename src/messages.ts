@@ -5,6 +5,7 @@ import {
     updateMessageStatus,
     insertPing,
     listTicketSubscribers,
+    listProjects,
     listProjectSubscribers,
     upsertTicketSubscription,
     listPendingResolvedForTicket,
@@ -212,6 +213,35 @@ function assertCloseAuthority(input: NewMessage): void {
  * `selfTicketId` is excluded so a body that mentions its own ticket
  * (e.g. "see also #B.42") doesn't trigger a self-referenced event.
  */
+/**
+ * Extract `@<name>` mentions from a body, outside backticks/fences.
+ * The disambiguation between agent and project is done by the caller
+ * via project lookup (`@<name>` matching a known project → project
+ * mention; otherwise → agent mention).
+ *
+ * Names accept word chars, dash and underscore, 2..64 long.
+ * Self-mentions (the author's own consumer_id) are skipped.
+ */
+function extractMentions(
+    body: string | null | undefined,
+    selfAgent: string | null,
+): string[] {
+    if (!body) return [];
+    const stripped = body
+        .replace(/```[\s\S]*?```/g, "")
+        .replace(/`[^`]*`/g, "");
+    const out = new Set<string>();
+    // Boundary: start of input or a non-word non-`@` char (so `email@x`
+    // and `@@name` don't get caught).
+    const re = /(?:^|[^\w@])@([a-zA-Z0-9_-]{2,64})\b/g;
+    for (const m of stripped.matchAll(re)) {
+        const name = m[1];
+        if (selfAgent && name === selfAgent) continue;
+        out.add(name);
+    }
+    return [...out];
+}
+
 function extractTicketRefs(
     body: string | null | undefined,
     selfTicketId: number,
@@ -293,6 +323,37 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
 }
 
 /**
+ * Force-deliver pings to `@<name>` mentions in the body (per #B.71).
+ * Disambiguation:
+ *   - `@<name>` matching a known project → ping every owner+follower of
+ *     that project (broadcast-style, but limited to the project membership).
+ *   - Otherwise → ping the consumer named directly, even if not subscribed
+ *     to anything (forced one-shot delivery).
+ *
+ * Self-mention is filtered. Existing pings (from the normal subscriber
+ * fan-out) dedup naturally via insertPing's onConflictDoNothing.
+ */
+function fanOutMentions(msg: Message): void {
+    const mentions = extractMentions(msg.body, msg.by_agent);
+    if (mentions.length === 0) return;
+    const knownProjects = new Set(listProjects());
+    for (const name of mentions) {
+        if (knownProjects.has(name)) {
+            const subs = listProjectSubscribers(name, { roles: ["owner", "follower"] });
+            for (const sub of subs) {
+                if (sub === msg.by_agent) continue;
+                insertPing(sub, msg);
+            }
+        } else {
+            // Treated as a consumer_id. We forcibly insert a ping even if
+            // the recipient isn't subscribed to anything — that's the
+            // whole point of the @-mention feature.
+            insertPing(name, msg);
+        }
+    }
+}
+
+/**
  * Single source of truth for "a new message arrived" — used by both the HTTP
  * API and the spool drainer so behavior is identical regardless of channel.
  */
@@ -319,6 +380,10 @@ export function submitMessage(input: NewMessage): Message {
     // still pending; rejection cleanup is a future iteration if needed.
     if (msg.kind === "ticket_created" || msg.kind === "comment_added") {
         postRelationEvents(msg, input);
+        // Force-deliver pings to `@<name>` mentions (per #B.71). Agent
+        // names get a direct ping; project names fan out to the
+        // project's owners + followers.
+        fanOutMentions(msg);
     }
 
     const ownerLifecycle = isOwnerLifecycleEvent(input);

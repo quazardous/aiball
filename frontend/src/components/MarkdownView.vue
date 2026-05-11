@@ -104,6 +104,18 @@ marked.use({
 // extension as before.
 const TICKET_CODE_RE = /<code>#([Bb])([._/-]?)(\d+)<\/code>/g;
 const COMMENT_CODE_RE = /<code>#([Cc])([._/-]?)([a-hjkmnp-z2-9]{4,8})<\/code>/gi;
+// `@<name>` mention highlighter (per #B.71). Scans the SANITIZED html
+// (after marked + DOMPurify) so HTML tags can't be smuggled through.
+// Won't match inside <code>…</code> spans because those contain literal
+// `&lt;` / `&gt;` already and the lookbehind here requires a non-word
+// non-`@` char or start-of-string just before the `@`. Anchor tags
+// (<a href="…">) typically have `=` before so they're skipped too.
+//
+// The backend fires the actual ping fan-out (forcing delivery to the
+// mentioned consumer or to the project's owners + followers); this UI
+// styling is purely visual so the author can see WHICH mentions will
+// trigger pings.
+const MENTION_RE = /(^|[^\w@>"'\/])@([a-zA-Z0-9_-]{2,64})\b/g;
 
 const html = computed(() => {
     const src = props.source ?? "";
@@ -130,7 +142,10 @@ const html = computed(() => {
         .replace(COMMENT_CODE_RE, (_, _letter, sep, hash) => {
             const h = hash.toLowerCase();
             return `<a class="comment-ref comment-ref--code" href="/b/${h}"><code>#C${sep}${hash}</code></a>`;
-        });
+        })
+        .replace(MENTION_RE, (_, lead, name) =>
+            `${lead}<span class="mention" title="Mention — fan-out ping fires on insertion.">@${name}</span>`,
+        );
 });
 
 // Intercept clicks on internal links (any /b/N, /rules, /tags, /projects, etc.)
@@ -230,5 +245,16 @@ async function onClick(ev: MouseEvent) {
     border: none;
     border-top: 1px solid var(--p-content-border-color);
     margin: 0.8em 0;
+}
+/* `@name` mentions (per #B.71). Visual cue so the author sees what
+ * triggers a forced ping. No href — clicks are inert. */
+.md-body .mention {
+    display: inline-block;
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.25rem;
+    background: color-mix(in srgb, var(--p-primary-color) 14%, transparent);
+    color: var(--p-primary-color);
+    font-weight: 500;
+    font-size: 0.92em;
 }
 </style>
