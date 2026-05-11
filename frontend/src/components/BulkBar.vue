@@ -1,10 +1,15 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import Button from "primevue/button";
+import {
+    BULK_ACTION_META,
+    BULK_ACTIONS_IN_ORDER,
+} from "../lib/labels";
 import { type BulkAction } from "../lib/ticket-actions";
 
 export type BulkCounts = Record<BulkAction, number>;
 
-defineProps<{
+const props = defineProps<{
     selectedSize: number;
     counts: BulkCounts;
     busy: boolean;
@@ -16,9 +21,19 @@ const emit = defineEmits<{
     (e: "action", action: BulkAction): void;
 }>();
 
-function trigger(action: BulkAction) {
-    emit("action", action);
-}
+/**
+ * Render order coming from the catalog. mark_read and mark_unread
+ * collapse into a single button picking the larger of the two counts —
+ * `unreadAction` is computed in templates, see below.
+ */
+const renderActions = computed<BulkAction[]>(() =>
+    BULK_ACTIONS_IN_ORDER.filter((a) => a !== "mark_unread"),
+);
+
+/** The combined read/unread button picks whichever side has more rows. */
+const readToggleAction = computed<BulkAction>(() =>
+    props.counts.mark_read >= props.counts.mark_unread ? "mark_read" : "mark_unread",
+);
 </script>
 
 <template>
@@ -35,82 +50,36 @@ function trigger(action: BulkAction) {
             <strong>{{ selectedSize }}</strong> selected
         </span>
         <span class="spacer" />
-        <Button
-            v-if="counts.mark_read || counts.mark_unread"
-            :icon="counts.mark_read >= counts.mark_unread ? 'pi pi-envelope-open' : 'pi pi-envelope'"
-            :label="counts.mark_read >= counts.mark_unread ? `read (${counts.mark_read})` : `unread (${counts.mark_unread})`"
-            severity="secondary"
-            text
-            size="small"
-            :loading="busy"
-            :title="counts.mark_read >= counts.mark_unread
-                ? 'Mark the selected unread tickets as read (others skipped)'
-                : 'Mark the selected read tickets as unread (others skipped)'"
-            @click="trigger(counts.mark_read >= counts.mark_unread ? 'mark_read' : 'mark_unread')"
-        />
-        <Button
-            v-if="counts.snooze"
-            icon="pi pi-history"
-            :label="`snooze (${counts.snooze})`"
-            severity="info"
-            text
-            size="small"
-            :loading="busy"
-            title="Snooze the selected open tickets for 3 days (others skipped). Use the thread toolbar for a custom duration."
-            @click="trigger('snooze')"
-        />
-        <Button
-            v-if="counts.unsnooze"
-            icon="pi pi-bell"
-            :label="`unsnooze (${counts.unsnooze})`"
-            severity="info"
-            text
-            size="small"
-            :loading="busy"
-            title="Bring the selected snoozed tickets back to the open inbox now."
-            @click="trigger('unsnooze')"
-        />
-        <Button
-            v-if="counts.close"
-            icon="pi pi-lock"
-            :label="`close (${counts.close})`"
-            severity="warn"
-            text
-            size="small"
-            :loading="busy"
-            title="Close the selected open tickets (others skipped). Only the reporter / human can close."
-            @click="trigger('close')"
-        />
-        <Button
-            v-if="counts.reopen"
-            icon="pi pi-unlock"
-            :label="`reopen (${counts.reopen})`"
-            severity="info"
-            text
-            size="small"
-            :loading="busy"
-            title="Reopen the selected closed tickets (others skipped)."
-            @click="trigger('reopen')"
-        />
-        <Button
-            v-if="counts.approve"
-            :label="`approve (${counts.approve})`"
-            icon="pi pi-check"
-            severity="success"
-            size="small"
-            :loading="busy"
-            title="Approve the selected pending tickets (others skipped)."
-            @click="trigger('approve')"
-        />
-        <Button
-            v-if="counts.reject"
-            :label="`reject (${counts.reject})`"
-            icon="pi pi-times"
-            severity="danger"
-            size="small"
-            :loading="busy"
-            title="Reject the selected pending tickets (others skipped)."
-            @click="trigger('reject')"
-        />
+        <template v-for="action in renderActions" :key="action">
+            <!--
+                Read / unread is rendered as a single button: pick the
+                side with more eligible rows. mark_unread is filtered
+                out of renderActions; mark_read is the slot that
+                renders the combined toggle.
+            -->
+            <Button
+                v-if="action === 'mark_read'"
+                v-show="counts.mark_read || counts.mark_unread"
+                :icon="BULK_ACTION_META[readToggleAction].icon"
+                :label="`${BULK_ACTION_META[readToggleAction].label} (${counts[readToggleAction]})`"
+                :severity="BULK_ACTION_META[readToggleAction].severity"
+                :text="BULK_ACTION_META[readToggleAction].text"
+                size="small"
+                :loading="busy"
+                :title="BULK_ACTION_META[readToggleAction].tooltip"
+                @click="emit('action', readToggleAction)"
+            />
+            <Button
+                v-else-if="counts[action]"
+                :icon="BULK_ACTION_META[action].icon"
+                :label="`${BULK_ACTION_META[action].label} (${counts[action]})`"
+                :severity="BULK_ACTION_META[action].severity"
+                :text="BULK_ACTION_META[action].text"
+                size="small"
+                :loading="busy"
+                :title="BULK_ACTION_META[action].tooltip"
+                @click="emit('action', action)"
+            />
+        </template>
     </div>
 </template>

@@ -3,7 +3,13 @@ import Tag from "primevue/tag";
 import Checkbox from "primevue/checkbox";
 import { type InboxRow, type SearchHit } from "../lib/api";
 import { relativeTime, snippetOf, titleOf } from "../lib/format";
-import { attentionOf } from "../lib/ticket-state";
+import { attentionOf, lifecycleStage } from "../lib/ticket-state";
+import {
+    INTENT_SEVERITY,
+    LIFECYCLE_ICONS,
+    STATUS_SEVERITY,
+    snoozedTooltip,
+} from "../lib/labels";
 import ListRow from "./ListRow.vue";
 import TagBadge from "./TagBadge.vue";
 
@@ -24,21 +30,6 @@ const emit = defineEmits<{
     (e: "toggle-selected", id: number, value: boolean): void;
 }>();
 
-// statusSeverity + intentSeverity remain inline for now — they're
-// presentation-mapping tables that will move to a label catalog in
-// Phase E (`#C.2gpcsd`).
-function statusSeverity(s: InboxRow["status"]) {
-    if (s === "pending") return "warn";
-    if (s === "approved") return "success";
-    return "danger";
-}
-
-function intentSeverity(p: InboxRow["intent"]) {
-    if (p === "panic") return "danger";
-    if (p === "request") return "info";
-    if (p === "question") return "warn";
-    return "secondary";
-}
 </script>
 
 <template>
@@ -71,7 +62,7 @@ function intentSeverity(p: InboxRow["intent"]) {
             <Tag
                 v-if="hit.status !== 'approved'"
                 :value="hit.status"
-                :severity="statusSeverity(hit.status)"
+                :severity="STATUS_SEVERITY[hit.status]"
                 style="font-size: 0.7rem"
             />
             <span v-if="hit.title" class="search-hit__title">{{ hit.title }}</span>
@@ -116,44 +107,14 @@ function intentSeverity(p: InboxRow["intent"]) {
             >
                 <i class="pi pi-envelope" />
             </button>
-            <!-- Lifecycle stage — single icon per row, deterministic. -->
+            <!-- Lifecycle stage — single icon per row, deterministic.
+                 The mapping lives in lib/labels.ts (LIFECYCLE_ICONS) so the
+                 catalog stays auditable in one place; the only special case
+                 is the snoozed tooltip which interpolates the wake-up date. -->
             <i
-                v-if="r.status === 'rejected'"
-                class="pi pi-times-circle"
-                title="rejected ticket"
-                style="color: var(--p-red-500)"
-            />
-            <i
-                v-else-if="r.closed && r.resolved"
-                class="pi pi-check-circle"
-                title="closed (resolved)"
-                style="color: var(--p-green-600)"
-            />
-            <i
-                v-else-if="r.closed"
-                class="pi pi-lock"
-                title="closed without explicit resolution (wontfix / abandoned / duplicate)"
-                style="color: var(--p-orange-500)"
-            />
-            <i
-                v-else-if="r.resolved"
-                class="pi pi-check-circle"
-                title="resolved (proposal accepted, reporter has not closed yet)"
-                style="color: var(--p-green-500)"
-            />
-            <i
-                v-else-if="r.postponed"
-                class="pi pi-history"
-                :title="r.postponed_until
-                    ? `snoozed until ${new Date(r.postponed_until).toLocaleString()}`
-                    : 'snoozed'"
-                style="color: var(--p-indigo-500)"
-            />
-            <i
-                v-else
-                class="pi pi-ticket"
-                style="color: var(--p-text-muted-color)"
-                title="open ticket"
+                :class="LIFECYCLE_ICONS[lifecycleStage(r)].icon"
+                :title="lifecycleStage(r) === 'snoozed' ? snoozedTooltip(r.postponed_until) : LIFECYCLE_ICONS[lifecycleStage(r)].title"
+                :style="`color: var(${LIFECYCLE_ICONS[lifecycleStage(r)].color})`"
             />
         </template>
         <template v-if="r.by_agent" #from>{{ r.by_agent }}</template>
@@ -175,13 +136,13 @@ function intentSeverity(p: InboxRow["intent"]) {
             <Tag
                 v-if="r.status !== 'approved'"
                 :value="r.status"
-                :severity="statusSeverity(r.status)"
+                :severity="STATUS_SEVERITY[r.status]"
                 style="font-size: 0.7rem"
             />
             <Tag
                 v-if="r.intent"
                 :value="r.intent"
-                :severity="intentSeverity(r.intent)"
+                :severity="r.intent ? INTENT_SEVERITY[r.intent] : 'secondary'"
                 style="font-size: 0.7rem"
             />
             <TagBadge

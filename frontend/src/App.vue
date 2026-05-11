@@ -9,9 +9,16 @@ import { bus, useBus } from "./lib/bus";
 import { isPeek } from "./lib/peek";
 import BulkBar from "./components/BulkBar.vue";
 import { type BulkAction, canDo } from "./lib/ticket-actions";
+import {
+    STATUS_FILTER_OPTIONS,
+    SORT_OPTIONS,
+    STRATEGY_OPTIONS,
+    type SortBy,
+    type StatusFilter,
+} from "./lib/labels";
 import HeaderBar from "./components/HeaderBar.vue";
 import InboxList from "./components/InboxList.vue";
-import InboxToolbar, { type SortBy, type StatusFilter } from "./components/InboxToolbar.vue";
+import InboxToolbar from "./components/InboxToolbar.vue";
 import NewTicketPage from "./components/NewTicketPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
@@ -41,18 +48,11 @@ const searchQuery = ref("");
 const searchHits = ref<import("./lib/api").SearchHit[]>([]);
 const searchActive = computed(() => searchQuery.value.trim().length > 0);
 
-const statusFilterOptions: { label: string; value: StatusFilter }[] = [
-    { label: "All", value: "all" },
-    { label: "Unread", value: "unread" },
-    { label: "Pending", value: "pending" },
-    { label: "Approved", value: "approved" },
-    { label: "Rejected", value: "rejected" },
-];
-const sortOptions: { label: string; value: SortBy }[] = [
-    { label: "Recent activity", value: "activity" },
-    { label: "Newest first", value: "created_desc" },
-    { label: "Oldest first", value: "created_asc" },
-];
+// Option catalogs come from lib/labels.ts — referenced via short
+// aliases here so the template stays terse.
+const statusFilterOptions = STATUS_FILTER_OPTIONS;
+const sortOptions = SORT_OPTIONS;
+const strategyOptions = STRATEGY_OPTIONS;
 
 // Sidebar can route to a settings panel that replaces the lists entirely.
 // SettingsPanel type lives in components/Sidebar.vue.
@@ -123,23 +123,7 @@ watch(autoRefresh, (v) => {
 }, { immediate: true });
 
 const strategy = ref<Strategy>("auto-reply");
-const strategyOptions: { label: string; value: Strategy; hint: string }[] = [
-    {
-        label: "Manual approve",
-        value: "manual",
-        hint: "Every message goes to human review.",
-    },
-    {
-        label: "Auto approve",
-        value: "auto",
-        hint: "Everything is auto-approved (tickets and replies).",
-    },
-    {
-        label: "Auto approve replies",
-        value: "auto-reply",
-        hint: "Replies auto-approved; new tickets need human review.",
-    },
-];
+
 async function loadStrategy() {
     try {
         const r = await api.getStrategy();

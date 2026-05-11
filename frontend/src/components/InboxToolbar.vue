@@ -3,10 +3,10 @@ import Button from "primevue/button";
 import Select from "primevue/select";
 import ToggleButton from "primevue/togglebutton";
 import InputText from "primevue/inputtext";
+import { type SortBy, type StatusFilter } from "../lib/labels";
 
-export type StatusFilter = "all" | "unread" | "pending" | "approved" | "rejected";
-export type SortBy = "activity" | "created_desc" | "created_asc";
-
+// Toolbar receives the options arrays as props so the parent can swap
+// them out if needed; the canonical defaults live in lib/labels.ts.
 export interface StatusFilterOption {
     label: string;
     value: StatusFilter;

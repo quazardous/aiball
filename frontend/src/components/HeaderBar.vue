@@ -3,6 +3,7 @@ import Button from "primevue/button";
 import Select from "primevue/select";
 import IdentityPicker from "./IdentityPicker.vue";
 import type { Strategy } from "../lib/api";
+import { HEADER_BADGE_TOOLTIPS } from "../lib/labels";
 
 export interface StrategyOption {
     label: string;
@@ -48,21 +49,21 @@ const emit = defineEmits<{
         <span
             v-if="globalPendingCount > 0"
             class="header-badge header-badge--pending"
-            :title="`${globalPendingCount} pending moderation across all projects`"
+            :title="HEADER_BADGE_TOOLTIPS.pending(globalPendingCount)"
         >
             <i class="pi pi-clock" /> {{ globalPendingCount }}
         </span>
         <span
             v-if="globalResolvedCount > 0"
             class="header-badge header-badge--resolved"
-            :title="`${globalResolvedCount} resolution proposal${globalResolvedCount > 1 ? 's' : ''} waiting for your accept/reject`"
+            :title="HEADER_BADGE_TOOLTIPS.resolved(globalResolvedCount)"
         >
             <i class="pi pi-check-circle" /> {{ globalResolvedCount }}
         </span>
         <span
             v-if="globalUnreadCount > 0"
             class="header-badge header-badge--unread"
-            :title="`${globalUnreadCount} unread for you across all projects`"
+            :title="HEADER_BADGE_TOOLTIPS.unread(globalUnreadCount)"
         >
             <i class="pi pi-envelope" /> {{ globalUnreadCount }}
         </span>
@@ -70,11 +71,7 @@ const emit = defineEmits<{
             type="button"
             class="header-badge header-badge--snoozed"
             :class="{ 'header-badge--snoozed-on': showSnoozed }"
-            :title="showSnoozed
-                ? `Showing snoozed tickets in the open inbox (${globalSnoozedCount}). Click to hide them.`
-                : globalSnoozedCount > 0
-                    ? `${globalSnoozedCount} ticket${globalSnoozedCount > 1 ? 's' : ''} currently snoozed (hidden). Click to surface them in the open inbox.`
-                    : `No tickets currently snoozed. Click to surface any future snooze in the open inbox.`"
+            :title="HEADER_BADGE_TOOLTIPS.snoozed(globalSnoozedCount, showSnoozed)"
             @click="emit('update:showSnoozed', !showSnoozed)"
         >
             <i class="pi pi-history" /> {{ globalSnoozedCount }}
