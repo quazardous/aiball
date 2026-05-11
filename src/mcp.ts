@@ -574,31 +574,57 @@ server.registerTool(
     "poll",
     {
         description:
-            "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Returns: identity, daemon health, subscriptions (project + ticket), known projects, your own pending tickets (waiting for moderation), your unread ping count, and per-project open-ticket counts. (Replaces the older `whoami` / `status` / `my_subscriptions` / `list_projects` quartet.)",
-        inputSchema: {},
-    },
-    async () => {
-        const [daemon, projectSubs, ticketSubs, projectStats, myPending, myPendingComments, pingCount] =
-            await Promise.all([
-                client.health().then(
-                    (info) => ({ up: true as const, ...((info as object) ?? {}) }),
-                    (e) => ({ up: false as const, error: (e as Error).message }),
+            "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Default scope is slim (per #B.68): identity + daemon health + per-project open counts + your own pending posts + unread ping count + bookend tickets (first/last). Set `include_subscriptions: true` to also receive your project + ticket subscription lists, and `include_projects: true` to receive the bare `known_projects` array.",
+        inputSchema: {
+            include_subscriptions: z
+                .boolean()
+                .optional()
+                .describe(
+                    "If true, include `project_subscriptions[]` and `ticket_subscriptions[]` (the full subscription lists). Default false — they're hidden because most pollers don't need them.",
                 ),
-                client.mySubs().catch(() => []),
-                client.myTicketSubs().catch(() => ({ subscriptions: [] })),
-                client.listProjectsDetailed().catch(() => []),
-                client.myPendingTickets().catch(() => []),
-                client.myPendingComments().catch(() => []),
-                client.pingsCount().catch(() => ({ unread: 0 })),
-            ]);
-        // Reduce the detailed project list to a `{ name: open_count }`
-        // map — agents care about "is there work waiting on this
-        // project?" more than the full meta blob. `known_projects` stays
-        // a bare string[] for back-compat. Snoozed tickets are reported
-        // separately so an agent that wants to see them must opt in via
-        // `ticket_list({include_snoozed: true})` (per #B.329).
+            include_projects: z
+                .boolean()
+                .optional()
+                .describe(
+                    "If true, include `known_projects[]` (the bare list of project names). Default false — the open_tickets map already encodes the project set.",
+                ),
+            include_snoozed: z
+                .boolean()
+                .optional()
+                .describe(
+                    "If true, snoozed tickets count toward the bookends (first/last). Default false — snoozed tickets are explicitly set aside, they shouldn't surface at the edges of a 'what's active' view.",
+                ),
+        },
+    },
+    async ({ include_subscriptions, include_projects, include_snoozed }) => {
+        const wantSubs = include_subscriptions === true;
+        const wantProjects = include_projects === true;
+        const wantSnoozed = include_snoozed === true;
+        const [
+            daemon,
+            projectSubs,
+            ticketSubs,
+            projectStats,
+            myPending,
+            myPendingComments,
+            pingCount,
+            bookends,
+        ] = await Promise.all([
+            client.health().then(
+                (info) => ({ up: true as const, ...((info as object) ?? {}) }),
+                (e) => ({ up: false as const, error: (e as Error).message }),
+            ),
+            wantSubs ? client.mySubs().catch(() => []) : Promise.resolve(null),
+            wantSubs
+                ? client.myTicketSubs().catch(() => ({ subscriptions: [] }))
+                : Promise.resolve(null),
+            client.listProjectsDetailed().catch(() => []),
+            client.myPendingTickets().catch(() => []),
+            client.myPendingComments().catch(() => []),
+            client.pingsCount().catch(() => ({ unread: 0 })),
+            client.bookends({ includeSnoozed: wantSnoozed }).catch(() => ({ first: null, last: null })),
+        ]);
         const stats = Array.isArray(projectStats) ? projectStats : [];
-        const knownProjects = stats.map((p) => p.name);
         const openTickets: Record<string, number> = {};
         const snoozedTickets: Record<string, number> = {};
         let openTicketsTotal = 0;
@@ -611,7 +637,9 @@ server.registerTool(
             openTicketsTotal += n;
             snoozedTicketsTotal += s;
         }
-        return asText({
+        // Build the response object — fields are conditionally included
+        // based on the opt-in flags. Slim by default per #B.68 user spec.
+        const out: Record<string, unknown> = {
             consumer_id: client.agentId,
             // The MCP server process cwd, which is used as the fallback to
             // derive the consumer_id when AIBALL_AGENT is unset. Renamed
@@ -621,30 +649,37 @@ server.registerTool(
             source: process.env.AIBALL_AGENT ? "AIBALL_AGENT env" : "sha256(mcp_server_cwd)",
             default_project: client.defaultProject,
             daemon,
-            project_subscriptions: projectSubs,
-            ticket_subscriptions:
-                (ticketSubs as { subscriptions?: unknown[] }).subscriptions ?? ticketSubs,
-            known_projects: knownProjects,
             /** Per-project count of approved, currently-open tickets
-             *  (i.e. not closed, not rejected, not snoozed). The default-
-             *  project entry is the agent's primary workload indicator. */
+             *  (i.e. not closed, not rejected, not snoozed). */
             open_tickets: openTickets,
             open_tickets_total: openTicketsTotal,
-            /** Per-project count of tickets currently snoozed (postponed_until
-             *  > now). Hidden from `open_tickets`. Use
-             *  `ticket_list({include_snoozed: true})` to retrieve them. */
+            /** Per-project count of tickets currently snoozed
+             *  (postponed_until > now). Hidden from `open_tickets`.
+             *  Use `ticket_list({include_snoozed: true})` to retrieve. */
             snoozed_tickets: snoozedTickets,
             snoozed_tickets_total: snoozedTicketsTotal,
+            /** Bookend tickets in scope — first (oldest) and last
+             *  (most recent). Cross-project, ordered by id. Snoozed
+             *  tickets are excluded unless `include_snoozed=true`. */
+            first_ticket: (bookends as { first?: unknown }).first ?? null,
+            last_ticket: (bookends as { last?: unknown }).last ?? null,
             my_pending_tickets: myPending,
-            /**
-             * Pending comments authored by this agent (per #B.69).
-             * Needed even in `auto-reply` mode since the strategy can
-             * flip to `manual` at any moment — comments stuck in
-             * moderation should always be visible to their author.
-             */
+            /** Pending comments authored by this agent (#B.69). Needed
+             *  even in `auto-reply` since the strategy can flip to
+             *  `manual` at any moment — comments stuck in moderation
+             *  should always be visible to their author. */
             my_pending_comments: myPendingComments,
             unread_pings: (pingCount as { unread?: number }).unread ?? 0,
-        });
+        };
+        if (wantSubs) {
+            out.project_subscriptions = projectSubs;
+            out.ticket_subscriptions =
+                (ticketSubs as { subscriptions?: unknown[] } | null)?.subscriptions ?? ticketSubs;
+        }
+        if (wantProjects) {
+            out.known_projects = stats.map((p) => p.name);
+        }
+        return asText(out);
     },
 );
 

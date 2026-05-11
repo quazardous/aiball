@@ -6,7 +6,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { and, asc, eq, inArray, isNotNull, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, lte, ne } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 
@@ -103,6 +103,68 @@ export function getTicketStages(ids: number[]): Map<number, TicketStage> {
     // safe default — keeps the frontend rendering consistent.
     for (const id of ids) if (!out.has(id)) out.set(id, "open");
     return out;
+}
+
+/**
+ * Bookends of a scope — first (oldest) and last (most recent) ticket
+ * matching the filters. Used by the slim `poll()` (per #B.68) so agents
+ * see the inbox edges without paying for the whole sub list.
+ *
+ * Ordering is by `id` (chronological by creation, since ticket ids are
+ * dense post-migration 0007). Rejected tickets are filtered out — they
+ * don't belong on either end of an "active" inbox view.
+ */
+export interface TicketBookend {
+    id: number;
+    project: string;
+    title: string;
+    by_agent: string | null;
+    created_at: string;
+    intent: string | null;
+}
+
+export function getTicketBookends(opts: {
+    project?: string;
+    includeSnoozed?: boolean;
+}): { first: TicketBookend | null; last: TicketBookend | null } {
+    const db = getDb();
+    // Build the WHERE: not-rejected + optional project filter. Snooze
+    // filter happens in JS to keep the SQL straightforward (no need to
+    // express "postponed_until > now" via Drizzle).
+    const baseConds = [ne(schema.tickets.status, "rejected")];
+    if (opts.project) baseConds.push(eq(schema.tickets.project, opts.project));
+    const rows = db.select({
+        id: schema.tickets.id,
+        project: schema.tickets.project,
+        title: schema.tickets.title,
+        editedTitle: schema.tickets.editedTitle,
+        byAgent: schema.tickets.byAgent,
+        createdAt: schema.tickets.createdAt,
+        intent: schema.tickets.intent,
+        postponedUntil: schema.tickets.postponedUntil,
+    })
+        .from(schema.tickets)
+        .where(and(...baseConds))
+        .all();
+    const nowStr = nowIso();
+    const filtered = rows.filter((r) => {
+        if (!opts.includeSnoozed && r.postponedUntil && r.postponedUntil > nowStr) return false;
+        return true;
+    });
+    if (filtered.length === 0) return { first: null, last: null };
+    filtered.sort((a, b) => a.id - b.id);
+    const toBookend = (r: typeof filtered[number]): TicketBookend => ({
+        id: r.id,
+        project: r.project,
+        title: r.editedTitle ?? r.title ?? "",
+        by_agent: r.byAgent,
+        created_at: r.createdAt,
+        intent: r.intent,
+    });
+    return {
+        first: toBookend(filtered[0]),
+        last: toBookend(filtered[filtered.length - 1]),
+    };
 }
 
 /**

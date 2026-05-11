@@ -295,6 +295,21 @@ export class AiballClient {
             `/api/messages?kind=comment_added&status=pending&by_agent=${encodeURIComponent(this.agentId)}`,
         );
     }
+    /**
+     * First + last non-rejected ticket in scope — used by the slim
+     * `poll()` (per #B.68). Cross-project by default; pass project to
+     * restrict. include_snoozed widens the scope.
+     */
+    bookends(opts: { project?: string; includeSnoozed?: boolean } = {}) {
+        const qs = new URLSearchParams();
+        if (opts.project) qs.set("project", opts.project);
+        if (opts.includeSnoozed) qs.set("include_snoozed", "1");
+        const q = qs.toString();
+        return this.http<{ first: unknown; last: unknown }>(
+            "GET",
+            `/api/tickets/bookends${q ? "?" + q : ""}`,
+        );
+    }
     myPendingCount() {
         return this.http<{ count: number }>(
             "GET",

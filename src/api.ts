@@ -51,6 +51,7 @@ import {
     listExpiredPostpones,
     listSubTickets,
     getTicketStages,
+    getTicketBookends,
     getMessageByHashid,
     markTicketSeen,
     markTicketUnseen,
@@ -422,6 +423,21 @@ api.get("/projects", (req, res) => {
 
 api.get("/projects/:name/stats", (req, res) => {
     res.json(getProjectStats(req.params.name));
+});
+
+/**
+ * Inbox bookends: oldest + newest non-rejected ticket matching the
+ * scope. Used by the slim `poll()` (per #B.68) so agents see the
+ * inbox edges without paying for the full subscriptions/projects blob.
+ *
+ * Query:
+ *   - project=NAME    (optional) restrict to a project; otherwise cross-project.
+ *   - include_snoozed=1  include snoozed tickets in the scope.
+ */
+api.get("/tickets/bookends", (req, res) => {
+    const project = typeof req.query.project === "string" ? req.query.project : undefined;
+    const includeSnoozed = req.query.include_snoozed === "1";
+    res.json(getTicketBookends({ project, includeSnoozed }));
 });
 
 /**
