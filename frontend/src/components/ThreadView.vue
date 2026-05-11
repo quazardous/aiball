@@ -768,9 +768,8 @@ async function copyTicketRef() {
                     <Button
                         v-else
                         icon="pi pi-undo"
-                        severity="secondary"
+                        severity="warn"
                         size="small"
-                        text
                         rounded
                         :loading="resolutionBusy"
                         title="Undo resolved — clear the resolution and bring the ticket back to plain open. Embarks any text typed in the composer."
@@ -802,9 +801,8 @@ async function copyTicketRef() {
             <Button
                 v-else-if="data && data.ticket.status === 'pending' && data.ticket.resolved && !data.ticket.closed"
                 icon="pi pi-undo"
-                severity="secondary"
+                severity="warn"
                 size="small"
-                text
                 rounded
                 :loading="resolutionBusy"
                 title="Undo resolved — clear the resolution while the ticket is still in moderation. Embarks any text typed in the composer."
@@ -1204,9 +1202,8 @@ async function copyTicketRef() {
                             v-else
                             icon="pi pi-undo"
                             :label="hasBody ? 'comment and undo resolved' : 'undo resolved'"
-                            severity="secondary"
+                            severity="warn"
                             size="small"
-                            text
                             :loading="resolutionBusy"
                             @click="commentAndReopen"
                         />
