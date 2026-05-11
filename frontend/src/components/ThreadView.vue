@@ -986,6 +986,7 @@ async function copyTicketRef() {
 .comment-actions {
     display: flex;
     gap: 0.4rem;
+    justify-content: flex-end;
 }
 .comment-edit {
     display: flex;
