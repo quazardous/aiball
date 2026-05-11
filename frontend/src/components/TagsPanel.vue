@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import { api, type Tag } from "../lib/api";
+import { bus, useBus } from "../lib/bus";
 import TagBadge from "./TagBadge.vue";
 
 const tags = ref<Tag[]>([]);
@@ -37,7 +38,7 @@ async function add() {
         newName.value = "";
         newColor.value = "#3b82f6";
         newNote.value = "";
-        await load();
+        bus.emit("tags.refresh");
     } catch (e) {
         error.value = (e as Error).message;
     }
@@ -46,7 +47,7 @@ async function add() {
 async function save(t: Tag, fields: Partial<Tag>) {
     try {
         await api.updateTag(t.id, fields);
-        await load();
+        bus.emit("tags.refresh");
     } catch (e) {
         error.value = (e as Error).message;
     }
@@ -57,13 +58,14 @@ async function del(t: Tag) {
         return;
     try {
         await api.delTag(t.id);
-        await load();
+        bus.emit("tags.refresh");
     } catch (e) {
         error.value = (e as Error).message;
     }
 }
 
-defineExpose({ load });
+// Self-refresh on bus events (WS-driven or local mutations).
+useBus("tags.refresh", () => load());
 onMounted(load);
 </script>
 

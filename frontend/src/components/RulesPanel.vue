@@ -5,6 +5,7 @@ import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import ToggleSwitch from "primevue/toggleswitch";
 import { api, type Rule } from "../lib/api";
+import { bus, useBus } from "../lib/bus";
 
 const rules = ref<Rule[]>([]);
 const error = ref<string | null>(null);
@@ -67,7 +68,7 @@ async function add() {
         matchBy.value = "";
         matchKind.value = null;
         note.value = "";
-        await load();
+        bus.emit("rules.refresh");
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -78,7 +79,7 @@ async function add() {
 async function toggle(r: Rule, enabled: boolean) {
     try {
         await api.toggleRule(r.id, enabled);
-        await load();
+        bus.emit("rules.refresh");
     } catch (e) {
         error.value = (e as Error).message;
     }
@@ -88,13 +89,15 @@ async function del(r: Rule) {
     if (!confirm(`Delete rule #${r.id}?`)) return;
     try {
         await api.delRule(r.id);
-        await load();
+        bus.emit("rules.refresh");
     } catch (e) {
         error.value = (e as Error).message;
     }
 }
 
-defineExpose({ load });
+// Self-refresh on bus events — covers our own mutations (round-trips
+// instantly) and any rule change made elsewhere (WS-driven).
+useBus("rules.refresh", () => load());
 onMounted(load);
 </script>
 

@@ -478,11 +478,11 @@ server.registerTool(
     "poll",
     {
         description:
-            "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Returns: identity, daemon health, subscriptions (project + ticket), known projects, your own pending tickets (waiting for moderation), and your unread ping count. (Replaces the older `whoami` / `status` / `my_subscriptions` / `list_projects` quartet.)",
+            "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Returns: identity, daemon health, subscriptions (project + ticket), known projects, your own pending tickets (waiting for moderation), your unread ping count, and per-project open-ticket counts. (Replaces the older `whoami` / `status` / `my_subscriptions` / `list_projects` quartet.)",
         inputSchema: {},
     },
     async () => {
-        const [daemon, projectSubs, ticketSubs, knownProjects, myPending, pingCount] =
+        const [daemon, projectSubs, ticketSubs, projectStats, myPending, pingCount] =
             await Promise.all([
                 client.health().then(
                     (info) => ({ up: true as const, ...((info as object) ?? {}) }),
@@ -490,10 +490,23 @@ server.registerTool(
                 ),
                 client.mySubs().catch(() => []),
                 client.myTicketSubs().catch(() => ({ subscriptions: [] })),
-                client.listProjects().catch(() => []),
+                client.listProjectsDetailed().catch(() => []),
                 client.myPendingTickets().catch(() => []),
                 client.pingsCount().catch(() => ({ unread: 0 })),
             ]);
+        // Reduce the detailed project list to a `{ name: open_count }`
+        // map — agents care about "is there work waiting on this
+        // project?" more than the full meta blob. `known_projects` stays
+        // a bare string[] for back-compat.
+        const stats = Array.isArray(projectStats) ? projectStats : [];
+        const knownProjects = stats.map((p) => p.name);
+        const openTickets: Record<string, number> = {};
+        let openTicketsTotal = 0;
+        for (const p of stats) {
+            const n = typeof p.open_count === "number" ? p.open_count : 0;
+            openTickets[p.name] = n;
+            openTicketsTotal += n;
+        }
         return asText({
             consumer_id: client.agentId,
             // The MCP server process cwd, which is used as the fallback to
@@ -508,6 +521,11 @@ server.registerTool(
             ticket_subscriptions:
                 (ticketSubs as { subscriptions?: unknown[] }).subscriptions ?? ticketSubs,
             known_projects: knownProjects,
+            /** Per-project count of approved, currently-open tickets
+             *  (i.e. not closed, not rejected). The default-project entry
+             *  is the agent's primary workload indicator. */
+            open_tickets: openTickets,
+            open_tickets_total: openTicketsTotal,
             my_pending_tickets: myPending,
             unread_pings: (pingCount as { unread?: number }).unread ?? 0,
         });

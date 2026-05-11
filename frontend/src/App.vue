@@ -366,7 +366,33 @@ function notifyArrival(m: Message) {
 // future component) subscribe to the bus where they're defined. See
 // `lib/bus.ts` for the typed event map.
 const { connected } = useWs((ev) => {
-    if (ev.type === "rule_changed") return;
+    if (ev.type === "rule_changed") {
+        bus.emit("rules.refresh");
+        return;
+    }
+    if (ev.type === "tag_changed") {
+        // Tag catalog touched (rename, color, delete) — refresh the
+        // tags panel and any open TagPicker. Don't touch inbox/projects
+        // here: the catalog change doesn't move per-project counts.
+        bus.emit("tags.refresh");
+        return;
+    }
+    if (ev.type === "message_tagged") {
+        // A message gained/lost tags. The catalog itself is unchanged,
+        // but the open thread (if it contains this message) and the
+        // inbox row need to redraw their tag chips. The server sends
+        // `{ message_id, tags }` — no ticket_id — so we trigger a
+        // defensive thread.refresh on whatever's currently open, plus
+        // an inbox refresh. Cheap and self-correcting.
+        const tagged = ev.data as { message_id?: number; ticket_id?: number } | undefined;
+        if (tagged?.ticket_id !== undefined) {
+            bus.emit("thread.refresh", { ticketId: tagged.ticket_id });
+        } else if (openTicketId.value !== null) {
+            bus.emit("thread.refresh", { ticketId: openTicketId.value });
+        }
+        bus.emit("inbox.refresh");
+        return;
+    }
     if (ev.type === "strategy_changed") {
         const s = (ev.data as { strategy?: Strategy } | undefined)?.strategy;
         if (s && (STRATEGIES as readonly string[]).includes(s)) strategy.value = s;
@@ -379,6 +405,8 @@ const { connected } = useWs((ev) => {
         bus.emit("inbox.refresh");
         return;
     }
+    // Remaining events are message-shaped (`message_created`,
+    // `message_decided`, `message_edited`, `message_noted`).
     const data = ev.data as Message | undefined;
     if (!data || typeof data !== "object") return;
     if (ev.type === "message_created") bus.emit("message.arrived", data);

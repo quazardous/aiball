@@ -33,6 +33,10 @@ export interface BusEvents {
     "projects.refresh": void;
     /** The open thread should reload its data, if it matches the ticket id. */
     "thread.refresh": { ticketId: number };
+    /** The moderation rules list should be refreshed (RulesPanel). */
+    "rules.refresh": void;
+    /** The tag catalog should be refreshed (TagsPanel, any TagPicker). */
+    "tags.refresh": void;
     /** Any new message landed in the system (approved or pending). */
     "message.arrived": Message;
     /** A pending message was approved or rejected by a moderator. */

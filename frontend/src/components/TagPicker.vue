@@ -2,6 +2,7 @@
 import { ref, watch } from "vue";
 import Button from "primevue/button";
 import { api, type Tag } from "../lib/api";
+import { useBus } from "../lib/bus";
 import TagBadge from "./TagBadge.vue";
 
 const props = defineProps<{
@@ -31,6 +32,9 @@ async function loadCatalog() {
     }
 }
 loadCatalog();
+// Keep the picker in sync if the tag catalog is edited from elsewhere
+// (TagsPanel CRUD, another agent, another browser tab).
+useBus("tags.refresh", () => loadCatalog());
 
 async function toggle(t: Tag) {
     const next = new Set(selected.value);

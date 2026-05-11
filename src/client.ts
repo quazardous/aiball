@@ -147,6 +147,22 @@ export class AiballClient {
     listProjects() {
         return this.http("GET", "/api/projects");
     }
+    /**
+     * Same endpoint with `detailed=1` — returns objects with counts
+     * (ticket_count, open_count, pending_count, last_activity…) instead
+     * of bare names. Used by poll() to surface per-project workload.
+     */
+    listProjectsDetailed() {
+        return this.http<Array<{
+            name: string;
+            last_activity: string;
+            ticket_count: number;
+            comment_count: number;
+            pending_count: number;
+            open_count?: number;
+            resolved_count?: number;
+        }>>("GET", "/api/projects?detailed=1");
+    }
     feedPath(project: string) {
         return this.http<{ path: string }>(
             "GET",
