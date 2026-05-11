@@ -1089,6 +1089,14 @@ watch(showSnoozed, (v) => {
                                 style="color: var(--p-green-500)"
                             />
                             <i
+                                v-else-if="r.postponed"
+                                class="pi pi-history"
+                                :title="r.postponed_until
+                                    ? `snoozed until ${new Date(r.postponed_until).toLocaleString()}`
+                                    : 'snoozed'"
+                                style="color: var(--p-indigo-500)"
+                            />
+                            <i
                                 v-else
                                 class="pi pi-ticket"
                                 style="color: var(--p-text-muted-color)"
