@@ -801,7 +801,7 @@ watch(showSnoozed, (v) => {
                     : `${globalSnoozedCount} ticket${globalSnoozedCount > 1 ? 's' : ''} currently snoozed (hidden). Click to surface them in the open inbox.`"
                 @click="showSnoozed = !showSnoozed"
             >
-                <i class="pi pi-moon" /> {{ globalSnoozedCount }}
+                <i class="pi pi-history" /> {{ globalSnoozedCount }}
             </button>
             <Select
                 :model-value="strategy"
@@ -1174,7 +1174,7 @@ watch(showSnoozed, (v) => {
                         />
                         <Button
                             v-if="bulkCounts.snooze"
-                            icon="pi pi-moon"
+                            icon="pi pi-history"
                             :label="`snooze (${bulkCounts.snooze})`"
                             severity="info"
                             text
@@ -1185,7 +1185,7 @@ watch(showSnoozed, (v) => {
                         />
                         <Button
                             v-if="bulkCounts.unsnooze"
-                            icon="pi pi-sun"
+                            icon="pi pi-bell"
                             :label="`unsnooze (${bulkCounts.unsnooze})`"
                             severity="info"
                             text

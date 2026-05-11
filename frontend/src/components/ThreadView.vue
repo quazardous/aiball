@@ -572,7 +572,7 @@ async function copyTicketRef() {
             />
             <Button
                 v-if="data && data.ticket.status === 'approved' && !data.ticket.closed && !isSnoozed"
-                icon="pi pi-moon"
+                icon="pi pi-history"
                 severity="info"
                 size="small"
                 text
@@ -583,7 +583,7 @@ async function copyTicketRef() {
             />
             <Button
                 v-if="data && isSnoozed"
-                icon="pi pi-sun"
+                icon="pi pi-bell"
                 severity="info"
                 size="small"
                 :loading="snoozeBusy"
@@ -779,7 +779,7 @@ async function copyTicketRef() {
                     class="thread-snoozed-banner"
                     :title="data.ticket.postponed_until ?? ''"
                 >
-                    <i class="pi pi-moon" />
+                    <i class="pi pi-history" />
                     Snoozed until
                     <strong>
                         {{ data.ticket.postponed_until
