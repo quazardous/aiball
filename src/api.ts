@@ -55,6 +55,10 @@ import {
     setUploadMaxBytes,
     UPLOAD_HARD_CAP_BYTES,
     DEFAULT_UPLOAD_MAX_BYTES,
+    insertUpload,
+    uploadStats,
+    listOrphanUploads,
+    deleteUploadRow,
     type MessageKind,
     type MessageStatus,
     type Strategy,
@@ -159,6 +163,20 @@ api.post(
         if (!existsSync(target)) {
             writeFileSync(target, buf);
         }
+        // Track in the uploads table so GC can find orphans later.
+        // Idempotent: re-uploading the same bytes by a different author
+        // keeps the first author on record (the first writer wins, no
+        // need to mutate metadata).
+        insertUpload({
+            sha,
+            ext,
+            content_type: ct,
+            bytes: buf.length,
+            by_agent: consumerOf(req),
+            original_name: typeof req.header("x-aiball-upload-name") === "string"
+                ? req.header("x-aiball-upload-name")!.slice(0, 200)
+                : null,
+        });
         res.status(201).json({
             url: `/uploads/${filename}`,
             sha256: sha,
@@ -167,6 +185,65 @@ api.post(
         });
     },
 );
+
+api.get("/uploads/stats", (_req, res) => {
+    res.json(uploadStats());
+});
+
+/**
+ * GC pass: find uploads not referenced anywhere in tickets / messages
+ * bodies, delete both the on-disk file and the metadata row. A grace
+ * window (default 5 min) protects very-recently-uploaded files that
+ * the user hasn't yet pasted into a message.
+ *
+ * `dry_run: true` (or query `?dry_run=1`) only reports what would be
+ * removed without touching anything.
+ */
+api.post("/uploads/gc", (req: Request, res: Response) => {
+    const dryRun =
+        req.body?.dry_run === true ||
+        req.query.dry_run === "1" ||
+        req.query.dry_run === "true";
+    const graceMinutes = typeof req.body?.grace_minutes === "number"
+        ? Math.max(0, req.body.grace_minutes)
+        : 5;
+    const orphans = listOrphanUploads(graceMinutes);
+    let deletedFiles = 0;
+    let freedBytes = 0;
+    if (!dryRun) {
+        for (const u of orphans) {
+            const filename = `${u.sha}.${u.ext}`;
+            const path = joinPath(UPLOADS_DIR, filename);
+            try {
+                if (existsSync(path)) {
+                    unlinkSync(path);
+                    deletedFiles += 1;
+                    freedBytes += u.bytes;
+                }
+                deleteUploadRow(u.sha);
+            } catch (e) {
+                // Best-effort: log + keep going. A stale row left behind
+                // is harmless; we'll retry next GC.
+                console.error(`[uploads/gc] failed for ${filename}:`, e);
+            }
+        }
+    }
+    res.json({
+        dry_run: dryRun,
+        grace_minutes: graceMinutes,
+        candidates: orphans.length,
+        candidate_bytes: orphans.reduce((s, u) => s + u.bytes, 0),
+        deleted_files: deletedFiles,
+        freed_bytes: freedBytes,
+        orphans: orphans.map((u) => ({
+            sha: u.sha,
+            ext: u.ext,
+            bytes: u.bytes,
+            by_agent: u.by_agent,
+            created_at: u.created_at,
+        })),
+    });
+});
 
 api.get("/settings/upload-max-bytes", (_req, res) => {
     res.json({

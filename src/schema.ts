@@ -177,6 +177,30 @@ export const settings = sqliteTable("settings", {
     value: text("value"),
 });
 
+/**
+ * Tracking table for files uploaded via POST /api/uploads (per #B.76).
+ * Storage is content-addressable on disk (<AIBALL_HOME>/uploads/<sha>.<ext>);
+ * this row is *just metadata* — useful for orphan GC, "who uploaded what"
+ * queries, and a future "my uploads" panel.
+ *
+ * Orphan rule: a row whose `sha` is no longer referenced by any
+ * `_messages.body` / `tickets.body` is a candidate for deletion. A grace
+ * period (`uploaded but not yet referenced because the user is still
+ * editing the message`) is enforced at GC time, not at the row level.
+ */
+export const uploads = sqliteTable("uploads", {
+    sha: text("sha").primaryKey(),
+    ext: text("ext").notNull(),
+    contentType: text("content_type").notNull(),
+    bytes: integer("bytes").notNull(),
+    byAgent: text("by_agent"),
+    originalName: text("original_name"),
+    createdAt: text("created_at").notNull(),
+}, (t) => [
+    index("idx_uploads_created").on(t.createdAt),
+    index("idx_uploads_by_agent").on(t.byAgent),
+]);
+
 // ---- inferred types ------------------------------------------------------
 
 export type Ticket = typeof tickets.$inferSelect;
