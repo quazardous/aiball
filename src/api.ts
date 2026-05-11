@@ -13,6 +13,7 @@ import {
     upsertSubscription,
     deleteSubscription,
     listSubscriptions,
+    listKnownAgents,
     listUnread,
     unreadCount,
     pendingTicketsByAuthor,
@@ -420,6 +421,19 @@ api.get("/projects", (req, res) => {
 
 api.get("/projects/:name/stats", (req, res) => {
     res.json(getProjectStats(req.params.name));
+});
+
+/**
+ * Autocomplete catalog for the composer's @-mentions (per #B.71).
+ * Returns the projects + the distinct consumer_ids the daemon has seen,
+ * so the composer can offer relevant completions when the user types @.
+ * Lightweight read — called once at composer mount, cached client-side.
+ */
+api.get("/mention-suggestions", (_req, res) => {
+    res.json({
+        projects: listProjects(),
+        agents: listKnownAgents(),
+    });
 });
 
 api.delete("/projects/:name", (req, res) => {

@@ -7,7 +7,7 @@ import Textarea from "primevue/textarea";
 import ToggleButton from "primevue/togglebutton";
 import { useToast } from "primevue/usetoast";
 import MarkdownView from "./MarkdownView.vue";
-import { INTENTS, type Intent } from "../lib/api";
+import { api, INTENTS, type Intent } from "../lib/api";
 import { bus } from "../lib/bus";
 import { attachPasteImage } from "../lib/pasteImage";
 import { uploadImage } from "../lib/upload";
@@ -203,10 +203,129 @@ onMounted(() => {
             });
         },
     });
+    // Load the @-mention catalog once (per #B.71). Cheap; the daemon
+    // builds it from SELECT DISTINCT across subs/tickets/messages.
+    api.mentionSuggestions()
+        .then((r) => { mentionCatalog.value = r; })
+        .catch(() => { /* offline OK — autocomplete just stays inert */ });
 });
 onBeforeUnmount(() => {
     detachPaste?.();
 });
+
+// =====================================================================
+//  @-mention autocomplete (#B.71)
+// =====================================================================
+//
+// Inline popover anchored below the textarea. Triggered by typing `@`
+// (or scrolling the caret back to an existing @-token). Suggestions:
+// projects first (folder icon), agents second (user icon). Selection
+// replaces the partial `@xxx` with the full `@name `.
+
+interface MentionSuggestion {
+    kind: "project" | "agent";
+    value: string;
+}
+
+const mentionCatalog = ref<{ projects: string[]; agents: string[] } | null>(null);
+const mentionQuery = ref<string | null>(null);  // null = popover closed
+const mentionTokenStart = ref(0);                // body index where the `@` sits
+const mentionSelectedIdx = ref(0);
+
+const mentionSuggestions = computed<MentionSuggestion[]>(() => {
+    if (mentionQuery.value === null || !mentionCatalog.value) return [];
+    const q = mentionQuery.value.toLowerCase();
+    const matchProj = mentionCatalog.value.projects.filter((p) => p.toLowerCase().includes(q));
+    const matchAgent = mentionCatalog.value.agents.filter((a) => a.toLowerCase().includes(q));
+    return [
+        ...matchProj.map((v): MentionSuggestion => ({ kind: "project", value: v })),
+        ...matchAgent.map((v): MentionSuggestion => ({ kind: "agent", value: v })),
+    ].slice(0, 8);
+});
+
+function detectMentionAtCaret() {
+    const el = bodyTextareaRef.value?.$el;
+    if (!el) {
+        mentionQuery.value = null;
+        return;
+    }
+    const caret = el.selectionStart ?? 0;
+    const before = body.value.slice(0, caret);
+    // Most recent `@` preceded by start-of-line or non-word non-@ char,
+    // followed by 0..N word/dash/underscore chars, ending at caret.
+    const m = before.match(/(?:^|[^\w@])@([a-zA-Z0-9_-]*)$/);
+    if (!m) {
+        mentionQuery.value = null;
+        return;
+    }
+    mentionQuery.value = m[1];
+    mentionTokenStart.value = caret - m[1].length - 1; // position of `@`
+    mentionSelectedIdx.value = 0;
+}
+
+function onComposerInput() {
+    // setTimeout(0) rather than rAF because rAF is throttled when the
+    // browser tab is in background (the autocomplete still needs to
+    // respond to typing even if the tab isn't focused).
+    setTimeout(detectMentionAtCaret, 0);
+}
+
+// Belt + braces: also re-evaluate when body changes via paste, drafts,
+// programmatic edits, etc. The @input handler above covers the typical
+// typing path; this watch handles everything else.
+watch(body, () => {
+    setTimeout(detectMentionAtCaret, 0);
+});
+
+function onComposerKeydown(ev: KeyboardEvent) {
+    if (mentionQuery.value === null || mentionSuggestions.value.length === 0) {
+        // Re-evaluate after arrow/backspace movements that change the caret.
+        if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(ev.key)) {
+            // setTimeout(0) rather than rAF because rAF is throttled when the
+    // browser tab is in background (the autocomplete still needs to
+    // respond to typing even if the tab isn't focused).
+    setTimeout(detectMentionAtCaret, 0);
+        }
+        return;
+    }
+    if (ev.key === "ArrowDown") {
+        ev.preventDefault();
+        mentionSelectedIdx.value =
+            (mentionSelectedIdx.value + 1) % mentionSuggestions.value.length;
+        return;
+    }
+    if (ev.key === "ArrowUp") {
+        ev.preventDefault();
+        mentionSelectedIdx.value =
+            (mentionSelectedIdx.value - 1 + mentionSuggestions.value.length) %
+            mentionSuggestions.value.length;
+        return;
+    }
+    if (ev.key === "Enter" || ev.key === "Tab") {
+        ev.preventDefault();
+        selectMention(mentionSuggestions.value[mentionSelectedIdx.value]);
+        return;
+    }
+    if (ev.key === "Escape") {
+        ev.preventDefault();
+        mentionQuery.value = null;
+        return;
+    }
+}
+
+function selectMention(s: MentionSuggestion) {
+    const el = bodyTextareaRef.value?.$el;
+    if (!el || mentionQuery.value === null) return;
+    const start = mentionTokenStart.value;
+    const end = start + 1 + mentionQuery.value.length;
+    body.value = `${body.value.slice(0, start)}@${s.value} ${body.value.slice(end)}`;
+    mentionQuery.value = null;
+    setTimeout(() => {
+        const pos = start + s.value.length + 2; // @ + name + space
+        el.focus();
+        el.setSelectionRange(pos, pos);
+    }, 0);
+}
 
 // Attach button (per #B.76 follow-up). Same upload path as paste, but
 // surfaces an explicit file picker so the user doesn't have to put the
@@ -295,9 +414,31 @@ async function onAttachPicked(ev: Event) {
                 :placeholder="placeholder"
                 :disabled="sending"
                 autoResize
+                @input="onComposerInput"
+                @keydown="onComposerKeydown"
                 @keydown.ctrl.enter.prevent="submit"
                 @keydown.meta.enter.prevent="submit"
+                @blur="mentionQuery = null"
             />
+            <ul
+                v-if="mentionQuery !== null && mentionSuggestions.length > 0"
+                class="mention-popover"
+                role="listbox"
+            >
+                <li
+                    v-for="(s, i) in mentionSuggestions"
+                    :key="`${s.kind}-${s.value}`"
+                    class="mention-popover__item"
+                    :class="{ 'mention-popover__item--selected': i === mentionSelectedIdx }"
+                    role="option"
+                    :aria-selected="i === mentionSelectedIdx"
+                    @mousedown.prevent="selectMention(s)"
+                >
+                    <i :class="s.kind === 'project' ? 'pi pi-folder' : 'pi pi-user'" />
+                    <span class="mention-popover__name">@{{ s.value }}</span>
+                    <span class="mention-popover__kind">{{ s.kind }}</span>
+                </li>
+            </ul>
         </div>
         <div v-else class="composer-preview">
             <h3 v-if="isTicket && title" style="margin: 0 0 0.4rem">{{ title }}</h3>
@@ -356,6 +497,58 @@ async function onAttachPicked(ev: Event) {
     flex-direction: column;
     gap: 0.6rem;
     background: var(--p-content-background);
+}
+.composer-textarea-wrap {
+    position: relative;
+}
+/* @-mention autocomplete popover (#B.71). Anchored to the composer
+ * textarea wrap; appears just below the textarea. Keyboard nav fires
+ * from the textarea itself (we don't move focus). */
+.mention-popover {
+    position: absolute;
+    z-index: 20;
+    top: 100%;
+    left: 0;
+    margin: 0.15rem 0 0;
+    padding: 0.2rem;
+    list-style: none;
+    min-width: 14rem;
+    max-width: 22rem;
+    background: var(--p-content-background);
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.4rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+}
+.mention-popover__item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 0.3rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+.mention-popover__item:hover,
+.mention-popover__item--selected {
+    background: color-mix(in srgb, var(--p-primary-color) 14%, transparent);
+}
+.mention-popover__item i {
+    font-size: 0.85em;
+    color: var(--p-text-muted-color);
+    width: 1rem;
+    text-align: center;
+}
+.mention-popover__name {
+    flex: 1;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    color: var(--p-text-color);
+}
+.mention-popover__kind {
+    font-size: 0.75rem;
+    color: var(--p-text-muted-color);
 }
 .composer-meta {
     display: flex;

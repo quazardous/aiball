@@ -785,6 +785,17 @@ async function copyTicketRef() {
                 @click="commentAndReopen"
             />
             <Button
+                v-else-if="data && data.ticket.status === 'pending' && data.ticket.resolved && !data.ticket.closed"
+                icon="pi pi-undo"
+                severity="secondary"
+                size="small"
+                text
+                rounded
+                :loading="resolutionBusy"
+                title="Undo resolved — clear the resolution while the ticket is still in moderation. Embarks any text typed in the composer."
+                @click="commentAndReopen"
+            />
+            <Button
                 v-else-if="data && data.ticket.status === 'rejected'"
                 icon="pi pi-replay"
                 severity="warn"

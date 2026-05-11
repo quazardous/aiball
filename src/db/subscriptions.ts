@@ -206,3 +206,30 @@ export function listTicketSubscriptions(consumer_id: string): {
         .orderBy(desc(schema.ticketSubscriptions.subscribedAt))
         .all();
 }
+
+/**
+ * Distinct consumer_ids seen anywhere in the database (project
+ * subscribers + ticket subscribers + ticket authors + message authors).
+ * Used to seed the @-mention autocomplete in the composer (#B.71).
+ */
+export function listKnownAgents(): string[] {
+    const db = getDb();
+    const out = new Set<string>();
+    for (const r of db.selectDistinct({ id: schema.subscriptions.consumerId })
+        .from(schema.subscriptions).all()) {
+        if (r.id) out.add(r.id);
+    }
+    for (const r of db.selectDistinct({ id: schema.ticketSubscriptions.consumerId })
+        .from(schema.ticketSubscriptions).all()) {
+        if (r.id) out.add(r.id);
+    }
+    for (const r of db.selectDistinct({ id: schema.tickets.byAgent })
+        .from(schema.tickets).all()) {
+        if (r.id) out.add(r.id);
+    }
+    for (const r of db.selectDistinct({ id: schema.messages.byAgent })
+        .from(schema.messages).all()) {
+        if (r.id) out.add(r.id);
+    }
+    return [...out].sort();
+}

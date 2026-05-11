@@ -106,6 +106,7 @@ export {
     deleteTicketSubscription,
     listTicketSubscribers,
     listTicketSubscriptions,
+    listKnownAgents,
 } from "./db/subscriptions.js";
 
 export {

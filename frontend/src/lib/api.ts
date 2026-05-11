@@ -214,6 +214,11 @@ export const api = {
             "DELETE",
             `/api/projects/${encodeURIComponent(name)}`,
         ),
+    mentionSuggestions: () =>
+        req<{ projects: string[]; agents: string[] }>(
+            "GET",
+            "/api/mention-suggestions",
+        ),
     listMessages: (params: {
         status?: string;
         project?: string;
