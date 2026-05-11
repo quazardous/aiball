@@ -10,7 +10,7 @@ import { useWs } from "./lib/ws";
 import { bus, useBus } from "./lib/bus";
 import { isPeek } from "./lib/peek";
 import BulkBar, { type BulkAction } from "./components/BulkBar.vue";
-import IdentityPicker from "./components/IdentityPicker.vue";
+import HeaderBar from "./components/HeaderBar.vue";
 import ListRow from "./components/ListRow.vue";
 import NewTicketPage from "./components/NewTicketPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
@@ -754,101 +754,28 @@ watch(showSnoozed, (v) => {
 
 <template>
     <div class="aiball-shell aiball-compact">
-        <header class="aiball-header">
-            <h1>aiball</h1>
-            <span
-                class="connection-dot"
-                :class="connected ? 'live' : 'offline'"
-                :title="connected ? 'WebSocket live' : 'WebSocket offline'"
-            />
-            <span
-                v-if="globalPendingCount > 0"
-                class="header-badge header-badge--pending"
-                :title="`${globalPendingCount} pending moderation across all projects`"
-            >
-                <i class="pi pi-clock" /> {{ globalPendingCount }}
-            </span>
-            <span
-                v-if="globalResolvedCount > 0"
-                class="header-badge header-badge--resolved"
-                :title="`${globalResolvedCount} resolution proposal${globalResolvedCount > 1 ? 's' : ''} waiting for your accept/reject`"
-            >
-                <i class="pi pi-check-circle" /> {{ globalResolvedCount }}
-            </span>
-            <span
-                v-if="globalUnreadCount > 0"
-                class="header-badge header-badge--unread"
-                :title="`${globalUnreadCount} unread for you across all projects`"
-            >
-                <i class="pi pi-envelope" /> {{ globalUnreadCount }}
-            </span>
-            <button
-                type="button"
-                class="header-badge header-badge--snoozed"
-                :class="{ 'header-badge--snoozed-on': showSnoozed }"
-                :title="showSnoozed
-                    ? `Showing snoozed tickets in the open inbox (${globalSnoozedCount}). Click to hide them.`
-                    : globalSnoozedCount > 0
-                        ? `${globalSnoozedCount} ticket${globalSnoozedCount > 1 ? 's' : ''} currently snoozed (hidden). Click to surface them in the open inbox.`
-                        : `No tickets currently snoozed. Click to surface any future snooze in the open inbox.`"
-                @click="showSnoozed = !showSnoozed"
-            >
-                <i class="pi pi-history" /> {{ globalSnoozedCount }}
-            </button>
-            <Select
-                :model-value="strategy"
-                :options="strategyOptions"
-                option-label="label"
-                option-value="value"
-                size="small"
-                class="strategy-select"
-                :title="strategyOptions.find(o => o.value === strategy)?.hint"
-                @update:model-value="(v: Strategy) => changeStrategy(v)"
-            />
-            <span class="spacer" />
-            <Button
-                v-if="!notifAllowed && !notifMuted"
-                icon="pi pi-bell"
-                label="enable alerts"
-                size="small"
-                severity="secondary"
-                text
-                @click="ensureNotifPermission"
-            />
-            <Button
-                v-else
-                :icon="notifMuted ? 'pi pi-bell-slash' : 'pi pi-bell'"
-                :title="notifMuted ? 'OS notifications muted' : 'OS notifications on'"
-                severity="secondary"
-                text
-                rounded
-                @click="toggleMute"
-            />
-            <IdentityPicker />
-            <Button
-                :icon="dark ? 'pi pi-sun' : 'pi pi-moon'"
-                severity="secondary"
-                text
-                rounded
-                @click="dark = !dark"
-            />
-            <Button
-                icon="pi pi-refresh"
-                severity="secondary"
-                text
-                rounded
-                :loading="loading"
-                @click="refresh"
-            />
-            <Button
-                :icon="autoRefresh ? 'pi pi-clock' : 'pi pi-stop-circle'"
-                :severity="autoRefresh ? 'success' : 'secondary'"
-                :title="autoRefresh ? 'Auto-refresh on (every 60s) — click to stop' : 'Auto-refresh off — click to enable (60s)'"
-                text
-                rounded
-                @click="autoRefresh = !autoRefresh"
-            />
-        </header>
+        <HeaderBar
+            :connected="connected"
+            :global-pending-count="globalPendingCount"
+            :global-resolved-count="globalResolvedCount"
+            :global-unread-count="globalUnreadCount"
+            :global-snoozed-count="globalSnoozedCount"
+            :show-snoozed="showSnoozed"
+            :strategy="strategy"
+            :strategy-options="strategyOptions"
+            :notif-allowed="notifAllowed"
+            :notif-muted="notifMuted"
+            :dark="dark"
+            :loading="loading"
+            :auto-refresh="autoRefresh"
+            @update:show-snoozed="showSnoozed = $event"
+            @update:strategy="changeStrategy"
+            @update:dark="dark = $event"
+            @update:auto-refresh="autoRefresh = $event"
+            @enable-notif="ensureNotifPermission"
+            @toggle-mute="toggleMute"
+            @refresh="refresh"
+        />
 
         <div class="aiball-layout">
             <aside class="aiball-sidebar">
