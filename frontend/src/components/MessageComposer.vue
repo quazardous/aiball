@@ -10,6 +10,7 @@ import MarkdownView from "./MarkdownView.vue";
 import { INTENTS, type Intent } from "../lib/api";
 import { bus } from "../lib/bus";
 import { attachPasteImage } from "../lib/pasteImage";
+import { uploadImage } from "../lib/upload";
 
 type Mode = "ticket" | "comment";
 
@@ -206,6 +207,44 @@ onMounted(() => {
 onBeforeUnmount(() => {
     detachPaste?.();
 });
+
+// Attach button (per #B.76 follow-up). Same upload path as paste, but
+// surfaces an explicit file picker so the user doesn't have to put the
+// image in the clipboard first.
+const attachInputRef = ref<HTMLInputElement | null>(null);
+const attaching = ref(false);
+
+function openAttachPicker() {
+    attachInputRef.value?.click();
+}
+
+async function onAttachPicked(ev: Event) {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    // Always reset so re-picking the same file fires the change event.
+    input.value = "";
+    if (!file) return;
+    attaching.value = true;
+    try {
+        const { url } = await uploadImage(file);
+        // Append at the end of the current body with a newline. The
+        // attach button isn't position-aware (no textarea caret in
+        // scope), and "append at the end" matches what GitHub does.
+        const snippet = `![${file.name}](${url})`;
+        body.value = body.value
+            ? `${body.value.replace(/\s+$/, "")}\n\n${snippet}\n`
+            : `${snippet}\n`;
+    } catch (e) {
+        toast.add({
+            severity: "error",
+            summary: "Image upload failed",
+            detail: (e as Error).message,
+            life: 5000,
+        });
+    } finally {
+        attaching.value = false;
+    }
+}
 </script>
 
 <template>
@@ -273,6 +312,24 @@ onBeforeUnmount(() => {
             lists, links, fenced ```code blocks```
         </div>
         <div class="composer-actions">
+            <Button
+                icon="pi pi-paperclip"
+                size="small"
+                severity="secondary"
+                text
+                rounded
+                :loading="attaching"
+                :disabled="sending || attaching"
+                title="Attach an image — same as Ctrl/Cmd+V on the textarea"
+                @click="openAttachPicker"
+            />
+            <input
+                ref="attachInputRef"
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                style="display: none"
+                @change="onAttachPicked"
+            />
             <span class="spacer" />
             <slot name="extra-actions" :body="body" :sending="sending" />
             <Button
