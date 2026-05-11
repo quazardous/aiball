@@ -578,7 +578,7 @@ server.registerTool(
         inputSchema: {},
     },
     async () => {
-        const [daemon, projectSubs, ticketSubs, projectStats, myPending, pingCount] =
+        const [daemon, projectSubs, ticketSubs, projectStats, myPending, myPendingComments, pingCount] =
             await Promise.all([
                 client.health().then(
                     (info) => ({ up: true as const, ...((info as object) ?? {}) }),
@@ -588,6 +588,7 @@ server.registerTool(
                 client.myTicketSubs().catch(() => ({ subscriptions: [] })),
                 client.listProjectsDetailed().catch(() => []),
                 client.myPendingTickets().catch(() => []),
+                client.myPendingComments().catch(() => []),
                 client.pingsCount().catch(() => ({ unread: 0 })),
             ]);
         // Reduce the detailed project list to a `{ name: open_count }`
@@ -635,6 +636,13 @@ server.registerTool(
             snoozed_tickets: snoozedTickets,
             snoozed_tickets_total: snoozedTicketsTotal,
             my_pending_tickets: myPending,
+            /**
+             * Pending comments authored by this agent (per #B.69).
+             * Needed even in `auto-reply` mode since the strategy can
+             * flip to `manual` at any moment — comments stuck in
+             * moderation should always be visible to their author.
+             */
+            my_pending_comments: myPendingComments,
             unread_pings: (pingCount as { unread?: number }).unread ?? 0,
         });
     },

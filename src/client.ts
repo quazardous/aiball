@@ -283,6 +283,18 @@ export class AiballClient {
             `/api/messages?kind=ticket_created&status=pending&by_agent=${encodeURIComponent(this.agentId)}`,
         );
     }
+    /**
+     * Pending comments authored by this agent. Symmetric to
+     * myPendingTickets() — both surface in poll() so the agent sees
+     * its own submissions blocked in moderation regardless of kind
+     * (per #B.69).
+     */
+    myPendingComments() {
+        return this.http(
+            "GET",
+            `/api/messages?kind=comment_added&status=pending&by_agent=${encodeURIComponent(this.agentId)}`,
+        );
+    }
     myPendingCount() {
         return this.http<{ count: number }>(
             "GET",
