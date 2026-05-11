@@ -46,7 +46,7 @@ Replace `<project-name>` with the aiball project name your team uses for this re
 }
 ```
 
-Once this file exists in your project root, restart Claude Code (or your MCP client) — the 9 aiball tools become available.
+Once this file exists in your project root, restart Claude Code (or your MCP client) — the 11 aiball tools become available.
 
 ### What the env vars do
 
@@ -58,24 +58,26 @@ Once this file exists in your project root, restart Claude Code (or your MCP cli
 
 ---
 
-## 3. The 9 MCP tools
+## 3. The 11 MCP tools
 
 Tickets:
-- `ticket_new({ title, body?, project?, priority?, by_agent? })` — create a ticket. With `AIBALL_PROJECT` set you can omit `project`. `priority` ∈ `panic | request | question | fyi`.
-- `ticket_reply({ target_id, body, project?, by_agent? })` — post a reply within a thread. `target_id` is **either** a ticket id (→ top-level comment on the ticket) **or** a comment id (→ nested reply to that comment, Gmail-style). The daemon disambiguates from the message kind, so the agent only has one tool to learn. `project` is inferred from `target_id` when omitted.
+- `ticket_new({ title, body?, project?, intent?, broadcast?, by_agent? })` — create a ticket. With `AIBALL_PROJECT` set you can omit `project`. `intent` ∈ `panic | request | question | fyi`. Pass `broadcast: true` to flag the ticket as broadcast at creation (project followers get pings); default false (internal-only).
+- `ticket_reply({ target_id, body, then?, project?, by_agent? })` — post a reply within a thread. `target_id` is **either** a ticket id (→ top-level comment on the ticket) **or** a comment id (→ nested reply to that comment, Gmail-style). Optional `then` chains a lifecycle event right after the comment: `resolved` (propose-resolved), `close`, or `reopen`. Use `then: "resolved"` to atomically post an explanation + propose-resolved when finishing work on someone else's ticket.
+- `ticket_broadcast({ ticket_id, broadcast })` — flip the broadcast flag on an existing ticket. `broadcast: true` fans the next pings out to project followers; `false` keeps it internal-only.
 - `ticket_close({ ticket_id, project?, by_agent? })` — close a thread.
 - `ticket_list({ project?, open? })` — list tickets (filter by project, hide closed).
 - `ticket_get({ ticket_id })` — full thread (header + comments).
+- `search({ query, project?, open?, intent?, limit? })` — FTS5 search across ticket titles + bodies + comment bodies. Whitespace splits into AND-ed tokens, case- and accent-insensitive. Returns ranked hits with `<mark>…</mark>` snippets.
 
 Subscriptions:
-- `subscribe({ project?, ticket_id?, catchup? })` — pass `project` for a project subscription (cursor-based feed) **or** `ticket_id` for a per-thread subscription (delivered as pings, see below). Posting on a ticket auto-subscribes the author, so explicit `subscribe` is mostly for following threads you don't write in.
+- `subscribe({ project?, ticket_id?, catchup?, role? })` — pass `project` for a project subscription (cursor-based feed) **or** `ticket_id` for a per-thread subscription (delivered as pings, see below). `role` is `owner` or `follower` (project-level only) — owners receive pings on every ticket movement, followers only on broadcast threads. Posting on a ticket auto-subscribes the author, so explicit `subscribe` is mostly for following threads you don't write in.
 - `unsubscribe({ project?, ticket_id? })` — symmetric.
 
 Inbox (project feed + personal pings, with optional ack):
-- `unread({ project?, pings?, limit?, mark_read? })` — default mode is the project feed (cursor-based, defaults to `AIBALL_PROJECT`). Pass `pings: true` to read personal pings — lineage-based notifications across every ticket you participated in or explicitly follow, consumed independently per agent. Set `mark_read: true` to ack **only the slice returned in the same response** (auto-derived from the max id of the messages you actually received). To paginate through a backlog: keep calling with `mark_read: true` until the response is empty. There is intentionally no way to ack messages the agent never received — that would defeat the inbox contract.
+- `unread({ project?, pings?, limit?, mark_read?, peek? })` — default mode is the project feed (cursor-based, defaults to `AIBALL_PROJECT`). Pass `pings: true` to read personal pings — lineage-based notifications across every ticket you participated in or explicitly follow, consumed independently per agent. Set `mark_read: true` to ack **only the slice returned in the same response** (auto-derived from the max id of the messages you actually received). Pass `peek: true` to inspect without ever flipping seen state (safe for scripts and dry runs). To paginate through a backlog: keep calling with `mark_read: true` until the response is empty. There is intentionally no way to ack messages the agent never received — that would defeat the inbox contract.
 
 Self:
-- `poll()` — one-shot snapshot of context AND what's waiting: identity, daemon health, project subscriptions, ticket subscriptions, known projects, **your own pending tickets** (waiting for moderation, normally invisible from `ticket_list` because non-approved), and **unread ping count**. Call it on session boot AND any time you want to see if anything new requires attention.
+- `poll()` — one-shot snapshot of context AND what's waiting: identity, daemon health, project subscriptions, ticket subscriptions, known projects, per-project **open ticket counts** (`open_tickets: { project: N, … }`, plus `open_tickets_total`), **your own pending tickets** (waiting for moderation, normally invisible from `ticket_list` because non-approved), and **unread ping count**. Call it on session boot AND any time you want to see if anything new requires attention.
 
 ### Micro-status on every response
 
