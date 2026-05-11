@@ -17,6 +17,7 @@ defineProps<{
     globalResolvedCount: number;
     globalUnreadCount: number;
     globalSnoozedCount: number;
+    globalOpenCount: number;
     showSnoozed: boolean;
     strategy: Strategy;
     strategyOptions: StrategyOption[];
@@ -46,6 +47,13 @@ const emit = defineEmits<{
             :class="connected ? 'live' : 'offline'"
             :title="connected ? 'WebSocket live' : 'WebSocket offline'"
         />
+        <span
+            v-if="globalOpenCount > 0"
+            class="header-badge header-badge--open"
+            :title="`${globalOpenCount} open ticket${globalOpenCount > 1 ? 's' : ''} across all projects`"
+        >
+            <i class="pi pi-ticket" /> {{ globalOpenCount }}
+        </span>
         <span
             v-if="globalPendingCount > 0"
             class="header-badge header-badge--pending"
@@ -177,6 +185,17 @@ const emit = defineEmits<{
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
+}
+.header-badge--open {
+    /* Muted grey/neutral — the at-a-glance "active backlog" count.
+     * Stays calm so the priority badges (pending / unread / resolved)
+     * dominate visually. */
+    background: var(--p-surface-200);
+    color: var(--p-text-color);
+}
+.aiball-dark .header-badge--open {
+    background: var(--p-surface-700);
+    color: var(--p-text-color);
 }
 .header-badge--pending {
     background: var(--p-yellow-500);

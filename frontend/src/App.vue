@@ -678,6 +678,16 @@ const globalResolvedCount = computed(() =>
 const globalSnoozedCount = computed(() =>
     projects.value.reduce((acc, p) => acc + (p.snoozed_count || 0), 0),
 );
+/**
+ * Total open tickets across every project (the muted "ticket count" the
+ * sidebar shows per project, summed). Surfaced as a grey badge in the
+ * header so a moderator sees the active backlog at a glance —
+ * complements the per-priority badges (pending / resolved / unread /
+ * snoozed). When `showSnoozed` is on, snoozed tickets count as open too.
+ */
+const globalOpenCount = computed(() =>
+    projects.value.reduce((acc, p) => acc + projectOpenCount(p), 0),
+);
 
 // Persist the toggle + refresh lists so the new include_postponed
 // flag takes effect immediately.
@@ -697,6 +707,7 @@ watch(showSnoozed, (v) => {
             :global-resolved-count="globalResolvedCount"
             :global-unread-count="globalUnreadCount"
             :global-snoozed-count="globalSnoozedCount"
+            :global-open-count="globalOpenCount"
             :show-snoozed="showSnoozed"
             :strategy="strategy"
             :strategy-options="strategyOptions"
