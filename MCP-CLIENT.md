@@ -24,7 +24,7 @@ If `poll` isn't available, the aiball MCP isn't registered for this session — 
 > ToolSearch select:mcp__aiball__poll,mcp__aiball__ticket_new,mcp__aiball__ticket_reply,mcp__aiball__unread,mcp__aiball__search
 > ```
 >
-> That covers ~90 % of usage. The rarer tools (`subscribe`, `ticket_broadcast`, `ticket_list`, `ticket_get`, `ticket_close`) can be loaded individually as needed.
+> That covers ~90 % of usage. The rarer tools (`subscribe`, `ticket_update`, `ticket_decide`, `ticket_list`, `ticket_get`, `ticket_close`) can be loaded individually as needed.
 
 ---
 
@@ -58,15 +58,16 @@ Once this file exists in your project root, restart Claude Code (or your MCP cli
 
 ---
 
-## 3. The 11 MCP tools
+## 3. The 12 MCP tools
 
 Tickets:
-- `ticket_new({ title, body?, project?, intent?, broadcast?, by_agent? })` — create a ticket. With `AIBALL_PROJECT` set you can omit `project`. `intent` ∈ `panic | request | question | fyi`. Pass `broadcast: true` to flag the ticket as broadcast at creation (project followers get pings); default false (internal-only).
+- `ticket_new({ title, body?, project?, intent?, broadcast?, parent_id?, by_agent? })` — create a ticket. With `AIBALL_PROJECT` set you can omit `project`. `intent` ∈ `panic | request | question | fyi`. Pass `broadcast: true` to flag the ticket as broadcast at creation (project followers get pings); default false (internal-only). `parent_id` makes the new ticket a sub-ticket of the given parent.
 - `ticket_reply({ target_id, body, then?, project?, by_agent? })` — post a reply within a thread. `target_id` is **either** a ticket id (→ top-level comment on the ticket) **or** a comment id (→ nested reply to that comment, Gmail-style). Optional `then` chains a lifecycle event right after the comment: `resolved` (propose-resolved), `close`, or `reopen`. Use `then: "resolved"` to atomically post an explanation + propose-resolved when finishing work on someone else's ticket.
-- `ticket_broadcast({ ticket_id, broadcast })` — flip the broadcast flag on an existing ticket. `broadcast: true` fans the next pings out to project followers; `false` keeps it internal-only.
+- `ticket_update({ ticket_id, title?, body?, intent?, broadcast?, postponed_until? })` — patch a ticket's persistent fields (per #B.76). Replaces the previous `ticket_postpone`, `ticket_broadcast`, and the planned `ticket_edit` tools. Pass only the fields to change; each field has its own permission check (owner-bypass for edit/broadcast, reporter-or-human for snooze). `postponed_until` accepts ISO8601 or relative shorthand (`+2h`, `+3d`, …); pass `null` to un-snooze.
+- `ticket_decide({ target_id, decision })` — approve or reject a pending post (ticket or comment). Human-only by convention; manual override for the rule engine.
 - `ticket_close({ ticket_id, project?, by_agent? })` — close a thread.
-- `ticket_list({ project?, open? })` — list tickets (filter by project, hide closed).
-- `ticket_get({ ticket_id })` — full thread (header + comments).
+- `ticket_list({ project?, open?, include_snoozed? })` — list tickets (filter by project, hide closed).
+- `ticket_get({ ticket_id })` — full thread (header + comments + sub-tickets recap).
 - `search({ query, project?, open?, intent?, limit? })` — FTS5 search across ticket titles + bodies + comment bodies. Whitespace splits into AND-ed tokens, case- and accent-insensitive. Returns ranked hits with `<mark>…</mark>` snippets.
 
 Subscriptions:

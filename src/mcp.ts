@@ -167,28 +167,11 @@ server.registerTool(
     },
 );
 
-server.registerTool(
-    "ticket_broadcast",
-    {
-        description:
-            "Flip a ticket's broadcast flag. ON = project followers receive pings on this thread alongside owners and explicit ticket subscribers. OFF = internal-only (default), only project owners and explicit subscribers see activity. Use this to promote a ticket to broadcast (e.g. an API change worth announcing to external agents) or to demote one back to internal.",
-        inputSchema: {
-            ticket_id: z
-                .number()
-                .int()
-                .describe("Ticket id (the integer in #B<id>) to flip."),
-            broadcast: z
-                .boolean()
-                .describe(
-                    "true to broadcast (notify project followers), false to make internal-only.",
-                ),
-        },
-    },
-    async ({ ticket_id, broadcast }) => {
-        const res = await client.setTicketBroadcast(ticket_id, broadcast);
-        return asText(res);
-    },
-);
+// `ticket_broadcast` and `ticket_postpone` were merged into `ticket_update`
+// per #B.76 — they were both setters on persistent ticket fields, so
+// they naturally fold into a single patch-style tool (along with the
+// edit verb that was on the MCP roadmap). The dedicated tools are
+// removed; surface stays at 12.
 
 server.registerTool(
     "ticket_reply",
@@ -328,27 +311,119 @@ function resolveUntil(input: string): string {
     return new Date(ts).toISOString();
 }
 
+/**
+ * Patch a ticket's persistent fields (per #B.76). Replaces the dedicated
+ * `ticket_postpone`, `ticket_broadcast`, and the planned `ticket_edit`
+ * tools — they were all setters on the same row, so one patch verb is
+ * the natural shape.
+ *
+ * Each field has its own permission check enforced by the daemon:
+ *  - title / body / intent → owner-bypass (author only) or human.
+ *  - broadcast             → owner-bypass.
+ *  - postponed_until       → reporter or human.
+ *
+ * Pass `null` to clear a value (e.g. `postponed_until: null` un-snoozes;
+ * `title: null` would normally be invalid since a ticket needs a title,
+ * so the daemon rejects that one).
+ *
+ * Multiple fields can be patched in one call. Each maps to its own
+ * existing HTTP endpoint under the hood (edit / postpone / broadcast),
+ * so this is a thin orchestrator MCP-side.
+ */
 server.registerTool(
-    "ticket_postpone",
+    "ticket_update",
     {
         description:
-            "Snooze a ticket — hide it from the open inbox until the given deadline, then auto-reveal it (per #B.329). Useful for \"come back to this later\" without closing or deleting the thread.\n\n`until` accepts either:\n- An ISO8601 timestamp (e.g. `2026-05-18T09:00:00Z`).\n- A relative shorthand: `+30m`, `+2h`, `+3d`, `+1w`, `+1mo` (months ≈ 30 days).\n\nOnly the ticket reporter or the human moderator can snooze. Pass `until: \"\"` (or use `ticket_unsnooze` semantically — there is no separate tool; pass an empty string to clear).",
+            "Patch a ticket's persistent fields in one call. Pass only the fields you want to change. Each field has its own permission check enforced by the daemon — owner-bypass for edit (title/body/intent) and broadcast, reporter-or-human for snooze.\n\n`postponed_until` accepts either an ISO8601 timestamp (e.g. `2026-05-18T09:00:00Z`) or a relative shorthand (`+30m`, `+2h`, `+3d`, `+1w`, `+1mo`). Pass `null` to clear (un-snooze). Other clearable fields (`body`, `intent`) accept `null` the same way; `title` must remain non-empty.",
         inputSchema: {
-            ticket_id: z.number().int(),
-            until: z
+            ticket_id: z
+                .number()
+                .int()
+                .describe("Ticket id (the integer in #B.<id>)."),
+            title: z
                 .string()
+                .nullable()
+                .optional()
+                .describe("New title (owner-bypass). Omit to leave unchanged."),
+            body: z
+                .string()
+                .nullable()
+                .optional()
+                .describe("New body (owner-bypass). Pass null to clear."),
+            intent: z
+                .enum(["panic", "request", "question", "fyi"])
+                .nullable()
+                .optional()
+                .describe("New intent label (owner-bypass)."),
+            broadcast: z
+                .boolean()
+                .optional()
                 .describe(
-                    "ISO8601 timestamp (e.g. 2026-05-18T09:00:00Z) or relative shorthand (+30m / +2h / +3d / +1w / +1mo). Pass an empty string to unsnooze.",
+                    "Flip broadcast flag (owner-bypass). true = project followers receive pings; false = internal-only.",
+                ),
+            postponed_until: z
+                .string()
+                .nullable()
+                .optional()
+                .describe(
+                    "Snooze the ticket until this deadline. ISO8601 or relative shorthand (+30m / +2h / +3d / +1w / +1mo). Pass null (or empty string) to un-snooze. Reporter-or-human only.",
                 ),
         },
     },
-    async ({ ticket_id, until }) => {
-        if (!until.trim()) {
-            const res = await client.unsnoozeTicket(ticket_id);
-            return asText(res);
+    async ({ ticket_id, title, body, intent, broadcast, postponed_until }) => {
+        const results: Record<string, unknown> = { ticket_id };
+        // Each field maps to its own HTTP endpoint. Apply in this
+        // order: edit fields first (they may change the title/body the
+        // following flips display), then broadcast, then postpone.
+        if (title !== undefined || body !== undefined || intent !== undefined) {
+            results.edit = await client.edit(ticket_id, { title, body, intent });
         }
-        const iso = resolveUntil(until);
-        const res = await client.postponeTicket(ticket_id, iso);
+        if (broadcast !== undefined) {
+            results.broadcast = await client.setTicketBroadcast(ticket_id, broadcast);
+        }
+        if (postponed_until !== undefined) {
+            if (postponed_until === null || !postponed_until.trim()) {
+                results.postponed_until = await client.unsnoozeTicket(ticket_id);
+            } else {
+                const iso = resolveUntil(postponed_until);
+                results.postponed_until = await client.postponeTicket(ticket_id, iso);
+            }
+        }
+        if (Object.keys(results).length === 1) {
+            throw new Error("ticket_update needs at least one field — pass title/body/intent/broadcast/postponed_until");
+        }
+        return asText(results);
+    },
+);
+
+/**
+ * Moderate a pending post — approve or reject it. Replaces the
+ * previous workaround of curl'ing /api/messages/:id/approve directly.
+ * target_id is the internal numeric id; for comments, use the id
+ * returned by ticket_reply (not the user-visible hashid).
+ *
+ * Human-only by convention (the rule engine + agent rules are what
+ * normally handles moderation; this is the manual override).
+ */
+server.registerTool(
+    "ticket_decide",
+    {
+        description:
+            "Approve or reject a pending post (ticket or comment). target_id is the internal numeric id of the message — for a ticket, the integer id; for a comment, the id field returned by ticket_reply. Rejecting silently removes the row from inboxes; approving runs the normal fan-out (pings, broadcast, downstream actions). Human-only by convention — manual override for the rule engine.",
+        inputSchema: {
+            target_id: z
+                .number()
+                .int()
+                .describe("Internal numeric id of the message to decide."),
+            decision: z
+                .enum(["approve", "reject"])
+                .describe("approve = mark as approved (fan-out runs); reject = mark as rejected (pings wiped)."),
+        },
+    },
+    async ({ target_id, decision }) => {
+        const res = decision === "approve"
+            ? await client.approve(target_id)
+            : await client.reject(target_id);
         return asText(res);
     },
 );
@@ -357,7 +432,7 @@ server.registerTool(
     "ticket_list",
     {
         description:
-            "List approved tickets, optionally filtered by project. Snoozed tickets (postponed_until > now, per #B.329) are excluded by default when `open: true` — pass `include_snoozed: true` to surface them. Use ticket_get to fetch comments of one ticket.",
+            "List approved tickets, optionally filtered by project. Snoozed tickets (postponed_until > now) are excluded by default when `open: true` — pass `include_snoozed: true` to surface them. Use ticket_get to fetch comments of one ticket.",
         inputSchema: {
             project: z.string().optional(),
             open: z
@@ -574,7 +649,7 @@ server.registerTool(
     "poll",
     {
         description:
-            "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Default scope is slim (per #B.68): identity + daemon health + per-project open counts + your own pending posts + unread ping count + bookend tickets (first/last). Set `include_subscriptions: true` to also receive your project + ticket subscription lists, and `include_projects: true` to receive the bare `known_projects` array.",
+            "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Default scope is slim: identity + daemon health + per-project open counts + your own pending posts + unread ping count + bookend tickets (first/last). Set `include_subscriptions: true` to also receive your project + ticket subscription lists, and `include_projects: true` to receive the bare `known_projects` array.",
         inputSchema: {
             include_subscriptions: z
                 .boolean()

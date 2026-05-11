@@ -325,7 +325,7 @@ export class AiballClient {
     reject(id: number) {
         return this.http("POST", `/api/messages/${id}/reject`);
     }
-    edit(id: number, fields: { title?: string; body?: string }) {
+    edit(id: number, fields: { title?: string | null; body?: string | null; intent?: string | null }) {
         return this.http("POST", `/api/messages/${id}/edit`, fields);
     }
     note(id: number, note: string | null) {
