@@ -91,3 +91,89 @@ const emit = defineEmits<{
         </button>
     </aside>
 </template>
+
+<style>
+.aiball-sidebar {
+    border-right: 1px solid var(--p-content-border-color);
+    padding: 0.8rem 0.6rem;
+    background: var(--p-surface-50);
+    overflow-y: auto;
+}
+.aiball-dark .aiball-sidebar {
+    background: var(--p-surface-900);
+}
+.sidebar-section-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--p-text-muted-color);
+    padding: 0.3rem 0.5rem 0.2rem;
+}
+.sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    padding: 0.45rem 0.6rem;
+    border-radius: 0.4rem;
+    color: var(--p-text-color);
+    cursor: pointer;
+    font: inherit;
+}
+.sidebar-item:hover {
+    background: var(--p-surface-100);
+}
+.aiball-dark .sidebar-item:hover {
+    background: var(--p-surface-800);
+}
+.sidebar-item.active {
+    background: var(--p-primary-color);
+    color: var(--p-primary-contrast-color);
+}
+.sidebar-item.active:hover {
+    background: var(--p-primary-color);
+}
+.sidebar-item-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sidebar-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 0.05rem 0.4rem;
+    line-height: 1.2;
+}
+.sidebar-badge--pending {
+    background: var(--p-yellow-500);
+    color: black;
+}
+.sidebar-badge--unread {
+    background: var(--p-blue-500);
+    color: white;
+}
+.sidebar-item.active .sidebar-badge--unread {
+    background: white;
+    color: var(--p-blue-500);
+}
+.sidebar-badge--resolved {
+    background: var(--p-green-500);
+    color: white;
+}
+.sidebar-item.active .sidebar-badge--resolved {
+    background: white;
+    color: var(--p-green-500);
+}
+.sidebar-badge--open {
+    background: var(--p-surface-300);
+    color: var(--p-text-color);
+}
+.aiball-dark .sidebar-badge--open {
+    background: var(--p-surface-600);
+}
+</style>

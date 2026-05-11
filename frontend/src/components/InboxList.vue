@@ -169,3 +169,83 @@ const emit = defineEmits<{
         <template #time>{{ relativeTime(r.last_activity) }}</template>
     </ListRow>
 </template>
+
+<style>
+.aiball-empty {
+    text-align: center;
+    color: var(--p-text-muted-color);
+    padding: 3rem 1rem;
+    border: 1px dashed var(--p-content-border-color);
+    border-radius: 0.5rem;
+}
+.ticket-id {
+    color: var(--p-text-muted-color);
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.85em;
+    margin-right: 0.4rem;
+}
+.read-toggle-lead {
+    appearance: none;
+    background: transparent;
+    border: none;
+    padding: 0.1rem;
+    margin-right: 0.1rem;
+    cursor: pointer;
+    /* Read state by default → grey. Click toggles via toggleRead(). */
+    color: var(--p-text-muted-color);
+    transition: color 0.12s, transform 0.08s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.read-toggle-lead:hover {
+    transform: scale(1.1);
+}
+.read-toggle-lead--unread {
+    /* Unread → green so the eye lands on the row from a distance. */
+    color: var(--p-green-500);
+}
+.search-hit {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--p-content-border-color);
+    cursor: pointer;
+    transition: background 0.1s;
+}
+.search-hit:hover {
+    background: var(--p-surface-100);
+}
+.aiball-dark .search-hit:hover {
+    background: var(--p-surface-800);
+}
+.search-hit__head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+    font-size: 0.9rem;
+}
+.search-hit__title {
+    font-weight: 600;
+    color: var(--p-text-color);
+}
+.search-hit__by {
+    font-size: 0.8rem;
+    color: var(--p-text-muted-color);
+}
+.search-hit__snippet {
+    font-size: 0.85rem;
+    color: var(--p-text-muted-color);
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+.search-hit__snippet mark {
+    background: color-mix(in srgb, var(--p-yellow-500) 30%, transparent);
+    color: var(--p-text-color);
+    padding: 0 0.1rem;
+    border-radius: 2px;
+}
+</style>

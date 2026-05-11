@@ -83,3 +83,32 @@ const readToggleAction = computed<BulkAction>(() =>
         </template>
     </div>
 </template>
+
+<style>
+/* Sticky toolbar at the bottom of the inbox list. Not scoped: it
+   inherits the same surface tokens as the rest of the app and the
+   dark-mode override targets the body class .aiball-dark. */
+.bulk-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.4rem;
+    background: var(--p-surface-50);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+.aiball-dark .bulk-bar { background: var(--p-surface-900); }
+.bulk-bar--bottom {
+    position: sticky;
+    top: auto;
+    bottom: 0;
+    margin-top: 0.4rem;
+}
+.bulk-count {
+    font-size: 0.85rem;
+    color: var(--p-text-muted-color);
+}
+</style>

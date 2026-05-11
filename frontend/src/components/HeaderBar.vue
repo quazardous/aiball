@@ -131,3 +131,86 @@ const emit = defineEmits<{
         />
     </header>
 </template>
+
+<style>
+.aiball-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--p-content-border-color);
+    background: var(--p-content-background);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+.aiball-header h1 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+.aiball-header .spacer {
+    flex: 1;
+}
+.connection-dot {
+    display: inline-block;
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: #888;
+}
+.connection-dot.live {
+    background: #22c55e;
+}
+.connection-dot.offline {
+    background: #ef4444;
+}
+.strategy-select {
+    min-width: 11rem;
+    margin-left: 0.4rem;
+}
+.header-badge {
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: 999px;
+    padding: 0.15rem 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+.header-badge--pending {
+    background: var(--p-yellow-500);
+    color: black;
+}
+.header-badge--unread {
+    background: var(--p-blue-500);
+    color: white;
+}
+.header-badge--resolved {
+    background: var(--p-green-500);
+    color: white;
+}
+.header-badge--snoozed {
+    /* Clickable toggle — off = muted indigo (just a count), on = solid
+     * indigo (active state, snoozed rows are surfaced everywhere). */
+    background: color-mix(in srgb, var(--p-indigo-500) 25%, transparent);
+    color: var(--p-indigo-700);
+    border: 1px solid color-mix(in srgb, var(--p-indigo-500) 40%, transparent);
+    cursor: pointer;
+    font-family: inherit;
+}
+.header-badge--snoozed:hover {
+    background: color-mix(in srgb, var(--p-indigo-500) 35%, transparent);
+}
+.header-badge--snoozed.header-badge--snoozed-on {
+    background: var(--p-indigo-500);
+    color: white;
+    border-color: var(--p-indigo-500);
+}
+.aiball-dark .header-badge--snoozed {
+    color: var(--p-indigo-200);
+}
+.aiball-dark .header-badge--snoozed.header-badge--snoozed-on {
+    color: white;
+}
+</style>

@@ -82,3 +82,20 @@ const emit = defineEmits<{
         />
     </div>
 </template>
+
+<style>
+.filters-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--p-content-border-color);
+    margin-bottom: 0.4rem;
+}
+.filter-select {
+    min-width: 9rem;
+}
+.filter-search {
+    min-width: 12rem;
+}
+</style>
