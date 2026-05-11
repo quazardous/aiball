@@ -9,6 +9,7 @@ import { useRouting } from "./lib/router";
 import { useWs } from "./lib/ws";
 import { bus, useBus } from "./lib/bus";
 import { isPeek } from "./lib/peek";
+import BulkBar, { type BulkAction } from "./components/BulkBar.vue";
 import IdentityPicker from "./components/IdentityPicker.vue";
 import ListRow from "./components/ListRow.vue";
 import NewTicketPage from "./components/NewTicketPage.vue";
@@ -193,16 +194,6 @@ function clearSelection() {
 function selectAllVisible() {
     selectedIds.value = new Set(rows.value.map((r) => r.id));
 }
-type BulkAction =
-    | "approve"
-    | "reject"
-    | "close"
-    | "reopen"
-    | "mark_read"
-    | "mark_unread"
-    | "snooze"
-    | "unsnooze";
-
 const BULK_LABELS: Record<BulkAction, string> = {
     approve: "approve",
     reject: "reject",
@@ -1155,97 +1146,15 @@ watch(showSnoozed, (v) => {
                         <template #time>{{ relativeTime(r.last_activity) }}</template>
                     </ListRow>
 
-                    <div v-if="rows.length" class="bulk-bar bulk-bar--bottom">
-                        <Button
-                            :label="selectedIds.size ? 'clear' : 'select all'"
-                            :icon="selectedIds.size ? 'pi pi-minus' : 'pi pi-list'"
-                            size="small"
-                            severity="secondary"
-                            text
-                            @click="selectedIds.size ? clearSelection() : selectAllVisible()"
-                        />
-                        <span class="bulk-count" v-if="selectedIds.size">
-                            <strong>{{ selectedIds.size }}</strong> selected
-                        </span>
-                        <span class="spacer" />
-                        <Button
-                            v-if="bulkCounts.mark_read || bulkCounts.mark_unread"
-                            :icon="bulkCounts.mark_read >= bulkCounts.mark_unread ? 'pi pi-envelope-open' : 'pi pi-envelope'"
-                            :label="bulkCounts.mark_read >= bulkCounts.mark_unread ? `read (${bulkCounts.mark_read})` : `unread (${bulkCounts.mark_unread})`"
-                            severity="secondary"
-                            text
-                            size="small"
-                            :loading="bulkBusy"
-                            :title="bulkCounts.mark_read >= bulkCounts.mark_unread
-                                ? 'Mark the selected unread tickets as read (others skipped)'
-                                : 'Mark the selected read tickets as unread (others skipped)'"
-                            @click="bulkAction(bulkCounts.mark_read >= bulkCounts.mark_unread ? 'mark_read' : 'mark_unread')"
-                        />
-                        <Button
-                            v-if="bulkCounts.snooze"
-                            icon="pi pi-history"
-                            :label="`snooze (${bulkCounts.snooze})`"
-                            severity="info"
-                            text
-                            size="small"
-                            :loading="bulkBusy"
-                            title="Snooze the selected open tickets for 3 days (others skipped). Use the thread toolbar for a custom duration."
-                            @click="bulkAction('snooze')"
-                        />
-                        <Button
-                            v-if="bulkCounts.unsnooze"
-                            icon="pi pi-bell"
-                            :label="`unsnooze (${bulkCounts.unsnooze})`"
-                            severity="info"
-                            text
-                            size="small"
-                            :loading="bulkBusy"
-                            title="Bring the selected snoozed tickets back to the open inbox now."
-                            @click="bulkAction('unsnooze')"
-                        />
-                        <Button
-                            v-if="bulkCounts.close"
-                            icon="pi pi-lock"
-                            :label="`close (${bulkCounts.close})`"
-                            severity="warn"
-                            text
-                            size="small"
-                            :loading="bulkBusy"
-                            title="Close the selected open tickets (others skipped). Only the reporter / human can close."
-                            @click="bulkAction('close')"
-                        />
-                        <Button
-                            v-if="bulkCounts.reopen"
-                            icon="pi pi-unlock"
-                            :label="`reopen (${bulkCounts.reopen})`"
-                            severity="info"
-                            text
-                            size="small"
-                            :loading="bulkBusy"
-                            title="Reopen the selected closed tickets (others skipped)."
-                            @click="bulkAction('reopen')"
-                        />
-                        <Button
-                            v-if="bulkCounts.approve"
-                            :label="`approve (${bulkCounts.approve})`"
-                            icon="pi pi-check"
-                            severity="success"
-                            size="small"
-                            :loading="bulkBusy"
-                            title="Approve the selected pending tickets (others skipped)."
-                            @click="bulkAction('approve')"
-                        />
-                        <Button
-                            v-if="bulkCounts.reject"
-                            :label="`reject (${bulkCounts.reject})`"
-                            icon="pi pi-times"
-                            severity="danger"
-                            size="small"
-                            :loading="bulkBusy"
-                            title="Reject the selected pending tickets (others skipped)."
-                            @click="bulkAction('reject')"
-                        />
-                    </div>
+                    <BulkBar
+                        v-if="rows.length"
+                        :selected-size="selectedIds.size"
+                        :counts="bulkCounts"
+                        :busy="bulkBusy"
+                        @clear="clearSelection"
+                        @select-all="selectAllVisible"
+                        @action="bulkAction"
+                    />
                 </template>
             </main>
         </div>
