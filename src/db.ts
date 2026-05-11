@@ -114,6 +114,8 @@ export {
     setTicketPostpone,
     getTicketPostpone,
     listExpiredPostpones,
+    listSubTickets,
+    type SubTicketSummary,
 } from "./db/tickets.js";
 
 export {

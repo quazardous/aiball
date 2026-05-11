@@ -48,6 +48,7 @@ import {
     setTicketPostpone,
     getTicketPostpone,
     listExpiredPostpones,
+    listSubTickets,
     getMessageByHashid,
     markTicketSeen,
     markTicketUnseen,
@@ -882,6 +883,12 @@ api.get("/tickets/:id", (req, res) => {
              * to repeat it in the body.
              */
             parent_ticket_id: t.parent_ticket_id ?? null,
+            /**
+             * Recap of direct children. Surfaced in the parent's
+             * header (symmetric to parent_ticket_id on the child).
+             * Empty array when this ticket has no sub-tickets.
+             */
+            sub_tickets: listSubTickets(t.id),
             tags: listMessageTags(t.id),
         },
         comments: withTags(threadMessages),

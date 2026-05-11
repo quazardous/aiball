@@ -829,6 +829,32 @@ async function copyTicketRef() {
                         #B.{{ data.ticket.parent_ticket_id }}
                     </a>
                 </div>
+                <div
+                    v-if="data.ticket.sub_tickets && data.ticket.sub_tickets.length > 0"
+                    class="thread-sub-tickets"
+                    :title="`This ticket has ${data.ticket.sub_tickets.length} sub-ticket${data.ticket.sub_tickets.length > 1 ? 's' : ''}.`"
+                >
+                    <div class="thread-sub-tickets__header">
+                        <i class="pi pi-sitemap" />
+                        <span>{{ data.ticket.sub_tickets.length }} sub-ticket{{ data.ticket.sub_tickets.length > 1 ? 's' : '' }}</span>
+                    </div>
+                    <ul class="thread-sub-tickets__list">
+                        <li
+                            v-for="sub in data.ticket.sub_tickets"
+                            :key="sub.id"
+                            class="thread-sub-tickets__item"
+                            :class="{
+                                'thread-sub-tickets__item--closed': sub.closed,
+                                'thread-sub-tickets__item--pending': sub.status === 'pending',
+                            }"
+                        >
+                            <a :href="`/b/${sub.id}`" class="thread-sub-tickets__id">#B.{{ sub.id }}</a>
+                            <span class="thread-sub-tickets__title">{{ sub.title }}</span>
+                            <span v-if="sub.status === 'pending'" class="thread-sub-tickets__tag">pending</span>
+                            <span v-else-if="sub.closed" class="thread-sub-tickets__tag thread-sub-tickets__tag--closed">closed</span>
+                        </li>
+                    </ul>
+                </div>
                 <h2 class="thread-title">{{ data.ticket.title }}</h2>
                 <div
                     v-if="data.ticket.resolved && !data.ticket.closed"
@@ -1196,6 +1222,68 @@ async function copyTicketRef() {
 }
 .thread-parent-ref__link:hover {
     text-decoration: underline;
+}
+/* Parent-side recap of children (mirrors thread-parent-ref). Shown
+ * above the title when the ticket has sub-tickets. */
+.thread-sub-tickets {
+    align-self: stretch;
+    padding: 0.4rem 0.6rem;
+    border-left: 2px solid var(--p-indigo-300);
+    background: color-mix(in srgb, var(--p-indigo-500) 7%, transparent);
+    border-radius: 0 0.25rem 0.25rem 0;
+    font-size: 0.85rem;
+}
+.thread-sub-tickets__header {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-weight: 600;
+    color: var(--p-text-color);
+    margin-bottom: 0.3rem;
+}
+.thread-sub-tickets__list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+.thread-sub-tickets__item {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    color: var(--p-text-color);
+}
+.thread-sub-tickets__item--closed {
+    opacity: 0.6;
+}
+.thread-sub-tickets__id {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    color: var(--p-primary-color);
+    text-decoration: none;
+    font-weight: 600;
+    flex: 0 0 auto;
+}
+.thread-sub-tickets__id:hover {
+    text-decoration: underline;
+}
+.thread-sub-tickets__title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.thread-sub-tickets__tag {
+    font-size: 0.72rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.25rem;
+    background: color-mix(in srgb, var(--p-yellow-500) 25%, transparent);
+    color: var(--p-yellow-700);
+}
+.thread-sub-tickets__tag--closed {
+    background: color-mix(in srgb, var(--p-orange-500) 20%, transparent);
+    color: var(--p-orange-700);
 }
 .thread-no-comments { padding: 1rem; }
 .thread-decide {

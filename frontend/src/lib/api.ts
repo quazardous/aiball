@@ -108,7 +108,17 @@ export interface TicketSummary {
     /** Parent ticket id when this ticket is a sub-ticket. Rendered as
      *  "Sub-ticket of #B.NN" metadata in the thread header. */
     parent_ticket_id?: number | null;
+    /** Direct children of this ticket (sub-tickets). Empty when none.
+     *  Rendered as a recap in the parent's thread header. */
+    sub_tickets?: SubTicketSummary[];
     tags: Tag[];
+}
+
+export interface SubTicketSummary {
+    id: number;
+    title: string;
+    status: "pending" | "approved" | "rejected";
+    closed: boolean;
 }
 
 export interface SearchHit {
