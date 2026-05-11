@@ -1,7 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, provide, ref, watch } from "vue";
-import Button from "primevue/button";
-import Select from "primevue/select";
 import Toast from "primevue/toast";
 import { useToast } from "primevue/usetoast";
 import { api, STRATEGIES, type InboxRow, type Message, type ProjectMeta, type Strategy } from "./lib/api";
@@ -11,6 +9,7 @@ import { bus, useBus } from "./lib/bus";
 import { isPeek } from "./lib/peek";
 import BulkBar, { type BulkAction } from "./components/BulkBar.vue";
 import HeaderBar from "./components/HeaderBar.vue";
+import InboxToolbar, { type SortBy, type StatusFilter } from "./components/InboxToolbar.vue";
 import ListRow from "./components/ListRow.vue";
 import NewTicketPage from "./components/NewTicketPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
@@ -21,13 +20,10 @@ import TagsPanel from "./components/TagsPanel.vue";
 import ThreadView from "./components/ThreadView.vue";
 import Tag from "primevue/tag";
 import Checkbox from "primevue/checkbox";
-import ToggleButton from "primevue/togglebutton";
-import InputText from "primevue/inputtext";
 
 const toast = useToast();
 
-type StatusFilter = "all" | "unread" | "pending" | "approved" | "rejected";
-type SortBy = "activity" | "created_desc" | "created_asc";
+// StatusFilter + SortBy types exported from components/InboxToolbar.vue.
 
 const statusFilter = ref<StatusFilter>(
     (localStorage.getItem("aiball.filter.status") as StatusFilter | null) ?? "pending",
@@ -796,49 +792,19 @@ watch(showSnoozed, (v) => {
                 />
 
                 <template v-else>
-                    <div class="filters-bar">
-                        <Select
-                            :model-value="statusFilter"
-                            :options="statusFilterOptions"
-                            option-label="label"
-                            option-value="value"
-                            size="small"
-                            class="filter-select"
-                            @update:model-value="(v: StatusFilter) => (statusFilter = v)"
-                        />
-                        <ToggleButton
-                            v-model="onlyOpen"
-                            on-label="open only"
-                            off-label="all"
-                            on-icon="pi pi-folder-open"
-                            off-icon="pi pi-folder"
-                            size="small"
-                        />
-                        <Select
-                            :model-value="sortBy"
-                            :options="sortOptions"
-                            option-label="label"
-                            option-value="value"
-                            size="small"
-                            class="filter-select"
-                            title="Sort order"
-                            @update:model-value="(v: SortBy) => (sortBy = v)"
-                        />
-                        <InputText
-                            v-model="searchQuery"
-                            placeholder="Search…"
-                            size="small"
-                            class="filter-search"
-                            title="Free-text search across ticket titles, bodies and comments (whitespace = AND)"
-                        />
-                        <span class="spacer" />
-                        <Button
-                            label="New ticket"
-                            icon="pi pi-plus"
-                            size="small"
-                            @click="panel = 'compose'"
-                        />
-                    </div>
+                    <InboxToolbar
+                        :status-filter="statusFilter"
+                        :status-filter-options="statusFilterOptions"
+                        :only-open="onlyOpen"
+                        :sort-by="sortBy"
+                        :sort-options="sortOptions"
+                        :search-query="searchQuery"
+                        @update:status-filter="statusFilter = $event"
+                        @update:only-open="onlyOpen = $event"
+                        @update:sort-by="sortBy = $event"
+                        @update:search-query="searchQuery = $event"
+                        @new-ticket="panel = 'compose'"
+                    />
 
                     <div v-if="loading && !rows.length && !searchHits.length" class="aiball-empty">
                         Loading…
