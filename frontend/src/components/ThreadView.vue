@@ -7,6 +7,7 @@ import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
 import { api, INTENTS, type Message, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
+import { isPeek } from "../lib/peek";
 import MarkdownView from "./MarkdownView.vue";
 import MessageComposer from "./MessageComposer.vue";
 import CommentNode from "./CommentNode.vue";
@@ -65,6 +66,10 @@ const AUTO_MARK_READ_MS = 2000;
 let autoMarkTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleAutoMarkRead() {
     if (autoMarkTimer) clearTimeout(autoMarkTimer);
+    if (isPeek()) {
+        // Peek mode → don't touch the endorsed agent's seen-state.
+        return;
+    }
     const id = props.ticketId;
     autoMarkTimer = setTimeout(() => {
         api.markTicketRead(id)

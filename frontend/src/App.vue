@@ -8,6 +8,8 @@ import { api, STRATEGIES, type InboxRow, type Message, type ProjectMeta, type St
 import { useRouting } from "./lib/router";
 import { useWs } from "./lib/ws";
 import { bus, useBus } from "./lib/bus";
+import { isPeek } from "./lib/peek";
+import IdentityPicker from "./components/IdentityPicker.vue";
 import ListRow from "./components/ListRow.vue";
 import MessageComposer from "./components/MessageComposer.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
@@ -549,6 +551,14 @@ function openSearchHit(hit: import("./lib/api").SearchHit) {
 }
 
 async function toggleRead(r: InboxRow) {
+    if (isPeek()) {
+        // Peek mode → don't touch the endorsed agent's seen-state.
+        // We still flip the local row so the UI gives feedback, but
+        // no API call goes out and the next inbox refresh will
+        // reconcile from the server.
+        r.unread = !r.unread;
+        return;
+    }
     const wasUnread = r.unread === true;
     r.unread = !wasUnread;
     try {
@@ -697,6 +707,7 @@ const globalResolvedCount = computed(() =>
                 rounded
                 @click="toggleMute"
             />
+            <IdentityPicker />
             <Button
                 :icon="dark ? 'pi pi-sun' : 'pi pi-moon'"
                 severity="secondary"
