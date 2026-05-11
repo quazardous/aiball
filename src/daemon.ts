@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { api } from "./api.js";
 import { attachWs } from "./ws.js";
 import { getDb } from "./db.js";
-import { AIBALL_HOME } from "./paths.js";
+import { AIBALL_HOME, UPLOADS_DIR, ensureDirs } from "./paths.js";
 import { drainSpool, watchSpool } from "./spool.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -26,16 +26,30 @@ function frontendDistDir(): string | null {
 }
 
 function main(): void {
+    ensureDirs(); // make sure UPLOADS_DIR etc. exist before serving them
     getDb(); // open + migrate
 
     const app = express();
     app.use(express.json({ limit: "1mb" }));
     app.use("/api", api);
 
+    // User-uploaded images (per #B.76). Served straight off disk — the
+    // POST /api/uploads endpoint writes content-addressable files into
+    // UPLOADS_DIR, the markdown body references them as /uploads/<hash>.<ext>.
+    app.use(
+        "/uploads",
+        express.static(UPLOADS_DIR, {
+            // 1 day cache — files are content-addressed so the hash is
+            // the version; a long max-age is safe.
+            maxAge: 86_400_000,
+            immutable: true,
+        }),
+    );
+
     const dist = frontendDistDir();
     if (dist) {
         app.use(express.static(dist));
-        app.get(/^\/(?!api|ws).*/, (_req, res) => {
+        app.get(/^\/(?!api|ws|uploads).*/, (_req, res) => {
             res.sendFile(join(dist, "index.html"));
         });
     } else {

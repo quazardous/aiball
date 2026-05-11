@@ -1720,3 +1720,30 @@ export function getStrategy(): Strategy {
 export function setStrategy(s: Strategy): void {
     setSetting("strategy", s);
 }
+
+// =====================================================================
+//                  Upload settings
+// =====================================================================
+
+/** Hard cap regardless of the configured `upload_max_bytes` (50 MB).
+ *  Keeps the daemon out of trouble even if the setting is corrupted
+ *  or a malicious caller sets it absurdly high. */
+export const UPLOAD_HARD_CAP_BYTES = 50 * 1024 * 1024;
+/** Default cap shipped at install. 10 MB matches the user's preference
+ *  (#B.76) and is comfortably above a typical screenshot. */
+export const DEFAULT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+
+export function getUploadMaxBytes(): number {
+    const v = getSetting("upload_max_bytes");
+    if (!v) return DEFAULT_UPLOAD_MAX_BYTES;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n <= 0) return DEFAULT_UPLOAD_MAX_BYTES;
+    return Math.min(n, UPLOAD_HARD_CAP_BYTES);
+}
+
+export function setUploadMaxBytes(bytes: number): void {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+        throw new Error("upload_max_bytes must be a positive integer");
+    }
+    setSetting("upload_max_bytes", String(Math.min(bytes, UPLOAD_HARD_CAP_BYTES)));
+}

@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import Textarea from "primevue/textarea";
 import ToggleButton from "primevue/togglebutton";
+import { useToast } from "primevue/usetoast";
 import MarkdownView from "./MarkdownView.vue";
 import { INTENTS, type Intent } from "../lib/api";
 import { bus } from "../lib/bus";
+import { attachPasteImage } from "../lib/pasteImage";
 
 type Mode = "ticket" | "comment";
 
@@ -178,6 +180,32 @@ async function submit() {
         sending.value = false;
     }
 }
+
+// Paste-image (per #B.76). Wire a handler on the body textarea so a
+// Ctrl/Cmd+V of an image uploads it and inserts a markdown ![pasted](…)
+// snippet at the caret. Errors surface as a toast — typical cases are
+// "unsupported type" or "exceeds limit".
+const bodyTextareaRef = ref<{ $el?: HTMLTextAreaElement } | null>(null);
+const toast = useToast();
+let detachPaste: (() => void) | null = null;
+
+onMounted(() => {
+    const el = bodyTextareaRef.value?.$el;
+    if (!el) return;
+    detachPaste = attachPasteImage(el, body, {
+        onError(err) {
+            toast.add({
+                severity: "error",
+                summary: "Image paste failed",
+                detail: err.message,
+                life: 5000,
+            });
+        },
+    });
+});
+onBeforeUnmount(() => {
+    detachPaste?.();
+});
 </script>
 
 <template>
@@ -221,6 +249,7 @@ async function submit() {
         </div>
         <div v-if="!preview" class="composer-textarea-wrap">
             <Textarea
+                ref="bodyTextareaRef"
                 v-model="body"
                 :rows="isTicket ? 6 : 8"
                 class="w-full composer-textarea"

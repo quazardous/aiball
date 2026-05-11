@@ -51,16 +51,23 @@ import {
     ticketUnreadFlags,
     deletePingsForMessage,
     getProjectStats,
+    getUploadMaxBytes,
+    setUploadMaxBytes,
+    UPLOAD_HARD_CAP_BYTES,
+    DEFAULT_UPLOAD_MAX_BYTES,
     type MessageKind,
     type MessageStatus,
     type Strategy,
     type Tag,
     type Message,
 } from "./db.js";
-import { existsSync, unlinkSync } from "node:fs";
+import express from "express";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { join as joinPath } from "node:path";
+import { createHash } from "node:crypto";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
-import { outboxPath } from "./paths.js";
+import { outboxPath, UPLOADS_DIR } from "./paths.js";
 import { searchMessages } from "./search.js";
 import { fanOutPings, submitMessage, validateNewMessage, VALID_KINDS } from "./messages.js";
 
@@ -86,6 +93,101 @@ function withTagsOne<T extends { id: number }>(row: T): T & { tags: Tag[] } {
 }
 
 export const api = Router();
+
+// =====================================================================
+//                  Uploads (per #B.76)
+// =====================================================================
+
+/**
+ * Allowed MIME → file extension. Only types we trust to render
+ * inline in an <img> through marked + DOMPurify. JPEG covers JPG.
+ * SVG is intentionally OUT — it can carry script.
+ */
+const UPLOAD_MIME_TO_EXT: Record<string, string> = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+};
+
+/**
+ * POST `/api/uploads` — accepts a raw image body keyed by `Content-Type`,
+ * writes it content-addressable under `<AIBALL_HOME>/uploads/<sha256>.<ext>`,
+ * returns `{ url, bytes, sha256 }`. The body must be the file bytes
+ * directly (no multipart wrapper) — the frontend posts the Blob as the
+ * fetch body with the right content-type. Cap is `getUploadMaxBytes()`,
+ * defaulting to 10 MB (configurable via `/api/settings/upload-max-bytes`).
+ *
+ * Hash-addressable storage means duplicate uploads dedupe naturally and
+ * the response URL doubles as a stable id for future referencing.
+ */
+api.post(
+    "/uploads",
+    // Use raw body parser scoped to this route so the global json parser
+    // upstream doesn't try to eat the binary stream. The limit enforces
+    // the hard cap; the per-setting limit is checked after parsing.
+    express.raw({
+        type: () => true,
+        limit: UPLOAD_HARD_CAP_BYTES,
+    }),
+    (req: Request, res: Response) => {
+        const ct = (req.header("content-type") ?? "").toLowerCase().split(";")[0].trim();
+        const ext = UPLOAD_MIME_TO_EXT[ct];
+        if (!ext) {
+            return badRequest(
+                res,
+                `unsupported content-type "${ct}" — allowed: ${Object.keys(UPLOAD_MIME_TO_EXT).join(", ")}`,
+            );
+        }
+        const buf = req.body as Buffer | undefined;
+        if (!buf || !Buffer.isBuffer(buf) || buf.length === 0) {
+            return badRequest(res, "empty body");
+        }
+        const max = getUploadMaxBytes();
+        if (buf.length > max) {
+            return res.status(413).json({
+                error: `upload exceeds limit (${buf.length} > ${max} bytes)`,
+                max_bytes: max,
+                received_bytes: buf.length,
+            });
+        }
+        const sha = createHash("sha256").update(buf).digest("hex");
+        const filename = `${sha}.${ext}`;
+        const target = joinPath(UPLOADS_DIR, filename);
+        // Hash-addressable — if the file already exists, skip the write.
+        // Two callers uploading the same bytes converge on a single file.
+        if (!existsSync(target)) {
+            writeFileSync(target, buf);
+        }
+        res.status(201).json({
+            url: `/uploads/${filename}`,
+            sha256: sha,
+            bytes: buf.length,
+            content_type: ct,
+        });
+    },
+);
+
+api.get("/settings/upload-max-bytes", (_req, res) => {
+    res.json({
+        bytes: getUploadMaxBytes(),
+        default: DEFAULT_UPLOAD_MAX_BYTES,
+        hard_cap: UPLOAD_HARD_CAP_BYTES,
+    });
+});
+
+api.patch("/settings/upload-max-bytes", (req: Request, res: Response) => {
+    const { bytes } = (req.body ?? {}) as { bytes?: unknown };
+    if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) {
+        return badRequest(res, "bytes must be a positive number");
+    }
+    setUploadMaxBytes(bytes);
+    res.json({
+        bytes: getUploadMaxBytes(),
+        default: DEFAULT_UPLOAD_MAX_BYTES,
+        hard_cap: UPLOAD_HARD_CAP_BYTES,
+    });
+});
 
 /**
  * Resolve the calling consumer from the `X-Aiball-Consumer` header. The UI

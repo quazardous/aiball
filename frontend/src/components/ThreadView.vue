@@ -5,9 +5,11 @@ import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
+import { useToast } from "primevue/usetoast";
 import { api, INTENTS, type Message, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
+import { attachPasteImage } from "../lib/pasteImage";
 import MarkdownView from "./MarkdownView.vue";
 import MessageComposer from "./MessageComposer.vue";
 import CommentNode from "./CommentNode.vue";
@@ -248,6 +250,31 @@ function cancelEdit() {
     }
     editing.value = false;
 }
+
+// Paste-image on the body textarea of the edit panel (per #B.76).
+// The textarea is mounted/unmounted by `v-if="editing"`, so we hook
+// the listener whenever it appears and detach when it leaves.
+const editBodyTextareaRef = ref<{ $el?: HTMLTextAreaElement } | null>(null);
+const editToast = useToast();
+let editDetachPaste: (() => void) | null = null;
+
+watch(editBodyTextareaRef, (instance) => {
+    editDetachPaste?.();
+    editDetachPaste = null;
+    const el = instance?.$el;
+    if (!el) return;
+    editDetachPaste = attachPasteImage(el, bodyDraft, {
+        onError(err) {
+            editToast.add({
+                severity: "error",
+                summary: "Image paste failed",
+                detail: err.message,
+                life: 5000,
+            });
+        },
+    });
+});
+onBeforeUnmount(() => editDetachPaste?.());
 
 // Comments render flat under the ticket. Nested replies are no longer
 // shown as a tree — to refer back to a specific comment, the reader
@@ -665,6 +692,7 @@ async function copyTicketRef() {
                     <div class="thread-edit-row">
                         <span class="thread-edit-label">Body</span>
                         <Textarea
+                            ref="editBodyTextareaRef"
                             v-model="bodyDraft"
                             :disabled="bodyBusy"
                             :rows="6"

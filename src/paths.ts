@@ -9,12 +9,14 @@ export const DB_PATH = join(AIBALL_HOME, "aiball.db");
 export const OUTBOX_DIR = join(AIBALL_HOME, "outbox");
 export const SPOOL_DIR = join(AIBALL_HOME, "spool");
 export const SPOOL_FAILED_DIR = join(AIBALL_HOME, "spool", "failed");
+export const UPLOADS_DIR = join(AIBALL_HOME, "uploads");
 
 export function ensureDirs(): void {
     mkdirSync(AIBALL_HOME, { recursive: true });
     mkdirSync(OUTBOX_DIR, { recursive: true });
     mkdirSync(SPOOL_DIR, { recursive: true });
     mkdirSync(SPOOL_FAILED_DIR, { recursive: true });
+    mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
 export function outboxPath(project: string): string {

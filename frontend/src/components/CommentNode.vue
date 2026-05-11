@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import Button from "primevue/button";
 import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
+import { useToast } from "primevue/usetoast";
 import MarkdownView from "./MarkdownView.vue";
 import { api, type Message } from "../lib/api";
 import { bus } from "../lib/bus";
+import { attachPasteImage } from "../lib/pasteImage";
 
 const props = defineProps<{
     msg: Message;
@@ -118,6 +120,31 @@ watch(bodyDraft, (v) => {
     if (!editing.value) return;
     sessionStorage.setItem(draftKey.value, v);
 });
+
+// Paste-image on the edit textarea (per #B.76). The textarea is
+// mounted/unmounted by `v-if="editing"`, so we hook the listener
+// whenever it appears.
+const editTextareaRef = ref<{ $el?: HTMLTextAreaElement } | null>(null);
+const toast = useToast();
+let detachPaste: (() => void) | null = null;
+
+watch(editTextareaRef, (instance) => {
+    detachPaste?.();
+    detachPaste = null;
+    const el = instance?.$el;
+    if (!el) return;
+    detachPaste = attachPasteImage(el, bodyDraft, {
+        onError(err) {
+            toast.add({
+                severity: "error",
+                summary: "Image paste failed",
+                detail: err.message,
+                life: 5000,
+            });
+        },
+    });
+});
+onBeforeUnmount(() => detachPaste?.());
 </script>
 
 <template>
@@ -164,6 +191,7 @@ watch(bodyDraft, (v) => {
         </div>
         <div v-if="editing" class="comment-edit">
             <Textarea
+                ref="editTextareaRef"
                 v-model="bodyDraft"
                 :rows="4"
                 autoResize
