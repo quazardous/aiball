@@ -15,6 +15,7 @@ import ListRow from "./components/ListRow.vue";
 import NewTicketPage from "./components/NewTicketPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
+import Sidebar, { type ProjectListItem, type SettingsPanel } from "./components/Sidebar.vue";
 import TagBadge from "./components/TagBadge.vue";
 import TagsPanel from "./components/TagsPanel.vue";
 import ThreadView from "./components/ThreadView.vue";
@@ -60,7 +61,7 @@ const sortOptions: { label: string; value: SortBy }[] = [
 ];
 
 // Sidebar can route to a settings panel that replaces the lists entirely.
-type SettingsPanel = "rules" | "tags" | "projects" | "compose";
+// SettingsPanel type lives in components/Sidebar.vue.
 const panel = ref<SettingsPanel | null>(null);
 
 // OS notifications: lazily ask permission on first interaction so we don't
@@ -687,16 +688,6 @@ const bulkCounts = computed(() => ({
     unsnooze: bulkApplicableCount("unsnooze"),
 }));
 
-interface ProjectListItem {
-    label: string;
-    value: string | null;
-    icon: string;
-    pending: number;
-    unread: number;
-    open: number;
-    resolved: number;
-    snoozed: number;
-}
 /** When the user toggled "show snoozed" on, the open count includes
  *  snoozed tickets (they reappear in the lists and badges). Off by
  *  default — snoozed rows are hidden the same way closed ones are. */
@@ -778,71 +769,13 @@ watch(showSnoozed, (v) => {
         />
 
         <div class="aiball-layout">
-            <aside class="aiball-sidebar">
-                <div class="sidebar-section-label">Projects</div>
-                <button
-                    v-for="p in projectListItems"
-                    :key="p.value ?? '__all__'"
-                    type="button"
-                    class="sidebar-item"
-                    :class="{ active: panel === null && project === p.value }"
-                    @click="selectProject(p.value)"
-                >
-                    <i :class="p.icon" />
-                    <span class="sidebar-item-label">{{ p.label }}</span>
-                    <span
-                        v-if="p.pending > 0"
-                        class="sidebar-badge sidebar-badge--pending"
-                        :title="`${p.pending} pending moderation`"
-                    >{{ p.pending }}</span>
-                    <span
-                        v-if="p.resolved > 0"
-                        class="sidebar-badge sidebar-badge--resolved"
-                        :title="`${p.resolved} resolution proposal${p.resolved > 1 ? 's' : ''} waiting for your accept/reject`"
-                    >{{ p.resolved }}</span>
-                    <span
-                        v-if="p.unread > 0"
-                        class="sidebar-badge sidebar-badge--unread"
-                        :title="`${p.unread} unread tickets for you`"
-                    >{{ p.unread }}</span>
-                    <span
-                        v-if="p.open > 0"
-                        class="sidebar-badge sidebar-badge--open"
-                        :title="`${p.open} open tickets`"
-                    >{{ p.open }}</span>
-                </button>
-
-                <div class="sidebar-section-label" style="margin-top: 1rem">
-                    Settings
-                </div>
-                <button
-                    type="button"
-                    class="sidebar-item"
-                    :class="{ active: panel === 'projects' }"
-                    @click="openPanel('projects')"
-                >
-                    <i class="pi pi-folder" />
-                    <span>Projects</span>
-                </button>
-                <button
-                    type="button"
-                    class="sidebar-item"
-                    :class="{ active: panel === 'rules' }"
-                    @click="openPanel('rules')"
-                >
-                    <i class="pi pi-cog" />
-                    <span>Rules</span>
-                </button>
-                <button
-                    type="button"
-                    class="sidebar-item"
-                    :class="{ active: panel === 'tags' }"
-                    @click="openPanel('tags')"
-                >
-                    <i class="pi pi-tag" />
-                    <span>Tags</span>
-                </button>
-            </aside>
+            <Sidebar
+                :items="projectListItems"
+                :panel="panel"
+                :project="project"
+                @select="selectProject"
+                @open-panel="openPanel"
+            />
 
             <main class="aiball-main">
                 <ProjectsPanel v-if="panel === 'projects'" />
