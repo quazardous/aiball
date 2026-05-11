@@ -172,13 +172,26 @@ export const ticketSubscriptions = sqliteTable("ticket_subscriptions", {
  * No FK constraint here (would have to span two tables); cleanup is enforced
  * in deleteProject.
  */
+/**
+ * Personal notifications. Each row says "consumer X has an unseen event
+ * pointing at <target>". Target is polymorphic but expressed as two
+ * mutually-exclusive columns rather than a single shared-counter id
+ * (#B.NNN used to look sparse for that reason — see migration 0007).
+ * Exactly one of `ticketId` / `commentId` is set per row; the schema
+ * CHECK enforces the invariant.
+ */
 export const pings = sqliteTable("pings", {
     recipient: text("recipient").notNull(),
-    messageId: integer("message_id").notNull(),
+    /** Set when the ping points at a ticket root (ticket_created /
+     *  ticket_closed / ticket_resolved / ticket_reopened on the ticket
+     *  itself). NULL for comment pings. */
+    ticketId: integer("ticket_id"),
+    /** Set when the ping points at a comment in a thread. NULL for
+     *  ticket-level pings. */
+    commentId: integer("comment_id"),
     createdAt: text("created_at").notNull(),
     seenAt: text("seen_at"),
 }, (t) => [
-    primaryKey({ columns: [t.recipient, t.messageId] }),
     index("idx_pings_recipient_unread").on(t.recipient),
 ]);
 

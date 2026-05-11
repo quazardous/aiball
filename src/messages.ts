@@ -144,7 +144,7 @@ export function fanOutPings(msg: Message): void {
 
     for (const r of recipients) {
         if (r === msg.by_agent) continue;
-        insertPing(r, msg.id);
+        insertPing(r, msg);
     }
 }
 

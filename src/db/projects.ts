@@ -200,7 +200,7 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             project: schema.tickets.project,
         })
             .from(schema.pings)
-            .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.messageId))
+            .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
             .where(and(
                 eq(schema.pings.recipient, consumer_id),
                 isNull(schema.pings.seenAt),
@@ -215,7 +215,7 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             project: schema.tickets.project,
         })
             .from(schema.pings)
-            .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.messageId))
+            .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
             .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
             .where(and(
                 eq(schema.pings.recipient, consumer_id),
@@ -273,9 +273,11 @@ export function deleteProject(name: string): { deleted_messages: number } {
                 .all()
                 .map((r) => r.id);
         }
-        const allIds = [...ticketIds, ...messageIds];
-        if (allIds.length) {
-            tx.delete(schema.pings).where(inArray(schema.pings.messageId, allIds)).run();
+        if (ticketIds.length) {
+            tx.delete(schema.pings).where(inArray(schema.pings.ticketId, ticketIds)).run();
+        }
+        if (messageIds.length) {
+            tx.delete(schema.pings).where(inArray(schema.pings.commentId, messageIds)).run();
         }
         tx.delete(schema.tickets).where(eq(schema.tickets.project, name)).run();
         tx.delete(schema.subscriptions).where(eq(schema.subscriptions.project, name)).run();

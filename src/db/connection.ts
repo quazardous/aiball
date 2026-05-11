@@ -261,17 +261,37 @@ export function nowIso(): string {
 }
 
 /**
- * Allocate the next id from the shared counter so tickets and _messages stay
- * in a single id space (pings reference this single integer namespace).
+ * Allocate the next ticket id. Tickets keep their own dense counter so the
+ * user-facing `#B.NNN` series stays sequential — no longer shared with the
+ * comment id space (see migration 0007 which split pings into ticket_id +
+ * comment_id columns and dropped the global counter).
+ *
  * Must be called inside an active transaction for atomicity.
  */
-export function nextGlobalId(db: BetterSQLite3Database<typeof schema>): number {
+export function nextTicketId(db: BetterSQLite3Database<typeof schema>): number {
+    return allocateCounter(db, "next_ticket_id");
+}
+
+/**
+ * Allocate the next comment / lifecycle-event id. Distinct counter from
+ * tickets; the two spaces are no longer shared because pings now has
+ * explicit ticket_id / comment_id columns instead of a polymorphic
+ * message_id.
+ */
+export function nextMessageId(db: BetterSQLite3Database<typeof schema>): number {
+    return allocateCounter(db, "next_message_id");
+}
+
+function allocateCounter(
+    db: BetterSQLite3Database<typeof schema>,
+    key: string,
+): number {
     const row = db.select().from(schema.settings)
-        .where(eq(schema.settings.key, "next_global_id"))
+        .where(eq(schema.settings.key, key))
         .get();
     const current = row ? Number(row.value) : 1;
     db.insert(schema.settings)
-        .values({ key: "next_global_id", value: String(current + 1) })
+        .values({ key, value: String(current + 1) })
         .onConflictDoUpdate({
             target: schema.settings.key,
             set: { value: String(current + 1) },

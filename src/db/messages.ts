@@ -11,7 +11,8 @@ import * as schema from "../schema.js";
 import {
     getDb,
     nowIso,
-    nextGlobalId,
+    nextTicketId,
+    nextMessageId,
     pickFreshHashid,
     ticketRowToMessage,
     messageRowToMessage,
@@ -25,9 +26,9 @@ import {
 export function insertMessage(m: NewMessage): Message {
     const db = getDb();
     return db.transaction((tx) => {
-        const id = nextGlobalId(tx);
         const createdAt = nowIso();
         if (m.kind === "ticket_created") {
+            const id = nextTicketId(tx);
             const seq = (tx.select({
                 n: sql<number>`COALESCE(MAX(${schema.tickets.displaySeq}), 0) + 1`,
             }).from(schema.tickets).where(eq(schema.tickets.project, m.project)).get())?.n ?? 1;
@@ -46,6 +47,7 @@ export function insertMessage(m: NewMessage): Message {
         if (!m.ticket_id) {
             throw new Error(`${m.kind} requires ticket_id`);
         }
+        const id = nextMessageId(tx);
         const seq = (tx.select({
             n: sql<number>`COALESCE(MAX(${schema.messages.displaySeq}), 0) + 1`,
         }).from(schema.messages).where(eq(schema.messages.ticketId, m.ticket_id)).get())?.n ?? 1;

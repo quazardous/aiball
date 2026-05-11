@@ -367,7 +367,7 @@ function decide(
         updated.by_agent !== "human" &&
         (status === "approved" || status === "rejected")
     ) {
-        insertPing(updated.by_agent, updated.id);
+        insertPing(updated.by_agent, updated);
     }
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_decided", data: decorated });

@@ -1,18 +1,19 @@
 /**
- * Pings — the per-recipient delivery table that powers the personal
- * inbox. Combines:
- *   - `insertPing` / `deletePingsForMessage` (fan-out from
- *     `messages.fanOutPings`).
- *   - `listUnread` / `unreadCount` / `listPings` / `markPingsRead` /
- *     `unreadPingCount` (read-side helpers for the inbox + MCP
- *     `_status` micro-probe).
- *   - `markMessageSeen` / `markAllSeenForProject` / `markTicketSeen` /
- *     `markTicketUnseen` / `markSeenUpToForProject` (write-side, per
- *     scope: single message, ticket thread, whole project).
- *   - `ticketUnreadFlags` (batched per-ticket flag for /api/inbox).
- *   - `pendingTicketsByAuthor` (count for `_status.my_pending`).
+ * Pings — the per-recipient delivery table. After migration 0007 the
+ * polymorphic `pings.message_id` was split into two mutually exclusive
+ * columns:
+ *   - `pings.ticket_id`  → set when the ping points at a ticket root.
+ *   - `pings.comment_id` → set when the ping points at a comment / lifecycle.
  *
- * Extracted from db.ts (#B.332 Phase A.2).
+ * Exactly one is non-NULL per row (CHECK enforced).
+ *
+ * Because the migration ALSO ensured that `tickets.id` and `_messages.id`
+ * never overlap (messages are shifted by +1_000_000), callers can keep
+ * passing a plain integer `id` to most read/seen helpers — the helpers
+ * test both columns with OR; at most one matches.
+ *
+ * For inserts the caller must say which kind it is (we wrap that in
+ * `insertPing(recipient, msg)` where msg.kind decides the column).
  */
 import { and, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
@@ -22,30 +23,63 @@ import {
     ticketRowToMessage,
     messageRowToMessage,
     type Message,
+    type MessageKind,
 } from "./connection.js";
+
+// =====================================================================
+//  Helpers
+// =====================================================================
+
+/**
+ * Returns a `WHERE pings.<col> = id` clause that matches whichever of the
+ * two target columns the id belongs to. Convenient for the seen / delete
+ * helpers that take a plain integer (the caller has lost the kind by then).
+ */
+function targetMatches(id: number) {
+    return or(eq(schema.pings.ticketId, id), eq(schema.pings.commentId, id));
+}
+
+function targetInArray(ids: number[]) {
+    return or(
+        inArray(schema.pings.ticketId, ids),
+        inArray(schema.pings.commentId, ids),
+    );
+}
 
 // =====================================================================
 //  Write side
 // =====================================================================
 
-export function insertPing(recipient: string, messageId: number): void {
+/**
+ * Insert a ping. The caller passes the Message itself (or just enough of
+ * one) so we can route the row to the right column based on `kind`.
+ *
+ * The shape `{ id, kind }` is loose on purpose — most callers have a full
+ * `Message` in hand from the fan-out path, but the moderation transition
+ * ping in api.ts only needs id + kind.
+ */
+export function insertPing(
+    recipient: string,
+    msg: { id: number; kind: MessageKind },
+): void {
+    const isTicket = msg.kind === "ticket_created";
     getDb().insert(schema.pings).values({
         recipient,
-        messageId,
+        ticketId: isTicket ? msg.id : null,
+        commentId: isTicket ? null : msg.id,
         createdAt: nowIso(),
     }).onConflictDoNothing().run();
 }
 
 /**
- * Wipe every ping row that points at this message id. Used when a message
- * is rejected: the at-insertion fan-out had already pinged subscribers,
- * but the message will never be approved so it should not keep surfacing
- * as unread in their inboxes. Called from the moderation handler in
- * api.ts as soon as the rejection lands.
+ * Wipe every ping row that points at this message id (whichever column).
+ * Used when a message is rejected: the at-insertion fan-out had already
+ * pinged subscribers, but the message will never be approved so it
+ * should not keep surfacing as unread in their inboxes.
  */
 export function deletePingsForMessage(messageId: number): { deleted: number } {
     const r = getDb().delete(schema.pings)
-        .where(eq(schema.pings.messageId, messageId))
+        .where(targetMatches(messageId))
         .run();
     return { deleted: r.changes };
 }
@@ -58,7 +92,7 @@ export function markMessageSeen(
         .set({ seenAt: nowIso() })
         .where(and(
             eq(schema.pings.recipient, consumer_id),
-            eq(schema.pings.messageId, message_id),
+            targetMatches(message_id),
             isNull(schema.pings.seenAt),
         )).run();
     return { updated: r.changes };
@@ -69,7 +103,6 @@ export function markAllSeenForProject(
     project: string,
 ): { updated: number } {
     const db = getDb();
-    // Collect ids in the project (tickets + messages), then mark pings.
     const ticketIds = db.select({ id: schema.tickets.id })
         .from(schema.tickets).where(eq(schema.tickets.project, project)).all().map((r) => r.id);
     const messageIds = ticketIds.length
@@ -83,7 +116,7 @@ export function markAllSeenForProject(
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
-            inArray(schema.pings.messageId, allIds),
+            targetInArray(allIds),
         )).run();
     return { updated: r.changes };
 }
@@ -99,18 +132,21 @@ export function markTicketSeen(
     ticket_id: number,
 ): { updated: number } {
     const db = getDb();
-    const messageIds = db.select({ id: schema.messages.id })
+    const commentIds = db.select({ id: schema.messages.id })
         .from(schema.messages)
         .where(eq(schema.messages.ticketId, ticket_id))
         .all()
         .map((r) => r.id);
-    const allIds = [ticket_id, ...messageIds];
+    // Build the WHERE — the ticket-root ping uses pings.ticket_id, the
+    // comment pings use pings.comment_id. Two OR'd predicates.
+    const conds = [eq(schema.pings.ticketId, ticket_id)];
+    if (commentIds.length) conds.push(inArray(schema.pings.commentId, commentIds));
     const r = db.update(schema.pings)
         .set({ seenAt: nowIso() })
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
-            inArray(schema.pings.messageId, allIds),
+            or(...conds),
         )).run();
     return { updated: r.changes };
 }
@@ -125,18 +161,19 @@ export function markTicketUnseen(
     ticket_id: number,
 ): { updated: number } {
     const db = getDb();
-    const messageIds = db.select({ id: schema.messages.id })
+    const commentIds = db.select({ id: schema.messages.id })
         .from(schema.messages)
         .where(eq(schema.messages.ticketId, ticket_id))
         .all()
         .map((r) => r.id);
-    const allIds = [ticket_id, ...messageIds];
+    const conds = [eq(schema.pings.ticketId, ticket_id)];
+    if (commentIds.length) conds.push(inArray(schema.pings.commentId, commentIds));
     const r = db.update(schema.pings)
         .set({ seenAt: null })
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             isNotNull(schema.pings.seenAt),
-            inArray(schema.pings.messageId, allIds),
+            or(...conds),
         )).run();
     return { updated: r.changes };
 }
@@ -160,7 +197,7 @@ export function markSeenUpToForProject(
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
-            inArray(schema.pings.messageId, allIds),
+            targetInArray(allIds),
         )).run();
     return { updated: r.changes };
 }
@@ -175,7 +212,16 @@ export function markPingsRead(opts: {
         eq(schema.pings.recipient, opts.recipient),
         isNull(schema.pings.seenAt),
     ];
-    if (opts.upToId) conds.push(lte(schema.pings.messageId, opts.upToId));
+    if (opts.upToId) {
+        // `upToId` is a cursor over the combined id space — match
+        // whichever target column is set, gated by ≤ cursor.
+        conds.push(
+            or(
+                and(isNotNull(schema.pings.ticketId), lte(schema.pings.ticketId, opts.upToId)),
+                and(isNotNull(schema.pings.commentId), lte(schema.pings.commentId, opts.upToId)),
+            )!,
+        );
+    }
     const r = getDb().update(schema.pings)
         .set({ seenAt: nowIso() })
         .where(and(...conds))
@@ -202,12 +248,10 @@ export function listUnread(
     limit = 100,
 ): Message[] {
     const db = getDb();
-    // A ping's message_id may live in either tickets or _messages. Two
-    // queries, merged in JS, ordered by id ASC so paginated mark_read
-    // advances monotonically.
+    // Ticket-pings: join pings.ticket_id → tickets.id.
     const ticketHits = db.select({ t: schema.tickets, ping: schema.pings })
         .from(schema.pings)
-        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.messageId))
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
@@ -219,9 +263,10 @@ export function listUnread(
         ))
         .all();
 
+    // Comment-pings: join pings.comment_id → _messages.id, then tickets for project filter.
     const messageHits = db.select({ m: schema.messages, project: schema.tickets.project })
         .from(schema.pings)
-        .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.messageId))
+        .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
         .where(and(
             eq(schema.pings.recipient, consumer_id),
@@ -264,7 +309,7 @@ export function unreadCount(consumer_id: string, project: string): number {
     const db = getDb();
     const t = db.select({ n: sql<number>`COUNT(*)` })
         .from(schema.pings)
-        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.messageId))
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
@@ -276,7 +321,7 @@ export function unreadCount(consumer_id: string, project: string): number {
         )).get();
     const m = db.select({ n: sql<number>`COUNT(*)` })
         .from(schema.pings)
-        .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.messageId))
+        .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
         .where(and(
             eq(schema.pings.recipient, consumer_id),
@@ -304,21 +349,21 @@ export function ticketUnreadFlags(
     for (const id of ticket_ids) out.set(id, false);
     if (ticket_ids.length === 0) return out;
     const db = getDb();
-    // Pings on the ticket roots themselves.
+    // Pings on the ticket roots (pings.ticket_id).
     const rootHits = db.select({
-        ticket_id: schema.pings.messageId,
+        ticket_id: schema.pings.ticketId,
     }).from(schema.pings).where(and(
         eq(schema.pings.recipient, consumer_id),
         isNull(schema.pings.seenAt),
-        inArray(schema.pings.messageId, ticket_ids),
+        inArray(schema.pings.ticketId, ticket_ids),
     )).all();
-    for (const r of rootHits) out.set(r.ticket_id, true);
+    for (const r of rootHits) if (r.ticket_id !== null) out.set(r.ticket_id, true);
     // Pings on comments → join _messages to map back to ticket_id.
     const commentHits = db.select({
         ticket_id: schema.messages.ticketId,
     })
         .from(schema.pings)
-        .innerJoin(schema.messages, eq(schema.pings.messageId, schema.messages.id))
+        .innerJoin(schema.messages, eq(schema.pings.commentId, schema.messages.id))
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
@@ -346,10 +391,6 @@ export function listPings(opts: {
     const baseConds = [eq(schema.pings.recipient, opts.recipient)];
     if (opts.unreadOnly) baseConds.push(isNull(schema.pings.seenAt));
 
-    // Filter self-pings out: a ping where the underlying message was authored
-    // by the recipient itself is not interesting (transition pings on the
-    // agent's own posts pollute the inbox). Each query gets the by_agent
-    // column from the appropriate table (tickets vs _messages).
     const ticketConds = [
         ...baseConds,
         or(
@@ -367,7 +408,7 @@ export function listPings(opts: {
 
     const ticketHits = db.select({ ping: schema.pings, t: schema.tickets })
         .from(schema.pings)
-        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.messageId))
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
         .where(and(...ticketConds))
         .all();
 
@@ -377,7 +418,7 @@ export function listPings(opts: {
         project: schema.tickets.project,
     })
         .from(schema.pings)
-        .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.messageId))
+        .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
         .where(and(...messageConds))
         .all();
@@ -385,14 +426,14 @@ export function listPings(opts: {
     const out: Ping[] = [
         ...ticketHits.map((r) => ({
             recipient: r.ping.recipient,
-            message_id: r.ping.messageId,
+            message_id: r.ping.ticketId!,
             created_at: r.ping.createdAt,
             seen_at: r.ping.seenAt,
             message: ticketRowToMessage(r.t),
         })),
         ...messageHits.map((r) => ({
             recipient: r.ping.recipient,
-            message_id: r.ping.messageId,
+            message_id: r.ping.commentId!,
             created_at: r.ping.createdAt,
             seen_at: r.ping.seenAt,
             message: messageRowToMessage(r.m, r.project),
@@ -405,10 +446,9 @@ export function listPings(opts: {
 
 export function unreadPingCount(recipient: string): number {
     const db = getDb();
-    // Self-pings filtered: split count over tickets + messages joins.
     const t = db.select({ n: sql<number>`COUNT(*)` })
         .from(schema.pings)
-        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.messageId))
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
         .where(and(
             eq(schema.pings.recipient, recipient),
             isNull(schema.pings.seenAt),
@@ -419,7 +459,7 @@ export function unreadPingCount(recipient: string): number {
         )).get();
     const m = db.select({ n: sql<number>`COUNT(*)` })
         .from(schema.pings)
-        .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.messageId))
+        .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
         .where(and(
             eq(schema.pings.recipient, recipient),
             isNull(schema.pings.seenAt),
