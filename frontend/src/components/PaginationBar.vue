@@ -90,7 +90,9 @@ function goto(p: number) {
     opacity: 0.8;
 }
 .pagination-bar__size {
-    width: 4.5rem;
+    /* Wide enough to fit "100" without truncating once the PrimeVue
+     * Select adds its padding + chevron-icon (~42px combined). */
+    width: 5.5rem;
 }
 .pagination-bar__size-label {
     font-size: 0.78rem;
