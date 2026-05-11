@@ -5,6 +5,7 @@ import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
 import MarkdownView from "./MarkdownView.vue";
 import { api, type Message } from "../lib/api";
+import { bus } from "../lib/bus";
 
 const props = defineProps<{
     msg: Message;
@@ -15,7 +16,21 @@ const props = defineProps<{
      */
     showPendingTag?: boolean;
 }>();
-const emit = defineEmits<{ (e: "submitted"): void }>();
+/**
+ * Refresh fan-out after a state-mutating action on this comment. We
+ * emit on the bus rather than firing a Vue `submitted` event up to the
+ * parent — anything that needs to react (the open thread, the inbox
+ * list, the sidebar badges) subscribes directly. The server also
+ * broadcasts the same change on WS, so the local emit is for instant
+ * UX feedback before the WS round-trip lands.
+ */
+function broadcastRefresh() {
+    if (props.msg.ticket_id !== null && props.msg.ticket_id !== undefined) {
+        bus.emit("thread.refresh", { ticketId: props.msg.ticket_id });
+    }
+    bus.emit("inbox.refresh");
+    bus.emit("projects.refresh");
+}
 
 const decideBusy = ref(false);
 async function decide(action: "approve" | "reject") {
@@ -23,7 +38,7 @@ async function decide(action: "approve" | "reject") {
     try {
         if (action === "approve") await api.approve(props.msg.id);
         else await api.reject(props.msg.id);
-        emit("submitted");
+        broadcastRefresh();
     } finally {
         decideBusy.value = false;
     }
@@ -76,7 +91,7 @@ async function saveEdit() {
     try {
         await api.edit(props.msg.id, { body: bodyDraft.value });
         editing.value = false;
-        emit("submitted");
+        broadcastRefresh();
     } finally {
         saveBusy.value = false;
     }

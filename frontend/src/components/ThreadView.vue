@@ -6,6 +6,7 @@ import Select from "primevue/select";
 import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
 import { api, INTENTS, type Message, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
+import { bus, useBus } from "../lib/bus";
 import MarkdownView from "./MarkdownView.vue";
 import MessageComposer from "./MessageComposer.vue";
 import CommentNode from "./CommentNode.vue";
@@ -46,7 +47,14 @@ async function load() {
 
 watch(() => props.ticketId, load);
 onMounted(load);
-defineExpose({ load });
+
+// React to bus-driven refreshes (WS events, local actions in this or
+// any sibling component). The thread reloads itself instead of being
+// poked imperatively by the parent through a ref — the parent only has
+// to emit on the bus and any open thread that matches reloads.
+useBus("thread.refresh", ({ ticketId }) => {
+    if (ticketId === props.ticketId) load();
+});
 
 // Auto-mark this ticket as read after a short dwell on the detail view
 // (per #B91). Two seconds is short enough to feel natural when reading,
@@ -59,7 +67,20 @@ function scheduleAutoMarkRead() {
     if (autoMarkTimer) clearTimeout(autoMarkTimer);
     const id = props.ticketId;
     autoMarkTimer = setTimeout(() => {
-        api.markTicketRead(id).catch(() => {/* silent — read state is best-effort */});
+        api.markTicketRead(id)
+            .then(() => {
+                // Read state is per-consumer, so the server doesn't
+                // broadcast it on WS. Push it onto the bus so the
+                // sidebar/list badges follow.
+                bus.emit("read-state.changed", {
+                    ticket_id: id,
+                    consumer_id: localStorage.getItem("aiball.human_id") ?? "human",
+                    unread: false,
+                });
+                bus.emit("projects.refresh");
+                bus.emit("inbox.refresh");
+            })
+            .catch(() => {/* silent — read state is best-effort */});
         autoMarkTimer = null;
     }, AUTO_MARK_READ_MS);
 }
@@ -77,13 +98,27 @@ function statusSeverity(s: "pending" | "approved" | "rejected") {
     return "danger";
 }
 
+/**
+ * After any state-mutating action, emit on the bus so the open thread,
+ * the inbox list, and the sidebar badges all refresh. The same event
+ * also arrives from the server via WS shortly after, but emitting
+ * locally makes the UI feel instant and keeps things responsive even
+ * if the WS connection blips.
+ */
+function broadcastRefresh(ticketId: number) {
+    bus.emit("thread.refresh", { ticketId });
+    bus.emit("inbox.refresh");
+    bus.emit("projects.refresh");
+}
+
 async function decide(action: "approve" | "reject") {
     if (!data.value) return;
+    const tid = data.value.ticket.id;
     decideBusy.value = true;
     try {
-        if (action === "approve") await api.approve(data.value.ticket.id);
-        else await api.reject(data.value.ticket.id);
-        await load();
+        if (action === "approve") await api.approve(tid);
+        else await api.reject(tid);
+        broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -99,10 +134,11 @@ const intentOptions = [
 ];
 async function changeIntent(v: Intent | null) {
     if (!data.value) return;
+    const tid = data.value.ticket.id;
     intentBusy.value = true;
     try {
-        await api.edit(data.value.ticket.id, { intent: v });
-        await load();
+        await api.edit(tid, { intent: v });
+        broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -132,10 +168,11 @@ async function saveTitleIfChanged() {
     if (!data.value) return;
     const current = data.value.ticket.title ?? "";
     if (titleDraft.value === current) return;
+    const tid = data.value.ticket.id;
     bodyBusy.value = true;
     try {
-        await api.edit(data.value.ticket.id, { title: titleDraft.value });
-        await load();
+        await api.edit(tid, { title: titleDraft.value });
+        broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
         titleDraft.value = current;
@@ -147,10 +184,11 @@ async function saveBodyIfChanged() {
     if (!data.value) return;
     const current = data.value.ticket.body ?? "";
     if (bodyDraft.value === current) return;
+    const tid = data.value.ticket.id;
     bodyBusy.value = true;
     try {
-        await api.edit(data.value.ticket.id, { body: bodyDraft.value });
-        await load();
+        await api.edit(tid, { body: bodyDraft.value });
+        broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
         bodyDraft.value = current;
@@ -227,6 +265,7 @@ async function postBodyAs(
 async function acceptResolution() {
     const msg = pendingResolution.value;
     if (!msg || !data.value) return;
+    const tid = data.value.ticket.id;
     resolutionBusy.value = true;
     try {
         await api.approve(msg.id);
@@ -235,7 +274,7 @@ async function acceptResolution() {
         // instead of being split between a comment and a bare close.
         await postBodyAs("ticket_closed");
         composerBody.value = "";
-        await load();
+        broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -244,7 +283,8 @@ async function acceptResolution() {
 }
 async function rejectResolution() {
     const msg = pendingResolution.value;
-    if (!msg) return;
+    if (!msg || !data.value) return;
+    const tid = data.value.ticket.id;
     resolutionBusy.value = true;
     try {
         if (composerBody.value.trim()) {
@@ -252,7 +292,7 @@ async function rejectResolution() {
         }
         await api.reject(msg.id);
         composerBody.value = "";
-        await load();
+        broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -262,11 +302,12 @@ async function rejectResolution() {
 
 async function commentAndMarkResolved() {
     if (!data.value) return;
+    const tid = data.value.ticket.id;
     resolutionBusy.value = true;
     try {
         await postBodyAs("ticket_resolved");
         composerBody.value = "";
-        await load();
+        broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -275,11 +316,12 @@ async function commentAndMarkResolved() {
 }
 async function commentAndClose() {
     if (!data.value) return;
+    const tid = data.value.ticket.id;
     resolutionBusy.value = true;
     try {
         await postBodyAs("ticket_closed");
         composerBody.value = "";
-        await load();
+        broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -288,11 +330,12 @@ async function commentAndClose() {
 }
 async function commentAndReopen() {
     if (!data.value) return;
+    const tid = data.value.ticket.id;
     resolutionBusy.value = true;
     try {
         await postBodyAs("ticket_reopened");
         composerBody.value = "";
-        await load();
+        broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -301,6 +344,7 @@ async function commentAndReopen() {
 }
 async function commentAndUndoReject() {
     if (!data.value) return;
+    const tid = data.value.ticket.id;
     resolutionBusy.value = true;
     try {
         // Re-decide the rejected ticket as approved. If a body is typed, it
@@ -309,9 +353,9 @@ async function commentAndUndoReject() {
         if (composerBody.value.trim()) {
             await postBodyAs("comment_added");
         }
-        await api.approve(data.value.ticket.id);
+        await api.approve(tid);
         composerBody.value = "";
-        await load();
+        broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -323,11 +367,12 @@ const hasBody = computed(() => composerBody.value.trim().length > 0);
 const broadcastBusy = ref(false);
 async function toggleBroadcast() {
     if (!data.value) return;
+    const tid = data.value.ticket.id;
     broadcastBusy.value = true;
     try {
         const next = !data.value.ticket.broadcast;
-        await api.setTicketBroadcast(data.value.ticket.id, next);
-        await load();
+        await api.setTicketBroadcast(tid, next);
+        broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -635,7 +680,6 @@ async function copyTicketRef() {
                     <CommentNode
                         :msg="msg"
                         :show-pending-tag="msg.id === latestPendingId"
-                        @submitted="load"
                     />
                 </li>
             </ul>
@@ -655,7 +699,6 @@ async function copyTicketRef() {
                             : data.ticket.status === 'pending'
                                 ? 'Reply on this pending thread (markdown supported) — your comment goes through moderation unless you are human'
                                 : 'Reply on this thread (markdown supported, use > for quotes and #N to reference a comment)'"
-                @submitted="load"
             >
                 <template #extra-actions>
                     <template v-if="pendingResolution">

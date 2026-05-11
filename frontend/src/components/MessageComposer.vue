@@ -7,6 +7,7 @@ import Textarea from "primevue/textarea";
 import ToggleButton from "primevue/togglebutton";
 import MarkdownView from "./MarkdownView.vue";
 import { INTENTS, type Intent } from "../lib/api";
+import { bus } from "../lib/bus";
 
 type Mode = "ticket" | "comment";
 
@@ -18,6 +19,11 @@ const props = defineProps<{
     placeholder?: string;
     submitLabel?: string;
 }>();
+/**
+ * Emitted after a successful submit so the parent can react to "the
+ * composer finished" (e.g. close a modal). Data refresh is on the bus
+ * — this emit is purely a parent-coupling UX signal.
+ */
 const emit = defineEmits<{ (e: "submitted"): void }>();
 
 const title = ref("");
@@ -86,6 +92,13 @@ async function submit() {
         title.value = "";
         body.value = "";
         preview.value = false;
+        // Refresh fan-out: WS will fire for everyone, but emitting
+        // locally now makes the sender's UI feel instant.
+        if (props.ticketId !== undefined) {
+            bus.emit("thread.refresh", { ticketId: props.ticketId });
+        }
+        bus.emit("inbox.refresh");
+        bus.emit("projects.refresh");
         emit("submitted");
     } catch (e) {
         error.value = (e as Error).message;

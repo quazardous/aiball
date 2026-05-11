@@ -164,6 +164,8 @@ export interface ProjectMeta {
     unread_for_consumer?: number;
     /** Approved tickets not currently closed. */
     open_count?: number;
+    /** Approved+open tickets currently in the resolved-pending-close state. */
+    resolved_count?: number;
 }
 
 export const api = {

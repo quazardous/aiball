@@ -7,6 +7,7 @@ import { useToast } from "primevue/usetoast";
 import { api, STRATEGIES, type InboxRow, type Message, type ProjectMeta, type Strategy } from "./lib/api";
 import { useRouting } from "./lib/router";
 import { useWs } from "./lib/ws";
+import { bus, useBus } from "./lib/bus";
 import ListRow from "./components/ListRow.vue";
 import MessageComposer from "./components/MessageComposer.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
@@ -110,15 +111,15 @@ const loading = ref(false);
 const dark = ref(localStorage.getItem("aiball.dark") === "1");
 const compact = ref(localStorage.getItem("aiball.compact") !== "0");
 const openTicketId = ref<number | null>(null);
-const threadRef = ref<InstanceType<typeof ThreadView> | null>(null);
 
 const selectedIds = ref<Set<number>>(new Set());
 const bulkBusy = ref(false);
 
 const composeOpen = ref(false);
 function onComposed() {
+    // Just close the dialog — the composer already pushed
+    // inbox.refresh / projects.refresh / thread.refresh onto the bus.
     composeOpen.value = false;
-    refresh();
 }
 
 // Auto-refresh: optional 60s heartbeat that triggers a refresh of the
@@ -314,9 +315,14 @@ async function loadRows() {
 }
 
 function refresh() {
-    loadProjects();
-    if (openTicketId.value !== null) threadRef.value?.load();
-    else loadRows();
+    // Hard manual refresh (toolbar button + 60s heartbeat fallback for
+    // WS-less envs). Route through the bus so consumers stay in sync.
+    bus.emit("projects.refresh");
+    if (openTicketId.value !== null) {
+        bus.emit("thread.refresh", { ticketId: openTicketId.value });
+    } else {
+        bus.emit("inbox.refresh");
+    }
 }
 
 function shortKindLabel(m: Message): string {
@@ -355,6 +361,10 @@ function notifyArrival(m: Message) {
     fireOsNotif(`aiball — ${k}`, `${summary}\n${detail}`);
 }
 
+// WS handler is now a thin relay: turn WebSocket events into high-level
+// `bus` events. Consumers (this file's own list/sidebar/toaster, plus any
+// future component) subscribe to the bus where they're defined. See
+// `lib/bus.ts` for the typed event map.
 const { connected } = useWs((ev) => {
     if (ev.type === "rule_changed") return;
     if (ev.type === "strategy_changed") {
@@ -364,36 +374,38 @@ const { connected } = useWs((ev) => {
     }
     if (ev.type === "project_deleted") {
         const deleted = (ev.data as { project?: string } | undefined)?.project;
-        // If the user is currently scoped to the just-deleted project, fall
-        // back to "all projects" so the lists don't sit empty silently.
-        if (deleted && project.value === deleted) project.value = null;
-        loadProjects();
-        if (inListView.value) loadRows();
+        if (deleted) bus.emit("project.deleted", { project: deleted });
+        bus.emit("projects.refresh");
+        bus.emit("inbox.refresh");
         return;
     }
     const data = ev.data as Message | undefined;
     if (!data || typeof data !== "object") return;
-
-    // Surface every arrival/transition with a toast and (off-tab) OS notif.
-    if (ev.type === "message_created" || ev.type === "message_decided") {
-        notifyArrival(data);
+    if (ev.type === "message_created") bus.emit("message.arrived", data);
+    else if (ev.type === "message_decided") bus.emit("message.decided", data);
+    if (data.ticket_id !== null && data.ticket_id !== undefined) {
+        bus.emit("thread.refresh", { ticketId: data.ticket_id });
     }
-
-    // Open thread: refresh thread state if the event touches it.
-    if (openTicketId.value !== null) {
-        const onThisThread =
-            data.id === openTicketId.value ||
-            data.ticket_id === openTicketId.value;
-        if (onThisThread) threadRef.value?.load();
+    if (data.kind === "ticket_created") {
+        bus.emit("thread.refresh", { ticketId: data.id });
     }
-
-    // Always reload the inbox aggregates AND the project counts so badges
-    // (pending / unread / open) stay in sync with whatever the toaster
-    // just announced. loadRows is no-op outside list view (cheap guard),
-    // loadProjects always runs since the sidebar is always visible.
-    loadRows();
-    loadProjects();
+    bus.emit("inbox.refresh");
+    bus.emit("projects.refresh");
 });
+
+// Local consumers — same effects as before, just driven by the bus now.
+useBus("projects.refresh", () => { loadProjects(); });
+useBus("inbox.refresh", () => { loadRows(); });
+useBus("message.arrived", (m) => { notifyArrival(m); });
+useBus("message.decided", (m) => { notifyArrival(m); });
+useBus("project.deleted", ({ project: deleted }) => {
+    // If the user is currently scoped to the just-deleted project, fall
+    // back to "all projects" so the lists don't sit empty silently.
+    if (project.value === deleted) project.value = null;
+});
+// `thread.refresh` is handled inside ThreadView itself (it knows its own
+// ticket id and reloads when the bus event matches), so we don't need to
+// poke it through a ref from here.
 
 watch([statusFilter, intentFilter, onlyOpen, project], () => {
     localStorage.setItem("aiball.filter.status", statusFilter.value);
@@ -514,6 +526,16 @@ async function toggleRead(r: InboxRow) {
     try {
         if (wasUnread) await api.markTicketRead(r.id);
         else await api.markTicketUnread(r.id);
+        // Read state is per-consumer (no WS broadcast). Push it onto the
+        // bus so the sidebar's unread badge follows without a manual
+        // refetch, and any future consumer (e.g. an unread indicator on
+        // an open thread) can react.
+        bus.emit("read-state.changed", {
+            ticket_id: r.id,
+            consumer_id: localStorage.getItem("aiball.human_id") ?? "human",
+            unread: !wasUnread,
+        });
+        bus.emit("projects.refresh");
     } catch (e) {
         r.unread = wasUnread; // rollback
         toast.add({
@@ -545,6 +567,7 @@ interface ProjectListItem {
     pending: number;
     unread: number;
     open: number;
+    resolved: number;
 }
 const projectListItems = computed<ProjectListItem[]>(() => [
     {
@@ -554,6 +577,7 @@ const projectListItems = computed<ProjectListItem[]>(() => [
         pending: projects.value.reduce((acc, p) => acc + (p.pending_count || 0), 0),
         unread: projects.value.reduce((acc, p) => acc + (p.unread_for_consumer || 0), 0),
         open: projects.value.reduce((acc, p) => acc + (p.open_count || 0), 0),
+        resolved: projects.value.reduce((acc, p) => acc + (p.resolved_count || 0), 0),
     },
     ...projects.value.map((p) => ({
         label: p.name,
@@ -562,6 +586,7 @@ const projectListItems = computed<ProjectListItem[]>(() => [
         pending: p.pending_count || 0,
         unread: p.unread_for_consumer || 0,
         open: p.open_count || 0,
+        resolved: p.resolved_count || 0,
     })),
 ]);
 
@@ -571,6 +596,9 @@ const globalPendingCount = computed(() =>
 );
 const globalUnreadCount = computed(() =>
     projects.value.reduce((acc, p) => acc + (p.unread_for_consumer || 0), 0),
+);
+const globalResolvedCount = computed(() =>
+    projects.value.reduce((acc, p) => acc + (p.resolved_count || 0), 0),
 );
 </script>
 
@@ -589,6 +617,13 @@ const globalUnreadCount = computed(() =>
                 :title="`${globalPendingCount} pending moderation across all projects`"
             >
                 <i class="pi pi-clock" /> {{ globalPendingCount }}
+            </span>
+            <span
+                v-if="globalResolvedCount > 0"
+                class="header-badge header-badge--resolved"
+                :title="`${globalResolvedCount} resolution proposal${globalResolvedCount > 1 ? 's' : ''} waiting for your accept/reject`"
+            >
+                <i class="pi pi-check-circle" /> {{ globalResolvedCount }}
             </span>
             <span
                 v-if="globalUnreadCount > 0"
@@ -678,6 +713,11 @@ const globalUnreadCount = computed(() =>
                         :title="`${p.pending} pending moderation`"
                     >{{ p.pending }}</span>
                     <span
+                        v-if="p.resolved > 0"
+                        class="sidebar-badge sidebar-badge--resolved"
+                        :title="`${p.resolved} resolution proposal${p.resolved > 1 ? 's' : ''} waiting for your accept/reject`"
+                    >{{ p.resolved }}</span>
+                    <span
                         v-if="p.unread > 0"
                         class="sidebar-badge sidebar-badge--unread"
                         :title="`${p.unread} unread tickets for you`"
@@ -728,7 +768,6 @@ const globalUnreadCount = computed(() =>
 
                 <ThreadView
                     v-else-if="openTicketId !== null"
-                    ref="threadRef"
                     :ticket-id="openTicketId"
                     @back="openTicketId = null"
                 />
@@ -1070,12 +1109,20 @@ const globalUnreadCount = computed(() =>
     color: black;
 }
 .sidebar-badge--unread {
-    background: var(--p-primary-color);
-    color: var(--p-primary-contrast-color);
+    background: var(--p-blue-500);
+    color: white;
 }
 .sidebar-item.active .sidebar-badge--unread {
-    background: var(--p-primary-contrast-color);
-    color: var(--p-primary-color);
+    background: white;
+    color: var(--p-blue-500);
+}
+.sidebar-badge--resolved {
+    background: var(--p-green-500);
+    color: white;
+}
+.sidebar-item.active .sidebar-badge--resolved {
+    background: white;
+    color: var(--p-green-500);
 }
 .sidebar-badge--open {
     background: var(--p-surface-300);
@@ -1098,8 +1145,12 @@ const globalUnreadCount = computed(() =>
     color: black;
 }
 .header-badge--unread {
-    background: var(--p-primary-color);
-    color: var(--p-primary-contrast-color);
+    background: var(--p-blue-500);
+    color: white;
+}
+.header-badge--resolved {
+    background: var(--p-green-500);
+    color: white;
 }
 
 .aiball-main {

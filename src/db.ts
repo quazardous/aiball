@@ -645,6 +645,9 @@ export interface ProjectMeta {
     /** Approved tickets currently in an open lifecycle state (i.e. no
      *  terminal close). Independent of the moderation pending_count. */
     open_count?: number;
+    /** Approved+open tickets with at least one PENDING `ticket_resolved`
+     *  proposal — the reporter needs to accept-and-close (or reject) it. */
+    resolved_count?: number;
 }
 
 export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
@@ -704,12 +707,8 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             });
         }
     }
-    // open_count: number of approved tickets in each project that are
-    // currently in an "open" lifecycle state — same definition as the
-    // `closed` flag in /api/inbox (terminal close not yet reopened).
-    // Per #B.219, the sidebar wants this to surface separately from
-    // pending_count (which is a moderation backlog signal, not an
-    // open-work signal).
+    // Lifecycle replay across (closed/reopened) events in id order so we
+    // know which tickets are currently closed.
     const lifecycle = db.select({
         ticket_id: schema.messages.ticketId,
         kind: schema.messages.kind,
@@ -726,6 +725,33 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     for (const ev of lifecycle) {
         closedByTicket.set(ev.ticket_id, ev.kind === "ticket_closed");
     }
+
+    // Pending resolution proposals: tickets with at least one
+    // `ticket_resolved` row in status=pending awaiting moderator
+    // accept/reject. The sidebar badge surfaces this as "I have a
+    // decision to make" — the user explicitly asked for the green count
+    // to map to *waiting on my accept*, not to *already accepted*.
+    const pendingResolveds = db.select({
+        project: schema.tickets.project,
+        ticket_id: schema.messages.ticketId,
+    })
+        .from(schema.messages)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+        .where(and(
+            eq(schema.messages.kind, "ticket_resolved"),
+            eq(schema.messages.status, "pending"),
+        ))
+        .all();
+    const pendingResolutionTickets = new Map<string, Set<number>>();
+    for (const r of pendingResolveds) {
+        let s = pendingResolutionTickets.get(r.project);
+        if (!s) {
+            s = new Set();
+            pendingResolutionTickets.set(r.project, s);
+        }
+        s.add(r.ticket_id);
+    }
+
     const openCounts = db.select({
         project: schema.tickets.project,
         id: schema.tickets.id,
@@ -740,6 +766,22 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     }
     for (const p of byProject.values()) {
         p.open_count = openPerProject.get(p.name) ?? 0;
+        // Filter the pending-resolution set to only ticket ids whose
+        // parent ticket is open + approved (otherwise a stale proposal
+        // on a closed ticket would inflate the count).
+        const candidates = pendingResolutionTickets.get(p.name);
+        if (!candidates) {
+            p.resolved_count = 0;
+        } else {
+            let n = 0;
+            for (const tid of candidates) {
+                const t = openCounts.find((x) => x.id === tid);
+                if (!t || t.status !== "approved") continue;
+                if (closedByTicket.get(tid) === true) continue;
+                n++;
+            }
+            p.resolved_count = n;
+        }
     }
 
     if (consumer_id) {

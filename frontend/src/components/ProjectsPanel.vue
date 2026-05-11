@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import Button from "primevue/button";
 import { useToast } from "primevue/usetoast";
 import { api, type ProjectMeta } from "../lib/api";
+import { bus, useBus } from "../lib/bus";
 
 const toast = useToast();
 const rows = ref<ProjectMeta[]>([]);
@@ -37,7 +38,11 @@ async function confirmDelete(name: string) {
             life: 8000,
         });
         confirming.value = null;
-        await load();
+        // WS will also fire project_deleted shortly; emitting locally
+        // keeps the panel responsive without waiting for the round-trip.
+        bus.emit("project.deleted", { project: r.project });
+        bus.emit("projects.refresh");
+        bus.emit("inbox.refresh");
     } catch (e) {
         toast.add({
             severity: "error",
@@ -61,6 +66,9 @@ function relativeTime(iso: string): string {
 }
 
 onMounted(load);
+// Self-refresh on bus events — keeps the table in sync without the
+// parent having to poke us through a ref.
+useBus("projects.refresh", () => load());
 defineExpose({ load });
 </script>
 
