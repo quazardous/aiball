@@ -164,37 +164,53 @@ watch(
         bodyDraft.value = data.value.ticket.body ?? "";
     },
 );
-async function saveTitleIfChanged() {
+/**
+ * Save any pending title + body changes and close the edit panel.
+ * Title and body draft mutations are buffered (no auto-save on blur),
+ * so a single click on "save" — or Ctrl/Cmd+Enter inside the body —
+ * commits both fields in one shot. Intent and tags save live and
+ * aren't part of this commit cycle.
+ */
+async function saveAndCloseEdit() {
     if (!data.value) return;
-    const current = data.value.ticket.title ?? "";
-    if (titleDraft.value === current) return;
     const tid = data.value.ticket.id;
+    const currentTitle = data.value.ticket.title ?? "";
+    const currentBody = data.value.ticket.body ?? "";
+    const titleChanged = titleDraft.value !== currentTitle;
+    const bodyChanged = bodyDraft.value !== currentBody;
+    if (!titleChanged && !bodyChanged) {
+        editing.value = false;
+        return;
+    }
     bodyBusy.value = true;
     try {
-        await api.edit(tid, { title: titleDraft.value });
+        const patch: { title?: string; body?: string } = {};
+        if (titleChanged) patch.title = titleDraft.value;
+        if (bodyChanged) patch.body = bodyDraft.value;
+        await api.edit(tid, patch);
         broadcastRefresh(tid);
+        editing.value = false;
     } catch (e) {
         error.value = (e as Error).message;
-        titleDraft.value = current;
+        // Rollback drafts so the panel reflects what's actually in the DB.
+        if (titleChanged) titleDraft.value = currentTitle;
+        if (bodyChanged) bodyDraft.value = currentBody;
     } finally {
         bodyBusy.value = false;
     }
 }
-async function saveBodyIfChanged() {
-    if (!data.value) return;
-    const current = data.value.ticket.body ?? "";
-    if (bodyDraft.value === current) return;
-    const tid = data.value.ticket.id;
-    bodyBusy.value = true;
-    try {
-        await api.edit(tid, { body: bodyDraft.value });
-        broadcastRefresh(tid);
-    } catch (e) {
-        error.value = (e as Error).message;
-        bodyDraft.value = current;
-    } finally {
-        bodyBusy.value = false;
+
+/**
+ * Drop any unsaved title/body edits and close the panel. Intent and
+ * tags changes made during the session aren't reverted — those saved
+ * live the moment the user changed them.
+ */
+function cancelEdit() {
+    if (data.value) {
+        titleDraft.value = data.value.ticket.title ?? "";
+        bodyDraft.value = data.value.ticket.body ?? "";
     }
+    editing.value = false;
 }
 
 // Comments render flat under the ticket. Nested replies are no longer
@@ -589,12 +605,13 @@ async function copyTicketRef() {
                     >{{ t.name }}</span>
                     <span class="spacer" />
                     <Button
-                        :icon="editing ? 'pi pi-times' : 'pi pi-pencil'"
-                        :label="editing ? 'done' : 'edit metadata'"
+                        v-if="!editing"
+                        icon="pi pi-pencil"
+                        label="edit message"
                         size="small"
                         severity="secondary"
                         text
-                        @click="editing = !editing"
+                        @click="editing = true"
                     />
                 </div>
                 <div v-if="editing" class="thread-edit-panel">
@@ -606,8 +623,7 @@ async function copyTicketRef() {
                             size="small"
                             style="flex: 1"
                             placeholder="Ticket title"
-                            @blur="saveTitleIfChanged"
-                            @keydown.enter.prevent="saveTitleIfChanged"
+                            @keydown.enter.prevent="saveAndCloseEdit"
                         />
                     </div>
                     <div class="thread-edit-row">
@@ -619,9 +635,9 @@ async function copyTicketRef() {
                             autoResize
                             style="flex: 1; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.9rem;"
                             placeholder="Ticket body (markdown supported, leave blank to clear)"
-                            @blur="saveBodyIfChanged"
-                            @keydown.ctrl.enter.prevent="saveBodyIfChanged"
-                            @keydown.meta.enter.prevent="saveBodyIfChanged"
+                            @keydown.ctrl.enter.prevent="saveAndCloseEdit"
+                            @keydown.meta.enter.prevent="saveAndCloseEdit"
+                            @keydown.escape.prevent="cancelEdit"
                         />
                     </div>
                     <div class="thread-edit-row">
@@ -643,6 +659,28 @@ async function copyTicketRef() {
                             :message-id="data.ticket.id"
                             :tags="data.ticket.tags"
                             @changed="onTagsChanged"
+                        />
+                    </div>
+                    <div class="thread-edit-actions">
+                        <span class="thread-edit-hint">
+                            Title + body are saved on <kbd>⌃Enter</kbd> or "save". Intent + tags save immediately.
+                        </span>
+                        <Button
+                            label="cancel"
+                            icon="pi pi-times"
+                            size="small"
+                            severity="secondary"
+                            text
+                            :disabled="bodyBusy"
+                            @click="cancelEdit"
+                        />
+                        <Button
+                            label="save"
+                            icon="pi pi-check"
+                            size="small"
+                            severity="success"
+                            :loading="bodyBusy"
+                            @click="saveAndCloseEdit"
                         />
                     </div>
                 </div>
@@ -878,6 +916,31 @@ async function copyTicketRef() {
     color: var(--p-text-muted-color);
     min-width: 5rem;
     padding-top: 0.3rem;
+}
+.thread-edit-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-top: 0.4rem;
+    margin-top: 0.2rem;
+    border-top: 1px dashed var(--p-content-border-color);
+}
+.thread-edit-hint {
+    flex: 1;
+    font-size: 0.78rem;
+    color: var(--p-text-muted-color);
+    line-height: 1.3;
+}
+.thread-edit-hint kbd {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.75rem;
+    padding: 0.05rem 0.3rem;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.2rem;
+    background: var(--p-surface-100);
+}
+.aiball-dark .thread-edit-hint kbd {
+    background: var(--p-surface-800);
 }
 .thread-comments {
     list-style: none;
