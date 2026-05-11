@@ -31,6 +31,11 @@ const statusFilter = ref<StatusFilter>(
     (localStorage.getItem("aiball.filter.status") as StatusFilter | null) ?? "pending",
 );
 const onlyOpen = ref(localStorage.getItem("aiball.filter.open") !== "0");
+/** Show snoozed tickets in the open inbox (per #B.329). Off by default
+ *  so the open inbox stays focused; the header toggle flips it on when
+ *  the moderator wants to see what's currently set aside. Counters
+ *  (sidebar + header badges) merge open_count + snoozed_count when on. */
+const showSnoozed = ref(localStorage.getItem("aiball.show_snoozed") === "1");
 const sortBy = ref<SortBy>(
     (localStorage.getItem("aiball.filter.sort") as SortBy | null) ?? "activity",
 );
@@ -385,6 +390,7 @@ async function loadRows() {
             status: apiStatus,
             project: project.value ?? undefined,
             open: onlyOpen.value,
+            include_postponed: showSnoozed.value,
         });
         if (statusFilter.value === "unread") {
             fetched = fetched.filter((r) => r.unread);
@@ -698,6 +704,15 @@ interface ProjectListItem {
     unread: number;
     open: number;
     resolved: number;
+    snoozed: number;
+}
+/** When the user toggled "show snoozed" on, the open count includes
+ *  snoozed tickets (they reappear in the lists and badges). Off by
+ *  default — snoozed rows are hidden the same way closed ones are. */
+function projectOpenCount(p: ProjectMeta): number {
+    const open = p.open_count || 0;
+    const snoozed = p.snoozed_count || 0;
+    return showSnoozed.value ? open + snoozed : open;
 }
 const projectListItems = computed<ProjectListItem[]>(() => [
     {
@@ -706,8 +721,9 @@ const projectListItems = computed<ProjectListItem[]>(() => [
         icon: "pi pi-globe",
         pending: projects.value.reduce((acc, p) => acc + (p.pending_count || 0), 0),
         unread: projects.value.reduce((acc, p) => acc + (p.unread_for_consumer || 0), 0),
-        open: projects.value.reduce((acc, p) => acc + (p.open_count || 0), 0),
+        open: projects.value.reduce((acc, p) => acc + projectOpenCount(p), 0),
         resolved: projects.value.reduce((acc, p) => acc + (p.resolved_count || 0), 0),
+        snoozed: projects.value.reduce((acc, p) => acc + (p.snoozed_count || 0), 0),
     },
     ...projects.value.map((p) => ({
         label: p.name,
@@ -715,8 +731,9 @@ const projectListItems = computed<ProjectListItem[]>(() => [
         icon: "pi pi-folder",
         pending: p.pending_count || 0,
         unread: p.unread_for_consumer || 0,
-        open: p.open_count || 0,
+        open: projectOpenCount(p),
         resolved: p.resolved_count || 0,
+        snoozed: p.snoozed_count || 0,
     })),
 ]);
 
@@ -730,6 +747,18 @@ const globalUnreadCount = computed(() =>
 const globalResolvedCount = computed(() =>
     projects.value.reduce((acc, p) => acc + (p.resolved_count || 0), 0),
 );
+const globalSnoozedCount = computed(() =>
+    projects.value.reduce((acc, p) => acc + (p.snoozed_count || 0), 0),
+);
+
+// Persist the toggle + refresh lists so the new include_postponed
+// flag takes effect immediately.
+watch(showSnoozed, (v) => {
+    if (v) localStorage.setItem("aiball.show_snoozed", "1");
+    else localStorage.removeItem("aiball.show_snoozed");
+    bus.emit("inbox.refresh");
+    bus.emit("projects.refresh");
+});
 </script>
 
 <template>
@@ -762,6 +791,18 @@ const globalResolvedCount = computed(() =>
             >
                 <i class="pi pi-envelope" /> {{ globalUnreadCount }}
             </span>
+            <button
+                v-if="globalSnoozedCount > 0 || showSnoozed"
+                type="button"
+                class="header-badge header-badge--snoozed"
+                :class="{ 'header-badge--snoozed-on': showSnoozed }"
+                :title="showSnoozed
+                    ? `Showing snoozed tickets in the open inbox (${globalSnoozedCount}). Click to hide them again.`
+                    : `${globalSnoozedCount} ticket${globalSnoozedCount > 1 ? 's' : ''} currently snoozed (hidden). Click to surface them in the open inbox.`"
+                @click="showSnoozed = !showSnoozed"
+            >
+                <i class="pi pi-moon" /> {{ globalSnoozedCount }}
+            </button>
             <Select
                 :model-value="strategy"
                 :options="strategyOptions"
@@ -1314,6 +1355,29 @@ const globalResolvedCount = computed(() =>
 }
 .header-badge--resolved {
     background: var(--p-green-500);
+    color: white;
+}
+.header-badge--snoozed {
+    /* Clickable toggle — off = muted indigo (just a count), on = solid
+     * indigo (active state, snoozed rows are surfaced everywhere). */
+    background: color-mix(in srgb, var(--p-indigo-500) 25%, transparent);
+    color: var(--p-indigo-700);
+    border: 1px solid color-mix(in srgb, var(--p-indigo-500) 40%, transparent);
+    cursor: pointer;
+    font-family: inherit;
+}
+.header-badge--snoozed:hover {
+    background: color-mix(in srgb, var(--p-indigo-500) 35%, transparent);
+}
+.header-badge--snoozed.header-badge--snoozed-on {
+    background: var(--p-indigo-500);
+    color: white;
+    border-color: var(--p-indigo-500);
+}
+.aiball-dark .header-badge--snoozed {
+    color: var(--p-indigo-200);
+}
+.aiball-dark .header-badge--snoozed.header-badge--snoozed-on {
     color: white;
 }
 

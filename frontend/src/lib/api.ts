@@ -170,8 +170,10 @@ export interface ProjectMeta {
     pending_count: number;
     /** Set when listProjectsDetailed is called with a consumer_id. */
     unread_for_consumer?: number;
-    /** Approved tickets not currently closed. */
+    /** Approved tickets currently open (not closed, not snoozed). */
     open_count?: number;
+    /** Approved tickets currently snoozed (postponed_until > now). */
+    snoozed_count?: number;
     /** Approved+open tickets currently in the resolved-pending-close state. */
     resolved_count?: number;
 }
@@ -215,6 +217,7 @@ export const api = {
             status?: string;
             open?: boolean;
             intent?: string;
+            include_postponed?: boolean;
         } = {},
     ) => {
         const qs = new URLSearchParams();
@@ -222,6 +225,7 @@ export const api = {
         if (params.status) qs.set("status", params.status);
         if (params.open) qs.set("open", "1");
         if (params.intent) qs.set("intent", params.intent);
+        if (params.include_postponed) qs.set("include_postponed", "1");
         const q = qs.toString();
         return req<InboxRow[]>("GET", `/api/inbox${q ? "?" + q : ""}`);
     },

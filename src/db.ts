@@ -652,8 +652,12 @@ export interface ProjectMeta {
      *  listProjectsDetailed is called with a consumer_id. */
     unread_for_consumer?: number;
     /** Approved tickets currently in an open lifecycle state (i.e. no
-     *  terminal close). Independent of the moderation pending_count. */
+     *  terminal close, not snoozed). Independent of the moderation pending_count. */
     open_count?: number;
+    /** Approved tickets currently snoozed (postponed_until > now). Excluded
+     *  from open_count above; surfaced separately so the UI can toggle a
+     *  "show snoozed" mode that merges the two counts (per #B.329). */
+    snoozed_count?: number;
     /** Approved+open tickets with at least one PENDING `ticket_resolved`
      *  proposal — the reporter needs to accept-and-close (or reject) it. */
     resolved_count?: number;
@@ -765,16 +769,25 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         project: schema.tickets.project,
         id: schema.tickets.id,
         status: schema.tickets.status,
+        postponedUntil: schema.tickets.postponedUntil,
     }).from(schema.tickets).all();
+    const nowStr = nowIso();
     const openPerProject = new Map<string, number>();
+    const snoozedPerProject = new Map<string, number>();
     for (const t of openCounts) {
         if (t.status !== "approved") continue;
         const closedByLifecycle = closedByTicket.get(t.id) === true;
         if (closedByLifecycle) continue;
+        const snoozed = !!t.postponedUntil && t.postponedUntil > nowStr;
+        if (snoozed) {
+            snoozedPerProject.set(t.project, (snoozedPerProject.get(t.project) ?? 0) + 1);
+            continue;
+        }
         openPerProject.set(t.project, (openPerProject.get(t.project) ?? 0) + 1);
     }
     for (const p of byProject.values()) {
         p.open_count = openPerProject.get(p.name) ?? 0;
+        p.snoozed_count = snoozedPerProject.get(p.name) ?? 0;
         // Filter the pending-resolution set to only ticket ids whose
         // parent ticket is open + approved (otherwise a stale proposal
         // on a closed ticket would inflate the count).

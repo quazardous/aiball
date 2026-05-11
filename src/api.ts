@@ -469,6 +469,11 @@ api.get("/inbox", (req, res) => {
     const status = req.query.status as MessageStatus | undefined;
     const onlyOpen = req.query.open === "1";
     const intentFilter = req.query.intent as string | undefined;
+    // Include snoozed tickets in the open-inbox view (per #B.329). The
+    // toggle in the header flips this on so a moderator can see what's
+    // currently set aside. Default off — snoozed rows are hidden the
+    // same way closed ones are.
+    const includePostponed = req.query.include_postponed === "1";
     // Read state is per-consumer — resolved from the X-Aiball-Consumer
     // header (UI sets this once globally) with AIBALL_HUMAN fallback.
     // Each row gets an `unread` boolean computed from the pings table
@@ -605,7 +610,11 @@ api.get("/inbox", (req, res) => {
     } else if (status === "approved" || status === "rejected") {
         rows = rows.filter((r) => r.status === status);
     }
-    if (onlyOpen) rows = rows.filter((r) => !r.closed && !r.postponed);
+    if (onlyOpen) {
+        rows = rows.filter(
+            (r) => !r.closed && (includePostponed || !r.postponed),
+        );
+    }
     if (intentFilter && intentFilter !== "all") {
         rows = rows.filter((r) => r.intent === intentFilter);
     }
