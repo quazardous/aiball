@@ -95,6 +95,21 @@ export interface TicketSummary {
     tags: Tag[];
 }
 
+export interface SearchHit {
+    kind: "ticket" | "comment";
+    id: number;
+    ticket_id: number;
+    project: string;
+    title: string | null;
+    hashid: string | null;
+    by_agent: string | null;
+    created_at: string;
+    status: "pending" | "approved" | "rejected";
+    /** HTML snippet with `<mark>…</mark>` around matched terms. */
+    snippet: string;
+    rank: number;
+}
+
 export interface InboxRow {
     id: number;
     project: string;
@@ -147,6 +162,8 @@ export interface ProjectMeta {
     pending_count: number;
     /** Set when listProjectsDetailed is called with a consumer_id. */
     unread_for_consumer?: number;
+    /** Approved tickets not currently closed. */
+    open_count?: number;
 }
 
 export const api = {
@@ -211,6 +228,20 @@ export const api = {
             {},
         ),
     getTicket: (id: number) => req<ThreadView>("GET", `/api/tickets/${id}`),
+    search: (params: {
+        q: string;
+        project?: string;
+        open?: boolean;
+        intent?: string;
+        limit?: number;
+    }) => {
+        const qs = new URLSearchParams({ q: params.q });
+        if (params.project) qs.set("project", params.project);
+        if (params.open) qs.set("open", "1");
+        if (params.intent) qs.set("intent", params.intent);
+        if (params.limit !== undefined) qs.set("limit", String(params.limit));
+        return req<SearchHit[]>("GET", `/api/search?${qs.toString()}`);
+    },
     setTicketBroadcast: (id: number, broadcast: boolean) =>
         req<TicketSummary>("PATCH", `/api/tickets/${id}`, { broadcast }),
     postMessage: (body: PostMessageInput) =>

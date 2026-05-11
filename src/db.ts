@@ -191,6 +191,22 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
     return dbInstance;
 }
 
+/**
+ * Raw better-sqlite3 handle. Exposed for modules that need to issue
+ * prepared statements bypassing Drizzle — currently only the FTS5
+ * search service in `search.ts`, which talks to virtual tables and
+ * uses SQLite-specific functions (`snippet()`, `MATCH`, `rank`) that
+ * Drizzle has no first-class binding for.
+ */
+export function getRawSqlite(): Database.Database {
+    if (!sqlite) {
+        // Force initialization via getDb to run migrations / bootstrap.
+        getDb();
+    }
+    if (!sqlite) throw new Error("sqlite handle not initialized after getDb()");
+    return sqlite;
+}
+
 function bootstrap(db: BetterSQLite3Database<typeof schema>): void {
     // Ensure the global id counter exists (idempotent).
     db.insert(schema.settings)
@@ -479,6 +495,39 @@ export function listMessages(filters: {
 }
 
 /**
+ * List pending lifecycle events of one or more kinds on a given ticket.
+ * Used by submitMessage to clean up stale lifecycle pendings when a
+ * terminal event lands — e.g. a successful close should reject any
+ * other pending close/reopen on the same thread (they're moot once the
+ * ticket is in a final state).
+ */
+export function listPendingLifecycleForTicket(
+    ticketId: number,
+    kinds: ("ticket_closed" | "ticket_reopened" | "ticket_resolved")[],
+    excludeId?: number,
+): Message[] {
+    const db = getDb();
+    const filters = [
+        eq(schema.messages.ticketId, ticketId),
+        inArray(schema.messages.kind, kinds),
+        eq(schema.messages.status, "pending"),
+    ];
+    if (excludeId !== undefined) {
+        filters.push(ne(schema.messages.id, excludeId));
+    }
+    const rows = db.select().from(schema.messages)
+        .where(and(...filters))
+        .all();
+    if (rows.length === 0) return [];
+    const parent = db.select({ project: schema.tickets.project })
+        .from(schema.tickets)
+        .where(eq(schema.tickets.id, ticketId))
+        .get();
+    const project = parent?.project ?? "";
+    return rows.map((r) => messageRowToMessage(r, project));
+}
+
+/**
  * List pending lifecycle proposals (ticket_resolved) on a given ticket.
  * Used by submitMessage to auto-approve dangling proposals when the
  * reporter closes the ticket: closing implicitly accepts any open
@@ -593,6 +642,9 @@ export interface ProjectMeta {
     /** Unread pings the given consumer has on this project. Set only when
      *  listProjectsDetailed is called with a consumer_id. */
     unread_for_consumer?: number;
+    /** Approved tickets currently in an open lifecycle state (i.e. no
+     *  terminal close). Independent of the moderation pending_count. */
+    open_count?: number;
 }
 
 export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
@@ -606,11 +658,19 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         ticket_pending: sql<number>`SUM(CASE WHEN ${schema.tickets.status} = 'pending' THEN 1 ELSE 0 END)`,
     }).from(schema.tickets).groupBy(schema.tickets.project).all();
 
+    // pending_count == "moderation backlog the human needs to look at".
+    // Only `comment_added` lifecycle counts here — pending lifecycle events
+    // (ticket_resolved / ticket_closed / ticket_reopened) are not part of
+    // the moderation queue. ticket_resolved pendings surface as a separate
+    // `pending_resolution` row tint in the inbox (action on the reporter,
+    // not the moderator). Pending ticket_closed/reopened on already-closed
+    // tickets are moot and get auto-rejected by submitMessage forward, plus
+    // backfill-rejected as a one-shot.
     const messageAgg = db.select({
         project: schema.tickets.project,
         last_activity: sql<string>`MAX(${schema.messages.createdAt})`,
         comment_count: sql<number>`SUM(CASE WHEN ${schema.messages.kind} = 'comment_added' THEN 1 ELSE 0 END)`,
-        message_pending: sql<number>`SUM(CASE WHEN ${schema.messages.status} = 'pending' THEN 1 ELSE 0 END)`,
+        message_pending: sql<number>`SUM(CASE WHEN ${schema.messages.kind} = 'comment_added' AND ${schema.messages.status} = 'pending' THEN 1 ELSE 0 END)`,
     })
         .from(schema.messages)
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
@@ -644,14 +704,60 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             });
         }
     }
+    // open_count: number of approved tickets in each project that are
+    // currently in an "open" lifecycle state — same definition as the
+    // `closed` flag in /api/inbox (terminal close not yet reopened).
+    // Per #B.219, the sidebar wants this to surface separately from
+    // pending_count (which is a moderation backlog signal, not an
+    // open-work signal).
+    const lifecycle = db.select({
+        ticket_id: schema.messages.ticketId,
+        kind: schema.messages.kind,
+        id: schema.messages.id,
+    })
+        .from(schema.messages)
+        .where(and(
+            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
+            eq(schema.messages.status, "approved"),
+        ))
+        .orderBy(asc(schema.messages.id))
+        .all();
+    const closedByTicket = new Map<number, boolean>();
+    for (const ev of lifecycle) {
+        closedByTicket.set(ev.ticket_id, ev.kind === "ticket_closed");
+    }
+    const openCounts = db.select({
+        project: schema.tickets.project,
+        id: schema.tickets.id,
+        status: schema.tickets.status,
+    }).from(schema.tickets).all();
+    const openPerProject = new Map<string, number>();
+    for (const t of openCounts) {
+        if (t.status !== "approved") continue;
+        const closedByLifecycle = closedByTicket.get(t.id) === true;
+        if (closedByLifecycle) continue;
+        openPerProject.set(t.project, (openPerProject.get(t.project) ?? 0) + 1);
+    }
+    for (const p of byProject.values()) {
+        p.open_count = openPerProject.get(p.name) ?? 0;
+    }
+
     if (consumer_id) {
-        // Per-project unread for this consumer = pings (ticket OR message)
-        // joined to tickets to get the project. One query per source, merged.
-        // Self-pings are filtered (the agent's own posts shouldn't count as
-        // unread to themselves — see listUnread for the rationale).
-        const ticketUnread = db.select({
+        // Per-project unread for this consumer = **count of distinct OPEN
+        // tickets** that have at least one unseen ping (NOT count of pings,
+        // and **closed/rejected tickets are excluded**). This matches the
+        // default "Unread" filter in the UI, which lives behind the
+        // `onlyOpen=true` filter most of the time — so the sidebar badge
+        // and the row list agree on the same number.
+        //
+        // Two sources of ticket ids: pings on the ticket-root, pings on
+        // any of its comments. Merge into a Set per project, then drop
+        // tickets that the lifecycle replay above flagged as closed.
+        // Self-pings are filtered (an agent's own posts don't count as
+        // unread for themselves).
+        const ticketIdsFromTicketPings = db.select({
+            ticket_id: schema.tickets.id,
             project: schema.tickets.project,
-            n: sql<number>`COUNT(*)`,
         })
             .from(schema.pings)
             .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.messageId))
@@ -663,11 +769,10 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
                     ne(schema.tickets.byAgent, consumer_id),
                 ),
             ))
-            .groupBy(schema.tickets.project)
             .all();
-        const messageUnread = db.select({
+        const ticketIdsFromCommentPings = db.select({
+            ticket_id: schema.messages.ticketId,
             project: schema.tickets.project,
-            n: sql<number>`COUNT(*)`,
         })
             .from(schema.pings)
             .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.messageId))
@@ -680,13 +785,27 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
                     ne(schema.messages.byAgent, consumer_id),
                 ),
             ))
-            .groupBy(schema.tickets.project)
             .all();
-        const counts = new Map<string, number>();
-        for (const r of ticketUnread) counts.set(r.project, (counts.get(r.project) ?? 0) + Number(r.n));
-        for (const r of messageUnread) counts.set(r.project, (counts.get(r.project) ?? 0) + Number(r.n));
+        const ticketStatusById = new Map<number, string>();
+        for (const t of openCounts) ticketStatusById.set(t.id, t.status);
+        const byProjectSets = new Map<string, Set<number>>();
+        function note(project: string, ticket_id: number) {
+            // Skip tickets the user can't act on directly: closed via
+            // lifecycle, or moderation-rejected.
+            const status = ticketStatusById.get(ticket_id);
+            if (status === "rejected") return;
+            if (closedByTicket.get(ticket_id) === true) return;
+            let s = byProjectSets.get(project);
+            if (!s) {
+                s = new Set();
+                byProjectSets.set(project, s);
+            }
+            s.add(ticket_id);
+        }
+        for (const r of ticketIdsFromTicketPings) note(r.project, r.ticket_id);
+        for (const r of ticketIdsFromCommentPings) note(r.project, r.ticket_id);
         for (const p of byProject.values()) {
-            p.unread_for_consumer = counts.get(p.name) ?? 0;
+            p.unread_for_consumer = byProjectSets.get(p.name)?.size ?? 0;
         }
     }
 
@@ -881,6 +1000,48 @@ export function listProjectSubscribers(
         .where(and(...filters))
         .all()
         .map((r) => r.consumer_id);
+}
+
+/**
+ * Lean per-project stats used by `ticket_new` to surface subscriber
+ * counts in the response (« nobody is listening » hint per #B.215).
+ * Cheap enough to fire on every post — three indexed SUMs.
+ */
+export interface ProjectStats {
+    project: string;
+    owners: number;
+    followers: number;
+    ticket_count: number;
+    comment_count: number;
+}
+
+export function getProjectStats(project: string): ProjectStats {
+    const db = getDb();
+    const subs = db.select({
+        owners: sql<number>`SUM(CASE WHEN ${schema.subscriptions.role} = 'owner' THEN 1 ELSE 0 END)`,
+        followers: sql<number>`SUM(CASE WHEN ${schema.subscriptions.role} = 'follower' THEN 1 ELSE 0 END)`,
+    }).from(schema.subscriptions)
+        .where(eq(schema.subscriptions.project, project))
+        .get();
+    const tickets = db.select({ n: sql<number>`COUNT(*)` })
+        .from(schema.tickets)
+        .where(eq(schema.tickets.project, project))
+        .get();
+    const comments = db.select({ n: sql<number>`COUNT(*)` })
+        .from(schema.messages)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+        .where(and(
+            eq(schema.tickets.project, project),
+            eq(schema.messages.kind, "comment_added"),
+        ))
+        .get();
+    return {
+        project,
+        owners: Number(subs?.owners ?? 0),
+        followers: Number(subs?.followers ?? 0),
+        ticket_count: Number(tickets?.n ?? 0),
+        comment_count: Number(comments?.n ?? 0),
+    };
 }
 
 /**
@@ -1161,6 +1322,20 @@ export function insertPing(recipient: string, messageId: number): void {
         messageId,
         createdAt: nowIso(),
     }).onConflictDoNothing().run();
+}
+
+/**
+ * Wipe every ping row that points at this message id. Used when a message
+ * is rejected: the at-insertion fan-out had already pinged subscribers,
+ * but the message will never be approved so it should not keep surfacing
+ * as unread in their inboxes. Called from the moderation handler in
+ * api.ts as soon as the rejection lands.
+ */
+export function deletePingsForMessage(messageId: number): { deleted: number } {
+    const r = getDb().delete(schema.pings)
+        .where(eq(schema.pings.messageId, messageId))
+        .run();
+    return { deleted: r.changes };
 }
 
 export interface Ping {

@@ -48,6 +48,8 @@ import {
     markTicketSeen,
     markTicketUnseen,
     ticketUnreadFlags,
+    deletePingsForMessage,
+    getProjectStats,
     type MessageKind,
     type MessageStatus,
     type Strategy,
@@ -58,6 +60,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
 import { outboxPath } from "./paths.js";
+import { searchMessages } from "./search.js";
 import { fanOutPings, submitMessage, validateNewMessage, VALID_KINDS } from "./messages.js";
 
 function badRequest(res: Response, msg: string): Response {
@@ -167,6 +170,11 @@ function decide(
     if (status === "approved") {
         deliverToOutbox(updated);
         fanOutPings(updated);
+    } else if (status === "rejected") {
+        // At-insertion fan-out had already delivered pings to subscribers.
+        // The message will never be approved, so wipe those pings so it
+        // stops surfacing as unread on their inboxes.
+        deletePingsForMessage(id);
     }
     // Transition ping: notify the message author that a moderator (human)
     // decided their submission. Skip if the author IS the moderator (close
@@ -226,6 +234,10 @@ api.get("/projects", (req, res) => {
     res.json(listProjects());
 });
 
+api.get("/projects/:name/stats", (req, res) => {
+    res.json(getProjectStats(req.params.name));
+});
+
 api.delete("/projects/:name", (req, res) => {
     const name = req.params.name;
     const { deleted_messages } = deleteProject(name);
@@ -251,6 +263,24 @@ api.delete("/projects/:name", (req, res) => {
  *   - "rejected" → tickets with status=rejected
  *   - undefined  → every ticket regardless of status
  */
+api.get("/search", (req: Request, res: Response) => {
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    if (!q.trim()) {
+        return res.json([]);
+    }
+    const project = typeof req.query.project === "string" ? req.query.project : undefined;
+    const open = req.query.open === "1";
+    const intentRaw = typeof req.query.intent === "string" ? req.query.intent : undefined;
+    const intent = intentRaw && INTENTS.includes(intentRaw as Intent)
+        ? (intentRaw as Intent)
+        : undefined;
+    const limit = typeof req.query.limit === "string"
+        ? Number(req.query.limit) || undefined
+        : undefined;
+    const hits = searchMessages(q, { project, open, intent, limit });
+    res.json(hits);
+});
+
 api.get("/inbox", (req, res) => {
     const project = req.query.project as string | undefined;
     const status = req.query.status as MessageStatus | undefined;

@@ -23,32 +23,36 @@ interface MsgRefToken extends Tokens.Generic {
 // either an integer (ticket id or legacy comment id) or a comment hashid;
 // in all three cases the route lands on the parent thread.
 //
-// Accepted source forms:
-//   - `#B123`            → ticket (canonical numeric, "B" for ball/bug).
-//   - `#C<hashid>`       → comment (canonical, 6-char base32, e.g. #Cxk7q3a).
-//   - `#C123`            → legacy numeric comment ref, still accepted for
-//                          old posts written before the hashid switch.
-//   - `#123`             → ticket (legacy, equivalent to `#B123`).
+// Canonical render uses a **dot** between the sigil and the id/hashid
+// (`#B.123`, `#C.xk7q3a`) for readability. Authors can type any of these
+// equivalent separator characters and they all parse the same way:
+//   - `#B.123` / `#C.xk7q3a` (canonical, dot)
+//   - `#B/123` / `#C/xk7q3a` (slash)
+//   - `#B_123` / `#C_xk7q3a` (underscore)
+//   - `#B-123` / `#C-xk7q3a` (dash)
+//   - `#B123`  / `#Cxk7q3a`  (legacy, no separator)
+//   - `#123`              → ticket (legacy bare, equivalent to `#B.123`).
 //
 // Matching is case-insensitive on the sigil letter only. Runs as an inline
 // marked extension so codespans, fenced blocks, and existing markdown
 // links are tokenized first. The trailing \b prevents matches inside hex
 // colors (#abc, #123abc).
 const HASHID_CHARS = "a-hjkmnp-z2-9"; // matches src/db.ts HASHID_ALPHABET
+const SEP = "[._/-]?"; // optional separator between sigil and id/hashid
 marked.use({
     extensions: [
         {
             name: "msgRef",
             level: "inline",
             start(src: string) {
-                const m = src.match(new RegExp(`#(?:[bBcC])?[\\d${HASHID_CHARS}]`, "i"));
+                const m = src.match(new RegExp(`#(?:[bBcC])?[._/-]?[\\d${HASHID_CHARS}]`, "i"));
                 return m?.index;
             },
             tokenizer(src: string): MsgRefToken | undefined {
-                // Canonical comment hashid first: #C followed by 4-8 chars
-                // from the hashid alphabet (case-insensitive).
+                // Canonical comment hashid first: #C[sep]?<4-8 chars from
+                // the hashid alphabet> (case-insensitive).
                 const hashMatch = new RegExp(
-                    `^#[Cc]([${HASHID_CHARS}]{4,8})\\b`,
+                    `^#[Cc]${SEP}([${HASHID_CHARS}]{4,8})\\b`,
                     "i",
                 ).exec(src);
                 if (hashMatch) {
@@ -57,12 +61,12 @@ marked.use({
                         type: "msgRef",
                         raw: hashMatch[0],
                         kind: "comment",
-                        label: `#C${hash}`,
+                        label: `#C.${hash}`,
                         ref: hash,
                     };
                 }
                 // Numeric forms (ticket or legacy comment).
-                const numMatch = /^#([bBcC])?(\d+)\b/.exec(src);
+                const numMatch = new RegExp(`^#([bBcC])?${SEP}(\\d+)\\b`).exec(src);
                 if (!numMatch) return undefined;
                 const prefix = (numMatch[1] ?? "").toUpperCase();
                 const kind: "ticket" | "comment" = prefix === "C" ? "comment" : "ticket";
@@ -71,7 +75,7 @@ marked.use({
                     type: "msgRef",
                     raw: numMatch[0],
                     kind,
-                    label: `#${letter}${numMatch[2]}`,
+                    label: `#${letter}.${numMatch[2]}`,
                     ref: numMatch[2],
                 };
             },

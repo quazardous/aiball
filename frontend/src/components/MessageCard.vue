@@ -269,15 +269,15 @@ async function saveNote() {
             />
             <Tag
                 :value="message.kind === 'ticket_created'
-                    ? `#B${message.id}`
-                    : `#C${message.hashid ?? message.id}`"
+                    ? `#B.${message.id}`
+                    : `#C.${message.hashid ?? message.id}`"
                 severity="secondary"
             />
             <Tag :value="kindLabel" />
             <Tag :value="message.project" severity="info" />
             <Tag :value="message.status" :severity="statusSeverity" />
             <span v-if="message.by_agent">by {{ message.by_agent }}</span>
-            <span v-if="message.ticket_id">→ #B{{ message.ticket_id }}</span>
+            <span v-if="message.ticket_id">→ #B.{{ message.ticket_id }}</span>
             <span class="spacer" />
             <span :title="message.created_at">{{
                 new Date(message.created_at).toLocaleString()

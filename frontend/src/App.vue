@@ -17,10 +17,11 @@ import ThreadView from "./components/ThreadView.vue";
 import Tag from "primevue/tag";
 import Checkbox from "primevue/checkbox";
 import ToggleButton from "primevue/togglebutton";
+import InputText from "primevue/inputtext";
 
 const toast = useToast();
 
-type StatusFilter = "all" | "pending" | "approved" | "rejected";
+type StatusFilter = "all" | "unread" | "pending" | "approved" | "rejected";
 type IntentFilter = "all" | "panic" | "request" | "question" | "fyi";
 type SortBy = "activity" | "created_desc" | "created_asc";
 
@@ -34,9 +35,15 @@ const onlyOpen = ref(localStorage.getItem("aiball.filter.open") !== "0");
 const sortBy = ref<SortBy>(
     (localStorage.getItem("aiball.filter.sort") as SortBy | null) ?? "activity",
 );
+// FTS5 search input. Empty → inbox mode. Debounced before triggering the
+// search endpoint so we don't fire a request on every keystroke.
+const searchQuery = ref("");
+const searchHits = ref<import("./lib/api").SearchHit[]>([]);
+const searchActive = computed(() => searchQuery.value.trim().length > 0);
 
 const statusFilterOptions: { label: string; value: StatusFilter }[] = [
     { label: "All", value: "all" },
+    { label: "Unread", value: "unread" },
     { label: "Pending", value: "pending" },
     { label: "Approved", value: "approved" },
     { label: "Rejected", value: "rejected" },
@@ -262,12 +269,38 @@ async function loadRows() {
     if (!inListView.value) return;
     loading.value = true;
     try {
-        rows.value = await api.inbox({
-            status: statusFilter.value === "all" ? undefined : statusFilter.value,
+        if (searchActive.value) {
+            // Search mode — hit /api/search and feed the same list slot.
+            // Other filters (project, intent, open) compose naturally.
+            searchHits.value = await api.search({
+                q: searchQuery.value.trim(),
+                project: project.value ?? undefined,
+                open: onlyOpen.value,
+                intent: intentFilter.value === "all" ? undefined : intentFilter.value,
+                limit: 100,
+            });
+            rows.value = []; // we render searchHits in this mode
+            return;
+        }
+        searchHits.value = [];
+        // `unread` is a per-consumer view, not a server-side moderation
+        // status. Don't forward it to the API — fetch the full set under
+        // the other filters, then narrow on the row's `unread` flag
+        // client-side. Same payload, smaller pile.
+        const apiStatus =
+            statusFilter.value === "all" || statusFilter.value === "unread"
+                ? undefined
+                : statusFilter.value;
+        let fetched = await api.inbox({
+            status: apiStatus,
             intent: intentFilter.value === "all" ? undefined : intentFilter.value,
             project: project.value ?? undefined,
             open: onlyOpen.value,
         });
+        if (statusFilter.value === "unread") {
+            fetched = fetched.filter((r) => r.unread);
+        }
+        rows.value = fetched;
     } catch (e) {
         toast.add({
             severity: "error",
@@ -309,8 +342,8 @@ function notifyArrival(m: Message) {
     // events use the hashid (#C<hashid>) backfilled by the 0003 migration.
     const ref =
         m.kind === "ticket_created"
-            ? `#B${m.id}`
-            : `#C${m.hashid ?? m.id}`;
+            ? `#B.${m.id}`
+            : `#C.${m.hashid ?? m.id}`;
     const detail = `${who} · ${ref} · ${m.project}`;
 
     toast.add({
@@ -354,11 +387,12 @@ const { connected } = useWs((ev) => {
         if (onThisThread) threadRef.value?.load();
     }
 
-    // Always reload the inbox aggregates too, even when a thread is open.
-    // Otherwise lifecycle events fired from inside the thread (close,
-    // resolve, broadcast flip) leave the list view stale and the user has
-    // to ctrl-r when they navigate back.
+    // Always reload the inbox aggregates AND the project counts so badges
+    // (pending / unread / open) stay in sync with whatever the toaster
+    // just announced. loadRows is no-op outside list view (cheap guard),
+    // loadProjects always runs since the sidebar is always visible.
     loadRows();
+    loadProjects();
 });
 
 watch([statusFilter, intentFilter, onlyOpen, project], () => {
@@ -369,6 +403,17 @@ watch([statusFilter, intentFilter, onlyOpen, project], () => {
 });
 
 watch(sortBy, (v) => localStorage.setItem("aiball.filter.sort", v));
+
+// Debounce the search input so we don't fire a request on every keystroke
+// — 220ms gives a comfortable feel without showing stale results too long.
+let searchTimer: number | null = null;
+watch(searchQuery, () => {
+    if (searchTimer !== null) clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => {
+        searchTimer = null;
+        if (inListView.value) loadRows();
+    }, 220);
+});
 
 const sortedRows = computed(() => {
     const r = [...rows.value];
@@ -438,6 +483,48 @@ function statusSeverity(s: InboxRow["status"]) {
     return "danger";
 }
 
+/**
+ * Pick the row tint per the workflow design (see #B148):
+ *   moderation > resolution > comments > null
+ * — at most one accent at a time, chosen by the most urgent action
+ * waiting on the consumer. `null` = nothing to do, row stays neutral.
+ */
+function attentionOf(r: InboxRow): "moderation" | "resolution" | "comments" | null {
+    if (r.status === "pending") return "moderation";
+    if (r.pending_resolution) return "resolution";
+    if (r.pending_comment_count > 0) return "comments";
+    return null;
+}
+
+/**
+ * Flip the read/unread state on a single row. Optimistic local update so
+ * the button feels instant; the next WS event will reconcile if the
+ * server end-up disagreed. Permanent control per #C92 — always visible,
+ * not hover-only, since acknowledging an unread row by reading-elsewhere
+ * is a frequent need.
+ */
+/** Open a search hit — route to the parent thread (with focus when a comment was matched). */
+function openSearchHit(hit: import("./lib/api").SearchHit) {
+    openTicketId.value = hit.ticket_id;
+}
+
+async function toggleRead(r: InboxRow) {
+    const wasUnread = r.unread === true;
+    r.unread = !wasUnread;
+    try {
+        if (wasUnread) await api.markTicketRead(r.id);
+        else await api.markTicketUnread(r.id);
+    } catch (e) {
+        r.unread = wasUnread; // rollback
+        toast.add({
+            severity: "error",
+            summary: "Failed to update read state",
+            detail: (e as Error).message,
+            life: 5000,
+        });
+    }
+}
+
 function intentSeverity(p: InboxRow["intent"]) {
     if (p === "panic") return "danger";
     if (p === "request") return "info";
@@ -457,6 +544,7 @@ interface ProjectListItem {
     icon: string;
     pending: number;
     unread: number;
+    open: number;
 }
 const projectListItems = computed<ProjectListItem[]>(() => [
     {
@@ -465,6 +553,7 @@ const projectListItems = computed<ProjectListItem[]>(() => [
         icon: "pi pi-globe",
         pending: projects.value.reduce((acc, p) => acc + (p.pending_count || 0), 0),
         unread: projects.value.reduce((acc, p) => acc + (p.unread_for_consumer || 0), 0),
+        open: projects.value.reduce((acc, p) => acc + (p.open_count || 0), 0),
     },
     ...projects.value.map((p) => ({
         label: p.name,
@@ -472,6 +561,7 @@ const projectListItems = computed<ProjectListItem[]>(() => [
         icon: "pi pi-folder",
         pending: p.pending_count || 0,
         unread: p.unread_for_consumer || 0,
+        open: p.open_count || 0,
     })),
 ]);
 
@@ -590,8 +680,13 @@ const globalUnreadCount = computed(() =>
                     <span
                         v-if="p.unread > 0"
                         class="sidebar-badge sidebar-badge--unread"
-                        :title="`${p.unread} unread for you`"
+                        :title="`${p.unread} unread tickets for you`"
                     >{{ p.unread }}</span>
+                    <span
+                        v-if="p.open > 0"
+                        class="sidebar-badge sidebar-badge--open"
+                        :title="`${p.open} open tickets`"
+                    >{{ p.open }}</span>
                 </button>
 
                 <div class="sidebar-section-label" style="margin-top: 1rem">
@@ -676,6 +771,13 @@ const globalUnreadCount = computed(() =>
                             title="Sort order"
                             @update:model-value="(v: SortBy) => (sortBy = v)"
                         />
+                        <InputText
+                            v-model="searchQuery"
+                            placeholder="Search…"
+                            size="small"
+                            class="filter-search"
+                            title="Free-text search across ticket titles, bodies and comments (whitespace = AND)"
+                        />
                         <span class="spacer" />
                         <Button
                             v-if="!composeOpen"
@@ -703,25 +805,53 @@ const globalUnreadCount = computed(() =>
                         @submitted="onComposed"
                     />
 
-                    <div v-if="loading && !rows.length" class="aiball-empty">
+                    <div v-if="loading && !rows.length && !searchHits.length" class="aiball-empty">
                         Loading…
                     </div>
-                    <div v-else-if="!rows.length" class="aiball-empty">
+                    <div v-else-if="searchActive && !searchHits.length" class="aiball-empty">
+                        <i class="pi pi-search" style="font-size: 1.6rem" />
+                        <div>No matches for « {{ searchQuery }} ».</div>
+                    </div>
+                    <div v-else-if="!searchActive && !rows.length" class="aiball-empty">
                         <i class="pi pi-inbox" style="font-size: 1.6rem" />
                         <div>
                             No tickets match your filters{{ project ? ` in ${project}` : "" }}.
                         </div>
                     </div>
 
+                    <a
+                        v-for="hit in searchHits"
+                        :key="`${hit.kind}-${hit.id}`"
+                        :href="`/b/${hit.kind === 'comment' && hit.hashid ? hit.hashid : hit.ticket_id}`"
+                        class="search-hit"
+                        @click.prevent="openSearchHit(hit)"
+                    >
+                        <div class="search-hit__head">
+                            <span class="ticket-id">
+                                {{ hit.kind === 'comment' ? `#C.${hit.hashid ?? hit.id}` : `#B.${hit.ticket_id}` }}
+                            </span>
+                            <Tag :value="hit.project" severity="info" style="font-size: 0.7rem" />
+                            <Tag
+                                v-if="hit.status !== 'approved'"
+                                :value="hit.status"
+                                :severity="statusSeverity(hit.status)"
+                                style="font-size: 0.7rem"
+                            />
+                            <span v-if="hit.title" class="search-hit__title">{{ hit.title }}</span>
+                            <span class="spacer" />
+                            <span class="search-hit__by" v-if="hit.by_agent">by {{ hit.by_agent }}</span>
+                        </div>
+                        <div class="search-hit__snippet" v-html="hit.snippet" />
+                    </a>
+
                     <ListRow
+                        v-if="!searchActive"
                         v-for="r in sortedRows"
                         :key="r.id"
                         :selected="selectedIds.has(r.id)"
                         :unread="r.unread"
-                        :pending="r.status === 'pending'"
                         :closed="r.closed"
-                        :resolution-proposed="r.pending_resolution"
-                        :broadcast="r.broadcast"
+                        :attention="attentionOf(r)"
                         @click="openThread(r)"
                     >
                         <template #select>
@@ -732,34 +862,65 @@ const globalUnreadCount = computed(() =>
                             />
                         </template>
                         <template #lead>
+                            <!--
+                                Read / unread toggle (per #C.tukrab on #B.58).
+                                Sits at the START of the row so it doubles as
+                                the read-state indicator (envelope closed when
+                                unread, envelope open when read). Clicking
+                                flips the state for this consumer.
+                            -->
+                            <button
+                                type="button"
+                                class="read-toggle-lead"
+                                :class="{ 'read-toggle-lead--unread': r.unread }"
+                                :title="r.unread ? 'Unread — click to mark read' : 'Read — click to mark unread'"
+                                :aria-pressed="r.unread"
+                                @click.stop="toggleRead(r)"
+                            >
+                                <i class="pi pi-envelope" />
+                            </button>
+                            <!-- Lifecycle stage — single icon per row, deterministic. -->
                             <i
-                                v-if="r.closed && r.resolved"
+                                v-if="r.status === 'rejected'"
+                                class="pi pi-times-circle"
+                                title="rejected ticket"
+                                style="color: var(--p-red-500)"
+                            />
+                            <i
+                                v-else-if="r.closed && r.resolved"
                                 class="pi pi-check-circle"
                                 title="closed (resolved)"
-                                style="color: var(--p-green-500)"
+                                style="color: var(--p-green-600)"
                             />
                             <i
                                 v-else-if="r.closed"
                                 class="pi pi-lock"
-                                title="closed without explicit resolution"
+                                title="closed without explicit resolution (wontfix / abandoned / duplicate)"
                                 style="color: var(--p-orange-500)"
                             />
                             <i
                                 v-else-if="r.resolved"
                                 class="pi pi-check-circle"
-                                title="resolved (pending close)"
+                                title="resolved (proposal accepted, reporter has not closed yet)"
                                 style="color: var(--p-green-500)"
                             />
                             <i
                                 v-else
                                 class="pi pi-ticket"
                                 style="color: var(--p-text-muted-color)"
+                                title="open ticket"
                             />
                         </template>
                         <template v-if="r.by_agent" #from>{{ r.by_agent }}</template>
                         <template #title>
-                            <span class="ticket-id">#B{{ r.id }}</span>
+                            <span class="ticket-id">#B.{{ r.id }}</span>
                             {{ titleOf(r) }}
+                            <i
+                                v-if="r.broadcast"
+                                class="pi pi-megaphone"
+                                style="margin-left: 0.35rem; color: var(--p-blue-500); font-size: 0.85rem"
+                                title="broadcast: project followers receive pings on this thread"
+                            />
                             <Tag
                                 v-if="r.status !== 'approved'"
                                 :value="r.status"
@@ -916,6 +1077,13 @@ const globalUnreadCount = computed(() =>
     background: var(--p-primary-contrast-color);
     color: var(--p-primary-color);
 }
+.sidebar-badge--open {
+    background: var(--p-surface-300);
+    color: var(--p-text-color);
+}
+.aiball-dark .sidebar-badge--open {
+    background: var(--p-surface-600);
+}
 .header-badge {
     font-size: 0.78rem;
     font-weight: 600;
@@ -961,6 +1129,73 @@ const globalUnreadCount = computed(() =>
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-size: 0.85em;
     margin-right: 0.4rem;
+}
+.filter-search {
+    min-width: 12rem;
+}
+.search-hit {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid var(--p-content-border-color);
+    cursor: pointer;
+    transition: background 0.1s;
+}
+.search-hit:hover {
+    background: var(--p-surface-100);
+}
+.aiball-dark .search-hit:hover {
+    background: var(--p-surface-800);
+}
+.search-hit__head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+    font-size: 0.9rem;
+}
+.search-hit__title {
+    font-weight: 600;
+    color: var(--p-text-color);
+}
+.search-hit__by {
+    font-size: 0.8rem;
+    color: var(--p-text-muted-color);
+}
+.search-hit__snippet {
+    font-size: 0.85rem;
+    color: var(--p-text-muted-color);
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+.search-hit__snippet mark {
+    background: color-mix(in srgb, var(--p-yellow-500) 30%, transparent);
+    color: var(--p-text-color);
+    padding: 0 0.1rem;
+    border-radius: 2px;
+}
+.read-toggle-lead {
+    appearance: none;
+    background: transparent;
+    border: none;
+    padding: 0.1rem;
+    margin-right: 0.1rem;
+    cursor: pointer;
+    /* Read state by default → grey. Click toggles via toggleRead(). */
+    color: var(--p-text-muted-color);
+    transition: color 0.12s, transform 0.08s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.read-toggle-lead:hover {
+    transform: scale(1.1);
+}
+.read-toggle-lead--unread {
+    /* Unread → green so the eye lands on the row from a distance. */
+    color: var(--p-green-500);
 }
 
 .bulk-bar {

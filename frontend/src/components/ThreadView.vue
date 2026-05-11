@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
+import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import Tag from "primevue/tag";
+import Textarea from "primevue/textarea";
 import { api, INTENTS, type Message, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
 import MarkdownView from "./MarkdownView.vue";
 import MessageComposer from "./MessageComposer.vue";
@@ -109,6 +111,52 @@ async function changeIntent(v: Intent | null) {
 }
 function onTagsChanged(tags: TagType[]) {
     if (data.value) data.value.ticket.tags = tags;
+}
+
+// Title + body edit (per #B.94): buffered drafts so we save on blur or
+// Ctrl/Cmd+Enter rather than fire api.edit on every keystroke. Drafts
+// reset every time the edit panel is reopened, or when the ticket id
+// changes, so we never leak a draft from one thread onto another.
+const titleDraft = ref("");
+const bodyDraft = ref("");
+const bodyBusy = ref(false);
+watch(
+    [() => props.ticketId, editing, () => data.value?.ticket.id],
+    () => {
+        if (!editing.value || !data.value) return;
+        titleDraft.value = data.value.ticket.title ?? "";
+        bodyDraft.value = data.value.ticket.body ?? "";
+    },
+);
+async function saveTitleIfChanged() {
+    if (!data.value) return;
+    const current = data.value.ticket.title ?? "";
+    if (titleDraft.value === current) return;
+    bodyBusy.value = true;
+    try {
+        await api.edit(data.value.ticket.id, { title: titleDraft.value });
+        await load();
+    } catch (e) {
+        error.value = (e as Error).message;
+        titleDraft.value = current;
+    } finally {
+        bodyBusy.value = false;
+    }
+}
+async function saveBodyIfChanged() {
+    if (!data.value) return;
+    const current = data.value.ticket.body ?? "";
+    if (bodyDraft.value === current) return;
+    bodyBusy.value = true;
+    try {
+        await api.edit(data.value.ticket.id, { body: bodyDraft.value });
+        await load();
+    } catch (e) {
+        error.value = (e as Error).message;
+        bodyDraft.value = current;
+    } finally {
+        bodyBusy.value = false;
+    }
 }
 
 // Comments render flat under the ticket. Nested replies are no longer
@@ -290,7 +338,7 @@ async function toggleBroadcast() {
 const justCopiedTicket = ref(false);
 async function copyTicketRef() {
     if (!data.value) return;
-    const ref_ = `#B${data.value.ticket.id}`;
+    const ref_ = `#B.${data.value.ticket.id}`;
     try {
         await navigator.clipboard.writeText(ref_);
         justCopiedTicket.value = true;
@@ -410,12 +458,12 @@ async function copyTicketRef() {
             <article class="thread-ticket">
                 <header class="meta">
                     <Tag
-                        :value="justCopiedTicket ? `copied #B${data.ticket.id}` : `#B${data.ticket.id}`"
+                        :value="justCopiedTicket ? `copied #B.${data.ticket.id}` : `#B.${data.ticket.id}`"
                         :severity="justCopiedTicket ? 'success' : 'secondary'"
                         class="comment-ref-tag"
                         role="button"
                         tabindex="0"
-                        :title="`Click to copy this ticket's reference (#B${data.ticket.id}) — paste it in any markdown body to link back here.`"
+                        :title="`Click to copy this ticket's reference (#B.${data.ticket.id}) — paste it in any markdown body to link back here.`"
                         @click="copyTicketRef"
                         @keydown.enter.prevent="copyTicketRef"
                         @keydown.space.prevent="copyTicketRef"
@@ -425,14 +473,21 @@ async function copyTicketRef() {
                         :value="data.ticket.status"
                         :severity="statusSeverity(data.ticket.status)"
                     />
+                    <!--
+                        Skip the lifecycle badge when the ticket itself is
+                        rejected — the `rejected` status tag rendered just
+                        above already conveys "this is over" with the right
+                        severity. Stacking "rejected" + "closed" would be
+                        redundant and misleading (it's not a wontfix close).
+                    -->
                     <Tag
-                        v-if="data.ticket.closed && data.ticket.resolved"
+                        v-if="data.ticket.status !== 'rejected' && data.ticket.closed && data.ticket.resolved"
                         value="closed (resolved)"
                         severity="success"
                         icon="pi pi-check-circle"
                     />
                     <Tag
-                        v-else-if="data.ticket.closed"
+                        v-else-if="data.ticket.status !== 'rejected' && data.ticket.closed"
                         value="closed"
                         severity="warn"
                         icon="pi pi-lock"
@@ -469,7 +524,7 @@ async function copyTicketRef() {
                     and closed.
                 </div>
                 <div
-                    v-else-if="data.ticket.closed"
+                    v-else-if="data.ticket.closed && data.ticket.status !== 'rejected'"
                     class="thread-closed-banner"
                 >
                     <i class="pi pi-lock" />
@@ -498,6 +553,32 @@ async function copyTicketRef() {
                     />
                 </div>
                 <div v-if="editing" class="thread-edit-panel">
+                    <div class="thread-edit-row">
+                        <span class="thread-edit-label">Title</span>
+                        <InputText
+                            v-model="titleDraft"
+                            :disabled="bodyBusy"
+                            size="small"
+                            style="flex: 1"
+                            placeholder="Ticket title"
+                            @blur="saveTitleIfChanged"
+                            @keydown.enter.prevent="saveTitleIfChanged"
+                        />
+                    </div>
+                    <div class="thread-edit-row">
+                        <span class="thread-edit-label">Body</span>
+                        <Textarea
+                            v-model="bodyDraft"
+                            :disabled="bodyBusy"
+                            :rows="6"
+                            autoResize
+                            style="flex: 1; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.9rem;"
+                            placeholder="Ticket body (markdown supported, leave blank to clear)"
+                            @blur="saveBodyIfChanged"
+                            @keydown.ctrl.enter.prevent="saveBodyIfChanged"
+                            @keydown.meta.enter.prevent="saveBodyIfChanged"
+                        />
+                    </div>
                     <div class="thread-edit-row">
                         <span class="thread-edit-label">Intent</span>
                         <Select
@@ -860,6 +941,15 @@ async function copyTicketRef() {
 .aiball-dark .comment-lifecycle[data-kind="ticket_closed"] { color: var(--p-orange-300); }
 .aiball-dark .comment-lifecycle[data-kind="ticket_reopened"] { color: var(--p-blue-300); }
 .comment-actions {
+    display: flex;
+    gap: 0.4rem;
+}
+.comment-edit {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.comment-edit-actions {
     display: flex;
     gap: 0.4rem;
 }

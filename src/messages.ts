@@ -7,7 +7,9 @@ import {
     listProjectSubscribers,
     upsertTicketSubscription,
     listPendingResolvedForTicket,
+    listPendingLifecycleForTicket,
     isTicketBroadcast,
+    deletePingsForMessage,
     INTENTS,
     type Message,
     type NewMessage,
@@ -131,6 +133,15 @@ export function fanOutPings(msg: Message): void {
         }
     }
 
+    // Pending messages also ping the configured human moderator (default
+    // "human", overridable via AIBALL_HUMAN) so they show up as unread in
+    // the moderation queue even when the moderator isn't subscribed to
+    // the project. Approved messages don't need this — the regular
+    // subscriber fan-out already covers what the human cares about.
+    if (msg.status === "pending") {
+        recipients.add(process.env.AIBALL_HUMAN ?? "human");
+    }
+
     for (const r of recipients) {
         if (r === msg.by_agent) continue;
         insertPing(r, msg.id);
@@ -179,6 +190,12 @@ function assertCloseAuthority(input: NewMessage): void {
     const parent = getMessage(input.ticket_id);
     if (!parent || parent.kind !== "ticket_created") return;
     if (input.by_agent && input.by_agent === parent.by_agent) return;
+    // Human moderator bypass: the configured human (default "human",
+    // overridable via AIBALL_HUMAN) can always close any ticket from the
+    // UI — they are the override authority on every project. The strict
+    // reporter-only rule still applies to agents posting via MCP/CLI.
+    const human = process.env.AIBALL_HUMAN ?? "human";
+    if (input.by_agent === human) return;
     const err = new Error(
         `only the ticket reporter (${parent.by_agent ?? "unknown"}) can close this ticket — post ticket_resolved instead to propose resolution`,
     );
@@ -194,6 +211,13 @@ export function submitMessage(input: NewMessage): Message {
     assertCloseAuthority(input);
     let msg = insertMessage(input);
     autoSubscribeAuthor(msg);
+    // Fan out delivery pings at INSERTION (not just at approval): subscribers
+    // need to know "new activity landed on my ticket" even before the
+    // moderator decides. `insertPing` is idempotent (onConflictDoNothing on
+    // the (recipient, message_id) primary key), so the later approval-time
+    // fan-out is a safe no-op. Pings on rejected messages are cleaned up by
+    // the moderation handler (api.ts decide()).
+    fanOutPings(msg);
     // Always announce the message: every UI list (pending, approved, tickets,
     // open thread) wants to know that a new row exists, regardless of how
     // moderation will resolve it.
@@ -227,6 +251,8 @@ export function submitMessage(input: NewMessage): Message {
             // Auto-approve them so the inbox / UI stop surfacing stale
             // pending state.
             if (msg.kind === "ticket_closed" && msg.ticket_id !== null) {
+                // Pending ticket_resolved on this ticket → auto-approve
+                // (closing implies acceptance of the resolution proposal).
                 for (const stale of listPendingResolvedForTicket(msg.ticket_id)) {
                     const promoted = updateMessageStatus(
                         stale.id,
@@ -238,6 +264,25 @@ export function submitMessage(input: NewMessage): Message {
                         deliverToOutbox(promoted);
                         fanOutPings(promoted);
                         broadcast({ type: "message_decided", data: promoted });
+                    }
+                }
+                // Pending ticket_closed / ticket_reopened on this ticket are
+                // moot once a close lands → auto-reject them so they stop
+                // polluting the moderation queue. Their pings get wiped too.
+                for (const stale of listPendingLifecycleForTicket(
+                    msg.ticket_id,
+                    ["ticket_closed", "ticket_reopened"],
+                    msg.id, // don't reject the close we just approved
+                )) {
+                    const rejected = updateMessageStatus(
+                        stale.id,
+                        "rejected",
+                        "owner",
+                        null,
+                    );
+                    if (rejected) {
+                        deletePingsForMessage(stale.id);
+                        broadcast({ type: "message_decided", data: rejected });
                     }
                 }
             }

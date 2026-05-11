@@ -100,6 +100,11 @@ export class AiballClient {
         return this.http("PATCH", `/api/tickets/${ticket_id}`, { broadcast });
     }
 
+    /** Per-project subscriber + content stats (« nobody is listening » hint). */
+    projectStats(project: string) {
+        return this.http("GET", `/api/projects/${encodeURIComponent(project)}/stats`);
+    }
+
     private spoolDrop(msg: Record<string, unknown>): SpoolResult {
         mkdirSync(this.spoolDir, { recursive: true });
         const ts = process.hrtime.bigint().toString();
@@ -113,6 +118,20 @@ export class AiballClient {
 
     // ---- read endpoints (no spool fallback) -------------------------------
 
+    search(opts: {
+        query: string;
+        project?: string;
+        open?: boolean;
+        intent?: string;
+        limit?: number;
+    }) {
+        const q: Record<string, string | undefined> = { q: opts.query };
+        if (opts.project) q.project = opts.project;
+        if (opts.open) q.open = "1";
+        if (opts.intent) q.intent = opts.intent;
+        if (opts.limit !== undefined) q.limit = String(opts.limit);
+        return this.http("GET", `/api/search${query(q)}`);
+    }
     listMessages(q: Record<string, string | number | undefined> = {}) {
         return this.http("GET", `/api/messages${query(q)}`);
     }

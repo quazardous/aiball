@@ -4,7 +4,7 @@ export type RouteState = {
     panel: "rules" | "tags" | "projects" | null;
     openTicketId: number | null;
     project: string | null;
-    statusFilter: "all" | "pending" | "approved" | "rejected";
+    statusFilter: "all" | "unread" | "pending" | "approved" | "rejected";
     intentFilter: "all" | "panic" | "request" | "question" | "fyi";
     onlyOpen: boolean;
 };
@@ -64,7 +64,13 @@ export function parseUrl(): Partial<RouteState> {
 
     if (qs.has("p")) out.project = qs.get("p") || null;
     const st = qs.get("status");
-    if (st === "pending" || st === "approved" || st === "rejected" || st === "all") {
+    if (
+        st === "pending" ||
+        st === "approved" ||
+        st === "rejected" ||
+        st === "unread" ||
+        st === "all"
+    ) {
         out.statusFilter = st;
     }
     const pr = qs.get("intent");

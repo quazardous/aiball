@@ -102,8 +102,9 @@ server.registerTool(
         },
     },
     async ({ project, title, body, intent, broadcast, by_agent }) => {
+        const proj = client.resolveProject(project);
         const res = (await client.postMessage({
-            project: client.resolveProject(project),
+            project: proj,
             kind: "ticket_created",
             title,
             body,
@@ -112,9 +113,34 @@ server.registerTool(
         })) as { id?: number };
         if (broadcast === true && typeof res?.id === "number") {
             await client.setTicketBroadcast(res.id, true);
-            return asText({ ...res, broadcast: 1 });
         }
-        return asText(res);
+        // « Nobody is listening » hint (per #B.215): show the agent how
+        // many owners / followers exist on the target project, and flag
+        // freshly-created projects (= this post is the only thing on it).
+        // Failure to fetch stats is silent — the post itself succeeded.
+        interface ProjectStatsLite {
+            owners: number;
+            followers: number;
+            ticket_count: number;
+            comment_count: number;
+        }
+        let stats: ProjectStatsLite | null = null;
+        try {
+            stats = (await client.projectStats(proj)) as ProjectStatsLite;
+        } catch {
+            stats = null;
+        }
+        const decorated: Record<string, unknown> = { ...res };
+        if (broadcast === true) decorated.broadcast = 1;
+        if (stats) {
+            decorated.target_project = {
+                name: proj,
+                owners: stats.owners,
+                followers: stats.followers,
+                is_new_project: stats.ticket_count <= 1 && stats.comment_count === 0,
+            };
+        }
+        return asText(decorated);
     },
 );
 
@@ -266,6 +292,28 @@ server.registerTool(
             open: open ? "1" : undefined,
         });
         return asText(list);
+    },
+);
+
+server.registerTool(
+    "search",
+    {
+        description:
+            "Full-text search over ticket titles, ticket bodies, and comment / lifecycle bodies. Backed by SQLite FTS5: case-insensitive, accent-insensitive, whitespace-separated tokens are AND-ed (so `search('hashid broadcast')` finds rows containing both). Returns at most `limit` hits sorted by FTS5 relevance (more relevant first). Each hit carries a `snippet` with `<mark>…</mark>` around the match, plus enough context (project, by_agent, created_at, kind=ticket|comment, hashid for comments) to render without an extra round-trip. Use this instead of scrolling `ticket_list` when you remember a keyword but not a number.",
+        inputSchema: {
+            query: z.string().describe("Free-form text to look up. Special FTS5 syntax characters are stripped — pass plain words."),
+            project: z.string().optional().describe("Scope to one project (default: all projects the consumer can see)."),
+            open: z.boolean().optional().describe("If true, exclude rejected tickets from the hit list."),
+            intent: z
+                .enum(["panic", "request", "question", "fyi"])
+                .optional()
+                .describe("Filter on intent of the parent ticket."),
+            limit: z.number().int().min(1).max(200).optional().describe("Max hits to return. Default 50, hard cap 200."),
+        },
+    },
+    async ({ query, project, open, intent, limit }) => {
+        const hits = await client.search({ query, project, open, intent, limit });
+        return asText(hits);
     },
 );
 
@@ -448,8 +496,12 @@ server.registerTool(
             ]);
         return asText({
             consumer_id: client.agentId,
-            cwd: process.cwd(),
-            source: process.env.AIBALL_AGENT ? "AIBALL_AGENT env" : "sha256(cwd)",
+            // The MCP server process cwd, which is used as the fallback to
+            // derive the consumer_id when AIBALL_AGENT is unset. Renamed
+            // from `cwd` (per #B.215 feedback) — the bare name read as
+            // "the client's cwd" while it is actually the server's.
+            mcp_server_cwd: process.cwd(),
+            source: process.env.AIBALL_AGENT ? "AIBALL_AGENT env" : "sha256(mcp_server_cwd)",
             default_project: client.defaultProject,
             daemon,
             project_subscriptions: projectSubs,
@@ -469,12 +521,15 @@ await server.connect(transport);
 
 // If the agent has an explicit project (AIBALL_PROJECT, typically set in
 // .mcp.json env), auto-subscribe at startup so the agent's outbox feed
-// starts collecting messages immediately. upsertSubscription is idempotent,
-// so this is safe to call on every MCP launch. We intentionally do NOT pass
-// catchup=true: the agent should see new messages from now on, not the full
-// history of the project.
+// starts collecting messages immediately. The role is **owner**: an agent
+// identified by AIBALL_PROJECT=foo is the maintainer of foo and should
+// see every movement on it, not just broadcast-flagged tickets. Cross-
+// project subscriptions (manual `subscribe({ project: "other" })`) keep
+// the default "follower" role unless the caller passes role=owner.
+// upsertSubscription is idempotent — it updates the role if it differs,
+// so this is safe to call on every MCP launch.
 if (client.defaultProject) {
-    client.subscribe(client.defaultProject, false).catch(() => {
+    client.subscribe(client.defaultProject, false, "owner").catch(() => {
         // Daemon may be down at MCP startup; the agent will hit the spool
         // path on its next post and the subscription registers later when
         // the daemon comes back. Don't crash the MCP for this.

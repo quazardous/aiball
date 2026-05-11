@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import Button from "primevue/button";
 import Tag from "primevue/tag";
+import Textarea from "primevue/textarea";
 import MarkdownView from "./MarkdownView.vue";
 import { api, type Message } from "../lib/api";
 
@@ -34,7 +35,7 @@ const commentRef = computed(() => {
     // Fall back to the integer id for any legacy row that somehow lacks
     // a hashid — the backend's /b/:ref still resolves both forms.
     const h = props.msg.hashid;
-    return h ? `#C${h}` : `#C${props.msg.id}`;
+    return h ? `#C.${h}` : `#C.${props.msg.id}`;
 });
 async function copyRef() {
     try {
@@ -51,6 +52,35 @@ const LIFECYCLE_LABELS: Record<string, { icon: string; verb: string; severity: "
     ticket_reopened: { icon: "pi pi-unlock", verb: "reopened this ticket", severity: "info" },
     ticket_resolved: { icon: "pi pi-check-circle", verb: "marked this ticket resolved", severity: "success" },
 };
+
+// Body edit (per #B.94). Toggle reveals a textarea seeded with the
+// current body; save on blur or Ctrl/Cmd+Enter posts to api.edit and
+// emits "submitted" so the thread reloads.
+const editing = ref(false);
+const bodyDraft = ref("");
+const saveBusy = ref(false);
+function startEdit() {
+    bodyDraft.value = props.msg.edited_body ?? props.msg.body ?? "";
+    editing.value = true;
+}
+function cancelEdit() {
+    editing.value = false;
+}
+async function saveEdit() {
+    const current = props.msg.edited_body ?? props.msg.body ?? "";
+    if (bodyDraft.value === current) {
+        editing.value = false;
+        return;
+    }
+    saveBusy.value = true;
+    try {
+        await api.edit(props.msg.id, { body: bodyDraft.value });
+        editing.value = false;
+        emit("submitted");
+    } finally {
+        saveBusy.value = false;
+    }
+}
 </script>
 
 <template>
@@ -95,7 +125,39 @@ const LIFECYCLE_LABELS: Record<string, { icon: string; verb: string; severity: "
             <i :class="LIFECYCLE_LABELS[msg.kind].icon" />
             <span>{{ LIFECYCLE_LABELS[msg.kind].verb }}</span>
         </div>
-        <MarkdownView v-if="msg.body || msg.edited_body" :source="msg.edited_body ?? msg.body" />
+        <div v-if="editing" class="comment-edit">
+            <Textarea
+                v-model="bodyDraft"
+                :rows="4"
+                autoResize
+                style="width: 100%; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.9rem;"
+                :disabled="saveBusy"
+                placeholder="Comment body (markdown supported, leave blank to clear)"
+                @keydown.ctrl.enter.prevent="saveEdit"
+                @keydown.meta.enter.prevent="saveEdit"
+                @keydown.escape.prevent="cancelEdit"
+            />
+            <div class="comment-edit-actions">
+                <Button
+                    label="save"
+                    icon="pi pi-check"
+                    size="small"
+                    severity="success"
+                    :loading="saveBusy"
+                    @click="saveEdit"
+                />
+                <Button
+                    label="cancel"
+                    icon="pi pi-times"
+                    size="small"
+                    severity="secondary"
+                    text
+                    :disabled="saveBusy"
+                    @click="cancelEdit"
+                />
+            </div>
+        </div>
+        <MarkdownView v-else-if="msg.body || msg.edited_body" :source="msg.edited_body ?? msg.body" />
         <div v-if="msg.human_note" class="comment-note">
             <i class="pi pi-comment" />
             <em>{{ msg.human_note }}</em>
@@ -119,6 +181,19 @@ const LIFECYCLE_LABELS: Record<string, { icon: string; verb: string; severity: "
                 size="small"
                 :loading="decideBusy"
                 @click="decide('reject')"
+            />
+        </div>
+        <div
+            v-if="!editing && msg.kind === 'comment_added'"
+            class="comment-actions"
+        >
+            <Button
+                label="edit"
+                icon="pi pi-pencil"
+                size="small"
+                severity="secondary"
+                text
+                @click="startEdit"
             />
         </div>
     </div>
