@@ -891,6 +891,18 @@ async function copyTicketRef() {
     flex-direction: column;
     gap: 0.5rem;
 }
+/* Mirror the comment card's meta line so the ticket header gets the
+ * same flex behaviour (chips left, date pushed right by .spacer).
+ * Without this, the unstyled `<header class="meta">` rendered as a
+ * block and the date glued itself behind the author name (per #B.325). */
+.thread-ticket > header.meta {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    color: var(--p-text-muted-color);
+}
 .thread-title {
     margin: 0;
     font-size: 1.3rem;
