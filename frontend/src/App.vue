@@ -11,7 +11,7 @@ import { bus, useBus } from "./lib/bus";
 import { isPeek } from "./lib/peek";
 import IdentityPicker from "./components/IdentityPicker.vue";
 import ListRow from "./components/ListRow.vue";
-import MessageComposer from "./components/MessageComposer.vue";
+import NewTicketPage from "./components/NewTicketPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
 import TagBadge from "./components/TagBadge.vue";
@@ -54,7 +54,7 @@ const sortOptions: { label: string; value: SortBy }[] = [
 ];
 
 // Sidebar can route to a settings panel that replaces the lists entirely.
-type SettingsPanel = "rules" | "tags" | "projects";
+type SettingsPanel = "rules" | "tags" | "projects" | "compose";
 const panel = ref<SettingsPanel | null>(null);
 
 // OS notifications: lazily ask permission on first interaction so we don't
@@ -104,13 +104,6 @@ const openTicketId = ref<number | null>(null);
 
 const selectedIds = ref<Set<number>>(new Set());
 const bulkBusy = ref(false);
-
-const composeOpen = ref(false);
-function onComposed() {
-    // Just close the dialog — the composer already pushed
-    // inbox.refresh / projects.refresh / thread.refresh onto the bus.
-    composeOpen.value = false;
-}
 
 // Auto-refresh: optional 60s heartbeat that triggers a refresh of the
 // current view. WS push already keeps things fresh; this is a fallback
@@ -787,6 +780,13 @@ const globalResolvedCount = computed(() =>
                 <RulesPanel v-else-if="panel === 'rules'" />
                 <TagsPanel v-else-if="panel === 'tags'" />
 
+                <NewTicketPage
+                    v-else-if="panel === 'compose'"
+                    :initial-project="project"
+                    @back="panel = null"
+                    @submitted="panel = null"
+                />
+
                 <ThreadView
                     v-else-if="openTicketId !== null"
                     :ticket-id="openTicketId"
@@ -831,30 +831,12 @@ const globalResolvedCount = computed(() =>
                         />
                         <span class="spacer" />
                         <Button
-                            v-if="!composeOpen"
-                            :label="project ? `New ticket in ${project}` : 'New ticket'"
+                            label="New ticket"
                             icon="pi pi-plus"
                             size="small"
-                            :disabled="!project"
-                            :title="project ? '' : 'Pick a project first'"
-                            @click="composeOpen = true"
-                        />
-                        <Button
-                            v-else
-                            label="cancel"
-                            icon="pi pi-times"
-                            size="small"
-                            severity="secondary"
-                            text
-                            @click="composeOpen = false"
+                            @click="panel = 'compose'"
                         />
                     </div>
-                    <MessageComposer
-                        v-if="composeOpen && project"
-                        mode="ticket"
-                        :project="project"
-                        @submitted="onComposed"
-                    />
 
                     <div v-if="loading && !rows.length && !searchHits.length" class="aiball-empty">
                         Loading…
