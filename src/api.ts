@@ -45,6 +45,9 @@ import {
     listProjectsDetailed,
     deleteProject,
     setTicketBroadcast,
+    setTicketPostpone,
+    getTicketPostpone,
+    listExpiredPostpones,
     getMessageByHashid,
     markTicketSeen,
     markTicketUnseen,
@@ -543,6 +546,7 @@ api.get("/inbox", (req, res) => {
 
     const tagsMap = tagsForMessages(tickets.map((m) => m.id));
     const unreadMap = ticketUnreadFlags(consumerId, tickets.map((m) => m.id));
+    const nowStr = new Date().toISOString();
     let rows = tickets.map((t) => {
         const agg =
             byTicket.get(t.id) ??
@@ -554,6 +558,9 @@ api.get("/inbox", (req, res) => {
                 resolved: false,
                 pendingResolution: false,
             } as Agg);
+        const postponedUntil = t.postponed_until ?? null;
+        const postponed =
+            !!postponedUntil && postponedUntil > nowStr;
         return {
             id: t.id,
             project: t.project,
@@ -577,6 +584,12 @@ api.get("/inbox", (req, res) => {
             // Per-consumer unread flag (≥1 unseen ping on the thread for
             // the caller, resolved from the X-Aiball-Consumer header).
             unread: unreadMap.get(t.id) ?? false,
+            // Snooze (#B.329). `postponed=true` means the deadline hasn't
+            // passed yet — UI hides the row from the open inbox the same
+            // way `closed=true` does. `postponed_until` is the deadline
+            // itself, surfaced as a chip on the row when relevant.
+            postponed,
+            postponed_until: postponedUntil,
             comment_count: agg.commentCount,
             pending_comment_count: agg.pendingCount,
             last_activity:
@@ -592,7 +605,7 @@ api.get("/inbox", (req, res) => {
     } else if (status === "approved" || status === "rejected") {
         rows = rows.filter((r) => r.status === status);
     }
-    if (onlyOpen) rows = rows.filter((r) => !r.closed);
+    if (onlyOpen) rows = rows.filter((r) => !r.closed && !r.postponed);
     if (intentFilter && intentFilter !== "all") {
         rows = rows.filter((r) => r.intent === intentFilter);
     }
@@ -665,6 +678,63 @@ api.patch("/tickets/:id", (req: Request, res: Response) => {
     const updated = getMessage(id);
     if (updated) broadcast({ type: "message_edited", data: updated });
     res.json(updated);
+});
+
+/**
+ * Snooze a ticket (per #B.329). Body: `{ until: ISO8601 }` — the ticket
+ * is hidden from the open inbox until that timestamp. The daemon's
+ * reveal cron clears the field at the deadline and posts a synthetic
+ * `ticket_reopened` so it bounces back.
+ *
+ * Owner / human-bypass is enforced: only the ticket reporter or the
+ * human moderator can snooze. Other agents get a 403 to avoid surprise
+ * "where did my ticket go" moments.
+ */
+api.post("/tickets/:id/postpone", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    const caller = consumerOf(req);
+    const human = process.env.AIBALL_HUMAN ?? "human";
+    if (caller !== human && t.by_agent !== caller) {
+        return res.status(403).json({
+            error: `only the ticket reporter (${t.by_agent}) or the human moderator (${human}) can snooze this ticket`,
+        });
+    }
+    const { until } = (req.body ?? {}) as { until?: unknown };
+    if (typeof until !== "string" || !until) {
+        return badRequest(res, "until (ISO8601 string) required");
+    }
+    const parsed = Date.parse(until);
+    if (!Number.isFinite(parsed)) {
+        return badRequest(res, `invalid until "${until}" — expected ISO8601`);
+    }
+    if (parsed <= Date.now()) {
+        return badRequest(res, "until must be in the future");
+    }
+    const iso = new Date(parsed).toISOString();
+    const ok = setTicketPostpone(id, iso);
+    if (!ok) return notFound(res, "ticket not found");
+    const updated = getMessage(id);
+    if (updated) broadcast({ type: "message_edited", data: updated });
+    res.json({ ticket_id: id, postponed_until: iso });
+});
+
+api.post("/tickets/:id/unsnooze", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    const caller = consumerOf(req);
+    const human = process.env.AIBALL_HUMAN ?? "human";
+    if (caller !== human && t.by_agent !== caller) {
+        return res.status(403).json({
+            error: `only the ticket reporter (${t.by_agent}) or the human moderator (${human}) can unsnooze this ticket`,
+        });
+    }
+    setTicketPostpone(id, null);
+    const updated = getMessage(id);
+    if (updated) broadcast({ type: "message_edited", data: updated });
+    res.json({ ticket_id: id, postponed_until: null });
 });
 
 api.get("/tickets/:id", (req, res) => {
@@ -757,6 +827,7 @@ api.get("/tickets/:id", (req, res) => {
             resolved_by: resolved ? resolvedBy : null,
             resolved_at: resolved ? resolvedAt : null,
             broadcast: t.broadcast === 1,
+            postponed_until: t.postponed_until ?? null,
             intent: t.intent,
             tags: listMessageTags(t.id),
         },

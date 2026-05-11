@@ -148,6 +148,25 @@ export class AiballClient {
         return this.http("GET", "/api/projects");
     }
     /**
+     * Snooze a ticket until the given ISO8601 timestamp (per #B.329).
+     * The ticket is hidden from the open inbox until the deadline; the
+     * daemon's reveal cron clears the field at that point.
+     */
+    postponeTicket(ticket_id: number, until: string) {
+        return this.http<{ ticket_id: number; postponed_until: string }>(
+            "POST",
+            `/api/tickets/${ticket_id}/postpone`,
+            { until },
+        );
+    }
+    unsnoozeTicket(ticket_id: number) {
+        return this.http<{ ticket_id: number; postponed_until: null }>(
+            "POST",
+            `/api/tickets/${ticket_id}/unsnooze`,
+            {},
+        );
+    }
+    /**
      * Same endpoint with `detailed=1` — returns objects with counts
      * (ticket_count, open_count, pending_count, last_activity…) instead
      * of bare names. Used by poll() to surface per-project workload.

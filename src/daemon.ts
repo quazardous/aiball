@@ -8,6 +8,32 @@ import { attachWs } from "./ws.js";
 import { getDb } from "./db.js";
 import { AIBALL_HOME, UPLOADS_DIR, ensureDirs } from "./paths.js";
 import { drainSpool, watchSpool } from "./spool.js";
+import { listExpiredPostpones, setTicketPostpone, getMessage } from "./db.js";
+import { broadcast as wsBroadcast } from "./ws.js";
+
+/**
+ * Snooze reveal cron (per #B.329). Every 60s, find tickets whose
+ * `postponed_until` has passed, clear the field, and broadcast a
+ * `message_edited` so the UI bounces them back into the open inbox.
+ * The ticket was never actually closed (snooze ≠ close), so no
+ * synthetic `ticket_reopened` event is needed — clearing the field
+ * is enough.
+ */
+function revealExpiredPostpones(): void {
+    try {
+        const ids = listExpiredPostpones();
+        for (const id of ids) {
+            setTicketPostpone(id, null);
+            const updated = getMessage(id);
+            if (updated) wsBroadcast({ type: "message_edited", data: updated });
+        }
+        if (ids.length > 0) {
+            console.log(`[postpone] revealed ${ids.length} ticket${ids.length === 1 ? "" : "s"}`);
+        }
+    } catch (e) {
+        console.error("[postpone] reveal cron failed:", e);
+    }
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -71,6 +97,11 @@ function main(): void {
         else console.log("no frontend build found (dev mode)");
         drainSpool();
         watchSpool();
+        // Run the postpone reveal cron once at boot (in case the daemon
+        // was down past a deadline), then every 60s after. 60s is fine
+        // grain — users typically snooze for hours / days, not minutes.
+        revealExpiredPostpones();
+        setInterval(revealExpiredPostpones, 60_000).unref();
     });
 
     const shutdown = () => {

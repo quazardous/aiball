@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
+import Popover from "primevue/popover";
 import Select from "primevue/select";
 import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
@@ -444,6 +445,74 @@ async function commentAndUndoReject() {
 const hasBody = computed(() => composerBody.value.trim().length > 0);
 
 const broadcastBusy = ref(false);
+// Snooze (#B.329) — popover with presets + ISO custom input.
+const snoozeBusy = ref(false);
+const snoozePopoverRef = ref<InstanceType<typeof Popover> | null>(null);
+const snoozeCustom = ref("");
+
+function openSnoozePopover(ev: MouseEvent) {
+    snoozeCustom.value = "";
+    snoozePopoverRef.value?.show(ev);
+}
+
+async function snoozeFor(ms: number) {
+    if (!data.value) return;
+    const tid = data.value.ticket.id;
+    snoozeBusy.value = true;
+    try {
+        const until = new Date(Date.now() + ms).toISOString();
+        await api.postponeTicket(tid, until);
+        snoozePopoverRef.value?.hide();
+        bus.emit("thread.refresh", { ticketId: tid });
+        bus.emit("inbox.refresh");
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        snoozeBusy.value = false;
+    }
+}
+
+async function snoozeCustomSubmit() {
+    if (!data.value || !snoozeCustom.value) return;
+    const tid = data.value.ticket.id;
+    const ts = Date.parse(snoozeCustom.value);
+    if (!Number.isFinite(ts) || ts <= Date.now()) {
+        error.value = "Snooze date must be a valid future ISO8601 timestamp";
+        return;
+    }
+    snoozeBusy.value = true;
+    try {
+        await api.postponeTicket(tid, new Date(ts).toISOString());
+        snoozePopoverRef.value?.hide();
+        bus.emit("thread.refresh", { ticketId: tid });
+        bus.emit("inbox.refresh");
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        snoozeBusy.value = false;
+    }
+}
+
+async function unsnooze() {
+    if (!data.value) return;
+    const tid = data.value.ticket.id;
+    snoozeBusy.value = true;
+    try {
+        await api.unsnoozeTicket(tid);
+        bus.emit("thread.refresh", { ticketId: tid });
+        bus.emit("inbox.refresh");
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        snoozeBusy.value = false;
+    }
+}
+
+const isSnoozed = computed(() => {
+    if (!data.value?.ticket.postponed_until) return false;
+    return Date.parse(data.value.ticket.postponed_until) > Date.now();
+});
+
 async function toggleBroadcast() {
     if (!data.value) return;
     const tid = data.value.ticket.id;
@@ -501,6 +570,57 @@ async function copyTicketRef() {
                     : 'Broadcast OFF (default): only project owners and explicit thread followers receive pings. Click to broadcast to all project followers.'"
                 @click="toggleBroadcast"
             />
+            <Button
+                v-if="data && data.ticket.status === 'approved' && !data.ticket.closed && !isSnoozed"
+                icon="pi pi-moon"
+                severity="info"
+                size="small"
+                text
+                rounded
+                :loading="snoozeBusy"
+                title="Snooze this ticket — it disappears from the open inbox until the date you pick, then auto-reappears."
+                @click="openSnoozePopover"
+            />
+            <Button
+                v-if="data && isSnoozed"
+                icon="pi pi-sun"
+                severity="info"
+                size="small"
+                :loading="snoozeBusy"
+                :title="`Snoozed until ${data.ticket.postponed_until ? new Date(data.ticket.postponed_until).toLocaleString() : ''} — click to bring back now.`"
+                @click="unsnooze"
+            />
+            <Popover ref="snoozePopoverRef">
+                <div class="snooze-popover">
+                    <div class="snooze-popover__title">Snooze until…</div>
+                    <div class="snooze-popover__presets">
+                        <Button label="1 hour"  size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(60 * 60_000)" />
+                        <Button label="3 hours" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(3 * 60 * 60_000)" />
+                        <Button label="tomorrow" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(86_400_000)" />
+                        <Button label="3 days" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(3 * 86_400_000)" />
+                        <Button label="1 week" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(7 * 86_400_000)" />
+                        <Button label="1 month" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(30 * 86_400_000)" />
+                    </div>
+                    <div class="snooze-popover__custom">
+                        <InputText
+                            v-model="snoozeCustom"
+                            size="small"
+                            type="datetime-local"
+                            class="snooze-popover__custom-input"
+                            :disabled="snoozeBusy"
+                        />
+                        <Button
+                            label="snooze"
+                            icon="pi pi-check"
+                            size="small"
+                            severity="info"
+                            :loading="snoozeBusy"
+                            :disabled="!snoozeCustom"
+                            @click="snoozeCustomSubmit"
+                        />
+                    </div>
+                </div>
+            </Popover>
             <template v-if="data && data.ticket.status === 'approved' && !data.ticket.closed">
                 <template v-if="pendingResolution">
                     <Button
@@ -653,6 +773,20 @@ async function copyTicketRef() {
                 >
                     <i class="pi pi-lock" />
                     Closed without explicit resolution (wontfix / abandoned / duplicate).
+                </div>
+                <div
+                    v-if="isSnoozed"
+                    class="thread-snoozed-banner"
+                    :title="data.ticket.postponed_until ?? ''"
+                >
+                    <i class="pi pi-moon" />
+                    Snoozed until
+                    <strong>
+                        {{ data.ticket.postponed_until
+                            ? new Date(data.ticket.postponed_until).toLocaleString()
+                            : "" }}
+                    </strong>
+                    — hidden from the open inbox until then.
                 </div>
                 <div class="thread-meta-extra">
                     <Tag
@@ -903,6 +1037,29 @@ async function copyTicketRef() {
     font-size: 0.85rem;
     color: var(--p-text-muted-color);
 }
+.snooze-popover {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    min-width: 22rem;
+}
+.snooze-popover__title {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+.snooze-popover__presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+.snooze-popover__custom {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.snooze-popover__custom-input {
+    flex: 1;
+}
 .thread-title {
     margin: 0;
     font-size: 1.3rem;
@@ -935,6 +1092,19 @@ async function copyTicketRef() {
     background: color-mix(in srgb, var(--p-green-500) 15%, transparent);
     border-left: 3px solid var(--p-green-500);
     font-size: 0.88rem;
+}
+.thread-snoozed-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: 0.4rem;
+    background: color-mix(in srgb, var(--p-blue-500) 12%, transparent);
+    border-left: 3px solid var(--p-blue-500);
+    font-size: 0.88rem;
+}
+.aiball-dark .thread-snoozed-banner {
+    background: color-mix(in srgb, var(--p-blue-500) 22%, transparent);
 }
 .aiball-dark .thread-resolved-banner {
     background: color-mix(in srgb, var(--p-green-500) 25%, transparent);

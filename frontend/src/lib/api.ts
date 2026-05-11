@@ -91,6 +91,9 @@ export interface TicketSummary {
     resolved_by?: string | null;
     resolved_at?: string | null;
     broadcast?: boolean;
+    /** Snooze (#B.329) — when set and in the future, the ticket is
+     *  hidden from the open inbox until that timestamp. */
+    postponed_until?: string | null;
     intent: Intent | null;
     tags: Tag[];
 }
@@ -126,6 +129,11 @@ export interface InboxRow {
     broadcast?: boolean;
     /** Per-consumer flag: ≥1 unseen ping on the thread for the requesting consumer. */
     unread?: boolean;
+    /** Snooze flag (#B.329): true iff `postponed_until` is in the future.
+     *  Postponed rows are hidden from the open inbox the same way closed
+     *  ones are. */
+    postponed?: boolean;
+    postponed_until?: string | null;
     comment_count: number;
     pending_comment_count: number;
     last_activity: string;
@@ -246,6 +254,18 @@ export const api = {
     },
     setTicketBroadcast: (id: number, broadcast: boolean) =>
         req<TicketSummary>("PATCH", `/api/tickets/${id}`, { broadcast }),
+    postponeTicket: (id: number, until: string) =>
+        req<{ ticket_id: number; postponed_until: string }>(
+            "POST",
+            `/api/tickets/${id}/postpone`,
+            { until },
+        ),
+    unsnoozeTicket: (id: number) =>
+        req<{ ticket_id: number; postponed_until: null }>(
+            "POST",
+            `/api/tickets/${id}/unsnooze`,
+            {},
+        ),
     postMessage: (body: PostMessageInput) =>
         req<Message>("POST", "/api/messages", body),
     approve: (id: number) =>

@@ -288,6 +288,63 @@ server.registerTool(
     },
 );
 
+/**
+ * Snooze a ticket until a future timestamp (per #B.329). Accepts either
+ * an absolute ISO8601 date OR a relative shorthand:
+ *   "+30m" / "+2h" / "+3d" / "+1w" / "+1mo" (mo = ~30 days for simplicity).
+ * The ticket is hidden from the open inbox until the deadline. At that
+ * point, the daemon's reveal cron pops it back in.
+ */
+function resolveUntil(input: string): string {
+    const m = /^\+(\d+)(min|m|h|d|w|mo)$/.exec(input.trim());
+    if (m) {
+        const n = Number(m[1]);
+        const unit = m[2];
+        const ms = (() => {
+            switch (unit) {
+                case "min":
+                case "m": return n * 60_000;
+                case "h": return n * 3_600_000;
+                case "d": return n * 86_400_000;
+                case "w": return n * 7 * 86_400_000;
+                case "mo": return n * 30 * 86_400_000;
+                default: return 0;
+            }
+        })();
+        if (ms <= 0) throw new Error(`invalid relative until "${input}"`);
+        return new Date(Date.now() + ms).toISOString();
+    }
+    const ts = Date.parse(input);
+    if (!Number.isFinite(ts)) throw new Error(`invalid until "${input}" — expected ISO8601 or +<N><unit>`);
+    if (ts <= Date.now()) throw new Error(`until must be in the future`);
+    return new Date(ts).toISOString();
+}
+
+server.registerTool(
+    "ticket_postpone",
+    {
+        description:
+            "Snooze a ticket — hide it from the open inbox until the given deadline, then auto-reveal it (per #B.329). Useful for \"come back to this later\" without closing or deleting the thread.\n\n`until` accepts either:\n- An ISO8601 timestamp (e.g. `2026-05-18T09:00:00Z`).\n- A relative shorthand: `+30m`, `+2h`, `+3d`, `+1w`, `+1mo` (months ≈ 30 days).\n\nOnly the ticket reporter or the human moderator can snooze. Pass `until: \"\"` (or use `ticket_unsnooze` semantically — there is no separate tool; pass an empty string to clear).",
+        inputSchema: {
+            ticket_id: z.number().int(),
+            until: z
+                .string()
+                .describe(
+                    "ISO8601 timestamp (e.g. 2026-05-18T09:00:00Z) or relative shorthand (+30m / +2h / +3d / +1w / +1mo). Pass an empty string to unsnooze.",
+                ),
+        },
+    },
+    async ({ ticket_id, until }) => {
+        if (!until.trim()) {
+            const res = await client.unsnoozeTicket(ticket_id);
+            return asText(res);
+        }
+        const iso = resolveUntil(until);
+        const res = await client.postponeTicket(ticket_id, iso);
+        return asText(res);
+    },
+);
+
 server.registerTool(
     "ticket_list",
     {

@@ -86,6 +86,13 @@ export interface Message {
      * chosen at insert time to never collide with ticket numbers.
      */
     hashid: string | null;
+    /**
+     * Snooze / postpone timestamp (per #B.329). When set to an ISO8601
+     * date in the future, the ticket is hidden from the open inbox until
+     * the daemon's reveal cron clears the field. NULL for non-ticket
+     * rows and for tickets that aren't currently snoozed.
+     */
+    postponed_until?: string | null;
 }
 
 export type SubscriptionRole = "owner" | "follower";
@@ -327,6 +334,7 @@ function ticketRowToMessage(t: schema.Ticket): Message {
         display_seq: t.displaySeq,
         broadcast: t.broadcast ?? 0,
         hashid: null,
+        postponed_until: t.postponedUntil ?? null,
     };
 }
 
@@ -1110,6 +1118,51 @@ export function setTicketBroadcast(ticketId: number, value: boolean): boolean {
         .where(eq(schema.tickets.id, ticketId))
         .run();
     return res.changes > 0;
+}
+
+// =====================================================================
+//                  Postpone / snooze (per #B.329)
+// =====================================================================
+
+/**
+ * Snooze a ticket until the given ISO8601 timestamp. While the ticket is
+ * snoozed, it's hidden from the open inbox (treated as closed for
+ * filtering). The daemon's reveal cron clears the field at the deadline
+ * and posts a synthetic `ticket_reopened` so the ticket bounces back.
+ */
+export function setTicketPostpone(ticketId: number, until: string | null): boolean {
+    const res = getDb().update(schema.tickets)
+        .set({ postponedUntil: until })
+        .where(eq(schema.tickets.id, ticketId))
+        .run();
+    return res.changes > 0;
+}
+
+export function getTicketPostpone(ticketId: number): string | null {
+    const row = getDb()
+        .select({ p: schema.tickets.postponedUntil })
+        .from(schema.tickets)
+        .where(eq(schema.tickets.id, ticketId))
+        .get();
+    return row?.p ?? null;
+}
+
+/**
+ * Return the ids of tickets whose snooze period has expired (i.e.
+ * `postponed_until <= now`). The caller (daemon cron) is expected to
+ * clear the field and post a `ticket_reopened` for each. Cheap query
+ * — uses the `idx_tickets_postponed` index.
+ */
+export function listExpiredPostpones(nowIsoString: string = nowIso()): number[] {
+    const rows = getDb()
+        .select({ id: schema.tickets.id })
+        .from(schema.tickets)
+        .where(and(
+            isNotNull(schema.tickets.postponedUntil),
+            lte(schema.tickets.postponedUntil, nowIsoString),
+        ))
+        .all();
+    return rows.map((r) => r.id);
 }
 
 // =====================================================================

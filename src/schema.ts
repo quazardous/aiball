@@ -47,10 +47,20 @@ export const tickets = sqliteTable("tickets", {
      * pings on the *next* activity after the flag flips.
      */
     broadcast: integer("broadcast").notNull().default(0),
+    /**
+     * Snooze / postpone (per #B.329). When set to an ISO8601 timestamp in
+     * the future, the ticket is hidden from the open-inbox view (treated
+     * as closed). At that timestamp, the daemon's reveal cron clears the
+     * field and posts a synthetic `ticket_reopened` so the ticket bounces
+     * back into the inbox with the usual ping fan-out. While snoozed, no
+     * pings fire (the user explicitly put it aside).
+     */
+    postponedUntil: text("postponed_until"),
 }, (t) => [
     uniqueIndex("idx_tickets_project_display").on(t.project, t.displaySeq),
     index("idx_tickets_project").on(t.project),
     index("idx_tickets_status").on(t.status),
+    index("idx_tickets_postponed").on(t.postponedUntil),
 ]);
 
 export const messages = sqliteTable("_messages", {

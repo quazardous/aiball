@@ -194,7 +194,9 @@ type BulkAction =
     | "close"
     | "reopen"
     | "mark_read"
-    | "mark_unread";
+    | "mark_unread"
+    | "snooze"
+    | "unsnooze";
 
 const BULK_LABELS: Record<BulkAction, string> = {
     approve: "approve",
@@ -203,7 +205,13 @@ const BULK_LABELS: Record<BulkAction, string> = {
     reopen: "reopen",
     mark_read: "mark read",
     mark_unread: "mark unread",
+    snooze: "snooze",
+    unsnooze: "unsnooze",
 };
+
+/** Default snooze duration when the bulk button is clicked without a
+ *  picker — matches the "+3d" preset of the thread popover. */
+const BULK_SNOOZE_DEFAULT_MS = 3 * 86_400_000;
 
 /**
  * Per-row applicability test for each bulk action. Rows that don't
@@ -224,6 +232,10 @@ function bulkApplicable(action: BulkAction, r: InboxRow): boolean {
             return r.unread === true;
         case "mark_unread":
             return r.unread !== true;
+        case "snooze":
+            return r.status === "approved" && !r.closed && !r.postponed;
+        case "unsnooze":
+            return r.postponed === true;
     }
 }
 
@@ -267,6 +279,15 @@ async function bulkAction(action: BulkAction) {
                         break;
                     case "mark_unread":
                         await api.markTicketUnread(r.id);
+                        break;
+                    case "snooze":
+                        await api.postponeTicket(
+                            r.id,
+                            new Date(Date.now() + BULK_SNOOZE_DEFAULT_MS).toISOString(),
+                        );
+                        break;
+                    case "unsnooze":
+                        await api.unsnoozeTicket(r.id);
                         break;
                 }
                 ok++;
@@ -665,6 +686,8 @@ const bulkCounts = computed(() => ({
     reopen: bulkApplicableCount("reopen"),
     mark_read: bulkApplicableCount("mark_read"),
     mark_unread: bulkApplicableCount("mark_unread"),
+    snooze: bulkApplicableCount("snooze"),
+    unsnooze: bulkApplicableCount("unsnooze"),
 }));
 
 interface ProjectListItem {
@@ -1107,6 +1130,28 @@ const globalResolvedCount = computed(() =>
                                 ? 'Mark the selected unread tickets as read (others skipped)'
                                 : 'Mark the selected read tickets as unread (others skipped)'"
                             @click="bulkAction(bulkCounts.mark_read >= bulkCounts.mark_unread ? 'mark_read' : 'mark_unread')"
+                        />
+                        <Button
+                            v-if="bulkCounts.snooze"
+                            icon="pi pi-moon"
+                            :label="`snooze (${bulkCounts.snooze})`"
+                            severity="info"
+                            text
+                            size="small"
+                            :loading="bulkBusy"
+                            title="Snooze the selected open tickets for 3 days (others skipped). Use the thread toolbar for a custom duration."
+                            @click="bulkAction('snooze')"
+                        />
+                        <Button
+                            v-if="bulkCounts.unsnooze"
+                            icon="pi pi-sun"
+                            :label="`unsnooze (${bulkCounts.unsnooze})`"
+                            severity="info"
+                            text
+                            size="small"
+                            :loading="bulkBusy"
+                            title="Bring the selected snoozed tickets back to the open inbox now."
+                            @click="bulkAction('unsnooze')"
                         />
                         <Button
                             v-if="bulkCounts.close"
