@@ -505,11 +505,13 @@ async function onAttachPicked(ev: Event) {
  * textarea wrap; appears just below the textarea. Keyboard nav fires
  * from the textarea itself (we don't move focus). */
 .mention-popover {
+    /* Sit ABOVE the textarea (bottom anchor) so it doesn't cover the
+     * markdown hint or the action buttons just below the composer. */
     position: absolute;
     z-index: 20;
-    top: 100%;
+    bottom: 100%;
     left: 0;
-    margin: 0.15rem 0 0;
+    margin: 0 0 0.25rem;
     padding: 0.2rem;
     list-style: none;
     min-width: 14rem;
@@ -517,7 +519,7 @@ async function onAttachPicked(ev: Event) {
     background: var(--p-content-background);
     border: 1px solid var(--p-content-border-color);
     border-radius: 0.4rem;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
     display: flex;
     flex-direction: column;
     gap: 0.05rem;

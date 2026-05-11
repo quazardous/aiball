@@ -770,6 +770,7 @@ async function copyTicketRef() {
                         icon="pi pi-undo"
                         severity="warn"
                         size="small"
+                        text
                         rounded
                         :loading="resolutionBusy"
                         title="Undo resolved — clear the resolution and bring the ticket back to plain open. Embarks any text typed in the composer."
@@ -798,16 +799,28 @@ async function copyTicketRef() {
                 title="Reopen this ticket. Embarks any text typed in the composer."
                 @click="commentAndReopen"
             />
-            <Button
-                v-else-if="data && data.ticket.status === 'pending' && data.ticket.resolved && !data.ticket.closed"
-                icon="pi pi-undo"
-                severity="warn"
-                size="small"
-                rounded
-                :loading="resolutionBusy"
-                title="Undo resolved — clear the resolution while the ticket is still in moderation. Embarks any text typed in the composer."
-                @click="commentAndReopen"
-            />
+            <template v-else-if="data && data.ticket.status === 'pending' && data.ticket.resolved && !data.ticket.closed">
+                <Button
+                    icon="pi pi-undo"
+                    severity="warn"
+                    size="small"
+                    text
+                    rounded
+                    :loading="resolutionBusy"
+                    title="Undo resolved — clear the resolution while the ticket is still in moderation. Embarks any text typed in the composer."
+                    @click="commentAndReopen"
+                />
+                <Button
+                    icon="pi pi-lock"
+                    severity="secondary"
+                    size="small"
+                    text
+                    rounded
+                    :loading="resolutionBusy"
+                    title="Close the ticket (only the reporter can close). Embarks any text typed in the composer."
+                    @click="commentAndClose"
+                />
+            </template>
             <Button
                 v-else-if="data && data.ticket.status === 'rejected'"
                 icon="pi pi-replay"
