@@ -43,11 +43,21 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     const db = getDb();
     // Aggregates by project across tickets + messages. Two queries merged
     // in JS — small data sizes, simpler than a SQL UNION/GROUP dance.
+    // Snoozed-pending tickets are explicitly set aside — they should NOT
+    // count in the sidebar pending badge (the human chose to defer them).
+    // Pattern: ticket_pending counts only pending tickets whose
+    // postponed_until is NULL or already past. Same idea for comments
+    // whose parent ticket is currently snoozed.
+    const nowIsoStr = nowIso();
     const ticketAgg = db.select({
         project: schema.tickets.project,
         last_activity: sql<string>`MAX(${schema.tickets.createdAt})`,
         ticket_count: sql<number>`COUNT(*)`,
-        ticket_pending: sql<number>`SUM(CASE WHEN ${schema.tickets.status} = 'pending' THEN 1 ELSE 0 END)`,
+        ticket_pending: sql<number>`SUM(CASE
+            WHEN ${schema.tickets.status} = 'pending'
+             AND (${schema.tickets.postponedUntil} IS NULL
+                  OR ${schema.tickets.postponedUntil} <= ${nowIsoStr})
+            THEN 1 ELSE 0 END)`,
     }).from(schema.tickets).groupBy(schema.tickets.project).all();
 
     // pending_count == "moderation backlog the human needs to look at".
@@ -58,11 +68,18 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     // not the moderator). Pending ticket_closed/reopened on already-closed
     // tickets are moot and get auto-rejected by submitMessage forward, plus
     // backfill-rejected as a one-shot.
+    // Snoozed parent tickets exclude their pending comments from the count
+    // for the same reason as above.
     const messageAgg = db.select({
         project: schema.tickets.project,
         last_activity: sql<string>`MAX(${schema.messages.createdAt})`,
         comment_count: sql<number>`SUM(CASE WHEN ${schema.messages.kind} = 'comment_added' THEN 1 ELSE 0 END)`,
-        message_pending: sql<number>`SUM(CASE WHEN ${schema.messages.kind} = 'comment_added' AND ${schema.messages.status} = 'pending' THEN 1 ELSE 0 END)`,
+        message_pending: sql<number>`SUM(CASE
+            WHEN ${schema.messages.kind} = 'comment_added'
+             AND ${schema.messages.status} = 'pending'
+             AND (${schema.tickets.postponedUntil} IS NULL
+                  OR ${schema.tickets.postponedUntil} <= ${nowIsoStr})
+            THEN 1 ELSE 0 END)`,
     })
         .from(schema.messages)
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
