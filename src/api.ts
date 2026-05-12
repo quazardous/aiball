@@ -688,9 +688,13 @@ api.get("/inbox", (req, res) => {
         rows = rows.filter((r) => r.status === status);
     }
     if (onlyOpen) {
-        rows = rows.filter(
-            (r) => !r.closed && (includePostponed || !r.postponed),
-        );
+        rows = rows.filter((r) => !r.closed);
+    }
+    // Snooze filter applies on every status combination — not just when
+    // `open=1`. Otherwise pending+snoozed tickets slip through (regression
+    // surfaced after #B.78 enabled snoozing on pending tickets).
+    if (!includePostponed) {
+        rows = rows.filter((r) => !r.postponed);
     }
     if (intentFilter && intentFilter !== "all") {
         rows = rows.filter((r) => r.intent === intentFilter);
