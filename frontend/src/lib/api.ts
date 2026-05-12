@@ -304,7 +304,10 @@ export const api = {
             `/api/tickets/${id}/mark-unread`,
             {},
         ),
-    getTicket: (id: number) => req<ThreadView>("GET", `/api/tickets/${id}`),
+    // The UI always needs the full thread (body + comments) — the
+    // summary default that landed in 0.5.x (#B.87) targets agents, not
+    // the moderator browser. Force full=1.
+    getTicket: (id: number) => req<ThreadView>("GET", `/api/tickets/${id}?full=1`),
     search: (params: {
         q: string;
         project?: string;
