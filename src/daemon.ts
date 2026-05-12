@@ -2,7 +2,7 @@ import express from "express";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, unlinkSync, chmodSync } from "node:fs";
 import { api } from "./api.js";
 import { attachWs } from "./ws.js";
 import { getDb } from "./db.js";
@@ -39,6 +39,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const HOST = process.env.AIBALL_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.AIBALL_PORT ?? 7777);
+
+// Unix-domain-socket listener for local-trust access (per #B.94 follow-up).
+// Same-uid clients (CLI, MCP wrapper) connect here and bypass bearer auth —
+// the OS already enforces the trust boundary via chmod 600. Set
+// AIBALL_SOCK="" to disable. Defaults to $AIBALL_HOME/sock.
+const SOCK_PATH = (() => {
+    const v = process.env.AIBALL_SOCK;
+    if (v === "") return null; // explicit opt-out
+    return v ?? join(AIBALL_HOME, "sock");
+})();
 
 function frontendDistDir(): string | null {
     const candidates = [
@@ -104,9 +114,31 @@ function main(): void {
         setInterval(revealExpiredPostpones, 60_000).unref();
     });
 
+    // Side-car UDS server. Same Express app, but every incoming socket
+    // is tagged so the auth middleware can recognize it as local-trust.
+    let udsServer: ReturnType<typeof createServer> | null = null;
+    if (SOCK_PATH) {
+        try { unlinkSync(SOCK_PATH); } catch { /* not present */ }
+        udsServer = createServer(app);
+        udsServer.on("connection", (sock) => {
+            // The auth middleware reads this flag on req.socket.
+            (sock as unknown as { __aiballUds: boolean }).__aiballUds = true;
+        });
+        udsServer.listen(SOCK_PATH, () => {
+            try { chmodSync(SOCK_PATH, 0o600); } catch { /* best effort */ }
+            console.log(`aiball daemon listening on unix:${SOCK_PATH} (local-trust)`);
+        });
+    }
+
     const shutdown = () => {
         console.log("shutting down...");
         server.close(() => process.exit(0));
+        if (udsServer) {
+            udsServer.close();
+            if (SOCK_PATH) {
+                try { unlinkSync(SOCK_PATH); } catch { /* already gone */ }
+            }
+        }
         setTimeout(() => process.exit(1), 5000).unref();
     };
     process.on("SIGINT", shutdown);

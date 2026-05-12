@@ -2,11 +2,19 @@
  * Thin HTTP client to talk to the aiball daemon, with the same spool-fallback
  * semantics as the bash CLI: if POST /messages can't reach the daemon, drop a
  * JSON file in the spool directory so the daemon picks it up later.
+ *
+ * Transport: TCP (`url`) is the default; pass `socketPath` (or set
+ * `AIBALL_SOCK`) to route through a Unix domain socket instead. UDS is
+ * the preferred transport for same-host CLI/MCP — the daemon enforces
+ * trust at the OS level (chmod 600 on the socket file) so no bearer
+ * token is needed. Token + URL remain the only path for remote clients
+ * if the architecture ever grows beyond local.
  */
 import { mkdirSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
+import { request as httpRequest, type IncomingMessage } from "node:http";
 
 export interface ClientOptions {
     url?: string;
@@ -14,8 +22,14 @@ export interface ClientOptions {
     timeoutMs?: number;
     agentId?: string;
     defaultProject?: string;
-    /** Bearer token (#B.94). Defaults to `$AIBALL_TOKEN` env. */
+    /** Bearer token (#B.94). Defaults to `$AIBALL_TOKEN` env. Ignored when `socketPath` is set. */
     token?: string;
+    /**
+     * Unix domain socket path. When set, requests bypass TCP and route
+     * through `http.request({socketPath})`. Defaults to `$AIBALL_SOCK`.
+     * Same-uid clients use this for token-less local access.
+     */
+    socketPath?: string;
 }
 
 export interface SpoolResult {
@@ -32,6 +46,7 @@ export class AiballClient {
     readonly agentId: string;
     readonly defaultProject: string | null;
     readonly token: string | null;
+    readonly socketPath: string | null;
 
     constructor(opts: ClientOptions = {}) {
         this.url = opts.url ?? process.env.AIBALL_URL ?? "http://127.0.0.1:7777";
@@ -45,6 +60,10 @@ export class AiballClient {
         this.agentId = opts.agentId ?? resolveAgentId();
         this.defaultProject =
             opts.defaultProject ?? process.env.AIBALL_PROJECT ?? null;
+        // UDS preferred when present — auth-free. Falls back to TCP+token.
+        const envSock = process.env.AIBALL_SOCK;
+        this.socketPath =
+            opts.socketPath ?? (envSock && envSock !== "" ? envSock : null);
         this.token = opts.token ?? process.env.AIBALL_TOKEN ?? null;
     }
 
@@ -67,17 +86,33 @@ export class AiballClient {
         path: string,
         body?: unknown,
     ): Promise<T> {
+        const headers: Record<string, string> = {};
+        if (body) headers["content-type"] = "application/json";
+        if (this.agentId) headers["x-aiball-consumer"] = this.agentId;
+        // Bearer is irrelevant over UDS (server bypasses auth there).
+        if (!this.socketPath && this.token) {
+            headers["authorization"] = `Bearer ${this.token}`;
+        }
+        const payload = body ? JSON.stringify(body) : undefined;
+        if (this.socketPath) {
+            return this.httpUds<T>(method, path, headers, payload);
+        }
+        return this.httpTcp<T>(method, path, headers, payload);
+    }
+
+    private async httpTcp<T>(
+        method: string,
+        path: string,
+        headers: Record<string, string>,
+        payload: string | undefined,
+    ): Promise<T> {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), this.timeoutMs);
         try {
-            const headers: Record<string, string> = {};
-            if (body) headers["content-type"] = "application/json";
-            if (this.token) headers["authorization"] = `Bearer ${this.token}`;
-            if (this.agentId) headers["x-aiball-consumer"] = this.agentId;
             const res = await fetch(this.url + path, {
                 method,
                 headers,
-                body: body ? JSON.stringify(body) : undefined,
+                body: payload,
                 signal: ctrl.signal,
             });
             if (!res.ok) {
@@ -90,6 +125,54 @@ export class AiballClient {
         } finally {
             clearTimeout(t);
         }
+    }
+
+    private httpUds<T>(
+        method: string,
+        path: string,
+        headers: Record<string, string>,
+        payload: string | undefined,
+    ): Promise<T> {
+        return new Promise((resolve, reject) => {
+            const req = httpRequest(
+                {
+                    socketPath: this.socketPath!,
+                    path,
+                    method,
+                    headers,
+                    timeout: this.timeoutMs,
+                },
+                (res: IncomingMessage) => {
+                    const chunks: Buffer[] = [];
+                    res.on("data", (c) => chunks.push(c as Buffer));
+                    res.on("end", () => {
+                        const text = Buffer.concat(chunks).toString("utf8");
+                        const status = res.statusCode ?? 0;
+                        if (status < 200 || status >= 300) {
+                            reject(new Error(`${method} ${path} → ${status}: ${text}`));
+                            return;
+                        }
+                        const ct = res.headers["content-type"] ?? "";
+                        if (typeof ct === "string" && ct.includes("application/json")) {
+                            try {
+                                resolve(JSON.parse(text) as T);
+                            } catch (e) {
+                                reject(e);
+                            }
+                            return;
+                        }
+                        resolve(undefined as unknown as T);
+                    });
+                    res.on("error", reject);
+                },
+            );
+            req.on("error", reject);
+            req.on("timeout", () => {
+                req.destroy(new Error(`${method} ${path} → timeout after ${this.timeoutMs}ms`));
+            });
+            if (payload) req.write(payload);
+            req.end();
+        });
     }
 
     /** Try to POST a new message; on failure, queue it in the spool. */

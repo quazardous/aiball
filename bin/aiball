@@ -14,10 +14,15 @@ ROOT="$(cd "$BIN_DIR/.." && pwd)"
 
 cd "$ROOT"
 
-# #B.94: auto-pick up the AIBALL_TOKEN written by `aiball auth init` /
-# `aiball auth issue` so HTTP calls authenticate without manual export.
+# Local-trust transport (#B.94 follow-up). If the daemon's Unix socket
+# is present, route through it — same-uid trust (chmod 600), no token.
+# Fall back to the cli-env bearer token if the socket isn't there yet
+# (e.g. talking to an older daemon or a remote box via SSH tunnel).
 AIBALL_HOME="${AIBALL_HOME:-$HOME/.local/share/aiball}"
-if [[ -z "${AIBALL_TOKEN:-}" && -f "$AIBALL_HOME/cli-env" ]]; then
+if [[ -z "${AIBALL_SOCK:-}" && -S "$AIBALL_HOME/sock" ]]; then
+    export AIBALL_SOCK="$AIBALL_HOME/sock"
+fi
+if [[ -z "${AIBALL_SOCK:-}" && -z "${AIBALL_TOKEN:-}" && -f "$AIBALL_HOME/cli-env" ]]; then
     # shellcheck source=/dev/null
     source "$AIBALL_HOME/cli-env"
 fi

@@ -100,7 +100,6 @@ async function submit() {
                 <InputText
                     id="cid"
                     v-model="consumerId"
-                    placeholder="david"
                     autocomplete="username"
                 />
                 <p class="auth-hint">
@@ -113,7 +112,7 @@ async function submit() {
                 <InputText
                     id="display"
                     v-model="displayName"
-                    placeholder="David (optional)"
+                    placeholder="optional"
                 />
             </div>
 

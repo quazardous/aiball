@@ -15,10 +15,14 @@ ROOT="$(cd "$BIN_DIR/.." && pwd)"
 
 cd "$ROOT"
 
-# #B.94: auto-source the CLI env so HTTP calls authenticate without
-# requiring each .mcp.json to hard-code a token.
+# Local-trust transport (#B.94 follow-up). UDS first; fall back to the
+# cli-env bearer token if the socket isn't around (older daemon, remote
+# box, opt-out via AIBALL_SOCK="").
 AIBALL_HOME="${AIBALL_HOME:-$HOME/.local/share/aiball}"
-if [[ -z "${AIBALL_TOKEN:-}" && -f "$AIBALL_HOME/cli-env" ]]; then
+if [[ -z "${AIBALL_SOCK:-}" && -S "$AIBALL_HOME/sock" ]]; then
+    export AIBALL_SOCK="$AIBALL_HOME/sock"
+fi
+if [[ -z "${AIBALL_SOCK:-}" && -z "${AIBALL_TOKEN:-}" && -f "$AIBALL_HOME/cli-env" ]]; then
     # shellcheck source=/dev/null
     source "$AIBALL_HOME/cli-env"
 fi

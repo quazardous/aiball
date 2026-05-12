@@ -124,6 +124,21 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         next();
         return;
     }
+    // Unix-socket local-trust bypass (per #B.94 follow-up). The daemon
+    // tags every UDS-borne socket with __aiballUds at connection time;
+    // those requests inherit OS-level same-uid trust (chmod 600 on the
+    // socket file) so no bearer is needed. Identity is read from the
+    // X-Aiball-Consumer header — defaults to "human" if omitted, since
+    // a same-uid caller is the local owner of this aiball instance.
+    if ((req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true) {
+        const override = req.header("x-aiball-consumer");
+        const cid = (typeof override === "string" && override.trim()) || "human";
+        const ar = req as AuthenticatedRequest;
+        ar.consumer_id = cid;
+        ar.token_kind = "agent";
+        next();
+        return;
+    }
     const token = readBearerToken(req);
     if (!token) {
         res.status(401).set("www-authenticate", "Bearer").json({

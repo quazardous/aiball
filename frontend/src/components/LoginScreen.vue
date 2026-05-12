@@ -76,7 +76,6 @@ async function submit() {
                 <InputText
                     id="cid"
                     v-model="consumerId"
-                    placeholder="david"
                     autocomplete="username"
                     @keydown.enter.prevent="submit"
                 />
