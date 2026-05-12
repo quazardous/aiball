@@ -146,15 +146,15 @@ export {
 } from "./db/pings.js";
 
 export {
-    listActors,
-    getActor,
-    ensureActor,
+    listConsumers,
+    getConsumer,
+    ensureConsumer,
     isHuman,
     listHumans,
-    updateActor,
-    upsertActor,
-    deleteActor,
-    getActorsByIds,
-    type Actor,
-    type ActorKind,
-} from "./db/actors.js";
+    updateConsumer,
+    upsertConsumer,
+    deleteConsumer,
+    getConsumersByIds,
+    type Consumer,
+    type ConsumerKind,
+} from "./db/consumers.js";

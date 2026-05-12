@@ -85,6 +85,13 @@
       "when": 1778800000000,
       "tag": "0011_actors",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1778900000000,
+      "tag": "0012_rename_actors_to_consumers",
+      "breakpoints": true
     }
   ]
 }

@@ -14,7 +14,7 @@ export type WsEvent =
     | { type: "strategy_changed"; data: unknown }
     | { type: "project_deleted"; data: unknown }
     | { type: "project_purged"; data: unknown }
-    | { type: "actor_changed"; data: unknown };
+    | { type: "consumer_changed"; data: unknown };
 
 export function attachWs(server: Server, path = "/ws"): void {
     wss = new WebSocketServer({ server, path });

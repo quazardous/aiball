@@ -12,7 +12,7 @@ import {
     listPendingLifecycleForTicket,
     isTicketBroadcast,
     deletePingsForMessage,
-    ensureActor,
+    ensureConsumer,
     isHuman,
     listHumans,
     INTENTS,
@@ -364,10 +364,10 @@ function fanOutMentions(msg: Message): void {
  */
 export function submitMessage(input: NewMessage): Message {
     assertCloseAuthority(input);
-    // Lazy-register the author in actors so the moderator sees them in
-    // Settings > Actors and can tag kind/display_name retroactively
-    // (#B.79). No-op when already present.
-    if (input.by_agent) ensureActor(input.by_agent);
+    // Lazy-register the author so the moderator sees them in Settings >
+    // Consumers and can tag kind/display_name retroactively (#B.79).
+    // No-op when already present.
+    if (input.by_agent) ensureConsumer(input.by_agent);
     let msg = insertMessage(input);
     autoSubscribeAuthor(msg);
     // Fan out delivery pings at INSERTION (not just at approval): subscribers

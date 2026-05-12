@@ -251,13 +251,16 @@ export const uploads = sqliteTable("uploads", {
 ]);
 
 /**
- * Identity registry (#B.79). Every consumer_id the daemon has seen
+ * Consumer registry (#B.79). Every `consumer_id` the daemon has seen
  * gets a row; `kind` says whether it's a human moderator or an agent
- * (or another type if we extend later). The literal `"human"` row
- * exists from migration backfill so historic bypass code keeps
- * working without reconfiguration.
+ * (or another type if we extend later). The literal `"human"` row is
+ * backfilled by migration 0011 so historic bypass code keeps working
+ * without reconfiguration.
+ *
+ * Renamed from `actors` in migration 0012 to match the rest of the
+ * codebase / UI which already used "consumer" everywhere.
  */
-export const actors = sqliteTable("actors", {
+export const consumers = sqliteTable("consumers", {
     consumerId: text("consumer_id").primaryKey(),
     kind: text("kind").notNull().default("agent"),
     displayName: text("display_name"),
@@ -268,7 +271,7 @@ export const actors = sqliteTable("actors", {
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (t) => [
-    index("idx_actors_kind").on(t.kind),
+    index("idx_consumers_kind").on(t.kind),
 ]);
 
 // ---- inferred types ------------------------------------------------------
@@ -289,5 +292,5 @@ export type Subscription = typeof subscriptions.$inferSelect;
 export type TicketSubscription = typeof ticketSubscriptions.$inferSelect;
 export type Ping = typeof pings.$inferSelect;
 
-export type Actor = typeof actors.$inferSelect;
-export type NewActorRow = typeof actors.$inferInsert;
+export type Consumer = typeof consumers.$inferSelect;
+export type NewConsumerRow = typeof consumers.$inferInsert;

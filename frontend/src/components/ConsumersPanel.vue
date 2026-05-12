@@ -5,29 +5,30 @@ import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
-import { api, type Actor, type ActorKind } from "../lib/api";
+import { api, type Consumer, type ConsumerKind } from "../lib/api";
 
 const toast = useToast();
-const rows = ref<Actor[]>([]);
+const rows = ref<Consumer[]>([]);
 const loading = ref(false);
-// New-actor form state
+
+// New-consumer form
 const newId = ref("");
-const newKind = ref<ActorKind>("agent");
+const newKind = ref<ConsumerKind>("agent");
 const newName = ref("");
 
 const KIND_OPTIONS = [
-    { label: "Human", value: "human" as ActorKind },
-    { label: "Agent", value: "agent" as ActorKind },
+    { label: "Human", value: "human" as ConsumerKind },
+    { label: "Agent", value: "agent" as ConsumerKind },
 ];
 
 async function load() {
     loading.value = true;
     try {
-        rows.value = await api.listActors();
+        rows.value = await api.listConsumers();
     } catch (e) {
         toast.add({
             severity: "error",
-            summary: "Failed to load actors",
+            summary: "Failed to load consumers",
             detail: (e as Error).message,
             life: 8000,
         });
@@ -36,9 +37,9 @@ async function load() {
     }
 }
 
-async function patch(consumer_id: string, patchBody: Partial<Actor>) {
+async function patch(consumer_id: string, patchBody: Partial<Consumer>) {
     try {
-        const updated = await api.updateActor(consumer_id, {
+        const updated = await api.updateConsumer(consumer_id, {
             kind: patchBody.kind,
             display_name: patchBody.display_name ?? null,
             enabled: patchBody.enabled,
@@ -63,14 +64,14 @@ async function create() {
         return;
     }
     try {
-        const a = await api.upsertActor({
+        const c = await api.upsertConsumer({
             consumer_id: id,
             kind: newKind.value,
             display_name: newName.value.trim() || null,
         });
         toast.add({
             severity: "success",
-            summary: `Actor "${a.consumer_id}" saved`,
+            summary: `Consumer "${c.consumer_id}" saved`,
             life: 4000,
         });
         newId.value = "";
@@ -88,9 +89,9 @@ async function create() {
 }
 
 async function remove(consumer_id: string) {
-    if (!confirm(`Delete actor "${consumer_id}"? Past posts are preserved.`)) return;
+    if (!confirm(`Delete consumer "${consumer_id}"? Past posts are preserved; the row will be re-created the next time this id posts.`)) return;
     try {
-        await api.deleteActor(consumer_id);
+        await api.deleteConsumer(consumer_id);
         rows.value = rows.value.filter((r) => r.consumer_id !== consumer_id);
     } catch (e) {
         toast.add({
@@ -106,53 +107,72 @@ onMounted(load);
 </script>
 
 <template>
-    <div class="actors-panel">
+    <div class="consumers-panel">
         <header class="rules-explainer-block">
-            <h2 style="margin: 0">Actors</h2>
+            <h2 style="margin: 0">Consumers</h2>
             <p class="rules-explainer rules-explainer--muted">
-                Every consumer_id the daemon has seen, with its kind (human or agent), display name, and
-                enabled flag. Tagging an actor <strong>human</strong> grants moderator bypass —
-                their posts skip moderation and they can close / snooze any ticket. New
-                consumer_ids are added automatically the first time they post.
+                One row per <code>consumer_id</code> the daemon has seen — the same identity
+                you pick in the header dropdown. <strong>Kind</strong> = <em>human</em>
+                grants moderator bypass: posts skip moderation, can close / snooze any
+                ticket, receives pings on every pending submission. <strong>display_name</strong>
+                is the friendly label (falls back to the raw id). Blocking disables future
+                writes without deleting history.
+            </p>
+            <p class="rules-explainer rules-explainer--muted">
+                New ids are added automatically on first post. Promote one to <em>human</em>
+                to make it the active moderator on this machine — and pair it with the
+                header picker so the web UI sends the matching <code>X-Aiball-Consumer</code>
+                header.
             </p>
         </header>
 
-        <div class="actors-new">
-            <strong>Add actor</strong>
-            <InputText v-model="newId" placeholder="consumer_id" style="width: 14rem" />
-            <Select v-model="newKind" :options="KIND_OPTIONS" optionLabel="label" optionValue="value" style="width: 8rem" />
-            <InputText v-model="newName" placeholder="display name (optional)" style="width: 18rem" />
-            <Button label="Save" icon="pi pi-plus" size="small" @click="create" />
-        </div>
+        <section class="consumers-new">
+            <strong>Add consumer</strong>
+            <InputText
+                v-model="newId"
+                placeholder="consumer_id"
+                style="width: 14rem"
+            />
+            <Select
+                v-model="newKind"
+                :options="KIND_OPTIONS"
+                optionLabel="label"
+                optionValue="value"
+                style="width: 8rem"
+            />
+            <InputText
+                v-model="newName"
+                placeholder="display name (optional)"
+                style="width: 18rem"
+            />
+            <Button
+                label="Save"
+                icon="pi pi-plus"
+                size="small"
+                @click="create"
+            />
+        </section>
 
         <div v-if="loading && !rows.length" class="aiball-empty">Loading…</div>
         <div v-else-if="!rows.length" class="aiball-empty">
             <i class="pi pi-users" style="font-size: 1.6rem" />
-            <div>No actors yet — anyone who posts will be added automatically.</div>
+            <div>No consumers yet — anyone who posts will be added here automatically.</div>
         </div>
 
-        <table v-else class="actors-table">
+        <table v-else class="consumers-table">
             <thead>
                 <tr>
                     <th>Consumer id</th>
                     <th>Kind</th>
                     <th>Display name</th>
-                    <th>Enabled</th>
+                    <th>State</th>
                     <th />
                 </tr>
             </thead>
             <tbody>
-                <tr v-for="r in rows" :key="r.consumer_id">
-                    <td class="actors-cid">{{ r.consumer_id }}</td>
-                    <td>
-                        <Select
-                            :model-value="r.kind"
-                            :options="KIND_OPTIONS"
-                            optionLabel="label"
-                            optionValue="value"
-                            @update:model-value="(v: ActorKind) => patch(r.consumer_id, { kind: v })"
-                            style="width: 7rem"
-                        />
+                <tr v-for="r in rows" :key="r.consumer_id" :class="{ 'is-blocked': !r.enabled }">
+                    <td class="consumers-cid">
+                        {{ r.consumer_id }}
                         <Tag
                             v-if="r.kind === 'human'"
                             value="moderator"
@@ -161,10 +181,20 @@ onMounted(load);
                         />
                     </td>
                     <td>
+                        <Select
+                            :model-value="r.kind"
+                            :options="KIND_OPTIONS"
+                            optionLabel="label"
+                            optionValue="value"
+                            @update:model-value="(v: ConsumerKind) => patch(r.consumer_id, { kind: v })"
+                            style="width: 7rem"
+                        />
+                    </td>
+                    <td>
                         <InputText
                             :model-value="r.display_name ?? ''"
                             @change="(e: Event) => patch(r.consumer_id, { display_name: (e.target as HTMLInputElement).value || null })"
-                            placeholder="(none)"
+                            placeholder="(uses id)"
                             style="width: 14rem"
                         />
                     </td>
@@ -174,6 +204,7 @@ onMounted(load);
                             :severity="r.enabled ? 'success' : 'danger'"
                             text
                             size="small"
+                            :title="r.enabled ? 'Click to block: future posts from this id will be refused' : 'Click to re-enable'"
                             @click="patch(r.consumer_id, { enabled: !r.enabled })"
                         />
                     </td>
@@ -184,7 +215,7 @@ onMounted(load);
                             text
                             rounded
                             size="small"
-                            title="Delete this actor"
+                            :title="`Delete consumer ${r.consumer_id} (history preserved)`"
                             @click="remove(r.consumer_id)"
                         />
                     </td>
@@ -195,13 +226,14 @@ onMounted(load);
 </template>
 
 <style>
-.actors-panel {
+.consumers-panel {
     display: flex;
     flex-direction: column;
     gap: 0.8rem;
 }
-.actors-new {
+.consumers-new {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.5rem;
     padding: 0.6rem 0.8rem;
@@ -209,20 +241,24 @@ onMounted(load);
     border-radius: 0.5rem;
     background: var(--p-content-background);
 }
-.actors-table {
+.consumers-table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.92rem;
 }
-.actors-table th,
-.actors-table td {
+.consumers-table th,
+.consumers-table td {
     text-align: left;
     padding: 0.5rem 0.6rem;
     border-bottom: 1px solid var(--p-content-border-color);
+    vertical-align: middle;
 }
-.actors-cid {
+.consumers-cid {
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-size: 0.85rem;
+}
+.consumers-table tr.is-blocked {
+    opacity: 0.55;
 }
 .action-cell {
     text-align: right;

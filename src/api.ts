@@ -69,14 +69,14 @@ import {
     uploadStats,
     listOrphanUploads,
     deleteUploadRow,
-    listActors,
-    getActor,
-    upsertActor,
-    updateActor,
-    deleteActor,
+    listConsumers,
+    getConsumer,
+    upsertConsumer,
+    updateConsumer,
+    deleteConsumer,
     isHuman,
-    type Actor,
-    type ActorKind,
+    type Consumer,
+    type ConsumerKind,
     type MessageKind,
     type MessageStatus,
     type Strategy,
@@ -1083,13 +1083,13 @@ function enrichRelationStages<T extends { id: number; kind: string; source_ticke
     });
 }
 
-// -------- actors (#B.79) ---------------------------------------------------
+// -------- consumers (#B.79) -----------------------------------------------
 
-api.get("/actors", (_req, res) => {
-    res.json(listActors());
+api.get("/consumers", (_req, res) => {
+    res.json(listConsumers());
 });
 
-api.post("/actors", (req: Request, res: Response) => {
+api.post("/consumers", (req: Request, res: Response) => {
     const { consumer_id, kind, display_name, enabled, note } = (req.body ?? {}) as {
         consumer_id?: unknown;
         kind?: unknown;
@@ -1103,19 +1103,19 @@ api.post("/actors", (req: Request, res: Response) => {
     if (kind !== undefined && kind !== "human" && kind !== "agent") {
         return badRequest(res, "kind must be 'human' or 'agent'");
     }
-    const actor = upsertActor({
+    const c = upsertConsumer({
         consumer_id,
-        kind: kind as ActorKind | undefined,
+        kind: kind as ConsumerKind | undefined,
         display_name: typeof display_name === "string" ? display_name : null,
         enabled: typeof enabled === "boolean" ? enabled : true,
         note: typeof note === "string" ? note : null,
     });
-    broadcast({ type: "actor_changed", data: actor });
-    res.json(actor);
+    broadcast({ type: "consumer_changed", data: c });
+    res.json(c);
 });
 
-api.patch("/actors/:consumer_id", (req: Request, res: Response) => {
-    const consumer_id = req.params.consumer_id;
+api.patch("/consumers/:consumer_id", (req: Request, res: Response) => {
+    const consumer_id = String(req.params.consumer_id);
     const body = (req.body ?? {}) as {
         kind?: unknown;
         display_name?: unknown;
@@ -1126,12 +1126,12 @@ api.patch("/actors/:consumer_id", (req: Request, res: Response) => {
         return badRequest(res, "kind must be 'human' or 'agent'");
     }
     const patch: {
-        kind?: ActorKind;
+        kind?: ConsumerKind;
         display_name?: string | null;
         enabled?: boolean;
         note?: string | null;
     } = {};
-    if (body.kind !== undefined) patch.kind = body.kind as ActorKind;
+    if (body.kind !== undefined) patch.kind = body.kind as ConsumerKind;
     if (body.display_name !== undefined) {
         patch.display_name = body.display_name === null
             ? null
@@ -1143,18 +1143,18 @@ api.patch("/actors/:consumer_id", (req: Request, res: Response) => {
     if (body.note !== undefined) {
         patch.note = body.note === null ? null : (typeof body.note === "string" ? body.note : null);
     }
-    const updated: Actor | null = updateActor(consumer_id, patch);
-    if (!updated) return notFound(res, "actor not found");
-    broadcast({ type: "actor_changed", data: updated });
+    const updated: Consumer | null = updateConsumer(consumer_id, patch);
+    if (!updated) return notFound(res, "consumer not found");
+    broadcast({ type: "consumer_changed", data: updated });
     res.json(updated);
 });
 
-api.delete("/actors/:consumer_id", (req: Request, res: Response) => {
-    const consumer_id = req.params.consumer_id;
-    const a = getActor(consumer_id);
-    if (!a) return notFound(res, "actor not found");
-    deleteActor(consumer_id);
-    broadcast({ type: "actor_changed", data: { consumer_id, deleted: true } });
+api.delete("/consumers/:consumer_id", (req: Request, res: Response) => {
+    const consumer_id = String(req.params.consumer_id);
+    const c = getConsumer(consumer_id);
+    if (!c) return notFound(res, "consumer not found");
+    deleteConsumer(consumer_id);
+    broadcast({ type: "consumer_changed", data: { consumer_id, deleted: true } });
     res.json({ consumer_id, deleted: true });
 });
 

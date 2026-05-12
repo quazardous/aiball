@@ -10,7 +10,7 @@ export interface ProjectListItem {
     snoozed: number;
 }
 
-export type SettingsPanel = "rules" | "tags" | "projects" | "actors" | "compose";
+export type SettingsPanel = "rules" | "tags" | "projects" | "consumers" | "compose";
 
 /**
  * Per-project sub-pages — currently just "stats". The entry point lives
@@ -101,11 +101,11 @@ const emit = defineEmits<{
         <button
             type="button"
             class="sidebar-item"
-            :class="{ active: panel === 'actors' }"
-            @click="emit('open-panel', 'actors')"
+            :class="{ active: panel === 'consumers' }"
+            @click="emit('open-panel', 'consumers')"
         >
             <i class="pi pi-users" />
-            <span>Actors</span>
+            <span>Consumers</span>
         </button>
     </aside>
 </template>

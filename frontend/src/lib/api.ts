@@ -203,11 +203,11 @@ export interface PostMessageInput {
     intent?: Intent | null;
 }
 
-/** Identity registry entry (#B.79). */
-export type ActorKind = "human" | "agent";
-export interface Actor {
+/** Consumer registry entry (#B.79). */
+export type ConsumerKind = "human" | "agent";
+export interface Consumer {
     consumer_id: string;
-    kind: ActorKind;
+    kind: ConsumerKind;
     display_name: string | null;
     enabled: boolean;
     note: string | null;
@@ -386,21 +386,21 @@ export const api = {
     setStrategy: (s: Strategy) =>
         req<{ strategy: Strategy }>("PATCH", "/api/strategy", { strategy: s }),
 
-    listActors: () => req<Actor[]>("GET", "/api/actors"),
-    upsertActor: (body: {
+    listConsumers: () => req<Consumer[]>("GET", "/api/consumers"),
+    upsertConsumer: (body: {
         consumer_id: string;
-        kind?: ActorKind;
+        kind?: ConsumerKind;
         display_name?: string | null;
         enabled?: boolean;
         note?: string | null;
-    }) => req<Actor>("POST", "/api/actors", body),
-    updateActor: (
+    }) => req<Consumer>("POST", "/api/consumers", body),
+    updateConsumer: (
         consumer_id: string,
-        patch: Partial<{ kind: ActorKind; display_name: string | null; enabled: boolean; note: string | null }>,
-    ) => req<Actor>("PATCH", `/api/actors/${encodeURIComponent(consumer_id)}`, patch),
-    deleteActor: (consumer_id: string) =>
+        patch: Partial<{ kind: ConsumerKind; display_name: string | null; enabled: boolean; note: string | null }>,
+    ) => req<Consumer>("PATCH", `/api/consumers/${encodeURIComponent(consumer_id)}`, patch),
+    deleteConsumer: (consumer_id: string) =>
         req<{ consumer_id: string; deleted: boolean }>(
             "DELETE",
-            `/api/actors/${encodeURIComponent(consumer_id)}`,
+            `/api/consumers/${encodeURIComponent(consumer_id)}`,
         ),
 };
