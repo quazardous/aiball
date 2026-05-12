@@ -678,7 +678,7 @@ async function copyTicketRef() {
                 @click="toggleBroadcast"
             />
             <Button
-                v-if="data && data.ticket.status === 'approved' && !data.ticket.closed && !isSnoozed"
+                v-if="data && data.ticket.status !== 'rejected' && !data.ticket.closed && !isSnoozed"
                 icon="pi pi-history"
                 severity="info"
                 size="small"

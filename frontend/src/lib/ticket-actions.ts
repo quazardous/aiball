@@ -11,7 +11,7 @@
  * Extracted from App.vue's bulkApplicable switch (#B.332 Phase D, per `#C.mf5h72`).
  */
 import { type InboxRow } from "./api";
-import { isClosed, isOpen, isPending, isSnoozed, isUnread } from "./ticket-state";
+import { isClosed, isOpen, isPending, isRejected, isSnoozed, isUnread } from "./ticket-state";
 
 export type BulkAction =
     | "approve"
@@ -40,7 +40,7 @@ export function canReopen(r: InboxRow): boolean {
 }
 
 export function canSnooze(r: InboxRow): boolean {
-    return isOpen(r);
+    return !isRejected(r) && !isClosed(r) && !isSnoozed(r);
 }
 
 export function canUnsnooze(r: InboxRow): boolean {
