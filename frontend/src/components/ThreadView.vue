@@ -379,11 +379,6 @@ function shortTime(iso: string): string {
  * always toggle via the chevron.
  */
 const subTicketsExpanded = ref(false);
-watch(
-    () => data.value?.ticket.sub_tickets?.length ?? 0,
-    (n) => { subTicketsExpanded.value = n > 0 && n <= 5; },
-    { immediate: true },
-);
 function onSubTicketsToggle(ev: Event) {
     subTicketsExpanded.value = (ev.target as HTMLDetailsElement).open;
 }
