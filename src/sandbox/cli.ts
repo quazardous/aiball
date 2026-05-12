@@ -368,11 +368,13 @@ function cmdList(): void {
     if (found === 0) process.stdout.write("(no sandboxes)\n");
 }
 
-function cmdAttach(name: string): void {
+function cmdAttach(name: string, readOnly: boolean): void {
     if (!tmuxHasSession(`sb-${name}`)) {
         die(`sandbox '${name}' has no tmux session (already exited?)`);
     }
-    spawnSync(MUX_CMD, ["attach", "-t", `sb-${name}`], { stdio: "inherit" });
+    const args = ["attach", "-t", `sb-${name}`];
+    if (readOnly) args.push("-r");
+    spawnSync(MUX_CMD, args, { stdio: "inherit" });
     postSessionHint(name);
 }
 
@@ -593,7 +595,10 @@ export function registerSandboxCommands(program: Command): void {
 
     sb.command("attach [name]")
         .description("tmux attach to a sandbox session (NAME inferred when there's only one)")
-        .action((name: string | undefined) => cmdAttach(resolveSingleName(name)));
+        .option("-r, --read-only", "Read-only attach (keystrokes don't reach the session)")
+        .action((name: string | undefined, opts: { readOnly?: boolean }) =>
+            cmdAttach(resolveSingleName(name), opts.readOnly === true),
+        );
 
     sb.command("tail [name]")
         .description("Print the last N lines of a sandbox pane (non-blocking; NAME inferred when only one)")
