@@ -69,6 +69,14 @@ import {
     uploadStats,
     listOrphanUploads,
     deleteUploadRow,
+    listActors,
+    getActor,
+    upsertActor,
+    updateActor,
+    deleteActor,
+    isHuman,
+    type Actor,
+    type ActorKind,
     type MessageKind,
     type MessageStatus,
     type Strategy,
@@ -882,10 +890,9 @@ api.post("/tickets/:id/postpone", (req: Request, res: Response) => {
     const t = getMessage(id);
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
     const caller = consumerOf(req);
-    const human = process.env.AIBALL_HUMAN ?? "human";
-    if (caller !== human && t.by_agent !== caller) {
+    if (!isHuman(caller) && t.by_agent !== caller) {
         return res.status(403).json({
-            error: `only the ticket reporter (${t.by_agent}) or the human moderator (${human}) can snooze this ticket`,
+            error: `only the ticket reporter (${t.by_agent}) or a registered human moderator can snooze this ticket`,
         });
     }
     const { until } = (req.body ?? {}) as { until?: unknown };
@@ -912,10 +919,9 @@ api.post("/tickets/:id/unsnooze", (req: Request, res: Response) => {
     const t = getMessage(id);
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
     const caller = consumerOf(req);
-    const human = process.env.AIBALL_HUMAN ?? "human";
-    if (caller !== human && t.by_agent !== caller) {
+    if (!isHuman(caller) && t.by_agent !== caller) {
         return res.status(403).json({
-            error: `only the ticket reporter (${t.by_agent}) or the human moderator (${human}) can unsnooze this ticket`,
+            error: `only the ticket reporter (${t.by_agent}) or a registered human moderator can unsnooze this ticket`,
         });
     }
     setTicketPostpone(id, null);
@@ -1076,6 +1082,81 @@ function enrichRelationStages<T extends { id: number; kind: string; source_ticke
         return c;
     });
 }
+
+// -------- actors (#B.79) ---------------------------------------------------
+
+api.get("/actors", (_req, res) => {
+    res.json(listActors());
+});
+
+api.post("/actors", (req: Request, res: Response) => {
+    const { consumer_id, kind, display_name, enabled, note } = (req.body ?? {}) as {
+        consumer_id?: unknown;
+        kind?: unknown;
+        display_name?: unknown;
+        enabled?: unknown;
+        note?: unknown;
+    };
+    if (typeof consumer_id !== "string" || !consumer_id) {
+        return badRequest(res, "consumer_id required");
+    }
+    if (kind !== undefined && kind !== "human" && kind !== "agent") {
+        return badRequest(res, "kind must be 'human' or 'agent'");
+    }
+    const actor = upsertActor({
+        consumer_id,
+        kind: kind as ActorKind | undefined,
+        display_name: typeof display_name === "string" ? display_name : null,
+        enabled: typeof enabled === "boolean" ? enabled : true,
+        note: typeof note === "string" ? note : null,
+    });
+    broadcast({ type: "actor_changed", data: actor });
+    res.json(actor);
+});
+
+api.patch("/actors/:consumer_id", (req: Request, res: Response) => {
+    const consumer_id = req.params.consumer_id;
+    const body = (req.body ?? {}) as {
+        kind?: unknown;
+        display_name?: unknown;
+        enabled?: unknown;
+        note?: unknown;
+    };
+    if (body.kind !== undefined && body.kind !== "human" && body.kind !== "agent") {
+        return badRequest(res, "kind must be 'human' or 'agent'");
+    }
+    const patch: {
+        kind?: ActorKind;
+        display_name?: string | null;
+        enabled?: boolean;
+        note?: string | null;
+    } = {};
+    if (body.kind !== undefined) patch.kind = body.kind as ActorKind;
+    if (body.display_name !== undefined) {
+        patch.display_name = body.display_name === null
+            ? null
+            : (typeof body.display_name === "string" ? body.display_name : null);
+    }
+    if (body.enabled !== undefined && typeof body.enabled === "boolean") {
+        patch.enabled = body.enabled;
+    }
+    if (body.note !== undefined) {
+        patch.note = body.note === null ? null : (typeof body.note === "string" ? body.note : null);
+    }
+    const updated: Actor | null = updateActor(consumer_id, patch);
+    if (!updated) return notFound(res, "actor not found");
+    broadcast({ type: "actor_changed", data: updated });
+    res.json(updated);
+});
+
+api.delete("/actors/:consumer_id", (req: Request, res: Response) => {
+    const consumer_id = req.params.consumer_id;
+    const a = getActor(consumer_id);
+    if (!a) return notFound(res, "actor not found");
+    deleteActor(consumer_id);
+    broadcast({ type: "actor_changed", data: { consumer_id, deleted: true } });
+    res.json({ consumer_id, deleted: true });
+});
 
 // -------- rules ------------------------------------------------------------
 

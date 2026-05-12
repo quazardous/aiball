@@ -250,6 +250,27 @@ export const uploads = sqliteTable("uploads", {
     index("idx_uploads_by_agent").on(t.byAgent),
 ]);
 
+/**
+ * Identity registry (#B.79). Every consumer_id the daemon has seen
+ * gets a row; `kind` says whether it's a human moderator or an agent
+ * (or another type if we extend later). The literal `"human"` row
+ * exists from migration backfill so historic bypass code keeps
+ * working without reconfiguration.
+ */
+export const actors = sqliteTable("actors", {
+    consumerId: text("consumer_id").primaryKey(),
+    kind: text("kind").notNull().default("agent"),
+    displayName: text("display_name"),
+    /** 1 = active, 0 = blocked. Blocking refuses future writes but
+     *  leaves historic content intact. */
+    enabled: integer("enabled").notNull().default(1),
+    note: text("note"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+}, (t) => [
+    index("idx_actors_kind").on(t.kind),
+]);
+
 // ---- inferred types ------------------------------------------------------
 
 export type Ticket = typeof tickets.$inferSelect;
@@ -267,3 +288,6 @@ export type NewTagRow = typeof tags.$inferInsert;
 export type Subscription = typeof subscriptions.$inferSelect;
 export type TicketSubscription = typeof ticketSubscriptions.$inferSelect;
 export type Ping = typeof pings.$inferSelect;
+
+export type Actor = typeof actors.$inferSelect;
+export type NewActorRow = typeof actors.$inferInsert;

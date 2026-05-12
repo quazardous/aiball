@@ -12,6 +12,9 @@ import {
     listPendingLifecycleForTicket,
     isTicketBroadcast,
     deletePingsForMessage,
+    ensureActor,
+    isHuman,
+    listHumans,
     INTENTS,
     type Message,
     type NewMessage,
@@ -139,13 +142,13 @@ export function fanOutPings(msg: Message): void {
         }
     }
 
-    // Pending messages also ping the configured human moderator (default
-    // "human", overridable via AIBALL_HUMAN) so they show up as unread in
-    // the moderation queue even when the moderator isn't subscribed to
-    // the project. Approved messages don't need this — the regular
-    // subscriber fan-out already covers what the human cares about.
+    // Pending messages also ping every registered human moderator (#B.79)
+    // so they show up as unread in the moderation queue even when not
+    // subscribed to the project. Approved messages don't need this —
+    // the regular subscriber fan-out already covers what humans care
+    // about.
     if (msg.status === "pending") {
-        recipients.add(process.env.AIBALL_HUMAN ?? "human");
+        for (const h of listHumans()) recipients.add(h);
     }
 
     for (const r of recipients) {
@@ -196,12 +199,10 @@ function assertCloseAuthority(input: NewMessage): void {
     const parent = getMessage(input.ticket_id);
     if (!parent || parent.kind !== "ticket_created") return;
     if (input.by_agent && input.by_agent === parent.by_agent) return;
-    // Human moderator bypass: the configured human (default "human",
-    // overridable via AIBALL_HUMAN) can always close any ticket from the
-    // UI — they are the override authority on every project. The strict
-    // reporter-only rule still applies to agents posting via MCP/CLI.
-    const human = process.env.AIBALL_HUMAN ?? "human";
-    if (input.by_agent === human) return;
+    // Human moderator bypass (#B.79): any actor registered with
+    // kind=human can close any ticket. Falls back to the env CSV
+    // when the actors table is empty (defensive at boot time).
+    if (input.by_agent && isHuman(input.by_agent)) return;
     const err = new Error(
         `only the ticket reporter (${parent.by_agent ?? "unknown"}) can close this ticket — post ticket_resolved instead to propose resolution`,
     );
@@ -363,6 +364,10 @@ function fanOutMentions(msg: Message): void {
  */
 export function submitMessage(input: NewMessage): Message {
     assertCloseAuthority(input);
+    // Lazy-register the author in actors so the moderator sees them in
+    // Settings > Actors and can tag kind/display_name retroactively
+    // (#B.79). No-op when already present.
+    if (input.by_agent) ensureActor(input.by_agent);
     let msg = insertMessage(input);
     autoSubscribeAuthor(msg);
     // Fan out delivery pings at INSERTION (not just at approval): subscribers

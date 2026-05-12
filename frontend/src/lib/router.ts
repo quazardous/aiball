@@ -1,7 +1,7 @@
 import { onBeforeUnmount, watch, type Ref } from "vue";
 
 export type RouteState = {
-    panel: "rules" | "tags" | "projects" | "compose" | null;
+    panel: "rules" | "tags" | "projects" | "actors" | "compose" | null;
     openTicketId: number | null;
     project: string | null;
     statusFilter: "all" | "unread" | "pending" | "approved" | "rejected";
@@ -18,6 +18,7 @@ export function buildUrl(s: RouteState): string {
     if (s.panel === "rules") path = "/rules";
     else if (s.panel === "tags") path = "/tags";
     else if (s.panel === "projects") path = "/projects";
+    else if (s.panel === "actors") path = "/actors";
     else if (s.panel === "compose") path = "/new";
     else if (s.openTicketId !== null) path = `/b/${s.openTicketId}`;
 
@@ -48,6 +49,9 @@ export function parseUrl(): Partial<RouteState> {
         out.openTicketId = null;
     } else if (path === "/projects") {
         out.panel = "projects";
+        out.openTicketId = null;
+    } else if (path === "/actors") {
+        out.panel = "actors";
         out.openTicketId = null;
     } else if (path === "/new") {
         out.panel = "compose";

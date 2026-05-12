@@ -203,6 +203,18 @@ export interface PostMessageInput {
     intent?: Intent | null;
 }
 
+/** Identity registry entry (#B.79). */
+export type ActorKind = "human" | "agent";
+export interface Actor {
+    consumer_id: string;
+    kind: ActorKind;
+    display_name: string | null;
+    enabled: boolean;
+    note: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
 export interface ProjectMeta {
     name: string;
     last_activity: string;
@@ -373,4 +385,22 @@ export const api = {
     getStrategy: () => req<{ strategy: Strategy }>("GET", "/api/strategy"),
     setStrategy: (s: Strategy) =>
         req<{ strategy: Strategy }>("PATCH", "/api/strategy", { strategy: s }),
+
+    listActors: () => req<Actor[]>("GET", "/api/actors"),
+    upsertActor: (body: {
+        consumer_id: string;
+        kind?: ActorKind;
+        display_name?: string | null;
+        enabled?: boolean;
+        note?: string | null;
+    }) => req<Actor>("POST", "/api/actors", body),
+    updateActor: (
+        consumer_id: string,
+        patch: Partial<{ kind: ActorKind; display_name: string | null; enabled: boolean; note: string | null }>,
+    ) => req<Actor>("PATCH", `/api/actors/${encodeURIComponent(consumer_id)}`, patch),
+    deleteActor: (consumer_id: string) =>
+        req<{ consumer_id: string; deleted: boolean }>(
+            "DELETE",
+            `/api/actors/${encodeURIComponent(consumer_id)}`,
+        ),
 };

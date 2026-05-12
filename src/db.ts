@@ -144,3 +144,17 @@ export {
     listPings,
     unreadPingCount,
 } from "./db/pings.js";
+
+export {
+    listActors,
+    getActor,
+    ensureActor,
+    isHuman,
+    listHumans,
+    updateActor,
+    upsertActor,
+    deleteActor,
+    getActorsByIds,
+    type Actor,
+    type ActorKind,
+} from "./db/actors.js";

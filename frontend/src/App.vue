@@ -23,6 +23,7 @@ import PaginationBar from "./components/PaginationBar.vue";
 import NewTicketPage from "./components/NewTicketPage.vue";
 import ProjectStatsPage from "./components/ProjectStatsPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
+import ActorsPanel from "./components/ActorsPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
 import Sidebar, { type ProjectListItem, type ProjectPage, type SettingsPanel } from "./components/Sidebar.vue";
 import TagsPanel from "./components/TagsPanel.vue";
@@ -759,6 +760,7 @@ watch(showSnoozed, (v) => {
                 />
                 <RulesPanel v-else-if="panel === 'rules'" />
                 <TagsPanel v-else-if="panel === 'tags'" />
+                <ActorsPanel v-else-if="panel === 'actors'" />
 
                 <NewTicketPage
                     v-else-if="panel === 'compose'"
