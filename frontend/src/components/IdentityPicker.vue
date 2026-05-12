@@ -1,11 +1,16 @@
 <script setup lang="ts">
 /**
- * Identity picker (per #B.79). The UI defaults to the moderator
- * persona `human`, but the human user can endorse any consumer_id
- * to see the BAL through that agent's eyes (their unread state,
- * their `_status`, their inbox sort). A separate `peek` toggle
- * disables every mark-read side effect so reads don't pollute the
- * endorsed agent's seen-state.
+ * Identity picker (#B.79). The UI defaults to the moderator persona
+ * `human`, but the human user can endorse any registered consumer to
+ * see the BAL through that agent's eyes (their unread state, their
+ * `_status`, their inbox sort). A separate `peek` toggle disables every
+ * mark-read side effect so reads don't pollute the endorsed agent's
+ * seen-state.
+ *
+ * Autocomplete: when the popover opens we fetch /api/consumers once
+ * and filter client-side. Each suggestion shows the kind badge and the
+ * optional display_name so the user can tell humans from agents at a
+ * glance.
  *
  * Storage:
  *   - `aiball.human_id` — current consumer_id (default "human")
@@ -19,9 +24,11 @@
  *     on the bus so the displayed perspective tracks the new identity.
  */
 import { computed, ref, watch } from "vue";
+import AutoComplete, { type AutoCompleteCompleteEvent, type AutoCompleteOptionSelectEvent } from "primevue/autocomplete";
 import Button from "primevue/button";
-import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
+import Tag from "primevue/tag";
+import { api, type Consumer } from "../lib/api";
 import { bus } from "../lib/bus";
 
 const DEFAULT_ID = "human";
@@ -39,13 +46,61 @@ const draftId = ref<string>(consumerId.value);
 
 const popoverRef = ref<InstanceType<typeof Popover> | null>(null);
 
-function openPopover(event: MouseEvent) {
+// Loaded once when the popover opens, then filtered client-side via
+// AutoComplete's @complete event. Re-fetched each open so a new
+// consumer added between sessions surfaces.
+const consumers = ref<Consumer[]>([]);
+const suggestions = ref<Consumer[]>([]);
+const loadingConsumers = ref(false);
+
+async function loadConsumers(): Promise<void> {
+    loadingConsumers.value = true;
+    try {
+        consumers.value = await api.listConsumers();
+    } catch {
+        consumers.value = [];
+    } finally {
+        loadingConsumers.value = false;
+    }
+}
+
+function filterConsumers(q: string): Consumer[] {
+    const needle = q.trim().toLowerCase();
+    if (!needle) {
+        // Empty query → suggest humans first, then everyone else.
+        return [...consumers.value].sort((a, b) => {
+            if (a.kind !== b.kind) return a.kind === "human" ? -1 : 1;
+            return a.consumer_id.localeCompare(b.consumer_id);
+        });
+    }
+    return consumers.value.filter(
+        (c) =>
+            c.consumer_id.toLowerCase().includes(needle) ||
+            (c.display_name ?? "").toLowerCase().includes(needle),
+    );
+}
+
+function onComplete(event: AutoCompleteCompleteEvent): void {
+    suggestions.value = filterConsumers(event.query);
+}
+
+function onSelect(event: AutoCompleteOptionSelectEvent): void {
+    const c = event.value as Consumer | string;
+    draftId.value = typeof c === "string" ? c : c.consumer_id;
+}
+
+async function openPopover(event: MouseEvent) {
     draftId.value = consumerId.value;
     popoverRef.value?.show(event);
+    await loadConsumers();
+    suggestions.value = filterConsumers("");
 }
 
 function applyId() {
-    const next = (draftId.value || DEFAULT_ID).trim();
+    // AutoComplete may hand back either the typed string or a Consumer
+    // object on free-text submit — normalize.
+    const raw = draftId.value as unknown;
+    const next = (typeof raw === "string" ? raw : (raw as Consumer)?.consumer_id ?? DEFAULT_ID).trim() || DEFAULT_ID;
     if (next === consumerId.value) return;
     consumerId.value = next;
 }
@@ -70,14 +125,21 @@ watch(peekMode, (v) => {
 });
 
 const summary = computed(() => {
-    if (peekMode.value) return `${consumerId.value} · peek`;
-    return consumerId.value;
+    const c = consumers.value.find((x) => x.consumer_id === consumerId.value);
+    const label = c?.display_name ?? consumerId.value;
+    if (peekMode.value) return `${label} · peek`;
+    return label;
 });
 
 const buttonSeverity = computed(() => {
     if (peekMode.value) return "warn" as const;
     if (consumerId.value !== DEFAULT_ID) return "info" as const;
     return "secondary" as const;
+});
+
+const currentDraftString = computed(() => {
+    const raw = draftId.value as unknown;
+    return (typeof raw === "string" ? raw : (raw as Consumer)?.consumer_id ?? "").trim();
 });
 </script>
 
@@ -97,12 +159,45 @@ const buttonSeverity = computed(() => {
         <div class="identity-picker">
             <div class="identity-picker__field">
                 <label class="identity-picker__label">Consumer ID</label>
-                <InputText
+                <AutoComplete
                     v-model="draftId"
-                    size="small"
+                    :suggestions="suggestions"
+                    :loading="loadingConsumers"
+                    optionLabel="consumer_id"
                     placeholder="human"
+                    size="small"
+                    dropdown
+                    :complete-on-focus="true"
+                    @complete="onComplete"
+                    @option-select="onSelect"
                     @keydown.enter.prevent="applyId"
-                />
+                >
+                    <template #option="slotProps">
+                        <div class="identity-picker__option">
+                            <span class="identity-picker__cid">{{ slotProps.option.consumer_id }}</span>
+                            <Tag
+                                v-if="slotProps.option.kind === 'human'"
+                                value="human"
+                                severity="success"
+                                style="font-size: 0.65rem"
+                            />
+                            <Tag
+                                v-else
+                                value="agent"
+                                severity="secondary"
+                                style="font-size: 0.65rem"
+                            />
+                            <span
+                                v-if="slotProps.option.display_name"
+                                class="identity-picker__display"
+                            >· {{ slotProps.option.display_name }}</span>
+                            <span
+                                v-if="!slotProps.option.enabled"
+                                class="identity-picker__display identity-picker__display--blocked"
+                            >· blocked</span>
+                        </div>
+                    </template>
+                </AutoComplete>
             </div>
             <div class="identity-picker__actions">
                 <Button
@@ -118,7 +213,7 @@ const buttonSeverity = computed(() => {
                     icon="pi pi-check"
                     size="small"
                     severity="success"
-                    :disabled="(draftId || DEFAULT_ID).trim() === consumerId"
+                    :disabled="currentDraftString === consumerId || !currentDraftString"
                     @click="applyId"
                 />
             </div>
@@ -135,9 +230,9 @@ const buttonSeverity = computed(() => {
                 </div>
             </label>
             <p class="identity-picker__footer">
-                The selected consumer applies to every API call (sent as the
-                <code>X-Aiball-Consumer</code> header) — inbox, sidebar badges,
-                and unread filters reflect that agent's perspective.
+                Suggestions come from <strong>Settings &rsaquo; Consumers</strong>.
+                Pick any registered consumer to view aiball through their eyes
+                (sent as <code>X-Aiball-Consumer</code> on every call).
             </p>
         </div>
     </Popover>
@@ -148,8 +243,8 @@ const buttonSeverity = computed(() => {
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
-    min-width: 22rem;
-    max-width: 28rem;
+    min-width: 24rem;
+    max-width: 30rem;
     padding: 0.2rem;
 }
 .identity-picker__field {
@@ -160,6 +255,10 @@ const buttonSeverity = computed(() => {
 .identity-picker__label {
     font-size: 0.78rem;
     color: var(--p-text-muted-color);
+}
+.identity-picker__field :deep(.p-autocomplete),
+.identity-picker__field :deep(.p-autocomplete-input) {
+    width: 100%;
 }
 .identity-picker__actions {
     display: flex;
@@ -204,5 +303,22 @@ const buttonSeverity = computed(() => {
 }
 .aiball-dark .identity-picker__footer code {
     background: var(--p-surface-800);
+}
+.identity-picker__option {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+}
+.identity-picker__cid {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.identity-picker__display {
+    color: var(--p-text-muted-color);
+    font-size: 0.78rem;
+}
+.identity-picker__display--blocked {
+    color: var(--p-red-500);
+    font-style: italic;
 }
 </style>
