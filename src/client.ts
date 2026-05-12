@@ -14,6 +14,8 @@ export interface ClientOptions {
     timeoutMs?: number;
     agentId?: string;
     defaultProject?: string;
+    /** Bearer token (#B.94). Defaults to `$AIBALL_TOKEN` env. */
+    token?: string;
 }
 
 export interface SpoolResult {
@@ -29,6 +31,7 @@ export class AiballClient {
     readonly timeoutMs: number;
     readonly agentId: string;
     readonly defaultProject: string | null;
+    readonly token: string | null;
 
     constructor(opts: ClientOptions = {}) {
         this.url = opts.url ?? process.env.AIBALL_URL ?? "http://127.0.0.1:7777";
@@ -42,6 +45,7 @@ export class AiballClient {
         this.agentId = opts.agentId ?? resolveAgentId();
         this.defaultProject =
             opts.defaultProject ?? process.env.AIBALL_PROJECT ?? null;
+        this.token = opts.token ?? process.env.AIBALL_TOKEN ?? null;
     }
 
     /**
@@ -66,9 +70,13 @@ export class AiballClient {
         const ctrl = new AbortController();
         const t = setTimeout(() => ctrl.abort(), this.timeoutMs);
         try {
+            const headers: Record<string, string> = {};
+            if (body) headers["content-type"] = "application/json";
+            if (this.token) headers["authorization"] = `Bearer ${this.token}`;
+            if (this.agentId) headers["x-aiball-consumer"] = this.agentId;
             const res = await fetch(this.url + path, {
                 method,
-                headers: body ? { "content-type": "application/json" } : undefined,
+                headers,
                 body: body ? JSON.stringify(body) : undefined,
                 signal: ctrl.signal,
             });

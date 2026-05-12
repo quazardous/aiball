@@ -18,6 +18,9 @@ export interface Consumer {
     display_name: string | null;
     enabled: boolean;
     note: string | null;
+    /** Whether this consumer has a password set (for human web login). */
+    has_password?: boolean;
+    last_login_at?: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -29,9 +32,36 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         display_name: r.displayName,
         enabled: r.enabled === 1,
         note: r.note,
+        has_password: !!r.passwordHash,
+        last_login_at: r.lastLoginAt,
         created_at: r.createdAt,
         updated_at: r.updatedAt,
     };
+}
+
+/** Fetch the password hash directly (returned only by the auth module). */
+export function getPasswordHash(consumer_id: string): string | null {
+    const r = getDb().select({ ph: schema.consumers.passwordHash })
+        .from(schema.consumers)
+        .where(eq(schema.consumers.consumerId, consumer_id))
+        .get();
+    return r?.ph ?? null;
+}
+
+export function setPasswordHash(consumer_id: string, hash: string): boolean {
+    const r = getDb().update(schema.consumers)
+        .set({ passwordHash: hash, updatedAt: nowIso() })
+        .where(eq(schema.consumers.consumerId, consumer_id))
+        .run();
+    return r.changes > 0;
+}
+
+export function touchLastLogin(consumer_id: string): void {
+    const now = nowIso();
+    getDb().update(schema.consumers)
+        .set({ lastLoginAt: now, updatedAt: now })
+        .where(eq(schema.consumers.consumerId, consumer_id))
+        .run();
 }
 
 export function listConsumers(): Consumer[] {

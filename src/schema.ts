@@ -268,10 +268,38 @@ export const consumers = sqliteTable("consumers", {
      *  leaves historic content intact. */
     enabled: integer("enabled").notNull().default(1),
     note: text("note"),
+    /**
+     * scrypt password hash (#B.94). Set for humans who go through the
+     * web /setup or /login flow. NULL for agents (they auth via
+     * agent-tokens, no password).
+     */
+    passwordHash: text("password_hash"),
+    /** ISO8601 of the last successful login. NULL if never logged in. */
+    lastLoginAt: text("last_login_at"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (t) => [
     index("idx_consumers_kind").on(t.kind),
+]);
+
+/**
+ * Bearer-token auth (#B.94). Three kinds share the same table so the
+ * middleware does one lookup. `install` is one-shot (consumed by the
+ * /setup endpoint). `auth` + `agent` are long-lived.
+ */
+export const tokens = sqliteTable("tokens", {
+    token: text("token").primaryKey(),
+    consumerId: text("consumer_id").references(() => consumers.consumerId, {
+        onDelete: "cascade",
+    }),
+    kind: text("kind").notNull(),
+    label: text("label"),
+    createdAt: text("created_at").notNull(),
+    lastUsedAt: text("last_used_at"),
+    expiresAt: text("expires_at"),
+}, (t) => [
+    index("idx_tokens_consumer").on(t.consumerId),
+    index("idx_tokens_kind").on(t.kind),
 ]);
 
 // ---- inferred types ------------------------------------------------------
@@ -294,3 +322,6 @@ export type Ping = typeof pings.$inferSelect;
 
 export type Consumer = typeof consumers.$inferSelect;
 export type NewConsumerRow = typeof consumers.$inferInsert;
+
+export type Token = typeof tokens.$inferSelect;
+export type NewTokenRow = typeof tokens.$inferInsert;

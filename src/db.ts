@@ -155,6 +155,22 @@ export {
     upsertConsumer,
     deleteConsumer,
     getConsumersByIds,
+    getPasswordHash,
+    setPasswordHash,
+    touchLastLogin,
     type Consumer,
     type ConsumerKind,
 } from "./db/consumers.js";
+
+export {
+    generateTokenString,
+    issueToken,
+    getToken,
+    getTokenAndTouch,
+    deleteToken,
+    listTokens,
+    purgeExpiredTokens,
+    anyHumanCredentials,
+    type Token,
+    type TokenKind,
+} from "./db/tokens.js";

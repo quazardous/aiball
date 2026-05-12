@@ -75,8 +75,18 @@ import {
     updateConsumer,
     deleteConsumer,
     isHuman,
+    getPasswordHash,
+    setPasswordHash,
+    touchLastLogin,
+    issueToken,
+    getToken,
+    deleteToken,
+    listTokens,
+    anyHumanCredentials,
     type Consumer,
     type ConsumerKind,
+    type Token,
+    type TokenKind,
     type MessageKind,
     type MessageStatus,
     type Strategy,
@@ -92,6 +102,7 @@ import { broadcast } from "./ws.js";
 import { outboxPath, UPLOADS_DIR } from "./paths.js";
 import { searchMessages } from "./search.js";
 import { fanOutPings, submitMessage, validateNewMessage, VALID_KINDS } from "./messages.js";
+import { bearerAuth, hashPassword, verifyPassword, type AuthenticatedRequest } from "./auth.js";
 
 function badRequest(res: Response, msg: string): Response {
     return res.status(400).json({ error: msg });
@@ -115,6 +126,156 @@ function withTagsOne<T extends { id: number }>(row: T): T & { tags: Tag[] } {
 }
 
 export const api = Router();
+
+// =====================================================================
+// Auth middleware (#B.94)
+// =====================================================================
+// Mounted first so every other route gets req.consumer_id set from the
+// bearer token. PUBLIC_PATHS bypass: /api/health, /api/auth/{setup,
+// login,status}. Everything else needs a valid auth or agent token.
+api.use(bearerAuth);
+
+// =====================================================================
+// /api/auth/* — setup, login, logout, status
+// =====================================================================
+
+/**
+ * GET /api/auth/status — public probe. Tells the frontend whether the
+ * daemon needs an install token (first boot, no humans yet) or is in
+ * normal "login required" mode.
+ */
+api.get("/auth/status", (req, res) => {
+    const ready = anyHumanCredentials();
+    const hasInstall = listTokens({ kind: "install" }).length > 0;
+    // Best-effort detection of the caller's auth state — if they pass
+    // a valid token, mention the consumer so the UI knows it's still
+    // logged in.
+    const tokenStr = (() => {
+        const a = req.header("authorization");
+        if (a && /^bearer\s+/i.test(a)) return a.replace(/^bearer\s+/i, "").trim();
+        return req.header("x-aiball-token") ?? null;
+    })();
+    let me: { consumer_id: string; kind: TokenKind } | null = null;
+    if (typeof tokenStr === "string" && tokenStr) {
+        const t = getToken(tokenStr);
+        if (t && t.kind !== "install" && t.consumer_id) {
+            me = { consumer_id: t.consumer_id, kind: t.kind };
+        }
+    }
+    res.json({
+        ready,
+        install_available: hasInstall && !ready,
+        me,
+    });
+});
+
+/**
+ * POST /api/auth/setup — consume the bootstrap install token to create
+ * the first human consumer. Body: {token, consumer_id, password,
+ * display_name?}.
+ */
+api.post("/auth/setup", async (req: Request, res: Response) => {
+    const { token, consumer_id, password, display_name } = (req.body ?? {}) as {
+        token?: unknown;
+        consumer_id?: unknown;
+        password?: unknown;
+        display_name?: unknown;
+    };
+    if (typeof token !== "string" || !token) {
+        return badRequest(res, "install token required");
+    }
+    if (typeof consumer_id !== "string" || !consumer_id || consumer_id.length > 64) {
+        return badRequest(res, "consumer_id required (1-64 chars)");
+    }
+    if (!/^[A-Za-z0-9._-]+$/.test(consumer_id)) {
+        return badRequest(res, "consumer_id must contain only A-Za-z0-9._-");
+    }
+    if (typeof password !== "string" || password.length < 6) {
+        return badRequest(res, "password required (min 6 chars)");
+    }
+    const installRow = getToken(token);
+    if (!installRow || installRow.kind !== "install") {
+        return res.status(401).json({ error: "invalid install token" });
+    }
+    // Reject if the consumer already exists with a password (avoid
+    // overriding via stolen install token).
+    const existing = getConsumer(consumer_id);
+    if (existing?.has_password) {
+        return res.status(409).json({ error: "consumer already has a password set" });
+    }
+    const hash = await hashPassword(password);
+    upsertConsumer({
+        consumer_id,
+        kind: "human",
+        display_name: typeof display_name === "string" && display_name ? display_name : null,
+        enabled: true,
+    });
+    setPasswordHash(consumer_id, hash);
+    touchLastLogin(consumer_id);
+    // Consume the install token + issue a fresh auth token.
+    deleteToken(token);
+    const auth = issueToken({ consumer_id, kind: "auth", label: "web setup" });
+    res.json({
+        token: auth.token,
+        consumer_id,
+    });
+});
+
+/**
+ * POST /api/auth/login — exchange login+password for an auth token.
+ * Body: {consumer_id, password}. Returns {token, consumer_id} on success.
+ */
+api.post("/auth/login", async (req: Request, res: Response) => {
+    const { consumer_id, password } = (req.body ?? {}) as {
+        consumer_id?: unknown;
+        password?: unknown;
+    };
+    if (typeof consumer_id !== "string" || !consumer_id) {
+        return badRequest(res, "consumer_id required");
+    }
+    if (typeof password !== "string") {
+        return badRequest(res, "password required");
+    }
+    const c = getConsumer(consumer_id);
+    if (!c || !c.enabled || c.kind !== "human") {
+        // Same response shape on failure to avoid revealing enumeration.
+        return res.status(401).json({ error: "invalid credentials" });
+    }
+    const hash = getPasswordHash(consumer_id);
+    if (!hash) return res.status(401).json({ error: "invalid credentials" });
+    const ok = await verifyPassword(password, hash);
+    if (!ok) return res.status(401).json({ error: "invalid credentials" });
+    touchLastLogin(consumer_id);
+    const auth = issueToken({ consumer_id, kind: "auth", label: "web login" });
+    res.json({
+        token: auth.token,
+        consumer_id,
+    });
+});
+
+/**
+ * POST /api/auth/logout — revoke the token used to authenticate.
+ * Idempotent: succeeds even if the token is already gone.
+ */
+api.post("/auth/logout", (req: Request, res: Response) => {
+    const a = req.header("authorization");
+    let token: string | null = null;
+    if (a && /^bearer\s+/i.test(a)) token = a.replace(/^bearer\s+/i, "").trim();
+    if (!token) token = req.header("x-aiball-token") ?? null;
+    if (token) deleteToken(token);
+    res.json({ ok: true });
+});
+
+/**
+ * GET /api/me — current authenticated consumer + display info. Useful
+ * for the frontend to render "Hello, David" without an extra lookup.
+ */
+api.get("/me", (req: Request, res: Response) => {
+    const id = consumerOf(req);
+    const c = getConsumer(id);
+    if (!c) return res.status(404).json({ error: "consumer not found" });
+    res.json(c);
+});
 
 // =====================================================================
 //                  Uploads (per #B.76)
@@ -285,15 +446,18 @@ api.patch("/settings/upload-max-bytes", (req: Request, res: Response) => {
 });
 
 /**
- * Resolve the calling consumer from the `X-Aiball-Consumer` header. The UI
- * sets this once globally (from `localStorage.aiball.human_id ?? "human"`),
- * MCP/CLI clients can set it per-request, and we fall back to the
- * `AIBALL_HUMAN` env value (default `"human"`) so the daemon always has a
- * sensible default when nothing is provided. Per-consumer fields (read
- * state, unread flags, mark-read scope) read from this without each
- * handler having to ask for `consumer_id` in the query/body.
+ * Resolve the calling consumer. After #B.94 this comes from the
+ * `req.consumer_id` set by the bearer-token middleware (`src/auth.ts`).
+ * Humans can still impersonate via `X-Aiball-Consumer` header — the
+ * middleware already applied that override when valid.
+ *
+ * Final fallback to `AIBALL_HUMAN` env (default `"human"`) for routes
+ * that are reached before the middleware fires (shouldn't happen, but
+ * cheap defense in depth).
  */
 function consumerOf(req: Request): string {
+    const ar = req as AuthenticatedRequest;
+    if (ar.consumer_id) return ar.consumer_id;
     const headerVal = req.header("x-aiball-consumer");
     if (typeof headerVal === "string" && headerVal.trim()) return headerVal.trim();
     return process.env.AIBALL_HUMAN ?? "human";

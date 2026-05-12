@@ -1,0 +1,178 @@
+/**
+ * Auth helpers (#B.94). Wraps:
+ *   - scrypt-based password hash + verify.
+ *   - bearer-token middleware that runs in front of every /api/* route.
+ *
+ * Password hashing uses Node's built-in `crypto.scrypt` — zero deps,
+ * no native module to compile. Hash format is
+ *   `scrypt$<N>$<r>$<p>$<salt-hex>$<derived-hex>`
+ * so we can bump parameters later without breaking existing rows.
+ */
+import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { promisify } from "node:util";
+import type { Request, Response, NextFunction } from "express";
+import {
+    anyHumanCredentials,
+    getTokenAndTouch,
+    isHuman,
+    type Token,
+} from "./db.js";
+
+const scryptAsync = promisify(scrypt);
+
+// scrypt cost parameters. N=16384 / r=8 / p=1 is the Node default
+// recommendation and gives ~100ms hash on modern hardware. Safe for
+// interactive logins; increase later if needed without breaking old
+// rows because we embed the parameters in the hash string.
+const SCRYPT_N = 16384;
+const SCRYPT_R = 8;
+const SCRYPT_P = 1;
+const SCRYPT_KEYLEN = 64;
+
+export async function hashPassword(password: string): Promise<string> {
+    const salt = randomBytes(16);
+    const derived = (await scryptAsync(password, salt, SCRYPT_KEYLEN, {
+        N: SCRYPT_N,
+        r: SCRYPT_R,
+        p: SCRYPT_P,
+    })) as Buffer;
+    return [
+        "scrypt",
+        SCRYPT_N,
+        SCRYPT_R,
+        SCRYPT_P,
+        salt.toString("hex"),
+        derived.toString("hex"),
+    ].join("$");
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+    if (!stored || !stored.startsWith("scrypt$")) return false;
+    const parts = stored.split("$");
+    if (parts.length !== 6) return false;
+    const [, nStr, rStr, pStr, saltHex, derivedHex] = parts;
+    const N = Number(nStr);
+    const r = Number(rStr);
+    const p = Number(pStr);
+    if (!Number.isFinite(N) || !Number.isFinite(r) || !Number.isFinite(p)) return false;
+    const salt = Buffer.from(saltHex, "hex");
+    const expected = Buffer.from(derivedHex, "hex");
+    const got = (await scryptAsync(password, salt, expected.length, { N, r, p })) as Buffer;
+    // Constant-time compare to avoid timing leaks.
+    if (got.length !== expected.length) return false;
+    return timingSafeEqual(got, expected);
+}
+
+// =====================================================================
+// Bearer-token middleware
+// =====================================================================
+
+/**
+ * Attach the authenticated consumer to the request. Mounted on every
+ * /api/* route except the public bypass list (see PUBLIC_PATHS).
+ *
+ * Order:
+ *   1. Read Authorization: Bearer <token> (or X-Aiball-Token fallback).
+ *   2. Look up the token. Reject if missing / expired / install-kind
+ *      (install tokens only grant /setup access).
+ *   3. Resolve token.consumer_id, attach to req.
+ *
+ * The legacy `X-Aiball-Consumer` header is honored as an override
+ * ONLY when the authenticated principal is a human moderator — the
+ * web UI uses this to "view as <agent>" without re-authenticating.
+ * Agents cannot override their identity.
+ */
+export interface AuthenticatedRequest extends Request {
+    consumer_id?: string;
+    token_kind?: Token["kind"];
+}
+
+const PUBLIC_PATHS = new Set<string>([
+    "/api/health",
+    "/api/auth/setup",
+    "/api/auth/login",
+    "/api/auth/status",
+]);
+
+function readBearerToken(req: Request): string | null {
+    const auth = req.header("authorization");
+    if (auth && /^bearer\s+/i.test(auth)) {
+        return auth.replace(/^bearer\s+/i, "").trim();
+    }
+    const fallback = req.header("x-aiball-token");
+    if (typeof fallback === "string" && fallback) return fallback.trim();
+    return null;
+}
+
+export function bearerAuth(req: Request, res: Response, next: NextFunction): void {
+    if (PUBLIC_PATHS.has(req.path)) {
+        next();
+        return;
+    }
+    const token = readBearerToken(req);
+    // Bootstrap mode: while no human has gone through /setup yet, the
+    // daemon accepts unauthenticated requests as the legacy "human"
+    // (or $AIBALL_HUMAN) consumer. The window closes the instant the
+    // first auth token is minted by /setup. The X-Aiball-Consumer
+    // header is still honored as the active consumer so the existing
+    // UI picker keeps working pre-auth.
+    if (!token && !anyHumanCredentials()) {
+        const ar = req as AuthenticatedRequest;
+        const headerVal = req.header("x-aiball-consumer");
+        ar.consumer_id =
+            typeof headerVal === "string" && headerVal.trim()
+                ? headerVal.trim()
+                : (process.env.AIBALL_HUMAN ?? "human");
+        ar.token_kind = undefined;
+        next();
+        return;
+    }
+    if (!token) {
+        res.status(401).set("www-authenticate", "Bearer").json({
+            error: "authentication required",
+        });
+        return;
+    }
+    const row = getTokenAndTouch(token);
+    if (!row) {
+        res.status(401).set("www-authenticate", "Bearer").json({
+            error: "invalid or expired token",
+        });
+        return;
+    }
+    if (row.kind === "install") {
+        res.status(403).json({
+            error: "install tokens cannot access /api/* — use POST /api/auth/setup first",
+        });
+        return;
+    }
+    if (!row.consumer_id) {
+        res.status(403).json({ error: "token is not bound to a consumer" });
+        return;
+    }
+    const ar = req as AuthenticatedRequest;
+    ar.consumer_id = row.consumer_id;
+    ar.token_kind = row.kind;
+
+    // Human-only impersonation via the legacy X-Aiball-Consumer header.
+    const override = req.header("x-aiball-consumer");
+    if (typeof override === "string" && override && override !== row.consumer_id) {
+        if (isHuman(row.consumer_id)) {
+            ar.consumer_id = override;
+        }
+        // Non-humans: silently ignore the override.
+    }
+    next();
+}
+
+/**
+ * Helper used outside middlewares (web socket handshake, batch jobs)
+ * to resolve a token without express. Returns the consumer_id when
+ * the token is auth/agent and valid; null otherwise.
+ */
+export function resolveTokenToConsumer(token: string): string | null {
+    const row = getTokenAndTouch(token);
+    if (!row) return null;
+    if (row.kind === "install") return null;
+    return row.consumer_id ?? null;
+}
