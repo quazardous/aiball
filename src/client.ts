@@ -143,8 +143,10 @@ export class AiballClient {
     listTickets(q: Record<string, string | undefined> = {}) {
         return this.http("GET", `/api/tickets${query(q)}`);
     }
-    getTicket(id: number) {
-        return this.http("GET", `/api/tickets/${id}`);
+    getTicket(id: number, opts: { summary?: boolean } = {}) {
+        const q: Record<string, string | undefined> = {};
+        if (opts.summary) q.summary = "1";
+        return this.http("GET", `/api/tickets/${id}${query(q)}`);
     }
     listProjects() {
         return this.http("GET", "/api/projects");

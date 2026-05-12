@@ -713,11 +713,40 @@ api.get("/tickets", (req, res) => {
     const tagsFilter = typeof req.query.tags === "string"
         ? req.query.tags.split(",").map((s) => s.trim()).filter(Boolean)
         : null;
+    // Summary mode (#B.83): drop body / edited_body from the payload.
+    // Saves tokens on agent calls that only need an index.
+    const summary = req.query.summary === "1";
+    // Author filter (#B.84): scope to tickets posted by a specific
+    // consumer_id. Useful for "my tickets" without scanning the full list.
+    const byAgent = typeof req.query.by_agent === "string" && req.query.by_agent
+        ? req.query.by_agent
+        : undefined;
+    // Status filter (#B.84): default "approved" preserves prior behavior;
+    // pass "pending" / "rejected" / "any" to widen.
+    const statusParam = (req.query.status as string | undefined) ?? "approved";
+    const statusFilter: "pending" | "approved" | "rejected" | undefined =
+        statusParam === "pending" || statusParam === "approved" || statusParam === "rejected"
+            ? statusParam
+            : statusParam === "any"
+              ? undefined
+              : "approved";
+    // Substring filter (#B.84): case-insensitive contains on the
+    // (edited_)title. Cheap alternative to FTS when looking up a ticket
+    // by name.
+    const titleContains =
+        typeof req.query.title_contains === "string" && req.query.title_contains
+            ? req.query.title_contains.toLowerCase()
+            : undefined;
+    const limit =
+        typeof req.query.limit === "string" && Number.isFinite(Number(req.query.limit))
+            ? Math.max(1, Math.min(500, Number(req.query.limit)))
+            : undefined;
 
     const created = listMessages({
-        status: "approved",
+        status: statusFilter,
         kind: "ticket_created",
         project,
+        by_agent: byAgent,
     });
 
     const closes = listMessages({
@@ -733,12 +762,12 @@ api.get("/tickets", (req, res) => {
     const tickets = created.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;
-        return {
+        const base = {
             id: m.id,
             project: m.project,
             title: m.edited_title ?? m.title,
-            body: m.edited_body ?? m.body,
             by_agent: m.by_agent,
+            status: m.status,
             created_at: m.created_at,
             closed: closedSet.has(m.id),
             broadcast: m.broadcast === 1,
@@ -749,6 +778,8 @@ api.get("/tickets", (req, res) => {
             sub_ticket_count: childCounts.get(m.id) ?? 0,
             tags: tagsMap.get(m.id) ?? [],
         };
+        if (summary) return base;
+        return { ...base, body: m.edited_body ?? m.body };
     });
 
     let result = tickets;
@@ -763,6 +794,12 @@ api.get("/tickets", (req, res) => {
             return true;
         });
     }
+    if (titleContains) {
+        result = result.filter((t) =>
+            (t.title ?? "").toLowerCase().includes(titleContains),
+        );
+    }
+    if (limit !== undefined) result = result.slice(0, limit);
     res.json(result);
 });
 
@@ -932,36 +969,41 @@ api.get("/tickets/:id", (req, res) => {
     // "closed without explicit resolution" (wontfix / abandoned / dup).
     // Reopen still zeroes resolvedFlag inside the replay loop.
     const resolved = resolvedFlag;
+    // Summary mode (#B.83): header only, no body, no comments array
+    // (comment_count instead). Keeps payload small for index callers.
+    const summary = req.query.summary === "1";
+    const headerBase = {
+        id: t.id,
+        project: t.project,
+        title: t.edited_title ?? t.title,
+        by_agent: t.by_agent,
+        created_at: t.created_at,
+        status: t.status,
+        closed,
+        resolved,
+        resolved_by: resolved ? resolvedBy : null,
+        resolved_at: resolved ? resolvedAt : null,
+        broadcast: t.broadcast === 1,
+        postponed_until: t.postponed_until ?? null,
+        intent: t.intent,
+        parent_ticket_id: t.parent_ticket_id ?? null,
+        sub_tickets: listSubTickets(t.id),
+        tags: listMessageTags(t.id),
+    };
+    if (summary) {
+        const commentCount = threadMessages.filter(
+            (m) => m.kind === "comment_added" && m.status !== "rejected",
+        ).length;
+        return res.json({
+            ticket: headerBase,
+            comment_count: commentCount,
+            focus_message_id: focusMessageId,
+        });
+    }
     res.json({
         ticket: {
-            id: t.id,
-            project: t.project,
-            title: t.edited_title ?? t.title,
+            ...headerBase,
             body: t.edited_body ?? t.body,
-            by_agent: t.by_agent,
-            created_at: t.created_at,
-            status: t.status,
-            closed,
-            resolved,
-            resolved_by: resolved ? resolvedBy : null,
-            resolved_at: resolved ? resolvedAt : null,
-            broadcast: t.broadcast === 1,
-            postponed_until: t.postponed_until ?? null,
-            intent: t.intent,
-            /**
-             * Sub-ticket lineage (per #B.61 / #B.62 follow-up): exposed
-             * here so the UI can render "Sub-ticket of #B.NN" as
-             * metadata in the header rather than expecting the author
-             * to repeat it in the body.
-             */
-            parent_ticket_id: t.parent_ticket_id ?? null,
-            /**
-             * Recap of direct children. Surfaced in the parent's
-             * header (symmetric to parent_ticket_id on the child).
-             * Empty array when this ticket has no sub-tickets.
-             */
-            sub_tickets: listSubTickets(t.id),
-            tags: listMessageTags(t.id),
         },
         comments: enrichRelationStages(withTags(threadMessages)),
         focus_message_id: focusMessageId,
