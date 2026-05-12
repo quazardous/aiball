@@ -255,6 +255,63 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
 }
 
 /**
+ * Hard-delete tickets that have been closed for more than `olderThanDays`
+ * within a single project. "Closed" is the same lifecycle-replay state the
+ * sidebar uses — the latest `ticket_closed`/`ticket_reopened` event must be
+ * `ticket_closed`. The cutoff compares the `createdAt` of that closing
+ * event against now − N days.
+ *
+ * Cascades: tickets → _messages, ticket_tags, ticket_subscriptions via FK;
+ * pings are wiped explicitly (no FK). Child sub-tickets with parent_ticket_id
+ * pointing at a purged row become top-level (ON DELETE SET NULL).
+ */
+export function purgeOldClosedTickets(
+    project: string,
+    olderThanDays: number,
+): { purged_tickets: number; purged_messages: number } {
+    const db = getDb();
+    const cutoff = new Date(Date.now() - olderThanDays * 86_400_000).toISOString();
+    return db.transaction((tx) => {
+        const events = tx.select({
+            ticketId: schema.messages.ticketId,
+            kind: schema.messages.kind,
+            createdAt: schema.messages.createdAt,
+            id: schema.messages.id,
+        })
+            .from(schema.messages)
+            .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+            .where(and(
+                eq(schema.tickets.project, project),
+                inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
+                eq(schema.messages.status, "approved"),
+            ))
+            .orderBy(asc(schema.messages.id))
+            .all();
+        const latestClose = new Map<number, string | null>();
+        for (const ev of events) {
+            if (ev.kind === "ticket_closed") latestClose.set(ev.ticketId, ev.createdAt);
+            else latestClose.set(ev.ticketId, null);
+        }
+        const purgeIds: number[] = [];
+        for (const [tid, closedAt] of latestClose) {
+            if (closedAt !== null && closedAt < cutoff) purgeIds.push(tid);
+        }
+        if (purgeIds.length === 0) return { purged_tickets: 0, purged_messages: 0 };
+        const messageIds = tx.select({ id: schema.messages.id })
+            .from(schema.messages)
+            .where(inArray(schema.messages.ticketId, purgeIds))
+            .all()
+            .map((r) => r.id);
+        tx.delete(schema.pings).where(inArray(schema.pings.ticketId, purgeIds)).run();
+        if (messageIds.length) {
+            tx.delete(schema.pings).where(inArray(schema.pings.commentId, messageIds)).run();
+        }
+        tx.delete(schema.tickets).where(inArray(schema.tickets.id, purgeIds)).run();
+        return { purged_tickets: purgeIds.length, purged_messages: messageIds.length };
+    });
+}
+
+/**
  * Hard-delete a project: every ticket (cascades to _messages, ticket_tags,
  * ticket_subscriptions via FK), every project subscription, every ping
  * targeting any of those ids (no FK on pings; cleanup is explicit).

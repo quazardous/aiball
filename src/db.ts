@@ -88,6 +88,7 @@ export {
     listProjectsDetailed,
     deleteProject,
     getProjectStatsRich,
+    purgeOldClosedTickets,
 } from "./db/projects.js";
 
 export {

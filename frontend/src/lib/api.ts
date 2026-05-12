@@ -228,6 +228,18 @@ export const api = {
             "DELETE",
             `/api/projects/${encodeURIComponent(name)}`,
         ),
+    purgeOldClosed: (name: string, older_than_days = 365) =>
+        req<{
+            project: string;
+            older_than_days: number;
+            purged_tickets: number;
+            purged_messages: number;
+            ok: boolean;
+        }>(
+            "POST",
+            `/api/projects/${encodeURIComponent(name)}/purge`,
+            { older_than_days },
+        ),
     projectStatsRich: (name: string) =>
         req<unknown>(
             "GET",

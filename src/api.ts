@@ -46,6 +46,7 @@ import {
     listProjectsDetailed,
     deleteProject,
     getProjectStatsRich,
+    purgeOldClosedTickets,
     setTicketBroadcast,
     setTicketPostpone,
     getTicketPostpone,
@@ -462,6 +463,19 @@ api.get("/mention-suggestions", (_req, res) => {
         projects: listProjects(),
         agents: listKnownAgents(),
     });
+});
+
+api.post("/projects/:name/purge", (req, res) => {
+    const name = req.params.name;
+    const raw = (req.body ?? {}) as { older_than_days?: unknown };
+    const days = typeof raw.older_than_days === "number" && raw.older_than_days > 0
+        ? Math.floor(raw.older_than_days)
+        : 365;
+    const result = purgeOldClosedTickets(name, days);
+    if (result.purged_tickets > 0) {
+        broadcast({ type: "project_purged", data: { project: name, ...result, older_than_days: days } });
+    }
+    res.json({ project: name, older_than_days: days, ...result, ok: true });
 });
 
 api.delete("/projects/:name", (req, res) => {

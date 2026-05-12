@@ -10,6 +10,8 @@ const rows = ref<ProjectMeta[]>([]);
 const loading = ref(false);
 const confirming = ref<string | null>(null);
 const deleting = ref<string | null>(null);
+const confirmingPurge = ref<string | null>(null);
+const purging = ref<string | null>(null);
 
 const emit = defineEmits<{
     (e: "open-stats", project: string): void;
@@ -28,6 +30,40 @@ async function load() {
         });
     } finally {
         loading.value = false;
+    }
+}
+
+async function confirmPurge(name: string) {
+    purging.value = name;
+    try {
+        const r = await api.purgeOldClosed(name, 365);
+        if (r.purged_tickets === 0) {
+            toast.add({
+                severity: "info",
+                summary: `"${r.project}" — nothing to purge`,
+                detail: `No tickets closed more than ${r.older_than_days} days ago.`,
+                life: 6000,
+            });
+        } else {
+            toast.add({
+                severity: "success",
+                summary: `Purged ${r.purged_tickets} ticket(s) from "${r.project}"`,
+                detail: `${r.purged_messages} message(s) removed (closed > ${r.older_than_days}d).`,
+                life: 8000,
+            });
+        }
+        confirmingPurge.value = null;
+        bus.emit("projects.refresh");
+        bus.emit("inbox.refresh");
+    } catch (e) {
+        toast.add({
+            severity: "error",
+            summary: "Purge failed",
+            detail: (e as Error).message,
+            life: 8000,
+        });
+    } finally {
+        purging.value = null;
     }
 }
 
@@ -121,27 +157,7 @@ defineExpose({ load });
                         <span v-else style="color: var(--p-text-muted-color)">—</span>
                     </td>
                     <td class="action-cell">
-                        <template v-if="confirming !== p.name">
-                            <Button
-                                icon="pi pi-chart-bar"
-                                severity="secondary"
-                                text
-                                rounded
-                                size="small"
-                                title="Open per-project stats"
-                                @click="emit('open-stats', p.name)"
-                            />
-                            <Button
-                                icon="pi pi-trash"
-                                severity="danger"
-                                text
-                                rounded
-                                size="small"
-                                title="Delete this project"
-                                @click="confirming = p.name"
-                            />
-                        </template>
-                        <template v-else>
+                        <template v-if="confirming === p.name">
                             <span class="confirm-text">Really delete?</span>
                             <Button
                                 label="confirm"
@@ -157,6 +173,53 @@ defineExpose({ load });
                                 severity="secondary"
                                 text
                                 @click="confirming = null"
+                            />
+                        </template>
+                        <template v-else-if="confirmingPurge === p.name">
+                            <span class="confirm-text">Purge tickets closed &gt; 1 year?</span>
+                            <Button
+                                label="confirm"
+                                icon="pi pi-eraser"
+                                severity="warn"
+                                size="small"
+                                :loading="purging === p.name"
+                                @click="confirmPurge(p.name)"
+                            />
+                            <Button
+                                label="cancel"
+                                size="small"
+                                severity="secondary"
+                                text
+                                @click="confirmingPurge = null"
+                            />
+                        </template>
+                        <template v-else>
+                            <Button
+                                icon="pi pi-chart-bar"
+                                severity="secondary"
+                                text
+                                rounded
+                                size="small"
+                                title="Open per-project stats"
+                                @click="emit('open-stats', p.name)"
+                            />
+                            <Button
+                                icon="pi pi-eraser"
+                                severity="warn"
+                                text
+                                rounded
+                                size="small"
+                                title="Purge tickets closed more than 1 year ago"
+                                @click="confirmingPurge = p.name"
+                            />
+                            <Button
+                                icon="pi pi-trash"
+                                severity="danger"
+                                text
+                                rounded
+                                size="small"
+                                title="Delete this project"
+                                @click="confirming = p.name"
                             />
                         </template>
                     </td>
