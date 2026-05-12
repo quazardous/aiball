@@ -172,6 +172,14 @@ interface StartOpts {
     worktree?: boolean;
     base?: string;
     attach?: boolean;
+    /**
+     * Claude Code permission mode to pass to the spawned session. For a
+     * sandbox loop, `auto` is the safe-but-autonomous default — actions
+     * go through the auto-mode classifier, no prompts. `bypassPermissions`
+     * removes the classifier (no safety). `acceptEdits` etc. prompt for
+     * shells, so the loop will stall waiting for a human.
+     */
+    permissionMode?: string;
 }
 
 async function cmdStart(opts: StartOpts): Promise<void> {
@@ -295,7 +303,16 @@ async function cmdStart(opts: StartOpts): Promise<void> {
 
     need(MUX_CMD);
     const tmuxName = `sb-${name}`;
-    const innerCmd = `source "${sd}/env"; exec claude --settings ${shQuote(settingsJson)}`;
+    const permMode = opts.permissionMode ?? "auto";
+    if (permMode === "default" || permMode === "acceptEdits" || permMode === "plan") {
+        warn(
+            `permission-mode '${permMode}' prompts for shell commands — the loop will stall without a human. ` +
+                `Consider --permission-mode auto or bypassPermissions.`,
+        );
+    }
+    const innerCmd =
+        `source "${sd}/env"; ` +
+        `exec claude --permission-mode ${shQuote(permMode)} --settings ${shQuote(settingsJson)}`;
     const r = spawnSync(MUX_CMD, [
         "new-session",
         "-d",
@@ -607,6 +624,11 @@ export function registerSandboxCommands(program: Command): void {
         .option("--worktree", "Create a git worktree under ~/sandboxes/<name>")
         .option("--base <ref>", "Worktree base ref (default HEAD)")
         .option("--attach", "Attach to the tmux session after spawn")
+        .option(
+            "--permission-mode <mode>",
+            "Claude permission-mode for the spawned session (default: auto — classifier-checked, no prompts). Other useful values: bypassPermissions (no safety check), dontAsk (only pre-approved tools). Modes that prompt (default/acceptEdits/plan) will stall the loop.",
+            "auto",
+        )
         .action(async (opts: StartOpts) => {
             await cmdStart(opts);
         });
