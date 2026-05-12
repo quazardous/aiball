@@ -26,6 +26,13 @@ export const tickets = sqliteTable("tickets", {
     displaySeq: integer("display_seq").notNull(),
     title: text("title").notNull(),
     body: text("body"),
+    /**
+     * Optional agent-authored single-line summary (#B.87). Distinct from
+     * `title` (short, often tag-like) and `body` (long markdown). Shown
+     * in inbox lists, ping notifications, search snippets. Falls back to
+     * `title` when null.
+     */
+    summary: text("summary"),
     byAgent: text("by_agent"),
     intent: text("intent"),
     status: text("status").notNull().default("pending"),

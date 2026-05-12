@@ -111,6 +111,12 @@ server.registerTool(
                     "Project name (free-form). Defaults to $AIBALL_PROJECT if set.",
                 ),
             title: z.string().describe("Ticket title"),
+            summary: z
+                .string()
+                .optional()
+                .describe(
+                    "Optional one-sentence summary (#B.87). Shown in inbox lists, ping notifications, search snippets. If omitted, consumers fall back to `title`. Try to write something tighter than the title — 5-15 words capturing the actionable gist.",
+                ),
             body: z.string().optional().describe("Ticket body / description"),
             intent: z
                 .enum(["panic", "request", "question", "fyi"])
@@ -143,12 +149,13 @@ server.registerTool(
                 ),
         },
     },
-    async ({ project, title, body, intent, broadcast, by_agent, parent_id, tags }) => {
+    async ({ project, title, summary, body, intent, broadcast, by_agent, parent_id, tags }) => {
         const proj = client.resolveProject(project);
         const res = (await client.postMessage({
             project: proj,
             kind: "ticket_created",
             title,
+            summary,
             body,
             intent,
             by_agent: effectiveBy(by_agent),
@@ -372,6 +379,13 @@ server.registerTool(
                 .nullable()
                 .optional()
                 .describe("New title (owner-bypass). Omit to leave unchanged."),
+            summary: z
+                .string()
+                .nullable()
+                .optional()
+                .describe(
+                    "New one-line summary (#B.87, owner-bypass). Pass null to clear and fall back to title.",
+                ),
             body: z
                 .string()
                 .nullable()
@@ -397,13 +411,18 @@ server.registerTool(
                 ),
         },
     },
-    async ({ ticket_id, title, body, intent, broadcast, postponed_until }) => {
+    async ({ ticket_id, title, summary, body, intent, broadcast, postponed_until }) => {
         const results: Record<string, unknown> = { ticket_id };
         // Each field maps to its own HTTP endpoint. Apply in this
         // order: edit fields first (they may change the title/body the
         // following flips display), then broadcast, then postpone.
-        if (title !== undefined || body !== undefined || intent !== undefined) {
-            results.edit = await client.edit(ticket_id, { title, body, intent });
+        if (
+            title !== undefined ||
+            body !== undefined ||
+            summary !== undefined ||
+            intent !== undefined
+        ) {
+            results.edit = await client.edit(ticket_id, { title, summary, body, intent });
         }
         if (broadcast !== undefined) {
             results.broadcast = await client.setTicketBroadcast(ticket_id, broadcast);
@@ -459,7 +478,7 @@ server.registerTool(
     "ticket_list",
     {
         description:
-            "List tickets, optionally filtered by project, tags, author, status, or title substring. Snoozed tickets (postponed_until > now) are excluded by default when `open: true` — pass `include_snoozed: true` to surface them. Tag filter is AND-semantic. Pass `summary: true` to drop ticket bodies and get header-only rows (id, title, status, parent, sub count, tags) — much cheaper for index lookups. Use ticket_get for the full thread.",
+            "List tickets, optionally filtered by project, tags, author, status, title substring, or `since` (created_at >= ISO8601). Snoozed tickets excluded by default when `open: true` — pass `include_snoozed: true` to surface them. Tag filter is AND-semantic. **Default: header-only rows** (id, title, summary, status, parent, sub_count, tags) — no bodies. Pass `full: true` to include `body` per row. Use ticket_get for one full thread.",
         inputSchema: {
             project: z.string().optional(),
             open: z
@@ -476,11 +495,17 @@ server.registerTool(
                 .describe(
                     "Restrict to tickets carrying every named tag (AND). Case-sensitive match on tag name. Unknown tags silently match nothing.",
                 ),
-            summary: z
+            full: z
                 .boolean()
                 .optional()
                 .describe(
-                    "If true, omit ticket bodies. Returns id, title, status, intent, by_agent, parent_ticket_id, sub_ticket_count, tags — header-only rows. Much cheaper for 'what tickets exist' than the default full payload.",
+                    "If true, include `body` in each row. Default is summary mode (header only) since #B.87 — listings are typically index lookups.",
+                ),
+            since: z
+                .string()
+                .optional()
+                .describe(
+                    "ISO8601 timestamp. Filters to tickets whose created_at >= since. Useful for 'what landed in the last hour'. Date.parse-friendly strings accepted (e.g. '2026-05-12T13:00:00Z' or '2026-05-12').",
                 ),
             by_agent: z
                 .string()
@@ -514,7 +539,8 @@ server.registerTool(
         open,
         include_snoozed,
         tags,
-        summary,
+        full,
+        since,
         by_agent,
         status,
         title_contains,
@@ -525,7 +551,10 @@ server.registerTool(
             open: open ? "1" : undefined,
             include_postponed: include_snoozed ? "1" : undefined,
             tags: tags && tags.length > 0 ? tags.join(",") : undefined,
-            summary: summary ? "1" : undefined,
+            // Default (no flag) → summary mode on the API side. `full: true`
+            // explicitly opts back into bodies.
+            full: full === true ? "1" : undefined,
+            since,
             by_agent,
             status,
             title_contains,
@@ -572,19 +601,19 @@ server.registerTool(
     "ticket_get",
     {
         description:
-            "Get a ticket header + all approved comments (the full thread). Pass `summary: true` to skip the comments array and bodies — the response then has `ticket` (header only, no body) + `comment_count`. Much cheaper when you only need to know whether the ticket exists / its current state.",
+            "Get a ticket. **Default: header only** (no body, no comments) + `comment_count` — cheap probe of state. Pass `full: true` for the full thread (header with body + all approved comments). Use when you want to read the conversation, not just check status.",
         inputSchema: {
             ticket_id: z.number().int(),
-            summary: z
+            full: z
                 .boolean()
                 .optional()
                 .describe(
-                    "If true, omit body and comments. Returns the header + comment_count only.",
+                    "If true, return the full thread (body + comments). Default is summary mode (#B.87): the header only + a `comment_count` integer.",
                 ),
         },
     },
-    async ({ ticket_id, summary }) => {
-        return asText(await client.getTicket(ticket_id, { summary }));
+    async ({ ticket_id, full }) => {
+        return asText(await client.getTicket(ticket_id, { summary: full !== true }));
     },
 );
 

@@ -71,6 +71,13 @@
       "when": 1778600000000,
       "tag": "0009_ticket_relations",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1778700000000,
+      "tag": "0010_ticket_summary",
+      "breakpoints": true
     }
   ]
 }

@@ -59,6 +59,12 @@ export interface Message {
     parent_id: number | null;
     title: string | null;
     body: string | null;
+    /**
+     * Agent-authored short summary (tickets only, #B.87). Optional. NULL
+     * for non-ticket rows and for tickets posted before this column
+     * existed. Consumers usually fall back to `title` when absent.
+     */
+    summary?: string | null;
     by_agent: string | null;
     status: MessageStatus;
     created_at: string;
@@ -133,6 +139,8 @@ export interface NewMessage {
     parent_id?: number | null;
     title?: string | null;
     body?: string | null;
+    /** Tickets only — optional agent-authored short summary (#B.87). */
+    summary?: string | null;
     by_agent?: string | null;
     intent?: Intent | null;
 }
@@ -324,6 +332,7 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         parent_id: null,
         title: t.title,
         body: t.body,
+        summary: t.summary ?? null,
         by_agent: t.byAgent,
         status: t.status as MessageStatus,
         created_at: t.createdAt,

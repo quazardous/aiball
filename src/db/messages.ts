@@ -41,6 +41,7 @@ export function insertMessage(m: NewMessage): Message {
                 displaySeq: seq,
                 title: m.title ?? "",
                 body: m.body ?? null,
+                summary: m.summary ?? null,
                 byAgent: m.by_agent ?? null,
                 intent: m.intent ?? null,
                 createdAt,
@@ -246,6 +247,7 @@ export function editMessage(
     fields: {
         title?: string | null;
         body?: string | null;
+        summary?: string | null;
         intent?: Intent | null;
     },
 ): Message | null {
@@ -254,6 +256,10 @@ export function editMessage(
     const ticketPatch: Partial<schema.NewTicket> = {};
     if (fields.title !== undefined) ticketPatch.editedTitle = fields.title;
     if (fields.body !== undefined) ticketPatch.editedBody = fields.body;
+    // Summary has no `edited_summary` overlay — it's agent-authored
+    // metadata, mutated in place (#B.87). The owner-bypass check that
+    // gates this edit is the same gate that protects title/body anyway.
+    if (fields.summary !== undefined) ticketPatch.summary = fields.summary;
     if (fields.intent !== undefined) ticketPatch.intent = fields.intent;
     if (Object.keys(ticketPatch).length > 0) {
         const t = db.update(schema.tickets)

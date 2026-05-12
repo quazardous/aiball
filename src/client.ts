@@ -145,7 +145,12 @@ export class AiballClient {
     }
     getTicket(id: number, opts: { summary?: boolean } = {}) {
         const q: Record<string, string | undefined> = {};
-        if (opts.summary) q.summary = "1";
+        // API default is now summary mode (#B.87). Caller passing
+        // {summary: false} explicitly wants the full thread — send full=1.
+        // {summary: true} (or omitted) accepts the default; we still send
+        // summary=1 when truthy for backward-compat with older daemons.
+        if (opts.summary === false) q.full = "1";
+        else if (opts.summary === true) q.summary = "1";
         return this.http("GET", `/api/tickets/${id}${query(q)}`);
     }
     listProjects() {
@@ -327,7 +332,15 @@ export class AiballClient {
     reject(id: number) {
         return this.http("POST", `/api/messages/${id}/reject`);
     }
-    edit(id: number, fields: { title?: string | null; body?: string | null; intent?: string | null }) {
+    edit(
+        id: number,
+        fields: {
+            title?: string | null;
+            body?: string | null;
+            summary?: string | null;
+            intent?: string | null;
+        },
+    ) {
         return this.http("POST", `/api/messages/${id}/edit`, fields);
     }
     /**

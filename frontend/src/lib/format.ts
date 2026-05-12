@@ -23,10 +23,12 @@ export function relativeTime(iso: string): string {
     return d.toLocaleDateString();
 }
 
-/** Inline snippet of a row's body — newlines collapsed, ellipsis at 140. */
+/** Inline snippet of a row — agent-authored summary (#B.87) takes
+ *  priority, otherwise fall back to the body's first ~140 chars.
+ *  Both flattened (whitespace collapsed). */
 export function snippetOf(r: InboxRow): string {
-    const s = r.body ?? "";
-    const flat = s.replace(/\s+/g, " ").trim();
+    const raw = r.summary && r.summary.trim().length > 0 ? r.summary : (r.body ?? "");
+    const flat = raw.replace(/\s+/g, " ").trim();
     return flat.length > 140 ? flat.slice(0, 140) + "…" : flat;
 }
 

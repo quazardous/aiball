@@ -66,6 +66,10 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         parent_id: typeof o.parent_id === "number" ? o.parent_id : null,
         title: typeof o.title === "string" ? o.title : null,
         body: typeof o.body === "string" ? o.body : null,
+        // Summary forwarded as-is (#B.87). NewTicket inserts it; other
+        // kinds ignore it. Empty string maps to null so an explicit
+        // clear works.
+        summary: typeof o.summary === "string" && o.summary !== "" ? o.summary : null,
         by_agent: typeof o.by_agent === "string" ? o.by_agent : null,
         intent: kind === "ticket_created" ? intent : null,
     };

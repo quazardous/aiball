@@ -105,6 +105,8 @@ export interface TicketSummary {
     id: number;
     project: string;
     title: string | null;
+    /** Agent-authored one-line summary (#B.87). Falls back to title. */
+    summary?: string | null;
     body: string | null;
     by_agent: string | null;
     created_at: string;
@@ -154,6 +156,8 @@ export interface InboxRow {
     id: number;
     project: string;
     title: string | null;
+    /** Agent-authored one-line summary (#B.87). Shown under the title. */
+    summary?: string | null;
     body: string | null;
     by_agent: string | null;
     created_at: string;

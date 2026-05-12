@@ -388,16 +388,21 @@ api.post("/messages/:id/edit", (req, res) => {
     const id = Number(req.params.id);
     const existing = getMessage(id);
     if (!existing) return notFound(res);
-    const { title, body, intent } = req.body ?? {};
-    if (title === undefined && body === undefined && intent === undefined) {
-        return badRequest(res, "provide title, body, and/or intent");
+    const { title, body, summary, intent } = req.body ?? {};
+    if (
+        title === undefined &&
+        body === undefined &&
+        summary === undefined &&
+        intent === undefined
+    ) {
+        return badRequest(res, "provide title, body, summary, and/or intent");
     }
     if (intent !== undefined && intent !== null) {
         if (typeof intent !== "string" || !INTENTS.includes(intent as Intent)) {
             return badRequest(res, `intent must be one of ${INTENTS.join(", ")}`);
         }
     }
-    const updated = editMessage(id, { title, body, intent });
+    const updated = editMessage(id, { title, body, summary, intent });
     if (!updated) return notFound(res);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });
@@ -647,6 +652,7 @@ api.get("/inbox", (req, res) => {
             id: t.id,
             project: t.project,
             title: t.edited_title ?? t.title,
+            summary: t.summary ?? null,
             body: t.edited_body ?? t.body,
             by_agent: t.by_agent,
             created_at: t.created_at,
@@ -717,9 +723,19 @@ api.get("/tickets", (req, res) => {
     const tagsFilter = typeof req.query.tags === "string"
         ? req.query.tags.split(",").map((s) => s.trim()).filter(Boolean)
         : null;
-    // Summary mode (#B.83): drop body / edited_body from the payload.
-    // Saves tokens on agent calls that only need an index.
-    const summary = req.query.summary === "1";
+    // Verbosity (#B.83 then #B.87 palier 2): default is summary now —
+    // header-only payload, no body / edited_body. Pass `full=1` to
+    // re-include bodies. `summary=1` kept as an accepted alias for
+    // explicit-summary requests; `summary=0` forces full. The plain
+    // default (neither flag) is summary.
+    const fullParam = req.query.full;
+    const summaryParam = req.query.summary;
+    const summary =
+        fullParam === "1"
+            ? false
+            : summaryParam === "0"
+              ? false
+              : true;
     // Author filter (#B.84): scope to tickets posted by a specific
     // consumer_id. Useful for "my tickets" without scanning the full list.
     const byAgent = typeof req.query.by_agent === "string" && req.query.by_agent
@@ -745,6 +761,13 @@ api.get("/tickets", (req, res) => {
         typeof req.query.limit === "string" && Number.isFinite(Number(req.query.limit))
             ? Math.max(1, Math.min(500, Number(req.query.limit)))
             : undefined;
+    // since (#B.87): filter on ticket created_at >= since. Accepts any
+    // string Date.parse() understands (ISO8601 recommended). Cheap
+    // alternative to client-side diff when polling for new tickets.
+    const sinceParam = typeof req.query.since === "string" ? req.query.since : undefined;
+    const sinceIso = sinceParam && Number.isFinite(Date.parse(sinceParam))
+        ? new Date(Date.parse(sinceParam)).toISOString()
+        : undefined;
 
     const created = listMessages({
         status: statusFilter,
@@ -770,6 +793,9 @@ api.get("/tickets", (req, res) => {
             id: m.id,
             project: m.project,
             title: m.edited_title ?? m.title,
+            // Agent-authored summary (#B.87). Falls back to title when
+            // unset so consumers always have something printable.
+            summary: m.summary ?? null,
             by_agent: m.by_agent,
             status: m.status,
             created_at: m.created_at,
@@ -802,6 +828,9 @@ api.get("/tickets", (req, res) => {
         result = result.filter((t) =>
             (t.title ?? "").toLowerCase().includes(titleContains),
         );
+    }
+    if (sinceIso) {
+        result = result.filter((t) => t.created_at >= sinceIso);
     }
     if (limit !== undefined) result = result.slice(0, limit);
     res.json(result);
@@ -973,13 +1002,18 @@ api.get("/tickets/:id", (req, res) => {
     // "closed without explicit resolution" (wontfix / abandoned / dup).
     // Reopen still zeroes resolvedFlag inside the replay loop.
     const resolved = resolvedFlag;
-    // Summary mode (#B.83): header only, no body, no comments array
-    // (comment_count instead). Keeps payload small for index callers.
-    const summary = req.query.summary === "1";
+    // Verbosity (#B.87 palier 2): default is summary now — header only,
+    // no body, no comments array. Pass `full=1` to opt back into the
+    // full thread. Old `summary=0` accepted as the explicit override
+    // for symmetry with /api/tickets.
+    const fullThread =
+        req.query.full === "1" || req.query.summary === "0";
+    const summary = !fullThread;
     const headerBase = {
         id: t.id,
         project: t.project,
         title: t.edited_title ?? t.title,
+        summary: t.summary ?? null,
         by_agent: t.by_agent,
         created_at: t.created_at,
         status: t.status,
