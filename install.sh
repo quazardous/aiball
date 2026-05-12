@@ -152,6 +152,27 @@ if ! command -v aiball >/dev/null 2>&1; then
     warn '    export PATH="$HOME/.local/bin:$PATH"'
 fi
 
+# --- Auth bootstrap (#B.94) ------------------------------------------------
+# Reentrant: if humans are already configured, we don't reinit. Otherwise
+# mint an install token via `aiball auth init` and print the setup URL.
+# Independent of the data dir (init never destroys anything).
+
+AIBALL_DATA_DIR="$HOME/.local/share/aiball"
+if command -v aiball >/dev/null 2>&1; then
+    # Wait briefly for the daemon to be reachable so the migration that
+    # creates `tokens` / `consumers` has run before we query the DB via
+    # the CLI (which talks to SQLite directly).
+    for _ in 1 2 3 4 5; do
+        curl -sS --max-time 1 "$URL/api/health" >/dev/null 2>&1 && break || sleep 1
+    done
+    if aiball auth init 2>/dev/null; then
+        :
+    else
+        # Already initialized — surface a hint.
+        log "auth already initialized (use 'aiball auth reinit' to mint a fresh setup token)"
+    fi
+fi
+
 printf '\n────────────────────────────────────────────────────────────────────\n'
 printf "${c_green}aiball installed.${c_off}\n"
 if $SYMLINK; then
@@ -161,9 +182,12 @@ cat <<EOF
 
 Next steps:
   1. Verify the daemon:        aiball status
-  2. Open the web UI:          http://127.0.0.1:7777
-                               (UI requires the frontend build — see README)
-  3. Register the MCP server:  see MCP-CLIENT.md or README.md
+  2. First-time setup:         open the URL printed above (or rerun
+                               'aiball auth init' to get a fresh one)
+  3. Issue CLI/MCP token:      aiball auth issue --consumer <login> --label cli
+                               then save it to $AIBALL_DATA_DIR/cli-env as
+                               'export AIBALL_TOKEN=<token>'
+  4. Register the MCP server:  see MCP-CLIENT.md or README.md
 EOF
 if $SYMLINK; then
     printf "  4. Iterate on backend:       edit src/, then 'systemctl --user restart %s'\n" "$SERVICE_NAME"

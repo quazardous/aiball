@@ -14,4 +14,13 @@ BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 ROOT="$(cd "$BIN_DIR/.." && pwd)"
 
 cd "$ROOT"
+
+# #B.94: auto-source the CLI env so HTTP calls authenticate without
+# requiring each .mcp.json to hard-code a token.
+AIBALL_HOME="${AIBALL_HOME:-$HOME/.local/share/aiball}"
+if [[ -z "${AIBALL_TOKEN:-}" && -f "$AIBALL_HOME/cli-env" ]]; then
+    # shellcheck source=/dev/null
+    source "$AIBALL_HOME/cli-env"
+fi
+
 exec npx --no-install tsx "$ROOT/src/mcp.ts" "$@"

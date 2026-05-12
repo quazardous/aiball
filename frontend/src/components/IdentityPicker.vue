@@ -28,7 +28,7 @@ import AutoComplete, { type AutoCompleteCompleteEvent, type AutoCompleteOptionSe
 import Button from "primevue/button";
 import Popover from "primevue/popover";
 import Tag from "primevue/tag";
-import { api, type Consumer } from "../lib/api";
+import { api, clearAuthToken, type Consumer } from "../lib/api";
 import { bus } from "../lib/bus";
 
 const DEFAULT_ID = "human";
@@ -108,6 +108,17 @@ function applyId() {
 function resetToHuman() {
     draftId.value = DEFAULT_ID;
     consumerId.value = DEFAULT_ID;
+}
+
+async function doLogout() {
+    try {
+        await api.authLogout();
+    } catch {
+        /* token already gone; we still log out client-side */
+    }
+    clearAuthToken();
+    localStorage.removeItem("aiball.human_id");
+    window.location.href = "/login";
 }
 
 watch(consumerId, (v) => {
@@ -234,6 +245,17 @@ const currentDraftString = computed(() => {
                 Pick any registered consumer to view aiball through their eyes
                 (sent as <code>X-Aiball-Consumer</code> on every call).
             </p>
+            <div class="identity-picker__divider" />
+            <div class="identity-picker__actions">
+                <Button
+                    label="Log out"
+                    icon="pi pi-sign-out"
+                    size="small"
+                    severity="danger"
+                    text
+                    @click="doLogout"
+                />
+            </div>
         </div>
     </Popover>
 </template>

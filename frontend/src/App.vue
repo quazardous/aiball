@@ -25,11 +25,69 @@ import ProjectStatsPage from "./components/ProjectStatsPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
 import ConsumersPanel from "./components/ConsumersPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
+import SetupScreen from "./components/SetupScreen.vue";
+import LoginScreen from "./components/LoginScreen.vue";
+import { setUnauthorizedHandler } from "./lib/api";
 import Sidebar, { type ProjectListItem, type ProjectPage, type SettingsPanel } from "./components/Sidebar.vue";
 import TagsPanel from "./components/TagsPanel.vue";
 import ThreadView from "./components/ThreadView.vue";
 
 const toast = useToast();
+
+// Auth gate (#B.94). Decides whether we render the app shell, the setup
+// screen (first-time install token), or the login screen.
+type AuthMode = "loading" | "setup" | "login" | "ready";
+const authMode = ref<AuthMode>("loading");
+const setupInitialToken = ref<string | null>(null);
+
+setUnauthorizedHandler(() => {
+    // Token revoked / expired mid-session — drop to the login screen
+    // without a full reload so the user's in-flight context isn't
+    // disturbed by a slow disk reload.
+    if (authMode.value === "ready") authMode.value = "login";
+    localStorage.removeItem("aiball.token");
+});
+
+function onAuthDone(): void {
+    authMode.value = "ready";
+    // Clear the install-token query param so the user can't replay the
+    // setup link, and drop back to the root path.
+    window.history.replaceState({}, "", "/");
+}
+
+async function resolveAuthMode(): Promise<void> {
+    // If the URL is /setup or carries ?t=, the user clicked the
+    // install-token link — show the setup form regardless of any
+    // previously stored token.
+    const params = new URLSearchParams(window.location.search);
+    const tokenParam = params.get("t");
+    if (window.location.pathname === "/setup" || tokenParam) {
+        setupInitialToken.value = tokenParam;
+        authMode.value = "setup";
+        return;
+    }
+    if (window.location.pathname === "/login") {
+        authMode.value = "login";
+        return;
+    }
+    // Have a stored token? Optimistically render the app; first /api
+    // call that returns 401 will bounce to /login via the handler.
+    if (localStorage.getItem("aiball.token")) {
+        authMode.value = "ready";
+        return;
+    }
+    // No token — ask the daemon what mode it's in.
+    try {
+        const s = await api.authStatus();
+        if (!s.ready) {
+            authMode.value = "setup";
+        } else {
+            authMode.value = "login";
+        }
+    } catch {
+        authMode.value = "login";
+    }
+}
 
 // StatusFilter + SortBy types exported from components/InboxToolbar.vue.
 
@@ -570,10 +628,20 @@ useRouting({
     onlyOpen,
 });
 
-onMounted(() => {
+onMounted(async () => {
+    await resolveAuthMode();
+    if (authMode.value !== "ready") return;
     loadProjects();
     loadStrategy();
     loadRows();
+});
+
+watch(authMode, (mode) => {
+    if (mode === "ready") {
+        loadProjects();
+        loadStrategy();
+        loadRows();
+    }
 });
 
 function selectProject(p: string | null) {
@@ -718,7 +786,20 @@ watch(showSnoozed, (v) => {
 </script>
 
 <template>
-    <div class="aiball-shell aiball-compact">
+    <div v-if="authMode === 'loading'" class="auth-screen">
+        <div class="auth-card"><p>Loading…</p></div>
+    </div>
+    <SetupScreen
+        v-else-if="authMode === 'setup'"
+        :initial-token="setupInitialToken"
+        @done="onAuthDone"
+    />
+    <LoginScreen
+        v-else-if="authMode === 'login'"
+        @done="onAuthDone"
+        @need-setup="authMode = 'setup'"
+    />
+    <div v-else class="aiball-shell aiball-compact">
         <HeaderBar
             :connected="connected"
             :global-pending-count="globalPendingCount"

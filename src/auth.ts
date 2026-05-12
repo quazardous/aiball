@@ -9,7 +9,6 @@
  * so we can bump parameters later without breaking existing rows.
  */
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
 import type { Request, Response, NextFunction } from "express";
 import {
     anyHumanCredentials,
@@ -18,7 +17,21 @@ import {
     type Token,
 } from "./db.js";
 
-const scryptAsync = promisify(scrypt);
+// The options overload of `crypto.scrypt` doesn't survive `promisify`'s
+// type inference, so we keep the callback form behind a typed helper.
+function scryptAsync(
+    password: string,
+    salt: Buffer,
+    keylen: number,
+    options: { N: number; r: number; p: number },
+): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+        scrypt(password, salt, keylen, options, (err, derived) => {
+            if (err) reject(err);
+            else resolve(derived);
+        });
+    });
+}
 
 // scrypt cost parameters. N=16384 / r=8 / p=1 is the Node default
 // recommendation and gives ~100ms hash on modern hardware. Safe for
@@ -87,11 +100,13 @@ export interface AuthenticatedRequest extends Request {
     token_kind?: Token["kind"];
 }
 
+// Paths are relative to the router mount (`api = Router()` mounted at
+// `/api` by the daemon), so we check `/health` not `/api/health`.
 const PUBLIC_PATHS = new Set<string>([
-    "/api/health",
-    "/api/auth/setup",
-    "/api/auth/login",
-    "/api/auth/status",
+    "/health",
+    "/auth/setup",
+    "/auth/login",
+    "/auth/status",
 ]);
 
 function readBearerToken(req: Request): string | null {
@@ -110,26 +125,12 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         return;
     }
     const token = readBearerToken(req);
-    // Bootstrap mode: while no human has gone through /setup yet, the
-    // daemon accepts unauthenticated requests as the legacy "human"
-    // (or $AIBALL_HUMAN) consumer. The window closes the instant the
-    // first auth token is minted by /setup. The X-Aiball-Consumer
-    // header is still honored as the active consumer so the existing
-    // UI picker keeps working pre-auth.
-    if (!token && !anyHumanCredentials()) {
-        const ar = req as AuthenticatedRequest;
-        const headerVal = req.header("x-aiball-consumer");
-        ar.consumer_id =
-            typeof headerVal === "string" && headerVal.trim()
-                ? headerVal.trim()
-                : (process.env.AIBALL_HUMAN ?? "human");
-        ar.token_kind = undefined;
-        next();
-        return;
-    }
     if (!token) {
         res.status(401).set("www-authenticate", "Bearer").json({
             error: "authentication required",
+            hint: anyHumanCredentials()
+                ? "log in at /login or pass Authorization: Bearer <agent token>"
+                : "no humans yet — run `aiball auth init` in a terminal, then open the printed setup URL",
         });
         return;
     }

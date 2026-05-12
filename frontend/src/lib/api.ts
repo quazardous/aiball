@@ -83,16 +83,50 @@ function currentConsumer(): string {
     return localStorage.getItem("aiball.human_id") ?? "human";
 }
 
+/** Stored auth token (#B.94). Set by Setup / Login, cleared by Logout. */
+function currentToken(): string | null {
+    return localStorage.getItem("aiball.token");
+}
+
+export function setAuthToken(token: string): void {
+    localStorage.setItem("aiball.token", token);
+}
+
+export function clearAuthToken(): void {
+    localStorage.removeItem("aiball.token");
+}
+
+/**
+ * Global 401 handler — called by `req()` when the daemon rejects the
+ * token. App.vue installs the real callback; the default just clears
+ * the token so a refresh sends us to the login screen.
+ */
+let onUnauthorized: () => void = () => {
+    clearAuthToken();
+    if (location.pathname !== "/login" && location.pathname !== "/setup") {
+        location.href = "/login";
+    }
+};
+export function setUnauthorizedHandler(fn: () => void): void {
+    onUnauthorized = fn;
+}
+
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = {
         "x-aiball-consumer": currentConsumer(),
     };
     if (body) headers["content-type"] = "application/json";
+    const tok = currentToken();
+    if (tok) headers["authorization"] = `Bearer ${tok}`;
     const res = await fetch(path, {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
     });
+    if (res.status === 401) {
+        // Token expired / never set — bail to the login screen.
+        onUnauthorized();
+    }
     if (!res.ok) {
         const text = await res.text();
         throw new Error(`${method} ${path} → ${res.status}: ${text}`);
@@ -385,6 +419,24 @@ export const api = {
     getStrategy: () => req<{ strategy: Strategy }>("GET", "/api/strategy"),
     setStrategy: (s: Strategy) =>
         req<{ strategy: Strategy }>("PATCH", "/api/strategy", { strategy: s }),
+
+    // ---- auth (#B.94) ----------------------------------------------------
+    authStatus: () =>
+        req<{
+            ready: boolean;
+            install_available: boolean;
+            me: { consumer_id: string; kind: "auth" | "agent" } | null;
+        }>("GET", "/api/auth/status"),
+    authSetup: (body: {
+        token: string;
+        consumer_id: string;
+        password: string;
+        display_name?: string | null;
+    }) => req<{ token: string; consumer_id: string }>("POST", "/api/auth/setup", body),
+    authLogin: (body: { consumer_id: string; password: string }) =>
+        req<{ token: string; consumer_id: string }>("POST", "/api/auth/login", body),
+    authLogout: () => req<{ ok: boolean }>("POST", "/api/auth/logout"),
+    me: () => req<Consumer>("GET", "/api/me"),
 
     listConsumers: () => req<Consumer[]>("GET", "/api/consumers"),
     upsertConsumer: (body: {
