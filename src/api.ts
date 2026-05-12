@@ -164,7 +164,12 @@ api.get("/auth/status", (req, res) => {
     }
     res.json({
         ready,
-        install_available: hasInstall && !ready,
+        // True whenever a usable install token exists in the DB. Decoupled
+        // from `ready` so that `aiball auth reinit` (which mints a fresh
+        // install token even when humans already exist) reopens the
+        // /setup path. The frontend uses this to decide whether to show
+        // the setup form at all.
+        install_available: hasInstall,
         me,
     });
 });
@@ -197,12 +202,10 @@ api.post("/auth/setup", async (req: Request, res: Response) => {
     if (!installRow || installRow.kind !== "install") {
         return res.status(401).json({ error: "invalid install token" });
     }
-    // Reject if the consumer already exists with a password (avoid
-    // overriding via stolen install token).
-    const existing = getConsumer(consumer_id);
-    if (existing?.has_password) {
-        return res.status(409).json({ error: "consumer already has a password set" });
-    }
+    // A valid install token is proof of CLI access (only `aiball auth
+    // init/reinit` mints one). CLI access already grants full power
+    // over the DB, so we allow overwriting an existing human's
+    // password — this is exactly what `aiball auth reinit` is for.
     const hash = await hashPassword(password);
     upsertConsumer({
         consumer_id,

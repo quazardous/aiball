@@ -4,11 +4,12 @@
  * URL printed by `aiball auth init` (e.g. /setup?t=aiball-...) or by
  * navigating manually when the daemon reports `install_available`.
  *
- * Submits {token, consumer_id, password, display_name} → /api/auth/setup
- * which mints an auth token in return. Persists the token via
- * `setAuthToken` and reloads into the main app.
+ * Gated: on mount we call /api/auth/status. The form is only revealed
+ * when `install_available === true` — i.e. someone just ran `aiball
+ * auth init` (first boot) or `aiball auth reinit` (password reset).
+ * Otherwise we render a "not allowed" panel pointing at /login.
  */
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Password from "primevue/password";
@@ -29,6 +30,23 @@ const pw1 = ref("");
 const pw2 = ref("");
 const submitting = ref(false);
 const error = ref<string | null>(null);
+
+// Gate: "checking" → call status; "allowed" → show form; "denied" →
+// show "no install token" screen.
+const gate = ref<"checking" | "allowed" | "denied">("checking");
+const alreadyReady = ref(false);
+
+onMounted(async () => {
+    try {
+        const s = await api.authStatus();
+        alreadyReady.value = s.ready;
+        gate.value = s.install_available ? "allowed" : "denied";
+    } catch {
+        // Daemon unreachable — leave the form available so the user
+        // can still try (and see a clear backend error on submit).
+        gate.value = "allowed";
+    }
+});
 
 async function submit() {
     error.value = null;
@@ -79,10 +97,41 @@ async function submit() {
 
 <template>
     <div class="auth-screen">
-        <div class="auth-card">
+        <div v-if="gate === 'checking'" class="auth-card">
+            <p class="auth-card__subtitle">Checking install state…</p>
+        </div>
+
+        <div v-else-if="gate === 'denied'" class="auth-card">
+            <h1 class="auth-card__title">Setup not available</h1>
+            <p class="auth-card__subtitle">
+                <template v-if="alreadyReady">
+                    This aiball instance is already set up. To re-run setup
+                    (e.g. password reset), run <code>aiball auth reinit</code>
+                    in a terminal — it mints a fresh install token and prints
+                    the URL.
+                </template>
+                <template v-else>
+                    No install token has been minted yet. Run
+                    <code>aiball auth init</code> in a terminal first.
+                </template>
+            </p>
+            <p class="auth-footer">
+                <a href="/login">Go to login</a>
+            </p>
+        </div>
+
+        <div v-else class="auth-card">
             <h1 class="auth-card__title">Set up aiball</h1>
             <p class="auth-card__subtitle">
-                First-time setup. Pick a login and password — they'll be the credentials you use to access this aiball instance.
+                <template v-if="alreadyReady">
+                    Re-running setup with a fresh install token. Pick a login
+                    (existing ones get their password updated, new ones get
+                    created).
+                </template>
+                <template v-else>
+                    First-time setup. Pick a login and password — they'll be
+                    the credentials you use to access this aiball instance.
+                </template>
             </p>
 
             <div class="auth-field">
