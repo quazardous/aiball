@@ -86,16 +86,60 @@ function applySandboxStyle(tmuxName: string, mode: "loop" | "plain", name: strin
     if (MUX_CMD !== "tmux") return;
     const bg = mode === "loop" ? "colour208" : "colour33"; // orange / blue
     const label = mode === "loop" ? "SANDBOX" : "MUX-TEST";
+    // status-right shows how to leave the session — tmux's default prefix
+    // is C-b; users with a custom prefix will mentally translate.
+    const right = ` C-b d detach │ C-d in claude to exit │ \`aiball sandbox rm ${name}\` to kill `;
     const opts: [string, string][] = [
         ["status-bg", bg],
         ["status-fg", "colour15"],
         ["status-left", ` ${label} · ${name} `],
         ["status-left-length", "60"],
+        ["status-right", right],
+        ["status-right-length", String(right.length + 2)],
         ["window-status-current-style", `bg=${bg},fg=colour15,bold`],
+        // Defensive: if the user has `remain-on-exit on` globally, force
+        // it off here so claude exiting cleanly tears down the session.
+        ["remain-on-exit", "off"],
     ];
     for (const [k, v] of opts) {
         spawnSync(MUX_CMD, ["set-option", "-t", tmuxName, k, v], { stdio: "ignore" });
     }
+}
+
+/**
+ * Print a one-shot hint to stderr after the user detaches from (or after
+ * claude exited inside) the tmux session, explaining their next options
+ * based on whether the session is still alive.
+ */
+function postSessionHint(name: string): void {
+    const tmuxName = `sb-${name}`;
+    const sd = stateDirFor(name);
+    if (tmuxHasSession(tmuxName)) {
+        process.stderr.write(
+            [
+                "",
+                `sandbox '${name}' still running in the background.`,
+                `  re-attach: aiball sandbox attach ${name}`,
+                `  peek:      aiball sandbox tail ${name}`,
+                `  kill:      aiball sandbox rm ${name}`,
+                "",
+            ].join("\n"),
+        );
+        return;
+    }
+    if (existsSync(sd)) {
+        process.stderr.write(
+            [
+                "",
+                `sandbox '${name}' exited (tmux session gone).`,
+                `  state remains at ${sd}`,
+                `  clean up: aiball sandbox rm ${name}`,
+                "",
+            ].join("\n"),
+        );
+        return;
+    }
+    process.stderr.write(`\nsandbox '${name}' exited and cleaned up.\n`);
 }
 
 interface StartOpts {
@@ -301,10 +345,11 @@ function cmdList(): void {
 }
 
 function cmdAttach(name: string): void {
-    const r = spawnSync(MUX_CMD, ["attach", "-t", `sb-${name}`], {
-        stdio: "inherit",
-    });
-    process.exit(r.status ?? 0);
+    if (!tmuxHasSession(`sb-${name}`)) {
+        die(`sandbox '${name}' has no tmux session (already exited?)`);
+    }
+    spawnSync(MUX_CMD, ["attach", "-t", `sb-${name}`], { stdio: "inherit" });
+    postSessionHint(name);
 }
 
 function cmdTail(name: string, lines: number): void {
