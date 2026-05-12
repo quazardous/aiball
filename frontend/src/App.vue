@@ -112,7 +112,6 @@ const openTicketId = ref<number | null>(null);
  * to "All projects" resets it. ProjectPage type lives in Sidebar.vue.
  */
 const projectPage = ref<ProjectPage | null>(null);
-watch(project, () => { projectPage.value = null; });
 function openProjectPage(p: string, page: ProjectPage) {
     project.value = p;
     projectPage.value = page;
@@ -578,12 +577,14 @@ onMounted(() => {
 
 function selectProject(p: string | null) {
     project.value = p;
+    projectPage.value = null;
     panel.value = null;
     openTicketId.value = null;
 }
 
 function openPanel(p: SettingsPanel) {
     panel.value = p;
+    projectPage.value = null;
     openTicketId.value = null;
     clearSelection();
 }
@@ -749,11 +750,13 @@ watch(showSnoozed, (v) => {
                 :project-page="projectPage"
                 @select="selectProject"
                 @open-panel="openPanel"
-                @open-project-page="openProjectPage"
             />
 
             <main class="aiball-main">
-                <ProjectsPanel v-if="panel === 'projects'" />
+                <ProjectsPanel
+                    v-if="panel === 'projects'"
+                    @open-stats="(name: string) => openProjectPage(name, 'stats')"
+                />
                 <RulesPanel v-else-if="panel === 'rules'" />
                 <TagsPanel v-else-if="panel === 'tags'" />
 

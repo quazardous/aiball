@@ -11,6 +11,10 @@ const loading = ref(false);
 const confirming = ref<string | null>(null);
 const deleting = ref<string | null>(null);
 
+const emit = defineEmits<{
+    (e: "open-stats", project: string): void;
+}>();
+
 async function load() {
     loading.value = true;
     try {
@@ -118,6 +122,15 @@ defineExpose({ load });
                     </td>
                     <td class="action-cell">
                         <template v-if="confirming !== p.name">
+                            <Button
+                                icon="pi pi-chart-bar"
+                                severity="secondary"
+                                text
+                                rounded
+                                size="small"
+                                title="Open per-project stats"
+                                @click="emit('open-stats', p.name)"
+                            />
                             <Button
                                 icon="pi pi-trash"
                                 severity="danger"

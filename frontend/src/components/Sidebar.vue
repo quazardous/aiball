@@ -13,8 +13,10 @@ export interface ProjectListItem {
 export type SettingsPanel = "rules" | "tags" | "projects" | "compose";
 
 /**
- * Per-project sub-pages — currently just "stats" (the v1 of the
- * per-project page from #B.60). Future: settings, handlers, etc.
+ * Per-project sub-pages — currently just "stats". The entry point lives
+ * in Settings > Projects (ProjectsPanel rows), not in the sidebar; we
+ * still receive `projectPage` so the inbox item doesn't light up while
+ * a sub-page is active.
  */
 export type ProjectPage = "stats";
 
@@ -28,61 +30,43 @@ defineProps<{
 const emit = defineEmits<{
     (e: "select", value: string | null): void;
     (e: "open-panel", panel: SettingsPanel): void;
-    (e: "open-project-page", project: string, page: ProjectPage): void;
 }>();
 </script>
 
 <template>
     <aside class="aiball-sidebar">
         <div class="sidebar-section-label">Projects</div>
-        <div
+        <button
             v-for="p in items"
             :key="p.value ?? '__all__'"
-            class="sidebar-project"
+            type="button"
+            class="sidebar-item"
+            :class="{ active: panel === null && projectPage === null && project === p.value }"
+            @click="emit('select', p.value)"
         >
-            <button
-                type="button"
-                class="sidebar-item"
-                :class="{ active: panel === null && projectPage === null && project === p.value }"
-                @click="emit('select', p.value)"
-            >
-                <i :class="p.icon" />
-                <span class="sidebar-item-label">{{ p.label }}</span>
-                <span
-                    v-if="p.pending > 0"
-                    class="sidebar-badge sidebar-badge--pending"
-                    :title="`${p.pending} pending moderation`"
-                >{{ p.pending }}</span>
-                <span
-                    v-if="p.resolved > 0"
-                    class="sidebar-badge sidebar-badge--resolved"
-                    :title="`${p.resolved} resolution proposal${p.resolved > 1 ? 's' : ''} waiting for your accept/reject`"
-                >{{ p.resolved }}</span>
-                <span
-                    v-if="p.unread > 0"
-                    class="sidebar-badge sidebar-badge--unread"
-                    :title="`${p.unread} unread tickets for you`"
-                >{{ p.unread }}</span>
-                <span
-                    v-if="p.open > 0"
-                    class="sidebar-badge sidebar-badge--open"
-                    :title="`${p.open} open tickets`"
-                >{{ p.open }}</span>
-            </button>
-            <!-- Per-project sub-nav: only revealed when this project is
-                 currently selected, to keep the sidebar compact. -->
-            <button
-                v-if="p.value !== null && project === p.value"
-                type="button"
-                class="sidebar-item sidebar-item--sub"
-                :class="{ active: projectPage === 'stats' }"
-                @click="emit('open-project-page', p.value, 'stats')"
-                :title="`Per-project stats for ${p.label}`"
-            >
-                <i class="pi pi-chart-bar" />
-                <span class="sidebar-item-label">Stats</span>
-            </button>
-        </div>
+            <i :class="p.icon" />
+            <span class="sidebar-item-label">{{ p.label }}</span>
+            <span
+                v-if="p.pending > 0"
+                class="sidebar-badge sidebar-badge--pending"
+                :title="`${p.pending} pending moderation`"
+            >{{ p.pending }}</span>
+            <span
+                v-if="p.resolved > 0"
+                class="sidebar-badge sidebar-badge--resolved"
+                :title="`${p.resolved} resolution proposal${p.resolved > 1 ? 's' : ''} waiting for your accept/reject`"
+            >{{ p.resolved }}</span>
+            <span
+                v-if="p.unread > 0"
+                class="sidebar-badge sidebar-badge--unread"
+                :title="`${p.unread} unread tickets for you`"
+            >{{ p.unread }}</span>
+            <span
+                v-if="p.open > 0"
+                class="sidebar-badge sidebar-badge--open"
+                :title="`${p.open} open tickets`"
+            >{{ p.open }}</span>
+        </button>
 
         <div class="sidebar-section-label" style="margin-top: 1rem">
             Settings
@@ -134,11 +118,6 @@ const emit = defineEmits<{
     color: var(--p-text-muted-color);
     padding: 0.3rem 0.5rem 0.2rem;
 }
-.sidebar-project {
-    display: flex;
-    flex-direction: column;
-    gap: 0.05rem;
-}
 .sidebar-item {
     display: flex;
     align-items: center;
@@ -152,14 +131,6 @@ const emit = defineEmits<{
     color: var(--p-text-color);
     cursor: pointer;
     font: inherit;
-}
-.sidebar-item--sub {
-    padding-left: 1.8rem;
-    font-size: 0.85rem;
-    color: var(--p-text-muted-color);
-}
-.sidebar-item--sub i {
-    font-size: 0.8em;
 }
 .sidebar-item:hover {
     background: var(--p-surface-100);
