@@ -31,15 +31,24 @@ import Tag from "primevue/tag";
 import { api, clearAuthToken, type Consumer } from "../lib/api";
 import { bus } from "../lib/bus";
 
-const DEFAULT_ID = "human";
+// Fallback when no one is authenticated yet (pre-#B.94 state, or DB
+// freshly wiped). Live UIs will have `aiball.me` set by Setup/Login.
+const FALLBACK_ID = "human";
 
+function readMe(): string {
+    return localStorage.getItem("aiball.me") || FALLBACK_ID;
+}
 function readId(): string {
-    return localStorage.getItem("aiball.human_id") || DEFAULT_ID;
+    return localStorage.getItem("aiball.human_id") || readMe();
 }
 function readPeek(): boolean {
     return localStorage.getItem("aiball.peek") === "1";
 }
 
+// The authenticated consumer (login). Stays stable for the session;
+// the "reset" action returns here. Re-read on popover open in case
+// another tab logged in/out.
+const meId = ref<string>(readMe());
 const consumerId = ref<string>(readId());
 const peekMode = ref<boolean>(readPeek());
 const draftId = ref<string>(consumerId.value);
@@ -90,6 +99,9 @@ function onSelect(event: AutoCompleteOptionSelectEvent): void {
 }
 
 async function openPopover(event: MouseEvent) {
+    // Refresh `aiball.me` from storage in case the user logged in/out
+    // in another tab since we last opened the popover.
+    meId.value = readMe();
     draftId.value = consumerId.value;
     popoverRef.value?.show(event);
     await loadConsumers();
@@ -100,14 +112,14 @@ function applyId() {
     // AutoComplete may hand back either the typed string or a Consumer
     // object on free-text submit — normalize.
     const raw = draftId.value as unknown;
-    const next = (typeof raw === "string" ? raw : (raw as Consumer)?.consumer_id ?? DEFAULT_ID).trim() || DEFAULT_ID;
+    const next = (typeof raw === "string" ? raw : (raw as Consumer)?.consumer_id ?? meId.value).trim() || meId.value;
     if (next === consumerId.value) return;
     consumerId.value = next;
 }
 
-function resetToHuman() {
-    draftId.value = DEFAULT_ID;
-    consumerId.value = DEFAULT_ID;
+function resetToMe() {
+    draftId.value = meId.value;
+    consumerId.value = meId.value;
 }
 
 async function doLogout() {
@@ -122,7 +134,10 @@ async function doLogout() {
 }
 
 watch(consumerId, (v) => {
-    if (v && v !== DEFAULT_ID) localStorage.setItem("aiball.human_id", v);
+    // Persist only when peeking away from the authed identity — the
+    // default (consumerId === meId) means "no override", so we clear
+    // the key. Avoids stale "human" leftovers from the pre-#B.94 days.
+    if (v && v !== meId.value) localStorage.setItem("aiball.human_id", v);
     else localStorage.removeItem("aiball.human_id");
     bus.emit("inbox.refresh");
     bus.emit("projects.refresh");
@@ -144,7 +159,8 @@ const summary = computed(() => {
 
 const buttonSeverity = computed(() => {
     if (peekMode.value) return "warn" as const;
-    if (consumerId.value !== DEFAULT_ID) return "info" as const;
+    // "Acting as someone other than me" → info tint.
+    if (consumerId.value !== meId.value) return "info" as const;
     return "secondary" as const;
 });
 
@@ -212,12 +228,13 @@ const currentDraftString = computed(() => {
             </div>
             <div class="identity-picker__actions">
                 <Button
-                    label="Reset to human"
+                    :label="`Reset to ${meId}`"
                     icon="pi pi-replay"
                     size="small"
                     severity="secondary"
                     text
-                    @click="resetToHuman"
+                    :disabled="draftId === meId && consumerId === meId"
+                    @click="resetToMe"
                 />
                 <Button
                     label="Apply"

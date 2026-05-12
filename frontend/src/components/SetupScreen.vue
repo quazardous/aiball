@@ -61,8 +61,12 @@ async function submit() {
             display_name: displayName.value.trim() || null,
         });
         setAuthToken(r.token);
-        // Also pin the picker's identity so the UI immediately shows
-        // the right consumer in the header.
+        // Pin both the auth identity (`aiball.me` — never changed by the
+        // peek picker) and the active acting identity (`aiball.human_id`,
+        // used by IdentityPicker as the "as X" override). They start
+        // equal; the picker can later reassign human_id without losing
+        // the reset target.
+        localStorage.setItem("aiball.me", r.consumer_id);
         localStorage.setItem("aiball.human_id", r.consumer_id);
         emit("done");
     } catch (e) {

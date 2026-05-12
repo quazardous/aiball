@@ -51,6 +51,8 @@ async function submit() {
             password: password.value,
         });
         setAuthToken(r.token);
+        // See SetupScreen for why both keys are set.
+        localStorage.setItem("aiball.me", r.consumer_id);
         localStorage.setItem("aiball.human_id", r.consumer_id);
         emit("done");
     } catch (e) {
