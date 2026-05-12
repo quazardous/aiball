@@ -342,6 +342,9 @@ export class AiballClient {
     note(id: number, note: string | null) {
         return this.http("POST", `/api/messages/${id}/note`, { note });
     }
+    listRules() {
+        return this.http("GET", "/api/rules");
+    }
     addRule(rule: {
         decision: "auto" | "review";
         match_project?: string;
@@ -353,6 +356,22 @@ export class AiballClient {
     }
     deleteRule(id: number) {
         return this.http("DELETE", `/api/rules/${id}`);
+    }
+    toggleRule(id: number, enabled: boolean) {
+        return this.http("PATCH", `/api/rules/${id}`, { enabled });
+    }
+    /**
+     * Bulk mark-read by project. Pass either upToId or all=true.
+     * Mirrors the bash `aiball mark-read` semantics.
+     */
+    markReadProject(opts: { project: string; upToId?: number; all?: boolean }) {
+        const body: Record<string, unknown> = {
+            consumer_id: this.agentId,
+            project: opts.project,
+        };
+        if (opts.all === true) body.all = true;
+        else if (opts.upToId !== undefined) body.up_to_id = opts.upToId;
+        return this.http("POST", "/api/mark-read", body);
     }
 
     health() {

@@ -21,6 +21,20 @@ import { AiballClient } from "./client.js";
 
 const client = new AiballClient();
 
+/**
+ * Hardened sandbox mode (#B.63). When AIBALL_MCP_MODE=sandbox is set, the
+ * server locks `by_agent` on every write to the resolved agent id —
+ * preventing an autonomous sub-agent from impersonating the human, another
+ * agent, or a fabricated identity. Whatever the agent passes in the param
+ * is ignored. Normal mode (unset) keeps the previous behavior where
+ * `by_agent` is an optional override.
+ */
+const SANDBOX_MODE = process.env.AIBALL_MCP_MODE === "sandbox";
+function effectiveBy(provided: string | undefined): string {
+    if (SANDBOX_MODE) return client.agentId;
+    return provided ?? client.agentId;
+}
+
 const server = new McpServer({
     name: "aiball",
     version: "0.2.0",
@@ -137,7 +151,7 @@ server.registerTool(
             title,
             body,
             intent,
-            by_agent: by_agent ?? client.agentId,
+            by_agent: effectiveBy(by_agent),
             parent_id,
         })) as { id?: number };
         if (broadcast === true && typeof res?.id === "number") {
@@ -250,7 +264,7 @@ server.registerTool(
             ticket_id: ticketId,
             parent_id: parentId,
             body,
-            by_agent: by_agent ?? client.agentId,
+            by_agent: effectiveBy(by_agent),
         });
         return asText(res);
     },
@@ -286,7 +300,7 @@ server.registerTool(
             kind: "ticket_closed",
             ticket_id,
             parent_id: ticket_id,
-            by_agent: by_agent ?? client.agentId,
+            by_agent: effectiveBy(by_agent),
         });
         return asText(res);
     },
