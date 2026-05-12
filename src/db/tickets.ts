@@ -6,7 +6,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { and, asc, eq, inArray, isNotNull, lte, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, lte, ne, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 
@@ -197,6 +197,31 @@ export function listSubTickets(parentId: number): SubTicketSummary[] {
             stage,
         };
     });
+}
+
+/**
+ * Count direct children per parent ticket, in one shot. Rejected children
+ * are excluded (symmetric with listSubTickets). Used by the ticket list
+ * endpoint to surface lineage without paying a per-row N+1.
+ */
+export function subTicketCounts(parentIds: number[]): Map<number, number> {
+    const out = new Map<number, number>();
+    if (parentIds.length === 0) return out;
+    const rows = getDb().select({
+        parentId: schema.tickets.parentTicketId,
+        count: sql<number>`COUNT(*)`,
+    })
+        .from(schema.tickets)
+        .where(and(
+            inArray(schema.tickets.parentTicketId, parentIds),
+            ne(schema.tickets.status, "rejected"),
+        ))
+        .groupBy(schema.tickets.parentTicketId)
+        .all();
+    for (const r of rows) {
+        if (r.parentId !== null) out.set(r.parentId, Number(r.count));
+    }
+    return out;
 }
 
 // =====================================================================

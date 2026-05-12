@@ -52,6 +52,7 @@ import {
     getTicketPostpone,
     listExpiredPostpones,
     listSubTickets,
+    subTicketCounts,
     getTicketStages,
     getTicketBookends,
     getMessageByHashid,
@@ -728,6 +729,7 @@ api.get("/tickets", (req, res) => {
     const nowStr = new Date().toISOString();
 
     const tagsMap = tagsForMessages(created.map((m) => m.id));
+    const childCounts = subTicketCounts(created.map((m) => m.id));
     const tickets = created.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;
@@ -743,6 +745,8 @@ api.get("/tickets", (req, res) => {
             postponed,
             postponed_until: postponedUntil,
             intent: m.intent,
+            parent_ticket_id: m.parent_ticket_id ?? null,
+            sub_ticket_count: childCounts.get(m.id) ?? 0,
             tags: tagsMap.get(m.id) ?? [],
         };
     });

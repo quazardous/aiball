@@ -119,6 +119,7 @@ export {
     getTicketPostpone,
     listExpiredPostpones,
     listSubTickets,
+    subTicketCounts,
     getTicketStages,
     getTicketBookends,
     type SubTicketSummary,
