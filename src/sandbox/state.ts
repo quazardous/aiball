@@ -21,10 +21,19 @@ export interface PlateTicket {
 
 export type SandboxMode = "in-place" | "worktree";
 
+/**
+ * What kind of sandbox this is. `loop` = full autonomous run with
+ * hooks + plate; `plain` = bare tmux+claude for testing the mux layer.
+ * Drives UX defaults like read-only attach.
+ */
+export type SandboxKind = "loop" | "plain";
+
 export interface Plate {
     agent: string;
     name: string;
     mode: SandboxMode;
+    /** loop (default) vs plain mux test. Older plates default to loop. */
+    kind?: SandboxKind;
     dir: string;
     project: string;
     tickets: PlateTicket[];

@@ -244,6 +244,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         agent,
         name,
         mode: opts.worktree ? "worktree" : "in-place",
+        kind: "loop",
         dir,
         project,
         tickets: ticketIds.map((id) => ({ id, status: "open" })),
@@ -358,22 +359,50 @@ function cmdList(): void {
         const summary = Object.entries(groups)
             .map(([k, v]) => `${k}: ${v}`)
             .join(", ");
+        const kind = plate.kind ?? "loop";
         process.stdout.write(
-            `${name.padEnd(30)}  ${alive.padEnd(5)}  ${plate.mode.padEnd(9)}  ${summary}\n`,
+            `${name.padEnd(20)}  ${alive.padEnd(5)}  ${kind.padEnd(5)}  ${plate.mode.padEnd(9)}  ${summary}\n`,
         );
-        process.stdout.write(`${"".padEnd(30)}  dir=${plate.dir}\n`);
+        process.stdout.write(`${"".padEnd(20)}  dir=${plate.dir}\n`);
         if (plate.halt) process.stdout.write(`${"".padEnd(30)}  HALT=true\n`);
         found++;
     }
     if (found === 0) process.stdout.write("(no sandboxes)\n");
 }
 
-function cmdAttach(name: string, readOnly: boolean): void {
+function cmdAttach(
+    name: string,
+    explicitRO: boolean | undefined,
+    explicitWrite: boolean,
+): void {
     if (!tmuxHasSession(`sb-${name}`)) {
         die(`sandbox '${name}' has no tmux session (already exited?)`);
     }
+    // Default: loop sandboxes attach read-only (avoid bumping the
+    // autonomous claude prompt by accident). Plain mux tests stay
+    // writable since the human runs them interactively.
+    let readOnly: boolean;
+    if (explicitWrite) {
+        readOnly = false;
+    } else if (explicitRO === true) {
+        readOnly = true;
+    } else {
+        const sd = stateDirFor(name);
+        let kind: string | undefined;
+        try {
+            kind = readPlate(sd).kind;
+        } catch {
+            /* assume loop if unreadable */
+        }
+        readOnly = (kind ?? "loop") === "loop";
+    }
     const args = ["attach", "-t", `sb-${name}`];
-    if (readOnly) args.push("-r");
+    if (readOnly) {
+        args.push("-r");
+        process.stderr.write(
+            `attaching read-only (pass --write to send keystrokes).\n`,
+        );
+    }
     spawnSync(MUX_CMD, args, { stdio: "inherit" });
     postSessionHint(name);
 }
@@ -475,6 +504,7 @@ function cmdPlain(opts: PlainOpts): void {
         agent: process.env.AIBALL_AGENT ?? `claude-${name}`,
         name,
         mode: opts.worktree ? "worktree" : "in-place",
+        kind: "plain",
         dir,
         project: process.env.AIBALL_PROJECT ?? "(plain)",
         tickets: [],
@@ -594,10 +624,18 @@ export function registerSandboxCommands(program: Command): void {
         .action(() => cmdList());
 
     sb.command("attach [name]")
-        .description("tmux attach to a sandbox session (NAME inferred when there's only one)")
-        .option("-r, --read-only", "Read-only attach (keystrokes don't reach the session)")
-        .action((name: string | undefined, opts: { readOnly?: boolean }) =>
-            cmdAttach(resolveSingleName(name), opts.readOnly === true),
+        .description(
+            "tmux attach to a sandbox session. Loop sandboxes default to read-only; plain (mux test) sandboxes default to writable. NAME inferred when there's only one.",
+        )
+        .option("-r, --read-only", "Force read-only attach (keystrokes don't reach the session)")
+        .option("-w, --write", "Force writable attach even for a loop sandbox")
+        .action(
+            (name: string | undefined, opts: { readOnly?: boolean; write?: boolean }) =>
+                cmdAttach(
+                    resolveSingleName(name),
+                    opts.readOnly === true ? true : undefined,
+                    opts.write === true,
+                ),
         );
 
     sb.command("tail [name]")
