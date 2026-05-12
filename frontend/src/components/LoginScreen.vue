@@ -19,12 +19,10 @@ const consumerId = ref("");
 const password = ref("");
 const submitting = ref(false);
 const error = ref<string | null>(null);
-const installAvailable = ref(false);
 
 onMounted(async () => {
     try {
         const s = await api.authStatus();
-        installAvailable.value = s.install_available;
         if (!s.ready) {
             // No humans yet — setup is the only meaningful entry.
             emit("need-setup");
@@ -104,11 +102,7 @@ async function submit() {
                 @click="submit"
             />
 
-            <p v-if="installAvailable" class="auth-footer">
-                <strong>Install token available.</strong>
-                <a href="/setup">Set up a new account</a>.
-            </p>
-            <p v-else class="auth-footer">
+            <p class="auth-footer">
                 Forgot your password? Run <code>aiball auth reinit</code> in the terminal to get a setup URL.
             </p>
         </div>
