@@ -55,7 +55,31 @@ function randomShort(): string {
 }
 
 function ensureName(name: string | undefined): string {
-    return name && name.length > 0 ? name : `sb-${randomShort()}`;
+    return name && name.length > 0 ? name : randomShort();
+}
+
+/**
+ * If `name` is given, return it. Otherwise, when exactly one sandbox
+ * state dir exists, return that name. When zero or many, die with a
+ * helpful message listing the candidates.
+ */
+function resolveSingleName(name: string | undefined): string {
+    if (name && name.length > 0) return name;
+    if (!existsSync(STATE_ROOT)) {
+        die("no sandboxes exist (state root missing). Run 'aiball sandbox start' or 'plain' first.");
+    }
+    const candidates = readdirSync(STATE_ROOT).filter((n) =>
+        existsSync(platePath(stateDirFor(n))),
+    );
+    if (candidates.length === 0) {
+        die("no sandboxes exist. Run 'aiball sandbox start' or 'plain' first.");
+    }
+    if (candidates.length > 1) {
+        die(
+            `multiple sandboxes — pass NAME explicitly. Candidates: ${candidates.join(", ")}`,
+        );
+    }
+    return candidates[0];
 }
 
 function installRoot(): string {
@@ -88,7 +112,7 @@ function applySandboxStyle(tmuxName: string, mode: "loop" | "plain", name: strin
     const label = mode === "loop" ? "SANDBOX" : "MUX-TEST";
     // status-right shows how to leave the session — tmux's default prefix
     // is C-b; users with a custom prefix will mentally translate.
-    const right = ` C-b d detach │ C-d in claude to exit │ \`aiball sandbox rm ${name}\` to kill `;
+    const right = ` C-b d detach │ \`aiball sandbox rm ${name}\` to kill `;
     const opts: [string, string][] = [
         ["status-bg", bg],
         ["status-fg", "colour15"],
@@ -567,22 +591,22 @@ export function registerSandboxCommands(program: Command): void {
         .description("List all known sandboxes with their state summary")
         .action(() => cmdList());
 
-    sb.command("attach <name>")
-        .description("tmux attach to a sandbox session")
-        .action((name: string) => cmdAttach(name));
+    sb.command("attach [name]")
+        .description("tmux attach to a sandbox session (NAME inferred when there's only one)")
+        .action((name: string | undefined) => cmdAttach(resolveSingleName(name)));
 
-    sb.command("tail <name>")
-        .description("Print the last N lines of a sandbox pane (non-blocking)")
+    sb.command("tail [name]")
+        .description("Print the last N lines of a sandbox pane (non-blocking; NAME inferred when only one)")
         .addOption(new Option("--lines <n>", "Lines to show").default("40"))
-        .action((name: string, opts: { lines: string }) => {
-            cmdTail(name, Number(opts.lines));
+        .action((name: string | undefined, opts: { lines: string }) => {
+            cmdTail(resolveSingleName(name), Number(opts.lines));
         });
 
-    sb.command("rm <name>")
-        .description("Kill the tmux session and remove the state dir (and worktree)")
+    sb.command("rm [name]")
+        .description("Kill the tmux session and remove the state dir (and worktree); NAME inferred when only one")
         .option("--force", "Force-remove even with open tickets / dirty worktree")
-        .action((name: string, opts: { force?: boolean }) => {
-            cmdRm(name, opts.force === true);
+        .action((name: string | undefined, opts: { force?: boolean }) => {
+            cmdRm(resolveSingleName(name), opts.force === true);
         });
 
     sb.command("prune")
