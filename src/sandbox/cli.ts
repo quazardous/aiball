@@ -12,12 +12,15 @@ import {
     chmodSync,
     copyFileSync,
     existsSync,
+    readFileSync,
     readdirSync,
+    renameSync,
     rmSync,
     writeFileSync,
 } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { Command, Option } from "commander";
@@ -99,6 +102,89 @@ function tmuxHasSession(name: string): boolean {
 
 function shQuote(s: string): string {
     return "'" + s.replace(/'/g, `'\\''`) + "'";
+}
+
+/**
+ * Pre-write Claude Code's per-project trust + MCP-auth state for the
+ * sandbox cwd so the agent doesn't sit on interactive prompts on first
+ * launch. Modifies `~/.claude.json` in place:
+ *
+ *   projects[<dir>] = {
+ *     ...existing,
+ *     hasTrustDialogAccepted: true,
+ *     enableAllProjectMcpServers: true,
+ *   }
+ *
+ * Atomic write via tmp + rename so a Claude Code process reading the
+ * file concurrently never sees a half-written object.
+ *
+ * Failure is logged but non-fatal — without this, the user just has to
+ * answer two prompts manually on the first spawn.
+ */
+function preTrustDirectory(dir: string): void {
+    const cfgPath = join(homedir(), ".claude.json");
+    let cfg: Record<string, unknown> = {};
+    if (existsSync(cfgPath)) {
+        try {
+            cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as Record<string, unknown>;
+        } catch {
+            warn(`could not parse ${cfgPath}, skipping pre-trust for ${dir}`);
+            return;
+        }
+    }
+    const projects =
+        (cfg.projects as Record<string, Record<string, unknown>> | undefined) ?? {};
+    projects[dir] = {
+        ...(projects[dir] ?? {}),
+        hasTrustDialogAccepted: true,
+        enableAllProjectMcpServers: true,
+    };
+    cfg.projects = projects;
+    const tmp = cfgPath + ".sandbox-tmp";
+    try {
+        writeFileSync(tmp, JSON.stringify(cfg, null, 2));
+        renameSync(tmp, cfgPath);
+    } catch (e) {
+        warn(`failed to write ${cfgPath} (${(e as Error).message}); spawn will likely prompt`);
+    }
+}
+
+/**
+ * Whitelist of MCP write tools we want the auto-mode classifier to
+ * pass without re-asking. Narrow allow rules survive auto mode (per
+ * Claude Code docs); broad wildcards get dropped.
+ */
+const AIBALL_MCP_ALLOWLIST = [
+    "mcp__aiball__poll",
+    "mcp__aiball__search",
+    "mcp__aiball__subscribe",
+    "mcp__aiball__unsubscribe",
+    "mcp__aiball__ticket_new",
+    "mcp__aiball__ticket_reply",
+    "mcp__aiball__ticket_close",
+    "mcp__aiball__ticket_update",
+    "mcp__aiball__ticket_decide",
+    "mcp__aiball__ticket_get",
+    "mcp__aiball__ticket_list",
+    "mcp__aiball__unread",
+];
+
+/**
+ * After tmux has spawned claude, the SessionStart hook injects the
+ * brief as `additionalContext` — which prepends to the conversation
+ * but does NOT trigger an assistant turn. Without a kickoff message,
+ * claude sits at the prompt waiting for input. Solve it with a
+ * detached `sleep N && tmux send-keys` so the wrapper still exits
+ * immediately and claude gets a "go" once it's done booting.
+ */
+function scheduleInitialNudge(tmuxName: string): void {
+    const delaySec = Number(process.env.CLAUDE_SANDBOX_NUDGE_DELAY ?? 4);
+    spawnSync("bash", [
+        "-c",
+        `(sleep ${delaySec} && ${shQuote(MUX_CMD)} send-keys -t ${shQuote(tmuxName)} ${shQuote(
+            "Start processing your ticket plate.",
+        )} Enter) >/dev/null 2>&1 &`,
+    ]);
 }
 
 /**
@@ -239,6 +325,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         if (opts.base) warn("--base is ignored without --worktree");
     }
 
+    // Pre-trust the sandbox cwd in ~/.claude.json so claude doesn't show
+    // "Trust this folder?" or "New MCP server, use it?" prompts on first
+    // launch — both blocked the loop end-to-end pre-fix (cf. #B.82).
+    preTrustDirectory(dir);
+
     ensureDir(join(sd, "hooks"));
     copyFileSync(
         hookTemplate("sandbox-session-start.sh"),
@@ -298,6 +389,17 @@ async function cmdStart(opts: StartOpts): Promise<void> {
                 },
             ],
         },
+        // Pre-approve the aiball MCP tools so the auto-mode classifier
+        // doesn't block ticket_close / ticket_reply / etc. inside the
+        // loop. Narrow allow rules survive auto mode (per Claude Code
+        // docs); broad Bash(*) wildcards would not.
+        permissions: {
+            allow: AIBALL_MCP_ALLOWLIST,
+        },
+        // Auto-approve the MCP server declared in any .mcp.json the cwd
+        // exposes, so claude doesn't prompt. Mirror of the
+        // preTrustDirectory hint, applied at the settings layer too.
+        enableAllProjectMcpServers: true,
     };
     const settingsJson = JSON.stringify(settings);
 
@@ -326,6 +428,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     ]);
     if (r.status !== 0) die("tmux new-session failed");
     applySandboxStyle(tmuxName, "loop", name);
+    // Kick claude into action after it boots — SessionStart context
+    // alone doesn't trigger a turn.
+    scheduleInitialNudge(tmuxName);
 
     process.stdout.write(
         [
