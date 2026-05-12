@@ -77,6 +77,27 @@ function shQuote(s: string): string {
     return "'" + s.replace(/'/g, `'\\''`) + "'";
 }
 
+/**
+ * Override the tmux status-bar so a sandbox session is visually
+ * unmistakable. Loop sandboxes get orange; plain mux tests get blue.
+ * No-op on screen (or any non-tmux MUX_CMD).
+ */
+function applySandboxStyle(tmuxName: string, mode: "loop" | "plain", name: string): void {
+    if (MUX_CMD !== "tmux") return;
+    const bg = mode === "loop" ? "colour208" : "colour33"; // orange / blue
+    const label = mode === "loop" ? "SANDBOX" : "MUX-TEST";
+    const opts: [string, string][] = [
+        ["status-bg", bg],
+        ["status-fg", "colour15"],
+        ["status-left", ` ${label} · ${name} `],
+        ["status-left-length", "60"],
+        ["window-status-current-style", `bg=${bg},fg=colour15,bold`],
+    ];
+    for (const [k, v] of opts) {
+        spawnSync(MUX_CMD, ["set-option", "-t", tmuxName, k, v], { stdio: "ignore" });
+    }
+}
+
 interface StartOpts {
     tickets: string;
     name?: string;
@@ -218,6 +239,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         innerCmd,
     ]);
     if (r.status !== 0) die("tmux new-session failed");
+    applySandboxStyle(tmuxName, "loop", name);
 
     process.stdout.write(
         [
@@ -336,6 +358,93 @@ function cmdRm(name: string, force: boolean): void {
     process.stdout.write(`removed sandbox '${name}'\n`);
 }
 
+interface PlainOpts {
+    name?: string;
+    worktree?: boolean;
+    base?: string;
+    attach?: boolean;
+}
+
+/**
+ * Bare wrapper-mux test: spawn a tmux session running plain `claude`,
+ * with no hooks, no plate, no MCP hardening. Used to verify that the
+ * multiplexing layer + install paths work before trusting the full
+ * sandbox loop.
+ */
+function cmdPlain(opts: PlainOpts): void {
+    const name = ensureName(opts.name);
+    const sd = stateDirFor(name);
+    if (existsSync(sd)) {
+        die(
+            `sandbox '${name}' already exists (state at ${sd}). ` +
+                `Use 'rm ${name}' first or pick another --name.`,
+        );
+    }
+
+    let dir: string;
+    if (opts.worktree) {
+        need("git");
+        dir = join(WORKTREE_ROOT, name);
+        ensureDir(WORKTREE_ROOT);
+        const baseRef = opts.base ?? "HEAD";
+        const r = spawnSync(
+            "git",
+            ["worktree", "add", dir, "-b", `sandbox/${name}`, baseRef],
+            { stdio: "inherit" },
+        );
+        if (r.status !== 0) die("git worktree add failed");
+    } else {
+        dir = process.cwd();
+        if (opts.base) warn("--base is ignored without --worktree");
+    }
+
+    // Minimal state so list/attach/tail/rm still work on the plain session.
+    ensureDir(sd);
+    const plate: Plate = {
+        agent: process.env.AIBALL_AGENT ?? `claude-${name}`,
+        name,
+        mode: opts.worktree ? "worktree" : "in-place",
+        dir,
+        project: process.env.AIBALL_PROJECT ?? "(plain)",
+        tickets: [],
+        halt: false,
+    };
+    writePlate(sd, plate);
+    writeFileSync(
+        envPath(sd),
+        [
+            `# plain mux test session — no hooks, no MCP hardening`,
+            `export SB_NAME="${name}"`,
+            `export SB_STATE_DIR="${sd}"`,
+            "",
+        ].join("\n"),
+    );
+
+    need(MUX_CMD);
+    const tmuxName = `sb-${name}`;
+    const r = spawnSync(
+        MUX_CMD,
+        ["new-session", "-d", "-s", tmuxName, "-c", dir, "bash", "-lc", "exec claude"],
+    );
+    if (r.status !== 0) die("tmux new-session failed");
+    applySandboxStyle(tmuxName, "plain", name);
+
+    process.stdout.write(
+        [
+            `plain sandbox '${name}' started (no hooks, no plate)`,
+            `  mode:   ${plate.mode}`,
+            `  dir:    ${dir}`,
+            `  state:  ${sd}`,
+            `  attach: ${MUX_CMD} attach -t ${tmuxName}   (or: aiball sandbox attach ${name})`,
+            "",
+        ].join("\n"),
+    );
+
+    if (opts.attach) {
+        spawnSync(MUX_CMD, ["attach", "-t", tmuxName], { stdio: "inherit" });
+    }
+}
+
 async function cmdPrune(): Promise<void> {
     const orphanTmux: string[] = [];
     const orphanState: string[] = [];
@@ -400,6 +509,14 @@ export function registerSandboxCommands(program: Command): void {
         .action(async (opts: StartOpts) => {
             await cmdStart(opts);
         });
+
+    sb.command("plain")
+        .description("Spawn a tmux session running plain claude — for testing the mux layer (no hooks, no plate)")
+        .option("--name <name>", "Sandbox name (default: auto-generated)")
+        .option("--worktree", "Create a git worktree under ~/sandboxes/<name>")
+        .option("--base <ref>", "Worktree base ref (default HEAD)")
+        .option("--attach", "Attach to the tmux session after spawn")
+        .action((opts: PlainOpts) => cmdPlain(opts));
 
     sb.command("list")
         .description("List all known sandboxes with their state summary")
