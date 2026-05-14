@@ -25,11 +25,25 @@ export interface AutopollPayload {
     open_tickets?: { count: number; project: string | null };
 }
 
-function backlogLine(payload: AutopollPayload): string {
+function backlogLine(tone: AutopollTone, payload: AutopollPayload): string {
     const b = payload.open_tickets;
     if (!b || b.count === 0) return "";
     const scope = b.project ? `\`${b.project}\`` : "your scope";
-    return `\n\nBacklog: ${b.count} open ticket${b.count === 1 ? "" : "s"} in ${scope} (see \`ticket_list({open: true})\` after draining).`;
+    const n = b.count;
+    const s = n === 1 ? "" : "s";
+    // Adjust the "after pings" framing depending on whether there are
+    // pings to drain — when triggered by backlog alone, the line is
+    // the only instruction.
+    const after = payload.pings > 0 ? "After draining pings, list" : "List";
+    const afterCaps = payload.pings > 0 ? "After the pings, you MUST call" : "Call";
+    switch (tone) {
+        case "hint":
+            return `\n\nBacklog: ${n} open ticket${s} in ${scope}. Have a look via \`ticket_list({open: true})\` when you can.`;
+        case "directive":
+            return `\n\nBacklog: ${n} open ticket${s} in ${scope}. ${after} via \`ticket_list({open: true})\` and process them (close / resolve / reply). Don't leave them sitting.`;
+        case "imperative":
+            return `\n\n**BACKLOG: ${n} open ticket${s} in ${scope}**. ${afterCaps} \`ticket_list({open: true})\` and clear them (close / resolve / reply each one). The backlog is YOUR queue — DO NOT ignore it.`;
+    }
 }
 
 export function formatReason(tone: AutopollTone, payload: AutopollPayload): string {
@@ -39,22 +53,31 @@ export function formatReason(tone: AutopollTone, payload: AutopollPayload): stri
             return `  - #B.${t.id} (${t.project}) ${title}`;
         })
         .join("\n");
-    const backlog = backlogLine(payload);
+    const backlog = backlogLine(tone, payload);
+
+    // No pings → backlog-only trigger. Skip the "drain them" wording
+    // entirely; the backlog line carries the full instruction.
+    if (payload.pings === 0) {
+        return backlog.replace(/^\n\n/, "");
+    }
+
+    const n = payload.pings;
+    const s = n === 1 ? "" : "s";
 
     switch (tone) {
         case "hint":
             return (ticketList
-                ? `You have ${payload.pings} unread aiball ping${payload.pings === 1 ? "" : "s"}:\n${ticketList}\n\nConsider calling \`unread({pings: true, mark_read: true})\` to drain them.`
-                : `You have ${payload.pings} unread aiball ping${payload.pings === 1 ? "" : "s"}. Consider calling \`unread({pings: true, mark_read: true})\`.`) + backlog;
+                ? `You have ${n} unread aiball ping${s}:\n${ticketList}\n\nConsider calling \`unread({pings: true, mark_read: true})\` to drain them.`
+                : `You have ${n} unread aiball ping${s}. Consider calling \`unread({pings: true, mark_read: true})\`.`) + backlog;
 
         case "directive":
             return (ticketList
-                ? `You have ${payload.pings} unread aiball ping${payload.pings === 1 ? "" : "s"}:\n${ticketList}\n\nDrain them via \`unread({pings: true, mark_read: true})\`, then react (reply / close / open follow-up). Do not stop to ask the human first.`
-                : `You have ${payload.pings} unread aiball ping${payload.pings === 1 ? "" : "s"}. Drain them via \`unread({pings: true, mark_read: true})\`, then react.`) + backlog;
+                ? `You have ${n} unread aiball ping${s}:\n${ticketList}\n\nDrain them via \`unread({pings: true, mark_read: true})\`, then react (reply / close / open follow-up). Do not stop to ask the human first.`
+                : `You have ${n} unread aiball ping${s}. Drain them via \`unread({pings: true, mark_read: true})\`, then react.`) + backlog;
 
         case "imperative":
             return (ticketList
-                ? `**YOU MUST** drain ${payload.pings} unread aiball ping${payload.pings === 1 ? "" : "s"} BEFORE doing anything else:\n${ticketList}\n\nCall \`unread({pings: true, mark_read: true})\` NOW. Then react (reply / close / open follow-up). DO NOT ask the human — the human is the moderator, not the operator.`
-                : `**YOU MUST** call \`unread({pings: true, mark_read: true})\` NOW. ${payload.pings} ping${payload.pings === 1 ? "" : "s"} pending. DO NOT ask permission.`) + backlog;
+                ? `**YOU MUST** drain ${n} unread aiball ping${s} BEFORE doing anything else:\n${ticketList}\n\nCall \`unread({pings: true, mark_read: true})\` NOW. Then react (reply / close / open follow-up). DO NOT ask the human — the human is the moderator, not the operator.`
+                : `**YOU MUST** call \`unread({pings: true, mark_read: true})\` NOW. ${n} ping${s} pending. DO NOT ask permission.`) + backlog;
     }
 }
