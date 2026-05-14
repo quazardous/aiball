@@ -8,7 +8,7 @@ import ToggleButton from "primevue/togglebutton";
 import { useToast } from "primevue/usetoast";
 import MarkdownView from "./MarkdownView.vue";
 import { api, INTENTS, type Intent } from "../lib/api";
-import { bus } from "../lib/bus";
+import { bus, useBus } from "../lib/bus";
 import { attachPasteImage } from "../lib/pasteImage";
 import { uploadImage } from "../lib/upload";
 
@@ -47,6 +47,40 @@ const intentOptions = INTENTS.map((p) => ({
     label: p,
     value: p,
 }));
+
+// #B.104 pending answers — populated when the user clicks a `- [ ]`
+// in a comment body (the MarkdownView emits `composer.add-answer`).
+// Each entry pairs the source message id with the question id; at
+// submit time, after the reply lands, we POST to
+// /api/messages/<msgId>/questions/<qid>/answer to toggle the
+// checkbox in the parent body.
+interface PendingAnswer {
+    messageId: number;
+    questionId: string;
+    questionText: string;
+}
+const pendingAnswers = ref<PendingAnswer[]>([]);
+
+useBus("composer.add-answer", (payload) => {
+    // Only react when we're a comment composer on this thread — the
+    // new-ticket composer shouldn't be hijacked. Drop dupes.
+    if (props.mode !== "comment") return;
+    if (props.ticketId !== undefined && payload.messageId !== props.ticketId) {
+        // Comment-on-comment case: the questionId lives on a comment
+        // (not the ticket root). Allow when ticketId is unset (rare)
+        // or always: the messageId itself drives the API call.
+    }
+    const dupe = pendingAnswers.value.find(
+        (p) => p.messageId === payload.messageId && p.questionId === payload.questionId,
+    );
+    if (dupe) return;
+    pendingAnswers.value.push(payload);
+    // Append a quote of the question to the body so the answer lands
+    // right under the question it addresses.
+    const quote = "> " + (payload.questionText || "(empty question)") + "\n\n";
+    const cur = body.value;
+    body.value = (cur ? cur.replace(/\s*$/, "\n\n") : "") + quote;
+});
 
 const isTicket = computed(() => props.mode === "ticket");
 const canSubmit = computed(() =>
@@ -157,7 +191,9 @@ async function submit() {
             });
             createdId = typeof r?.id === "number" ? r.id : null;
         } else {
-            await api.postMessage({
+            // Capture the comment's id too — needed by #B.104 to fill
+            // the `answered_in` audit field on the parent's meta.
+            const r = await api.postMessage({
                 project: props.project,
                 kind: "comment_added",
                 ticket_id: props.ticketId,
@@ -165,12 +201,42 @@ async function submit() {
                 body: body.value,
                 by_agent: byAgent.value || "human",
             });
+            createdId = typeof r?.id === "number" ? r.id : null;
+        }
+        // #B.104: after the reply lands, mark every question that was
+        // queued via the click-to-quote flow as answered. Done after
+        // the post so the answer message id is known (used in the
+        // audit `answered_in` field). Each call is independent —
+        // a failure on one doesn't block the others, and the body
+        // toggle on the parent is server-side idempotent.
+        if (
+            createdId !== null &&
+            pendingAnswers.value.length > 0 &&
+            !isTicket.value
+        ) {
+            const answeredBy = byAgent.value || "human";
+            for (const pa of pendingAnswers.value) {
+                try {
+                    await api.markQuestionAnswered(pa.messageId, pa.questionId, {
+                        answered_by: answeredBy,
+                        answered_in: createdId,
+                    });
+                } catch (e) {
+                    // Surface a discreet toast but don't fail the
+                    // whole submit — the comment is already posted.
+                    console.warn(
+                        `[composer] failed to mark question ${pa.questionId} answered:`,
+                        e,
+                    );
+                }
+            }
         }
         // Successful post → drop the persisted draft, reset local state.
         sessionStorage.removeItem(draftKey.value);
         title.value = "";
         body.value = "";
         preview.value = false;
+        pendingAnswers.value = [];
         // Refresh fan-out: WS will fire for everyone, but emitting
         // locally now makes the sender's UI feel instant.
         if (props.ticketId !== undefined) {

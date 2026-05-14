@@ -8,6 +8,7 @@ import MarkdownView from "./MarkdownView.vue";
 import { api, type Message } from "../lib/api";
 import { bus } from "../lib/bus";
 import { attachPasteImage } from "../lib/pasteImage";
+import { questionStats as computeQuestionStats } from "../lib/questions";
 
 const props = defineProps<{
     msg: Message;
@@ -54,6 +55,14 @@ const commentRef = computed(() => {
     const h = props.msg.hashid;
     return h ? `#C.${h}` : `#C.${props.msg.id}`;
 });
+
+// #B.104: chip "X/Y answered" on the card. Computed off the rendered
+// body (edited overrides original) — derives total / answered / open
+// from the `- [ ]` vs `- [x]` characters; markers are not needed at
+// the count level. Updates reactively when the body changes server-side.
+const questionStats = computed(() =>
+    computeQuestionStats(props.msg.edited_body ?? props.msg.body ?? ""),
+);
 async function copyRef() {
     try {
         await navigator.clipboard.writeText(commentRef.value);
@@ -178,6 +187,15 @@ onBeforeUnmount(() => detachPaste?.());
                 ·
             </span>
             <span v-if="msg.by_agent">by {{ msg.by_agent }}</span>
+            <Tag
+                v-if="questionStats.total > 0"
+                :value="`${questionStats.answered}/${questionStats.total} answered`"
+                :severity="questionStats.open === 0 ? 'success' : 'warn'"
+                :title="questionStats.open === 0
+                    ? 'All questions in this comment have been answered.'
+                    : `${questionStats.open} question${questionStats.open === 1 ? '' : 's'} still open — click a checkbox to quote it in your reply.`"
+                style="font-size: 0.7rem; margin-left: 0.4rem"
+            />
             <span class="spacer" />
             <span
                 class="comment-date-copy"
@@ -238,7 +256,12 @@ onBeforeUnmount(() => detachPaste?.());
                 />
             </div>
         </div>
-        <MarkdownView v-else-if="msg.body || msg.edited_body" :source="msg.edited_body ?? msg.body" />
+        <MarkdownView
+            v-else-if="msg.body || msg.edited_body"
+            :source="msg.edited_body ?? msg.body"
+            :message-id="msg.id"
+            :questions-clickable="true"
+        />
         <div v-if="msg.human_note" class="comment-note">
             <i class="pi pi-comment" />
             <em>{{ msg.human_note }}</em>

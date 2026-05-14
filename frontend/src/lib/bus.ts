@@ -45,6 +45,15 @@ export interface BusEvents {
     "project.deleted": { project: string };
     /** Read state for a ticket flipped; sidebar/list badges may need refresh. */
     "read-state.changed": { ticket_id: number; consumer_id: string; unread: boolean };
+    /** A `- [ ]` question was clicked in a rendered body (#B.104). The
+     *  composer subscribes, appends a quote of the question text, and
+     *  records the pair so the eventual submit toggles the checkbox
+     *  via the answer endpoint after the reply lands. */
+    "composer.add-answer": {
+        messageId: number;
+        questionId: string;
+        questionText: string;
+    };
 }
 
 type BusHandler<K extends keyof BusEvents> =

@@ -1,9 +1,22 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { marked, type Tokens } from "marked";
 import DOMPurify from "dompurify";
+import { bus } from "../lib/bus";
+import { extractQuestions } from "../lib/questions";
 
-const props = defineProps<{ source: string | null | undefined }>();
+/**
+ * `messageId` + `questionsClickable` opt the body into the #B.104
+ * Q&A flow: each GFM `- [ ]` becomes a clickable handle that emits
+ * `composer.add-answer` on the bus. The composer subscribes, appends
+ * a quote of the question text, and tracks the (messageId, questionId)
+ * pair so the eventual submit toggles the checkbox via the API.
+ */
+const props = defineProps<{
+    source: string | null | undefined;
+    messageId?: number;
+    questionsClickable?: boolean;
+}>();
 
 marked.setOptions({
     gfm: true,
@@ -193,10 +206,63 @@ async function onClick(ev: MouseEvent) {
     history.pushState({}, "", href);
     window.dispatchEvent(new PopStateEvent("popstate"));
 }
+
+// #B.104: after every re-render, scan rendered checkboxes and wire
+// the click → "ask the composer to quote this question" flow. We
+// pair the Nth DOM checkbox with the Nth task-list line in the
+// source body to recover the question id from its `<!-- q:xxx -->`
+// marker. DOMPurify strips the HTML comment, so the rendered DOM
+// has no way to carry the id directly — the source string is the
+// source of truth.
+const rootRef = ref<HTMLDivElement | null>(null);
+
+async function wireQuestionClicks() {
+    await nextTick();
+    const root = rootRef.value;
+    if (!root) return;
+    const inputs = Array.from(root.querySelectorAll('input[type="checkbox"]'));
+    if (inputs.length === 0) return;
+    const questions = extractQuestions(props.source ?? "");
+    const clickable = props.questionsClickable === true && props.messageId !== undefined;
+    inputs.forEach((el, i) => {
+        const input = el as HTMLInputElement;
+        const q = questions[i];
+        if (!q) return;
+        input.dataset.aiballQid = q.id;
+        // Enable interaction only when explicitly opted in. Toggles
+        // are NEVER persisted from a raw click — the composer flow
+        // owns the write-back. We prevent the default checkbox toggle
+        // so the visual state stays in sync with the source body.
+        if (clickable && q.status === "open") {
+            input.removeAttribute("disabled");
+            input.addEventListener("click", onQuestionClick, { once: true });
+            input.classList.add("aiball-q-clickable");
+        }
+    });
+}
+
+function onQuestionClick(ev: Event) {
+    const input = ev.target as HTMLInputElement;
+    ev.preventDefault();
+    // Don't actually flip the checkbox — let the round-trip handle it.
+    input.checked = false;
+    const qid = input.dataset.aiballQid;
+    if (!qid || props.messageId === undefined) return;
+    const questions = extractQuestions(props.source ?? "");
+    const q = questions.find((x) => x.id === qid);
+    if (!q) return;
+    bus.emit("composer.add-answer", {
+        messageId: props.messageId,
+        questionId: q.id,
+        questionText: q.text,
+    });
+}
+
+watch(html, () => { void wireQuestionClicks(); }, { flush: "post" });
 </script>
 
 <template>
-    <div class="md-body" @click="onClick" v-html="html" />
+    <div ref="rootRef" class="md-body" @click="onClick" v-html="html" />
 </template>
 
 <style>

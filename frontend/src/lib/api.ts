@@ -393,6 +393,22 @@ export const api = {
     note: (id: number, note: string | null) =>
         req<Message>("POST", `/api/messages/${id}/note`, { note }),
 
+    /**
+     * Mark a question (GFM `- [ ]` item with a `<!-- q:<id> -->` marker
+     * in the parent body) as answered (#B.104). Flips the checkbox and
+     * records the audit (`meta.questions[qid]`). Idempotent.
+     */
+    markQuestionAnswered: (
+        messageId: number,
+        questionId: string,
+        body: { answered_by: string; answered_in: number },
+    ) =>
+        req<Message>(
+            "POST",
+            `/api/messages/${messageId}/questions/${encodeURIComponent(questionId)}/answer`,
+            body,
+        ),
+
     listRules: () => req<Rule[]>("GET", "/api/rules"),
     addRule: (body: {
         decision: "auto" | "review";
