@@ -31,6 +31,7 @@ export const VALID_KINDS: MessageKind[] = [
     "ticket_closed",
     "ticket_reopened",
     "ticket_resolved",
+    "ticket_blocked",
 ];
 
 export interface ValidationError {
@@ -396,7 +397,12 @@ export function submitMessage(input: NewMessage): Message {
     }
 
     const ownerLifecycle = isOwnerLifecycleEvent(input);
-    const decision = ownerLifecycle
+    // `ticket_blocked` always auto-approves (#B.119): it's a signal
+    // from an agent that they can't proceed — not a state mutation
+    // anyone needs to vet. The reporter still controls the real
+    // resolution by replying / reopening / closing.
+    const autoApproveLifecycle = ownerLifecycle || input.kind === "ticket_blocked";
+    const decision = autoApproveLifecycle
         ? { decision: "auto" as const, matched_rule_id: null }
         : evaluate({
             project: input.project,

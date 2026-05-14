@@ -22,6 +22,7 @@ export interface Message {
         | "ticket_closed"
         | "ticket_reopened"
         | "ticket_resolved"
+        | "ticket_blocked"
         | "ticket_sub_added"
         | "ticket_referenced";
     ticket_id: number | null;
@@ -55,6 +56,7 @@ export type TicketStage =
     | "closed-resolved"
     | "closed"
     | "resolved"
+    | "blocked"
     | "snoozed"
     | "pending"
     | "open";
@@ -149,6 +151,10 @@ export interface TicketSummary {
     resolved?: boolean;
     resolved_by?: string | null;
     resolved_at?: string | null;
+    /** Agent signalled "I'm stuck, your call" (#B.119). */
+    blocked?: boolean;
+    blocked_by?: string | null;
+    blocked_at?: string | null;
     broadcast?: boolean;
     /** Snooze (#B.329) — when set and in the future, the ticket is
      *  hidden from the open inbox until that timestamp. */
@@ -199,6 +205,8 @@ export interface InboxRow {
     intent: Intent | null;
     closed: boolean;
     resolved?: boolean;
+    /** Agent signalled "I'm stuck, your call" (#B.119). */
+    blocked?: boolean;
     /** Some agent has proposed this ticket as resolved, awaiting reporter's accept/reject. */
     pending_resolution?: boolean;
     broadcast?: boolean;
@@ -228,7 +236,7 @@ export interface ThreadView {
 
 export interface PostMessageInput {
     project: string;
-    kind: "ticket_created" | "comment_added" | "ticket_closed" | "ticket_reopened" | "ticket_resolved";
+    kind: "ticket_created" | "comment_added" | "ticket_closed" | "ticket_reopened" | "ticket_resolved" | "ticket_blocked";
     title?: string;
     body?: string;
     by_agent?: string;

@@ -119,15 +119,16 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             });
         }
     }
-    // Lifecycle replay across (closed/reopened/resolved) events in id
-    // order so we know which tickets are currently closed AND which
-    // have been marked resolved by an agent (waiting for the reporter
-    // to actually close). Resolved tickets are excluded from
-    // `actionable_count` (#B.119): they're in the human's court now,
-    // the agent shouldn't be nagged about them by autopoll. We
-    // consider BOTH approved and pending ticket_resolved (#B.120) —
-    // a pending proposal is still the agent saying "I'm done", even
-    // if the reporter hasn't validated yet.
+    // Lifecycle replay across (closed/reopened/resolved/blocked) events
+    // in id order so we know which tickets are currently closed AND which
+    // have been marked resolved or blocked by an agent (waiting for the
+    // reporter to act). Both resolved and blocked tickets are excluded
+    // from `actionable_count` (#B.119): they're in the human's court now,
+    // the agent shouldn't be nagged about them by autopoll. We consider
+    // BOTH approved and pending ticket_resolved (#B.120) — a pending
+    // proposal is still the agent saying "I'm done", even if the reporter
+    // hasn't validated yet. `ticket_blocked` always auto-approves so
+    // pending-vs-approved doesn't matter there.
     const lifecycle = db.select({
         ticket_id: schema.messages.ticketId,
         kind: schema.messages.kind,
@@ -136,12 +137,13 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     })
         .from(schema.messages)
         .where(
-            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened", "ticket_resolved"]),
+            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened", "ticket_resolved", "ticket_blocked"]),
         )
         .orderBy(asc(schema.messages.id))
         .all();
     const closedByTicket = new Map<number, boolean>();
     const resolvedByTicket = new Map<number, boolean>();
+    const blockedByTicket = new Map<number, boolean>();
     for (const ev of lifecycle) {
         if (ev.kind === "ticket_closed") {
             // Close needs to be approved to count (rejected closes
@@ -151,11 +153,18 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             if (ev.status === "approved") {
                 closedByTicket.set(ev.ticket_id, false);
                 resolvedByTicket.set(ev.ticket_id, false);
+                blockedByTicket.set(ev.ticket_id, false);
             }
         } else if (ev.kind === "ticket_resolved") {
             // Pending OR approved counts as "agent done".
             if (ev.status === "approved" || ev.status === "pending") {
                 resolvedByTicket.set(ev.ticket_id, true);
+            }
+        } else if (ev.kind === "ticket_blocked") {
+            // ticket_blocked is always auto-approved (it's a signal,
+            // not a contested mutation) but be defensive anyway.
+            if (ev.status === "approved" || ev.status === "pending") {
+                blockedByTicket.set(ev.ticket_id, true);
             }
         }
     }
@@ -206,11 +215,13 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             continue;
         }
         openPerProject.set(t.project, (openPerProject.get(t.project) ?? 0) + 1);
-        // Actionable = open and NOT marked resolved by an agent. The
-        // autopoll trigger uses this so a resolved ticket doesn't
-        // keep nagging the agent who already did their part (#B.119).
+        // Actionable = open and NOT marked resolved/blocked by an agent.
+        // The autopoll trigger uses this so a resolved-or-blocked ticket
+        // doesn't keep nagging the agent who already escalated it
+        // (#B.119).
         const isResolved = resolvedByTicket.get(t.id) === true;
-        if (!isResolved) {
+        const isBlocked = blockedByTicket.get(t.id) === true;
+        if (!isResolved && !isBlocked) {
             actionablePerProject.set(t.project, (actionablePerProject.get(t.project) ?? 0) + 1);
         }
     }

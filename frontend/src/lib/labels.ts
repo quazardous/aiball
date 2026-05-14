@@ -56,6 +56,15 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         color: "--p-amber-500",
         title: "an agent proposed resolution — accept (close) or reject to bring it back",
     },
+    blocked: {
+        // Agent escalation (#B.119): the agent flagged "I can't proceed,
+        // your call." Red to differentiate from amber-pending-resolved
+        // (which the reporter can rubber-stamp) — blocked needs the
+        // human to actually look at the thread.
+        icon: "pi pi-flag",
+        color: "--p-red-500",
+        title: "agent blocked — your call (reply, reopen, or close)",
+    },
     snoozed: {
         icon: "pi pi-history",
         color: "--p-indigo-500",

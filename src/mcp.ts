@@ -226,10 +226,10 @@ server.registerTool(
                 .describe("Project name. Required for offline (spool) mode."),
             by_agent: z.string().optional(),
             then: z
-                .enum(["resolved", "close", "reopen"])
+                .enum(["resolved", "close", "reopen", "blocked"])
                 .optional()
                 .describe(
-                    "Optional lifecycle event posted right after the comment. `resolved` = propose-resolved (banner in UI; reporter closes to validate). `close` = close the ticket. `reopen` = reopen a closed ticket. Owner-authored `close`/`reopen`/`resolved` skip moderation.",
+                    "Optional lifecycle event posted right after the comment. `resolved` = propose-resolved (banner in UI; reporter closes to validate). `blocked` = agent is stuck and explicitly hands the ticket back to a human (reporter answers, reopens, or closes — see #B.119). `close` = close the ticket. `reopen` = reopen a closed ticket. Owner-authored `close`/`reopen`/`resolved` skip moderation; `blocked` always auto-approves regardless of author (it's a signal, not a state contest).",
                 ),
         },
     },
@@ -261,9 +261,11 @@ server.registerTool(
             ? "comment_added"
             : then === "resolved"
               ? "ticket_resolved"
-              : then === "close"
-                ? "ticket_closed"
-                : "ticket_reopened";
+              : then === "blocked"
+                ? "ticket_blocked"
+                : then === "close"
+                  ? "ticket_closed"
+                  : "ticket_reopened";
         const proj = project ?? target.project;
         const res = await client.postMessage({
             project: proj,

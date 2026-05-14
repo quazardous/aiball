@@ -38,6 +38,7 @@ export type TicketStage =
     | "closed-resolved"
     | "closed"
     | "resolved"
+    | "blocked"
     | "snoozed"
     | "pending"
     | "open";
@@ -72,17 +73,21 @@ export function getTicketStages(ids: number[]): Map<number, TicketStage> {
         .all();
     const closedById = new Map<number, boolean>();
     const resolvedById = new Map<number, boolean>();
+    const blockedById = new Map<number, boolean>();
     for (const ev of events) {
         if (ev.kind === "ticket_closed") closedById.set(ev.ticket_id, true);
         else if (ev.kind === "ticket_reopened") {
             closedById.set(ev.ticket_id, false);
             resolvedById.set(ev.ticket_id, false);
+            blockedById.set(ev.ticket_id, false);
         } else if (ev.kind === "ticket_resolved") resolvedById.set(ev.ticket_id, true);
+        else if (ev.kind === "ticket_blocked") blockedById.set(ev.ticket_id, true);
     }
     const nowStr = nowIso();
     for (const r of rows) {
         const closed = closedById.get(r.id) === true;
         const resolved = resolvedById.get(r.id) === true;
+        const blocked = blockedById.get(r.id) === true;
         if (r.status === "rejected") {
             out.set(r.id, "rejected");
         } else if (closed && resolved) {
@@ -91,6 +96,8 @@ export function getTicketStages(ids: number[]): Map<number, TicketStage> {
             out.set(r.id, "closed");
         } else if (resolved) {
             out.set(r.id, "resolved");
+        } else if (blocked) {
+            out.set(r.id, "blocked");
         } else if (r.postponedUntil && r.postponedUntil > nowStr) {
             out.set(r.id, "snoozed");
         } else if (r.status === "pending") {

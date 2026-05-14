@@ -31,6 +31,7 @@ export type MessageKind =
     | "ticket_closed"
     | "ticket_reopened"
     | "ticket_resolved"
+    | "ticket_blocked"
     | "ticket_sub_added"
     | "ticket_referenced";
 export type MessageStatus = "pending" | "approved" | "rejected";

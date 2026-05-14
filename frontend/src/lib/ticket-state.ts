@@ -29,6 +29,10 @@ export function isResolved(r: InboxRow): boolean {
     return r.resolved === true;
 }
 
+export function isBlocked(r: InboxRow): boolean {
+    return r.blocked === true;
+}
+
 export function isSnoozed(r: InboxRow): boolean {
     return r.postponed === true;
 }
@@ -61,6 +65,7 @@ export type LifecycleStage =
     | "closed"
     | "resolved"
     | "pending-resolved"
+    | "blocked"
     | "snoozed"
     | "open";
 
@@ -73,6 +78,9 @@ export function lifecycleStage(r: InboxRow): LifecycleStage {
     // yet. Visually distinct from final-resolved so the reporter sees
     // there's a pending decision (#B.120).
     if (r.pending_resolution) return "pending-resolved";
+    // Agent escalated — distinct from resolved because the human can't
+    // just rubber-stamp; they need to look at it (#B.119).
+    if (isBlocked(r)) return "blocked";
     if (isSnoozed(r)) return "snoozed";
     return "open";
 }

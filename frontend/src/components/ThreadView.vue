@@ -423,6 +423,7 @@ async function postBodyAs(
         | "comment_added"
         | "ticket_closed"
         | "ticket_resolved"
+        | "ticket_blocked"
         | "ticket_reopened",
 ) {
     if (!data.value) return;
@@ -486,6 +487,20 @@ async function commentAndMarkResolved() {
     resolutionBusy.value = true;
     try {
         await postBodyAs("ticket_resolved");
+        composerBody.value = "";
+        broadcastRefresh(tid);
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        resolutionBusy.value = false;
+    }
+}
+async function commentAndMarkBlocked() {
+    if (!data.value) return;
+    const tid = data.value.ticket.id;
+    resolutionBusy.value = true;
+    try {
+        await postBodyAs("ticket_blocked");
         composerBody.value = "";
         broadcastRefresh(tid);
     } catch (e) {
@@ -749,7 +764,7 @@ async function copyTicketRef() {
                 </template>
                 <template v-else>
                     <Button
-                        v-if="!data.ticket.resolved"
+                        v-if="!data.ticket.resolved && !data.ticket.blocked"
                         icon="pi pi-check-circle"
                         severity="success"
                         size="small"
@@ -760,14 +775,27 @@ async function copyTicketRef() {
                         @click="commentAndMarkResolved"
                     />
                     <Button
-                        v-else
+                        v-if="!data.ticket.resolved && !data.ticket.blocked"
+                        icon="pi pi-flag"
+                        severity="danger"
+                        size="small"
+                        text
+                        rounded
+                        :loading="resolutionBusy"
+                        title="Mark blocked — hand the ticket back to a human. The reporter replies, reopens, or closes."
+                        @click="commentAndMarkBlocked"
+                    />
+                    <Button
+                        v-if="data.ticket.resolved || data.ticket.blocked"
                         icon="pi pi-undo"
                         severity="warn"
                         size="small"
                         text
                         rounded
                         :loading="resolutionBusy"
-                        title="Undo resolved — clear the resolution and bring the ticket back to plain open. Embarks any text typed in the composer."
+                        :title="data.ticket.blocked
+                            ? 'Unblock — bring the ticket back to plain open. Embarks any text typed in the composer.'
+                            : 'Undo resolved — clear the resolution and bring the ticket back to plain open. Embarks any text typed in the composer.'"
                         @click="commentAndReopen"
                     />
                     <Button
@@ -1199,7 +1227,7 @@ async function copyTicketRef() {
                     </template>
                     <template v-else>
                         <Button
-                            v-if="!data.ticket.resolved"
+                            v-if="!data.ticket.resolved && !data.ticket.blocked"
                             icon="pi pi-check-circle"
                             :label="hasBody ? 'comment and mark resolved' : 'mark resolved'"
                             severity="success"
@@ -1209,9 +1237,22 @@ async function copyTicketRef() {
                             @click="commentAndMarkResolved"
                         />
                         <Button
-                            v-else
+                            v-if="!data.ticket.resolved && !data.ticket.blocked"
+                            icon="pi pi-flag"
+                            :label="hasBody ? 'comment and mark blocked' : 'mark blocked'"
+                            severity="danger"
+                            size="small"
+                            text
+                            title="Hand the ticket back to a human — you can't proceed. The reporter will reply, reopen, or close."
+                            :loading="resolutionBusy"
+                            @click="commentAndMarkBlocked"
+                        />
+                        <Button
+                            v-if="data.ticket.resolved || data.ticket.blocked"
                             icon="pi pi-undo"
-                            :label="hasBody ? 'comment and undo resolved' : 'undo resolved'"
+                            :label="hasBody
+                                ? (data.ticket.blocked ? 'comment and unblock' : 'comment and undo resolved')
+                                : (data.ticket.blocked ? 'unblock' : 'undo resolved')"
                             severity="warn"
                             size="small"
                             :loading="resolutionBusy"
@@ -1627,6 +1668,10 @@ async function copyTicketRef() {
     background: color-mix(in srgb, var(--p-green-500) 18%, transparent);
     color: var(--p-green-700);
 }
+.comment-lifecycle[data-kind="ticket_blocked"] {
+    background: color-mix(in srgb, var(--p-red-500) 18%, transparent);
+    color: var(--p-red-700);
+}
 .comment-lifecycle[data-kind="ticket_closed"] {
     background: color-mix(in srgb, var(--p-orange-500) 18%, transparent);
     color: var(--p-orange-700);
@@ -1644,6 +1689,7 @@ async function copyTicketRef() {
     color: var(--p-text-muted-color);
 }
 .aiball-dark .comment-lifecycle[data-kind="ticket_resolved"] { color: var(--p-green-300); }
+.aiball-dark .comment-lifecycle[data-kind="ticket_blocked"] { color: var(--p-red-300); }
 .aiball-dark .comment-lifecycle[data-kind="ticket_closed"] { color: var(--p-orange-300); }
 .aiball-dark .comment-lifecycle[data-kind="ticket_reopened"] { color: var(--p-blue-300); }
 .aiball-dark .comment-lifecycle[data-kind="ticket_sub_added"] { color: var(--p-indigo-300); }

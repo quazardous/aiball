@@ -86,6 +86,7 @@ const LIFECYCLE_LABELS: Record<string, LifecycleLabel> = {
     ticket_closed: { icon: "pi pi-lock", verb: "closed this ticket", severity: "warn" },
     ticket_reopened: { icon: "pi pi-unlock", verb: "reopened this ticket", severity: "info" },
     ticket_resolved: { icon: "pi pi-check-circle", verb: "marked this ticket resolved", severity: "success" },
+    ticket_blocked: { icon: "pi pi-flag", verb: "marked this ticket blocked (handing back to a human)", severity: "warn" },
     ticket_sub_added: { icon: "pi pi-sitemap", verb: "added sub-ticket", severity: "info", showSource: true },
     ticket_referenced: { icon: "pi pi-link", verb: "referenced this ticket from", severity: "secondary", showSource: true },
 };

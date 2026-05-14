@@ -789,6 +789,10 @@ api.get("/inbox", (req, res) => {
         // resets resolved.
         closed: boolean;
         resolved: boolean;
+        // Agent explicitly flagged "I can't proceed, human take over"
+        // (#B.119). Independent of resolved — they signal different
+        // intents to the reporter.
+        blocked: boolean;
         // Surface pending ticket_resolved proposals so the reporter sees
         // in the list view that a thread is awaiting their accept/reject.
         // Only counts non-stale ones (we ignore them once the ticket is
@@ -809,6 +813,7 @@ api.get("/inbox", (req, res) => {
                 lastActivity: "",
                 closed: false,
                 resolved: false,
+                blocked: false,
                 pendingResolution: false,
             } as Agg);
         if (m.kind === "comment_added") {
@@ -821,7 +826,8 @@ api.get("/inbox", (req, res) => {
         if (
             (m.kind === "ticket_closed" ||
                 m.kind === "ticket_reopened" ||
-                m.kind === "ticket_resolved") &&
+                m.kind === "ticket_resolved" ||
+                m.kind === "ticket_blocked") &&
             m.status === "approved"
         ) {
             const list = lifecycleByTicket.get(m.ticket_id) ?? [];
@@ -831,7 +837,9 @@ api.get("/inbox", (req, res) => {
         if (m.created_at > cur.lastActivity) cur.lastActivity = m.created_at;
         byTicket.set(m.ticket_id, cur);
     }
-    // Replay lifecycle events to compute final closed/resolved flags.
+    // Replay lifecycle events to compute final closed/resolved/blocked
+    // flags. Reopen clears resolved + blocked alike (it's a "scratch
+    // and restart" signal from the reporter).
     for (const [tid, events] of lifecycleByTicket) {
         events.sort((a, b) => a.id - b.id);
         const cur = byTicket.get(tid)!;
@@ -840,7 +848,9 @@ api.get("/inbox", (req, res) => {
             else if (ev.kind === "ticket_reopened") {
                 cur.closed = false;
                 cur.resolved = false;
+                cur.blocked = false;
             } else if (ev.kind === "ticket_resolved") cur.resolved = true;
+            else if (ev.kind === "ticket_blocked") cur.blocked = true;
         }
     }
 
@@ -856,6 +866,7 @@ api.get("/inbox", (req, res) => {
                 lastActivity: "",
                 closed: false,
                 resolved: false,
+                blocked: false,
                 pendingResolution: false,
             } as Agg);
         const postponedUntil = t.postponed_until ?? null;
@@ -876,6 +887,10 @@ api.get("/inbox", (req, res) => {
             // true after close so the UI can distinguish "closed because
             // resolved" from "closed without explicit resolution".
             resolved: agg.resolved,
+            // Agent-signalled "blocked, your call" (#B.119). Same rationale
+            // as resolved: stays true after close so the UI can still show
+            // *why* the ticket ended up closed.
+            blocked: agg.blocked,
             // True iff there is a pending ticket_resolved on this ticket
             // that the reporter still has to accept-and-close or reject.
             // Stays false once the ticket is closed (the close auto-promotes
@@ -1181,6 +1196,7 @@ api.get("/tickets/:id", (req, res) => {
                     m.kind === "ticket_closed" ||
                     m.kind === "ticket_reopened" ||
                     m.kind === "ticket_resolved" ||
+                    m.kind === "ticket_blocked" ||
                     m.kind === "ticket_sub_added" ||
                     m.kind === "ticket_referenced") &&
                 m.status !== "rejected",
@@ -1194,6 +1210,9 @@ api.get("/tickets/:id", (req, res) => {
     let resolvedFlag = false;
     let resolvedBy: string | null = null;
     let resolvedAt: string | null = null;
+    let blockedFlag = false;
+    let blockedBy: string | null = null;
+    let blockedAt: string | null = null;
     for (const ev of lifecycle) {
         if (ev.kind === "ticket_closed") closedFlag = true;
         else if (ev.kind === "ticket_reopened") {
@@ -1201,10 +1220,17 @@ api.get("/tickets/:id", (req, res) => {
             resolvedFlag = false;
             resolvedBy = null;
             resolvedAt = null;
+            blockedFlag = false;
+            blockedBy = null;
+            blockedAt = null;
         } else if (ev.kind === "ticket_resolved") {
             resolvedFlag = true;
             resolvedBy = ev.by_agent;
             resolvedAt = ev.created_at;
+        } else if (ev.kind === "ticket_blocked") {
+            blockedFlag = true;
+            blockedBy = ev.by_agent;
+            blockedAt = ev.created_at;
         }
     }
     const closed = closedFlag || t.status === "rejected";
@@ -1213,6 +1239,9 @@ api.get("/tickets/:id", (req, res) => {
     // "closed without explicit resolution" (wontfix / abandoned / dup).
     // Reopen still zeroes resolvedFlag inside the replay loop.
     const resolved = resolvedFlag;
+    // Same idea for blocked (#B.119): persists past close so the UI can
+    // still tell "closed after agent escalation" from a normal resolve.
+    const blocked = blockedFlag;
     // Verbosity (#B.87 palier 2): default is summary now — header only,
     // no body, no comments array. Pass `full=1` to opt back into the
     // full thread. Old `summary=0` accepted as the explicit override
@@ -1232,6 +1261,9 @@ api.get("/tickets/:id", (req, res) => {
         resolved,
         resolved_by: resolved ? resolvedBy : null,
         resolved_at: resolved ? resolvedAt : null,
+        blocked,
+        blocked_by: blocked ? blockedBy : null,
+        blocked_at: blocked ? blockedAt : null,
         broadcast: t.broadcast === 1,
         postponed_until: t.postponed_until ?? null,
         intent: t.intent,
