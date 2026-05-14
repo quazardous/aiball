@@ -8,7 +8,7 @@
  * request to resolve `token → {consumer_id, kind}`. Install tokens
  * are rejected for /api/* — they grant access to /setup only.
  */
-import { and, asc, eq, lt } from "drizzle-orm";
+import { and, asc, eq, isNotNull, lt } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
@@ -140,14 +140,22 @@ export function purgeExpiredTokens(): number {
 }
 
 /**
- * Convenience: any auth/agent token currently valid in the DB? Used
- * by install.sh to decide whether to also create a default human or
- * just print the existing setup URL.
+ * Convenience: is there at least one human consumer with a password
+ * configured? Drives /auth/status.ready — i.e. "is the web auth set
+ * up?". Must NOT look at active auth tokens (those come and go with
+ * logouts; a logout would otherwise look like the daemon was never
+ * set up and bounce the user to /setup).
  */
 export function anyHumanCredentials(): boolean {
-    const r = getDb().select({ token: schema.tokens.token })
-        .from(schema.tokens)
-        .where(eq(schema.tokens.kind, "auth"))
+    const r = getDb().select({ id: schema.consumers.consumerId })
+        .from(schema.consumers)
+        .where(
+            and(
+                eq(schema.consumers.kind, "human"),
+                eq(schema.consumers.enabled, 1),
+                isNotNull(schema.consumers.passwordHash),
+            ),
+        )
         .get();
     return !!r;
 }
