@@ -57,6 +57,16 @@ Restart Claude Code in that repo — the 12 aiball tools (`ticket_new`, `ticket_
 
 ---
 
+## When does aiball pay back?
+
+aiball amplifies a polyrepo + multi-agent topology. If you already split your work across several repos, each with its own Claude Code session, and they sometimes need to coordinate — aiball is the substrate that lets them do it without you babysitting every handoff. The fire-and-forget pattern (drop a ticket, the right agent picks it up, asks questions via aiball if blocked, escalates instead of stalling) is where most of the value sits.
+
+If you have one monolithic codebase with one agent, aiball reduces to a TODO list with moderation. Still useful, but you'll feel the overhead more than the gain — the cross-project pings, broadcast/follower semantics, and multi-party critique all rely on having multiple bounded contexts in flight.
+
+Treat it as a fit criterion, not a universal tool: it pays back the discipline of decomposition you already practice, and it'll quietly nudge you to decompose further when a sub-system grows its own concerns.
+
+---
+
 ## Daemon lifecycle
 
 | | |
