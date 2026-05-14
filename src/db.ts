@@ -79,6 +79,7 @@ export {
     updateMessageStatus,
     editMessage,
     noteMessage,
+    markQuestionAnswered,
 } from "./db/messages.js";
 
 export {

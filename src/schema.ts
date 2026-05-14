@@ -72,6 +72,13 @@ export const tickets = sqliteTable("tickets", {
      * top-level rather than cascading (kids may still be relevant).
      */
     parentTicketId: integer("parent_ticket_id").references((): any => tickets.id, { onDelete: "set null" }),
+    /**
+     * Sidecar JSON metadata (#B.104). Today: question-answer audit
+     * (`{"questions": {"q-abc": {"answered_by", "answered_at",
+     * "answered_in"}}}`). Future fields colocate here — sidecar
+     * pattern, no new table for every new metadata kind.
+     */
+    meta: text("meta"),
 }, (t) => [
     uniqueIndex("idx_tickets_project_display").on(t.project, t.displaySeq),
     index("idx_tickets_project").on(t.project),
@@ -113,6 +120,8 @@ export const messages = sqliteTable("_messages", {
      * notifications elsewhere.
      */
     sourceTicketId: integer("source_ticket_id").references(() => tickets.id, { onDelete: "cascade" }),
+    /** Sidecar JSON metadata (#B.104). Same shape as `tickets.meta`. */
+    meta: text("meta"),
 }, (t) => [
     uniqueIndex("idx_messages_ticket_display").on(t.ticketId, t.displaySeq),
     index("idx_messages_ticket").on(t.ticketId),

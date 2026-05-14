@@ -5,6 +5,7 @@ import {
     updateMessageStatus,
     editMessage,
     noteMessage,
+    markQuestionAnswered,
     listProjects,
     insertRule,
     listRules,
@@ -578,6 +579,43 @@ api.post("/messages/:id/edit", (req, res) => {
         }
     }
     const updated = editMessage(id, { title, body, summary, intent });
+    if (!updated) return notFound(res);
+    const decorated = withTagsOne(updated);
+    broadcast({ type: "message_edited", data: decorated });
+    res.json(decorated);
+});
+
+/**
+ * Mark a question on a message as answered (#B.104). Flips
+ * `- [ ]<!-- q:<qid> -->` → `- [x]<!-- q:<qid> -->` in the parent's
+ * body and records the audit in `meta.questions[<qid>]`.
+ *
+ *   POST /api/messages/:id/questions/:qid/answer
+ *   body: { answered_by: string, answered_in: number }
+ *
+ * Idempotent — re-answering is a no-op. Broadcasts `message_edited`
+ * on success so live clients see the toggle and the chip update.
+ */
+api.post("/messages/:id/questions/:qid/answer", (req, res) => {
+    const id = Number(req.params.id);
+    const qid = String(req.params.qid);
+    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
+    if (!/^[a-zA-Z0-9_-]+$/.test(qid)) return badRequest(res, "invalid question id");
+    const { answered_by, answered_in } = (req.body ?? {}) as {
+        answered_by?: unknown;
+        answered_in?: unknown;
+    };
+    if (typeof answered_by !== "string" || !answered_by) {
+        return badRequest(res, "answered_by required");
+    }
+    if (typeof answered_in !== "number" || !Number.isFinite(answered_in)) {
+        return badRequest(res, "answered_in (number) required");
+    }
+    const updated = markQuestionAnswered(id, qid, {
+        answered_by,
+        answered_at: new Date().toISOString(),
+        answered_in,
+    });
     if (!updated) return notFound(res);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });
@@ -1200,6 +1238,10 @@ api.get("/tickets/:id", (req, res) => {
         parent_ticket_id: t.parent_ticket_id ?? null,
         sub_tickets: listSubTickets(t.id),
         tags: listMessageTags(t.id),
+        // #B.104: sidecar metadata (question-answer audit, etc.).
+        // Frontend reads this to render the "X/Y open" chip beside
+        // questions without round-tripping to the server.
+        meta: t.meta ?? null,
     };
     if (summary) {
         const commentCount = threadMessages.filter(

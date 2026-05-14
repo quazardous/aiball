@@ -108,6 +108,14 @@ export interface Message {
      * the body.
      */
     source_ticket_id?: number | null;
+    /**
+     * Sidecar JSON metadata (#B.104). String-encoded JSON shaped like
+     * `{"questions": {"q-abc": {answered_by, answered_at, answered_in}}}`.
+     * NULL when no metadata is attached. Today only used for the
+     * question-answer audit; future fields (signatures, polls, ...)
+     * colocate without schema changes.
+     */
+    meta?: string | null;
 }
 
 export type SubscriptionRole = "owner" | "follower";
@@ -349,6 +357,7 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         postponed_until: t.postponedUntil ?? null,
         parent_ticket_id: t.parentTicketId ?? null,
         source_ticket_id: null,
+        meta: t.meta ?? null,
     };
 }
 
@@ -377,5 +386,6 @@ export function messageRowToMessage(m: schema.Message, project: string): Message
         broadcast: 0,
         hashid: m.hashid ?? null,
         source_ticket_id: m.sourceTicketId ?? null,
+        meta: m.meta ?? null,
     };
 }

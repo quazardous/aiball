@@ -22,11 +22,24 @@ import {
     type MessageStatus,
     type NewMessage,
 } from "./connection.js";
+import {
+    injectMarkers,
+    parseMeta,
+    serializeMeta,
+    setQuestionStatus,
+    type MessageMeta,
+    type QuestionAnswer,
+} from "../questions.js";
 
 export function insertMessage(m: NewMessage): Message {
     const db = getDb();
     return db.transaction((tx) => {
         const createdAt = nowIso();
+        // #B.104: stamp stable `<!-- q:xxx -->` markers on every
+        // `- [ ]` line so future toggles can address the question by
+        // id regardless of edits / reorders. Idempotent — lines that
+        // already carry a marker are left alone.
+        const bodyWithMarkers = injectMarkers(m.body ?? null);
         if (m.kind === "ticket_created") {
             const id = nextTicketId(tx);
             const seq = (tx.select({
@@ -40,7 +53,7 @@ export function insertMessage(m: NewMessage): Message {
                 project: m.project,
                 displaySeq: seq,
                 title: m.title ?? "",
-                body: m.body ?? null,
+                body: bodyWithMarkers || null,
                 summary: m.summary ?? null,
                 byAgent: m.by_agent ?? null,
                 intent: m.intent ?? null,
@@ -72,7 +85,7 @@ export function insertMessage(m: NewMessage): Message {
             displaySeq: seq,
             kind: m.kind,
             parentMessageId,
-            body: m.body ?? null,
+            body: bodyWithMarkers || null,
             byAgent: m.by_agent ?? null,
             createdAt,
             hashid,
@@ -252,10 +265,16 @@ export function editMessage(
     },
 ): Message | null {
     const db = getDb();
+    // #B.104: re-inject `<!-- q:xxx -->` markers on any new task-list
+    // lines the editor added. Existing markers are preserved.
+    const editedBody =
+        fields.body !== undefined && fields.body !== null
+            ? injectMarkers(fields.body)
+            : fields.body;
     // Try tickets first — only tickets have edited_title and intent.
     const ticketPatch: Partial<schema.NewTicket> = {};
     if (fields.title !== undefined) ticketPatch.editedTitle = fields.title;
-    if (fields.body !== undefined) ticketPatch.editedBody = fields.body;
+    if (fields.body !== undefined) ticketPatch.editedBody = editedBody;
     // Summary has no `edited_summary` overlay — it's agent-authored
     // metadata, mutated in place (#B.87). The owner-bypass check that
     // gates this edit is the same gate that protects title/body anyway.
@@ -272,7 +291,7 @@ export function editMessage(
     // ticket-scoped and silently ignored on comments/lifecycle.
     if (fields.body !== undefined) {
         db.update(schema.messages)
-            .set({ editedBody: fields.body })
+            .set({ editedBody: editedBody })
             .where(eq(schema.messages.id, id))
             .run();
     }
@@ -339,4 +358,72 @@ export function noteMessage(id: number, note: string | null): Message | null {
         .where(eq(schema.messages.id, id))
         .run();
     return getMessage(id);
+}
+
+// =====================================================================
+// Question / metadata side-channel (#B.104)
+// =====================================================================
+
+/**
+ * Mark a question (identified by its `q-xxx` id) as answered: flips
+ * `[ ]` → `[x]` in the parent's body AND records the audit in
+ * `meta.questions[qid]`. Idempotent — already-answered questions
+ * return the existing message untouched.
+ *
+ * Walks ticket-first, then comments. Returns the updated Message,
+ * or null when the parent doesn't exist / the question id isn't
+ * found in the body.
+ */
+export function markQuestionAnswered(
+    messageId: number,
+    questionId: string,
+    answer: QuestionAnswer,
+): Message | null {
+    const db = getDb();
+    return db.transaction((tx) => {
+        // Try the tickets table first.
+        const t = tx.select().from(schema.tickets).where(eq(schema.tickets.id, messageId)).get();
+        if (t) {
+            const r = setQuestionStatus(t.body, questionId, "answered");
+            if (!r.changed) {
+                // No body change means either the question was already
+                // answered or the id isn't in the body. In the first
+                // case we still want to record the audit if missing.
+                const meta = parseMeta(t.meta ?? null);
+                const already = meta.questions?.[questionId];
+                if (already) return ticketRowToMessage(t);
+            }
+            const meta = mergeMeta(t.meta ?? null, questionId, answer);
+            tx.update(schema.tickets)
+                .set({ body: r.body, meta: serializeMeta(meta) })
+                .where(eq(schema.tickets.id, messageId))
+                .run();
+            const fresh = tx.select().from(schema.tickets).where(eq(schema.tickets.id, messageId)).get();
+            return fresh ? ticketRowToMessage(fresh) : null;
+        }
+        // Fall through to comments.
+        const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!m) return null;
+        const r = setQuestionStatus(m.body, questionId, "answered");
+        const meta = mergeMeta(m.meta ?? null, questionId, answer);
+        tx.update(schema.messages)
+            .set({ body: r.body, meta: serializeMeta(meta) })
+            .where(eq(schema.messages.id, messageId))
+            .run();
+        const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!fresh) return null;
+        const parent = tx.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
+        return messageRowToMessage(fresh, parent?.project ?? "");
+    });
+}
+
+function mergeMeta(
+    raw: string | null,
+    questionId: string,
+    answer: QuestionAnswer,
+): MessageMeta {
+    const meta = parseMeta(raw);
+    meta.questions = { ...(meta.questions ?? {}), [questionId]: answer };
+    return meta;
 }
