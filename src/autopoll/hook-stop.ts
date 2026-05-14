@@ -33,26 +33,38 @@ function emit(obj: unknown): never {
     process.exit(0);
 }
 
-function throttleFile(agent: string): string {
-    return join(homedir(), ".cache", "aiball", `autopoll-${agent}.ts`);
+interface AutopollState {
+    /** Unix seconds when we last fired a notify for this agent. */
+    last_notified_at: number;
+    /** Highest ping id we've already notified about. Used to dedupe
+     *  "same inbox state" repeat fires, and to bypass the throttle
+     *  when a strictly newer ping shows up. */
+    last_max_ping_id: number;
 }
 
-function readThrottle(agent: string): number {
-    const p = throttleFile(agent);
-    if (!existsSync(p)) return 0;
+function stateFile(agent: string): string {
+    return join(homedir(), ".cache", "aiball", `autopoll-${agent}.json`);
+}
+
+function readState(agent: string): AutopollState {
+    const p = stateFile(agent);
+    if (!existsSync(p)) return { last_notified_at: 0, last_max_ping_id: 0 };
     try {
-        const n = Number.parseInt(readFileSync(p, "utf8").trim(), 10);
-        return Number.isFinite(n) ? n : 0;
+        const s = JSON.parse(readFileSync(p, "utf8")) as Partial<AutopollState>;
+        return {
+            last_notified_at: typeof s.last_notified_at === "number" ? s.last_notified_at : 0,
+            last_max_ping_id: typeof s.last_max_ping_id === "number" ? s.last_max_ping_id : 0,
+        };
     } catch {
-        return 0;
+        return { last_notified_at: 0, last_max_ping_id: 0 };
     }
 }
 
-function writeThrottle(agent: string, ts: number): void {
-    const p = throttleFile(agent);
+function writeState(agent: string, state: AutopollState): void {
+    const p = stateFile(agent);
     try {
         mkdirSync(dirname(p), { recursive: true });
-        writeFileSync(p, String(ts));
+        writeFileSync(p, JSON.stringify(state));
     } catch {
         /* best effort */
     }
@@ -71,16 +83,13 @@ async function main(): Promise<void> {
     if (!cfg.autopoll.enabled) emit({});
     if (!cfg.consumer.agent) emit({});
 
-    // Throttle: skip if we notified < N seconds ago.
+    const agent = cfg.consumer.agent;
     const nowSec = Math.floor(Date.now() / 1000);
-    const last = readThrottle(cfg.consumer.agent);
-    if (cfg.autopoll.throttle_seconds > 0 && nowSec - last < cfg.autopoll.throttle_seconds) {
-        emit({});
-    }
+    const state = readState(agent);
 
     // Build a client bound to this consumer so the X-Aiball-Consumer
     // header is right (UDS local-trust honors it for identity).
-    const client = new AiballClient({ agentId: cfg.consumer.agent });
+    const client = new AiballClient({ agentId: agent });
 
     // Count first — sub-ms, the bail path is the common case.
     let count = 0;
@@ -90,30 +99,64 @@ async function main(): Promise<void> {
     } catch {
         emit({}); // daemon unreachable — never block
     }
-    if (count === 0) emit({});
+    if (count === 0) {
+        // Inbox drained — reset the watermark so future pings notify
+        // immediately even if the throttle was set high.
+        if (state.last_max_ping_id !== 0) {
+            writeState(agent, { last_notified_at: state.last_notified_at, last_max_ping_id: 0 });
+        }
+        emit({});
+    }
 
-    // We have pings. Fetch the N most recent for the reason body.
+    // Fetch recent pings to (a) derive the current max_id and (b) fill
+    // the notify reason. Always call this — we need max_id even when
+    // include_recent_tickets is 0.
     let recent: AutopollPayload["recent_tickets"] = [];
-    if (cfg.autopoll.include_recent_tickets > 0) {
-        try {
-            const r = (await client.listPings({
-                unreadOnly: true,
-                limit: cfg.autopoll.include_recent_tickets,
-            })) as { pings: Array<{ message: { id: number; title: string | null; project: string; ticket_id: number | null } }> };
-            recent = (r.pings ?? []).map((p) => ({
+    let maxId = 0;
+    try {
+        const limit = Math.max(1, cfg.autopoll.include_recent_tickets);
+        const r = (await client.listPings({ unreadOnly: true, limit })) as {
+            pings: Array<{
+                message_id: number;
+                message: { id: number; title: string | null; project: string; ticket_id: number | null };
+            }>;
+        };
+        const pings = r.pings ?? [];
+        for (const p of pings) {
+            if (typeof p.message_id === "number" && p.message_id > maxId) maxId = p.message_id;
+        }
+        if (cfg.autopoll.include_recent_tickets > 0) {
+            recent = pings.map((p) => ({
                 // Prefer ticket_id (the thread root) when this ping is on
                 // a comment; the title comes from the message either way.
                 id: p.message.ticket_id ?? p.message.id,
                 title: p.message.title,
                 project: p.message.project,
             }));
-        } catch {
-            /* keep recent empty — count alone is still useful */
         }
+    } catch {
+        emit({}); // daemon unreachable mid-way — never block
     }
 
+    // Decision matrix:
+    //   - new ping (max_id > last)        → notify (always bypasses throttle)
+    //   - same head + volatile=true       → skip (one-shot semantics)
+    //   - same head + throttle elapsed    → notify (persistent reminder)
+    //   - same head + within throttle     → skip
+    const newPing = maxId > state.last_max_ping_id;
+    const throttleElapsed =
+        cfg.autopoll.throttle_seconds === 0 ||
+        nowSec - state.last_notified_at >= cfg.autopoll.throttle_seconds;
+    let shouldNotify = false;
+    if (newPing) {
+        shouldNotify = true;
+    } else if (!cfg.autopoll.volatile && throttleElapsed) {
+        shouldNotify = true;
+    }
+    if (!shouldNotify) emit({});
+
     const reason = formatReason(cfg.autopoll.tone, { pings: count, recent_tickets: recent });
-    writeThrottle(cfg.consumer.agent, nowSec);
+    writeState(agent, { last_notified_at: nowSec, last_max_ping_id: maxId });
     emit({ decision: "block", reason });
 }
 

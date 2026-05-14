@@ -550,6 +550,7 @@ program
             },
             autopoll: {
                 enabled: cfg.autopoll.enabled,
+                volatile: cfg.autopoll.volatile,
                 throttle_seconds: cfg.autopoll.throttle_seconds,
                 tone: cfg.autopoll.tone,
                 include_recent_tickets: cfg.autopoll.include_recent_tickets,
@@ -588,7 +589,8 @@ program
         process.stdout.write(`  ${ok(payload.config.found)} .aiball.yaml: ${payload.config.path ?? "(none found by walking up)"}\n`);
         process.stdout.write(`  ${ok(payload.autopoll.enabled)} autopoll: ${payload.autopoll.reason}\n`);
         if (payload.autopoll.enabled) {
-            process.stdout.write(`     tone=${payload.autopoll.tone}, throttle=${payload.autopoll.throttle_seconds}s, recent=${payload.autopoll.include_recent_tickets}\n`);
+            const mode = payload.autopoll.volatile ? "volatile (one-shot per new ping)" : "persistent";
+            process.stdout.write(`     mode=${mode}, throttle=${payload.autopoll.throttle_seconds}s, tone=${payload.autopoll.tone}, recent=${payload.autopoll.include_recent_tickets}\n`);
         }
         process.stdout.write(`\nconsumer\n`);
         process.stdout.write(`  ${ok(!!payload.consumer.agent)} agent:   ${payload.consumer.agent ?? "(unresolved)"} ${payload.consumer.agent_source ? `[from ${payload.consumer.agent_source}]` : ""}\n`);
@@ -823,6 +825,17 @@ autopoll
             die(`throttle must be a non-negative integer, got '${seconds}'`);
         }
         await setAutopollField("throttle_seconds", n);
+    });
+
+autopoll
+    .command("volatile <value>")
+    .description("Set autopoll.volatile (true = one-shot per ping, false = persistent reminders)")
+    .action(async (value: string) => {
+        const v = value.toLowerCase();
+        if (v !== "true" && v !== "false") {
+            die(`volatile must be true or false, got '${value}'`);
+        }
+        await setAutopollField("volatile", v === "true");
     });
 
 async function setAutopollField(key: string, value: unknown): Promise<void> {

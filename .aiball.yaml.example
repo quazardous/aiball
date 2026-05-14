@@ -14,6 +14,23 @@ autopoll:
   # is the per-project opt-in. Default when this file exists: true.
   enabled: true
 
+  # Reminder behavior :
+  #
+  #   false (default) — persistent. The hook re-fires after
+  #                     `throttle_seconds` even if you didn't drain.
+  #                     New pings (max_id moves) always notify
+  #                     immediately, bypassing the throttle.
+  #   true            — one-shot. Notify only when a strictly newer
+  #                     ping arrives (max_id watermark moves). No
+  #                     time-based reminders — "tell me once and
+  #                     leave me alone".
+  volatile: false
+
+  # Reminder cadence (ignored when volatile: true). 0 means "every
+  # Stop"; with persistent mode that's spammy. State persists in
+  # ~/.cache/aiball/autopoll-<agent>.json.
+  throttle_seconds: 30
+
   # How aggressively the hook nudges the agent.
   #
   #   hint       — "Consider calling unread(...)." Polite, easy to ignore.
@@ -25,11 +42,6 @@ autopoll:
   #                Last resort if the agent persists in asking
   #                permission patterns.
   tone: directive
-
-  # Don't fire more than once per N seconds. 0 = always fire on every
-  # Claude Stop. 30 is a sane "don't repeat yourself on every turn"
-  # value. State persists in ~/.cache/aiball/autopoll-<agent>.ts.
-  throttle_seconds: 0
 
   # Include up to N recent unread ticket titles in the hook's reason,
   # so the agent knows what's waiting before draining. 0 = count only.

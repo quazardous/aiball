@@ -31,6 +31,16 @@ const VALID_TONES: AutopollTone[] = ["hint", "directive", "imperative"];
 export interface AiballConfig {
     autopoll: {
         enabled: boolean;
+        /**
+         * `false` (default) — reminders persist: re-notify when
+         * `throttle_seconds` elapses even if you didn't drain. New
+         * pings (max_id moves) always notify immediately, bypassing
+         * the throttle.
+         * `true` — one-shot: notify only when max_id moves. No
+         * time-based reminders. Use when you want "tell me once and
+         * leave me alone".
+         */
+        volatile: boolean;
         throttle_seconds: number;
         include_recent_tickets: number;
         tone: AutopollTone;
@@ -39,14 +49,15 @@ export interface AiballConfig {
         agent: string | null;
         project: string | null;
     };
-    /** Absolute path to the loaded `.aiball.json`, or null when none was found. */
+    /** Absolute path to the loaded `.aiball.yaml`, or null when none was found. */
     configPath: string | null;
 }
 
 const DEFAULTS: AiballConfig = {
     autopoll: {
         enabled: true,
-        throttle_seconds: 0,
+        volatile: false,
+        throttle_seconds: 30,
         include_recent_tickets: 3,
         tone: "directive",
     },
@@ -129,6 +140,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             const raw = (parseYaml(readFileSync(configPath, "utf8")) ?? {}) as Record<string, unknown>;
             const a = (raw.autopoll ?? {}) as Record<string, unknown>;
             if (typeof a.enabled === "boolean") cfg.autopoll.enabled = a.enabled;
+            if (typeof a.volatile === "boolean") cfg.autopoll.volatile = a.volatile;
             if (typeof a.throttle_seconds === "number" && a.throttle_seconds >= 0) {
                 cfg.autopoll.throttle_seconds = a.throttle_seconds;
             }
