@@ -740,6 +740,7 @@ async function copyTicketRef() {
                         icon="pi pi-verified"
                         severity="success"
                         size="small"
+                        text
                         rounded
                         :loading="resolutionBusy"
                         title="Accept the resolution and close. Embarks any text typed in the composer."
