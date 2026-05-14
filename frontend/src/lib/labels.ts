@@ -48,6 +48,14 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         color: "--p-green-500",
         title: "resolved (proposal accepted, reporter has not closed yet)",
     },
+    "pending-resolved": {
+        // Same shape as resolved but a muted/amber color so the eye
+        // catches it as "an agent proposes done — your call to
+        // accept or reject" rather than "definitively done" (#B.120).
+        icon: "pi pi-check-circle",
+        color: "--p-amber-500",
+        title: "an agent proposed resolution — accept (close) or reject to bring it back",
+    },
     snoozed: {
         icon: "pi pi-history",
         color: "--p-indigo-500",

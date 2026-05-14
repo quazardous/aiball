@@ -124,30 +124,39 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     // have been marked resolved by an agent (waiting for the reporter
     // to actually close). Resolved tickets are excluded from
     // `actionable_count` (#B.119): they're in the human's court now,
-    // the agent shouldn't be nagged about them by autopoll.
+    // the agent shouldn't be nagged about them by autopoll. We
+    // consider BOTH approved and pending ticket_resolved (#B.120) —
+    // a pending proposal is still the agent saying "I'm done", even
+    // if the reporter hasn't validated yet.
     const lifecycle = db.select({
         ticket_id: schema.messages.ticketId,
         kind: schema.messages.kind,
+        status: schema.messages.status,
         id: schema.messages.id,
     })
         .from(schema.messages)
-        .where(and(
+        .where(
             inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened", "ticket_resolved"]),
-            eq(schema.messages.status, "approved"),
-        ))
+        )
         .orderBy(asc(schema.messages.id))
         .all();
     const closedByTicket = new Map<number, boolean>();
     const resolvedByTicket = new Map<number, boolean>();
     for (const ev of lifecycle) {
         if (ev.kind === "ticket_closed") {
-            closedByTicket.set(ev.ticket_id, true);
+            // Close needs to be approved to count (rejected closes
+            // shouldn't shut a ticket).
+            if (ev.status === "approved") closedByTicket.set(ev.ticket_id, true);
         } else if (ev.kind === "ticket_reopened") {
-            closedByTicket.set(ev.ticket_id, false);
-            // Reopening clears the resolved flag too — back to actionable.
-            resolvedByTicket.set(ev.ticket_id, false);
+            if (ev.status === "approved") {
+                closedByTicket.set(ev.ticket_id, false);
+                resolvedByTicket.set(ev.ticket_id, false);
+            }
         } else if (ev.kind === "ticket_resolved") {
-            resolvedByTicket.set(ev.ticket_id, true);
+            // Pending OR approved counts as "agent done".
+            if (ev.status === "approved" || ev.status === "pending") {
+                resolvedByTicket.set(ev.ticket_id, true);
+            }
         }
     }
 

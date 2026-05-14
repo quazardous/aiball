@@ -60,6 +60,7 @@ export type LifecycleStage =
     | "closed-resolved"
     | "closed"
     | "resolved"
+    | "pending-resolved"
     | "snoozed"
     | "open";
 
@@ -68,6 +69,10 @@ export function lifecycleStage(r: InboxRow): LifecycleStage {
     if (isClosed(r) && isResolved(r)) return "closed-resolved";
     if (isClosed(r)) return "closed";
     if (isResolved(r)) return "resolved";
+    // An agent proposed resolution but the reporter hasn't approved it
+    // yet. Visually distinct from final-resolved so the reporter sees
+    // there's a pending decision (#B.120).
+    if (r.pending_resolution) return "pending-resolved";
     if (isSnoozed(r)) return "snoozed";
     return "open";
 }
