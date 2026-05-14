@@ -351,19 +351,37 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     };
     writePlate(sd, plate);
 
-    writeFileSync(
-        envPath(sd),
-        [
-            `export AIBALL_URL="${process.env.AIBALL_URL ?? "http://127.0.0.1:7777"}"`,
-            `export AIBALL_AGENT="${agent}"`,
-            `export AIBALL_PROJECT="${project}"`,
-            `export AIBALL_MCP_MODE="sandbox"`,
-            `export SB_NAME="${name}"`,
-            `export SB_STATE_DIR="${sd}"`,
-            `export SB_INSTALL_ROOT="${installRoot()}"`,
-            "",
-        ].join("\n"),
+    // #B.94 follow-up: forward whatever auth transport the launching
+    // shell uses so the spawned sandbox's hooks + MCP can reach the
+    // daemon. UDS is preferred (same-host, token-less); TCP+bearer
+    // remains a fallback. If neither is set in the parent env, probe
+    // for the conventional socket path.
+    const sockEnv = process.env.AIBALL_SOCK;
+    const sockGuess = join(
+        process.env.AIBALL_HOME ?? join(homedir(), ".local", "share", "aiball"),
+        "sock",
     );
+    const resolvedSock =
+        sockEnv && sockEnv !== ""
+            ? sockEnv
+            : existsSync(sockGuess)
+            ? sockGuess
+            : null;
+    const lines: string[] = [
+        `export AIBALL_URL="${process.env.AIBALL_URL ?? "http://127.0.0.1:7777"}"`,
+        `export AIBALL_AGENT="${agent}"`,
+        `export AIBALL_PROJECT="${project}"`,
+        `export AIBALL_MCP_MODE="sandbox"`,
+        `export SB_NAME="${name}"`,
+        `export SB_STATE_DIR="${sd}"`,
+        `export SB_INSTALL_ROOT="${installRoot()}"`,
+    ];
+    if (resolvedSock) lines.push(`export AIBALL_SOCK="${resolvedSock}"`);
+    if (process.env.AIBALL_TOKEN) {
+        lines.push(`export AIBALL_TOKEN="${process.env.AIBALL_TOKEN}"`);
+    }
+    lines.push("");
+    writeFileSync(envPath(sd), lines.join("\n"));
 
     const settings = {
         hooks: {
