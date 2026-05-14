@@ -98,14 +98,13 @@ watch(projectChoice, (v) => {
     }
 });
 
-function onComposerSubmitted() {
-    // The composer fires the bus events; we just navigate back.
-    // The newly-created ticket id isn't exposed by MessageComposer's
-    // `submitted` event today — we pop to the inbox and let the user
-    // click the new row (it'll be at the top, freshly arrived).
+function onComposerSubmitted(messageId: number | null) {
+    // The composer fires the bus events; forward the newly-created
+    // ticket id so App.vue can open the thread instead of bouncing
+    // back to the inbox (#B.98).
     bus.emit("inbox.refresh");
     bus.emit("projects.refresh");
-    emit("submitted", null);
+    emit("submitted", messageId);
 }
 </script>
 

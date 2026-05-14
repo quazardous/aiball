@@ -662,6 +662,18 @@ function openThread(r: InboxRow) {
     openTicketId.value = r.id;
 }
 
+/**
+ * After a new ticket was just submitted via the compose panel, drop
+ * the user straight into the thread we just created (#B.98). Falls
+ * back to "back to the list" if the composer couldn't surface an id.
+ */
+function onNewTicketSubmitted(ticketId: number | null) {
+    panel.value = null;
+    if (ticketId !== null) {
+        openTicketId.value = ticketId;
+    }
+}
+
 /** Open a search hit — route to the parent thread (with focus when a comment was matched). */
 function openSearchHit(hit: import("./lib/api").SearchHit) {
     openTicketId.value = hit.ticket_id;
@@ -847,7 +859,7 @@ watch(showSnoozed, (v) => {
                     v-else-if="panel === 'compose'"
                     :initial-project="project"
                     @back="panel = null"
-                    @submitted="panel = null"
+                    @submitted="onNewTicketSubmitted"
                 />
 
                 <ThreadView

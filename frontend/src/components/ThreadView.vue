@@ -814,6 +814,27 @@ async function copyTicketRef() {
                     @click="commentAndClose"
                 />
             </template>
+            <template v-else-if="data && data.ticket.status === 'pending' && !data.ticket.resolved && !data.ticket.closed">
+                <Button
+                    icon="pi pi-times"
+                    severity="danger"
+                    size="small"
+                    text
+                    rounded
+                    :loading="decideBusy"
+                    title="Reject this pending ticket. The author is notified; comments stay readable."
+                    @click="decide('reject')"
+                />
+                <Button
+                    icon="pi pi-check"
+                    severity="success"
+                    size="small"
+                    rounded
+                    :loading="decideBusy"
+                    title="Approve this pending ticket so it joins the open inbox."
+                    @click="decide('approve')"
+                />
+            </template>
             <Button
                 v-else-if="data && data.ticket.status === 'rejected'"
                 icon="pi pi-replay"
@@ -1068,24 +1089,6 @@ async function copyTicketRef() {
                     </div>
                 </div>
                 <MarkdownView :source="data.ticket.body" />
-                <div v-if="data.ticket.status === 'pending'" class="thread-decide">
-                    <Button
-                        label="approve"
-                        icon="pi pi-check"
-                        severity="success"
-                        size="small"
-                        :loading="decideBusy"
-                        @click="decide('approve')"
-                    />
-                    <Button
-                        label="reject"
-                        icon="pi pi-times"
-                        severity="danger"
-                        size="small"
-                        :loading="decideBusy"
-                        @click="decide('reject')"
-                    />
-                </div>
             </article>
 
             <div v-if="flatComments.length === 0" class="aiball-empty thread-no-comments">
@@ -1414,12 +1417,6 @@ async function copyTicketRef() {
     color: var(--p-red-700);
 }
 .thread-no-comments { padding: 1rem; }
-.thread-decide {
-    display: flex;
-    gap: 0.4rem;
-    align-items: center;
-    margin-top: 0.4rem;
-}
 .comment-card--focused {
     box-shadow: 0 0 0 2px var(--p-primary-color);
     transition: box-shadow 0.2s;

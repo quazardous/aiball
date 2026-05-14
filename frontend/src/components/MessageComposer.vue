@@ -24,10 +24,13 @@ const props = defineProps<{
 }>();
 /**
  * Emitted after a successful submit so the parent can react to "the
- * composer finished" (e.g. close a modal). Data refresh is on the bus
- * — this emit is purely a parent-coupling UX signal.
+ * composer finished" (e.g. close a modal or navigate to the freshly-
+ * created thread). Carries the new message id when known (#B.98 —
+ * `ticket_created` exposes its id so NewTicketPage can open it
+ * instead of dumping the user back to the inbox). Data refresh is
+ * fan-out on the bus.
  */
-const emit = defineEmits<{ (e: "submitted"): void }>();
+const emit = defineEmits<{ (e: "submitted", messageId: number | null): void }>();
 
 const title = ref("");
 // `body` is a v-model so the parent can attach extra-action buttons that
@@ -142,8 +145,9 @@ async function submit() {
         // Goes through api.postMessage → req() so the bearer token +
         // X-Aiball-Consumer header are attached. fetch() directly
         // skipped both and produced 401s once auth became mandatory.
+        let createdId: number | null = null;
         if (isTicket.value) {
-            await api.postMessage({
+            const r = await api.postMessage({
                 project: props.project,
                 kind: "ticket_created",
                 title: title.value.trim(),
@@ -151,6 +155,7 @@ async function submit() {
                 intent: intent.value,
                 by_agent: byAgent.value || "human",
             });
+            createdId = typeof r?.id === "number" ? r.id : null;
         } else {
             await api.postMessage({
                 project: props.project,
@@ -173,7 +178,7 @@ async function submit() {
         }
         bus.emit("inbox.refresh");
         bus.emit("projects.refresh");
-        emit("submitted");
+        emit("submitted", createdId);
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
