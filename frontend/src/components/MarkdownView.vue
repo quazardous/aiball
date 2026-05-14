@@ -167,7 +167,16 @@ async function onClick(ev: MouseEvent) {
     const match = /^\/b\/([^/?#]+)(.*)$/.exec(href);
     if (match && !/^\d+$/.test(match[1])) {
         try {
-            const res = await fetch(`/api/tickets/${encodeURIComponent(match[1])}`);
+            // #B.94: hashid → numeric id resolution lives under the
+            // bearer-auth middleware. Send the stored token; the SPA
+            // shell handles 401 globally via setUnauthorizedHandler.
+            const tok = localStorage.getItem("aiball.token");
+            const headers: Record<string, string> = {};
+            if (tok) headers["authorization"] = `Bearer ${tok}`;
+            const res = await fetch(
+                `/api/tickets/${encodeURIComponent(match[1])}`,
+                { headers },
+            );
             if (res.ok) {
                 const data = await res.json();
                 if (data?.ticket?.id) {

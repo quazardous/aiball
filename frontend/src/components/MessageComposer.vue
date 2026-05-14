@@ -139,29 +139,28 @@ async function submit() {
     error.value = null;
     try {
         localStorage.setItem("aiball.human_id", byAgent.value);
-        const payload = isTicket.value
-            ? {
+        // Goes through api.postMessage → req() so the bearer token +
+        // X-Aiball-Consumer header are attached. fetch() directly
+        // skipped both and produced 401s once auth became mandatory.
+        if (isTicket.value) {
+            await api.postMessage({
                 project: props.project,
                 kind: "ticket_created",
                 title: title.value.trim(),
                 body: body.value,
                 intent: intent.value,
                 by_agent: byAgent.value || "human",
-            }
-            : {
+            });
+        } else {
+            await api.postMessage({
                 project: props.project,
                 kind: "comment_added",
                 ticket_id: props.ticketId,
                 parent_id: props.parentId ?? props.ticketId,
                 body: body.value,
                 by_agent: byAgent.value || "human",
-            };
-        const res = await fetch("/api/messages", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(payload),
-        });
-        if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+            });
+        }
         // Successful post → drop the persisted draft, reset local state.
         sessionStorage.removeItem(draftKey.value);
         title.value = "";

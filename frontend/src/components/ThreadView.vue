@@ -430,19 +430,17 @@ async function postBodyAs(
     const trimmed = composerBody.value.trim();
     if (!trimmed && kind === "comment_added") return; // no-op
     const byAgent = localStorage.getItem("aiball.human_id") || "human";
-    const res = await fetch("/api/messages", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-            project: t.project,
-            kind,
-            ticket_id: t.id,
-            parent_id: t.id,
-            body: trimmed || null,
-            by_agent: byAgent,
-        }),
+    // Goes through api.postMessage → req() so the bearer token + the
+    // X-Aiball-Consumer header are attached. Hitting fetch() directly
+    // bypassed both and returned 401 once auth became mandatory.
+    await api.postMessage({
+        project: t.project,
+        kind,
+        ticket_id: t.id,
+        parent_id: t.id,
+        body: trimmed || undefined,
+        by_agent: byAgent,
     });
-    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
 }
 async function acceptResolution() {
     const msg = pendingResolution.value;

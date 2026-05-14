@@ -38,13 +38,17 @@ export async function uploadImage(file: File | Blob): Promise<UploadResult> {
             `unsupported image type "${file.type}" — allowed: ${[...ALLOWED_TYPES].join(", ")}`,
         );
     }
+    const headers: Record<string, string> = {
+        "content-type": file.type,
+        "x-aiball-consumer":
+            localStorage.getItem("aiball.human_id") ?? "human",
+    };
+    // #B.94: image uploads also live behind the bearer-auth middleware.
+    const tok = localStorage.getItem("aiball.token");
+    if (tok) headers["authorization"] = `Bearer ${tok}`;
     const res = await fetch("/api/uploads", {
         method: "POST",
-        headers: {
-            "content-type": file.type,
-            "x-aiball-consumer":
-                localStorage.getItem("aiball.human_id") ?? "human",
-        },
+        headers,
         body: file,
     });
     if (!res.ok) {
