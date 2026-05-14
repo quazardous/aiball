@@ -7,6 +7,8 @@
 #   ./install.sh --port 7878           # override listen port (writes a systemd drop-in)
 #   ./install.sh --host 0.0.0.0        # override listen host (default 127.0.0.1)
 #   ./install.sh --no-systemd          # skip systemd unit
+#   ./install.sh --stop-hook           # also register the interactive Stop notify
+#                                      # hook in ~/.claude/settings.json (#B.99)
 #   ./install.sh --uninstall           # remove everything we installed
 #
 # Reentrant: re-running with new --port / --host overwrites only the bind
@@ -22,6 +24,7 @@ SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 NO_SYSTEMD=false
 UNINSTALL=false
 SYMLINK=false
+STOP_HOOK=false
 PORT=""
 HOST=""
 
@@ -30,6 +33,7 @@ while [[ $# -gt 0 ]]; do
         --no-systemd) NO_SYSTEMD=true; shift ;;
         --uninstall)  UNINSTALL=true; shift ;;
         --symlink)    SYMLINK=true; shift ;;
+        --stop-hook)  STOP_HOOK=true; shift ;;
         --port)       PORT="${2:-}"; shift 2 ;;
         --port=*)     PORT="${1#--port=}"; shift ;;
         --host)       HOST="${2:-}"; shift 2 ;;
@@ -69,6 +73,23 @@ uninstall() {
         rm -f "$PREFIX_LIB"
     else
         rm -rf "$PREFIX_LIB"
+    fi
+    # Remove the Stop notify hook from ~/.claude/settings.json if we
+    # installed it. Best-effort, jq required.
+    local settings="$HOME/.claude/settings.json"
+    if [[ -f "$settings" ]] && command -v jq >/dev/null 2>&1; then
+        if jq -e '.hooks.Stop[]?.hooks[]? | select(.command|tostring|test("aiball-notify-stop\\.sh$"))' "$settings" >/dev/null 2>&1; then
+            cp -n "$settings" "$settings.aiball-bak" || true
+            jq '
+                if .hooks.Stop then
+                    .hooks.Stop |= map(
+                        .hooks |= map(select(.command|tostring|test("aiball-notify-stop\\.sh$")|not))
+                    ) |
+                    .hooks.Stop |= map(select(.hooks|length > 0))
+                else . end
+            ' "$settings" > "$settings.tmp" && mv "$settings.tmp" "$settings"
+            log "Removed Stop hook from $settings"
+        fi
     fi
     warn "Data preserved at \$AIBALL_HOME (~/.local/share/aiball). Remove manually if you want a clean slate."
     log "Done."
@@ -205,6 +226,43 @@ if command -v aiball >/dev/null 2>&1; then
     fi
 fi
 
+# --- Interactive Stop notify hook (#B.99) --------------------------------
+# Opt-in via --stop-hook. Injects an entry in ~/.claude/settings.json so
+# Stop fires after every Claude Code response and asks aiball if there
+# are unread pings for this consumer. Per-project config lives in
+# `.aiball.json` (notify.enabled, throttle_seconds, tone, ...).
+
+if $STOP_HOOK; then
+    HOOK_TARGET="$PREFIX_LIB/skill/hooks/aiball-notify-stop.sh"
+    SETTINGS="$HOME/.claude/settings.json"
+    if [[ ! -x "$HOOK_TARGET" ]]; then
+        warn "Stop hook script not found at $HOOK_TARGET — install layout is broken"
+    elif ! command -v jq >/dev/null 2>&1; then
+        warn "jq is required to wire the Stop hook into ~/.claude/settings.json"
+        warn "    install jq, then re-run: $SRC_DIR/install.sh --stop-hook"
+    else
+        mkdir -p "$(dirname "$SETTINGS")"
+        [[ -f "$SETTINGS" ]] || echo '{}' > "$SETTINGS"
+        # Backup once per install pass.
+        cp -n "$SETTINGS" "$SETTINGS.aiball-bak" || true
+        # Idempotent: skip if a Stop hook with this command already
+        # exists. Otherwise append a new hooks entry.
+        if jq -e --arg cmd "$HOOK_TARGET" \
+            '.hooks.Stop[]?.hooks[]? | select(.command == $cmd)' \
+            "$SETTINGS" >/dev/null 2>&1; then
+            log "Stop hook already wired in $SETTINGS"
+        else
+            jq --arg cmd "$HOOK_TARGET" '
+                .hooks //= {} |
+                .hooks.Stop //= [] |
+                .hooks.Stop += [{"hooks": [{"type": "command", "command": $cmd}]}]
+            ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+            log "Wired Stop hook → $SETTINGS"
+            log "Backup of previous settings: $SETTINGS.aiball-bak"
+        fi
+    fi
+fi
+
 printf '\n────────────────────────────────────────────────────────────────────\n'
 printf "${c_green}aiball installed.${c_off}\n"
 if $SYMLINK; then
@@ -220,6 +278,9 @@ Next steps:
                                then save it to $AIBALL_DATA_DIR/cli-env as
                                'export AIBALL_TOKEN=<token>'
   4. Register the MCP server:  see MCP-CLIENT.md or README.md
+  5. (optional) Interactive Stop notify hook:
+                               re-run with --stop-hook to wire ~/.claude/settings.json
+                               Per-project tuning: $.aiball.json (notify.tone, throttle_seconds)
 EOF
 if $SYMLINK; then
     printf "  4. Iterate on backend:       edit src/, then 'systemctl --user restart %s'\n" "$SERVICE_NAME"
