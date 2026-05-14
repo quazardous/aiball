@@ -1181,7 +1181,7 @@ async function copyTicketRef() {
                             label="reject"
                             severity="danger"
                             size="small"
-                            text
+                            outlined
                             :loading="decideBusy"
                             title="Reject this pending ticket. The author is notified; comments stay readable."
                             @click="decide('reject')"
