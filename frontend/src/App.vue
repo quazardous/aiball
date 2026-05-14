@@ -379,7 +379,12 @@ provide("compact", compact);
 
 async function loadProjects() {
     try {
-        projects.value = await api.listProjectsDetailed(myConsumerId);
+        const list = await api.listProjectsDetailed(myConsumerId);
+        // Alphabetical (#B.106). The backend returns by last-activity which
+        // makes the sidebar reshuffle every time anyone posts — confusing
+        // when scanning by name.
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        projects.value = list;
     } catch (e) {
         toast.add({
             severity: "error",
