@@ -4,3 +4,4 @@ autopoll:
   enabled: true
   tone: directive
   throttle_seconds: 30
+  volatile: false

@@ -43,6 +43,12 @@ export interface AiballConfig {
         volatile: boolean;
         throttle_seconds: number;
         include_recent_tickets: number;
+        /**
+         * Include the open-tickets count for the consumer's project
+         * in the notify reason. Default true — gives the agent
+         * project-level context beyond personal pings.
+         */
+        backlog: boolean;
         tone: AutopollTone;
     };
     consumer: {
@@ -59,6 +65,7 @@ const DEFAULTS: AiballConfig = {
         volatile: false,
         throttle_seconds: 30,
         include_recent_tickets: 3,
+        backlog: true,
         tone: "directive",
     },
     consumer: {
@@ -141,6 +148,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             const a = (raw.autopoll ?? {}) as Record<string, unknown>;
             if (typeof a.enabled === "boolean") cfg.autopoll.enabled = a.enabled;
             if (typeof a.volatile === "boolean") cfg.autopoll.volatile = a.volatile;
+            if (typeof a.backlog === "boolean") cfg.autopoll.backlog = a.backlog;
             if (typeof a.throttle_seconds === "number" && a.throttle_seconds >= 0) {
                 cfg.autopoll.throttle_seconds = a.throttle_seconds;
             }

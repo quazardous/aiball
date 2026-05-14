@@ -551,6 +551,7 @@ program
             autopoll: {
                 enabled: cfg.autopoll.enabled,
                 volatile: cfg.autopoll.volatile,
+                backlog: cfg.autopoll.backlog,
                 throttle_seconds: cfg.autopoll.throttle_seconds,
                 tone: cfg.autopoll.tone,
                 include_recent_tickets: cfg.autopoll.include_recent_tickets,
@@ -589,8 +590,9 @@ program
         process.stdout.write(`  ${ok(payload.config.found)} .aiball.yaml: ${payload.config.path ?? "(none found by walking up)"}\n`);
         process.stdout.write(`  ${ok(payload.autopoll.enabled)} autopoll: ${payload.autopoll.reason}\n`);
         if (payload.autopoll.enabled) {
-            const mode = payload.autopoll.volatile ? "volatile (one-shot per new ping)" : "persistent";
-            process.stdout.write(`     mode=${mode}, throttle=${payload.autopoll.throttle_seconds}s, tone=${payload.autopoll.tone}, recent=${payload.autopoll.include_recent_tickets}\n`);
+            const mode = payload.autopoll.volatile ? "volatile (one-shot)" : "persistent";
+            const backlog = payload.autopoll.backlog ? "backlog-trigger" : "pings-only";
+            process.stdout.write(`     mode=${mode}, ${backlog}, throttle=${payload.autopoll.throttle_seconds}s, tone=${payload.autopoll.tone}, recent=${payload.autopoll.include_recent_tickets}\n`);
         }
         process.stdout.write(`\nconsumer\n`);
         process.stdout.write(`  ${ok(!!payload.consumer.agent)} agent:   ${payload.consumer.agent ?? "(unresolved)"} ${payload.consumer.agent_source ? `[from ${payload.consumer.agent_source}]` : ""}\n`);
@@ -836,6 +838,19 @@ autopoll
             die(`volatile must be true or false, got '${value}'`);
         }
         await setAutopollField("volatile", v === "true");
+    });
+
+autopoll
+    .command("backlog <value>")
+    .description(
+        "Set autopoll.backlog (true = open-tickets count is also a notify trigger, not just context)",
+    )
+    .action(async (value: string) => {
+        const v = value.toLowerCase();
+        if (v !== "true" && v !== "false") {
+            die(`backlog must be true or false, got '${value}'`);
+        }
+        await setAutopollField("backlog", v === "true");
     });
 
 async function setAutopollField(key: string, value: unknown): Promise<void> {

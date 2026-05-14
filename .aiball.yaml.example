@@ -47,6 +47,16 @@ autopoll:
   # so the agent knows what's waiting before draining. 0 = count only.
   include_recent_tickets: 3
 
+  # Open-tickets count handling :
+  #
+  #   true (default) — the count is also a trigger: notify when open
+  #                    tickets exist in your scope, even without unread
+  #                    pings. New open tickets bump the watermark.
+  #   false          — context only: the count is still displayed in
+  #                    the reason if there are pings, but doesn't
+  #                    trigger by itself.
+  backlog: true
+
 # Identity overrides. Both fall back to AIBALL_AGENT/AIBALL_PROJECT
 # env vars, then to .mcp.json's mcpServers.aiball.env block. Set
 # these only if you need to override the natural resolution.
