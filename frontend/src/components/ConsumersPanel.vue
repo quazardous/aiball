@@ -172,13 +172,15 @@ onMounted(load);
             <tbody>
                 <tr v-for="r in rows" :key="r.consumer_id" :class="{ 'is-blocked': !r.enabled }">
                     <td class="consumers-cid">
-                        {{ r.consumer_id }}
-                        <Tag
-                            v-if="r.kind === 'human'"
-                            value="moderator"
-                            severity="success"
-                            style="margin-left: 0.4rem; font-size: 0.7rem"
-                        />
+                        <div class="consumers-cid__inner">
+                            <span class="consumers-cid__text">{{ r.consumer_id }}</span>
+                            <Tag
+                                v-if="r.kind === 'human'"
+                                value="moderator"
+                                severity="success"
+                                class="consumers-cid__tag"
+                            />
+                        </div>
                     </td>
                     <td>
                         <Select
@@ -252,10 +254,30 @@ onMounted(load);
     padding: 0.5rem 0.6rem;
     border-bottom: 1px solid var(--p-content-border-color);
     vertical-align: middle;
+    /* Pin row height so PrimeVue components with mildly different
+       intrinsic heights (Select vs Button text vs Button rounded)
+       can't drift between rows. */
+    height: 3rem;
 }
 .consumers-cid {
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-size: 0.85rem;
+}
+.consumers-cid__inner {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+.consumers-cid__text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.consumers-cid__tag {
+    font-size: 0.7rem;
+    flex-shrink: 0;
 }
 .consumers-table tr.is-blocked {
     opacity: 0.55;
