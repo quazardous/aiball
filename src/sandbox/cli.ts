@@ -383,6 +383,51 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     lines.push("");
     writeFileSync(envPath(sd), lines.join("\n"));
 
+    const permMode = opts.permissionMode ?? "auto";
+    if (permMode === "default" || permMode === "acceptEdits" || permMode === "plan") {
+        warn(
+            `permission-mode '${permMode}' prompts for shell commands — the loop will stall without a human. ` +
+                `Consider --permission-mode auto or bypassPermissions.`,
+        );
+    }
+    spawnLoopTmux({ name, sd, dir, permMode });
+    const tmuxName = `sb-${name}`;
+
+    process.stdout.write(
+        [
+            `sandbox '${name}' started`,
+            `  agent:   ${agent}`,
+            `  project: ${project}`,
+            `  mode:    ${plate.mode}`,
+            `  dir:     ${dir}`,
+            `  state:   ${sd}`,
+            `  tickets: ${ticketIds.map((id) => `#B.${id}`).join(", ")}`,
+            `  attach:  ${MUX_CMD} attach -t ${tmuxName}   (or: aiball sandbox attach ${name})`,
+            "",
+        ].join("\n"),
+    );
+
+    if (opts.attach) {
+        spawnSync(MUX_CMD, ["attach", "-t", tmuxName], { stdio: "inherit" });
+    }
+}
+
+/**
+ * Build the inline Claude Code settings JSON, spawn `tmux new-session`
+ * detached running `claude --settings <json>`, schedule the initial
+ * nudge, and apply the sandbox-flavored status bar.
+ *
+ * Used by both `cmdStart` (first launch) and `cmdRespawn` (re-arming
+ * a previously-exited sandbox after pings / human reply). The state
+ * dir (`sd`) must already exist with hooks/, env, plate.json.
+ */
+function spawnLoopTmux(opts: {
+    name: string;
+    sd: string;
+    dir: string;
+    permMode: string;
+}): void {
+    const { name, sd, dir, permMode } = opts;
     const settings = {
         hooks: {
             SessionStart: [
@@ -411,9 +456,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // doesn't block ticket_close / ticket_reply / etc. inside the
         // loop. Narrow allow rules survive auto mode (per Claude Code
         // docs); broad Bash(*) wildcards would not.
-        permissions: {
-            allow: AIBALL_MCP_ALLOWLIST,
-        },
+        permissions: { allow: AIBALL_MCP_ALLOWLIST },
         // Auto-approve the MCP server declared in any .mcp.json the cwd
         // exposes, so claude doesn't prompt. Mirror of the
         // preTrustDirectory hint, applied at the settings layer too.
@@ -423,13 +466,6 @@ async function cmdStart(opts: StartOpts): Promise<void> {
 
     need(MUX_CMD);
     const tmuxName = `sb-${name}`;
-    const permMode = opts.permissionMode ?? "auto";
-    if (permMode === "default" || permMode === "acceptEdits" || permMode === "plan") {
-        warn(
-            `permission-mode '${permMode}' prompts for shell commands — the loop will stall without a human. ` +
-                `Consider --permission-mode auto or bypassPermissions.`,
-        );
-    }
     const innerCmd =
         `source "${sd}/env"; ` +
         `exec claude --permission-mode ${shQuote(permMode)} --settings ${shQuote(settingsJson)}`;
@@ -449,24 +485,55 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // Kick claude into action after it boots — SessionStart context
     // alone doesn't trigger a turn.
     scheduleInitialNudge(tmuxName);
+}
 
+interface RespawnOpts {
+    permissionMode: string;
+}
+
+/**
+ * Re-arm a sandbox whose tmux session exited. Reads the existing
+ * plate to recover dir + name, refuses if tmux is still alive, then
+ * spawns a fresh `tmux new-session` reusing the existing hooks/env.
+ *
+ * The SessionStart hook will re-inject the brief with the current
+ * plate state, so any new pings the human posted are visible to the
+ * agent on the next turn.
+ *
+ * Foundation for the daemon-side watcher cron (#B.81 point 2): the
+ * watcher detects new pings and shells out to this subcommand instead
+ * of duplicating spawn logic.
+ */
+function cmdRespawn(maybeName: string | undefined, opts: RespawnOpts): void {
+    const name = resolveSingleName(maybeName);
+    const sd = stateDirFor(name);
+    if (!existsSync(platePath(sd))) {
+        die(`sandbox '${name}' has no plate.json at ${sd}.`);
+    }
+    const plate = readPlate(sd);
+    if (plate.kind && plate.kind !== "loop") {
+        die(
+            `sandbox '${name}' is kind=${plate.kind}; respawn is only for loop sandboxes.`,
+        );
+    }
+    const tmuxName = `sb-${name}`;
+    if (tmuxHasSession(tmuxName)) {
+        die(
+            `sandbox '${name}' is already alive (tmux: ${tmuxName}). ` +
+                `Use 'aiball sandbox attach ${name}' instead.`,
+        );
+    }
+    spawnLoopTmux({ name, sd, dir: plate.dir, permMode: opts.permissionMode });
     process.stdout.write(
         [
-            `sandbox '${name}' started`,
-            `  agent:   ${agent}`,
-            `  project: ${project}`,
-            `  mode:    ${plate.mode}`,
-            `  dir:     ${dir}`,
-            `  state:   ${sd}`,
-            `  tickets: ${ticketIds.map((id) => `#B.${id}`).join(", ")}`,
+            `sandbox '${name}' respawned`,
+            `  agent:   ${plate.agent}`,
+            `  project: ${plate.project}`,
+            `  dir:     ${plate.dir}`,
             `  attach:  ${MUX_CMD} attach -t ${tmuxName}   (or: aiball sandbox attach ${name})`,
             "",
         ].join("\n"),
     );
-
-    if (opts.attach) {
-        spawnSync(MUX_CMD, ["attach", "-t", tmuxName], { stdio: "inherit" });
-    }
 }
 
 function cmdList(): void {
@@ -755,6 +822,20 @@ export function registerSandboxCommands(program: Command): void {
         .action(async (opts: StartOpts) => {
             await cmdStart(opts);
         });
+
+    sb.command("respawn [name]")
+        .description(
+            "Re-arm a sandbox whose tmux session exited (e.g. after an escalation + human reply). Reuses the existing state dir (plate, env, hooks); SessionStart will re-inject the brief. NAME inferred when only one state dir exists.",
+        )
+        .option(
+            "--permission-mode <mode>",
+            "Claude permission-mode for the respawned session (default: auto).",
+            "auto",
+        )
+        .action(
+            (name: string | undefined, opts: { permissionMode: string }) =>
+                cmdRespawn(name, opts),
+        );
 
     sb.command("plain")
         .description("Spawn a tmux session running plain claude — for testing the mux layer (no hooks, no plate)")
