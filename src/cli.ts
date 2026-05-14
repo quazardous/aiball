@@ -598,7 +598,7 @@ program
         process.stdout.write(`\nstop hook (~/.claude/settings.json)\n`);
         process.stdout.write(`  ${ok(payload.stop_hook.wired)} wired: ${payload.stop_hook.wired ? payload.stop_hook.command : "no aiball-autopoll-stop.sh entry"}\n`);
         if (!payload.stop_hook.wired) {
-            process.stdout.write(`     enable with: <install-dir>/install.sh --stop-hook\n`);
+            process.stdout.write(`     enable with: ${resolveInstallRoot()}/install.sh --stop-hook\n`);
         }
         process.stdout.write(`\ndaemon\n`);
         process.stdout.write(`  ${ok(payload.daemon.up)} reachable\n`);
