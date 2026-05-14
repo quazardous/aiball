@@ -814,27 +814,6 @@ async function copyTicketRef() {
                     @click="commentAndClose"
                 />
             </template>
-            <template v-else-if="data && data.ticket.status === 'pending' && !data.ticket.resolved && !data.ticket.closed">
-                <Button
-                    icon="pi pi-times"
-                    severity="danger"
-                    size="small"
-                    text
-                    rounded
-                    :loading="decideBusy"
-                    title="Reject this pending ticket. The author is notified; comments stay readable."
-                    @click="decide('reject')"
-                />
-                <Button
-                    icon="pi pi-check"
-                    severity="success"
-                    size="small"
-                    rounded
-                    :loading="decideBusy"
-                    title="Approve this pending ticket so it joins the open inbox."
-                    @click="decide('approve')"
-                />
-            </template>
             <Button
                 v-else-if="data && data.ticket.status === 'rejected'"
                 icon="pi pi-replay"
@@ -1194,6 +1173,27 @@ async function copyTicketRef() {
                             size="small"
                             :loading="resolutionBusy"
                             @click="commentAndReopen"
+                        />
+                    </template>
+                    <template v-else-if="data.ticket.status === 'pending'">
+                        <Button
+                            icon="pi pi-times"
+                            label="reject"
+                            severity="danger"
+                            size="small"
+                            text
+                            :loading="decideBusy"
+                            title="Reject this pending ticket. The author is notified; comments stay readable."
+                            @click="decide('reject')"
+                        />
+                        <Button
+                            icon="pi pi-check"
+                            label="approve"
+                            severity="success"
+                            size="small"
+                            :loading="decideBusy"
+                            title="Approve this pending ticket so it joins the open inbox."
+                            @click="decide('approve')"
                         />
                     </template>
                     <template v-else>
