@@ -10,6 +10,7 @@ import { AIBALL_HOME, UPLOADS_DIR, ensureDirs } from "./paths.js";
 import { drainSpool, watchSpool } from "./spool.js";
 import { listExpiredPostpones, setTicketPostpone, getMessage } from "./db.js";
 import { broadcast as wsBroadcast } from "./ws.js";
+import { checkSandboxPings } from "./sandbox/watcher.js";
 
 /**
  * Snooze reveal cron (per #B.329). Every 60s, find tickets whose
@@ -112,6 +113,13 @@ function main(): void {
         // grain — users typically snooze for hours / days, not minutes.
         revealExpiredPostpones();
         setInterval(revealExpiredPostpones, 60_000).unref();
+        // Sandbox watcher: re-arms dead loop sandboxes when their agent
+        // receives a new ping (#B.81 point 2). Set
+        // AIBALL_SANDBOX_WATCHER=0 to disable.
+        if (process.env.AIBALL_SANDBOX_WATCHER !== "0") {
+            checkSandboxPings();
+            setInterval(checkSandboxPings, 30_000).unref();
+        }
     });
 
     // Side-car UDS server. Same Express app, but every incoming socket
