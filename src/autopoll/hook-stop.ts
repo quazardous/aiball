@@ -108,18 +108,24 @@ async function main(): Promise<void> {
 
     // Open-tickets count — fetched whether backlog is on (used in the
     // reason) or off (we still surface the number in the message).
-    // Best-effort; if it fails we just omit the line.
+    // We use `actionable_count` (= open minus agent-resolved) so the
+    // agent isn't nagged about tickets already in the human's court
+    // (#B.119). Falls back to `open_count` for old daemons.
     let openCount = 0;
     let openProject: string | null = null;
     try {
         const projects = (await client.listProjectsDetailed()) as Array<{
             name: string;
             open_count?: number;
+            actionable_count?: number;
         }>;
         const filtered = cfg.consumer.project
             ? projects.filter((p) => p.name === cfg.consumer.project)
             : projects;
-        openCount = filtered.reduce((acc, p) => acc + (p.open_count ?? 0), 0);
+        openCount = filtered.reduce(
+            (acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0),
+            0,
+        );
         openProject = cfg.consumer.project;
     } catch {
         /* context-only */

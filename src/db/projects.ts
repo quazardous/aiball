@@ -30,6 +30,12 @@ export interface ProjectMeta {
     /** Approved tickets currently in an open lifecycle state (i.e. no
      *  terminal close, not snoozed). Independent of the moderation pending_count. */
     open_count?: number;
+    /** Subset of `open_count`: tickets that have NOT been marked
+     *  resolved by an agent. Used by the autopoll hook (#B.119) so
+     *  the agent isn't nagged about tickets already in the reporter's
+     *  court awaiting close. `open_count - actionable_count` = the
+     *  number of "agent-done, human-pending" tickets. */
+    actionable_count?: number;
     /** Approved tickets currently snoozed (postponed_until > now). Excluded
      *  from open_count above; surfaced separately so the UI can toggle a
      *  "show snoozed" mode that merges the two counts (per #B.329). */
@@ -113,8 +119,12 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             });
         }
     }
-    // Lifecycle replay across (closed/reopened) events in id order so we
-    // know which tickets are currently closed.
+    // Lifecycle replay across (closed/reopened/resolved) events in id
+    // order so we know which tickets are currently closed AND which
+    // have been marked resolved by an agent (waiting for the reporter
+    // to actually close). Resolved tickets are excluded from
+    // `actionable_count` (#B.119): they're in the human's court now,
+    // the agent shouldn't be nagged about them by autopoll.
     const lifecycle = db.select({
         ticket_id: schema.messages.ticketId,
         kind: schema.messages.kind,
@@ -122,14 +132,23 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     })
         .from(schema.messages)
         .where(and(
-            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
+            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened", "ticket_resolved"]),
             eq(schema.messages.status, "approved"),
         ))
         .orderBy(asc(schema.messages.id))
         .all();
     const closedByTicket = new Map<number, boolean>();
+    const resolvedByTicket = new Map<number, boolean>();
     for (const ev of lifecycle) {
-        closedByTicket.set(ev.ticket_id, ev.kind === "ticket_closed");
+        if (ev.kind === "ticket_closed") {
+            closedByTicket.set(ev.ticket_id, true);
+        } else if (ev.kind === "ticket_reopened") {
+            closedByTicket.set(ev.ticket_id, false);
+            // Reopening clears the resolved flag too — back to actionable.
+            resolvedByTicket.set(ev.ticket_id, false);
+        } else if (ev.kind === "ticket_resolved") {
+            resolvedByTicket.set(ev.ticket_id, true);
+        }
     }
 
     // Pending resolution proposals: tickets with at least one
@@ -166,6 +185,7 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     }).from(schema.tickets).all();
     const nowStr = nowIso();
     const openPerProject = new Map<string, number>();
+    const actionablePerProject = new Map<string, number>();
     const snoozedPerProject = new Map<string, number>();
     for (const t of openCounts) {
         if (t.status !== "approved") continue;
@@ -177,9 +197,17 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             continue;
         }
         openPerProject.set(t.project, (openPerProject.get(t.project) ?? 0) + 1);
+        // Actionable = open and NOT marked resolved by an agent. The
+        // autopoll trigger uses this so a resolved ticket doesn't
+        // keep nagging the agent who already did their part (#B.119).
+        const isResolved = resolvedByTicket.get(t.id) === true;
+        if (!isResolved) {
+            actionablePerProject.set(t.project, (actionablePerProject.get(t.project) ?? 0) + 1);
+        }
     }
     for (const p of byProject.values()) {
         p.open_count = openPerProject.get(p.name) ?? 0;
+        p.actionable_count = actionablePerProject.get(p.name) ?? 0;
         p.snoozed_count = snoozedPerProject.get(p.name) ?? 0;
         // Filter the pending-resolution set to only ticket ids whose
         // parent ticket is open + approved (otherwise a stale proposal

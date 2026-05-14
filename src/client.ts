@@ -279,6 +279,10 @@ export class AiballClient {
             comment_count: number;
             pending_count: number;
             open_count?: number;
+            /** Subset of `open_count` excluding agent-resolved tickets
+             *  (#B.119). Used by the autopoll hook so the agent
+             *  isn't nagged about tickets already in the human's court. */
+            actionable_count?: number;
             snoozed_count?: number;
             resolved_count?: number;
         }>>("GET", "/api/projects?detailed=1");
