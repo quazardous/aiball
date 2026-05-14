@@ -1,0 +1,44 @@
+# aiball per-project config (#B.99)
+#
+# Drop this file at your project root as `.aiball.yaml` to enable the
+# autopoll hook (Stop event → "you have N aiball pings to drain").
+# Without this file, the hook is inactive even if it's wired in
+# ~/.claude/settings.json. Everything below is optional with sensible
+# defaults — `{}` (empty YAML) is enough to turn autopoll on.
+#
+# Pilot from the CLI: `aiball autopoll enable|disable|tone X|throttle N`
+# Inspect current state: `aiball check`
+
+autopoll:
+  # Master switch. The hook in ~/.claude/settings.json is global; this
+  # is the per-project opt-in. Default when this file exists: true.
+  enabled: true
+
+  # How aggressively the hook nudges the agent.
+  #
+  #   hint       — "Consider calling unread(...)." Polite, easy to ignore.
+  #                Use when the agent's own system prompt already
+  #                handles proactivity.
+  #   directive  — "Drain via unread(...) then react. Do not ask first."
+  #                Default. Names the action explicitly.
+  #   imperative — "**YOU MUST** drain N pings BEFORE doing anything."
+  #                Last resort if the agent persists in asking
+  #                permission patterns.
+  tone: directive
+
+  # Don't fire more than once per N seconds. 0 = always fire on every
+  # Claude Stop. 30 is a sane "don't repeat yourself on every turn"
+  # value. State persists in ~/.cache/aiball/autopoll-<agent>.ts.
+  throttle_seconds: 0
+
+  # Include up to N recent unread ticket titles in the hook's reason,
+  # so the agent knows what's waiting before draining. 0 = count only.
+  include_recent_tickets: 3
+
+# Identity overrides. Both fall back to AIBALL_AGENT/AIBALL_PROJECT
+# env vars, then to .mcp.json's mcpServers.aiball.env block. Set
+# these only if you need to override the natural resolution.
+#
+# consumer:
+#   agent: skybot-claude
+#   project: skybot

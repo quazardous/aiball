@@ -7,8 +7,9 @@
  * Global flag --human / -H swaps the active consumer to $AIBALL_HUMAN
  * (default "human"), so a single CLI invocation can play either side.
  */
-import { existsSync, statSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, statSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { homedir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";
 import { registerSandboxCommands } from "./sandbox/cli.js";
@@ -25,6 +26,16 @@ const URL = process.env.AIBALL_URL ?? "http://127.0.0.1:7777";
 function die(msg: string): never {
     process.stderr.write(`aiball: ${msg}\n`);
     process.exit(1);
+}
+
+/**
+ * The invoker's working directory. `bin/aiball` does `cd "$ROOT"`
+ * before exec'ing tsx, which corrupts `process.cwd()`. The wrapper
+ * preserves the original PWD in AIBALL_CWD so commands that walk
+ * up from the project (autopoll, check, …) see the right tree.
+ */
+function userCwd(): string {
+    return process.env.AIBALL_CWD ?? process.cwd();
 }
 
 /** Print a value as JSON line; preserves the existing bash CLI contract. */
@@ -428,6 +439,174 @@ program
     });
 
 program
+    .command("check")
+    .description(
+        "Project-level health check: .aiball.json, hook wiring, agent id resolution, daemon reachability.",
+    )
+    .option("--json", "Machine-readable JSON output")
+    .action(async (opts: { json?: boolean }, cmd) => {
+        const { loadConfig } = await import("./autopoll/config.js");
+        const cfg = loadConfig(userCwd());
+        const client = buildClient(gOpts(cmd));
+
+        // Resolve where each consumer field actually came from.
+        const configRaw =
+            cfg.configPath && existsSync(cfg.configPath)
+                ? (() => {
+                      try {
+                          return JSON.parse(readFileSync(cfg.configPath, "utf8")) as {
+                              consumer?: { agent?: string; project?: string };
+                          };
+                      } catch {
+                          return null;
+                      }
+                  })()
+                : null;
+        const agentSource = (() => {
+            if (configRaw?.consumer?.agent) return "config";
+            if (process.env.AIBALL_AGENT) return "env";
+            // Same fallback as loadConfig
+            const projectDir = cfg.configPath ? dirname(cfg.configPath) : userCwd();
+            const mcp = join(projectDir, ".mcp.json");
+            if (existsSync(mcp)) {
+                try {
+                    const r = JSON.parse(readFileSync(mcp, "utf8")) as {
+                        mcpServers?: Record<string, { env?: Record<string, string> }>;
+                    };
+                    if (r.mcpServers?.aiball?.env?.AIBALL_AGENT) return ".mcp.json";
+                } catch {
+                    /* ignore */
+                }
+            }
+            return null;
+        })();
+        const projectSource = (() => {
+            if (configRaw?.consumer?.project) return "config";
+            if (process.env.AIBALL_PROJECT) return "env";
+            const projectDir = cfg.configPath ? dirname(cfg.configPath) : userCwd();
+            const mcp = join(projectDir, ".mcp.json");
+            if (existsSync(mcp)) {
+                try {
+                    const r = JSON.parse(readFileSync(mcp, "utf8")) as {
+                        mcpServers?: Record<string, { env?: Record<string, string> }>;
+                    };
+                    if (r.mcpServers?.aiball?.env?.AIBALL_PROJECT) return ".mcp.json";
+                } catch {
+                    /* ignore */
+                }
+            }
+            return null;
+        })();
+
+        // Stop hook wiring check.
+        const settingsPath = join(homedir(), ".claude", "settings.json");
+        let stopHookWired = false;
+        let stopHookCommand: string | null = null;
+        if (existsSync(settingsPath)) {
+            try {
+                const s = JSON.parse(readFileSync(settingsPath, "utf8")) as {
+                    hooks?: { Stop?: Array<{ hooks?: Array<{ command?: string }> }> };
+                };
+                for (const entry of s.hooks?.Stop ?? []) {
+                    for (const h of entry.hooks ?? []) {
+                        if (h.command && /aiball-autopoll-stop\.sh$/.test(h.command)) {
+                            stopHookWired = true;
+                            stopHookCommand = h.command;
+                        }
+                    }
+                }
+            } catch {
+                /* ignore */
+            }
+        }
+
+        // Daemon reachability.
+        let daemonUp = false;
+        try {
+            await client.health();
+            daemonUp = true;
+        } catch {
+            /* down */
+        }
+
+        // Resolved unread ping count for the agent (only if daemon up + agent known).
+        let pings: number | null = null;
+        if (daemonUp && cfg.consumer.agent) {
+            try {
+                const r = (await new AiballClient({ agentId: cfg.consumer.agent }).pingsCount()) as {
+                    unread: number;
+                };
+                pings = r.unread;
+            } catch {
+                pings = null;
+            }
+        }
+
+        const payload = {
+            cwd: userCwd(),
+            config: {
+                path: cfg.configPath,
+                found: !!cfg.configPath,
+            },
+            autopoll: {
+                enabled: cfg.autopoll.enabled,
+                throttle_seconds: cfg.autopoll.throttle_seconds,
+                tone: cfg.autopoll.tone,
+                include_recent_tickets: cfg.autopoll.include_recent_tickets,
+                reason: cfg.configPath
+                    ? cfg.autopoll.enabled
+                        ? "enabled via .aiball.yaml"
+                        : "explicitly disabled in .aiball.yaml"
+                    : "no .aiball.yaml found — hook stays silent",
+            },
+            consumer: {
+                agent: cfg.consumer.agent,
+                agent_source: agentSource,
+                project: cfg.consumer.project,
+                project_source: projectSource,
+            },
+            stop_hook: {
+                wired: stopHookWired,
+                command: stopHookCommand,
+                settings_path: settingsPath,
+            },
+            daemon: {
+                up: daemonUp,
+                unread_pings: pings,
+            },
+        };
+
+        if (opts.json) {
+            jsonline(payload);
+            return;
+        }
+
+        // Human-readable.
+        const ok = (b: boolean): string => (b ? "✓" : "·");
+        process.stdout.write(`aiball check — cwd: ${payload.cwd}\n\n`);
+        process.stdout.write(`config\n`);
+        process.stdout.write(`  ${ok(payload.config.found)} .aiball.yaml: ${payload.config.path ?? "(none found by walking up)"}\n`);
+        process.stdout.write(`  ${ok(payload.autopoll.enabled)} autopoll: ${payload.autopoll.reason}\n`);
+        if (payload.autopoll.enabled) {
+            process.stdout.write(`     tone=${payload.autopoll.tone}, throttle=${payload.autopoll.throttle_seconds}s, recent=${payload.autopoll.include_recent_tickets}\n`);
+        }
+        process.stdout.write(`\nconsumer\n`);
+        process.stdout.write(`  ${ok(!!payload.consumer.agent)} agent:   ${payload.consumer.agent ?? "(unresolved)"} ${payload.consumer.agent_source ? `[from ${payload.consumer.agent_source}]` : ""}\n`);
+        process.stdout.write(`  ${ok(!!payload.consumer.project)} project: ${payload.consumer.project ?? "(unresolved)"} ${payload.consumer.project_source ? `[from ${payload.consumer.project_source}]` : ""}\n`);
+        process.stdout.write(`\nstop hook (~/.claude/settings.json)\n`);
+        process.stdout.write(`  ${ok(payload.stop_hook.wired)} wired: ${payload.stop_hook.wired ? payload.stop_hook.command : "no aiball-autopoll-stop.sh entry"}\n`);
+        if (!payload.stop_hook.wired) {
+            process.stdout.write(`     enable with: <install-dir>/install.sh --stop-hook\n`);
+        }
+        process.stdout.write(`\ndaemon\n`);
+        process.stdout.write(`  ${ok(payload.daemon.up)} reachable\n`);
+        if (payload.daemon.up && payload.consumer.agent) {
+            process.stdout.write(`  ${ok(payload.daemon.unread_pings === 0)} unread pings for ${payload.consumer.agent}: ${payload.daemon.unread_pings ?? "?"}\n`);
+        }
+        process.stdout.write(`\n`);
+    });
+
+program
     .command("drain")
     .description("Touch the spool dir to nudge the daemon's spool watcher")
     .action(async (_opts, cmd) => {
@@ -570,6 +749,107 @@ auth.command("revoke <token-or-prefix>")
         deleteToken(matches[0].token);
         process.stdout.write(`revoked ${matches[0].token}\n`);
     });
+
+// =====================================================================
+// autopoll subcommands — pilot per-project .aiball.yaml settings
+// =====================================================================
+
+const autopoll = program
+    .command("autopoll")
+    .description(
+        "Manage the per-project autopoll hook (Stop → drain pings). Operates on the closest .aiball.yaml walking up from cwd.",
+    );
+
+autopoll
+    .command("init")
+    .description("Write a starter .aiball.yaml at cwd if none is found up-tree")
+    .option("--force", "Overwrite an existing .aiball.yaml at cwd")
+    .action(async (opts: { force?: boolean }) => {
+        const { findConfigUpwards, CONFIG_FILENAME } = await import("./autopoll/config.js");
+        const existing = findConfigUpwards(userCwd());
+        const target = join(userCwd(), CONFIG_FILENAME);
+        if (existing && !opts.force) {
+            die(`already configured at ${existing} — re-run with --force to overwrite`);
+        }
+        // Resolve the install dir to find the example template.
+        const installRoot = resolveInstallRoot();
+        const example = join(installRoot, ".aiball.yaml.example");
+        if (!existsSync(example)) {
+            die(`example template missing at ${example}`);
+        }
+        writeFileSync(target, readFileSync(example, "utf8"));
+        process.stdout.write(`wrote ${target}\nedit it or pilot via 'aiball autopoll {enable|disable|tone|throttle}'\n`);
+    });
+
+autopoll
+    .command("show")
+    .description("Print resolved autopoll settings for cwd")
+    .action(async () => {
+        const { loadConfig } = await import("./autopoll/config.js");
+        const cfg = loadConfig(userCwd());
+        jsonline({
+            config_path: cfg.configPath,
+            autopoll: cfg.autopoll,
+            consumer: cfg.consumer,
+        });
+    });
+
+autopoll
+    .command("enable")
+    .description("Set autopoll.enabled = true in .aiball.yaml")
+    .action(async () => setAutopollField("enabled", true));
+
+autopoll
+    .command("disable")
+    .description("Set autopoll.enabled = false in .aiball.yaml")
+    .action(async () => setAutopollField("enabled", false));
+
+autopoll
+    .command("tone <value>")
+    .description("Set autopoll.tone (hint | directive | imperative)")
+    .action(async (value: string) => {
+        if (value !== "hint" && value !== "directive" && value !== "imperative") {
+            die(`unknown tone '${value}' (expected hint | directive | imperative)`);
+        }
+        await setAutopollField("tone", value);
+    });
+
+autopoll
+    .command("throttle <seconds>")
+    .description("Set autopoll.throttle_seconds (integer ≥ 0)")
+    .action(async (seconds: string) => {
+        const n = Number.parseInt(seconds, 10);
+        if (!Number.isFinite(n) || n < 0) {
+            die(`throttle must be a non-negative integer, got '${seconds}'`);
+        }
+        await setAutopollField("throttle_seconds", n);
+    });
+
+async function setAutopollField(key: string, value: unknown): Promise<void> {
+    const { findConfigUpwards, CONFIG_FILENAME } = await import("./autopoll/config.js");
+    const yamlMod = await import("yaml");
+    let path = findConfigUpwards(userCwd());
+    if (!path) {
+        // Bootstrap: create a minimal .aiball.yaml at cwd so the user
+        // doesn't have to run init separately.
+        path = join(userCwd(), CONFIG_FILENAME);
+        writeFileSync(path, "autopoll: {}\n");
+        process.stdout.write(`created ${path}\n`);
+    }
+    const src = readFileSync(path, "utf8");
+    const doc = yamlMod.parseDocument(src);
+    if (!doc.has("autopoll")) doc.set("autopoll", { [key]: value });
+    else doc.setIn(["autopoll", key], value);
+    writeFileSync(path, doc.toString());
+    process.stdout.write(`${path}: autopoll.${key} = ${JSON.stringify(value)}\n`);
+}
+
+function resolveInstallRoot(): string {
+    // The bin/aiball wrapper cd's into the install dir before exec'ing
+    // tsx — process.cwd() at this point IS the install root. Easier
+    // and faster than walking up looking for package.json.
+    return process.cwd();
+}
 
 // =====================================================================
 // sandbox subcommands (delegated)

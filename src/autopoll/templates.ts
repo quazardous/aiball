@@ -1,9 +1,9 @@
 /**
- * Tone → reason string templates for the Stop notify hook.
+ * Tone → reason string templates for the Stop autopoll hook.
  *
  * Calibration is empirical — Claude responds differently to "consider"
  * vs "should" vs "YOU MUST" depending on the session's system prompt.
- * Project owners pick via `.aiball.json` → `notify.tone`.
+ * Project owners pick via `.aiball.json` → `autopoll.tone`.
  *
  * - `hint`       : polite, easy to override by the agent. Use when the
  *                  system prompt already nudges proactivity.
@@ -11,9 +11,9 @@
  * - `imperative` : capitalized commands. Last resort when the agent
  *                  persists in asking-for-permission patterns.
  */
-import type { NotifyTone } from "./config.js";
+import type { AutopollTone } from "./config.js";
 
-export interface NotifyPayload {
+export interface AutopollPayload {
     pings: number;
     recent_tickets: Array<{
         id: number;
@@ -22,7 +22,7 @@ export interface NotifyPayload {
     }>;
 }
 
-export function formatReason(tone: NotifyTone, payload: NotifyPayload): string {
+export function formatReason(tone: AutopollTone, payload: AutopollPayload): string {
     const ticketList = payload.recent_tickets
         .map((t) => {
             const title = (t.title ?? "(no title)").slice(0, 80);

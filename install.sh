@@ -7,7 +7,7 @@
 #   ./install.sh --port 7878           # override listen port (writes a systemd drop-in)
 #   ./install.sh --host 0.0.0.0        # override listen host (default 127.0.0.1)
 #   ./install.sh --no-systemd          # skip systemd unit
-#   ./install.sh --stop-hook           # also register the interactive Stop notify
+#   ./install.sh --stop-hook           # register the interactive Stop autopoll
 #                                      # hook in ~/.claude/settings.json (#B.99)
 #   ./install.sh --uninstall           # remove everything we installed
 #
@@ -74,16 +74,16 @@ uninstall() {
     else
         rm -rf "$PREFIX_LIB"
     fi
-    # Remove the Stop notify hook from ~/.claude/settings.json if we
+    # Remove the Stop autopoll hook from ~/.claude/settings.json if we
     # installed it. Best-effort, jq required.
     local settings="$HOME/.claude/settings.json"
     if [[ -f "$settings" ]] && command -v jq >/dev/null 2>&1; then
-        if jq -e '.hooks.Stop[]?.hooks[]? | select(.command|tostring|test("aiball-notify-stop\\.sh$"))' "$settings" >/dev/null 2>&1; then
+        if jq -e '.hooks.Stop[]?.hooks[]? | select(.command|tostring|test("aiball-autopoll-stop\\.sh$"))' "$settings" >/dev/null 2>&1; then
             cp -n "$settings" "$settings.aiball-bak" || true
             jq '
                 if .hooks.Stop then
                     .hooks.Stop |= map(
-                        .hooks |= map(select(.command|tostring|test("aiball-notify-stop\\.sh$")|not))
+                        .hooks |= map(select(.command|tostring|test("aiball-autopoll-stop\\.sh$")|not))
                     ) |
                     .hooks.Stop |= map(select(.hooks|length > 0))
                 else . end
@@ -226,14 +226,14 @@ if command -v aiball >/dev/null 2>&1; then
     fi
 fi
 
-# --- Interactive Stop notify hook (#B.99) --------------------------------
+# --- Interactive Stop autopoll hook (#B.99) ------------------------------
 # Opt-in via --stop-hook. Injects an entry in ~/.claude/settings.json so
 # Stop fires after every Claude Code response and asks aiball if there
 # are unread pings for this consumer. Per-project config lives in
-# `.aiball.json` (notify.enabled, throttle_seconds, tone, ...).
+# `.aiball.json` (autopoll.enabled, throttle_seconds, tone, ...).
 
 if $STOP_HOOK; then
-    HOOK_TARGET="$PREFIX_LIB/skill/hooks/aiball-notify-stop.sh"
+    HOOK_TARGET="$PREFIX_LIB/skill/hooks/aiball-autopoll-stop.sh"
     SETTINGS="$HOME/.claude/settings.json"
     if [[ ! -x "$HOOK_TARGET" ]]; then
         warn "Stop hook script not found at $HOOK_TARGET — install layout is broken"
@@ -278,9 +278,10 @@ Next steps:
                                then save it to $AIBALL_DATA_DIR/cli-env as
                                'export AIBALL_TOKEN=<token>'
   4. Register the MCP server:  see MCP-CLIENT.md or README.md
-  5. (optional) Interactive Stop notify hook:
+  5. (optional) Interactive Stop autopoll hook:
                                re-run with --stop-hook to wire ~/.claude/settings.json
-                               Per-project tuning: $.aiball.json (notify.tone, throttle_seconds)
+                               Per-project: drop a {} into .aiball.json to enable;
+                               tune via autopoll.tone / throttle_seconds (see docs)
 EOF
 if $SYMLINK; then
     printf "  4. Iterate on backend:       edit src/, then 'systemctl --user restart %s'\n" "$SERVICE_NAME"

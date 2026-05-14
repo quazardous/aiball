@@ -1,37 +1,39 @@
 /**
- * Load + parse `.aiball.json` from the project root (walks up from
+ * Load + parse `.aiball.yaml` from the project root (walks up from
  * cwd, like git/qcmp). All fields are optional — defaults applied at
- * read time. Missing file → returns the default shape, hook stays
- * silent.
+ * read time. Missing file → autopoll disabled, hook stays silent.
+ *
+ * YAML is preferred over JSON because the file is meant to be
+ * human-edited and commented — see `.aiball.yaml.example` at the
+ * repo root for the canonical annotated template.
  *
  * Schema (everything optional):
- * ```json
- * {
- *   "notify": {
- *     "enabled": true,
- *     "throttle_seconds": 0,
- *     "include_recent_tickets": 3,
- *     "tone": "directive"
- *   },
- *   "consumer": {
- *     "agent": "skybot-claude",
- *     "project": "skybot"
- *   }
- * }
+ * ```yaml
+ * autopoll:
+ *   enabled: true
+ *   throttle_seconds: 0
+ *   include_recent_tickets: 3
+ *   tone: directive
+ * consumer:
+ *   agent: skybot-claude
+ *   project: skybot
  * ```
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, parse as parsePath, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 
-export type NotifyTone = "hint" | "directive" | "imperative";
-const VALID_TONES: NotifyTone[] = ["hint", "directive", "imperative"];
+export const CONFIG_FILENAME = ".aiball.yaml";
+
+export type AutopollTone = "hint" | "directive" | "imperative";
+const VALID_TONES: AutopollTone[] = ["hint", "directive", "imperative"];
 
 export interface AiballConfig {
-    notify: {
+    autopoll: {
         enabled: boolean;
         throttle_seconds: number;
         include_recent_tickets: number;
-        tone: NotifyTone;
+        tone: AutopollTone;
     };
     consumer: {
         agent: string | null;
@@ -42,7 +44,7 @@ export interface AiballConfig {
 }
 
 const DEFAULTS: AiballConfig = {
-    notify: {
+    autopoll: {
         enabled: true,
         throttle_seconds: 0,
         include_recent_tickets: 3,
@@ -59,7 +61,7 @@ export function findConfigUpwards(start: string): string | null {
     let dir = resolve(start);
     const rootPath = parsePath(dir).root;
     for (let i = 0; i < 64; i++) {
-        const candidate = join(dir, ".aiball.json");
+        const candidate = join(dir, CONFIG_FILENAME);
         if (existsSync(candidate)) return candidate;
         if (dir === rootPath) return null;
         const next = dirname(dir);
@@ -109,36 +111,44 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
 
     const cfg: AiballConfig = {
         ...DEFAULTS,
-        notify: { ...DEFAULTS.notify },
+        autopoll: { ...DEFAULTS.autopoll },
         consumer: { ...DEFAULTS.consumer },
         configPath,
     };
 
+    // No .aiball.json → autopoll disabled. The hook wiring in
+    // ~/.claude/settings.json is global; per-project opt-in lives in
+    // the file. Drop a `{}` in at the project root to activate with
+    // sensible defaults; override individual fields as needed.
+    if (!configPath) {
+        cfg.autopoll.enabled = false;
+    }
+
     if (configPath) {
         try {
-            const raw = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
-            const n = (raw.notify ?? {}) as Record<string, unknown>;
-            if (typeof n.enabled === "boolean") cfg.notify.enabled = n.enabled;
-            if (typeof n.throttle_seconds === "number" && n.throttle_seconds >= 0) {
-                cfg.notify.throttle_seconds = n.throttle_seconds;
+            const raw = (parseYaml(readFileSync(configPath, "utf8")) ?? {}) as Record<string, unknown>;
+            const a = (raw.autopoll ?? {}) as Record<string, unknown>;
+            if (typeof a.enabled === "boolean") cfg.autopoll.enabled = a.enabled;
+            if (typeof a.throttle_seconds === "number" && a.throttle_seconds >= 0) {
+                cfg.autopoll.throttle_seconds = a.throttle_seconds;
             }
-            if (typeof n.include_recent_tickets === "number" && n.include_recent_tickets >= 0) {
-                cfg.notify.include_recent_tickets = Math.min(20, n.include_recent_tickets);
+            if (typeof a.include_recent_tickets === "number" && a.include_recent_tickets >= 0) {
+                cfg.autopoll.include_recent_tickets = Math.min(20, a.include_recent_tickets);
             }
-            if (typeof n.tone === "string" && (VALID_TONES as string[]).includes(n.tone)) {
-                cfg.notify.tone = n.tone as NotifyTone;
+            if (typeof a.tone === "string" && (VALID_TONES as string[]).includes(a.tone)) {
+                cfg.autopoll.tone = a.tone as AutopollTone;
             }
             const c = (raw.consumer ?? {}) as Record<string, unknown>;
             if (typeof c.agent === "string" && c.agent) cfg.consumer.agent = c.agent;
             if (typeof c.project === "string" && c.project) cfg.consumer.project = c.project;
         } catch {
-            /* malformed — fall back to defaults, hook will run with defaults */
+            /* malformed — fall back to defaults, hook stays silent */
         }
     }
 
     // Resolve agent/project: env > .aiball.json > .mcp.json. Cwd-hash
-    // fallback is deliberately not used here — without an explicit id,
-    // we'd notify a phantom consumer that has no pings anyway.
+    // fallback is deliberately not used — without an explicit id,
+    // we'd autopoll for a phantom consumer that has no pings anyway.
     if (!cfg.consumer.agent) {
         const fromEnv = process.env.AIBALL_AGENT;
         if (fromEnv) cfg.consumer.agent = fromEnv;

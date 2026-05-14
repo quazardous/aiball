@@ -1,11 +1,13 @@
 /**
- * Stop hook for interactive Claude Code sessions (#B.99 follow-up).
+ * Stop hook for interactive Claude Code sessions — "autopoll"
+ * (#B.99 follow-up). Aiball polls itself when Claude wants to stop,
+ * so the agent doesn't have to remember to drain its inbox.
  *
  * Fires when Claude wants to stop responding. We:
  *   1. Walk up from cwd (or $CLAUDE_PROJECT_DIR if set) to find
- *      `.aiball.json`. If missing or `notify.enabled === false` → release.
+ *      `.aiball.json`. If missing or `autopoll.enabled === false` → release.
  *   2. Resolve the agent id (config > env > .mcp.json). If unresolved → release.
- *   3. Check the throttle file. If we notified recently → release.
+ *   3. Check the throttle file. If we polled recently → release.
  *   4. Query the daemon for unread ping count for this agent + the N
  *      most recent ticket titles.
  *   5. If pings > 0: emit `{decision: "block", reason: "..."}` with the
@@ -17,14 +19,14 @@
  * block Claude due to a hook bug.
  *
  * Layout mirrors `src/sandbox/hook-stop.ts` — same TS-with-thin-bash
- * pattern (`skill/hooks/aiball-notify-stop.sh`).
+ * pattern (`skill/hooks/aiball-autopoll-stop.sh`).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { AiballClient } from "../client.js";
 import { loadConfig } from "./config.js";
-import { formatReason, type NotifyPayload } from "./templates.js";
+import { formatReason, type AutopollPayload } from "./templates.js";
 
 function emit(obj: unknown): never {
     process.stdout.write(JSON.stringify(obj) + "\n");
@@ -32,7 +34,7 @@ function emit(obj: unknown): never {
 }
 
 function throttleFile(agent: string): string {
-    return join(homedir(), ".cache", "aiball", `notify-${agent}.ts`);
+    return join(homedir(), ".cache", "aiball", `autopoll-${agent}.ts`);
 }
 
 function readThrottle(agent: string): number {
@@ -66,13 +68,13 @@ async function main(): Promise<void> {
     const cwd = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
     const cfg = loadConfig(cwd);
 
-    if (!cfg.notify.enabled) emit({});
+    if (!cfg.autopoll.enabled) emit({});
     if (!cfg.consumer.agent) emit({});
 
     // Throttle: skip if we notified < N seconds ago.
     const nowSec = Math.floor(Date.now() / 1000);
     const last = readThrottle(cfg.consumer.agent);
-    if (cfg.notify.throttle_seconds > 0 && nowSec - last < cfg.notify.throttle_seconds) {
+    if (cfg.autopoll.throttle_seconds > 0 && nowSec - last < cfg.autopoll.throttle_seconds) {
         emit({});
     }
 
@@ -91,12 +93,12 @@ async function main(): Promise<void> {
     if (count === 0) emit({});
 
     // We have pings. Fetch the N most recent for the reason body.
-    let recent: NotifyPayload["recent_tickets"] = [];
-    if (cfg.notify.include_recent_tickets > 0) {
+    let recent: AutopollPayload["recent_tickets"] = [];
+    if (cfg.autopoll.include_recent_tickets > 0) {
         try {
             const r = (await client.listPings({
                 unreadOnly: true,
-                limit: cfg.notify.include_recent_tickets,
+                limit: cfg.autopoll.include_recent_tickets,
             })) as { pings: Array<{ message: { id: number; title: string | null; project: string; ticket_id: number | null } }> };
             recent = (r.pings ?? []).map((p) => ({
                 // Prefer ticket_id (the thread root) when this ping is on
@@ -110,7 +112,7 @@ async function main(): Promise<void> {
         }
     }
 
-    const reason = formatReason(cfg.notify.tone, { pings: count, recent_tickets: recent });
+    const reason = formatReason(cfg.autopoll.tone, { pings: count, recent_tickets: recent });
     writeThrottle(cfg.consumer.agent, nowSec);
     emit({ decision: "block", reason });
 }

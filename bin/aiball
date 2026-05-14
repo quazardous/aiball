@@ -12,6 +12,11 @@ done
 BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 ROOT="$(cd "$BIN_DIR/.." && pwd)"
 
+# Preserve the invoker's cwd so any subcommand that walks up from the
+# user's project (autopoll, check, …) sees the right starting point.
+# cli.ts reads AIBALL_CWD when set, falls back to process.cwd().
+AIBALL_CWD="$PWD"
+export AIBALL_CWD
 cd "$ROOT"
 
 # Local-trust transport (#B.94 follow-up). If the daemon's Unix socket
