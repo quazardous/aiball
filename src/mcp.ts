@@ -824,7 +824,7 @@ server.registerTool(
     "poll",
     {
         description:
-            "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Default scope is slim AND project-scoped when AIBALL_PROJECT is set (only the relevant project's counters and pending lists are returned). Pass `all_projects: true` for the cross-project view. My_pending_tickets / my_pending_comments are returned in summary mode (header only, no body) by default — pass `full_pending: true` if you need bodies.",
+            "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Default scope is slim AND project-scoped when AIBALL_PROJECT is set (only the relevant project's counters and pending lists are returned). Pass `all_projects: true` for the cross-project view. My_pending_tickets / my_pending_comments are returned in summary mode (header only, no body) by default — pass `full_pending: true` if you need bodies.\n\nProactive flow expectation: if the response shows `unread_pings > 0` or `unread_project > 0`, call `unread({pings: true, mark_read: true})` (or `unread({mark_read: true})` for the project feed) yourself — do NOT ask the human first. The human IS watching this via the web UI; you're expected to drain, read, react, and only escalate when you have a concrete question or blocker. Stopping at 'should I check the pings?' wastes a round-trip.",
         inputSchema: {
             include_subscriptions: z
                 .boolean()
