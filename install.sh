@@ -107,6 +107,15 @@ NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 [[ "$NODE_MAJOR" -ge 20 ]] || die "node >=20 required, found $(node --version)"
 
 # --- deploy source ---------------------------------------------------------
+# Preserve the existing layout when the user didn't ask for a change:
+# re-running with just --stop-hook / --port / etc. shouldn't flip a
+# dev symlink into a prod copy (or vice versa) silently. Only switch
+# when --symlink is explicitly passed.
+
+if [[ -L "$PREFIX_LIB" ]] && ! $SYMLINK; then
+    SYMLINK=true
+    log "Existing install at $PREFIX_LIB is a symlink — keeping dev layout (run --uninstall first to switch to a prod copy)"
+fi
 
 if $SYMLINK; then
     log "Symlinking $PREFIX_LIB → $SRC_DIR (dev install)"
