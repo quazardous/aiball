@@ -1,0 +1,17 @@
+# Component inventory for aiball — driven by qcmp (Quick Components).
+# See packages/components/README.md.
+project: aiball
+
+components:
+  - key: aiball
+    name: Aiball BAL
+    file: package.json
+    path: version
+    extractor: json
+    main: true
+
+  - key: frontend
+    name: Aiball Web UI
+    file: frontend/package.json
+    path: version
+    extractor: json

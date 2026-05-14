@@ -26,7 +26,6 @@
     "drizzle-orm": "^0.45.2",
     "express": "^4.21.0",
     "ws": "^8.18.0",
-    "yaml": "^2.6.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
