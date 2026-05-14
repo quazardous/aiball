@@ -7,9 +7,10 @@
 #   ./install.sh --port 7878           # override listen port (writes a systemd drop-in)
 #   ./install.sh --host 0.0.0.0        # override listen host (default 127.0.0.1)
 #   ./install.sh --no-systemd          # skip systemd unit
-#   ./install.sh --no-components       # skip the `components` CLI symlink
-#                                      # (bundled sibling — see #B.96. Will move
-#                                      # to its own repo + install path later.)
+#   ./install.sh --no-components       # skip the `qcmp` CLI symlink (the
+#                                      # components/version-extraction sibling
+#                                      # bundled here — see #B.96. Will move to
+#                                      # its own repo + install path later.)
 #   ./install.sh --uninstall           # remove everything we installed
 #
 # Reentrant: re-running with new --port / --host overwrites only the bind
@@ -71,7 +72,7 @@ uninstall() {
     rm -f "$SYSTEMD_DIR/$SERVICE_NAME"
     rm -f "$DEV_DROPIN" "$BIND_DROPIN"
     rmdir "$DROPIN_DIR" 2>/dev/null || true
-    rm -f "$PREFIX_BIN/aiball" "$PREFIX_BIN/aiball-mcp" "$PREFIX_BIN/components"
+    rm -f "$PREFIX_BIN/aiball" "$PREFIX_BIN/aiball-mcp" "$PREFIX_BIN/qcmp"
     if [[ -L "$PREFIX_LIB" ]]; then
         # Symlinked install — drop the link, never touch the source it points to
         rm -f "$PREFIX_LIB"
@@ -132,15 +133,16 @@ ln -sf "$PREFIX_LIB/bin/aiball"     "$PREFIX_BIN/aiball"
 ln -sf "$PREFIX_LIB/bin/aiball-mcp" "$PREFIX_BIN/aiball-mcp"
 log "Symlinked $PREFIX_BIN/aiball and $PREFIX_BIN/aiball-mcp"
 
-# `components` is a sibling tool, bundled here until #B.96 carves it
-# out into its own repo. --no-components skips just the symlink; the
-# code stays in the install tree so a future re-enable is a no-op.
+# `qcmp` is a sibling tool (quazardous components), bundled here
+# until #B.96 carves it out into its own repo. --no-components skips
+# just the symlink; the code stays in the install tree so a future
+# re-enable is a no-op.
 if $WITH_COMPONENTS; then
-    ln -sf "$PREFIX_LIB/bin/components" "$PREFIX_BIN/components"
-    log "Symlinked $PREFIX_BIN/components (pass --no-components to skip)"
+    ln -sf "$PREFIX_LIB/bin/qcmp" "$PREFIX_BIN/qcmp"
+    log "Symlinked $PREFIX_BIN/qcmp (pass --no-components to skip)"
 else
-    rm -f "$PREFIX_BIN/components"
-    log "Skipped $PREFIX_BIN/components (--no-components)"
+    rm -f "$PREFIX_BIN/qcmp"
+    log "Skipped $PREFIX_BIN/qcmp (--no-components)"
 fi
 
 # --- systemd user service -------------------------------------------------

@@ -1,11 +1,12 @@
 /**
- * `components` CLI — read-only inventory + version extractors driven
- * by a project-root `components.yaml` (#B.96).
+ * `qcmp` CLI — read-only inventory + version extractors driven by a
+ * project-root `components.yaml` (#B.96). Name is short for
+ * "quazardous components".
  *
- *   components list                          one row per component
- *   components version <key>                 print one version
- *   components versions                      JSON map {key: version}
- *   components changelog <key> [--limit N]   tail CHANGELOG entries
+ *   qcmp list                          one row per component
+ *   qcmp version <key>                 print one version
+ *   qcmp versions                      JSON map {key: version}
+ *   qcmp changelog <key> [--limit N]   tail CHANGELOG entries
  *
  * Pass --config <path> to point at an explicit components.yaml;
  * otherwise we walk up from cwd.
@@ -23,14 +24,14 @@ function loadCfgOrDie(opts: GlobalOpts): ComponentsConfig {
     try {
         return loadConfig(opts.config ?? null);
     } catch (e) {
-        process.stderr.write(`components: ${(e as Error).message}\n`);
+        process.stderr.write(`qcmp: ${(e as Error).message}\n`);
         process.exit(1);
     }
 }
 
 const program = new Command();
 program
-    .name("components")
+    .name("qcmp")
     .description("Read-only component inventory + version extractors")
     .option("--config <path>", "Path to components.yaml (default: walk up from cwd)")
     .version("0.1.0");
@@ -57,7 +58,7 @@ program
             const c = findComponent(cfg, key);
             process.stdout.write(extractVersion(cfg, c) + "\n");
         } catch (e) {
-            process.stderr.write(`components: ${(e as Error).message}\n`);
+            process.stderr.write(`qcmp: ${(e as Error).message}\n`);
             process.exit(1);
         }
     });
@@ -97,7 +98,7 @@ program
                 process.stdout.write(`${e.header}\n${e.body}\n\n`);
             }
         } catch (e) {
-            process.stderr.write(`components: ${(e as Error).message}\n`);
+            process.stderr.write(`qcmp: ${(e as Error).message}\n`);
             process.exit(1);
         }
     });

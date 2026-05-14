@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# components — read-only inventory + version extractors driven by
-# components.yaml at the project root. Sibling of aiball, no shared
-# state. See packages/components/src/cli.ts for the command surface.
+# qcmp — read-only component inventory + version extractors driven
+# by components.yaml at the project root. Short for "quazardous
+# components". Sibling of aiball, no shared state. See
+# packages/components/src/cli.ts for the command surface.
 set -eo pipefail
 
 SELF="$0"
@@ -20,7 +21,7 @@ while [[ "$ROOT" != "/" ]] && [[ ! -d "$ROOT/node_modules/tsx" ]]; do
     ROOT="$(dirname "$ROOT")"
 done
 if [[ "$ROOT" == "/" ]]; then
-    echo "components: cannot find tsx — install aiball or run 'npm install' in the parent monorepo" >&2
+    echo "qcmp: cannot find tsx — install aiball or run 'npm install' in the parent monorepo" >&2
     exit 1
 fi
 
