@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# components — read-only inventory + version extractors driven by
+# components.yaml at the project root. Sibling of aiball, no shared
+# state. See packages/components/src/cli.ts for the command surface.
+set -eo pipefail
+
+SELF="$0"
+while [[ -L "$SELF" ]]; do
+    target="$(readlink "$SELF")"
+    if [[ "$target" = /* ]]; then SELF="$target"; else SELF="$(dirname "$SELF")/$target"; fi
+done
+BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+PKG_ROOT="$(cd "$BIN_DIR/.." && pwd)"
+
+# Walk up to find the nearest node_modules so we can run tsx without
+# requiring the package itself to npm-install. Aiball's root install
+# carries `tsx` + `yaml` + `commander` as deps.
+ROOT="$PKG_ROOT"
+while [[ "$ROOT" != "/" ]] && [[ ! -d "$ROOT/node_modules/tsx" ]]; do
+    ROOT="$(dirname "$ROOT")"
+done
+if [[ "$ROOT" == "/" ]]; then
+    echo "components: cannot find tsx — install aiball or run 'npm install' in the parent monorepo" >&2
+    exit 1
+fi
+
+cd "$ROOT"
+exec npx --no-install tsx "$PKG_ROOT/src/cli.ts" "$@"

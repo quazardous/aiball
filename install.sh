@@ -7,6 +7,9 @@
 #   ./install.sh --port 7878           # override listen port (writes a systemd drop-in)
 #   ./install.sh --host 0.0.0.0        # override listen host (default 127.0.0.1)
 #   ./install.sh --no-systemd          # skip systemd unit
+#   ./install.sh --no-components       # skip the `components` CLI symlink
+#                                      # (bundled sibling — see #B.96. Will move
+#                                      # to its own repo + install path later.)
 #   ./install.sh --uninstall           # remove everything we installed
 #
 # Reentrant: re-running with new --port / --host overwrites only the bind
@@ -24,16 +27,21 @@ UNINSTALL=false
 SYMLINK=false
 PORT=""
 HOST=""
+# TODO(#B.96): when @quazardous/components moves out of this repo, drop
+# the bundled install and have its own install.sh / npm package. For
+# now we ship it together with --no-components as the opt-out.
+WITH_COMPONENTS=true
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --no-systemd) NO_SYSTEMD=true; shift ;;
-        --uninstall)  UNINSTALL=true; shift ;;
-        --symlink)    SYMLINK=true; shift ;;
-        --port)       PORT="${2:-}"; shift 2 ;;
-        --port=*)     PORT="${1#--port=}"; shift ;;
-        --host)       HOST="${2:-}"; shift 2 ;;
-        --host=*)     HOST="${1#--host=}"; shift ;;
+        --no-systemd)    NO_SYSTEMD=true; shift ;;
+        --uninstall)     UNINSTALL=true; shift ;;
+        --symlink)       SYMLINK=true; shift ;;
+        --port)          PORT="${2:-}"; shift 2 ;;
+        --port=*)        PORT="${1#--port=}"; shift ;;
+        --host)          HOST="${2:-}"; shift 2 ;;
+        --host=*)        HOST="${1#--host=}"; shift ;;
+        --no-components) WITH_COMPONENTS=false; shift ;;
         -h|--help)
             sed -n '1,/^set -e/p' "$0" | sed 's/^# \?//'
             exit 0 ;;
@@ -63,7 +71,7 @@ uninstall() {
     rm -f "$SYSTEMD_DIR/$SERVICE_NAME"
     rm -f "$DEV_DROPIN" "$BIND_DROPIN"
     rmdir "$DROPIN_DIR" 2>/dev/null || true
-    rm -f "$PREFIX_BIN/aiball" "$PREFIX_BIN/aiball-mcp"
+    rm -f "$PREFIX_BIN/aiball" "$PREFIX_BIN/aiball-mcp" "$PREFIX_BIN/components"
     if [[ -L "$PREFIX_LIB" ]]; then
         # Symlinked install — drop the link, never touch the source it points to
         rm -f "$PREFIX_LIB"
@@ -123,6 +131,17 @@ mkdir -p "$PREFIX_BIN"
 ln -sf "$PREFIX_LIB/bin/aiball"     "$PREFIX_BIN/aiball"
 ln -sf "$PREFIX_LIB/bin/aiball-mcp" "$PREFIX_BIN/aiball-mcp"
 log "Symlinked $PREFIX_BIN/aiball and $PREFIX_BIN/aiball-mcp"
+
+# `components` is a sibling tool, bundled here until #B.96 carves it
+# out into its own repo. --no-components skips just the symlink; the
+# code stays in the install tree so a future re-enable is a no-op.
+if $WITH_COMPONENTS; then
+    ln -sf "$PREFIX_LIB/bin/components" "$PREFIX_BIN/components"
+    log "Symlinked $PREFIX_BIN/components (pass --no-components to skip)"
+else
+    rm -f "$PREFIX_BIN/components"
+    log "Skipped $PREFIX_BIN/components (--no-components)"
+fi
 
 # --- systemd user service -------------------------------------------------
 
