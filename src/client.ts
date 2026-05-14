@@ -480,6 +480,23 @@ export class AiballClient {
         return this.http("POST", "/api/mark-read", body);
     }
 
+    /**
+     * Upsert a consumer row (#B.79). Used by the sandbox launcher to
+     * pre-register the autonomous agent with `kind: "sandbox"` so the
+     * Consumers panel can distinguish loop agents from interactive ones
+     * (#B.103). No-op on the daemon side if the row already exists with
+     * the same shape.
+     */
+    upsertConsumer(input: {
+        consumer_id: string;
+        kind?: "human" | "agent" | "sandbox";
+        display_name?: string | null;
+        enabled?: boolean;
+        note?: string | null;
+    }) {
+        return this.http("POST", "/api/consumers", input);
+    }
+
     health() {
         return this.http<{ ok: boolean; ts: string }>("GET", "/api/health");
     }

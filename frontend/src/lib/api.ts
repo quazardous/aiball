@@ -238,7 +238,7 @@ export interface PostMessageInput {
 }
 
 /** Consumer registry entry (#B.79). */
-export type ConsumerKind = "human" | "agent";
+export type ConsumerKind = "human" | "agent" | "sandbox";
 export interface Consumer {
     consumer_id: string;
     kind: ConsumerKind;

@@ -19,6 +19,7 @@ const newName = ref("");
 const KIND_OPTIONS = [
     { label: "Human", value: "human" as ConsumerKind },
     { label: "Agent", value: "agent" as ConsumerKind },
+    { label: "Sandbox", value: "sandbox" as ConsumerKind },
 ];
 
 async function load() {
@@ -114,9 +115,12 @@ onMounted(load);
                 One row per <code>consumer_id</code> the daemon has seen — the same identity
                 you pick in the header dropdown. <strong>Kind</strong> = <em>human</em>
                 grants moderator bypass: posts skip moderation, can close / snooze any
-                ticket, receives pings on every pending submission. <strong>display_name</strong>
-                is the friendly label (falls back to the raw id). Blocking disables future
-                writes without deleting history.
+                ticket, receives pings on every pending submission. <em>agent</em> is the
+                default for interactive Claude Code sessions paired with a repo;
+                <em>sandbox</em> is for ephemeral autonomous agents spawned by
+                <code>aiball sandbox start</code> (set automatically at launch).
+                <strong>display_name</strong> is the friendly label (falls back to the raw id).
+                Blocking disables future writes without deleting history.
             </p>
             <p class="rules-explainer rules-explainer--muted">
                 New ids are added automatically on first post. Promote one to <em>human</em>
@@ -178,6 +182,12 @@ onMounted(load);
                                 v-if="r.kind === 'human'"
                                 value="moderator"
                                 severity="success"
+                                class="consumers-cid__tag"
+                            />
+                            <Tag
+                                v-else-if="r.kind === 'sandbox'"
+                                value="sandbox"
+                                severity="warn"
                                 class="consumers-cid__tag"
                             />
                         </div>

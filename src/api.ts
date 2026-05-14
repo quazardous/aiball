@@ -1267,8 +1267,8 @@ api.post("/consumers", (req: Request, res: Response) => {
     if (typeof consumer_id !== "string" || !consumer_id) {
         return badRequest(res, "consumer_id required");
     }
-    if (kind !== undefined && kind !== "human" && kind !== "agent") {
-        return badRequest(res, "kind must be 'human' or 'agent'");
+    if (kind !== undefined && kind !== "human" && kind !== "agent" && kind !== "sandbox") {
+        return badRequest(res, "kind must be 'human', 'agent', or 'sandbox'");
     }
     const c = upsertConsumer({
         consumer_id,
@@ -1289,8 +1289,8 @@ api.patch("/consumers/:consumer_id", (req: Request, res: Response) => {
         enabled?: unknown;
         note?: unknown;
     };
-    if (body.kind !== undefined && body.kind !== "human" && body.kind !== "agent") {
-        return badRequest(res, "kind must be 'human' or 'agent'");
+    if (body.kind !== undefined && body.kind !== "human" && body.kind !== "agent" && body.kind !== "sandbox") {
+        return badRequest(res, "kind must be 'human', 'agent', or 'sandbox'");
     }
     const patch: {
         kind?: ConsumerKind;

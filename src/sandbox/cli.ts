@@ -351,6 +351,21 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     };
     writePlate(sd, plate);
 
+    // #B.103: pre-register the agent as kind=sandbox so the Consumers
+    // panel can distinguish loop agents (ephemeral, autonomous) from
+    // interactive sessions. Best-effort — failure here doesn't block
+    // the launch; the agent will fall back to kind=agent on its first
+    // MCP post via the ensureConsumer hot path.
+    try {
+        await new AiballClient({ agentId: agent }).upsertConsumer({
+            consumer_id: agent,
+            kind: "sandbox",
+            display_name: `sandbox ${name}`,
+        });
+    } catch {
+        /* daemon unreachable, or already exists — fine */
+    }
+
     // #B.94 follow-up: forward whatever auth transport the launching
     // shell uses so the spawned sandbox's hooks + MCP can reach the
     // daemon. UDS is preferred (same-host, token-less); TCP+bearer

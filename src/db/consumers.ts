@@ -10,7 +10,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 
-export type ConsumerKind = "human" | "agent";
+export type ConsumerKind = "human" | "agent" | "sandbox";
 
 export interface Consumer {
     consumer_id: string;
