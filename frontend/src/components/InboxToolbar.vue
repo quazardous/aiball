@@ -65,14 +65,25 @@ const emit = defineEmits<{
             title="Sort order"
             @update:model-value="(v: SortBy) => emit('update:sortBy', v)"
         />
-        <InputText
-            :model-value="searchQuery"
-            placeholder="Search…"
-            size="small"
-            class="filter-search"
-            title="Free-text search across ticket titles, bodies and comments (whitespace = AND)"
-            @update:model-value="(v: string | undefined) => emit('update:searchQuery', v ?? '')"
-        />
+        <span class="filter-search-wrap">
+            <InputText
+                :model-value="searchQuery"
+                placeholder="Search…"
+                size="small"
+                class="filter-search"
+                title="Free-text search across ticket titles, bodies and comments (whitespace = AND)"
+                @update:model-value="(v: string | undefined) => emit('update:searchQuery', v ?? '')"
+            />
+            <button
+                v-if="searchQuery"
+                type="button"
+                class="filter-search__clear"
+                title="Clear search"
+                @click="emit('update:searchQuery', '')"
+            >
+                <i class="pi pi-times" />
+            </button>
+        </span>
         <span class="spacer" />
         <Button
             label="New ticket"
@@ -97,5 +108,35 @@ const emit = defineEmits<{
 }
 .filter-search {
     min-width: 12rem;
+}
+.filter-search-wrap {
+    position: relative;
+    display: inline-flex;
+}
+.filter-search-wrap .filter-search :deep(input) {
+    padding-right: 1.8rem;
+}
+.filter-search__clear {
+    position: absolute;
+    right: 0.35rem;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    padding: 0.15rem 0.3rem;
+    cursor: pointer;
+    color: var(--p-text-muted-color);
+    line-height: 1;
+    border-radius: 0.2rem;
+}
+.filter-search__clear:hover {
+    color: var(--p-text-color);
+    background: var(--p-surface-100);
+}
+.aiball-dark .filter-search__clear:hover {
+    background: var(--p-surface-700);
+}
+.filter-search__clear i {
+    font-size: 0.8rem;
 }
 </style>
