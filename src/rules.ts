@@ -36,7 +36,7 @@ function strategyDefault(s: Strategy, kind: MessageKind): RuleDecision {
  * Evaluate first-match-wins. Rules are ordered by (position ASC, id ASC).
  * Posts authored by a registered human actor (#B.79) bypass moderation
  * — the moderator IS the approver, re-routing their own posts through
- * the queue is busywork. `isHuman()` reads the actors table; the
+ * the queue is busywork. `isHuman()` reads the consumers table; the
  * literal `"human"` row is backfilled by migration 0011 so the bypass
  * works out of the box.
  *

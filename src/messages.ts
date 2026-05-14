@@ -199,9 +199,9 @@ function assertCloseAuthority(input: NewMessage): void {
     const parent = getMessage(input.ticket_id);
     if (!parent || parent.kind !== "ticket_created") return;
     if (input.by_agent && input.by_agent === parent.by_agent) return;
-    // Human moderator bypass (#B.79): any actor registered with
+    // Human moderator bypass (#B.79): any consumer registered with
     // kind=human can close any ticket. Falls back to the env CSV
-    // when the actors table is empty (defensive at boot time).
+    // when the consumers table is empty (defensive at boot time).
     if (input.by_agent && isHuman(input.by_agent)) return;
     const err = new Error(
         `only the ticket reporter (${parent.by_agent ?? "unknown"}) can close this ticket — post ticket_resolved instead to propose resolution`,
