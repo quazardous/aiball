@@ -133,11 +133,19 @@ else
         warn "$PREFIX_LIB is currently a symlink — replacing with a real copy"
         rm -f "$PREFIX_LIB"
     fi
+    # The daemon serves the SPA from frontend/dist. In symlink mode we
+    # share the source dir's dist (which the dev rebuilds on save); in
+    # rsync mode we have to ship the built bundle ourselves. Build it
+    # in the source tree if missing so rsync picks it up.
+    if [[ -f "$SRC_DIR/frontend/package.json" && ! -f "$SRC_DIR/frontend/dist/index.html" ]]; then
+        log "Building frontend bundle in $SRC_DIR/frontend (one-time, ~30s)"
+        ( cd "$SRC_DIR/frontend" && npm install --silent && npm run build --silent )
+    fi
     mkdir -p "$PREFIX_LIB"
     rsync -a --delete \
-        --exclude=node_modules --exclude=dist --exclude=.git \
+        --exclude=node_modules --exclude=.git \
         --exclude='*.log' --exclude='.env' --exclude='var' \
-        --exclude='frontend/node_modules' --exclude='frontend/dist' \
+        --exclude='frontend/node_modules' \
         "$SRC_DIR/" "$PREFIX_LIB/"
 fi
 
