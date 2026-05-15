@@ -1168,7 +1168,7 @@ async function copyTicketRef() {
                             label="reject and keep open"
                             severity="secondary"
                             size="small"
-                            text
+                            outlined
                             :loading="resolutionBusy"
                             :disabled="!hasBody"
                             :title="hasBody

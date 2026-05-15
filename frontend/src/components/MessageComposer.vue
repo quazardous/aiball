@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
@@ -80,6 +80,19 @@ useBus("composer.add-answer", (payload) => {
     const quote = "> " + (payload.questionText || "(empty question)") + "\n\n";
     const cur = body.value;
     body.value = (cur ? cur.replace(/\s*$/, "\n\n") : "") + quote;
+    // Scroll the composer into view and focus the textarea so the user
+    // lands ready to type (#B.104). Without this the click felt like a
+    // no-op when the composer was below the fold.
+    void nextTick(() => {
+        const el = bodyTextareaRef.value?.$el as HTMLTextAreaElement | undefined;
+        if (!el) return;
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.focus();
+        // Drop the caret at the end so the user starts typing right
+        // after the freshly inserted quote.
+        const end = el.value.length;
+        try { el.setSelectionRange(end, end); } catch { /* ignore */ }
+    });
 });
 
 const isTicket = computed(() => props.mode === "ticket");
