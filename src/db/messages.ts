@@ -82,16 +82,19 @@ export function insertMessage(m: NewMessage): Message {
         const hashid = pickFreshHashid(tx);
         // #B.129 + #B.130: stamp meta from optional post-time inputs.
         // decision_kind → meta.decision (decision-on-comment, #B.129)
-        // summary_line  → meta.summary  (one-line TLDR, #B.130)
+        // summary_until → meta.summary_until (rolling TLDR, #B.130).
+        //                Conceptually summarizes the thread state up to
+        //                AND including this comment — not just this
+        //                comment's body in isolation.
         // Both gated on kind===comment_added by the validator.
         let metaInit: string | null = null;
-        if (m.kind === "comment_added" && (m.decision_kind || m.summary_line)) {
+        if (m.kind === "comment_added" && (m.decision_kind || m.summary_until)) {
             const meta: Record<string, unknown> = {};
             if (m.decision_kind) {
                 meta.decision = { kind: m.decision_kind, status: "pending" };
             }
-            if (m.summary_line) {
-                meta.summary = m.summary_line;
+            if (m.summary_until) {
+                meta.summary_until = m.summary_until;
             }
             metaInit = JSON.stringify(meta);
         }
@@ -455,8 +458,8 @@ function mergeMeta(
  * The HTTP layer maps the throw to 409 Conflict.
  */
 /**
- * Set or clear the `meta.summary` one-liner on a comment (#B.130
- * phase 1). Empty string → drop the field. Returns the updated
+ * Set or clear the `meta.summary_until` one-liner on a comment
+ * (#B.130). Empty string → drop the field. Returns the updated
  * message or null when the id doesn't resolve. Caller permissioning
  * is upstream (any participant can summarize; the audit is in the
  * who-edited-when of the row's updated_at, not in meta itself —
@@ -476,9 +479,9 @@ export function setMessageSummary(
         }
         const meta = parseMeta(m.meta ?? null);
         if (!trimmed) {
-            delete meta.summary;
+            delete meta.summary_until;
         } else {
-            meta.summary = trimmed;
+            meta.summary_until = trimmed;
         }
         tx.update(schema.messages)
             .set({ meta: serializeMeta(meta) })

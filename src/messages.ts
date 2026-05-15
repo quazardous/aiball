@@ -87,20 +87,26 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         }
         decisionKind = o.decision_kind;
     }
-    // #B.130 phase 1: optional `summary_line` on comments — author's
-    // one-line TLDR, used by brief-mode reads.
-    let summaryLine: string | null = null;
-    if (o.summary_line !== undefined && o.summary_line !== null && o.summary_line !== "") {
-        if (typeof o.summary_line !== "string") {
-            return { error: "summary_line must be a string" };
+    // #B.130: `summary_until` on comments — author's one-line TLDR of
+    // the thread state *up to this comment*. Powers brief-mode reads
+    // and densifies the thread context. Mandatory on comment_added
+    // FOR AGENTS (david: "ship en obligatoire" + "pour l'humain le
+    // summary est pas obligatoire") — human consumers skip the
+    // requirement; only agents must summarize what they post.
+    let summaryUntil: string | null = null;
+    const byAgent = typeof o.by_agent === "string" ? o.by_agent : null;
+    const authorIsHuman = byAgent ? isHuman(byAgent) : false;
+    if (kind === "comment_added") {
+        const provided = typeof o.summary_until === "string" ? o.summary_until.trim().slice(0, 200) : "";
+        if (!provided && !authorIsHuman) {
+            return { error: "summary_until is required on comment_added for agent authors (one-line TLDR of the thread state up to this comment). Humans skip the requirement." };
         }
-        if (kind !== "comment_added") {
-            return { error: `summary_line only allowed on comment_added (got kind=${kind})` };
+        if (o.summary_until !== undefined && o.summary_until !== null && typeof o.summary_until !== "string") {
+            return { error: "summary_until must be a string" };
         }
-        // Soft cap: 200 chars. Don't reject — clip silently. Empty
-        // string after trim → drop.
-        const trimmed = o.summary_line.trim().slice(0, 200);
-        if (trimmed) summaryLine = trimmed;
+        summaryUntil = provided || null;
+    } else if (o.summary_until !== undefined && o.summary_until !== null && o.summary_until !== "") {
+        return { error: `summary_until only allowed on comment_added (got kind=${kind})` };
     }
     return {
         project: o.project,
@@ -116,7 +122,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         by_agent: typeof o.by_agent === "string" ? o.by_agent : null,
         intent: kind === "ticket_created" ? intent : null,
         decision_kind: decisionKind,
-        summary_line: summaryLine,
+        summary_until: summaryUntil,
     };
 }
 

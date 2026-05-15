@@ -1480,13 +1480,13 @@ api.get("/tickets/:id", (req, res) => {
     }
     // #B.130 phase 2: brief mode. Returns the full ticket body PLUS
     // a `comments` array where each comment_added is replaced by a
-    // slim header carrying `summary` (from meta.summary) instead of
-    // the full body. The body is preserved on the LAST comment so the
-    // reader still gets "current state". Lifecycle events (closed /
-    // reopened / resolved / blocked / sub-added / referenced) stay
-    // unchanged. No fallback: comments without meta.summary surface
-    // as `summary: null` and the consumer decides whether to refetch
-    // full.
+    // slim header carrying `summary_until` (from meta.summary_until)
+    // instead of the full body. The body is preserved on the LAST
+    // comment so the reader still gets "current state". Lifecycle
+    // events (closed / reopened / resolved / blocked / sub-added /
+    // referenced) stay unchanged. No fallback: comments without
+    // meta.summary_until surface as `summary_until: null` and the
+    // consumer decides whether to refetch full.
     const brief = req.query.brief === "1";
     let outComments = enrichRelationStages(withTags(threadMessages));
     if (brief) {
@@ -1501,8 +1501,8 @@ api.get("/tickets/:id", (req, res) => {
         outComments = outComments.map((m) => {
             if (m.kind !== "comment_added" || m.id === lastCommentId) return m;
             const meta = parseMeta(m.meta ?? null);
-            const summaryLine = meta.summary ?? null;
-            return { ...m, body: null, edited_body: null, summary_line: summaryLine } as typeof m;
+            const summaryUntil = meta.summary_until ?? null;
+            return { ...m, body: null, edited_body: null, summary_until: summaryUntil } as typeof m;
         });
     }
     res.json({
