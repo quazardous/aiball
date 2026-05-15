@@ -168,17 +168,19 @@ const emit = defineEmits<{
             <span v-if="r.pending_comment_count > 0" :title="`${r.pending_comment_count} pending comment${r.pending_comment_count > 1 ? 's' : ''}`">
                 <i class="pi pi-clock" /> {{ r.pending_comment_count }}
             </span>
-            <span v-else-if="r.comment_count > 0">
+            <span
+                v-else-if="r.comment_count > 0 || r.last_speaker"
+                :class="{ 'list-row__last-mine': r.last_speaker === currentConsumer() }"
+                :title="r.last_speaker
+                    ? (r.last_speaker === currentConsumer()
+                        ? `You spoke last (${r.comment_count} comment${r.comment_count === 1 ? '' : 's'}).`
+                        : `Last spoke: ${r.last_speaker} (${r.comment_count} comment${r.comment_count === 1 ? '' : 's'}).`)
+                    : ''"
+            >
                 <i class="pi pi-comments" /> {{ r.comment_count }}
             </span>
         </template>
-        <template #time>
-            <span
-                v-if="r.last_speaker && r.last_speaker === currentConsumer()"
-                class="list-row__you"
-                title="You spoke last on this thread."
-            >you · </span>{{ relativeTime(r.last_activity) }}
-        </template>
+        <template #time>{{ relativeTime(r.last_activity) }}</template>
     </ListRow>
 </template>
 
@@ -190,11 +192,10 @@ const emit = defineEmits<{
     border: 1px dashed var(--p-content-border-color);
     border-radius: 0.5rem;
 }
-/* #B.132: discrete "you spoke last" prefix in the row time slot. */
-.list-row__you {
-    font-style: italic;
-    color: var(--p-primary-color);
-    opacity: 0.85;
+/* #B.132: tint the comments-count chip green when YOU were the last
+   to speak. Discreet — same icon and number, just an accent color. */
+.list-row__last-mine {
+    color: var(--p-green-500);
 }
 .ticket-id {
     color: var(--p-text-muted-color);

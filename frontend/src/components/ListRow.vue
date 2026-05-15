@@ -224,8 +224,10 @@ const slots = useSlots();
     align-items: center;
     gap: 0.15rem;
 }
-.list-row:hover .list-row__time,
-.list-row:hover .list-row__meta {
+/* On hover only the time gets replaced by the actions; the meta
+   (discussion icon + count) stays visible — david flagged that
+   losing the discussion zone on hover was annoying (#B.132). */
+.list-row:hover .list-row__time {
     display: none;
 }
 .list-row:hover .list-row__actions {
