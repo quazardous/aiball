@@ -300,6 +300,29 @@ const flatComments = computed<Message[]>(() => {
     return topDown.value ? sorted.reverse() : sorted;
 });
 
+// #B.130: latest summary_until wins. Scan all approved comments,
+// pick the most recent one carrying `meta.summary_until`. That's the
+// canonical "current state of the thread" snippet to show as a
+// banner. Older summary_until values are invisible/lost (per david).
+const latestSummaryUntil = computed<{ text: string; by: string | null; ts: string } | null>(() => {
+    if (!data.value) return null;
+    let best: { text: string; by: string | null; ts: string; id: number } | null = null;
+    for (const m of data.value.comments) {
+        if (m.kind !== "comment_added") continue;
+        if (m.status === "rejected") continue;
+        if (!m.meta) continue;
+        let summaryUntil: string | undefined;
+        try {
+            summaryUntil = (JSON.parse(m.meta) as { summary_until?: string }).summary_until;
+        } catch { continue; }
+        if (!summaryUntil) continue;
+        if (!best || m.id > best.id) {
+            best = { text: summaryUntil, by: m.by_agent, ts: m.created_at, id: m.id };
+        }
+    }
+    return best;
+});
+
 /**
  * Relation events (`ticket_sub_added` / `ticket_referenced`) render
  * compact — they're machine-generated notifications, not authored
@@ -1296,6 +1319,21 @@ async function copyTicketRef() {
                 <MarkdownView :source="data.ticket.body" />
             </article>
 
+            <!-- #B.130: latest summary_until = canonical "current state
+                 of the thread". Shown once, between the ticket body
+                 and the comments list. Older summaries are invisible
+                 (per david: "c'est toujours le dernier qui a raison,
+                 les autres sont invisible perdu"). -->
+            <div
+                v-if="latestSummaryUntil"
+                class="thread-summary-banner"
+                :title="`Current-state summary by ${latestSummaryUntil.by ?? 'author'} at ${new Date(latestSummaryUntil.ts).toLocaleString()}. Older summaries are superseded.`"
+            >
+                <i class="pi pi-bookmark thread-summary-banner__icon" />
+                <span class="thread-summary-banner__label">tldr</span>
+                <span class="thread-summary-banner__text">{{ latestSummaryUntil.text }}</span>
+            </div>
+
             <div v-if="flatComments.length === 0" class="aiball-empty thread-no-comments">
                 No comments yet — be the first to reply.
             </div>
@@ -1851,28 +1889,37 @@ async function copyTicketRef() {
     font-size: 0.85rem;
     color: var(--p-text-muted-color);
 }
-/* #B.130 phase 1: prominent summary banner above the comment body
-   when meta.summary is set. Sits between the header and the
-   MarkdownView so the user sees the TLDR first AND the full body
-   below — david: "pas instead à côté pour que je vois les 2". */
-.comment-summary-banner {
+/* #B.130: thread-level banner showing the latest summary_until as
+   the canonical "current state of the thread". Replaces the per-
+   comment banners (older ones are invisible, latest wins). */
+.thread-summary-banner {
     display: flex;
     align-items: flex-start;
     gap: 0.5rem;
-    padding: 0.45rem 0.7rem;
+    padding: 0.55rem 0.8rem;
     border-left: 3px solid var(--p-info-color, var(--p-primary-color));
-    background: color-mix(in srgb, var(--p-info-color, var(--p-primary-color)) 6%, transparent);
-    border-radius: 0.25rem;
+    background: color-mix(in srgb, var(--p-info-color, var(--p-primary-color)) 7%, transparent);
+    border-radius: 0.3rem;
     font-style: italic;
-    font-size: 0.9rem;
+    font-size: 0.92rem;
     color: var(--p-text-color);
 }
-.comment-summary-banner__icon {
+.thread-summary-banner__icon {
     color: var(--p-info-color, var(--p-primary-color));
-    margin-top: 0.15rem;
+    margin-top: 0.18rem;
     flex-shrink: 0;
 }
-.comment-summary-banner__text {
+.thread-summary-banner__label {
+    font-weight: 600;
+    font-style: normal;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    color: var(--p-info-color, var(--p-primary-color));
+    margin-top: 0.1rem;
+    flex-shrink: 0;
+}
+.thread-summary-banner__text {
     flex: 1;
 }
 .comment-ref-tag {

@@ -85,16 +85,18 @@ const decisionChipSeverity = computed(() => {
     return "warn"; // pending
 });
 
-// #B.130 phase 1: one-line TLDR sidecar (`meta.summary`). Surfaced as
-// a discrete chip in the comment header. When user clicks it, we
-// emit a quick toast/popover with the summary text — but for v1 the
-// summary IS the chip label (truncated), tooltip carries the full
-// text. Cheaper and sufficient.
+// #B.130: rolling summary (`meta.summary_until`). Surfaced as a tiny
+// chip in the header for audit. The CANONICAL view of "current state"
+// lives at the THREAD level (ThreadView shows the latest one as a
+// banner above the comments) — per david: "c'est toujours le dernier
+// summary_until qui a raison, les autres sont invisible perdu". Per-
+// comment banners removed; the chip alone signals "this comment has
+// a summary on record".
 const summary = computed(() => {
     if (!props.msg.meta) return null;
     try {
-        const m = JSON.parse(props.msg.meta) as { summary?: string };
-        return typeof m.summary === "string" && m.summary ? m.summary : null;
+        const m = JSON.parse(props.msg.meta) as { summary_until?: string };
+        return typeof m.summary_until === "string" && m.summary_until ? m.summary_until : null;
     } catch {
         return null;
     }
@@ -313,18 +315,6 @@ onBeforeUnmount(() => detachPaste?.());
                     @click="cancelEdit"
                 />
             </div>
-        </div>
-        <!-- #B.130 phase 1: prominent summary banner above the body
-             when a summary exists. Visible side-by-side with the
-             full body (per david: "pas instead à côté pour que je
-             vois les 2"). Always shown when set — no toggle. -->
-        <div
-            v-if="summary && !editing"
-            class="comment-summary-banner"
-            :title="`Summary by ${msg.by_agent ?? 'author'}`"
-        >
-            <i class="pi pi-bookmark comment-summary-banner__icon" />
-            <span class="comment-summary-banner__text">{{ summary }}</span>
         </div>
         <MarkdownView
             v-if="!editing && (msg.body || msg.edited_body)"
