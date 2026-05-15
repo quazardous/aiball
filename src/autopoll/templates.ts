@@ -40,9 +40,9 @@ function backlogLine(tone: AutopollTone, payload: AutopollPayload): string {
         case "hint":
             return `\n\nBacklog: ${n} open ticket${s} in ${scope}. Have a look via \`ticket_list({open: true})\` when you can.`;
         case "directive":
-            return `\n\nBacklog: ${n} open ticket${s} in ${scope}. ${after} via \`ticket_list({open: true})\` and process them (close / resolve / reply). Don't leave them sitting.`;
+            return `\n\nBacklog: ${n} open ticket${s} in ${scope}. ${after} via \`ticket_list({open: true})\` and process them — close your own, otherwise \`ticket_reply({target_id, body, then: "resolved"})\` (or \`then: "blocked"\` if you genuinely can't proceed). A plain reply leaves the ticket in the backlog and the autopoll will nag again.`;
         case "imperative":
-            return `\n\n**BACKLOG: ${n} open ticket${s} in ${scope}**. ${afterCaps} \`ticket_list({open: true})\` and clear them (close / resolve / reply each one). The backlog is YOUR queue — DO NOT ignore it.`;
+            return `\n\n**BACKLOG: ${n} open ticket${s} in ${scope}**. ${afterCaps} \`ticket_list({open: true})\` and clear EACH one with \`ticket_reply({target_id, body, then: "resolved"})\` (or \`then: "blocked"\` only if escalation is unavoidable). A bare reply does NOT drain the backlog — the autopoll WILL re-fire until each ticket is resolved / closed / blocked.`;
     }
 }
 

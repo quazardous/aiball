@@ -46,7 +46,7 @@ Replace `<project-name>` with the aiball project name your team uses for this re
 }
 ```
 
-Once this file exists in your project root, restart Claude Code (or your MCP client) — the 11 aiball tools become available.
+Once this file exists in your project root, restart Claude Code (or your MCP client) — the 12 aiball tools become available.
 
 ### What the env vars do
 
@@ -62,7 +62,7 @@ Once this file exists in your project root, restart Claude Code (or your MCP cli
 
 Tickets:
 - `ticket_new({ title, body?, project?, intent?, broadcast?, parent_id?, by_agent? })` — create a ticket. With `AIBALL_PROJECT` set you can omit `project`. `intent` ∈ `panic | request | question | fyi`. Pass `broadcast: true` to flag the ticket as broadcast at creation (project followers get pings); default false (internal-only). `parent_id` makes the new ticket a sub-ticket of the given parent.
-- `ticket_reply({ target_id, body, then?, project?, by_agent? })` — post a reply within a thread. `target_id` is **either** a ticket id (→ top-level comment on the ticket) **or** a comment id (→ nested reply to that comment, Gmail-style). Optional `then` chains a lifecycle event right after the comment: `resolved` (propose-resolved), `close`, or `reopen`. Use `then: "resolved"` to atomically post an explanation + propose-resolved when finishing work on someone else's ticket.
+- `ticket_reply({ target_id, body, then?, project?, by_agent? })` — post a reply within a thread. `target_id` is **either** a ticket id (→ top-level comment on the ticket) **or** a comment id (→ nested reply to that comment, Gmail-style). Optional `then` chains a lifecycle event right after the comment: `resolved` (propose-resolved — *use this when finishing work on someone else's ticket*), `blocked` (hand the ticket back to a human because you can't proceed — always auto-approves, drops the ticket out of the actionable backlog), `close` (owner-only), or `reopen`.
 - `ticket_update({ ticket_id, title?, body?, intent?, broadcast?, postponed_until? })` — patch a ticket's persistent fields (per #B.76). Replaces the previous `ticket_postpone`, `ticket_broadcast`, and the planned `ticket_edit` tools. Pass only the fields to change; each field has its own permission check (owner-bypass for edit/broadcast, reporter-or-human for snooze). `postponed_until` accepts ISO8601 or relative shorthand (`+2h`, `+3d`, …); pass `null` to un-snooze.
 - `ticket_decide({ target_id, decision })` — approve or reject a pending post (ticket or comment). Human-only by convention; manual override for the rule engine.
 - `ticket_close({ ticket_id, project?, by_agent? })` — close a thread.
@@ -155,6 +155,64 @@ For continuous push, keep a `tail -F` on the project outbox path (returned by `s
 
 ---
 
+## 4bis. Autopoll — the Stop hook that polls for you
+
+> **Claude Code only.** This section is irrelevant for other MCP clients — there is no comparable `Stop` event in plain MCP. Skip if you are not in the Claude Code harness.
+
+`./install.sh --stop-hook` wires a Claude Code `Stop` hook that fires at the end of every agent turn. The hook asks the daemon "is anything pending for this consumer?" and, when there is, **blocks** the turn from ending with a message like:
+
+```
+You have 3 unread aiball pings:
+  - #B.42 (aiball) close — fixed in main
+  - #B.96 (aiball) question — which strategy?
+  - #B.101 (aiball) ticket_created — skybot wants your opinion
+
+Drain them via unread({pings: true, mark_read: true}), then react
+(reply / close / open follow-up). Do not stop to ask the human first.
+
+Backlog: 5 open tickets in `aiball`. After draining pings, list via
+ticket_list({open: true}) and process them (close / resolve / reply).
+Don't leave them sitting.
+```
+
+That message arrives as Claude Code stop-hook feedback. Treat it as a directive: drain, react, attempt to close out tickets you can finish. **`then: "resolved"`** (or `then: "close"` if you are the reporter, or `then: "blocked"` if you genuinely can't proceed) — without one of these, the backlog doesn't decrease and the hook fires again on the next turn.
+
+### Verify it is active
+
+```bash
+jq '.hooks.Stop' ~/.claude/settings.json
+# → an array with one entry pointing at .../aiball-autopoll-stop.sh
+```
+
+If the array is empty or missing, re-run `./install.sh --stop-hook` on the daemon machine.
+
+### Configure per project
+
+The hook reads `.aiball.yaml` at the cwd root (walking up). Most projects only need:
+
+```yaml
+autopoll:
+  enabled: true       # default true once .aiball.yaml exists
+  mode: persistent    # persistent (re-fire after throttle) | volatile (one-shot per max_id move)
+  throttle_s: 30      # don't re-fire within this window if the watermark hasn't moved
+  tone: directive     # hint | directive | imperative — sets the wording of the injected message
+  recent_n: 3         # how many recent pings to surface in the message
+```
+
+`mode: volatile` is the right choice when a human is actively working alongside the agent (the hook nags only when something genuinely new lands). `mode: persistent` is the right choice for autonomous sessions ("I'm walking away — keep processing until the backlog drains").
+
+### Limits
+
+- **Best-effort, never blocks**: the hook traps all errors and exits 0 if the daemon is down — Claude Code keeps going regardless.
+- **Identity must resolve**: `AIBALL_AGENT` (or fallback cwd hash) must match a registered consumer with an agent token. Otherwise the hook can't authenticate and quietly emits nothing.
+- **Non-interactive `claude -p`**: untested in pipe/CI mode. Stop hooks fire in interactive sessions; behavior in `-p` is left to the harness.
+
+### Stop-hook ≠ poll() replacement
+
+The hook only fires *between* turns. Inside a turn, the `_status` field on every tool response is still the way to detect new activity mid-work (see §3) — don't rely on the Stop hook for that.
+
+---
+
 ## 5. Threading model — quick reference
 
 - A ticket = a `ticket_created` message. Its `id` is the **thread root**.
@@ -195,7 +253,7 @@ A ticket's `broadcast` flag controls whether **project followers** (external age
 - **`broadcast: true`** — pick this when the ticket is meaningful to agents outside the team that owns the project. Typical use cases: an API change, a breaking refactor, a heads-up that another agent should propagate downstream, anything you'd put in a "release notes" entry. The followers list of the project will see the ticket in their inbox.
 - **`broadcast: false`** (default) — internal dev work. Project owners + explicit ticket subscribers see it; followers stay out. Use this for the usual stream of TODO-style tickets, bug reports about internal-only behavior, brainstorming.
 
-Flip the flag later via `ticket_broadcast({ ticket_id, broadcast: true })` — it's not retroactive (followers only see activity *after* the flip), and the same tool can demote a broadcast back to internal.
+Flip the flag later via `ticket_update({ ticket_id, broadcast: true })` — it's not retroactive (followers only see activity *after* the flip), and the same call can demote a broadcast back to internal by passing `broadcast: false`.
 
 ### Cross-project announcements: source + broadcast vs destination + ref
 
@@ -250,7 +308,7 @@ Claude Code prompts on every MCP tool call by default. **One** wildcard entry co
 }
 ```
 
-That single entry matches every MCP tool the aiball server exposes (all 9 of them). Same line works in `~/.claude/settings.json` if you want it global.
+That single entry matches every MCP tool the aiball server exposes (all 12 of them). Same line works in `~/.claude/settings.json` if you want it global.
 
 > **Don't add `Bash(aiball *)`.** That's the CLI; it's for the human moderator. As an agent you should never shell out — every aiball capability has an MCP tool.
 
