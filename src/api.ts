@@ -1465,13 +1465,41 @@ api.get("/tickets/:id", (req, res) => {
             focus_message_id: focusMessageId,
         });
     }
+    // #B.130 phase 2: brief mode. Returns the full ticket body PLUS
+    // a `comments` array where each comment_added is replaced by a
+    // slim header carrying `summary` (from meta.summary) instead of
+    // the full body. The body is preserved on the LAST comment so the
+    // reader still gets "current state". Lifecycle events (closed /
+    // reopened / resolved / blocked / sub-added / referenced) stay
+    // unchanged. No fallback: comments without meta.summary surface
+    // as `summary: null` and the consumer decides whether to refetch
+    // full.
+    const brief = req.query.brief === "1";
+    let outComments = enrichRelationStages(withTags(threadMessages));
+    if (brief) {
+        // Find the highest-id approved comment_added — its body is
+        // always shipped in full so the reader sees the "now".
+        let lastCommentId = 0;
+        for (const m of threadMessages) {
+            if (m.kind === "comment_added" && m.status === "approved" && m.id > lastCommentId) {
+                lastCommentId = m.id;
+            }
+        }
+        outComments = outComments.map((m) => {
+            if (m.kind !== "comment_added" || m.id === lastCommentId) return m;
+            const meta = parseMeta(m.meta ?? null);
+            const summaryLine = meta.summary ?? null;
+            return { ...m, body: null, edited_body: null, summary_line: summaryLine } as typeof m;
+        });
+    }
     res.json({
         ticket: {
             ...headerBase,
             body: t.edited_body ?? t.body,
         },
-        comments: enrichRelationStages(withTags(threadMessages)),
+        comments: outComments,
         focus_message_id: focusMessageId,
+        brief,
     });
 });
 

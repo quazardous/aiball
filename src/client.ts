@@ -234,7 +234,7 @@ export class AiballClient {
     listTickets(q: Record<string, string | undefined> = {}) {
         return this.http("GET", `/api/tickets${query(q)}`);
     }
-    getTicket(id: number, opts: { summary?: boolean } = {}) {
+    getTicket(id: number, opts: { summary?: boolean; brief?: boolean } = {}) {
         const q: Record<string, string | undefined> = {};
         // API default is now summary mode (#B.87). Caller passing
         // {summary: false} explicitly wants the full thread — send full=1.
@@ -242,6 +242,13 @@ export class AiballClient {
         // summary=1 when truthy for backward-compat with older daemons.
         if (opts.summary === false) q.full = "1";
         else if (opts.summary === true) q.summary = "1";
+        // #B.130 phase 2: brief mode = full thread but per-comment bodies
+        // replaced by `summary_line` (meta.summary) except the last one.
+        // Implies full=1 server-side.
+        if (opts.brief) {
+            q.full = "1";
+            q.brief = "1";
+        }
         return this.http("GET", `/api/tickets/${id}${query(q)}`);
     }
     listProjects() {

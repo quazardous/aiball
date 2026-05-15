@@ -615,7 +615,7 @@ server.registerTool(
     "ticket_get",
     {
         description:
-            "Get a ticket. **Default: header only** (no body, no comments) + `comment_count` — cheap probe of state. Pass `full: true` for the full thread (header with body + all approved comments). Use when you want to read the conversation, not just check status.",
+            "Get a ticket. **Default: header only** (no body, no comments) + `comment_count` — cheap probe of state. Pass `full: true` for the full thread (header with body + all approved comments). Pass `brief: true` for a token-efficient middle ground (#B.130): header + body + comments with `summary_line` (the one-line TLDR each comment carries in `meta.summary`) instead of full bodies. The LAST comment keeps its full body so you see the current state. Comments without a summary surface as `summary_line: null` — fetch full if you need that one body. Best practice when authoring: always pass `summary_line` on `ticket_reply` so future brief-mode reads stay useful.",
         inputSchema: {
             ticket_id: z.number().int(),
             full: z
@@ -624,10 +624,21 @@ server.registerTool(
                 .describe(
                     "If true, return the full thread (body + comments). Default is summary mode (#B.87): the header only + a `comment_count` integer.",
                 ),
+            brief: z
+                .boolean()
+                .optional()
+                .describe(
+                    "If true (and `full` is true OR brief implies full), return the full thread but with each comment_added body replaced by its `summary_line` (one-line TLDR from meta.summary). The LAST comment keeps its full body. Comments without a meta.summary surface as `summary_line: null`. Use this to scan long threads cheaply — ~5x token reduction on threads with disciplined summaries.",
+                ),
         },
     },
-    async ({ ticket_id, full }) => {
-        return asText(await client.getTicket(ticket_id, { summary: full !== true }));
+    async ({ ticket_id, full, brief }) => {
+        return asText(
+            await client.getTicket(ticket_id, {
+                summary: full !== true && brief !== true,
+                brief: brief === true,
+            }),
+        );
     },
 );
 
