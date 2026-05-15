@@ -4,6 +4,7 @@ import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
 import Select from "primevue/select";
+import SplitButton from "primevue/splitbutton";
 import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
 import { useToast } from "primevue/usetoast";
@@ -623,6 +624,18 @@ async function commentAndUndoReject() {
 }
 const hasBody = computed(() => composerBody.value.trim().length > 0);
 
+// #B.129 — author decision splitbutton: primary action = mark resolved
+// (the most common case once work is done), dropdown reveals less-
+// frequent options (propose plan, …). Keeps the visual surface tight
+// — one button visible, the secondary kinds discoverable via chevron.
+const decisionMenu = computed(() => [
+    {
+        label: hasBody.value ? "comment and propose plan" : "propose plan",
+        icon: "pi pi-compass",
+        command: () => { void commentAndProposePlan(); },
+    },
+]);
+
 const broadcastBusy = ref(false);
 // Snooze (#B.329) — popover with presets + ISO custom input.
 const snoozeBusy = ref(false);
@@ -869,24 +882,13 @@ async function copyTicketRef() {
                 <template v-else>
                     <Button
                         v-if="!data.ticket.resolved && !data.ticket.blocked"
-                        icon="pi pi-compass"
-                        severity="info"
-                        size="small"
-                        text
-                        rounded
-                        :loading="resolutionBusy"
-                        title="Propose plan — describe your approach; the reporter accepts or rejects before you code."
-                        @click="commentAndProposePlan"
-                    />
-                    <Button
-                        v-if="!data.ticket.resolved && !data.ticket.blocked"
                         icon="pi pi-check-circle"
                         severity="success"
                         size="small"
                         text
                         rounded
                         :loading="resolutionBusy"
-                        title="Mark resolved (soft proposal — reporter accepts to close). Embarks any text typed in the composer."
+                        title="Mark resolved (soft proposal — reporter accepts to close). Plan-proposal is available in the composer split-button. Embarks any text typed in the composer."
                         @click="commentAndMarkResolved"
                     />
                     <Button
@@ -1366,25 +1368,16 @@ async function copyTicketRef() {
                             title="Set aside — type your context first if you want, then pick a duration. The ticket disappears from the open inbox until then."
                             @click="openSnoozePopover"
                         />
-                        <Button
+                        <SplitButton
                             v-if="!data.ticket.resolved && !data.ticket.blocked"
-                            icon="pi pi-compass"
-                            :label="hasBody ? 'comment and propose plan' : 'propose plan'"
-                            severity="info"
-                            size="small"
-                            text
-                            title="Propose an approach for this ticket — the reporter accepts/rejects before you code. (#B.129)"
-                            :loading="resolutionBusy"
-                            @click="commentAndProposePlan"
-                        />
-                        <Button
-                            v-if="!data.ticket.resolved && !data.ticket.blocked"
-                            icon="pi pi-check-circle"
                             :label="hasBody ? 'comment and mark resolved' : 'mark resolved'"
+                            icon="pi pi-check-circle"
                             severity="success"
                             size="small"
                             text
                             :loading="resolutionBusy"
+                            :model="decisionMenu"
+                            menu-button-aria-label="Other decision actions"
                             @click="commentAndMarkResolved"
                         />
                         <Button
