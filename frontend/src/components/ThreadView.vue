@@ -285,9 +285,19 @@ onBeforeUnmount(() => editDetachPaste?.());
 // copies its #N ref and pastes it (or quotes with `> ...`) into a fresh
 // top-level comment. The data layer still tolerates parent_message_id
 // for backward compatibility but the UI ignores it.
+// #B.133: per-user thread ordering pref. localStorage so it survives
+// reloads, default false (oldest-first as before). Top-down = newest
+// at top so the reader sees the latest reply right under the header.
+const topDown = ref(localStorage.getItem("aiball.thread_top_down") === "1");
+function toggleTopDown() {
+    topDown.value = !topDown.value;
+    localStorage.setItem("aiball.thread_top_down", topDown.value ? "1" : "0");
+}
+
 const flatComments = computed<Message[]>(() => {
     if (!data.value) return [];
-    return [...data.value.comments].sort((a, b) => a.id - b.id);
+    const sorted = [...data.value.comments].sort((a, b) => a.id - b.id);
+    return topDown.value ? sorted.reverse() : sorted;
 });
 
 /**
@@ -829,6 +839,18 @@ async function copyTicketRef() {
                 @click="emit('back')"
             />
             <span class="spacer" />
+            <!-- #B.133: per-user thread order toggle. -->
+            <Button
+                :icon="topDown ? 'pi pi-sort-amount-down' : 'pi pi-sort-amount-up'"
+                severity="secondary"
+                size="small"
+                text
+                rounded
+                :title="topDown
+                    ? 'Thread order: newest at top. Click to flip to oldest-first.'
+                    : 'Thread order: oldest first (default). Click to flip to newest at top.'"
+                @click="toggleTopDown"
+            />
             <Button
                 v-if="data && data.ticket.status === 'approved'"
                 icon="pi pi-megaphone"
@@ -1489,6 +1511,19 @@ async function copyTicketRef() {
 .thread-toolbar {
     display: flex;
     align-items: center;
+}
+/* #B.133: tighten the SplitButton chevron — PrimeVue's default
+   renders the menu trigger as a separate column with the same
+   padding as the main button, which doubles the visual width.
+   Trim the chevron column so the dropdown reads as a small affordance
+   instead of a second button. */
+.thread-view .p-splitbutton .p-splitbutton-dropdown {
+    padding-left: 0.4rem;
+    padding-right: 0.4rem;
+    min-width: 1.6rem;
+}
+.thread-view .p-splitbutton .p-splitbutton-dropdown .p-button-icon {
+    font-size: 0.7rem;
 }
 .thread-ticket {
     border: 1px solid var(--p-content-border-color);
