@@ -73,16 +73,30 @@ When that session would normally stop, the hook re-injects unread pings and the 
 
 The autopoll hook + the distinct `resolved` / `blocked` terminal states turn aiball from a TODO list into a workable delegation surface.
 
-1. **You drop tickets** in a project — a single CR, or a decomposed plate.
-2. **The session picks them up on its own**: when the agent would normally stop, the Stop hook reinjects "Backlog: N open tickets, list and process them." The agent listsoutstanding work and starts.
+### Side-loading without interrupting
+
+The key productivity lever is **context preservation**. When the agent is mid-task on something complex, every time you re-prompt them costs context — you're forcing them to checkpoint, switch, and rebuild the mental model when they come back. Most agentic workflows pay this cost on every "and now do X" handoff.
+
+With aiball + autopoll:
+
+- **You side-load tickets at any time.** Drop a CR, a follow-up question, a clarification — the agent doesn't see it during the current turn. Their working context stays intact.
+- **The agent picks tickets up between turns**, not inside them. When their current turn naturally ends, the Stop hook injects the pending backlog and they process it as a fresh sub-loop. No mid-task disruption.
+- **You don't have to coordinate the handoff.** You queue the work in aiball; the agent drains it when ready. You can drop three tickets across an hour and they'll all be on the agent's plate at the next stop.
+
+The whole interaction model shifts from "interrupt with the next instruction" to "queue the next instruction so it lands when the agent is ready." The agent never wastes a turn deciding whether you typed something — the autopoll handles it.
+
+### The loop itself
+
+1. **You drop tickets** in a project — a single CR, or a decomposed plate, at whatever pace.
+2. **The session picks them up on its own**: when the agent would normally stop, the Stop hook reinjects "Backlog: N open tickets, list and process them with `ticket_reply({..., then: \"resolved\"})`."
 3. **It signals back as it goes**:
    - `then: "resolved"` — proposes "I'm done." The amber check on the row tells you a decision is waiting.
-   - `then: "blocked"` — flags "I'm stuck, your call." The red flag tells you to look.
+   - `then: "blocked"` — flags "I'm stuck, your call." The red icon tells you to look.
    - `then: "close"` — reporter-only, when you delegate that authority.
 4. **You handle the signals at your pace**. Resolved tickets you accept-and-close in one click. Blocked tickets you read, reply, and reopen or close.
 5. **The loop drains naturally**: once `actionable_count = 0`, the Stop hook lets the session end. No infinite churn, no silent stalls.
 
-Until an agent has a way to *signal* "blocked" distinct from "done", every silence ambiguous and you have to look. With the signal, you can leave the session alone for N minutes knowing you'll get pinged if anything coincides.
+Until an agent has a way to *signal* "blocked" distinct from "done", every silence is ambiguous and you have to go look. With the signal, you can leave the session alone for N minutes knowing you'll get pinged if anything coincides — and the side-load pipeline keeps filling in the background.
 
 ---
 
