@@ -34,6 +34,8 @@ import {
     tagsForMessages,
     getStrategy,
     setStrategy,
+    getProjectStrategy,
+    setProjectStrategy,
     STRATEGIES,
     INTENTS,
     type Intent,
@@ -483,6 +485,37 @@ api.patch("/strategy", (req: Request, res: Response) => {
     setStrategy(s as Strategy);
     broadcast({ type: "strategy_changed", data: { strategy: s } });
     res.json({ strategy: s });
+});
+
+// Per-project strategy override (#B.127). Returns the project override
+// (or null when unset) alongside the global, so the UI can render a
+// "Use global (currently: X)" sentinel choice.
+api.get("/projects/:project/strategy", (req: Request, res: Response) => {
+    const project = String(req.params.project ?? "");
+    if (!project) return badRequest(res, "project required");
+    res.json({
+        project,
+        strategy: getProjectStrategy(project),
+        global: getStrategy(),
+    });
+});
+
+api.patch("/projects/:project/strategy", (req: Request, res: Response) => {
+    const project = String(req.params.project ?? "");
+    if (!project) return badRequest(res, "project required");
+    const s = req.body?.strategy;
+    // Pass null (or omit) to clear the override and fall back to global.
+    if (s === null || s === undefined) {
+        setProjectStrategy(project, null);
+        broadcast({ type: "strategy_changed", data: { project, strategy: null } });
+        return res.json({ project, strategy: null, global: getStrategy() });
+    }
+    if (typeof s !== "string" || !(STRATEGIES as readonly string[]).includes(s)) {
+        return badRequest(res, `strategy must be one of ${STRATEGIES.join(", ")} or null`);
+    }
+    setProjectStrategy(project, s as Strategy);
+    broadcast({ type: "strategy_changed", data: { project, strategy: s } });
+    res.json({ project, strategy: s, global: getStrategy() });
 });
 
 // -------- messages ----------------------------------------------------------

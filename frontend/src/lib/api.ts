@@ -304,6 +304,19 @@ export const api = {
             "GET",
             `/api/projects/${encodeURIComponent(name)}/stats-rich`,
         ),
+    // Per-project strategy override (#B.127). `strategy: null` in the
+    // response = no override, the project follows the global strategy.
+    getProjectStrategy: (name: string) =>
+        req<{ project: string; strategy: Strategy | null; global: Strategy }>(
+            "GET",
+            `/api/projects/${encodeURIComponent(name)}/strategy`,
+        ),
+    setProjectStrategy: (name: string, strategy: Strategy | null) =>
+        req<{ project: string; strategy: Strategy | null; global: Strategy }>(
+            "PATCH",
+            `/api/projects/${encodeURIComponent(name)}/strategy`,
+            { strategy },
+        ),
     mentionSuggestions: () =>
         req<{ projects: string[]; agents: string[] }>(
             "GET",

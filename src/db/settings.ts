@@ -35,6 +35,37 @@ export function setStrategy(s: Strategy): void {
     setSetting("strategy", s);
 }
 
+// Per-project strategy override (#B.127). Stored in the same k/v
+// `settings` table under `strategy:<project>` so we don't need to
+// model a `projects` table (project is still just a string column on
+// tickets). `null`/missing → fall back to the global strategy.
+const PROJECT_STRATEGY_PREFIX = "strategy:";
+
+export function getProjectStrategy(project: string): Strategy | null {
+    if (!project) return null;
+    const v = getSetting(PROJECT_STRATEGY_PREFIX + project);
+    if (v && (STRATEGIES as readonly string[]).includes(v)) return v as Strategy;
+    return null;
+}
+
+export function setProjectStrategy(project: string, s: Strategy | null): void {
+    if (!project) throw new Error("project required");
+    const key = PROJECT_STRATEGY_PREFIX + project;
+    if (s === null) {
+        // Clear by deleting the row, so getProjectStrategy returns null
+        // and the global strategy takes over.
+        getDb().delete(schema.settings).where(eq(schema.settings.key, key)).run();
+        return;
+    }
+    setSetting(key, s);
+}
+
+/** Effective strategy used by the rule engine: per-project override
+ *  takes precedence over the global default. */
+export function effectiveStrategy(project: string): Strategy {
+    return getProjectStrategy(project) ?? getStrategy();
+}
+
 /** Hard cap regardless of the configured `upload_max_bytes` (50 MB).
  *  Keeps the daemon out of trouble even if the setting is corrupted
  *  or a malicious caller sets it absurdly high. */

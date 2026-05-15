@@ -1,5 +1,5 @@
 import {
-    getStrategy,
+    effectiveStrategy,
     isHuman,
     listRules,
     type MessageKind,
@@ -40,9 +40,10 @@ function strategyDefault(s: Strategy, kind: MessageKind): RuleDecision {
  * literal `"human"` row is backfilled by migration 0011 so the bypass
  * works out of the box.
  *
- * If no rule matches, fall back to the global strategy: "manual" →
- * review, "auto" → auto, "auto-reply" → auto for comments, review for
- * tickets/closes.
+ * If no rule matches, fall back to the strategy in effect for the
+ * target project (per-project override → global default, per #B.127):
+ * "manual" → review, "auto" → auto, "auto-reply" → auto for comments,
+ * review for tickets/closes.
  */
 export function evaluate(input: RuleEvalInput): RuleEvalResult {
     if (input.by_agent && isHuman(input.by_agent)) {
@@ -55,7 +56,7 @@ export function evaluate(input: RuleEvalInput): RuleEvalResult {
         }
     }
     return {
-        decision: strategyDefault(getStrategy(), input.kind),
+        decision: strategyDefault(effectiveStrategy(input.project), input.kind),
         matched_rule_id: null,
     };
 }
