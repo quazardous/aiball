@@ -879,6 +879,21 @@ watch(showSnoozed, (v) => {
                 />
 
                 <template v-else>
+                    <!-- #B.127: surface the per-project strategy state
+                         + a one-click path to change it. The actual
+                         selector lives on ProjectStatsPage; here we
+                         show a discrete tile so the user knows the
+                         feature exists. -->
+                    <button
+                        v-if="project"
+                        type="button"
+                        class="project-strategy-hint"
+                        :title="`Click to manage the moderation strategy for \`${project}\` — set a per-project override or fall back to the global default.`"
+                        @click="openProjectPage(project, 'stats')"
+                    >
+                        <i class="pi pi-shield" />
+                        <span>strategy: project page →</span>
+                    </button>
                     <InboxToolbar
                         :status-filter="statusFilter"
                         :status-filter-options="statusFilterOptions"
@@ -942,6 +957,32 @@ watch(showSnoozed, (v) => {
     gap: 0;
     flex: 1;
     min-height: 0;
+}
+
+/* #B.127: discrete pointer to the per-project strategy panel — surfaced
+   in the inbox header so the feature is discoverable from the user's
+   daily view. Click → opens ProjectStatsPage where the selector lives. */
+.project-strategy-hint {
+    align-self: flex-start;
+    appearance: none;
+    background: transparent;
+    border: 1px dashed var(--p-content-border-color);
+    color: var(--p-text-muted-color);
+    border-radius: 0.3rem;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.4rem;
+}
+.project-strategy-hint:hover {
+    background: var(--p-surface-100);
+    color: var(--p-text-color);
+}
+.aiball-dark .project-strategy-hint:hover {
+    background: var(--p-surface-800);
 }
 
 .aiball-main {
