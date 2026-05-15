@@ -25,14 +25,19 @@ import { evaluate } from "./rules.js";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
 
-export const VALID_KINDS: MessageKind[] = [
+// User-postable subset of MESSAGE_KINDS: excludes `ticket_sub_added` and
+// `ticket_referenced` which are emitted by the daemon when relations
+// are established. Declared as a `satisfies` tuple so adding a new
+// postable kind only requires touching this list — TS guarantees each
+// entry is a real MessageKind.
+export const VALID_KINDS = [
     "ticket_created",
     "comment_added",
     "ticket_closed",
     "ticket_reopened",
     "ticket_resolved",
     "ticket_blocked",
-];
+] as const satisfies readonly MessageKind[];
 
 export interface ValidationError {
     error: string;
@@ -44,7 +49,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
     if (typeof o.project !== "string" || !o.project) {
         return { error: "project required" };
     }
-    if (typeof o.kind !== "string" || !VALID_KINDS.includes(o.kind as MessageKind)) {
+    if (typeof o.kind !== "string" || !(VALID_KINDS as readonly string[]).includes(o.kind)) {
         return { error: `kind must be one of ${VALID_KINDS.join(", ")}` };
     }
     const kind = o.kind as MessageKind;

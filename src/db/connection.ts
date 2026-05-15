@@ -25,19 +25,39 @@ import { DEFAULT_TAGS } from "./tags.js";
 // connection.ts is the single low-level dependency.
 // =====================================================================
 
-export type MessageKind =
-    | "ticket_created"
-    | "comment_added"
-    | "ticket_closed"
-    | "ticket_reopened"
-    | "ticket_resolved"
-    | "ticket_blocked"
-    | "ticket_sub_added"
-    | "ticket_referenced";
-export type MessageStatus = "pending" | "approved" | "rejected";
-export type RuleDecision = "auto" | "review";
-export type Intent = "panic" | "request" | "question" | "fyi";
-export const INTENTS: readonly Intent[] = ["panic", "request", "question", "fyi"];
+// Domain enums live in `src/domain.ts` (#B.122). Imported locally so
+// uses inside this file resolve, then re-exported so existing call
+// sites importing from db.ts keep compiling without touching imports.
+import {
+    MESSAGE_KINDS,
+    MESSAGE_STATUSES,
+    RULE_DECISIONS,
+    INTENTS,
+    STRATEGIES,
+    isMessageKind,
+    isMessageStatus,
+    isIntent,
+    isStrategy,
+} from "../domain.js";
+import type {
+    MessageKind,
+    MessageStatus,
+    RuleDecision,
+    Intent,
+    Strategy,
+} from "../domain.js";
+export {
+    MESSAGE_KINDS,
+    MESSAGE_STATUSES,
+    RULE_DECISIONS,
+    INTENTS,
+    STRATEGIES,
+    isMessageKind,
+    isMessageStatus,
+    isIntent,
+    isStrategy,
+};
+export type { MessageKind, MessageStatus, RuleDecision, Intent, Strategy };
 
 /** Drizzle row types (internal) re-exported for callers that handle the
  *  split shapes natively. The legacy union JSON shape is `Message` below. */

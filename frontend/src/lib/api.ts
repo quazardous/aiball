@@ -7,30 +7,31 @@ export interface Tag {
     created_at: string;
 }
 
-export type Intent = "panic" | "request" | "question" | "fyi";
-export const INTENTS: readonly Intent[] = ["panic", "request", "question", "fyi"];
-
-export type Strategy = "manual" | "auto" | "auto-reply";
-export const STRATEGIES: readonly Strategy[] = ["manual", "auto", "auto-reply"];
+// Business enums are centralised in `./domain.ts` (#B.122). Re-export
+// them here so existing consumers that import from `./api` still work.
+export {
+    MESSAGE_KINDS,
+    MESSAGE_STATUSES,
+    INTENTS,
+    STRATEGIES,
+    isMessageKind,
+    isMessageStatus,
+    isIntent,
+    isStrategy,
+} from "./domain";
+export type { MessageKind, MessageStatus, Intent, Strategy } from "./domain";
+import type { MessageKind, MessageStatus, Intent, Strategy } from "./domain";
 
 export interface Message {
     id: number;
     project: string;
-    kind:
-        | "ticket_created"
-        | "comment_added"
-        | "ticket_closed"
-        | "ticket_reopened"
-        | "ticket_resolved"
-        | "ticket_blocked"
-        | "ticket_sub_added"
-        | "ticket_referenced";
+    kind: MessageKind;
     ticket_id: number | null;
     parent_id: number | null;
     title: string | null;
     body: string | null;
     by_agent: string | null;
-    status: "pending" | "approved" | "rejected";
+    status: MessageStatus;
     created_at: string;
     decided_at: string | null;
     decided_by: string | null;
@@ -146,7 +147,7 @@ export interface TicketSummary {
     body: string | null;
     by_agent: string | null;
     created_at: string;
-    status: "pending" | "approved" | "rejected";
+    status: MessageStatus;
     closed: boolean;
     resolved?: boolean;
     resolved_by?: string | null;
@@ -172,7 +173,7 @@ export interface TicketSummary {
 export interface SubTicketSummary {
     id: number;
     title: string;
-    status: "pending" | "approved" | "rejected";
+    status: MessageStatus;
     closed: boolean;
     stage: TicketStage;
 }
@@ -186,7 +187,7 @@ export interface SearchHit {
     hashid: string | null;
     by_agent: string | null;
     created_at: string;
-    status: "pending" | "approved" | "rejected";
+    status: MessageStatus;
     /** HTML snippet with `<mark>…</mark>` around matched terms. */
     snippet: string;
     rank: number;
@@ -201,7 +202,7 @@ export interface InboxRow {
     body: string | null;
     by_agent: string | null;
     created_at: string;
-    status: "pending" | "approved" | "rejected";
+    status: MessageStatus;
     intent: Intent | null;
     closed: boolean;
     resolved?: boolean;
@@ -236,7 +237,7 @@ export interface ThreadView {
 
 export interface PostMessageInput {
     project: string;
-    kind: "ticket_created" | "comment_added" | "ticket_closed" | "ticket_reopened" | "ticket_resolved" | "ticket_blocked";
+    kind: MessageKind;
     title?: string;
     body?: string;
     by_agent?: string;

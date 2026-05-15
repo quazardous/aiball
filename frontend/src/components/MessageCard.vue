@@ -7,6 +7,7 @@ import Textarea from "primevue/textarea";
 import ToggleButton from "primevue/togglebutton";
 import Tag from "primevue/tag";
 import { api, type Message } from "../lib/api";
+import { KIND_ICONS, KIND_LABELS, STATUS_SEVERITY } from "../lib/labels";
 import MarkdownView from "./MarkdownView.vue";
 import ListRow from "./ListRow.vue";
 import TagBadge from "./TagBadge.vue";
@@ -65,31 +66,11 @@ function relativeTime(iso: string): string {
     return d.toLocaleDateString();
 }
 
-const statusSeverity = computed(() => {
-    switch (props.message.status) {
-        case "approved": return "success";
-        case "rejected": return "danger";
-        default:         return "warn";
-    }
-});
-
-const kindLabel = computed(() => {
-    switch (props.message.kind) {
-        case "ticket_created": return "ticket";
-        case "comment_added":  return "comment";
-        case "ticket_closed":  return "close";
-    }
-    return props.message.kind;
-});
-
-const kindIcon = computed(() => {
-    switch (props.message.kind) {
-        case "ticket_created": return "pi pi-ticket";
-        case "comment_added":  return "pi pi-comment";
-        case "ticket_closed":  return "pi pi-lock";
-    }
-    return "pi pi-circle";
-});
+// Pull severities + kind labels from the central catalog so adding a
+// new MessageKind only happens in labels.ts (#B.122).
+const statusSeverity = computed(() => STATUS_SEVERITY[props.message.status]);
+const kindLabel = computed(() => KIND_LABELS[props.message.kind] ?? props.message.kind);
+const kindIcon = computed(() => KIND_ICONS[props.message.kind] ?? "pi pi-circle");
 
 async function call<T>(fn: () => Promise<T>): Promise<T | null> {
     busy.value = true;

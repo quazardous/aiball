@@ -8,6 +8,7 @@ import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
 import { useToast } from "primevue/usetoast";
 import { api, INTENTS, type Message, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
+import { STATUS_SEVERITY } from "../lib/labels";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -100,10 +101,10 @@ onBeforeUnmount(() => {
     }
 });
 
+// Delegated to the shared severity catalog (#B.122) — the local
+// switch-case duplicated STATUS_SEVERITY from `lib/labels.ts`.
 function statusSeverity(s: "pending" | "approved" | "rejected") {
-    if (s === "pending") return "warn";
-    if (s === "approved") return "success";
-    return "danger";
+    return STATUS_SEVERITY[s];
 }
 
 /**

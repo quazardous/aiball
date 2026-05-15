@@ -9,6 +9,7 @@
  * label etc"). Phase E of #B.332.
  */
 import type { InboxRow, Intent, Strategy } from "./api";
+import type { MessageKind } from "./domain";
 import type { BulkAction } from "./ticket-actions";
 import type { LifecycleStage } from "./ticket-state";
 
@@ -100,6 +101,39 @@ export const STATUS_SEVERITY: Record<InboxRow["status"], Severity> = {
     pending: "warn",
     approved: "success",
     rejected: "danger",
+};
+
+// =====================================================================
+//  Kind labels + icons (single source for the moderation queue)
+// =====================================================================
+//
+// MessageCard.vue used to switch-case on `kind` and cover only 3 of the
+// 8 values (`ticket_created`, `comment_added`, `ticket_closed`), with
+// a raw-string fallback for the rest — so the moderation queue rendered
+// `ticket_blocked` / `ticket_resolved` / `ticket_reopened` etc. as
+// their raw enum text. Catalogue here so all 8 are covered uniformly
+// and adding a new kind is a one-place change (per #B.122).
+
+export const KIND_LABELS: Record<MessageKind, string> = {
+    ticket_created: "ticket",
+    comment_added: "comment",
+    ticket_closed: "close",
+    ticket_reopened: "reopen",
+    ticket_resolved: "resolved",
+    ticket_blocked: "blocked",
+    ticket_sub_added: "sub-ticket",
+    ticket_referenced: "reference",
+};
+
+export const KIND_ICONS: Record<MessageKind, string> = {
+    ticket_created: "pi pi-ticket",
+    comment_added: "pi pi-comment",
+    ticket_closed: "pi pi-lock",
+    ticket_reopened: "pi pi-unlock",
+    ticket_resolved: "pi pi-check-circle",
+    ticket_blocked: "pi pi-ban",
+    ticket_sub_added: "pi pi-sitemap",
+    ticket_referenced: "pi pi-link",
 };
 
 export const INTENT_SEVERITY: Record<Intent, Severity> = {
