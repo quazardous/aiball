@@ -942,15 +942,18 @@ api.get("/inbox", (req, res) => {
             cur.commentCount++;
             if (m.status === "pending") cur.pendingCount++;
         }
-        // #B.132: track who spoke last on this thread. Counts approved
-        // messages that CARRY content the human would read — any
-        // comment_added, plus lifecycle events with a non-empty body
-        // (a ticket_closed/reopened often embarks an explanation
-        // typed in the composer). System-only relations
-        // (ticket_referenced / ticket_sub_added) don't count. Pending
-        // mod comments excluded — "tentative speech".
+        // #B.132: track who spoke last on this thread. Counts any
+        // non-rejected message carrying content the human would read.
+        // - `comment_added`: always (any status — even pending mod is
+        //   "the author spoke, just not yet visible publicly").
+        // - lifecycle events (`ticket_closed`/`reopened`/`resolved`/
+        //   `blocked`): count when they carry a non-empty body (an
+        //   explanation typed in the composer). Bare close/reopen
+        //   with no body excluded — that's not speech.
+        // System-only relations (`ticket_referenced` / `ticket_sub_added`)
+        // never count.
         if (
-            m.status === "approved" &&
+            m.status !== "rejected" &&
             m.by_agent &&
             m.id > cur.lastSpeakerId &&
             (m.kind === "comment_added" ||
