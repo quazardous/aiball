@@ -458,17 +458,43 @@ async function postBodyAs(
         decision_kind: decisionKind,
     });
 }
-async function acceptResolution() {
+async function acceptResolution(asKind?: "plan" | "resolution") {
     const msg = pendingResolution.value;
     if (!msg || !data.value) return;
     const tid = data.value.ticket.id;
+    const effectiveKind = asKind ?? "resolution";
     resolutionBusy.value = true;
     try {
         await api.approve(msg.id);
-        // The typed body (if any) rides along on the close event so the
-        // reporter's "yes, this is done" gets a single decorated card
-        // instead of being split between a comment and a bare close.
-        await postBodyAs("ticket_closed");
+        // #B.129 follow-up: the reporter can reclassify a legacy
+        // ticket_resolved row as "really a plan" — same mechanic as
+        // the new decision-on-comment flow. We approve the message
+        // either way; the close is suppressed when accepting as plan.
+        // When reclassifying, post a marker comment so the audit
+        // trail shows the reclassification.
+        if (effectiveKind === "plan") {
+            if (composerBody.value.trim()) {
+                await postBodyAs("comment_added");
+            } else {
+                // Even with no body, drop a tiny audit comment so
+                // future readers see the reclassification happened.
+                const t = data.value.ticket;
+                const byAgent = localStorage.getItem("aiball.human_id") || "human";
+                await api.postMessage({
+                    project: t.project,
+                    kind: "comment_added",
+                    ticket_id: t.id,
+                    parent_id: t.id,
+                    body: `(accepted as plan — ticket stays open)`,
+                    by_agent: byAgent,
+                });
+            }
+        } else {
+            // The typed body (if any) rides along on the close event so the
+            // reporter's "yes, this is done" gets a single decorated card
+            // instead of being split between a comment and a bare close.
+            await postBodyAs("ticket_closed");
+        }
         composerBody.value = "";
         broadcastRefresh(tid);
     } catch (e) {
@@ -477,6 +503,17 @@ async function acceptResolution() {
         resolutionBusy.value = false;
     }
 }
+
+// Menu items for the legacy pendingResolution path — same reclassify
+// idea as `acceptMenu` but reached when the active "resolution" is a
+// historical ticket_resolved row (not a comment+decision).
+const legacyAcceptMenu = computed(() => [
+    {
+        label: "accept as plan (keep open)",
+        icon: "pi pi-compass",
+        command: () => { void acceptResolution("plan"); },
+    },
+]);
 async function rejectResolution() {
     const msg = pendingResolution.value;
     if (!msg || !data.value) return;
@@ -908,7 +945,7 @@ async function copyTicketRef() {
                         rounded
                         :loading="resolutionBusy"
                         title="Accept the resolution and close. Embarks any text typed in the composer."
-                        @click="acceptResolution"
+                        @click="() => acceptResolution()"
                     />
                 </template>
                 <template v-else>
@@ -1340,13 +1377,15 @@ async function copyTicketRef() {
                                 : 'Type an explanation in the composer first — rejecting a proposal needs a reason.'"
                             @click="rejectResolution"
                         />
-                        <Button
-                            icon="pi pi-verified"
+                        <SplitButton
                             label="accept resolution and close"
+                            icon="pi pi-verified"
                             severity="success"
                             size="small"
                             :loading="resolutionBusy"
-                            @click="acceptResolution"
+                            :model="legacyAcceptMenu"
+                            menu-button-aria-label="Accept as different decision kind"
+                            @click="() => acceptResolution()"
                         />
                     </template>
                     <template v-else-if="data.ticket.status === 'rejected'">
