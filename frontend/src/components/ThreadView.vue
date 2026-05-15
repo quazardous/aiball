@@ -1816,6 +1816,30 @@ async function copyTicketRef() {
     font-size: 0.85rem;
     color: var(--p-text-muted-color);
 }
+/* #B.130 phase 1: prominent summary banner above the comment body
+   when meta.summary is set. Sits between the header and the
+   MarkdownView so the user sees the TLDR first AND the full body
+   below — david: "pas instead à côté pour que je vois les 2". */
+.comment-summary-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.45rem 0.7rem;
+    border-left: 3px solid var(--p-info-color, var(--p-primary-color));
+    background: color-mix(in srgb, var(--p-info-color, var(--p-primary-color)) 6%, transparent);
+    border-radius: 0.25rem;
+    font-style: italic;
+    font-size: 0.9rem;
+    color: var(--p-text-color);
+}
+.comment-summary-banner__icon {
+    color: var(--p-info-color, var(--p-primary-color));
+    margin-top: 0.15rem;
+    flex-shrink: 0;
+}
+.comment-summary-banner__text {
+    flex: 1;
+}
 .comment-ref-tag {
     cursor: pointer;
     user-select: none;

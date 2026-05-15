@@ -244,13 +244,15 @@ onBeforeUnmount(() => detachPaste?.());
                     : `${decision.kind} ${decision.status}${decision.decided_at ? ' at ' + new Date(decision.decided_at).toLocaleString() : ''}`"
                 style="font-size: 0.7rem; margin-left: 0.4rem"
             />
-            <!-- #B.130 phase 1: one-line TLDR chip. Hover for full text. -->
+            <!-- #B.130 phase 1: one-line TLDR chip (kept in the
+                 header for compact glance). A more prominent banner
+                 above the body is rendered below. -->
             <Tag
                 v-if="summary"
-                :value="`📝 ${summary.length > 60 ? summary.slice(0, 60) + '…' : summary}`"
+                value="📝"
                 severity="info"
                 :title="`Summary (author's TLDR): ${summary}`"
-                style="font-size: 0.7rem; margin-left: 0.4rem; font-style: italic; max-width: 28rem; overflow: hidden; text-overflow: ellipsis"
+                style="font-size: 0.7rem; margin-left: 0.4rem; font-style: italic"
             />
             <span class="spacer" />
             <span
@@ -312,8 +314,20 @@ onBeforeUnmount(() => detachPaste?.());
                 />
             </div>
         </div>
+        <!-- #B.130 phase 1: prominent summary banner above the body
+             when a summary exists. Visible side-by-side with the
+             full body (per david: "pas instead à côté pour que je
+             vois les 2"). Always shown when set — no toggle. -->
+        <div
+            v-if="summary && !editing"
+            class="comment-summary-banner"
+            :title="`Summary by ${msg.by_agent ?? 'author'}`"
+        >
+            <i class="pi pi-bookmark comment-summary-banner__icon" />
+            <span class="comment-summary-banner__text">{{ summary }}</span>
+        </div>
         <MarkdownView
-            v-else-if="msg.body || msg.edited_body"
+            v-if="!editing && (msg.body || msg.edited_body)"
             :source="msg.edited_body ?? msg.body"
             :message-id="msg.id"
             :questions-clickable="true"
