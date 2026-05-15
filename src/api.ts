@@ -897,6 +897,11 @@ api.get("/inbox", (req, res) => {
         // Only counts non-stale ones (we ignore them once the ticket is
         // closed since closing implicitly clears them).
         pendingResolution: boolean;
+        // #B.132: who spoke last on this thread. Tracks the by_agent
+        // of the most recent non-rejected approved comment_added.
+        // Falls back to the ticket creator if no comments yet.
+        lastSpeaker: string | null;
+        lastSpeakerId: number;
     }
     const byTicket = new Map<number, Agg>();
     // Sort lifecycle events for each ticket by id ASC so we can replay
@@ -914,10 +919,23 @@ api.get("/inbox", (req, res) => {
                 resolved: false,
                 blocked: false,
                 pendingResolution: false,
+                lastSpeaker: null,
+                lastSpeakerId: 0,
             } as Agg);
         if (m.kind === "comment_added") {
             cur.commentCount++;
             if (m.status === "pending") cur.pendingCount++;
+            // #B.132: track who spoke last on this thread. Only count
+            // approved, non-rejected comments — pending mod comments
+            // are "tentative speech".
+            if (
+                m.status === "approved" &&
+                m.by_agent &&
+                m.id > cur.lastSpeakerId
+            ) {
+                cur.lastSpeaker = m.by_agent;
+                cur.lastSpeakerId = m.id;
+            }
         }
         if (m.kind === "ticket_resolved" && m.status === "pending") {
             cur.pendingResolution = true;
@@ -987,6 +1005,8 @@ api.get("/inbox", (req, res) => {
                 resolved: false,
                 blocked: false,
                 pendingResolution: false,
+                lastSpeaker: null,
+                lastSpeakerId: 0,
             } as Agg);
         const postponedUntil = t.postponed_until ?? null;
         const postponed =
@@ -1031,6 +1051,11 @@ api.get("/inbox", (req, res) => {
                 agg.lastActivity && agg.lastActivity > t.created_at
                     ? agg.lastActivity
                     : t.created_at,
+            // #B.132: who spoke last on this thread. Fallback to the
+            // ticket creator when there are no comments yet — the
+            // discrete "you spoke last" cue should still apply to
+            // freshly created tickets the consumer just authored.
+            last_speaker: agg.lastSpeaker ?? t.by_agent,
             tags: tagsMap.get(t.id) ?? [],
         };
     });

@@ -13,6 +13,12 @@ import {
 import ListRow from "./ListRow.vue";
 import TagBadge from "./TagBadge.vue";
 
+// #B.132: who-spoke-last discrete cue. Read the current consumer
+// once (it's set in localStorage by the header switcher and doesn't
+// change reactively within a session — but we resolve at template-
+// access time so a switch through the URL still works at next render).
+const currentConsumer = () => localStorage.getItem("aiball.human_id") ?? "human";
+
 defineProps<{
     loading: boolean;
     rows: InboxRow[];
@@ -166,7 +172,13 @@ const emit = defineEmits<{
                 <i class="pi pi-comments" /> {{ r.comment_count }}
             </span>
         </template>
-        <template #time>{{ relativeTime(r.last_activity) }}</template>
+        <template #time>
+            <span
+                v-if="r.last_speaker && r.last_speaker === currentConsumer()"
+                class="list-row__you"
+                title="You spoke last on this thread."
+            >you · </span>{{ relativeTime(r.last_activity) }}
+        </template>
     </ListRow>
 </template>
 
@@ -177,6 +189,12 @@ const emit = defineEmits<{
     padding: 3rem 1rem;
     border: 1px dashed var(--p-content-border-color);
     border-radius: 0.5rem;
+}
+/* #B.132: discrete "you spoke last" prefix in the row time slot. */
+.list-row__you {
+    font-style: italic;
+    color: var(--p-primary-color);
+    opacity: 0.85;
 }
 .ticket-id {
     color: var(--p-text-muted-color);

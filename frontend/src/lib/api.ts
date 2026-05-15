@@ -225,6 +225,11 @@ export interface InboxRow {
     comment_count: number;
     pending_comment_count: number;
     last_activity: string;
+    /** #B.132 — `by_agent` of the most recent approved comment on the
+     *  thread (or the ticket creator if no comments yet). UI shows a
+     *  discrete "you" marker when this matches the current consumer
+     *  so the user remembers who spoke last without opening the thread. */
+    last_speaker?: string | null;
     tags: Tag[];
 }
 
