@@ -225,6 +225,12 @@ server.registerTool(
                 .optional()
                 .describe("Project name. Required for offline (spool) mode."),
             by_agent: z.string().optional(),
+            summary_until: z
+                .string()
+                .min(1)
+                .describe(
+                    "One-line TLDR of the thread state *up to AND including this comment* (#B.130). Required for agent authors — the API rejects comment_added without it (HTTP 400). Humans skip the requirement. Each summary_until supersedes the previous: only the most recent one is shown as the canonical 'current state' banner. Soft cap 200 chars.",
+                ),
             then: z
                 .enum(["resolved", "close", "reopen"])
                 .optional()
@@ -233,7 +239,7 @@ server.registerTool(
                 ),
         },
     },
-    async ({ target_id, body, project, by_agent, then }) => {
+    async ({ target_id, body, project, by_agent, summary_until, then }) => {
         const target = (await client.getMessage(target_id)) as {
             project: string;
             kind: string;
@@ -286,6 +292,10 @@ server.registerTool(
             body,
             by_agent: effectiveBy(by_agent),
             decision_kind,
+            // Only forward summary_until for comment_added kinds —
+            // close/reopen are lifecycle rows where the field has no
+            // meaning and the validator would reject it.
+            summary_until: kind === "comment_added" ? summary_until : undefined,
         });
         return asText(res);
     },
