@@ -6,6 +6,7 @@ import {
     editMessage,
     noteMessage,
     markQuestionAnswered,
+    applyMessageDecision,
     listProjects,
     insertRule,
     listRules,
@@ -653,6 +654,41 @@ api.post("/messages/:id/questions/:qid/answer", (req, res) => {
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });
     res.json(decorated);
+});
+
+/**
+ * Decision-on-comment accept/reject (#B.129).
+ *
+ *   POST /api/messages/:id/decide
+ *   body: { status: "accepted" | "rejected", decided_by?: string }
+ *
+ * The message must already carry a `meta.decision` block (the author
+ * tagged it at post time via the composer dropdown). Idempotent —
+ * re-applying the same status returns the row unchanged. Re-deciding
+ * a terminal decision returns 409: the proper flow is to post a new
+ * comment with a fresh decision (e.g. plan v2 after a rejected v1).
+ */
+api.post("/messages/:id/decide", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
+    const body = (req.body ?? {}) as { status?: unknown; decided_by?: unknown };
+    if (body.status !== "accepted" && body.status !== "rejected") {
+        return badRequest(res, "status must be 'accepted' or 'rejected'");
+    }
+    const by = typeof body.decided_by === "string" && body.decided_by
+        ? body.decided_by
+        : consumerOf(req);
+    try {
+        const updated = applyMessageDecision(id, body.status, by);
+        if (!updated) return notFound(res);
+        const decorated = withTagsOne(updated);
+        broadcast({ type: "message_edited", data: decorated });
+        res.json(decorated);
+    } catch (e) {
+        // Domain-level conflict (no decision present, or already
+        // terminal) — surface as 409 so the UI can show the reason.
+        return res.status(409).json({ error: (e as Error).message });
+    }
 });
 
 api.post("/messages/:id/note", (req, res) => {

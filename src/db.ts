@@ -83,6 +83,7 @@ export {
     editMessage,
     noteMessage,
     markQuestionAnswered,
+    applyMessageDecision,
 } from "./db/messages.js";
 
 export {

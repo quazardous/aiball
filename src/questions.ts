@@ -40,8 +40,14 @@ export interface QuestionAnswer {
     answered_in: number;
 }
 
+import type { CommentDecision } from "./decisions.js";
+
 export interface MessageMeta {
     questions?: Record<string, QuestionAnswer>;
+    /** Decision-on-comment sidecar (#B.129). Set by the author at post
+     *  time (composer dropdown) and updated when the reporter accepts
+     *  or rejects via POST /api/messages/:id/decide. */
+    decision?: CommentDecision;
 }
 
 // `- [ ]` or `- [x]` line, optionally preceded by indent, optionally
@@ -183,10 +189,8 @@ export function parseMeta(raw: string | null | undefined): MessageMeta {
  * answered, no other keys) so the column stays NULL on empty rows.
  */
 export function serializeMeta(meta: MessageMeta): string | null {
-    if (!meta.questions || Object.keys(meta.questions).length === 0) {
-        // No other fields today; once we add more, this returns
-        // `JSON.stringify(meta)` whenever any non-empty key exists.
-        return null;
-    }
+    const hasQuestions = !!meta.questions && Object.keys(meta.questions).length > 0;
+    const hasDecision = !!meta.decision;
+    if (!hasQuestions && !hasDecision) return null;
     return JSON.stringify(meta);
 }

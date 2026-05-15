@@ -30,6 +30,7 @@ import {
     type MessageMeta,
     type QuestionAnswer,
 } from "../questions.js";
+import { applyDecision, type DecisionStatus } from "../decisions.js";
 
 export function insertMessage(m: NewMessage): Message {
     const db = getDb();
@@ -79,6 +80,15 @@ export function insertMessage(m: NewMessage): Message {
                 ? m.parent_id
                 : null;
         const hashid = pickFreshHashid(tx);
+        // #B.129: if the author tagged this comment as decisional at
+        // post time, stamp `meta.decision = {kind, status:"pending"}`.
+        // Only honored on comment_added (validator enforces that).
+        let metaInit: string | null = null;
+        if (m.decision_kind && m.kind === "comment_added") {
+            metaInit = JSON.stringify({
+                decision: { kind: m.decision_kind, status: "pending" },
+            });
+        }
         const inserted = tx.insert(schema.messages).values({
             id,
             ticketId: m.ticket_id,
@@ -89,6 +99,7 @@ export function insertMessage(m: NewMessage): Message {
             byAgent: m.by_agent ?? null,
             createdAt,
             hashid,
+            meta: metaInit,
         }).returning().get();
         // Resolve project via parent ticket for the legacy shape.
         const parent = tx.select({ project: schema.tickets.project })
@@ -426,4 +437,43 @@ function mergeMeta(
     const meta = parseMeta(raw);
     meta.questions = { ...(meta.questions ?? {}), [questionId]: answer };
     return meta;
+}
+
+/**
+ * Apply an accept/reject to the `meta.decision` sidecar of a comment
+ * (#B.129). Comments only — tickets carry their own lifecycle via
+ * ticket_resolved / ticket_blocked. Returns the updated message or null
+ * when the message id doesn't exist OR has no decision to update.
+ *
+ * Throws for invalid transitions (re-deciding a terminal decision).
+ * The HTTP layer maps the throw to 409 Conflict.
+ */
+export function applyMessageDecision(
+    messageId: number,
+    status: DecisionStatus,
+    decidedBy: string,
+): Message | null {
+    const db = getDb();
+    return db.transaction((tx) => {
+        const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!m) return null;
+        const meta = parseMeta(m.meta ?? null);
+        const r = applyDecision(meta.decision, status, decidedBy, new Date().toISOString());
+        if (!r.changed) {
+            // idempotent re-decide — return current row unchanged
+            const parent = tx.select({ project: schema.tickets.project })
+                .from(schema.tickets).where(eq(schema.tickets.id, m.ticketId)).get();
+            return messageRowToMessage(m, parent?.project ?? "");
+        }
+        meta.decision = r.decision;
+        tx.update(schema.messages)
+            .set({ meta: serializeMeta(meta) })
+            .where(eq(schema.messages.id, messageId))
+            .run();
+        const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!fresh) return null;
+        const parent = tx.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
+        return messageRowToMessage(fresh, parent?.project ?? "");
+    });
 }

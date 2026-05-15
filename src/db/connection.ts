@@ -172,6 +172,11 @@ export interface NewMessage {
     summary?: string | null;
     by_agent?: string | null;
     intent?: Intent | null;
+    /** #B.129 decision-on-comment: author tags a comment as decisional
+     *  at post-time (`plan` / `resolution` / extensible). Stored in
+     *  `meta.decision = {kind, status:"pending"}` so the reporter can
+     *  later accept/reject via POST /api/messages/:id/decide. */
+    decision_kind?: string | null;
 }
 
 export interface NewRule {

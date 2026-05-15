@@ -21,6 +21,7 @@ import {
     type MessageKind,
     type Intent,
 } from "./db.js";
+import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
 import { evaluate } from "./rules.js";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
@@ -68,6 +69,21 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         }
         intent = o.intent as Intent;
     }
+    // #B.129 decision-on-comment: validate optional `decision_kind`.
+    // Only meaningful on comment_added today; other kinds drop it.
+    let decisionKind: string | null = null;
+    if (o.decision_kind !== undefined && o.decision_kind !== null) {
+        if (typeof o.decision_kind !== "string") {
+            return { error: "decision_kind must be a string" };
+        }
+        if (!isDecisionKind(o.decision_kind)) {
+            return { error: `decision_kind must be one of ${DECISION_KINDS.join(", ")}` };
+        }
+        if (kind !== "comment_added") {
+            return { error: `decision_kind only allowed on comment_added (got kind=${kind})` };
+        }
+        decisionKind = o.decision_kind;
+    }
     return {
         project: o.project,
         kind,
@@ -81,6 +97,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         summary: typeof o.summary === "string" && o.summary !== "" ? o.summary : null,
         by_agent: typeof o.by_agent === "string" ? o.by_agent : null,
         intent: kind === "ticket_created" ? intent : null,
+        decision_kind: decisionKind,
     };
 }
 
