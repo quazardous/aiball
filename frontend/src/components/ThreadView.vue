@@ -1283,14 +1283,14 @@ async function copyTicketRef() {
                     <template v-if="activeDecision">
                         <Button
                             icon="pi pi-times"
-                            :label="activeDecision.decision.kind === 'resolution' ? 'reject and keep open' : `reject ${activeDecision.decision.kind}`"
+                            :label="`reject ${activeDecision.decision.kind}`"
                             severity="secondary"
                             size="small"
                             outlined
                             :loading="resolutionBusy"
                             :disabled="!hasBody"
                             :title="hasBody
-                                ? `Reject the ${activeDecision.decision.kind} and post your note explaining why.`
+                                ? `Reject the ${activeDecision.decision.kind} — ticket stays open. Your composer body is posted as the explanation.`
                                 : `Type an explanation in the composer first — rejecting a ${activeDecision.decision.kind} needs a reason.`"
                             @click="rejectActiveDecision"
                         />
@@ -1306,14 +1306,14 @@ async function copyTicketRef() {
                     <template v-else-if="pendingResolution">
                         <Button
                             icon="pi pi-times"
-                            label="reject and keep open"
+                            label="reject resolution"
                             severity="secondary"
                             size="small"
                             outlined
                             :loading="resolutionBusy"
                             :disabled="!hasBody"
                             :title="hasBody
-                                ? 'Reject the resolution proposal and post your note explaining why.'
+                                ? 'Reject the resolution proposal — ticket stays open. Your composer body is posted as the explanation.'
                                 : 'Type an explanation in the composer first — rejecting a proposal needs a reason.'"
                             @click="rejectResolution"
                         />
