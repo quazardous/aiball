@@ -7,8 +7,12 @@
 #   ./install.sh --port 7878           # override listen port (writes a systemd drop-in)
 #   ./install.sh --host 0.0.0.0        # override listen host (default 127.0.0.1)
 #   ./install.sh --no-systemd          # skip systemd unit
-#   ./install.sh --stop-hook           # register the interactive Stop autopoll
-#                                      # hook in ~/.claude/settings.json (#B.99)
+#   ./install.sh --stop-hook           # register the Stop autopoll hook in
+#                                      # <PWD>/.claude/settings.json (project-
+#                                      # local since #B.128). Add --global to
+#                                      # write to ~/.claude/settings.json
+#                                      # instead (fires in every Claude Code
+#                                      # session everywhere). #B.99
 #   ./install.sh --uninstall           # remove everything we installed
 #
 # Reentrant: re-running with new --port / --host overwrites only the bind
@@ -25,6 +29,7 @@ NO_SYSTEMD=false
 UNINSTALL=false
 SYMLINK=false
 STOP_HOOK=false
+GLOBAL_HOOK=false
 PORT=""
 HOST=""
 
@@ -34,6 +39,12 @@ while [[ $# -gt 0 ]]; do
         --uninstall)  UNINSTALL=true; shift ;;
         --symlink)    SYMLINK=true; shift ;;
         --stop-hook)  STOP_HOOK=true; shift ;;
+        # #B.128: --stop-hook now writes to <PWD>/.claude/settings.json
+        # by default (project-local). Pass --global to fall back to the
+        # legacy ~/.claude/settings.json behavior, which fires in EVERY
+        # Claude Code session (the per-project filter is then done by
+        # the hook script walking up to find a .aiball.yaml).
+        --global)     GLOBAL_HOOK=true; shift ;;
         --port)       PORT="${2:-}"; shift 2 ;;
         --port=*)     PORT="${1#--port=}"; shift ;;
         --host)       HOST="${2:-}"; shift 2 ;;
@@ -74,22 +85,27 @@ uninstall() {
     else
         rm -rf "$PREFIX_LIB"
     fi
-    # Remove the Stop autopoll hook from ~/.claude/settings.json if we
-    # installed it. Best-effort, jq required.
-    local settings="$HOME/.claude/settings.json"
-    if [[ -f "$settings" ]] && command -v jq >/dev/null 2>&1; then
-        if jq -e '.hooks.Stop[]?.hooks[]? | select(.command|tostring|test("aiball-autopoll-stop\\.sh$"))' "$settings" >/dev/null 2>&1; then
-            cp -n "$settings" "$settings.aiball-bak" || true
-            jq '
-                if .hooks.Stop then
-                    .hooks.Stop |= map(
-                        .hooks |= map(select(.command|tostring|test("aiball-autopoll-stop\\.sh$")|not))
-                    ) |
-                    .hooks.Stop |= map(select(.hooks|length > 0))
-                else . end
-            ' "$settings" > "$settings.tmp" && mv "$settings.tmp" "$settings"
-            log "Removed Stop hook from $settings"
-        fi
+    # Remove the Stop autopoll hook from any settings.json we may have
+    # written into — global ~/.claude/settings.json (legacy default) AND
+    # project-local <PWD>/.claude/settings.json (#B.128). Best-effort,
+    # jq required; missing files are silently skipped.
+    if command -v jq >/dev/null 2>&1; then
+        local s
+        for s in "$HOME/.claude/settings.json" "$PWD/.claude/settings.json"; do
+            [[ -f "$s" ]] || continue
+            if jq -e '.hooks.Stop[]?.hooks[]? | select(.command|tostring|test("aiball-autopoll-stop\\.sh$"))' "$s" >/dev/null 2>&1; then
+                cp -n "$s" "$s.aiball-bak" || true
+                jq '
+                    if .hooks.Stop then
+                        .hooks.Stop |= map(
+                            .hooks |= map(select(.command|tostring|test("aiball-autopoll-stop\\.sh$")|not))
+                        ) |
+                        .hooks.Stop |= map(select(.hooks|length > 0))
+                    else . end
+                ' "$s" > "$s.tmp" && mv "$s.tmp" "$s"
+                log "Removed Stop hook from $s"
+            fi
+        done
     fi
     warn "Data preserved at \$AIBALL_HOME (~/.local/share/aiball). Remove manually if you want a clean slate."
     log "Done."
@@ -243,21 +259,39 @@ if command -v aiball >/dev/null 2>&1; then
     fi
 fi
 
-# --- Interactive Stop autopoll hook (#B.99) ------------------------------
-# Opt-in via --stop-hook. Injects an entry in ~/.claude/settings.json so
-# Stop fires after every Claude Code response and asks aiball if there
-# are unread pings for this consumer. Per-project config lives in
-# `.aiball.json` (autopoll.enabled, throttle_seconds, tone, ...).
+# --- Interactive Stop autopoll hook (#B.99, #B.128) ----------------------
+# Opt-in via --stop-hook. Default target since #B.128 is project-local
+# (<PWD>/.claude/settings.json) so the hook only fires when Claude Code
+# is launched in this repo. Pass --global to write to the legacy global
+# location (~/.claude/settings.json) — fires in every Claude Code
+# session and relies on the hook script walking up to find a
+# .aiball.yaml; useful but pollutes settings of unrelated projects.
 
 if $STOP_HOOK; then
     HOOK_TARGET="$PREFIX_LIB/skill/hooks/aiball-autopoll-stop.sh"
-    SETTINGS="$HOME/.claude/settings.json"
+    if $GLOBAL_HOOK; then
+        SETTINGS="$HOME/.claude/settings.json"
+        SETTINGS_SCOPE="global"
+    else
+        SETTINGS="$PWD/.claude/settings.json"
+        SETTINGS_SCOPE="project-local ($PWD)"
+    fi
     if [[ ! -x "$HOOK_TARGET" ]]; then
         warn "Stop hook script not found at $HOOK_TARGET — install layout is broken"
     elif ! command -v jq >/dev/null 2>&1; then
-        warn "jq is required to wire the Stop hook into ~/.claude/settings.json"
+        warn "jq is required to wire the Stop hook into $SETTINGS"
         warn "    install jq, then re-run: $SRC_DIR/install.sh --stop-hook"
     else
+        # Warn (don't fail) when --global is requested and a project-
+        # local hook already exists, or vice versa — flags the user
+        # before they end up with two entries firing concurrently.
+        OTHER="$([[ $GLOBAL_HOOK == true ]] && echo "$PWD/.claude/settings.json" || echo "$HOME/.claude/settings.json")"
+        if [[ -f "$OTHER" ]] && jq -e --arg cmd "$HOOK_TARGET" \
+            '.hooks.Stop[]?.hooks[]? | select(.command == $cmd)' \
+            "$OTHER" >/dev/null 2>&1; then
+            warn "Stop hook already present in $OTHER ($($GLOBAL_HOOK && echo project-local || echo global) scope)"
+            warn "    you may want to remove it to avoid firing twice — see ./install.sh --uninstall (cleans both)"
+        fi
         mkdir -p "$(dirname "$SETTINGS")"
         [[ -f "$SETTINGS" ]] || echo '{}' > "$SETTINGS"
         # Backup once per install pass.
@@ -267,14 +301,14 @@ if $STOP_HOOK; then
         if jq -e --arg cmd "$HOOK_TARGET" \
             '.hooks.Stop[]?.hooks[]? | select(.command == $cmd)' \
             "$SETTINGS" >/dev/null 2>&1; then
-            log "Stop hook already wired in $SETTINGS"
+            log "Stop hook already wired in $SETTINGS ($SETTINGS_SCOPE)"
         else
             jq --arg cmd "$HOOK_TARGET" '
                 .hooks //= {} |
                 .hooks.Stop //= [] |
                 .hooks.Stop += [{"hooks": [{"type": "command", "command": $cmd}]}]
             ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
-            log "Wired Stop hook → $SETTINGS"
+            log "Wired Stop hook → $SETTINGS ($SETTINGS_SCOPE)"
             log "Backup of previous settings: $SETTINGS.aiball-bak"
         fi
     fi
@@ -296,7 +330,10 @@ Next steps:
                                'export AIBALL_TOKEN=<token>'
   4. Register the MCP server:  see MCP-CLIENT.md or README.md
   5. (optional) Interactive Stop autopoll hook:
-                               re-run with --stop-hook to wire ~/.claude/settings.json
+                               re-run with --stop-hook in the repo's root to wire
+                               <PWD>/.claude/settings.json (project-local).
+                               Add --global to wire ~/.claude/settings.json
+                               instead (fires in every Claude Code session).
                                Per-project: drop a {} into .aiball.json to enable;
                                tune via autopoll.tone / throttle_seconds (see docs)
 EOF

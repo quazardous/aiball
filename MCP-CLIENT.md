@@ -159,7 +159,9 @@ For continuous push, keep a `tail -F` on the project outbox path (returned by `s
 
 > **Claude Code only.** This section is irrelevant for other MCP clients — there is no comparable `Stop` event in plain MCP. Skip if you are not in the Claude Code harness.
 
-`./install.sh --stop-hook` wires a Claude Code `Stop` hook that fires at the end of every agent turn. The hook asks the daemon "is anything pending for this consumer?" and, when there is, **blocks** the turn from ending with a message like:
+`./install.sh --stop-hook` (run in the repo's root) wires a Claude Code `Stop` hook in `<PWD>/.claude/settings.json` — **project-local by default since #B.128**, so the hook only fires when Claude Code is launched in this repo. Pass `--global` to write to `~/.claude/settings.json` instead (fires in every Claude Code session everywhere; the hook script then walks up looking for a `.aiball.yaml` to decide whether to nag).
+
+The hook asks the daemon "is anything pending for this consumer?" and, when there is, **blocks** the turn from ending with a message like:
 
 ```
 You have 3 unread aiball pings:
@@ -180,11 +182,14 @@ That message arrives as Claude Code stop-hook feedback. Treat it as a directive:
 ### Verify it is active
 
 ```bash
+# Project-local install (the default since #B.128):
+jq '.hooks.Stop' .claude/settings.json
+# Global install (legacy / --global):
 jq '.hooks.Stop' ~/.claude/settings.json
 # → an array with one entry pointing at .../aiball-autopoll-stop.sh
 ```
 
-If the array is empty or missing, re-run `./install.sh --stop-hook` on the daemon machine.
+If both are empty or missing, re-run `./install.sh --stop-hook` (project-local) or `./install.sh --stop-hook --global` (global) on the daemon machine.
 
 ### Configure per project
 
