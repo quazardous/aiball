@@ -40,9 +40,9 @@ function backlogLine(tone: AutopollTone, payload: AutopollPayload): string {
         case "hint":
             return `\n\nBacklog: ${n} open ticket${s} in ${scope}. Have a look via \`ticket_list({open: true})\` when you can.`;
         case "directive":
-            return `\n\nBacklog: ${n} open ticket${s} in ${scope}. ${after} via \`ticket_list({open: true})\` and process them — close your own, otherwise \`ticket_reply({target_id, body, then: "resolved"})\` (or \`then: "blocked"\` if you genuinely can't proceed). A plain reply leaves the ticket in the backlog and the autopoll will nag again.`;
+            return `\n\nBacklog: ${n} open ticket${s} in ${scope}. ${after} via \`ticket_list({open: true})\` and process them — close your own, otherwise \`ticket_reply({target_id, body, then: "resolved"})\`. If you need info before proceeding, post a plain comment with your question (the conversation IS the channel — there's no separate blocked/TBD signal anymore). A plain reply leaves the ticket in the backlog and the autopoll will nag again.`;
         case "imperative":
-            return `\n\n**BACKLOG: ${n} open ticket${s} in ${scope}**. ${afterCaps} \`ticket_list({open: true})\` and clear EACH one with \`ticket_reply({target_id, body, then: "resolved"})\` (or \`then: "blocked"\` only if escalation is unavoidable). A bare reply does NOT drain the backlog — the autopoll WILL re-fire until each ticket is resolved / closed / blocked.`;
+            return `\n\n**BACKLOG: ${n} open ticket${s} in ${scope}**. ${afterCaps} \`ticket_list({open: true})\` and clear EACH one with \`ticket_reply({target_id, body, then: "resolved"})\`. Need info? Post a plain comment with your question. A bare reply does NOT drain the backlog — the autopoll WILL re-fire until each ticket is resolved / closed.`;
     }
 }
 
