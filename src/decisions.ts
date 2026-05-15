@@ -50,6 +50,33 @@ export function isDecisionStatus(s: string): s is DecisionStatus {
  * already terminal in a different direction). Callers should turn
  * these into 4xx responses.
  */
+/**
+ * Reclassify the kind of a pending decision WITHOUT accepting/rejecting
+ * (#B.129 follow-up): "the agent tagged this as resolution but it's
+ * really a plan — keep it pending, just change the verb". Throws when
+ * the decision is missing or already terminal.
+ */
+export function reclassifyDecision(
+    current: CommentDecision | undefined,
+    newKind: DecisionKind,
+): { decision: CommentDecision; changed: boolean } {
+    if (!current) {
+        throw new Error("no decision on this message — author must tag it first");
+    }
+    if (current.status !== "pending") {
+        throw new Error(
+            `decision already ${current.status} — reclassify requires the decision to still be pending`,
+        );
+    }
+    if (current.kind === newKind) {
+        return { decision: current, changed: false };
+    }
+    return {
+        decision: { ...current, kind: newKind },
+        changed: true,
+    };
+}
+
 export function applyDecision(
     current: CommentDecision | undefined,
     next: DecisionStatus,

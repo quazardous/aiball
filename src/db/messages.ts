@@ -30,7 +30,7 @@ import {
     type MessageMeta,
     type QuestionAnswer,
 } from "../questions.js";
-import { applyDecision, type DecisionStatus } from "../decisions.js";
+import { applyDecision, reclassifyDecision, type DecisionStatus } from "../decisions.js";
 
 export function insertMessage(m: NewMessage): Message {
     const db = getDb();
@@ -483,6 +483,39 @@ export function setMessageSummary(
         } else {
             meta.summary_until = trimmed;
         }
+        tx.update(schema.messages)
+            .set({ meta: serializeMeta(meta) })
+            .where(eq(schema.messages.id, messageId))
+            .run();
+        const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!fresh) return null;
+        const parent = tx.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
+        return messageRowToMessage(fresh, parent?.project ?? "");
+    });
+}
+
+/**
+ * Reclassify a comment's decision kind without changing its status
+ * (#B.129 follow-up). Throws when the decision is missing or already
+ * terminal. HTTP layer maps to 409 on conflict.
+ */
+export function reclassifyMessageDecision(
+    messageId: number,
+    newKind: import("../decisions.js").DecisionKind,
+): Message | null {
+    const db = getDb();
+    return db.transaction((tx) => {
+        const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!m) return null;
+        const meta = parseMeta(m.meta ?? null);
+        const r = reclassifyDecision(meta.decision, newKind);
+        if (!r.changed) {
+            const parent = tx.select({ project: schema.tickets.project })
+                .from(schema.tickets).where(eq(schema.tickets.id, m.ticketId)).get();
+            return messageRowToMessage(m, parent?.project ?? "");
+        }
+        meta.decision = r.decision;
         tx.update(schema.messages)
             .set({ meta: serializeMeta(meta) })
             .where(eq(schema.messages.id, messageId))

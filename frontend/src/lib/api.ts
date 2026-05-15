@@ -434,6 +434,11 @@ export const api = {
         new_kind?: "plan" | "resolution",
     ) =>
         req<Message>("POST", `/api/messages/${id}/decide`, { status, new_kind }),
+    /** Reclassify a pending decision's kind without changing its
+     *  status (#B.129 follow-up). 409 when the decision is missing
+     *  or already terminal. */
+    reclassify: (id: number, new_kind: "plan" | "resolution") =>
+        req<Message>("POST", `/api/messages/${id}/reclassify`, { new_kind }),
     edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>

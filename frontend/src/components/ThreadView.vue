@@ -11,6 +11,7 @@ import { useToast } from "primevue/usetoast";
 import { api, INTENTS, type Message, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
 import { findActiveDecision, type CommentDecision } from "../lib/decisions";
 import { STATUS_SEVERITY } from "../lib/labels";
+import { topDown, toggleTopDown } from "../lib/prefs";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -285,15 +286,6 @@ onBeforeUnmount(() => editDetachPaste?.());
 // copies its #N ref and pastes it (or quotes with `> ...`) into a fresh
 // top-level comment. The data layer still tolerates parent_message_id
 // for backward compatibility but the UI ignores it.
-// #B.133: per-user thread ordering pref. localStorage so it survives
-// reloads, default false (oldest-first as before). Top-down = newest
-// at top so the reader sees the latest reply right under the header.
-const topDown = ref(localStorage.getItem("aiball.thread_top_down") === "1");
-function toggleTopDown() {
-    topDown.value = !topDown.value;
-    localStorage.setItem("aiball.thread_top_down", topDown.value ? "1" : "0");
-}
-
 const flatComments = computed<Message[]>(() => {
     if (!data.value) return [];
     const sorted = [...data.value.comments].sort((a, b) => a.id - b.id);
@@ -636,9 +628,28 @@ async function acceptActiveDecision(asKind?: "plan" | "resolution") {
     }
 }
 
+async function reclassifyActiveDecision(newKind: "plan" | "resolution") {
+    const active = activeDecision.value;
+    if (!active || !data.value) return;
+    const tid = data.value.ticket.id;
+    if (active.decision.kind === newKind) return;
+    resolutionBusy.value = true;
+    try {
+        await api.reclassify(active.message.id, newKind);
+        broadcastRefresh(tid);
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        resolutionBusy.value = false;
+    }
+}
+
 // Menu items for the reporter's accept SplitButton (#B.129 follow-up).
-// Surfaces a "reclassify and accept" path when the active decision's
-// kind doesn't match what the reporter sees in the body.
+// Surfaces two related-but-distinct paths:
+//   - "accept as <other-kind>" flips kind + status in one shot
+//   - "just reclassify to <other-kind>" flips kind only, decision
+//     stays pending (per david: "je dois pouvoir requalifier en
+//     voici mon plan").
 const acceptMenu = computed(() => {
     const active = activeDecision.value;
     if (!active) return [];
@@ -649,11 +660,21 @@ const acceptMenu = computed(() => {
             icon: "pi pi-compass",
             command: () => { void acceptActiveDecision("plan"); },
         });
+        items.push({
+            label: "just reclassify as plan (still pending)",
+            icon: "pi pi-pencil",
+            command: () => { void reclassifyActiveDecision("plan"); },
+        });
     } else if (active.decision.kind === "plan") {
         items.push({
             label: "accept as resolution and close",
             icon: "pi pi-check-circle",
             command: () => { void acceptActiveDecision("resolution"); },
+        });
+        items.push({
+            label: "just reclassify as resolution (still pending)",
+            icon: "pi pi-pencil",
+            command: () => { void reclassifyActiveDecision("resolution"); },
         });
     }
     return items;
@@ -862,7 +883,11 @@ async function copyTicketRef() {
                 @click="emit('back')"
             />
             <span class="spacer" />
-            <!-- #B.133: per-user thread order toggle. -->
+            <!-- #B.133: thread-order toggle. Button lives in the
+                 thread head (per david: "tu peux laisser le bouton
+                 dans le head du thread") but the state is shared
+                 globally via `lib/prefs.ts` — toggling here flips
+                 the order on every thread you open. -->
             <Button
                 :icon="topDown ? 'pi pi-sort-amount-down' : 'pi pi-sort-amount-up'"
                 severity="secondary"
@@ -870,8 +895,8 @@ async function copyTicketRef() {
                 text
                 rounded
                 :title="topDown
-                    ? 'Thread order: newest at top. Click to flip to oldest-first.'
-                    : 'Thread order: oldest first (default). Click to flip to newest at top.'"
+                    ? 'Thread order (applies to ALL threads): newest at top. Click to flip to oldest-first.'
+                    : 'Thread order (applies to ALL threads): oldest first (default). Click to flip to newest at top.'"
                 @click="toggleTopDown"
             />
             <Button

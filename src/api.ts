@@ -7,6 +7,7 @@ import {
     noteMessage,
     markQuestionAnswered,
     applyMessageDecision,
+    reclassifyMessageDecision,
     setMessageSummary,
     listProjects,
     insertRule,
@@ -728,6 +729,35 @@ api.post("/messages/:id/summarize", (req: Request, res: Response) => {
     }
     try {
         const updated = setMessageSummary(id, body.summary);
+        if (!updated) return notFound(res);
+        const decorated = withTagsOne(updated);
+        broadcast({ type: "message_edited", data: decorated });
+        res.json(decorated);
+    } catch (e) {
+        return res.status(409).json({ error: (e as Error).message });
+    }
+});
+
+/**
+ * Reclassify a comment's decision kind without flipping its status
+ * (#B.129 follow-up — david: "je dois pouvoir requalifier en voici
+ * mon plan"). Keeps the decision pending; just swaps `meta.decision
+ * .kind` between `plan` and `resolution`.
+ *
+ *   POST /api/messages/:id/reclassify
+ *   body: { new_kind: "plan" | "resolution" }
+ *
+ * HTTP 409 when the decision doesn't exist OR is already terminal.
+ */
+api.post("/messages/:id/reclassify", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
+    const body = (req.body ?? {}) as { new_kind?: unknown };
+    if (typeof body.new_kind !== "string" || !isDecisionKind(body.new_kind)) {
+        return badRequest(res, "new_kind must be a valid decision kind");
+    }
+    try {
+        const updated = reclassifyMessageDecision(id, body.new_kind);
         if (!updated) return notFound(res);
         const decorated = withTagsOne(updated);
         broadcast({ type: "message_edited", data: decorated });
