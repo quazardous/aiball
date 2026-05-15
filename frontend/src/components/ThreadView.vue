@@ -639,6 +639,14 @@ async function snoozeFor(ms: number) {
     const tid = data.value.ticket.id;
     snoozeBusy.value = true;
     try {
+        // #B.63: if the composer has body text, post it as a comment
+        // before the snooze — keeps the audit trail with the typed
+        // context ("snoozing because waiting on X"). Empty composer
+        // → just the snooze, same as before.
+        if (composerBody.value.trim()) {
+            await postBodyAs("comment_added");
+            composerBody.value = "";
+        }
         const until = new Date(Date.now() + ms).toISOString();
         await api.postponeTicket(tid, until);
         snoozePopoverRef.value?.hide();
@@ -661,6 +669,11 @@ async function snoozeCustomSubmit() {
     }
     snoozeBusy.value = true;
     try {
+        // Same as snoozeFor — embark the composer body if any.
+        if (composerBody.value.trim()) {
+            await postBodyAs("comment_added");
+            composerBody.value = "";
+        }
         await api.postponeTicket(tid, new Date(ts).toISOString());
         snoozePopoverRef.value?.hide();
         bus.emit("thread.refresh", { ticketId: tid });
@@ -1342,6 +1355,17 @@ async function copyTicketRef() {
                         />
                     </template>
                     <template v-else>
+                        <Button
+                            v-if="!data.ticket.resolved && !data.ticket.blocked && !isSnoozed"
+                            icon="pi pi-history"
+                            :label="hasBody ? 'comment and snooze' : 'snooze'"
+                            severity="info"
+                            size="small"
+                            text
+                            :loading="snoozeBusy"
+                            title="Set aside — type your context first if you want, then pick a duration. The ticket disappears from the open inbox until then."
+                            @click="openSnoozePopover"
+                        />
                         <Button
                             v-if="!data.ticket.resolved && !data.ticket.blocked"
                             icon="pi pi-compass"
