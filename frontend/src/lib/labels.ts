@@ -57,11 +57,13 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         title: "an agent proposed resolution — accept (close) or reject to bring it back",
     },
     blocked: {
-        // Agent escalation (#B.119): the agent flagged "I can't proceed,
-        // your call." Red to differentiate from amber-pending-resolved
-        // (which the reporter can rubber-stamp) — blocked needs the
-        // human to actually look at the thread.
-        icon: "pi pi-flag",
+        // Agent escalation (#B.119): "I can't proceed, your call." Uses
+        // the encircled-icon family on purpose — symmetric with the
+        // encircled-check used for resolved / pending-resolved. Red so
+        // the eye picks it up as "stop, look here", different from the
+        // amber pending-resolved (rubber-stamp) and the green resolved
+        // (done). `pi-ban` is the closest stop-sign in PrimeIcons.
+        icon: "pi pi-ban",
         color: "--p-red-500",
         title: "agent blocked — your call (reply, reopen, or close)",
     },

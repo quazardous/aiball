@@ -49,7 +49,13 @@ export interface MessageMeta {
 // undefined, 4=trailing text after the marker.
 //
 // We also accept asterisks (`* [ ]`) and plus (`+ [ ]`) as GFM does.
-const TASK_LINE = /^([ \t]*)(?:[-*+])\s\[( |x|X)\](?:<!--\s*q:([a-zA-Z0-9_-]+)\s*-->)?(.*)$/;
+//
+// `\s*` between `]` and the marker so both the legacy no-space format
+// (`- [ ]<!-- q:xxx -->`) and the GFM-friendly one (`- [ ] <!-- q:xxx -->`)
+// parse. marked needs the space to recognize the line as a task-list
+// item, so injectMarkers always emits the spaced form — but the read
+// path tolerates either to avoid breaking existing bodies in the DB.
+const TASK_LINE = /^([ \t]*)(?:[-*+])\s\[( |x|X)\](?:\s*<!--\s*q:([a-zA-Z0-9_-]+)\s*-->)?(.*)$/;
 
 function newId(): string {
     // Just the hex — the `q:` namespace prefix lives in the marker
@@ -97,19 +103,24 @@ export function injectMarkers(body: string | null | undefined): string {
     for (let i = 0; i < lines.length; i++) {
         const m = TASK_LINE.exec(lines[i]);
         if (!m) continue;
-        if (m[3]) continue; // already has a marker
         const indent = m[1];
         const char = m[2];
         const trailing = m[4] ?? "";
-        // Insert the marker right after the `]` and before the
-        // trailing text. Preserve the original whitespace shape.
+        const id = m[3] ?? newId();
         const trailingWithLeadingSpace = trailing.startsWith(" ") ? trailing : trailing ? " " + trailing : "";
-        lines[i] = `${indent}- [${char}]<!-- q:${newId()} -->${trailingWithLeadingSpace}`;
-        // Note: we rewrite as `-` even if the source used `*` or `+`.
-        // Choice of style consistency over preservation; this only
-        // touches lines that were already task-list-shaped and were
-        // missing their id.
-        changed = true;
+        // Always emit the spaced form. marked's GFM task-list tokenizer
+        // requires whitespace between `]` and the next content — without
+        // it, the line renders as plain text instead of a checkbox. We
+        // also rewrite legacy unspaced bodies on edit so they become
+        // clickable next time the message round-trips through here.
+        const rebuilt = `${indent}- [${char}] <!-- q:${id} -->${trailingWithLeadingSpace}`;
+        // Note: we rewrite the bullet as `-` even if the source used
+        // `*` or `+`. Style consistency over preservation; only fires
+        // on task-list-shaped lines that need rewriting.
+        if (lines[i] !== rebuilt) {
+            lines[i] = rebuilt;
+            changed = true;
+        }
     }
     return changed ? lines.join("\n") : body;
 }
@@ -142,7 +153,9 @@ export function setQuestionStatus(
         }
         const trailing = m[4] ?? "";
         const trailingWithLeadingSpace = trailing.startsWith(" ") ? trailing : trailing ? " " + trailing : "";
-        lines[i] = `${indent}- [${targetChar}]<!-- q:${questionId} -->${trailingWithLeadingSpace}`;
+        // Spaced form between `]` and `<!--` so marked's GFM task-list
+        // tokenizer renders the line as a checkbox (see injectMarkers).
+        lines[i] = `${indent}- [${targetChar}] <!-- q:${questionId} -->${trailingWithLeadingSpace}`;
         return { body: lines.join("\n"), changed: true };
     }
     return { body, changed: false };

@@ -258,7 +258,11 @@ function onQuestionClick(ev: Event) {
     });
 }
 
-watch(html, () => { void wireQuestionClicks(); }, { flush: "post" });
+// `immediate: true` so the very first render also wires clicks —
+// `watch` without it only fires on subsequent changes, which means a
+// freshly mounted MarkdownView would leave its checkboxes inert until
+// the source changes again.
+watch(html, () => { void wireQuestionClicks(); }, { flush: "post", immediate: true });
 </script>
 
 <template>

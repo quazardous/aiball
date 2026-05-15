@@ -776,7 +776,7 @@ async function copyTicketRef() {
                     />
                     <Button
                         v-if="!data.ticket.resolved && !data.ticket.blocked"
-                        icon="pi pi-flag"
+                        icon="pi pi-ban"
                         severity="danger"
                         size="small"
                         text
@@ -1238,7 +1238,7 @@ async function copyTicketRef() {
                         />
                         <Button
                             v-if="!data.ticket.resolved && !data.ticket.blocked"
-                            icon="pi pi-flag"
+                            icon="pi pi-ban"
                             :label="hasBody ? 'comment and mark blocked' : 'mark blocked'"
                             severity="danger"
                             size="small"

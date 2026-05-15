@@ -26,7 +26,11 @@ export interface Question {
 // `- [ ]` or `- [x]` (or `*` / `+` bullet, indented or not), optional
 // `<!-- q:xxx -->` marker right after the close-bracket, optional
 // trailing text. Captures: 1=indent, 2=char, 3=marker-id, 4=text.
-const TASK_LINE = /^([ \t]*)(?:[-*+])\s\[( |x|X)\](?:<!--\s*q:([a-zA-Z0-9_-]+)\s*-->)?(.*)$/;
+//
+// `\s*` between `]` and the marker tolerates both the legacy unspaced
+// form (`- [ ]<!-- q:xxx -->`, breaks marked's GFM tokenizer) and the
+// spaced form that the backend emits going forward.
+const TASK_LINE = /^([ \t]*)(?:[-*+])\s\[( |x|X)\](?:\s*<!--\s*q:([a-zA-Z0-9_-]+)\s*-->)?(.*)$/;
 
 export function extractQuestions(body: string | null | undefined): Question[] {
     if (!body) return [];
