@@ -58,15 +58,17 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         title: "an agent proposed resolution — accept (close) or reject to bring it back",
     },
     blocked: {
-        // Agent escalation (#B.119): "I can't proceed, your call." Uses
-        // the encircled-icon family on purpose — symmetric with the
-        // encircled-check used for resolved / pending-resolved. Red so
-        // the eye picks it up as "stop, look here", different from the
-        // amber pending-resolved (rubber-stamp) and the green resolved
-        // (done). `pi-ban` is the closest stop-sign in PrimeIcons.
+        // Agent escalation (#B.119): the ticket needs the human to
+        // weigh in. Wording softened to "TBD" / to-be-discussed (#B.129
+        // wording pass): the original "blocked" read as too hostile and
+        // david wanted a more conversational frame. The underlying
+        // mechanic stays the same — drops the ticket out of the
+        // actionable backlog while it waits on the human — only the
+        // label and tooltip change. `pi-ban` icon kept (it's the
+        // encircled stop family, symmetric with `pi-check-circle`).
         icon: "pi pi-ban",
         color: "--p-red-500",
-        title: "agent blocked — your call (reply, reopen, or close)",
+        title: "TBD — agent flagged this ticket for human discussion (reply, reopen, or close)",
     },
     snoozed: {
         icon: "pi pi-history",

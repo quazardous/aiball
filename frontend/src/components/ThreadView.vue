@@ -526,21 +526,6 @@ async function commentAndProposePlan() {
         resolutionBusy.value = false;
     }
 }
-async function commentAndMarkBlocked() {
-    if (!data.value) return;
-    const tid = data.value.ticket.id;
-    resolutionBusy.value = true;
-    try {
-        await postBodyAs("ticket_blocked");
-        composerBody.value = "";
-        broadcastRefresh(tid);
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        resolutionBusy.value = false;
-    }
-}
-
 // #B.129 phase 3: accept / reject the active decision on a comment.
 // For a resolution decision, accepting also closes the ticket (same
 // composite action as the legacy "accept resolution and close"). For
@@ -890,17 +875,6 @@ async function copyTicketRef() {
                         :loading="resolutionBusy"
                         title="Mark resolved (soft proposal — reporter accepts to close). Embarks any text typed in the composer."
                         @click="commentAndMarkResolved"
-                    />
-                    <Button
-                        v-if="!data.ticket.resolved && !data.ticket.blocked"
-                        icon="pi pi-ban"
-                        severity="danger"
-                        size="small"
-                        text
-                        rounded
-                        :loading="resolutionBusy"
-                        title="Mark blocked — hand the ticket back to a human. The reporter replies, reopens, or closes."
-                        @click="commentAndMarkBlocked"
                     />
                     <Button
                         v-if="data.ticket.resolved || data.ticket.blocked"
@@ -1388,17 +1362,6 @@ async function copyTicketRef() {
                             text
                             :loading="resolutionBusy"
                             @click="commentAndMarkResolved"
-                        />
-                        <Button
-                            v-if="!data.ticket.resolved && !data.ticket.blocked"
-                            icon="pi pi-ban"
-                            :label="hasBody ? 'comment and mark blocked' : 'mark blocked'"
-                            severity="danger"
-                            size="small"
-                            text
-                            title="Hand the ticket back to a human — you can't proceed. The reporter will reply, reopen, or close."
-                            :loading="resolutionBusy"
-                            @click="commentAndMarkBlocked"
                         />
                         <Button
                             v-if="data.ticket.resolved || data.ticket.blocked"

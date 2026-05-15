@@ -211,7 +211,7 @@ server.registerTool(
     "ticket_reply",
     {
         description:
-            "Post a reply within a ticket thread. `target_id` is either a ticket id (→ top-level comment on the ticket) or a comment id (→ nested reply to that specific comment, Gmail-style). Both produce a comment_added; only parent_id differs.\n\nOptional `then` lets the author tag the comment with a decision intent or chain a unilateral state mutation, in the same call:\n- `then: \"resolved\"` — tag the comment as a *resolution decision* (#B.129). The comment carries `meta.decision={kind:\"resolution\",status:\"pending\"}` and the reporter validates it via accept/reject. Closing the ticket auto-accepts any dangling resolution decisions. The 'decision-on-comment' paradigm: the audit lives in the thread, no separate lifecycle row.\n- `then: \"blocked\"` — agent is stuck and explicitly hands the ticket back to a human (always auto-approves, drops the ticket out of the actionable backlog — see #B.119).\n- `then: \"close\"` — close the ticket. Owner-bypass when posted by the reporter.\n- `then: \"reopen\"` — reopen a closed ticket (resets resolved + blocked too).\n\nUse `then: \"resolved\"` instead of separate reply + ticket_close when finishing work on someone else's ticket: a single call posts the explanation comment AND tags it as a pending resolution proposal. The reporter sees ONE accept/reject pair under the composer.",
+            "Post a reply within a ticket thread. `target_id` is either a ticket id (→ top-level comment on the ticket) or a comment id (→ nested reply to that specific comment, Gmail-style). Both produce a comment_added; only parent_id differs.\n\nOptional `then` lets the author tag the comment with a decision intent or chain a unilateral state mutation, in the same call:\n- `then: \"resolved\"` — tag the comment as a *resolution decision* (#B.129). The comment carries `meta.decision={kind:\"resolution\",status:\"pending\"}` and the reporter validates it via accept/reject. Closing the ticket auto-accepts any dangling resolution decisions. The 'decision-on-comment' paradigm: the audit lives in the thread, no separate lifecycle row.\n- `then: \"close\"` — close the ticket. Owner-bypass when posted by the reporter.\n- `then: \"reopen\"` — reopen a closed ticket (resets resolved too).\n\nUse `then: \"resolved\"` instead of separate reply + ticket_close when finishing work on someone else's ticket: a single call posts the explanation comment AND tags it as a pending resolution proposal. The reporter sees ONE accept/reject pair under the composer.\n\nIf you need more info before you can proceed, just post a plain comment with your question — there is no agent→human \"blocked\" signal anymore (it induced misuse where agents temporized with blocked instead of asking; the conversational comment IS the right primitive).",
         inputSchema: {
             target_id: z
                 .number()
@@ -226,10 +226,10 @@ server.registerTool(
                 .describe("Project name. Required for offline (spool) mode."),
             by_agent: z.string().optional(),
             then: z
-                .enum(["resolved", "close", "reopen", "blocked"])
+                .enum(["resolved", "close", "reopen"])
                 .optional()
                 .describe(
-                    "Optional intent on the comment. `resolved` (#B.129) = tag the comment as a resolution decision (`meta.decision={kind:\"resolution\",status:\"pending\"}`); the reporter accept/reject — no separate ticket_resolved row anymore, the comment IS the proposal and the audit lives on it. `blocked` (#B.119) = unilateral escalation (auto-approves, drops from actionable). `close` = close the ticket (reporter-only). `reopen` = bring a closed ticket back. `close`/`reopen` are still emitted as distinct lifecycle event rows; `resolved` is now a comment+decision sidecar.",
+                    "Optional intent on the comment. `resolved` (#B.129) = tag the comment as a resolution decision (`meta.decision={kind:\"resolution\",status:\"pending\"}`); the reporter accept/reject — no separate ticket_resolved row anymore, the comment IS the proposal and the audit lives on it. `close` = close the ticket (reporter-only). `reopen` = bring a closed ticket back. `close`/`reopen` are still emitted as distinct lifecycle event rows; `resolved` is a comment+decision sidecar. There is no agent→human `blocked` option — post a plain comment with your question if you need info before proceeding.",
                 ),
         },
     },
@@ -255,23 +255,27 @@ server.registerTool(
         }
         // A state change is just a decorator on a comment. Two shapes:
         //
-        //   - close / reopen / blocked → still a dedicated kind row
-        //     (unilateral state mutation, not a decision).
-        //   - resolved → since #B.129 phase 2, posts a `comment_added`
-        //     with `decision_kind="resolution"` instead of the legacy
+        //   - close / reopen → dedicated kind row (unilateral state
+        //     mutation).
+        //   - resolved → since #B.129, posts a `comment_added` with
+        //     `decision_kind="resolution"` instead of the legacy
         //     `ticket_resolved` row. The reporter validates via the
         //     decide endpoint, same as any other decisional comment.
         //     Historical `ticket_resolved` rows stay readable in the
         //     lifecycle replay — replays accept both shapes.
+        //
+        // `blocked` was retired from the `then` enum (#B.129 wording
+        // pass): the primitive induced misuse (agents temporizing
+        // with blocked when they were just waiting on input). The
+        // right pattern for "I need info" is a plain comment with a
+        // question — the conversational thread covers it naturally.
         const kind: string = !then
             ? "comment_added"
             : then === "resolved"
               ? "comment_added"
-              : then === "blocked"
-                ? "ticket_blocked"
-                : then === "close"
-                  ? "ticket_closed"
-                  : "ticket_reopened";
+              : then === "close"
+                ? "ticket_closed"
+                : "ticket_reopened";
         const decision_kind = then === "resolved" ? "resolution" : undefined;
         const proj = project ?? target.project;
         const res = await client.postMessage({

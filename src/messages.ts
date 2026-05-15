@@ -28,18 +28,19 @@ import { evaluate } from "./rules.js";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
 
-// User-postable subset of MESSAGE_KINDS: excludes `ticket_sub_added` and
-// `ticket_referenced` which are emitted by the daemon when relations
-// are established. Declared as a `satisfies` tuple so adding a new
-// postable kind only requires touching this list — TS guarantees each
-// entry is a real MessageKind.
+// User-postable subset of MESSAGE_KINDS: excludes `ticket_sub_added`
+// and `ticket_referenced` (daemon-emitted on relations) AND
+// `ticket_blocked` since the agent→human blocked direction was
+// retired by david (#B.129 wording pass): the primitive induced
+// misuse (agents temporizing with blocked when they were just
+// waiting on input). Historical rows stay in the DB and continue to
+// render via the lifecycle replay; only emission is gated.
 export const VALID_KINDS = [
     "ticket_created",
     "comment_added",
     "ticket_closed",
     "ticket_reopened",
     "ticket_resolved",
-    "ticket_blocked",
 ] as const satisfies readonly MessageKind[];
 
 export interface ValidationError {
@@ -421,10 +422,12 @@ export function submitMessage(input: NewMessage): Message {
     }
 
     const ownerLifecycle = isOwnerLifecycleEvent(input);
-    // `ticket_blocked` always auto-approves (#B.119): it's a signal
-    // from an agent that they can't proceed — not a state mutation
-    // anyone needs to vet. The reporter still controls the real
-    // resolution by replying / reopening / closing.
+    // Historically `ticket_blocked` auto-approved too. The kind is
+    // retired from the agent→human direction (david, 2026-05-15), so
+    // VALID_KINDS now blocks emission. The defensive special-case is
+    // kept in case a legacy MCP client still posts one — it'll fail
+    // validation upstream, but if it slipped through somehow, the
+    // historical auto-approve path stays.
     const autoApproveLifecycle = ownerLifecycle || input.kind === "ticket_blocked";
     const decision = autoApproveLifecycle
         ? { decision: "auto" as const, matched_rule_id: null }
