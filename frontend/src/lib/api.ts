@@ -49,6 +49,10 @@ export interface Message {
      *  ticket_referenced / ticket_sub_added rows so the UI can render a
      *  small "where is this relation pointing now?" badge. */
     source_ticket_stage?: TicketStage;
+    /** Sidecar JSON (raw string from the DB). Carries question audit
+     *  (#B.104) and decision-on-comment (#B.129). Parsed lazily by
+     *  components that need it. */
+    meta?: string | null;
     tags: Tag[];
 }
 
@@ -244,6 +248,9 @@ export interface PostMessageInput {
     ticket_id?: number;
     parent_id?: number;
     intent?: Intent | null;
+    /** #B.129 — tag a comment as a decision proposal at post-time
+     *  (server validates: `"plan" | "resolution"`, comment_added only). */
+    decision_kind?: "plan" | "resolution";
 }
 
 /** Consumer registry entry (#B.79). */
@@ -410,6 +417,12 @@ export const api = {
         req<Message>("POST", `/api/messages/${id}/approve`),
     reject: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/reject`),
+    /** Accept or reject a comment's decision (#B.129). The comment must
+     *  carry `meta.decision={kind, status:"pending"}` set by the
+     *  author at post time. Idempotent; 409 if the decision is
+     *  already terminal. */
+    decide: (id: number, status: "accepted" | "rejected") =>
+        req<Message>("POST", `/api/messages/${id}/decide`, { status }),
     edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>

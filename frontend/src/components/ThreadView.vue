@@ -8,6 +8,7 @@ import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
 import { useToast } from "primevue/usetoast";
 import { api, INTENTS, type Message, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
+import { findActiveDecision, type CommentDecision } from "../lib/decisions";
 import { STATUS_SEVERITY } from "../lib/labels";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
@@ -413,6 +414,16 @@ const pendingResolution = computed<Message | null>(() => {
     return pending[0] ?? null;
 });
 
+// #B.129 phase 3: the active decision = the most recent comment_added
+// in this thread carrying `meta.decision.status === "pending"`. Drives
+// the accept/reject pair under the composer. Replaces the legacy
+// pendingResolution path for new posts (the legacy lookup above stays
+// only so historical `ticket_resolved` rows still get the right UI).
+const activeDecision = computed<{ message: Message; decision: CommentDecision } | null>(() => {
+    if (!data.value || data.value.ticket.closed) return null;
+    return findActiveDecision(data.value.comments);
+});
+
 // Body of the in-thread composer, exposed here so the resolution-decision
 // buttons can piggy-back on whatever the user has typed (e.g. closing the
 // ticket while explaining what was done in the textarea).
@@ -426,11 +437,12 @@ async function postBodyAs(
         | "ticket_resolved"
         | "ticket_blocked"
         | "ticket_reopened",
+    decisionKind?: "plan" | "resolution",
 ) {
     if (!data.value) return;
     const t = data.value.ticket;
     const trimmed = composerBody.value.trim();
-    if (!trimmed && kind === "comment_added") return; // no-op
+    if (!trimmed && kind === "comment_added" && !decisionKind) return; // no-op
     const byAgent = localStorage.getItem("aiball.human_id") || "human";
     // Goes through api.postMessage → req() so the bearer token + the
     // X-Aiball-Consumer header are attached. Hitting fetch() directly
@@ -442,6 +454,7 @@ async function postBodyAs(
         parent_id: t.id,
         body: trimmed || undefined,
         by_agent: byAgent,
+        decision_kind: decisionKind,
     });
 }
 async function acceptResolution() {
@@ -487,7 +500,24 @@ async function commentAndMarkResolved() {
     const tid = data.value.ticket.id;
     resolutionBusy.value = true;
     try {
-        await postBodyAs("ticket_resolved");
+        // #B.129 phase 2: a resolution proposal is now a comment with
+        // `meta.decision={kind:"resolution",status:"pending"}` rather
+        // than a dedicated ticket_resolved row.
+        await postBodyAs("comment_added", "resolution");
+        composerBody.value = "";
+        broadcastRefresh(tid);
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        resolutionBusy.value = false;
+    }
+}
+async function commentAndProposePlan() {
+    if (!data.value) return;
+    const tid = data.value.ticket.id;
+    resolutionBusy.value = true;
+    try {
+        await postBodyAs("comment_added", "plan");
         composerBody.value = "";
         broadcastRefresh(tid);
     } catch (e) {
@@ -502,6 +532,54 @@ async function commentAndMarkBlocked() {
     resolutionBusy.value = true;
     try {
         await postBodyAs("ticket_blocked");
+        composerBody.value = "";
+        broadcastRefresh(tid);
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        resolutionBusy.value = false;
+    }
+}
+
+// #B.129 phase 3: accept / reject the active decision on a comment.
+// For a resolution decision, accepting also closes the ticket (same
+// composite action as the legacy "accept resolution and close"). For
+// a plan decision, accepting just flips the meta — ticket stays open.
+async function acceptActiveDecision() {
+    const active = activeDecision.value;
+    if (!active || !data.value) return;
+    const tid = data.value.ticket.id;
+    resolutionBusy.value = true;
+    try {
+        // Post any typed body as a regular comment so the reporter's
+        // explanation lands in the trail before the decision flip.
+        if (composerBody.value.trim()) {
+            await postBodyAs("comment_added");
+        }
+        await api.decide(active.message.id, "accepted");
+        if (active.decision.kind === "resolution") {
+            // Resolution accept = ticket closes. Mirrors the legacy
+            // "accept resolution and close" composite button.
+            await postBodyAs("ticket_closed");
+        }
+        composerBody.value = "";
+        broadcastRefresh(tid);
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        resolutionBusy.value = false;
+    }
+}
+async function rejectActiveDecision() {
+    const active = activeDecision.value;
+    if (!active || !data.value) return;
+    const tid = data.value.ticket.id;
+    resolutionBusy.value = true;
+    try {
+        if (composerBody.value.trim()) {
+            await postBodyAs("comment_added");
+        }
+        await api.decide(active.message.id, "rejected");
         composerBody.value = "";
         broadcastRefresh(tid);
     } catch (e) {
@@ -738,7 +816,34 @@ async function copyTicketRef() {
                 </div>
             </Popover>
             <template v-if="data && data.ticket.status === 'approved' && !data.ticket.closed">
-                <template v-if="pendingResolution">
+                <template v-if="activeDecision">
+                    <Button
+                        icon="pi pi-times"
+                        severity="secondary"
+                        size="small"
+                        text
+                        rounded
+                        :loading="resolutionBusy"
+                        :disabled="!hasBody"
+                        :title="hasBody
+                            ? `Reject the ${activeDecision.decision.kind} and post your note. Keeps the ticket open.`
+                            : `Type an explanation in the composer first — rejecting needs a reason.`"
+                        @click="rejectActiveDecision"
+                    />
+                    <Button
+                        icon="pi pi-verified"
+                        severity="success"
+                        size="small"
+                        text
+                        rounded
+                        :loading="resolutionBusy"
+                        :title="activeDecision.decision.kind === 'resolution'
+                            ? 'Accept the resolution and close. Embarks any text typed in the composer.'
+                            : `Accept the ${activeDecision.decision.kind}. Embarks any text typed in the composer.`"
+                        @click="acceptActiveDecision"
+                    />
+                </template>
+                <template v-else-if="pendingResolution">
                     <Button
                         icon="pi pi-times"
                         severity="secondary"
@@ -766,13 +871,24 @@ async function copyTicketRef() {
                 <template v-else>
                     <Button
                         v-if="!data.ticket.resolved && !data.ticket.blocked"
+                        icon="pi pi-compass"
+                        severity="info"
+                        size="small"
+                        text
+                        rounded
+                        :loading="resolutionBusy"
+                        title="Propose plan — describe your approach; the reporter accepts or rejects before you code."
+                        @click="commentAndProposePlan"
+                    />
+                    <Button
+                        v-if="!data.ticket.resolved && !data.ticket.blocked"
                         icon="pi pi-check-circle"
                         severity="success"
                         size="small"
                         text
                         rounded
                         :loading="resolutionBusy"
-                        title="Mark resolved (soft proposal — reporter validates by closing). Embarks any text typed in the composer."
+                        title="Mark resolved (soft proposal — reporter accepts to close). Embarks any text typed in the composer."
                         @click="commentAndMarkResolved"
                     />
                     <Button
@@ -1151,18 +1267,43 @@ async function copyTicketRef() {
                 :project="data.ticket.project"
                 :ticket-id="data.ticket.id"
                 :parent-id="data.ticket.id"
-                :placeholder="pendingResolution
-                    ? `${pendingResolution.by_agent ?? 'someone'} proposes this is resolved — type WHY before rejecting, or pick an action below`
-                    : data.ticket.status === 'rejected'
-                        ? 'This ticket was rejected — comment for context, or undo the rejection to bring it back'
-                        : data.ticket.closed
-                            ? 'This ticket is closed but still commentable — type a note, or reopen the thread to keep working'
-                            : data.ticket.status === 'pending'
-                                ? 'Reply on this pending thread (markdown supported) — your comment goes through moderation unless you are human'
-                                : 'Reply on this thread (markdown supported, use > for quotes and #N to reference a comment)'"
+                :placeholder="activeDecision
+                    ? `${activeDecision.message.by_agent ?? 'someone'} tagged this as a ${activeDecision.decision.kind} — type WHY before rejecting, or pick an action below`
+                    : pendingResolution
+                        ? `${pendingResolution.by_agent ?? 'someone'} proposes this is resolved — type WHY before rejecting, or pick an action below`
+                        : data.ticket.status === 'rejected'
+                            ? 'This ticket was rejected — comment for context, or undo the rejection to bring it back'
+                            : data.ticket.closed
+                                ? 'This ticket is closed but still commentable — type a note, or reopen the thread to keep working'
+                                : data.ticket.status === 'pending'
+                                    ? 'Reply on this pending thread (markdown supported) — your comment goes through moderation unless you are human'
+                                    : 'Reply on this thread (markdown supported, use > for quotes and #N to reference a comment)'"
             >
                 <template #extra-actions>
-                    <template v-if="pendingResolution">
+                    <template v-if="activeDecision">
+                        <Button
+                            icon="pi pi-times"
+                            :label="activeDecision.decision.kind === 'resolution' ? 'reject and keep open' : `reject ${activeDecision.decision.kind}`"
+                            severity="secondary"
+                            size="small"
+                            outlined
+                            :loading="resolutionBusy"
+                            :disabled="!hasBody"
+                            :title="hasBody
+                                ? `Reject the ${activeDecision.decision.kind} and post your note explaining why.`
+                                : `Type an explanation in the composer first — rejecting a ${activeDecision.decision.kind} needs a reason.`"
+                            @click="rejectActiveDecision"
+                        />
+                        <Button
+                            icon="pi pi-verified"
+                            :label="activeDecision.decision.kind === 'resolution' ? 'accept resolution and close' : `accept ${activeDecision.decision.kind}`"
+                            severity="success"
+                            size="small"
+                            :loading="resolutionBusy"
+                            @click="acceptActiveDecision"
+                        />
+                    </template>
+                    <template v-else-if="pendingResolution">
                         <Button
                             icon="pi pi-times"
                             label="reject and keep open"
@@ -1227,6 +1368,17 @@ async function copyTicketRef() {
                         />
                     </template>
                     <template v-else>
+                        <Button
+                            v-if="!data.ticket.resolved && !data.ticket.blocked"
+                            icon="pi pi-compass"
+                            :label="hasBody ? 'comment and propose plan' : 'propose plan'"
+                            severity="info"
+                            size="small"
+                            text
+                            title="Propose an approach for this ticket — the reporter accepts/rejects before you code. (#B.129)"
+                            :loading="resolutionBusy"
+                            @click="commentAndProposePlan"
+                        />
                         <Button
                             v-if="!data.ticket.resolved && !data.ticket.blocked"
                             icon="pi pi-check-circle"

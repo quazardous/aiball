@@ -9,6 +9,7 @@ import { api, type Message } from "../lib/api";
 import { bus } from "../lib/bus";
 import { attachPasteImage } from "../lib/pasteImage";
 import { questionStats as computeQuestionStats } from "../lib/questions";
+import { readDecision } from "../lib/decisions";
 
 const props = defineProps<{
     msg: Message;
@@ -63,6 +64,26 @@ const commentRef = computed(() => {
 const questionStats = computed(() =>
     computeQuestionStats(props.msg.edited_body ?? props.msg.body ?? ""),
 );
+
+// #B.129 phase 4: decision-on-comment audit chip. Read-only — the
+// accept/reject pair lives under the composer, per david's layout
+// constraint ("on change pas le layout actuel").
+const decision = computed(() => readDecision(props.msg));
+const decisionChipLabel = computed(() => {
+    const d = decision.value;
+    if (!d) return "";
+    if (d.status === "pending") return `pending ${d.kind}`;
+    const prefix = d.status === "accepted" ? "✓ accepted" : "✗ rejected";
+    const by = d.decided_by ? ` by ${d.decided_by}` : "";
+    return `${prefix} ${d.kind}${by}`;
+});
+const decisionChipSeverity = computed(() => {
+    const d = decision.value;
+    if (!d) return "secondary";
+    if (d.status === "accepted") return "success";
+    if (d.status === "rejected") return "danger";
+    return "warn"; // pending
+});
 async function copyRef() {
     try {
         await navigator.clipboard.writeText(commentRef.value);
@@ -195,6 +216,17 @@ onBeforeUnmount(() => detachPaste?.());
                 :title="questionStats.open === 0
                     ? 'All questions in this comment have been answered.'
                     : `${questionStats.open} question${questionStats.open === 1 ? '' : 's'} still open — click a checkbox to quote it in your reply.`"
+                style="font-size: 0.7rem; margin-left: 0.4rem"
+            />
+            <!-- #B.129 phase 4: decision audit chip (read-only on the card;
+                 accept/reject lives under the composer). -->
+            <Tag
+                v-if="decision"
+                :value="decisionChipLabel"
+                :severity="decisionChipSeverity"
+                :title="decision.status === 'pending'
+                    ? `${msg.by_agent ?? 'someone'} tagged this comment as a ${decision.kind} — accept/reject pair is under the composer.`
+                    : `${decision.kind} ${decision.status}${decision.decided_at ? ' at ' + new Date(decision.decided_at).toLocaleString() : ''}`"
                 style="font-size: 0.7rem; margin-left: 0.4rem"
             />
             <span class="spacer" />
