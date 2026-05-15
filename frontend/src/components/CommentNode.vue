@@ -84,6 +84,21 @@ const decisionChipSeverity = computed(() => {
     if (d.status === "rejected") return "danger";
     return "warn"; // pending
 });
+
+// #B.130 phase 1: one-line TLDR sidecar (`meta.summary`). Surfaced as
+// a discrete chip in the comment header. When user clicks it, we
+// emit a quick toast/popover with the summary text — but for v1 the
+// summary IS the chip label (truncated), tooltip carries the full
+// text. Cheaper and sufficient.
+const summary = computed(() => {
+    if (!props.msg.meta) return null;
+    try {
+        const m = JSON.parse(props.msg.meta) as { summary?: string };
+        return typeof m.summary === "string" && m.summary ? m.summary : null;
+    } catch {
+        return null;
+    }
+});
 async function copyRef() {
     try {
         await navigator.clipboard.writeText(commentRef.value);
@@ -228,6 +243,14 @@ onBeforeUnmount(() => detachPaste?.());
                     ? `${msg.by_agent ?? 'someone'} tagged this comment as a ${decision.kind} — accept/reject pair is under the composer.`
                     : `${decision.kind} ${decision.status}${decision.decided_at ? ' at ' + new Date(decision.decided_at).toLocaleString() : ''}`"
                 style="font-size: 0.7rem; margin-left: 0.4rem"
+            />
+            <!-- #B.130 phase 1: one-line TLDR chip. Hover for full text. -->
+            <Tag
+                v-if="summary"
+                :value="`📝 ${summary.length > 60 ? summary.slice(0, 60) + '…' : summary}`"
+                severity="info"
+                :title="`Summary (author's TLDR): ${summary}`"
+                style="font-size: 0.7rem; margin-left: 0.4rem; font-style: italic; max-width: 28rem; overflow: hidden; text-overflow: ellipsis"
             />
             <span class="spacer" />
             <span

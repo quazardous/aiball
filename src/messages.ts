@@ -87,6 +87,21 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         }
         decisionKind = o.decision_kind;
     }
+    // #B.130 phase 1: optional `summary_line` on comments — author's
+    // one-line TLDR, used by brief-mode reads.
+    let summaryLine: string | null = null;
+    if (o.summary_line !== undefined && o.summary_line !== null && o.summary_line !== "") {
+        if (typeof o.summary_line !== "string") {
+            return { error: "summary_line must be a string" };
+        }
+        if (kind !== "comment_added") {
+            return { error: `summary_line only allowed on comment_added (got kind=${kind})` };
+        }
+        // Soft cap: 200 chars. Don't reject — clip silently. Empty
+        // string after trim → drop.
+        const trimmed = o.summary_line.trim().slice(0, 200);
+        if (trimmed) summaryLine = trimmed;
+    }
     return {
         project: o.project,
         kind,
@@ -101,6 +116,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         by_agent: typeof o.by_agent === "string" ? o.by_agent : null,
         intent: kind === "ticket_created" ? intent : null,
         decision_kind: decisionKind,
+        summary_line: summaryLine,
     };
 }
 

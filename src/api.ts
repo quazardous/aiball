@@ -7,6 +7,7 @@ import {
     noteMessage,
     markQuestionAnswered,
     applyMessageDecision,
+    setMessageSummary,
     listProjects,
     insertRule,
     listRules,
@@ -688,6 +689,34 @@ api.post("/messages/:id/decide", (req: Request, res: Response) => {
     } catch (e) {
         // Domain-level conflict (no decision present, or already
         // terminal) — surface as 409 so the UI can show the reason.
+        return res.status(409).json({ error: (e as Error).message });
+    }
+});
+
+/**
+ * Set or clear a comment's one-line summary (#B.130 phase 1).
+ *
+ *   POST /api/messages/:id/summarize
+ *   body: { summary: string }   (empty string clears)
+ *
+ * comment_added only. Caller permissioning is light — any participant
+ * can summarize an existing comment (the audit is in updated_at, not
+ * meta). Broadcasts `message_edited`.
+ */
+api.post("/messages/:id/summarize", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
+    const body = (req.body ?? {}) as { summary?: unknown };
+    if (typeof body.summary !== "string") {
+        return badRequest(res, "summary (string) required");
+    }
+    try {
+        const updated = setMessageSummary(id, body.summary);
+        if (!updated) return notFound(res);
+        const decorated = withTagsOne(updated);
+        broadcast({ type: "message_edited", data: decorated });
+        res.json(decorated);
+    } catch (e) {
         return res.status(409).json({ error: (e as Error).message });
     }
 });

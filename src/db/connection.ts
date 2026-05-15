@@ -177,6 +177,9 @@ export interface NewMessage {
      *  `meta.decision = {kind, status:"pending"}` so the reporter can
      *  later accept/reject via POST /api/messages/:id/decide. */
     decision_kind?: string | null;
+    /** #B.130 phase 1: author-supplied one-line TLDR. comment_added
+     *  only — used by brief-mode reads to skip the full body. */
+    summary_line?: string | null;
 }
 
 export interface NewRule {

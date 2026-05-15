@@ -80,14 +80,20 @@ export function insertMessage(m: NewMessage): Message {
                 ? m.parent_id
                 : null;
         const hashid = pickFreshHashid(tx);
-        // #B.129: if the author tagged this comment as decisional at
-        // post time, stamp `meta.decision = {kind, status:"pending"}`.
-        // Only honored on comment_added (validator enforces that).
+        // #B.129 + #B.130: stamp meta from optional post-time inputs.
+        // decision_kind → meta.decision (decision-on-comment, #B.129)
+        // summary_line  → meta.summary  (one-line TLDR, #B.130)
+        // Both gated on kind===comment_added by the validator.
         let metaInit: string | null = null;
-        if (m.decision_kind && m.kind === "comment_added") {
-            metaInit = JSON.stringify({
-                decision: { kind: m.decision_kind, status: "pending" },
-            });
+        if (m.kind === "comment_added" && (m.decision_kind || m.summary_line)) {
+            const meta: Record<string, unknown> = {};
+            if (m.decision_kind) {
+                meta.decision = { kind: m.decision_kind, status: "pending" };
+            }
+            if (m.summary_line) {
+                meta.summary = m.summary_line;
+            }
+            metaInit = JSON.stringify(meta);
         }
         const inserted = tx.insert(schema.messages).values({
             id,
@@ -448,6 +454,44 @@ function mergeMeta(
  * Throws for invalid transitions (re-deciding a terminal decision).
  * The HTTP layer maps the throw to 409 Conflict.
  */
+/**
+ * Set or clear the `meta.summary` one-liner on a comment (#B.130
+ * phase 1). Empty string → drop the field. Returns the updated
+ * message or null when the id doesn't resolve. Caller permissioning
+ * is upstream (any participant can summarize; the audit is in the
+ * who-edited-when of the row's updated_at, not in meta itself —
+ * keeping summary cheap to write).
+ */
+export function setMessageSummary(
+    messageId: number,
+    summary: string,
+): Message | null {
+    const trimmed = summary.trim().slice(0, 200);
+    const db = getDb();
+    return db.transaction((tx) => {
+        const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!m) return null;
+        if (m.kind !== "comment_added") {
+            throw new Error("summary is only meaningful on comments");
+        }
+        const meta = parseMeta(m.meta ?? null);
+        if (!trimmed) {
+            delete meta.summary;
+        } else {
+            meta.summary = trimmed;
+        }
+        tx.update(schema.messages)
+            .set({ meta: serializeMeta(meta) })
+            .where(eq(schema.messages.id, messageId))
+            .run();
+        const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!fresh) return null;
+        const parent = tx.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
+        return messageRowToMessage(fresh, parent?.project ?? "");
+    });
+}
+
 /**
  * Find all approved comments on a ticket that carry a pending
  * `meta.decision.kind=="resolution"` block. Used when the ticket

@@ -48,6 +48,12 @@ export interface MessageMeta {
      *  time (composer dropdown) and updated when the reporter accepts
      *  or rejects via POST /api/messages/:id/decide. */
     decision?: CommentDecision;
+    /** One-line agent-authored TLDR of the comment body (#B.130 phase 1).
+     *  Used by the planned `ticket_get({brief:true})` mode to ship a
+     *  thread summary instead of every full body. Settable at post time
+     *  via `validateNewMessage` (comment_added only) or retroactively
+     *  via POST /api/messages/:id/summarize. */
+    summary?: string;
 }
 
 // `- [ ]` or `- [x]` line, optionally preceded by indent, optionally
@@ -191,6 +197,7 @@ export function parseMeta(raw: string | null | undefined): MessageMeta {
 export function serializeMeta(meta: MessageMeta): string | null {
     const hasQuestions = !!meta.questions && Object.keys(meta.questions).length > 0;
     const hasDecision = !!meta.decision;
-    if (!hasQuestions && !hasDecision) return null;
+    const hasSummary = typeof meta.summary === "string" && meta.summary.length > 0;
+    if (!hasQuestions && !hasDecision && !hasSummary) return null;
     return JSON.stringify(meta);
 }
