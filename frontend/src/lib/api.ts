@@ -425,9 +425,15 @@ export const api = {
     /** Accept or reject a comment's decision (#B.129). The comment must
      *  carry `meta.decision={kind, status:"pending"}` set by the
      *  author at post time. Idempotent; 409 if the decision is
-     *  already terminal. */
-    decide: (id: number, status: "accepted" | "rejected") =>
-        req<Message>("POST", `/api/messages/${id}/decide`, { status }),
+     *  already terminal. `new_kind` optionally reclassifies the
+     *  decision at decide-time (e.g. "accept this resolution as a
+     *  plan instead" — #B.129 follow-up). */
+    decide: (
+        id: number,
+        status: "accepted" | "rejected",
+        new_kind?: "plan" | "resolution",
+    ) =>
+        req<Message>("POST", `/api/messages/${id}/decide`, { status, new_kind }),
     edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>

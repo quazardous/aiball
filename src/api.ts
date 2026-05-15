@@ -108,6 +108,7 @@ import { outboxPath, UPLOADS_DIR } from "./paths.js";
 import { searchMessages } from "./search.js";
 import { fanOutPings, submitMessage, validateNewMessage, VALID_KINDS } from "./messages.js";
 import { parseMeta } from "./questions.js";
+import { isDecisionKind, type DecisionKind } from "./decisions.js";
 import { bearerAuth, hashPassword, verifyPassword, type AuthenticatedRequest } from "./auth.js";
 
 function badRequest(res: Response, msg: string): Response {
@@ -673,15 +674,30 @@ api.post("/messages/:id/questions/:qid/answer", (req, res) => {
 api.post("/messages/:id/decide", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
-    const body = (req.body ?? {}) as { status?: unknown; decided_by?: unknown };
+    const body = (req.body ?? {}) as {
+        status?: unknown;
+        decided_by?: unknown;
+        new_kind?: unknown;
+    };
     if (body.status !== "accepted" && body.status !== "rejected") {
         return badRequest(res, "status must be 'accepted' or 'rejected'");
     }
     const by = typeof body.decided_by === "string" && body.decided_by
         ? body.decided_by
         : consumerOf(req);
+    // Optional reclassification (#B.129 follow-up).
+    let newKind: DecisionKind | undefined;
+    if (body.new_kind !== undefined && body.new_kind !== null) {
+        if (typeof body.new_kind !== "string") {
+            return badRequest(res, "new_kind must be a string when set");
+        }
+        if (!isDecisionKind(body.new_kind)) {
+            return badRequest(res, "new_kind must be a valid decision kind");
+        }
+        newKind = body.new_kind;
+    }
     try {
-        const updated = applyMessageDecision(id, body.status, by);
+        const updated = applyMessageDecision(id, body.status, by, newKind);
         if (!updated) return notFound(res);
         const decorated = withTagsOne(updated);
         broadcast({ type: "message_edited", data: decorated });

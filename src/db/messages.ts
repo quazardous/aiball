@@ -528,13 +528,18 @@ export function applyMessageDecision(
     messageId: number,
     status: DecisionStatus,
     decidedBy: string,
+    /** Optional reclassification (#B.129 follow-up): pass to change
+     *  `meta.decision.kind` at the moment of decide. Useful when the
+     *  reporter wants to accept a comment tagged as a resolution as a
+     *  plan instead (or vice versa). */
+    newKind?: import("../decisions.js").DecisionKind,
 ): Message | null {
     const db = getDb();
     return db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
         if (!m) return null;
         const meta = parseMeta(m.meta ?? null);
-        const r = applyDecision(meta.decision, status, decidedBy, new Date().toISOString());
+        const r = applyDecision(meta.decision, status, decidedBy, new Date().toISOString(), newKind);
         if (!r.changed) {
             // idempotent re-decide — return current row unchanged
             const parent = tx.select({ project: schema.tickets.project })

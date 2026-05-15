@@ -531,10 +531,17 @@ async function commentAndProposePlan() {
 // For a resolution decision, accepting also closes the ticket (same
 // composite action as the legacy "accept resolution and close"). For
 // a plan decision, accepting just flips the meta — ticket stays open.
-async function acceptActiveDecision() {
+//
+// `asKind` (#B.129 follow-up): the reporter can reclassify the
+// decision at accept-time — e.g. "this was tagged as a resolution
+// but it's really just a plan, accept it as a plan". When `asKind`
+// is passed AND differs from the original kind, the close side-
+// effect of resolution-accept is suppressed (we want plan ergonomics).
+async function acceptActiveDecision(asKind?: "plan" | "resolution") {
     const active = activeDecision.value;
     if (!active || !data.value) return;
     const tid = data.value.ticket.id;
+    const effectiveKind = asKind ?? active.decision.kind;
     resolutionBusy.value = true;
     try {
         // Post any typed body as a regular comment so the reporter's
@@ -542,10 +549,12 @@ async function acceptActiveDecision() {
         if (composerBody.value.trim()) {
             await postBodyAs("comment_added");
         }
-        await api.decide(active.message.id, "accepted");
-        if (active.decision.kind === "resolution") {
+        await api.decide(active.message.id, "accepted", asKind);
+        if (effectiveKind === "resolution") {
             // Resolution accept = ticket closes. Mirrors the legacy
-            // "accept resolution and close" composite button.
+            // "accept resolution and close" composite button. When
+            // the reporter reclassified to plan, the ticket stays
+            // open instead.
             await postBodyAs("ticket_closed");
         }
         composerBody.value = "";
@@ -556,6 +565,29 @@ async function acceptActiveDecision() {
         resolutionBusy.value = false;
     }
 }
+
+// Menu items for the reporter's accept SplitButton (#B.129 follow-up).
+// Surfaces a "reclassify and accept" path when the active decision's
+// kind doesn't match what the reporter sees in the body.
+const acceptMenu = computed(() => {
+    const active = activeDecision.value;
+    if (!active) return [];
+    const items: { label: string; icon: string; command: () => void }[] = [];
+    if (active.decision.kind === "resolution") {
+        items.push({
+            label: "accept as plan (keep open)",
+            icon: "pi pi-compass",
+            command: () => { void acceptActiveDecision("plan"); },
+        });
+    } else if (active.decision.kind === "plan") {
+        items.push({
+            label: "accept as resolution and close",
+            icon: "pi pi-check-circle",
+            command: () => { void acceptActiveDecision("resolution"); },
+        });
+    }
+    return items;
+});
 async function rejectActiveDecision() {
     const active = activeDecision.value;
     if (!active || !data.value) return;
@@ -851,7 +883,7 @@ async function copyTicketRef() {
                         :title="activeDecision.decision.kind === 'resolution'
                             ? 'Accept the resolution and close. Embarks any text typed in the composer.'
                             : `Accept the ${activeDecision.decision.kind}. Embarks any text typed in the composer.`"
-                        @click="acceptActiveDecision"
+                        @click="() => acceptActiveDecision()"
                     />
                 </template>
                 <template v-else-if="pendingResolution">
@@ -1283,13 +1315,15 @@ async function copyTicketRef() {
                                 : `Type an explanation in the composer first — rejecting a ${activeDecision.decision.kind} needs a reason.`"
                             @click="rejectActiveDecision"
                         />
-                        <Button
-                            icon="pi pi-verified"
+                        <SplitButton
                             :label="activeDecision.decision.kind === 'resolution' ? 'accept resolution and close' : `accept ${activeDecision.decision.kind}`"
+                            icon="pi pi-verified"
                             severity="success"
                             size="small"
                             :loading="resolutionBusy"
-                            @click="acceptActiveDecision"
+                            :model="acceptMenu"
+                            menu-button-aria-label="Accept as different decision kind"
+                            @click="() => acceptActiveDecision()"
                         />
                     </template>
                     <template v-else-if="pendingResolution">

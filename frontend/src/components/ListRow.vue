@@ -224,12 +224,9 @@ const slots = useSlots();
     align-items: center;
     gap: 0.15rem;
 }
-/* On hover only the time gets replaced by the actions; the meta
-   (discussion icon + count) stays visible — david flagged that
-   losing the discussion zone on hover was annoying (#B.132). */
-.list-row:hover .list-row__time {
-    display: none;
-}
+/* Time and meta both stay visible on hover (#B.132 follow-up: david
+   flagged the disappear-on-hover as a flicker). Actions slot just
+   appears next to them on hover instead of replacing the time. */
 .list-row:hover .list-row__actions {
     display: flex;
 }

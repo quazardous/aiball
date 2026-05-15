@@ -55,6 +55,12 @@ export function applyDecision(
     next: DecisionStatus,
     by: string,
     at: string,
+    /** Optional reclassification (#B.129 follow-up): the reporter can
+     *  change the decision kind at the moment of accepting/rejecting
+     *  — e.g. "this was tagged as a resolution but it's really just
+     *  a plan, accept it as a plan". Without this, the kind stays
+     *  whatever the author originally chose. */
+    newKind?: DecisionKind,
 ): { decision: CommentDecision; changed: boolean } {
     if (!current) {
         throw new Error("no decision on this message — author must tag it first");
@@ -62,7 +68,8 @@ export function applyDecision(
     if (next === "pending") {
         throw new Error("cannot reset a decision to pending");
     }
-    if (current.status === next) {
+    const effectiveKind = newKind ?? current.kind;
+    if (current.status === next && effectiveKind === current.kind) {
         return { decision: current, changed: false };
     }
     if (current.status !== "pending") {
@@ -72,7 +79,7 @@ export function applyDecision(
     }
     return {
         decision: {
-            kind: current.kind,
+            kind: effectiveKind,
             status: next,
             decided_by: by,
             decided_at: at,
