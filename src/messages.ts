@@ -9,6 +9,8 @@ import {
     listProjectSubscribers,
     upsertTicketSubscription,
     listPendingResolvedForTicket,
+    listPendingResolutionDecisionsForTicket,
+    applyMessageDecision,
     listPendingLifecycleForTicket,
     isTicketBroadcast,
     deletePingsForMessage,
@@ -464,6 +466,19 @@ export function submitMessage(input: NewMessage): Message {
                         deliverToOutbox(promoted);
                         fanOutPings(promoted);
                         broadcast({ type: "message_decided", data: promoted });
+                    }
+                }
+                // #B.129 phase 2: same idea for decision-on-comment
+                // resolutions still pending — closing the ticket
+                // implicitly accepts every dangling resolution decision.
+                for (const c of listPendingResolutionDecisionsForTicket(msg.ticket_id)) {
+                    const accepted = applyMessageDecision(
+                        c.id,
+                        "accepted",
+                        msg.by_agent ?? "owner",
+                    );
+                    if (accepted) {
+                        broadcast({ type: "message_edited", data: accepted });
                     }
                 }
                 // Pending ticket_closed / ticket_reopened on this ticket are

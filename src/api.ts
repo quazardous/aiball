@@ -106,6 +106,7 @@ import { broadcast } from "./ws.js";
 import { outboxPath, UPLOADS_DIR } from "./paths.js";
 import { searchMessages } from "./search.js";
 import { fanOutPings, submitMessage, validateNewMessage, VALID_KINDS } from "./messages.js";
+import { parseMeta } from "./questions.js";
 import { bearerAuth, hashPassword, verifyPassword, type AuthenticatedRequest } from "./auth.js";
 
 function badRequest(res: Response, msg: string): Response {
@@ -892,6 +893,21 @@ api.get("/inbox", (req, res) => {
         if (m.kind === "ticket_resolved" && m.status === "pending") {
             cur.pendingResolution = true;
         }
+        // #B.129 phase 2: a comment carrying `meta.decision.kind ===
+        // "resolution"` plays the same role as the legacy
+        // ticket_resolved event. Pending decision → pendingResolution;
+        // accepted → synthetic resolved event for the replay below.
+        let syntheticResolved: Message | null = null;
+        if (m.kind === "comment_added" && m.status === "approved") {
+            const meta = parseMeta(m.meta ?? null);
+            const d = meta.decision;
+            if (d?.kind === "resolution") {
+                if (d.status === "pending") cur.pendingResolution = true;
+                else if (d.status === "accepted") {
+                    syntheticResolved = { ...m, kind: "ticket_resolved" };
+                }
+            }
+        }
         if (
             (m.kind === "ticket_closed" ||
                 m.kind === "ticket_reopened" ||
@@ -901,6 +917,11 @@ api.get("/inbox", (req, res) => {
         ) {
             const list = lifecycleByTicket.get(m.ticket_id) ?? [];
             list.push(m);
+            lifecycleByTicket.set(m.ticket_id, list);
+        }
+        if (syntheticResolved) {
+            const list = lifecycleByTicket.get(m.ticket_id) ?? [];
+            list.push(syntheticResolved);
             lifecycleByTicket.set(m.ticket_id, list);
         }
         if (m.created_at > cur.lastActivity) cur.lastActivity = m.created_at;
@@ -1271,10 +1292,30 @@ api.get("/tickets/:id", (req, res) => {
                 m.status !== "rejected",
         )
         .sort((a, b) => a.id - b.id);
-    // Lifecycle replay restricted to approved events for the header flags.
-    const lifecycle = threadMessages.filter(
-        (m) => m.kind !== "comment_added" && m.status === "approved",
-    );
+    // Lifecycle replay restricted to approved events for the header
+    // flags. Since #B.129 phase 2, a comment_added with `meta.decision
+    // .kind=="resolution"` and decision.status=="accepted" is replayed
+    // as a synthetic ticket_resolved event at the comment's id, so
+    // historical (legacy ticket_resolved kind) AND new (comment+decision)
+    // shapes converge in the same replay.
+    const lifecycle: Message[] = [];
+    for (const m of threadMessages) {
+        if (m.status !== "approved") continue;
+        if (m.kind === "comment_added") {
+            const d = parseMeta(m.meta ?? null).decision;
+            if (d?.kind === "resolution" && d.status === "accepted") {
+                lifecycle.push({
+                    ...m,
+                    kind: "ticket_resolved",
+                    by_agent: d.decided_by ?? m.by_agent,
+                    created_at: d.decided_at ?? m.created_at,
+                });
+            }
+            continue;
+        }
+        lifecycle.push(m);
+    }
+    lifecycle.sort((a, b) => a.id - b.id);
     let closedFlag = false;
     let resolvedFlag = false;
     let resolvedBy: string | null = null;

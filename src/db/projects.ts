@@ -169,12 +169,45 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         }
     }
 
+    // #B.129 phase 2: layer decision-on-comment resolutions on top of
+    // the lifecycle replay. A comment with `meta.decision.kind=
+    // "resolution"` in any status (pending or accepted) means "agent
+    // proposed done" — same effect on actionable_count as a legacy
+    // ticket_resolved row. We can't reliably re-do the
+    // reopen-clears-resolved ordering here without re-sorting events,
+    // but the existing replay already cleared resolvedByTicket on the
+    // last reopen seen; a NEW resolution comment after that reopen
+    // will set it again here, which is the correct semantic.
+    const resolutionComments = db.select({
+        ticket_id: schema.messages.ticketId,
+        meta: schema.messages.meta,
+        status: schema.messages.status,
+        id: schema.messages.id,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.kind, "comment_added"),
+            eq(schema.messages.status, "approved"),
+        ))
+        .all();
+    for (const c of resolutionComments) {
+        if (!c.meta) continue;
+        try {
+            const m = JSON.parse(c.meta) as { decision?: { kind?: string; status?: string } };
+            const d = m.decision;
+            if (d?.kind === "resolution" && (d.status === "pending" || d.status === "accepted")) {
+                resolvedByTicket.set(c.ticket_id, true);
+            }
+        } catch { /* malformed meta, skip */ }
+    }
+
     // Pending resolution proposals: tickets with at least one
-    // `ticket_resolved` row in status=pending awaiting moderator
-    // accept/reject. The sidebar badge surfaces this as "I have a
-    // decision to make" — the user explicitly asked for the green count
-    // to map to *waiting on my accept*, not to *already accepted*.
-    const pendingResolveds = db.select({
+    // resolution awaiting reporter accept. Two shapes since #B.129
+    // phase 2: legacy `ticket_resolved` row in status=pending OR a
+    // `comment_added` carrying `meta.decision={kind:"resolution",
+    // status:"pending"}`. Either way the moderator/reporter has a
+    // decision to make.
+    const legacyPendingResolveds = db.select({
         project: schema.tickets.project,
         ticket_id: schema.messages.ticketId,
     })
@@ -185,14 +218,36 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             eq(schema.messages.status, "pending"),
         ))
         .all();
+    const decisionPendingResolveds = db.select({
+        project: schema.tickets.project,
+        ticket_id: schema.messages.ticketId,
+        meta: schema.messages.meta,
+    })
+        .from(schema.messages)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+        .where(and(
+            eq(schema.messages.kind, "comment_added"),
+            eq(schema.messages.status, "approved"),
+        ))
+        .all();
     const pendingResolutionTickets = new Map<string, Set<number>>();
-    for (const r of pendingResolveds) {
-        let s = pendingResolutionTickets.get(r.project);
+    function bumpPending(project: string, ticketId: number): void {
+        let s = pendingResolutionTickets.get(project);
         if (!s) {
             s = new Set();
-            pendingResolutionTickets.set(r.project, s);
+            pendingResolutionTickets.set(project, s);
         }
-        s.add(r.ticket_id);
+        s.add(ticketId);
+    }
+    for (const r of legacyPendingResolveds) bumpPending(r.project, r.ticket_id);
+    for (const r of decisionPendingResolveds) {
+        if (!r.meta) continue;
+        try {
+            const m = JSON.parse(r.meta) as { decision?: { kind?: string; status?: string } };
+            if (m.decision?.kind === "resolution" && m.decision.status === "pending") {
+                bumpPending(r.project, r.ticket_id);
+            }
+        } catch { /* malformed meta, skip */ }
     }
 
     const openCounts = db.select({

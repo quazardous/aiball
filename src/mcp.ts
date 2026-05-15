@@ -253,19 +253,26 @@ server.registerTool(
                 `target ${target_id} is not a valid reply target (kind=${target.kind})`,
             );
         }
-        // A state change is just a decorator on a comment: the same row
-        // carries the body AND flips the lifecycle flag. We post a single
-        // message whose kind reflects the chosen `then` (or comment_added
-        // if no state change is requested).
-        const kind = !then
+        // A state change is just a decorator on a comment. Two shapes:
+        //
+        //   - close / reopen / blocked → still a dedicated kind row
+        //     (unilateral state mutation, not a decision).
+        //   - resolved → since #B.129 phase 2, posts a `comment_added`
+        //     with `decision_kind="resolution"` instead of the legacy
+        //     `ticket_resolved` row. The reporter validates via the
+        //     decide endpoint, same as any other decisional comment.
+        //     Historical `ticket_resolved` rows stay readable in the
+        //     lifecycle replay — replays accept both shapes.
+        const kind: string = !then
             ? "comment_added"
             : then === "resolved"
-              ? "ticket_resolved"
+              ? "comment_added"
               : then === "blocked"
                 ? "ticket_blocked"
                 : then === "close"
                   ? "ticket_closed"
                   : "ticket_reopened";
+        const decision_kind = then === "resolved" ? "resolution" : undefined;
         const proj = project ?? target.project;
         const res = await client.postMessage({
             project: proj,
@@ -274,6 +281,7 @@ server.registerTool(
             parent_id: parentId,
             body,
             by_agent: effectiveBy(by_agent),
+            decision_kind,
         });
         return asText(res);
     },

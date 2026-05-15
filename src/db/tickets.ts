@@ -83,6 +83,28 @@ export function getTicketStages(ids: number[]): Map<number, TicketStage> {
         } else if (ev.kind === "ticket_resolved") resolvedById.set(ev.ticket_id, true);
         else if (ev.kind === "ticket_blocked") blockedById.set(ev.ticket_id, true);
     }
+    // #B.129 phase 2: layer decision-on-comment "resolution"-accepted
+    // comments on top. Same semantic as legacy ticket_resolved.
+    const decisionComments = db.select({
+        ticket_id: schema.messages.ticketId,
+        meta: schema.messages.meta,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.status, "approved"),
+            eq(schema.messages.kind, "comment_added"),
+            inArray(schema.messages.ticketId, ids),
+        ))
+        .all();
+    for (const c of decisionComments) {
+        if (!c.meta) continue;
+        try {
+            const m = JSON.parse(c.meta) as { decision?: { kind?: string; status?: string } };
+            if (m.decision?.kind === "resolution" && m.decision.status === "accepted") {
+                resolvedById.set(c.ticket_id, true);
+            }
+        } catch { /* malformed meta, skip */ }
+    }
     const nowStr = nowIso();
     for (const r of rows) {
         const closed = closedById.get(r.id) === true;

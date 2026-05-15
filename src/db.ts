@@ -84,6 +84,7 @@ export {
     noteMessage,
     markQuestionAnswered,
     applyMessageDecision,
+    listPendingResolutionDecisionsForTicket,
 } from "./db/messages.js";
 
 export {

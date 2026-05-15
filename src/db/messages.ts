@@ -448,6 +448,38 @@ function mergeMeta(
  * Throws for invalid transitions (re-deciding a terminal decision).
  * The HTTP layer maps the throw to 409 Conflict.
  */
+/**
+ * Find all approved comments on a ticket that carry a pending
+ * `meta.decision.kind=="resolution"` block. Used when the ticket
+ * closes to auto-accept the proposals (mirror of the legacy
+ * `listPendingResolvedForTicket` flow for `ticket_resolved` rows).
+ */
+export function listPendingResolutionDecisionsForTicket(
+    ticketId: number,
+): Message[] {
+    const db = getDb();
+    const rows = db.select().from(schema.messages)
+        .where(and(
+            eq(schema.messages.ticketId, ticketId),
+            eq(schema.messages.kind, "comment_added"),
+            eq(schema.messages.status, "approved"),
+        ))
+        .all();
+    const out: Message[] = [];
+    for (const r of rows) {
+        if (!r.meta) continue;
+        try {
+            const m = JSON.parse(r.meta) as { decision?: { kind?: string; status?: string } };
+            if (m.decision?.kind === "resolution" && m.decision.status === "pending") {
+                const parent = db.select({ project: schema.tickets.project })
+                    .from(schema.tickets).where(eq(schema.tickets.id, r.ticketId)).get();
+                out.push(messageRowToMessage(r, parent?.project ?? ""));
+            }
+        } catch { /* malformed meta, skip */ }
+    }
+    return out;
+}
+
 export function applyMessageDecision(
     messageId: number,
     status: DecisionStatus,
