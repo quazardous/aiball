@@ -941,17 +941,27 @@ api.get("/inbox", (req, res) => {
         if (m.kind === "comment_added") {
             cur.commentCount++;
             if (m.status === "pending") cur.pendingCount++;
-            // #B.132: track who spoke last on this thread. Only count
-            // approved, non-rejected comments — pending mod comments
-            // are "tentative speech".
-            if (
-                m.status === "approved" &&
-                m.by_agent &&
-                m.id > cur.lastSpeakerId
-            ) {
-                cur.lastSpeaker = m.by_agent;
-                cur.lastSpeakerId = m.id;
-            }
+        }
+        // #B.132: track who spoke last on this thread. Counts approved
+        // messages that CARRY content the human would read — any
+        // comment_added, plus lifecycle events with a non-empty body
+        // (a ticket_closed/reopened often embarks an explanation
+        // typed in the composer). System-only relations
+        // (ticket_referenced / ticket_sub_added) don't count. Pending
+        // mod comments excluded — "tentative speech".
+        if (
+            m.status === "approved" &&
+            m.by_agent &&
+            m.id > cur.lastSpeakerId &&
+            (m.kind === "comment_added" ||
+                (m.body &&
+                    (m.kind === "ticket_closed" ||
+                        m.kind === "ticket_reopened" ||
+                        m.kind === "ticket_resolved" ||
+                        m.kind === "ticket_blocked")))
+        ) {
+            cur.lastSpeaker = m.by_agent;
+            cur.lastSpeakerId = m.id;
         }
         if (m.kind === "ticket_resolved" && m.status === "pending") {
             cur.pendingResolution = true;

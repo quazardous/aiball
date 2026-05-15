@@ -932,7 +932,7 @@ async function copyTicketRef() {
                         rounded
                         :loading="resolutionBusy"
                         :title="data.ticket.blocked
-                            ? 'Unblock — bring the ticket back to plain open. Embarks any text typed in the composer.'
+                            ? 'Undo the TBD flag — bring the ticket back to plain open. Embarks any text typed in the composer.'
                             : 'Undo resolved — clear the resolution and bring the ticket back to plain open. Embarks any text typed in the composer.'"
                         @click="commentAndReopen"
                     />
@@ -1417,11 +1417,12 @@ async function copyTicketRef() {
                         <Button
                             v-if="data.ticket.resolved || data.ticket.blocked"
                             icon="pi pi-undo"
-                            :label="hasBody
-                                ? (data.ticket.blocked ? 'comment and unblock' : 'comment and undo resolved')
-                                : (data.ticket.blocked ? 'unblock' : 'undo resolved')"
+                            :label="hasBody ? 'comment and undo' : 'undo'"
                             severity="warn"
                             size="small"
+                            :title="data.ticket.blocked
+                                ? 'Undo the TBD flag — bring the ticket back to plain open. Embarks any text typed in the composer.'
+                                : 'Undo resolved — clear the resolution and bring the ticket back to plain open. Embarks any text typed in the composer.'"
                             :loading="resolutionBusy"
                             @click="commentAndReopen"
                         />
