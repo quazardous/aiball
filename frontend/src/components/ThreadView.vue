@@ -1571,17 +1571,17 @@ async function copyTicketRef() {
     flex-direction: column;
     gap: 0.8rem;
 }
-/* #B.133 follow-up: in top-down mode the composer sits right under
-   the ticket header so the user types where the newest comment lands
-   (per david: "en topdown il faut que la zone commentaire soit juste
-   sous le titre"). Re-orders the flex children — the source order
-   stays the same. */
+/* #B.133 follow-up: in top-down mode, newest content is at the top
+   and the original ticket body goes at the bottom (per david: "même
+   le body du ticket devrait être en bas non"). Composer sits just
+   under the toolbar so the user types where the next comment lands.
+   Re-orders the flex children — source order stays the same. */
 .thread-view--top-down .thread-toolbar { order: 0; }
-.thread-view--top-down .thread-ticket { order: 1; }
-.thread-view--top-down > .composer { order: 2; }
-.thread-view--top-down .thread-summary-banner { order: 3; }
+.thread-view--top-down > .composer { order: 1; }
+.thread-view--top-down .thread-summary-banner { order: 2; }
 .thread-view--top-down .thread-no-comments,
-.thread-view--top-down .thread-comments { order: 4; }
+.thread-view--top-down .thread-comments { order: 3; }
+.thread-view--top-down .thread-ticket { order: 4; }
 .thread-toolbar {
     display: flex;
     align-items: center;

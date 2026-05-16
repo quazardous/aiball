@@ -195,6 +195,15 @@ defineExpose({ load });
                         </template>
                         <template v-else>
                             <Button
+                                icon="pi pi-cog"
+                                severity="secondary"
+                                text
+                                rounded
+                                size="small"
+                                title="Project admin: strategy, settings, stats (#B.127)"
+                                @click="emit('open-stats', p.name)"
+                            />
+                            <Button
                                 icon="pi pi-chart-bar"
                                 severity="secondary"
                                 text
