@@ -872,7 +872,7 @@ async function copyTicketRef() {
 </script>
 
 <template>
-    <div class="thread-view">
+    <div class="thread-view" :class="{ 'thread-view--top-down': topDown }">
         <div class="thread-toolbar">
             <Button
                 icon="pi pi-arrow-left"
@@ -1571,6 +1571,17 @@ async function copyTicketRef() {
     flex-direction: column;
     gap: 0.8rem;
 }
+/* #B.133 follow-up: in top-down mode the composer sits right under
+   the ticket header so the user types where the newest comment lands
+   (per david: "en topdown il faut que la zone commentaire soit juste
+   sous le titre"). Re-orders the flex children — the source order
+   stays the same. */
+.thread-view--top-down .thread-toolbar { order: 0; }
+.thread-view--top-down .thread-ticket { order: 1; }
+.thread-view--top-down > .composer { order: 2; }
+.thread-view--top-down .thread-summary-banner { order: 3; }
+.thread-view--top-down .thread-no-comments,
+.thread-view--top-down .thread-comments { order: 4; }
 .thread-toolbar {
     display: flex;
     align-items: center;
