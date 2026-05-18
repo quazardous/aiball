@@ -44,11 +44,16 @@ const PORT = Number(process.env.AIBALL_PORT ?? 7777);
 // Unix-domain-socket listener for local-trust access (per #B.94 follow-up).
 // Same-uid clients (CLI, MCP wrapper) connect here and bypass bearer auth —
 // the OS already enforces the trust boundary via chmod 600. Set
-// AIBALL_SOCK="" to disable. Defaults to $AIBALL_HOME/sock.
+// AIBALL_SOCK="" to disable. Defaults to $AIBALL_HOME/sock — except on
+// Windows, where docs/WIN-INSTALL.md mandates TCP-only (#B.178) since
+// chmod is a no-op and the trust model can't be enforced the same way.
+// Advanced users can still opt in by setting AIBALL_SOCK explicitly.
 const SOCK_PATH = (() => {
     const v = process.env.AIBALL_SOCK;
     if (v === "") return null; // explicit opt-out
-    return v ?? join(AIBALL_HOME, "sock");
+    if (v) return v;           // explicit opt-in (any platform)
+    if (process.platform === "win32") return null; // Windows default: TCP-only
+    return join(AIBALL_HOME, "sock");
 })();
 
 function frontendDistDir(): string | null {
