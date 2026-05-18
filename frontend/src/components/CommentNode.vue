@@ -264,7 +264,7 @@ onBeforeUnmount(() => detachPaste?.());
                  Heuristic match in ThreadView (same author + decided_at
                  within 60s of this comment's created_at). -->
             <Tag
-                v-if="decider"
+                v-if="decider && !decision"
                 :icon="decider.action === 'accepted' ? 'pi pi-check' : 'pi pi-times'"
                 :severity="decider.action === 'accepted' ? 'success' : 'danger'"
                 :value="`${decider.action} ${decider.target_kind}`"
