@@ -66,6 +66,7 @@ export type LifecycleStage =
     | "resolved"
     | "pending-resolved"
     | "rejected-resolved"
+    | "rejected-plan"
     | "blocked"
     | "snoozed"
     | "open";
@@ -83,6 +84,12 @@ export function lifecycleStage(r: InboxRow): LifecycleStage {
     // is still open — distinct red X badge so the reporter sees their
     // earlier rejection still leaves work on the table.
     if (r.latest_resolution_rejected) return "rejected-resolved";
+    // #B.173: same surface for plan decisions. Lower priority than
+    // rejected-resolved since a rejected resolution is "later in the
+    // pipeline" (work was claimed done but reporter said no) while a
+    // rejected plan is "earlier" (the proposed direction didn't fly).
+    // Both can coexist in theory but the resolution wins the badge.
+    if (r.latest_plan_rejected) return "rejected-plan";
     // Agent escalated — distinct from resolved because the human can't
     // just rubber-stamp; they need to look at it (#B.119).
     if (isBlocked(r)) return "blocked";

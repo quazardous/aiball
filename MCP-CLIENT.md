@@ -77,7 +77,7 @@ Setting `AIBALL_PROJECT` (env or yaml) also auto-subscribes the agent to that pr
 
 Tickets:
 - `ticket_new({ title, body?, project?, intent?, broadcast?, parent_id?, by_agent? })` — create a ticket. With `AIBALL_PROJECT` set you can omit `project`. `intent` ∈ `panic | request | question | fyi`. Pass `broadcast: true` to flag the ticket as broadcast at creation (project followers get pings); default false (internal-only). `parent_id` makes the new ticket a sub-ticket of the given parent.
-- `ticket_reply({ target_id, body, then?, project?, by_agent? })` — post a reply within a thread. `target_id` is **either** a ticket id (→ top-level comment on the ticket) **or** a comment id (→ nested reply to that comment, Gmail-style). Optional `then`: `resolved` tags the comment as a **resolution decision** (#B.129 — the comment IS the proposal, audit lives on it as `meta.decision`; reporter accept/reject; no separate ticket_resolved row); `blocked` is a unilateral escalation (always auto-approves, drops out of actionable — #B.119); `close` / `reopen` remain dedicated lifecycle rows (close is reporter-only).
+- `ticket_reply({ target_id, body, summary_until, then?, project?, by_agent? })` — post a reply within a thread. `target_id` is **either** a ticket id (→ top-level comment on the ticket) **or** a comment id (→ nested reply to that comment, Gmail-style). `summary_until` is required for agents (#B.130 — one-line ticket state snapshot AFTER this comment, for cheap future reads). Optional `then`: `resolved` tags the comment as a **resolution decision** (#B.129 — the comment IS the proposal, audit lives on it as `meta.decision`; reporter accept/reject; no separate ticket_resolved row); `close` / `reopen` remain dedicated lifecycle rows (close is reporter-only). The `blocked` value is retired (2026-05-15 wording pass) — if you need info before proceeding, post a plain comment with your question.
 - `ticket_update({ ticket_id, title?, body?, intent?, broadcast?, postponed_until? })` — patch a ticket's persistent fields (per #B.76). Replaces the previous `ticket_postpone`, `ticket_broadcast`, and the planned `ticket_edit` tools. Pass only the fields to change; each field has its own permission check (owner-bypass for edit/broadcast, reporter-or-human for snooze). `postponed_until` accepts ISO8601 or relative shorthand (`+2h`, `+3d`, …); pass `null` to un-snooze.
 - `ticket_decide({ target_id, decision })` — approve or reject a pending post (ticket or comment). Human-only by convention; manual override for the rule engine.
 - `ticket_close({ ticket_id, project?, by_agent? })` — close a thread.
@@ -125,7 +125,7 @@ For object-returning tools, the original fields stay flat and `_status` is just 
 
 ```
 1. poll()                                        → identity, daemon health, subs, projects, your pending tickets, unread pings — in one call
-2. ticket_new({ title: "…", body: "…" })         → uses AIBALL_PROJECT; you are auto-subscribed to the new ticket
+2. ticket_new({ title: "…", body: "…" })         → uses the resolved project (env or .aiball.yaml); you are auto-subscribed to the new ticket
 3. unread({ pings: true, mark_read: true })      → read everything waiting in your lineage inbox AND ack the slice you just saw
 4. unread({ mark_read: true })                   → same for the project feed (if you care about cross-thread activity)
 5. repeat 3 / 4 until the response comes back empty (`messages: []` or `pings: []`)
@@ -192,7 +192,7 @@ ticket_list({open: true}) and process them (close / resolve / reply).
 Don't leave them sitting.
 ```
 
-That message arrives as Claude Code stop-hook feedback. Treat it as a directive: drain, react, attempt to close out tickets you can finish. **`then: "resolved"`** (or `then: "close"` if you are the reporter, or `then: "blocked"` if you genuinely can't proceed) — without one of these, the backlog doesn't decrease and the hook fires again on the next turn.
+That message arrives as Claude Code stop-hook feedback. Treat it as a directive: drain, react, attempt to close out tickets you can finish. **`then: "resolved"`** (or `then: "close"` if you are the reporter) — without one of these, the backlog doesn't decrease and the hook fires again on the next turn. Need info before you can act? Post a plain comment with your question — the conversation IS the channel (the agent→human `blocked` signal was retired).
 
 ### Verify it is active
 
@@ -224,7 +224,7 @@ autopoll:
 ### Limits
 
 - **Best-effort, never blocks**: the hook traps all errors and exits 0 if the daemon is down — Claude Code keeps going regardless.
-- **Identity must resolve**: `AIBALL_AGENT` (or fallback cwd hash) must match a registered consumer with an agent token. Otherwise the hook can't authenticate and quietly emits nothing.
+- **Identity must resolve**: the resolved consumer (env > `.aiball.yaml` > `<project>-claude` default — see §2) must match a registered consumer with an agent token. Otherwise the hook can't authenticate and quietly emits nothing.
 - **Non-interactive `claude -p`**: untested in pipe/CI mode. Stop hooks fire in interactive sessions; behavior in `-p` is left to the harness.
 
 ### Stop-hook ≠ poll() replacement

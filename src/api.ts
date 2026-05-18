@@ -956,6 +956,11 @@ api.get("/inbox", (req, res) => {
             resolution decision was rejected (so the reporter sees
             "yes I rejected it, the thread is open"). */
         latestResolutionRejected: boolean;
+        // #B.173: same mechanic for plan decisions. David: "reject
+        // plan est pas flag dans les list comme reject resolution".
+        // Latest-wins symmetric with resolution.
+        latestPlanId: number;
+        latestPlanRejected: boolean;
         // #B.132: who spoke last on this thread. Tracks the by_agent
         // of the most recent non-rejected approved comment_added.
         // Falls back to the ticket creator if no comments yet.
@@ -980,6 +985,8 @@ api.get("/inbox", (req, res) => {
                 pendingResolution: false,
                 latestResolutionId: 0,
                 latestResolutionRejected: false,
+                latestPlanId: 0,
+                latestPlanRejected: false,
                 lastSpeaker: null,
                 lastSpeakerId: 0,
             } as Agg);
@@ -1039,6 +1046,18 @@ api.get("/inbox", (req, res) => {
                     syntheticResolved = { ...m, kind: "ticket_resolved" };
                 }
             }
+            // #B.173: same latest-wins for plan decisions. No
+            // synthetic event — accepting a plan doesn't change the
+            // ticket lifecycle (it just records "yes, that's the
+            // direction"), only resolutions can close. Surface the
+            // rejected state so the inbox row can flag it (parallel
+            // to latest_resolution_rejected).
+            if (d?.kind === "plan") {
+                if (cur.latestPlanId === 0 || m.id > cur.latestPlanId) {
+                    cur.latestPlanId = m.id;
+                    cur.latestPlanRejected = d.status === "rejected";
+                }
+            }
         }
         if (
             (m.kind === "ticket_closed" ||
@@ -1092,6 +1111,8 @@ api.get("/inbox", (req, res) => {
                 pendingResolution: false,
                 latestResolutionId: 0,
                 latestResolutionRejected: false,
+                latestPlanId: 0,
+                latestPlanRejected: false,
                 lastSpeaker: null,
                 lastSpeakerId: 0,
             } as Agg);
@@ -1127,6 +1148,12 @@ api.get("/inbox", (req, res) => {
                 suppression as pending_resolution (cleared once
                 ticket is closed/rejected). */
             latest_resolution_rejected: agg.latestResolutionRejected && !(agg.closed || t.status === "rejected"),
+            /** #B.173: same flag for plan decisions. David: reject
+                plan wasn't surfaced in the list view the way reject
+                resolution is. Symmetric to latest_resolution_rejected
+                — cleared once the ticket is closed/rejected so the
+                badge represents "live unresolved rejection". */
+            latest_plan_rejected: agg.latestPlanRejected && !(agg.closed || t.status === "rejected"),
             broadcast: t.broadcast === 1,
             // Per-consumer unread flag (≥1 unseen ping on the thread for
             // the caller, resolved from the X-Aiball-Consumer header).

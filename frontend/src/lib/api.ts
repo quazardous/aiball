@@ -235,6 +235,11 @@ export interface InboxRow {
      *  ticket was rejected — UI shows a `× rejected` badge so the
      *  reporter sees "I rejected, the thread is still open". */
     latest_resolution_rejected?: boolean;
+    /** #B.173: same for plan decisions — the latest plan was
+     *  rejected. UI surfaces this so the list shows that an
+     *  agent's plan was knocked back and the thread stays open
+     *  pending a new direction. */
+    latest_plan_rejected?: boolean;
     broadcast?: boolean;
     /** Per-consumer flag: ≥1 unseen ping on the thread for the requesting consumer. */
     unread?: boolean;

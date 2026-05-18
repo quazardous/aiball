@@ -66,6 +66,18 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         color: "--p-red-500",
         title: "you rejected the latest resolution — thread still open",
     },
+    "rejected-plan": {
+        // #B.173: latest plan decision was rejected. Visually
+        // distinct from rejected-resolved (which is "work was
+        // claimed done") — a rejected plan is "the proposed
+        // direction didn't fly". Use the lightbulb-times pairing
+        // (no exact PrimeIcons match → `pi-ban` reuses the blocked
+        // family which already reads as "this direction's a no",
+        // but in amber to differentiate from agent-escalation red).
+        icon: "pi pi-ban",
+        color: "--p-amber-500",
+        title: "you rejected the latest plan — thread still open, awaiting new direction",
+    },
     blocked: {
         // Agent escalation (#B.119): the ticket needs the human to
         // weigh in. Wording softened to "TBD" / to-be-discussed (#B.129
