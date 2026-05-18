@@ -1156,6 +1156,24 @@ async function copyTicketRef() {
                     </span>
                 </header>
                 <h2 class="thread-title">{{ data.ticket.title }}</h2>
+                <!-- david "manque la nature": include the intent + tag
+                     chips in the lifted block so the ticket's "nature"
+                     is visible at the top in top-down. The original
+                     .thread-meta-extra (with the edit button) stays
+                     in-article — the edit button belongs near the body. -->
+                <div v-if="data.ticket.intent || (data.ticket.tags && data.ticket.tags.length)" class="thread-meta-extra thread-meta-extra--lifted">
+                    <Tag
+                        v-if="data.ticket.intent"
+                        :value="data.ticket.intent"
+                        :severity="data.ticket.intent === 'panic' ? 'danger' : 'info'"
+                    />
+                    <span
+                        v-for="t in data.ticket.tags"
+                        :key="t.id"
+                        class="thread-tag"
+                        :style="{ background: t.color ?? 'var(--p-surface-200)' }"
+                    >{{ t.name }}</span>
+                </div>
             </div>
             <article class="thread-ticket">
                 <header class="meta">
@@ -1634,11 +1652,15 @@ async function copyTicketRef() {
 .thread-view--top-down .thread-no-comments,
 .thread-view--top-down .thread-comments { order: 3; }
 .thread-view--top-down .thread-ticket { order: 4; }
-/* In top-down, the lifted headline above carries the meta tags and
-   title — hide the in-article copies to avoid showing them twice
-   (top AND bottom). */
+/* In top-down, the lifted headline above carries the meta tags, the
+   title, intent + tag chips — hide their in-article copies to avoid
+   showing them twice (top AND bottom). The in-article .thread-meta-extra
+   keeps its "edit message" button (it belongs near the body); we hide
+   only the chips inside it. */
 .thread-view--top-down .thread-ticket > header.meta,
 .thread-view--top-down .thread-ticket > .thread-title { display: none; }
+.thread-view--top-down .thread-ticket > .thread-meta-extra .p-tag,
+.thread-view--top-down .thread-ticket > .thread-meta-extra > .thread-tag { display: none; }
 .thread-headline--lifted {
     display: flex;
     flex-direction: column;
