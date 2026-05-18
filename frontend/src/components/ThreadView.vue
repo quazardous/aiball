@@ -3,15 +3,14 @@ import { computed, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
-import Tag from "primevue/tag";
 import { api, INTENTS, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
-import { STATUS_SEVERITY } from "../lib/labels";
 import { topDown } from "../lib/prefs";
 import ThreadRelations from "./ThreadRelations.vue";
 import RelationKindMenu from "./RelationKindMenu.vue";
 import ThreadHeader from "./ThreadHeader.vue";
 import ThreadEditPanel from "./ThreadEditPanel.vue";
 import ThreadCommentsList from "./ThreadCommentsList.vue";
+import ThreadMetaHeader from "./ThreadMetaHeader.vue";
 import ThreadActionsDock from "./ThreadActionsDock.vue";
 import ThreadToolbar from "./ThreadToolbar.vue";
 import { STAGE_LABELS, useThreadItems } from "../lib/threadItems";
@@ -103,12 +102,6 @@ useBus("thread.refresh", ({ ticketId }) => {
 // Auto-mark-as-read dwell timer (#B.91 / #B.191) — wired by the
 // composable; no surface in this file.
 useAutoMarkRead({ data, ticketId: () => props.ticketId });
-
-// Delegated to the shared severity catalog (#B.122) — the local
-// switch-case duplicated STATUS_SEVERITY from `lib/labels.ts`.
-function statusSeverity(s: "pending" | "approved" | "rejected") {
-    return STATUS_SEVERITY[s];
-}
 
 /**
  * After any state-mutating action, emit on the bus so the open thread,
@@ -366,54 +359,11 @@ async function copyTicketRef() {
                  in-article copies stay in .thread-ticket (which sinks
                  to the bottom in top-down). No second lifted block. -->
             <article class="thread-ticket">
-                <header class="meta">
-                    <Tag
-                        :value="justCopiedTicket ? `copied #B.${data.ticket.id}` : `#B.${data.ticket.id}`"
-                        :severity="justCopiedTicket ? 'success' : 'secondary'"
-                        class="comment-ref-tag"
-                        role="button"
-                        tabindex="0"
-                        :title="`Click to copy this ticket's reference (#B.${data.ticket.id}) — paste it in any markdown body to link back here.`"
-                        @click="copyTicketRef"
-                        @keydown.enter.prevent="copyTicketRef"
-                        @keydown.space.prevent="copyTicketRef"
-                    />
-                    <Tag :value="data.ticket.project" severity="info" />
-                    <Tag
-                        :value="data.ticket.status"
-                        :severity="statusSeverity(data.ticket.status)"
-                    />
-                    <!--
-                        Skip the lifecycle badge when the ticket itself is
-                        rejected — the `rejected` status tag rendered just
-                        above already conveys "this is over" with the right
-                        severity. Stacking "rejected" + "closed" would be
-                        redundant and misleading (it's not a wontfix close).
-                    -->
-                    <Tag
-                        v-if="data.ticket.status !== 'rejected' && data.ticket.closed && data.ticket.resolved"
-                        value="closed (resolved)"
-                        severity="success"
-                        icon="pi pi-check-circle"
-                    />
-                    <Tag
-                        v-else-if="data.ticket.status !== 'rejected' && data.ticket.closed"
-                        value="closed"
-                        severity="warn"
-                        icon="pi pi-lock"
-                    />
-                    <Tag
-                        v-else-if="data.ticket.resolved"
-                        value="resolved (pending close)"
-                        severity="success"
-                        icon="pi pi-check-circle"
-                    />
-                    <span v-if="data.ticket.by_agent">by {{ data.ticket.by_agent }}</span>
-                    <span class="spacer" />
-                    <span :title="data.ticket.created_at">
-                        {{ new Date(data.ticket.created_at).toLocaleString() }}
-                    </span>
-                </header>
+                <ThreadMetaHeader
+                    :ticket="data.ticket"
+                    :just-copied="justCopiedTicket"
+                    @copy="copyTicketRef"
+                />
                 <div
                     v-if="data.ticket.parent_ticket_id"
                     class="thread-parent-ref"
@@ -542,47 +492,11 @@ async function copyTicketRef() {
                                     : 'Reply on this thread (markdown supported, use > for quotes and #N to reference a comment)'"
             >
                 <template v-if="topDown" #headline>
-                    <header class="meta">
-                        <Tag
-                            :value="justCopiedTicket ? `copied #B.${data.ticket.id}` : `#B.${data.ticket.id}`"
-                            :severity="justCopiedTicket ? 'success' : 'secondary'"
-                            class="comment-ref-tag"
-                            role="button"
-                            tabindex="0"
-                            :title="`Click to copy this ticket's reference (#B.${data.ticket.id}) — paste it in any markdown body to link back here.`"
-                            @click="copyTicketRef"
-                            @keydown.enter.prevent="copyTicketRef"
-                            @keydown.space.prevent="copyTicketRef"
-                        />
-                        <Tag :value="data.ticket.project" severity="info" />
-                        <Tag
-                            :value="data.ticket.status"
-                            :severity="statusSeverity(data.ticket.status)"
-                        />
-                        <Tag
-                            v-if="data.ticket.status !== 'rejected' && data.ticket.closed && data.ticket.resolved"
-                            value="closed (resolved)"
-                            severity="success"
-                            icon="pi pi-check-circle"
-                        />
-                        <Tag
-                            v-else-if="data.ticket.status !== 'rejected' && data.ticket.closed"
-                            value="closed"
-                            severity="warn"
-                            icon="pi pi-lock"
-                        />
-                        <Tag
-                            v-else-if="data.ticket.resolved"
-                            value="resolved (pending close)"
-                            severity="success"
-                            icon="pi pi-check-circle"
-                        />
-                        <span v-if="data.ticket.by_agent">by {{ data.ticket.by_agent }}</span>
-                        <span class="spacer" />
-                        <span :title="data.ticket.created_at">
-                            {{ new Date(data.ticket.created_at).toLocaleString() }}
-                        </span>
-                    </header>
+                    <ThreadMetaHeader
+                        :ticket="data.ticket"
+                        :just-copied="justCopiedTicket"
+                        @copy="copyTicketRef"
+                    />
                     <!-- Mirror cartouche for the top-down headline (same
                          component, hoisted state syncs the form across
                          both instances). #B.196 split. -->
