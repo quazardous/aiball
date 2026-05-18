@@ -116,7 +116,7 @@ async function tryWake(reason: string, manualWake = false): Promise<boolean> {
  * the stream with simple backoff (no aggressive reconnect storm).
  */
 async function mainSse(): Promise<void> {
-    log(`timer started — SSE mode (heartbeat ${interval}s), check-cmd: ${checkCmd}`);
+    log(`timer started — SSE mode (heartbeat ${interval}s), check-cmd: ${checkCmd || "(internal SDK)"}`);
     let unsubscribe: (() => void) | null = null;
     let lastConnectAt = 0;
     const reconnect = () => {
@@ -127,7 +127,11 @@ async function mainSse(): Promise<void> {
         lastConnectAt = now;
         unsubscribe?.();
         unsubscribe = client().subscribeEvents({
-            onPing: () => { void tryWake("sse:ping"); },
+            onHello: (h) => { log(`SSE hello: unread=${h.unread}`); },
+            onPing: (p) => {
+                log(`SSE ping received: ${JSON.stringify(p)} → tryWake`);
+                void tryWake("sse:ping");
+            },
             onError: (e) => {
                 log(`SSE error: ${e.message ?? String(e)} — will reconnect on next heartbeat`);
                 unsubscribe = null;
