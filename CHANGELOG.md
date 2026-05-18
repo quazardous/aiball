@@ -15,6 +15,60 @@ the human-readable narrative.
 
 ## [Unreleased]
 
+### Unified identity resolution chain (`#B.154`)
+
+`.aiball.yaml consumer.*` is now the canonical source for `consumer_id`
+and default project across every aiball surface (autopoll, claude-loop,
+`aiball` CLI, MCP server). The chain, applied entirely in
+`src/autopoll/config.ts:loadConfig()`:
+
+1. `process.env.AIBALL_AGENT` / `AIBALL_PROJECT` — priority override
+   for special cases
+2. `.aiball.yaml consumer.agent` / `consumer.project` — canonical
+3. `.mcp.json mcpServers.aiball.env.*` — DEPRECATED (still works,
+   `aiball check` + `claude-loop` warn on stderr)
+4. Defaults: project = `basename(cwd)`; agent = `<project>-claude`
+
+`aiball check` now surfaces the source of each resolved field
+(`[from aiball.yaml/env/mcp.json/default]`), a dedicated
+`deprecation` section when `.mcp.json` carries the legacy env block,
+and an activation hint (`activate with: aiball autopoll init`) when
+the Stop hook is wired but no `.aiball.yaml` is present.
+
+Migration: drop the `mcpServers.aiball.env` block from `.mcp.json`,
+add a `consumer:` block to `.aiball.yaml`. See `.aiball.yaml.example`.
+
+### claude-loop status & pane awareness (`#B.154`)
+
+- **Status colors** in the tmux bar: `[boot]` (yellow) → `[idle]` (gray)
+  → `[busy]` (cyan, queued/waiting) → `[working]` (green, claude
+  actively mid-turn per `esc to interrupt`). Plus phase suffixes
+  `[busy:compacting]` / `[busy:rate-limit]` / `[busy:api-error]` and
+  resume picker phases (`[boot:resume?]`, `[boot:pick→as-is]`, …).
+- **Resume picker auto-dismiss** on `--resume`: SessionStart hook
+  detects the picker text and sends Down+Enter (or Enter, per
+  `CL_RESUME_MODE`).
+- **Heartbeat pane-probe**: every tick the timer reads pane content
+  and flips the bar between `working` ↔ `idle` based on
+  `esc to interrupt`. Catches the case where Claude Code's Stop hook
+  doesn't fire (slash commands like `/compact`), so the bar no longer
+  sticks at `[busy]` after a slash command returns.
+- **Bootstrap refactor**: new `ProjectContext` service centralizes
+  cwd + identity resolution for cmdStart / cmdCheck / cmdTrace
+  (previously duplicated with subtle drift).
+
+### Rejected decisions surfaced in the inbox (`#B.168`, `#B.173`)
+
+When the reporter rejects an agent's resolution proposal and the
+thread stays open, the row now shows a red × badge
+(`rejected-resolved`) so the reporter sees "I rejected, work still
+on the table". Same surface for plan decisions
+(`rejected-plan`, amber `pi-ban` badge — distinct from agent-
+escalation red).
+
+Latest-wins semantics: a fresh proposal supersedes prior rejected
+ones on the badge. Cleared once the ticket is closed or rejected.
+
 ### SSE event-bus — daemon push, kill the polling lag (`#B.148`)
 
 The daemon now exposes a Server-Sent-Events stream at
