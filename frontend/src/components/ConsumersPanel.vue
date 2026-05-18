@@ -223,21 +223,9 @@ const sortedRows = computed<Consumer[]>(() => {
         <header class="rules-explainer-block">
             <h2 style="margin: 0">Consumers</h2>
             <p class="rules-explainer rules-explainer--muted">
-                One row per <code>consumer_id</code> the daemon has seen — the same identity
-                you pick in the header dropdown. <strong>Kind</strong> = <em>human</em>
-                grants moderator bypass: posts skip moderation, can close / snooze any
-                ticket, receives pings on every pending submission. <em>agent</em> is the
-                default for interactive Claude Code sessions paired with a repo;
-                <em>sandbox</em> is for ephemeral autonomous agents spawned by
-                <code>aiball sandbox start</code> (set automatically at launch).
-                <strong>display_name</strong> is the friendly label (falls back to the raw id).
-                Blocking disables future writes without deleting history.
-            </p>
-            <p class="rules-explainer rules-explainer--muted">
-                New ids are added automatically on first post. Promote one to <em>human</em>
-                to make it the active moderator on this machine — and pair it with the
-                header picker so the web UI sends the matching <code>X-Aiball-Consumer</code>
-                header.
+                One row per <code>consumer_id</code> the daemon has seen.
+                <em>Human</em> = moderator (bypasses moderation, closes / snoozes any ticket);
+                <em>agent</em> = anyone else. Click the pencil to edit, the envelope to block.
             </p>
         </header>
 

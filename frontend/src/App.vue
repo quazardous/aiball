@@ -474,15 +474,39 @@ function shortKindLabel(m: Message): string {
     return m.kind;
 }
 
+// #B.194: auto-approve projects emit message_created (pending) then
+// message_decided (approved) in quick succession → two toasts per
+// message. Hold the pending toast 250ms; if a decision lands first,
+// cancel the pending and only show the decision.
+const pendingArrivalTimers = new Map<number, ReturnType<typeof setTimeout>>();
+const PENDING_TOAST_HOLD_MS = 250;
+
 function notifyArrival(m: Message) {
     const inScope = !project.value || project.value === m.project;
     if (!inScope) return;
 
+    if (m.status !== "pending") {
+        const t = pendingArrivalTimers.get(m.id);
+        if (t) {
+            clearTimeout(t);
+            pendingArrivalTimers.delete(m.id);
+        }
+        renderArrivalToast(m);
+        return;
+    }
+
+    if (pendingArrivalTimers.has(m.id)) return;
+    const t = setTimeout(() => {
+        pendingArrivalTimers.delete(m.id);
+        renderArrivalToast(m);
+    }, PENDING_TOAST_HOLD_MS);
+    pendingArrivalTimers.set(m.id, t);
+}
+
+function renderArrivalToast(m: Message) {
     const who = m.by_agent ?? "unknown";
     const k = shortKindLabel(m);
     const summary = m.title ?? (m.body ? m.body.slice(0, 80) : `new ${k}`);
-    // Tickets use their integer id as canonical ref; comments and lifecycle
-    // events use the hashid (#C<hashid>) backfilled by the 0003 migration.
     const ref =
         m.kind === "ticket_created"
             ? `#B.${m.id}`
