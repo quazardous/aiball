@@ -782,6 +782,11 @@ async function acceptResolution(asKind?: "plan" | "resolution") {
 // decision). Arrow notation matches the new-flow labels (#B.139).
 const legacyAcceptMenu = computed(() => [
     {
+        label: "accept resolution → close the ticket",
+        icon: "pi pi-check-circle",
+        command: () => { void acceptResolution(); },
+    },
+    {
         label: "accept as plan → keep the ticket open",
         icon: "pi pi-compass",
         command: () => { void acceptResolution("plan"); },
@@ -905,17 +910,23 @@ async function reclassifyActiveDecision(newKind: "plan" | "resolution") {
 // Replaced with Button + popup Menu where ALL accept variants are
 // explicit menu items including the "primary" path. The trigger
 // button just opens the menu; user picks the variant they want.
-// SplitButton main click = the kind's "natural" accept (resolution
-// closes the ticket, plan stays open). Dropdown = alternates with
-// the EFFECT spelled out in the label (arrow → consequence) so
-// users don't have to guess what each path does. David #B.139:
-// SplitButton wording was unclear; the arrow notation makes the
-// cause-effect explicit.
+// SplitButton main click = the kind's "natural" accept. Dropdown
+// lists ALL options including the main action again (#B.139 follow-
+// up — david: "tu peux réintroduire le chevron séparé plus l'action
+// principale dispo immédiatement au clic direct, tout en laissant
+// l'action principale aussi dans la liste"). User has two paths
+// to the default: quick click OR dropdown pick. Alternates carry
+// the EFFECT in the label via the arrow → notation.
 const acceptMenu = computed(() => {
     const active = activeDecision.value;
     if (!active) return [];
     const items: { label: string; icon: string; command: () => void }[] = [];
     if (active.decision.kind === "resolution") {
+        items.push({
+            label: "accept resolution → close the ticket",
+            icon: "pi pi-check-circle",
+            command: () => { void acceptActiveDecision(); },
+        });
         items.push({
             label: "accept as plan → keep the ticket open",
             icon: "pi pi-compass",
@@ -927,6 +938,11 @@ const acceptMenu = computed(() => {
             command: () => { void reclassifyActiveDecision("plan"); },
         });
     } else if (active.decision.kind === "plan") {
+        items.push({
+            label: "accept plan → keep the ticket open",
+            icon: "pi pi-check-circle",
+            command: () => { void acceptActiveDecision(); },
+        });
         items.push({
             label: "accept as resolution → close the ticket",
             icon: "pi pi-verified",

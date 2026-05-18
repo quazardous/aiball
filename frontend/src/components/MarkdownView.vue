@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { marked, type Tokens } from "marked";
 import DOMPurify from "dompurify";
 import { bus } from "../lib/bus";
+import { promoteTrigger } from "../lib/prefs";
 import { extractQuestions } from "../lib/questions";
 
 /**
@@ -223,26 +224,51 @@ async function onClick(ev: MouseEvent) {
 // to, anchoring its relation-menu Popover at the click coords. Plain
 // right-click anywhere else passes through (we don't hijack the
 // browser menu globally).
-function onContextMenu(ev: MouseEvent) {
-    const target = (ev.target as HTMLElement | null)?.closest("a.ticket-ref");
-    if (!target) return;
-    const href = target.getAttribute("href") ?? "";
+// Helper: extract a target ticket id from a `.ticket-ref` link, or
+// null when the click/hover landed elsewhere / on a self-reference.
+function ticketRefFromEvent(ev: Event): { ticketId: number; target: HTMLElement } | null {
+    const el = (ev.target as HTMLElement | null)?.closest("a.ticket-ref");
+    if (!el) return null;
+    const href = el.getAttribute("href") ?? "";
     const match = /^\/b\/(\d+)/.exec(href);
-    if (!match) return;
+    if (!match) return null;
     const ticketId = Number(match[1]);
-    if (!Number.isFinite(ticketId) || ticketId <= 0) return;
-    // Self-references are meaningless as relations — let the browser's
-    // native context menu show instead of hijacking with the promote
-    // popup. David #B.123: "on peut filtrer le popup".
-    if (props.selfTicketId !== undefined && ticketId === props.selfTicketId) {
-        return;
-    }
+    if (!Number.isFinite(ticketId) || ticketId <= 0) return null;
+    if (props.selfTicketId !== undefined && ticketId === props.selfTicketId) return null;
+    return { ticketId, target: el as HTMLElement };
+}
+
+function onContextMenu(ev: MouseEvent) {
+    // Only handles right-click when the user has chosen contextmenu
+    // trigger mode; hover mode lets the browser's native menu show on
+    // right-click of refs (since clicking is no longer the trigger).
+    if (promoteTrigger.value !== "contextmenu") return;
+    const hit = ticketRefFromEvent(ev);
+    if (!hit) return;
     ev.preventDefault();
-    bus.emit("ticket-ref.promote", {
-        ticket_id: ticketId,
-        event: ev,
-        target: target as HTMLElement,
-    });
+    bus.emit("ticket-ref.promote", { ticket_id: hit.ticketId, event: ev, target: hit.target });
+}
+
+let hoverTimer: number | null = null;
+function onMouseOver(ev: MouseEvent) {
+    if (promoteTrigger.value !== "hover") return;
+    const hit = ticketRefFromEvent(ev);
+    if (!hit) return;
+    // Small delay so brushing past links doesn't trigger the popover.
+    if (hoverTimer !== null) window.clearTimeout(hoverTimer);
+    hoverTimer = window.setTimeout(() => {
+        hoverTimer = null;
+        bus.emit("ticket-ref.promote", { ticket_id: hit.ticketId, event: ev, target: hit.target });
+    }, 350);
+}
+function onMouseOut(ev: MouseEvent) {
+    if (promoteTrigger.value !== "hover") return;
+    const hit = ticketRefFromEvent(ev);
+    if (!hit) return;
+    if (hoverTimer !== null) {
+        window.clearTimeout(hoverTimer);
+        hoverTimer = null;
+    }
 }
 
 // #B.104: after every re-render, scan rendered checkboxes and wire
@@ -304,7 +330,15 @@ watch(html, () => { void wireQuestionClicks(); }, { flush: "post", immediate: tr
 </script>
 
 <template>
-    <div ref="rootRef" class="md-body" @click="onClick" @contextmenu="onContextMenu" v-html="html" />
+    <div
+        ref="rootRef"
+        class="md-body"
+        @click="onClick"
+        @contextmenu="onContextMenu"
+        @mouseover="onMouseOver"
+        @mouseout="onMouseOut"
+        v-html="html"
+    />
 </template>
 
 <style>

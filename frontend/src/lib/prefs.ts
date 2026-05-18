@@ -17,3 +17,20 @@ watch(topDown, (v) => {
 export function toggleTopDown(): void {
     topDown.value = !topDown.value;
 }
+
+// #B.123 follow-up: how the promote-to-typed-relation popover is
+// triggered on a `#B.NN` link in a rendered body. "hover" = popover
+// shows when the mouse enters the link (default — david's pref);
+// "contextmenu" = popover shows on right-click. Persisted globally.
+const PROMOTE_TRIGGER_KEY = "aiball.promote_trigger";
+type PromoteTrigger = "hover" | "contextmenu";
+const stored = localStorage.getItem(PROMOTE_TRIGGER_KEY);
+export const promoteTrigger = ref<PromoteTrigger>(
+    stored === "contextmenu" ? "contextmenu" : "hover",
+);
+watch(promoteTrigger, (v) => {
+    localStorage.setItem(PROMOTE_TRIGGER_KEY, v);
+});
+export function togglePromoteTrigger(): void {
+    promoteTrigger.value = promoteTrigger.value === "hover" ? "contextmenu" : "hover";
+}
