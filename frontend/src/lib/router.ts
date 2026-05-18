@@ -3,11 +3,7 @@ import { onBeforeUnmount, watch, type Ref } from "vue";
 export type RouteState = {
     panel: "rules" | "tags" | "projects" | "consumers" | "compose" | null;
     openTicketId: number | null;
-    /**
-     * #B.193 item 3: when `panel === "consumers"` and this is set, the
-     * consumers panel renders the dedicated edit view for that
-     * consumer_id instead of the table. URL: `/consumers/<id>`.
-     */
+    /** Set on `/consumers/<id>` — ConsumersPanel renders the edit view (#B.193). */
     consumerEditId: string | null;
     project: string | null;
     statusFilter: "all" | "unread" | "pending" | "approved" | "rejected";
@@ -50,9 +46,7 @@ export function parseUrl(): Partial<RouteState> {
     const path = location.pathname;
     const qs = new URLSearchParams(location.search);
     const out: Partial<RouteState> = {};
-    // #B.193 item 3: always (re-)set so navigating away from a
-    // /consumers/<id> URL clears the dedicated edit view; only the
-    // /consumers/<id> branch below overrides it back to a value.
+    // Default to null so navigating away from /consumers/<id> clears the edit view.
     out.consumerEditId = null;
 
     if (path === "/rules") {

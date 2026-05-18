@@ -205,17 +205,13 @@ export function fanOutPings(msg: Message): void {
     }
 
     const authorIsHuman = isHuman(msg.by_agent);
+    // #B.191: when a human posts, skip pings to other humans — they
+    // share the moderator backlog, so cross-human pings are noise.
+    // Hoist the human set so we don't SELECT once per recipient.
+    const humanSet = authorIsHuman ? new Set(listHumans()) : null;
     for (const r of recipients) {
         if (r === msg.by_agent) continue;
-        // #B.191: when a human posts (via the web UI or the CLI as
-        // themselves), don't ping OTHER human consumers — they all
-        // see the same project backlog as moderators, so a cross-human
-        // ping is just noise. Concretely: posting "as david" from the
-        // web UI used to ping the `human` Moderator consumer
-        // (david's other identity) and surface david's own posts as
-        // unread — david: "faux unread". Agent → human pings stay
-        // intact (that's the whole point of the moderation queue).
-        if (authorIsHuman && isHuman(r)) continue;
+        if (humanSet?.has(r)) continue;
         insertPing(r, msg);
     }
 }

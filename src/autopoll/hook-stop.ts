@@ -30,21 +30,14 @@ import { loadConfig } from "./config.js";
 import { formatReason, type AutopollPayload } from "./templates.js";
 
 /**
- * #B.192 david: when claude-loop wraps the session, the autopoll Stop
- * hook should NOT inject backlog while claude is still mid-work
- * (footer shows "esc to interrupt"). The Stop hook can fire on
- * intermediate stops too, and even at a real stop the pane can lag.
- * Probe the LAST 5 non-empty lines of the tmux pane (matches the
- * #B.185 timer-side scoping) — anything earlier in scrollback is
- * stale and would falsely suppress legit injections.
- *
- * Returns true if we're confident claude is still working. Returns
- * false on any uncertainty (no tmux, no pane name, capture failed) —
- * we'd rather inject than block on a false negative.
+ * True iff the tmux pane's footer shows "esc to interrupt" — Claude
+ * is mid-work and injecting backlog would race the next prompt
+ * (#B.192). Scoped to the last 5 non-empty lines to match the
+ * #B.185 timer probe; stale scrollback can't falsely suppress.
+ * Uncertainty (no tmux, capture failed) → false: rather inject
+ * a legit reminder than block on a false positive.
  */
 function claudeStillWorking(): boolean {
-    // Only meaningful inside a tmux session. Claude Code sets TMUX
-    // when run inside one (tmux exports it to children).
     if (!process.env.TMUX) return false;
     const r = spawnSync("tmux", ["display-message", "-p", "-F", "#{pane_id}"], { encoding: "utf8" });
     if (r.status !== 0) return false;
@@ -239,16 +232,10 @@ async function main(): Promise<void> {
         shouldNotify = true;
     }
 
-    // #B.192 david: "c'est les 2 — on test à la fin du throttle et on
-    // relance le throttle". When we're about to fire, probe the pane
-    // first: if claude is still mid-work (footer "esc to interrupt"),
-    // racing the next prompt would clash with the in-flight turn.
-    // - For the throttle-elapsed reminder: reset the throttle counter
-    //   so we wait another full window after busy clears, rather than
-    //   re-firing on every Stop hook until idle.
-    // - For new-ping / new-open triggers: skip without touching state
-    //   so the next Stop re-evaluates and fires as soon as the pane
-    //   footer clears.
+    // Pane probe gate (#B.192): if claude is mid-work, don't race
+    // the next prompt. Throttle reminder → reset its counter so we
+    // wait a full window after busy clears. New-ping / new-open →
+    // leave state alone so the next Stop fires once the footer clears.
     if (shouldNotify && claudeStillWorking()) {
         if (!newPing && !newOpenTicket) {
             writeState(agent, {

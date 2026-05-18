@@ -7,13 +7,13 @@
  * note) but with more room — and a single save action so all changes
  * land atomically.
  */
-import { onMounted, ref, watch } from "vue";
+import { ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import Textarea from "primevue/textarea";
 import { useToast } from "primevue/usetoast";
-import { api, type Consumer, type ConsumerKind } from "../lib/api";
+import { api, CONSUMER_KIND_OPTIONS, type Consumer, type ConsumerKind } from "../lib/api";
 import { relativeTime } from "../lib/format";
 
 const props = defineProps<{ consumerId: string }>();
@@ -30,11 +30,7 @@ const displayName = ref("");
 const note = ref("");
 const enabled = ref(true);
 
-const KIND_OPTIONS = [
-    { label: "Human", value: "human" as ConsumerKind },
-    { label: "Agent", value: "agent" as ConsumerKind },
-    { label: "Sandbox", value: "sandbox" as ConsumerKind },
-];
+const KIND_OPTIONS = CONSUMER_KIND_OPTIONS;
 
 async function load() {
     loading.value = true;
@@ -61,8 +57,7 @@ async function load() {
     }
 }
 
-watch(() => props.consumerId, load, { immediate: false });
-onMounted(load);
+watch(() => props.consumerId, load, { immediate: true });
 
 async function save() {
     if (!original.value) return;

@@ -674,11 +674,8 @@ async function onAttachPicked(ev: Event) {
     min-width: 0;
     font-weight: 600;
 }
-/* #B.188: on a narrow viewport the intent Select (min-width 9rem)
-   plus the title input couldn't fit side-by-side and the Select
-   overflowed past the right edge (david: "champ type légèrement
-   hors du cadre"). Stack vertically below 720px — title gets the
-   full row, intent select sits below at full width. */
+/* Narrow viewports: stack title + intent select instead of
+   overflowing past the right edge (#B.188). */
 @media (max-width: 720px) {
     .composer-title-row {
         flex-direction: column;

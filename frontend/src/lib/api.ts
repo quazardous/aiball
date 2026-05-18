@@ -286,6 +286,12 @@ export interface PostMessageInput {
 
 /** Consumer registry entry (#B.79). */
 export type ConsumerKind = "human" | "agent" | "sandbox";
+
+export const CONSUMER_KIND_OPTIONS: { label: string; value: ConsumerKind }[] = [
+    { label: "Human", value: "human" },
+    { label: "Agent", value: "agent" },
+    { label: "Sandbox", value: "sandbox" },
+];
 /** Claude-loop state pushed by the timer (#B.177 B1). */
 export type ConsumerState = "boot" | "idle" | "busy";
 export interface Consumer {

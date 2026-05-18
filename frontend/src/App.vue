@@ -170,9 +170,7 @@ const rows = ref<InboxRow[]>([]);
 const loading = ref(false);
 const dark = ref(localStorage.getItem("aiball.dark") === "1");
 const openTicketId = ref<number | null>(null);
-// #B.193 item 3: when set AND panel === "consumers", ConsumersPanel
-// switches from the table to the dedicated edit view. Routed as
-// `/consumers/<id>` (see lib/router.ts).
+// Routed as /consumers/<id> via lib/router.ts (#B.193).
 const consumerEditId = ref<string | null>(null);
 
 /**
@@ -504,11 +502,6 @@ function notifyArrival(m: Message) {
 // `bus` events. Consumers (this file's own list/sidebar/toaster, plus any
 // future component) subscribe to the bus where they're defined. See
 // `lib/bus.ts` for the typed event map.
-// #B.191: after a WS reconnect (typically after the tab came back
-// from mobile background freeze), the in-memory inbox/projects state
-// can be arbitrarily stale — any event we missed while the socket
-// was down won't replay. Force a fresh fetch on the false→true
-// transition so the rows + sidebar badges catch up to reality.
 const { connected } = useWs((ev) => {
     if (ev.type === "rule_changed") {
         bus.emit("rules.refresh");
@@ -565,9 +558,8 @@ const { connected } = useWs((ev) => {
     bus.emit("projects.refresh");
 });
 
-// #B.191: catch up after a WS reconnect (mobile background freeze
-// most commonly). False→true edge only — initial mount is already
-// covered by the regular load chain.
+// Catch up after a WS reconnect (mobile freeze most commonly) —
+// any event missed while the socket was down won't replay (#B.191).
 watch(connected, (now, prev) => {
     if (now && prev === false) {
         bus.emit("inbox.refresh");
@@ -1147,14 +1139,8 @@ watch(showSnoozed, (v) => {
     }
 }
 @media (max-width: 720px) {
-    /* #B.165 + #B.161 + #B.187: mobile toasts go edge-to-edge AT
-       THE BOTTOM (david: "en mode drop down les toaster devrait
-       apparaitre en bas") so they don't cover header + dropdown
-       menus. Verbose footer line stays hidden — summary suffices.
-       Was previously wrapped in `min-width: 721px` by mistake
-       (#B.187: "toast pas complètement centré sur mon tel") so the
-       mobile overrides never fired — PrimeVue's defaults left the
-       toast flush-left without padding. */
+    /* Mobile toasts edge-to-edge AT THE BOTTOM so they don't cover
+       header + dropdown menus (#B.165, #B.161, #B.187). */
     .p-toast {
         bottom: 0.25rem !important;
         top: auto !important;

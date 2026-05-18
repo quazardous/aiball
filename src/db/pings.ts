@@ -140,57 +140,33 @@ export function markAllSeenForProject(
 export function markTicketSeen(
     consumer_id: string,
     ticket_id: number,
+    opts?: { upTo?: number },
 ): { updated: number } {
+    // `upTo` (#B.191) bounds the ack — only pings whose target message
+    // id is <= upTo are flipped to seen. Used by the ThreadView dwell
+    // timer so comments arriving AFTER the user opened the thread keep
+    // their unseen ping (row stays bold+green in the inbox).
     const db = getDb();
+    const upTo = opts?.upTo;
+    const commentConds = [eq(schema.messages.ticketId, ticket_id)];
+    if (typeof upTo === "number") commentConds.push(lte(schema.messages.id, upTo));
     const commentIds = db.select({ id: schema.messages.id })
         .from(schema.messages)
-        .where(eq(schema.messages.ticketId, ticket_id))
+        .where(and(...commentConds))
         .all()
         .map((r) => r.id);
-    // Build the WHERE — the ticket-root ping uses pings.ticket_id, the
-    // comment pings use pings.comment_id. Two OR'd predicates.
-    const conds = [eq(schema.pings.ticketId, ticket_id)];
-    if (commentIds.length) conds.push(inArray(schema.pings.commentId, commentIds));
+    const targetConds = [];
+    if (typeof upTo !== "number" || ticket_id <= upTo) {
+        targetConds.push(eq(schema.pings.ticketId, ticket_id));
+    }
+    if (commentIds.length) targetConds.push(inArray(schema.pings.commentId, commentIds));
+    if (!targetConds.length) return { updated: 0 };
     const r = db.update(schema.pings)
         .set({ seenAt: nowIso() })
         .where(and(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
-            or(...conds),
-        )).run();
-    return { updated: r.changes };
-}
-
-/**
- * Like markTicketSeen but bounded by an upper message id. Only acks
- * pings whose target message id is <= upToId. Used by the auto-mark
- * path in ThreadView (#B.191): the dwell timer captures the max msg
- * id present at mount, then acks only THAT slice — comments arriving
- * after mount keep their ping unseen so the row stays bold+green in
- * the inbox even while the user is reading.
- */
-export function markTicketSeenUpTo(
-    consumer_id: string,
-    ticket_id: number,
-    upToId: number,
-): { updated: number } {
-    const db = getDb();
-    const commentIds = db.select({ id: schema.messages.id })
-        .from(schema.messages)
-        .where(eq(schema.messages.ticketId, ticket_id))
-        .all()
-        .map((r) => r.id)
-        .filter((id) => id <= upToId);
-    const conds = [];
-    if (ticket_id <= upToId) conds.push(eq(schema.pings.ticketId, ticket_id));
-    if (commentIds.length) conds.push(inArray(schema.pings.commentId, commentIds));
-    if (!conds.length) return { updated: 0 };
-    const r = db.update(schema.pings)
-        .set({ seenAt: nowIso() })
-        .where(and(
-            eq(schema.pings.recipient, consumer_id),
-            isNull(schema.pings.seenAt),
-            or(...conds),
+            or(...targetConds),
         )).run();
     return { updated: r.changes };
 }

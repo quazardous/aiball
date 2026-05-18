@@ -5,12 +5,11 @@ import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
-import { api, type Consumer, type ConsumerKind } from "../lib/api";
+import { api, CONSUMER_KIND_OPTIONS, type Consumer, type ConsumerKind } from "../lib/api";
 import ConsumerEditPage from "./ConsumerEditPage.vue";
 
-// #B.193 item 3: when set, render the dedicated edit view instead of
-// the table. Driven by the URL `/consumers/<id>`. Parent (App.vue)
-// owns the ref so back/forward navigation works.
+// Set on /consumers/<id> → render the dedicated edit view. Parent
+// (App.vue) owns the ref so browser back/forward works (#B.193).
 const props = defineProps<{
     editConsumerId?: string | null;
 }>();
@@ -32,18 +31,12 @@ const toast = useToast();
 const rows = ref<Consumer[]>([]);
 const loading = ref(false);
 
-// #B.193: hide consumers that haven't been seen for over a week.
-// Toggle lets the user surface the long tail for debugging /
-// auditing. Default ON because the panel was getting cluttered with
-// agents that landed on the box once and never came back.
+// Hide consumers idle > 1 week by default; toggle reveals the long
+// tail for debugging (#B.193).
 const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 const hideStale = ref(true);
 
-const KIND_OPTIONS = [
-    { label: "Human", value: "human" as ConsumerKind },
-    { label: "Agent", value: "agent" as ConsumerKind },
-    { label: "Sandbox", value: "sandbox" as ConsumerKind },
-];
+const KIND_OPTIONS = CONSUMER_KIND_OPTIONS;
 
 async function load() {
     loading.value = true;
@@ -81,11 +74,6 @@ async function patch(consumer_id: string, patchBody: Partial<Consumer>) {
     }
 }
 
-// #B.193: the inline "Add consumer" form was retired — the daemon
-// auto-inserts on the first `by_agent` it sees (`ensureConsumer()`
-// in src/db/consumers.ts), and humans are created via setup-screen
-// or `aiball auth issue`. Keeping the form invited duplicate-id
-// confusion for zero new capability.
 
 async function remove(consumer_id: string) {
     if (!confirm(`Delete consumer "${consumer_id}"? Past posts are preserved; the row will be re-created the next time this id posts.`)) return;
@@ -169,9 +157,7 @@ void hasLoopAgents; // referenced in template via direct access
 // =====================================================================
 
 type SortKey = "consumer_id" | "kind" | "display_name" | "activity" | "enabled";
-// #B.193: default sort by activity (= last_seen_at), most recent
-// first. Aligns the panel with "who's been around lately" — the
-// list is much more useful to triage than alphabetical by kind.
+// Default sort: most-recent activity first (#B.193).
 const sortKey = ref<SortKey>("activity");
 const sortDir = ref<"asc" | "desc">("desc");
 
@@ -189,11 +175,8 @@ function sortIcon(key: SortKey): string {
     return sortDir.value === "asc" ? "pi pi-sort-up" : "pi pi-sort-down";
 }
 
-// #B.193: filter out consumers idle > STALE_THRESHOLD_MS unless the
-// user explicitly asked to see them. A consumer with no last_seen_at
-// at all is treated as stale too (one-shot agents that never came
-// back). Filter runs before sort so the badges in the empty state
-// reflect the visible row count, not the underlying total.
+// Filter before sort so empty-state badges reflect the visible
+// row count. Consumers with no last_seen_at count as stale (#B.193).
 const visibleRows = computed<Consumer[]>(() => {
     if (!hideStale.value) return rows.value;
     const threshold = Date.now() - STALE_THRESHOLD_MS;
@@ -258,10 +241,6 @@ const sortedRows = computed<Consumer[]>(() => {
             </p>
         </header>
 
-        <!-- #B.193: "Add consumer" form retired (auto-creation via
-             ensureConsumer + setup-screen / `aiball auth issue` cover
-             the use cases). Replaced by the stale-filter toggle which
-             is the actual common operation now. -->
         <section class="consumers-toolbar">
             <label class="consumers-toolbar__toggle">
                 <input

@@ -234,19 +234,9 @@ useBus("thread.refresh", ({ ticketId }) => {
     if (ticketId === props.ticketId) load();
 });
 
-// Auto-mark this ticket as read after a short dwell on the detail view
-// (per #B91). Two seconds is short enough to feel natural when reading,
-// long enough to avoid marking pass-through scrolling. The timer cancels
-// on ticket switch (watch) and on unmount, so quick navigations don't
-// flip the read state.
-//
-// #B.191: pass up_to_id = max(ticket.id, last visible comment id) so
-// the ack is BOUNDED to what's actually on screen. Comments arriving
-// AFTER the dwell timer fires keep their unseen ping intact — the
-// inbox row stays bold+green so the user notices the new content
-// without missing the read-state catch-up on what they already saw.
-// David: "ce qui marche c'est de les marquer unread manuellement" —
-// the old all-ack behavior consumed new pings within 2s of arrival.
+// Auto-mark this ticket read after a short dwell (#B.91). Bounded
+// by up_to_id (#B.191) so comments arriving after the timer fires
+// keep their unseen ping — inbox row stays bold+green for new content.
 const AUTO_MARK_READ_MS = 2000;
 let autoMarkTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleAutoMarkRead() {

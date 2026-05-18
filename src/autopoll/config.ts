@@ -98,14 +98,9 @@ const DEFAULTS: AiballConfig = {
     autopoll: {
         enabled: true,
         volatile: false,
-        // #B.192 david: "y a des ping pop sauvage on dirait" — the 30s
-        // default meant the Stop hook re-fired the backlog reminder
-        // on basically every turn during a fast back-and-forth
-        // (each turn ≪ 30s, so throttle was always elapsed when no
-        // new ping had arrived). Bumped to 120s so the *new ping*
-        // and *new open ticket* triggers stay reactive (they bypass
-        // the throttle), while the standing reminder stops spamming
-        // every turn. New pings still wake instantly.
+        // 120s so fast back-and-forth doesn't re-fire the standing
+        // reminder every turn; new-ping/new-open triggers still
+        // bypass the throttle (#B.192).
         throttle_seconds: 120,
         include_recent_tickets: 3,
         backlog: true,
@@ -119,14 +114,8 @@ const DEFAULTS: AiballConfig = {
     },
     mcp_json_deprecated: false,
     claude_loop: {
-        // #B.185 david: user-facing waits aligned on a coherent
-        // order of magnitude. user_grace was 300s (5min outlier:
-        // wrapper stayed silent 5min after a single keystroke even
-        // when the human had moved on); interval_seconds was 60s
-        // (bar lagged visibly behind real state changes — david:
-        // "on peut réduire à 30s"). interval_seconds dropped to
-        // 30s, the others stay at 60s (long enough to ride out
-        // boot / typing pauses without surprising).
+        // Heartbeat 30s, grace windows 60s — coherent order of
+        // magnitude, all yaml-overridable (#B.180, #B.185).
         interval_seconds: 30,
         boot_grace_seconds: 60,
         user_grace_seconds: 60,

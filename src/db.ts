@@ -146,7 +146,6 @@ export {
     markMessageSeen,
     markAllSeenForProject,
     markTicketSeen,
-    markTicketSeenUpTo,
     markTicketUnseen,
     markSeenUpToForProject,
     markPingsRead,
