@@ -12,6 +12,7 @@
  */
 import { existsSync, unlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { AiballClient } from "../client.js";
 import {
     MUX_CMD,
     idleMarkerPath,
@@ -53,9 +54,29 @@ function sleep(ms: number): Promise<void> {
     return new Promise((res) => setTimeout(res, ms));
 }
 
-function checkHasWork(): boolean {
+// Cached client for the default-path direct API call (no fork). The
+// process is long-lived so the keep-alive socket / token resolution
+// stays warm across ticks. David #B.63: "claude-loop peut avoir un
+// accès direct à l'api même niveau de aiball — on peut garder le
+// check-cmd". When the user passes a custom --check-cmd, we still
+// shell out so any external check works; only the default takes the
+// fast in-process path.
+const DEFAULT_AIBALL_CHECK = "aiball pings-count -q";
+let aiballClient: AiballClient | null = null;
+async function checkHasWork(): Promise<boolean> {
     // Empty / `true` check-cmd → always ping (legacy "pure timer").
     if (!checkCmd || checkCmd === "true") return true;
+    // Default check-cmd → bypass subprocess fork, call the API directly.
+    if (checkCmd === DEFAULT_AIBALL_CHECK) {
+        if (!aiballClient) aiballClient = new AiballClient();
+        try {
+            const r = await aiballClient.pingsCount() as { unread?: number };
+            return (r.unread ?? 0) > 0;
+        } catch {
+            return false;
+        }
+    }
+    // Custom check-cmd → shell out so any user snippet works.
     const r = spawnSync("bash", ["-c", checkCmd], { stdio: "ignore" });
     return r.status === 0;
 }
@@ -68,7 +89,7 @@ async function main(): Promise<void> {
         // Manual wake (claude-loop wake NAME) bypasses the check —
         // user explicitly asked to fire the next tick.
         const manualWake = existsSync(wakeRequestedPath(sd!));
-        if (!manualWake && !checkHasWork()) continue;
+        if (!manualWake && !(await checkHasWork())) continue;
         try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
         try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
         const phrase = pickPhrase();
