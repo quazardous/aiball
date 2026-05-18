@@ -27,12 +27,12 @@ import {
     isInternalCheckCmd,
     DEFAULT_USER_GRACE_SEC,
     MUX_CMD,
+    buildWakePhrase,
     checkHasWork,
     formatPaneSnapshot,
     idleMarkerPath,
     lastWakeAtPath,
     paneFooterShowsBusy,
-    pickPingPhrase,
     pingsPath,
     setTmuxStatus,
     snapshotPane,
@@ -40,6 +40,7 @@ import {
     userIsTakingOver,
     wakeInFlightPath,
     wakeRequestedPath,
+    type WakeHint,
 } from "./state.js";
 
 const sd = process.env.CL_STATE_DIR;
@@ -82,8 +83,8 @@ function capturePane(): string {
     }
 }
 
-function pickPhrase(): string {
-    return pickPingPhrase(pingsPath(sd!));
+function pickPhrase(hint?: WakeHint): string {
+    return buildWakePhrase(hint, pingsPath(sd!));
 }
 
 function sendKeys(phrase: string): void {
@@ -129,7 +130,7 @@ function client(): AiballClient {
  * the check-cmd; only the idle-since gate stays because pinging over
  * a busy claude is always wrong.
  */
-async function tryWake(reason: string, manualWake = false): Promise<boolean> {
+async function tryWake(reason: string, manualWake = false, hint?: WakeHint): Promise<boolean> {
     if (!existsSync(idleMarkerPath(sd!))) return false;
     if (!manualWake && userIsTakingOver(sd!, userGraceSec)) return false;
     // #B.198: catch the brief race where the idle marker has been
@@ -159,7 +160,7 @@ async function tryWake(reason: string, manualWake = false): Promise<boolean> {
     if (!manualWake && !(await checkHasWork(checkCmd, client()))) return false;
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
-    const phrase = pickPhrase();
+    const phrase = pickPhrase(hint);
     sendKeys(phrase);
     setTmuxStatus(name!, "busy");
     log(`wake (${reason}) → '${phrase}'`);
@@ -192,7 +193,11 @@ async function mainSse(): Promise<void> {
             onHello: (h) => { log(`SSE hello: unread=${h.unread}`); },
             onPing: (p) => {
                 log(`SSE ping received: ${JSON.stringify(p)} → tryWake`);
-                void tryWake("sse:ping");
+                // #B.198 david: pass the SSE payload as a hint so the
+                // wake phrase names the concrete artifact ("Poll ticket
+                // #X — new comment #Y.") instead of a random pop-culture
+                // line, which left claude guessing what to do.
+                void tryWake("sse:ping", false, p);
             },
             onError: (e) => {
                 log(`SSE error: ${e.message ?? String(e)} — will reconnect on next heartbeat`);

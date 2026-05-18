@@ -374,3 +374,35 @@ export function pickPingPhrase(pingsAbsPath: string): string {
         return "ping";
     }
 }
+
+/**
+ * Optional context attached to a wake — typically the SSE ping
+ * payload (`{ ticket_id, comment_id }`). When present, the wake
+ * phrase names the concrete artifact instead of a random pop-culture
+ * line, so claude knows what to poll without re-fetching the inbox
+ * (#B.198 david: "vu qu'on connait l'id du comment autant balancé
+ * le numéro en disant poll ce ticket — ça sera plus clair que le
+ * pop culture ping").
+ */
+export interface WakeHint {
+    ticket_id?: number;
+    comment_id?: number;
+}
+
+/**
+ * Build the wake-prompt sent to claude via `send-keys`. Returns a
+ * targeted "Poll ticket #X — new comment #Y." when the hint carries
+ * an id; falls back to a random pop-culture phrase from `pingsAbsPath`
+ * when there's nothing to point at (heartbeat re-check, manual wake,
+ * startup nudge). David explicitly wants pop-culture preserved for
+ * the no-id path ("si on a pas de ticket on continue à pop culture
+ * ping (c rigolo)").
+ */
+export function buildWakePhrase(hint: WakeHint | undefined, pingsAbsPath: string): string {
+    const ticketId = hint?.ticket_id;
+    const commentId = hint?.comment_id;
+    if (ticketId && commentId) return `Poll ticket #${ticketId} — new comment #${commentId}.`;
+    if (ticketId) return `Poll ticket #${ticketId}.`;
+    if (commentId) return `Poll comment #${commentId}.`;
+    return pickPingPhrase(pingsAbsPath);
+}
