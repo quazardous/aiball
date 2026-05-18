@@ -58,6 +58,22 @@ function tmuxAlive(): boolean {
     return r.status === 0;
 }
 
+/**
+ * Read the visible content of pane 0. Empty string on any failure
+ * (tmux gone, capture errored) — callers fall back to last-known
+ * state. Used by the heartbeat `esc to interrupt` probe (#B.173).
+ */
+function capturePane(): string {
+    try {
+        const r = spawnSync(MUX_CMD, [
+            "capture-pane", "-t", `${tname}.0`, "-p",
+        ], { encoding: "utf8" });
+        return r.stdout ?? "";
+    } catch {
+        return "";
+    }
+}
+
 function pickPhrase(): string {
     return pickPingPhrase(pingsPath(sd!));
 }
@@ -180,7 +196,12 @@ async function mainSse(): Promise<void> {
     // #B.149: track the "settled" status so the count-refresh below
     // doesn't reset bar to idle while claude is busy. tryWake flips
     // to busy on wake; we mirror that. Boot stays until settleBoot.
-    let settledStatus: "boot" | "idle" | "busy" = "boot";
+    // #B.173 (david skybot bug): can also flip to `working` when the
+    // pane probe sees "esc to interrupt" mid-heartbeat, or back to
+    // `idle` when slash commands (e.g. /compact) returned without
+    // firing Stop. Critical because Claude Code's Stop hook doesn't
+    // fire for slash-command completion, leaving the bar stuck.
+    let settledStatus: "boot" | "idle" | "busy" | "working" = "boot";
     while (tmuxAlive()) {
         await sleep(interval * 1000);
         // Manual wake (claude-loop wake NAME): file marker, fires
@@ -195,6 +216,30 @@ async function mainSse(): Promise<void> {
         const woke = await tryWake("heartbeat");
         if (woke) settledStatus = "busy";
         else if (existsSync(idleMarkerPath(sd!))) settledStatus = "idle";
+        // #B.173: pane-probe correction. `esc to interrupt` is THE
+        // authoritative claude-busy signal (david: "seul le esc to
+        // interrupt est vraiment crucial dans le workflow"). Use the
+        // heartbeat to flip the bar between `working` and `idle`
+        // independently of hook events, so slash commands that don't
+        // trigger Stop (/compact, /clear, …) don't leave us stuck.
+        // Boot stays sticky until settleBoot — don't pull the rug.
+        if (settledStatus !== "boot") {
+            const paneText = capturePane();
+            if (paneText) {
+                const claudeWorking = /esc to interrupt/i.test(paneText);
+                if (claudeWorking && settledStatus !== "working") {
+                    settledStatus = "working";
+                } else if (!claudeWorking && settledStatus !== "idle") {
+                    // Claude is at the prompt. Seed idle-since so the
+                    // next tryWake has a clean gate and flip the bar.
+                    settledStatus = "idle";
+                    try {
+                        const { writeFileSync } = await import("node:fs");
+                        writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+                    } catch { /* ignore */ }
+                }
+            }
+        }
         // Refresh the bar with the current unread count (#B.149
         // david: "dans la barre mux on peut afficher le nombre de
         // read / ticket meme en idle ?"). Skipped while booting —
