@@ -1943,7 +1943,7 @@ async function copyTicketRef() {
  * Without this, the unstyled `<header class="meta">` rendered as a
  * block and the date glued itself behind the author name (per #B.325). */
 .thread-ticket > header.meta,
-.composer-headline__body > header.meta {
+.composer-headline > header.meta {
     display: flex;
     gap: 0.5rem;
     align-items: center;

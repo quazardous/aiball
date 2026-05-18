@@ -31,7 +31,12 @@ body,
 .aiball-shell {
     display: flex;
     flex-direction: column;
-    min-height: 100vh;
+    /* #B.134: constrained height (was min-height) so the layout child
+       gets a bounded vertical space — otherwise the shell grew with
+       its content and the BODY scrolled instead of .aiball-main, which
+       dragged the sidebar along for the ride. */
+    height: 100vh;
+    overflow: hidden;
 }
 
 /* .aiball-header / .connection-dot / .strategy-select → components/HeaderBar.vue
