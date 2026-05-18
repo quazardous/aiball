@@ -148,10 +148,12 @@ async function mainSse(): Promise<void> {
     // status there. After BOOT_GRACE_MS the timer assumes claude has
     // settled, seeds the idle marker, and lets tryWake run normally
     // (will wake if SSE has been silent but there's actually work).
-    // 30s covers MCP trust prompts + resume picker dismissal for the
-    // typical case; user can override via the legacy idle/busy
-    // signals if they're quicker (UserPromptSubmit / Stop hooks).
-    const BOOT_GRACE_MS = 30_000;
+    // David: "on passe en idle avec un timeout court (60 sec par
+    // defaut), si le user fait pas de prompt on lance l'auto ping,
+    // si le user prompt on passe dasn la hook stop plus tard". User
+    // input within the window updates user-took-over → tryWake's
+    // user-grace gate skips the wake (the user is actively driving).
+    const BOOT_GRACE_MS = 60_000;
     let bootSettled = false;
     const settleBoot = async () => {
         if (bootSettled) return;

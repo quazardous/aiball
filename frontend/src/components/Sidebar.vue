@@ -249,15 +249,18 @@ function onProjectsSummaryClick(e: Event) {
 .sidebar-new-ticket,
 .sidebar-project-settings {
     background: transparent;
-    border: 1px solid var(--p-content-border-color);
+    /* #B.161 follow-up: no border around the cog/+ buttons next to
+       the project name (david: "liseret autor du cog à coté nom
+       projet pas utile") — hover background is enough affordance. */
+    border: 0;
     border-radius: 0.3rem;
     width: 1.6rem;
     height: 1.6rem;
     align-items: center;
     justify-content: center;
-    color: var(--p-text-color);
+    color: var(--p-text-muted-color);
     cursor: pointer;
-    font-size: 0.75rem;
+    font-size: 0.85rem;
 }
 .sidebar-new-ticket:hover,
 .sidebar-project-settings:hover {
