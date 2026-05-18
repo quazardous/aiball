@@ -54,6 +54,14 @@ export interface AiballConfig {
     consumer: {
         agent: string | null;
         project: string | null;
+        /**
+         * Which source the agent value came from. Lets callers warn on
+         * deprecated paths (`mcp.json`) or recognize when no config
+         * provided anything (`null`, which is when the agent stays null).
+         * Project resolution is parallel but we don't track its source —
+         * the deprecation focus is the agent identity.
+         */
+        agent_source: "aiball.yaml" | "env" | "mcp.json" | null;
     };
     /** Absolute path to the loaded `.aiball.yaml`, or null when none was found. */
     configPath: string | null;
@@ -71,6 +79,7 @@ const DEFAULTS: AiballConfig = {
     consumer: {
         agent: null,
         project: null,
+        agent_source: null,
     },
     configPath: null,
 };
@@ -159,22 +168,40 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
                 cfg.autopoll.tone = a.tone as AutopollTone;
             }
             const c = (raw.consumer ?? {}) as Record<string, unknown>;
-            if (typeof c.agent === "string" && c.agent) cfg.consumer.agent = c.agent;
+            if (typeof c.agent === "string" && c.agent) {
+                cfg.consumer.agent = c.agent;
+                cfg.consumer.agent_source = "aiball.yaml";
+            }
             if (typeof c.project === "string" && c.project) cfg.consumer.project = c.project;
         } catch {
             /* malformed — fall back to defaults, hook stays silent */
         }
     }
 
-    // Resolve agent/project: env > .aiball.json > .mcp.json. Cwd-hash
-    // fallback is deliberately not used — without an explicit id,
-    // we'd autopoll for a phantom consumer that has no pings anyway.
+    // Resolve agent/project: .aiball.yaml > env > .mcp.json (deprecated).
+    // David's directive (#B.154, 2026-05-18): the canonical source is
+    // .aiball.yaml `consumer.agent`. Env vars stay as a real override
+    // (shell `export AIBALL_AGENT=x` is legit). Reading from .mcp.json
+    // is deprecated — callers that surface a warning use
+    // `consumer.agent_source === "mcp.json"` to spot it.
+    //
+    // Cwd-hash / basename defaults are NOT applied here — autopoll
+    // treats null-agent as a "stay silent" signal. Callers that need a
+    // sensible default (claude-loop) apply it themselves on top of
+    // this resolved value.
     if (!cfg.consumer.agent) {
         const fromEnv = process.env.AIBALL_AGENT;
-        if (fromEnv) cfg.consumer.agent = fromEnv;
+        if (fromEnv) {
+            cfg.consumer.agent = fromEnv;
+            cfg.consumer.agent_source = "env";
+        }
     }
     if (!cfg.consumer.agent) {
-        cfg.consumer.agent = readMcpJsonAgent(projectDir);
+        const fromMcp = readMcpJsonAgent(projectDir);
+        if (fromMcp) {
+            cfg.consumer.agent = fromMcp;
+            cfg.consumer.agent_source = "mcp.json";
+        }
     }
     if (!cfg.consumer.project) {
         const fromEnv = process.env.AIBALL_PROJECT;

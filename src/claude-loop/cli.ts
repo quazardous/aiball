@@ -27,7 +27,7 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
 import { AiballClient } from "../client.js";
-import { applyToProcessEnv, resolveProjectContext } from "./project-context.js";
+import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
 import {
     DEFAULT_CHECK_CMD,
     isInternalCheckCmd,
@@ -150,6 +150,7 @@ function cmdStart(opts: StartOpts): void {
     // right identity. Single source for every subcommand.
     const ctx = resolveProjectContext();
     applyToProcessEnv(ctx);
+    warnIfDeprecated(ctx);
     const cwd = ctx.cwd;
 
     // #B.154: housekeeping before spawn. (1) prune dead state dirs
@@ -159,7 +160,7 @@ function cmdStart(opts: StartOpts): void {
     // 14 dead loops accumulate from repeated rm-less restarts.
     pruneDeadStateDirs();
     if (!opts.force) {
-        const conflict = findLiveLoopForCwdAgent(cwd, ctx.agent ?? undefined);
+        const conflict = findLiveLoopForCwdAgent(cwd, ctx.agent);
         if (conflict) {
             die(
                 `live loop '${conflict.name}' already runs in ${cwd}` +
@@ -412,6 +413,7 @@ function cmdWake(name: string): void {
 async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; config?: boolean }): Promise<void> {
     const ctx = resolveProjectContext();
     applyToProcessEnv(ctx);
+    warnIfDeprecated(ctx);
     let plateCheckCmd: string | undefined;
     let plateName: string | undefined;
     let plate: Plate | null = null;
@@ -426,13 +428,14 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
         }
     }
     const checkCmd = opts.checkCmd ?? plateCheckCmd ?? process.env.CL_CHECK_CMD ?? DEFAULT_CHECK_CMD;
-    const agentEnv = ctx.agent ?? "(unset → AiballClient default)";
-    const projectEnv = ctx.project ?? "(unset)";
     process.stdout.write(`claude-loop check\n`);
     process.stdout.write(`  loop name      : ${plateName ?? name ?? "(no loop)"}\n`);
     process.stdout.write(`  check-cmd      : ${checkCmd}\n`);
-    process.stdout.write(`  AIBALL_AGENT   : ${agentEnv}\n`);
-    process.stdout.write(`  AIBALL_PROJECT : ${projectEnv}\n`);
+    process.stdout.write(`  AIBALL_AGENT   : ${ctx.agent} (from ${ctx.agent_source})\n`);
+    process.stdout.write(`  AIBALL_PROJECT : ${ctx.project ?? "(unset)"}\n`);
+    if (ctx.config_path) {
+        process.stdout.write(`  .aiball.yaml   : ${ctx.config_path}\n`);
+    }
     process.stdout.write(`\n`);
 
     // #B.149: --config flag inspects the loop's state dir + the
@@ -489,9 +492,9 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
             process.stdout.write(`\n`);
             const verdict = ping.unread > 0 ? "WAKE (work to drain)" : "SLEEP (nothing)";
             process.stdout.write(`  verdict: ${verdict}\n`);
-            const hasProjectSub = projectEnv !== "(unset)" && projectSubs.some((s) => s.project === projectEnv);
-            if (projectEnv !== "(unset)" && !hasProjectSub) {
-                process.stdout.write(`  hint   : AIBALL_PROJECT=${projectEnv} is set but consumer '${ping.consumer_id}' has NO subscription on that project — new tickets there won't generate pings. Fix: subscribe via MCP \`subscribe({project: "${projectEnv}", role: "owner"})\` while running AS this consumer.\n`);
+            const hasProjectSub = ctx.project !== null && projectSubs.some((s) => s.project === ctx.project);
+            if (ctx.project && !hasProjectSub) {
+                process.stdout.write(`  hint   : AIBALL_PROJECT=${ctx.project} is set but consumer '${ping.consumer_id}' has NO subscription on that project — new tickets there won't generate pings. Fix: subscribe via MCP \`subscribe({project: "${ctx.project}", role: "owner"})\` while running AS this consumer.\n`);
             }
             if (projectSubs.length === 0) {
                 process.stdout.write(`  hint   : consumer '${ping.consumer_id}' looks ephemeral (random fallback?). Set AIBALL_AGENT to a stable id and subscribe it to the projects you care about.\n`);
@@ -525,7 +528,9 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
  * as you want.
  */
 async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boolean; events?: boolean }): Promise<void> {
-    applyToProcessEnv(resolveProjectContext());
+    const ctx = resolveProjectContext();
+    applyToProcessEnv(ctx);
+    warnIfDeprecated(ctx);
     // --events mode (#B.154): open SSE and print every aiball event
     // live. Pure tail — no gate eval, no decision making, just observe
     // what the daemon would push to this consumer. Useful to verify

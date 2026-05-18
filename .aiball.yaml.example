@@ -57,9 +57,23 @@ autopoll:
   #                    trigger by itself.
   backlog: true
 
-# Identity overrides. Both fall back to AIBALL_AGENT/AIBALL_PROJECT
-# env vars, then to .mcp.json's mcpServers.aiball.env block. Set
-# these only if you need to override the natural resolution.
+# Identity — consumer_id and project for this project. The CANONICAL
+# source (#B.154). Resolution chain across aiball tools (autopoll,
+# claude-loop, etc.):
+#
+#   1. `consumer.agent` here              ← preferred, canonical
+#   2. `AIBALL_AGENT` env var             ← real override (shell export)
+#   3. `.mcp.json` mcpServers.aiball.env  ← DEPRECATED legacy fallback
+#                                           (claude-loop will warn on
+#                                           stderr when this kicks in)
+#   4. `<basename(project_dir)>-claude`   ← default for claude-loop only
+#                                           (autopoll stays silent if
+#                                           agent is unset; it doesn't
+#                                           guess)
+#
+# Set `consumer.agent` once here and you stop having to maintain the
+# value in `.mcp.json`'s env block. Project name follows the same
+# chain (no default — left null means all-projects scope).
 #
 # consumer:
 #   agent: skybot-claude
