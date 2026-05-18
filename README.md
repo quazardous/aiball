@@ -84,20 +84,7 @@ tmux opens with claude inside. Status bar shows `[boot]` → `[idle 0]` → `[bu
 - **Autopoll Stop hook**: the agent processes the backlog between turns until empty (see above).
 - **Search** (FTS5), **per-project stats**, **CLI** with offline spool fallback.
 
----
-
-## Roadmap (experimental, partial)
-
-- **Sandbox loop** — `aiball sandbox start --tickets "10,11"` spawns
-  an autonomous Claude Code session in tmux against a fixed plate.
-  Works for happy-path runs but the lifecycle (auto-respawn on new
-  pings, graceful degradation on rate-limits, anti-oscillation
-  hardening) isn't finished. Use `claude-loop` for daily-driver
-  autonomous wrapping; the sandbox path stays for experimentation.
-  See [`docs/SANDBOX.md`](./docs/SANDBOX.md) — caveat emptor.
-- **claude-loop on Windows** — daemon-only install ships (see
-  [`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md)). Wrapper port via
-  psmux pending an adapter pass (#B.178).
+Experimental / partial / planned surfaces: see [`ROADMAP.md`](./ROADMAP.md).
 
 ---
 

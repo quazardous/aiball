@@ -1,9 +1,8 @@
 # Sandbox loop
 
-> **Status: experimental / partial (#B.183).** The happy path runs but
-> the lifecycle hardening (auto-respawn on new pings, graceful rate-limit
-> handling, anti-oscillation guards) isn't shipped. For daily-driver
-> autonomous wrapping use [`claude-loop`](../README.md#quickstart--claude-loop-recommended).
+> **Status: experimental / partial (#B.183).** See [`ROADMAP.md`](../ROADMAP.md#sandbox-loop-b183)
+> for what's missing. For daily-driver autonomous wrapping use
+> [`claude-loop`](../README.md#quickstart--claude-loop-recommended).
 > This page stays for the experimentation surface; caveat emptor.
 
 Run a Claude Code session autonomously against a fixed plate of aiball
