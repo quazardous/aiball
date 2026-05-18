@@ -1121,17 +1121,15 @@ watch(showSnoozed, (v) => {
         display: none !important;
     }
 }
-@media (min-width: 721px) {
-    /* Desktop: footer-settings is the mobile-only band; hide it
-       since the sidebar already exposes Projects/Rules/Tags/
-       Consumers. */
-    .aiball-footer-settings {
-        display: none;
-    }
-    /* #B.165 + #B.161: mobile toasts go edge-to-edge AT THE BOTTOM
-       (david: "en mode drop down les toaster devrait apparaitre en
-       bas") so they don't cover header + dropdown menus. Verbose
-       footer line stays hidden — summary suffices. */
+@media (max-width: 720px) {
+    /* #B.165 + #B.161 + #B.187: mobile toasts go edge-to-edge AT
+       THE BOTTOM (david: "en mode drop down les toaster devrait
+       apparaitre en bas") so they don't cover header + dropdown
+       menus. Verbose footer line stays hidden — summary suffices.
+       Was previously wrapped in `min-width: 721px` by mistake
+       (#B.187: "toast pas complètement centré sur mon tel") so the
+       mobile overrides never fired — PrimeVue's defaults left the
+       toast flush-left without padding. */
     .p-toast {
         bottom: 0.25rem !important;
         top: auto !important;
@@ -1154,6 +1152,12 @@ watch(showSnoozed, (v) => {
     }
 }
 @media (min-width: 721px) {
+    /* Desktop: footer-settings is the mobile-only band; hide it
+       since the sidebar already exposes Projects/Rules/Tags/
+       Consumers. */
+    .aiball-footer-settings {
+        display: none;
+    }
     /* #B.161: desktop toast — explicit small width pinned to the
        top-right. PrimeVue's default in this version still rendered
        full-width despite position="top-right"; override directly. */

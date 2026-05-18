@@ -15,6 +15,16 @@ the human-readable narrative.
 
 ## [Unreleased]
 
+### Mobile toast positioning fix (`#B.187`)
+
+The mobile-toast CSS block (edge-to-edge at the bottom) was
+wrapped in `@media (min-width: 721px)` by mistake — it targeted
+desktop and got immediately overridden by the desktop block right
+after, while the phone fell back to PrimeVue's defaults: flush-left,
+no padding, text touching the viewport edge (david screenshot:
+"toast pas complètement centré sur mon tel"). The media query is
+now `max-width: 720px` so the mobile overrides actually fire.
+
 ### Tailscale remote-access guide + helper (`#B.182`)
 
 aiball can now be reached from your phone (or any other device on
