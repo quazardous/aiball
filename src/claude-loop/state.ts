@@ -85,8 +85,10 @@ export function timerLogPath(sd: string): string { return join(sd, "timer.log");
 export function wakeInFlightPath(sd: string): string { return join(sd, "wake-in-flight"); }
 /** Wake-in-flight markers older than this many ms are stale and
  *  ignored — covers race where the user types BEFORE claude-loop's
- *  wake reaches the hook (unlikely but possible). */
-export const WAKE_IN_FLIGHT_TTL_MS = 2000;
+ *  wake reaches the hook (unlikely but possible). #B.180:
+ *  yaml-configurable via `.aiball.yaml claude_loop.wake_in_flight_ttl_ms`,
+ *  exposed to child processes via CL_WAKE_IN_FLIGHT_TTL_MS env. */
+export const WAKE_IN_FLIGHT_TTL_MS = Math.max(0, Number(process.env.CL_WAKE_IN_FLIGHT_TTL_MS ?? 2000));
 
 export function readPlate(sd: string): Plate {
     return JSON.parse(readFileSync(platePath(sd), "utf8")) as Plate;

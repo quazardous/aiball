@@ -82,12 +82,21 @@ function defaultName(): string {
 
 interface StartOpts {
     name?: string;
-    interval: number;
+    /**
+     * Tick interval seconds. null = use the resolved
+     * `.aiball.yaml claude_loop.interval_seconds` default (#B.180).
+     * Set by the CLI only when --interval was explicitly passed.
+     */
+    interval: number | null;
     checkCmd: string;
     pings?: string;
     attach?: boolean;
     noStartupPing?: boolean;
-    userGraceSec?: number;
+    /**
+     * User-grace seconds. null = use the resolved
+     * `.aiball.yaml claude_loop.user_grace_seconds` default (#B.180).
+     */
+    userGraceSec?: number | null;
     /** Bypass the live-loop conflict check (#B.154). */
     force?: boolean;
     /** Resume-picker auto-dismiss (#B.154): summary | as-is | abort. */
@@ -175,10 +184,17 @@ function cmdStart(opts: StartOpts): void {
     ensureDir(sd);
     copyFileSync(pingsSrc, pingsPath(sd));
 
+    // #B.180 david: resolve timeouts (CLI flag > .aiball.yaml > built-in
+    // default). loadConfig defaults are 60/60/300/2000 — see config.ts.
+    const interval = opts.interval ?? ctx.claude_loop.interval_seconds;
+    const userGraceSec = opts.userGraceSec ?? ctx.claude_loop.user_grace_seconds;
+    const bootGraceSec = ctx.claude_loop.boot_grace_seconds; // no CLI flag yet — yaml-only
+    const wakeInFlightTtlMs = ctx.claude_loop.wake_in_flight_ttl_ms; // yaml-only
+
     const plate: Plate = {
         name,
         created_at: new Date().toISOString(),
-        interval: opts.interval,
+        interval,
         check_cmd: opts.checkCmd,
         pings_path: pingsPath(sd),
         cwd,
@@ -191,7 +207,7 @@ function cmdStart(opts: StartOpts): void {
     const envLines = [
         `export CL_NAME=${shQuote(name)}`,
         `export CL_STATE_DIR=${shQuote(sd)}`,
-        `export CL_INTERVAL=${String(opts.interval)}`,
+        `export CL_INTERVAL=${String(interval)}`,
         `export CL_CHECK_CMD=${shQuote(opts.checkCmd)}`,
         `export CL_PINGS=${shQuote(pingsPath(sd))}`,
         // Read by the SessionStart hook to decide whether to ping at
@@ -200,7 +216,10 @@ function cmdStart(opts: StartOpts): void {
         // Seconds the timer stays out of the way after the human
         // submits a prompt (UserPromptSubmit hook refreshes the
         // user-took-over marker). 0 disables the grace.
-        `export CL_USER_GRACE_SEC=${shQuote(String(opts.userGraceSec ?? 300))}`,
+        `export CL_USER_GRACE_SEC=${shQuote(String(userGraceSec))}`,
+        // #B.180: boot-grace + wake-in-flight TTL, yaml-only knobs.
+        `export CL_BOOT_GRACE_SEC=${shQuote(String(bootGraceSec))}`,
+        `export CL_WAKE_IN_FLIGHT_TTL_MS=${shQuote(String(wakeInFlightTtlMs))}`,
         // #B.154: resume picker auto-dismiss mode. Read by the
         // SessionStart hook when source=resume.
         `export CL_RESUME_MODE=${shQuote(opts.resumeMode ?? "as-is")}`,
@@ -324,7 +343,7 @@ function cmdStart(opts: StartOpts): void {
         process.stdout.write([
             `loop '${name}' started (detached)`,
             `  state:    ${sd}`,
-            `  interval: ${opts.interval}s`,
+            `  interval: ${interval}s`,
             `  claude:   claude --permission-mode auto${passthrough ? " " + passthrough : ""}`,
             `  attach:   ${MUX_CMD} attach -t ${tname}   (or: claude-loop attach ${name})`,
             "",
@@ -644,7 +663,10 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
     return new Command()
         .description("Spawn a new claude-loop (default subcommand)")
         .option("--name <name>", "Loop name (default: auto-generated)")
-        .addOption(new Option("--interval <sec>", "Tick interval seconds").default("60"))
+        .addOption(new Option(
+            "--interval <sec>",
+            "Tick interval seconds (default from .aiball.yaml `claude_loop.interval_seconds`, 60 if unset — #B.180)",
+        ))
         .option(
             "--check-cmd <cmd>",
             "Shell snippet — exit 0 = wake claude, non-zero = stay idle. " +
@@ -663,22 +685,22 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         ).default("as-is").choices(["summary", "as-is", "abort"]))
         .addOption(new Option(
             "--user-grace <sec>",
-            "Seconds to stay out of the way after the human submits a prompt",
-        ).default("300"))
+            "Seconds to stay out of the way after the human submits a prompt (default from .aiball.yaml `claude_loop.user_grace_seconds`, 300 if unset — #B.180)",
+        ))
         .allowExcessArguments(false)
         .action((opts: {
-            name?: string; interval: string; checkCmd: string; pings?: string;
-            attach: boolean; startupPing: boolean; userGrace: string; force?: boolean;
+            name?: string; interval?: string; checkCmd: string; pings?: string;
+            attach: boolean; startupPing: boolean; userGrace?: string; force?: boolean;
             resumeMode?: string;
         }) => {
             invoke({
                 name: opts.name,
-                interval: Math.max(1, Number(opts.interval)),
+                interval: opts.interval !== undefined ? Math.max(1, Number(opts.interval)) : null,
                 checkCmd: opts.checkCmd,
                 pings: opts.pings,
                 attach: opts.attach !== false,
                 noStartupPing: opts.startupPing === false,
-                userGraceSec: Math.max(0, Number(opts.userGrace)),
+                userGraceSec: opts.userGrace !== undefined ? Math.max(0, Number(opts.userGrace)) : null,
                 force: opts.force === true,
                 resumeMode: opts.resumeMode,
                 claudeArgs: [], // filled in by the dispatcher below

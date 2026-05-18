@@ -84,3 +84,27 @@ autopoll:
 # consumer:
 #   agent: skybot-claude
 #   project: skybot
+
+# claude-loop timeouts (#B.180). All optional — the defaults below
+# are what ship today. CLI flags (`--interval`, `--user-grace`) still
+# win over yaml when explicitly passed.
+#
+# claude_loop:
+#   # Heartbeat tick in seconds. Lower = bar more reactive + faster
+#   # polling-fallback, higher = less daemon load. Default 60.
+#   interval_seconds: 60
+#
+#   # Boot-grace before settleBoot fires. The pane-probe can sortir
+#   # du `[boot]` plus tôt si elle detecte le prompt. Default 60.
+#   boot_grace_seconds: 60
+#
+#   # User-grace window after a human prompt — tryWake refuses to
+#   # send-keys during this period. Default 300 (5 min).
+#   user_grace_seconds: 300
+#
+#   # Wake-in-flight TTL (#B.180): how long the marker stays "fresh"
+#   # after the timer touches it pre-send-keys. The UserPromptSubmit
+#   # hook checks this to distinguish auto-wake from human input.
+#   # Default 2000 (2s) — only reduce if your shell is faster than
+#   # 2s round-trip on send-keys → hook fire.
+#   wake_in_flight_ttl_ms: 2000

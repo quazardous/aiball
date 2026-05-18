@@ -35,6 +35,13 @@ export interface ProjectContext {
     mcp_json_deprecated: boolean;
     /** Absolute path to the loaded `.aiball.yaml`, if any. */
     config_path: string | null;
+    /** #B.180 david: claude-loop timeouts, yaml-configurable. */
+    claude_loop: {
+        interval_seconds: number;
+        boot_grace_seconds: number;
+        user_grace_seconds: number;
+        wake_in_flight_ttl_ms: number;
+    };
 }
 
 interface ResolveOpts {
@@ -55,6 +62,7 @@ export function resolveProjectContext(opts: ResolveOpts = {}): ProjectContext {
         project_source: cfg.consumer.project_source ?? "default",
         mcp_json_deprecated: cfg.mcp_json_deprecated,
         config_path: cfg.configPath,
+        claude_loop: { ...cfg.claude_loop },
     };
 }
 

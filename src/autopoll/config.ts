@@ -70,6 +70,24 @@ export interface AiballConfig {
      * deprecation nudge when this flag is set.
      */
     mcp_json_deprecated: boolean;
+    /**
+     * #B.180 david: all claude-loop timeouts are yaml-configurable.
+     * CLI flags (`--interval`, `--user-grace`) still win when passed;
+     * env vars (`CL_*`) override yaml on the timer/hook child
+     * processes. All values are seconds (ms in the schema would be
+     * confusing — internal conversion happens at the consumption
+     * site for BOOT_GRACE_MS / WAKE_IN_FLIGHT_TTL_MS).
+     */
+    claude_loop: {
+        /** Heartbeat tick in seconds. CL_INTERVAL. */
+        interval_seconds: number;
+        /** Boot-grace before settleBoot fires. CL_BOOT_GRACE_SEC. */
+        boot_grace_seconds: number;
+        /** User-took-over grace window. CL_USER_GRACE_SEC. */
+        user_grace_seconds: number;
+        /** Wake-in-flight marker TTL (#B.180). CL_WAKE_IN_FLIGHT_TTL_MS. */
+        wake_in_flight_ttl_ms: number;
+    };
     /** Absolute path to the loaded `.aiball.yaml`, or null when none was found. */
     configPath: string | null;
 }
@@ -92,6 +110,12 @@ const DEFAULTS: AiballConfig = {
         project_source: null,
     },
     mcp_json_deprecated: false,
+    claude_loop: {
+        interval_seconds: 60,
+        boot_grace_seconds: 60,
+        user_grace_seconds: 300,
+        wake_in_flight_ttl_ms: 2000,
+    },
     configPath: null,
 };
 
@@ -173,6 +197,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         ...DEFAULTS,
         autopoll: { ...DEFAULTS.autopoll },
         consumer: { ...DEFAULTS.consumer },
+        claude_loop: { ...DEFAULTS.claude_loop },
         mcp_json_deprecated: mcpJsonHasIdentityEnv(projectDir),
         configPath,
     };
@@ -209,6 +234,20 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof c.project === "string" && c.project) {
                 cfg.consumer.project = c.project;
                 cfg.consumer.project_source = "aiball.yaml";
+            }
+            // #B.180 david: all claude-loop timeouts configurable.
+            const cl = (raw.claude_loop ?? {}) as Record<string, unknown>;
+            if (typeof cl.interval_seconds === "number" && cl.interval_seconds > 0) {
+                cfg.claude_loop.interval_seconds = cl.interval_seconds;
+            }
+            if (typeof cl.boot_grace_seconds === "number" && cl.boot_grace_seconds >= 0) {
+                cfg.claude_loop.boot_grace_seconds = cl.boot_grace_seconds;
+            }
+            if (typeof cl.user_grace_seconds === "number" && cl.user_grace_seconds >= 0) {
+                cfg.claude_loop.user_grace_seconds = cl.user_grace_seconds;
+            }
+            if (typeof cl.wake_in_flight_ttl_ms === "number" && cl.wake_in_flight_ttl_ms > 0) {
+                cfg.claude_loop.wake_in_flight_ttl_ms = cl.wake_in_flight_ttl_ms;
             }
         } catch {
             /* malformed — fall back to defaults, hook stays silent */

@@ -182,7 +182,9 @@ async function mainSse(): Promise<void> {
     // si le user prompt on passe dasn la hook stop plus tard". User
     // input within the window updates user-took-over → tryWake's
     // user-grace gate skips the wake (the user is actively driving).
-    const BOOT_GRACE_MS = 60_000;
+    // #B.180: yaml-configurable via `.aiball.yaml claude_loop.boot_grace_seconds`.
+    // Env-var override read here at boot; cli.ts writes the resolved value.
+    const BOOT_GRACE_MS = Math.max(0, Number(process.env.CL_BOOT_GRACE_SEC ?? 60)) * 1000;
     let bootSettled = false;
     const settleBoot = async () => {
         if (bootSettled) return;
