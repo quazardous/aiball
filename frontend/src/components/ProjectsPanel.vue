@@ -270,7 +270,7 @@ defineExpose({ load });
     text-align: right;
     width: 6rem;
 }
-.action-cell {
+.projects-table .action-cell {
     display: flex;
     gap: 0.4rem;
     align-items: center;

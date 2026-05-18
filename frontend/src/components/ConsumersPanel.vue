@@ -404,7 +404,9 @@ const sortedRows = computed<Consumer[]>(() => {
 /* Use a .consumers-table-scoped selector — there's a sibling
    .action-cell rule in ProjectsPanel.vue (non-scoped styles bleed
    across components) that forces display: flex on td which breaks
-   the table layout here (#B.150). */
+   the table layout here (#B.150). Also reset min-width because that
+   sibling rule pinned 14rem (224px), which on phone ate the cid cell
+   down to 1 character (#B.193 "login complètement masqué"). */
 .consumers-table .action-cell {
     display: table-cell;
     text-align: right;
@@ -414,6 +416,7 @@ const sortedRows = computed<Consumer[]>(() => {
        right padding so the icon is inset away from any scrollbar
        gutter. */
     width: 4rem;
+    min-width: 0;
     padding-right: 0.75rem;
 }
 .consumers-table .action-cell__inner {
@@ -492,17 +495,25 @@ const sortedRows = computed<Consumer[]>(() => {
         padding: 0.4rem 0.35rem;
         height: auto;
     }
+    /* Force display:block on cells so the flex tr can size them — desktop
+       rules set display:table-cell on .activity-cell / .action-cell, which
+       kept the cid cell from actually growing under flex: 1 1 0 (#B.193:
+       "login complètement masqué par le label modérateur"). Specificity
+       must match the desktop rules (0,2,0) so the @media override wins. */
     .consumers-table .consumers-cid {
+        display: block;
         flex: 1 1 0;
         min-width: 0;
         overflow: hidden;
     }
     .consumers-table .activity-cell {
+        display: block;
         flex: 0 0 auto;
         min-width: 0;
         white-space: nowrap;
     }
     .consumers-table .action-cell {
+        display: block;
         flex: 0 0 auto;
         width: auto;
         padding-right: 0.25rem;
