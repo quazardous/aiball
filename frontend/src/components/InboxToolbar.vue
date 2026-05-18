@@ -407,9 +407,6 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     .filters-chip {
         display: inline-flex;
     }
-    .filters-body--collapsed {
-        display: none;
-    }
     .filters-body {
         display: flex;
         flex-wrap: wrap;
@@ -417,6 +414,11 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
         flex: 1 0 100%;
         padding: 0.3rem 0;
         order: 9;
+    }
+    /* Must come AFTER .filters-body to win the same-specificity
+       tie — otherwise display: flex above hides the collapse. */
+    .filters-body--collapsed {
+        display: none;
     }
     .filter-project-dropdown,
     .filter-project-settings,

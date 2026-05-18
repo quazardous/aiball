@@ -54,7 +54,7 @@ function readPane(): string {
         return r.stdout ?? "";
     } catch { return ""; }
 }
-type PaneState = { kind: "compacting" | "rate-limit" | "api-error" | "normal"; info: string };
+type PaneState = { kind: "compacting" | "rate-limit" | "api-error" | "working" | "normal"; info: string };
 function classifyPane(text: string): PaneState {
     if (/Compacting|compacting conversation|Summarizing the conversation/i.test(text)) {
         return { kind: "compacting", info: "compacting" };
@@ -64,6 +64,12 @@ function classifyPane(text: string): PaneState {
     }
     if (/API Error|APIError/i.test(text)) {
         return { kind: "api-error", info: "api-error" };
+    }
+    // #B.154 david: "si claude fonctionne l'écran affiche 'esc to
+    // interrupt'". Claude is mid-turn; don't send a fresh prompt
+    // (it'd corrupt the active operation or queue uselessly).
+    if (/esc to interrupt/i.test(text)) {
+        return { kind: "working", info: "working" };
     }
     return { kind: "normal", info: "" };
 }
