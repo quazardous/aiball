@@ -74,6 +74,19 @@ export function wakeRequestedPath(sd: string): string { return join(sd, "wake-re
 export function userTookOverPath(sd: string): string { return join(sd, "user-took-over"); }
 export function timerPidPath(sd: string): string { return join(sd, "timer.pid"); }
 export function timerLogPath(sd: string): string { return join(sd, "timer.log"); }
+/**
+ * Touched by the timer / stop-hook RIGHT BEFORE they `send-keys` an
+ * auto-wake into the claude pane (#B.180 david: the wake itself
+ * triggered UserPromptSubmit → user-took-over → tryWake locked for
+ * 5 min). The UserPromptSubmit hook checks this marker on fire: if
+ * present + mtime < ~2s, the prompt came from claude-loop itself,
+ * skip the user-took-over touch. Marker then deleted by the hook.
+ */
+export function wakeInFlightPath(sd: string): string { return join(sd, "wake-in-flight"); }
+/** Wake-in-flight markers older than this many ms are stale and
+ *  ignored — covers race where the user types BEFORE claude-loop's
+ *  wake reaches the hook (unlikely but possible). */
+export const WAKE_IN_FLIGHT_TTL_MS = 2000;
 
 export function readPlate(sd: string): Plate {
     return JSON.parse(readFileSync(platePath(sd), "utf8")) as Plate;

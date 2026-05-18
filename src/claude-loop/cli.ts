@@ -275,11 +275,25 @@ function cmdStart(opts: StartOpts): void {
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-left-length", "60"], { stdio: "ignore" });
     // #B.176 (david): mouse mode ON for the session so the scroll
     // wheel actually scrolls the pane buffer instead of being
-    // translated to Up/Down arrow keys (the tmux default for
-    // non-mouse modes is awful — the user's mid-prompt navigation
-    // gets clobbered by accidental scroll). Scoped per-session so
-    // we don't touch the user's global `.tmux.conf`.
+    // translated to Up/Down arrow keys. Scoped per-session — we
+    // don't touch the user's global `.tmux.conf`.
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "mouse", "on"], { stdio: "ignore" });
+    // #B.181 (david): with mouse-on, drag-select goes to tmux's
+    // paste buffer instead of the terminal clipboard, breaking
+    // copy/paste. `set-clipboard on` makes tmux emit OSC 52 escape
+    // sequences so the terminal (Windows Terminal, Alacritty, kitty,
+    // recent gnome-terminal) writes the selection to the system
+    // clipboard directly. Also enable copy-on-drag-end in copy-mode
+    // so a mouse drag inside the pane Just Works.
+    spawnSync(MUX_CMD, ["set-option", "-t", tname, "set-clipboard", "on"], { stdio: "ignore" });
+    // Cancel the drag selection (which puts us in copy-mode) and
+    // pipe to system clipboard automatically on mouse-up.
+    // Note: Shift+drag still works as a no-tmux fallback for terminals
+    // that don't honor OSC 52.
+    spawnSync(MUX_CMD, [
+        "bind-key", "-T", "copy-mode", "MouseDragEnd1Pane",
+        "send-keys", "-X", "copy-pipe-and-cancel",
+    ], { stdio: "ignore" });
     setTmuxStatus(name, "boot");
 
     // Detached timer process. Inherits CL_* env via the env file

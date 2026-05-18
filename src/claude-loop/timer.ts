@@ -20,7 +20,7 @@
  * Logs to stdout (the launcher redirects to $STATE_DIR/timer.log).
  * Exits when the tmux session disappears.
  */
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { AiballClient } from "../client.js";
 import {
@@ -34,6 +34,7 @@ import {
     setTmuxStatus,
     tmuxName,
     userIsTakingOver,
+    wakeInFlightPath,
     wakeRequestedPath,
 } from "./state.js";
 
@@ -79,6 +80,14 @@ function pickPhrase(): string {
 }
 
 function sendKeys(phrase: string): void {
+    // #B.180: touch the wake-in-flight marker BEFORE send-keys so
+    // UserPromptSubmit hook sees it when claude processes the wake
+    // prompt and skips the user-took-over update. Without this, the
+    // auto-wake would trigger the user-grace and lock subsequent
+    // wakes for `CL_USER_GRACE_SEC` (default 300s).
+    try {
+        writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n");
+    } catch { /* ignore — UserPromptSubmit hook will fall through to user-grace path, suboptimal but safe */ }
     spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, phrase, "Enter"], { stdio: "ignore" });
 }
 

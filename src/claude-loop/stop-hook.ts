@@ -16,7 +16,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MUX_CMD, checkHasWork, idleMarkerPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName } from "./state.js";
+import { MUX_CMD, checkHasWork, idleMarkerPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName, wakeInFlightPath } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -96,6 +96,9 @@ function classifyPane(text: string): PaneState {
         if (hasWork) {
             // Work still pending — ping immediately, don't enter idle.
             const phrase = pickPingPhrase(pingsPath(sd!));
+            // #B.180: mark this send-keys as auto-wake so the
+            // UserPromptSubmit hook skips user-took-over.
+            try { writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
             spawnSync(MUX_CMD, [
                 "send-keys", "-t", `${tmuxName(name!)}.0`, phrase, "Enter",
             ], { stdio: "ignore" });
