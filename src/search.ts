@@ -195,9 +195,43 @@ export function searchMessages(
     // simple (we need lifecycle replay to know if a ticket is closed,
     // which is expensive to inline here). The inbox endpoint does the
     // same dance.
+    //
+    // #B.135: also exclude tickets closed via the lifecycle (ticket_closed
+    // event with no later ticket_reopened). Previously only rejected
+    // tickets were filtered out — david: "la recherche devrait respecter
+    // les filtres, le only-open laisse passer des tickets fermés".
+    // Cheap pre-pass over the candidate ids only.
+    const candidateIds = new Set<number>();
+    for (const r of ticketRows) candidateIds.add(r.id);
+    for (const r of messageRows) candidateIds.add(r.ticket_id);
+    const closedTicketIds = new Set<number>();
+    if (opts.open && candidateIds.size > 0) {
+        const placeholders = Array.from(candidateIds).map(() => "?").join(",");
+        const ids = Array.from(candidateIds);
+        const rows = sqlite.prepare(`
+            SELECT t.id AS id
+            FROM tickets t
+            WHERE t.id IN (${placeholders})
+              AND EXISTS (
+                SELECT 1 FROM _messages c
+                WHERE c.ticket_id = t.id
+                  AND c.kind = 'ticket_closed'
+                  AND c.status = 'approved'
+                  AND c.id > COALESCE(
+                    (SELECT MAX(r.id) FROM _messages r
+                     WHERE r.ticket_id = t.id
+                       AND r.kind = 'ticket_reopened'
+                       AND r.status = 'approved'),
+                    0
+                  )
+              )
+        `).all(...ids) as { id: number }[];
+        for (const r of rows) closedTicketIds.add(r.id);
+    }
     const hits: SearchHit[] = [];
     for (const r of ticketRows) {
         if (opts.open && r.status === "rejected") continue;
+        if (opts.open && closedTicketIds.has(r.id)) continue;
         hits.push({
             kind: "ticket",
             id: r.id,
@@ -213,6 +247,8 @@ export function searchMessages(
         });
     }
     for (const r of messageRows) {
+        if (opts.open && r.ticket_status === "rejected") continue;
+        if (opts.open && closedTicketIds.has(r.ticket_id)) continue;
         hits.push({
             kind: "comment",
             id: r.id,
