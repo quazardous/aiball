@@ -897,6 +897,18 @@ watch(showSnoozed, (v) => {
             />
 
             <main class="aiball-main">
+                <!-- #B.194: settings panels lacked a visible way back to
+                     the inbox on mobile (the sidebar lives in the footer
+                     band, easy to miss). One unified back-link covers
+                     all four; per-panel headers stay untouched. -->
+                <a
+                    v-if="panel === 'projects' || panel === 'rules' || panel === 'tags' || panel === 'consumers'"
+                    href="/"
+                    class="settings-back-link"
+                    @click.prevent="panel = null"
+                >
+                    <i class="pi pi-arrow-left" /> Back to inbox
+                </a>
                 <ProjectsPanel
                     v-if="panel === 'projects'"
                     @open-stats="(name: string) => openProjectPage(name, 'stats')"
@@ -1072,6 +1084,17 @@ watch(showSnoozed, (v) => {
 .aiball-dark .project-strategy-hint:hover {
     background: var(--p-surface-800);
 }
+
+.settings-back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--p-primary-color);
+    text-decoration: none;
+    font-size: 0.9rem;
+    align-self: flex-start;
+}
+.settings-back-link:hover { text-decoration: underline; }
 
 .aiball-main {
     padding: 1rem;
