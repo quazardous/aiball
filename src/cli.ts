@@ -8,7 +8,7 @@
  * (default "human"), so a single CLI invocation can play either side.
  */
 import { existsSync, statSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { basename, join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";
@@ -875,6 +875,54 @@ async function setAutopollField(key: string, value: unknown): Promise<void> {
     writeFileSync(path, doc.toString());
     process.stdout.write(`${path}: autopoll.${key} = ${JSON.stringify(value)}\n`);
 }
+
+// =====================================================================
+// mcp subcommands — wire .mcp.json non-destructively (#B.175)
+// =====================================================================
+
+const mcp = program
+    .command("mcp")
+    .description("Manage the aiball entry in this project's .mcp.json");
+
+mcp
+    .command("init")
+    .description("Add the aiball MCP server to .mcp.json at cwd (preserves any existing entries)")
+    .option("--force", "Overwrite an existing aiball entry (drops any legacy env block — #B.154)")
+    .action(async (opts: { force?: boolean }) => {
+        const path = join(userCwd(), ".mcp.json");
+        type McpFile = {
+            mcpServers?: Record<string, unknown>;
+        };
+        let json: McpFile = { mcpServers: {} };
+        let existed = false;
+        if (existsSync(path)) {
+            existed = true;
+            try {
+                json = JSON.parse(readFileSync(path, "utf8")) as McpFile;
+            } catch {
+                die(`${path} exists but is invalid JSON — fix it by hand, then re-run`);
+            }
+            if (!json.mcpServers || typeof json.mcpServers !== "object") {
+                json.mcpServers = {};
+            }
+        }
+        const servers = json.mcpServers as Record<string, unknown>;
+        const had = "aiball" in servers;
+        if (had && !opts.force) {
+            process.stdout.write(`${path}: aiball entry already present — re-run with --force to overwrite (drops legacy env block)\n`);
+            return;
+        }
+        servers.aiball = { command: "aiball-mcp" };
+        writeFileSync(path, JSON.stringify(json, null, 2) + "\n");
+        if (!existed) {
+            process.stdout.write(`created ${path} with the aiball MCP entry\n`);
+        } else if (!had) {
+            process.stdout.write(`${path}: added aiball MCP entry (other servers preserved)\n`);
+        } else {
+            process.stdout.write(`${path}: aiball entry rewritten to canonical form (legacy env block dropped if any)\n`);
+        }
+        process.stdout.write(`\nNext: identity defaults to '${basename(userCwd())}-claude'. Override via .aiball.yaml consumer:* if needed.\n`);
+    });
 
 function resolveInstallRoot(): string {
     // The bin/aiball wrapper cd's into the install dir before exec'ing

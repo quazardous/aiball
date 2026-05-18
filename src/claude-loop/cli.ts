@@ -273,6 +273,13 @@ function cmdStart(opts: StartOpts): void {
     // (#B.149). SessionStart hook flips to idle/busy once claude is
     // actually ready. Color + label are driven by setTmuxStatus.
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-left-length", "60"], { stdio: "ignore" });
+    // #B.176 (david): mouse mode ON for the session so the scroll
+    // wheel actually scrolls the pane buffer instead of being
+    // translated to Up/Down arrow keys (the tmux default for
+    // non-mouse modes is awful — the user's mid-prompt navigation
+    // gets clobbered by accidental scroll). Scoped per-session so
+    // we don't touch the user's global `.tmux.conf`.
+    spawnSync(MUX_CMD, ["set-option", "-t", tname, "mouse", "on"], { stdio: "ignore" });
     setTmuxStatus(name, "boot");
 
     // Detached timer process. Inherits CL_* env via the env file
