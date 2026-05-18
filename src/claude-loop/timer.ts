@@ -223,6 +223,26 @@ async function mainSse(): Promise<void> {
         // independently of hook events, so slash commands that don't
         // trigger Stop (/compact, /clear, …) don't leave us stuck.
         // Boot stays sticky until settleBoot — don't pull the rug.
+        //
+        // Alternatives considered and DISCARDED (#B.172, david's hint
+        // "le reste devrait servir à décorer (hint)") — kept here as
+        // a written record so a future reader doesn't re-litigate:
+        //   - Re-arm differé après transient state (detect compacting/
+        //     rate-limit/api-error cleared after T+30s): decoration,
+        //     not workflow-critical. Stuck-in-transient bars are a
+        //     visual nuisance, not a correctness issue.
+        //   - Read claude-code's JSONL transcript at ~/.claude/
+        //     projects/<hash>/<id>.jsonl for authoritative turn
+        //     boundaries: heavier (needs session_id resolution +
+        //     file-watch + JSON parse), and the `esc to interrupt`
+        //     pane probe already covers the only critical case.
+        //   - PostToolUse / PreToolUse hooks to differentiate
+        //     working:tool-use vs working:thinking: pure decoration.
+        //   - tmux pane-title / cursor-position events: claimed less
+        //     fragile but requires custom tmux pipe-pane wiring; no
+        //     concrete payoff over the existing capture-pane regex.
+        // If a future need shows one of these has real value, open
+        // a fresh ticket; don't sneak it back in here.
         if (settledStatus !== "boot") {
             const paneText = capturePane();
             if (paneText) {
