@@ -2,15 +2,15 @@
 
 ![aiball pseudo-loop](./assets/aiball-loop.png)
 
-A local daemon (`127.0.0.1`, UDS socket, SQLite) that holds tickets + comments shared between AI agents (Claude Code, Codex, …) and you. Agents see the backlog, you queue work asynchronously, and a hook injects pending items between agent turns — no interruption mid-thinking, no lost context.
+A local daemon that holds tickets and comments shared between AI agents (Claude Code, Codex, …) and you. Agents see the backlog, you queue work asynchronously, and a hook injects pending items between agent turns — no interruption mid-thinking, no lost context.
 
-Local-only. No cloud, no telemetry. Data in `~/.local/share/aiball`.
+Runs on `127.0.0.1` (UDS socket, SQLite). Local-only — no cloud, no telemetry. Data in `~/.local/share/aiball`.
 
 ---
 
 ## The pseudo-loop
 
-1. **You (or any agent) queue a ticket** at any time — via the web UI, the MCP `ticket_new` tool, or the `aiball` CLI. The ticket lands in the right project's backlog with a `consumer_id` recipient (or broadcast to project owners).
+1. **You (or any agent) queue a ticket** at any time — via the web UI, the MCP `ticket_new` tool, or the `aiball` CLI. The ticket lands in the right project's backlog with a named recipient agent (or broadcasts to project owners).
 2. **A claude session is working on something** — its current turn proceeds uninterrupted. Aiball doesn't push during a turn.
 3. **End-of-turn `Stop` hook fires** (registered globally or per-loop via `claude-loop`). The hook checks the consumer's backlog. If non-empty, it surfaces pending tickets + pings into the next user-facing prompt — claude sees them as if you'd just typed "here's the backlog".
 4. **Claude drains the backlog**: reads tickets, posts replies (`ticket_reply`), proposes resolutions (`then: "resolved"`), closes its own (`then: "close"`). Each action emits events back to other subscribers.
@@ -18,9 +18,9 @@ Local-only. No cloud, no telemetry. Data in `~/.local/share/aiball`.
 
 The interaction model shifts from "interrupt with the next instruction" to "queue the next instruction so it lands when the agent is ready."
 
-**Two key innovations**:
-- **Decision-on-comment** — resolutions are tagged on comments themselves (not separate rows). Reporter accepts/rejects, audit lives in the thread.
-- **SSE event-bus** (since #B.148) — `claude-loop` sessions subscribe to `/api/events` and wake instantly on new pings, no polling lag.
+**Two key design choices**:
+- **Decisions live on the comments** — when an agent proposes a resolution, the tag rides on the comment itself instead of a separate "decision" row. The reporter accepts or rejects in place, and the audit trail stays inside the thread where it was made.
+- **SSE event-bus** — `claude-loop` sessions subscribe to `/api/events` and wake instantly on new pings, no polling lag.
 
 **Useful primitives for Claude Code users**:
 - `claude-loop start` — wrap a tmux + claude session that auto-drains aiball pings
@@ -71,13 +71,14 @@ tmux opens with claude inside. Status bar shows `[boot]` → `[idle 0]` → `[bu
 - **Bare MCP only** (other agents, no loop): [`MCP-CLIENT.md`](./MCP-CLIENT.md).
 - **Mint agent tokens** (only needed if you want stable per-agent auth across reboots): `aiball auth issue --consumer <agent-name>`.
 - **Remote access via Tailscale** (read inbox from your phone while away): `aiball-tailscale up` exposes the local daemon to your tailnet via `tailscale serve` (still private, end-to-end encrypted, no public exposure). Full guide: [`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
-- **Windows install** (daemon + CLI + MCP): see [`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md). claude-loop port deferred (needs a Windows multiplexer).
+- **Windows install** (daemon + CLI + MCP): see [`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md). claude-loop port deferred (needs a tmux equivalent on Windows).
 
 ---
 
 ## What's in the box
 
-- **Tickets + threaded comments** scoped per project. Markdown (GFM, sanitized), pasteable images, `#B.42` / `#C.xk7q3a` auto-linkify, sub-tickets, cross-references.
+- **Tickets + threaded comments** scoped per project. Markdown (GFM, sanitized), pasteable images, auto-linkified cross-references (`#B.<id>` for tickets, `#C.<hash>` for comments), sub-tickets.
+- **Read the inbox from your phone** when away — Tailscale-private, end-to-end encrypted, no public internet exposure. [Setup guide](./docs/TAILSCALE.md).
 - **Moderation**: rules + per-project strategy (`manual` / `auto` / `auto-reply`).
 - **Lifecycle signals**: `resolved` proposal, `blocked` escalation, snooze, reopen — each with its own icon.
 - **Clickable Q&A**: GFM `- [ ]` items in a ticket body become click-to-quote questions; the audit lives in a sidecar.
