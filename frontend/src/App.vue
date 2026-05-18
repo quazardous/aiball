@@ -880,10 +880,12 @@ watch(showSnoozed, (v) => {
                 <ProjectSettingsPage
                     v-else-if="projectPage === 'settings' && project !== null"
                     :project="project"
+                    @back="projectPage = null"
                 />
                 <ProjectStatsPage
                     v-else-if="projectPage === 'stats' && project !== null"
                     :project="project"
+                    @back="projectPage = null"
                 />
 
                 <template v-else>
@@ -900,7 +902,14 @@ watch(showSnoozed, (v) => {
                         :sort-options="sortOptions"
                         :search-query="searchQuery"
                         :project="project"
-                        :project-options="projectListItems.map(p => ({ label: p.label, value: p.value }))"
+                        :project-options="projectListItems.map(p => ({
+                            label: p.label,
+                            value: p.value,
+                            pending: p.pending,
+                            unread: p.unread,
+                            open: p.open,
+                            resolved: p.resolved,
+                        }))"
                         @update:status-filter="statusFilter = $event"
                         @update:only-open="onlyOpen = $event"
                         @update:sort-by="sortBy = $event"

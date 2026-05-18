@@ -6,6 +6,10 @@ const props = defineProps<{
     project: string;
 }>();
 
+const emit = defineEmits<{
+    (e: "back"): void;
+}>();
+
 interface OldestOpen {
     id: number;
     title: string;
@@ -76,6 +80,14 @@ const topIntentMax = computed(() =>
         </div>
         <template v-else-if="stats">
             <header class="project-stats__header">
+                <button
+                    type="button"
+                    class="project-stats__back"
+                    title="Back to inbox"
+                    @click="emit('back')"
+                >
+                    <i class="pi pi-arrow-left" /> back
+                </button>
                 <h2>{{ project }} — stats</h2>
                 <div class="project-stats__header-actions">
                     <button
@@ -224,6 +236,25 @@ const topIntentMax = computed(() =>
 .project-stats__header h2 {
     margin: 0;
     font-size: 1.3rem;
+}
+.project-stats__back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: transparent;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.4rem;
+    padding: 0.25rem 0.55rem;
+    color: var(--p-text-color);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.85rem;
+}
+.project-stats__back:hover {
+    background: var(--p-surface-100);
+}
+.aiball-dark .project-stats__back:hover {
+    background: var(--p-surface-800);
 }
 .project-stats__header-actions {
     margin-left: auto;

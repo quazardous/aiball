@@ -8,6 +8,10 @@ const props = defineProps<{
     project: string;
 }>();
 
+const emit = defineEmits<{
+    (e: "back"): void;
+}>();
+
 // Strategy override state (#B.127). `strategy === null` means "follow
 // the global". Picker uses a sentinel "_global" value because Select
 // can't bind to null directly.
@@ -69,6 +73,17 @@ onMounted(load);
 <template>
     <div class="project-settings">
         <header class="project-settings__header">
+            <!-- #B.161 mobile: back button to return to the inbox.
+                 Always rendered; styling makes it tight so it doesn't
+                 dominate on desktop either. -->
+            <button
+                type="button"
+                class="project-settings__back"
+                title="Back to inbox"
+                @click="emit('back')"
+            >
+                <i class="pi pi-arrow-left" /> back
+            </button>
             <h2>{{ project }} — settings</h2>
         </header>
 
@@ -125,9 +140,33 @@ onMounted(load);
     flex-direction: column;
     gap: 1rem;
 }
+.project-settings__header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
 .project-settings__header h2 {
     margin: 0;
     font-size: 1.3rem;
+}
+.project-settings__back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: transparent;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.4rem;
+    padding: 0.25rem 0.55rem;
+    color: var(--p-text-color);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.85rem;
+}
+.project-settings__back:hover {
+    background: var(--p-surface-100);
+}
+.aiball-dark .project-settings__back:hover {
+    background: var(--p-surface-800);
 }
 .project-settings__section {
     padding: 1rem 1.2rem;
