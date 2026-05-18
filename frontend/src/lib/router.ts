@@ -3,6 +3,12 @@ import { onBeforeUnmount, watch, type Ref } from "vue";
 export type RouteState = {
     panel: "rules" | "tags" | "projects" | "consumers" | "compose" | null;
     openTicketId: number | null;
+    /**
+     * #B.193 item 3: when `panel === "consumers"` and this is set, the
+     * consumers panel renders the dedicated edit view for that
+     * consumer_id instead of the table. URL: `/consumers/<id>`.
+     */
+    consumerEditId: string | null;
     project: string | null;
     statusFilter: "all" | "unread" | "pending" | "approved" | "rejected";
     onlyOpen: boolean;
@@ -18,7 +24,11 @@ export function buildUrl(s: RouteState): string {
     if (s.panel === "rules") path = "/rules";
     else if (s.panel === "tags") path = "/tags";
     else if (s.panel === "projects") path = "/projects";
-    else if (s.panel === "consumers") path = "/consumers";
+    else if (s.panel === "consumers") {
+        path = s.consumerEditId
+            ? `/consumers/${encodeURIComponent(s.consumerEditId)}`
+            : "/consumers";
+    }
     else if (s.panel === "compose") path = "/new";
     else if (s.openTicketId !== null) path = `/b/${s.openTicketId}`;
 
@@ -40,6 +50,10 @@ export function parseUrl(): Partial<RouteState> {
     const path = location.pathname;
     const qs = new URLSearchParams(location.search);
     const out: Partial<RouteState> = {};
+    // #B.193 item 3: always (re-)set so navigating away from a
+    // /consumers/<id> URL clears the dedicated edit view; only the
+    // /consumers/<id> branch below overrides it back to a value.
+    out.consumerEditId = null;
 
     if (path === "/rules") {
         out.panel = "rules";
@@ -53,6 +67,12 @@ export function parseUrl(): Partial<RouteState> {
     } else if (path === "/consumers") {
         out.panel = "consumers";
         out.openTicketId = null;
+        out.consumerEditId = null;
+    } else if (path.startsWith("/consumers/")) {
+        out.panel = "consumers";
+        out.openTicketId = null;
+        const raw = path.slice("/consumers/".length);
+        out.consumerEditId = raw ? decodeURIComponent(raw) : null;
     } else if (path === "/new") {
         out.panel = "compose";
         out.openTicketId = null;
@@ -94,6 +114,7 @@ export function parseUrl(): Partial<RouteState> {
 export function useRouting(refs: {
     panel: Ref<RouteState["panel"]>;
     openTicketId: Ref<number | null>;
+    consumerEditId: Ref<string | null>;
     project: Ref<string | null>;
     statusFilter: Ref<RouteState["statusFilter"]>;
     onlyOpen: Ref<boolean>;
@@ -104,6 +125,7 @@ export function useRouting(refs: {
         return {
             panel: refs.panel.value,
             openTicketId: refs.openTicketId.value,
+            consumerEditId: refs.consumerEditId.value,
             project: refs.project.value,
             statusFilter: refs.statusFilter.value,
             onlyOpen: refs.onlyOpen.value,
@@ -114,6 +136,7 @@ export function useRouting(refs: {
         applying = true;
         if ("panel" in state) refs.panel.value = state.panel ?? null;
         if ("openTicketId" in state) refs.openTicketId.value = state.openTicketId ?? null;
+        if ("consumerEditId" in state) refs.consumerEditId.value = state.consumerEditId ?? null;
         if ("project" in state) refs.project.value = state.project ?? null;
         if ("statusFilter" in state && state.statusFilter)
             refs.statusFilter.value = state.statusFilter;
@@ -138,6 +161,7 @@ export function useRouting(refs: {
         [
             refs.panel,
             refs.openTicketId,
+            refs.consumerEditId,
             refs.project,
             refs.statusFilter,
             refs.onlyOpen,

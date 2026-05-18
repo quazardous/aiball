@@ -170,6 +170,10 @@ const rows = ref<InboxRow[]>([]);
 const loading = ref(false);
 const dark = ref(localStorage.getItem("aiball.dark") === "1");
 const openTicketId = ref<number | null>(null);
+// #B.193 item 3: when set AND panel === "consumers", ConsumersPanel
+// switches from the table to the dedicated edit view. Routed as
+// `/consumers/<id>` (see lib/router.ts).
+const consumerEditId = ref<string | null>(null);
 
 /**
  * Per-project sub-page (per #B.60). Default null = inbox view. When
@@ -650,6 +654,7 @@ watch(pageSize, (v) => {
 useRouting({
     panel,
     openTicketId,
+    consumerEditId,
     project,
     statusFilter,
     onlyOpen,
@@ -883,7 +888,12 @@ watch(showSnoozed, (v) => {
                 />
                 <RulesPanel v-else-if="panel === 'rules'" />
                 <TagsPanel v-else-if="panel === 'tags'" />
-                <ConsumersPanel v-else-if="panel === 'consumers'" />
+                <ConsumersPanel
+                    v-else-if="panel === 'consumers'"
+                    :edit-consumer-id="consumerEditId"
+                    @open-edit="(id: string) => { consumerEditId = id; }"
+                    @close-edit="consumerEditId = null"
+                />
 
                 <NewTicketPage
                     v-else-if="panel === 'compose'"

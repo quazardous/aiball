@@ -6,6 +6,18 @@ import Select from "primevue/select";
 import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
 import { api, type Consumer, type ConsumerKind } from "../lib/api";
+import ConsumerEditPage from "./ConsumerEditPage.vue";
+
+// #B.193 item 3: when set, render the dedicated edit view instead of
+// the table. Driven by the URL `/consumers/<id>`. Parent (App.vue)
+// owns the ref so back/forward navigation works.
+const props = defineProps<{
+    editConsumerId?: string | null;
+}>();
+const emit = defineEmits<{
+    (e: "open-edit", consumerId: string): void;
+    (e: "close-edit"): void;
+}>();
 
 // #B.177: how long without a state heartbeat before we render the
 // loop agent as "offline" in the Activity badge. Matches david's
@@ -219,7 +231,12 @@ const sortedRows = computed<Consumer[]>(() => {
 });</script>
 
 <template>
-    <div class="consumers-panel">
+    <ConsumerEditPage
+        v-if="props.editConsumerId"
+        :consumer-id="props.editConsumerId"
+        @close="emit('close-edit')"
+    />
+    <div v-else class="consumers-panel">
         <header class="rules-explainer-block">
             <h2 style="margin: 0">Consumers</h2>
             <p class="rules-explainer rules-explainer--muted">
@@ -350,6 +367,14 @@ const sortedRows = computed<Consumer[]>(() => {
                     </td>
                     <td class="action-cell">
                         <div class="action-cell__inner">
+                            <Button
+                                icon="pi pi-pencil"
+                                text
+                                rounded
+                                size="small"
+                                :title="`Edit ${r.consumer_id} on a dedicated page`"
+                                @click="emit('open-edit', r.consumer_id)"
+                            />
                             <Button
                                 icon="pi pi-trash"
                                 severity="danger"
