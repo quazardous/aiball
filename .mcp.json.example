@@ -3,8 +3,8 @@
     "aiball": {
       "command": "aiball-mcp",
       "env": {
-        "AIBALL_PROJECT": "aiball",
-        "AIBALL_AGENT": "claude-aiball-dev"
+        "AIBALL_PROJECT": "your-project-name",
+        "AIBALL_AGENT": "your-agent-id"
       }
     }
   }

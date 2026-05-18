@@ -16,3 +16,7 @@ outbox/
 # throttle, claude-loop wiring). Use .aiball.yaml.example as the
 # committed template; copy on first install. #B.166
 .aiball.yaml
+# .mcp.json carries the per-user AIBALL_AGENT identity (consumer id) +
+# project binding. Use .mcp.json.example as the committed template;
+# copy + edit AIBALL_AGENT / AIBALL_PROJECT on first install. #B.166
+.mcp.json
