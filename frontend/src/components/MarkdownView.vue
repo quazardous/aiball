@@ -16,6 +16,15 @@ const props = defineProps<{
     source: string | null | undefined;
     messageId?: number;
     questionsClickable?: boolean;
+    /**
+     * #B.123 follow-up: id of the ticket this body lives under, when
+     * known. Used to suppress the "promote to typed relation" right-
+     * click intercept on self-references (a ticket can't link to
+     * itself; suppressing keeps the browser's native context menu
+     * available on those links). When undefined, all ticket-refs
+     * route to the promote popup as before.
+     */
+    selfTicketId?: number;
 }>();
 
 marked.setOptions({
@@ -222,6 +231,12 @@ function onContextMenu(ev: MouseEvent) {
     if (!match) return;
     const ticketId = Number(match[1]);
     if (!Number.isFinite(ticketId) || ticketId <= 0) return;
+    // Self-references are meaningless as relations — let the browser's
+    // native context menu show instead of hijacking with the promote
+    // popup. David #B.123: "on peut filtrer le popup".
+    if (props.selfTicketId !== undefined && ticketId === props.selfTicketId) {
+        return;
+    }
     ev.preventDefault();
     bus.emit("ticket-ref.promote", {
         ticket_id: ticketId,

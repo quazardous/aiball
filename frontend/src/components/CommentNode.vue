@@ -341,6 +341,7 @@ onBeforeUnmount(() => detachPaste?.());
             :source="msg.edited_body ?? msg.body"
             :message-id="msg.id"
             :questions-clickable="true"
+            :self-ticket-id="msg.ticket_id ?? undefined"
         />
         <div v-if="msg.human_note" class="comment-note">
             <i class="pi pi-comment" />

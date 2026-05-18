@@ -93,6 +93,10 @@ function openRelationMenu(
 // ticket (current kind looked up from data.ticket.relations if any).
 useBus("ticket-ref.promote", (payload) => {
     if (!data.value) return;
+    // Self-references are filtered upstream in MarkdownView (it gets
+    // selfTicketId as a prop and skips the @contextmenu intercept so
+    // the browser's native menu can show on those links). David
+    // #B.123: "on peut filtrer le popup".
     const existing = (data.value.ticket.relations ?? []).find(
         (r) => r.target_ticket_id === payload.ticket_id,
     );
@@ -1683,7 +1687,7 @@ async function copyTicketRef() {
                         />
                     </div>
                 </div>
-                <MarkdownView :source="data.ticket.body" />
+                <MarkdownView :source="data.ticket.body" :self-ticket-id="data.ticket.id" />
             </article>
 
             <!-- #B.130 follow-up: the TLDR banner used to sit between
