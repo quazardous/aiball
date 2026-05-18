@@ -643,20 +643,34 @@ async function acceptResolution(asKind?: "plan" | "resolution") {
         // trail shows the reclassification.
         if (effectiveKind === "plan") {
             if (composerBody.value.trim()) {
-                await postBodyAs("comment_added");
+                // The typed body becomes a plan-accepted comment so it
+                // carries the chip (per #B.129 / #C.ffvfgm david: chip
+                // must surface visually on the audit comment, not just
+                // in the absent meta of the legacy ticket_resolved row).
+                await postBodyAs("comment_added", "plan");
             } else {
-                // Even with no body, drop a tiny audit comment so
-                // future readers see the reclassification happened.
+                // Empty composer → drop the canned marker AND stamp
+                // its meta.decision so CommentNode renders the
+                // "✓ accepted plan by david" chip. Without it the
+                // marker shows as bare text, no visual feedback.
                 const t = data.value.ticket;
                 const byAgent = localStorage.getItem("aiball.human_id") || "human";
-                await api.postMessage({
+                const posted = await api.postMessage({
                     project: t.project,
                     kind: "comment_added",
                     ticket_id: t.id,
                     parent_id: t.id,
                     body: `(accepted as plan — ticket stays open)`,
                     by_agent: byAgent,
+                    decision_kind: "plan",
                 });
+                // Flip it to accepted immediately so the chip reads
+                // "✓ accepted plan by <byAgent>" rather than "pending".
+                if (posted?.id) {
+                    try {
+                        await api.decide(posted.id, "accepted");
+                    } catch { /* race-tolerant — chip will catch up on next refresh */ }
+                }
             }
         } else {
             // The typed body (if any) rides along on the close event so the
