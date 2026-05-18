@@ -8,17 +8,28 @@
  *
  * Naming convention:
  *   - `ping:<recipient>` — a new ping was inserted for this consumer.
- *     Payload: `{ ticket_id?: number, comment_id?: number }`.
+ *     Payload: `{ ticket_id?, comment_id?, comment_hashid?, intent? }`.
+ *     For a comment ping, `ticket_id` is the parent ticket and
+ *     `comment_hashid` is the public-facing ref (`#<hashid>`) —
+ *     `comment_id` is the numeric `_messages.id` and is kept for
+ *     backward-compat only; consumers should prefer the hashid when
+ *     surfacing the ref to humans/agents. `intent` is the parent
+ *     ticket's intent (panic / request / question / fyi) — lets
+ *     downstream consumers (claude-loop wake phrase) scale the
+ *     directiveness of the prompt to match the ticket's urgency.
  *
  * Keep this layer dumb: just a typed emitter. SSE filtering, batching,
  * keepalives all live in the consumer (api.ts). New event kinds get
  * added here as their emit-point lands.
  */
 import { EventEmitter } from "node:events";
+import type { Intent } from "./domain.js";
 
 export interface PingEvent {
     ticket_id?: number;
     comment_id?: number;
+    comment_hashid?: string;
+    intent?: Intent;
 }
 
 const bus = new EventEmitter();

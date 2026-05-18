@@ -27,13 +27,16 @@ import {
     isInternalCheckCmd,
     DEFAULT_USER_GRACE_SEC,
     MUX_CMD,
+    WAKE_COALESCE_WINDOW_MS,
     buildWakePhrase,
     checkHasWork,
     formatPaneSnapshot,
     idleMarkerPath,
+    isDuplicateWakeHint,
     lastWakeAtPath,
     paneFooterShowsBusy,
     pingsPath,
+    recordWakeHint,
     setTmuxStatus,
     snapshotPane,
     tmuxName,
@@ -162,6 +165,11 @@ async function tryWake(reason: string, manualWake = false, hint?: WakeHint): Pro
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
     const phrase = pickPhrase(hint);
     sendKeys(phrase);
+    // #B.198 david: "on cumule pas les event identique on les merge".
+    // Persist the just-fired hint so subsequent SSE pings about the
+    // same (ticket, comment) within `WAKE_COALESCE_WINDOW_MS` get
+    // dropped at `onPing` (event-layer merge, no DB write).
+    recordWakeHint(sd!, hint);
     setTmuxStatus(name!, "busy");
     log(`wake (${reason}) → '${phrase}'`);
     return true;
@@ -192,6 +200,15 @@ async function mainSse(): Promise<void> {
         unsubscribe = client().subscribeEvents({
             onHello: (h) => { log(`SSE hello: unread=${h.unread}`); },
             onPing: (p) => {
+                // #B.198 david: "on cumule pas les event identique on
+                // les merge". When N SSE pings about the same
+                // (ticket, comment) arrive in a burst, only the first
+                // gets a wake; the rest are dropped here at the event
+                // boundary. Hook layer only — model is untouched.
+                if (isDuplicateWakeHint(sd!, p, WAKE_COALESCE_WINDOW_MS)) {
+                    log(`SSE ping coalesced (dup hint <${WAKE_COALESCE_WINDOW_MS}ms): ${JSON.stringify(p)}`);
+                    return;
+                }
                 log(`SSE ping received: ${JSON.stringify(p)} → tryWake`);
                 // #B.198 david: pass the SSE payload as a hint so the
                 // wake phrase names the concrete artifact ("Poll ticket

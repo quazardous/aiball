@@ -417,7 +417,7 @@ export class AiballClient {
      *     logic upstream for long-lived consumers.
      */
     subscribeEvents(handlers: {
-        onPing: (payload: { ticket_id?: number; comment_id?: number }) => void;
+        onPing: (payload: { ticket_id?: number; comment_id?: number; comment_hashid?: string; intent?: "panic" | "request" | "question" | "fyi" }) => void;
         onHello?: (payload: { consumer_id: string; unread: number }) => void;
         onError?: (err: Error) => void;
     }): () => void {
@@ -459,7 +459,7 @@ export class AiballClient {
                     try { payload = JSON.parse(dataStr); }
                     catch { continue; }
                     if (evName === "ping") {
-                        handlers.onPing(payload as { ticket_id?: number; comment_id?: number });
+                        handlers.onPing(payload as { ticket_id?: number; comment_id?: number; comment_hashid?: string; intent?: "panic" | "request" | "question" | "fyi" });
                     } else if (evName === "hello" && handlers.onHello) {
                         handlers.onHello(payload as { consumer_id: string; unread: number });
                     }

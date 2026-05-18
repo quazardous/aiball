@@ -26,6 +26,7 @@ import {
     type Message,
     type MessageKind,
 } from "./connection.js";
+import type { Intent } from "../domain.js";
 
 // =====================================================================
 //  Helpers
@@ -61,10 +62,25 @@ function targetInArray(ids: number[]) {
  */
 export function insertPing(
     recipient: string,
-    msg: { id: number; kind: MessageKind },
+    msg: {
+        id: number;
+        kind: MessageKind;
+        // Comment-only fields — used to enrich the emitted PingEvent so
+        // SSE consumers (notably claude-loop's wake-phrase builder) can
+        // reference the comment by its public hashid and name the parent
+        // ticket, instead of leaking the numeric `_messages.id`.
+        hashid?: string | null;
+        ticket_id?: number | null;
+        // Ticket-only: msg.intent is the ticket's own intent. For comment
+        // pings the comment row's intent is almost always null, so we
+        // look the parent ticket's intent up below — agents care about
+        // the THREAD's urgency, not the comment's.
+        intent?: Intent | null;
+    },
 ): void {
     const isTicket = msg.kind === "ticket_created";
-    const r = getDb().insert(schema.pings).values({
+    const db = getDb();
+    const r = db.insert(schema.pings).values({
         recipient,
         ticketId: isTicket ? msg.id : null,
         commentId: isTicket ? null : msg.id,
@@ -74,9 +90,24 @@ export function insertPing(
     // can swallow a duplicate). Subscribers (SSE) react in real-time —
     // no more polling-lag (#B.148 phase A).
     if (r.changes > 0) {
+        let intent: Intent | undefined;
+        if (isTicket) {
+            intent = (msg.intent ?? undefined) as Intent | undefined;
+        } else if (msg.ticket_id) {
+            // Comment ping: pull the parent ticket's intent so the wake
+            // phrase can scale directiveness. One tiny indexed lookup
+            // per actual new ping — fine.
+            const t = db.select({ intent: schema.tickets.intent })
+                .from(schema.tickets)
+                .where(eq(schema.tickets.id, msg.ticket_id))
+                .get();
+            intent = (t?.intent ?? undefined) as Intent | undefined;
+        }
         emitPing(recipient, {
-            ticket_id: isTicket ? msg.id : undefined,
+            ticket_id: isTicket ? msg.id : (msg.ticket_id ?? undefined),
             comment_id: isTicket ? undefined : msg.id,
+            comment_hashid: isTicket ? undefined : (msg.hashid ?? undefined),
+            intent,
         });
     }
 }

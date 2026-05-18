@@ -2128,7 +2128,17 @@ api.get("/pings/count", (req, res) => {
  *   data: {"consumer_id":"…","unread":N}
  *
  *   event: ping
- *   data: {"ticket_id":N}      // or {"comment_id":N}
+ *   data: {"ticket_id":N,"intent":"request"}       // ticket ping
+ *   data: {"ticket_id":N,"comment_id":N,"comment_hashid":"abcdef","intent":"panic"}
+ *                              // comment ping — ticket_id is the
+ *                              // parent ticket; comment_hashid is the
+ *                              // public ref (`#<hashid>`); comment_id
+ *                              // is the numeric `_messages.id` (kept
+ *                              // for backward-compat — prefer hashid);
+ *                              // intent is the PARENT ticket's intent
+ *                              // (panic / request / question / fyi),
+ *                              // so consumers can scale UI/wake-phrase
+ *                              // urgency
  *
  *   :keepalive 30s              // SSE comment, ignored by parsers
  *

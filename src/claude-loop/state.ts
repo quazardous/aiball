@@ -15,6 +15,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AiballClient } from "../client.js";
+import type { Intent } from "../domain.js";
 
 export const STATE_ROOT = process.env.CLAUDE_LOOP_STATE_ROOT
     ?? join(homedir(), ".claude-loop");
@@ -107,6 +108,58 @@ export function lastWakeAtPath(sd: string): string { return join(sd, "last-wake-
  *  the typical short pop-phrase turn (1-5s) that produced the
  *  "wake-on-busy" perception in #B.198. */
 export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env.CL_WAKE_COALESCE_WINDOW_MS ?? 3000));
+
+/**
+ * Last successful wake's hint, written as JSON `{ticket_id,
+ * comment_hashid}` right after `send-keys`. Read by the SSE consumer
+ * to coalesce IDENTICAL events (#B.198 david: "on cumule pas les
+ * event identique on les merge"). When N SSE pings about the same
+ * (ticket, comment) arrive in a burst, only the first triggers a
+ * wake; subsequent dups within `WAKE_COALESCE_WINDOW_MS` are dropped
+ * at the hook layer — no DB / model change ("on touche pas au model,
+ * on merge au moment des event dans / hook"). mtime is the "at" so
+ * the JSON body stays free of timestamps.
+ */
+export function lastWakeHintPath(sd: string): string { return join(sd, "last-wake-hint"); }
+
+/** Persist the hint that just triggered a wake. Pass `undefined` to
+ *  no-op (we only want hinted wakes in the dedup ledger; un-hinted
+ *  pop-culture wakes coalesce via `lastWakeAtPath` already). */
+export function recordWakeHint(sd: string, hint: WakeHint | undefined): void {
+    if (!hint || hint.ticket_id === undefined) return;
+    try {
+        writeFileSync(lastWakeHintPath(sd), JSON.stringify({
+            ticket_id: hint.ticket_id,
+            comment_hashid: hint.comment_hashid ?? null,
+        }) + "\n");
+    } catch { /* coalesce will just fail open on next event */ }
+}
+
+/** True iff `hint` matches the last recorded wake hint AND the marker
+ *  is fresher than `windowMs`. Use to drop duplicate SSE pings before
+ *  invoking the wake path. Returns false on missing marker / parse
+ *  error / no ticket id — fail-open so a corrupt ledger never silences
+ *  a real ping. */
+export function isDuplicateWakeHint(sd: string, hint: WakeHint | undefined, windowMs: number): boolean {
+    if (!hint || hint.ticket_id === undefined) return false;
+    const p = lastWakeHintPath(sd);
+    if (!existsSync(p)) return false;
+    try {
+        const age = Date.now() - statSync(p).mtimeMs;
+        if (age > windowMs) return false;
+        const prev = JSON.parse(readFileSync(p, "utf8")) as { ticket_id?: number; comment_hashid?: string | null };
+        return prev.ticket_id === hint.ticket_id
+            && (prev.comment_hashid ?? null) === (hint.comment_hashid ?? null);
+    } catch { return false; }
+}
+
+/** Delay applied by the Stop hook when the visible pane STILL shows
+ *  `esc to interrupt` at FIRE time (#B.198 david: "si pane=busy:true
+ *  on attend 5 secondes de plus pour faire quoi que ce soit"). The
+ *  Stop hook fires post-turn so the footer may be stale (#B.185) — we
+ *  don't gate forever, we just give it 5 more seconds to settle and
+ *  re-snapshot before deciding wake vs idle. */
+export const PANE_BUSY_DELAY_MS = Math.max(0, Number(process.env.CL_PANE_BUSY_DELAY_MS ?? 5000));
 
 export function readPlate(sd: string): Plate {
     return JSON.parse(readFileSync(platePath(sd), "utf8")) as Plate;
@@ -377,32 +430,134 @@ export function pickPingPhrase(pingsAbsPath: string): string {
 
 /**
  * Optional context attached to a wake — typically the SSE ping
- * payload (`{ ticket_id, comment_id }`). When present, the wake
- * phrase names the concrete artifact instead of a random pop-culture
- * line, so claude knows what to poll without re-fetching the inbox
- * (#B.198 david: "vu qu'on connait l'id du comment autant balancé
- * le numéro en disant poll ce ticket — ça sera plus clair que le
- * pop culture ping").
+ * payload (`{ ticket_id, comment_id, comment_hashid, intent }`).
+ * When present, the wake phrase names the concrete artifact instead
+ * of a random pop-culture line, so claude knows what to poll without
+ * re-fetching the inbox (#B.198 david: "vu qu'on connait l'id du
+ * comment autant balancé le numéro en disant poll ce ticket — ça
+ * sera plus clair que le pop culture ping").
+ *
+ * Vocab contract: the human-facing ref for a comment is its short
+ * `hashid` (e.g. `#agpgpg`), NOT the numeric `_messages.id`. And we
+ * only ever "poll" a ticket — never a comment in isolation. The wake
+ * phrase respects both rules; `comment_id` (numeric) is kept on the
+ * type only for backward-compat with older SSE producers.
+ *
+ * `intent` is the parent TICKET's intent (panic / request / question /
+ * fyi). Lets the wake phrase scale its directiveness — see
+ * `buildWakePhrase` + `wake_phrases` in the pings yaml for the
+ * per-intent wording.
  */
 export interface WakeHint {
     ticket_id?: number;
     comment_id?: number;
+    comment_hashid?: string;
+    intent?: Intent;
 }
 
 /**
- * Build the wake-prompt sent to claude via `send-keys`. Returns a
- * targeted "Poll ticket #X — new comment #Y." when the hint carries
- * an id; falls back to a random pop-culture phrase from `pingsAbsPath`
- * when there's nothing to point at (heartbeat re-check, manual wake,
+ * Per-intent wake-phrase templates loaded from `wake_phrases` in the
+ * pings yaml. Two slots per intent so we render a tight sentence
+ * whether or not the SSE ping carried a comment hashid.
+ *
+ * Tokens substituted at render time: `{ticket}` → integer ticket id,
+ * `{comment}` → comment hashid WITHOUT the leading `#` (the `#` lives
+ * in the template, so YAML authors can change the surface format
+ * without touching code).
+ */
+interface WakeTemplate {
+    with_comment: string;
+    ticket_only: string;
+}
+type WakeTemplates = Record<Intent, WakeTemplate>;
+
+/**
+ * Hardcoded backstop used when the loop's pings yaml predates the
+ * `wake_phrases` block (#B.198 david: "le niveau de directivité est
+ * géré en config yaml" — the YAML is authoritative; this fallback
+ * only kicks in if the YAML is missing the section, never overrides
+ * a YAML that has it). Kept in sync with the defaults shipped in
+ * `skill/claude-loop-pings.yaml`.
+ */
+const DEFAULT_WAKE_TEMPLATES: WakeTemplates = {
+    panic: {
+        with_comment: "URGENT: ticket #{ticket} needs you — new comment #{comment}.",
+        ticket_only: "URGENT: ticket #{ticket} needs you.",
+    },
+    request: {
+        with_comment: "Handle ticket #{ticket} — new comment #{comment}.",
+        ticket_only: "Handle ticket #{ticket}.",
+    },
+    question: {
+        with_comment: "Ticket #{ticket} waits for your answer — comment #{comment}.",
+        ticket_only: "Ticket #{ticket} waits for your answer.",
+    },
+    fyi: {
+        with_comment: "Heads-up on ticket #{ticket} — new comment #{comment}.",
+        ticket_only: "Heads-up on ticket #{ticket}.",
+    },
+};
+
+const WAKE_INTENTS: readonly Intent[] = ["panic", "request", "question", "fyi"];
+
+function isWakeTemplate(x: unknown): x is WakeTemplate {
+    return !!x && typeof x === "object"
+        && typeof (x as WakeTemplate).with_comment === "string"
+        && typeof (x as WakeTemplate).ticket_only === "string";
+}
+
+/**
+ * Load `wake_phrases` from the pings yaml. Returns null when the
+ * block is absent or malformed — the caller then falls back to
+ * `DEFAULT_WAKE_TEMPLATES`. Best-effort: missing intents inside an
+ * otherwise-valid block are backfilled from the defaults so a partial
+ * override never crashes the wake.
+ */
+export function loadWakeTemplates(pingsAbsPath: string): WakeTemplates | null {
+    try {
+        const raw = readFileSync(pingsAbsPath, "utf8");
+        const parsed = parseYaml(raw) as { wake_phrases?: unknown };
+        const block = parsed?.wake_phrases as Record<string, unknown> | undefined;
+        if (!block || typeof block !== "object") return null;
+        const out = { ...DEFAULT_WAKE_TEMPLATES };
+        for (const intent of WAKE_INTENTS) {
+            const candidate = block[intent];
+            if (isWakeTemplate(candidate)) out[intent] = candidate;
+        }
+        return out;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Build the wake-prompt sent to claude via `send-keys`. Picks the
+ * per-intent template from the pings yaml (see `wake_phrases` block,
+ * shape in `WakeTemplate`) and interpolates `{ticket}` / `{comment}`.
+ * Intent defaults to `request` when the hint doesn't carry one (so
+ * the wording stays directive — david: "poll est pas suffisant […]
+ * il faut encourager à traiter le pb").
+ *
+ * Falls back to a random pop-culture phrase from `pingsAbsPath` when
+ * there's no ticket id at all (heartbeat re-check, manual wake,
  * startup nudge). David explicitly wants pop-culture preserved for
  * the no-id path ("si on a pas de ticket on continue à pop culture
  * ping (c rigolo)").
+ *
+ * We deliberately do NOT emit a "Handle comment #…" branch: (a) the
+ * unit of work in aiball is a ticket, not a comment, and (b) using
+ * the numeric `_messages.id` as a public ref contradicts the aiball
+ * vocab (hashid only).
  */
 export function buildWakePhrase(hint: WakeHint | undefined, pingsAbsPath: string): string {
     const ticketId = hint?.ticket_id;
-    const commentId = hint?.comment_id;
-    if (ticketId && commentId) return `Poll ticket #${ticketId} — new comment #${commentId}.`;
-    if (ticketId) return `Poll ticket #${ticketId}.`;
-    if (commentId) return `Poll comment #${commentId}.`;
-    return pickPingPhrase(pingsAbsPath);
+    if (!ticketId) return pickPingPhrase(pingsAbsPath);
+    const commentHashid = hint?.comment_hashid;
+    const intent: Intent = hint?.intent ?? "request";
+    const templates = loadWakeTemplates(pingsAbsPath) ?? DEFAULT_WAKE_TEMPLATES;
+    const slot = templates[intent] ?? templates.request ?? DEFAULT_WAKE_TEMPLATES.request;
+    const tpl = commentHashid ? slot.with_comment : slot.ticket_only;
+    return tpl
+        .replace(/\{ticket\}/g, String(ticketId))
+        .replace(/\{comment\}/g, commentHashid ?? "");
 }
