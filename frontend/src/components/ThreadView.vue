@@ -12,6 +12,7 @@ import { api, INTENTS, type Message, type Intent, type Tag as TagType, type Thre
 import { findActiveDecision, type CommentDecision } from "../lib/decisions";
 import { STATUS_SEVERITY } from "../lib/labels";
 import { topDown, toggleTopDown } from "../lib/prefs";
+import { RELATION_LABELS as TYPED_RELATION_LABELS } from "../lib/relations";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -1214,6 +1215,32 @@ async function copyTicketRef() {
                         </li>
                     </ul>
                 </details>
+                <!-- #B.123 phase B.2: typed relations cartouche. Chips
+                     for each active relation (kind label + linked
+                     target). The change-kind dropdown and × remove
+                     button land in a follow-up; for now the panel
+                     surfaces existing relations so they're visible
+                     while the rest of the UI catches up. -->
+                <div
+                    v-if="data.ticket.relations && data.ticket.relations.length > 0"
+                    class="thread-relations"
+                >
+                    <span class="thread-relations__label">
+                        <i class="pi pi-share-alt" />
+                        Relations
+                    </span>
+                    <a
+                        v-for="r in data.ticket.relations"
+                        :key="`${r.target_ticket_id}-${r.last_event_id}`"
+                        :href="`/b/${r.target_ticket_id}`"
+                        class="thread-relations__chip"
+                        :data-kind="r.kind"
+                        :title="`${TYPED_RELATION_LABELS[r.kind]} #B.${r.target_ticket_id} — set by ${r.by_agent ?? '?'} on ${new Date(r.last_event_at).toLocaleString()}`"
+                    >
+                        <span class="thread-relations__kind">{{ TYPED_RELATION_LABELS[r.kind] }}</span>
+                        <span class="thread-relations__target">#B.{{ r.target_ticket_id }}</span>
+                    </a>
+                </div>
                 <h2 class="thread-title">{{ data.ticket.title }}</h2>
                 <div
                     v-if="data.ticket.resolved && !data.ticket.closed"
@@ -1696,6 +1723,63 @@ async function copyTicketRef() {
     flex-wrap: wrap;
     font-size: 0.85rem;
     color: var(--p-text-muted-color);
+}
+/* #B.123 phase B.2: typed relations cartouche. Chip palette is keyed
+   off data-kind so future kinds added to RELATION_KINDS can be styled
+   here without touching the JS. */
+.thread-relations {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.thread-relations__label {
+    font-size: 0.8rem;
+    color: var(--p-text-muted-color);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+.thread-relations__chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    text-decoration: none;
+    border: 1px solid var(--p-content-border-color);
+    color: var(--p-text-color);
+    background: var(--p-surface-50);
+}
+.aiball-dark .thread-relations__chip { background: var(--p-surface-800); }
+.thread-relations__chip:hover { border-color: var(--p-primary-color); }
+.thread-relations__chip[data-kind="depends_on"],
+.thread-relations__chip[data-kind="blocks"] {
+    border-color: var(--p-yellow-500);
+    background: var(--p-yellow-50);
+}
+.aiball-dark .thread-relations__chip[data-kind="depends_on"],
+.aiball-dark .thread-relations__chip[data-kind="blocks"] {
+    background: rgba(255, 196, 0, 0.12);
+}
+.thread-relations__chip[data-kind="duplicates"] {
+    border-color: var(--p-red-500);
+    background: var(--p-red-50);
+}
+.aiball-dark .thread-relations__chip[data-kind="duplicates"] {
+    background: rgba(255, 99, 99, 0.12);
+}
+.thread-relations__kind {
+    font-weight: 600;
+    color: var(--p-text-muted-color);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.thread-relations__target {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    color: var(--p-primary-color);
 }
 .snooze-popover {
     display: flex;

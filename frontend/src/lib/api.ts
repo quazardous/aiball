@@ -171,7 +171,19 @@ export interface TicketSummary {
     /** Direct children of this ticket (sub-tickets). Empty when none.
      *  Rendered as a recap in the parent's thread header. */
     sub_tickets?: SubTicketSummary[];
+    /** Typed inter-ticket relations (#B.123 phase B). Active set after
+     *  replay — already filtered for `kind=ignored` tombstones. Only
+     *  surfaced when the GET asked for `full=1`. */
+    relations?: TicketRelation[];
     tags: Tag[];
+}
+
+export interface TicketRelation {
+    target_ticket_id: number;
+    kind: import("./relations").RelationKind;
+    last_event_id: number;
+    last_event_at: string;
+    by_agent: string | null;
 }
 
 export interface SubTicketSummary {
