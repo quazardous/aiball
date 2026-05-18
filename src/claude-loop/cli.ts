@@ -27,6 +27,7 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
 import { AiballClient } from "../client.js";
+import { applyToProcessEnv, resolveProjectContext } from "./project-context.js";
 import {
     DEFAULT_CHECK_CMD,
     isInternalCheckCmd,
@@ -143,15 +144,13 @@ function cmdStart(opts: StartOpts): void {
     }
     need(MUX_CMD);
 
-    // #B.154: auto-resolve AIBALL_AGENT / AIBALL_PROJECT from the
-    // .mcp.json in the cwd, like trace/check already do. Without
-    // this, the timer + hooks spawn with an empty agent → random
-    // uuid fallback in AiballClient → SSE delivers nothing for
-    // that ghost consumer (david saw "SSE hello: unread=0" while
-    // the real project consumer had 8 unread).
-    loadMcpEnvDefaults();
-
-    const cwd = process.env.CLAUDE_LOOP_CWD ?? process.cwd();
+    // #B.154: ProjectContext resolves cwd + AIBALL_AGENT +
+    // AIBALL_PROJECT from .mcp.json once, then writes them back to
+    // process.env so the timer + hooks + claude spawn with the
+    // right identity. Single source for every subcommand.
+    const ctx = resolveProjectContext();
+    applyToProcessEnv(ctx);
+    const cwd = ctx.cwd;
 
     // #B.154: housekeeping before spawn. (1) prune dead state dirs
     // so the user's ~/.claude-loop/ doesn't accumulate orphans from
@@ -160,7 +159,7 @@ function cmdStart(opts: StartOpts): void {
     // 14 dead loops accumulate from repeated rm-less restarts.
     pruneDeadStateDirs();
     if (!opts.force) {
-        const conflict = findLiveLoopForCwdAgent(cwd, process.env.AIBALL_AGENT);
+        const conflict = findLiveLoopForCwdAgent(cwd, ctx.agent ?? undefined);
         if (conflict) {
             die(
                 `live loop '${conflict.name}' already runs in ${cwd}` +
@@ -204,12 +203,13 @@ function cmdStart(opts: StartOpts): void {
         // #B.154: resume picker auto-dismiss mode. Read by the
         // SessionStart hook when source=resume.
         `export CL_RESUME_MODE=${shQuote(opts.resumeMode ?? "as-is")}`,
-        // #B.154: persist the resolved aiball identity so the timer
-        // + every hook fire sees the SAME consumer as the spawn-
-        // time .mcp.json resolution. Without this, a hook can run
-        // with an empty AIBALL_AGENT and fall back to a random uuid.
-        ...(process.env.AIBALL_AGENT ? [`export AIBALL_AGENT=${shQuote(process.env.AIBALL_AGENT)}`] : []),
-        ...(process.env.AIBALL_PROJECT ? [`export AIBALL_PROJECT=${shQuote(process.env.AIBALL_PROJECT)}`] : []),
+        // #B.154: persist the resolved aiball identity (from ctx) so
+        // every hook fire and the timer process see the SAME
+        // consumer as the spawn-time .mcp.json resolution. Without
+        // this, a hook spawned via a fresh shell could fall back to
+        // a random uuid via AiballClient.
+        ...(ctx.agent ? [`export AIBALL_AGENT=${shQuote(ctx.agent)}`] : []),
+        ...(ctx.project ? [`export AIBALL_PROJECT=${shQuote(ctx.project)}`] : []),
         "",
     ];
     writeFileSync(envPath(sd), envLines.join("\n"));
@@ -410,7 +410,8 @@ function cmdWake(name: string): void {
  * (wrong agent? wrong project? actually no pings?).
  */
 async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; config?: boolean }): Promise<void> {
-    loadMcpEnvDefaults();
+    const ctx = resolveProjectContext();
+    applyToProcessEnv(ctx);
     let plateCheckCmd: string | undefined;
     let plateName: string | undefined;
     let plate: Plate | null = null;
@@ -425,8 +426,8 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
         }
     }
     const checkCmd = opts.checkCmd ?? plateCheckCmd ?? process.env.CL_CHECK_CMD ?? DEFAULT_CHECK_CMD;
-    const agentEnv = process.env.AIBALL_AGENT ?? "(unset → AiballClient default)";
-    const projectEnv = process.env.AIBALL_PROJECT ?? "(unset)";
+    const agentEnv = ctx.agent ?? "(unset → AiballClient default)";
+    const projectEnv = ctx.project ?? "(unset)";
     process.stdout.write(`claude-loop check\n`);
     process.stdout.write(`  loop name      : ${plateName ?? name ?? "(no loop)"}\n`);
     process.stdout.write(`  check-cmd      : ${checkCmd}\n`);
@@ -523,32 +524,8 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
  * claude subprocess; you can run as many `trace` sessions in parallel
  * as you want.
  */
-/**
- * Resolve AIBALL_AGENT / AIBALL_PROJECT from a project's .mcp.json
- * when not already in env (#B.154). claude-loop's `trace` /
- * `check` subcommands run directly in the user's shell — without
- * this auto-detection, the user has to repeat the export each
- * invocation despite the same info living in `.mcp.json` next to
- * them. Honors CLAUDE_LOOP_CWD set by bin/claude-loop launcher.
- */
-function loadMcpEnvDefaults(): void {
-    const cwd = process.env.CLAUDE_LOOP_CWD ?? process.cwd();
-    const mcpPath = join(cwd, ".mcp.json");
-    if (!existsSync(mcpPath)) return;
-    try {
-        const raw = readFileSync(mcpPath, "utf8");
-        const j = JSON.parse(raw) as { mcpServers?: { aiball?: { env?: Record<string, string> } } };
-        const env = j.mcpServers?.aiball?.env;
-        if (!env) return;
-        if (!process.env.AIBALL_AGENT && env.AIBALL_AGENT) process.env.AIBALL_AGENT = env.AIBALL_AGENT;
-        if (!process.env.AIBALL_PROJECT && env.AIBALL_PROJECT) process.env.AIBALL_PROJECT = env.AIBALL_PROJECT;
-    } catch {
-        /* malformed json — ignore */
-    }
-}
-
 async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boolean; events?: boolean }): Promise<void> {
-    loadMcpEnvDefaults();
+    applyToProcessEnv(resolveProjectContext());
     // --events mode (#B.154): open SSE and print every aiball event
     // live. Pure tail — no gate eval, no decision making, just observe
     // what the daemon would push to this consumer. Useful to verify
