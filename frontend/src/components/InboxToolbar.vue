@@ -73,15 +73,12 @@ function pickProject(v: string | null) {
     projectOpen.value = false;
 }
 
-// #B.161: filters collapse on mobile (<720px). Forced open on
-// desktop via CSS — the toggle event re-syncs the ref so the
-// :open binding doesn't fight the browser's native click.
+// #B.161: filters collapse on mobile (<720px). Default-open on
+// desktop, default-collapsed on mobile; resize keeps the state in
+// sync if the viewport crosses the breakpoint.
 const filtersExpanded = ref(typeof window === "undefined" || window.innerWidth > 720);
 function syncFilters() {
     filtersExpanded.value = window.innerWidth > 720;
-}
-function onFiltersToggle(e: Event) {
-    filtersExpanded.value = (e.target as HTMLDetailsElement).open;
 }
 onMounted(() => window.addEventListener("resize", syncFilters));
 onUnmounted(() => window.removeEventListener("resize", syncFilters));
@@ -142,11 +139,29 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
              sort) collapse inside a <details> panel on mobile.
              Desktop CSS forces the details open so the bar reads
              flat as before. -->
-        <details class="filters-collapse" :open="filtersExpanded" @toggle="onFiltersToggle">
-            <summary class="filters-collapse__summary" title="Filters">
-                <i class="pi pi-filter" /> <span class="filters-collapse__label">filters</span>
-            </summary>
-            <div class="filters-collapse__body">
+        <!-- #B.161: filters chip (row-1 clickable) + body as
+             SEPARATE siblings — the previous <details> +
+             display:contents combo had flexbox ordering bugs that
+             couldn't keep new-ticket on row 1 when the body
+             wrapped. Now everything is a direct flex child of
+             filters-bar with explicit `order`. -->
+        <button
+            type="button"
+            class="filters-chip filter-mobile-only"
+            :class="{ 'filters-chip--open': filtersExpanded }"
+            title="Filters"
+            @click="filtersExpanded = !filtersExpanded"
+        >
+            <i class="pi pi-filter" /> filters
+        </button>
+        <Button
+            class="filter-new-ticket"
+            label="New ticket"
+            icon="pi pi-plus"
+            size="small"
+            @click="emit('new-ticket')"
+        />
+        <div class="filters-body" :class="{ 'filters-body--collapsed': !filtersExpanded }">
                 <Select
                     :model-value="statusFilter"
                     :options="statusFilterOptions"
@@ -201,15 +216,7 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
                         <i class="pi pi-times" />
                     </button>
                 </span>
-            </div>
-        </details>
-        <Button
-            class="filter-new-ticket"
-            label="New ticket"
-            icon="pi pi-plus"
-            size="small"
-            @click="emit('new-ticket')"
-        />
+        </div>
         <span class="spacer" />
     </div>
 </template>
@@ -354,37 +361,27 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
 .aiball-dark .filter-project-settings:hover {
     background: var(--p-surface-800);
 }
-/* #B.161: filters live inside a <details> that collapses on mobile.
-   Desktop forces the details flat (display: contents on the body)
-   so the bar reads the same as before. */
-.filters-collapse {
-    display: contents;
-}
-.filters-collapse__summary {
+/* #B.161: filters chip = text-link style mobile toggle. Desktop
+   hides the chip entirely (filters-body stays inline always). */
+.filters-chip {
     display: none;
-    cursor: pointer;
-    list-style: none;
     align-items: center;
     gap: 0.25rem;
-    /* #B.161 follow-up: filter toggle is a secondary action, not a
-       primary button (david: "le bouton qui toggle les filtre a
-       trop d'imortance pour ce qu'il fait"). Text-only with muted
-       color, no border. */
     padding: 0.2rem 0.4rem;
     border: 0;
     background: transparent;
     color: var(--p-text-muted-color);
+    font: inherit;
     font-size: 0.78rem;
+    cursor: pointer;
     user-select: none;
 }
-.filters-collapse__summary:hover {
+.filters-chip:hover {
     color: var(--p-text-color);
 }
-.filters-collapse__summary::-webkit-details-marker { display: none; }
-.aiball-dark .filters-collapse__summary {
-    background: var(--p-surface-800);
-}
-.filters-collapse__body {
+.filters-body {
+    /* Desktop: behaves like the old inline flex (display: contents
+       lets each child be a direct flex item of filters-bar). */
     display: contents;
 }
 @media (max-width: 720px) {
@@ -403,25 +400,29 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     .filters-collapse {
         display: contents;
     }
-    /* When unfolded, the body becomes a sibling row (flex-basis 100%
-       forces line break) — the summary itself stays inline alongside
-       project picker + new ticket. David: "le new ticket peut rester
-       en haut meme unfolded". Explicit `order` cascade: row-1 items
-       get 0, body gets 9 so it's painted LAST regardless of source
-       position. */
-    .filter-project-dropdown,
-    .filter-project-settings,
-    .filters-collapse__summary,
-    .filter-new-ticket {
-        order: 0;
+    /* Mobile: filters-chip becomes visible, body is hidden when
+       collapsed, body takes its own row when expanded (flex-basis
+       100% + explicit order:9 ensures it renders AFTER all row-1
+       items regardless of source position). */
+    .filters-chip {
+        display: inline-flex;
     }
-    .filters-collapse[open] .filters-collapse__body {
+    .filters-body--collapsed {
+        display: none;
+    }
+    .filters-body {
         display: flex;
         flex-wrap: wrap;
         gap: 0.3rem;
         flex: 1 0 100%;
         padding: 0.3rem 0;
         order: 9;
+    }
+    .filter-project-dropdown,
+    .filter-project-settings,
+    .filters-chip,
+    .filter-new-ticket {
+        order: 0;
     }
     /* Compact filters-bar layout on mobile: search wide, new ticket
        icon-only (label hidden), spacer collapses. */
