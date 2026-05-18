@@ -111,13 +111,15 @@ const DEFAULTS: AiballConfig = {
     },
     mcp_json_deprecated: false,
     claude_loop: {
-        // #B.185 david: all user-facing waits aligned on the 60s order
-        // of magnitude. Previously user_grace was 300s (5min), an
-        // outlier that surprised — when the human typed once, the
-        // wrapper stayed silent for 5min even after they'd clearly
-        // moved on. 60s matches the heartbeat / boot grace and is
-        // long enough to ride out a normal typing pause.
-        interval_seconds: 60,
+        // #B.185 david: user-facing waits aligned on a coherent
+        // order of magnitude. user_grace was 300s (5min outlier:
+        // wrapper stayed silent 5min after a single keystroke even
+        // when the human had moved on); interval_seconds was 60s
+        // (bar lagged visibly behind real state changes — david:
+        // "on peut réduire à 30s"). interval_seconds dropped to
+        // 30s, the others stay at 60s (long enough to ride out
+        // boot / typing pauses without surprising).
+        interval_seconds: 30,
         boot_grace_seconds: 60,
         user_grace_seconds: 60,
         wake_in_flight_ttl_ms: 2000,

@@ -685,7 +685,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--name <name>", "Loop name (default: auto-generated)")
         .addOption(new Option(
             "--interval <sec>",
-            "Tick interval seconds (default from .aiball.yaml `claude_loop.interval_seconds`, 60 if unset — #B.180)",
+            "Tick interval seconds (default from .aiball.yaml `claude_loop.interval_seconds`, 30 if unset — #B.180)",
         ))
         .option(
             "--check-cmd <cmd>",
