@@ -8,7 +8,7 @@
  * (default "human"), so a single CLI invocation can play either side.
  */
 import { existsSync, statSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join, dirname } from "node:path";
+import { basename, join } from "node:path";
 import { homedir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";

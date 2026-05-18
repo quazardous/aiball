@@ -58,7 +58,6 @@ export function getTicketStages(ids: number[]): Map<number, TicketStage> {
         status: schema.tickets.status,
         postponedUntil: schema.tickets.postponedUntil,
     }).from(schema.tickets).where(inArray(schema.tickets.id, ids)).all();
-    const idsByStatus = new Map(rows.map((r) => [r.id, r]));
     const events = db.select({
         ticket_id: schema.messages.ticketId,
         kind: schema.messages.kind,

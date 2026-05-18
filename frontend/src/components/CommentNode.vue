@@ -98,22 +98,6 @@ const decisionChipSeverity = computed(() => {
     return "warn"; // pending
 });
 
-// #B.130: rolling summary (`meta.summary_until`). Surfaced as a tiny
-// chip in the header for audit. The CANONICAL view of "current state"
-// lives at the THREAD level (ThreadView shows the latest one as a
-// banner above the comments) — per david: "c'est toujours le dernier
-// summary_until qui a raison, les autres sont invisible perdu". Per-
-// comment banners removed; the chip alone signals "this comment has
-// a summary on record".
-const summary = computed(() => {
-    if (!props.msg.meta) return null;
-    try {
-        const m = JSON.parse(props.msg.meta) as { summary_until?: string };
-        return typeof m.summary_until === "string" && m.summary_until ? m.summary_until : null;
-    } catch {
-        return null;
-    }
-});
 async function copyRef() {
     try {
         await navigator.clipboard.writeText(commentRef.value);

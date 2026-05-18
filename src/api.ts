@@ -55,8 +55,6 @@ import {
     purgeOldClosedTickets,
     setTicketBroadcast,
     setTicketPostpone,
-    getTicketPostpone,
-    listExpiredPostpones,
     listSubTickets,
     subTicketCounts,
     getTicketStages,
@@ -93,7 +91,6 @@ import {
     anyHumanCredentials,
     type Consumer,
     type ConsumerKind,
-    type Token,
     type TokenKind,
     type MessageKind,
     type MessageStatus,
@@ -102,7 +99,6 @@ import {
     type Message,
     insertTypedRelation,
     listTypedRelationsForTicket,
-    type ActiveRelation,
 } from "./db.js";
 import { onPing } from "./event-bus.js";
 import { RELATION_KINDS, isRelationKind, type RelationKind } from "./relations.js";

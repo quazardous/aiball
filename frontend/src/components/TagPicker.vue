@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import Button from "primevue/button";
 import { api, type Tag } from "../lib/api";
 import { useBus } from "../lib/bus";
 import TagBadge from "./TagBadge.vue";

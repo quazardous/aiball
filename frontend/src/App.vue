@@ -647,9 +647,6 @@ const pageSize = ref<number>(
     Number(localStorage.getItem("aiball.page_size")) || DEFAULT_PAGE_SIZE,
 );
 const page = ref(1);
-const totalPages = computed(() =>
-    Math.max(1, Math.ceil(sortedRows.value.length / pageSize.value)),
-);
 const pagedRows = computed(() =>
     sortedRows.value.slice(
         (page.value - 1) * pageSize.value,

@@ -9,7 +9,6 @@ import TagBadge from "./TagBadge.vue";
 const tags = ref<Tag[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
-const editingId = ref<number | null>(null);
 
 const newName = ref("");
 const newColor = ref("#3b82f6");
