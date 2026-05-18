@@ -26,7 +26,7 @@
  *     here.
  */
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { MUX_CMD, checkHasWork, idleMarkerPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName } from "./state.js";
 
 function emit(): never {
@@ -39,6 +39,27 @@ const name = process.env.CL_NAME;
 const checkCmd = process.env.CL_CHECK_CMD ?? "true";
 const noStartup = process.env.CL_NO_STARTUP_PING === "1";
 if (!sd || !name) emit();
+
+// #B.149: Claude Code passes JSON on stdin including a `source` field
+// matching the matcher (startup / resume / clear). On `resume`, claude
+// has not actually reached the prompt yet — it's still showing the
+// resume-mode picker ("context compacted or as-is?"). If we send-keys
+// at that moment, the keys are typed into the picker; if we flip the
+// status to `[idle]`, the bar lies about the real state. David's bug
+// report: "ça passe idle avant que je choisisse le type de reprise".
+// Strategy: on resume, leave the bar in `[boot]` (set by cli.ts at
+// spawn) and skip the initial drain entirely — Stop hook (fires after
+// the first claude turn) will flip status correctly. New SSE pings
+// arriving post-picker still wake via the timer; pre-existing unread
+// gets drained by the user's first prompt or the next ping.
+let source = "startup";
+try {
+    const raw = readFileSync(0, "utf8");
+    if (raw) source = (JSON.parse(raw) as { source?: string }).source ?? source;
+} catch { /* no stdin, assume startup */ }
+
+if (source === "resume") emit();
+
 if (noStartup) {
     // Don't ping at boot, but still seed the idle state so the bar
     // doesn't carry over the cli's startup placeholder and so the
