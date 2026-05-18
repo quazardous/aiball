@@ -899,10 +899,14 @@ watch(showSnoozed, (v) => {
                         :sort-by="sortBy"
                         :sort-options="sortOptions"
                         :search-query="searchQuery"
+                        :project="project"
+                        :project-options="projectListItems.map(p => ({ label: p.label, value: p.value }))"
                         @update:status-filter="statusFilter = $event"
                         @update:only-open="onlyOpen = $event"
                         @update:sort-by="sortBy = $event"
                         @update:search-query="searchQuery = $event"
+                        @update:project="selectProject"
+                        @open-current-settings="project && openProjectPage(project, 'settings')"
                         @new-ticket="panel = 'compose'"
                     />
 
@@ -1037,9 +1041,10 @@ watch(showSnoozed, (v) => {
         grid-template-columns: 1fr;
     }
     .aiball-sidebar {
-        border-right: 0;
-        border-bottom: 1px solid var(--p-content-border-color);
-        max-height: 30vh;
+        /* #B.161 v4: sidebar hidden on mobile — project picker +
+           cog moved into the InboxToolbar (no more gray-vs-white
+           rupture between two stacked bars). */
+        display: none;
     }
     .aiball-main {
         padding: 0.5rem;

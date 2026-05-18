@@ -18,6 +18,11 @@ export interface SortOption {
     value: SortBy;
 }
 
+export interface ProjectOption {
+    label: string;
+    value: string | null;
+}
+
 defineProps<{
     statusFilter: StatusFilter;
     statusFilterOptions: StatusFilterOption[];
@@ -25,6 +30,9 @@ defineProps<{
     sortBy: SortBy;
     sortOptions: SortOption[];
     searchQuery: string;
+    /** Project picker — only used on mobile (sidebar is hidden there). */
+    projectOptions: ProjectOption[];
+    project: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -32,6 +40,8 @@ const emit = defineEmits<{
     (e: "update:onlyOpen", v: boolean): void;
     (e: "update:sortBy", v: SortBy): void;
     (e: "update:searchQuery", v: string): void;
+    (e: "update:project", v: string | null): void;
+    (e: "open-current-settings"): void;
     (e: "new-ticket"): void;
 }>();
 
@@ -51,10 +61,30 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
 
 <template>
     <div class="filters-bar">
-        <!-- #B.161 mobile merge: the less-frequently-used filters
-             (status, only-open, sort) collapse inside a <details>
-             panel so the bar reads as `[filters ▾] [search] [+]`
-             on phones. Search + new ticket stay visible always.
+        <!-- #B.161 mobile: project picker lives in the toolbar now
+             (sidebar is hidden on phones), with the settings cog
+             beside it. Desktop hides these (sidebar exposes them). -->
+        <Select
+            class="filter-project filter-mobile-only"
+            :model-value="project"
+            :options="projectOptions"
+            option-label="label"
+            option-value="value"
+            size="small"
+            title="Switch project"
+            @update:model-value="(v: string | null) => emit('update:project', v)"
+        />
+        <button
+            v-if="project"
+            type="button"
+            class="filter-project-settings filter-mobile-only"
+            title="Project settings"
+            @click="emit('open-current-settings')"
+        >
+            <i class="pi pi-cog" />
+        </button>
+        <!-- The less-frequently-used filters (status, only-open,
+             sort) collapse inside a <details> panel on mobile.
              Desktop CSS forces the details open so the bar reads
              flat as before. -->
         <details class="filters-collapse" :open="filtersExpanded" @toggle="onFiltersToggle">
@@ -131,6 +161,33 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     border-bottom: 1px solid var(--p-content-border-color);
     margin-bottom: 0.4rem;
 }
+/* #B.161: project picker + cog inside the toolbar — visible only
+   on mobile (desktop has them in the sidebar). */
+.filter-mobile-only {
+    display: none;
+}
+.filter-project {
+    flex: 0 1 auto;
+    min-width: 7rem;
+    max-width: 10rem;
+}
+.filter-project-settings {
+    background: transparent;
+    border: 0;
+    border-radius: 0.3rem;
+    width: 1.8rem;
+    height: 1.8rem;
+    align-items: center;
+    justify-content: center;
+    color: var(--p-text-muted-color);
+    cursor: pointer;
+}
+.filter-project-settings:hover {
+    background: var(--p-surface-100);
+}
+.aiball-dark .filter-project-settings:hover {
+    background: var(--p-surface-800);
+}
 /* #B.161: filters live inside a <details> that collapses on mobile.
    Desktop forces the details flat (display: contents on the body)
    so the bar reads the same as before. */
@@ -158,6 +215,12 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     display: contents;
 }
 @media (max-width: 720px) {
+    .filter-mobile-only {
+        display: inline-flex;
+    }
+    .filter-project-settings.filter-mobile-only {
+        display: inline-flex;
+    }
     .filters-collapse__summary {
         display: inline-flex;
     }
