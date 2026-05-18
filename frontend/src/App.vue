@@ -1105,12 +1105,13 @@ watch(showSnoozed, (v) => {
     .aiball-footer-settings {
         display: none;
     }
-    /* #B.165: toasts go edge-to-edge on mobile (slim left/right safety
-       margin), and the verbose footer line (consumer · ref · project)
-       is hidden — the summary already says what happened, the detail
-       eats vertical space without adding signal on small screens.
-       Smaller padding too. */
+    /* #B.165 + #B.161: mobile toasts go edge-to-edge AT THE BOTTOM
+       (david: "en mode drop down les toaster devrait apparaitre en
+       bas") so they don't cover header + dropdown menus. Verbose
+       footer line stays hidden — summary suffices. */
     .p-toast {
+        bottom: 0.25rem !important;
+        top: auto !important;
         right: 0.25rem !important;
         left: 0.25rem !important;
         width: calc(100vw - 0.5rem) !important;
@@ -1127,6 +1128,20 @@ watch(showSnoozed, (v) => {
     }
     .p-toast .p-toast-summary {
         font-size: 0.92rem;
+    }
+}
+@media (min-width: 721px) {
+    /* #B.161: desktop toast — explicit small width pinned to the
+       top-right. PrimeVue's default in this version still rendered
+       full-width despite position="top-right"; override directly. */
+    .p-toast {
+        position: fixed !important;
+        top: 1rem !important;
+        right: 1rem !important;
+        left: auto !important;
+        bottom: auto !important;
+        width: 24rem !important;
+        max-width: 24rem !important;
     }
 }
 </style>

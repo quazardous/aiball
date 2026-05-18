@@ -262,13 +262,23 @@ function onProjectsSummaryClick(e: Event) {
     cursor: pointer;
     font-size: 0.85rem;
 }
-.sidebar-new-ticket:hover,
+/* The + new-ticket button is a primary action — green tint, more
+   prominent than the settings cog (david: "le bouton compact new
+   ticket devrait etre vert"). */
+.sidebar-new-ticket {
+    color: var(--p-green-600);
+}
+.sidebar-new-ticket:hover {
+    background: color-mix(in srgb, var(--p-green-500) 15%, transparent);
+}
 .sidebar-project-settings:hover {
     background: var(--p-surface-100);
 }
-.aiball-dark .sidebar-new-ticket:hover,
 .aiball-dark .sidebar-project-settings:hover {
     background: var(--p-surface-800);
+}
+.aiball-dark .sidebar-new-ticket {
+    color: var(--p-green-400);
 }
 /* The cog is shown on every viewport — quick access to current
    project's settings (#B.169). The [+] new-ticket is mobile-only

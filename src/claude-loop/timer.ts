@@ -173,17 +173,34 @@ async function mainSse(): Promise<void> {
         }
     };
     setTimeout(() => { void settleBoot(); }, BOOT_GRACE_MS);
+    // #B.149: track the "settled" status so the count-refresh below
+    // doesn't reset bar to idle while claude is busy. tryWake flips
+    // to busy on wake; we mirror that. Boot stays until settleBoot.
+    let settledStatus: "boot" | "idle" | "busy" = "boot";
     while (tmuxAlive()) {
         await sleep(interval * 1000);
         // Manual wake (claude-loop wake NAME): file marker, fires
         // even when SSE silent.
         if (existsSync(wakeRequestedPath(sd!))) {
             await tryWake("manual", true);
+            settledStatus = "busy";
             continue;
         }
         // SSE-drop safety net: re-check the gate ourselves.
         if (!unsubscribe) reconnect();
-        await tryWake("heartbeat");
+        const woke = await tryWake("heartbeat");
+        if (woke) settledStatus = "busy";
+        else if (existsSync(idleMarkerPath(sd!))) settledStatus = "idle";
+        // Refresh the bar with the current unread count (#B.149
+        // david: "dans la barre mux on peut afficher le nombre de
+        // read / ticket meme en idle ?"). Skipped while booting —
+        // count is meaningless until settleBoot fires.
+        if (settledStatus !== "boot") {
+            try {
+                const r = await client().pingsCount() as { unread?: number };
+                setTmuxStatus(name!, settledStatus, r.unread ?? 0);
+            } catch { /* swallow — bar stays as-is */ }
+        }
     }
     log("tmux session gone — timer exiting");
     if (unsubscribe) (unsubscribe as () => void)();

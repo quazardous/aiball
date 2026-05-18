@@ -197,8 +197,13 @@ const STATUS_COLORS: Record<LoopStatus, { bg: string; fg: string }> = {
     boot: { bg: "colour178", fg: "colour15" },  // yellow / white (transitional)
 };
 
-export function setTmuxStatus(name: string, status: LoopStatus): void {
-    const left = ` CLAUDE-LOOP · ${name} [${status}] `;
+export function setTmuxStatus(name: string, status: LoopStatus, count?: number): void {
+    // #B.149: optional unread-ping count appended to the status
+    // label (`[idle 3]`) so the user sees "there's stuff queued" at
+    // a glance even when claude isn't ringing. count omitted or 0 →
+    // no suffix.
+    const tag = count && count > 0 ? `[${status} ${count}]` : `[${status}]`;
+    const left = ` CLAUDE-LOOP · ${name} ${tag} `;
     const tn = tmuxName(name);
     const c = STATUS_COLORS[status];
     spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-left", left], { stdio: "ignore" });
