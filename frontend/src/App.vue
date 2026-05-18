@@ -887,21 +887,11 @@ watch(showSnoozed, (v) => {
                 />
 
                 <template v-else>
-                    <!-- #B.127: surface the per-project strategy state
-                         + a one-click path to change it. The selector
-                         now lives on ProjectSettingsPage (split from
-                         stats per david: "settings et stats clairement
-                         dissocié, 2 routes"). -->
-                    <button
-                        v-if="project"
-                        type="button"
-                        class="project-strategy-hint"
-                        :title="`Click to manage the moderation strategy for \`${project}\` — set a per-project override or fall back to the global default.`"
-                        @click="openProjectPage(project, 'settings')"
-                    >
-                        <i class="pi pi-shield" />
-                        <span>strategy: project settings →</span>
-                    </button>
+                    <!-- #B.127: the per-project strategy hint button
+                         lived here as the only entry point. Removed
+                         in #B.161 — the sidebar's cog icon next to
+                         the project name (#B.169) replaces it. -->
+
                     <InboxToolbar
                         :status-filter="statusFilter"
                         :status-filter-options="statusFilterOptions"
@@ -949,28 +939,30 @@ watch(showSnoozed, (v) => {
                         @action="bulkAction"
                     />
                 </template>
-            </main>
 
-            <!-- #B.161: mobile-only settings footer. Same vertical
-                 text list look as the desktop sidebar, but rendered
-                 here (after main) so it scrolls naturally with the
-                 inbox instead of being a fixed band. Hidden on
-                 desktop where the sidebar already exposes these. -->
-            <aside class="aiball-footer-settings">
-                <div class="aiball-footer-settings__label">Settings</div>
-                <button type="button" class="aiball-footer-settings__item" @click="openPanel('projects')">
-                    <i class="pi pi-folder" /> <span>Projects</span>
-                </button>
-                <button type="button" class="aiball-footer-settings__item" @click="openPanel('rules')">
-                    <i class="pi pi-cog" /> <span>Rules</span>
-                </button>
-                <button type="button" class="aiball-footer-settings__item" @click="openPanel('tags')">
-                    <i class="pi pi-tag" /> <span>Tags</span>
-                </button>
-                <button type="button" class="aiball-footer-settings__item" @click="openPanel('consumers')">
-                    <i class="pi pi-users" /> <span>Consumers</span>
-                </button>
-            </aside>
+                <!-- #B.161: mobile-only settings footer. Rendered
+                     INSIDE main so it scrolls with the inbox/thread
+                     instead of sitting always-visible at the
+                     viewport bottom (david: "le footer settings
+                     doit pas etre par desus les tickets mais à la
+                     suite, visible que si on scrolle vers le bas").
+                     Hidden on desktop — the sidebar exposes these. -->
+                <aside class="aiball-footer-settings">
+                    <div class="aiball-footer-settings__label">Settings</div>
+                    <button type="button" class="aiball-footer-settings__item" @click="openPanel('projects')">
+                        <i class="pi pi-folder" /> <span>Projects</span>
+                    </button>
+                    <button type="button" class="aiball-footer-settings__item" @click="openPanel('rules')">
+                        <i class="pi pi-cog" /> <span>Rules</span>
+                    </button>
+                    <button type="button" class="aiball-footer-settings__item" @click="openPanel('tags')">
+                        <i class="pi pi-tag" /> <span>Tags</span>
+                    </button>
+                    <button type="button" class="aiball-footer-settings__item" @click="openPanel('consumers')">
+                        <i class="pi pi-users" /> <span>Consumers</span>
+                    </button>
+                </aside>
+            </main>
         </div>
 
         <Toast position="top-right" />
@@ -1052,25 +1044,15 @@ watch(showSnoozed, (v) => {
     .aiball-main {
         padding: 0.5rem;
     }
-    /* #B.161 v2: aiball-layout becomes a stack on mobile — sidebar
-       at top, main in the middle, and a dedicated SidebarFooter
-       below main that scrolls naturally with the rest of the page
-       (david: "vraiment en scroll apres la liste ticket"). */
-    .aiball-layout {
-        grid-template-areas:
-            "sidebar"
-            "main"
-            "footer";
-        grid-template-rows: auto 1fr auto;
-    }
-    .aiball-sidebar { grid-area: sidebar; }
-    .aiball-main { grid-area: main; }
-    .aiball-footer-settings { grid-area: footer; }
-
+    /* #B.161 v3: footer settings rendered INSIDE main so it scrolls
+       with the inbox content — user only sees it after scrolling
+       past the ticket list. Margin-top: auto positions it at the
+       bottom of main's scroll area when content is short. */
     .aiball-footer-settings {
         display: flex;
         flex-direction: column;
         gap: 0.1rem;
+        margin-top: 2rem;
         padding: 0.5rem 0.6rem;
         background: var(--p-surface-50);
         border-top: 1px solid var(--p-content-border-color);
