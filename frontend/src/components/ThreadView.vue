@@ -887,17 +887,18 @@ async function acceptActiveDecision(asKind?: "plan" | "resolution") {
     const effectiveKind = asKind ?? active.decision.kind;
     resolutionBusy.value = true;
     try {
-        // Post any typed body as a regular comment so the reporter's
-        // explanation lands in the trail before the decision flip.
-        if (composerBody.value.trim()) {
+        // Post the typed body EXACTLY ONCE. For resolution-accept
+        // the body rides along on the ticket_closed event so the
+        // explanation + close show as a single decorated card; for
+        // plan-accept (no close follows), the body lands as a plain
+        // comment. David #B.140: previously both branches fired,
+        // duplicating the body (one comment_added + one ticket_closed
+        // both carrying the same text). One source of truth per accept.
+        if (composerBody.value.trim() && effectiveKind !== "resolution") {
             await postBodyAs("comment_added");
         }
         await api.decide(active.message.id, "accepted", asKind);
         if (effectiveKind === "resolution") {
-            // Resolution accept = ticket closes. Mirrors the legacy
-            // "accept resolution and close" composite button. When
-            // the reporter reclassified to plan, the ticket stays
-            // open instead.
             await postBodyAs("ticket_closed");
         }
         composerBody.value = "";
