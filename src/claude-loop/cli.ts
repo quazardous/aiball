@@ -7,8 +7,8 @@
  * (if anything) to do based on its own context / MCP tools.
  *
  * Subcommands (start is default): `start | list | attach | tail | rm
- * | wake | prune`. Anything after `--` is passed verbatim to the
- * spawned `claude`.
+ * | wake | reload | check | trace | prune`. Anything after `--` is
+ * passed verbatim to the spawned `claude`.
  */
 import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import {
@@ -628,6 +628,49 @@ function cmdWake(name: string): void {
 }
 
 /**
+ * Respawn just the detached timer process without touching claude.
+ * Needed because `tsx` doesn't hot-reload (#B.198): when timer.ts or
+ * state.ts changes, the running timer keeps the old code in memory
+ * until restarted — but `rm + start` kills claude too, losing the
+ * conversation. `reload` kills the recorded timer pid and re-execs a
+ * fresh one using the same env file the loop was started with, so the
+ * tmux session + claude pane stay intact.
+ */
+function cmdReload(name: string): void {
+    if (!tmuxAlive(name)) {
+        die(`loop '${name}' not alive (use 'start' to spawn a fresh one)`);
+    }
+    const sd = stateDirFor(name);
+    if (!existsSync(platePath(sd))) die(`no state dir at ${sd}`);
+    if (!existsSync(envPath(sd))) die(`no env file at ${envPath(sd)} — loop is broken, use rm + start`);
+
+    let oldPid: number | null = null;
+    if (existsSync(timerPidPath(sd))) {
+        const raw = Number(readFileSync(timerPidPath(sd), "utf8").trim());
+        if (Number.isFinite(raw) && raw > 0) oldPid = raw;
+    }
+    if (oldPid !== null) {
+        try { process.kill(oldPid); } catch { /* already dead */ }
+    }
+
+    const root = selfRoot();
+    const logFd = openSync(timerLogPath(sd), "a");
+    const timerScript = join(root, "src/claude-loop/timer.ts");
+    const child = spawn("bash", [
+        "-lc",
+        `source ${shQuote(envPath(sd))} && exec npx --no-install tsx ${shQuote(timerScript)}`,
+    ], {
+        detached: true,
+        stdio: ["ignore", logFd, logFd],
+    });
+    child.unref();
+    writeFileSync(timerPidPath(sd), String(child.pid) + "\n");
+
+    const killed = oldPid !== null ? ` (killed old pid ${oldPid})` : "";
+    process.stdout.write(`timer for '${name}' respawned${killed} — new pid ${child.pid}\n`);
+}
+
+/**
  * Diagnostic subcommand (#B.149). Answers "what would the timer do
  * right now?" without spawning claude. Useful when a fresh ticket
  * isn't being picked up — surfaces whether the resolved consumer_id /
@@ -911,9 +954,13 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--log" || wrapper[0] === "--timer" || wrapper[0] === "--stop-hook") {
         wrapper.unshift("tail");
     }
+    // Bare top-level alias for `reload` (parity with `--tail`):
+    // `claude-loop --reload` respawns the timer of the current-cwd
+    // loop without touching claude.
+    else if (wrapper[0] === "--reload") wrapper[0] = "reload";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "check", "trace", "prune", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "check", "trace", "prune", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -946,6 +993,9 @@ async function main(): Promise<void> {
     program.command("wake <name>")
         .description("Force the next timer tick to fire immediately")
         .action(cmdWake);
+    program.command("reload [name]")
+        .description("Respawn the detached timer process without killing claude (picks up edited timer.ts / state.ts since tsx doesn't hot-reload). Name optional — defaults to the loop registered for the current cwd.")
+        .action((name: string | undefined) => cmdReload(name ?? resolveCurrentLoopName()));
     program.command("check [name]")
         .description("Diagnose what the check-cmd would do right now (no claude spawn)")
         .option("--check-cmd <cmd>", "Override the check-cmd (default: from loop plate or DEFAULT_CHECK_CMD)")
