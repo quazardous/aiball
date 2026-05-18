@@ -69,7 +69,7 @@ aiball autopoll enable        # writes .aiball.yaml so the hook actually fires h
 - **Lifecycle signals**: `resolved` proposal, `blocked` escalation, snooze, reopen — each with its own icon.
 - **Clickable Q&A**: GFM `- [ ]` items in a ticket body become click-to-quote questions; the audit lives in a sidecar.
 - **Autopoll Stop hook**: the agent processes the backlog between turns until empty (see above).
-- **Sandbox loop**: `claude-sandbox start --tickets "10,11"` runs an autonomous session in tmux against a fixed plate. See [`docs/SANDBOX.md`](./docs/SANDBOX.md).
+- **Sandbox loop**: `aiball sandbox start --tickets "10,11"` runs an autonomous session in tmux against a fixed plate. See [`docs/SANDBOX.md`](./docs/SANDBOX.md).
 - **Search** (FTS5), **per-project stats**, **CLI** with offline spool fallback.
 
 ---
