@@ -34,6 +34,7 @@ const emit = defineEmits<{
     (e: "select", value: string | null): void;
     (e: "open-panel", panel: SettingsPanel): void;
     (e: "new-ticket"): void;
+    (e: "open-current-settings"): void;
 }>();
 
 // #B.161: collapse the projects details by default on phones so the
@@ -72,6 +73,21 @@ const activeProjectLabel = computed(() => {
                      desktop (the InboxToolbar already exposes it
                      there). @click.stop so the summary toggle
                      doesn't fire. -->
+                <!-- #B.169: quick-access cog to the current project's
+                     settings page — shorter route than the "strategy:
+                     project settings →" hint that was the only entry
+                     point before. Visible only when a specific
+                     project is selected (the link makes no sense in
+                     "All projects" mode). -->
+                <button
+                    v-if="project"
+                    type="button"
+                    class="sidebar-project-settings"
+                    title="Project settings"
+                    @click.stop="emit('open-current-settings')"
+                >
+                    <i class="pi pi-cog" />
+                </button>
                 <button
                     type="button"
                     class="sidebar-new-ticket"
@@ -208,8 +224,8 @@ const activeProjectLabel = computed(() => {
 .sidebar-projects:not([open]) > summary::before {
     content: "▸";
 }
-.sidebar-new-ticket {
-    display: none;
+.sidebar-new-ticket,
+.sidebar-project-settings {
     background: transparent;
     border: 1px solid var(--p-content-border-color);
     border-radius: 0.3rem;
@@ -221,11 +237,22 @@ const activeProjectLabel = computed(() => {
     cursor: pointer;
     font-size: 0.75rem;
 }
-.sidebar-new-ticket:hover {
+.sidebar-new-ticket:hover,
+.sidebar-project-settings:hover {
     background: var(--p-surface-100);
 }
-.aiball-dark .sidebar-new-ticket:hover {
+.aiball-dark .sidebar-new-ticket:hover,
+.aiball-dark .sidebar-project-settings:hover {
     background: var(--p-surface-800);
+}
+/* The cog is shown on every viewport — quick access to current
+   project's settings (#B.169). The [+] new-ticket is mobile-only
+   (desktop has it in the InboxToolbar already). */
+.sidebar-project-settings {
+    display: inline-flex;
+}
+.sidebar-new-ticket {
+    display: none;
 }
 @media (max-width: 720px) {
     .sidebar-new-ticket {

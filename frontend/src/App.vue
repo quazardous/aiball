@@ -851,6 +851,7 @@ watch(showSnoozed, (v) => {
                 @select="selectProject"
                 @open-panel="openPanel"
                 @new-ticket="panel = 'compose'"
+                @open-current-settings="project && openProjectPage(project, 'settings')"
             />
 
             <main class="aiball-main">
@@ -1039,6 +1040,15 @@ watch(showSnoozed, (v) => {
         /* Same — sidebar's own scroll area shouldn't bleed under the
            fixed settings footer. */
         padding-bottom: 3.2rem;
+    }
+    /* #B.161: bulk actions (per-row checkbox + "select all" footer)
+       are awkward on a phone — hide them entirely. The thread view
+       still offers per-ticket actions for individual ops. */
+    .list-row__select {
+        display: none !important;
+    }
+    .bulk-bar {
+        display: none !important;
     }
     /* #B.165: toasts go edge-to-edge on mobile (slim left/right safety
        margin), and the verbose footer line (consumer · ref · project)
