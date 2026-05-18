@@ -86,7 +86,50 @@ interface StartOpts {
     attach?: boolean;
     noStartupPing?: boolean;
     userGraceSec?: number;
+    /** Bypass the live-loop conflict check (#B.154). */
+    force?: boolean;
     claudeArgs: string[];
+}
+
+/**
+ * Silently prune state dirs whose tmux session no longer exists.
+ * Called before `start` so orphans don't accumulate; safe no-op
+ * when the state root is empty.
+ */
+function pruneDeadStateDirs(): void {
+    if (!existsSync(STATE_ROOT)) return;
+    for (const name of readdirSync(STATE_ROOT)) {
+        if (tmuxAlive(name)) continue;
+        try { rmSync(stateDirFor(name), { recursive: true, force: true }); }
+        catch { /* ignore */ }
+    }
+}
+
+/**
+ * Find a LIVE loop (tmux session present) running in the same cwd
+ * AND for the same agent. Used by `start` to refuse a duplicate
+ * spawn — david: "pluieurs claude-loop nommé pareil devrait pas
+ * etre permis (meme agent)". Agent matched via the loop's env file
+ * CL_NAME / AIBALL_AGENT export if present.
+ */
+function findLiveLoopForCwdAgent(cwd: string, agent: string | undefined): { name: string; agent: string | null } | null {
+    if (!existsSync(STATE_ROOT)) return null;
+    for (const name of readdirSync(STATE_ROOT)) {
+        if (!tmuxAlive(name)) continue;
+        let plate: Plate | null = null;
+        try { plate = readPlate(stateDirFor(name)); } catch { /* skip */ }
+        if (!plate) continue;
+        if (plate.cwd !== cwd) continue;
+        const envFile = envPath(stateDirFor(name));
+        let loopAgent: string | null = null;
+        if (existsSync(envFile)) {
+            const m = readFileSync(envFile, "utf8").match(/export AIBALL_AGENT=['"]?([^'"\n]+)/);
+            if (m) loopAgent = m[1];
+        }
+        if (agent && loopAgent && agent !== loopAgent) continue;
+        return { name, agent: loopAgent };
+    }
+    return null;
 }
 
 function cmdStart(opts: StartOpts): void {
@@ -98,6 +141,23 @@ function cmdStart(opts: StartOpts): void {
     need(MUX_CMD);
 
     const cwd = process.env.CLAUDE_LOOP_CWD ?? process.cwd();
+
+    // #B.154: housekeeping before spawn. (1) prune dead state dirs
+    // so the user's ~/.claude-loop/ doesn't accumulate orphans from
+    // every test run; (2) refuse to spawn if another LIVE loop
+    // already runs in the same cwd for the same agent — david saw
+    // 14 dead loops accumulate from repeated rm-less restarts.
+    pruneDeadStateDirs();
+    if (!opts.force) {
+        const conflict = findLiveLoopForCwdAgent(cwd, process.env.AIBALL_AGENT);
+        if (conflict) {
+            die(
+                `live loop '${conflict.name}' already runs in ${cwd}` +
+                (conflict.agent ? ` for agent '${conflict.agent}'` : "") +
+                `.\n  Attach with: claude-loop attach ${conflict.name}\n  Override with: --force\n  Stop with: claude-loop rm ${conflict.name}`,
+            );
+        }
+    }
     const pingsSrc = opts.pings ?? defaultPingsPath();
     if (!existsSync(pingsSrc)) die(`pings file not found: ${pingsSrc}`);
 
@@ -572,6 +632,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         // Commander convention: `--no-foo` flips foo to false.
         .option("--no-attach", "Don't attach after spawn (wrapper exits silently)")
         .option("--no-startup-ping", "Don't send a wake-up message on launch")
+        .option("--force", "Spawn even if another live loop already runs in this cwd")
         .addOption(new Option(
             "--user-grace <sec>",
             "Seconds to stay out of the way after the human submits a prompt",
@@ -579,7 +640,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .allowExcessArguments(false)
         .action((opts: {
             name?: string; interval: string; checkCmd: string; pings?: string;
-            attach: boolean; startupPing: boolean; userGrace: string;
+            attach: boolean; startupPing: boolean; userGrace: string; force?: boolean;
         }) => {
             invoke({
                 name: opts.name,
@@ -589,6 +650,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 attach: opts.attach !== false,
                 noStartupPing: opts.startupPing === false,
                 userGraceSec: Math.max(0, Number(opts.userGrace)),
+                force: opts.force === true,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });
