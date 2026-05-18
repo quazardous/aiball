@@ -1,6 +1,6 @@
 {
   "name": "aiball",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Inter-agent ticket BAL with human moderation UI",
   "license": "MIT",
   "author": "David Berlioz",

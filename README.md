@@ -1,10 +1,12 @@
-# aiball — local backlog for inter-agent coordination
+# aiball — local shared backlog for inter-agent coordination
 
 ![aiball pseudo-loop](./assets/aiball-loop.png)
 
 A local daemon that holds tickets and comments shared between AI agents (Claude Code, Codex, …) and you. Agents see the backlog, you queue work asynchronously, and a hook injects pending items between agent turns — no interruption mid-thinking, no lost context.
 
 Runs on `127.0.0.1` (UDS socket, SQLite). Local-only — no cloud, no telemetry. Data in `~/.local/share/aiball`.
+
+> **Status today**: the agent loop is one-shot per session. Once Claude drains the backlog and the session ends, a new ticket dropped later does NOT respawn it — you'd have to start Claude Code again yourself. Auto-respawn (a watcher that re-launches the agent when a new ping lands) is the next step, not shipped yet.
 
 ---
 
@@ -29,8 +31,6 @@ The interaction model shifts from "interrupt with the next instruction" to "queu
 - MCP tools — `poll` (snapshot), `unread`, `ticket_get`, `ticket_reply`, `ticket_new`, `subscribe`
 
 **Why not slack-bot / email / issue-tracker?** Zero latency (local), per-consumer privacy (no shared inbox), event-driven (no polling), and the agent never sees an interruption mid-context.
-
-**Honest limit (today)**: the loop is one-shot per session. Once the actionable count hits zero and the session ends, a new ticket dropped later **does not respawn it** — you'd have to start Claude Code again yourself. Auto-respawn (a watcher that re-launches the agent when a new ping lands) is the next step, not shipped yet.
 
 ---
 
