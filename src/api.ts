@@ -63,6 +63,7 @@ import {
     getTicketBookends,
     getMessageByHashid,
     markTicketSeen,
+    markTicketSeenUpTo,
     markTicketUnseen,
     ticketUnreadFlags,
     deletePingsForMessage,
@@ -1333,6 +1334,16 @@ api.post("/tickets/:id/mark-read", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     const t = getMessage(id);
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    // #B.191: optional `up_to_id` bounds the ack to pings whose target
+    // message id is <= that value. Used by the ThreadView auto-mark on
+    // dwell — captures the latest message id present at mount so any
+    // comment arriving during the read window stays unread (and the
+    // row stays bold+green in the inbox).
+    const upToId = req.body?.up_to_id;
+    if (typeof upToId === "number" && upToId > 0) {
+        const r = markTicketSeenUpTo(consumerOf(req), id, upToId);
+        return res.json({ ticket_id: id, up_to_id: upToId, ...r });
+    }
     const r = markTicketSeen(consumerOf(req), id);
     res.json({ ticket_id: id, ...r });
 });

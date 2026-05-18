@@ -411,11 +411,11 @@ export const api = {
         const q = qs.toString();
         return req<InboxRow[]>("GET", `/api/inbox${q ? "?" + q : ""}`);
     },
-    markTicketRead: (id: number) =>
-        req<{ ticket_id: number; updated: number }>(
+    markTicketRead: (id: number, upToId?: number) =>
+        req<{ ticket_id: number; updated: number; up_to_id?: number }>(
             "POST",
             `/api/tickets/${id}/mark-read`,
-            {},
+            typeof upToId === "number" ? { up_to_id: upToId } : {},
         ),
     markTicketUnread: (id: number) =>
         req<{ ticket_id: number; updated: number }>(

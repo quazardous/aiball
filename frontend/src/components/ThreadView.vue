@@ -239,6 +239,14 @@ useBus("thread.refresh", ({ ticketId }) => {
 // long enough to avoid marking pass-through scrolling. The timer cancels
 // on ticket switch (watch) and on unmount, so quick navigations don't
 // flip the read state.
+//
+// #B.191: pass up_to_id = max(ticket.id, last visible comment id) so
+// the ack is BOUNDED to what's actually on screen. Comments arriving
+// AFTER the dwell timer fires keep their unseen ping intact — the
+// inbox row stays bold+green so the user notices the new content
+// without missing the read-state catch-up on what they already saw.
+// David: "ce qui marche c'est de les marquer unread manuellement" —
+// the old all-ack behavior consumed new pings within 2s of arrival.
 const AUTO_MARK_READ_MS = 2000;
 let autoMarkTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleAutoMarkRead() {
@@ -249,7 +257,14 @@ function scheduleAutoMarkRead() {
     }
     const id = props.ticketId;
     autoMarkTimer = setTimeout(() => {
-        api.markTicketRead(id)
+        const snapshot = data.value;
+        const lastSeenId = snapshot && snapshot.ticket?.id === id
+            ? Math.max(
+                snapshot.ticket.id,
+                ...snapshot.comments.map((c) => c.id),
+              )
+            : undefined;
+        api.markTicketRead(id, lastSeenId)
             .then(() => {
                 // Read state is per-consumer, so the server doesn't
                 // broadcast it on WS. Push it onto the bus so the

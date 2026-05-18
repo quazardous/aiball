@@ -162,6 +162,40 @@ export function markTicketSeen(
 }
 
 /**
+ * Like markTicketSeen but bounded by an upper message id. Only acks
+ * pings whose target message id is <= upToId. Used by the auto-mark
+ * path in ThreadView (#B.191): the dwell timer captures the max msg
+ * id present at mount, then acks only THAT slice — comments arriving
+ * after mount keep their ping unseen so the row stays bold+green in
+ * the inbox even while the user is reading.
+ */
+export function markTicketSeenUpTo(
+    consumer_id: string,
+    ticket_id: number,
+    upToId: number,
+): { updated: number } {
+    const db = getDb();
+    const commentIds = db.select({ id: schema.messages.id })
+        .from(schema.messages)
+        .where(eq(schema.messages.ticketId, ticket_id))
+        .all()
+        .map((r) => r.id)
+        .filter((id) => id <= upToId);
+    const conds = [];
+    if (ticket_id <= upToId) conds.push(eq(schema.pings.ticketId, ticket_id));
+    if (commentIds.length) conds.push(inArray(schema.pings.commentId, commentIds));
+    if (!conds.length) return { updated: 0 };
+    const r = db.update(schema.pings)
+        .set({ seenAt: nowIso() })
+        .where(and(
+            eq(schema.pings.recipient, consumer_id),
+            isNull(schema.pings.seenAt),
+            or(...conds),
+        )).run();
+    return { updated: r.changes };
+}
+
+/**
  * Inverse of markTicketSeen: clear the seen_at on every ping the consumer
  * has on this ticket and its comments. Used by the explicit "mark unread"
  * toggle in the list row (#C92) so the thread re-surfaces in unread filters.
