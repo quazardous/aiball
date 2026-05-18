@@ -12,7 +12,7 @@ import { api, INTENTS, type Message, type Intent, type Tag as TagType, type Thre
 import { findActiveDecision, type CommentDecision } from "../lib/decisions";
 import { STATUS_SEVERITY } from "../lib/labels";
 import { topDown, toggleTopDown } from "../lib/prefs";
-import { RELATION_LABELS as TYPED_RELATION_LABELS } from "../lib/relations";
+import { RELATION_KINDS, RELATION_LABELS as TYPED_RELATION_LABELS, type RelationKind } from "../lib/relations";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -28,6 +28,50 @@ const data = ref<ThreadViewData | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const decideBusy = ref(false);
+
+// #B.123 phase B.2.b: add-relation widget state. Inline panel that
+// expands under the relations chips row when the user clicks "+
+// relation". Target id parsed from input (accepts "42", "#B.42" or
+// "B.42"); kind defaults to relates_to. Errors surface in toast.
+const addRelationOpen = ref(false);
+const newRelationTarget = ref("");
+const newRelationKind = ref<RelationKind>("relates_to");
+const addRelationBusy = ref(false);
+const relationKindOptions = RELATION_KINDS.map((k) => ({
+    label: TYPED_RELATION_LABELS[k],
+    value: k,
+}));
+async function submitNewRelation() {
+    if (!data.value) return;
+    const raw = newRelationTarget.value.trim().replace(/^#?B?\.?/i, "");
+    const target = Number(raw);
+    if (!Number.isFinite(target) || target <= 0) {
+        editToast.add({
+            severity: "warn",
+            summary: "Invalid target ticket id",
+            detail: "Type a ticket number, e.g. 42 or #B.42",
+            life: 4000,
+        });
+        return;
+    }
+    addRelationBusy.value = true;
+    try {
+        await api.addRelation(data.value.ticket.id, target, newRelationKind.value);
+        await load();
+        addRelationOpen.value = false;
+        newRelationTarget.value = "";
+        newRelationKind.value = "relates_to";
+    } catch (e) {
+        editToast.add({
+            severity: "error",
+            summary: "Could not add relation",
+            detail: (e as Error).message,
+            life: 6000,
+        });
+    } finally {
+        addRelationBusy.value = false;
+    }
+}
 
 async function load() {
     loading.value = true;
@@ -1217,12 +1261,10 @@ async function copyTicketRef() {
                 </details>
                 <!-- #B.123 phase B.2: typed relations cartouche. Chips
                      for each active relation (kind label + linked
-                     target). The change-kind dropdown and × remove
-                     button land in a follow-up; for now the panel
-                     surfaces existing relations so they're visible
-                     while the rest of the UI catches up. -->
+                     target) + add-relation widget. Per-chip change-kind
+                     and × remove land in B.2.c. -->
                 <div
-                    v-if="data.ticket.relations && data.ticket.relations.length > 0"
+                    v-if="(data.ticket.relations && data.ticket.relations.length > 0) || true"
                     class="thread-relations"
                 >
                     <span class="thread-relations__label">
@@ -1230,7 +1272,7 @@ async function copyTicketRef() {
                         Relations
                     </span>
                     <a
-                        v-for="r in data.ticket.relations"
+                        v-for="r in data.ticket.relations ?? []"
                         :key="`${r.target_ticket_id}-${r.last_event_id}`"
                         :href="`/b/${r.target_ticket_id}`"
                         class="thread-relations__chip"
@@ -1240,6 +1282,51 @@ async function copyTicketRef() {
                         <span class="thread-relations__kind">{{ TYPED_RELATION_LABELS[r.kind] }}</span>
                         <span class="thread-relations__target">#B.{{ r.target_ticket_id }}</span>
                     </a>
+                    <Button
+                        v-if="!addRelationOpen"
+                        icon="pi pi-plus"
+                        label="relation"
+                        size="small"
+                        severity="secondary"
+                        text
+                        title="Link this ticket to another with a typed relation (#B.123 phase B)"
+                        @click="addRelationOpen = true"
+                    />
+                </div>
+                <div v-if="addRelationOpen" class="thread-relations-form">
+                    <InputText
+                        v-model="newRelationTarget"
+                        placeholder="target ticket — 42 or #B.42"
+                        size="small"
+                        :disabled="addRelationBusy"
+                        style="max-width: 14rem"
+                        @keydown.enter.prevent="submitNewRelation"
+                    />
+                    <Select
+                        v-model="newRelationKind"
+                        :options="relationKindOptions"
+                        option-label="label"
+                        option-value="value"
+                        size="small"
+                        :disabled="addRelationBusy"
+                        style="min-width: 10rem"
+                    />
+                    <Button
+                        label="add"
+                        icon="pi pi-check"
+                        size="small"
+                        :loading="addRelationBusy"
+                        :disabled="!newRelationTarget.trim()"
+                        @click="submitNewRelation"
+                    />
+                    <Button
+                        label="cancel"
+                        size="small"
+                        severity="secondary"
+                        text
+                        :disabled="addRelationBusy"
+                        @click="addRelationOpen = false; newRelationTarget = ''"
+                    />
                 </div>
                 <h2 class="thread-title">{{ data.ticket.title }}</h2>
                 <div
@@ -1780,6 +1867,19 @@ async function copyTicketRef() {
 .thread-relations__target {
     font-family: ui-monospace, SFMono-Regular, monospace;
     color: var(--p-primary-color);
+}
+.thread-relations-form {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 0.4rem 0.6rem;
+    background: var(--p-surface-50);
+    border-radius: 0.4rem;
+    margin-top: 0.2rem;
+}
+.aiball-dark .thread-relations-form {
+    background: var(--p-surface-900);
 }
 .snooze-popover {
     display: flex;

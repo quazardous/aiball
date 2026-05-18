@@ -430,6 +430,19 @@ export const api = {
         ),
     postMessage: (body: PostMessageInput) =>
         req<Message>("POST", "/api/messages", body),
+    /** Add (or supersede) a typed inter-ticket relation (#B.123 phase B).
+     *  Append-only: posting with the same target replaces; posting with
+     *  kind="ignored" tombstones the relation. */
+    addRelation: (
+        ticketId: number,
+        target: number,
+        kind: import("./relations").RelationKind,
+    ) =>
+        req<{ ticket_id: number; event_id: number; relations: TicketRelation[] }>(
+            "POST",
+            `/api/tickets/${ticketId}/relations`,
+            { target_ticket_id: target, kind },
+        ),
     approve: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/approve`),
     reject: (id: number) =>
