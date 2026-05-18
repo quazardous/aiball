@@ -2,8 +2,9 @@
 /**
  * claude-loop CLI (#B.63 TS port). Generic terminal wrapper that
  * makes a Claude Code session tickable via tmux + a Stop hook + a
- * detached timer process that wakes claude when idle if a check-cmd
- * reports new work.
+ * detached timer process that wakes claude when idle by sending a
+ * random ping phrase every CL_INTERVAL seconds. Claude decides what
+ * (if anything) to do based on its own context / MCP tools.
  *
  * Subcommands (start is default): `start | list | attach | tail | rm
  * | wake | prune`. Anything after `--` is passed verbatim to the
@@ -76,10 +77,9 @@ function defaultName(): string {
 interface StartOpts {
     name?: string;
     interval: number;
-    checkCmd: string;
     pings?: string;
     attach?: boolean;
-    noStartupCheck?: boolean;
+    noStartupPing?: boolean;
     claudeArgs: string[];
 }
 
@@ -102,7 +102,6 @@ function cmdStart(opts: StartOpts): void {
         name,
         created_at: new Date().toISOString(),
         interval: opts.interval,
-        check_cmd: opts.checkCmd,
         pings_path: pingsPath(sd),
         cwd,
         claude_args: opts.claudeArgs,
@@ -115,7 +114,6 @@ function cmdStart(opts: StartOpts): void {
         `export CL_NAME=${shQuote(name)}`,
         `export CL_STATE_DIR=${shQuote(sd)}`,
         `export CL_INTERVAL=${String(opts.interval)}`,
-        `export CL_CHECK_CMD=${shQuote(opts.checkCmd)}`,
         `export CL_PINGS=${shQuote(pingsPath(sd))}`,
         "",
     ];
@@ -171,20 +169,17 @@ function cmdStart(opts: StartOpts): void {
     child.unref();
     writeFileSync(timerPidPath(sd), String(child.pid) + "\n");
 
-    // Kick claude into action after SessionStart settles. If a
-    // check-cmd is set and reports work right now, fire a real ping
-    // immediately so the loop starts USEFUL — david: "claude-loop
-    // devrait aussi faire un check au début s'il y a des choses en
-    // attente". `--no-startup-check` opts out.
-    const startupNudge = (() => {
-        if (opts.noStartupCheck) return "ready when you are";
-        if (opts.checkCmd === "true") return "ready when you are";
-        const r = spawnSync("bash", ["-c", opts.checkCmd], { stdio: "ignore" });
-        return r.status === 0 ? "check the backlog" : "ready when you are";
-    })();
-    spawnSync("bash", ["-c",
-        `(sleep 3 && ${shQuote(MUX_CMD)} send-keys -t ${shQuote(tname)} ${shQuote(startupNudge)} Enter) >/dev/null 2>&1 &`,
-    ]);
+    // Kick claude into action after SessionStart settles. Always
+    // sends a wake-up — claude itself is responsible for figuring
+    // out whether there's work (via its MCP tools / context). David:
+    // "quand on lance claude-loop si y a du taf il faut immédiatement
+    // ping claude c'est tout". `--no-startup-ping` opts out for the
+    // rare case the user wants a silent boot.
+    if (!opts.noStartupPing) {
+        spawnSync("bash", ["-c",
+            `(sleep 3 && ${shQuote(MUX_CMD)} send-keys -t ${shQuote(tname)} 'check the backlog' Enter) >/dev/null 2>&1 &`,
+        ]);
+    }
 
     // Default behavior: attach. David: "par défaut claude-loop
     // devrait s'attacher (on peut faire un flag inversé)".
@@ -194,7 +189,6 @@ function cmdStart(opts: StartOpts): void {
             `loop '${name}' started (detached)`,
             `  state:    ${sd}`,
             `  interval: ${opts.interval}s`,
-            `  check:    ${opts.checkCmd === "true" ? "<pure timer>" : opts.checkCmd}`,
             `  claude:   claude --permission-mode auto${passthrough ? " " + passthrough : ""}`,
             `  attach:   ${MUX_CMD} attach -t ${tname}   (or: claude-loop attach ${name})`,
             "",
@@ -323,27 +317,22 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
     return new Command()
         .description("Spawn a new claude-loop (default subcommand)")
         .option("--name <name>", "Loop name (default: auto-generated)")
-        .addOption(new Option("--interval <sec>", "Poll interval seconds").default("60"))
-        .option("--check-cmd <cmd>", "Shell snippet — exit 0 = wake claude", "true")
+        .addOption(new Option("--interval <sec>", "Tick interval seconds").default("60"))
         .option("--pings <yaml>", "Path to custom ping-phrases YAML")
-        // Commander conventionally turns `--no-foo` into `foo: false`;
-        // we want the default to be `attach=true` and `--no-attach`
-        // opts out. The default(true) makes commander accept either
-        // (--attach is silently no-op, --no-attach flips to false).
+        // Commander convention: `--no-foo` flips foo to false.
         .option("--no-attach", "Don't attach after spawn (wrapper exits silently)")
-        .option("--no-startup-check", "Skip the initial check-cmd run on launch")
+        .option("--no-startup-ping", "Don't send a wake-up message on launch")
         .allowExcessArguments(false)
         .action((opts: {
-            name?: string; interval: string; checkCmd: string; pings?: string;
-            attach: boolean; startupCheck: boolean;
+            name?: string; interval: string; pings?: string;
+            attach: boolean; startupPing: boolean;
         }) => {
             invoke({
                 name: opts.name,
                 interval: Math.max(1, Number(opts.interval)),
-                checkCmd: opts.checkCmd,
                 pings: opts.pings,
                 attach: opts.attach !== false,
-                noStartupCheck: opts.startupCheck === false,
+                noStartupPing: opts.startupPing === false,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });

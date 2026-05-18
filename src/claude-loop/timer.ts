@@ -2,10 +2,10 @@
 /**
  * claude-loop timer process (#B.63 TS port). Detached child of the
  * `start` command. Polls every CL_INTERVAL seconds; when claude is
- * idle (idle-since marker present) AND either a manual wake was
- * requested OR the check-cmd reports work (exit 0), picks a random
- * phrase from the loop's pings YAML and `tmux send-keys` it into
- * pane 0 of the loop's tmux session.
+ * idle (idle-since marker present), picks a random phrase from the
+ * loop's pings YAML and `tmux send-keys` it into pane 0. Claude
+ * decides via its own context (MCP tools, etc) whether there's work
+ * to do — david: "il faut immédiatement ping claude c'est tout".
  *
  * Logs to stdout (the launcher redirects to $STATE_DIR/timer.log).
  * Exits when the tmux session disappears.
@@ -24,7 +24,6 @@ import {
 const sd = process.env.CL_STATE_DIR;
 const name = process.env.CL_NAME;
 const intervalRaw = process.env.CL_INTERVAL;
-const checkCmd = process.env.CL_CHECK_CMD ?? "true";
 if (!sd || !name || !intervalRaw) {
     process.stderr.write("[claude-loop:timer] missing CL_* env vars\n");
     process.exit(1);
@@ -59,35 +58,24 @@ function sendKeys(phrase: string): void {
     spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, phrase, "Enter"], { stdio: "ignore" });
 }
 
-function runCheckCmd(): boolean {
-    const r = spawnSync("bash", ["-c", checkCmd], { stdio: "ignore" });
-    return r.status === 0;
-}
-
 function sleep(ms: number): Promise<void> {
     return new Promise((res) => setTimeout(res, ms));
 }
 
 async function main(): Promise<void> {
-    log(`timer started — poll every ${interval}s; check: ${checkCmd}`);
+    log(`timer started — tick every ${interval}s`);
     while (tmuxAlive()) {
         await sleep(interval * 1000);
         if (!existsSync(idleMarkerPath(sd!))) continue;
-        // Manual wake bypasses the check-cmd.
-        if (existsSync(wakeRequestedPath(sd!))) {
-            try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
-            try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
-            const phrase = pickPhrase();
-            sendKeys(phrase);
-            log(`manual wake → '${phrase}'`);
-            continue;
-        }
-        if (runCheckCmd()) {
-            try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
-            const phrase = pickPhrase();
-            sendKeys(phrase);
-            log(`check-cmd hit → '${phrase}'`);
-        }
+        // Whether the wake came from the periodic tick or from
+        // `claude-loop wake NAME`, treat it identically — claude is
+        // idle, send a phrase. The wake-requested marker is cleared
+        // for housekeeping; behavior unchanged either way.
+        try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
+        try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
+        const phrase = pickPhrase();
+        sendKeys(phrase);
+        log(`wake → '${phrase}'`);
     }
     log("tmux session gone — timer exiting");
 }

@@ -35,14 +35,8 @@ export interface Plate {
     name: string;
     /** Created-at ISO timestamp. */
     created_at: string;
-    /** Polling interval in seconds — the timer wakes this often to check. */
+    /** Tick interval in seconds — the timer pings claude this often when idle. */
     interval: number;
-    /**
-     * Shell snippet the timer runs each tick. Exit 0 = "new event,
-     * wake claude up"; non-zero = "nothing to do". Default `true` =
-     * every tick fires (pure timer).
-     */
-    check_cmd: string;
     /**
      * Absolute path to the YAML file with `ping_messages: [...]`.
      * The timer picks one at random per wake-up.
