@@ -298,7 +298,7 @@ function cmdStart(opts: StartOpts): void {
         (passthrough ? ` ${passthrough}` : "");
 
     const tname = tmuxName(name);
-    let r = spawnSync(MUX_CMD, [
+    const r = spawnSync(MUX_CMD, [
         "new-session", "-d", "-s", tname, "-c", cwd, "bash", "-lc", innerCmd,
     ]);
     if (r.status !== 0) die("tmux new-session failed");
@@ -619,7 +619,7 @@ async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boo
     let tick = 0;
     const once = opts.once === true;
     const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
-    // eslint-disable-next-line no-constant-condition
+     
     while (true) {
         tick += 1;
         const ts = new Date().toISOString();
