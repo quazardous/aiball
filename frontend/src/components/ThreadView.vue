@@ -492,7 +492,7 @@ type ThreadItem =
     | { kind: "summary_banner" };
 
 function isRelationKind(k: Message["kind"]): boolean {
-    return k === "ticket_sub_added" || k === "ticket_referenced";
+    return k === "ticket_sub_added" || k === "ticket_referenced" || k === "ticket_relation";
 }
 
 const RELATION_LABELS: Record<string, { icon: string; verbOne: string; verbMany: string }> = {
@@ -506,7 +506,33 @@ const RELATION_LABELS: Record<string, { icon: string; verbOne: string; verbMany:
         verbOne: "referenced from",
         verbMany: "referenced from",
     },
+    // #B.137: ticket_relation events used to fall back to the default
+    // comment renderer (empty body → silent blank rows). Now rendered
+    // inline like sub-added/referenced. The verb is generic ("linked
+    // to" / "linked from") — the actual relation kind (depends_on /
+    // blocks / etc.) is read from meta.relation.kind in the template
+    // via decodeRelationEvent below.
+    ticket_relation: {
+        icon: "pi pi-share-alt",
+        verbOne: "linked to",
+        verbMany: "linked to",
+    },
 };
+
+// #B.137: read meta.relation.kind from a ticket_relation event and
+// produce the inline verb. `ignored` is the tombstone — surface it
+// as "unlinked" so the timeline reads correctly.
+function decodeRelationEvent(m: Message): { verb: string; target: number | null } {
+    let kind: string | undefined;
+    try {
+        const meta = m.meta ? JSON.parse(m.meta) as { relation?: { kind?: string } } : null;
+        kind = meta?.relation?.kind;
+    } catch { /* malformed meta */ }
+    const target = m.source_ticket_id ?? null;
+    if (kind === "ignored") return { verb: "unlinked", target };
+    if (kind) return { verb: `linked as ${kind}`, target };
+    return { verb: "linked", target };
+}
 
 /**
  * Compact one-word labels for the lifecycle stage badge rendered next
@@ -1661,25 +1687,44 @@ async function copyTicketRef() {
                         :data-kind="item.msgs[0].kind"
                     >
                         <i :class="RELATION_LABELS[item.msgs[0].kind].icon" />
-                        <span class="thread-relation-row__verb">{{
-                            item.msgs.length > 1
-                                ? RELATION_LABELS[item.msgs[0].kind].verbMany
-                                : RELATION_LABELS[item.msgs[0].kind].verbOne
-                        }}</span>
-                        <span class="thread-relation-row__refs">
-                            <a
-                                v-for="(m, i2) in item.msgs"
-                                :key="m.id"
-                                :href="`/b/${m.source_ticket_id}`"
-                                class="thread-relation-row__ref"
-                            >
-                                #B.{{ m.source_ticket_id }}<span
-                                    v-if="m.source_ticket_stage && m.source_ticket_stage !== 'open'"
-                                    class="thread-relation-row__stage"
-                                    :data-stage="m.source_ticket_stage"
-                                >{{ STAGE_LABELS[m.source_ticket_stage] }}</span><template v-if="i2 < item.msgs.length - 1">,</template>
-                            </a>
-                        </span>
+                        <template v-if="item.msgs[0].kind === 'ticket_relation'">
+                            <!-- typed-relation events: per-event verb
+                                 derived from meta.relation.kind. Each
+                                 event in the group rendered as its own
+                                 "verb #B.target" pair, comma-joined. -->
+                            <span class="thread-relation-row__refs">
+                                <template v-for="(m, i2) in item.msgs" :key="m.id">
+                                    <span class="thread-relation-row__verb">{{ decodeRelationEvent(m).verb }}</span>
+                                    <a
+                                        v-if="decodeRelationEvent(m).target !== null"
+                                        :href="`/b/${decodeRelationEvent(m).target}`"
+                                        class="thread-relation-row__ref"
+                                    >#B.{{ decodeRelationEvent(m).target }}</a>
+                                    <template v-if="i2 < item.msgs.length - 1">,</template>
+                                </template>
+                            </span>
+                        </template>
+                        <template v-else>
+                            <span class="thread-relation-row__verb">{{
+                                item.msgs.length > 1
+                                    ? RELATION_LABELS[item.msgs[0].kind].verbMany
+                                    : RELATION_LABELS[item.msgs[0].kind].verbOne
+                            }}</span>
+                            <span class="thread-relation-row__refs">
+                                <a
+                                    v-for="(m, i2) in item.msgs"
+                                    :key="m.id"
+                                    :href="`/b/${m.source_ticket_id}`"
+                                    class="thread-relation-row__ref"
+                                >
+                                    #B.{{ m.source_ticket_id }}<span
+                                        v-if="m.source_ticket_stage && m.source_ticket_stage !== 'open'"
+                                        class="thread-relation-row__stage"
+                                        :data-stage="m.source_ticket_stage"
+                                    >{{ STAGE_LABELS[m.source_ticket_stage] }}</span><template v-if="i2 < item.msgs.length - 1">,</template>
+                                </a>
+                            </span>
+                        </template>
                         <span class="thread-relation-row__meta">by {{ item.msgs[0].by_agent ?? "?" }} · {{ shortTime(item.msgs[0].created_at) }}</span>
                     </li>
                 </template>
