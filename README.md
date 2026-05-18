@@ -52,10 +52,10 @@ Follow the invite to create your human moderator account.
 
 ```bash
 cd <your-project>
-aiball mcp init           # merges aiball into .mcp.json (preserves existing servers)
+aiball init               # writes .mcp.json + .aiball.yaml (idempotent, preserves existing MCP servers)
 ```
 
-That's it. Identity defaults to `<project>-claude` (matches `basename(cwd)`), no other config needed for the happy path. Drop a `.aiball.yaml` with `consumer.agent` / `consumer.project` only if you want explicit overrides — see [`.aiball.yaml.example`](./.aiball.yaml.example).
+Identity defaults to `<project>-claude` (matches `basename(cwd)`). Add a `consumer:` block to `.aiball.yaml` if you want explicit overrides — see [`.aiball.yaml.example`](./.aiball.yaml.example).
 
 ### 3. Launch claude in the loop
 

@@ -877,8 +877,46 @@ async function setAutopollField(key: string, value: unknown): Promise<void> {
 }
 
 // =====================================================================
-// mcp subcommands — wire .mcp.json non-destructively (#B.175)
+// mcp + init subcommands — wire .mcp.json non-destructively (#B.175)
 // =====================================================================
+
+/**
+ * Shared `mcp init` body so both `aiball mcp init` and the combined
+ * `aiball init` can call it. Returns false when the entry already
+ * exists and --force wasn't passed (caller decides if that's an error).
+ */
+async function mcpInitAction(force: boolean): Promise<void> {
+    const path = join(userCwd(), ".mcp.json");
+    type McpFile = { mcpServers?: Record<string, unknown> };
+    let json: McpFile = { mcpServers: {} };
+    let existed = false;
+    if (existsSync(path)) {
+        existed = true;
+        try {
+            json = JSON.parse(readFileSync(path, "utf8")) as McpFile;
+        } catch {
+            die(`${path} exists but is invalid JSON — fix it by hand, then re-run`);
+        }
+        if (!json.mcpServers || typeof json.mcpServers !== "object") {
+            json.mcpServers = {};
+        }
+    }
+    const servers = json.mcpServers as Record<string, unknown>;
+    const had = "aiball" in servers;
+    if (had && !force) {
+        process.stdout.write(`${path}: aiball entry already present — re-run with --force to overwrite (drops legacy env block)\n`);
+        return;
+    }
+    servers.aiball = { command: "aiball-mcp" };
+    writeFileSync(path, JSON.stringify(json, null, 2) + "\n");
+    if (!existed) {
+        process.stdout.write(`created ${path} with the aiball MCP entry\n`);
+    } else if (!had) {
+        process.stdout.write(`${path}: added aiball MCP entry (other servers preserved)\n`);
+    } else {
+        process.stdout.write(`${path}: aiball entry rewritten to canonical form (legacy env block dropped if any)\n`);
+    }
+}
 
 const mcp = program
     .command("mcp")
@@ -889,39 +927,43 @@ mcp
     .description("Add the aiball MCP server to .mcp.json at cwd (preserves any existing entries)")
     .option("--force", "Overwrite an existing aiball entry (drops any legacy env block — #B.154)")
     .action(async (opts: { force?: boolean }) => {
-        const path = join(userCwd(), ".mcp.json");
-        type McpFile = {
-            mcpServers?: Record<string, unknown>;
-        };
-        let json: McpFile = { mcpServers: {} };
-        let existed = false;
-        if (existsSync(path)) {
-            existed = true;
-            try {
-                json = JSON.parse(readFileSync(path, "utf8")) as McpFile;
-            } catch {
-                die(`${path} exists but is invalid JSON — fix it by hand, then re-run`);
-            }
-            if (!json.mcpServers || typeof json.mcpServers !== "object") {
-                json.mcpServers = {};
-            }
-        }
-        const servers = json.mcpServers as Record<string, unknown>;
-        const had = "aiball" in servers;
-        if (had && !opts.force) {
-            process.stdout.write(`${path}: aiball entry already present — re-run with --force to overwrite (drops legacy env block)\n`);
-            return;
-        }
-        servers.aiball = { command: "aiball-mcp" };
-        writeFileSync(path, JSON.stringify(json, null, 2) + "\n");
-        if (!existed) {
-            process.stdout.write(`created ${path} with the aiball MCP entry\n`);
-        } else if (!had) {
-            process.stdout.write(`${path}: added aiball MCP entry (other servers preserved)\n`);
+        await mcpInitAction(opts.force === true);
+        process.stdout.write(`\nNext: identity defaults to '${basename(userCwd())}-claude'. Override via .aiball.yaml consumer:* if needed.\n`);
+    });
+
+/**
+ * Combined bootstrap: `.mcp.json` (MCP wiring) + `.aiball.yaml`
+ * (autopoll-on, identity overrides optional). David's ask (#B.175
+ * "tu parle aussi de aiball autopoll init ??"): one command for
+ * the Quickstart, instead of having the user run two.
+ *
+ * `.aiball.yaml` body is intentionally minimal — just enough to
+ * flip autopoll on. The verbose annotated template lives at
+ * `.aiball.yaml.example` for users who want to tune knobs.
+ */
+program
+    .command("init")
+    .description("Bootstrap a project: write .mcp.json + .aiball.yaml (combines `mcp init` + `autopoll init`)")
+    .option("--force", "Overwrite existing entries (passes through to both subactions)")
+    .action(async (opts: { force?: boolean }) => {
+        const force = opts.force === true;
+        await mcpInitAction(force);
+        // Inline minimal .aiball.yaml — don't pull the example
+        // template here, that one is reference doc with 60+ lines
+        // of comments. The bootstrap should be tight.
+        const yamlPath = join(userCwd(), ".aiball.yaml");
+        if (existsSync(yamlPath) && !force) {
+            process.stdout.write(`${yamlPath}: already exists — re-run with --force to overwrite\n`);
         } else {
-            process.stdout.write(`${path}: aiball entry rewritten to canonical form (legacy env block dropped if any)\n`);
+            const body =
+                "# Bootstrapped by `aiball init`. See .aiball.yaml.example for the full annotated template.\n" +
+                "autopoll:\n" +
+                "  enabled: true\n";
+            writeFileSync(yamlPath, body);
+            process.stdout.write(`${existsSync(yamlPath) && force ? "overwrote" : "created"} ${yamlPath} (autopoll enabled)\n`);
         }
         process.stdout.write(`\nNext: identity defaults to '${basename(userCwd())}-claude'. Override via .aiball.yaml consumer:* if needed.\n`);
+        process.stdout.write(`Run \`aiball check\` to verify everything resolves.\n`);
     });
 
 function resolveInstallRoot(): string {
