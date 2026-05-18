@@ -7,19 +7,8 @@
  * this component is pure UI — no state, no fetches.
  */
 import type { Message } from "../lib/api";
+import type { DeciderInfo, ThreadItem } from "../lib/threadItems";
 import CommentNode from "./CommentNode.vue";
-
-export type ThreadItem =
-    | { kind: "comment"; msg: Message }
-    | { kind: "relation_group"; msgs: Message[] }
-    | { kind: "summary_banner" };
-
-interface DeciderInfo {
-    action: "accepted" | "rejected";
-    target_id: number;
-    target_hashid: string | null;
-    target_kind: string;
-}
 
 defineProps<{
     items: ThreadItem[];
