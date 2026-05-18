@@ -330,6 +330,7 @@ function cmdWake(name: string): void {
  * (wrong agent? wrong project? actually no pings?).
  */
 async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; config?: boolean }): Promise<void> {
+    loadMcpEnvDefaults();
     let plateCheckCmd: string | undefined;
     let plateName: string | undefined;
     let plate: Plate | null = null;
@@ -441,7 +442,32 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
  * claude subprocess; you can run as many `trace` sessions in parallel
  * as you want.
  */
+/**
+ * Resolve AIBALL_AGENT / AIBALL_PROJECT from a project's .mcp.json
+ * when not already in env (#B.154). claude-loop's `trace` /
+ * `check` subcommands run directly in the user's shell — without
+ * this auto-detection, the user has to repeat the export each
+ * invocation despite the same info living in `.mcp.json` next to
+ * them. Honors CLAUDE_LOOP_CWD set by bin/claude-loop launcher.
+ */
+function loadMcpEnvDefaults(): void {
+    const cwd = process.env.CLAUDE_LOOP_CWD ?? process.cwd();
+    const mcpPath = join(cwd, ".mcp.json");
+    if (!existsSync(mcpPath)) return;
+    try {
+        const raw = readFileSync(mcpPath, "utf8");
+        const j = JSON.parse(raw) as { mcpServers?: { aiball?: { env?: Record<string, string> } } };
+        const env = j.mcpServers?.aiball?.env;
+        if (!env) return;
+        if (!process.env.AIBALL_AGENT && env.AIBALL_AGENT) process.env.AIBALL_AGENT = env.AIBALL_AGENT;
+        if (!process.env.AIBALL_PROJECT && env.AIBALL_PROJECT) process.env.AIBALL_PROJECT = env.AIBALL_PROJECT;
+    } catch {
+        /* malformed json — ignore */
+    }
+}
+
 async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boolean; events?: boolean }): Promise<void> {
+    loadMcpEnvDefaults();
     // --events mode (#B.154): open SSE and print every aiball event
     // live. Pure tail — no gate eval, no decision making, just observe
     // what the daemon would push to this consumer. Useful to verify

@@ -127,6 +127,7 @@ function pickStrategy(v: Strategy) {
             v-if="!notifAllowed && !notifMuted"
             icon="pi pi-bell"
             label="enable alerts"
+            title="Enable browser notifications"
             size="small"
             severity="secondary"
             text
@@ -203,6 +204,12 @@ function pickStrategy(v: Strategy) {
        row reads as a tight cluster. */
     .aiball-header .p-button.p-button-rounded {
         margin: 0;
+    }
+    /* #B.161: "enable alerts" button has a label that eats horizontal
+       space — on mobile, drop the label so the icon stays the only
+       affordance (tooltip via the existing title attr remains). */
+    .aiball-header .p-button-label {
+        display: none;
     }
     .aiball-header h1 {
         font-size: 1rem;
