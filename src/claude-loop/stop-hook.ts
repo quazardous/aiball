@@ -69,14 +69,14 @@ function classifyTurn(): string {
     const wake = ageMs(lastWakeAtPath(sd!));
     const user = ageMs(userTookOverPath(sd!));
     const inflight = ageMs(wakeInFlightPath(sd!));
-    const userGraceMs = userGraceSec * 1000;
+    // Whichever marker is more recent likely triggered THIS turn —
+    // no time cutoff (claude turns can legitimately run minutes on
+    // tool chains, so capping by user-grace mis-labeled long
+    // auto-wake replies as "autonomous").
     let turn = "?";
     if (wake === null && user === null) turn = "?";
-    else if (user !== null && (wake === null || user < wake)) {
-        turn = user < userGraceMs ? "user" : "user-stale";
-    } else if (wake !== null) {
-        turn = wake < userGraceMs ? "auto-wake" : "autonomous";
-    }
+    else if (user !== null && (wake === null || user <= wake)) turn = "user";
+    else turn = "auto-wake";
     return `turn=${turn} last-wake=${fmt(wake)} user-took-over=${fmt(user)} wake-in-flight=${fmt(inflight)}`;
 }
 

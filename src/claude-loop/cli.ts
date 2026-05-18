@@ -527,8 +527,14 @@ async function cmdTail(name: string, lines: number, which: TailMode, follow: boo
         const sd = stateDirFor(name);
         const timer = timerLogPath(sd);
         const hook = join(sd, "stop-hook.log");
+        // Prefixes name the source explicitly (#B.198, david: "il
+        // faut quand meme dire le nom du hook") — `[hook]` was
+        // ambiguous now that we may add more hooks later.
+        // Pad to longest so the body columns line up.
+        const TIMER_TAG = "[timer]     ";
+        const HOOK_TAG  = "[stop-hook] ";
         if (!follow) {
-            for (const [p, prefix] of [[timer, "[timer] "], [hook, "[hook]  "]] as const) {
+            for (const [p, prefix] of [[timer, TIMER_TAG], [hook, HOOK_TAG]] as const) {
                 if (!existsSync(p)) continue;
                 const all = readFileSync(p, "utf8").split("\n");
                 for (const l of all.slice(-lines)) process.stdout.write(`${prefix}${l}\n`);
@@ -536,8 +542,8 @@ async function cmdTail(name: string, lines: number, which: TailMode, follow: boo
             return;
         }
         await Promise.race([
-            followFile(timer, lines, "[timer] "),
-            followFile(hook, lines, "[hook]  "),
+            followFile(timer, lines, TIMER_TAG),
+            followFile(hook, lines, HOOK_TAG),
         ]);
         return;
     }
