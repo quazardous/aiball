@@ -14,7 +14,8 @@
  * Always emits `{}` and exits 0 — never block claude's stop.
  */
 import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { MUX_CMD, checkHasWork, idleMarkerPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName } from "./state.js";
 
 function emit(): never {
@@ -27,22 +28,39 @@ const name = process.env.CL_NAME;
 const checkCmd = process.env.CL_CHECK_CMD ?? "true";
 if (!sd || !name) emit();
 
-(async () => {
+// #B.149: tail-friendly log of every Stop hook fire — so we can spot
+// from outside the session whether the hook actually ran, what branch
+// it took, and any error. Replaces the previous swallow-on-error
+// silence that made misfires invisible. tail -f via
+// `claude-loop tail <name> --stop-hook` (planned subcommand) or
+// `tail -f ~/.claude-loop/<name>/stop-hook.log`.
+function log(msg: string): void {
     try {
-        if (await checkHasWork(checkCmd)) {
+        appendFileSync(join(sd!, "stop-hook.log"), `${new Date().toISOString()} ${msg}\n`);
+    } catch { /* nowhere to log */ }
+}
+
+(async () => {
+    log(`fire — checkCmd=${checkCmd}`);
+    try {
+        const hasWork = await checkHasWork(checkCmd);
+        log(`  checkHasWork → ${hasWork}`);
+        if (hasWork) {
             // Work still pending — ping immediately, don't enter idle.
             const phrase = pickPingPhrase(pingsPath(sd!));
             spawnSync(MUX_CMD, [
                 "send-keys", "-t", `${tmuxName(name!)}.0`, phrase, "Enter",
             ], { stdio: "ignore" });
             setTmuxStatus(name!, "busy");
+            log(`  → send-keys '${phrase}' + status busy`);
         } else {
             // Nothing to do — mark idle so the timer can take over.
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
             setTmuxStatus(name!, "idle");
+            log(`  → idle-since + status idle`);
         }
-    } catch {
-        /* swallow — never block stop */
+    } catch (e) {
+        log(`  ERROR ${(e as Error).message ?? String(e)}`);
     }
     emit();
 })();
