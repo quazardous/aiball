@@ -57,6 +57,15 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         color: "--p-amber-500",
         title: "an agent proposed resolution — accept (close) or reject to bring it back",
     },
+    "rejected-resolved": {
+        // #B.168 follow-up: latest resolution was rejected, thread
+        // still open. Red X mirrors the green check-circle of
+        // resolved — same shape (times-circle) so the visual scan
+        // pairs it with the resolution family.
+        icon: "pi pi-times-circle",
+        color: "--p-red-500",
+        title: "you rejected the latest resolution — thread still open",
+    },
     blocked: {
         // Agent escalation (#B.119): the ticket needs the human to
         // weigh in. Wording softened to "TBD" / to-be-discussed (#B.129

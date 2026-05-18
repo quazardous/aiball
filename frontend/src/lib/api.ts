@@ -231,6 +231,10 @@ export interface InboxRow {
     blocked?: boolean;
     /** Some agent has proposed this ticket as resolved, awaiting reporter's accept/reject. */
     pending_resolution?: boolean;
+    /** #B.168 follow-up: the LATEST resolution decision on this
+     *  ticket was rejected — UI shows a `× rejected` badge so the
+     *  reporter sees "I rejected, the thread is still open". */
+    latest_resolution_rejected?: boolean;
     broadcast?: boolean;
     /** Per-consumer flag: ≥1 unseen ping on the thread for the requesting consumer. */
     unread?: boolean;

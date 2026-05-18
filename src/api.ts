@@ -952,6 +952,10 @@ api.get("/inbox", (req, res) => {
         // used to honor "latest wins" when multiple resolution
         // comments coexist on the same thread.
         latestResolutionId: number;
+        /** #B.168 follow-up: surface in the inbox row when the LAST
+            resolution decision was rejected (so the reporter sees
+            "yes I rejected it, the thread is open"). */
+        latestResolutionRejected: boolean;
         // #B.132: who spoke last on this thread. Tracks the by_agent
         // of the most recent non-rejected approved comment_added.
         // Falls back to the ticket creator if no comments yet.
@@ -975,6 +979,7 @@ api.get("/inbox", (req, res) => {
                 blocked: false,
                 pendingResolution: false,
                 latestResolutionId: 0,
+                latestResolutionRejected: false,
                 lastSpeaker: null,
                 lastSpeakerId: 0,
             } as Agg);
@@ -1028,6 +1033,7 @@ api.get("/inbox", (req, res) => {
                 if (cur.latestResolutionId === 0 || m.id > cur.latestResolutionId) {
                     cur.latestResolutionId = m.id;
                     cur.pendingResolution = d.status === "pending";
+                    cur.latestResolutionRejected = d.status === "rejected";
                 }
                 if (d.status === "accepted") {
                     syntheticResolved = { ...m, kind: "ticket_resolved" };
@@ -1085,6 +1091,7 @@ api.get("/inbox", (req, res) => {
                 blocked: false,
                 pendingResolution: false,
                 latestResolutionId: 0,
+                latestResolutionRejected: false,
                 lastSpeaker: null,
                 lastSpeakerId: 0,
             } as Agg);
@@ -1115,6 +1122,11 @@ api.get("/inbox", (req, res) => {
             // Stays false once the ticket is closed (the close auto-promotes
             // any dangling pending resolved, see submitMessage).
             pending_resolution: agg.pendingResolution && !(agg.closed || t.status === "rejected"),
+            /** #B.168 follow-up: latest resolution was rejected →
+                flag for a `× rejected` badge on the inbox row. Same
+                suppression as pending_resolution (cleared once
+                ticket is closed/rejected). */
+            latest_resolution_rejected: agg.latestResolutionRejected && !(agg.closed || t.status === "rejected"),
             broadcast: t.broadcast === 1,
             // Per-consumer unread flag (≥1 unseen ping on the thread for
             // the caller, resolved from the X-Aiball-Consumer header).

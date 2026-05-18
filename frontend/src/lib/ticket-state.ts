@@ -65,6 +65,7 @@ export type LifecycleStage =
     | "closed"
     | "resolved"
     | "pending-resolved"
+    | "rejected-resolved"
     | "blocked"
     | "snoozed"
     | "open";
@@ -78,6 +79,10 @@ export function lifecycleStage(r: InboxRow): LifecycleStage {
     // yet. Visually distinct from final-resolved so the reporter sees
     // there's a pending decision (#B.120).
     if (r.pending_resolution) return "pending-resolved";
+    // #B.168 follow-up: latest resolution was rejected and the thread
+    // is still open — distinct red X badge so the reporter sees their
+    // earlier rejection still leaves work on the table.
+    if (r.latest_resolution_rejected) return "rejected-resolved";
     // Agent escalated — distinct from resolved because the human can't
     // just rubber-stamp; they need to look at it (#B.119).
     if (isBlocked(r)) return "blocked";
