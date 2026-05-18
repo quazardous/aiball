@@ -43,11 +43,9 @@ The productivity unlock. A tmux wrapper that keeps claude alive between tickets:
 ```bash
 git clone https://github.com/quazardous/aiball.git && cd aiball
 ./install.sh --auth-init      # daemon (systemd user unit) + bins (aiball, aiball-mcp, claude-loop) + invite link
-# open http://127.0.0.1:7777 in your browser
-# (Linux: `xdg-open ...`, macOS: `open ...`, WSL: `wslview ...` or paste in host browser)
 ```
 
-Follow the invite to create your human moderator account.
+Then open <http://127.0.0.1:7777> in your browser and follow the invite to create your human moderator account.
 
 ### 2. Wire your project (per repo)
 
