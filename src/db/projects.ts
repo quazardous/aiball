@@ -260,6 +260,58 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     const openPerProject = new Map<string, number>();
     const actionablePerProject = new Map<string, number>();
     const snoozedPerProject = new Map<string, number>();
+
+    // #B.123 phase B.4: gate actionable_count on active depends_on
+    // relations to an OPEN blocker. Walk all ticket_relation events in
+    // id order, keep the latest per (source, target) pair, then build
+    // the set of ticket ids whose latest active relation says "blocked
+    // by something still open". A `blocks` from A→B is the inverse of
+    // depends_on from B→A; both forms gate the dependent ticket.
+    const openTicketIds = new Set<number>();
+    for (const t of openCounts) {
+        if (t.status !== "approved") continue;
+        if (closedByTicket.get(t.id) === true) continue;
+        if (t.postponedUntil && t.postponedUntil > nowStr) continue;
+        openTicketIds.add(t.id);
+    }
+    const latestRelations = db.select({
+        sourceTicketId: schema.messages.ticketId,
+        targetTicketId: schema.messages.sourceTicketId,
+        meta: schema.messages.meta,
+        id: schema.messages.id,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.kind, "ticket_relation"),
+            eq(schema.messages.status, "approved"),
+        ))
+        .orderBy(schema.messages.id)
+        .all();
+    const latestPerPair = new Map<string, { source: number; target: number; kind: string }>();
+    for (const r of latestRelations) {
+        if (!r.meta || !r.targetTicketId) continue;
+        let kind: string | undefined;
+        try {
+            const m = JSON.parse(r.meta) as { relation?: { kind?: string } };
+            kind = m.relation?.kind;
+        } catch { continue; }
+        if (!kind) continue;
+        latestPerPair.set(`${r.sourceTicketId}-${r.targetTicketId}`, {
+            source: r.sourceTicketId,
+            target: r.targetTicketId,
+            kind,
+        });
+    }
+    const gatedByBlocker = new Set<number>();
+    for (const r of latestPerPair.values()) {
+        if (r.kind === "depends_on" && openTicketIds.has(r.target)) {
+            gatedByBlocker.add(r.source);
+        } else if (r.kind === "blocks" && openTicketIds.has(r.source)) {
+            // A blocks B → B is gated when A is open.
+            gatedByBlocker.add(r.target);
+        }
+    }
+
     for (const t of openCounts) {
         if (t.status !== "approved") continue;
         const closedByLifecycle = closedByTicket.get(t.id) === true;
@@ -270,13 +322,16 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             continue;
         }
         openPerProject.set(t.project, (openPerProject.get(t.project) ?? 0) + 1);
-        // Actionable = open and NOT marked resolved/blocked by an agent.
-        // The autopoll trigger uses this so a resolved-or-blocked ticket
-        // doesn't keep nagging the agent who already escalated it
-        // (#B.119).
+        // Actionable = open and NOT marked resolved/blocked by an agent
+        // AND not gated by an active depends_on to an open blocker
+        // (#B.123 phase B.4). The autopoll trigger uses this so:
+        //   - a resolved/blocked ticket doesn't nag (#B.119)
+        //   - a ticket waiting on an unfinished dependency doesn't
+        //     surface as work to do (gating clears when blocker closes)
         const isResolved = resolvedByTicket.get(t.id) === true;
         const isBlocked = blockedByTicket.get(t.id) === true;
-        if (!isResolved && !isBlocked) {
+        const isGated = gatedByBlocker.has(t.id);
+        if (!isResolved && !isBlocked && !isGated) {
             actionablePerProject.set(t.project, (actionablePerProject.get(t.project) ?? 0) + 1);
         }
     }
