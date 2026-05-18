@@ -15,6 +15,48 @@ the human-readable narrative.
 
 ## [Unreleased]
 
+### Consumers panel: live activity column (`#B.177`)
+
+The consumers panel now shows two new pieces of information per row:
+last-seen (relative time since the consumer's last API call) and, for
+claude-loop agents, a live state badge — `busy` (electric blue,
+matches the tmux bar), `boot` (yellow), `idle` (gray), or `offline`
+(gray, no heartbeat in the last 60s).
+
+- Backend: `last_seen_at` touched in the auth middleware on every
+  authenticated request. New `PUT /api/consumers/:id/state` endpoint
+  for claude-loop's timer to push its `settledStatus` on each tick
+  (own-state only — humans rejected, the badge surface is for loop
+  agents).
+- Frontend: new "Activity" column in `ConsumersPanel.vue` with a
+  tick-clock for relative-time freshness (no re-fetch) plus a full
+  re-fetch every ~30s. Existing "State" column renamed to "Active"
+  (it's the enable/block toggle). Column headers are clickable to
+  sort by id / kind / display name / activity / active.
+- Migration: 0015 adds `last_seen_at`, `state`, `state_since`,
+  `state_updated_at` to the consumers table.
+
+### Project bootstrap CLI (`#B.175`)
+
+Three new commands consolidate the per-project wiring:
+
+- `aiball mcp init` — merges the aiball entry into `.mcp.json`
+  non-destructively (preserves any existing MCP servers, idempotent,
+  `--force` rewrites to canonical form which drops the legacy
+  `mcpServers.aiball.env` block per #B.154).
+- `aiball autopoll init` — copies the annotated `.aiball.yaml`
+  template (already shipped, unchanged here).
+- `aiball init` — Quickstart wrapper. Calls `mcp init` then writes
+  a minimal `.aiball.yaml` (`autopoll: enabled: true`).
+
+README Quickstart §2 now a single line: `aiball init`.
+
+### Tmux mouse mode in claude-loop sessions (`#B.176`)
+
+`claude-loop start` now sets `mouse on` per-session (scoped, no
+`.tmux.conf` impact). Scroll wheel scrolls the pane buffer instead
+of getting translated to Up/Down arrow keys.
+
 ### Unified identity resolution chain (`#B.154`)
 
 `.aiball.yaml consumer.*` is now the canonical source for `consumer_id`

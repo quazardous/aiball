@@ -173,7 +173,53 @@ function loopBadgeTooltip(r: Consumer): string {
 }
 
 const hasLoopAgents = computed(() => rows.value.some((r) => !!r.state));
-void hasLoopAgents; // referenced in template via direct access</script>
+void hasLoopAgents; // referenced in template via direct access
+
+// =====================================================================
+// #B.177 david: clickable column headers for sort/tri
+// =====================================================================
+
+type SortKey = "consumer_id" | "kind" | "display_name" | "activity" | "enabled";
+const sortKey = ref<SortKey>("kind");
+const sortDir = ref<"asc" | "desc">("asc");
+
+function toggleSort(key: SortKey): void {
+    if (sortKey.value === key) {
+        sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
+    } else {
+        sortKey.value = key;
+        sortDir.value = "asc";
+    }
+}
+
+function sortIcon(key: SortKey): string {
+    if (sortKey.value !== key) return "pi pi-sort";
+    return sortDir.value === "asc" ? "pi pi-sort-up" : "pi pi-sort-down";
+}
+
+const sortedRows = computed<Consumer[]>(() => {
+    const mul = sortDir.value === "asc" ? 1 : -1;
+    return [...rows.value].sort((a, b) => {
+        switch (sortKey.value) {
+            case "consumer_id":
+                return mul * a.consumer_id.localeCompare(b.consumer_id);
+            case "kind":
+                return mul * a.kind.localeCompare(b.kind);
+            case "display_name":
+                return mul * (a.display_name ?? "").localeCompare(b.display_name ?? "");
+            case "enabled":
+                // Enabled-first when asc.
+                return mul * (Number(b.enabled) - Number(a.enabled));
+            case "activity": {
+                // Sort by last_seen_at — most recent first when asc
+                // (most useful default for "who's around right now").
+                const ta = a.last_seen_at ? Date.parse(a.last_seen_at) : 0;
+                const tb = b.last_seen_at ? Date.parse(b.last_seen_at) : 0;
+                return mul * (tb - ta);
+            }
+        }
+    });
+});</script>
 
 <template>
     <div class="consumers-panel">
@@ -234,16 +280,26 @@ void hasLoopAgents; // referenced in template via direct access</script>
         <table v-else class="consumers-table">
             <thead>
                 <tr>
-                    <th>Consumer id</th>
-                    <th>Kind</th>
-                    <th>Display name</th>
-                    <th>Activity</th>
-                    <th>Active</th>
+                    <th class="sortable" @click="toggleSort('consumer_id')">
+                        Consumer id <i :class="sortIcon('consumer_id')" />
+                    </th>
+                    <th class="sortable" @click="toggleSort('kind')">
+                        Kind <i :class="sortIcon('kind')" />
+                    </th>
+                    <th class="sortable" @click="toggleSort('display_name')">
+                        Display name <i :class="sortIcon('display_name')" />
+                    </th>
+                    <th class="sortable" @click="toggleSort('activity')">
+                        Activity <i :class="sortIcon('activity')" />
+                    </th>
+                    <th class="sortable" @click="toggleSort('enabled')">
+                        Active <i :class="sortIcon('enabled')" />
+                    </th>
                     <th />
                 </tr>
             </thead>
             <tbody>
-                <tr v-for="r in rows" :key="r.consumer_id" :class="{ 'is-blocked': !r.enabled }">
+                <tr v-for="r in sortedRows" :key="r.consumer_id" :class="{ 'is-blocked': !r.enabled }">
                     <td class="consumers-cid">
                         <div class="consumers-cid__inner">
                             <span class="consumers-cid__text">{{ r.consumer_id }}</span>
@@ -385,7 +441,13 @@ void hasLoopAgents; // referenced in template via direct access</script>
 .consumers-table .action-cell {
     display: table-cell;
     text-align: right;
-    width: 3rem;
+    /* #B.177 david: "chevauchement de l'icone delete avec la barre
+       scroll" — when the table overflows horizontally, the scroll
+       bar sat on top of the action button. Bump the width + add
+       right padding so the icon is inset away from any scrollbar
+       gutter. */
+    width: 4rem;
+    padding-right: 0.75rem;
 }
 .consumers-table .action-cell__inner {
     display: flex;
@@ -396,6 +458,20 @@ void hasLoopAgents; // referenced in template via direct access</script>
        and the row's border-bottom aligns across all columns. */
     min-height: 2.4375rem;
     line-height: 1;
+}
+/* #B.177 david: clickable sort headers */
+.consumers-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+.consumers-table th.sortable:hover {
+    color: var(--p-primary-color);
+}
+.consumers-table th.sortable i {
+    font-size: 0.75em;
+    margin-left: 0.25rem;
+    opacity: 0.55;
 }
 /* #B.177 Activity column */
 .consumers-table .activity-cell {
