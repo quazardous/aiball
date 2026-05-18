@@ -15,6 +15,7 @@ const purging = ref<string | null>(null);
 
 const emit = defineEmits<{
     (e: "open-stats", project: string): void;
+    (e: "open-settings", project: string): void;
 }>();
 
 async function load() {
@@ -200,8 +201,8 @@ defineExpose({ load });
                                 text
                                 rounded
                                 size="small"
-                                title="Project admin: strategy, settings, stats (#B.127)"
-                                @click="emit('open-stats', p.name)"
+                                title="Project settings — moderation strategy (#B.127)"
+                                @click="emit('open-settings', p.name)"
                             />
                             <Button
                                 icon="pi pi-chart-bar"

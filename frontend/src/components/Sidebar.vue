@@ -13,12 +13,13 @@ export interface ProjectListItem {
 export type SettingsPanel = "rules" | "tags" | "projects" | "consumers" | "compose";
 
 /**
- * Per-project sub-pages — currently just "stats". The entry point lives
- * in Settings > Projects (ProjectsPanel rows), not in the sidebar; we
- * still receive `projectPage` so the inbox item doesn't light up while
- * a sub-page is active.
+ * Per-project sub-pages (#B.127): "settings" hosts the moderation
+ * strategy + future admin; "stats" is read-only metrics. Entry points
+ * live in Settings > Projects (ProjectsPanel rows) — sidebar receives
+ * `projectPage` so the inbox item doesn't light up while a sub-page
+ * is active.
  */
-export type ProjectPage = "stats";
+export type ProjectPage = "stats" | "settings";
 
 defineProps<{
     items: ProjectListItem[];

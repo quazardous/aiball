@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import Select from "primevue/select";
-import { api, type Strategy } from "../lib/api";
-import { STRATEGY_OPTIONS } from "../lib/labels";
+import { api } from "../lib/api";
 
 const props = defineProps<{
     project: string;
@@ -38,55 +36,11 @@ const stats = ref<ProjectStatsRich | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
-// Strategy override state (#B.127). `strategy === null` means "follow
-// the global". Picker uses a sentinel "_global" value because Select
-// can't bind to null directly.
-const strategy = ref<Strategy | null>(null);
-const strategyGlobal = ref<Strategy>("auto-reply");
-const strategyBusy = ref(false);
-const GLOBAL_SENTINEL = "_global";
-type StrategyChoice = Strategy | typeof GLOBAL_SENTINEL;
-const strategyChoice = computed<StrategyChoice>({
-    get: () => strategy.value ?? GLOBAL_SENTINEL,
-    set: (v) => { void applyStrategy(v); },
-});
-const strategyOptions = computed(() => [
-    {
-        label: `Use global (currently: ${strategyGlobal.value})`,
-        value: GLOBAL_SENTINEL as StrategyChoice,
-        hint: "Project follows the daemon-wide strategy. Change the global from the header.",
-    },
-    ...STRATEGY_OPTIONS.map((o) => ({
-        label: o.label,
-        value: o.value as StrategyChoice,
-        hint: o.hint,
-    })),
-]);
-async function applyStrategy(v: StrategyChoice) {
-    strategyBusy.value = true;
-    try {
-        const next: Strategy | null = v === GLOBAL_SENTINEL ? null : v;
-        const r = await api.setProjectStrategy(props.project, next);
-        strategy.value = r.strategy;
-        strategyGlobal.value = r.global;
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        strategyBusy.value = false;
-    }
-}
-
 async function load() {
     loading.value = true;
     error.value = null;
     try {
-        const [statsResp, strategyResp] = await Promise.all([
-            api.projectStatsRich(props.project),
-            api.getProjectStrategy(props.project),
-        ]);
-        stats.value = statsResp as ProjectStatsRich;
-        strategy.value = strategyResp.strategy;
-        strategyGlobal.value = strategyResp.global;
+        stats.value = await api.projectStatsRich(props.project) as ProjectStatsRich;
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -124,26 +78,6 @@ const topIntentMax = computed(() =>
             <header class="project-stats__header">
                 <h2>{{ project }} — stats</h2>
                 <div class="project-stats__header-actions">
-                    <!-- #B.127 — per-project strategy override -->
-                    <Select
-                        v-model="strategyChoice"
-                        :options="strategyOptions"
-                        option-label="label"
-                        option-value="value"
-                        size="small"
-                        :disabled="strategyBusy"
-                        :title="strategy === null
-                            ? `Project follows the global strategy (${strategyGlobal})`
-                            : `Project override active — using “${strategy}” regardless of the global setting`"
-                        class="project-stats__strategy-select"
-                    >
-                        <template #option="{ option }">
-                            <div class="project-stats__strategy-opt">
-                                <div>{{ option.label }}</div>
-                                <small>{{ option.hint }}</small>
-                            </div>
-                        </template>
-                    </Select>
                     <button
                         type="button"
                         class="project-stats__refresh"
@@ -296,15 +230,6 @@ const topIntentMax = computed(() =>
     display: flex;
     align-items: center;
     gap: 0.5rem;
-}
-.project-stats__strategy-select {
-    min-width: 14rem;
-}
-.project-stats__strategy-opt small {
-    display: block;
-    color: var(--p-text-muted-color);
-    font-size: 0.78rem;
-    margin-top: 0.1rem;
 }
 .project-stats__refresh {
     background: transparent;

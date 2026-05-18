@@ -22,6 +22,7 @@ import InboxToolbar from "./components/InboxToolbar.vue";
 import PaginationBar from "./components/PaginationBar.vue";
 import NewTicketPage from "./components/NewTicketPage.vue";
 import ProjectStatsPage from "./components/ProjectStatsPage.vue";
+import ProjectSettingsPage from "./components/ProjectSettingsPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
 import ConsumersPanel from "./components/ConsumersPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
@@ -855,6 +856,7 @@ watch(showSnoozed, (v) => {
                 <ProjectsPanel
                     v-if="panel === 'projects'"
                     @open-stats="(name: string) => openProjectPage(name, 'stats')"
+                    @open-settings="(name: string) => openProjectPage(name, 'settings')"
                 />
                 <RulesPanel v-else-if="panel === 'rules'" />
                 <TagsPanel v-else-if="panel === 'tags'" />
@@ -873,6 +875,10 @@ watch(showSnoozed, (v) => {
                     @back="openTicketId = null"
                 />
 
+                <ProjectSettingsPage
+                    v-else-if="projectPage === 'settings' && project !== null"
+                    :project="project"
+                />
                 <ProjectStatsPage
                     v-else-if="projectPage === 'stats' && project !== null"
                     :project="project"
@@ -880,19 +886,19 @@ watch(showSnoozed, (v) => {
 
                 <template v-else>
                     <!-- #B.127: surface the per-project strategy state
-                         + a one-click path to change it. The actual
-                         selector lives on ProjectStatsPage; here we
-                         show a discrete tile so the user knows the
-                         feature exists. -->
+                         + a one-click path to change it. The selector
+                         now lives on ProjectSettingsPage (split from
+                         stats per david: "settings et stats clairement
+                         dissocié, 2 routes"). -->
                     <button
                         v-if="project"
                         type="button"
                         class="project-strategy-hint"
                         :title="`Click to manage the moderation strategy for \`${project}\` — set a per-project override or fall back to the global default.`"
-                        @click="openProjectPage(project, 'stats')"
+                        @click="openProjectPage(project, 'settings')"
                     >
                         <i class="pi pi-shield" />
-                        <span>strategy: project page →</span>
+                        <span>strategy: project settings →</span>
                     </button>
                     <InboxToolbar
                         :status-filter="statusFilter"
