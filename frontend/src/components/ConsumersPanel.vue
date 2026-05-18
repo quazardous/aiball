@@ -211,11 +211,14 @@ const sortedRows = computed<Consumer[]>(() => {
                 // Enabled-first when asc.
                 return mul * (Number(b.enabled) - Number(a.enabled));
             case "activity": {
-                // Sort by last_seen_at — most recent first when asc
-                // (most useful default for "who's around right now").
+                // Sort by last_seen_at. Follow the conventional
+                // direction: asc = OLDEST first (smallest timestamp),
+                // desc = most recent first. David flagged "ordre pas
+                // bon pour le temp" — earlier impl had it inverted.
+                // Null last_seen_at = treated as oldest (epoch).
                 const ta = a.last_seen_at ? Date.parse(a.last_seen_at) : 0;
                 const tb = b.last_seen_at ? Date.parse(b.last_seen_at) : 0;
-                return mul * (tb - ta);
+                return mul * (ta - tb);
             }
         }
     });
