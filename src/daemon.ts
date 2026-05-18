@@ -8,7 +8,7 @@ import { attachWs } from "./ws.js";
 import { getDb } from "./db.js";
 import { AIBALL_HOME, UPLOADS_DIR, ensureDirs } from "./paths.js";
 import { drainSpool, watchSpool } from "./spool.js";
-import { listExpiredPostpones, setTicketPostpone, getMessage } from "./db.js";
+import { listExpiredPostpones, setTicketPostpone, getMessage, backfillParentTicketRelations } from "./db.js";
 import { broadcast as wsBroadcast } from "./ws.js";
 import { checkSandboxPings } from "./sandbox/watcher.js";
 
@@ -108,6 +108,17 @@ function main(): void {
         else console.log("no frontend build found (dev mode)");
         drainSpool();
         watchSpool();
+        // #B.123 phase B.3: backfill typed `depends_on` relations from
+        // legacy parent_ticket_id rows. Idempotent — only inserts when
+        // no relation event between the pair already exists.
+        try {
+            const n = backfillParentTicketRelations();
+            if (n > 0) {
+                console.log(`backfilled ${n} parent→depends_on relation(s)`);
+            }
+        } catch (e) {
+            console.error("parent→depends_on backfill failed:", e);
+        }
         // Run the postpone reveal cron once at boot (in case the daemon
         // was down past a deadline), then every 60s after. 60s is fine
         // grain — users typically snooze for hours / days, not minutes.

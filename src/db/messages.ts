@@ -477,6 +477,74 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
         .sort((a, b) => b.last_event_id - a.last_event_id);
 }
 
+/**
+ * One-shot migration (#B.123 phase B.3): backfill `depends_on` typed
+ * relations from the legacy `parent_ticket_id` FK column. For every
+ * ticket with `parent_ticket_id` set, ensure a `depends_on` event
+ * exists from the child to the parent (only inserts when no active
+ * relation between the same pair is already in place — idempotent).
+ *
+ * Called at daemon boot. Best-effort: per-row failures are swallowed
+ * (we log a count) so a malformed sidecar doesn't kill the daemon.
+ * Returns the number of relations newly inserted (0 on re-run).
+ *
+ * After this migration, the lifecycle replay and the new typed-
+ * relations API treat both shapes uniformly. The legacy column stays
+ * in the schema (read-only) for backwards compat; new sub-tickets
+ * coming through `ticket_new(parent_ticket_id)` still set both for
+ * now (a follow-up can flip the writes to relations-only once we're
+ * confident the read paths agree).
+ */
+export function backfillParentTicketRelations(): number {
+    const db = getDb();
+    const parents = db.select({
+        id: schema.tickets.id,
+        parent: schema.tickets.parentTicketId,
+    })
+        .from(schema.tickets)
+        .all()
+        .filter((r) => r.parent !== null);
+
+    let inserted = 0;
+    for (const t of parents) {
+        const parent = t.parent;
+        if (parent === null) continue;
+        // Check if an active (any kind) ticket_relation already exists
+        // for this (child, parent) pair — we replay latest-per-target.
+        const existing = db.select({
+            meta: schema.messages.meta,
+            id: schema.messages.id,
+        })
+            .from(schema.messages)
+            .where(and(
+                eq(schema.messages.ticketId, t.id),
+                eq(schema.messages.kind, "ticket_relation"),
+                eq(schema.messages.status, "approved"),
+                eq(schema.messages.sourceTicketId, parent),
+            ))
+            .orderBy(desc(schema.messages.id))
+            .limit(1)
+            .all();
+        if (existing.length > 0) {
+            // Already migrated (or user explicitly set a relation
+            // between these two — don't overwrite their choice).
+            continue;
+        }
+        try {
+            insertTypedRelation({
+                source_ticket_id: t.id,
+                target_ticket_id: parent,
+                relation_kind: "depends_on",
+                by_agent: null, // system-authored backfill
+            });
+            inserted++;
+        } catch {
+            /* row-level failure, skip */
+        }
+    }
+    return inserted;
+}
+
 export function noteMessage(id: number, note: string | null): Message | null {
     const db = getDb();
     const t = db.update(schema.tickets)

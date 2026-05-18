@@ -76,6 +76,7 @@ export {
     insertRelationEvent,
     insertTypedRelation,
     listTypedRelationsForTicket,
+    backfillParentTicketRelations,
     type ActiveRelation,
     getMessage,
     getMessageByHashid,
