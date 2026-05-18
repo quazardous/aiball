@@ -199,7 +199,11 @@ export function userIsTakingOver(sd: string, graceSec: number): boolean {
 export type LoopStatus = "idle" | "boot" | "busy";
 
 const STATUS_COLORS: Record<LoopStatus, { bg: string; fg: string }> = {
-    busy: { bg: "colour34",  fg: "colour15" },  // green / white (claude processing)
+    // #B.154 david: "la couleur de busy c'est bleu electrique
+    // (le vert est pas clair en signal)". colour33 = vivid blue
+    // (~#0087ff), more readable as an active-state signal than the
+    // previous green and the original cyan.
+    busy: { bg: "colour33",  fg: "colour15" },  // electric blue / white (claude processing)
     idle: { bg: "colour240", fg: "colour15" },  // dark gray / white (at prompt)
     boot: { bg: "colour178", fg: "colour15" },  // yellow / white (transitional)
 };

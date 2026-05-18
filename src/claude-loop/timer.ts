@@ -214,54 +214,66 @@ async function mainSse(): Promise<void> {
         const woke = await tryWake("heartbeat");
         if (woke) settledStatus = "busy";
         else if (existsSync(idleMarkerPath(sd!))) settledStatus = "idle";
-        // #B.173: pane-probe correction. `esc to interrupt` is THE
-        // authoritative claude-busy signal (david: "seul le esc to
-        // interrupt est vraiment crucial dans le workflow"). Use the
-        // heartbeat to flip the bar between `busy` and `idle`
-        // independently of hook events, so slash commands that don't
-        // trigger Stop (/compact, /clear, …) don't leave us stuck.
-        // Boot stays sticky until settleBoot — don't pull the rug.
+        // Pane-probe (#B.173, refined #B.154 davids). `esc to
+        // interrupt` is THE authoritative claude-busy signal
+        // ("seul le esc to interrupt est vraiment crucial dans le
+        // workflow"). Heartbeat flips the bar between `busy` and
+        // `idle` independently of hook events, covering slash
+        // commands (/compact, /clear) that don't fire Stop hook.
+        //
+        // Runs from the FIRST heartbeat (no boot gate). The prompt-
+        // signature check ("Claude Code v" header or "❯"/"> ") guards
+        // against flipping to idle while claude is still spawning the
+        // splash — without it, an early empty pane would seed
+        // idle-since and the next tick would ping over a still-
+        // loading claude. When the pane settles, the probe overrides
+        // boot grace so we don't wait BOOT_GRACE_MS for nothing.
+        //
+        // For "state pas claire" (pane empty, garbled, no prompt
+        // signature, no esc-to-interrupt): stay last-state.
+        // Conservative — pinging into uncertainty is the costly
+        // mistake; over-displaying busy is the cheap one.
         //
         // Alternatives considered and DISCARDED (#B.172, david's hint
         // "le reste devrait servir à décorer (hint)") — kept here as
         // a written record so a future reader doesn't re-litigate:
         //   - Re-arm differé après transient state (detect compacting/
         //     rate-limit/api-error cleared after T+30s): decoration,
-        //     not workflow-critical. Stuck-in-transient bars are a
-        //     visual nuisance, not a correctness issue.
+        //     not workflow-critical.
         //   - Read claude-code's JSONL transcript at ~/.claude/
         //     projects/<hash>/<id>.jsonl for authoritative turn
-        //     boundaries: heavier (needs session_id resolution +
-        //     file-watch + JSON parse), and the `esc to interrupt`
-        //     pane probe already covers the only critical case.
+        //     boundaries: heavier, and `esc to interrupt` covers the
+        //     only critical case.
         //   - PostToolUse / PreToolUse hooks to differentiate
         //     busy:tool-use vs busy:thinking: pure decoration.
         //   - tmux pane-title / cursor-position events: claimed less
         //     fragile but requires custom tmux pipe-pane wiring; no
-        //     concrete payoff over the existing capture-pane regex.
-        // If a future need shows one of these has real value, open
-        // a fresh ticket; don't sneak it back in here.
-        if (settledStatus !== "boot") {
-            const paneText = capturePane();
-            if (paneText) {
-                const claudeWorking = /esc to interrupt/i.test(paneText);
-                if (claudeWorking && settledStatus !== "busy") {
-                    settledStatus = "busy";
-                } else if (!claudeWorking && settledStatus !== "idle") {
-                    // Claude is at the prompt. Seed idle-since so the
-                    // next tryWake has a clean gate and flip the bar.
-                    settledStatus = "idle";
-                    try {
-                        const { writeFileSync } = await import("node:fs");
-                        writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-                    } catch { /* ignore */ }
-                }
+        //     concrete payoff over capture-pane regex.
+        // If a future need shows real value, open a fresh ticket.
+        const paneText = capturePane();
+        if (paneText) {
+            const claudeWorking = /esc to interrupt/i.test(paneText);
+            const claudeReady = /Claude Code v|❯ |^> /m.test(paneText);
+            if (claudeWorking && settledStatus !== "busy") {
+                settledStatus = "busy";
+                bootSettled = true; // probe overrides boot grace
+            } else if (claudeReady && !claudeWorking && settledStatus !== "idle") {
+                // Claude is at the prompt. Seed idle-since so the
+                // next tryWake has a clean gate and flip the bar.
+                settledStatus = "idle";
+                bootSettled = true;
+                try {
+                    const { writeFileSync } = await import("node:fs");
+                    writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+                } catch { /* ignore */ }
             }
+            // Else: pane present but ambiguous → keep settledStatus.
         }
         // Refresh the bar with the current unread count (#B.149
         // david: "dans la barre mux on peut afficher le nombre de
         // read / ticket meme en idle ?"). Skipped while booting —
-        // count is meaningless until settleBoot fires.
+        // count is meaningless until settleBoot or the probe
+        // detected claude is ready (whichever comes first).
         if (settledStatus !== "boot") {
             try {
                 const r = await client().pingsCount() as { unread?: number };
