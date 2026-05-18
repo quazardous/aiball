@@ -21,6 +21,7 @@ import ThreadCommentsList, { type ThreadItem } from "./ThreadCommentsList.vue";
 import ThreadActionsDock from "./ThreadActionsDock.vue";
 import ThreadToolbar from "./ThreadToolbar.vue";
 import { bus, useBus } from "../lib/bus";
+import { useSnooze } from "../lib/snooze";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
 import MarkdownView from "./MarkdownView.vue";
@@ -1062,86 +1063,20 @@ const decisionMenu = computed(() => [
 ]);
 
 const broadcastBusy = ref(false);
-// Snooze (#B.329) — popover with presets + ISO custom input.
-const snoozeBusy = ref(false);
-const snoozePopoverRef = ref<InstanceType<typeof Popover> | null>(null);
-const snoozeCustom = ref("");
-
-function openSnoozePopover(ev: MouseEvent) {
-    snoozeCustom.value = "";
-    snoozePopoverRef.value?.show(ev);
-}
-
-async function snoozeFor(ms: number) {
-    if (!data.value) return;
-    const tid = data.value.ticket.id;
-    snoozeBusy.value = true;
-    try {
-        // #B.63: if the composer has body text, post it as a comment
-        // before the snooze — keeps the audit trail with the typed
-        // context ("snoozing because waiting on X"). Empty composer
-        // → just the snooze, same as before.
-        if (composerBody.value.trim()) {
-            await postBodyAs("comment_added");
-            composerBody.value = "";
-        }
-        const until = new Date(Date.now() + ms).toISOString();
-        await api.postponeTicket(tid, until);
-        snoozePopoverRef.value?.hide();
-        bus.emit("thread.refresh", { ticketId: tid });
-        bus.emit("inbox.refresh");
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        snoozeBusy.value = false;
-    }
-}
-
-async function snoozeCustomSubmit() {
-    if (!data.value || !snoozeCustom.value) return;
-    const tid = data.value.ticket.id;
-    const ts = Date.parse(snoozeCustom.value);
-    if (!Number.isFinite(ts) || ts <= Date.now()) {
-        error.value = "Snooze date must be a valid future ISO8601 timestamp";
-        return;
-    }
-    snoozeBusy.value = true;
-    try {
-        // Same as snoozeFor — embark the composer body if any.
-        if (composerBody.value.trim()) {
-            await postBodyAs("comment_added");
-            composerBody.value = "";
-        }
-        await api.postponeTicket(tid, new Date(ts).toISOString());
-        snoozePopoverRef.value?.hide();
-        bus.emit("thread.refresh", { ticketId: tid });
-        bus.emit("inbox.refresh");
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        snoozeBusy.value = false;
-    }
-}
-
-async function unsnooze() {
-    if (!data.value) return;
-    const tid = data.value.ticket.id;
-    snoozeBusy.value = true;
-    try {
-        await api.unsnoozeTicket(tid);
-        bus.emit("thread.refresh", { ticketId: tid });
-        bus.emit("inbox.refresh");
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        snoozeBusy.value = false;
-    }
-}
-
-const isSnoozed = computed(() => {
-    if (!data.value?.ticket.postponed_until) return false;
-    return Date.parse(data.value.ticket.postponed_until) > Date.now();
-});
+// Snooze flow (#B.329) — popover ref + busy + the three "set aside"
+// verbs (preset duration / custom datetime / unsnooze). Lives in
+// lib/snooze.ts since the logic is self-contained around (data,
+// composerBody, postBodyAs, error).
+const {
+    snoozeBusy,
+    popoverRef: snoozePopoverRef,
+    snoozeCustom,
+    openSnoozePopover,
+    snoozeFor,
+    snoozeCustomSubmit,
+    unsnooze,
+    isSnoozed,
+} = useSnooze({ data, composerBody, postBodyAs, error });
 
 async function toggleBroadcast() {
     if (!data.value) return;
