@@ -27,8 +27,31 @@ the human-readable narrative.
 - New dedicated edit page at `/consumers/<id>` (pi-pencil button
   per row) with a "← Consumers / <id>" breadcrumb header — full
   form for kind / display_name / note / enabled plus read-only
-  created_at + last_seen_at. Inline kind/display_name editors stay
-  on the table rows for quick tweaks.
+  created_at + last_seen_at.
+- The list table is now read-only — every edit goes through the
+  detail page. Kept the kind/display_name inline editors initially
+  but david: "la liste a plus besoin d'être éditable, je veux une
+  page détail édition d'un consumer" → removed.
+- Header blurb trimmed from a 13-line moderation primer to two
+  sentences (the old text pushed the table below the fold on phone).
+
+### Mobile navigation polish (`#B.194`)
+
+- "← Back to inbox" link rendered above every settings panel
+  (Projects / Rules / Tags / Consumers). The sidebar lives in the
+  mobile footer band and is easy to miss; the panels used to look
+  like dead-ends.
+- Auto-approve projects no longer fire two toasts per event. The
+  "pending review" toast holds for 250ms; if a decision lands in
+  that window, the pending timer is canceled and only the decision
+  shows.
+
+### Internal cleanup (continued)
+
+- `claudeStillWorking()` pane probe in the autopoll Stop hook now
+  forks tmux once instead of twice — `capture-pane` defaults to
+  the active pane in the current session when no `-t` is given,
+  so the prior `display-message` round-trip was unnecessary.
 
 ### Autopoll is quieter when there's nothing new (`#B.192`)
 
