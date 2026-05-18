@@ -36,7 +36,7 @@ The interaction model shifts from "interrupt with the next instruction" to "queu
 
 ## Quickstart — `claude-loop` (recommended)
 
-Shortest path: a tmux wrapper that runs claude inside a self-draining loop. claude wakes itself instantly on new pings (SSE event-bus, no polling lag) and you don't have to babysit a hook config.
+The productivity unlock. A tmux wrapper that keeps claude alive between tickets: queue twenty things over the day, walk away, claude wakes on each ping (SSE event-bus, no polling lag) and drains them. No hook config to babysit, no session to re-launch — the token quota becomes the only ceiling.
 
 ### 1. Install (one-time)
 
@@ -111,7 +111,7 @@ If you have one monolithic codebase with one agent, aiball reduces to a TODO lis
 
 ## Status
 
-Experimental. Used daily on a single machine to coordinate a handful of agent sessions. APIs and schema still moving — see git log. Issues + ideas welcome.
+Experimental. APIs and schema still moving — see git log. Issues + ideas welcome.
 
 ## License
 
