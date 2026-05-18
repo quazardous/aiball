@@ -180,21 +180,25 @@ export function userIsTakingOver(sd: string, graceSec: number): boolean {
  *
  * No-op when tmux is gone (loop was just rm'd) — never throw.
  */
-export type LoopStatus = "idle" | "busy" | "boot";
+export type LoopStatus = "idle" | "busy" | "boot" | "working";
 
 /**
- * tmux color palette per state (#B.146 / #B.149). Cyan (claude-loop
- * brand) stays for `busy` so an active loop pops; idle drops to dark
- * gray so a row of inactive loops fades into background. `boot` is
- * yellow — transitional state set by cli.ts at spawn-time, before
- * SessionStart hook fires and decides idle/busy. Without this, the
- * bar reads `[idle]` while claude is actually booting MCP/UI prompts
- * (david's #B.149: "ça devrait pas etre idle tout desuite").
+ * tmux color palette per state (#B.146 / #B.149 / #B.154). David:
+ * "la barre tmux devrait etre d'une couleur particulière si claude
+ * est en train de travailler (vs idle)". Differentiate:
+ *   - `working` (green) — claude actively mid-turn ("esc to
+ *     interrupt"). The bar pops to show the user "claude IS doing
+ *     stuff right now".
+ *   - `busy` (cyan, brand) — scheduled/queued, between turns or
+ *     waiting on backend (compacting / rate-limit / api-error).
+ *   - `idle` (dark gray) — at prompt, nothing to drain.
+ *   - `boot` (yellow) — transitional at spawn, before SessionStart.
  */
 const STATUS_COLORS: Record<LoopStatus, { bg: string; fg: string }> = {
-    busy: { bg: "colour39",  fg: "colour15" },  // cyan / white (default brand)
-    idle: { bg: "colour240", fg: "colour15" },  // dark gray / white
-    boot: { bg: "colour178", fg: "colour15" },  // yellow / white (transitional)
+    working: { bg: "colour34",  fg: "colour15" },  // green / white (claude mid-turn)
+    busy:    { bg: "colour39",  fg: "colour15" },  // cyan / white (queued/waiting)
+    idle:    { bg: "colour240", fg: "colour15" },  // dark gray / white
+    boot:    { bg: "colour178", fg: "colour15" },  // yellow / white (transitional)
 };
 
 export function setTmuxStatus(

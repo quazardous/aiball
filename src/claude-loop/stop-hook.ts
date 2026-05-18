@@ -80,9 +80,12 @@ function classifyPane(text: string): PaneState {
         const paneState = classifyPane(readPane());
         if (paneState.kind !== "normal") {
             // Suppress wake — claude is busy with something internal
-            // or blocked. Surface the state in the bar.
-            setTmuxStatus(name!, "busy", paneState.info);
-            log(`  pane state = ${paneState.kind} → suppress wake, status busy:${paneState.info}`);
+            // or blocked. Surface the state in the bar with a status
+            // that matches: `working` (green) when claude is actively
+            // mid-turn, `busy` (cyan) when queued/waiting on backend.
+            const status = paneState.kind === "working" ? "working" : "busy";
+            setTmuxStatus(name!, status, paneState.info);
+            log(`  pane state = ${paneState.kind} → suppress wake, status ${status}:${paneState.info}`);
             emit();
         }
         const hasWork = await checkHasWork(checkCmd);
