@@ -46,7 +46,7 @@ const bg = computed(() => props.tag.color ?? "var(--p-surface-200)");
     </span>
 </template>
 
-<style>
+<style scoped>
 .tag-badge {
     display: inline-flex;
     align-items: center;

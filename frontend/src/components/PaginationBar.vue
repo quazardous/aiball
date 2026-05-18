@@ -66,7 +66,7 @@ function goto(p: number) {
     </div>
 </template>
 
-<style>
+<style scoped>
 .pagination-bar {
     display: flex;
     align-items: center;

@@ -84,10 +84,11 @@ const readToggleAction = computed<BulkAction>(() =>
     </div>
 </template>
 
-<style>
-/* Sticky toolbar at the bottom of the inbox list. Not scoped: it
-   inherits the same surface tokens as the rest of the app and the
-   dark-mode override targets the body class .aiball-dark. */
+<style scoped>
+/* Sticky toolbar at the top of the inbox list. Scoped: dark-mode
+   overrides extracted to styles/theme-dark.css (#B.196 Layer 0); the
+   hide-on-mobile rule in App.vue uses !important so it still wins
+   over scoped specificity. */
 .bulk-bar {
     display: flex;
     align-items: center;
