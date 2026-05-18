@@ -71,6 +71,8 @@ tmux opens with claude inside. Status bar shows `[boot]` → `[idle 0]` → `[bu
 - **Sandbox loop** (autonomous unattended on a fixed ticket plate): `aiball sandbox start --tickets "10,11"` — see [`docs/SANDBOX.md`](./docs/SANDBOX.md).
 - **Bare MCP only** (other agents, no loop): [`MCP-CLIENT.md`](./MCP-CLIENT.md).
 - **Mint agent tokens** (only needed if you want stable per-agent auth across reboots): `aiball auth issue --consumer <agent-name>`.
+- **Remote access via Tailscale** (read inbox from your phone while away): one-line `tailscale serve --bg --https=443 127.0.0.1:7777` exposes aiball to your tailnet (still private, end-to-end encrypted, no public exposure). Full guide: [`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
+- **Windows install** (daemon + CLI + MCP): see [`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md). claude-loop port deferred (needs a Windows multiplexer).
 
 ---
 
