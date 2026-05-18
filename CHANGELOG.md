@@ -15,6 +15,16 @@ the human-readable narrative.
 
 ## [Unreleased]
 
+### Mobile new-ticket form: stack title + intent on narrow viewports (`#B.188`)
+
+The new-ticket form's title input + intent Select sat side-by-side
+in a flex row. On a phone the Select (min-width 9rem) overflowed
+slightly past the right edge — david screenshot: "champ type
+légèrement hors du cadre". Below 720px the row now stacks
+vertically; both fields take full width. Also added `min-width: 0`
+to the title input so it can shrink properly inside the flex row
+on intermediate widths.
+
 ### Mobile toast positioning fix (`#B.187`)
 
 The mobile-toast CSS block (edge-to-edge at the bottom) was
