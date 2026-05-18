@@ -1106,75 +1106,13 @@ async function copyTicketRef() {
         </div>
         <div v-else-if="!data && loading" class="aiball-empty">Loading…</div>
         <template v-else-if="data">
-            <!-- #B.133 follow-ups: in top-down the .thread-ticket card sinks
-                 to the bottom (order:4), dragging its in-article <header>
-                 and <h2> down with it ("le titre à disparu", then "il
-                 manque les tags etc dans la version topdown"). We lift a
-                 second copy of the full headline (meta tags + title) to
-                 the top of the flex. The in-article copy is hidden in
-                 top-down via CSS — never both visible. -->
-            <div v-if="topDown" class="thread-headline thread-headline--lifted">
-                <header class="meta">
-                    <Tag
-                        :value="justCopiedTicket ? `copied #B.${data.ticket.id}` : `#B.${data.ticket.id}`"
-                        :severity="justCopiedTicket ? 'success' : 'secondary'"
-                        class="comment-ref-tag"
-                        role="button"
-                        tabindex="0"
-                        :title="`Click to copy this ticket's reference (#B.${data.ticket.id}) — paste it in any markdown body to link back here.`"
-                        @click="copyTicketRef"
-                        @keydown.enter.prevent="copyTicketRef"
-                        @keydown.space.prevent="copyTicketRef"
-                    />
-                    <Tag :value="data.ticket.project" severity="info" />
-                    <Tag
-                        :value="data.ticket.status"
-                        :severity="statusSeverity(data.ticket.status)"
-                    />
-                    <Tag
-                        v-if="data.ticket.status !== 'rejected' && data.ticket.closed && data.ticket.resolved"
-                        value="closed (resolved)"
-                        severity="success"
-                        icon="pi pi-check-circle"
-                    />
-                    <Tag
-                        v-else-if="data.ticket.status !== 'rejected' && data.ticket.closed"
-                        value="closed"
-                        severity="warn"
-                        icon="pi pi-lock"
-                    />
-                    <Tag
-                        v-else-if="data.ticket.resolved"
-                        value="resolved (pending close)"
-                        severity="success"
-                        icon="pi pi-check-circle"
-                    />
-                    <span v-if="data.ticket.by_agent">by {{ data.ticket.by_agent }}</span>
-                    <span class="spacer" />
-                    <span :title="data.ticket.created_at">
-                        {{ new Date(data.ticket.created_at).toLocaleString() }}
-                    </span>
-                </header>
-                <h2 class="thread-title">{{ data.ticket.title }}</h2>
-                <!-- david "manque la nature": include the intent + tag
-                     chips in the lifted block so the ticket's "nature"
-                     is visible at the top in top-down. The original
-                     .thread-meta-extra (with the edit button) stays
-                     in-article — the edit button belongs near the body. -->
-                <div v-if="data.ticket.intent || (data.ticket.tags && data.ticket.tags.length)" class="thread-meta-extra thread-meta-extra--lifted">
-                    <Tag
-                        v-if="data.ticket.intent"
-                        :value="data.ticket.intent"
-                        :severity="data.ticket.intent === 'panic' ? 'danger' : 'info'"
-                    />
-                    <span
-                        v-for="t in data.ticket.tags"
-                        :key="t.id"
-                        class="thread-tag"
-                        :style="{ background: t.color ?? 'var(--p-surface-200)' }"
-                    >{{ t.name }}</span>
-                </div>
-            </div>
+            <!-- #B.133 follow-up (david "ça devrait être dans le cadre de
+                 la réponse en dropdown"): in top-down, the ticket
+                 context (#B.NNN, tags, status, title, intent) is hosted
+                 INSIDE the composer's frame via the #headline /
+                 #headline-summary slots — collapsed by default. The
+                 in-article copies stay in .thread-ticket (which sinks
+                 to the bottom in top-down). No second lifted block. -->
             <article class="thread-ticket">
                 <header class="meta">
                     <Tag
@@ -1491,6 +1429,66 @@ async function copyTicketRef() {
                                     ? 'Reply on this pending thread (markdown supported) — your comment goes through moderation unless you are human'
                                     : 'Reply on this thread (markdown supported, use > for quotes and #N to reference a comment)'"
             >
+                <template v-if="topDown" #headline-summary>
+                    <strong>#B.{{ data.ticket.id }}</strong>
+                    <span> — {{ data.ticket.title }}</span>
+                </template>
+                <template v-if="topDown" #headline>
+                    <header class="meta">
+                        <Tag
+                            :value="justCopiedTicket ? `copied #B.${data.ticket.id}` : `#B.${data.ticket.id}`"
+                            :severity="justCopiedTicket ? 'success' : 'secondary'"
+                            class="comment-ref-tag"
+                            role="button"
+                            tabindex="0"
+                            :title="`Click to copy this ticket's reference (#B.${data.ticket.id}) — paste it in any markdown body to link back here.`"
+                            @click="copyTicketRef"
+                            @keydown.enter.prevent="copyTicketRef"
+                            @keydown.space.prevent="copyTicketRef"
+                        />
+                        <Tag :value="data.ticket.project" severity="info" />
+                        <Tag
+                            :value="data.ticket.status"
+                            :severity="statusSeverity(data.ticket.status)"
+                        />
+                        <Tag
+                            v-if="data.ticket.status !== 'rejected' && data.ticket.closed && data.ticket.resolved"
+                            value="closed (resolved)"
+                            severity="success"
+                            icon="pi pi-check-circle"
+                        />
+                        <Tag
+                            v-else-if="data.ticket.status !== 'rejected' && data.ticket.closed"
+                            value="closed"
+                            severity="warn"
+                            icon="pi pi-lock"
+                        />
+                        <Tag
+                            v-else-if="data.ticket.resolved"
+                            value="resolved (pending close)"
+                            severity="success"
+                            icon="pi pi-check-circle"
+                        />
+                        <span v-if="data.ticket.by_agent">by {{ data.ticket.by_agent }}</span>
+                        <span class="spacer" />
+                        <span :title="data.ticket.created_at">
+                            {{ new Date(data.ticket.created_at).toLocaleString() }}
+                        </span>
+                    </header>
+                    <div v-if="data.ticket.intent || (data.ticket.tags && data.ticket.tags.length)" class="thread-meta-extra">
+                        <Tag
+                            v-if="data.ticket.intent"
+                            :value="data.ticket.intent"
+                            :severity="data.ticket.intent === 'panic' ? 'danger' : 'info'"
+                        />
+                        <span
+                            v-for="t in data.ticket.tags"
+                            :key="t.id"
+                            class="thread-tag"
+                            :style="{ background: t.color ?? 'var(--p-surface-200)' }"
+                        >{{ t.name }}</span>
+                    </div>
+                </template>
                 <template #extra-actions>
                     <template v-if="activeDecision">
                         <Button
@@ -1645,32 +1643,21 @@ async function copyTicketRef() {
    le body du ticket devrait être en bas non"). Composer sits just
    under the toolbar so the user types where the next comment lands.
    Re-orders the flex children — source order stays the same. */
-.thread-view--top-down .thread-headline--lifted { order: -1; }
 .thread-view--top-down .thread-toolbar { order: 0; }
 .thread-view--top-down > .composer { order: 1; }
 .thread-view--top-down .thread-summary-banner { order: 2; }
 .thread-view--top-down .thread-no-comments,
 .thread-view--top-down .thread-comments { order: 3; }
 .thread-view--top-down .thread-ticket { order: 4; }
-/* In top-down, the lifted headline above carries the meta tags, the
-   title, intent + tag chips — hide their in-article copies to avoid
-   showing them twice (top AND bottom). The in-article .thread-meta-extra
-   keeps its "edit message" button (it belongs near the body); we hide
-   only the chips inside it. */
+/* In top-down the ticket context (#B.NNN, status tags, title, intent,
+   tag chips) lives inside the composer's #headline dropdown — see
+   MessageComposer's .composer-headline. Hide the in-article copies so
+   they don't surface again at the bottom with the body. The "edit
+   message" button stays in-article (it edits the body it sits next to). */
 .thread-view--top-down .thread-ticket > header.meta,
 .thread-view--top-down .thread-ticket > .thread-title { display: none; }
 .thread-view--top-down .thread-ticket > .thread-meta-extra .p-tag,
 .thread-view--top-down .thread-ticket > .thread-meta-extra > .thread-tag { display: none; }
-.thread-headline--lifted {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-}
-.thread-headline--lifted .thread-title {
-    margin: 0;
-    font-size: 1.4rem;
-    line-height: 1.2;
-}
 .thread-toolbar {
     display: flex;
     align-items: center;
@@ -1702,7 +1689,7 @@ async function copyTicketRef() {
  * Without this, the unstyled `<header class="meta">` rendered as a
  * block and the date glued itself behind the author name (per #B.325). */
 .thread-ticket > header.meta,
-.thread-headline--lifted > header.meta {
+.composer-headline__body > header.meta {
     display: flex;
     gap: 0.5rem;
     align-items: center;

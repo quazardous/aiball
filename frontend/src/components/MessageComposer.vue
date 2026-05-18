@@ -451,6 +451,22 @@ async function onAttachPicked(ev: Event) {
 
 <template>
     <div class="composer">
+        <!-- #B.133: optional headline slot, rendered as a collapsible
+             dropdown at the top of the composer's frame. ThreadView
+             feeds the ticket header (#B.NNN tag, project, status, by,
+             title, intent, tags) so in top-down mode the context lives
+             "inside the reply container" instead of floating above it
+             (david: "ça devrait être dans le cadre de la réponse en
+             dropdown"). Hidden when the slot is empty. -->
+        <details v-if="$slots.headline" class="composer-headline">
+            <summary class="composer-headline__summary">
+                <i class="pi pi-chevron-right composer-headline__chevron" />
+                <slot name="headline-summary">context</slot>
+            </summary>
+            <div class="composer-headline__body">
+                <slot name="headline" />
+            </div>
+        </details>
         <div class="composer-meta">
             <span class="field-label" style="margin: 0">{{ roleLabel }}</span>
             <InputText
@@ -580,6 +596,37 @@ async function onAttachPicked(ev: Event) {
     flex-direction: column;
     gap: 0.6rem;
     background: var(--p-content-background);
+}
+/* #B.133: collapsible ticket-context header rendered at the top of the
+   composer frame in top-down mode. <details> is native and accessible;
+   we just style the disclosure triangle (suppressed) and use our own
+   chevron that rotates on open. */
+.composer-headline {
+    margin: -0.4rem -0.4rem 0;
+    padding: 0.3rem 0.45rem;
+    border-bottom: 1px dashed var(--p-content-border-color);
+}
+.composer-headline summary {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    color: var(--p-text-muted-color);
+    user-select: none;
+}
+.composer-headline summary::-webkit-details-marker { display: none; }
+.composer-headline__chevron {
+    transition: transform 0.15s;
+    font-size: 0.75rem;
+}
+.composer-headline[open] .composer-headline__chevron {
+    transform: rotate(90deg);
+}
+.composer-headline__body {
+    margin-top: 0.5rem;
+    padding-top: 0.3rem;
 }
 .composer-textarea-wrap {
     position: relative;
