@@ -948,6 +948,10 @@ api.get("/inbox", (req, res) => {
         // Only counts non-stale ones (we ignore them once the ticket is
         // closed since closing implicitly clears them).
         pendingResolution: boolean;
+        // #B.168: latest comment id carrying a resolution decision —
+        // used to honor "latest wins" when multiple resolution
+        // comments coexist on the same thread.
+        latestResolutionId: number;
         // #B.132: who spoke last on this thread. Tracks the by_agent
         // of the most recent non-rejected approved comment_added.
         // Falls back to the ticket creator if no comments yet.
@@ -970,6 +974,7 @@ api.get("/inbox", (req, res) => {
                 resolved: false,
                 blocked: false,
                 pendingResolution: false,
+                latestResolutionId: 0,
                 lastSpeaker: null,
                 lastSpeakerId: 0,
             } as Agg);
@@ -1006,15 +1011,25 @@ api.get("/inbox", (req, res) => {
         }
         // #B.129 phase 2: a comment carrying `meta.decision.kind ===
         // "resolution"` plays the same role as the legacy
-        // ticket_resolved event. Pending decision → pendingResolution;
-        // accepted → synthetic resolved event for the replay below.
+        // ticket_resolved event. Latest-wins semantics (#B.168):
+        // pending_resolution reflects whether the MOST RECENT
+        // resolution-decision comment is still pending — older
+        // pending proposals that the agent re-framed over time
+        // shouldn't keep the flag stuck after the reporter rejected
+        // the active one. otherMessages is sorted DESC by id, so the
+        // FIRST resolution-decision comment we see is the latest;
+        // skip subsequent ones via `latestResolutionId`. accepted →
+        // synthetic resolved event for the replay below.
         let syntheticResolved: Message | null = null;
         if (m.kind === "comment_added" && m.status === "approved") {
             const meta = parseMeta(m.meta ?? null);
             const d = meta.decision;
             if (d?.kind === "resolution") {
-                if (d.status === "pending") cur.pendingResolution = true;
-                else if (d.status === "accepted") {
+                if (cur.latestResolutionId === 0 || m.id > cur.latestResolutionId) {
+                    cur.latestResolutionId = m.id;
+                    cur.pendingResolution = d.status === "pending";
+                }
+                if (d.status === "accepted") {
                     syntheticResolved = { ...m, kind: "ticket_resolved" };
                 }
             }
@@ -1069,6 +1084,7 @@ api.get("/inbox", (req, res) => {
                 resolved: false,
                 blocked: false,
                 pendingResolution: false,
+                latestResolutionId: 0,
                 lastSpeaker: null,
                 lastSpeakerId: 0,
             } as Agg);
