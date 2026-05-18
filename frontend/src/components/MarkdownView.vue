@@ -223,7 +223,11 @@ function onContextMenu(ev: MouseEvent) {
     const ticketId = Number(match[1]);
     if (!Number.isFinite(ticketId) || ticketId <= 0) return;
     ev.preventDefault();
-    bus.emit("ticket-ref.promote", { ticket_id: ticketId, event: ev });
+    bus.emit("ticket-ref.promote", {
+        ticket_id: ticketId,
+        event: ev,
+        target: target as HTMLElement,
+    });
 }
 
 // #B.104: after every re-render, scan rendered checkboxes and wire

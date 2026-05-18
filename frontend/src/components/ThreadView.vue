@@ -96,7 +96,11 @@ useBus("ticket-ref.promote", (payload) => {
         target_ticket_id: payload.ticket_id,
         kind: existing?.kind ?? null,
     };
-    relationMenuRef.value?.show(payload.event);
+    // Anchor the popover on the link element itself (2nd arg of
+    // Popover.show is the explicit target) so it lands next to the
+    // ref, not at the @contextmenu listener's host (.md-body). David
+    // #B.123: "le popup est pas bien accroché à la réf (loin)".
+    relationMenuRef.value?.show(payload.event, payload.target);
 });
 async function pickRelationKind(newKind: RelationKind) {
     const t = relationMenuTarget.value;
