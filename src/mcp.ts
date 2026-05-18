@@ -645,7 +645,7 @@ server.registerTool(
     "ticket_get",
     {
         description:
-            "Get a ticket. **Default: header only** (no body, no comments) + `comment_count` — cheap probe of state. Pass `full: true` for the full thread (header with body + all approved comments). Pass `brief: true` for the **agent-friendly read** (#B.130): header + body + comments where each agent comment that carried a `summary_until` ships ONLY that snapshot (body replaced). The LAST comment always keeps its full body. Comments WITHOUT a summary_until (humans, who are exempt; pre-#B.130 history) keep their body too — so brief reads are never silently lossy.\n\n**How to use brief efficiently**: scan top→bottom. The latest snapshot + the last body is enough to resume the ticket — that's the contract `ticket_reply.summary_until` enforces. If you need an older body specifically (e.g. a long human comment in the middle of a thread), re-fetch with `full: true`.",
+            "Get a ticket. **Default: header only** (no body, no comments) + `comment_count` — cheap probe of state. Pass `full: true` for the full thread (header with body + all approved comments). Pass `brief: true` for the **agent-friendly read** (#B.130): header + body + comments where each agent comment that carried a `summary_until` ships ONLY that snapshot (body replaced). The LAST comment always keeps its full body. Comments WITHOUT a summary_until (humans, who are exempt; pre-#B.130 history) keep their body too — so brief reads are never silently lossy.\n\n**How to use brief efficiently**: scan top→bottom. The latest snapshot + the last body is enough to resume the ticket — that's the contract `ticket_reply.summary_until` enforces. If you need an older body specifically (e.g. a long human comment in the middle of a thread), re-fetch with `full: true`. On very long human-heavy threads where brief still blows the budget, pair brief with `tail: N` (#B.202) to keep just the last N bodies — cheaper than `full`.",
         inputSchema: {
             ticket_id: z.number().int(),
             full: z
@@ -660,13 +660,22 @@ server.registerTool(
                 .describe(
                     "If true, return the full thread but with each agent comment's body replaced by its `meta.summary_until` snapshot (the one-line ticket state AFTER that comment — see ticket_reply.summary_until contract). The LAST comment ALWAYS keeps its full body so you see the current 'now'. Comments without a summary_until (humans + pre-#B.130) keep their body — brief reads never silently drop content. Use this to scan long threads cheaply (~5x token reduction on threads with disciplined snapshots).",
                 ),
+            tail: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe(
+                    "Brief-mode only (#B.202): keep the N most-recent comment bodies intact, not just the last one. Default 1 (legacy behaviour). Useful on long threads where the last comment + one snapshot isn't enough — bump to 3-5 to see recent back-and-forth without falling back to `full: true`. Ignored when `brief` is not set.",
+                ),
         },
     },
-    async ({ ticket_id, full, brief }) => {
+    async ({ ticket_id, full, brief, tail }) => {
         return asText(
             await client.getTicket(ticket_id, {
                 summary: full !== true && brief !== true,
                 brief: brief === true,
+                tail,
             }),
         );
     },

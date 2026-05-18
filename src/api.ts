@@ -1635,18 +1635,26 @@ api.get("/tickets/:id", (req, res) => {
     // meta.summary_until surface as `summary_until: null` and the
     // consumer decides whether to refetch full.
     const brief = req.query.brief === "1";
+    // #B.202: `tail=N` keeps the N most-recent approved comment_added
+    // bodies (default 1 = legacy behaviour). Lets the reader scale
+    // brief reads on threads where summary_until isn't enough.
+    const tailRaw = req.query.tail;
+    const tailParsed = typeof tailRaw === "string" ? Number.parseInt(tailRaw, 10) : NaN;
+    const tail = Number.isFinite(tailParsed) && tailParsed > 0 ? tailParsed : 1;
     let outComments = enrichRelationStages(withTags(threadMessages));
     if (brief) {
-        // Find the highest-id approved comment_added — its body is
-        // always shipped in full so the reader sees the "now".
-        let lastCommentId = 0;
-        for (const m of threadMessages) {
-            if (m.kind === "comment_added" && m.status === "approved" && m.id > lastCommentId) {
-                lastCommentId = m.id;
-            }
-        }
+        // Keep the `tail` most-recent approved comment_added bodies
+        // intact so the reader sees the "now" tail; older comments
+        // collapse to summary_until.
+        const keepIds = new Set<number>();
+        const approvedIds = threadMessages
+            .filter((m) => m.kind === "comment_added" && m.status === "approved")
+            .map((m) => m.id)
+            .sort((a, b) => b - a)
+            .slice(0, tail);
+        for (const id of approvedIds) keepIds.add(id);
         outComments = outComments.map((m) => {
-            if (m.kind !== "comment_added" || m.id === lastCommentId) return m;
+            if (m.kind !== "comment_added" || keepIds.has(m.id)) return m;
             const meta = parseMeta(m.meta ?? null);
             const summaryUntil = meta.summary_until ?? null;
             // Replacement is conditional on a summary being present.
@@ -1687,6 +1695,7 @@ api.get("/tickets/:id", (req, res) => {
         comments: outComments,
         focus_message_id: focusMessageId,
         brief,
+        tail: brief ? tail : undefined,
     });
 });
 
