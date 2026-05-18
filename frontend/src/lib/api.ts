@@ -286,12 +286,25 @@ export interface PostMessageInput {
 
 /** Consumer registry entry (#B.79). */
 export type ConsumerKind = "human" | "agent" | "sandbox";
+/** Claude-loop state pushed by the timer (#B.177 B1). */
+export type ConsumerState = "boot" | "idle" | "busy";
 export interface Consumer {
     consumer_id: string;
     kind: ConsumerKind;
     display_name: string | null;
     enabled: boolean;
     note: string | null;
+    /** #B.177: ISO8601 of last API call from this consumer. */
+    last_seen_at?: string | null;
+    /** #B.177 B1: current claude-loop state (null = no loop tracking). */
+    state?: ConsumerState | null;
+    /** #B.177 B1: ISO8601 of when current state was entered. */
+    state_since?: string | null;
+    /**
+     * #B.177 B1: ISO8601 of last heartbeat. UI computes "offline"
+     * when `now - state_updated_at > 60s`.
+     */
+    state_updated_at?: string | null;
     created_at: string;
     updated_at: string;
 }

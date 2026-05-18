@@ -285,6 +285,28 @@ export const consumers = sqliteTable("consumers", {
     passwordHash: text("password_hash"),
     /** ISO8601 of the last successful login. NULL if never logged in. */
     lastLoginAt: text("last_login_at"),
+    /**
+     * ISO8601 of the last API request this consumer made (#B.177).
+     * Touched on every request that carries `x-aiball-consumer` /
+     * resolves to this id. Surfaced in the consumers panel as
+     * "Last seen 2 min ago".
+     */
+    lastSeenAt: text("last_seen_at"),
+    /**
+     * Current claude-loop state pushed by the timer (#B.177 B1):
+     * `boot` / `idle` / `busy`. NULL when the consumer isn't a
+     * claude-loop agent (humans, ephemeral sandboxes).
+     */
+    state: text("state"),
+    /** ISO8601 of the LAST TRANSITION into the current state. */
+    stateSince: text("state_since"),
+    /**
+     * ISO8601 of the last state heartbeat (timer pushes every tick
+     * regardless of transition). Used by the UI to detect "offline"
+     * (no heartbeat in the last 60s) — distinct from `lastSeenAt`
+     * which moves on any API call (e.g. an MCP `ticket_get`).
+     */
+    stateUpdatedAt: text("state_updated_at"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (t) => [

@@ -14,6 +14,7 @@ import {
     anyHumanCredentials,
     getTokenAndTouch,
     isHuman,
+    touchLastSeen,
     type Token,
 } from "./db.js";
 
@@ -136,6 +137,7 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         const ar = req as AuthenticatedRequest;
         ar.consumer_id = cid;
         ar.token_kind = "agent";
+        touchLastSeen(cid); // #B.177
         next();
         return;
     }
@@ -178,6 +180,7 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         }
         // Non-humans: silently ignore the override.
     }
+    touchLastSeen(ar.consumer_id); // #B.177
     next();
 }
 

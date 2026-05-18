@@ -12,6 +12,8 @@ import { getDb, nowIso } from "./connection.js";
 
 export type ConsumerKind = "human" | "agent" | "sandbox";
 
+export type ConsumerState = "boot" | "idle" | "busy";
+
 export interface Consumer {
     consumer_id: string;
     kind: ConsumerKind;
@@ -21,6 +23,14 @@ export interface Consumer {
     /** Whether this consumer has a password set (for human web login). */
     has_password?: boolean;
     last_login_at?: string | null;
+    /** #B.177: ISO8601 of the last API request this consumer made. */
+    last_seen_at?: string | null;
+    /** #B.177 B1: current claude-loop state, null if not a loop agent. */
+    state?: ConsumerState | null;
+    /** #B.177 B1: when current state was entered. */
+    state_since?: string | null;
+    /** #B.177 B1: last state heartbeat — UI uses this for offline detection. */
+    state_updated_at?: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -34,6 +44,10 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         note: r.note,
         has_password: !!r.passwordHash,
         last_login_at: r.lastLoginAt,
+        last_seen_at: r.lastSeenAt,
+        state: (r.state as ConsumerState | null) ?? null,
+        state_since: r.stateSince,
+        state_updated_at: r.stateUpdatedAt,
         created_at: r.createdAt,
         updated_at: r.updatedAt,
     };
@@ -60,6 +74,47 @@ export function touchLastLogin(consumer_id: string): void {
     const now = nowIso();
     getDb().update(schema.consumers)
         .set({ lastLoginAt: now, updatedAt: now })
+        .where(eq(schema.consumers.consumerId, consumer_id))
+        .run();
+}
+
+/**
+ * Bump `last_seen_at` to now (#B.177). Called from the request
+ * middleware on every API call that resolves a consumer header.
+ * Cheap: single column update, no read first. Silent no-op when
+ * the consumer row doesn't exist (ensureConsumer covers creation).
+ */
+export function touchLastSeen(consumer_id: string): void {
+    if (!consumer_id) return;
+    const now = nowIso();
+    getDb().update(schema.consumers)
+        .set({ lastSeenAt: now })
+        .where(eq(schema.consumers.consumerId, consumer_id))
+        .run();
+}
+
+/**
+ * Push the claude-loop state for this consumer (#B.177 B1). On state
+ * change, `state_since` advances (transition timestamp). On every
+ * call, `state_updated_at` is touched — the heartbeat freshness
+ * signal the UI uses for "offline" detection.
+ */
+export function setConsumerState(consumer_id: string, state: ConsumerState): void {
+    if (!consumer_id) return;
+    const now = nowIso();
+    const cur = getDb().select({ state: schema.consumers.state })
+        .from(schema.consumers)
+        .where(eq(schema.consumers.consumerId, consumer_id))
+        .get();
+    const changed = cur?.state !== state;
+    const patch: Partial<schema.NewConsumerRow> = {
+        state,
+        stateUpdatedAt: now,
+        updatedAt: now,
+    };
+    if (changed) patch.stateSince = now;
+    getDb().update(schema.consumers)
+        .set(patch)
         .where(eq(schema.consumers.consumerId, consumer_id))
         .run();
 }

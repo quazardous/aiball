@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
 import { api, type Consumer, type ConsumerKind } from "../lib/api";
+
+// #B.177: how long without a state heartbeat before we render the
+// loop agent as "offline" in the Activity badge. Matches david's
+// 60s default from the design comment on the ticket.
+const OFFLINE_THRESHOLD_MS = 60_000;
+
+// Tick-clock so "2 min ago" updates without re-fetching the API.
+const now = ref(Date.now());
+let nowTimer: ReturnType<typeof setInterval> | null = null;
 
 const toast = useToast();
 const rows = ref<Consumer[]>([]);
@@ -104,8 +113,67 @@ async function remove(consumer_id: string) {
     }
 }
 
-onMounted(load);
-</script>
+onMounted(() => {
+    load();
+    // Live-poll the consumers list so the activity column reflects
+    // heartbeats from claude-loop timers without manual refresh.
+    nowTimer = setInterval(() => {
+        now.value = Date.now();
+        // Re-fetch every 5 ticks (~30s) — cheap, gets state changes.
+        if (Math.floor(now.value / 1000) % 30 === 0) void load();
+    }, 6_000);
+});
+onUnmounted(() => {
+    if (nowTimer) clearInterval(nowTimer);
+});
+
+// =====================================================================
+// #B.177 Activity column helpers
+// =====================================================================
+
+function relativeTime(iso: string | null | undefined): string {
+    if (!iso) return "never";
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return iso;
+    const diff = now.value - t;
+    if (diff < 0) return "just now";
+    if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min ago`;
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+    return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+/** True when the consumer is a claude-loop agent whose last heartbeat
+ *  is older than OFFLINE_THRESHOLD_MS — the timer process is likely
+ *  gone or wedged. */
+function isOffline(r: Consumer): boolean {
+    if (!r.state || !r.state_updated_at) return false;
+    const t = Date.parse(r.state_updated_at);
+    if (!Number.isFinite(t)) return false;
+    return now.value - t > OFFLINE_THRESHOLD_MS;
+}
+
+function loopBadgeLabel(r: Consumer): string {
+    if (isOffline(r)) return "offline";
+    return r.state ?? "";
+}
+
+function loopBadgeSeverity(r: Consumer): "info" | "secondary" | "warn" {
+    if (isOffline(r)) return "secondary";
+    if (r.state === "busy") return "info";    // electric blue — matches tmux bar
+    if (r.state === "boot") return "warn";    // yellow
+    return "secondary";                        // idle = gray
+}
+
+function loopBadgeTooltip(r: Consumer): string {
+    if (!r.state) return "no claude-loop activity recorded";
+    if (isOffline(r))
+        return `last heartbeat ${relativeTime(r.state_updated_at)} — timer likely down`;
+    return `${r.state} since ${relativeTime(r.state_since)}`;
+}
+
+const hasLoopAgents = computed(() => rows.value.some((r) => !!r.state));
+void hasLoopAgents; // referenced in template via direct access</script>
 
 <template>
     <div class="consumers-panel">
@@ -169,7 +237,8 @@ onMounted(load);
                     <th>Consumer id</th>
                     <th>Kind</th>
                     <th>Display name</th>
-                    <th>State</th>
+                    <th>Activity</th>
+                    <th>Active</th>
                     <th />
                 </tr>
             </thead>
@@ -208,6 +277,21 @@ onMounted(load);
                             @change="(e: Event) => patch(r.consumer_id, { display_name: (e.target as HTMLInputElement).value || null })"
                             placeholder="(uses id)"
                             style="width: 14rem"
+                        />
+                    </td>
+                    <td class="activity-cell">
+                        <div
+                            class="activity-cell__seen"
+                            :title="r.last_seen_at ?? 'never seen'"
+                        >
+                            {{ relativeTime(r.last_seen_at) }}
+                        </div>
+                        <Tag
+                            v-if="r.state"
+                            :value="loopBadgeLabel(r)"
+                            :severity="loopBadgeSeverity(r)"
+                            :title="loopBadgeTooltip(r)"
+                            class="activity-cell__state"
                         />
                     </td>
                     <td>
@@ -312,5 +396,18 @@ onMounted(load);
        and the row's border-bottom aligns across all columns. */
     min-height: 2.4375rem;
     line-height: 1;
+}
+/* #B.177 Activity column */
+.consumers-table .activity-cell {
+    display: table-cell;
+    min-width: 8rem;
+    vertical-align: middle;
+}
+.consumers-table .activity-cell__seen {
+    font-size: 0.85em;
+    color: var(--p-text-muted-color);
+}
+.consumers-table .activity-cell__state {
+    margin-top: 2px;
 }
 </style>

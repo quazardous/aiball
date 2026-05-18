@@ -383,6 +383,20 @@ export class AiballClient {
     }
 
     /**
+     * #B.177 B1: push the current claude-loop state for this consumer
+     * (own-state only — the daemon refuses cross-consumer pushes).
+     * Best-effort: failures are not surfaced to the caller, the timer
+     * heartbeats again on the next tick.
+     */
+    pushState(state: "busy" | "idle" | "boot") {
+        return this.http<{ consumer_id: string; state: string }>(
+            "PUT",
+            `/api/consumers/${encodeURIComponent(this.agentId)}/state`,
+            { state },
+        );
+    }
+
+    /**
      * Open a long-lived SSE stream for live ping notifications
      * (#B.148 phase B). Each `event: ping` from the daemon invokes
      * the handler with the parsed JSON payload (typically

@@ -280,6 +280,15 @@ async function mainSse(): Promise<void> {
                 setTmuxStatus(name!, settledStatus, r.unread ?? 0);
             } catch { /* swallow — bar stays as-is */ }
         }
+        // #B.177 B1: heartbeat push of current state to the daemon
+        // so the consumers panel shows `[busy]`/`[idle]`/`[boot]` per
+        // agent + an "offline" badge after 60s without a push.
+        // Fire on EVERY tick (not just transitions) — the daemon
+        // updates `state_updated_at` always, freshness signal for
+        // the UI's offline detector.
+        try {
+            await client().pushState(settledStatus);
+        } catch { /* daemon down or transient — next tick retries */ }
     }
     log("tmux session gone — timer exiting");
     if (unsubscribe) (unsubscribe as () => void)();

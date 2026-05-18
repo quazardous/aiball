@@ -170,8 +170,11 @@ export {
     getPasswordHash,
     setPasswordHash,
     touchLastLogin,
+    touchLastSeen,
+    setConsumerState,
     type Consumer,
     type ConsumerKind,
+    type ConsumerState,
 } from "./db/consumers.js";
 
 export {

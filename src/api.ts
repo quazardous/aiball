@@ -77,9 +77,11 @@ import {
     deleteUploadRow,
     listConsumers,
     getConsumer,
+    ensureConsumer,
     upsertConsumer,
     updateConsumer,
     deleteConsumer,
+    setConsumerState,
     isHuman,
     getPasswordHash,
     setPasswordHash,
@@ -1791,6 +1793,40 @@ api.delete("/consumers/:consumer_id", (req: Request, res: Response) => {
     deleteConsumer(consumer_id);
     broadcast({ type: "consumer_changed", data: { consumer_id, deleted: true } });
     res.json({ consumer_id, deleted: true });
+});
+
+/**
+ * #B.177 B1: claude-loop timer pushes its current state here on every
+ * heartbeat tick (busy / idle / boot). `state_since` only advances on
+ * transition; `state_updated_at` is touched every call (freshness
+ * signal the UI uses for "offline" detection).
+ *
+ * Auth: own-state only — the resolved consumer (from header/token)
+ * must match :consumer_id. Prevents one agent from spoofing another's
+ * state. Humans can't push state (kind=human is silently rejected to
+ * keep the UI semantic clean: state badges are for loop agents only).
+ */
+api.put("/consumers/:consumer_id/state", (req: Request, res: Response) => {
+    const target = String(req.params.consumer_id);
+    const caller = consumerOf(req);
+    if (target !== caller) {
+        return res.status(403).json({ error: "can only push state for your own consumer_id" });
+    }
+    const c = getConsumer(caller);
+    if (!c) {
+        // ensureConsumer + auto-set state — bootstrap when a loop
+        // starts before the consumer has any post history.
+        ensureConsumer(caller);
+    } else if (c.kind === "human") {
+        return res.status(403).json({ error: "state push is for loop agents, not humans" });
+    }
+    const body = (req.body ?? {}) as { state?: unknown };
+    if (body.state !== "busy" && body.state !== "idle" && body.state !== "boot") {
+        return badRequest(res, "state must be one of: busy, idle, boot");
+    }
+    setConsumerState(caller, body.state);
+    broadcast({ type: "consumer_changed", data: { consumer_id: caller, state: body.state } });
+    res.json({ consumer_id: caller, state: body.state });
 });
 
 // -------- rules ------------------------------------------------------------
