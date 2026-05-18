@@ -10,12 +10,12 @@
  * Logs to stdout (the launcher redirects to $STATE_DIR/timer.log).
  * Exits when the tmux session disappears.
  */
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { parse as parseYaml } from "yaml";
 import {
     MUX_CMD,
     idleMarkerPath,
+    pickPingPhrase,
     pingsPath,
     tmuxName,
     wakeRequestedPath,
@@ -41,17 +41,7 @@ function tmuxAlive(): boolean {
 }
 
 function pickPhrase(): string {
-    try {
-        const raw = readFileSync(pingsPath(sd!), "utf8");
-        const parsed = parseYaml(raw) as { ping_messages?: unknown };
-        const list = Array.isArray(parsed?.ping_messages)
-            ? (parsed.ping_messages as unknown[]).filter((x): x is string => typeof x === "string")
-            : [];
-        if (list.length === 0) return "ping";
-        return list[Math.floor(Math.random() * list.length)];
-    } catch {
-        return "ping";
-    }
+    return pickPingPhrase(pingsPath(sd!));
 }
 
 function sendKeys(phrase: string): void {

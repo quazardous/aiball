@@ -12,6 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 
 export const STATE_ROOT = process.env.CLAUDE_LOOP_STATE_ROOT
     ?? join(homedir(), ".claude-loop");
@@ -81,4 +82,25 @@ export function installRoot(): string {
 /** Path to the default ping phrases yaml shipped with the install. */
 export function defaultPingsPath(): string {
     return join(installRoot(), "skill", "claude-loop-pings.yaml");
+}
+
+/**
+ * Read the loop's pings YAML and return one phrase at random. Falls
+ * back to "ping" on any read/parse failure so the wake-up always
+ * delivers SOMETHING — the wrapper's job is to poke claude, not to
+ * be picky about which phrase. Shared by the timer (per-tick wake)
+ * and the CLI startup nudge (#B.63 follow-up: same source for both).
+ */
+export function pickPingPhrase(pingsAbsPath: string): string {
+    try {
+        const raw = readFileSync(pingsAbsPath, "utf8");
+        const parsed = parseYaml(raw) as { ping_messages?: unknown };
+        const list = Array.isArray(parsed?.ping_messages)
+            ? (parsed.ping_messages as unknown[]).filter((x): x is string => typeof x === "string")
+            : [];
+        if (list.length === 0) return "ping";
+        return list[Math.floor(Math.random() * list.length)];
+    } catch {
+        return "ping";
+    }
 }

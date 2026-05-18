@@ -32,6 +32,7 @@ import {
     defaultPingsPath,
     envPath,
     idleMarkerPath,
+    pickPingPhrase,
     pingsPath,
     platePath,
     readPlate,
@@ -169,15 +170,15 @@ function cmdStart(opts: StartOpts): void {
     child.unref();
     writeFileSync(timerPidPath(sd), String(child.pid) + "\n");
 
-    // Kick claude into action after SessionStart settles. Always
-    // sends a wake-up — claude itself is responsible for figuring
-    // out whether there's work (via its MCP tools / context). David:
-    // "quand on lance claude-loop si y a du taf il faut immédiatement
-    // ping claude c'est tout". `--no-startup-ping` opts out for the
-    // rare case the user wants a silent boot.
+    // Kick claude into action after SessionStart settles. Same
+    // pop-culture phrase pool as the timer (per david: "on peut
+    // utiliser notre ping pop culture existant") — startup and tick
+    // wake-ups speak the same language. `--no-startup-ping` opts out
+    // for a silent boot.
     if (!opts.noStartupPing) {
+        const phrase = pickPingPhrase(pingsPath(sd));
         spawnSync("bash", ["-c",
-            `(sleep 3 && ${shQuote(MUX_CMD)} send-keys -t ${shQuote(tname)} 'check the backlog' Enter) >/dev/null 2>&1 &`,
+            `(sleep 3 && ${shQuote(MUX_CMD)} send-keys -t ${shQuote(tname)} ${shQuote(phrase)} Enter) >/dev/null 2>&1 &`,
         ]);
     }
 
