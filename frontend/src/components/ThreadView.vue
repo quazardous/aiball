@@ -567,10 +567,21 @@ const latestPendingId = computed<number | null>(() => {
 // proposal is moot, so we never surface a decision UI in that state.
 const pendingResolution = computed<Message | null>(() => {
     if (!data.value || data.value.ticket.closed) return null;
+    // #B.129 follow-up: when a newer activeDecision exists on a
+    // comment, the legacy ticket_resolved pending row is stale and
+    // its accept controls would double-post (the legacy accept-as-
+    // plan path posts a "(accepted as plan)" marker comment, while
+    // the new decision-on-comment path correctly just flips meta).
+    // Suppress the legacy controls in that case — the user should
+    // only see one accept/reject pair under the composer.
     const pending = data.value.comments
         .filter((m) => m.kind === "ticket_resolved" && m.status === "pending")
         .sort((a, b) => b.id - a.id);
-    return pending[0] ?? null;
+    const legacyTop = pending[0] ?? null;
+    if (!legacyTop) return null;
+    const newer = findActiveDecision(data.value.comments);
+    if (newer && newer.message.id > legacyTop.id) return null;
+    return legacyTop;
 });
 
 // #B.129 phase 3: the active decision = the most recent comment_added
