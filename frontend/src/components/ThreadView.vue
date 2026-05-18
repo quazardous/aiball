@@ -14,6 +14,7 @@ import { STATUS_SEVERITY } from "../lib/labels";
 import { topDown, toggleTopDown } from "../lib/prefs";
 import { RELATION_KINDS, RELATION_LABELS as TYPED_RELATION_LABELS, type RelationKind } from "../lib/relations";
 import RelationChip from "./RelationChip.vue";
+import ThreadRelations from "./ThreadRelations.vue";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -1557,70 +1558,21 @@ async function copyTicketRef() {
                         </li>
                     </ul>
                 </details>
-                <!-- #B.123 phase B.2: typed relations cartouche. Chips
-                     for each active relation (kind label + linked
-                     target) + add-relation widget. Per-chip change-kind
-                     and × remove land in B.2.c. -->
-                <div
-                    v-if="(data.ticket.relations && data.ticket.relations.length > 0) || true"
-                    class="thread-relations"
-                >
-                    <span class="thread-relations__label">
-                        <i class="pi pi-share-alt" />
-                        Relations
-                    </span>
-                    <RelationChip
-                        v-for="r in data.ticket.relations ?? []"
-                        :key="`${r.target_ticket_id}-${r.last_event_id}`"
-                        :relation="r"
-                        @open-menu="(payload) => openRelationMenu(payload.event, payload.relation)"
-                    />
-                    <Button
-                        v-if="!addRelationOpen"
-                        icon="pi pi-plus"
-                        label="relation"
-                        size="small"
-                        severity="secondary"
-                        text
-                        title="Link this ticket to another with a typed relation (#B.123 phase B)"
-                        @click="addRelationOpen = true"
-                    />
-                </div>
-                <div v-if="addRelationOpen" class="thread-relations-form">
-                    <InputText
-                        v-model="newRelationTarget"
-                        placeholder="target ticket — 42 or #B.42"
-                        size="small"
-                        :disabled="addRelationBusy"
-                        style="max-width: 14rem"
-                        @keydown.enter.prevent="submitNewRelation"
-                    />
-                    <Select
-                        v-model="newRelationKind"
-                        :options="relationKindOptions"
-                        option-label="label"
-                        option-value="value"
-                        size="small"
-                        :disabled="addRelationBusy"
-                        style="min-width: 10rem"
-                    />
-                    <Button
-                        label="add"
-                        icon="pi pi-check"
-                        size="small"
-                        :loading="addRelationBusy"
-                        :disabled="!newRelationTarget.trim()"
-                        @click="submitNewRelation"
-                    />
-                    <Button
-                        label="cancel"
-                        size="small"
-                        severity="secondary"
-                        text
-                        :disabled="addRelationBusy"
-                        @click="addRelationOpen = false; newRelationTarget = ''"
-                    />
-                </div>
+                <!-- #B.123 phase B.2 / #B.196 split: relations cartouche
+                     extracted to ThreadRelations.vue. State is hoisted so
+                     the top-down mirror instance below shares the same
+                     form. The change-kind / remove popover stays here
+                     (one ref, both instances trigger it via @open-menu). -->
+                <ThreadRelations
+                    :relations="data.ticket.relations ?? []"
+                    v-model:form-open="addRelationOpen"
+                    v-model:form-target="newRelationTarget"
+                    v-model:form-kind="newRelationKind"
+                    :busy="addRelationBusy"
+                    :relation-kind-options="relationKindOptions"
+                    @submit="submitNewRelation"
+                    @open-menu="(payload) => openRelationMenu(payload.event, payload.relation)"
+                />
                 <h2 class="thread-title">{{ data.ticket.title }}</h2>
                 <div
                     v-if="data.ticket.resolved && !data.ticket.closed"
@@ -1901,68 +1853,20 @@ async function copyTicketRef() {
                             {{ new Date(data.ticket.created_at).toLocaleString() }}
                         </span>
                     </header>
-                    <!-- Mirror the .thread-relations row + add widget
-                         from the article so the lifted headline has the
-                         same info AND the same affordances as bottom-up
-                         mode (the article copy is hidden in topdown via
-                         CSS, so we re-render the interactive parts here). -->
-                    <div class="thread-relations">
-                        <span class="thread-relations__label">
-                            <i class="pi pi-share-alt" />
-                            Relations
-                        </span>
-                        <RelationChip
-                            v-for="r in data.ticket.relations ?? []"
-                            :key="`hdr-${r.target_ticket_id}-${r.last_event_id}`"
-                            :relation="r"
-                            @open-menu="(payload) => openRelationMenu(payload.event, payload.relation)"
-                        />
-                        <Button
-                            v-if="!addRelationOpen"
-                            icon="pi pi-plus"
-                            label="relation"
-                            size="small"
-                            severity="secondary"
-                            text
-                            title="Link this ticket to another with a typed relation"
-                            @click="addRelationOpen = true"
-                        />
-                    </div>
-                    <div v-if="addRelationOpen" class="thread-relations-form">
-                        <InputText
-                            v-model="newRelationTarget"
-                            placeholder="target ticket — 42 or #B.42"
-                            size="small"
-                            :disabled="addRelationBusy"
-                            style="max-width: 14rem"
-                            @keydown.enter.prevent="submitNewRelation"
-                        />
-                        <Select
-                            v-model="newRelationKind"
-                            :options="relationKindOptions"
-                            option-label="label"
-                            option-value="value"
-                            size="small"
-                            :disabled="addRelationBusy"
-                            style="min-width: 10rem"
-                        />
-                        <Button
-                            label="add"
-                            icon="pi pi-check"
-                            size="small"
-                            :loading="addRelationBusy"
-                            :disabled="!newRelationTarget.trim()"
-                            @click="submitNewRelation"
-                        />
-                        <Button
-                            label="cancel"
-                            size="small"
-                            severity="secondary"
-                            text
-                            :disabled="addRelationBusy"
-                            @click="addRelationOpen = false; newRelationTarget = ''"
-                        />
-                    </div>
+                    <!-- Mirror cartouche for the top-down headline (same
+                         component, hoisted state syncs the form across
+                         both instances). #B.196 split. -->
+                    <ThreadRelations
+                        :relations="data.ticket.relations ?? []"
+                        v-model:form-open="addRelationOpen"
+                        v-model:form-target="newRelationTarget"
+                        v-model:form-kind="newRelationKind"
+                        :busy="addRelationBusy"
+                        :relation-kind-options="relationKindOptions"
+                        instance-key-prefix="hdr-"
+                        @submit="submitNewRelation"
+                        @open-menu="(payload) => openRelationMenu(payload.event, payload.relation)"
+                    />
                     <h2 class="thread-title">{{ data.ticket.title }}</h2>
                     <div v-if="data.ticket.intent || (data.ticket.tags && data.ticket.tags.length)" class="thread-meta-extra">
                         <Tag
