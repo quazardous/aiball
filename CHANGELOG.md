@@ -15,6 +15,105 @@ the human-readable narrative.
 
 ## [Unreleased]
 
+### SSE event-bus — daemon push, kill the polling lag (`#B.148`)
+
+The daemon now exposes a Server-Sent-Events stream at
+`GET /api/events?consumer_id=X`. New ping insertions emit a `ping` event
+to every subscriber for that recipient in real time (sub-10ms end-to-end
+in smoke tests, FIFO-ordered, no drops).
+
+- **Daemon side**: `src/event-bus.ts` (typed EventEmitter), `insertPing`
+  emits on successful insert (skips `onConflictDoNothing` duplicates),
+  `/api/events` endpoint with `hello` boot frame + 30s keepalive + clean
+  teardown on close/error.
+- **Client side**: `AiballClient.subscribeEvents({onPing, onHello?,
+  onError?}): unsubscribe` opens an SSE stream over UDS, parses frames,
+  invokes callbacks. No built-in reconnect — caller decides.
+- **claude-loop timer** now picks SSE mode automatically when the
+  check-cmd is the default `aiball pings-count -q`. Wake fires
+  ~immediately on a new ping. Heartbeat (interval) stays as a safety
+  net for `wake-requested` files + SSE-drop reconnect. Custom check-cmds
+  keep the legacy polling loop.
+
+Latency before: worst-case `CL_INTERVAL` (60s default). Latency after:
+~1ms (DB insert → emit → SSE flush → wake).
+
+### claude-loop diagnostic toolkit (`#B.149`, `#B.154`)
+
+Two new subcommands to debug "loop stays idle, why?" without spawning a
+claude session:
+
+- `claude-loop check [name]` — one-shot report: resolved consumer_id,
+  unread pings count, project subscriptions, verdict (WAKE/SLEEP), plus
+  contextual hints when AIBALL_PROJECT is set but the consumer has no
+  subscription on it.
+- `claude-loop trace [--events] [--once] [--interval N]` — foreground
+  gate evaluator. Default prints WAKE/sleep every N seconds. `--events`
+  opens SSE and tails every incoming event raw (no claude, no tmux —
+  pure observation).
+
+`bin/claude-loop` launcher now resolves `AIBALL_SOCK` (same logic as
+`bin/aiball`), so `claude-loop check` works standalone without the
+daemon's auth-via-token path.
+
+### claude-loop SessionStart matcher fix (`#B.148`)
+
+Hook matcher was `"startup"` only, so `claude --resume` (matcher
+`"resume"`) and `claude --continue`/`/clear` (matcher `"clear"`) skipped
+the boot drain entirely. Combined with SSE only delivering NEW pings
+(existing unread don't replay at connect), loops stayed `[idle]` after
+resume even with work waiting. Fix: register the hook against the three
+matchers (array form). Plus the timer now does an immediate `tryWake`
+right after subscribing, as a defensive catch-up when SessionStart
+misses.
+
+Also: `claude-loop start --user-grace <sec>` CLI option (`#B.145`),
+inline `UserPromptSubmit` hook refreshing a `user-took-over` marker; the
+timer skips wakes while the marker is fresh (default 300s) so the
+wrapper doesn't send-keys over a human-driven prompt.
+
+### Mobile-responsive UI pass (`#B.161`, `#B.150`, `#B.158`, `#B.159`, `#B.165`)
+
+First-pass mobile readiness for tailscale/phone access. Audited live at
+500px viewport, fixed several breaks:
+
+- **Header** wraps on narrow viewports (was clipping the strategy
+  dropdown). At <720px: strategy select hidden (accessible via Project
+  Settings), badges compacted, h1 smaller, spacer collapsed. All
+  controls visible on at most two rows.
+- **Sidebar** projects list collapses to a CSS `<details>` dropdown on
+  mobile (open by default on desktop). Settings section becomes a
+  horizontal icon-row pushed to the bottom of the sidebar band —
+  matches david's "settings should read as footer" intent without
+  splitting the component.
+- **Toasts** go edge-to-edge with detail footer hidden on mobile (the
+  summary already carries the kind + ref).
+- **Consumers panel** border-bottom now aligns across all cells on
+  every row (was a 7px drift from a leaked `display: flex` rule in
+  ProjectsPanel — scoped selectors with `.consumers-table` prefix fix
+  it).
+- **Relation-promote popover** survives navigation no more — Popover
+  state hidden + reset on `ticketId` watcher. Plus an explicit close X
+  button top-right.
+
+### ticket_referenced dedupe (`#B.153`)
+
+`insertRelationEvent` now skips inserting a `ticket_referenced` row
+when one already exists for the same (target, source) pair — fixes the
+"referenced from #B.NN, #B.NN" rendering noise when a source ticket
+edits or re-mentions the same target across multiple comments.
+
+### README + hero image (`#B.157`)
+
+- New title: `aiball — local backlog for inter-agent coordination`
+- Hero diagram at the top (`assets/aiball-loop.png`)
+- Pseudo-loop section rewritten with the SSE + claude-loop + MCP
+  primitives now shipped
+- "Two key innovations" (decision-on-comment + SSE event-bus) +
+  "Useful primitives for Claude Code users" + "Why not slack-bot" sub-
+  sections aligned with the diagram
+- GitHub repo description updated to match
+
 ### claude-loop — new generic tickable wrapper (`#B.63`)
 
 `claude-loop` wraps a Claude Code session in a tmux loop that wakes itself
