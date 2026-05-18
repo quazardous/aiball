@@ -470,26 +470,41 @@ const sortedRows = computed<Consumer[]>(() => {
     .consumers-table .col-enabled {
         display: none;
     }
+    /* Drop table layout in favor of flex per row — width:99%/1%/1%
+       on table cells didn't pack tight enough (consumer_id cell took
+       its full 99% even when content was only "aiball-dev", leaving
+       a big in-cell gap before Activity). With flex, the cid grows
+       and the other two shrink to their intrinsic content, packed
+       left-to-right with zero slack. */
+    .consumers-table,
+    .consumers-table thead,
+    .consumers-table tbody {
+        display: block;
+    }
+    .consumers-table tr {
+        display: flex;
+        align-items: center;
+        border-bottom: 1px solid var(--p-content-border-color);
+    }
     .consumers-table th,
     .consumers-table td {
+        border-bottom: none;
         padding: 0.4rem 0.35rem;
         height: auto;
     }
-    /* With only 3 visible cells, force the browser to stretch the
-       consumer_id column and shrink Activity + Actions to their
-       intrinsic widths — otherwise the table distributes free space
-       between Activity and Actions and you get a big blank gap
-       between them. */
     .consumers-table .consumers-cid {
-        width: 99%;
+        flex: 1 1 0;
+        min-width: 0;
+        overflow: hidden;
     }
     .consumers-table .activity-cell {
+        flex: 0 0 auto;
         min-width: 0;
-        width: 1%;
         white-space: nowrap;
     }
     .consumers-table .action-cell {
-        width: 1%;
+        flex: 0 0 auto;
+        width: auto;
         padding-right: 0.25rem;
     }
 }
