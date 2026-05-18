@@ -52,31 +52,34 @@ claude-loop rm bg
 claude-loop prune                  # offers to delete orphan state dirs
 ```
 
-Default behavior on `start`: **attach immediately** + **send a
-"check the backlog" ping** so claude starts useful right away (it
-figures out what to do via its own context / MCP tools — the
-wrapper doesn't try to know what "work" is). Flip via `--no-attach`
-or `--no-startup-ping`.
+Default behavior on `start`: **attach immediately** + **send a random
+wake-up ping** (via the SessionStart hook, after claude has finished
+booting — no race with MCP trust prompts) IF the check-cmd reports
+work. Otherwise claude opens silently and the timer takes over.
+Flip via `--no-attach` or `--no-startup-ping`.
 
 ---
 
 ## How it works
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│ tmux session cl-<NAME>      (single pane = claude itself)  │
-│                                                            │
-│   user prompt waits ← send-keys ← detached timer process   │
-│                  │                          ▲              │
-│   Stop hook ─────┘                          │ poll         │
-│      writes idle-since                      │ every        │
-│             │                               │ CL_INTERVAL  │
-│             ▼                               │              │
-│        ~/.claude-loop/<NAME>/idle-since ────┘              │
-└────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│ tmux session cl-<NAME>        (single pane = claude itself)     │
+│                                                                 │
+│   SessionStart hook ──┐                                         │
+│      runs check-cmd   │                                         │
+│      → wake if work   ▼                                         │
+│   user prompt waits ←── send-keys ←─── detached timer process   │
+│                  │                              ▲               │
+│   Stop hook ─────┘                              │ tick every    │
+│      writes idle-since                          │ CL_INTERVAL   │
+│             │                                   │ + check-cmd   │
+│             ▼                                   │ (gates wake)  │
+│        ~/.claude-loop/<NAME>/idle-since ────────┘               │
+└─────────────────────────────────────────────────────────────────┘
                               │
-        detached child:  src/claude-loop/timer.ts (tsx)
-        logs to ~/.claude-loop/<NAME>/timer.log
+       detached child:  src/claude-loop/timer.ts (tsx)
+       logs to ~/.claude-loop/<NAME>/timer.log
 ```
 
 State dir per loop: `~/.claude-loop/<NAME>/` containing
@@ -89,9 +92,9 @@ State dir per loop: `~/.claude-loop/<NAME>/` containing
 - `timer.pid` — pid of the detached timer process
 - `timer.log` — stdout/stderr of the timer (inspect with `tail --timer`)
 
-The Stop hook is installed via `claude --settings '<inline JSON>'`
-so it applies ONLY to this session — no pollution of the user's
-`.claude/settings.json`.
+Both hooks (SessionStart + Stop) are installed via `claude --settings
+'<inline JSON>'` so they apply ONLY to this session — no pollution
+of the user's `.claude/settings.json`.
 
 ---
 
@@ -118,16 +121,23 @@ ping_messages:
 
 ## Cadence
 
-The timer fires every `--interval` seconds (default 60). If claude
-is idle when the tick lands, it gets a random wake-up phrase typed
-into its prompt. If claude is mid-turn (no idle marker), the tick
-is skipped — no double-poke.
+The timer fires every `--interval` seconds (default 60). On each
+tick:
 
-There's no `--check-cmd` (#B.63 v1 had one; david: "il faut
-immédiatement ping claude c'est tout"). The wrapper doesn't try to
-know what "work" is — claude does, via its own MCP tools / context.
-On each wake-up claude polls, decides, processes, and returns to
-idle until the next tick.
+1. **Is claude idle?** (Stop hook touched `idle-since` on its last
+   turn). No → skip the tick.
+2. **Is there work?** Run `--check-cmd`. Exit 0 → wake. Non-zero →
+   stay idle, wait for the next tick.
+
+`--check-cmd` default = `aiball pings-count -q` (wake when there
+are unread pings for the consumer). Optimized path: when using the
+default, the timer calls `AiballClient.pingsCount()` in-process
+instead of forking a subprocess. Pass `--check-cmd 'your shell'`
+for any custom check; pass `--check-cmd true` to disable the gate
+entirely and ping every tick.
+
+Manual wake (`claude-loop wake NAME`) bypasses the check-cmd — the
+next tick fires regardless of what the check would have said.
 
 ---
 
@@ -165,9 +175,13 @@ becomes sub-second.
 
 - `bin/claude-loop` — thin bash launcher → `tsx src/claude-loop/cli.ts`
 - `src/claude-loop/cli.ts` — Commander-based CLI surface
-- `src/claude-loop/state.ts` — state-dir helpers + Plate type
+- `src/claude-loop/state.ts` — state-dir helpers + Plate type +
+  `pickPingPhrase()` + `DEFAULT_CHECK_CMD`
 - `src/claude-loop/stop-hook.ts` — Stop hook (writes idle-since)
-- `src/claude-loop/timer.ts` — detached timer process (polls, send-keys)
+- `src/claude-loop/session-start-hook.ts` — SessionStart hook
+  (gates the startup ping on the same check-cmd as the timer)
+- `src/claude-loop/timer.ts` — detached timer process (polls,
+  send-keys; in-process AiballClient fastpath on default check)
 - `skill/claude-loop-pings.yaml` — default ping phrases pool
 - `docs/SANDBOX.md` — `aiball sandbox`, the aiball-specific
   specialization (will be refactored to use claude-loop underneath in

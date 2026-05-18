@@ -120,6 +120,9 @@ function cmdStart(opts: StartOpts): void {
         `export CL_INTERVAL=${String(opts.interval)}`,
         `export CL_CHECK_CMD=${shQuote(opts.checkCmd)}`,
         `export CL_PINGS=${shQuote(pingsPath(sd))}`,
+        // Read by the SessionStart hook to decide whether to ping at
+        // boot. Empty / unset = ping (per default). "1" = stay silent.
+        `export CL_NO_STARTUP_PING=${shQuote(opts.noStartupPing ? "1" : "")}`,
         "",
     ];
     writeFileSync(envPath(sd), envLines.join("\n"));
@@ -129,8 +132,17 @@ function cmdStart(opts: StartOpts): void {
     // pollution of the user's ~/.claude/settings.json.
     const root = selfRoot();
     const stopHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/stop-hook.ts"))}`;
+    const sessionStartHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/session-start-hook.ts"))}`;
     const settings = {
         hooks: {
+            // SessionStart fires once when claude has finished booting
+            // — replaces the fragile `sleep 3 && send-keys` race the
+            // wrapper used (#B.63 follow-up: david saw bugs when
+            // claude was still prompting for MCP trust etc).
+            SessionStart: [{
+                matcher: "startup",
+                hooks: [{ type: "command", command: sessionStartHookCmd }],
+            }],
             Stop: [{ hooks: [{ type: "command", command: stopHookCmd }] }],
         },
     };
@@ -174,17 +186,12 @@ function cmdStart(opts: StartOpts): void {
     child.unref();
     writeFileSync(timerPidPath(sd), String(child.pid) + "\n");
 
-    // Kick claude into action after SessionStart settles. Same
-    // pop-culture phrase pool as the timer (per david: "on peut
-    // utiliser notre ping pop culture existant") — startup and tick
-    // wake-ups speak the same language. `--no-startup-ping` opts out
-    // for a silent boot.
-    if (!opts.noStartupPing) {
-        const phrase = pickPingPhrase(pingsPath(sd));
-        spawnSync("bash", ["-c",
-            `(sleep 3 && ${shQuote(MUX_CMD)} send-keys -t ${shQuote(tname)} ${shQuote(phrase)} Enter) >/dev/null 2>&1 &`,
-        ]);
-    }
+    // No more sleep+send-keys race for the startup ping — handled
+    // by src/claude-loop/session-start-hook.ts which fires when the
+    // session is actually ready and gates on the same check-cmd
+    // (see SessionStart entry in the inline settings JSON above).
+    // pickPingPhrase still used by the hook + the timer.
+    void pickPingPhrase;
 
     // Default behavior: attach. David: "par défaut claude-loop
     // devrait s'attacher (on peut faire un flag inversé)".

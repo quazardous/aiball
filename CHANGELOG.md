@@ -7,6 +7,90 @@ handful of bullets describing what changed for users / integrators, not a
 file-by-file diff. If you want details, see the linked tickets or
 `git log`. Dates are YYYY-MM-DD; format inspired by Keep a Changelog.
 
+Multi-component changes get listed under one date even when individual
+versions diverge — qcmp.yaml tracks per-component versions; this file is
+the human-readable narrative.
+
+---
+
+## [Unreleased]
+
+### claude-loop — new generic tickable wrapper (`#B.63`)
+
+`claude-loop` wraps a Claude Code session in a tmux loop that wakes itself
+when idle. Built generic but ships aiball-aware by default — the timer
+checks `aiball pings-count` each tick and pings claude only when there's
+work to drain (no unnecessary nags). Pure timer mode still available via
+`--check-cmd true`. Direct in-process AiballClient call when using the
+default check (no fork per tick).
+
+Defaults: spawn + attach + random pop-culture wake-up phrase ("Hello,
+Dave." / "Make it so." / "Allons-y!" — 20 phrases in
+`skill/claude-loop-pings.yaml`, overridable). `--no-attach` / `--no-
+startup-ping` / `--interval N` / `--check-cmd '<shell>'` / `--pings
+<yaml>` for fine control. Anything after `--` is forwarded to `claude`
+(e.g., `claude-loop -- --model opus -p "hello"`).
+
+Wired into the existing install pipeline (`install.sh` symlinks
+`~/.local/bin/claude-loop`; `--uninstall` cleans all three CLIs).
+
+Architecture mirrors `aiball`: `bin/claude-loop` is a thin bash launcher
+→ `tsx src/claude-loop/cli.ts`. State lives in `~/.claude-loop/<NAME>/`
+(plate.json, env, pings.yaml, idle-since, timer.log). Inline `claude
+--settings` JSON registers SessionStart + Stop hooks scoped to that
+session — no pollution of the user's `.claude/settings.json`.
+
+- **SessionStart hook** replaces the fragile `sleep 3 && send-keys` race
+  for the startup ping. Fires when claude is actually ready (after MCP
+  trust prompts etc), gates on the same check-cmd as the timer.
+- **Stop hook** writes an `idle-since` marker each turn; the timer
+  consults it before considering a wake.
+- **`aiball pings-count`** new CLI subcommand: prints the unread ping
+  count, exits 0 when > 0 (= work to drain), 1 when 0. Shell-pipeline
+  friendly.
+
+Subcommands: `start | list | attach | tail | rm | wake | prune`.
+
+### Typed inter-ticket relations (`#B.123`)
+
+New `ticket_relation` event kind backed by an N-N event-sourced graph.
+Five kinds: `relates_to | depends_on | blocks | duplicates | ignored`.
+UI cartouche in the thread header with per-chip change-kind menu +
+remove (tombstone via `kind=ignored`). Right-click on any `#B.NN` link
+in a comment body opens a promote popover anchored on the link with the
+target's title fetched lazily. Chips display the target's lifecycle
+stage badge (closed / closed-resolved / rejected / snoozed).
+
+Backfill at daemon boot: existing `parent_ticket_id` rows get a
+`depends_on` relation event so the new graph subsumes the legacy sub-
+ticket shape. Idempotent. `actionable_count` now excludes tickets with
+an active `depends_on` to an open blocker.
+
+### Wording + UI polish
+
+- **summary_until cap removed** (`#B.130`) — was 200 → 500 → none; now
+  a free-text field like `body`. MCP description carries a state-vs-
+  action contract with good/bad examples to coach agents on framing.
+- **TLDR banner intercalé** between the carrier comment and the post-
+  summary comments (`#B.130`). Older `summary_until` values stay
+  invisible by design — latest wins.
+- **Brief mode lossless** (`#B.130`) — comments without a
+  `summary_until` (humans, pre-`#B.130`) keep their body instead of
+  returning `null`. Brief mode is now lossy-by-summary, never lossy-by-
+  absence.
+- **SplitButton accept wording** (`#B.139`) — main label now reads
+  "accept resolution → close" (arrow notation makes the effect
+  explicit); dropdown lists all variants including the default as the
+  first item so users have two equivalent paths.
+- **Decider chip** (`#B.129`) — a comment that triggered an
+  accept/reject act now carries a small severity-colored chip pointing
+  at the target (frontend-only heuristic, 60s window). Suppressed when
+  the comment already carries its own decision chip — no dupes.
+- **Search respects `open` filter** (`#B.135`) — previously only
+  excluded rejected tickets; now also excludes lifecycle-closed.
+- **Sidebar counters consistent** (`#B.138`) — `resolved_count` badge
+  now also excludes snoozed tickets, matching the inbox list.
+
 ---
 
 ## [0.5.0] — 2026-05-12
