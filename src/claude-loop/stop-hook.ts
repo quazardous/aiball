@@ -16,7 +16,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_USER_GRACE_SEC, MUX_CMD, WAKE_COALESCE_WINDOW_MS, checkHasWork, idleMarkerPath, lastWakeAtPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
+import { DEFAULT_USER_GRACE_SEC, MUX_CMD, WAKE_COALESCE_WINDOW_MS, checkHasWork, formatPaneSnapshot, idleMarkerPath, lastWakeAtPath, pickPingPhrase, pingsPath, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -80,22 +80,19 @@ function classifyTurn(): string {
     return `turn=${turn} last-wake=${fmt(wake)} user-took-over=${fmt(user)} wake-in-flight=${fmt(inflight)}`;
 }
 
-// #B.154: probe the visible pane for claude-side states that
-// shouldn't get a wake. Compacting takes minutes (claude is busy
-// summarizing the session); rate-limited / API errors mean any new
-// send-keys will queue uselessly. Both surface in the tmux bar
-// as transient `[busy:compacting]` / `[busy:rate-limit]` etc and
-// suppress the auto-ping so we don't pile garbage into claude.
+// #B.154 / #B.198: probe the visible pane via the shared
+// `snapshotPane` service (state.ts). Returns `{ busy, special }` —
+// the same snapshot is logged on every FIRE so david can see what the
+// hook saw (#B.198 david: "ajoute la detection esc to interrupt dans
+// les log").
 //
-// #B.185: dropped the `working` (esc-to-interrupt) detection here.
-// The Stop hook fires when claude has ENDED a turn — by definition
-// not working anymore — so probing for "esc to interrupt" only
-// caught stale footer text from the just-finished turn and
-// suppressed the idle-since write, leaving the bar stuck on busy
-// forever (david: "claude-loop reste encore en busy alors qu'on a
-// fait plusieur tour de ping → hook stop"). Compacting/rate-limit/
-// api-error stay because those are pane-persistent conditions that
-// Claude legitimately reports even mid-turn.
+// `special` (compacting / rate-limit / api-error) STILL suppresses
+// the wake — pane-persistent conditions where any send-keys queues
+// uselessly. `busy` (esc-to-interrupt) is recorded for visibility but
+// does NOT suppress here: per #B.185 the Stop hook fires post-turn so
+// the footer text is by definition stale; gating on it left the bar
+// stuck on busy forever (david: "claude-loop reste encore en busy
+// alors qu'on a fait plusieur tour de ping → hook stop").
 function readPane(): string {
     try {
         const r = spawnSync(MUX_CMD, [
@@ -104,30 +101,17 @@ function readPane(): string {
         return r.stdout ?? "";
     } catch { return ""; }
 }
-type PaneState = { kind: "compacting" | "rate-limit" | "api-error" | "normal"; info: string };
-function classifyPane(text: string): PaneState {
-    if (/Compacting|compacting conversation|Summarizing the conversation/i.test(text)) {
-        return { kind: "compacting", info: "compacting" };
-    }
-    if (/Rate limited|temporarily limiting requests/i.test(text)) {
-        return { kind: "rate-limit", info: "rate-limit" };
-    }
-    if (/API Error|APIError/i.test(text)) {
-        return { kind: "api-error", info: "api-error" };
-    }
-    return { kind: "normal", info: "" };
-}
 
 (async () => {
-    log(`FIRE — ${classifyTurn()} | checkCmd=${checkCmd}`);
+    const pane = snapshotPane(readPane());
+    log(`FIRE — ${classifyTurn()} | ${formatPaneSnapshot(pane)} | checkCmd=${checkCmd}`);
     try {
-        const paneState = classifyPane(readPane());
-        if (paneState.kind !== "normal") {
+        if (pane.special !== null) {
             // Suppress wake — claude is doing something internal
             // (compacting, etc.) or blocked on backend. Surface the
-            // SUB-STATE in the bar as a `busy:<info>` suffix.
-            setTmuxStatus(name!, "busy", paneState.info);
-            log(`  → SUPPRESS (pane=${paneState.kind}) became=busy:${paneState.info}`);
+            // SUB-STATE in the bar as a `busy:<special>` suffix.
+            setTmuxStatus(name!, "busy", pane.special);
+            log(`  → SUPPRESS (pane=${pane.special}) became=busy:${pane.special}`);
             emit();
         }
         // #B.195 — when the human typed within the user-grace window,

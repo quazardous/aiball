@@ -294,6 +294,73 @@ export function paneFooterShowsBusy(paneText: string, footerLines = 5): boolean 
     return /esc to interrupt/i.test(footer);
 }
 
+/**
+ * Special pane states surfaced by Claude Code that should suppress
+ * auto-wakes regardless of the `esc to interrupt` mid-turn signal.
+ *
+ *   - `compacting`  — `/compact` or auto-compact summarizing the
+ *     transcript; the next prompt has to wait for it to finish.
+ *   - `rate-limit`  — Anthropic backend throttling; any new send-keys
+ *     just queues uselessly.
+ *   - `api-error`   — transient API failure visible to the user; same
+ *     reasoning, don't pile on.
+ */
+export type PaneSpecial = "compacting" | "rate-limit" | "api-error";
+
+export interface PaneSnapshot {
+    /** True iff the pane footer shows `esc to interrupt` — claude is
+     *  visually mid-turn. Authoritative claude-busy signal (#B.173). */
+    busy: boolean;
+    /** Special state if detected; null on a normal/idle pane. */
+    special: PaneSpecial | null;
+}
+
+/**
+ * Classify the special states (compacting / rate-limit / api-error)
+ * visible in the captured pane text. Centralized here (#B.198 david:
+ * "fait un etat/funcion/serrvice global qui sert aussi pour le
+ * business") so the Stop hook, the timer, and the autopoll hook all
+ * agree on what counts as "claude is internally busy and shouldn't
+ * be poked". Returns null when nothing special — caller falls through
+ * to the regular busy/idle decision.
+ */
+export function classifyPaneSpecial(text: string): PaneSpecial | null {
+    if (/Compacting|compacting conversation|Summarizing the conversation/i.test(text)) {
+        return "compacting";
+    }
+    if (/Rate limited|temporarily limiting requests/i.test(text)) {
+        return "rate-limit";
+    }
+    if (/API Error|APIError/i.test(text)) {
+        return "api-error";
+    }
+    return null;
+}
+
+/**
+ * Unified pane-state probe — bundles `paneFooterShowsBusy` and
+ * `classifyPaneSpecial` into one snapshot. The single source every
+ * wake decision should consult so the log line and the business
+ * branch never disagree (#B.198). Caller does the `tmux capture-pane`
+ * itself (different surfaces use different tmux targets / flags); we
+ * only classify what's already in hand.
+ */
+export function snapshotPane(paneText: string, footerLines = 5): PaneSnapshot {
+    return {
+        busy: paneFooterShowsBusy(paneText, footerLines),
+        special: classifyPaneSpecial(paneText),
+    };
+}
+
+/**
+ * One-line summary of a PaneSnapshot suitable for log lines, e.g.
+ * `pane=busy:false special=-` or `pane=busy:true special=compacting`.
+ * Stable column order so `grep` / `awk` over log files stays trivial.
+ */
+export function formatPaneSnapshot(snap: PaneSnapshot): string {
+    return `pane=busy:${snap.busy} special=${snap.special ?? "-"}`;
+}
+
 export function pickPingPhrase(pingsAbsPath: string): string {
     try {
         const raw = readFileSync(pingsAbsPath, "utf8");

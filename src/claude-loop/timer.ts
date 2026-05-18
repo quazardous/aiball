@@ -28,12 +28,14 @@ import {
     DEFAULT_USER_GRACE_SEC,
     MUX_CMD,
     checkHasWork,
+    formatPaneSnapshot,
     idleMarkerPath,
     lastWakeAtPath,
     paneFooterShowsBusy,
     pickPingPhrase,
     pingsPath,
     setTmuxStatus,
+    snapshotPane,
     tmuxName,
     userIsTakingOver,
     wakeInFlightPath,
@@ -140,7 +142,19 @@ async function tryWake(reason: string, manualWake = false): Promise<boolean> {
     // those are explicit user requests.
     if (!manualWake) {
         const paneText = capturePane();
-        if (paneText && paneFooterShowsBusy(paneText)) return false;
+        if (paneText) {
+            const snap = snapshotPane(paneText);
+            // Both `busy` (esc-to-interrupt mid-turn) and any `special`
+            // state (compacting/rate-limit/api-error) are reasons to
+            // skip — same family of "claude is internally busy". Log
+            // the snapshot so david sees why a wake was withheld
+            // (#B.198 david: "ajoute la detection esc to interrupt
+            // dans les log").
+            if (snap.busy || snap.special !== null) {
+                log(`skip wake (${reason}) — ${formatPaneSnapshot(snap)}`);
+                return false;
+            }
+        }
     }
     if (!manualWake && !(await checkHasWork(checkCmd, client()))) return false;
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
