@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import Button from "primevue/button";
-import InputText from "primevue/inputtext";
-import Select from "primevue/select";
 import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
-import { api, CONSUMER_KIND_OPTIONS, type Consumer, type ConsumerKind } from "../lib/api";
+import { api, type Consumer } from "../lib/api";
 import ConsumerEditPage from "./ConsumerEditPage.vue";
 
 // Set on /consumers/<id> → render the dedicated edit view. Parent
@@ -36,8 +34,6 @@ const loading = ref(false);
 const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 const hideStale = ref(true);
 
-const KIND_OPTIONS = CONSUMER_KIND_OPTIONS;
-
 async function load() {
     loading.value = true;
     try {
@@ -53,27 +49,6 @@ async function load() {
         loading.value = false;
     }
 }
-
-async function patch(consumer_id: string, patchBody: Partial<Consumer>) {
-    try {
-        const updated = await api.updateConsumer(consumer_id, {
-            kind: patchBody.kind,
-            display_name: patchBody.display_name ?? null,
-            enabled: patchBody.enabled,
-            note: patchBody.note,
-        });
-        const idx = rows.value.findIndex((r) => r.consumer_id === consumer_id);
-        if (idx >= 0) rows.value[idx] = updated;
-    } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: `Update failed for ${consumer_id}`,
-            detail: (e as Error).message,
-            life: 6000,
-        });
-    }
-}
-
 
 async function remove(consumer_id: string) {
     if (!confirm(`Delete consumer "${consumer_id}"? Past posts are preserved; the row will be re-created the next time this id posts.`)) return;
@@ -289,24 +264,8 @@ const sortedRows = computed<Consumer[]>(() => {
                             />
                         </div>
                     </td>
-                    <td>
-                        <Select
-                            :model-value="r.kind"
-                            :options="KIND_OPTIONS"
-                            optionLabel="label"
-                            optionValue="value"
-                            @update:model-value="(v: ConsumerKind) => patch(r.consumer_id, { kind: v })"
-                            style="width: 7rem"
-                        />
-                    </td>
-                    <td>
-                        <InputText
-                            :model-value="r.display_name ?? ''"
-                            @change="(e: Event) => patch(r.consumer_id, { display_name: (e.target as HTMLInputElement).value || null })"
-                            placeholder="(uses id)"
-                            style="width: 14rem"
-                        />
-                    </td>
+                    <td>{{ r.kind }}</td>
+                    <td>{{ r.display_name ?? "" }}</td>
                     <td class="activity-cell">
                         <div
                             class="activity-cell__seen"
@@ -323,13 +282,9 @@ const sortedRows = computed<Consumer[]>(() => {
                         />
                     </td>
                     <td>
-                        <Button
-                            :label="r.enabled ? 'Enabled' : 'Blocked'"
+                        <Tag
+                            :value="r.enabled ? 'enabled' : 'blocked'"
                             :severity="r.enabled ? 'success' : 'danger'"
-                            text
-                            size="small"
-                            :title="r.enabled ? 'Click to block: future posts from this id will be refused' : 'Click to re-enable'"
-                            @click="patch(r.consumer_id, { enabled: !r.enabled })"
                         />
                     </td>
                     <td class="action-cell">
