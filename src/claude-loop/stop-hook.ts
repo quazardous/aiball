@@ -16,7 +16,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_USER_GRACE_SEC, MUX_CMD, WAKE_COALESCE_WINDOW_MS, checkHasWork, idleMarkerPath, lastWakeAtPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName, userIsTakingOver, wakeInFlightPath } from "./state.js";
+import { DEFAULT_USER_GRACE_SEC, MUX_CMD, WAKE_COALESCE_WINDOW_MS, checkHasWork, idleMarkerPath, lastWakeAtPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -39,6 +39,37 @@ function log(msg: string): void {
     try {
         appendFileSync(join(sd!, "stop-hook.log"), `${new Date().toISOString()} ${msg}\n`);
     } catch { /* nowhere to log */ }
+}
+
+/**
+ * Compact snapshot of the loop's state markers AT FIRE TIME — david
+ * (#B.198): "dans le log il manque l'état avant event (si on était
+ * busy ou idle ou autre)". Each marker is rendered as `name=<age>s`
+ * or `-` if absent, so a tail-reader can reconstruct what the loop
+ * was doing the moment this Stop hook ran.
+ */
+function ageMs(p: string): number | null {
+    if (!existsSync(p)) return null;
+    try { return Date.now() - statSync(p).mtimeMs; }
+    catch { return null; }
+}
+function fmt(ms: number | null): string {
+    return ms === null ? "-" : `${Math.round(ms / 1000)}s`;
+}
+function priorState(): string {
+    const idle = ageMs(idleMarkerPath(sd!));
+    const wake = ageMs(lastWakeAtPath(sd!));
+    const user = ageMs(userTookOverPath(sd!));
+    const inflight = ageMs(wakeInFlightPath(sd!));
+    // Best-guess prior bar status, derived from the markers:
+    //   wake recent (< coalesce window) → busy (we just sent keys, claude is processing)
+    //   wake set but old + idle set     → idle (we sent keys earlier, claude has since gone idle)
+    //   only idle set                   → idle (clean idle, no wake history)
+    //   nothing                         → ? (first fire or pruned state)
+    let was = "?";
+    if (wake !== null && wake < WAKE_COALESCE_WINDOW_MS) was = "busy";
+    else if (idle !== null) was = "idle";
+    return `was=${was} idle=${fmt(idle)} last-wake=${fmt(wake)} user-took-over=${fmt(user)} wake-in-flight=${fmt(inflight)}`;
 }
 
 // #B.154: probe the visible pane for claude-side states that
@@ -80,7 +111,7 @@ function classifyPane(text: string): PaneState {
 }
 
 (async () => {
-    log(`fire — checkCmd=${checkCmd}`);
+    log(`fire — checkCmd=${checkCmd} | ${priorState()}`);
     try {
         const paneState = classifyPane(readPane());
         if (paneState.kind !== "normal") {
