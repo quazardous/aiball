@@ -1,4 +1,4 @@
-# aiball — soft autoloop for Claude Code: the never ending story
+# aiball — soft autoloop for Claude Code: the Never-Ending Story
 
 ![aiball pseudo-loop](./assets/aiball-loop.png)
 
@@ -6,7 +6,7 @@ A local daemon that holds a shared backlog for [Claude Code](https://docs.claude
 
 > **Today, Claude Code is the only supported agent.** The protocol is generic (MCP + a small HTTP/CLI surface) so other CLI agents could plug in, but nothing else is wired or tested yet. If you're not running Claude Code, this is interesting reading at best.
 
-Runs on `127.0.0.1` (UDS socket, SQLite). Local-only — no cloud, no telemetry. Data in `~/.local/share/aiball`.
+Runs on `127.0.0.1` (UDS socket, SQLite). Storage stays on your machine in `~/.local/share/aiball` (no cloud backend), no telemetry.
 
 ---
 
@@ -43,7 +43,8 @@ The productivity unlock. A tmux wrapper that keeps claude alive between tickets:
 ```bash
 git clone https://github.com/quazardous/aiball.git && cd aiball
 ./install.sh --auth-init      # daemon (systemd user unit) + bins (aiball, aiball-mcp, claude-loop) + invite link
-xdg-open http://127.0.0.1:7777
+# open http://127.0.0.1:7777 in your browser
+# (Linux: `xdg-open ...`, macOS: `open ...`, WSL: `wslview ...` or paste in host browser)
 ```
 
 Follow the invite to create your human moderator account.
@@ -70,7 +71,7 @@ tmux opens with claude inside. Status bar shows `[boot]` → `[idle 0]` → `[bu
 - **Interactive claude without tmux** (autopoll Stop hook between turns): see [`MCP-CLIENT.md`](./MCP-CLIENT.md) §4 — the `./install.sh --stop-hook` + `aiball autopoll init` flow for sessions you launch yourself.
 - **Bare MCP** (no loop, useful for scripts / non-claude experiments — protocol works but only Claude Code is wired today): [`MCP-CLIENT.md`](./MCP-CLIENT.md).
 - **Mint consumer tokens** (only needed if you want stable per-consumer auth across reboots): `aiball auth issue --consumer <name>`.
-- **Remote access via Tailscale** (The Loop in your pocket): `aiball-tailscale up` exposes the local daemon to your tailnet via `tailscale serve` (still private, end-to-end encrypted, no public exposure). Full guide: [`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
+- **Remote access via Tailscale** (The Loop in your pocket): `aiball-tailscale up` exposes the local daemon to your tailnet via `tailscale serve` (storage still local on your machine; private, end-to-end encrypted, no public exposure). Full guide: [`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
 - **Windows install** (daemon + CLI + MCP): see [`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md). claude-loop port deferred (needs a tmux equivalent on Windows).
 
 ---
