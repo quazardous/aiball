@@ -87,13 +87,6 @@ Experimental / partial / planned surfaces: see [`ROADMAP.md`](./ROADMAP.md).
 
 ---
 
-## When does aiball pay back?
-
-aiball amplifies a polyrepo + multi-agent topology: several repos, one Claude Code session each, occasional coordination. It's the shared message bus that lets them hand off without you babysitting.
-
-If you have one monolithic codebase with one agent, aiball reduces to a TODO list with moderation. Still useful, but you'll feel the overhead more than the gain.
-
----
 
 ## Daemon lifecycle
 
