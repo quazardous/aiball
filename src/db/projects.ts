@@ -340,8 +340,11 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         p.actionable_count = actionablePerProject.get(p.name) ?? 0;
         p.snoozed_count = snoozedPerProject.get(p.name) ?? 0;
         // Filter the pending-resolution set to only ticket ids whose
-        // parent ticket is open + approved (otherwise a stale proposal
-        // on a closed ticket would inflate the count).
+        // parent ticket is open + approved + NOT snoozed (otherwise a
+        // stale proposal on a closed/snoozed ticket would inflate the
+        // sidebar badge — david #B.138: "2 open mais 4 résolu mais 2
+        // en liste"). The default inbox list hides snoozed; the badge
+        // count must match that filter to stay legible.
         const candidates = pendingResolutionTickets.get(p.name);
         if (!candidates) {
             p.resolved_count = 0;
@@ -351,6 +354,8 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
                 const t = openCounts.find((x) => x.id === tid);
                 if (!t || t.status !== "approved") continue;
                 if (closedByTicket.get(tid) === true) continue;
+                const snoozed = !!t.postponedUntil && t.postponedUntil > nowStr;
+                if (snoozed) continue;
                 n++;
             }
             p.resolved_count = n;
