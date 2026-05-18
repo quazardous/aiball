@@ -29,6 +29,7 @@ import {
     MUX_CMD,
     checkHasWork,
     idleMarkerPath,
+    lastWakeAtPath,
     paneFooterShowsBusy,
     pickPingPhrase,
     pingsPath,
@@ -89,6 +90,12 @@ function sendKeys(phrase: string): void {
     try {
         writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n");
     } catch { /* ignore — UserPromptSubmit hook will fall through to user-grace path, suboptimal but safe */ }
+    // #B.198 fix A: shared coalesce marker — Stop hook reads it to
+    // suppress chain-fire bursts. Touched here so timer-driven
+    // wakes also count toward the coalesce window.
+    try {
+        writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n");
+    } catch { /* ignore — coalesce will just fail open */ }
     spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, phrase, "Enter"], { stdio: "ignore" });
 }
 

@@ -14,9 +14,9 @@
  * Always emits `{}` and exits 0 — never block claude's stop.
  */
 import { spawnSync } from "node:child_process";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_USER_GRACE_SEC, MUX_CMD, checkHasWork, idleMarkerPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName, userIsTakingOver, wakeInFlightPath } from "./state.js";
+import { DEFAULT_USER_GRACE_SEC, MUX_CMD, WAKE_COALESCE_WINDOW_MS, checkHasWork, idleMarkerPath, lastWakeAtPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName, userIsTakingOver, wakeInFlightPath } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -107,11 +107,30 @@ function classifyPane(text: string): PaneState {
         const hasWork = await checkHasWork(checkCmd);
         log(`  checkHasWork → ${hasWork}`);
         if (hasWork) {
+            // #B.198 fix A: coalesce. If the previous wake fired
+            // within the coalesce window, this Stop hook is the tail
+            // of a burst (N events were unread, each turn drained one
+            // and the chain rolls forward). Suppress the send-keys —
+            // the next legit SSE event or heartbeat tick will wake
+            // again, but without piling pop-culture phrases on top of
+            // each other while claude is still visually finishing.
+            const lastWakePath = lastWakeAtPath(sd!);
+            const lastWakeMs = existsSync(lastWakePath) ? statSync(lastWakePath).mtimeMs : 0;
+            const sinceLastWakeMs = Date.now() - lastWakeMs;
+            if (lastWakeMs > 0 && sinceLastWakeMs < WAKE_COALESCE_WINDOW_MS) {
+                writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+                setTmuxStatus(name!, "idle");
+                log(`  → coalesced (last wake ${sinceLastWakeMs}ms < ${WAKE_COALESCE_WINDOW_MS}ms), idle marker set`);
+                emit();
+            }
             // Work still pending — ping immediately, don't enter idle.
             const phrase = pickPingPhrase(pingsPath(sd!));
             // #B.180: mark this send-keys as auto-wake so the
             // UserPromptSubmit hook skips user-took-over.
             try { writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
+            // #B.198 fix A: also touch the coalesce marker so the
+            // next Stop hook fire can detect "we just sent a wake".
+            try { writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
             spawnSync(MUX_CMD, [
                 "send-keys", "-t", `${tmuxName(name!)}.0`, phrase, "Enter",
             ], { stdio: "ignore" });

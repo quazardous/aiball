@@ -90,6 +90,24 @@ export function wakeInFlightPath(sd: string): string { return join(sd, "wake-in-
  *  exposed to child processes via CL_WAKE_IN_FLIGHT_TTL_MS env. */
 export const WAKE_IN_FLIGHT_TTL_MS = Math.max(0, Number(process.env.CL_WAKE_IN_FLIGHT_TTL_MS ?? 2000));
 
+/**
+ * Touched by ANY wake path (Stop hook chain-fire AND timer's
+ * tryWake) right before the send-keys. Read by the Stop hook to
+ * coalesce a burst of chain-fires (#B.198 fix A): when N events were
+ * unread, the hook used to fire N back-to-back wakes — each turn was
+ * a 3-5s loop responding to a pop phrase, all queued tickets drained
+ * across N turns instead of one. The coalesce now suppresses
+ * subsequent chain-fires whose previous wake was within the window,
+ * leaving the timer/SSE path to wake again on the next genuine event
+ * arrival or heartbeat tick.
+ */
+export function lastWakeAtPath(sd: string): string { return join(sd, "last-wake-at"); }
+/** Wake-coalesce window — Stop hook skips its chain-fire if the
+ *  prior wake was sent within this many ms ago. Default 3s covers
+ *  the typical short pop-phrase turn (1-5s) that produced the
+ *  "wake-on-busy" perception in #B.198. */
+export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env.CL_WAKE_COALESCE_WINDOW_MS ?? 3000));
+
 export function readPlate(sd: string): Plate {
     return JSON.parse(readFileSync(platePath(sd), "utf8")) as Plate;
 }
