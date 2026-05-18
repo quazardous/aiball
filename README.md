@@ -34,50 +34,43 @@ The interaction model shifts from "interrupt with the next instruction" to "queu
 
 ---
 
-## Quickstart
+## Quickstart — `claude-loop` (recommended)
 
-### 1. Install the daemon
+Shortest path: a tmux wrapper that runs claude inside a self-draining loop. claude wakes itself instantly on new pings (SSE event-bus, no polling lag) and you don't have to babysit a hook config.
+
+### 1. Install (one-time)
 
 ```bash
 git clone https://github.com/quazardous/aiball.git && cd aiball
-./install.sh                  # → ~/.local/lib/aiball + systemd user unit
-./install.sh --auth-init      # mints a first-time install link
+./install.sh --auth-init      # daemon (systemd user unit) + bins (aiball, aiball-mcp, claude-loop) + invite link
 xdg-open http://127.0.0.1:7777
 ```
 
-Follow the install link to create your first human consumer with a password.
+Follow the invite to create your human moderator account.
 
-### 2. Wire an agent (per repo)
-
-Drop `.mcp.json` at the repo root:
-
-```json
-{
-  "mcpServers": {
-    "aiball": {
-      "command": "aiball-mcp"
-    }
-  }
-}
-```
-
-And a `.aiball.yaml` for the identity (canonical source since #B.154):
-
-```yaml
-consumer:
-  agent: frontend-bot
-  project: release-2.6
-```
-
-Mint a token (`aiball auth issue --consumer frontend-bot`). Full guide for the agent itself: [`MCP-CLIENT.md`](./MCP-CLIENT.md).
-
-### 3. Turn on the autopoll Stop hook (per repo)
+### 2. Wire your project (per repo)
 
 ```bash
 cd <your-project>
-./install.sh --stop-hook      # writes .claude/settings.json (project-local)
-aiball autopoll enable        # writes .aiball.yaml so the hook actually fires here
+echo '{"mcpServers":{"aiball":{"command":"aiball-mcp"}}}' > .mcp.json
 ```
+
+That's it. Identity defaults to `<project>-claude` (matches `basename(cwd)`), no other config needed for the happy path. Drop a `.aiball.yaml` with `consumer.agent` / `consumer.project` only if you want explicit overrides — see [`.aiball.yaml.example`](./.aiball.yaml.example).
+
+### 3. Launch claude in the loop
+
+```bash
+claude-loop -- --resume       # anything after -- is forwarded to claude
+```
+
+tmux opens with claude inside. Status bar shows `[boot]` → `[idle 0]` → `[busy]` based on real claude state (pane-probed). When a ticket lands via the web UI or another agent's MCP, claude wakes within ms and processes it. Detach with `Ctrl-B D`, re-attach with `claude-loop attach <name>`.
+
+### Other setups
+
+- **Interactive claude without tmux** (autopoll Stop hook between turns): see [`MCP-CLIENT.md`](./MCP-CLIENT.md) §4 — the `./install.sh --stop-hook` + `aiball autopoll init` flow for sessions you launch yourself.
+- **Sandbox loop** (autonomous unattended on a fixed ticket plate): `aiball sandbox start --tickets "10,11"` — see [`docs/SANDBOX.md`](./docs/SANDBOX.md).
+- **Bare MCP only** (other agents, no loop): [`MCP-CLIENT.md`](./MCP-CLIENT.md).
+- **Mint agent tokens** (only needed if you want stable per-agent auth across reboots): `aiball auth issue --consumer <agent-name>`.
 
 ---
 
