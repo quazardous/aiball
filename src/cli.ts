@@ -364,6 +364,23 @@ program
     });
 
 program
+    .command("pings-count")
+    .description(
+        "Print the count of unread pings for the current consumer. " +
+        "Exits 0 when count > 0 (= there's something to drain), exit 1 " +
+        "when count === 0. Useful as a shell check in pipelines like " +
+        "claude-loop's default check-cmd (#B.63).",
+    )
+    .option("-q, --quiet", "Suppress stdout (just use the exit code)")
+    .action(async (opts, cmd) => {
+        const client = buildClient(gOpts(cmd));
+        const r = (await client.pingsCount()) as { consumer_id: string; unread: number };
+        const n = r.unread ?? 0;
+        if (!opts.quiet) process.stdout.write(`${n}\n`);
+        process.exit(n > 0 ? 0 : 1);
+    });
+
+program
     .command("mark-read")
     .description("Bulk mark project messages as seen")
     .requiredOption("--project <project>", "Project to ack")

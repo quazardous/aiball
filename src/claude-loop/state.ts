@@ -39,6 +39,14 @@ export interface Plate {
     /** Tick interval in seconds — the timer pings claude this often when idle. */
     interval: number;
     /**
+     * Shell snippet the timer runs each tick to decide whether to
+     * wake claude. Exit 0 = "there's work, ping"; non-zero = "nothing
+     * to do, stay idle". Default is the aiball ping check
+     * (`aiball pings-count -q`); pass `--check-cmd true` to ping
+     * unconditionally on every tick. #B.63 v2.1.
+     */
+    check_cmd: string;
+    /**
      * Absolute path to the YAML file with `ping_messages: [...]`.
      * The timer picks one at random per wake-up.
      */
@@ -83,6 +91,15 @@ export function installRoot(): string {
 export function defaultPingsPath(): string {
     return join(installRoot(), "skill", "claude-loop-pings.yaml");
 }
+
+/**
+ * Default `--check-cmd` for the timer — gates the per-tick wake on
+ * the aiball ping count for the current consumer. Exits 0 when there
+ * are unread pings (= ping claude), non-zero when empty (= stay
+ * idle). User can override with `--check-cmd '<shell>'`, or pass
+ * `--check-cmd true` to ping unconditionally every tick. #B.63 v2.1.
+ */
+export const DEFAULT_CHECK_CMD = "aiball pings-count -q";
 
 /**
  * Read the loop's pings YAML and return one phrase at random. Falls

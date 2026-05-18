@@ -24,6 +24,7 @@ import {
 const sd = process.env.CL_STATE_DIR;
 const name = process.env.CL_NAME;
 const intervalRaw = process.env.CL_INTERVAL;
+const checkCmd = process.env.CL_CHECK_CMD ?? "true";
 if (!sd || !name || !intervalRaw) {
     process.stderr.write("[claude-loop:timer] missing CL_* env vars\n");
     process.exit(1);
@@ -52,20 +53,27 @@ function sleep(ms: number): Promise<void> {
     return new Promise((res) => setTimeout(res, ms));
 }
 
+function checkHasWork(): boolean {
+    // Empty / `true` check-cmd → always ping (legacy "pure timer").
+    if (!checkCmd || checkCmd === "true") return true;
+    const r = spawnSync("bash", ["-c", checkCmd], { stdio: "ignore" });
+    return r.status === 0;
+}
+
 async function main(): Promise<void> {
-    log(`timer started — tick every ${interval}s`);
+    log(`timer started — tick every ${interval}s, check-cmd: ${checkCmd}`);
     while (tmuxAlive()) {
         await sleep(interval * 1000);
         if (!existsSync(idleMarkerPath(sd!))) continue;
-        // Whether the wake came from the periodic tick or from
-        // `claude-loop wake NAME`, treat it identically — claude is
-        // idle, send a phrase. The wake-requested marker is cleared
-        // for housekeeping; behavior unchanged either way.
+        // Manual wake (claude-loop wake NAME) bypasses the check —
+        // user explicitly asked to fire the next tick.
+        const manualWake = existsSync(wakeRequestedPath(sd!));
+        if (!manualWake && !checkHasWork()) continue;
         try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
         try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
         const phrase = pickPhrase();
         sendKeys(phrase);
-        log(`wake → '${phrase}'`);
+        log(`wake (${manualWake ? "manual" : "check-cmd hit"}) → '${phrase}'`);
     }
     log("tmux session gone — timer exiting");
 }

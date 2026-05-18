@@ -27,6 +27,7 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
 import {
+    DEFAULT_CHECK_CMD,
     MUX_CMD,
     STATE_ROOT,
     defaultPingsPath,
@@ -78,6 +79,7 @@ function defaultName(): string {
 interface StartOpts {
     name?: string;
     interval: number;
+    checkCmd: string;
     pings?: string;
     attach?: boolean;
     noStartupPing?: boolean;
@@ -103,6 +105,7 @@ function cmdStart(opts: StartOpts): void {
         name,
         created_at: new Date().toISOString(),
         interval: opts.interval,
+        check_cmd: opts.checkCmd,
         pings_path: pingsPath(sd),
         cwd,
         claude_args: opts.claudeArgs,
@@ -115,6 +118,7 @@ function cmdStart(opts: StartOpts): void {
         `export CL_NAME=${shQuote(name)}`,
         `export CL_STATE_DIR=${shQuote(sd)}`,
         `export CL_INTERVAL=${String(opts.interval)}`,
+        `export CL_CHECK_CMD=${shQuote(opts.checkCmd)}`,
         `export CL_PINGS=${shQuote(pingsPath(sd))}`,
         "",
     ];
@@ -319,18 +323,26 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .description("Spawn a new claude-loop (default subcommand)")
         .option("--name <name>", "Loop name (default: auto-generated)")
         .addOption(new Option("--interval <sec>", "Tick interval seconds").default("60"))
+        .option(
+            "--check-cmd <cmd>",
+            "Shell snippet — exit 0 = wake claude, non-zero = stay idle. " +
+                "Default: `aiball pings-count -q` (wake when there are unread pings). " +
+                "Pass `true` to ping unconditionally every tick.",
+            DEFAULT_CHECK_CMD,
+        )
         .option("--pings <yaml>", "Path to custom ping-phrases YAML")
         // Commander convention: `--no-foo` flips foo to false.
         .option("--no-attach", "Don't attach after spawn (wrapper exits silently)")
         .option("--no-startup-ping", "Don't send a wake-up message on launch")
         .allowExcessArguments(false)
         .action((opts: {
-            name?: string; interval: string; pings?: string;
+            name?: string; interval: string; checkCmd: string; pings?: string;
             attach: boolean; startupPing: boolean;
         }) => {
             invoke({
                 name: opts.name,
                 interval: Math.max(1, Number(opts.interval)),
+                checkCmd: opts.checkCmd,
                 pings: opts.pings,
                 attach: opts.attach !== false,
                 noStartupPing: opts.startupPing === false,
