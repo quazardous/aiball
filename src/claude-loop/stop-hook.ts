@@ -16,7 +16,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { MUX_CMD, checkHasWork, idleMarkerPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName, wakeInFlightPath } from "./state.js";
+import { DEFAULT_USER_GRACE_SEC, MUX_CMD, checkHasWork, idleMarkerPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName, userIsTakingOver, wakeInFlightPath } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -26,6 +26,7 @@ function emit(): never {
 const sd = process.env.CL_STATE_DIR;
 const name = process.env.CL_NAME;
 const checkCmd = process.env.CL_CHECK_CMD ?? "true";
+const userGraceSec = Math.max(0, Number(process.env.CL_USER_GRACE_SEC ?? DEFAULT_USER_GRACE_SEC));
 if (!sd || !name) emit();
 
 // #B.149: tail-friendly log of every Stop hook fire — so we can spot
@@ -88,6 +89,19 @@ function classifyPane(text: string): PaneState {
             // SUB-STATE in the bar as a `busy:<info>` suffix.
             setTmuxStatus(name!, "busy", paneState.info);
             log(`  pane state = ${paneState.kind} → suppress wake, status busy:${paneState.info}`);
+            emit();
+        }
+        // #B.195 — when the human typed within the user-grace window,
+        // suppress the auto-ping. Otherwise the Stop hook fires
+        // "Geronimo!" via send-keys right on top of the user's next
+        // keystrokes ("pop culture en boucle"). The timer keeps
+        // honoring user-took-over too, so nothing else wakes claude
+        // until grace lapses. We still write idle-since so the bar
+        // doesn't get stuck on busy when claude returns the prompt.
+        if (userIsTakingOver(sd!, userGraceSec)) {
+            writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            setTmuxStatus(name!, "idle");
+            log(`  user-took-over within grace (${userGraceSec}s) → suppress wake, idle`);
             emit();
         }
         const hasWork = await checkHasWork(checkCmd);
