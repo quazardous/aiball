@@ -9,6 +9,18 @@ defineProps<{
 const emit = defineEmits<{
     (e: "open-menu", payload: { event: Event; relation: { target_ticket_id: number; kind: RelationKind } }): void;
 }>();
+
+// #B.123 follow-up: target stage badge so the chip carries the
+// target ticket's lifecycle state inline. "open" suppresses the
+// badge (default state = no extra noise).
+const STAGE_LABELS: Record<string, string> = {
+    rejected: "rejected",
+    "closed-resolved": "closed ✓",
+    closed: "closed",
+    resolved: "resolved",
+    snoozed: "snoozed",
+    pending: "pending",
+};
 </script>
 
 <template>
@@ -23,6 +35,11 @@ const emit = defineEmits<{
         >
             <span class="thread-relations__kind">{{ RELATION_LABELS[relation.kind] }}</span>
             <span class="thread-relations__target">#B.{{ relation.target_ticket_id }}</span>
+            <span
+                v-if="relation.target_stage && relation.target_stage !== 'open' && STAGE_LABELS[relation.target_stage]"
+                class="thread-relations__stage"
+                :data-stage="relation.target_stage"
+            >{{ STAGE_LABELS[relation.target_stage] }}</span>
         </a>
         <button
             type="button"

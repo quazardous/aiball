@@ -1608,15 +1608,24 @@ api.get("/tickets/:id", (req, res) => {
         });
     }
     // #B.123 phase B: surface the active typed relations alongside the
-    // existing parent/sub-ticket lineage. Both shapes coexist during the
-    // migration window — UI is free to render either, frontend mirror
-    // (lib/relations.ts) carries the labels.
+    // existing parent/sub-ticket lineage. Each relation is enriched
+    // with the target ticket's lifecycle stage (open / closed /
+    // closed-resolved / rejected) so the chip can render a state
+    // badge — david: "dans la nouvelle présentation on voit plus
+    // l'état du ticket en relation".
     const typedRelations = listTypedRelationsForTicket(id);
+    const targetStages = typedRelations.length > 0
+        ? getTicketStages(typedRelations.map((r) => r.target_ticket_id))
+        : new Map<number, string>();
+    const typedRelationsWithStage = typedRelations.map((r) => ({
+        ...r,
+        target_stage: targetStages.get(r.target_ticket_id) ?? "open",
+    }));
     res.json({
         ticket: {
             ...headerBase,
             body: t.edited_body ?? t.body,
-            relations: typedRelations,
+            relations: typedRelationsWithStage,
         },
         comments: outComments,
         focus_message_id: focusMessageId,

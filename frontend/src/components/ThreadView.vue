@@ -2342,6 +2342,47 @@ async function copyTicketRef() {
     font-family: ui-monospace, SFMono-Regular, monospace;
     color: var(--p-primary-color);
 }
+/* #B.123 follow-up: target stage badge inside the chip. Small,
+   muted, color-coded by stage. "open" is the default state — no
+   badge (we omit it via v-if in RelationChip). */
+.thread-relations__stage {
+    margin-left: 0.3rem;
+    font-size: 0.7rem;
+    padding: 0 0.35rem;
+    border-radius: 0.2rem;
+    background: var(--p-surface-200);
+    color: var(--p-text-muted-color);
+    text-transform: lowercase;
+}
+.aiball-dark .thread-relations__stage {
+    background: var(--p-surface-700);
+}
+.thread-relations__stage[data-stage="closed"],
+.thread-relations__stage[data-stage="closed-resolved"] {
+    background: var(--p-green-100);
+    color: var(--p-green-800);
+}
+.aiball-dark .thread-relations__stage[data-stage="closed"],
+.aiball-dark .thread-relations__stage[data-stage="closed-resolved"] {
+    background: rgba(34, 197, 94, 0.18);
+    color: var(--p-green-300);
+}
+.thread-relations__stage[data-stage="rejected"] {
+    background: var(--p-red-100);
+    color: var(--p-red-800);
+}
+.aiball-dark .thread-relations__stage[data-stage="rejected"] {
+    background: rgba(239, 68, 68, 0.18);
+    color: var(--p-red-300);
+}
+.thread-relations__stage[data-stage="snoozed"] {
+    background: var(--p-yellow-100);
+    color: var(--p-yellow-800);
+}
+.aiball-dark .thread-relations__stage[data-stage="snoozed"] {
+    background: rgba(234, 179, 8, 0.18);
+    color: var(--p-yellow-300);
+}
 .thread-relations-form {
     display: flex;
     gap: 0.4rem;

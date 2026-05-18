@@ -184,6 +184,11 @@ export interface TicketRelation {
     last_event_id: number;
     last_event_at: string;
     by_agent: string | null;
+    /** #B.123 follow-up: target's current lifecycle stage so the chip
+     *  can render a state badge (open / closed / closed-resolved /
+     *  rejected). Enriched server-side; backfill defaults to "open"
+     *  when the stage isn't known. */
+    target_stage?: TicketStage;
 }
 
 export interface SubTicketSummary {
