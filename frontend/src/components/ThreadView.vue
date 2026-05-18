@@ -2085,3 +2085,11 @@ async function copyTicketRef() {
     </div>
 </template>
 
+<!-- #B.196 Layer 3: CSS lives in the sibling file (component-owned but
+     unscoped because child components — RelationChip, CommentNode,
+     ThreadRelations — render the .thread-* classes the rules target,
+     so scoping would orphan them). The future per-component splits
+     should use `<style src="./X.css" scoped>` when classes aren't
+     shared with children. -->
+<style src="./ThreadView.css"></style>
+

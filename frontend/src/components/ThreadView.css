@@ -1,18 +1,16 @@
 /*
- * Thread view styles (#B.196 Layer 3 — extracted from ThreadView.vue).
+ * ThreadView styles — owned by ThreadView.vue via `<style src="./ThreadView.css">`.
  *
- * Kept global because:
- *   - ThreadView renders children (RelationChip, CommentNode, ...) whose
- *     DOM gets ThreadView classes (.thread-relations__chip etc). A scoped
- *     rule would only match elements rendered by ThreadView's own template,
- *     not the child components — so global it stays.
- *   - The .aiball-dark overrides for these selectors live in theme-dark.css;
- *     keeping the base in a sibling sheet preserves the same cross-file
- *     cascade we already had.
+ * Unscoped on purpose: ThreadView renders children (RelationChip,
+ * CommentNode, ThreadRelations) whose DOM carries these .thread-*
+ * classes. A scoped block would only match the parent's own template,
+ * orphaning everything the children render. Dark-mode overrides live
+ * in styles/theme-dark.css (loaded after this sheet so they win the
+ * cascade on specificity, not on order).
  *
- * Refactor opportunities (deferred): factor .thread-relations__chip* into a
- * RelationChip-owned scoped block once ThreadRelations + the menu popover
- * are fully extracted with their CSS.
+ * Future per-component splits should prefer `<style src="./X.css" scoped>`
+ * when the styled classes are NOT shared with children — keeps CSS in
+ * a sibling file AND gets the data-v-xxx isolation.
  */
 
 .thread-view {
