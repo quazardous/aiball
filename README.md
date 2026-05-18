@@ -68,7 +68,6 @@ tmux opens with claude inside. Status bar shows `[boot]` → `[idle 0]` → `[bu
 ### Other setups
 
 - **Interactive claude without tmux** (autopoll Stop hook between turns): see [`MCP-CLIENT.md`](./MCP-CLIENT.md) §4 — the `./install.sh --stop-hook` + `aiball autopoll init` flow for sessions you launch yourself.
-- **Sandbox loop** (autonomous unattended on a fixed ticket plate): `aiball sandbox start --tickets "10,11"` — see [`docs/SANDBOX.md`](./docs/SANDBOX.md).
 - **Bare MCP only** (other agents, no loop): [`MCP-CLIENT.md`](./MCP-CLIENT.md).
 - **Mint agent tokens** (only needed if you want stable per-agent auth across reboots): `aiball auth issue --consumer <agent-name>`.
 - **Remote access via Tailscale** (read inbox from your phone while away): one-line `tailscale serve --bg --https=443 127.0.0.1:7777` exposes aiball to your tailnet (still private, end-to-end encrypted, no public exposure). Full guide: [`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
@@ -83,8 +82,22 @@ tmux opens with claude inside. Status bar shows `[boot]` → `[idle 0]` → `[bu
 - **Lifecycle signals**: `resolved` proposal, `blocked` escalation, snooze, reopen — each with its own icon.
 - **Clickable Q&A**: GFM `- [ ]` items in a ticket body become click-to-quote questions; the audit lives in a sidecar.
 - **Autopoll Stop hook**: the agent processes the backlog between turns until empty (see above).
-- **Sandbox loop**: `aiball sandbox start --tickets "10,11"` runs an autonomous session in tmux against a fixed plate. See [`docs/SANDBOX.md`](./docs/SANDBOX.md).
 - **Search** (FTS5), **per-project stats**, **CLI** with offline spool fallback.
+
+---
+
+## Roadmap (experimental, partial)
+
+- **Sandbox loop** — `aiball sandbox start --tickets "10,11"` spawns
+  an autonomous Claude Code session in tmux against a fixed plate.
+  Works for happy-path runs but the lifecycle (auto-respawn on new
+  pings, graceful degradation on rate-limits, anti-oscillation
+  hardening) isn't finished. Use `claude-loop` for daily-driver
+  autonomous wrapping; the sandbox path stays for experimentation.
+  See [`docs/SANDBOX.md`](./docs/SANDBOX.md) — caveat emptor.
+- **claude-loop on Windows** — daemon-only install ships (see
+  [`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md)). Wrapper port via
+  psmux pending an adapter pass (#B.178).
 
 ---
 

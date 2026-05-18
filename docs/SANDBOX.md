@@ -1,5 +1,11 @@
 # Sandbox loop
 
+> **Status: experimental / partial (#B.183).** The happy path runs but
+> the lifecycle hardening (auto-respawn on new pings, graceful rate-limit
+> handling, anti-oscillation guards) isn't shipped. For daily-driver
+> autonomous wrapping use [`claude-loop`](../README.md#quickstart--claude-loop-recommended).
+> This page stays for the experimentation surface; caveat emptor.
+
 Run a Claude Code session autonomously against a fixed plate of aiball
 tickets. The session lives in a tmux window, observes its plate via hooks,
 and exits when there's nothing actionable left (or when you tell it to
