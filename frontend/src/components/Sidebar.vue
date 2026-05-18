@@ -117,6 +117,12 @@ const emit = defineEmits<{
     padding: 0.8rem 0.6rem;
     background: var(--p-surface-50);
     overflow-y: auto;
+    /* #B.134: fill the grid cell vertically so its internal overflow
+       (this rule was already here, kept for explicitness) becomes the
+       only scroll context — the parent .aiball-layout now owns
+       overflow:hidden, so without height:100% the sidebar would just
+       shrink-wrap its content and the page wouldn't scroll at all. */
+    height: 100%;
 }
 .aiball-dark .aiball-sidebar {
     background: var(--p-surface-900);

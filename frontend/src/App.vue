@@ -963,6 +963,10 @@ watch(showSnoozed, (v) => {
     gap: 0;
     flex: 1;
     min-height: 0;
+    /* #B.134: own the vertical overflow so sidebar + main get
+       independent scroll contexts — the sidebar stays put when the
+       user scrolls a long ticket thread. */
+    overflow: hidden;
 }
 
 /* #B.127: discrete pointer to the per-project strategy panel — surfaced
@@ -1000,6 +1004,10 @@ watch(showSnoozed, (v) => {
     display: flex;
     flex-direction: column;
     gap: 0.8rem;
+    /* #B.134: fill the layout cell and own the vertical scroll so the
+       sidebar (sibling) stays static while the thread scrolls. */
+    height: 100%;
+    overflow-y: auto;
 }
 
 .compose-bar {
