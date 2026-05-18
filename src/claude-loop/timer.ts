@@ -308,7 +308,16 @@ async function mainSse(): Promise<void> {
         if (settledStatus !== "boot") {
             try {
                 const r = await client().pingsCount() as { unread?: number };
-                setTmuxStatus(name!, settledStatus, r.unread ?? 0);
+                // #B.198: during user-grace, the third arg is the
+                // grace label ("user") instead of the unread count —
+                // matches the Stop hook's `[idle:user]` rendering so
+                // the bar stays consistent across the whole window.
+                // Count comes back once grace lapses.
+                if (settledStatus === "idle" && userIsTakingOver(sd!, userGraceSec)) {
+                    setTmuxStatus(name!, settledStatus, "user");
+                } else {
+                    setTmuxStatus(name!, settledStatus, r.unread ?? 0);
+                }
             } catch { /* swallow — bar stays as-is */ }
         }
         // #B.177 B1: heartbeat push of current state to the daemon

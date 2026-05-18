@@ -139,8 +139,12 @@ function classifyPane(text: string): PaneState {
         // doesn't get stuck on busy when claude returns the prompt.
         if (userIsTakingOver(sd!, userGraceSec)) {
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-            setTmuxStatus(name!, "idle");
-            log(`  → SUPPRESS (user-grace<${userGraceSec}s) became=idle`);
+            // David #B.198: plain `[idle]` here mis-signaled "ready
+            // for wakes" — we're actually deferring wakes. Surface
+            // the user-grace caveat in the bar so the human reads it
+            // as "claude IS at prompt, but we won't poke during grace".
+            setTmuxStatus(name!, "idle", "user");
+            log(`  → SUPPRESS (user-grace<${userGraceSec}s) became=idle:user`);
             emit();
         }
         const hasWork = await checkHasWork(checkCmd);
