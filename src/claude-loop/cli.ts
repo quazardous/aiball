@@ -280,12 +280,17 @@ function cmdRm(name: string, force: boolean): void {
 function cmdWake(name: string): void {
     if (!tmuxAlive(name)) die(`loop '${name}' not alive`);
     const sd = stateDirFor(name);
-    try { rmSync(idleMarkerPath(sd)); } catch { /* race */ }
+    // Don't clear idle-since: the timer's first check is
+    // `if (!idle-since) continue` — wiping it would make the next
+    // tick SKIP instead of fire (regression noted in concept review).
+    // We only need wake-requested set; timer reads it as a check-cmd
+    // bypass. If claude is mid-turn (no idle-since), wake is queued
+    // until claude finishes and the Stop hook decides what to do.
     writeFileSync(wakeRequestedPath(sd), new Date().toISOString());
     const plate = (() => { try { return readPlate(sd); } catch { return null; } })();
     const interval = plate?.interval ?? 60;
     process.stdout.write(
-        `wake requested for '${name}' (fires at next timer tick, up to ${interval}s)\n`,
+        `wake requested for '${name}' (fires at next timer tick when claude is idle, up to ${interval}s)\n`,
     );
 }
 
