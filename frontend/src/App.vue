@@ -500,6 +500,11 @@ function notifyArrival(m: Message) {
 // `bus` events. Consumers (this file's own list/sidebar/toaster, plus any
 // future component) subscribe to the bus where they're defined. See
 // `lib/bus.ts` for the typed event map.
+// #B.191: after a WS reconnect (typically after the tab came back
+// from mobile background freeze), the in-memory inbox/projects state
+// can be arbitrarily stale — any event we missed while the socket
+// was down won't replay. Force a fresh fetch on the false→true
+// transition so the rows + sidebar badges catch up to reality.
 const { connected } = useWs((ev) => {
     if (ev.type === "rule_changed") {
         bus.emit("rules.refresh");
@@ -554,6 +559,16 @@ const { connected } = useWs((ev) => {
     }
     bus.emit("inbox.refresh");
     bus.emit("projects.refresh");
+});
+
+// #B.191: catch up after a WS reconnect (mobile background freeze
+// most commonly). False→true edge only — initial mount is already
+// covered by the regular load chain.
+watch(connected, (now, prev) => {
+    if (now && prev === false) {
+        bus.emit("inbox.refresh");
+        bus.emit("projects.refresh");
+    }
 });
 
 // Local consumers — same effects as before, just driven by the bus now.
