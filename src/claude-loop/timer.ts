@@ -36,6 +36,7 @@ import {
     lastWakeAtPath,
     paneFooterShowsBusy,
     pingsPath,
+    readBusyDefer,
     recordWakeHint,
     setTmuxStatus,
     snapshotPane,
@@ -136,6 +137,18 @@ function client(): AiballClient {
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint): Promise<boolean> {
     if (!existsSync(idleMarkerPath(sd!))) return false;
     if (!manualWake && userIsTakingOver(sd!, userGraceSec)) return false;
+    // #B.198 david: state-based busy defer set by the Stop hook when
+    // the FIRE-time pane still showed `esc to interrupt`. We honor
+    // it on every tryWake path EXCEPT manual (file-marker is an
+    // explicit user override). Marker auto-clears once its target
+    // ISO is past (handled inside `readBusyDefer`).
+    if (!manualWake) {
+        const defer = readBusyDefer(sd!);
+        if (defer) {
+            log(`skip wake (${reason}) — busy-defer ${defer.activeMs}ms remaining (until ${defer.until.toISOString()})`);
+            return false;
+        }
+    }
     // #B.198: catch the brief race where the idle marker has been
     // written (Stop hook just fired) but claude is still mid-turn
     // (a slash command, a hook in flight, or just hasn't repainted

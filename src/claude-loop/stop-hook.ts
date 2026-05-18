@@ -16,11 +16,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, checkHasWork, formatPaneSnapshot, idleMarkerPath, lastWakeAtPath, pickPingPhrase, pingsPath, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
-
-function sleep(ms: number): Promise<void> {
-    return new Promise((res) => setTimeout(res, ms));
-}
+import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, checkHasWork, formatPaneSnapshot, idleMarkerPath, lastWakeAtPath, pickPingPhrase, pingsPath, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -107,7 +103,7 @@ function readPane(): string {
 }
 
 (async () => {
-    let pane = snapshotPane(readPane());
+    const pane = snapshotPane(readPane());
     log(`FIRE — ${classifyTurn()} | ${formatPaneSnapshot(pane)} | checkCmd=${checkCmd}`);
     try {
         if (pane.special !== null) {
@@ -136,23 +132,21 @@ function readPane(): string {
             emit();
         }
         // #B.198 david: "si pane=busy:true on attend 5 secondes de
-        // plus pour faire quoi que ce soit". The Stop hook fires
-        // post-turn so the footer can be stale (#B.185, we don't
-        // gate forever — bar would stick on busy). Middle ground:
-        // one 5s grace, re-snapshot, then proceed with the post-
-        // delay state. If the re-snapshot promotes to a `special`
-        // condition (compacting / rate-limit / api-error appeared
-        // while we waited), suppress as usual.
+        // plus pour faire quoi que ce soit" + "le sleep devrait etre
+        // loop/state based pas promise (pour staker oublié c plus
+        // facile)". State-based defer: arm the `busy-defer-until`
+        // marker, set the bar, exit. Timer's `tryWake` honors the
+        // marker on its next SSE ping / heartbeat tick — so the
+        // defer survives this process exiting (durable) and is
+        // inspectable (`cat busy-defer-until`). We don't write
+        // idle-since here (pane IS busy); the timer's heartbeat
+        // pane-probe will seed it once claude actually returns to
+        // the prompt.
         if (pane.busy && PANE_BUSY_DELAY_MS > 0) {
-            log(`  → BUSY-DELAY sleeping ${PANE_BUSY_DELAY_MS}ms (pane.busy=true)`);
-            await sleep(PANE_BUSY_DELAY_MS);
-            pane = snapshotPane(readPane());
-            log(`  → BUSY-DELAY resumed | ${formatPaneSnapshot(pane)}`);
-            if (pane.special !== null) {
-                setTmuxStatus(name!, "busy", pane.special);
-                log(`  → SUPPRESS (pane=${pane.special}, post-delay) became=busy:${pane.special}`);
-                emit();
-            }
+            const until = armBusyDefer(sd!, PANE_BUSY_DELAY_MS);
+            setTmuxStatus(name!, "busy", "wait");
+            log(`  → BUSY-DEFER armed until=${until} became=busy:wait`);
+            emit();
         }
         const hasWork = await checkHasWork(checkCmd);
         log(`  checkHasWork=${hasWork}`);

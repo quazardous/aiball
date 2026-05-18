@@ -10,7 +10,7 @@
  * - `timer.log`   — stdout/stderr of the timer
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -153,13 +153,75 @@ export function isDuplicateWakeHint(sd: string, hint: WakeHint | undefined, wind
     } catch { return false; }
 }
 
-/** Delay applied by the Stop hook when the visible pane STILL shows
- *  `esc to interrupt` at FIRE time (#B.198 david: "si pane=busy:true
- *  on attend 5 secondes de plus pour faire quoi que ce soit"). The
- *  Stop hook fires post-turn so the footer may be stale (#B.185) — we
- *  don't gate forever, we just give it 5 more seconds to settle and
- *  re-snapshot before deciding wake vs idle. */
+/** Delay applied when the visible pane STILL shows `esc to interrupt`
+ *  at Stop-hook FIRE time (#B.198 david: "si pane=busy:true on attend
+ *  5 secondes de plus pour faire quoi que ce soit"). The Stop hook
+ *  fires post-turn so the footer may be stale (#B.185) — we don't
+ *  gate forever, just defer the next wake by this much. Realized via
+ *  the `busy-defer-until` marker so the gate survives the hook
+ *  process exiting (#B.198 david: "le sleep devrait etre loop/state
+ *  based pas promise (pour staker oublié c plus facile)"). */
 export const PANE_BUSY_DELAY_MS = Math.max(0, Number(process.env.CL_PANE_BUSY_DELAY_MS ?? 5000));
+
+/**
+ * Wake-defer gate. File content is the ISO target time at which the
+ * gate opens again. Written by the Stop hook when it sees pane.busy;
+ * read by the timer's `tryWake` to short-circuit a wake during the
+ * window. Persistent so:
+ *   - the gate survives if the Stop hook process dies before the
+ *     window elapses ("staker oublié c plus facile" — david's reason
+ *     for moving away from the in-hook `await sleep`);
+ *   - `cat busy-defer-until` shows the next-allowed wake time at a
+ *     glance for debugging.
+ *
+ * No mtime arithmetic on purpose — the absolute target is the source
+ * of truth, and a manual `touch` won't accidentally extend / shorten
+ * the gate.
+ */
+export function busyDeferUntilPath(sd: string): string { return join(sd, "busy-defer-until"); }
+
+/** Arm the defer gate so the next wake is blocked until `now + ms`.
+ *  Writes the absolute target as ISO. Idempotent: pushes the existing
+ *  gate forward if the new target is later, never shortens an existing
+ *  defer (a fresh busy snapshot mid-defer extends the wait, doesn't
+ *  cut it). */
+export function armBusyDefer(sd: string, ms: number): string {
+    if (ms <= 0) return "";
+    const target = new Date(Date.now() + ms);
+    const p = busyDeferUntilPath(sd);
+    if (existsSync(p)) {
+        try {
+            const prev = new Date(readFileSync(p, "utf8").trim());
+            if (!Number.isNaN(prev.getTime()) && prev.getTime() > target.getTime()) {
+                return prev.toISOString();
+            }
+        } catch { /* fall through and overwrite */ }
+    }
+    const iso = target.toISOString();
+    try { writeFileSync(p, iso + "\n"); } catch { /* fail open */ }
+    return iso;
+}
+
+/** Read the defer marker. Returns `{ activeMs }` with the remaining
+ *  defer window in ms, or `null` if the gate is open (no marker, parse
+ *  failure, or target already past). Side effect: deletes the marker
+ *  when the gate has opened, so subsequent calls return null cleanly. */
+export function readBusyDefer(sd: string): { activeMs: number; until: Date } | null {
+    const p = busyDeferUntilPath(sd);
+    if (!existsSync(p)) return null;
+    try {
+        const until = new Date(readFileSync(p, "utf8").trim());
+        const activeMs = until.getTime() - Date.now();
+        if (!Number.isFinite(activeMs) || activeMs <= 0) {
+            try { unlinkSync(p); } catch { /* race */ }
+            return null;
+        }
+        return { activeMs, until };
+    } catch {
+        try { unlinkSync(p); } catch { /* race */ }
+        return null;
+    }
+}
 
 export function readPlate(sd: string): Plate {
     return JSON.parse(readFileSync(platePath(sd), "utf8")) as Plate;
