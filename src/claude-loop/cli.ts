@@ -162,6 +162,32 @@ function findLiveLoopForCwdAgent(cwd: string, agent: string | undefined): { name
     return null;
 }
 
+/**
+ * Resolve the "current" loop for tail / wake when no name is passed:
+ * the loop registered to the invoker's cwd. Prefer alive loops on
+ * ties — `claude-loop tail` is "show me what's happening now", so a
+ * live session beats a stale state dir from a prior run.
+ */
+function resolveCurrentLoopName(): string {
+    const cwd = process.env.CLAUDE_LOOP_CWD ?? process.cwd();
+    if (!existsSync(STATE_ROOT)) die(`no loops registered (state root ${STATE_ROOT} missing). Pass a name or start one first.`);
+    const matches: { name: string; alive: boolean }[] = [];
+    for (const name of readdirSync(STATE_ROOT)) {
+        const sd = stateDirFor(name);
+        if (!existsSync(platePath(sd))) continue;
+        let plate: Plate | null = null;
+        try { plate = readPlate(sd); } catch { continue; }
+        if (plate.cwd !== cwd) continue;
+        matches.push({ name, alive: tmuxAlive(name) });
+    }
+    if (matches.length === 0) die(`no claude-loop registered for cwd ${cwd}. Pass a name or run \`claude-loop list\`.`);
+    if (matches.length === 1) return matches[0].name;
+    const alive = matches.filter((m) => m.alive);
+    if (alive.length === 1) return alive[0].name;
+    const names = matches.map((m) => `${m.name}${m.alive ? "" : " (dead)"}`).join(", ");
+    die(`multiple loops in cwd ${cwd}: ${names}. Pass a name explicitly.`);
+}
+
 function cmdStart(opts: StartOpts): void {
     const name = opts.name ?? defaultName();
     const sd = stateDirFor(name);
@@ -736,6 +762,11 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
 
 async function main(): Promise<void> {
     const { wrapper, passthrough } = splitClaudeArgs(process.argv.slice(2));
+    // `claude-loop --tail [flags]` is a top-level alias for the
+    // `tail` subcommand on the current-cwd loop. David: "claude-loop
+    // --tail pourrait etre bien". Rewrite the args before dispatch
+    // so commander parses it like an explicit `tail` invocation.
+    if (wrapper[0] === "--tail") wrapper[0] = "tail";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
     const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "check", "trace", "prune", "-h", "--help", "help"]);
@@ -750,15 +781,16 @@ async function main(): Promise<void> {
     program.addCommand(buildStartCommand((opts) => cmdStart({ ...opts, claudeArgs: passthrough })).name("start"));
     program.command("list").description("List all known loops").action(cmdList);
     program.command("attach <name>").description("tmux attach to a loop session").action(cmdAttach);
-    program.command("tail <name>")
-        .description("Tail the claude pane (--timer / --stop-hook for the wake-decision logs)")
+    program.command("tail [name]")
+        .description("Tail the claude pane (--timer / --stop-hook for the wake-decision logs). Name optional — defaults to the loop registered for the current cwd.")
         .option("--lines <n>", "Lines to show", "40")
         .option("--timer", "Tail the detached timer log instead of the claude pane")
         .option("--stop-hook", "Tail the Stop hook log (per-fire wake decisions + coalesce)")
-        .action((name: string, opts: { lines: string; timer?: boolean; stopHook?: boolean }) => {
+        .action((name: string | undefined, opts: { lines: string; timer?: boolean; stopHook?: boolean }) => {
             if (opts.timer && opts.stopHook) die("pass only one of --timer / --stop-hook");
             const which = opts.timer ? "timer" : opts.stopHook ? "stop-hook" : "pane";
-            cmdTail(name, Number(opts.lines), which);
+            const resolved = name ?? resolveCurrentLoopName();
+            cmdTail(resolved, Number(opts.lines), which);
         });
     program.command("rm <name>")
         .description("Kill tmux + timer + remove state dir")
