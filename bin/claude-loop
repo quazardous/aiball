@@ -38,15 +38,21 @@ tmux_name() { echo "cl-$1"; }
 tmux_alive() { $MUX_CMD has-session -t "$(tmux_name "$1")" 2>/dev/null; }
 
 cmd_start() {
+    # Loop flags come before `--`; everything after `--` is passed
+    # through to the spawned `claude` (per david: "il faut pouvoir
+    # passer des options à claude derrière"). E.g.:
+    #   claude-loop --name foo --interval 90 -- --model opus -p "..."
     local name="" interval="$DEFAULT_INTERVAL" check_cmd="" pings="" attach=0
+    local claude_args=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --) shift; claude_args=("$@"); break ;;
             --name) name="$2"; shift 2 ;;
             --interval) interval="$2"; shift 2 ;;
             --check-cmd) check_cmd="$2"; shift 2 ;;
             --pings) pings="$2"; shift 2 ;;
             --attach) attach=1; shift ;;
-            *) die "unknown flag: $1" ;;
+            *) die "unknown flag: $1  (claude options go after \`--\`)" ;;
         esac
     done
     [[ -z "$name" ]] && name="cl-$(date +%s)-$$"
@@ -81,9 +87,17 @@ export CL_PINGS="$sd/pings.yaml"
 EOF
 
     local tname; tname="$(tmux_name "$name")"
-    # Pane 0: claude itself.
+    # Pane 0: claude itself. The Stop hook + permission-mode are
+    # always injected; any user-supplied claude args after `--` are
+    # appended verbatim. Shell-escape each one so spaces / quotes
+    # round-trip safely.
+    local claude_passthrough=""
+    for arg in "${claude_args[@]:-}"; do
+        [[ -z "$arg" ]] && continue
+        claude_passthrough+=" $(printf %q "$arg")"
+    done
     local inner
-    inner="source '$sd/env'; exec claude --permission-mode auto --settings $(printf %q "$settings_json")"
+    inner="source '$sd/env'; exec claude --permission-mode auto --settings $(printf %q "$settings_json")${claude_passthrough}"
     $MUX_CMD new-session -d -s "$tname" -c "$PWD" bash -lc "$inner"
     # Pane 1 (split-window): the timer loop.
     local timer_script="$SKILL_DIR/claude-loop-timer.sh"
@@ -199,13 +213,20 @@ case "${1:-}" in
     rm)      shift; cmd_rm "$@" ;;
     wake)    shift; cmd_wake "$@" ;;
     prune)   cmd_prune ;;
-    -h|--help|help|"")
-        cat <<EOF
+    -h|--help|help)
+        cat <<'EOF'
 claude-loop — wrap a Claude Code session in a tmux loop that wakes
 itself when idle if a check-cmd reports new work (#B.63 v1).
 
-Subcommands:
-  start [--name N] [--interval 60] [--check-cmd 'CMD'] [--pings YAML] [--attach]
+Default invocation (no subcommand) = `start`:
+  claude-loop [--name N] [--interval 60] [--check-cmd CMD] [--pings YAML]
+              [--attach] [-- CLAUDE_ARGS...]
+
+Anything after `--` is passed verbatim to the spawned `claude`.
+Example:
+  claude-loop --name oncall --interval 90 -- --model opus -p "start drain"
+
+Lifecycle subcommands:
   list
   attach NAME
   tail NAME [--lines N]
@@ -214,5 +235,14 @@ Subcommands:
   prune
 EOF
         ;;
-    *) die "unknown subcommand: $1 (try --help)" ;;
+    "")
+        # No args at all = start a loop with all defaults.
+        cmd_start
+        ;;
+    *)
+        # Any other first arg is treated as a `start` flag (or the
+        # `--` passthrough separator). Falls into cmd_start which
+        # will reject genuinely unknown flags.
+        cmd_start "$@"
+        ;;
 esac
