@@ -4,7 +4,6 @@ import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
 import Select from "primevue/select";
-import SplitButton from "primevue/splitbutton";
 import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
 import { useToast } from "primevue/usetoast";
@@ -19,6 +18,7 @@ import RelationKindMenu from "./RelationKindMenu.vue";
 import ThreadHeader from "./ThreadHeader.vue";
 import ThreadEditPanel from "./ThreadEditPanel.vue";
 import ThreadCommentsList, { type ThreadItem } from "./ThreadCommentsList.vue";
+import ThreadActionsDock from "./ThreadActionsDock.vue";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -1652,151 +1652,30 @@ async function copyTicketRef() {
                     />
                 </template>
                 <template #extra-actions>
-                    <!-- #B.143: snooze is "mental-load relief" (david's
-                         framing) — should be reachable regardless of
-                         which decision/state the thread is in. Lives
-                         here so every branch below inherits it. -->
-                    <Button
-                        v-if="!data.ticket.closed && data.ticket.status !== 'rejected' && !isSnoozed"
-                        icon="pi pi-history"
-                        :label="hasBody ? 'comment and snooze' : 'snooze'"
-                        severity="info"
-                        size="small"
-                        text
-                        :loading="snoozeBusy"
-                        title="Set aside — type your context first if you want, then pick a duration. The ticket disappears from the open inbox until then."
-                        @click="openSnoozePopover"
+                    <ThreadActionsDock
+                        :ticket="data.ticket"
+                        :has-body="hasBody"
+                        :active-decision="activeDecision"
+                        :pending-resolution="pendingResolution"
+                        :is-snoozed="isSnoozed"
+                        :resolution-busy="resolutionBusy"
+                        :decide-busy="decideBusy"
+                        :snooze-busy="snoozeBusy"
+                        :accept-menu="acceptMenu"
+                        :reject-menu="rejectMenu"
+                        :legacy-accept-menu="legacyAcceptMenu"
+                        :decision-menu="decisionMenu"
+                        @open-snooze="openSnoozePopover"
+                        @reject-active="rejectActiveDecision"
+                        @accept-active="acceptActiveDecision()"
+                        @reject-resolution="rejectResolution"
+                        @accept-resolution="acceptResolution()"
+                        @comment-undo-reject="commentAndUndoReject"
+                        @comment-reopen="commentAndReopen"
+                        @comment-close="commentAndClose"
+                        @comment-mark-resolved="commentAndMarkResolved"
+                        @decide="decide"
                     />
-                    <template v-if="activeDecision">
-                        <SplitButton
-                            :label="`reject ${activeDecision.decision.kind}`"
-                            icon="pi pi-times"
-                            severity="secondary"
-                            size="small"
-                            outlined
-                            :loading="resolutionBusy"
-                            :disabled="!hasBody"
-                            :model="rejectMenu"
-                            menu-button-aria-label="Reject or reclassify as different decision kind"
-                            :title="hasBody
-                                ? `Reject the ${activeDecision.decision.kind} — ticket stays open. Your composer body is posted as the explanation.`
-                                : `Type an explanation in the composer first — rejecting a ${activeDecision.decision.kind} needs a reason.`"
-                            @click="rejectActiveDecision"
-                        />
-                        <SplitButton
-                            :label="activeDecision.decision.kind === 'resolution' ? 'accept resolution → close' : `accept ${activeDecision.decision.kind} → keep open`"
-                            icon="pi pi-verified"
-                            severity="success"
-                            size="small"
-                            :loading="resolutionBusy"
-                            :model="acceptMenu"
-                            menu-button-aria-label="Accept as different decision kind"
-                            @click="() => acceptActiveDecision()"
-                        />
-                    </template>
-                    <template v-else-if="pendingResolution">
-                        <Button
-                            icon="pi pi-times"
-                            label="reject resolution"
-                            severity="secondary"
-                            size="small"
-                            outlined
-                            :loading="resolutionBusy"
-                            :disabled="!hasBody"
-                            :title="hasBody
-                                ? 'Reject the resolution proposal — ticket stays open. Your composer body is posted as the explanation.'
-                                : 'Type an explanation in the composer first — rejecting a proposal needs a reason.'"
-                            @click="rejectResolution"
-                        />
-                        <SplitButton
-                            label="accept resolution → close"
-                            icon="pi pi-verified"
-                            severity="success"
-                            size="small"
-                            :loading="resolutionBusy"
-                            :model="legacyAcceptMenu"
-                            menu-button-aria-label="Accept as different decision kind"
-                            @click="() => acceptResolution()"
-                        />
-                    </template>
-                    <template v-else-if="data.ticket.status === 'rejected'">
-                        <Button
-                            icon="pi pi-replay"
-                            :label="hasBody ? 'comment and undo reject' : 'undo reject'"
-                            severity="warn"
-                            size="small"
-                            :loading="resolutionBusy"
-                            @click="commentAndUndoReject"
-                        />
-                    </template>
-                    <template v-else-if="data.ticket.closed">
-                        <Button
-                            icon="pi pi-unlock"
-                            :label="hasBody ? 'comment and reopen' : 'reopen ticket'"
-                            severity="info"
-                            size="small"
-                            :loading="resolutionBusy"
-                            @click="commentAndReopen"
-                        />
-                    </template>
-                    <template v-else-if="data.ticket.status === 'pending'">
-                        <Button
-                            icon="pi pi-times"
-                            label="reject"
-                            severity="danger"
-                            size="small"
-                            outlined
-                            :loading="decideBusy"
-                            title="Reject this pending ticket. The author is notified; comments stay readable."
-                            @click="decide('reject')"
-                        />
-                        <Button
-                            icon="pi pi-check"
-                            label="approve"
-                            severity="success"
-                            size="small"
-                            :loading="decideBusy"
-                            title="Approve this pending ticket so it joins the open inbox."
-                            @click="decide('approve')"
-                        />
-                    </template>
-                    <template v-else>
-                        <!-- snooze button now lives at the top of
-                             #extra-actions (#B.143) so every state
-                             inherits it; no per-branch dupe here -->
-                        <SplitButton
-                            v-if="!data.ticket.resolved && !data.ticket.blocked"
-                            :label="hasBody ? 'comment and mark resolved' : 'mark resolved'"
-                            icon="pi pi-check-circle"
-                            severity="success"
-                            size="small"
-                            text
-                            :loading="resolutionBusy"
-                            :model="decisionMenu"
-                            menu-button-aria-label="Other decision actions"
-                            @click="commentAndMarkResolved"
-                        />
-                        <Button
-                            v-if="data.ticket.resolved || data.ticket.blocked"
-                            icon="pi pi-undo"
-                            :label="hasBody ? 'comment and undo' : 'undo'"
-                            severity="warn"
-                            size="small"
-                            :title="data.ticket.blocked
-                                ? 'Undo the TBD flag — bring the ticket back to plain open. Embarks any text typed in the composer.'
-                                : 'Undo resolved — clear the resolution and bring the ticket back to plain open. Embarks any text typed in the composer.'"
-                            :loading="resolutionBusy"
-                            @click="commentAndReopen"
-                        />
-                        <Button
-                            icon="pi pi-lock"
-                            :label="hasBody ? 'comment and close' : 'close ticket'"
-                            severity="secondary"
-                            size="small"
-                            :loading="resolutionBusy"
-                            @click="commentAndClose"
-                        />
-                    </template>
                 </template>
             </MessageComposer>
         </template>
