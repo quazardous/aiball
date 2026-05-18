@@ -1,7 +1,0 @@
-# aiball's own per-project config. See .aiball.yaml.example for the
-# annotated template covering every option.
-autopoll:
-  enabled: true
-  tone: directive
-  throttle_seconds: 30
-  volatile: false

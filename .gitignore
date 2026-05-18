@@ -12,3 +12,7 @@ var/
 data/
 outbox/
 *.log
+# .aiball.yaml is per-user / per-machine project config (autopoll tone,
+# throttle, claude-loop wiring). Use .aiball.yaml.example as the
+# committed template; copy on first install. #B.166
+.aiball.yaml
