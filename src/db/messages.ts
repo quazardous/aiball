@@ -340,6 +340,23 @@ export function insertRelationEvent(opts: {
 }): Message | null {
     const db = getDb();
     return db.transaction((tx) => {
+        // #B.153: dedupe ticket_referenced. The same source can mention
+        // the target multiple times — once at creation, then again in
+        // edited bodies / new comments. The first event already records
+        // the relationship; subsequent ones add noise without info.
+        // ticket_sub_added is naturally one-shot (per parent_id set),
+        // no dedup needed there.
+        if (opts.kind === "ticket_referenced") {
+            const existing = tx.select({ id: schema.messages.id })
+                .from(schema.messages)
+                .where(and(
+                    eq(schema.messages.ticketId, opts.target_ticket_id),
+                    eq(schema.messages.kind, "ticket_referenced"),
+                    eq(schema.messages.sourceTicketId, opts.source_ticket_id),
+                ))
+                .get();
+            if (existing) return null;
+        }
         const id = nextMessageId(tx);
         const seq = (tx.select({
             n: sql<number>`COALESCE(MAX(${schema.messages.displaySeq}), 0) + 1`,

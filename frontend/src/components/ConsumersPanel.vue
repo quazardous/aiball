@@ -221,15 +221,17 @@ onMounted(load);
                         />
                     </td>
                     <td class="action-cell">
-                        <Button
-                            icon="pi pi-trash"
-                            severity="danger"
-                            text
-                            rounded
-                            size="small"
-                            :title="`Delete consumer ${r.consumer_id} (history preserved)`"
-                            @click="remove(r.consumer_id)"
-                        />
+                        <div class="action-cell__inner">
+                            <Button
+                                icon="pi pi-trash"
+                                severity="danger"
+                                text
+                                rounded
+                                size="small"
+                                :title="`Delete consumer ${r.consumer_id} (history preserved)`"
+                                @click="remove(r.consumer_id)"
+                            />
+                        </div>
                     </td>
                 </tr>
             </tbody>
@@ -292,7 +294,23 @@ onMounted(load);
 .consumers-table tr.is-blocked {
     opacity: 0.55;
 }
-.action-cell {
+/* Use a .consumers-table-scoped selector — there's a sibling
+   .action-cell rule in ProjectsPanel.vue (non-scoped styles bleed
+   across components) that forces display: flex on td which breaks
+   the table layout here (#B.150). */
+.consumers-table .action-cell {
+    display: table-cell;
     text-align: right;
+    width: 3rem;
+}
+.consumers-table .action-cell__inner {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    /* Match the intrinsic height of the PrimeVue Select/Input in the
+       other cells (~39px) so this cell's total height equals theirs
+       and the row's border-bottom aligns across all columns. */
+    min-height: 2.4375rem;
+    line-height: 1;
 }
 </style>

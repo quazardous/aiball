@@ -144,13 +144,41 @@ const emit = defineEmits<{
 .aiball-header {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    padding: 0.6rem 1rem;
+    /* #B.161: allow header to wrap on narrow viewports so controls
+       don't clip off the right edge. Tight gap keeps the wrapped row
+       readable. */
+    flex-wrap: wrap;
+    gap: 0.4rem 0.6rem;
+    padding: 0.5rem 0.7rem;
     border-bottom: 1px solid var(--p-content-border-color);
     background: var(--p-content-background);
     position: sticky;
     top: 0;
     z-index: 10;
+}
+@media (max-width: 720px) {
+    .aiball-header {
+        /* On the wrapped layout the spacer would push half the
+           controls to a third line — collapse it so all controls
+           stay on at most two rows. #B.161 compact pass: tighter
+           gap + smaller h1 + hide the strategy-select (rarely
+           changed; accessible via Project Settings). */
+        gap: 0.25rem 0.35rem;
+        padding: 0.35rem 0.45rem;
+    }
+    .aiball-header h1 {
+        font-size: 1rem;
+    }
+    .aiball-header .spacer {
+        display: none;
+    }
+    .strategy-select {
+        display: none !important;
+    }
+    .header-badge {
+        font-size: 0.72rem;
+        padding: 0.1rem 0.4rem;
+    }
 }
 .aiball-header h1 {
     margin: 0;

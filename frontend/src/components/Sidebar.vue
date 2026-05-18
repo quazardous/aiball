@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ref, onMounted, onUnmounted } from "vue";
+
 export interface ProjectListItem {
     label: string;
     value: string | null;
@@ -32,82 +34,105 @@ const emit = defineEmits<{
     (e: "select", value: string | null): void;
     (e: "open-panel", panel: SettingsPanel): void;
 }>();
+
+// #B.161: collapse the projects details by default on phones so the
+// sidebar band (max-height 30vh on mobile) leaves room for the active
+// project's badges + settings footer. User can still expand to pick
+// another project. Tracked reactively to handle window resize.
+const projectsOpen = ref(typeof window === "undefined" || window.innerWidth > 720);
+function syncProjectsOpen() {
+    projectsOpen.value = window.innerWidth > 720;
+}
+onMounted(() => window.addEventListener("resize", syncProjectsOpen));
+onUnmounted(() => window.removeEventListener("resize", syncProjectsOpen));
 </script>
 
 <template>
     <aside class="aiball-sidebar">
-        <div class="sidebar-section-label">Projects</div>
-        <button
-            v-for="p in items"
-            :key="p.value ?? '__all__'"
-            type="button"
-            class="sidebar-item"
-            :class="{ active: panel === null && projectPage === null && project === p.value }"
-            @click="emit('select', p.value)"
-        >
-            <i :class="p.icon" />
-            <span class="sidebar-item-label">{{ p.label }}</span>
-            <span
-                v-if="p.pending > 0"
-                class="sidebar-badge sidebar-badge--pending"
-                :title="`${p.pending} pending moderation`"
-            >{{ p.pending }}</span>
-            <span
-                v-if="p.resolved > 0"
-                class="sidebar-badge sidebar-badge--resolved"
-                :title="`${p.resolved} resolution proposal${p.resolved > 1 ? 's' : ''} waiting for your accept/reject`"
-            >{{ p.resolved }}</span>
-            <span
-                v-if="p.unread > 0"
-                class="sidebar-badge sidebar-badge--unread"
-                :title="`${p.unread} unread tickets for you`"
-            >{{ p.unread }}</span>
-            <span
-                v-if="p.open > 0"
-                class="sidebar-badge sidebar-badge--open"
-                :title="`${p.open} open tickets`"
-            >{{ p.open }}</span>
-        </button>
+        <!-- #B.161: projects list wrapped in <details> so it collapses
+             on mobile via CSS (open by default on desktop, collapsed
+             by default on phone — saves the 30vh sidebar band for the
+             active project's row only). -->
+        <details class="sidebar-projects" :open="projectsOpen">
+            <summary class="sidebar-section-label">Projects</summary>
+            <button
+                v-for="p in items"
+                :key="p.value ?? '__all__'"
+                type="button"
+                class="sidebar-item"
+                :class="{ active: panel === null && projectPage === null && project === p.value }"
+                @click="emit('select', p.value)"
+            >
+                <i :class="p.icon" />
+                <span class="sidebar-item-label">{{ p.label }}</span>
+                <span
+                    v-if="p.pending > 0"
+                    class="sidebar-badge sidebar-badge--pending"
+                    :title="`${p.pending} pending moderation`"
+                >{{ p.pending }}</span>
+                <span
+                    v-if="p.resolved > 0"
+                    class="sidebar-badge sidebar-badge--resolved"
+                    :title="`${p.resolved} resolution proposal${p.resolved > 1 ? 's' : ''} waiting for your accept/reject`"
+                >{{ p.resolved }}</span>
+                <span
+                    v-if="p.unread > 0"
+                    class="sidebar-badge sidebar-badge--unread"
+                    :title="`${p.unread} unread tickets for you`"
+                >{{ p.unread }}</span>
+                <span
+                    v-if="p.open > 0"
+                    class="sidebar-badge sidebar-badge--open"
+                    :title="`${p.open} open tickets`"
+                >{{ p.open }}</span>
+            </button>
+        </details>
 
-        <div class="sidebar-section-label" style="margin-top: 1rem">
-            Settings
+        <!-- Settings — visually pushed to the bottom on mobile via
+             margin-top: auto so the section reads as a footer band
+             (david's #B.161: "setting devrait aller en footer"). On
+             desktop the natural flow keeps it under projects. -->
+        <div class="sidebar-settings">
+            <div class="sidebar-section-label">
+                Settings
+            </div>
+            <button
+                type="button"
+                class="sidebar-item"
+                :class="{ active: panel === 'projects' }"
+                @click="emit('open-panel', 'projects')"
+            >
+                <i class="pi pi-folder" />
+                <span>Projects</span>
+            </button>
+            <button
+                type="button"
+                class="sidebar-item"
+                :class="{ active: panel === 'rules' }"
+                @click="emit('open-panel', 'rules')"
+            >
+                <i class="pi pi-cog" />
+                <span>Rules</span>
+            </button>
+            <button
+                type="button"
+                class="sidebar-item"
+                :class="{ active: panel === 'tags' }"
+                @click="emit('open-panel', 'tags')"
+            >
+                <i class="pi pi-tag" />
+                <span>Tags</span>
+            </button>
+            <button
+                type="button"
+                class="sidebar-item"
+                :class="{ active: panel === 'consumers' }"
+                @click="emit('open-panel', 'consumers')"
+            >
+                <i class="pi pi-users" />
+                <span>Consumers</span>
+            </button>
         </div>
-        <button
-            type="button"
-            class="sidebar-item"
-            :class="{ active: panel === 'projects' }"
-            @click="emit('open-panel', 'projects')"
-        >
-            <i class="pi pi-folder" />
-            <span>Projects</span>
-        </button>
-        <button
-            type="button"
-            class="sidebar-item"
-            :class="{ active: panel === 'rules' }"
-            @click="emit('open-panel', 'rules')"
-        >
-            <i class="pi pi-cog" />
-            <span>Rules</span>
-        </button>
-        <button
-            type="button"
-            class="sidebar-item"
-            :class="{ active: panel === 'tags' }"
-            @click="emit('open-panel', 'tags')"
-        >
-            <i class="pi pi-tag" />
-            <span>Tags</span>
-        </button>
-        <button
-            type="button"
-            class="sidebar-item"
-            :class="{ active: panel === 'consumers' }"
-            @click="emit('open-panel', 'consumers')"
-        >
-            <i class="pi pi-users" />
-            <span>Consumers</span>
-        </button>
     </aside>
 </template>
 
@@ -123,6 +148,66 @@ const emit = defineEmits<{
        overflow:hidden, so without height:100% the sidebar would just
        shrink-wrap its content and the page wouldn't scroll at all. */
     height: 100%;
+    /* #B.161: flex column so the .sidebar-settings band can push to
+       the bottom via margin-top: auto on mobile. */
+    display: flex;
+    flex-direction: column;
+}
+.sidebar-projects {
+    /* #B.161: <details> default styling — chevron tighter. */
+    margin-bottom: 1rem;
+}
+.sidebar-projects > summary {
+    cursor: pointer;
+    list-style: none;
+}
+.sidebar-projects > summary::-webkit-details-marker {
+    display: none;
+}
+.sidebar-projects > summary::before {
+    content: "▾ ";
+    color: var(--p-text-muted-color);
+    font-size: 0.6rem;
+    margin-right: 0.25rem;
+}
+.sidebar-projects:not([open]) > summary::before {
+    content: "▸ ";
+}
+.sidebar-settings {
+    display: flex;
+    flex-direction: column;
+}
+@media (max-width: 720px) {
+    /* #B.161 mobile: settings becomes a horizontal icon row at the
+       bottom of the sidebar (the actual page footer is owned by
+       App.vue layout — this is the closest we get without splitting
+       the component). Compact icons only, the label tucked under via
+       smaller font so taps stay reachable. */
+    .sidebar-settings {
+        margin-top: auto;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--p-content-border-color);
+        flex-direction: row;
+        gap: 0.25rem;
+        flex-wrap: wrap;
+        align-items: stretch;
+    }
+    .sidebar-settings > .sidebar-section-label {
+        display: none;
+    }
+    .sidebar-settings > .sidebar-item {
+        flex: 1 1 0;
+        flex-direction: column;
+        gap: 0.15rem;
+        padding: 0.4rem 0.3rem;
+        font-size: 0.72rem;
+        text-align: center;
+        min-width: 0;
+        justify-content: center;
+    }
+    .sidebar-settings > .sidebar-item > i {
+        font-size: 1rem;
+    }
 }
 .aiball-dark .aiball-sidebar {
     background: var(--p-surface-900);

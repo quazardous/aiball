@@ -211,7 +211,19 @@ async function load() {
     }
 }
 
-watch(() => props.ticketId, load);
+watch(() => props.ticketId, (_, oldId) => {
+    // #B.158: when the user clicks a ref the hover-popover (relation
+    // promote menu) survives the navigation if we don't tear it down.
+    // The Popover instance is component-scoped, so it stays open across
+    // the route change; force-hide on every ticket switch.
+    if (oldId !== undefined) {
+        relationMenuRef.value?.hide();
+        snoozePopoverRef.value?.hide();
+        relationMenuTarget.value = null;
+        relationMenuTargetTitle.value = null;
+    }
+    load();
+});
 onMounted(load);
 
 // React to bus-driven refreshes (WS events, local actions in this or
@@ -2092,6 +2104,16 @@ async function copyTicketRef() {
              remove. Anchored on demand to whichever chip triggered it. -->
         <Popover ref="relationMenuRef">
             <div class="relation-menu" v-if="relationMenuTarget">
+                <!-- #B.159: explicit close (X) so the popup can be
+                     dismissed without an outside-click hunt. -->
+                <button
+                    type="button"
+                    class="relation-menu__close"
+                    title="Close"
+                    @click="relationMenuRef?.hide()"
+                >
+                    <i class="pi pi-times" />
+                </button>
                 <div class="relation-menu__title">
                     <template v-if="relationMenuTarget.kind === null">
                         Promote ref to relation —
@@ -2257,6 +2279,27 @@ async function copyTicketRef() {
     flex-direction: column;
     gap: 0.4rem;
     min-width: 14rem;
+    position: relative;
+}
+.relation-menu__close {
+    position: absolute;
+    top: -0.25rem;
+    right: -0.25rem;
+    width: 1.4rem;
+    height: 1.4rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    color: var(--p-text-muted-color);
+    font-size: 0.85rem;
+}
+.relation-menu__close:hover {
+    background: var(--p-content-hover-background);
+    color: var(--p-text-color);
 }
 .relation-menu__title {
     font-size: 0.82rem;

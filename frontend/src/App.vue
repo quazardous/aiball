@@ -1026,5 +1026,31 @@ watch(showSnoozed, (v) => {
         border-bottom: 1px solid var(--p-content-border-color);
         max-height: 30vh;
     }
+    .aiball-main {
+        padding: 0.5rem;
+    }
+    /* #B.165: toasts go edge-to-edge on mobile (slim left/right safety
+       margin), and the verbose footer line (consumer · ref · project)
+       is hidden — the summary already says what happened, the detail
+       eats vertical space without adding signal on small screens.
+       Smaller padding too. */
+    .p-toast {
+        right: 0.25rem !important;
+        left: 0.25rem !important;
+        width: calc(100vw - 0.5rem) !important;
+        max-width: none !important;
+    }
+    .p-toast .p-toast-message {
+        max-width: 100%;
+    }
+    .p-toast .p-toast-message-content {
+        padding: 0.5rem 0.6rem;
+    }
+    .p-toast .p-toast-detail {
+        display: none;
+    }
+    .p-toast .p-toast-summary {
+        font-size: 0.92rem;
+    }
 }
 </style>
