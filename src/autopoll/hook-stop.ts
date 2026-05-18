@@ -24,9 +24,43 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { AiballClient } from "../client.js";
 import { loadConfig } from "./config.js";
 import { formatReason, type AutopollPayload } from "./templates.js";
+
+/**
+ * #B.192 david: when claude-loop wraps the session, the autopoll Stop
+ * hook should NOT inject backlog while claude is still mid-work
+ * (footer shows "esc to interrupt"). The Stop hook can fire on
+ * intermediate stops too, and even at a real stop the pane can lag.
+ * Probe the LAST 5 non-empty lines of the tmux pane (matches the
+ * #B.185 timer-side scoping) — anything earlier in scrollback is
+ * stale and would falsely suppress legit injections.
+ *
+ * Returns true if we're confident claude is still working. Returns
+ * false on any uncertainty (no tmux, no pane name, capture failed) —
+ * we'd rather inject than block on a false negative.
+ */
+function claudeStillWorking(): boolean {
+    // Only meaningful inside a tmux session. Claude Code sets TMUX
+    // when run inside one (tmux exports it to children).
+    if (!process.env.TMUX) return false;
+    const r = spawnSync("tmux", ["display-message", "-p", "-F", "#{pane_id}"], { encoding: "utf8" });
+    if (r.status !== 0) return false;
+    const paneId = (r.stdout ?? "").trim();
+    if (!paneId) return false;
+    const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", paneId, "-J"], { encoding: "utf8" });
+    if (cap.status !== 0) return false;
+    const text = cap.stdout ?? "";
+    const footer = text
+        .split("\n")
+        .map((l) => l.trimEnd())
+        .filter((l) => l.length > 0)
+        .slice(-5)
+        .join("\n");
+    return /esc to interrupt/i.test(footer);
+}
 
 function emit(obj: unknown): never {
     process.stdout.write(JSON.stringify(obj) + "\n");
@@ -92,6 +126,12 @@ async function main(): Promise<void> {
     // became redundant when loadConfig started applying a
     // `<project>-claude` default (#B.154 unification, david).
     if (!cfg.autopoll.enabled) emit({});
+
+    // #B.192: if claude is still mid-work (pane footer shows
+    // "esc to interrupt"), the Stop hook is firing on an intermediate
+    // pause — don't inject backlog now or we'll race the next prompt.
+    // The next real Stop will re-fire the hook with the same backlog.
+    if (claudeStillWorking()) emit({});
 
     // loadConfig now guarantees agent + project non-null (`<project>-
     // claude` default kicks in at the end of the chain), but the
