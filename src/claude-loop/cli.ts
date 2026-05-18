@@ -56,7 +56,11 @@ function die(msg: string): never {
 }
 
 function need(cmd: string): void {
-    const r = spawnSync("command", ["-v", cmd], { shell: true });
+    // `command -v` is a bash builtin — fails under cmd.exe. Use the
+    // OS PATH lookup tool instead (`where` on Windows, `which`
+    // elsewhere) so the probe works on every supported shell.
+    const probe = process.platform === "win32" ? "where" : "which";
+    const r = spawnSync(probe, [cmd], { stdio: "ignore" });
     if (r.status !== 0) die(`missing dependency: ${cmd}`);
 }
 

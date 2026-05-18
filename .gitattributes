@@ -1,0 +1,10 @@
+# Windows .cmd launchers MUST keep CRLF — cmd.exe parses them
+# line-by-line and breaks completely on bare LF (treats the whole
+# file as one mangled line). Forcing eol=crlf survives clones on
+# Linux/macOS dev machines too.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Everything else: normalize to LF in the repo, let git decide the
+# checkout eol via the user's core.autocrlf.
+* text=auto
