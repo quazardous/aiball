@@ -264,45 +264,20 @@ const activeProjectLabel = computed(() => {
     flex-direction: column;
 }
 @media (max-width: 720px) {
-    /* #B.161 mobile: settings becomes a horizontal icon-row anchored
-       at the very bottom of the viewport — david's "la partie
-       settings doit etre apres les tickets et le thread en footer
-       de page". Out of the sidebar's vertical flow entirely;
-       position: fixed lets it overlay nothing of value (toast
-       padding handles the visual margin). The aiball-main / sidebar
-       get extra bottom padding so content doesn't slide under. */
+    /* #B.161 mobile: settings hidden in the sidebar — App.vue
+       renders a duplicate <SidebarFooter> after the inbox so the
+       settings scroll naturally below the ticket list (david: "pas
+       bloqué sur l'écran, vraiment en scroll apres la liste
+       ticket"). Same look as desktop (vertical text list), just
+       repositioned.
+       Plus collapse the empty bottom space: shrink the sidebar to
+       its content height instead of forcing 30vh. */
+    .aiball-sidebar {
+        max-height: none;
+        height: auto;
+    }
     .sidebar-settings {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        display: flex;
-        flex-direction: row;
-        justify-content: space-around;
-        align-items: stretch;
-        padding: 0.2rem 0.4rem;
-        background: var(--p-surface-50);
-        border-top: 1px solid var(--p-content-border-color);
-        z-index: 5;
-    }
-    .aiball-dark .sidebar-settings {
-        background: var(--p-surface-900);
-    }
-    .sidebar-settings > .sidebar-section-label {
         display: none;
-    }
-    .sidebar-settings > .sidebar-item {
-        flex: 1 1 0;
-        flex-direction: column;
-        gap: 0.1rem;
-        padding: 0.35rem 0.2rem;
-        font-size: 0.7rem;
-        text-align: center;
-        min-width: 0;
-        justify-content: center;
-    }
-    .sidebar-settings > .sidebar-item > i {
-        font-size: 1rem;
     }
 }
 .aiball-dark .aiball-sidebar {

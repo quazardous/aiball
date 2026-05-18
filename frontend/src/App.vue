@@ -950,6 +950,27 @@ watch(showSnoozed, (v) => {
                     />
                 </template>
             </main>
+
+            <!-- #B.161: mobile-only settings footer. Same vertical
+                 text list look as the desktop sidebar, but rendered
+                 here (after main) so it scrolls naturally with the
+                 inbox instead of being a fixed band. Hidden on
+                 desktop where the sidebar already exposes these. -->
+            <aside class="aiball-footer-settings">
+                <div class="aiball-footer-settings__label">Settings</div>
+                <button type="button" class="aiball-footer-settings__item" @click="openPanel('projects')">
+                    <i class="pi pi-folder" /> <span>Projects</span>
+                </button>
+                <button type="button" class="aiball-footer-settings__item" @click="openPanel('rules')">
+                    <i class="pi pi-cog" /> <span>Rules</span>
+                </button>
+                <button type="button" class="aiball-footer-settings__item" @click="openPanel('tags')">
+                    <i class="pi pi-tag" /> <span>Tags</span>
+                </button>
+                <button type="button" class="aiball-footer-settings__item" @click="openPanel('consumers')">
+                    <i class="pi pi-users" /> <span>Consumers</span>
+                </button>
+            </aside>
         </div>
 
         <Toast />
@@ -1030,17 +1051,61 @@ watch(showSnoozed, (v) => {
     }
     .aiball-main {
         padding: 0.5rem;
-        /* #B.161 footer: settings is position: fixed at viewport
-           bottom on mobile — leave room so the last ticket row /
-           composer doesn't get covered. ~3rem matches the footer
-           band height + a little breathing room. */
-        padding-bottom: 3.2rem;
     }
-    .aiball-sidebar {
-        /* Same — sidebar's own scroll area shouldn't bleed under the
-           fixed settings footer. */
-        padding-bottom: 3.2rem;
+    /* #B.161 v2: aiball-layout becomes a stack on mobile — sidebar
+       at top, main in the middle, and a dedicated SidebarFooter
+       below main that scrolls naturally with the rest of the page
+       (david: "vraiment en scroll apres la liste ticket"). */
+    .aiball-layout {
+        grid-template-areas:
+            "sidebar"
+            "main"
+            "footer";
+        grid-template-rows: auto 1fr auto;
     }
+    .aiball-sidebar { grid-area: sidebar; }
+    .aiball-main { grid-area: main; }
+    .aiball-footer-settings { grid-area: footer; }
+
+    .aiball-footer-settings {
+        display: flex;
+        flex-direction: column;
+        gap: 0.1rem;
+        padding: 0.5rem 0.6rem;
+        background: var(--p-surface-50);
+        border-top: 1px solid var(--p-content-border-color);
+    }
+    .aiball-dark .aiball-footer-settings {
+        background: var(--p-surface-900);
+    }
+    .aiball-footer-settings__label {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--p-text-muted-color);
+        padding: 0.3rem 0.5rem 0.2rem;
+    }
+    .aiball-footer-settings__item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        text-align: left;
+        background: transparent;
+        border: 0;
+        padding: 0.45rem 0.6rem;
+        border-radius: 0.4rem;
+        color: var(--p-text-color);
+        cursor: pointer;
+        font: inherit;
+    }
+    .aiball-footer-settings__item:hover {
+        background: var(--p-surface-100);
+    }
+    .aiball-dark .aiball-footer-settings__item:hover {
+        background: var(--p-surface-800);
+    }
+
     /* #B.161: bulk actions (per-row checkbox + "select all" footer)
        are awkward on a phone — hide them entirely. The thread view
        still offers per-ticket actions for individual ops. */
@@ -1049,6 +1114,14 @@ watch(showSnoozed, (v) => {
     }
     .bulk-bar {
         display: none !important;
+    }
+}
+@media (min-width: 721px) {
+    /* Desktop: footer-settings is the mobile-only band; hide it
+       since the sidebar already exposes Projects/Rules/Tags/
+       Consumers. */
+    .aiball-footer-settings {
+        display: none;
     }
     /* #B.165: toasts go edge-to-edge on mobile (slim left/right safety
        margin), and the verbose footer line (consumer · ref · project)
