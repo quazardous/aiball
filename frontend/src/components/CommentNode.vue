@@ -321,16 +321,11 @@ onBeforeUnmount(() => detachPaste?.());
             <i class="pi pi-comment" />
             <em>{{ msg.human_note }}</em>
         </div>
-        <!-- #B.130 follow-up: inline summary frame, grey/yellow tint.
-             Reads like a reference attached to the comment. Placed
-             AFTER the body in source (= after in default bottom-up
-             mode); CSS flex order lifts it to the top of the card in
-             top-down so it's the first thing seen when scrolling
-             latest-first. -->
-        <div v-if="summary" class="comment-summary">
-            <span class="comment-summary__label">tldr</span>
-            <span class="comment-summary__text">{{ summary }}</span>
-        </div>
+        <!-- #B.130 follow-up: per-comment TLDR frame removed (david:
+             "si le dernier comment until est maintenant ok, pas besoin
+             d'afficher les encarts jaunâtres"). The thread-level
+             banner displays the latest summary_until as the canonical
+             state — older ones are invisible-by-design. -->
         <div
             v-if="msg.status === 'pending' && msg.kind === 'comment_added'"
             class="comment-actions"

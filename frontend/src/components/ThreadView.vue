@@ -2434,41 +2434,9 @@ async function copyTicketRef() {
     font-size: 0.85rem;
     color: var(--p-text-muted-color);
 }
-/* #B.130 follow-up: inline summary frame attached to each comment.
-   Grey/yellow tint so it reads as a sidebar reference, not as content.
-   Default mode: source order = below body. Top-down: lifted above the
-   header via flex order so the TLDR is the first thing visible when
-   scanning latest-first. */
-.comment-card .comment-summary {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-    padding: 0.4rem 0.6rem;
-    border-radius: 0.3rem;
-    border: 1px solid color-mix(in srgb, var(--p-yellow-500) 30%, var(--p-content-border-color));
-    background: color-mix(in srgb, var(--p-yellow-500) 9%, var(--p-surface-50));
-    font-size: 0.83rem;
-    line-height: 1.4;
-    color: var(--p-text-color);
-}
-.aiball-dark .comment-card .comment-summary {
-    background: color-mix(in srgb, var(--p-yellow-500) 12%, var(--p-surface-800));
-}
-.comment-card .comment-summary__label {
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--p-text-muted-color);
-    font-weight: 600;
-    flex-shrink: 0;
-}
-.comment-card .comment-summary__text {
-    font-style: italic;
-    color: var(--p-text-color);
-}
-.thread-view--top-down .comment-card .comment-summary {
-    order: -1;
-}
+/* #B.130 follow-up: per-comment .comment-summary frame retired —
+   the thread-level latestSummaryUntil banner is the canonical TLDR
+   display; older summaries are invisible-by-design (latest wins). */
 /* #B.130: thread-level banner showing the latest summary_until as
    the canonical "current state of the thread". Replaces the per-
    comment banners (older ones are invisible, latest wins). */
