@@ -61,6 +61,24 @@ function need(cmd: string): void {
     if (r.status !== 0) die(`missing dependency: ${cmd}`);
 }
 
+function has(cmd: string): boolean {
+    return spawnSync("command", ["-v", cmd], { shell: true }).status === 0;
+}
+
+// Pick the local clipboard tool tmux should pipe selections into. OSC 52
+// (`set-clipboard on`) works in some terminals (Alacritty, Windows
+// Terminal, kitty, recent gnome-terminal) but is rejected by default
+// in VTE-based terminals like Ptyxis (#B.181 follow-up). When a real
+// clipboard binary is on the host we prefer it; OSC 52 stays on as the
+// remote-session (SSH) fallback.
+function resolveClipboardCmd(): string | null {
+    if (process.platform === "darwin" && has("pbcopy")) return "pbcopy";
+    if (process.env.WAYLAND_DISPLAY && has("wl-copy")) return "wl-copy";
+    if (process.env.DISPLAY && has("xclip")) return "xclip -selection clipboard -i";
+    if (process.env.DISPLAY && has("xsel")) return "xsel --clipboard --input";
+    return null;
+}
+
 function shQuote(s: string): string {
     return "'" + s.replace(/'/g, `'\\''`) + "'";
 }
@@ -297,21 +315,23 @@ function cmdStart(opts: StartOpts): void {
     // translated to Up/Down arrow keys. Scoped per-session — we
     // don't touch the user's global `.tmux.conf`.
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "mouse", "on"], { stdio: "ignore" });
-    // #B.181 (david): with mouse-on, drag-select goes to tmux's
-    // paste buffer instead of the terminal clipboard, breaking
-    // copy/paste. `set-clipboard on` makes tmux emit OSC 52 escape
-    // sequences so the terminal (Windows Terminal, Alacritty, kitty,
-    // recent gnome-terminal) writes the selection to the system
-    // clipboard directly. Also enable copy-on-drag-end in copy-mode
-    // so a mouse drag inside the pane Just Works.
+    // #B.181 (david): with mouse-on, drag-select goes to tmux's paste
+    // buffer instead of the terminal clipboard. Strategy: bind
+    // MouseDragEnd1Pane to copy-pipe-no-clear piping into a real
+    // local clipboard tool (wl-copy / xclip / pbcopy) when available —
+    // robust across terminals including Ptyxis (VTE blocks OSC 52 by
+    // default). `set-clipboard on` stays enabled as an SSH/remote
+    // fallback path via OSC 52. `-no-clear` (vs `-and-cancel`) keeps
+    // the visual selection on screen after mouse release so the user
+    // can see what was copied.
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "set-clipboard", "on"], { stdio: "ignore" });
-    // Cancel the drag selection (which puts us in copy-mode) and
-    // pipe to system clipboard automatically on mouse-up.
-    // Note: Shift+drag still works as a no-tmux fallback for terminals
-    // that don't honor OSC 52.
+    const clipboardCmd = resolveClipboardCmd();
+    const pipeArgs = clipboardCmd
+        ? ["send-keys", "-X", "copy-pipe-no-clear", clipboardCmd]
+        : ["send-keys", "-X", "copy-pipe-no-clear"];
     spawnSync(MUX_CMD, [
         "bind-key", "-T", "copy-mode", "MouseDragEnd1Pane",
-        "send-keys", "-X", "copy-pipe-and-cancel",
+        ...pipeArgs,
     ], { stdio: "ignore" });
     setTmuxStatus(name, "boot");
 
@@ -685,7 +705,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         ).default("as-is").choices(["summary", "as-is", "abort"]))
         .addOption(new Option(
             "--user-grace <sec>",
-            "Seconds to stay out of the way after the human submits a prompt (default from .aiball.yaml `claude_loop.user_grace_seconds`, 300 if unset — #B.180)",
+            "Seconds to stay out of the way after the human submits a prompt (default from .aiball.yaml `claude_loop.user_grace_seconds`, 60 if unset — #B.180, recalibrated #B.185)",
         ))
         .allowExcessArguments(false)
         .action((opts: {
