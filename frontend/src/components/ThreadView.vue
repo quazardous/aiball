@@ -17,6 +17,7 @@ import RelationChip from "./RelationChip.vue";
 import ThreadRelations from "./ThreadRelations.vue";
 import RelationKindMenu from "./RelationKindMenu.vue";
 import ThreadHeader from "./ThreadHeader.vue";
+import ThreadEditPanel from "./ThreadEditPanel.vue";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -435,13 +436,14 @@ function cancelEdit() {
 }
 
 // Paste-image on the body textarea of the edit panel (per #B.76).
-// The textarea is mounted/unmounted by `v-if="editing"`, so we hook
-// the listener whenever it appears and detach when it leaves.
-const editBodyTextareaRef = ref<{ $el?: HTMLTextAreaElement } | null>(null);
+// ThreadEditPanel mounts/unmounts the textarea with `v-if="editing"`
+// and exposes its ref via defineExpose; we read it off editPanelRef
+// and (re)attach on each transition.
+const editPanelRef = ref<{ bodyTextareaRef: { $el?: HTMLTextAreaElement } | null } | null>(null);
 const editToast = useToast();
 let editDetachPaste: (() => void) | null = null;
 
-watch(editBodyTextareaRef, (instance) => {
+watch(() => editPanelRef.value?.bodyTextareaRef ?? null, (instance) => {
     editDetachPaste?.();
     editDetachPaste = null;
     const el = instance?.$el;
@@ -1583,77 +1585,20 @@ async function copyTicketRef() {
                     :editing="editing"
                     @start-edit="editing = true"
                 />
-                <div v-if="editing" class="thread-edit-panel">
-                    <div class="thread-edit-row">
-                        <span class="thread-edit-label">Title</span>
-                        <InputText
-                            v-model="titleDraft"
-                            :disabled="bodyBusy"
-                            size="small"
-                            style="flex: 1"
-                            placeholder="Ticket title"
-                            @keydown.enter.prevent="saveAndCloseEdit"
-                        />
-                    </div>
-                    <div class="thread-edit-row">
-                        <span class="thread-edit-label">Body</span>
-                        <Textarea
-                            ref="editBodyTextareaRef"
-                            v-model="bodyDraft"
-                            :disabled="bodyBusy"
-                            :rows="6"
-                            autoResize
-                            style="flex: 1; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.9rem;"
-                            placeholder="Ticket body (markdown supported, leave blank to clear)"
-                            @keydown.ctrl.enter.prevent="saveAndCloseEdit"
-                            @keydown.meta.enter.prevent="saveAndCloseEdit"
-                            @keydown.escape.prevent="cancelEdit"
-                        />
-                    </div>
-                    <div class="thread-edit-row">
-                        <span class="thread-edit-label">Intent</span>
-                        <Select
-                            :model-value="data.ticket.intent"
-                            :options="intentOptions"
-                            option-label="label"
-                            option-value="value"
-                            size="small"
-                            :disabled="intentBusy"
-                            style="min-width: 9rem"
-                            @update:model-value="(v: Intent | null) => changeIntent(v)"
-                        />
-                    </div>
-                    <div class="thread-edit-row">
-                        <span class="thread-edit-label">Tags</span>
-                        <TagPicker
-                            :message-id="data.ticket.id"
-                            :tags="data.ticket.tags"
-                            @changed="onTagsChanged"
-                        />
-                    </div>
-                    <div class="thread-edit-actions">
-                        <span class="thread-edit-hint">
-                            Title + body are saved on <kbd>⌃Enter</kbd> or "save". Intent + tags save immediately.
-                        </span>
-                        <Button
-                            label="cancel"
-                            icon="pi pi-times"
-                            size="small"
-                            severity="secondary"
-                            text
-                            :disabled="bodyBusy"
-                            @click="cancelEdit"
-                        />
-                        <Button
-                            label="save"
-                            icon="pi pi-check"
-                            size="small"
-                            severity="success"
-                            :loading="bodyBusy"
-                            @click="saveAndCloseEdit"
-                        />
-                    </div>
-                </div>
+                <ThreadEditPanel
+                    v-if="editing"
+                    ref="editPanelRef"
+                    :ticket="data.ticket"
+                    v-model:title-draft="titleDraft"
+                    v-model:body-draft="bodyDraft"
+                    :body-busy="bodyBusy"
+                    :intent-busy="intentBusy"
+                    :intent-options="intentOptions"
+                    @save="saveAndCloseEdit"
+                    @cancel="cancelEdit"
+                    @intent-change="changeIntent"
+                    @tags-changed="onTagsChanged"
+                />
                 <MarkdownView :source="data.ticket.body" :self-ticket-id="data.ticket.id" />
             </article>
 
