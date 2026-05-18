@@ -997,6 +997,26 @@ const acceptMenu = computed(() => {
     }
     return items;
 });
+// #B.167: reject as a split button — default action rejects the
+// current decision kind; menu items offer requalification (reclassify
+// to the other kind, leaving status pending).
+const rejectMenu = computed(() => {
+    const active = activeDecision.value;
+    if (!active) return [];
+    const other: "plan" | "resolution" = active.decision.kind === "resolution" ? "plan" : "resolution";
+    return [
+        {
+            label: `reject ${active.decision.kind}`,
+            icon: "pi pi-times",
+            command: () => { void rejectActiveDecision(); },
+        },
+        {
+            label: `reclassify as ${other} → still pending`,
+            icon: "pi pi-pencil",
+            command: () => { void reclassifyActiveDecision(other); },
+        },
+    ];
+});
 async function rejectActiveDecision() {
     const active = activeDecision.value;
     if (!active || !data.value) return;
@@ -1970,14 +1990,16 @@ async function copyTicketRef() {
                         @click="openSnoozePopover"
                     />
                     <template v-if="activeDecision">
-                        <Button
-                            icon="pi pi-times"
+                        <SplitButton
                             :label="`reject ${activeDecision.decision.kind}`"
+                            icon="pi pi-times"
                             severity="secondary"
                             size="small"
                             outlined
                             :loading="resolutionBusy"
                             :disabled="!hasBody"
+                            :model="rejectMenu"
+                            menu-button-aria-label="Reject or reclassify as different decision kind"
                             :title="hasBody
                                 ? `Reject the ${activeDecision.decision.kind} — ticket stays open. Your composer body is posted as the explanation.`
                                 : `Type an explanation in the composer first — rejecting a ${activeDecision.decision.kind} needs a reason.`"
