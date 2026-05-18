@@ -868,7 +868,13 @@ async function main(): Promise<void> {
     // `tail` subcommand on the current-cwd loop. David: "claude-loop
     // --tail pourrait etre bien". Rewrite the args before dispatch
     // so commander parses it like an explicit `tail` invocation.
+    // The log-mode flags (--log / --timer / --stop-hook) are also
+    // accepted bare — they're tail sub-modes, and david typed
+    // `claude-loop --log` directly expecting it to "just work".
     if (wrapper[0] === "--tail") wrapper[0] = "tail";
+    else if (wrapper[0] === "--log" || wrapper[0] === "--timer" || wrapper[0] === "--stop-hook") {
+        wrapper.unshift("tail");
+    }
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
     const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "check", "trace", "prune", "-h", "--help", "help"]);
