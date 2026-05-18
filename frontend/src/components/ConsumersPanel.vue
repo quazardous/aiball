@@ -20,10 +20,12 @@ const toast = useToast();
 const rows = ref<Consumer[]>([]);
 const loading = ref(false);
 
-// New-consumer form
-const newId = ref("");
-const newKind = ref<ConsumerKind>("agent");
-const newName = ref("");
+// #B.193: hide consumers that haven't been seen for over a week.
+// Toggle lets the user surface the long tail for debugging /
+// auditing. Default ON because the panel was getting cluttered with
+// agents that landed on the box once and never came back.
+const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+const hideStale = ref(true);
 
 const KIND_OPTIONS = [
     { label: "Human", value: "human" as ConsumerKind },
@@ -67,36 +69,11 @@ async function patch(consumer_id: string, patchBody: Partial<Consumer>) {
     }
 }
 
-async function create() {
-    const id = newId.value.trim();
-    if (!id) {
-        toast.add({ severity: "warn", summary: "consumer_id required", life: 4000 });
-        return;
-    }
-    try {
-        const c = await api.upsertConsumer({
-            consumer_id: id,
-            kind: newKind.value,
-            display_name: newName.value.trim() || null,
-        });
-        toast.add({
-            severity: "success",
-            summary: `Consumer "${c.consumer_id}" saved`,
-            life: 4000,
-        });
-        newId.value = "";
-        newName.value = "";
-        newKind.value = "agent";
-        await load();
-    } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: "Create failed",
-            detail: (e as Error).message,
-            life: 6000,
-        });
-    }
-}
+// #B.193: the inline "Add consumer" form was retired — the daemon
+// auto-inserts on the first `by_agent` it sees (`ensureConsumer()`
+// in src/db/consumers.ts), and humans are created via setup-screen
+// or `aiball auth issue`. Keeping the form invited duplicate-id
+// confusion for zero new capability.
 
 async function remove(consumer_id: string) {
     if (!confirm(`Delete consumer "${consumer_id}"? Past posts are preserved; the row will be re-created the next time this id posts.`)) return;
@@ -180,8 +157,11 @@ void hasLoopAgents; // referenced in template via direct access
 // =====================================================================
 
 type SortKey = "consumer_id" | "kind" | "display_name" | "activity" | "enabled";
-const sortKey = ref<SortKey>("kind");
-const sortDir = ref<"asc" | "desc">("asc");
+// #B.193: default sort by activity (= last_seen_at), most recent
+// first. Aligns the panel with "who's been around lately" — the
+// list is much more useful to triage than alphabetical by kind.
+const sortKey = ref<SortKey>("activity");
+const sortDir = ref<"asc" | "desc">("desc");
 
 function toggleSort(key: SortKey): void {
     if (sortKey.value === key) {
@@ -197,9 +177,23 @@ function sortIcon(key: SortKey): string {
     return sortDir.value === "asc" ? "pi pi-sort-up" : "pi pi-sort-down";
 }
 
+// #B.193: filter out consumers idle > STALE_THRESHOLD_MS unless the
+// user explicitly asked to see them. A consumer with no last_seen_at
+// at all is treated as stale too (one-shot agents that never came
+// back). Filter runs before sort so the badges in the empty state
+// reflect the visible row count, not the underlying total.
+const visibleRows = computed<Consumer[]>(() => {
+    if (!hideStale.value) return rows.value;
+    const threshold = Date.now() - STALE_THRESHOLD_MS;
+    return rows.value.filter((r) => {
+        if (!r.last_seen_at) return false;
+        return Date.parse(r.last_seen_at) >= threshold;
+    });
+});
+
 const sortedRows = computed<Consumer[]>(() => {
     const mul = sortDir.value === "asc" ? 1 : -1;
-    return [...rows.value].sort((a, b) => {
+    return [...visibleRows.value].sort((a, b) => {
         switch (sortKey.value) {
             case "consumer_id":
                 return mul * a.consumer_id.localeCompare(b.consumer_id);
@@ -247,31 +241,22 @@ const sortedRows = computed<Consumer[]>(() => {
             </p>
         </header>
 
-        <section class="consumers-new">
-            <strong>Add consumer</strong>
-            <InputText
-                v-model="newId"
-                placeholder="consumer_id"
-                style="width: 14rem"
-            />
-            <Select
-                v-model="newKind"
-                :options="KIND_OPTIONS"
-                optionLabel="label"
-                optionValue="value"
-                style="width: 8rem"
-            />
-            <InputText
-                v-model="newName"
-                placeholder="display name (optional)"
-                style="width: 18rem"
-            />
-            <Button
-                label="Save"
-                icon="pi pi-plus"
-                size="small"
-                @click="create"
-            />
+        <!-- #B.193: "Add consumer" form retired (auto-creation via
+             ensureConsumer + setup-screen / `aiball auth issue` cover
+             the use cases). Replaced by the stale-filter toggle which
+             is the actual common operation now. -->
+        <section class="consumers-toolbar">
+            <label class="consumers-toolbar__toggle">
+                <input
+                    type="checkbox"
+                    :checked="hideStale"
+                    @change="hideStale = ($event.target as HTMLInputElement).checked"
+                />
+                Hide consumers idle &gt; 1 week
+            </label>
+            <span class="consumers-toolbar__count">
+                {{ sortedRows.length }} shown / {{ rows.length }} total
+            </span>
         </section>
 
         <div v-if="loading && !rows.length" class="aiball-empty">Loading…</div>
@@ -388,15 +373,25 @@ const sortedRows = computed<Consumer[]>(() => {
     flex-direction: column;
     gap: 0.8rem;
 }
-.consumers-new {
+.consumers-toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: space-between;
     gap: 0.5rem;
-    padding: 0.6rem 0.8rem;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
-    background: var(--p-content-background);
+    padding: 0.4rem 0.2rem;
+}
+.consumers-toolbar__toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    user-select: none;
+}
+.consumers-toolbar__count {
+    font-size: 0.82rem;
+    color: var(--p-text-muted-color);
 }
 .consumers-table {
     width: 100%;
