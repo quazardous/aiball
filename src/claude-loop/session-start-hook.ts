@@ -27,8 +27,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { AiballClient } from "../client.js";
-import { MUX_CMD, idleMarkerPath, pickPingPhrase, pingsPath, tmuxName } from "./state.js";
+import { MUX_CMD, checkHasWork, idleMarkerPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -39,36 +38,32 @@ const sd = process.env.CL_STATE_DIR;
 const name = process.env.CL_NAME;
 const checkCmd = process.env.CL_CHECK_CMD ?? "true";
 const noStartup = process.env.CL_NO_STARTUP_PING === "1";
-if (!sd || !name || noStartup) emit();
-
-const DEFAULT_AIBALL_CHECK = "aiball pings-count -q";
-
-async function checkHasWork(): Promise<boolean> {
-    if (!checkCmd || checkCmd === "true") return true;
-    if (checkCmd === DEFAULT_AIBALL_CHECK) {
-        try {
-            const r = await new AiballClient().pingsCount() as { unread?: number };
-            return (r.unread ?? 0) > 0;
-        } catch {
-            return false;
-        }
-    }
-    const r = spawnSync("bash", ["-c", checkCmd], { stdio: "ignore" });
-    return r.status === 0;
+if (!sd || !name) emit();
+if (noStartup) {
+    // Don't ping at boot, but still seed the idle state so the bar
+    // doesn't carry over the cli's startup placeholder and so the
+    // timer's idle-since watch starts immediately.
+    try {
+        writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+        setTmuxStatus(name!, "idle");
+    } catch { /* swallow */ }
+    emit();
 }
 
 (async () => {
     try {
-        if (await checkHasWork()) {
+        if (await checkHasWork(checkCmd)) {
             const phrase = pickPingPhrase(pingsPath(sd!));
             spawnSync(MUX_CMD, [
                 "send-keys", "-t", `${tmuxName(name!)}.0`, phrase, "Enter",
             ], { stdio: "ignore" });
+            setTmuxStatus(name!, "busy");
         } else {
             // Nothing to do at boot — mark idle so the timer takes
             // over the watch immediately (no need to wait for claude's
             // first Stop). Mirrors the Stop hook's "sleep" branch.
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            setTmuxStatus(name!, "idle");
         }
     } catch {
         /* swallow — never block startup */

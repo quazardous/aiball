@@ -26,6 +26,7 @@ import { dirname, join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
+import { AiballClient } from "../client.js";
 import {
     DEFAULT_CHECK_CMD,
     MUX_CMD,
@@ -37,6 +38,7 @@ import {
     pingsPath,
     platePath,
     readPlate,
+    setTmuxStatus,
     stateDirFor,
     timerLogPath,
     timerPidPath,
@@ -83,6 +85,7 @@ interface StartOpts {
     pings?: string;
     attach?: boolean;
     noStartupPing?: boolean;
+    userGraceSec?: number;
     claudeArgs: string[];
 }
 
@@ -123,6 +126,10 @@ function cmdStart(opts: StartOpts): void {
         // Read by the SessionStart hook to decide whether to ping at
         // boot. Empty / unset = ping (per default). "1" = stay silent.
         `export CL_NO_STARTUP_PING=${shQuote(opts.noStartupPing ? "1" : "")}`,
+        // Seconds the timer stays out of the way after the human
+        // submits a prompt (UserPromptSubmit hook refreshes the
+        // user-took-over marker). 0 disables the grace.
+        `export CL_USER_GRACE_SEC=${shQuote(String(opts.userGraceSec ?? 300))}`,
         "",
     ];
     writeFileSync(envPath(sd), envLines.join("\n"));
@@ -133,17 +140,34 @@ function cmdStart(opts: StartOpts): void {
     const root = selfRoot();
     const stopHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/stop-hook.ts"))}`;
     const sessionStartHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/session-start-hook.ts"))}`;
+    const userPromptSubmitHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/user-prompt-submit-hook.ts"))}`;
     const settings = {
         hooks: {
             // SessionStart fires once when claude has finished booting
             // — replaces the fragile `sleep 3 && send-keys` race the
             // wrapper used (#B.63 follow-up: david saw bugs when
             // claude was still prompting for MCP trust etc).
-            SessionStart: [{
-                matcher: "startup",
-                hooks: [{ type: "command", command: sessionStartHookCmd }],
-            }],
+            //
+            // #B.148 bug: matcher was "startup" only, so `claude
+            // --resume` (which fires matcher="resume") and `claude
+            // --continue`/"clear" (matcher="clear") bypassed the hook
+            // entirely. Loop stayed idle even with pings unread because
+            // SSE only delivers NEW pings (existing ones don't replay).
+            // Register the same hook against each matcher so the
+            // initial drain runs in every entry mode.
+            SessionStart: [
+                { matcher: "startup", hooks: [{ type: "command", command: sessionStartHookCmd }] },
+                { matcher: "resume",  hooks: [{ type: "command", command: sessionStartHookCmd }] },
+                { matcher: "clear",   hooks: [{ type: "command", command: sessionStartHookCmd }] },
+            ],
             Stop: [{ hooks: [{ type: "command", command: stopHookCmd }] }],
+            // UserPromptSubmit fires when the human (not the wrapper)
+            // sends a prompt. Used to (a) suspend auto-pings for the
+            // grace window so we don't send-keys over the human, and
+            // (b) flip the tmux bar to `[busy]` immediately so the
+            // display matches reality without waiting for the next
+            // Stop tick (#B.145 v2.2).
+            UserPromptSubmit: [{ hooks: [{ type: "command", command: userPromptSubmitHookCmd }] }],
         },
     };
     const settingsJson = JSON.stringify(settings);
@@ -162,15 +186,12 @@ function cmdStart(opts: StartOpts): void {
     ]);
     if (r.status !== 0) die("tmux new-session failed");
 
-    // Status bar so a loop session is visually distinct (cyan).
-    for (const [k, v] of [
-        ["status-bg", "colour39"],
-        ["status-fg", "colour15"],
-        ["status-left", ` CLAUDE-LOOP · ${name} `],
-        ["status-left-length", "60"],
-    ] as const) {
-        spawnSync(MUX_CMD, ["set-option", "-t", tname, k, v], { stdio: "ignore" });
-    }
+    // Status bar so a loop session is visually distinct. Initial
+    // state is idle (claude boots = waiting); SessionStart hook flips
+    // to busy if there's work to drain. Color + label are driven by
+    // setTmuxStatus (#B.146).
+    spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-left-length", "60"], { stdio: "ignore" });
+    setTmuxStatus(name, "idle");
 
     // Detached timer process. Inherits CL_* env via the env file
     // sourced in the child shell. nohup-like: ignore SIGHUP, detach.
@@ -294,6 +315,155 @@ function cmdWake(name: string): void {
     );
 }
 
+/**
+ * Diagnostic subcommand (#B.149). Answers "what would the timer do
+ * right now?" without spawning claude. Useful when a fresh ticket
+ * isn't being picked up — surfaces whether the resolved consumer_id /
+ * project actually sees pings for the work the user expects.
+ *
+ * Pulls config from (in order): the named loop's plate.json (if a
+ * `name` is passed and the loop exists), then process env (CL_*,
+ * AIBALL_AGENT, AIBALL_PROJECT), then defaults. Prints the resolved
+ * settings, runs `checkHasWork`, and for the default aiball check
+ * also breaks down the ping counters so the cause of a 0 is visible
+ * (wrong agent? wrong project? actually no pings?).
+ */
+async function cmdCheck(name: string | undefined, opts: { checkCmd?: string }): Promise<void> {
+    let plateCheckCmd: string | undefined;
+    let plateName: string | undefined;
+    if (name) {
+        const sd = stateDirFor(name);
+        if (existsSync(platePath(sd))) {
+            try {
+                const p = readPlate(sd);
+                plateCheckCmd = p.check_cmd;
+                plateName = p.name;
+            } catch { /* ignore */ }
+        }
+    }
+    const checkCmd = opts.checkCmd ?? plateCheckCmd ?? process.env.CL_CHECK_CMD ?? DEFAULT_CHECK_CMD;
+    const agentEnv = process.env.AIBALL_AGENT ?? "(unset → AiballClient default)";
+    const projectEnv = process.env.AIBALL_PROJECT ?? "(unset)";
+    process.stdout.write(`claude-loop check\n`);
+    process.stdout.write(`  loop name      : ${plateName ?? name ?? "(no loop)"}\n`);
+    process.stdout.write(`  check-cmd      : ${checkCmd}\n`);
+    process.stdout.write(`  AIBALL_AGENT   : ${agentEnv}\n`);
+    process.stdout.write(`  AIBALL_PROJECT : ${projectEnv}\n`);
+    process.stdout.write(`\n`);
+
+    // Default aiball check → also dump the rich snapshot so the cause
+    // of a 0 is visible without re-running curl by hand.
+    if (checkCmd === DEFAULT_CHECK_CMD) {
+        try {
+            const client = new AiballClient();
+            const ping = await client.pingsCount() as { consumer_id: string; unread: number };
+            const subs = await client.mySubs() as Array<{
+                project?: string;
+                role?: string;
+                ticket_id?: number;
+            }>;
+            process.stdout.write(`  resolved consumer_id  : ${ping.consumer_id}\n`);
+            process.stdout.write(`  unread pings (this consumer): ${ping.unread}\n`);
+            const projectSubs = subs.filter((s) => s.project && !s.ticket_id);
+            process.stdout.write(`  project subscriptions :\n`);
+            if (projectSubs.length === 0) {
+                process.stdout.write(`    (none — consumer subscribes to NO project; new tickets won't generate pings for this consumer in any project)\n`);
+            } else {
+                for (const s of projectSubs) {
+                    process.stdout.write(`    ${(s.project ?? "?").padEnd(24)}  role=${s.role ?? "(?)"}\n`);
+                }
+            }
+            process.stdout.write(`\n`);
+            const verdict = ping.unread > 0 ? "WAKE (work to drain)" : "SLEEP (nothing)";
+            process.stdout.write(`  verdict: ${verdict}\n`);
+            const hasProjectSub = projectEnv !== "(unset)" && projectSubs.some((s) => s.project === projectEnv);
+            if (projectEnv !== "(unset)" && !hasProjectSub) {
+                process.stdout.write(`  hint   : AIBALL_PROJECT=${projectEnv} is set but consumer '${ping.consumer_id}' has NO subscription on that project — new tickets there won't generate pings. Fix: subscribe via MCP \`subscribe({project: "${projectEnv}", role: "owner"})\` while running AS this consumer.\n`);
+            }
+            if (projectSubs.length === 0) {
+                process.stdout.write(`  hint   : consumer '${ping.consumer_id}' looks ephemeral (random fallback?). Set AIBALL_AGENT to a stable id and subscribe it to the projects you care about.\n`);
+            }
+            process.exit(ping.unread > 0 ? 0 : 1);
+        } catch (e) {
+            process.stderr.write(`  ERROR: ${(e as Error).message ?? String(e)}\n`);
+            process.exit(2);
+        }
+    } else {
+        // Custom check-cmd → shell out, report exit code.
+        const r = spawnSync("bash", ["-c", checkCmd], { stdio: ["ignore", "inherit", "inherit"] });
+        process.stdout.write(`\n`);
+        const verdict = r.status === 0 ? "WAKE (exit 0)" : `SLEEP (exit ${r.status})`;
+        process.stdout.write(`  verdict: ${verdict}\n`);
+        process.exit(r.status ?? 2);
+    }
+}
+
+/**
+ * Dummy/observe subcommand (#B.149). Runs the timer's gate logic in
+ * the foreground without spawning claude or a tmux session — david:
+ * "un mode dummy qui permet de savoir ce qui devrait se passer
+ * (claude-loop sans claude)". Each iteration prints whether the
+ * wrapper WOULD wake claude right now, and why.
+ *
+ * Unlike `check` (one-shot), `trace` loops every `interval` seconds
+ * until Ctrl-C. Useful for "I just created a ticket — does the loop
+ * see it?" debugging in real time. No state written, no tmux, no
+ * claude subprocess; you can run as many `trace` sessions in parallel
+ * as you want.
+ */
+async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boolean; events?: boolean }): Promise<void> {
+    // --events mode (#B.154): open SSE and print every aiball event
+    // live. Pure tail — no gate eval, no decision making, just observe
+    // what the daemon would push to this consumer. Useful to verify
+    // "is my consumer actually wired to receive events for this
+    // project?" without involving claude-loop's timer logic.
+    if (opts.events) {
+        const client = new AiballClient();
+        process.stdout.write(`claude-loop trace --events — tailing aiball SSE\n`);
+        process.stdout.write(`(consumer=${client.agentId}, Ctrl-C to exit)\n\n`);
+        const off = client.subscribeEvents({
+            onHello: (p) => process.stdout.write(`[${new Date().toISOString()}] hello: consumer=${p.consumer_id} unread=${p.unread}\n`),
+            onPing: (p) => process.stdout.write(`[${new Date().toISOString()}] PING ${JSON.stringify(p)}\n`),
+            onError: (e) => process.stdout.write(`[${new Date().toISOString()}] error: ${e.message}\n`),
+        });
+        await new Promise<void>((res) => {
+            process.on("SIGINT", () => { off(); res(); });
+            process.on("SIGTERM", () => { off(); res(); });
+        });
+        return;
+    }
+
+    const checkCmd = opts.checkCmd ?? process.env.CL_CHECK_CMD ?? DEFAULT_CHECK_CMD;
+    const interval = Math.max(1, Number(opts.interval ?? 10));
+    process.stdout.write(`claude-loop trace — check-cmd=${checkCmd}, interval=${interval}s\n`);
+    process.stdout.write(`(no claude spawn, no tmux session — Ctrl-C to exit)\n\n`);
+    let aiballClient: AiballClient | null = null;
+    let tick = 0;
+    const once = opts.once === true;
+    const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+        tick += 1;
+        const ts = new Date().toISOString();
+        if (checkCmd === DEFAULT_CHECK_CMD) {
+            if (!aiballClient) aiballClient = new AiballClient();
+            try {
+                const r = await aiballClient.pingsCount() as { consumer_id: string; unread: number };
+                const verdict = r.unread > 0 ? "WAKE" : "sleep";
+                process.stdout.write(`[${ts}] tick ${tick}: consumer=${r.consumer_id} unread=${r.unread} → ${verdict}\n`);
+            } catch (e) {
+                process.stdout.write(`[${ts}] tick ${tick}: ERROR ${(e as Error).message ?? String(e)} → sleep\n`);
+            }
+        } else {
+            const r = spawnSync("bash", ["-c", checkCmd], { stdio: "ignore" });
+            const verdict = r.status === 0 ? "WAKE" : "sleep";
+            process.stdout.write(`[${ts}] tick ${tick}: exit=${r.status} → ${verdict}\n`);
+        }
+        if (once) return;
+        await sleep(interval * 1000);
+    }
+}
+
 async function cmdPrune(): Promise<void> {
     if (!existsSync(STATE_ROOT)) {
         process.stdout.write("nothing to prune\n");
@@ -346,10 +516,14 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         // Commander convention: `--no-foo` flips foo to false.
         .option("--no-attach", "Don't attach after spawn (wrapper exits silently)")
         .option("--no-startup-ping", "Don't send a wake-up message on launch")
+        .addOption(new Option(
+            "--user-grace <sec>",
+            "Seconds to stay out of the way after the human submits a prompt",
+        ).default("300"))
         .allowExcessArguments(false)
         .action((opts: {
             name?: string; interval: string; checkCmd: string; pings?: string;
-            attach: boolean; startupPing: boolean;
+            attach: boolean; startupPing: boolean; userGrace: string;
         }) => {
             invoke({
                 name: opts.name,
@@ -358,6 +532,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 pings: opts.pings,
                 attach: opts.attach !== false,
                 noStartupPing: opts.startupPing === false,
+                userGraceSec: Math.max(0, Number(opts.userGrace)),
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });
@@ -367,7 +542,7 @@ async function main(): Promise<void> {
     const { wrapper, passthrough } = splitClaudeArgs(process.argv.slice(2));
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "prune", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "check", "trace", "prune", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -393,6 +568,17 @@ async function main(): Promise<void> {
     program.command("wake <name>")
         .description("Force the next timer tick to fire immediately")
         .action(cmdWake);
+    program.command("check [name]")
+        .description("Diagnose what the check-cmd would do right now (no claude spawn)")
+        .option("--check-cmd <cmd>", "Override the check-cmd (default: from loop plate or DEFAULT_CHECK_CMD)")
+        .action((name: string | undefined, opts: { checkCmd?: string }) => cmdCheck(name, opts));
+    program.command("trace")
+        .description("Foreground gate evaluator — print WAKE/sleep every tick (no claude, no tmux)")
+        .option("--check-cmd <cmd>", "Override the check-cmd (default: DEFAULT_CHECK_CMD)")
+        .option("--interval <sec>", "Seconds between ticks (default: 10)")
+        .option("--once", "Print one evaluation and exit")
+        .option("--events", "Open SSE and tail every aiball event live (no gate eval)")
+        .action((opts: { checkCmd?: string; interval?: string; once?: boolean; events?: boolean }) => cmdTrace(opts));
     program.command("prune").description("Interactively clean orphan state dirs").action(cmdPrune);
 
     // -h / --help at top level → root help, not start help.

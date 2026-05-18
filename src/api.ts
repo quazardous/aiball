@@ -102,6 +102,7 @@ import {
     listTypedRelationsForTicket,
     type ActiveRelation,
 } from "./db.js";
+import { onPing } from "./event-bus.js";
 import { RELATION_KINDS, isRelationKind, type RelationKind } from "./relations.js";
 import express from "express";
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
@@ -2023,6 +2024,52 @@ api.get("/pings/count", (req, res) => {
     const consumer = req.query.consumer_id as string | undefined;
     if (!consumer) return badRequest(res, "consumer_id required");
     res.json({ consumer_id: consumer, unread: unreadPingCount(consumer) });
+});
+
+/**
+ * Server-Sent Events stream for live ping notifications (#B.148
+ * phase A). Long-lived connection per consumer; the daemon flushes a
+ * `ping` event whenever `insertPing` fires for this consumer. Clients
+ * (claude-loop timer, autopoll daemon, UI badge) react instantly
+ * without polling.
+ *
+ * Wire format:
+ *   event: hello
+ *   data: {"consumer_id":"…","unread":N}
+ *
+ *   event: ping
+ *   data: {"ticket_id":N}      // or {"comment_id":N}
+ *
+ *   :keepalive 30s              // SSE comment, ignored by parsers
+ *
+ * Keepalive every 30s prevents proxies/UDS buffers from killing the
+ * idle stream. Client tears down the connection on its end.
+ */
+api.get("/events", (req, res) => {
+    const consumer = req.query.consumer_id as string | undefined;
+    if (!consumer) return badRequest(res, "consumer_id required");
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+    res.write(`event: hello\ndata: ${JSON.stringify({
+        consumer_id: consumer,
+        unread: unreadPingCount(consumer),
+    })}\n\n`);
+    const off = onPing(consumer, (payload) => {
+        res.write(`event: ping\ndata: ${JSON.stringify(payload)}\n\n`);
+    });
+    const ka = setInterval(() => {
+        res.write(`:keepalive ${new Date().toISOString()}\n\n`);
+    }, 30_000);
+    const cleanup = () => {
+        clearInterval(ka);
+        off();
+        try { res.end(); } catch { /* already closed */ }
+    };
+    req.on("close", cleanup);
+    req.on("error", cleanup);
 });
 
 api.post("/pings/mark-read", (req: Request, res: Response) => {

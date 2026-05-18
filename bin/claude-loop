@@ -18,4 +18,16 @@ CLAUDE_LOOP_CWD="$PWD"
 export CLAUDE_LOOP_CWD
 cd "$ROOT"
 
+# Same UDS/auth resolution as bin/aiball (#B.149 follow-up). claude-loop
+# `check` and the loops it spawns both talk to the aiball daemon via
+# AiballClient; without these vars, they hit TCP and 401.
+AIBALL_HOME="${AIBALL_HOME:-$HOME/.local/share/aiball}"
+if [[ -z "${AIBALL_SOCK:-}" && -S "$AIBALL_HOME/sock" ]]; then
+    export AIBALL_SOCK="$AIBALL_HOME/sock"
+fi
+if [[ -z "${AIBALL_SOCK:-}" && -z "${AIBALL_TOKEN:-}" && -f "$AIBALL_HOME/cli-env" ]]; then
+    # shellcheck source=/dev/null
+    source "$AIBALL_HOME/cli-env"
+fi
+
 exec npx --no-install tsx "$ROOT/src/claude-loop/cli.ts" "$@"

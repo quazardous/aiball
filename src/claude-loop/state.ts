@@ -9,10 +9,12 @@
  * - `timer.pid`   — pid of the detached timer process
  * - `timer.log`   — stdout/stderr of the timer
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { AiballClient } from "../client.js";
 
 export const STATE_ROOT = process.env.CLAUDE_LOOP_STATE_ROOT
     ?? join(homedir(), ".claude-loop");
@@ -69,6 +71,7 @@ export function envPath(sd: string): string { return join(sd, "env"); }
 export function pingsPath(sd: string): string { return join(sd, "pings.yaml"); }
 export function idleMarkerPath(sd: string): string { return join(sd, "idle-since"); }
 export function wakeRequestedPath(sd: string): string { return join(sd, "wake-requested"); }
+export function userTookOverPath(sd: string): string { return join(sd, "user-took-over"); }
 export function timerPidPath(sd: string): string { return join(sd, "timer.pid"); }
 export function timerLogPath(sd: string): string { return join(sd, "timer.log"); }
 
@@ -100,6 +103,104 @@ export function defaultPingsPath(): string {
  * `--check-cmd true` to ping unconditionally every tick. #B.63 v2.1.
  */
 export const DEFAULT_CHECK_CMD = "aiball pings-count -q";
+
+/**
+ * The "is there work to drain?" gate used by every wake surface
+ * (timer tick + SessionStart hook + Stop hook). #B.63 used to
+ * duplicate this across all three callers; #B.141 extracted it
+ * here so any tuning (timeout, retry, new fastpath kind) happens
+ * once.
+ *
+ * Behavior:
+ *   - Empty / `true` → always wake (legacy "pure timer" mode).
+ *   - Default `aiball pings-count -q` → call AiballClient.pingsCount()
+ *     in-process (no fork). Caller passes its own cached client to
+ *     keep the keep-alive socket warm across ticks.
+ *   - Anything else → shell out via `bash -c <cmd>`; exit 0 = work.
+ *
+ * Async because the in-process path returns a promise. Hooks await
+ * it once and exit; the timer awaits it per tick.
+ */
+export async function checkHasWork(
+    checkCmd: string,
+    client?: AiballClient,
+): Promise<boolean> {
+    if (!checkCmd || checkCmd === "true") return true;
+    if (checkCmd === DEFAULT_CHECK_CMD) {
+        const c = client ?? new AiballClient();
+        try {
+            const r = await c.pingsCount() as { unread?: number };
+            return (r.unread ?? 0) > 0;
+        } catch {
+            return false;
+        }
+    }
+    const r = spawnSync("bash", ["-c", checkCmd], { stdio: "ignore" });
+    return r.status === 0;
+}
+
+/**
+ * Default user-grace window in seconds (#B.145 v2.2). When the user
+ * has typed a prompt within this window, the timer skips its wake so
+ * the wrapper doesn't `send-keys` over a human-driven session. Tunable
+ * via `CL_USER_GRACE_SEC`.
+ */
+export const DEFAULT_USER_GRACE_SEC = 300;
+
+/**
+ * Is the human actively driving the session? True iff the
+ * `user-took-over` marker exists AND its mtime is within the grace
+ * window. The marker is refreshed on every UserPromptSubmit hook
+ * fire (#B.145), so any prompt the human submits keeps the loop
+ * deferential for `graceSec` more seconds.
+ */
+export function userIsTakingOver(sd: string, graceSec: number): boolean {
+    const p = userTookOverPath(sd);
+    if (!existsSync(p)) return false;
+    try {
+        return (Date.now() - statSync(p).mtimeMs) < graceSec * 1000;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Lightweight "claude is busy / idle" display written into the tmux
+ * status-left. Two states only on purpose (#B.144 — david: "debug
+ * light, faut pas rendre trop complexe"):
+ *
+ *   - `idle` → claude is at the prompt with no work pending
+ *   - `busy` → claude is in a turn (or we just sent it work)
+ *
+ * Transitions happen on the same surfaces that drive idle-since:
+ * Stop hook + SessionStart hook write `idle`/`busy` depending on
+ * checkHasWork; the timer writes `busy` when it sends a wake. The
+ * cli writes `busy` at startup so the bar isn't empty until the first
+ * hook fires.
+ *
+ * No-op when tmux is gone (loop was just rm'd) — never throw.
+ */
+export type LoopStatus = "idle" | "busy";
+
+/**
+ * tmux color palette per state (#B.146). Cyan (claude-loop brand)
+ * stays for `busy` so an active loop pops; idle drops to dark gray
+ * so a row of inactive loops fades into background. Both keep white
+ * fg for legibility.
+ */
+const STATUS_COLORS: Record<LoopStatus, { bg: string; fg: string }> = {
+    busy: { bg: "colour39", fg: "colour15" },   // cyan / white (default brand)
+    idle: { bg: "colour240", fg: "colour15" },  // dark gray / white
+};
+
+export function setTmuxStatus(name: string, status: LoopStatus): void {
+    const left = ` CLAUDE-LOOP · ${name} [${status}] `;
+    const tn = tmuxName(name);
+    const c = STATUS_COLORS[status];
+    spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-left", left], { stdio: "ignore" });
+    spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-bg", c.bg], { stdio: "ignore" });
+    spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-fg", c.fg], { stdio: "ignore" });
+}
 
 /**
  * Read the loop's pings YAML and return one phrase at random. Falls

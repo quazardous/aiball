@@ -380,6 +380,85 @@ export class AiballClient {
             `/api/pings/count?consumer_id=${encodeURIComponent(this.agentId)}`,
         );
     }
+
+    /**
+     * Open a long-lived SSE stream for live ping notifications
+     * (#B.148 phase B). Each `event: ping` from the daemon invokes
+     * the handler with the parsed JSON payload (typically
+     * `{ticket_id}` or `{comment_id}`). Returns an `unsubscribe`
+     * function the caller invokes to tear down the connection.
+     *
+     * UDS-only (the daemon's SSE endpoint is local-trust). TCP-fallback
+     * isn't wired here — remote SSE is a separate concern when/if the
+     * daemon grows beyond local.
+     *
+     * Behavior:
+     *   - Sends a `hello` event at connect time; ignored unless caller
+     *     opts in via the `onHello` callback (for badge bootstrap).
+     *   - No built-in reconnect — caller decides retry strategy. The
+     *     claude-loop timer (#B.148 phase C) wraps this with backoff.
+     *   - `onError` fires on socket / parse failures; if absent, the
+     *     stream just teardown silently. Always pair with reconnect
+     *     logic upstream for long-lived consumers.
+     */
+    subscribeEvents(handlers: {
+        onPing: (payload: { ticket_id?: number; comment_id?: number }) => void;
+        onHello?: (payload: { consumer_id: string; unread: number }) => void;
+        onError?: (err: Error) => void;
+    }): () => void {
+        if (!this.socketPath) {
+            throw new Error("subscribeEvents requires UDS (AIBALL_SOCK)");
+        }
+        const path = `/api/events?consumer_id=${encodeURIComponent(this.agentId)}`;
+        const req = httpRequest({
+            socketPath: this.socketPath,
+            path,
+            method: "GET",
+            headers: { "x-aiball-consumer": this.agentId },
+        }, (res: IncomingMessage) => {
+            if ((res.statusCode ?? 0) >= 400) {
+                handlers.onError?.(new Error(`SSE ${path} → ${res.statusCode}`));
+                req.destroy();
+                return;
+            }
+            let buf = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk: string) => {
+                buf += chunk;
+                // SSE frames are separated by a blank line. Process
+                // every complete frame; the tail (incomplete) stays
+                // in `buf` for the next chunk.
+                let idx: number;
+                while ((idx = buf.indexOf("\n\n")) !== -1) {
+                    const frame = buf.slice(0, idx);
+                    buf = buf.slice(idx + 2);
+                    let evName = "message";
+                    let dataStr = "";
+                    for (const line of frame.split("\n")) {
+                        if (line.startsWith(":")) continue;
+                        if (line.startsWith("event:")) evName = line.slice(6).trim();
+                        else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+                    }
+                    if (!dataStr) continue;
+                    let payload: unknown;
+                    try { payload = JSON.parse(dataStr); }
+                    catch { continue; }
+                    if (evName === "ping") {
+                        handlers.onPing(payload as { ticket_id?: number; comment_id?: number });
+                    } else if (evName === "hello" && handlers.onHello) {
+                        handlers.onHello(payload as { consumer_id: string; unread: number });
+                    }
+                }
+            });
+            res.on("end", () => handlers.onError?.(new Error("SSE stream closed by server")));
+            res.on("error", (e) => handlers.onError?.(e));
+        });
+        req.on("error", (e) => handlers.onError?.(e));
+        req.end();
+        return () => {
+            try { req.destroy(); } catch { /* already torn */ }
+        };
+    }
     unreadCount(project: string) {
         return this.http<{ count: number }>(
             "GET",

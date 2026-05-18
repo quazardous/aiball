@@ -1,11 +1,21 @@
 #!/usr/bin/env -S npx --no-install tsx
 /**
- * claude-loop timer process (#B.63 TS port). Detached child of the
- * `start` command. Polls every CL_INTERVAL seconds; when claude is
- * idle (idle-since marker present), picks a random phrase from the
- * loop's pings YAML and `tmux send-keys` it into pane 0. Claude
- * decides via its own context (MCP tools, etc) whether there's work
- * to do — david: "il faut immédiatement ping claude c'est tout".
+ * claude-loop timer process (#B.63 TS port, #B.148 phase C reactive).
+ *
+ * Detached child of the `start` command. Two operating modes:
+ *
+ *   - **SSE mode** (when CL_CHECK_CMD is the default aiball check):
+ *     opens a long-lived SSE stream to the daemon's `/api/events`
+ *     endpoint and wakes claude as soon as a `ping` event arrives. No
+ *     polling lag. A slow heartbeat (every CL_INTERVAL) checks
+ *     `wake-requested` and re-verifies in case SSE silently dropped.
+ *
+ *   - **Polling mode** (custom CL_CHECK_CMD or when SSE refuses to
+ *     start): legacy `while(sleep, check)` loop — exact behavior
+ *     pre-#B.148.
+ *
+ * Both modes share `tryWake()` which honors idle-since + user-grace +
+ * tmux-alive gates, fires send-keys, and updates the tmux status bar.
  *
  * Logs to stdout (the launcher redirects to $STATE_DIR/timer.log).
  * Exits when the tmux session disappears.
@@ -14,11 +24,16 @@ import { existsSync, unlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { AiballClient } from "../client.js";
 import {
+    DEFAULT_CHECK_CMD,
+    DEFAULT_USER_GRACE_SEC,
     MUX_CMD,
+    checkHasWork,
     idleMarkerPath,
     pickPingPhrase,
     pingsPath,
+    setTmuxStatus,
     tmuxName,
+    userIsTakingOver,
     wakeRequestedPath,
 } from "./state.js";
 
@@ -26,6 +41,7 @@ const sd = process.env.CL_STATE_DIR;
 const name = process.env.CL_NAME;
 const intervalRaw = process.env.CL_INTERVAL;
 const checkCmd = process.env.CL_CHECK_CMD ?? "true";
+const userGraceSec = Math.max(0, Number(process.env.CL_USER_GRACE_SEC ?? DEFAULT_USER_GRACE_SEC));
 if (!sd || !name || !intervalRaw) {
     process.stderr.write("[claude-loop:timer] missing CL_* env vars\n");
     process.exit(1);
@@ -56,47 +72,115 @@ function sleep(ms: number): Promise<void> {
 
 // Cached client for the default-path direct API call (no fork). The
 // process is long-lived so the keep-alive socket / token resolution
-// stays warm across ticks. David #B.63: "claude-loop peut avoir un
-// accès direct à l'api même niveau de aiball — on peut garder le
-// check-cmd". When the user passes a custom --check-cmd, we still
-// shell out so any external check works; only the default takes the
-// fast in-process path.
-const DEFAULT_AIBALL_CHECK = "aiball pings-count -q";
+// stays warm across ticks. Passed into the shared `checkHasWork`
+// helper (state.ts) so the keep-alive socket stays warm; the helper
+// itself centralizes the empty/default/custom branching (#B.141).
 let aiballClient: AiballClient | null = null;
-async function checkHasWork(): Promise<boolean> {
-    // Empty / `true` check-cmd → always ping (legacy "pure timer").
-    if (!checkCmd || checkCmd === "true") return true;
-    // Default check-cmd → bypass subprocess fork, call the API directly.
-    if (checkCmd === DEFAULT_AIBALL_CHECK) {
-        if (!aiballClient) aiballClient = new AiballClient();
-        try {
-            const r = await aiballClient.pingsCount() as { unread?: number };
-            return (r.unread ?? 0) > 0;
-        } catch {
-            return false;
+function client(): AiballClient {
+    if (!aiballClient) aiballClient = new AiballClient();
+    return aiballClient;
+}
+
+/**
+ * Common wake path used by SSE-driven and timer-driven modes. Honors
+ * all the gates (idle-since, user-grace, optional check-cmd) and only
+ * actually fires send-keys when claude is at the prompt with work to
+ * do. Returns true iff a wake was sent — useful for logging.
+ *
+ * `manualWake = true` (file-marker bypass) skips the user-grace AND
+ * the check-cmd; only the idle-since gate stays because pinging over
+ * a busy claude is always wrong.
+ */
+async function tryWake(reason: string, manualWake = false): Promise<boolean> {
+    if (!existsSync(idleMarkerPath(sd!))) return false;
+    if (!manualWake && userIsTakingOver(sd!, userGraceSec)) return false;
+    if (!manualWake && !(await checkHasWork(checkCmd, client()))) return false;
+    try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
+    try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
+    const phrase = pickPhrase();
+    sendKeys(phrase);
+    setTmuxStatus(name!, "busy");
+    log(`wake (${reason}) → '${phrase}'`);
+    return true;
+}
+
+/**
+ * SSE-driven main loop (#B.148 phase C). Subscribes once, lets the
+ * daemon push `ping` events, and reacts via `tryWake`. Parallel slow
+ * heartbeat handles two things SSE can't:
+ *   - `wake-requested` file marker (claude-loop wake NAME)
+ *   - SSE-drop safety net (re-verifies via checkHasWork in case the
+ *     stream silently dropped under load)
+ *
+ * On SSE error, the heartbeat keeps running; next iteration re-opens
+ * the stream with simple backoff (no aggressive reconnect storm).
+ */
+async function mainSse(): Promise<void> {
+    log(`timer started — SSE mode (heartbeat ${interval}s), check-cmd: ${checkCmd}`);
+    let unsubscribe: (() => void) | null = null;
+    let lastConnectAt = 0;
+    const reconnect = () => {
+        // Throttle reconnects (one per 5s) so a daemon flap doesn't
+        // turn into a hot loop.
+        const now = Date.now();
+        if (now - lastConnectAt < 5000) return;
+        lastConnectAt = now;
+        unsubscribe?.();
+        unsubscribe = client().subscribeEvents({
+            onPing: () => { void tryWake("sse:ping"); },
+            onError: (e) => {
+                log(`SSE error: ${e.message ?? String(e)} — will reconnect on next heartbeat`);
+                unsubscribe = null;
+            },
+        });
+        log("SSE subscribed");
+    };
+    reconnect();
+    // #B.148 bug: SSE only fires on NEW pings — existing unread at
+    // boot would never trigger a wake until a fresh ping arrives.
+    // Immediate tryWake covers the case where pings already exist
+    // when the loop spawns (e.g. claude --resume scenario, or a
+    // crashed-and-restarted loop).
+    await tryWake("startup");
+    while (tmuxAlive()) {
+        await sleep(interval * 1000);
+        // Manual wake (claude-loop wake NAME): file marker, fires
+        // even when SSE silent.
+        if (existsSync(wakeRequestedPath(sd!))) {
+            await tryWake("manual", true);
+            continue;
         }
+        // SSE-drop safety net: re-check the gate ourselves.
+        if (!unsubscribe) reconnect();
+        await tryWake("heartbeat");
     }
-    // Custom check-cmd → shell out so any user snippet works.
-    const r = spawnSync("bash", ["-c", checkCmd], { stdio: "ignore" });
-    return r.status === 0;
+    log("tmux session gone — timer exiting");
+    if (unsubscribe) (unsubscribe as () => void)();
+}
+
+/**
+ * Pre-#B.148 polling loop, kept for non-aiball check-cmds where SSE
+ * doesn't apply.
+ */
+async function mainPoll(): Promise<void> {
+    log(`timer started — polling mode (tick ${interval}s), check-cmd: ${checkCmd}`);
+    // Same startup safety net as SSE mode (#B.148): drain any
+    // pre-existing work right away instead of waiting `interval`s.
+    await tryWake("startup");
+    while (tmuxAlive()) {
+        await sleep(interval * 1000);
+        const manualWake = existsSync(wakeRequestedPath(sd!));
+        await tryWake(manualWake ? "manual" : "check-cmd hit", manualWake);
+    }
+    log("tmux session gone — timer exiting");
 }
 
 async function main(): Promise<void> {
-    log(`timer started — tick every ${interval}s, check-cmd: ${checkCmd}`);
-    while (tmuxAlive()) {
-        await sleep(interval * 1000);
-        if (!existsSync(idleMarkerPath(sd!))) continue;
-        // Manual wake (claude-loop wake NAME) bypasses the check —
-        // user explicitly asked to fire the next tick.
-        const manualWake = existsSync(wakeRequestedPath(sd!));
-        if (!manualWake && !(await checkHasWork())) continue;
-        try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
-        try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
-        const phrase = pickPhrase();
-        sendKeys(phrase);
-        log(`wake (${manualWake ? "manual" : "check-cmd hit"}) → '${phrase}'`);
+    if (checkCmd === DEFAULT_CHECK_CMD) {
+        await mainSse();
+    } else {
+        await mainPoll();
     }
-    log("tmux session gone — timer exiting");
 }
 
 main().catch((e) => {

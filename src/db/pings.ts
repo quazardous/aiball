@@ -17,6 +17,7 @@
  */
 import { and, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
+import { emitPing } from "../event-bus.js";
 import {
     getDb,
     nowIso,
@@ -63,12 +64,21 @@ export function insertPing(
     msg: { id: number; kind: MessageKind },
 ): void {
     const isTicket = msg.kind === "ticket_created";
-    getDb().insert(schema.pings).values({
+    const r = getDb().insert(schema.pings).values({
         recipient,
         ticketId: isTicket ? msg.id : null,
         commentId: isTicket ? null : msg.id,
         createdAt: nowIso(),
     }).onConflictDoNothing().run();
+    // Only emit when the row was actually inserted (onConflictDoNothing
+    // can swallow a duplicate). Subscribers (SSE) react in real-time —
+    // no more polling-lag (#B.148 phase A).
+    if (r.changes > 0) {
+        emitPing(recipient, {
+            ticket_id: isTicket ? msg.id : undefined,
+            comment_id: isTicket ? undefined : msg.id,
+        });
+    }
 }
 
 /**
