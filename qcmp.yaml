@@ -15,3 +15,12 @@ components:
     file: frontend/package.json
     path: version
     extractor: json
+
+  # claude-loop ships with aiball (same repo, no own package.json) —
+  # version tracks the main aiball release. See bin/claude-loop +
+  # src/claude-loop/. Doc: docs/CLAUDE-LOOP.md.
+  - key: claude-loop
+    name: Claude Loop wrapper
+    file: package.json
+    path: version
+    extractor: json
