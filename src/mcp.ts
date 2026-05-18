@@ -211,7 +211,7 @@ server.registerTool(
     "ticket_reply",
     {
         description:
-            "Post a reply within a ticket thread. `target_id` is either a ticket id (→ top-level comment on the ticket) or a comment id (→ nested reply to that specific comment, Gmail-style). Both produce a comment_added; only parent_id differs.\n\n**`summary_until` is required** (#B.130) — pass a one-line TLDR of the thread state *up to AND including this comment*. Not just this comment's body in isolation; a rolling summary that future brief-mode reads can use to skip full bodies. The API rejects comment_added without it (HTTP 400).\n\nOptional `then` lets the author tag the comment with a decision intent or chain a unilateral state mutation, in the same call:\n- `then: \"resolved\"` — tag the comment as a *resolution decision* (#B.129). The comment carries `meta.decision={kind:\"resolution\",status:\"pending\"}` and the reporter validates it via accept/reject. Closing the ticket auto-accepts any dangling resolution decisions. The 'decision-on-comment' paradigm: the audit lives in the thread, no separate lifecycle row.\n- `then: \"close\"` — close the ticket. Owner-bypass when posted by the reporter.\n- `then: \"reopen\"` — reopen a closed ticket (resets resolved too).\n\nUse `then: \"resolved\"` instead of separate reply + ticket_close when finishing work on someone else's ticket: a single call posts the explanation comment AND tags it as a pending resolution proposal. The reporter sees ONE accept/reject pair under the composer.\n\nIf you need more info before you can proceed, just post a plain comment with your question — there is no agent→human \"blocked\" signal anymore (it induced misuse where agents temporized with blocked instead of asking; the conversational comment IS the right primitive).",
+            "Post a reply within a ticket thread. `target_id` is either a ticket id (→ top-level comment on the ticket) or a comment id (→ nested reply to that specific comment, Gmail-style). Both produce a comment_added; only parent_id differs.\n\n**`summary_until` is required** (#B.130). It's a one-line **ticket state snapshot AFTER this comment lands** — written so a future agent (or you on next session) can resume the ticket from JUST this line, without re-reading any prior body. NOT a summary of what you just said. See the `summary_until` schema description below for the contract + good/bad examples. The API rejects comment_added without it (HTTP 400).\n\nOptional `then` lets the author tag the comment with a decision intent or chain a unilateral state mutation, in the same call:\n- `then: \"resolved\"` — tag the comment as a *resolution decision* (#B.129). The comment carries `meta.decision={kind:\"resolution\",status:\"pending\"}` and the reporter validates it via accept/reject. Closing the ticket auto-accepts any dangling resolution decisions. The 'decision-on-comment' paradigm: the audit lives in the thread, no separate lifecycle row.\n- `then: \"close\"` — close the ticket. Owner-bypass when posted by the reporter.\n- `then: \"reopen\"` — reopen a closed ticket (resets resolved too).\n\nUse `then: \"resolved\"` instead of separate reply + ticket_close when finishing work on someone else's ticket: a single call posts the explanation comment AND tags it as a pending resolution proposal. The reporter sees ONE accept/reject pair under the composer.\n\nIf you need more info before you can proceed, just post a plain comment with your question — there is no agent→human \"blocked\" signal anymore (it induced misuse where agents temporized with blocked instead of asking; the conversational comment IS the right primitive).",
         inputSchema: {
             target_id: z
                 .number()
@@ -229,7 +229,27 @@ server.registerTool(
                 .string()
                 .min(1)
                 .describe(
-                    "One-line TLDR of the thread state *up to AND including this comment* (#B.130). Required for agent authors — the API rejects comment_added without it (HTTP 400). Humans skip the requirement. Each summary_until supersedes the previous: only the most recent one is shown as the canonical 'current state' banner. Soft cap 200 chars.",
+                    [
+                        "One-line **TICKET STATE SNAPSHOT** after this comment (#B.130) — the canonical resume-point for the next agent reading this ticket.",
+                        "",
+                        "Contract: when an agent reads the ticket in brief mode, this string PLUS the latest comment body must be enough to know what's happening and what's next. The string is your context handoff to future-you — not a description of your own action.",
+                        "",
+                        "RULE OF THUMB: imagine someone opens this ticket fresh tomorrow, reads ONLY this line + the latest body. Can they (a) understand current status, (b) tell who's expected to do what next, (c) spot open decisions/blockers? If no, rewrite.",
+                        "",
+                        "GOOD (state-framed):",
+                        "  - 'Phase B done; B.3 migration backfilled 10 rows. Awaiting david accept on UI cartouche.'",
+                        "  - 'Awaiting explicit go for phase B (typed relations + parent_ticket_id migration, ~400-500 lines).'",
+                        "  - 'Search open-filter now excludes lifecycle-closed tickets; pending david review.'",
+                        "",
+                        "BAD (action-framed — describes what YOU did, not ticket state):",
+                        "  - 'Shipped B.2 slice 2/3: add-relation widget.'  ← OK as part of the body, not as the snapshot",
+                        "  - 'Phase B.2 complete (chips + add widget + per-chip change-kind/remove menu).'  ← delta, not state",
+                        "  - 'Plan: B.5 → B.4 → B.3.'  ← decision, doesn't say where the work currently sits",
+                        "",
+                        "How a state-frame differs: include 'awaiting X', 'blocked on Y', 'next step Z', open questions, current ownership. Skip 'I added', 'I shipped', 'I refactored' — those are the body's job.",
+                        "",
+                        "Latest-wins: only the most recent summary_until is canonical; older ones become invisible in brief reads. Soft cap 200 chars. Humans are exempted (the requirement targets agents — humans can be terse). Mandatory for agents — the API rejects comment_added without it (HTTP 400).",
+                    ].join("\n"),
                 ),
             then: z
                 .enum(["resolved", "close", "reopen"])
@@ -625,7 +645,7 @@ server.registerTool(
     "ticket_get",
     {
         description:
-            "Get a ticket. **Default: header only** (no body, no comments) + `comment_count` — cheap probe of state. Pass `full: true` for the full thread (header with body + all approved comments). Pass `brief: true` for a token-efficient middle ground (#B.130): header + body + comments with `summary_until` (the one-line TLDR each comment carries in `meta.summary_until`) instead of full bodies. The LAST comment keeps its full body so you see the current state. Comments without a summary surface as `summary_until: null` — fetch full if you need that one body. Best practice when authoring: always pass `summary_until` on `ticket_reply` so future brief-mode reads stay useful.",
+            "Get a ticket. **Default: header only** (no body, no comments) + `comment_count` — cheap probe of state. Pass `full: true` for the full thread (header with body + all approved comments). Pass `brief: true` for the **agent-friendly read** (#B.130): header + body + comments where each agent comment that carried a `summary_until` ships ONLY that snapshot (body replaced). The LAST comment always keeps its full body. Comments WITHOUT a summary_until (humans, who are exempt; pre-#B.130 history) keep their body too — so brief reads are never silently lossy.\n\n**How to use brief efficiently**: scan top→bottom. The latest snapshot + the last body is enough to resume the ticket — that's the contract `ticket_reply.summary_until` enforces. If you need an older body specifically (e.g. a long human comment in the middle of a thread), re-fetch with `full: true`.",
         inputSchema: {
             ticket_id: z.number().int(),
             full: z
@@ -638,7 +658,7 @@ server.registerTool(
                 .boolean()
                 .optional()
                 .describe(
-                    "If true (and `full` is true OR brief implies full), return the full thread but with each comment_added body replaced by its `summary_until` (one-line TLDR from meta.summary_until). The LAST comment keeps its full body. Comments without a meta.summary_until surface as `summary_until: null`. Use this to scan long threads cheaply — ~5x token reduction on threads with disciplined summaries.",
+                    "If true, return the full thread but with each agent comment's body replaced by its `meta.summary_until` snapshot (the one-line ticket state AFTER that comment — see ticket_reply.summary_until contract). The LAST comment ALWAYS keeps its full body so you see the current 'now'. Comments without a summary_until (humans + pre-#B.130) keep their body — brief reads never silently drop content. Use this to scan long threads cheaply (~5x token reduction on threads with disciplined snapshots).",
                 ),
         },
     },
