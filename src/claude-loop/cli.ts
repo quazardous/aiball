@@ -88,6 +88,8 @@ interface StartOpts {
     userGraceSec?: number;
     /** Bypass the live-loop conflict check (#B.154). */
     force?: boolean;
+    /** Resume-picker auto-dismiss (#B.154): summary | as-is | abort. */
+    resumeMode?: string;
     claudeArgs: string[];
 }
 
@@ -190,6 +192,9 @@ function cmdStart(opts: StartOpts): void {
         // submits a prompt (UserPromptSubmit hook refreshes the
         // user-took-over marker). 0 disables the grace.
         `export CL_USER_GRACE_SEC=${shQuote(String(opts.userGraceSec ?? 300))}`,
+        // #B.154: resume picker auto-dismiss mode. Read by the
+        // SessionStart hook when source=resume.
+        `export CL_RESUME_MODE=${shQuote(opts.resumeMode ?? "as-is")}`,
         "",
     ];
     writeFileSync(envPath(sd), envLines.join("\n"));
@@ -634,6 +639,10 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--no-startup-ping", "Don't send a wake-up message on launch")
         .option("--force", "Spawn even if another live loop already runs in this cwd")
         .addOption(new Option(
+            "--resume-mode <mode>",
+            "How to auto-dismiss the claude --resume picker (summary | as-is | abort)",
+        ).default("as-is").choices(["summary", "as-is", "abort"]))
+        .addOption(new Option(
             "--user-grace <sec>",
             "Seconds to stay out of the way after the human submits a prompt",
         ).default("300"))
@@ -641,6 +650,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .action((opts: {
             name?: string; interval: string; checkCmd: string; pings?: string;
             attach: boolean; startupPing: boolean; userGrace: string; force?: boolean;
+            resumeMode?: string;
         }) => {
             invoke({
                 name: opts.name,
@@ -651,6 +661,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 noStartupPing: opts.startupPing === false,
                 userGraceSec: Math.max(0, Number(opts.userGrace)),
                 force: opts.force === true,
+                resumeMode: opts.resumeMode,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });

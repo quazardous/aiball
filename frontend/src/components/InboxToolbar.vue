@@ -203,13 +203,14 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
                 </span>
             </div>
         </details>
-        <span class="spacer" />
         <Button
+            class="filter-new-ticket"
             label="New ticket"
             icon="pi pi-plus"
             size="small"
             @click="emit('new-ticket')"
         />
+        <span class="spacer" />
     </div>
 </template>
 
@@ -405,16 +406,22 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     /* When unfolded, the body becomes a sibling row (flex-basis 100%
        forces line break) — the summary itself stays inline alongside
        project picker + new ticket. David: "le new ticket peut rester
-       en haut meme unfolded". Order: 1 on body pushes it AFTER all
-       default-order siblings (project, cog, chip, search, spacer,
-       new ticket) so row 1 stays full no matter the unfold state. */
+       en haut meme unfolded". Explicit `order` cascade: row-1 items
+       get 0, body gets 9 so it's painted LAST regardless of source
+       position. */
+    .filter-project-dropdown,
+    .filter-project-settings,
+    .filters-collapse__summary,
+    .filter-new-ticket {
+        order: 0;
+    }
     .filters-collapse[open] .filters-collapse__body {
         display: flex;
         flex-wrap: wrap;
         gap: 0.3rem;
         flex: 1 0 100%;
         padding: 0.3rem 0;
-        order: 1;
+        order: 9;
     }
     /* Compact filters-bar layout on mobile: search wide, new ticket
        icon-only (label hidden), spacer collapses. */
