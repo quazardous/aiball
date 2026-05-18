@@ -246,16 +246,11 @@ onBeforeUnmount(() => detachPaste?.());
                     : `${decision.kind} ${decision.status}${decision.decided_at ? ' at ' + new Date(decision.decided_at).toLocaleString() : ''}`"
                 style="font-size: 0.7rem; margin-left: 0.4rem"
             />
-            <!-- #B.130 phase 1: one-line TLDR chip (kept in the
-                 header for compact glance). A more prominent banner
-                 above the body is rendered below. -->
-            <Tag
-                v-if="summary"
-                value="📝"
-                severity="info"
-                :title="`Summary (author's TLDR): ${summary}`"
-                style="font-size: 0.7rem; margin-left: 0.4rem; font-style: italic"
-            />
+            <!-- #B.130 follow-up: TLDR is now rendered as an inline
+                 frame below the body (or above in top-down) — see
+                 .comment-summary further down. No more header chip
+                 with tooltip — david: "au lieu d'un popup ce bouton
+                 devrait afficher un cadre dans le commentaire". -->
             <span class="spacer" />
             <span
                 class="comment-date-copy"
@@ -325,6 +320,16 @@ onBeforeUnmount(() => detachPaste?.());
         <div v-if="msg.human_note" class="comment-note">
             <i class="pi pi-comment" />
             <em>{{ msg.human_note }}</em>
+        </div>
+        <!-- #B.130 follow-up: inline summary frame, grey/yellow tint.
+             Reads like a reference attached to the comment. Placed
+             AFTER the body in source (= after in default bottom-up
+             mode); CSS flex order lifts it to the top of the card in
+             top-down so it's the first thing seen when scrolling
+             latest-first. -->
+        <div v-if="summary" class="comment-summary">
+            <span class="comment-summary__label">tldr</span>
+            <span class="comment-summary__text">{{ summary }}</span>
         </div>
         <div
             v-if="msg.status === 'pending' && msg.kind === 'comment_added'"
