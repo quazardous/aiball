@@ -15,127 +15,83 @@ the human-readable narrative.
 
 ## [Unreleased]
 
-### Mobile new-ticket form: stack title + intent on narrow viewports (`#B.188`)
+### Remote access from your phone via Tailscale (`#B.182`)
 
-The new-ticket form's title input + intent Select sat side-by-side
-in a flex row. On a phone the Select (min-width 9rem) overflowed
-slightly past the right edge — david screenshot: "champ type
-légèrement hors du cadre". Below 720px the row now stacks
-vertically; both fields take full width. Also added `min-width: 0`
-to the title input so it can shrink properly inside the flex row
-on intermediate widths.
+aiball can now be reached from your phone (or any tailnet device)
+without exposing the daemon to the public internet.
 
-### Mobile toast positioning fix (`#B.187`)
-
-The mobile-toast CSS block (edge-to-edge at the bottom) was
-wrapped in `@media (min-width: 721px)` by mistake — it targeted
-desktop and got immediately overridden by the desktop block right
-after, while the phone fell back to PrimeVue's defaults: flush-left,
-no padding, text touching the viewport edge (david screenshot:
-"toast pas complètement centré sur mon tel"). The media query is
-now `max-width: 720px` so the mobile overrides actually fire.
-
-### Tailscale remote-access guide + helper (`#B.182`)
-
-aiball can now be reached from your phone (or any other device on
-your tailnet) without touching the daemon config or exposing
-anything to the public internet.
-
-- New `docs/TAILSCALE.md`: 6-step quickstart covering both sides —
-  host (install Tailscale, `aiball-tailscale up`) and client
-  (install the Tailscale app on phone/desktop, sign in to the same
-  account, enable the VPN, open the URL). Security model and
-  troubleshooting included.
 - New `bin/aiball-tailscale` helper wraps `tailscale serve` with
-  the daemon port auto-resolved from `AIBALL_PORT`, the systemd
-  `bind.conf` drop-in, or the 7777 default. Subcommands: `up`
-  (HTTPS on :443 by default, `--http` fallback for tailnets
-  without MagicDNS HTTPS certs), `down`, `status`.
-- `install.sh` now symlinks the helper into `~/.local/bin`
-  alongside the existing `aiball` symlink (and removes it on
-  uninstall).
-- README points to the new doc.
+  the daemon port auto-resolved. `up` / `down` / `status`
+  subcommands; HTTPS on :443 by default, `--http` fallback when
+  MagicDNS HTTPS certs aren't enabled.
+- New `docs/TAILSCALE.md` quickstart covering both host (install
+  Tailscale + run helper) and client (install the app on
+  phone/desktop, sign in to the same account, enable VPN, open
+  URL).
+- `install.sh` symlinks the helper alongside `aiball`.
 
-aiball auth is unchanged — Tailscale handles the transport, the
-`bearerAuth` middleware still fires.
+aiball auth (password / bearer) is unchanged — Tailscale handles
+the transport, the middleware still fires.
 
-### Sandbox loop demoted to experimental + ROADMAP extracted (`#B.183`)
+### README pre-publication polish (`#B.183`, `#B.189`)
 
-The "sandbox loop" / autonomous-multi-agent narrative was confusing
-new readers into thinking it was a current shipping feature. It's
-now clearly framed as experimental / forward-looking.
+The "sandbox loop" / autonomous-multi-agent narrative was framing
+aiball as something it isn't yet — moved to a new `ROADMAP.md`,
+README trimmed to current shipping features. Internal ticket refs
+stripped from user-facing copy. Mobile/Tailscale flow surfaced in
+"What's in the box".
 
-- README trimmed: sandbox-loop section removed from the main flow,
-  Quickstart and current-features sections kept tight.
-- New `ROADMAP.md` holds the longer-term vision (sandbox loop,
-  multi-agent orchestration sketches) so it stays visible without
-  diluting the "what aiball does today" pitch.
+### Mobile UI fixes (`#B.187`, `#B.188`)
 
-### claude-loop: all timeouts yaml-configurable + wake-key + OSC 52 clipboard (`#B.180`, `#B.181`)
+Two cuts after testing the new mobile flow:
 
-Three claude-loop fixes/improvements rolled together:
+- Toast notifications now sit at the bottom on phone with proper
+  margins (the mobile CSS block had the wrong media query and
+  never fired).
+- New-ticket form: title + intent select stack vertically below
+  720px instead of overflowing off the right edge.
 
-- **All timeouts yaml-configurable** (#B.180). New `claude_loop:`
-  block in `.aiball.yaml` exposes the heartbeat tick and grace
-  windows (`interval_seconds`, `boot_grace_seconds`,
-  `user_grace_seconds`, `wake_in_flight_ttl_ms`) instead of
-  hard-coding them. Defaults preserved. `.aiball.yaml.example`
-  documents the block. Loaded via `loadConfig()` and threaded
-  through `project-context.ts` → `cli.ts` → `timer.ts` /
-  `stop-hook.ts`.
-- **Wake-keys no longer self-trigger user-grace** (#B.180). The
-  loop's own auto-wake `send-keys` was tripping the
-  `UserPromptSubmit` hook, marking `user-took-over` and locking
-  the loop into user-grace until a real human typed something.
-  The timer now sets a short-lived in-flight marker
-  (`wake_in_flight_ttl_ms`, default 2s) before send-keys; the hook
-  checks it and skips the takeover update when set.
-- **Tmux clipboard, local-tool first** (#B.181). claude-loop
-  sessions bind `MouseDragEnd1Pane` to `copy-pipe-no-clear` and
-  pipe the selection into a real local clipboard tool when
-  available — `wl-copy` on Wayland, `xclip`/`xsel` on X11,
-  `pbcopy` on macOS. `set-clipboard on` stays enabled as the OSC
-  52 SSH/remote fallback. The local-tool path fixes VTE-based
-  terminals (Ptyxis) that reject OSC 52 by default. Shift+drag
-  still works as the no-tmux fallback.
+### claude-loop: all timeouts yaml-configurable (`#B.180`)
 
-### claude-loop: drop stale `working` state + recalibrate user-grace (`#B.185`)
+New `claude_loop:` block in `.aiball.yaml` exposes the heartbeat
+tick and grace windows (`interval_seconds`, `boot_grace_seconds`,
+`user_grace_seconds`, `wake_in_flight_ttl_ms`). Fixed alongside:
+the loop's own auto-wake `send-keys` no longer self-triggers
+user-grace (it had been locking the wrapper out until a real
+human keystroke arrived).
 
-Two fixes against the bar getting stuck on `busy` after a turn ended:
+### claude-loop: tmux clipboard via local tool with OSC 52 fallback (`#B.181`)
 
-- **`working` pane-state retired from the Stop hook.** The
-  hook fires when claude has ENDED a turn — by definition not
-  working anymore — so probing the pane for `esc to interrupt`
-  there only caught stale footer text from the just-finished turn
-  and suppressed the `idle-since` write, leaving the bar pinned on
-  busy forever. `compacting` / `rate-limit` / `api-error` stay
-  because those are pane-persistent conditions claude legitimately
-  reports mid-turn.
-- **`esc to interrupt` regex scoped to the footer.** In `timer.ts`,
-  the heartbeat probe now matches only the last few non-empty
-  lines of the pane instead of the whole buffer — a stale
-  occurrence in scrollback can no longer pin `settledStatus=busy`
-  forever once the prompt has returned.
-- **User-grace default 300s → 60s.** David: "recalibre les défauts
-  du même ordre de grandeur". The 5-minute outlier surprised — a
-  single human keystroke silenced the wrapper for 5 minutes even
-  after the user had clearly moved on. 60s now matches the
-  heartbeat / boot-grace cadence; long enough to ride out normal
-  typing pauses. `.aiball.yaml` field unchanged.
+Drag-select in a claude-loop pane now copies to the system
+clipboard. Pipes through `wl-copy` / `xclip` / `pbcopy` when
+available (fixes VTE terminals like Ptyxis that reject OSC 52);
+OSC 52 stays as the SSH/remote fallback. Shift+drag still works
+as the no-tmux escape hatch.
 
-### Default status filter "all" + reset from empty list (`#B.184`)
+### claude-loop: status bar no longer stuck on `busy` (`#B.185`)
 
-The inbox defaulted to `pending`, which meant projects with
-auto-approve (aiball itself, mostly) landed on an empty moderation
-queue while the sidebar badges screamed dozens of open tickets —
-"compteurs ok mais rien dans les listes". Now:
+After a few turns the bar could get pinned on `busy` even when
+Claude was idle, because the Stop hook re-probed the pane for
+"esc to interrupt" and matched stale footer text from the
+just-finished turn. The probe is now scoped to the live footer
+and the obsolete `working` pane-state was retired. Default
+heartbeat tick `interval_seconds` also dropped from 60s → 30s
+(the bar was lagging visibly behind real state changes);
+`user_grace_seconds` recalibrated from 300s → 60s (5-minute
+outlier; one keystroke silenced the wrapper for 5min).
 
-- Default `statusFilter` is `all`. Users land on content first;
-  the moderation queue is one filter-click away. Existing users
-  keep their previous localStorage choice.
-- Empty `InboxList` rows now offer a "reset filters" button
-  (sets status → all, open → true) when the count mismatch with
-  the sidebar badges suggests filters are the cause.
+### Inbox: default to "all" status + reset-from-empty filter (`#B.184`)
+
+The inbox defaulted to `pending`, which on auto-approve projects
+(aiball itself) landed users on an empty list while the sidebar
+badges showed dozens of open tickets. Now defaults to `all`;
+empty rows offer a "Show all open tickets" reset button when
+filters are narrowed.
+
+### Main branch protected (`#B.186`)
+
+GitHub ruleset on `quazardous/aiball` blocks force-push and
+deletion on `main`. Direct-push workflow unchanged.
 
 
 
