@@ -1144,4 +1144,14 @@ watch(showSnoozed, (v) => {
         max-width: 24rem !important;
     }
 }
+/* #B.161: PrimeVue draws an inconsistent circle around the close X
+   on warn-severity toasts only (background bleed from a hover/focus
+   pseudo). Normalize across severities — flat icon, no bg. */
+.p-toast-close-button,
+.p-toast-message-icon-close,
+.p-toast .p-button.p-button-icon-only {
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+}
 </style>
