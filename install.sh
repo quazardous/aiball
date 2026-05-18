@@ -78,7 +78,7 @@ uninstall() {
     rm -f "$SYSTEMD_DIR/$SERVICE_NAME"
     rm -f "$DEV_DROPIN" "$BIND_DROPIN"
     rmdir "$DROPIN_DIR" 2>/dev/null || true
-    rm -f "$PREFIX_BIN/aiball" "$PREFIX_BIN/aiball-mcp"
+    rm -f "$PREFIX_BIN/aiball" "$PREFIX_BIN/aiball-mcp" "$PREFIX_BIN/claude-loop"
     if [[ -L "$PREFIX_LIB" ]]; then
         # Symlinked install — drop the link, never touch the source it points to
         rm -f "$PREFIX_LIB"
@@ -174,9 +174,10 @@ log "Installing npm dependencies (this can take ~30s)"
 # --- symlink binaries ------------------------------------------------------
 
 mkdir -p "$PREFIX_BIN"
-ln -sf "$PREFIX_LIB/bin/aiball"     "$PREFIX_BIN/aiball"
-ln -sf "$PREFIX_LIB/bin/aiball-mcp" "$PREFIX_BIN/aiball-mcp"
-log "Symlinked $PREFIX_BIN/aiball and $PREFIX_BIN/aiball-mcp"
+ln -sf "$PREFIX_LIB/bin/aiball"        "$PREFIX_BIN/aiball"
+ln -sf "$PREFIX_LIB/bin/aiball-mcp"    "$PREFIX_BIN/aiball-mcp"
+ln -sf "$PREFIX_LIB/bin/claude-loop"   "$PREFIX_BIN/claude-loop"
+log "Symlinked $PREFIX_BIN/aiball, aiball-mcp, claude-loop"
 
 # --- systemd user service -------------------------------------------------
 
