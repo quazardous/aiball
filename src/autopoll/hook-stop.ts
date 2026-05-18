@@ -37,11 +37,8 @@ import { formatReason, type AutopollPayload } from "./templates.js";
  */
 function claudeStillWorking(): boolean {
     if (!process.env.TMUX) return false;
-    const r = spawnSync("tmux", ["display-message", "-p", "-F", "#{pane_id}"], { encoding: "utf8" });
-    if (r.status !== 0) return false;
-    const paneId = (r.stdout ?? "").trim();
-    if (!paneId) return false;
-    const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", paneId, "-J"], { encoding: "utf8" });
+    // No -t: defaults to the active pane in the current tmux session.
+    const cap = spawnSync("tmux", ["capture-pane", "-p", "-J"], { encoding: "utf8" });
     if (cap.status !== 0) return false;
     return paneFooterShowsBusy(cap.stdout ?? "");
 }
