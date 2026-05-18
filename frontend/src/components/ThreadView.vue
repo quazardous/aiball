@@ -16,6 +16,7 @@ import { RELATION_KINDS, RELATION_LABELS as TYPED_RELATION_LABELS, type Relation
 import RelationChip from "./RelationChip.vue";
 import ThreadRelations from "./ThreadRelations.vue";
 import RelationKindMenu from "./RelationKindMenu.vue";
+import ThreadHeader from "./ThreadHeader.vue";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -1574,69 +1575,14 @@ async function copyTicketRef() {
                     @submit="submitNewRelation"
                     @open-menu="(payload) => openRelationMenu(payload.event, payload.relation)"
                 />
-                <h2 class="thread-title">{{ data.ticket.title }}</h2>
-                <div
-                    v-if="data.ticket.resolved && !data.ticket.closed"
-                    class="thread-resolved-banner"
-                    :title="data.ticket.resolved_at ?? ''"
-                >
-                    <i class="pi pi-check-circle" />
-                    Marked resolved<span v-if="data.ticket.resolved_by"> by <strong>{{ data.ticket.resolved_by }}</strong></span>
-                    — the reporter can close to confirm.
-                </div>
-                <div
-                    v-else-if="data.ticket.resolved && data.ticket.closed"
-                    class="thread-resolved-banner thread-resolved-banner--closed"
-                    :title="data.ticket.resolved_at ?? ''"
-                >
-                    <i class="pi pi-check-circle" />
-                    Resolved<span v-if="data.ticket.resolved_by"> by <strong>{{ data.ticket.resolved_by }}</strong></span>
-                    and closed.
-                </div>
-                <div
-                    v-else-if="data.ticket.closed && data.ticket.status !== 'rejected'"
-                    class="thread-closed-banner"
-                >
-                    <i class="pi pi-lock" />
-                    Closed without explicit resolution (wontfix / abandoned / duplicate).
-                </div>
-                <div
-                    v-if="isSnoozed"
-                    class="thread-snoozed-banner"
-                    :title="data.ticket.postponed_until ?? ''"
-                >
-                    <i class="pi pi-history" />
-                    Snoozed until
-                    <strong>
-                        {{ data.ticket.postponed_until
-                            ? new Date(data.ticket.postponed_until).toLocaleString()
-                            : "" }}
-                    </strong>
-                    — hidden from the open inbox until then.
-                </div>
-                <div class="thread-meta-extra">
-                    <Tag
-                        v-if="data.ticket.intent"
-                        :value="data.ticket.intent"
-                        :severity="data.ticket.intent === 'panic' ? 'danger' : 'info'"
-                    />
-                    <span
-                        v-for="t in data.ticket.tags"
-                        :key="t.id"
-                        class="thread-tag"
-                        :style="{ background: t.color ?? 'var(--p-surface-200)' }"
-                    >{{ t.name }}</span>
-                    <span class="spacer" />
-                    <Button
-                        v-if="!editing"
-                        icon="pi pi-pencil"
-                        label="edit message"
-                        size="small"
-                        severity="secondary"
-                        text
-                        @click="editing = true"
-                    />
-                </div>
+                <ThreadHeader
+                    :ticket="data.ticket"
+                    :is-snoozed="isSnoozed"
+                    show-banners
+                    show-edit-button
+                    :editing="editing"
+                    @start-edit="editing = true"
+                />
                 <div v-if="editing" class="thread-edit-panel">
                     <div class="thread-edit-row">
                         <span class="thread-edit-label">Title</span>
@@ -1868,20 +1814,10 @@ async function copyTicketRef() {
                         @submit="submitNewRelation"
                         @open-menu="(payload) => openRelationMenu(payload.event, payload.relation)"
                     />
-                    <h2 class="thread-title">{{ data.ticket.title }}</h2>
-                    <div v-if="data.ticket.intent || (data.ticket.tags && data.ticket.tags.length)" class="thread-meta-extra">
-                        <Tag
-                            v-if="data.ticket.intent"
-                            :value="data.ticket.intent"
-                            :severity="data.ticket.intent === 'panic' ? 'danger' : 'info'"
-                        />
-                        <span
-                            v-for="t in data.ticket.tags"
-                            :key="t.id"
-                            class="thread-tag"
-                            :style="{ background: t.color ?? 'var(--p-surface-200)' }"
-                        >{{ t.name }}</span>
-                    </div>
+                    <ThreadHeader
+                        :ticket="data.ticket"
+                        :is-snoozed="isSnoozed"
+                    />
                 </template>
                 <template #extra-actions>
                     <!-- #B.143: snooze is "mental-load relief" (david's
