@@ -26,16 +26,14 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { AiballClient } from "../client.js";
+import { paneFooterShowsBusy } from "../claude-loop/state.js";
 import { loadConfig } from "./config.js";
 import { formatReason, type AutopollPayload } from "./templates.js";
 
 /**
- * True iff the tmux pane's footer shows "esc to interrupt" — Claude
- * is mid-work and injecting backlog would race the next prompt
- * (#B.192). Scoped to the last 5 non-empty lines to match the
- * #B.185 timer probe; stale scrollback can't falsely suppress.
- * Uncertainty (no tmux, capture failed) → false: rather inject
- * a legit reminder than block on a false positive.
+ * True iff the current tmux pane footer shows claude is mid-work
+ * (#B.192). Uncertainty (no tmux, capture failed) → false: rather
+ * over-inject a legit reminder than suppress on a false positive.
  */
 function claudeStillWorking(): boolean {
     if (!process.env.TMUX) return false;
@@ -45,14 +43,7 @@ function claudeStillWorking(): boolean {
     if (!paneId) return false;
     const cap = spawnSync("tmux", ["capture-pane", "-p", "-t", paneId, "-J"], { encoding: "utf8" });
     if (cap.status !== 0) return false;
-    const text = cap.stdout ?? "";
-    const footer = text
-        .split("\n")
-        .map((l) => l.trimEnd())
-        .filter((l) => l.length > 0)
-        .slice(-5)
-        .join("\n");
-    return /esc to interrupt/i.test(footer);
+    return paneFooterShowsBusy(cap.stdout ?? "");
 }
 
 function emit(obj: unknown): never {

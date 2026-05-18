@@ -257,6 +257,25 @@ export function setTmuxStatus(
  * be picky about which phrase. Shared by the timer (per-tick wake)
  * and the CLI startup nudge (#B.63 follow-up: same source for both).
  */
+/**
+ * True iff the last few non-empty lines of `paneText` contain Claude
+ * Code's "esc to interrupt" footer — i.e. claude is mid-turn.
+ *
+ * Scoped to the footer (default last 5 lines) so a stale occurrence
+ * earlier in scrollback can't pin "busy" forever once the prompt
+ * returns (#B.185). Shared by the heartbeat timer, the claude-loop
+ * Stop hook, and the autopoll Stop hook (#B.192).
+ */
+export function paneFooterShowsBusy(paneText: string, footerLines = 5): boolean {
+    const footer = paneText
+        .split("\n")
+        .map((l) => l.trimEnd())
+        .filter((l) => l.length > 0)
+        .slice(-footerLines)
+        .join("\n");
+    return /esc to interrupt/i.test(footer);
+}
+
 export function pickPingPhrase(pingsAbsPath: string): string {
     try {
         const raw = readFileSync(pingsAbsPath, "utf8");

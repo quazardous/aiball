@@ -204,7 +204,7 @@ export function fanOutPings(msg: Message): void {
         for (const h of listHumans()) recipients.add(h);
     }
 
-    const authorIsHuman = isHuman(msg.by_agent);
+    const authorIsHuman = msg.by_agent != null && isHuman(msg.by_agent);
     // #B.191: when a human posts, skip pings to other humans — they
     // share the moderator backlog, so cross-human pings are noise.
     // Hoist the human set so we don't SELECT once per recipient.
