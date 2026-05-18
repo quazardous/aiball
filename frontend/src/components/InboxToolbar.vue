@@ -392,16 +392,19 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     .filters-collapse:not([open]) .filters-collapse__body {
         display: none;
     }
-    .filters-collapse[open] {
-        display: flex;
-        flex-direction: column;
-        flex: 1 1 100%;
-        gap: 0.3rem;
+    .filters-collapse {
+        display: contents;
     }
+    /* When unfolded, the body becomes a sibling row (flex-basis 100%
+       forces line break) — the summary itself stays inline alongside
+       project picker + search. David: "pourquoi filter va a la ligne
+       en version unfold ?? et plein de place vide". */
     .filters-collapse[open] .filters-collapse__body {
         display: flex;
         flex-wrap: wrap;
         gap: 0.3rem;
+        flex: 1 0 100%;
+        padding: 0.3rem 0;
     }
     /* Compact filters-bar layout on mobile: search wide, new ticket
        icon-only (label hidden), spacer collapses. */
