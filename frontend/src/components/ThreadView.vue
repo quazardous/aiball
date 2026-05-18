@@ -77,11 +77,38 @@ async function removeRelation(targetId: number) {
 // creates one. Otherwise it carries the existing kind (chip edit).
 const relationMenuRef = ref<InstanceType<typeof Popover> | null>(null);
 const relationMenuTarget = ref<{ target_ticket_id: number; kind: RelationKind | null } | null>(null);
+// #B.123 follow-up: fetched title of the referenced ticket so the
+// popover header reads "→ #B.NN — <title>" instead of just the
+// number. Null while loading (or unfetched). Cached in-memory across
+// pop-overs in the same session.
+const relationMenuTargetTitle = ref<string | null>(null);
+const relationTitleCache = new Map<number, string>();
+async function loadRelationTargetTitle(ticketId: number): Promise<void> {
+    const cached = relationTitleCache.get(ticketId);
+    if (cached !== undefined) {
+        relationMenuTargetTitle.value = cached;
+        return;
+    }
+    relationMenuTargetTitle.value = null;
+    try {
+        const resp = await api.getTicket(ticketId);
+        const title = resp?.ticket?.title ?? "";
+        relationTitleCache.set(ticketId, title);
+        // Only update if the popover still targets this id (user
+        // might have closed + re-opened on a different ref).
+        if (relationMenuTarget.value?.target_ticket_id === ticketId) {
+            relationMenuTargetTitle.value = title;
+        }
+    } catch {
+        /* silent — popover just shows the number alone */
+    }
+}
 function openRelationMenu(
     ev: Event,
     r: { target_ticket_id: number; kind: RelationKind },
 ) {
     relationMenuTarget.value = { target_ticket_id: r.target_ticket_id, kind: r.kind };
+    void loadRelationTargetTitle(r.target_ticket_id);
     relationMenuRef.value?.show(ev);
 }
 // #B.123 phase B.5: bus listener — right-click on a `.ticket-ref` in
@@ -100,6 +127,7 @@ useBus("ticket-ref.promote", (payload) => {
         target_ticket_id: payload.ticket_id,
         kind: existing?.kind ?? null,
     };
+    void loadRelationTargetTitle(payload.ticket_id);
     // Synthesize an event whose currentTarget IS the link. PrimeVue
     // Popover stores event.currentTarget in this.eventTarget, then
     // uses it for outside-click detection (eventTarget.contains(...)
@@ -2064,6 +2092,9 @@ async function copyTicketRef() {
                     <template v-else>
                         Relation to <strong>#B.{{ relationMenuTarget.target_ticket_id }}</strong>
                     </template>
+                    <div v-if="relationMenuTargetTitle" class="relation-menu__target-title">
+                        {{ relationMenuTargetTitle }}
+                    </div>
                 </div>
                 <div class="relation-menu__kinds">
                     <button
@@ -2224,6 +2255,15 @@ async function copyTicketRef() {
     color: var(--p-text-muted-color);
     padding-bottom: 0.3rem;
     border-bottom: 1px solid var(--p-content-border-color);
+}
+.relation-menu__target-title {
+    margin-top: 0.2rem;
+    color: var(--p-text-color);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 22rem;
 }
 .relation-menu__kinds {
     display: flex;
