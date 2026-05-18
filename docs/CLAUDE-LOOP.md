@@ -163,10 +163,12 @@ becomes sub-second.
 
 ## See also
 
-- `bin/claude-loop` — the bash wrapper
-- `skill/claude-loop-stop.sh` — Stop hook template
-- `skill/claude-loop-timer.sh` — timer pane loop
-- `skill/claude-loop-pings.yaml` — default ping phrases
+- `bin/claude-loop` — thin bash launcher → `tsx src/claude-loop/cli.ts`
+- `src/claude-loop/cli.ts` — Commander-based CLI surface
+- `src/claude-loop/state.ts` — state-dir helpers + Plate type
+- `src/claude-loop/stop-hook.ts` — Stop hook (writes idle-since)
+- `src/claude-loop/timer.ts` — detached timer process (polls, send-keys)
+- `skill/claude-loop-pings.yaml` — default ping phrases pool
 - `docs/SANDBOX.md` — `aiball sandbox`, the aiball-specific
   specialization (will be refactored to use claude-loop underneath in
   a follow-up)
