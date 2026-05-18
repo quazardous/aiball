@@ -404,14 +404,17 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     }
     /* When unfolded, the body becomes a sibling row (flex-basis 100%
        forces line break) — the summary itself stays inline alongside
-       project picker + search. David: "pourquoi filter va a la ligne
-       en version unfold ?? et plein de place vide". */
+       project picker + new ticket. David: "le new ticket peut rester
+       en haut meme unfolded". Order: 1 on body pushes it AFTER all
+       default-order siblings (project, cog, chip, search, spacer,
+       new ticket) so row 1 stays full no matter the unfold state. */
     .filters-collapse[open] .filters-collapse__body {
         display: flex;
         flex-wrap: wrap;
         gap: 0.3rem;
         flex: 1 0 100%;
         padding: 0.3rem 0;
+        order: 1;
     }
     /* Compact filters-bar layout on mobile: search wide, new ticket
        icon-only (label hidden), spacer collapses. */

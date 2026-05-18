@@ -55,14 +55,31 @@ try {
 } catch { /* no stdin, assume startup */ }
 
 if (source === "resume") {
-    // Wait a beat so claude has had time to render the picker, then
-    // send Enter to accept the default ("as-is"). Falls through to
-    // the normal check + status flip below.
+    // #B.154: auto-dismiss the resume picker — but only if it's
+    // actually showing. The user might have ticked "don't ask me
+    // again" in claude, in which case there's no picker and our
+    // send-keys would spew garbage into the prompt. Capture the
+    // pane content after a short delay and look for the picker's
+    // signature ("Resume from summary" / "Resume full session as-is").
+    // If matched: send Down + Enter to select "as-is" (option 2,
+    // david's preferred default). If no picker: skip the keys.
     try {
-        spawnSync("sleep", ["0.5"], { stdio: "ignore" });
-        spawnSync(MUX_CMD, [
-            "send-keys", "-t", `${tmuxName(name!)}.0`, "Enter",
-        ], { stdio: "ignore" });
+        spawnSync("sleep", ["1"], { stdio: "ignore" });
+        const pane = spawnSync(MUX_CMD, [
+            "capture-pane", "-t", `${tmuxName(name!)}.0`, "-p",
+        ], { encoding: "utf8" });
+        const text = pane.stdout ?? "";
+        if (/Resume from summary|Resume full session as-is|Don't ask me again/.test(text)) {
+            // Picker visible — pick option 2 ("as-is") via Down + Enter.
+            spawnSync(MUX_CMD, [
+                "send-keys", "-t", `${tmuxName(name!)}.0`, "Down",
+            ], { stdio: "ignore" });
+            spawnSync(MUX_CMD, [
+                "send-keys", "-t", `${tmuxName(name!)}.0`, "Enter",
+            ], { stdio: "ignore" });
+        }
+        // No picker → claude is already at the prompt, fall through
+        // to the normal check + status flip below.
     } catch { /* swallow */ }
 }
 
