@@ -42,11 +42,20 @@ function log(msg: string): void {
 }
 
 /**
- * Compact snapshot of the loop's state markers AT FIRE TIME — david
- * (#B.198): "dans le log il manque l'état avant event (si on était
- * busy ou idle ou autre)". Each marker is rendered as `name=<age>s`
- * or `-` if absent, so a tail-reader can reconstruct what the loop
- * was doing the moment this Stop hook ran.
+ * Compact characterization of the TURN that just ended (#B.198).
+ *
+ * By definition the Stop hook fires post-turn, so "was the loop
+ * busy?" is always yes — useless. What david actually wants is "what
+ * kind of turn was this": user-driven, auto-wake-driven, or
+ * autonomous (claude continued on its own). Comparison of marker
+ * ages gives a reliable signal:
+ *   - whichever of user-took-over / last-wake is more recent wins
+ *   - if both are stale (> userGraceSec), call it "autonomous"
+ *   - if neither marker exists → "?" (first fire / pruned state)
+ *
+ * The trailing markers stay raw so the reader can sanity-check the
+ * classification or spot edge cases (wake-in-flight still set = the
+ * UserPromptSubmit hook didn't get a chance to clean up).
  */
 function ageMs(p: string): number | null {
     if (!existsSync(p)) return null;
@@ -56,20 +65,19 @@ function ageMs(p: string): number | null {
 function fmt(ms: number | null): string {
     return ms === null ? "-" : `${Math.round(ms / 1000)}s`;
 }
-function priorState(): string {
-    const idle = ageMs(idleMarkerPath(sd!));
+function classifyTurn(): string {
     const wake = ageMs(lastWakeAtPath(sd!));
     const user = ageMs(userTookOverPath(sd!));
     const inflight = ageMs(wakeInFlightPath(sd!));
-    // Best-guess prior bar status, derived from the markers:
-    //   wake recent (< coalesce window) → busy (we just sent keys, claude is processing)
-    //   wake set but old + idle set     → idle (we sent keys earlier, claude has since gone idle)
-    //   only idle set                   → idle (clean idle, no wake history)
-    //   nothing                         → ? (first fire or pruned state)
-    let was = "?";
-    if (wake !== null && wake < WAKE_COALESCE_WINDOW_MS) was = "busy";
-    else if (idle !== null) was = "idle";
-    return `was=${was} idle=${fmt(idle)} last-wake=${fmt(wake)} user-took-over=${fmt(user)} wake-in-flight=${fmt(inflight)}`;
+    const userGraceMs = userGraceSec * 1000;
+    let turn = "?";
+    if (wake === null && user === null) turn = "?";
+    else if (user !== null && (wake === null || user < wake)) {
+        turn = user < userGraceMs ? "user" : "user-stale";
+    } else if (wake !== null) {
+        turn = wake < userGraceMs ? "auto-wake" : "autonomous";
+    }
+    return `turn=${turn} last-wake=${fmt(wake)} user-took-over=${fmt(user)} wake-in-flight=${fmt(inflight)}`;
 }
 
 // #B.154: probe the visible pane for claude-side states that
@@ -111,7 +119,7 @@ function classifyPane(text: string): PaneState {
 }
 
 (async () => {
-    log(`fire — checkCmd=${checkCmd} | ${priorState()}`);
+    log(`FIRE — ${classifyTurn()} | checkCmd=${checkCmd}`);
     try {
         const paneState = classifyPane(readPane());
         if (paneState.kind !== "normal") {
@@ -119,7 +127,7 @@ function classifyPane(text: string): PaneState {
             // (compacting, etc.) or blocked on backend. Surface the
             // SUB-STATE in the bar as a `busy:<info>` suffix.
             setTmuxStatus(name!, "busy", paneState.info);
-            log(`  pane state = ${paneState.kind} → suppress wake, status busy:${paneState.info}`);
+            log(`  → SUPPRESS (pane=${paneState.kind}) became=busy:${paneState.info}`);
             emit();
         }
         // #B.195 — when the human typed within the user-grace window,
@@ -132,11 +140,11 @@ function classifyPane(text: string): PaneState {
         if (userIsTakingOver(sd!, userGraceSec)) {
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
             setTmuxStatus(name!, "idle");
-            log(`  user-took-over within grace (${userGraceSec}s) → suppress wake, idle`);
+            log(`  → SUPPRESS (user-grace<${userGraceSec}s) became=idle`);
             emit();
         }
         const hasWork = await checkHasWork(checkCmd);
-        log(`  checkHasWork → ${hasWork}`);
+        log(`  checkHasWork=${hasWork}`);
         if (hasWork) {
             // #B.198 fix A: coalesce. If the previous wake fired
             // within the coalesce window, this Stop hook is the tail
@@ -151,7 +159,7 @@ function classifyPane(text: string): PaneState {
             if (lastWakeMs > 0 && sinceLastWakeMs < WAKE_COALESCE_WINDOW_MS) {
                 writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
                 setTmuxStatus(name!, "idle");
-                log(`  → coalesced (last wake ${sinceLastWakeMs}ms < ${WAKE_COALESCE_WINDOW_MS}ms), idle marker set`);
+                log(`  → COALESCE (last-wake=${sinceLastWakeMs}ms<${WAKE_COALESCE_WINDOW_MS}ms) became=idle`);
                 emit();
             }
             // Work still pending — ping immediately, don't enter idle.
@@ -166,15 +174,15 @@ function classifyPane(text: string): PaneState {
                 "send-keys", "-t", `${tmuxName(name!)}.0`, phrase, "Enter",
             ], { stdio: "ignore" });
             setTmuxStatus(name!, "busy");
-            log(`  → send-keys '${phrase}' + status busy`);
+            log(`  → WAKE '${phrase}' became=busy`);
         } else {
             // Nothing to do — mark idle so the timer can take over.
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
             setTmuxStatus(name!, "idle");
-            log(`  → idle-since + status idle`);
+            log(`  → IDLE (no work) became=idle`);
         }
     } catch (e) {
-        log(`  ERROR ${(e as Error).message ?? String(e)}`);
+        log(`  → ERROR ${(e as Error).message ?? String(e)}`);
     }
     emit();
 })();
