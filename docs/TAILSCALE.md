@@ -1,101 +1,70 @@
 # aiball over Tailscale — remote access (#B.182)
 
-> **Use case**: aiball daemon runs on your home machine. You want to
-> read the inbox / moderate / drop tickets from your phone or a
-> laptop while away from that machine — without exposing aiball to
-> the public internet.
+Read the inbox / moderate / drop tickets from your phone (or any
+other device) while away from the aiball host, without exposing
+aiball to the public internet.
 
-Tailscale gives every device on your tailnet a private IP and a
-stable hostname. Reverse-proxying aiball's local port through
-`tailscale serve` makes the web UI reachable from any other tailnet
-device, end-to-end encrypted, with the daemon still bound only to
-`127.0.0.1` on the host.
+## Quickstart
 
-No aiball config change needed — Tailscale handles the transport.
+**On the host** (the machine running the aiball daemon):
 
-## Prerequisites
+1. Install Tailscale + log in:
+   <https://tailscale.com/download>, then `sudo tailscale up`.
+2. Expose the daemon to your tailnet:
+   ```bash
+   aiball-tailscale up                 # HTTPS on :443 (needs MagicDNS HTTPS)
+   aiball-tailscale up --http          # plain HTTP on :80 (fallback if HTTPS fails)
+   ```
+   The command prints the reachable URL — note it (e.g.
+   `https://<your-host>.<tailnet>.ts.net/`).
 
-- Tailscale installed + logged in on the **host** (the machine
-  running the aiball daemon) AND on every **client** you want to
-  reach it from. See <https://tailscale.com/download>.
-- Daemon running locally (the standard install: systemd user unit
-  bound to `127.0.0.1:7777`).
-- Optional but recommended: HTTPS enabled on the tailnet (Settings
-  → DNS → MagicDNS + HTTPS Certificates). The HTTPS path below
-  requires this; the plain HTTP variant skips it.
+**On every client** (phone, laptop, …) you want to reach aiball from:
 
-## Expose the daemon to your tailnet (HTTPS)
+3. Install the Tailscale app:
+   - Android: <https://play.google.com/store/apps/details?id=com.tailscale.ipn>
+   - iOS: <https://apps.apple.com/app/tailscale/id1470499037>
+   - Desktop: <https://tailscale.com/download>
+4. Sign in with the **same account** you used on the host.
+5. Enable the VPN toggle (the app asks for the permission once).
+6. Open the URL from step 2 in any browser → log in with your aiball
+   human credentials (created at install time via `--auth-init`).
 
-On the host:
+Verify from the host: `tailscale status` should now list the client.
 
-```bash
-# One-line setup. --bg makes it survive shell exit.
-tailscale serve --bg --https=443 127.0.0.1:7777
-```
-
-That's it. aiball is now reachable at:
-
-```
-https://<your-machine-name>.<your-tailnet>.ts.net/
-```
-
-Verify:
+## Useful commands
 
 ```bash
-tailscale serve status      # show current config + URL
+aiball-tailscale status     # show current serve config + URL
+aiball-tailscale down       # un-expose (remove serve config)
 ```
 
-From any tailnet device (phone, laptop), open that URL in a browser
-and log in with your aiball human consumer credentials.
-
-## Plain HTTP variant (no HTTPS certs)
-
-If you don't have MagicDNS / HTTPS enabled:
-
-```bash
-tailscale serve --bg --http=80 127.0.0.1:7777
-```
-
-Access at `http://<your-machine-name>:80/`. Less polished UX (no TLS
-in the browser) but zero cert setup.
-
-## Stop / un-expose
-
-```bash
-tailscale serve reset       # remove all serve config
-# or
-tailscale serve --https=443 off    # remove just this route
-```
+Auto-resolves the daemon port from `AIBALL_PORT`, the systemd
+`bind.conf` drop-in, or the 7777 default. Override with `--port`.
 
 ## Security model
 
-- aiball auth (password for humans, bearer token for agents) is
-  unchanged — the `bearerAuth` middleware fires regardless of the
-  transport. Tailscale doesn't bypass it.
-- Tailscale serve only routes to **devices on your tailnet**; it's
-  NOT a public-internet exposure. If you ALSO want public exposure,
-  use `tailscale funnel` instead of `serve` — but think hard before
-  doing so (aiball has admin endpoints).
-- The daemon still listens on `127.0.0.1:7777` on the host. UDS-local
-  trust (used by `aiball` CLI on the host itself) is unaffected.
-
-## Mobile UI
-
-The web UI is responsive (#B.161) — usable from a phone browser
-without zoom. Quick triage / moderation works fine on a small
-screen. Composing long ticket bodies is more comfortable with a
-keyboard; you'll probably draft those on a laptop.
+- aiball auth (password for humans, bearer for agents) is unchanged
+  — Tailscale doesn't bypass it.
+- `tailscale serve` routes to **tailnet devices only** — not the
+  public internet. For public exposure use `tailscale funnel`
+  instead (think hard first; aiball has admin endpoints).
+- The daemon still binds `127.0.0.1` on the host. UDS-local trust
+  (used by `aiball` CLI on the host itself) is unaffected.
 
 ## Troubleshooting
 
-- **"connection refused"** from a tailnet device → check the daemon
-  is up: `systemctl --user status aiball`. Check `tailscale serve
-  status` matches `127.0.0.1:7777`.
-- **"401 authentication required"** → expected on first visit.
-  Log in with your human consumer credentials (created at install
-  time via the `--auth-init` URL).
-- **MagicDNS hostname doesn't resolve** → Tailscale admin console →
-  DNS → enable MagicDNS. Or use the tailnet IP directly:
-  `https://100.x.y.z/`.
-- **HTTPS cert warning** → MagicDNS HTTPS certs need to be enabled
+- **"can't connect" / DNS error on the client** → Tailscale app not
+  installed, not logged in with the same account, or VPN toggle
+  off. Check the host appears in the app's device list.
+- **MagicDNS hostname doesn't resolve** → admin console → DNS →
+  enable MagicDNS. Or use the tailnet IP directly: `https://100.x.y.z/`.
+- **HTTPS cert warning** → MagicDNS HTTPS Certificates not enabled
   in the admin console (Settings → DNS → HTTPS Certificates).
+  Quick workaround: `aiball-tailscale down && aiball-tailscale up --http`.
+- **"connection refused"** → daemon down: `systemctl --user status aiball`.
+  Check `aiball-tailscale status` proxy target matches `127.0.0.1:<port>`.
+- **"401 authentication required"** → expected on first visit; log in
+  with your human consumer credentials.
+
+The web UI is responsive (#B.161) — usable from a phone without
+zoom. Long ticket bodies are still more comfortable on a laptop.
