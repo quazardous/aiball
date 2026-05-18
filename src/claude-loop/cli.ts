@@ -143,6 +143,14 @@ function cmdStart(opts: StartOpts): void {
     }
     need(MUX_CMD);
 
+    // #B.154: auto-resolve AIBALL_AGENT / AIBALL_PROJECT from the
+    // .mcp.json in the cwd, like trace/check already do. Without
+    // this, the timer + hooks spawn with an empty agent → random
+    // uuid fallback in AiballClient → SSE delivers nothing for
+    // that ghost consumer (david saw "SSE hello: unread=0" while
+    // the real project consumer had 8 unread).
+    loadMcpEnvDefaults();
+
     const cwd = process.env.CLAUDE_LOOP_CWD ?? process.cwd();
 
     // #B.154: housekeeping before spawn. (1) prune dead state dirs
@@ -196,6 +204,12 @@ function cmdStart(opts: StartOpts): void {
         // #B.154: resume picker auto-dismiss mode. Read by the
         // SessionStart hook when source=resume.
         `export CL_RESUME_MODE=${shQuote(opts.resumeMode ?? "as-is")}`,
+        // #B.154: persist the resolved aiball identity so the timer
+        // + every hook fire sees the SAME consumer as the spawn-
+        // time .mcp.json resolution. Without this, a hook can run
+        // with an empty AIBALL_AGENT and fall back to a random uuid.
+        ...(process.env.AIBALL_AGENT ? [`export AIBALL_AGENT=${shQuote(process.env.AIBALL_AGENT)}`] : []),
+        ...(process.env.AIBALL_PROJECT ? [`export AIBALL_PROJECT=${shQuote(process.env.AIBALL_PROJECT)}`] : []),
         "",
     ];
     writeFileSync(envPath(sd), envLines.join("\n"));
