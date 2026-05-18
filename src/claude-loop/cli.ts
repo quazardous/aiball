@@ -403,16 +403,23 @@ function cmdAttach(name: string): void {
     spawnSync(MUX_CMD, ["attach", "-t", tmuxName(name)], { stdio: "inherit" });
 }
 
-function cmdTail(name: string, lines: number, timer: boolean): void {
-    if (timer) {
+function cmdTail(name: string, lines: number, which: "pane" | "timer" | "stop-hook"): void {
+    if (which === "timer") {
         const log = timerLogPath(stateDirFor(name));
         if (!existsSync(log)) die(`no timer log at ${log}`);
         const all = readFileSync(log, "utf8").split("\n");
         process.stdout.write(all.slice(-lines).join("\n") + "\n");
         return;
     }
+    if (which === "stop-hook") {
+        const log = join(stateDirFor(name), "stop-hook.log");
+        if (!existsSync(log)) die(`no stop-hook log at ${log} (no Stop hook fire yet?)`);
+        const all = readFileSync(log, "utf8").split("\n");
+        process.stdout.write(all.slice(-lines).join("\n") + "\n");
+        return;
+    }
     if (!tmuxAlive(name)) {
-        die(`loop '${name}' not alive (use --timer to inspect the timer log)`);
+        die(`loop '${name}' not alive (use --timer / --stop-hook to inspect logs instead)`);
     }
     const r = spawnSync(MUX_CMD, ["capture-pane", "-t", `${tmuxName(name)}.0`, "-p"], {
         encoding: "utf8",
@@ -744,11 +751,14 @@ async function main(): Promise<void> {
     program.command("list").description("List all known loops").action(cmdList);
     program.command("attach <name>").description("tmux attach to a loop session").action(cmdAttach);
     program.command("tail <name>")
-        .description("Tail the claude pane (or --timer for the timer log)")
+        .description("Tail the claude pane (--timer / --stop-hook for the wake-decision logs)")
         .option("--lines <n>", "Lines to show", "40")
         .option("--timer", "Tail the detached timer log instead of the claude pane")
-        .action((name: string, opts: { lines: string; timer?: boolean }) => {
-            cmdTail(name, Number(opts.lines), opts.timer === true);
+        .option("--stop-hook", "Tail the Stop hook log (per-fire wake decisions + coalesce)")
+        .action((name: string, opts: { lines: string; timer?: boolean; stopHook?: boolean }) => {
+            if (opts.timer && opts.stopHook) die("pass only one of --timer / --stop-hook");
+            const which = opts.timer ? "timer" : opts.stopHook ? "stop-hook" : "pane";
+            cmdTail(name, Number(opts.lines), which);
         });
     program.command("rm <name>")
         .description("Kill tmux + timer + remove state dir")
