@@ -127,12 +127,6 @@ async function main(): Promise<void> {
     // `<project>-claude` default (#B.154 unification, david).
     if (!cfg.autopoll.enabled) emit({});
 
-    // #B.192: if claude is still mid-work (pane footer shows
-    // "esc to interrupt"), the Stop hook is firing on an intermediate
-    // pause — don't inject backlog now or we'll race the next prompt.
-    // The next real Stop will re-fire the hook with the same backlog.
-    if (claudeStillWorking()) emit({});
-
     // loadConfig now guarantees agent + project non-null (`<project>-
     // claude` default kicks in at the end of the chain), but the
     // interface stays `string | null` so the internal walk can use
@@ -243,6 +237,27 @@ async function main(): Promise<void> {
         shouldNotify = true;
     } else if (!cfg.autopoll.volatile && throttleElapsed) {
         shouldNotify = true;
+    }
+
+    // #B.192 david: "c'est les 2 — on test à la fin du throttle et on
+    // relance le throttle". When we're about to fire, probe the pane
+    // first: if claude is still mid-work (footer "esc to interrupt"),
+    // racing the next prompt would clash with the in-flight turn.
+    // - For the throttle-elapsed reminder: reset the throttle counter
+    //   so we wait another full window after busy clears, rather than
+    //   re-firing on every Stop hook until idle.
+    // - For new-ping / new-open triggers: skip without touching state
+    //   so the next Stop re-evaluates and fires as soon as the pane
+    //   footer clears.
+    if (shouldNotify && claudeStillWorking()) {
+        if (!newPing && !newOpenTicket) {
+            writeState(agent, {
+                last_notified_at: nowSec,
+                last_max_ping_id: state.last_max_ping_id,
+                last_open_count: state.last_open_count,
+            });
+        }
+        emit({});
     }
     if (!shouldNotify) {
         // Sync state for decreased counts so future bumps register.
