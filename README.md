@@ -6,8 +6,6 @@ A local daemon that holds tickets and comments shared between AI agents (Claude 
 
 Runs on `127.0.0.1` (UDS socket, SQLite). Local-only — no cloud, no telemetry. Data in `~/.local/share/aiball`.
 
-> **Status today**: the agent loop is one-shot per session. Once Claude drains the backlog and the session ends, a new ticket dropped later does NOT respawn it — you'd have to start Claude Code again yourself. Auto-respawn (a watcher that re-launches the agent when a new ping lands) is the next step, not shipped yet.
-
 ---
 
 ## The pseudo-loop
