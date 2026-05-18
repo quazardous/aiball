@@ -68,20 +68,28 @@ if (source === "resume") {
     const mode = process.env.CL_RESUME_MODE ?? "as-is";
     if (mode !== "abort") {
         try {
+            // Surface what we're doing in the bar so the user can
+            // follow the phase without tailing logs (#B.154).
+            setTmuxStatus(name!, "boot", "resume?");
             spawnSync("sleep", ["1.2"], { stdio: "ignore" });
             const pane = spawnSync(MUX_CMD, [
                 "capture-pane", "-t", `${tmuxName(name!)}.0`, "-p",
             ], { encoding: "utf8" });
             const text = pane.stdout ?? "";
             if (/Resume from summary|Resume full session as-is|Don't ask me again/.test(text)) {
+                setTmuxStatus(name!, "boot", `pick→${mode}`);
                 if (mode === "as-is") {
                     spawnSync(MUX_CMD, ["send-keys", "-t", `${tmuxName(name!)}.0`, "Down"], { stdio: "ignore" });
                 }
                 spawnSync(MUX_CMD, ["send-keys", "-t", `${tmuxName(name!)}.0`, "Enter"], { stdio: "ignore" });
+            } else {
+                // No picker → claude is already at the prompt, fall
+                // through to the normal check + status flip below.
+                setTmuxStatus(name!, "boot", "no-picker");
             }
-            // No picker → claude is already at the prompt, fall
-            // through to the normal check + status flip below.
         } catch { /* swallow */ }
+    } else {
+        setTmuxStatus(name!, "boot", "resume:abort");
     }
 }
 

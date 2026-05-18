@@ -197,12 +197,23 @@ const STATUS_COLORS: Record<LoopStatus, { bg: string; fg: string }> = {
     boot: { bg: "colour178", fg: "colour15" },  // yellow / white (transitional)
 };
 
-export function setTmuxStatus(name: string, status: LoopStatus, count?: number): void {
-    // #B.149: optional unread-ping count appended to the status
-    // label (`[idle 3]`) so the user sees "there's stuff queued" at
-    // a glance even when claude isn't ringing. count omitted or 0 →
-    // no suffix.
-    const tag = count && count > 0 ? `[${status} ${count}]` : `[${status}]`;
+export function setTmuxStatus(
+    name: string,
+    status: LoopStatus,
+    countOrInfo?: number | string,
+): void {
+    // #B.149/#B.154: optional unread-ping count OR free-form phase
+    // info appended to the status label. count → `[idle 3]`. info
+    // → `[boot:picker?]`. Lets the bar carry transient diagnostic
+    // state without inventing new colors per phase. David: "la
+    // barre tmux peut etre utilisé pour afficher le mode (dialogue
+    // detecté etc)".
+    let tag = `[${status}]`;
+    if (typeof countOrInfo === "number" && countOrInfo > 0) {
+        tag = `[${status} ${countOrInfo}]`;
+    } else if (typeof countOrInfo === "string" && countOrInfo) {
+        tag = `[${status}:${countOrInfo}]`;
+    }
     const left = ` CLAUDE-LOOP · ${name} ${tag} `;
     const tn = tmuxName(name);
     const c = STATUS_COLORS[status];
