@@ -4,7 +4,6 @@ import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
 import Tag from "primevue/tag";
-import { useToast } from "primevue/usetoast";
 import { api, INTENTS, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
 import { STATUS_SEVERITY } from "../lib/labels";
 import { topDown } from "../lib/prefs";
@@ -20,8 +19,8 @@ import { bus, useBus } from "../lib/bus";
 import { useSnooze } from "../lib/snooze";
 import { useResolutionFlow } from "../lib/resolutionFlow";
 import { useThreadRelations } from "../lib/threadRelations";
+import { useEditPanel } from "../lib/editPanel";
 import { isPeek } from "../lib/peek";
-import { attachPasteImage } from "../lib/pasteImage";
 import MarkdownView from "./MarkdownView.vue";
 import MessageComposer from "./MessageComposer.vue";
 
@@ -209,120 +208,25 @@ function onTagsChanged(tags: TagType[]) {
 // lose typing — when the panel reopens, the saved draft takes
 // priority over the current DB values. Cleared on save (success)
 // and on cancel.
-const titleDraft = ref("");
-const bodyDraft = ref("");
-const bodyBusy = ref(false);
-
-function draftKey(ticketId: number): string {
-    return `aiball.draft.ticket.${ticketId}`;
-}
-
-watch(
-    [() => props.ticketId, editing, () => data.value?.ticket.id],
-    () => {
-        if (!editing.value || !data.value) return;
-        const tid = data.value.ticket.id;
-        const saved = sessionStorage.getItem(draftKey(tid));
-        if (saved !== null) {
-            try {
-                const { title, body } = JSON.parse(saved) as { title?: string; body?: string };
-                titleDraft.value = typeof title === "string" ? title : (data.value.ticket.title ?? "");
-                bodyDraft.value = typeof body === "string" ? body : (data.value.ticket.body ?? "");
-                return;
-            } catch {
-                // Corrupted draft — fall through to DB values.
-            }
-        }
-        titleDraft.value = data.value.ticket.title ?? "";
-        bodyDraft.value = data.value.ticket.body ?? "";
-    },
-);
-
-// Mirror drafts into sessionStorage on every change while editing.
-watch([titleDraft, bodyDraft], ([t, b]) => {
-    if (!editing.value || !data.value) return;
-    sessionStorage.setItem(
-        draftKey(data.value.ticket.id),
-        JSON.stringify({ title: t, body: b }),
-    );
+// Edit-panel flow (#B.196 Layer 3) — title/body drafts +
+// sessionStorage mirror + save/cancel verbs + the paste-image
+// attach/detach on the body textarea. Intent + tags handlers stay
+// here (they pair with the article header pickers, not just the
+// edit panel). See lib/editPanel.ts.
+const {
+    titleDraft,
+    bodyDraft,
+    bodyBusy,
+    editPanelRef,
+    saveAndClose: saveAndCloseEdit,
+    cancel: cancelEdit,
+} = useEditPanel({
+    data,
+    ticketId: () => props.ticketId,
+    editing,
+    error,
+    broadcastRefresh,
 });
-/**
- * Save any pending title + body changes and close the edit panel.
- * Title and body draft mutations are buffered (no auto-save on blur),
- * so a single click on "save" — or Ctrl/Cmd+Enter inside the body —
- * commits both fields in one shot. Intent and tags save live and
- * aren't part of this commit cycle.
- */
-async function saveAndCloseEdit() {
-    if (!data.value) return;
-    const tid = data.value.ticket.id;
-    const currentTitle = data.value.ticket.title ?? "";
-    const currentBody = data.value.ticket.body ?? "";
-    const titleChanged = titleDraft.value !== currentTitle;
-    const bodyChanged = bodyDraft.value !== currentBody;
-    if (!titleChanged && !bodyChanged) {
-        editing.value = false;
-        return;
-    }
-    bodyBusy.value = true;
-    try {
-        const patch: { title?: string; body?: string } = {};
-        if (titleChanged) patch.title = titleDraft.value;
-        if (bodyChanged) patch.body = bodyDraft.value;
-        await api.edit(tid, patch);
-        sessionStorage.removeItem(draftKey(tid));
-        broadcastRefresh(tid);
-        editing.value = false;
-    } catch (e) {
-        error.value = (e as Error).message;
-        // Rollback drafts so the panel reflects what's actually in the DB.
-        if (titleChanged) titleDraft.value = currentTitle;
-        if (bodyChanged) bodyDraft.value = currentBody;
-    } finally {
-        bodyBusy.value = false;
-    }
-}
-
-/**
- * Drop any unsaved title/body edits and close the panel. Intent and
- * tags changes made during the session aren't reverted — those saved
- * live the moment the user changed them. Also clears the
- * sessionStorage draft so the next open re-seeds from the DB.
- */
-function cancelEdit() {
-    if (data.value) {
-        sessionStorage.removeItem(draftKey(data.value.ticket.id));
-        titleDraft.value = data.value.ticket.title ?? "";
-        bodyDraft.value = data.value.ticket.body ?? "";
-    }
-    editing.value = false;
-}
-
-// Paste-image on the body textarea of the edit panel (per #B.76).
-// ThreadEditPanel mounts/unmounts the textarea with `v-if="editing"`
-// and exposes its ref via defineExpose; we read it off editPanelRef
-// and (re)attach on each transition.
-const editPanelRef = ref<{ bodyTextareaRef: { $el?: HTMLTextAreaElement } | null } | null>(null);
-const editToast = useToast();
-let editDetachPaste: (() => void) | null = null;
-
-watch(() => editPanelRef.value?.bodyTextareaRef ?? null, (instance) => {
-    editDetachPaste?.();
-    editDetachPaste = null;
-    const el = instance?.$el;
-    if (!el) return;
-    editDetachPaste = attachPasteImage(el, bodyDraft, {
-        onError(err) {
-            editToast.add({
-                severity: "error",
-                summary: "Image paste failed",
-                detail: err.message,
-                life: 5000,
-            });
-        },
-    });
-});
-onBeforeUnmount(() => editDetachPaste?.());
 
 // Comments render flat under the ticket. Nested replies are no longer
 // shown as a tree — to refer back to a specific comment, the reader
