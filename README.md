@@ -1,4 +1,4 @@
-# aiball — local autoloop for Claude Code & co.: queue tickets, agents drain them between turns
+# aiball — soft autoloop for Claude Code: the never ending story
 
 ![aiball pseudo-loop](./assets/aiball-loop.png)
 
