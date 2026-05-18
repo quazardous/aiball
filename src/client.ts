@@ -11,8 +11,9 @@
  * if the architecture ever grows beyond local.
  */
 import { mkdirSync, writeFileSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { homedir } from "node:os";
+import { loadConfig } from "./autopoll/config.js";
 import { createHash } from "node:crypto";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 
@@ -59,7 +60,7 @@ export class AiballClient {
         this.timeoutMs = opts.timeoutMs ?? 2000;
         this.agentId = opts.agentId ?? resolveAgentId();
         this.defaultProject =
-            opts.defaultProject ?? process.env.AIBALL_PROJECT ?? null;
+            opts.defaultProject ?? resolveDefaultProject();
         // UDS preferred when present — auth-free. Falls back to TCP+token.
         const envSock = process.env.AIBALL_SOCK;
         this.socketPath =
@@ -599,7 +600,43 @@ function query(q: Record<string, string | number | undefined>): string {
     return parts.length ? `?${parts.join("&")}` : "";
 }
 
+/**
+ * Resolve default project: env > .aiball.yaml > .mcp.json. Returns
+ * null when nothing provides a project name — callers that NEED a
+ * project (most ticket ops) will throw via `resolveProject()`. The
+ * `<basename>-claude` default for agent isn't mirrored here because
+ * project name without explicit user intent (yaml or env) tends to
+ * be ambiguous (e.g. running `aiball ticket new` from a tools dir).
+ */
+export function resolveDefaultProject(cwd = process.cwd()): string | null {
+    if (process.env.AIBALL_PROJECT) return process.env.AIBALL_PROJECT;
+    try {
+        const cfg = loadConfig(cwd);
+        return cfg.consumer.project ?? null;
+    } catch {
+        return null;
+    }
+}
+
 export function resolveAgentId(cwd = process.cwd()): string {
+    // Resolution chain (#B.154 david):
+    //   1. env AIBALL_AGENT (priority override)
+    //   2. .aiball.yaml consumer.agent (canonical) — via shared
+    //      loadConfig, which also handles the deprecated .mcp.json
+    //      env fallback
+    //   3. `<project>-claude` default, where project comes from the
+    //      same loadConfig chain (env > yaml > .mcp.json) and finally
+    //      basename(cwd)
+    //
+    // sha256(cwd) survives as the absolute last-resort fallback so
+    // we never throw from identity resolution.
     if (process.env.AIBALL_AGENT) return process.env.AIBALL_AGENT;
-    return createHash("sha256").update(cwd).digest("hex").slice(0, 12);
+    try {
+        const cfg = loadConfig(cwd);
+        if (cfg.consumer.agent) return cfg.consumer.agent;
+        const project = cfg.consumer.project ?? basename(cwd);
+        return `${project}-claude`;
+    } catch {
+        return createHash("sha256").update(cwd).digest("hex").slice(0, 12);
+    }
 }

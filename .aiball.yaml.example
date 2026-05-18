@@ -58,22 +58,28 @@ autopoll:
   backlog: true
 
 # Identity — consumer_id and project for this project. The CANONICAL
-# source (#B.154). Resolution chain across aiball tools (autopoll,
-# claude-loop, etc.):
+# source (#B.154 — david: ".aiball.yaml est la source canonique").
+# Resolution chain across every aiball tool (autopoll, claude-loop,
+# `aiball` CLI, MCP server):
 #
-#   1. `consumer.agent` here              ← preferred, canonical
-#   2. `AIBALL_AGENT` env var             ← real override (shell export)
-#   3. `.mcp.json` mcpServers.aiball.env  ← DEPRECATED legacy fallback
-#                                           (claude-loop will warn on
-#                                           stderr when this kicks in)
-#   4. `<basename(project_dir)>-claude`   ← default for claude-loop only
-#                                           (autopoll stays silent if
-#                                           agent is unset; it doesn't
-#                                           guess)
+#   1. `AIBALL_AGENT` / `AIBALL_PROJECT` env  ← priority override.
+#                                               Reserved for special
+#                                               cases (shell scripts
+#                                               running as another
+#                                               identity, one-off
+#                                               scopes). Don't use as
+#                                               the everyday setting.
+#   2. `consumer:` block here                 ← canonical, recommended
+#   3. `.mcp.json` mcpServers.aiball.env      ← DEPRECATED. Still
+#                                               works, but `aiball
+#                                               check` + claude-loop
+#                                               warn. Migrate.
+#   4. Defaults                                project: basename(cwd)
+#                                              agent: <project>-claude
 #
-# Set `consumer.agent` once here and you stop having to maintain the
-# value in `.mcp.json`'s env block. Project name follows the same
-# chain (no default — left null means all-projects scope).
+# Set the `consumer:` block once here and you stop maintaining the
+# values in `.mcp.json`'s env block (which only ever reached the MCP
+# subprocess anyway — not claude-loop or the bash CLI).
 #
 # consumer:
 #   agent: skybot-claude

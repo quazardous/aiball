@@ -55,17 +55,26 @@ export interface AiballConfig {
         agent: string | null;
         project: string | null;
         /**
-         * Which source the agent value came from. Lets callers warn on
-         * deprecated paths (`mcp.json`) or recognize when no config
-         * provided anything (`null`, which is when the agent stays null).
-         * Project resolution is parallel but we don't track its source —
-         * the deprecation focus is the agent identity.
+         * Which source the resolved value came from. Lets callers
+         * surface diagnostics and warn on the deprecated path.
          */
-        agent_source: "aiball.yaml" | "env" | "mcp.json" | null;
+        agent_source: ConsumerSource | null;
+        project_source: ConsumerSource | null;
     };
+    /**
+     * True when `.mcp.json` next to the config carries an
+     * `mcpServers.aiball.env` block with AIBALL_AGENT or AIBALL_PROJECT
+     * (#B.154, david 2026-05-18). The block is the legacy injection
+     * mechanism — `.aiball.yaml` `consumer:` is the new canonical
+     * source. Callers (`aiball check`, `claude-loop`) surface a
+     * deprecation nudge when this flag is set.
+     */
+    mcp_json_deprecated: boolean;
     /** Absolute path to the loaded `.aiball.yaml`, or null when none was found. */
     configPath: string | null;
 }
+
+export type ConsumerSource = "env" | "aiball.yaml" | "mcp.json";
 
 const DEFAULTS: AiballConfig = {
     autopoll: {
@@ -80,7 +89,9 @@ const DEFAULTS: AiballConfig = {
         agent: null,
         project: null,
         agent_source: null,
+        project_source: null,
     },
+    mcp_json_deprecated: false,
     configPath: null,
 };
 
@@ -132,6 +143,28 @@ function readMcpJsonProject(dir: string): string | null {
     }
 }
 
+/**
+ * True when `.mcp.json` at the project dir has an
+ * `mcpServers.aiball.env` block that carries AIBALL_AGENT or
+ * AIBALL_PROJECT. Independent of where the *resolved* value came
+ * from — drives the deprecation warning since presence-in-file is
+ * what david wants to flag (#B.154).
+ */
+function mcpJsonHasIdentityEnv(dir: string): boolean {
+    const p = join(dir, ".mcp.json");
+    if (!existsSync(p)) return false;
+    try {
+        const raw = JSON.parse(readFileSync(p, "utf8")) as {
+            mcpServers?: Record<string, { env?: Record<string, string> }>;
+        };
+        const env = raw.mcpServers?.aiball?.env;
+        if (!env) return false;
+        return !!(env.AIBALL_AGENT || env.AIBALL_PROJECT);
+    } catch {
+        return false;
+    }
+}
+
 export function loadConfig(cwd: string = process.cwd()): AiballConfig {
     const configPath = findConfigUpwards(cwd);
     const projectDir = configPath ? dirname(configPath) : cwd;
@@ -140,6 +173,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         ...DEFAULTS,
         autopoll: { ...DEFAULTS.autopoll },
         consumer: { ...DEFAULTS.consumer },
+        mcp_json_deprecated: mcpJsonHasIdentityEnv(projectDir),
         configPath,
     };
 
@@ -172,29 +206,34 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
                 cfg.consumer.agent = c.agent;
                 cfg.consumer.agent_source = "aiball.yaml";
             }
-            if (typeof c.project === "string" && c.project) cfg.consumer.project = c.project;
+            if (typeof c.project === "string" && c.project) {
+                cfg.consumer.project = c.project;
+                cfg.consumer.project_source = "aiball.yaml";
+            }
         } catch {
             /* malformed — fall back to defaults, hook stays silent */
         }
     }
 
-    // Resolve agent/project: .aiball.yaml > env > .mcp.json (deprecated).
-    // David's directive (#B.154, 2026-05-18): the canonical source is
-    // .aiball.yaml `consumer.agent`. Env vars stay as a real override
-    // (shell `export AIBALL_AGENT=x` is legit). Reading from .mcp.json
-    // is deprecated — callers that surface a warning use
-    // `consumer.agent_source === "mcp.json"` to spot it.
+    // Resolution chain (#B.154, david 2026-05-18):
+    //   1. process.env.AIBALL_*  ← priority, for special cases
+    //   2. .aiball.yaml consumer.*  ← canonical, recommended
+    //   3. .mcp.json mcpServers.aiball.env.*  ← DEPRECATED, warned via
+    //      mcp_json_deprecated (presence-in-file, independent of
+    //      whether the value was actually used here)
     //
-    // Cwd-hash / basename defaults are NOT applied here — autopoll
-    // treats null-agent as a "stay silent" signal. Callers that need a
-    // sensible default (claude-loop) apply it themselves on top of
-    // this resolved value.
-    if (!cfg.consumer.agent) {
-        const fromEnv = process.env.AIBALL_AGENT;
-        if (fromEnv) {
-            cfg.consumer.agent = fromEnv;
-            cfg.consumer.agent_source = "env";
-        }
+    // Env wins over yaml because david's framing is: env is the legit
+    // override path ("prioritaire mais utilisé pour cas particulier").
+    // Yaml is what most users set; env is the temporary override.
+    //
+    // No defaults applied at this layer — autopoll treats null-agent
+    // as "stay silent", which is the right semantic for that surface.
+    // Callers that need a fallback (claude-loop, mcp server) apply
+    // their own default on top of this resolved value.
+    const envAgent = process.env.AIBALL_AGENT;
+    if (envAgent) {
+        cfg.consumer.agent = envAgent;
+        cfg.consumer.agent_source = "env";
     }
     if (!cfg.consumer.agent) {
         const fromMcp = readMcpJsonAgent(projectDir);
@@ -203,12 +242,17 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             cfg.consumer.agent_source = "mcp.json";
         }
     }
-    if (!cfg.consumer.project) {
-        const fromEnv = process.env.AIBALL_PROJECT;
-        if (fromEnv) cfg.consumer.project = fromEnv;
+    const envProject = process.env.AIBALL_PROJECT;
+    if (envProject) {
+        cfg.consumer.project = envProject;
+        cfg.consumer.project_source = "env";
     }
     if (!cfg.consumer.project) {
-        cfg.consumer.project = readMcpJsonProject(projectDir);
+        const fromMcp = readMcpJsonProject(projectDir);
+        if (fromMcp) {
+            cfg.consumer.project = fromMcp;
+            cfg.consumer.project_source = "mcp.json";
+        }
     }
 
     return cfg;

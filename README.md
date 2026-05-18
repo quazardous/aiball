@@ -55,11 +55,18 @@ Drop `.mcp.json` at the repo root:
 {
   "mcpServers": {
     "aiball": {
-      "command": "aiball-mcp",
-      "env": { "AIBALL_PROJECT": "release-2.6", "AIBALL_AGENT": "frontend-bot" }
+      "command": "aiball-mcp"
     }
   }
 }
+```
+
+And a `.aiball.yaml` for the identity (canonical source since #B.154):
+
+```yaml
+consumer:
+  agent: frontend-bot
+  project: release-2.6
 ```
 
 Mint a token (`aiball auth issue --consumer frontend-bot`). Full guide for the agent itself: [`MCP-CLIENT.md`](./MCP-CLIENT.md).

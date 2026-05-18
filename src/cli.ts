@@ -290,19 +290,23 @@ program
 program
     .command("whoami")
     .description("Print the consumer_id used here")
-    .action((_opts, cmd) => {
+    .action(async (_opts, cmd) => {
         const globalOpts = gOpts(cmd);
         const client = buildClient(globalOpts);
+        const { loadConfig } = await import("./autopoll/config.js");
+        const cfg = loadConfig(userCwd());
         let source: string;
         if (globalOpts.human) source = "--human flag ($AIBALL_HUMAN)";
         else if (process.env.AIBALL_AGENT) source = "$AIBALL_AGENT env";
-        else source = "sha256(pwd)";
+        else if (cfg.consumer.agent_source === "aiball.yaml") source = ".aiball.yaml consumer.agent";
+        else if (cfg.consumer.agent_source === "mcp.json") source = ".mcp.json env (DEPRECATED)";
+        else source = "<basename(cwd)>-claude (default)";
         jsonline({
             consumer_id: client.agentId,
-            cwd: process.cwd(),
+            cwd: userCwd(),
             source,
             human: globalOpts.human === true,
-            default_project: process.env.AIBALL_PROJECT ?? null,
+            default_project: client.defaultProject,
         });
     });
 
@@ -466,54 +470,12 @@ program
         const cfg = loadConfig(userCwd());
         const client = buildClient(gOpts(cmd));
 
-        // Resolve where each consumer field actually came from.
-        const configRaw =
-            cfg.configPath && existsSync(cfg.configPath)
-                ? (() => {
-                      try {
-                          return JSON.parse(readFileSync(cfg.configPath, "utf8")) as {
-                              consumer?: { agent?: string; project?: string };
-                          };
-                      } catch {
-                          return null;
-                      }
-                  })()
-                : null;
-        const agentSource = (() => {
-            if (configRaw?.consumer?.agent) return "config";
-            if (process.env.AIBALL_AGENT) return "env";
-            // Same fallback as loadConfig
-            const projectDir = cfg.configPath ? dirname(cfg.configPath) : userCwd();
-            const mcp = join(projectDir, ".mcp.json");
-            if (existsSync(mcp)) {
-                try {
-                    const r = JSON.parse(readFileSync(mcp, "utf8")) as {
-                        mcpServers?: Record<string, { env?: Record<string, string> }>;
-                    };
-                    if (r.mcpServers?.aiball?.env?.AIBALL_AGENT) return ".mcp.json";
-                } catch {
-                    /* ignore */
-                }
-            }
-            return null;
-        })();
-        const projectSource = (() => {
-            if (configRaw?.consumer?.project) return "config";
-            if (process.env.AIBALL_PROJECT) return "env";
-            const projectDir = cfg.configPath ? dirname(cfg.configPath) : userCwd();
-            const mcp = join(projectDir, ".mcp.json");
-            if (existsSync(mcp)) {
-                try {
-                    const r = JSON.parse(readFileSync(mcp, "utf8")) as {
-                        mcpServers?: Record<string, { env?: Record<string, string> }>;
-                    };
-                    if (r.mcpServers?.aiball?.env?.AIBALL_PROJECT) return ".mcp.json";
-                } catch {
-                    /* ignore */
-                }
-            }
-            return null;
-        })();
+        // Source tracking now lives in loadConfig (#B.154) — no need
+        // to re-walk the chain here. Previously this block parsed the
+        // YAML config as JSON (buggy: always returned null, so every
+        // resolved agent showed "[from .mcp.json]" regardless).
+        const agentSource = cfg.consumer.agent_source;
+        const projectSource = cfg.consumer.project_source;
 
         // Stop hook wiring check.
         const settingsPath = join(homedir(), ".claude", "settings.json");
@@ -593,6 +555,14 @@ program
                 up: daemonUp,
                 unread_pings: pings,
             },
+            // #B.154: deprecation surface — `.mcp.json` env block is
+            // the legacy identity-injection mechanism; users should
+            // migrate to `.aiball.yaml consumer:*`. Independent of
+            // whether the resolved value actually came from that
+            // path (presence-in-file is what we flag).
+            deprecation: {
+                mcp_json_env_block: cfg.mcp_json_deprecated,
+            },
         };
 
         if (opts.json) {
@@ -623,6 +593,17 @@ program
         process.stdout.write(`  ${ok(payload.daemon.up)} reachable\n`);
         if (payload.daemon.up && payload.consumer.agent) {
             process.stdout.write(`  ${ok(payload.daemon.unread_pings === 0)} unread pings for ${payload.consumer.agent}: ${payload.daemon.unread_pings ?? "?"}\n`);
+        }
+        if (payload.deprecation.mcp_json_env_block) {
+            process.stdout.write(
+                `\ndeprecation\n` +
+                `  ! .mcp.json carries an mcpServers.aiball.env block with AIBALL_AGENT/PROJECT.\n` +
+                `    This injection mechanism is deprecated (#B.154). Migrate to .aiball.yaml:\n\n` +
+                `        consumer:\n` +
+                `          agent: ${payload.consumer.agent ?? "<your-agent-id>"}\n` +
+                `          project: ${payload.consumer.project ?? "<your-project>"}\n\n` +
+                `    Then drop the env block from .mcp.json. See .aiball.yaml.example.\n`,
+            );
         }
         process.stdout.write(`\n`);
     });
