@@ -15,7 +15,65 @@ the human-readable narrative.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Consumers panel rework (`#B.193`, `#B.194`)
+
+- "Add consumer" form retired — daemon auto-inserts on first sight,
+  humans go through setup-screen or `aiball auth issue`.
+- Default sort flipped to activity-desc ("who's been around lately"
+  is the real triage view).
+- Toolbar checkbox "Hide consumers idle > 1 week" (default ON) with
+  an "N shown / M total" count so the filter never silently hides
+  a row you're looking for.
+- New dedicated edit page at `/consumers/<id>` (pi-pencil button
+  per row) with a "← Consumers / <id>" breadcrumb header — full
+  form for kind / display_name / note / enabled plus read-only
+  created_at + last_seen_at. Inline kind/display_name editors stay
+  on the table rows for quick tweaks.
+
+### Autopoll is quieter when there's nothing new (`#B.192`)
+
+The Stop hook used to re-fire the "Backlog: N open ticket"
+reminder on basically every turn during fast back-and-forth.
+Two fixes:
+
+- Default `autopoll.throttle_seconds` raised 30s → 120s so the
+  standing reminder doesn't spam during sub-minute turns. New
+  pings and new open tickets still bypass the throttle and notify
+  instantly.
+- Inside tmux, the hook now probes the pane footer for "esc to
+  interrupt" before firing. Still mid-work → skip. For the
+  throttle-elapsed reminder we also reset the throttle counter,
+  so we wait another full window after busy clears instead of
+  re-checking on every Stop.
+
+### Mobile inbox stays fresh after a phone sleep (`#B.191`)
+
+- WS reconnect: a `visibilitychange` listener catches the case
+  where mobile browsers freeze a backgrounded tab and silently
+  drop the socket. When the tab returns the client tears down the
+  zombie socket and reconnects immediately instead of waiting for
+  the exponential backoff.
+- Server-side WebSocket pings every 25s plus per-socket liveness
+  via pong: keeps middleboxes (mobile carriers, Tailscale serve,
+  corp proxies) from killing idle TCP, and lets the server notice
+  half-dead clients on its own.
+- On a fresh WS connection the inbox + projects re-fetch so any
+  event missed during the outage gets reconciled.
+- Auto-mark-read on the thread dwell is now bounded by `up_to_id`
+  — comments arriving AFTER you opened the thread keep their
+  unseen ping so the inbox row stays bold+green for the new
+  content. The envelope toggle still acks the whole thread.
+
+### Internal cleanup
+
+- Shared `paneFooterShowsBusy()` helper in `claude-loop/state.ts`
+  used by the heartbeat timer AND the autopoll Stop hook
+  (#B.185 / #B.192 follow-up).
+- `/simplify` pass on the post-v0.6.2 commits: aggressive comment
+  prune (~130 lines of #B.xxx narration trimmed), `markTicketSeen`
+  collapsed with optional `upTo` (DB function de-dup), N+1 lookup
+  fixed in `fanOutPings` via a hoisted human set, `CONSUMER_KIND_OPTIONS`
+  exported once.
 
 ## [0.6.2] - 2026-05-18
 
