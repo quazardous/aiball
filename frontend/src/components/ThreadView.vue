@@ -19,6 +19,7 @@ import ThreadHeader from "./ThreadHeader.vue";
 import ThreadEditPanel from "./ThreadEditPanel.vue";
 import ThreadCommentsList, { type ThreadItem } from "./ThreadCommentsList.vue";
 import ThreadActionsDock from "./ThreadActionsDock.vue";
+import ThreadToolbar from "./ThreadToolbar.vue";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -1174,233 +1175,60 @@ async function copyTicketRef() {
 
 <template>
     <div class="thread-view" :class="{ 'thread-view--top-down': topDown }">
-        <div class="thread-toolbar">
-            <Button
-                icon="pi pi-arrow-left"
-                label="back"
-                severity="secondary"
-                text
-                size="small"
-                @click="emit('back')"
-            />
-            <span class="spacer" />
-            <!-- #B.133: thread-order toggle. Button lives in the
-                 thread head (per david: "tu peux laisser le bouton
-                 dans le head du thread") but the state is shared
-                 globally via `lib/prefs.ts` — toggling here flips
-                 the order on every thread you open. -->
-            <Button
-                :icon="topDown ? 'pi pi-sort-amount-down' : 'pi pi-sort-amount-up'"
-                severity="secondary"
-                size="small"
-                text
-                rounded
-                :title="topDown
-                    ? 'Thread order (applies to ALL threads): newest at top. Click to flip to oldest-first.'
-                    : 'Thread order (applies to ALL threads): oldest first (default). Click to flip to newest at top.'"
-                @click="toggleTopDown"
-            />
-            <Button
-                v-if="data && data.ticket.status === 'approved'"
-                icon="pi pi-megaphone"
-                :severity="data.ticket.broadcast ? 'success' : 'secondary'"
-                size="small"
-                :text="!data.ticket.broadcast"
-                rounded
-                class="broadcast-toggle"
-                :class="{ 'broadcast-toggle--off': !data.ticket.broadcast }"
-                :loading="broadcastBusy"
-                :title="data.ticket.broadcast
-                    ? 'Broadcast ON: project followers receive pings on this thread. Click to make it internal-only.'
-                    : 'Broadcast OFF (default): only project owners and explicit thread followers receive pings. Click to broadcast to all project followers.'"
-                @click="toggleBroadcast"
-            />
-            <Button
-                v-if="data && data.ticket.status !== 'rejected' && !data.ticket.closed && !isSnoozed"
-                icon="pi pi-history"
-                severity="info"
-                size="small"
-                text
-                rounded
-                :loading="snoozeBusy"
-                title="Snooze this ticket — it disappears from the open inbox until the date you pick, then auto-reappears."
-                @click="openSnoozePopover"
-            />
-            <Button
-                v-if="data && isSnoozed"
-                icon="pi pi-bell"
-                severity="info"
-                size="small"
-                :loading="snoozeBusy"
-                :title="`Snoozed until ${data.ticket.postponed_until ? new Date(data.ticket.postponed_until).toLocaleString() : ''} — click to bring back now.`"
-                @click="unsnooze"
-            />
-            <Popover ref="snoozePopoverRef">
-                <div class="snooze-popover">
-                    <div class="snooze-popover__title">Snooze until…</div>
-                    <div class="snooze-popover__presets">
-                        <Button label="1 hour"  size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(60 * 60_000)" />
-                        <Button label="3 hours" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(3 * 60 * 60_000)" />
-                        <Button label="tomorrow" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(86_400_000)" />
-                        <Button label="3 days" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(3 * 86_400_000)" />
-                        <Button label="1 week" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(7 * 86_400_000)" />
-                        <Button label="1 month" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(30 * 86_400_000)" />
-                    </div>
-                    <div class="snooze-popover__custom">
-                        <InputText
-                            v-model="snoozeCustom"
-                            size="small"
-                            type="datetime-local"
-                            class="snooze-popover__custom-input"
-                            :disabled="snoozeBusy"
-                        />
-                        <Button
-                            label="snooze"
-                            icon="pi pi-check"
-                            size="small"
-                            severity="info"
-                            :loading="snoozeBusy"
-                            :disabled="!snoozeCustom"
-                            @click="snoozeCustomSubmit"
-                        />
-                    </div>
+        <ThreadToolbar
+            v-if="data"
+            :ticket="data.ticket"
+            :is-snoozed="isSnoozed"
+            :has-body="hasBody"
+            :active-decision="activeDecision"
+            :pending-resolution="pendingResolution"
+            :broadcast-busy="broadcastBusy"
+            :snooze-busy="snoozeBusy"
+            :resolution-busy="resolutionBusy"
+            @back="emit('back')"
+            @toggle-broadcast="toggleBroadcast"
+            @open-snooze="openSnoozePopover"
+            @unsnooze="unsnooze"
+            @reject-active="rejectActiveDecision"
+            @accept-active="acceptActiveDecision()"
+            @reject-resolution="rejectResolution"
+            @accept-resolution="acceptResolution()"
+            @comment-mark-resolved="commentAndMarkResolved"
+            @comment-reopen="commentAndReopen"
+            @comment-close="commentAndClose"
+            @comment-undo-reject="commentAndUndoReject"
+        />
+        <Popover ref="snoozePopoverRef">
+            <div class="snooze-popover">
+                <div class="snooze-popover__title">Snooze until…</div>
+                <div class="snooze-popover__presets">
+                    <Button label="1 hour"  size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(60 * 60_000)" />
+                    <Button label="3 hours" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(3 * 60 * 60_000)" />
+                    <Button label="tomorrow" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(86_400_000)" />
+                    <Button label="3 days" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(3 * 86_400_000)" />
+                    <Button label="1 week" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(7 * 86_400_000)" />
+                    <Button label="1 month" size="small" severity="secondary" :loading="snoozeBusy" @click="snoozeFor(30 * 86_400_000)" />
                 </div>
-            </Popover>
-            <template v-if="data && data.ticket.status === 'approved' && !data.ticket.closed">
-                <template v-if="activeDecision">
-                    <Button
-                        icon="pi pi-times"
-                        severity="secondary"
+                <div class="snooze-popover__custom">
+                    <InputText
+                        v-model="snoozeCustom"
                         size="small"
-                        text
-                        rounded
-                        :loading="resolutionBusy"
-                        :disabled="!hasBody"
-                        :title="hasBody
-                            ? `Reject the ${activeDecision.decision.kind} and post your note. Keeps the ticket open.`
-                            : `Type an explanation in the composer first — rejecting needs a reason.`"
-                        @click="rejectActiveDecision"
+                        type="datetime-local"
+                        class="snooze-popover__custom-input"
+                        :disabled="snoozeBusy"
                     />
                     <Button
-                        icon="pi pi-verified"
-                        severity="success"
+                        label="snooze"
+                        icon="pi pi-check"
                         size="small"
-                        text
-                        rounded
-                        :loading="resolutionBusy"
-                        :title="activeDecision.decision.kind === 'resolution'
-                            ? 'Accept the resolution and close. Embarks any text typed in the composer.'
-                            : `Accept the ${activeDecision.decision.kind}. Embarks any text typed in the composer.`"
-                        @click="() => acceptActiveDecision()"
+                        severity="info"
+                        :loading="snoozeBusy"
+                        :disabled="!snoozeCustom"
+                        @click="snoozeCustomSubmit"
                     />
-                </template>
-                <template v-else-if="pendingResolution">
-                    <Button
-                        icon="pi pi-times"
-                        severity="secondary"
-                        size="small"
-                        text
-                        rounded
-                        :loading="resolutionBusy"
-                        :disabled="!hasBody"
-                        :title="hasBody
-                            ? 'Reject the resolution proposal and post your note. Keeps the ticket open.'
-                            : 'Type an explanation in the composer first — rejecting needs a reason.'"
-                        @click="rejectResolution"
-                    />
-                    <Button
-                        icon="pi pi-verified"
-                        severity="success"
-                        size="small"
-                        text
-                        rounded
-                        :loading="resolutionBusy"
-                        title="Accept the resolution and close. Embarks any text typed in the composer."
-                        @click="() => acceptResolution()"
-                    />
-                </template>
-                <template v-else>
-                    <Button
-                        v-if="!data.ticket.resolved && !data.ticket.blocked"
-                        icon="pi pi-check-circle"
-                        severity="success"
-                        size="small"
-                        text
-                        rounded
-                        :loading="resolutionBusy"
-                        title="Mark resolved (soft proposal — reporter accepts to close). Plan-proposal is available in the composer split-button. Embarks any text typed in the composer."
-                        @click="commentAndMarkResolved"
-                    />
-                    <Button
-                        v-if="data.ticket.resolved || data.ticket.blocked"
-                        icon="pi pi-undo"
-                        severity="warn"
-                        size="small"
-                        text
-                        rounded
-                        :loading="resolutionBusy"
-                        :title="data.ticket.blocked
-                            ? 'Undo the TBD flag — bring the ticket back to plain open. Embarks any text typed in the composer.'
-                            : 'Undo resolved — clear the resolution and bring the ticket back to plain open. Embarks any text typed in the composer.'"
-                        @click="commentAndReopen"
-                    />
-                    <Button
-                        icon="pi pi-lock"
-                        severity="secondary"
-                        size="small"
-                        text
-                        rounded
-                        :loading="resolutionBusy"
-                        title="Close the ticket (only the reporter can close). Embarks any text typed in the composer."
-                        @click="commentAndClose"
-                    />
-                </template>
-            </template>
-            <Button
-                v-else-if="data && data.ticket.status === 'approved' && data.ticket.closed"
-                icon="pi pi-unlock"
-                severity="info"
-                size="small"
-                text
-                rounded
-                :loading="resolutionBusy"
-                title="Reopen this ticket. Embarks any text typed in the composer."
-                @click="commentAndReopen"
-            />
-            <template v-else-if="data && data.ticket.status === 'pending' && data.ticket.resolved && !data.ticket.closed">
-                <Button
-                    icon="pi pi-undo"
-                    severity="warn"
-                    size="small"
-                    text
-                    rounded
-                    :loading="resolutionBusy"
-                    title="Undo resolved — clear the resolution while the ticket is still in moderation. Embarks any text typed in the composer."
-                    @click="commentAndReopen"
-                />
-                <Button
-                    icon="pi pi-lock"
-                    severity="secondary"
-                    size="small"
-                    text
-                    rounded
-                    :loading="resolutionBusy"
-                    title="Close the ticket (only the reporter can close). Embarks any text typed in the composer."
-                    @click="commentAndClose"
-                />
-            </template>
-            <Button
-                v-else-if="data && data.ticket.status === 'rejected'"
-                icon="pi pi-replay"
-                severity="warn"
-                size="small"
-                text
-                rounded
-                :loading="resolutionBusy"
-                title="Undo reject — bring this ticket back to approved. Embarks any text typed in the composer."
-                @click="commentAndUndoReject"
-            />
-        </div>
+                </div>
+            </div>
+        </Popover>
 
         <div v-if="error" class="aiball-empty" style="color: var(--p-red-500)">
             {{ error }}
