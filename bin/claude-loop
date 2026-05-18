@@ -87,10 +87,10 @@ export CL_PINGS="$sd/pings.yaml"
 EOF
 
     local tname; tname="$(tmux_name "$name")"
-    # Pane 0: claude itself. The Stop hook + permission-mode are
-    # always injected; any user-supplied claude args after `--` are
-    # appended verbatim. Shell-escape each one so spaces / quotes
-    # round-trip safely.
+    # Pane 0 (only pane): claude itself. The Stop hook + permission-
+    # mode are always injected; any user-supplied claude args after
+    # `--` are appended verbatim. Shell-escape each one so spaces /
+    # quotes round-trip safely.
     local claude_passthrough=""
     for arg in "${claude_args[@]:-}"; do
         [[ -z "$arg" ]] && continue
@@ -99,10 +99,18 @@ EOF
     local inner
     inner="source '$sd/env'; exec claude --permission-mode auto --settings $(printf %q "$settings_json")${claude_passthrough}"
     $MUX_CMD new-session -d -s "$tname" -c "$PWD" bash -lc "$inner"
-    # Pane 1 (split-window): the timer loop.
+    # Timer = a detached background process, NOT a tmux pane (david:
+    # "le double écran ça sert à rien et ça catch les touches"). The
+    # timer logs to $sd/timer.log so it's still inspectable via
+    # `claude-loop tail-timer` if we add that, or just `tail -f` on
+    # the file directly.
     local timer_script="$SKILL_DIR/claude-loop-timer.sh"
     [[ -x "$timer_script" ]] || die "timer script not executable: $timer_script"
-    $MUX_CMD split-window -t "$tname" -h -l 30% "source '$sd/env' && exec '$timer_script'"
+    (
+        source "$sd/env"
+        nohup "$timer_script" > "$sd/timer.log" 2>&1 &
+        echo "$!" > "$sd/timer.pid"
+    )
     # Status bar so a loop session is visually distinct (cyan).
     $MUX_CMD set-option -t "$tname" status-bg colour39 >/dev/null 2>&1 || true
     $MUX_CMD set-option -t "$tname" status-fg colour15 >/dev/null 2>&1 || true
@@ -145,16 +153,23 @@ cmd_attach() {
 }
 
 cmd_tail() {
-    local name="$1" lines=40
+    local name="$1" lines=40 source="pane"
     shift
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --lines) lines="$2"; shift 2 ;;
+            --timer) source="timer"; shift ;;
             *) shift ;;
         esac
     done
-    [[ -z "$name" ]] && die "usage: claude-loop tail NAME [--lines N]"
-    tmux_alive "$name" || die "loop '$name' not alive"
+    [[ -z "$name" ]] && die "usage: claude-loop tail NAME [--lines N] [--timer]"
+    local sd; sd="$(state_dir "$name")"
+    if [[ "$source" = "timer" ]]; then
+        [[ -f "$sd/timer.log" ]] || die "no timer log at $sd/timer.log"
+        tail -n "$lines" "$sd/timer.log"
+        return
+    fi
+    tmux_alive "$name" || die "loop '$name' not alive (use --timer to inspect the timer log)"
     $MUX_CMD capture-pane -t "$(tmux_name "$name").0" -p | tail -n "$lines"
 }
 
@@ -165,6 +180,10 @@ cmd_rm() {
     [[ -z "$name" ]] && die "usage: claude-loop rm NAME [--force]"
     local sd; sd="$(state_dir "$name")"
     $MUX_CMD kill-session -t "$(tmux_name "$name")" 2>/dev/null || true
+    # Kill the detached timer process if its pid file is still around.
+    if [[ -f "$sd/timer.pid" ]]; then
+        kill "$(cat "$sd/timer.pid")" 2>/dev/null || true
+    fi
     if [[ -d "$sd" ]]; then
         rm -rf "$sd"
         echo "removed loop '$name'"
@@ -229,10 +248,14 @@ Example:
 Lifecycle subcommands:
   list
   attach NAME
-  tail NAME [--lines N]
+  tail NAME [--lines N] [--timer]   (--timer = timer log instead of claude pane)
   rm NAME [--force]
   wake NAME    (v1: bumps the timer; sub-minute reactivity is v2 via socket)
   prune
+
+The timer runs as a detached background process (logs at
+~/.claude-loop/<NAME>/timer.log) — no longer a tmux pane, so it
+doesn't catch keystrokes when you attach.
 EOF
         ;;
     "")

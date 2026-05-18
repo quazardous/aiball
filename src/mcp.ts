@@ -248,7 +248,7 @@ server.registerTool(
                         "",
                         "How a state-frame differs: include 'awaiting X', 'blocked on Y', 'next step Z', open questions, current ownership. Skip 'I added', 'I shipped', 'I refactored' — those are the body's job.",
                         "",
-                        "Latest-wins: only the most recent summary_until is canonical; older ones become invisible in brief reads. Hard cap 500 chars (raised from 200 once the whole-ticket-state framing made richer summaries necessary — 200 truncated mid-word and pushed agents toward action-deltas). Humans are exempted (the requirement targets agents — humans can be terse). Mandatory for agents — the API rejects comment_added without it (HTTP 400).",
+                        "Latest-wins: only the most recent summary_until is canonical; older ones become invisible in brief reads. No length cap (free-text field like body) — long enough to carry the whole ticket state. Humans are exempted (the requirement targets agents — humans can be terse). Mandatory for agents — the API rejects comment_added without it (HTTP 400).",
                     ].join("\n"),
                 ),
             then: z
