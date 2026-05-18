@@ -18,12 +18,12 @@ import ThreadRelations from "./ThreadRelations.vue";
 import RelationKindMenu from "./RelationKindMenu.vue";
 import ThreadHeader from "./ThreadHeader.vue";
 import ThreadEditPanel from "./ThreadEditPanel.vue";
+import ThreadCommentsList, { type ThreadItem } from "./ThreadCommentsList.vue";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
 import MarkdownView from "./MarkdownView.vue";
 import MessageComposer from "./MessageComposer.vue";
-import CommentNode from "./CommentNode.vue";
 import TagPicker from "./TagPicker.vue";
 
 const props = defineProps<{ ticketId: number }>();
@@ -550,60 +550,23 @@ const latestSummaryUntil = computed<{ text: string; by: string | null; ts: strin
  * window collapse into one row: "added 8 sub-tickets: #B.66, #B.67, …"
  * (per user feedback on #B.62: "gère la factorisation en front si
  * plusieurs relation se suivent").
+ *
+ * The relation-row rendering (and the per-kind icon/verb table, the
+ * meta.relation decoder, and the relative-time formatter) live in
+ * sibling ThreadCommentsList.vue — they only render inside the
+ * comments list. This builder stays here because it depends on
+ * `data` + `latestSummaryUntil` + `topDown` (parent state).
  */
-type ThreadItem =
-    | { kind: "comment"; msg: Message }
-    | { kind: "relation_group"; msgs: Message[] }
-    | { kind: "summary_banner" };
-
 function isRelationKind(k: Message["kind"]): boolean {
     return k === "ticket_sub_added" || k === "ticket_referenced" || k === "ticket_relation";
-}
-
-const RELATION_LABELS: Record<string, { icon: string; verbOne: string; verbMany: string }> = {
-    ticket_sub_added: {
-        icon: "pi pi-sitemap",
-        verbOne: "added sub-ticket",
-        verbMany: "added sub-tickets",
-    },
-    ticket_referenced: {
-        icon: "pi pi-link",
-        verbOne: "referenced from",
-        verbMany: "referenced from",
-    },
-    // #B.137: ticket_relation events used to fall back to the default
-    // comment renderer (empty body → silent blank rows). Now rendered
-    // inline like sub-added/referenced. The verb is generic ("linked
-    // to" / "linked from") — the actual relation kind (depends_on /
-    // blocks / etc.) is read from meta.relation.kind in the template
-    // via decodeRelationEvent below.
-    ticket_relation: {
-        icon: "pi pi-share-alt",
-        verbOne: "linked to",
-        verbMany: "linked to",
-    },
-};
-
-// #B.137: read meta.relation.kind from a ticket_relation event and
-// produce the inline verb. `ignored` is the tombstone — surface it
-// as "unlinked" so the timeline reads correctly.
-function decodeRelationEvent(m: Message): { verb: string; target: number | null } {
-    let kind: string | undefined;
-    try {
-        const meta = m.meta ? JSON.parse(m.meta) as { relation?: { kind?: string } } : null;
-        kind = meta?.relation?.kind;
-    } catch { /* malformed meta */ }
-    const target = m.source_ticket_id ?? null;
-    if (kind === "ignored") return { verb: "unlinked", target };
-    if (kind) return { verb: `linked as ${kind}`, target };
-    return { verb: "linked", target };
 }
 
 /**
  * Compact one-word labels for the lifecycle stage badge rendered next
  * to ticket refs in relation rows and sub-ticket recap items (per
  * #B.70 follow-up). `open` is intentionally NOT in the table — it's
- * the default, no badge needed.
+ * the default, no badge needed. Used here for the sub-ticket recap
+ * AND passed down to ThreadCommentsList for the relation rows.
  */
 const STAGE_LABELS: Record<string, string> = {
     rejected: "rejected",
@@ -661,16 +624,6 @@ const threadItems = computed<ThreadItem[]>(() => {
     }
     return topDown.value ? out.reverse() : out;
 });
-
-function shortTime(iso: string): string {
-    const d = new Date(iso);
-    const diff = Date.now() - d.getTime();
-    const min = 60_000, hr = 3_600_000, day = 86_400_000;
-    if (diff < hr) return `${Math.max(1, Math.floor(diff / min))}m ago`;
-    if (diff < day) return `${Math.floor(diff / hr)}h ago`;
-    if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
-    return d.toLocaleDateString();
-}
 
 /**
  * Sub-tickets panel collapse state (per #B.62 reopen — accordion).
@@ -1610,80 +1563,14 @@ async function copyTicketRef() {
                  summarized" side of the banner (david: "intercalé
                  entre le commentaire qu'il porte et les suivants non
                  encore pris en compte"). See threadItems builder. -->
-
-            <div v-if="flatComments.length === 0" class="aiball-empty thread-no-comments">
-                No comments yet — be the first to reply.
-            </div>
-
-            <ul v-else class="thread-comments">
-                <template v-for="(item, idx) in threadItems" :key="idx">
-                    <li
-                        v-if="item.kind === 'comment'"
-                        class="thread-comment"
-                    >
-                        <CommentNode
-                            :msg="item.msg"
-                            :show-pending-tag="item.msg.id === latestPendingId"
-                            :decider="decidersByMessage.get(item.msg.id) ?? null"
-                        />
-                    </li>
-                    <li
-                        v-else-if="item.kind === 'summary_banner' && latestSummaryUntil"
-                        class="thread-summary-banner thread-summary-banner--inline"
-                        :title="`Current-state summary by ${latestSummaryUntil.by ?? 'author'} at ${new Date(latestSummaryUntil.ts).toLocaleString()}. Comments below (or above in top-down) are post-summary and not yet captured.`"
-                    >
-                        <i class="pi pi-bookmark thread-summary-banner__icon" />
-                        <span class="thread-summary-banner__label">tldr</span>
-                        <span class="thread-summary-banner__text">{{ latestSummaryUntil.text }}</span>
-                    </li>
-                    <li
-                        v-else-if="item.kind === 'relation_group'"
-                        class="thread-relation-row"
-                        :data-kind="item.msgs[0].kind"
-                    >
-                        <i :class="RELATION_LABELS[item.msgs[0].kind].icon" />
-                        <template v-if="item.msgs[0].kind === 'ticket_relation'">
-                            <!-- typed-relation events: per-event verb
-                                 derived from meta.relation.kind. Each
-                                 event in the group rendered as its own
-                                 "verb #B.target" pair, comma-joined. -->
-                            <span class="thread-relation-row__refs">
-                                <template v-for="(m, i2) in item.msgs" :key="m.id">
-                                    <span class="thread-relation-row__verb">{{ decodeRelationEvent(m).verb }}</span>
-                                    <a
-                                        v-if="decodeRelationEvent(m).target !== null"
-                                        :href="`/b/${decodeRelationEvent(m).target}`"
-                                        class="thread-relation-row__ref"
-                                    >#B.{{ decodeRelationEvent(m).target }}</a>
-                                    <template v-if="i2 < item.msgs.length - 1">,</template>
-                                </template>
-                            </span>
-                        </template>
-                        <template v-else>
-                            <span class="thread-relation-row__verb">{{
-                                item.msgs.length > 1
-                                    ? RELATION_LABELS[item.msgs[0].kind].verbMany
-                                    : RELATION_LABELS[item.msgs[0].kind].verbOne
-                            }}</span>
-                            <span class="thread-relation-row__refs">
-                                <a
-                                    v-for="(m, i2) in item.msgs"
-                                    :key="m.id"
-                                    :href="`/b/${m.source_ticket_id}`"
-                                    class="thread-relation-row__ref"
-                                >
-                                    #B.{{ m.source_ticket_id }}<span
-                                        v-if="m.source_ticket_stage && m.source_ticket_stage !== 'open'"
-                                        class="thread-relation-row__stage"
-                                        :data-stage="m.source_ticket_stage"
-                                    >{{ STAGE_LABELS[m.source_ticket_stage] }}</span><template v-if="i2 < item.msgs.length - 1">,</template>
-                                </a>
-                            </span>
-                        </template>
-                        <span class="thread-relation-row__meta">by {{ item.msgs[0].by_agent ?? "?" }} · {{ shortTime(item.msgs[0].created_at) }}</span>
-                    </li>
-                </template>
-            </ul>
+            <ThreadCommentsList
+                :items="threadItems"
+                :is-empty="flatComments.length === 0"
+                :latest-pending-id="latestPendingId"
+                :deciders-by-message="decidersByMessage"
+                :latest-summary-until="latestSummaryUntil"
+                :stage-labels="STAGE_LABELS"
+            />
 
             <MessageComposer
                 v-model:body="composerBody"

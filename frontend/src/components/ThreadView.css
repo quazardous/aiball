@@ -413,20 +413,6 @@
     color: black;
     font-weight: 500;
 }
-.thread-comments {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-}
-.thread-comments.nested {
-    margin-left: 1.4rem;
-    margin-top: 0.6rem;
-    border-left: 2px solid var(--p-content-border-color);
-    padding-left: 0.8rem;
-}
 .comment-card {
     border: 1px solid var(--p-content-border-color);
     border-radius: 0.4rem;
@@ -449,40 +435,8 @@
 }
 /* #B.130 follow-up: per-comment .comment-summary frame retired —
    the thread-level latestSummaryUntil banner is the canonical TLDR
-   display; older summaries are invisible-by-design (latest wins). */
-/* #B.130: thread-level banner showing the latest summary_until as
-   the canonical "current state of the thread". Replaces the per-
-   comment banners (older ones are invisible, latest wins). */
-.thread-summary-banner {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-    padding: 0.55rem 0.8rem;
-    border-left: 3px solid var(--p-info-color, var(--p-primary-color));
-    background: color-mix(in srgb, var(--p-info-color, var(--p-primary-color)) 7%, transparent);
-    border-radius: 0.3rem;
-    font-style: italic;
-    font-size: 0.92rem;
-    color: var(--p-text-color);
-}
-.thread-summary-banner__icon {
-    color: var(--p-info-color, var(--p-primary-color));
-    margin-top: 0.18rem;
-    flex-shrink: 0;
-}
-.thread-summary-banner__label {
-    font-weight: 600;
-    font-style: normal;
-    text-transform: uppercase;
-    font-size: 0.7rem;
-    letter-spacing: 0.06em;
-    color: var(--p-info-color, var(--p-primary-color));
-    margin-top: 0.1rem;
-    flex-shrink: 0;
-}
-.thread-summary-banner__text {
-    flex: 1;
-}
+   display; older summaries are invisible-by-design (latest wins).
+   Banner styles live in sibling ThreadCommentsList.css. */
 .comment-ref-tag {
     cursor: pointer;
     user-select: none;
@@ -568,84 +522,9 @@
 .comment-lifecycle__ref:hover {
     text-decoration: underline;
 }
-/*
- * Compact, single-line rendering for machine-generated relation
- * events (ticket_sub_added / ticket_referenced). They don't get the
- * full comment-card visual — they're notifications, not authored
- * content.
- */
-.thread-relation-row {
-    list-style: none;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.4rem;
-    padding: 0.2rem 0.7rem;
-    font-size: 0.82rem;
-    color: var(--p-text-muted-color);
-    border-left: 2px solid transparent;
-}
-.thread-relation-row[data-kind="ticket_sub_added"] {
-    border-left-color: var(--p-indigo-300);
-}
-.thread-relation-row[data-kind="ticket_referenced"] {
-    border-left-color: var(--p-surface-300);
-}
-.thread-relation-row i {
-    color: var(--p-text-muted-color);
-    font-size: 0.85em;
-}
-.thread-relation-row__verb {
-    color: var(--p-text-color);
-}
-.thread-relation-row__refs {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-}
-.thread-relation-row__ref {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    color: var(--p-primary-color);
-    text-decoration: none;
-}
-.thread-relation-row__ref:hover {
-    text-decoration: underline;
-}
-.thread-relation-row__stage {
-    font-family: ui-sans-serif, system-ui, sans-serif;
-    font-size: 0.7rem;
-    margin-left: 0.2rem;
-    padding: 0 0.3rem;
-    border-radius: 0.2rem;
-    background: color-mix(in srgb, var(--p-surface-500) 20%, transparent);
-    color: var(--p-text-muted-color);
-}
-.thread-relation-row__stage[data-stage="pending"] {
-    background: color-mix(in srgb, var(--p-yellow-500) 25%, transparent);
-    color: var(--p-yellow-700);
-}
-.thread-relation-row__stage[data-stage="closed"],
-.thread-relation-row__stage[data-stage="closed-resolved"] {
-    background: color-mix(in srgb, var(--p-orange-500) 20%, transparent);
-    color: var(--p-orange-700);
-}
-.thread-relation-row__stage[data-stage="resolved"] {
-    background: color-mix(in srgb, var(--p-green-500) 22%, transparent);
-    color: var(--p-green-700);
-}
-.thread-relation-row__stage[data-stage="snoozed"] {
-    background: color-mix(in srgb, var(--p-indigo-500) 22%, transparent);
-    color: var(--p-indigo-700);
-}
-.thread-relation-row__stage[data-stage="rejected"] {
-    background: color-mix(in srgb, var(--p-red-500) 20%, transparent);
-    color: var(--p-red-700);
-}
-.thread-relation-row__meta {
-    margin-left: auto;
-    font-size: 0.78rem;
-    opacity: 0.8;
-}
+/* Relation-row styles (.thread-relation-row*) live in sibling
+   ThreadCommentsList.css — they only render inside the comments
+   list. */
 .comment-actions {
     display: flex;
     gap: 0.4rem;
