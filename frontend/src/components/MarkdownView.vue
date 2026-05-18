@@ -364,7 +364,6 @@ watch(html, () => { void wireQuestionClicks(); }, { flush: "post", immediate: tr
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.9em;
 }
-.aiball-dark .md-body code { background: var(--p-surface-800); }
 .md-body pre {
     background: var(--p-surface-100);
     padding: 0.6em 0.8em;
@@ -373,7 +372,6 @@ watch(html, () => { void wireQuestionClicks(); }, { flush: "post", immediate: tr
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.85em;
 }
-.aiball-dark .md-body pre { background: var(--p-surface-800); }
 .md-body pre > code {
     background: transparent;
     padding: 0;

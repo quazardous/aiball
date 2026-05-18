@@ -261,9 +261,6 @@ function filtersAreNarrowed(): boolean {
 .search-hit:hover {
     background: var(--p-surface-100);
 }
-.aiball-dark .search-hit:hover {
-    background: var(--p-surface-800);
-}
 .search-hit__head {
     display: flex;
     align-items: center;

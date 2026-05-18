@@ -215,7 +215,4 @@ function onComposerSubmitted(messageId: number | null) {
     border-left: 3px solid var(--p-content-border-color);
     border-radius: 0.3rem;
 }
-.aiball-dark .new-ticket-hint {
-    background: var(--p-surface-900);
-}
 </style>

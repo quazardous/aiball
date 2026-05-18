@@ -259,9 +259,6 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     max-width: 12rem;
 }
 .filter-project-dropdown > summary::-webkit-details-marker { display: none; }
-.aiball-dark .filter-project-dropdown > summary {
-    background: var(--p-surface-800);
-}
 .filter-project-dropdown__label {
     flex: 1 1 auto;
     min-width: 0;
@@ -312,9 +309,6 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
 .filter-project-dropdown__item:hover {
     background: var(--p-surface-100);
 }
-.aiball-dark .filter-project-dropdown__item:hover {
-    background: var(--p-surface-800);
-}
 .filter-project-dropdown__item--current {
     color: var(--p-primary-color);
     font-weight: 600;
@@ -343,7 +337,6 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
 .filter-project-dropdown__badge--unread  { background: var(--p-blue-500); color: white; }
 .filter-project-dropdown__badge--resolved{ background: var(--p-green-500); color: white; }
 .filter-project-dropdown__badge--open    { background: var(--p-surface-200); color: var(--p-text-color); }
-.aiball-dark .filter-project-dropdown__badge--open { background: var(--p-surface-700); }
 .filter-project-settings {
     background: transparent;
     border: 0;
@@ -357,9 +350,6 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
 }
 .filter-project-settings:hover {
     background: var(--p-surface-100);
-}
-.aiball-dark .filter-project-settings:hover {
-    background: var(--p-surface-800);
 }
 /* #B.161: filters chip = text-link style mobile toggle. Desktop
    hides the chip entirely (filters-body stays inline always). */
@@ -465,9 +455,6 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
 .filter-search__clear:hover {
     color: var(--p-text-color);
     background: var(--p-surface-100);
-}
-.aiball-dark .filter-search__clear:hover {
-    background: var(--p-surface-700);
 }
 .filter-search__clear i {
     font-size: 0.8rem;

@@ -86,9 +86,6 @@ const slots = useSlots();
 .list-row:hover {
     background: var(--p-surface-100);
 }
-.aiball-dark .list-row:hover {
-    background: var(--p-surface-800);
-}
 .list-row--selected,
 .list-row--selected:hover {
     background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
@@ -129,26 +126,17 @@ const slots = useSlots();
 .list-row--unread.list-row--attention-moderation:hover {
     background: color-mix(in srgb, var(--p-yellow-500) 20%, transparent);
 }
-.aiball-dark .list-row--unread.list-row--attention-moderation {
-    background: color-mix(in srgb, var(--p-yellow-500) 18%, transparent);
-}
 .list-row--unread.list-row--attention-resolution {
     background: color-mix(in srgb, var(--p-green-500) 10%, transparent);
 }
 .list-row--unread.list-row--attention-resolution:hover {
     background: color-mix(in srgb, var(--p-green-500) 18%, transparent);
 }
-.aiball-dark .list-row--unread.list-row--attention-resolution {
-    background: color-mix(in srgb, var(--p-green-500) 16%, transparent);
-}
 .list-row--unread.list-row--attention-comments {
     background: color-mix(in srgb, var(--p-yellow-500) 6%, transparent);
 }
 .list-row--unread.list-row--attention-comments:hover {
     background: color-mix(in srgb, var(--p-yellow-500) 12%, transparent);
-}
-.aiball-dark .list-row--unread.list-row--attention-comments {
-    background: color-mix(in srgb, var(--p-yellow-500) 10%, transparent);
 }
 .list-row--danger .list-row__title {
     color: var(--p-red-500);

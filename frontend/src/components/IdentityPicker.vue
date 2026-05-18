@@ -340,9 +340,6 @@ const currentDraftString = computed(() => {
     background: var(--p-surface-100);
     border-radius: 0.2rem;
 }
-.aiball-dark .identity-picker__footer code {
-    background: var(--p-surface-800);
-}
 .identity-picker__option {
     display: flex;
     align-items: center;

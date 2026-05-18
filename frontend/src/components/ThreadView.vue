@@ -2310,9 +2310,6 @@ async function copyTicketRef() {
     background: var(--p-surface-100);
     color: var(--p-text-color);
 }
-.aiball-dark .thread-relations__menu-btn:hover {
-    background: var(--p-surface-700);
-}
 .relation-menu {
     display: flex;
     flex-direction: column;
@@ -2373,9 +2370,6 @@ async function copyTicketRef() {
 .relation-menu__kind-btn:hover:not(:disabled) {
     background: var(--p-surface-100);
 }
-.aiball-dark .relation-menu__kind-btn:hover:not(:disabled) {
-    background: var(--p-surface-800);
-}
 .relation-menu__kind-btn--current {
     font-weight: 600;
     color: var(--p-primary-color);
@@ -2400,26 +2394,15 @@ async function copyTicketRef() {
 .relation-menu__remove:hover:not(:disabled) {
     background: var(--p-red-50);
 }
-.aiball-dark .relation-menu__remove:hover:not(:disabled) {
-    background: rgba(255, 0, 0, 0.1);
-}
-.aiball-dark .thread-relations__chip { background: var(--p-surface-800); }
 .thread-relations__chip:hover { border-color: var(--p-primary-color); }
 .thread-relations__chip[data-kind="depends_on"],
 .thread-relations__chip[data-kind="blocks"] {
     border-color: var(--p-yellow-500);
     background: var(--p-yellow-50);
 }
-.aiball-dark .thread-relations__chip[data-kind="depends_on"],
-.aiball-dark .thread-relations__chip[data-kind="blocks"] {
-    background: rgba(255, 196, 0, 0.12);
-}
 .thread-relations__chip[data-kind="duplicates"] {
     border-color: var(--p-red-500);
     background: var(--p-red-50);
-}
-.aiball-dark .thread-relations__chip[data-kind="duplicates"] {
-    background: rgba(255, 99, 99, 0.12);
 }
 .thread-relations__kind {
     font-weight: 600;
@@ -2444,34 +2427,18 @@ async function copyTicketRef() {
     color: var(--p-text-muted-color);
     text-transform: lowercase;
 }
-.aiball-dark .thread-relations__stage {
-    background: var(--p-surface-700);
-}
 .thread-relations__stage[data-stage="closed"],
 .thread-relations__stage[data-stage="closed-resolved"] {
     background: var(--p-green-100);
     color: var(--p-green-800);
 }
-.aiball-dark .thread-relations__stage[data-stage="closed"],
-.aiball-dark .thread-relations__stage[data-stage="closed-resolved"] {
-    background: rgba(34, 197, 94, 0.18);
-    color: var(--p-green-300);
-}
 .thread-relations__stage[data-stage="rejected"] {
     background: var(--p-red-100);
     color: var(--p-red-800);
 }
-.aiball-dark .thread-relations__stage[data-stage="rejected"] {
-    background: rgba(239, 68, 68, 0.18);
-    color: var(--p-red-300);
-}
 .thread-relations__stage[data-stage="snoozed"] {
     background: var(--p-yellow-100);
     color: var(--p-yellow-800);
-}
-.aiball-dark .thread-relations__stage[data-stage="snoozed"] {
-    background: rgba(234, 179, 8, 0.18);
-    color: var(--p-yellow-300);
 }
 .thread-relations-form {
     display: flex;
@@ -2482,9 +2449,6 @@ async function copyTicketRef() {
     background: var(--p-surface-50);
     border-radius: 0.4rem;
     margin-top: 0.2rem;
-}
-.aiball-dark .thread-relations-form {
-    background: var(--p-surface-900);
 }
 .snooze-popover {
     display: flex;
@@ -2672,12 +2636,6 @@ async function copyTicketRef() {
     border-left: 3px solid var(--p-blue-500);
     font-size: 0.88rem;
 }
-.aiball-dark .thread-snoozed-banner {
-    background: color-mix(in srgb, var(--p-blue-500) 22%, transparent);
-}
-.aiball-dark .thread-resolved-banner {
-    background: color-mix(in srgb, var(--p-green-500) 25%, transparent);
-}
 .broadcast-toggle--off {
     opacity: 0.45;
     transition: opacity 0.12s ease;
@@ -2701,9 +2659,6 @@ async function copyTicketRef() {
     font-size: 0.88rem;
     color: var(--p-text-color);
 }
-.aiball-dark .thread-closed-banner {
-    background: color-mix(in srgb, var(--p-orange-500) 22%, transparent);
-}
 .thread-tag {
     border-radius: 0.3rem;
     padding: 0.1rem 0.5rem;
@@ -2720,7 +2675,6 @@ async function copyTicketRef() {
     gap: 0.6rem;
     background: var(--p-surface-50);
 }
-.aiball-dark .thread-edit-panel { background: var(--p-surface-900); }
 .thread-edit-row {
     display: flex;
     align-items: flex-start;
@@ -2753,9 +2707,6 @@ async function copyTicketRef() {
     border: 1px solid var(--p-content-border-color);
     border-radius: 0.2rem;
     background: var(--p-surface-100);
-}
-.aiball-dark .thread-edit-hint kbd {
-    background: var(--p-surface-800);
 }
 .thread-comments {
     list-style: none;
@@ -2850,9 +2801,6 @@ async function copyTicketRef() {
     background: var(--p-surface-100);
     color: var(--p-primary-color);
 }
-.aiball-dark .comment-date-copy:hover {
-    background: var(--p-surface-800);
-}
 .comment-date-copy-icon {
     color: var(--p-green-500);
 }
@@ -2906,11 +2854,6 @@ async function copyTicketRef() {
     background: color-mix(in srgb, var(--p-surface-500) 18%, transparent);
     color: var(--p-text-muted-color);
 }
-.aiball-dark .comment-lifecycle[data-kind="ticket_resolved"] { color: var(--p-green-300); }
-.aiball-dark .comment-lifecycle[data-kind="ticket_blocked"] { color: var(--p-red-300); }
-.aiball-dark .comment-lifecycle[data-kind="ticket_closed"] { color: var(--p-orange-300); }
-.aiball-dark .comment-lifecycle[data-kind="ticket_reopened"] { color: var(--p-blue-300); }
-.aiball-dark .comment-lifecycle[data-kind="ticket_sub_added"] { color: var(--p-indigo-300); }
 .comment-lifecycle__ref {
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-weight: 600;

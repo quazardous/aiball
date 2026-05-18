@@ -1,0 +1,225 @@
+/*
+ * Aiball dark-mode overrides (#B.196 Layer 0).
+ *
+ * Extracted from per-component <style> blocks into one global sheet.
+ * Selectors stay global (`.aiball-dark .X`) because they cross-cut
+ * components and target the body-level toggle class. Component CSS
+ * can later move to <style scoped> without these rules drifting —
+ * a global rule still matches scoped elements (the data-v-xxx
+ * attribute is added to the element, not required by the selector).
+ *
+ * Regenerate-friendly: re-running scripts/extract-theme-dark.mjs is a
+ * no-op once components are clean; rules added back to a component
+ * will be re-extracted on the next run.
+ */
+
+/* --- from components/BulkBar.vue --- */
+.aiball-dark .bulk-bar { background: var(--p-surface-900); }
+
+/* --- from components/ConsumerEditPage.vue --- */
+.aiball-dark .consumer-edit__static {
+    background: var(--p-surface-800);
+}
+
+/* --- from components/HeaderBar.vue --- */
+.aiball-dark .strategy-dropdown > summary {
+    background: var(--p-surface-800);
+}
+.aiball-dark .strategy-dropdown__item:hover {
+    background: var(--p-surface-800);
+}
+.aiball-dark .header-badge--open {
+    background: var(--p-surface-700);
+    color: var(--p-text-color);
+}
+.aiball-dark .header-badge--snoozed {
+    color: var(--p-indigo-200);
+}
+.aiball-dark .header-badge--snoozed.header-badge--snoozed-on {
+    color: white;
+}
+
+/* --- from components/IdentityPicker.vue --- */
+.aiball-dark .identity-picker__footer code {
+    background: var(--p-surface-800);
+}
+
+/* --- from components/InboxList.vue --- */
+.aiball-dark .search-hit:hover {
+    background: var(--p-surface-800);
+}
+
+/* --- from components/InboxToolbar.vue --- */
+.aiball-dark .filter-project-dropdown > summary {
+    background: var(--p-surface-800);
+}
+.aiball-dark .filter-project-dropdown__item:hover {
+    background: var(--p-surface-800);
+}
+.aiball-dark .filter-project-dropdown__badge--open { background: var(--p-surface-700); }
+.aiball-dark .filter-project-settings:hover {
+    background: var(--p-surface-800);
+}
+.aiball-dark .filter-search__clear:hover {
+    background: var(--p-surface-700);
+}
+
+/* --- from components/ListRow.vue --- */
+.aiball-dark .list-row:hover {
+    background: var(--p-surface-800);
+}
+.aiball-dark .list-row--unread.list-row--attention-moderation {
+    background: color-mix(in srgb, var(--p-yellow-500) 18%, transparent);
+}
+.aiball-dark .list-row--unread.list-row--attention-resolution {
+    background: color-mix(in srgb, var(--p-green-500) 16%, transparent);
+}
+.aiball-dark .list-row--unread.list-row--attention-comments {
+    background: color-mix(in srgb, var(--p-yellow-500) 10%, transparent);
+}
+
+/* --- from components/MarkdownView.vue --- */
+.aiball-dark .md-body code { background: var(--p-surface-800); }
+.aiball-dark .md-body pre { background: var(--p-surface-800); }
+
+/* --- from components/NewTicketPage.vue --- */
+.aiball-dark .new-ticket-hint {
+    background: var(--p-surface-900);
+}
+
+/* --- from components/ProjectSettingsPage.vue --- */
+.aiball-dark .project-settings__back:hover {
+    background: var(--p-surface-800);
+}
+
+/* --- from components/ProjectStatsPage.vue --- */
+.aiball-dark .project-stats__back:hover {
+    background: var(--p-surface-800);
+}
+.aiball-dark .project-stats__refresh:hover {
+    background: var(--p-surface-800);
+}
+.aiball-dark .stat-card {
+    background: var(--p-surface-900);
+}
+.aiball-dark .project-stats__bar-track {
+    background: var(--p-surface-700);
+}
+
+/* --- from components/RulesPanel.vue --- */
+.aiball-dark .rule-item.disabled {
+    background: var(--p-surface-900);
+}
+.aiball-dark .rule-rank {
+    background: var(--p-surface-800);
+}
+.aiball-dark .cond {
+    background: var(--p-surface-800);
+}
+.aiball-dark .verdict-auto {
+    color: var(--p-green-300);
+}
+.aiball-dark .verdict-review {
+    color: var(--p-orange-300);
+}
+
+/* --- from components/SetupScreen.vue --- */
+.aiball-dark .auth-screen {
+    background: var(--p-surface-950);
+}
+.aiball-dark .auth-hint code,
+.aiball-dark .auth-card__subtitle code {
+    background: var(--p-surface-800);
+}
+.aiball-dark .auth-error {
+    background: var(--p-red-900);
+    color: var(--p-red-200);
+    border-color: var(--p-red-700);
+}
+
+/* --- from components/Sidebar.vue --- */
+.aiball-dark .sidebar-project-settings:hover {
+    background: var(--p-surface-800);
+}
+.aiball-dark .sidebar-new-ticket {
+    color: var(--p-green-400);
+}
+.aiball-dark .aiball-sidebar {
+    background: var(--p-surface-900);
+}
+.aiball-dark .sidebar-item:hover {
+    background: var(--p-surface-800);
+}
+.aiball-dark .sidebar-badge--open {
+    background: var(--p-surface-600);
+}
+
+/* --- from components/ThreadView.vue --- */
+.aiball-dark .thread-relations__menu-btn:hover {
+    background: var(--p-surface-700);
+}
+.aiball-dark .relation-menu__kind-btn:hover:not(:disabled) {
+    background: var(--p-surface-800);
+}
+.aiball-dark .relation-menu__remove:hover:not(:disabled) {
+    background: rgba(255, 0, 0, 0.1);
+}
+.aiball-dark .thread-relations__chip { background: var(--p-surface-800); }
+.aiball-dark .thread-relations__chip[data-kind="depends_on"],
+.aiball-dark .thread-relations__chip[data-kind="blocks"] {
+    background: rgba(255, 196, 0, 0.12);
+}
+.aiball-dark .thread-relations__chip[data-kind="duplicates"] {
+    background: rgba(255, 99, 99, 0.12);
+}
+.aiball-dark .thread-relations__stage {
+    background: var(--p-surface-700);
+}
+.aiball-dark .thread-relations__stage[data-stage="closed"],
+.aiball-dark .thread-relations__stage[data-stage="closed-resolved"] {
+    background: rgba(34, 197, 94, 0.18);
+    color: var(--p-green-300);
+}
+.aiball-dark .thread-relations__stage[data-stage="rejected"] {
+    background: rgba(239, 68, 68, 0.18);
+    color: var(--p-red-300);
+}
+.aiball-dark .thread-relations__stage[data-stage="snoozed"] {
+    background: rgba(234, 179, 8, 0.18);
+    color: var(--p-yellow-300);
+}
+.aiball-dark .thread-relations-form {
+    background: var(--p-surface-900);
+}
+.aiball-dark .thread-snoozed-banner {
+    background: color-mix(in srgb, var(--p-blue-500) 22%, transparent);
+}
+.aiball-dark .thread-resolved-banner {
+    background: color-mix(in srgb, var(--p-green-500) 25%, transparent);
+}
+.aiball-dark .thread-closed-banner {
+    background: color-mix(in srgb, var(--p-orange-500) 22%, transparent);
+}
+.aiball-dark .thread-edit-panel { background: var(--p-surface-900); }
+.aiball-dark .thread-edit-hint kbd {
+    background: var(--p-surface-800);
+}
+.aiball-dark .comment-date-copy:hover {
+    background: var(--p-surface-800);
+}
+.aiball-dark .comment-lifecycle[data-kind="ticket_resolved"] { color: var(--p-green-300); }
+.aiball-dark .comment-lifecycle[data-kind="ticket_blocked"] { color: var(--p-red-300); }
+.aiball-dark .comment-lifecycle[data-kind="ticket_closed"] { color: var(--p-orange-300); }
+.aiball-dark .comment-lifecycle[data-kind="ticket_reopened"] { color: var(--p-blue-300); }
+.aiball-dark .comment-lifecycle[data-kind="ticket_sub_added"] { color: var(--p-indigo-300); }
+
+/* --- from App.vue --- */
+.aiball-dark .project-strategy-hint:hover {
+    background: var(--p-surface-800);
+}
+.aiball-dark .aiball-footer-settings {
+        background: var(--p-surface-900);
+    }
+.aiball-dark .aiball-footer-settings__item:hover {
+        background: var(--p-surface-800);
+    }

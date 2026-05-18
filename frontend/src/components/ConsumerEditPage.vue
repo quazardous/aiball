@@ -252,9 +252,6 @@ async function save() {
     background: var(--p-surface-100);
     border-radius: 0.3rem;
 }
-.aiball-dark .consumer-edit__static {
-    background: var(--p-surface-800);
-}
 .consumer-edit__meta {
     display: flex;
     gap: 1.5rem;

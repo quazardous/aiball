@@ -100,7 +100,6 @@ const readToggleAction = computed<BulkAction>(() =>
     top: 0;
     z-index: 5;
 }
-.aiball-dark .bulk-bar { background: var(--p-surface-900); }
 .bulk-bar--bottom {
     position: sticky;
     top: auto;

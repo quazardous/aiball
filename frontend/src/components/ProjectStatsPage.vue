@@ -253,9 +253,6 @@ const topIntentMax = computed(() =>
 .project-stats__back:hover {
     background: var(--p-surface-100);
 }
-.aiball-dark .project-stats__back:hover {
-    background: var(--p-surface-800);
-}
 .project-stats__header-actions {
     margin-left: auto;
     display: flex;
@@ -273,9 +270,6 @@ const topIntentMax = computed(() =>
 .project-stats__refresh:hover {
     background: var(--p-surface-100);
 }
-.aiball-dark .project-stats__refresh:hover {
-    background: var(--p-surface-800);
-}
 .project-stats__pulse {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -292,9 +286,6 @@ const topIntentMax = computed(() =>
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
-}
-.aiball-dark .stat-card {
-    background: var(--p-surface-900);
 }
 .stat-card--accent {
     border-left: 3px solid var(--p-primary-color);
@@ -412,9 +403,6 @@ const topIntentMax = computed(() =>
     background: var(--p-surface-200);
     border-radius: 0.25rem;
     overflow: hidden;
-}
-.aiball-dark .project-stats__bar-track {
-    background: var(--p-surface-700);
 }
 .project-stats__bar-fill {
     display: block;

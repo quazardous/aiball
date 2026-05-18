@@ -205,9 +205,6 @@ async function submit() {
     background: var(--p-surface-50);
     padding: 1rem;
 }
-.aiball-dark .auth-screen {
-    background: var(--p-surface-950);
-}
 .auth-card {
     width: 100%;
     max-width: 28rem;
@@ -259,10 +256,6 @@ async function submit() {
     background: var(--p-surface-100);
     border-radius: 0.2rem;
 }
-.aiball-dark .auth-hint code,
-.aiball-dark .auth-card__subtitle code {
-    background: var(--p-surface-800);
-}
 .auth-error {
     padding: 0.5rem 0.7rem;
     background: var(--p-red-50);
@@ -270,11 +263,6 @@ async function submit() {
     border: 1px solid var(--p-red-200);
     border-radius: 0.4rem;
     font-size: 0.85rem;
-}
-.aiball-dark .auth-error {
-    background: var(--p-red-900);
-    color: var(--p-red-200);
-    border-color: var(--p-red-700);
 }
 .auth-footer {
     margin: 0;

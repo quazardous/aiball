@@ -165,9 +165,6 @@ onMounted(load);
 .project-settings__back:hover {
     background: var(--p-surface-100);
 }
-.aiball-dark .project-settings__back:hover {
-    background: var(--p-surface-800);
-}
 .project-settings__section {
     padding: 1rem 1.2rem;
     border: 1px solid var(--p-content-border-color);

@@ -305,9 +305,6 @@ onMounted(load);
     opacity: 0.5;
     background: var(--p-surface-50);
 }
-.aiball-dark .rule-item.disabled {
-    background: var(--p-surface-900);
-}
 .rule-rank {
     width: 1.8rem;
     height: 1.8rem;
@@ -319,9 +316,6 @@ onMounted(load);
     align-items: center;
     justify-content: center;
     font-size: 0.85rem;
-}
-.aiball-dark .rule-rank {
-    background: var(--p-surface-800);
 }
 .rule-body {
     display: flex;
@@ -353,9 +347,6 @@ onMounted(load);
     border-radius: 0.3rem;
     font-size: 0.9rem;
 }
-.aiball-dark .cond {
-    background: var(--p-surface-800);
-}
 .cond-any {
     font-style: italic;
     color: var(--p-text-muted-color);
@@ -381,15 +372,9 @@ onMounted(load);
     background: color-mix(in srgb, var(--p-green-500) 15%, transparent);
     color: var(--p-green-600);
 }
-.aiball-dark .verdict-auto {
-    color: var(--p-green-300);
-}
 .verdict-review {
     background: color-mix(in srgb, var(--p-orange-500) 15%, transparent);
     color: var(--p-orange-600);
-}
-.aiball-dark .verdict-review {
-    color: var(--p-orange-300);
 }
 .rule-note {
     font-size: 0.85rem;

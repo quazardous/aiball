@@ -274,12 +274,6 @@ function onProjectsSummaryClick(e: Event) {
 .sidebar-project-settings:hover {
     background: var(--p-surface-100);
 }
-.aiball-dark .sidebar-project-settings:hover {
-    background: var(--p-surface-800);
-}
-.aiball-dark .sidebar-new-ticket {
-    color: var(--p-green-400);
-}
 /* The cog is shown on every viewport — quick access to current
    project's settings (#B.169). The [+] new-ticket is mobile-only
    (desktop has it in the InboxToolbar already). */
@@ -315,9 +309,6 @@ function onProjectsSummaryClick(e: Event) {
         display: none;
     }
 }
-.aiball-dark .aiball-sidebar {
-    background: var(--p-surface-900);
-}
 .sidebar-section-label {
     font-size: 0.75rem;
     text-transform: uppercase;
@@ -341,9 +332,6 @@ function onProjectsSummaryClick(e: Event) {
 }
 .sidebar-item:hover {
     background: var(--p-surface-100);
-}
-.aiball-dark .sidebar-item:hover {
-    background: var(--p-surface-800);
 }
 .sidebar-item.active {
     background: var(--p-primary-color);
@@ -388,8 +376,5 @@ function onProjectsSummaryClick(e: Event) {
 .sidebar-badge--open {
     background: var(--p-surface-300);
     color: var(--p-text-color);
-}
-.aiball-dark .sidebar-badge--open {
-    background: var(--p-surface-600);
 }
 </style>

@@ -1081,9 +1081,6 @@ watch(showSnoozed, (v) => {
     background: var(--p-surface-100);
     color: var(--p-text-color);
 }
-.aiball-dark .project-strategy-hint:hover {
-    background: var(--p-surface-800);
-}
 
 .settings-back-link {
     display: inline-flex;
@@ -1144,9 +1141,6 @@ watch(showSnoozed, (v) => {
         background: var(--p-surface-50);
         border-top: 1px solid var(--p-content-border-color);
     }
-    .aiball-dark .aiball-footer-settings {
-        background: var(--p-surface-900);
-    }
     .aiball-footer-settings__label {
         font-size: 0.75rem;
         text-transform: uppercase;
@@ -1170,9 +1164,6 @@ watch(showSnoozed, (v) => {
     }
     .aiball-footer-settings__item:hover {
         background: var(--p-surface-100);
-    }
-    .aiball-dark .aiball-footer-settings__item:hover {
-        background: var(--p-surface-800);
     }
 
     /* #B.161: bulk actions (per-row checkbox + "select all" footer)

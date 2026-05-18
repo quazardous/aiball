@@ -290,9 +290,6 @@ function pickStrategy(v: Strategy) {
     user-select: none;
 }
 .strategy-dropdown > summary::-webkit-details-marker { display: none; }
-.aiball-dark .strategy-dropdown > summary {
-    background: var(--p-surface-800);
-}
 .strategy-dropdown__chev {
     font-size: 0.65rem;
     color: var(--p-text-muted-color);
@@ -333,9 +330,6 @@ function pickStrategy(v: Strategy) {
 .strategy-dropdown__item:hover {
     background: var(--p-surface-100);
 }
-.aiball-dark .strategy-dropdown__item:hover {
-    background: var(--p-surface-800);
-}
 .strategy-dropdown__item--current {
     color: var(--p-primary-color);
     font-weight: 600;
@@ -358,10 +352,6 @@ function pickStrategy(v: Strategy) {
      * Stays calm so the priority badges (pending / unread / resolved)
      * dominate visually. */
     background: var(--p-surface-200);
-    color: var(--p-text-color);
-}
-.aiball-dark .header-badge--open {
-    background: var(--p-surface-700);
     color: var(--p-text-color);
 }
 .header-badge--pending {
@@ -392,11 +382,5 @@ function pickStrategy(v: Strategy) {
     background: var(--p-indigo-500);
     color: white;
     border-color: var(--p-indigo-500);
-}
-.aiball-dark .header-badge--snoozed {
-    color: var(--p-indigo-200);
-}
-.aiball-dark .header-badge--snoozed.header-badge--snoozed-on {
-    color: white;
 }
 </style>
