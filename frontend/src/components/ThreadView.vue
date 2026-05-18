@@ -1543,10 +1543,6 @@ async function copyTicketRef() {
                                     ? 'Reply on this pending thread (markdown supported) — your comment goes through moderation unless you are human'
                                     : 'Reply on this thread (markdown supported, use > for quotes and #N to reference a comment)'"
             >
-                <template v-if="topDown" #headline-summary>
-                    <strong>#B.{{ data.ticket.id }}</strong>
-                    <span> — {{ data.ticket.title }}</span>
-                </template>
                 <template v-if="topDown" #headline>
                     <header class="meta">
                         <Tag
@@ -1589,6 +1585,74 @@ async function copyTicketRef() {
                             {{ new Date(data.ticket.created_at).toLocaleString() }}
                         </span>
                     </header>
+                    <!-- Mirror the .thread-relations row + add widget
+                         from the article so the lifted headline has the
+                         same info AND the same affordances as bottom-up
+                         mode (the article copy is hidden in topdown via
+                         CSS, so we re-render the interactive parts here). -->
+                    <div class="thread-relations">
+                        <span class="thread-relations__label">
+                            <i class="pi pi-share-alt" />
+                            Relations
+                        </span>
+                        <a
+                            v-for="r in data.ticket.relations ?? []"
+                            :key="`hdr-${r.target_ticket_id}-${r.last_event_id}`"
+                            :href="`/b/${r.target_ticket_id}`"
+                            class="thread-relations__chip"
+                            :data-kind="r.kind"
+                            :title="`${TYPED_RELATION_LABELS[r.kind]} #B.${r.target_ticket_id}`"
+                        >
+                            <span class="thread-relations__kind">{{ TYPED_RELATION_LABELS[r.kind] }}</span>
+                            <span class="thread-relations__target">#B.{{ r.target_ticket_id }}</span>
+                        </a>
+                        <Button
+                            v-if="!addRelationOpen"
+                            icon="pi pi-plus"
+                            label="relation"
+                            size="small"
+                            severity="secondary"
+                            text
+                            title="Link this ticket to another with a typed relation"
+                            @click="addRelationOpen = true"
+                        />
+                    </div>
+                    <div v-if="addRelationOpen" class="thread-relations-form">
+                        <InputText
+                            v-model="newRelationTarget"
+                            placeholder="target ticket — 42 or #B.42"
+                            size="small"
+                            :disabled="addRelationBusy"
+                            style="max-width: 14rem"
+                            @keydown.enter.prevent="submitNewRelation"
+                        />
+                        <Select
+                            v-model="newRelationKind"
+                            :options="relationKindOptions"
+                            option-label="label"
+                            option-value="value"
+                            size="small"
+                            :disabled="addRelationBusy"
+                            style="min-width: 10rem"
+                        />
+                        <Button
+                            label="add"
+                            icon="pi pi-check"
+                            size="small"
+                            :loading="addRelationBusy"
+                            :disabled="!newRelationTarget.trim()"
+                            @click="submitNewRelation"
+                        />
+                        <Button
+                            label="cancel"
+                            size="small"
+                            severity="secondary"
+                            text
+                            :disabled="addRelationBusy"
+                            @click="addRelationOpen = false; newRelationTarget = ''"
+                        />
+                    </div>
+                    <h2 class="thread-title">{{ data.ticket.title }}</h2>
                     <div v-if="data.ticket.intent || (data.ticket.tags && data.ticket.tags.length)" class="thread-meta-extra">
                         <Tag
                             v-if="data.ticket.intent"
@@ -1769,7 +1833,9 @@ async function copyTicketRef() {
    they don't surface again at the bottom with the body. The "edit
    message" button stays in-article (it edits the body it sits next to). */
 .thread-view--top-down .thread-ticket > header.meta,
-.thread-view--top-down .thread-ticket > .thread-title { display: none; }
+.thread-view--top-down .thread-ticket > .thread-title,
+.thread-view--top-down .thread-ticket > .thread-relations,
+.thread-view--top-down .thread-ticket > .thread-relations-form { display: none; }
 .thread-view--top-down .thread-ticket > .thread-meta-extra .p-tag,
 .thread-view--top-down .thread-ticket > .thread-meta-extra > .thread-tag { display: none; }
 .thread-toolbar {

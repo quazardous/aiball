@@ -451,22 +451,17 @@ async function onAttachPicked(ev: Event) {
 
 <template>
     <div class="composer">
-        <!-- #B.133: optional headline slot, rendered as a collapsible
-             dropdown at the top of the composer's frame. ThreadView
-             feeds the ticket header (#B.NNN tag, project, status, by,
-             title, intent, tags) so in top-down mode the context lives
-             "inside the reply container" instead of floating above it
-             (david: "ça devrait être dans le cadre de la réponse en
-             dropdown"). Hidden when the slot is empty. -->
-        <details v-if="$slots.headline" class="composer-headline">
-            <summary class="composer-headline__summary">
-                <i class="pi pi-chevron-right composer-headline__chevron" />
-                <slot name="headline-summary">context</slot>
-            </summary>
-            <div class="composer-headline__body">
-                <slot name="headline" />
-            </div>
-        </details>
+        <!-- #B.133: optional headline slot at the top of the composer
+             frame. In top-down mode ThreadView feeds the full ticket
+             header here (meta tags, title, intent, tags, typed
+             relations) so the user has the same info as the non-topdown
+             view, just embedded in the composer card. David: "il faut
+             garder les memes info même présentation que le non top
+             down" + "pas besoin du chevron". Always visible, no
+             disclosure widget. -->
+        <div v-if="$slots.headline" class="composer-headline">
+            <slot name="headline" />
+        </div>
         <div class="composer-meta">
             <span class="field-label" style="margin: 0">{{ roleLabel }}</span>
             <InputText
@@ -597,36 +592,18 @@ async function onAttachPicked(ev: Event) {
     gap: 0.6rem;
     background: var(--p-content-background);
 }
-/* #B.133: collapsible ticket-context header rendered at the top of the
-   composer frame in top-down mode. <details> is native and accessible;
-   we just style the disclosure triangle (suppressed) and use our own
-   chevron that rotates on open. */
+/* #B.133: ticket-context header rendered at the top of the composer
+   frame in top-down mode. Always visible (no disclosure widget) —
+   same info, same presentation as the non-topdown .thread-ticket
+   header. Separator under it so it visually reads as a header strip,
+   not part of the composer fields. */
 .composer-headline {
     margin: -0.4rem -0.4rem 0;
-    padding: 0.3rem 0.45rem;
-    border-bottom: 1px dashed var(--p-content-border-color);
-}
-.composer-headline summary {
-    list-style: none;
-    cursor: pointer;
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--p-content-border-color);
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 0.4rem;
-    font-size: 0.85rem;
-    color: var(--p-text-muted-color);
-    user-select: none;
-}
-.composer-headline summary::-webkit-details-marker { display: none; }
-.composer-headline__chevron {
-    transition: transform 0.15s;
-    font-size: 0.75rem;
-}
-.composer-headline[open] .composer-headline__chevron {
-    transform: rotate(90deg);
-}
-.composer-headline__body {
-    margin-top: 0.5rem;
-    padding-top: 0.3rem;
 }
 .composer-textarea-wrap {
     position: relative;
