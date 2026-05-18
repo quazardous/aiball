@@ -15,6 +15,7 @@ import { topDown, toggleTopDown } from "../lib/prefs";
 import { RELATION_KINDS, RELATION_LABELS as TYPED_RELATION_LABELS, type RelationKind } from "../lib/relations";
 import RelationChip from "./RelationChip.vue";
 import ThreadRelations from "./ThreadRelations.vue";
+import RelationKindMenu from "./RelationKindMenu.vue";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -2031,56 +2032,19 @@ async function copyTicketRef() {
                 </template>
             </MessageComposer>
         </template>
-        <!-- #B.123 phase B.2.c: shared menu for per-chip change-kind /
-             remove. Anchored on demand to whichever chip triggered it. -->
+        <!-- #B.123 phase B.2.c / #B.196 split: change-kind / remove
+             popover. Body is RelationKindMenu, Popover keeps the ref
+             (shared trigger surface across both ThreadRelations
+             instances + the ticket-ref bus listener). -->
         <Popover ref="relationMenuRef">
-            <div class="relation-menu" v-if="relationMenuTarget">
-                <!-- #B.159: explicit close (X) so the popup can be
-                     dismissed without an outside-click hunt. -->
-                <button
-                    type="button"
-                    class="relation-menu__close"
-                    title="Close"
-                    @click="relationMenuRef?.hide()"
-                >
-                    <i class="pi pi-times" />
-                </button>
-                <div class="relation-menu__title">
-                    <template v-if="relationMenuTarget.kind === null">
-                        Promote ref to relation —
-                        <strong>#B.{{ relationMenuTarget.target_ticket_id }}</strong>
-                    </template>
-                    <template v-else>
-                        Relation to <strong>#B.{{ relationMenuTarget.target_ticket_id }}</strong>
-                    </template>
-                    <div v-if="relationMenuTargetTitle" class="relation-menu__target-title">
-                        {{ relationMenuTargetTitle }}
-                    </div>
-                </div>
-                <div class="relation-menu__kinds">
-                    <button
-                        v-for="k in RELATION_KINDS.filter(x => x !== 'ignored')"
-                        :key="k"
-                        type="button"
-                        class="relation-menu__kind-btn"
-                        :class="{ 'relation-menu__kind-btn--current': k === relationMenuTarget.kind }"
-                        :disabled="addRelationBusy"
-                        @click="pickRelationKind(k)"
-                    >
-                        {{ TYPED_RELATION_LABELS[k] }}
-                    </button>
-                </div>
-                <button
-                    v-if="relationMenuTarget.kind !== null"
-                    type="button"
-                    class="relation-menu__remove"
-                    :disabled="addRelationBusy"
-                    title="Remove this relation (posts an `ignored` tombstone — re-add anytime)"
-                    @click="deleteFromRelationMenu"
-                >
-                    <i class="pi pi-times" /> remove
-                </button>
-            </div>
+            <RelationKindMenu
+                :target="relationMenuTarget"
+                :target-title="relationMenuTargetTitle"
+                :busy="addRelationBusy"
+                @close="relationMenuRef?.hide()"
+                @pick="(k) => pickRelationKind(k)"
+                @remove="deleteFromRelationMenu"
+            />
         </Popover>
     </div>
 </template>
