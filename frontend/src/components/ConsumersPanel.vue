@@ -455,11 +455,21 @@ const sortedRows = computed<Consumer[]>(() => {
         padding: 0.4rem 0.35rem;
         height: auto;
     }
+    /* With only 3 visible cells, force the browser to stretch the
+       consumer_id column and shrink Activity + Actions to their
+       intrinsic widths — otherwise the table distributes free space
+       between Activity and Actions and you get a big blank gap
+       between them. */
+    .consumers-table .consumers-cid {
+        width: 99%;
+    }
     .consumers-table .activity-cell {
         min-width: 0;
+        width: 1%;
+        white-space: nowrap;
     }
     .consumers-table .action-cell {
-        width: auto;
+        width: 1%;
         padding-right: 0.25rem;
     }
 }
