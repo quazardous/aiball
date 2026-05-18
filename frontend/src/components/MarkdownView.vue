@@ -207,6 +207,25 @@ async function onClick(ev: MouseEvent) {
     window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
+// #B.123 phase B.5: right-click on a `.ticket-ref` link inside a
+// rendered body offers to promote the inline reference to a typed
+// relation. Suppresses the native browser context menu only when the
+// click landed on a ticket-ref; emits a bus event ThreadView listens
+// to, anchoring its relation-menu Popover at the click coords. Plain
+// right-click anywhere else passes through (we don't hijack the
+// browser menu globally).
+function onContextMenu(ev: MouseEvent) {
+    const target = (ev.target as HTMLElement | null)?.closest("a.ticket-ref");
+    if (!target) return;
+    const href = target.getAttribute("href") ?? "";
+    const match = /^\/b\/(\d+)/.exec(href);
+    if (!match) return;
+    const ticketId = Number(match[1]);
+    if (!Number.isFinite(ticketId) || ticketId <= 0) return;
+    ev.preventDefault();
+    bus.emit("ticket-ref.promote", { ticket_id: ticketId, event: ev });
+}
+
 // #B.104: after every re-render, scan rendered checkboxes and wire
 // the click → "ask the composer to quote this question" flow. We
 // pair the Nth DOM checkbox with the Nth task-list line in the
@@ -266,7 +285,7 @@ watch(html, () => { void wireQuestionClicks(); }, { flush: "post", immediate: tr
 </script>
 
 <template>
-    <div ref="rootRef" class="md-body" @click="onClick" v-html="html" />
+    <div ref="rootRef" class="md-body" @click="onClick" @contextmenu="onContextMenu" v-html="html" />
 </template>
 
 <style>

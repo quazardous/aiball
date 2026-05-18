@@ -72,8 +72,11 @@ async function removeRelation(targetId: number) {
 
 // Single shared Popover for per-chip kind/remove menu — track which
 // relation it currently anchors so the menu body re-renders correctly.
+// `kind` is null when the menu was triggered by a fresh ticket-ref
+// promote (#B.123 phase B.5) — no existing relation yet, the picker
+// creates one. Otherwise it carries the existing kind (chip edit).
 const relationMenuRef = ref<InstanceType<typeof Popover> | null>(null);
-const relationMenuTarget = ref<{ target_ticket_id: number; kind: RelationKind } | null>(null);
+const relationMenuTarget = ref<{ target_ticket_id: number; kind: RelationKind | null } | null>(null);
 function openRelationMenu(
     ev: Event,
     r: { target_ticket_id: number; kind: RelationKind },
@@ -81,6 +84,20 @@ function openRelationMenu(
     relationMenuTarget.value = { target_ticket_id: r.target_ticket_id, kind: r.kind };
     relationMenuRef.value?.show(ev);
 }
+// #B.123 phase B.5: bus listener — right-click on a `.ticket-ref` in
+// a rendered body opens the same menu, pre-targeting the referenced
+// ticket (current kind looked up from data.ticket.relations if any).
+useBus("ticket-ref.promote", (payload) => {
+    if (!data.value) return;
+    const existing = (data.value.ticket.relations ?? []).find(
+        (r) => r.target_ticket_id === payload.ticket_id,
+    );
+    relationMenuTarget.value = {
+        target_ticket_id: payload.ticket_id,
+        kind: existing?.kind ?? null,
+    };
+    relationMenuRef.value?.show(payload.event);
+});
 async function pickRelationKind(newKind: RelationKind) {
     const t = relationMenuTarget.value;
     if (!t) return;
@@ -1855,7 +1872,13 @@ async function copyTicketRef() {
         <Popover ref="relationMenuRef">
             <div class="relation-menu" v-if="relationMenuTarget">
                 <div class="relation-menu__title">
-                    Relation to <strong>#B.{{ relationMenuTarget.target_ticket_id }}</strong>
+                    <template v-if="relationMenuTarget.kind === null">
+                        Promote ref to relation —
+                        <strong>#B.{{ relationMenuTarget.target_ticket_id }}</strong>
+                    </template>
+                    <template v-else>
+                        Relation to <strong>#B.{{ relationMenuTarget.target_ticket_id }}</strong>
+                    </template>
                 </div>
                 <div class="relation-menu__kinds">
                     <button
@@ -1871,6 +1894,7 @@ async function copyTicketRef() {
                     </button>
                 </div>
                 <button
+                    v-if="relationMenuTarget.kind !== null"
                     type="button"
                     class="relation-menu__remove"
                     :disabled="addRelationBusy"

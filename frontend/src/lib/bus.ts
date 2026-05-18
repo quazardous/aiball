@@ -54,6 +54,15 @@ export interface BusEvents {
         questionId: string;
         questionText: string;
     };
+    /** Right-click on a rendered `.ticket-ref` inside a body (#B.123
+     *  phase B.5). ThreadView picks this up and opens its relation
+     *  menu popover anchored at the click coords, pre-targeting the
+     *  referenced ticket so the user can promote the inline ref to a
+     *  typed relation in one click. */
+    "ticket-ref.promote": {
+        ticket_id: number;
+        event: MouseEvent;
+    };
 }
 
 type BusHandler<K extends keyof BusEvents> =
