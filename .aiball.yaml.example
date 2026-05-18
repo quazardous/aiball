@@ -99,8 +99,9 @@ autopoll:
 #   boot_grace_seconds: 60
 #
 #   # User-grace window after a human prompt — tryWake refuses to
-#   # send-keys during this period. Default 300 (5 min).
-#   user_grace_seconds: 300
+#   # send-keys during this period. Default 60 (aligned on the
+#   # heartbeat / boot-grace order, #B.185).
+#   user_grace_seconds: 60
 #
 #   # Wake-in-flight TTL (#B.180): how long the marker stays "fresh"
 #   # after the timer touches it pre-send-keys. The UserPromptSubmit

@@ -263,7 +263,20 @@ async function mainSse(): Promise<void> {
         // If a future need shows real value, open a fresh ticket.
         const paneText = capturePane();
         if (paneText) {
-            const claudeWorking = /esc to interrupt/i.test(paneText);
+            // #B.185: `esc to interrupt` is part of Claude Code's
+            // status footer at the very bottom of the pane — it
+            // disappears when claude returns to the prompt. Scope
+            // the regex to the last few non-empty lines so a stale
+            // occurrence in scrollback can't pin settledStatus=busy
+            // forever (the previous full-pane match meant the loop
+            // could never recover to `idle` once `esc to interrupt`
+            // had ever appeared in the visible buffer).
+            const footer = paneText.split("\n")
+                .map((l) => l.trimEnd())
+                .filter((l) => l.length > 0)
+                .slice(-5)
+                .join("\n");
+            const claudeWorking = /esc to interrupt/i.test(footer);
             const claudeReady = /Claude Code v|❯ |^> /m.test(paneText);
             if (claudeWorking && settledStatus !== "busy") {
                 settledStatus = "busy";

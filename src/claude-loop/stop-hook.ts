@@ -46,6 +46,16 @@ function log(msg: string): void {
 // send-keys will queue uselessly. Both surface in the tmux bar
 // as transient `[busy:compacting]` / `[busy:rate-limit]` etc and
 // suppress the auto-ping so we don't pile garbage into claude.
+//
+// #B.185: dropped the `working` (esc-to-interrupt) detection here.
+// The Stop hook fires when claude has ENDED a turn — by definition
+// not working anymore — so probing for "esc to interrupt" only
+// caught stale footer text from the just-finished turn and
+// suppressed the idle-since write, leaving the bar stuck on busy
+// forever (david: "claude-loop reste encore en busy alors qu'on a
+// fait plusieur tour de ping → hook stop"). Compacting/rate-limit/
+// api-error stay because those are pane-persistent conditions that
+// Claude legitimately reports even mid-turn.
 function readPane(): string {
     try {
         const r = spawnSync(MUX_CMD, [
@@ -54,7 +64,7 @@ function readPane(): string {
         return r.stdout ?? "";
     } catch { return ""; }
 }
-type PaneState = { kind: "compacting" | "rate-limit" | "api-error" | "working" | "normal"; info: string };
+type PaneState = { kind: "compacting" | "rate-limit" | "api-error" | "normal"; info: string };
 function classifyPane(text: string): PaneState {
     if (/Compacting|compacting conversation|Summarizing the conversation/i.test(text)) {
         return { kind: "compacting", info: "compacting" };
@@ -64,12 +74,6 @@ function classifyPane(text: string): PaneState {
     }
     if (/API Error|APIError/i.test(text)) {
         return { kind: "api-error", info: "api-error" };
-    }
-    // #B.154 david: "si claude fonctionne l'écran affiche 'esc to
-    // interrupt'". Claude is mid-turn; don't send a fresh prompt
-    // (it'd corrupt the active operation or queue uselessly).
-    if (/esc to interrupt/i.test(text)) {
-        return { kind: "working", info: "working" };
     }
     return { kind: "normal", info: "" };
 }
@@ -81,14 +85,9 @@ function classifyPane(text: string): PaneState {
         if (paneState.kind !== "normal") {
             // Suppress wake — claude is doing something internal
             // (compacting, etc.) or blocked on backend. Surface the
-            // SUB-STATE in the bar as a `busy:<info>` suffix when
-            // it's diagnostic (compacting/rate-limit/api-error);
-            // skip the suffix for the plain `working` case — that's
-            // just busy (#B.154 david: "busy égal working / garde
-            // busy", no need for `[busy:working]` redundancy).
-            const suffix = paneState.kind === "working" ? undefined : paneState.info;
-            setTmuxStatus(name!, "busy", suffix);
-            log(`  pane state = ${paneState.kind} → suppress wake, status busy${suffix ? `:${suffix}` : ""}`);
+            // SUB-STATE in the bar as a `busy:<info>` suffix.
+            setTmuxStatus(name!, "busy", paneState.info);
+            log(`  pane state = ${paneState.kind} → suppress wake, status busy:${paneState.info}`);
             emit();
         }
         const hasWork = await checkHasWork(checkCmd);

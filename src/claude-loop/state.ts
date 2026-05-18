@@ -167,12 +167,14 @@ export function isInternalCheckCmd(checkCmd: string | null | undefined): boolean
 }
 
 /**
- * Default user-grace window in seconds (#B.145 v2.2). When the user
- * has typed a prompt within this window, the timer skips its wake so
- * the wrapper doesn't `send-keys` over a human-driven session. Tunable
+ * Default user-grace window in seconds (#B.145 v2.2, recalibrated
+ * #B.185). When the user has typed a prompt within this window, the
+ * timer skips its wake so the wrapper doesn't `send-keys` over a
+ * human-driven session. 60s aligns with the heartbeat / boot grace —
+ * david: "recalibre les defaut du meme ordre de grandeur". Tunable
  * via `CL_USER_GRACE_SEC`.
  */
-export const DEFAULT_USER_GRACE_SEC = 300;
+export const DEFAULT_USER_GRACE_SEC = 60;
 
 /**
  * Is the human actively driving the session? True iff the
