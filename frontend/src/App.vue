@@ -973,7 +973,7 @@ watch(showSnoozed, (v) => {
             </aside>
         </div>
 
-        <Toast />
+        <Toast position="top-right" />
     </div>
 </template>
 

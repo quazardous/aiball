@@ -55,6 +55,14 @@ const activeProjectLabel = computed(() => {
     const active = props.items.find((p) => p.value === props.project);
     return active?.label ?? "Projects";
 });
+
+// #B.161 desktop: clicking the project summary on desktop should NOT
+// toggle the details (the projects list is always visible there;
+// collapse only makes sense on mobile where vertical space is
+// scarce). preventDefault stops the native <details> toggle.
+function onProjectsSummaryClick(e: Event) {
+    if (window.innerWidth > 720) e.preventDefault();
+}
 </script>
 
 <template>
@@ -64,7 +72,10 @@ const activeProjectLabel = computed(() => {
              by default on phone — saves the 30vh sidebar band for the
              active project's row only). -->
         <details class="sidebar-projects" :open="projectsOpen">
-            <summary class="sidebar-section-label">
+            <summary
+                class="sidebar-section-label"
+                @click="onProjectsSummaryClick"
+            >
                 <span class="sidebar-projects__label">{{ activeProjectLabel }}</span>
                 <!-- #B.161 follow-up: quick "+ new ticket" on the
                      right of the project name when projects is
@@ -223,6 +234,17 @@ const activeProjectLabel = computed(() => {
 }
 .sidebar-projects:not([open]) > summary::before {
     content: "▸";
+}
+@media (min-width: 721px) {
+    /* Desktop: project list is always open and click-locked
+       (onProjectsSummaryClick preventDefault). The chevron would
+       suggest collapsibility that doesn't apply here — drop it. */
+    .sidebar-projects > summary {
+        cursor: default;
+    }
+    .sidebar-projects > summary::before {
+        display: none;
+    }
 }
 .sidebar-new-ticket,
 .sidebar-project-settings {
