@@ -95,14 +95,34 @@ function relativeTime(iso: string | null | undefined): string {
     return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
-/** True when the consumer is a claude-loop agent whose last heartbeat
- *  is older than OFFLINE_THRESHOLD_MS — the timer process is likely
- *  gone or wedged. */
-function isOffline(r: Consumer): boolean {
-    if (!r.state || !r.state_updated_at) return false;
+function isHeartbeatFresh(r: Consumer): boolean {
+    if (!r.state_updated_at) return false;
     const t = Date.parse(r.state_updated_at);
-    if (!Number.isFinite(t)) return false;
-    return now.value - t > OFFLINE_THRESHOLD_MS;
+    return Number.isFinite(t) && now.value - t <= OFFLINE_THRESHOLD_MS;
+}
+
+function isMcpActive(r: Consumer): boolean {
+    if (!r.last_seen_at) return false;
+    const t = Date.parse(r.last_seen_at);
+    return Number.isFinite(t) && now.value - t <= OFFLINE_THRESHOLD_MS;
+}
+
+/** "Offline" = the claude-loop timer's heartbeat stopped (state
+ *  stale > OFFLINE_THRESHOLD_MS) AND nothing fresh on the MCP side
+ *  either. Without the last_seen_at cross-check we'd lie when the
+ *  agent runs without claude-loop (no timer, no heartbeat — but it
+ *  IS posting via MCP), which is the david report on #B.193. */
+function isOffline(r: Consumer): boolean {
+    return !!r.state && !isHeartbeatFresh(r) && !isMcpActive(r);
+}
+
+/** Render the state badge only when it carries meaning — a fresh
+ *  heartbeat (show the actual state), or a confirmed offline
+ *  (heartbeat AND MCP both silent). Stale heartbeat + active MCP =
+ *  agent alive without claude-loop, no badge (the activity column
+ *  already shows "Ns ago" which is the truthful signal). */
+function shouldShowStateBadge(r: Consumer): boolean {
+    return !!r.state && (isHeartbeatFresh(r) || isOffline(r));
 }
 
 function loopBadgeLabel(r: Consumer): string {
@@ -275,7 +295,7 @@ const sortedRows = computed<Consumer[]>(() => {
                             {{ relativeTime(r.last_seen_at) }}
                         </div>
                         <Tag
-                            v-if="r.state"
+                            v-if="shouldShowStateBadge(r)"
                             :value="loopBadgeLabel(r)"
                             :severity="loopBadgeSeverity(r)"
                             :title="loopBadgeTooltip(r)"
