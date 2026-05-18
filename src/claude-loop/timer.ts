@@ -142,6 +142,35 @@ async function mainSse(): Promise<void> {
     // when the loop spawns (e.g. claude --resume scenario, or a
     // crashed-and-restarted loop).
     await tryWake("startup");
+    // #B.149: post-boot heuristic. Claude Code has no native "claude
+    // is at prompt" signal — for `--resume` the SessionStart hook
+    // fires BEFORE the user dismisses the picker, so we can't flip
+    // status there. After BOOT_GRACE_MS the timer assumes claude has
+    // settled, seeds the idle marker, and lets tryWake run normally
+    // (will wake if SSE has been silent but there's actually work).
+    // 30s covers MCP trust prompts + resume picker dismissal for the
+    // typical case; user can override via the legacy idle/busy
+    // signals if they're quicker (UserPromptSubmit / Stop hooks).
+    const BOOT_GRACE_MS = 30_000;
+    let bootSettled = false;
+    const settleBoot = async () => {
+        if (bootSettled) return;
+        bootSettled = true;
+        log("boot grace elapsed — settling to idle/busy via check");
+        // Seed idle-since so tryWake's gate passes; tryWake will
+        // flip to busy if there's work or stay idle otherwise.
+        try {
+            const { writeFileSync } = await import("node:fs");
+            writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+        } catch { /* ignore */ }
+        await tryWake("boot-settle");
+        // tryWake removes idle-since on wake; if it didn't fire,
+        // we still want the bar to read [idle] not [boot].
+        if (existsSync(idleMarkerPath(sd!))) {
+            setTmuxStatus(name!, "idle");
+        }
+    };
+    setTimeout(() => { void settleBoot(); }, BOOT_GRACE_MS);
     while (tmuxAlive()) {
         await sleep(interval * 1000);
         // Manual wake (claude-loop wake NAME): file marker, fires
