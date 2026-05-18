@@ -429,30 +429,132 @@ function cmdAttach(name: string): void {
     spawnSync(MUX_CMD, ["attach", "-t", tmuxName(name)], { stdio: "inherit" });
 }
 
-function cmdTail(name: string, lines: number, which: "pane" | "timer" | "stop-hook"): void {
-    if (which === "timer") {
-        const log = timerLogPath(stateDirFor(name));
-        if (!existsSync(log)) die(`no timer log at ${log}`);
-        const all = readFileSync(log, "utf8").split("\n");
-        process.stdout.write(all.slice(-lines).join("\n") + "\n");
+type TailMode = "pane" | "timer" | "stop-hook" | "log";
+
+/**
+ * Print lines that appeared in `now` but weren't in `prev` (#B.198
+ * follow). The pane buffer scrolls, so we anchor by finding the
+ * longest suffix of `prev` that matches a prefix of `now` — anything
+ * past that anchor is new content. Empty `prev` → first poll, dump
+ * everything. No overlap → content scrolled past faster than we
+ * polled, dump everything (best-effort, missed lines stay lost).
+ */
+function paneDelta(prev: string, now: string): string {
+    if (!prev) return now;
+    if (prev === now) return "";
+    const a = prev.split("\n");
+    const b = now.split("\n");
+    for (let k = Math.min(a.length, b.length); k > 0; k--) {
+        let match = true;
+        for (let i = 0; i < k; i++) {
+            if (a[a.length - k + i] !== b[i]) { match = false; break; }
+        }
+        if (match) return b.slice(k).join("\n");
+    }
+    return now;
+}
+
+async function followPane(name: string, lines: number): Promise<void> {
+    let prev = "";
+    let printedInitial = false;
+    // Best-effort cleanup on Ctrl-C — let the SIGINT propagate.
+    process.on("SIGINT", () => process.exit(0));
+    while (true) {
+        if (!tmuxAlive(name)) die(`loop '${name}' no longer alive`);
+        const r = spawnSync(MUX_CMD, ["capture-pane", "-t", `${tmuxName(name)}.0`, "-p"], {
+            encoding: "utf8",
+        }) as SpawnSyncReturns<string>;
+        if (r.status !== 0) die(`capture-pane failed for ${tmuxName(name)}`);
+        const buf = r.stdout ?? "";
+        if (!printedInitial) {
+            const all = buf.split("\n");
+            process.stdout.write(all.slice(-lines).join("\n") + "\n");
+            prev = buf;
+            printedInitial = true;
+        } else {
+            const delta = paneDelta(prev, buf);
+            if (delta) {
+                process.stdout.write(delta + (delta.endsWith("\n") ? "" : "\n"));
+                prev = buf;
+            }
+        }
+        await new Promise((res) => setTimeout(res, 500));
+    }
+}
+
+function followFile(path: string, lines: number, prefix?: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const child = spawn("tail", ["-n", String(lines), "-F", path], {
+            stdio: prefix ? ["ignore", "pipe", "inherit"] : "inherit",
+        });
+        if (prefix && child.stdout) {
+            let carry = "";
+            child.stdout.on("data", (chunk: Buffer) => {
+                const text = carry + chunk.toString("utf8");
+                const lines = text.split("\n");
+                carry = lines.pop() ?? "";
+                for (const l of lines) process.stdout.write(`${prefix}${l}\n`);
+            });
+            child.stdout.on("end", () => { if (carry) process.stdout.write(`${prefix}${carry}\n`); });
+        }
+        child.on("error", reject);
+        child.on("exit", (code) => code === 0 || code === null ? resolve() : reject(new Error(`tail exited ${code}`)));
+        process.on("SIGINT", () => { child.kill("SIGINT"); process.exit(0); });
+    });
+}
+
+async function cmdTail(name: string, lines: number, which: TailMode, follow: boolean): Promise<void> {
+    if (which === "timer" || which === "stop-hook") {
+        const log = which === "timer"
+            ? timerLogPath(stateDirFor(name))
+            : join(stateDirFor(name), "stop-hook.log");
+        const label = which === "timer" ? "timer log" : "stop-hook log";
+        if (!existsSync(log)) {
+            if (!follow) die(`no ${label} at ${log}`);
+            // Follow mode: tail -F handles a not-yet-existent file
+            // (waits for it to appear). Helpful when the Stop hook
+            // hasn't fired yet — user can leave it running.
+        }
+        if (!follow) {
+            const all = readFileSync(log, "utf8").split("\n");
+            process.stdout.write(all.slice(-lines).join("\n") + "\n");
+            return;
+        }
+        await followFile(log, lines, undefined);
         return;
     }
-    if (which === "stop-hook") {
-        const log = join(stateDirFor(name), "stop-hook.log");
-        if (!existsSync(log)) die(`no stop-hook log at ${log} (no Stop hook fire yet?)`);
-        const all = readFileSync(log, "utf8").split("\n");
-        process.stdout.write(all.slice(-lines).join("\n") + "\n");
+    if (which === "log") {
+        const sd = stateDirFor(name);
+        const timer = timerLogPath(sd);
+        const hook = join(sd, "stop-hook.log");
+        if (!follow) {
+            for (const [p, prefix] of [[timer, "[timer] "], [hook, "[hook]  "]] as const) {
+                if (!existsSync(p)) continue;
+                const all = readFileSync(p, "utf8").split("\n");
+                for (const l of all.slice(-lines)) process.stdout.write(`${prefix}${l}\n`);
+            }
+            return;
+        }
+        await Promise.race([
+            followFile(timer, lines, "[timer] "),
+            followFile(hook, lines, "[hook]  "),
+        ]);
         return;
     }
+    // pane mode
     if (!tmuxAlive(name)) {
-        die(`loop '${name}' not alive (use --timer / --stop-hook to inspect logs instead)`);
+        die(`loop '${name}' not alive (use --timer / --stop-hook / --log to inspect logs instead)`);
     }
-    const r = spawnSync(MUX_CMD, ["capture-pane", "-t", `${tmuxName(name)}.0`, "-p"], {
-        encoding: "utf8",
-    }) as SpawnSyncReturns<string>;
-    if (r.status !== 0) die(`capture-pane failed for ${tmuxName(name)}`);
-    const all = (r.stdout ?? "").split("\n");
-    process.stdout.write(all.slice(-lines).join("\n") + "\n");
+    if (!follow) {
+        const r = spawnSync(MUX_CMD, ["capture-pane", "-t", `${tmuxName(name)}.0`, "-p"], {
+            encoding: "utf8",
+        }) as SpawnSyncReturns<string>;
+        if (r.status !== 0) die(`capture-pane failed for ${tmuxName(name)}`);
+        const all = (r.stdout ?? "").split("\n");
+        process.stdout.write(all.slice(-lines).join("\n") + "\n");
+        return;
+    }
+    await followPane(name, lines);
 }
 
 function cmdRm(name: string, force: boolean): void {
@@ -782,15 +884,18 @@ async function main(): Promise<void> {
     program.command("list").description("List all known loops").action(cmdList);
     program.command("attach <name>").description("tmux attach to a loop session").action(cmdAttach);
     program.command("tail [name]")
-        .description("Tail the claude pane (--timer / --stop-hook for the wake-decision logs). Name optional — defaults to the loop registered for the current cwd.")
+        .description("Follow the claude pane live (--timer / --stop-hook / --log for the wake-decision logs). Name optional — defaults to the loop registered for the current cwd. Ctrl-C to stop; pass --once for a snapshot.")
         .option("--lines <n>", "Lines to show", "40")
-        .option("--timer", "Tail the detached timer log instead of the claude pane")
-        .option("--stop-hook", "Tail the Stop hook log (per-fire wake decisions + coalesce)")
-        .action((name: string | undefined, opts: { lines: string; timer?: boolean; stopHook?: boolean }) => {
-            if (opts.timer && opts.stopHook) die("pass only one of --timer / --stop-hook");
-            const which = opts.timer ? "timer" : opts.stopHook ? "stop-hook" : "pane";
+        .option("--timer", "Follow the detached timer log instead of the claude pane")
+        .option("--stop-hook", "Follow the Stop hook log (per-fire wake decisions + coalesce)")
+        .option("--log", "Follow timer + stop-hook logs interleaved with [timer]/[hook] prefixes")
+        .option("--once", "Snapshot only — print and exit instead of following")
+        .action(async (name: string | undefined, opts: { lines: string; timer?: boolean; stopHook?: boolean; log?: boolean; once?: boolean }) => {
+            const flags = [opts.timer, opts.stopHook, opts.log].filter(Boolean).length;
+            if (flags > 1) die("pass only one of --timer / --stop-hook / --log");
+            const which: TailMode = opts.timer ? "timer" : opts.stopHook ? "stop-hook" : opts.log ? "log" : "pane";
             const resolved = name ?? resolveCurrentLoopName();
-            cmdTail(resolved, Number(opts.lines), which);
+            await cmdTail(resolved, Number(opts.lines), which, opts.once !== true);
         });
     program.command("rm <name>")
         .description("Kill tmux + timer + remove state dir")
