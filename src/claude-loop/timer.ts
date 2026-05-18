@@ -284,7 +284,16 @@ async function mainSse(): Promise<void> {
     // commands (/compact, /clear) that don't fire Stop hook.
     let settledStatus: "boot" | "idle" | "busy" = "boot";
     while (tmuxAlive()) {
-        await sleep(interval * 1000);
+        // #B.205: when busy-defer is armed, cap the heartbeat sleep at
+        // the defer deadline so the post-defer work-check happens
+        // promptly. Without this, an `idle:wait` armed for 5s could
+        // sit unchecked for up to `interval` seconds (default 30s) if
+        // no SSE ping arrived in the gap — david: "c'est pas appelé
+        // tout le temps. et il faudrait tester en interne si il y a
+        // encore du travail à ce moment".
+        const defer = readBusyDefer(sd!);
+        const sleepMs = defer ? Math.min(interval * 1000, defer.activeMs) : interval * 1000;
+        await sleep(sleepMs);
         // Manual wake (claude-loop wake NAME): file marker, fires
         // even when SSE silent.
         if (existsSync(wakeRequestedPath(sd!))) {
@@ -396,7 +405,10 @@ async function mainPoll(): Promise<void> {
     // pre-existing work right away instead of waiting `interval`s.
     await tryWake("startup");
     while (tmuxAlive()) {
-        await sleep(interval * 1000);
+        // #B.205: cap sleep at busy-defer deadline (see mainSse note).
+        const defer = readBusyDefer(sd!);
+        const sleepMs = defer ? Math.min(interval * 1000, defer.activeMs) : interval * 1000;
+        await sleep(sleepMs);
         const manualWake = existsSync(wakeRequestedPath(sd!));
         await tryWake(manualWake ? "manual" : "check-cmd hit", manualWake);
     }
