@@ -528,22 +528,52 @@ async function cmdTail(name: string, lines: number, which: TailMode, follow: boo
         const timer = timerLogPath(sd);
         const hook = join(sd, "stop-hook.log");
         // Prefixes name the source explicitly (#B.198, david: "il
-        // faut quand meme dire le nom du hook") — `[hook]` was
-        // ambiguous now that we may add more hooks later.
-        // Pad to longest so the body columns line up.
-        const TIMER_TAG = "[timer]     ";
-        const HOOK_TAG  = "[stop-hook] ";
+        // faut quand meme dire le nom du hook"). Order is now
+        // `<timestamp> <tag> <rest>` (david: "ça serait plus pratique
+        // cet ordre heure [type event]"): we pull any leading ISO
+        // timestamp out of the body line and reinject it BEFORE the
+        // tag, so all sources show one consistent time column.
+        const TIMER_TAG = "[timer]    ";
+        const HOOK_TAG  = "[stop-hook]";
+        const ISO_RE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\s+/;
+        function reformat(line: string, tag: string): string {
+            const m = ISO_RE.exec(line);
+            if (m) return `${m[1]} ${tag} ${line.slice(m[0].length)}`;
+            // No leading timestamp (older/foreign lines) — synthesize
+            // a placeholder so columns still line up.
+            return `${" ".repeat(24)} ${tag} ${line}`;
+        }
         if (!follow) {
-            for (const [p, prefix] of [[timer, TIMER_TAG], [hook, HOOK_TAG]] as const) {
+            for (const [p, tag] of [[timer, TIMER_TAG], [hook, HOOK_TAG]] as const) {
                 if (!existsSync(p)) continue;
                 const all = readFileSync(p, "utf8").split("\n");
-                for (const l of all.slice(-lines)) process.stdout.write(`${prefix}${l}\n`);
+                for (const l of all.slice(-lines)) process.stdout.write(`${reformat(l, tag)}\n`);
             }
             return;
         }
+        const runFollow = async (path: string, tag: string): Promise<void> => {
+            return new Promise((resolveP, rejectP) => {
+                const child = spawn("tail", ["-n", String(lines), "-F", path], {
+                    stdio: ["ignore", "pipe", "inherit"],
+                });
+                let carry = "";
+                child.stdout?.on("data", (chunk: Buffer) => {
+                    const text = carry + chunk.toString("utf8");
+                    const out = text.split("\n");
+                    carry = out.pop() ?? "";
+                    for (const l of out) process.stdout.write(`${reformat(l, tag)}\n`);
+                });
+                child.stdout?.on("end", () => {
+                    if (carry) process.stdout.write(`${reformat(carry, tag)}\n`);
+                });
+                child.on("error", rejectP);
+                child.on("exit", (code) => code === 0 || code === null ? resolveP() : rejectP(new Error(`tail exited ${code}`)));
+                process.on("SIGINT", () => { child.kill("SIGINT"); process.exit(0); });
+            });
+        };
         await Promise.race([
-            followFile(timer, lines, TIMER_TAG),
-            followFile(hook, lines, HOOK_TAG),
+            runFollow(timer, TIMER_TAG),
+            runFollow(hook, HOOK_TAG),
         ]);
         return;
     }

@@ -53,7 +53,10 @@ const interval = Math.max(1, Number(intervalRaw));
 const tname = tmuxName(name);
 
 function log(msg: string): void {
-    process.stdout.write(`[claude-loop:${name}] ${msg}\n`);
+    // #B.198 david: timer lines were missing timestamps — added at
+    // the head to match stop-hook.log and to let `--log` reorder as
+    // `<ts> [tag] body`.
+    process.stdout.write(`${new Date().toISOString()} [claude-loop:${name}] ${msg}\n`);
 }
 
 function tmuxAlive(): boolean {
