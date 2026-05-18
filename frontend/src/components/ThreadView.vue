@@ -13,6 +13,7 @@ import { findActiveDecision, type CommentDecision } from "../lib/decisions";
 import { STATUS_SEVERITY } from "../lib/labels";
 import { topDown, toggleTopDown } from "../lib/prefs";
 import { RELATION_KINDS, RELATION_LABELS as TYPED_RELATION_LABELS, type RelationKind } from "../lib/relations";
+import RelationChip from "./RelationChip.vue";
 import { bus, useBus } from "../lib/bus";
 import { isPeek } from "../lib/peek";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -41,6 +42,58 @@ const relationKindOptions = RELATION_KINDS.map((k) => ({
     label: TYPED_RELATION_LABELS[k],
     value: k,
 }));
+// #B.123 phase B.2.c: change-kind / remove on each relation chip.
+// Posting a NEW ticket_relation event with the same target replaces
+// the kind (latest-event-wins). Removing = posting with kind=ignored
+// (tombstone in the replay). Both go through the same POST endpoint
+// as add, no PATCH/DELETE.
+async function changeRelationKind(targetId: number, newKind: RelationKind) {
+    if (!data.value) return;
+    addRelationBusy.value = true;
+    try {
+        await api.addRelation(data.value.ticket.id, targetId, newKind);
+        await load();
+    } catch (e) {
+        editToast.add({
+            severity: "error",
+            summary: "Could not change relation",
+            detail: (e as Error).message,
+            life: 6000,
+        });
+    } finally {
+        addRelationBusy.value = false;
+    }
+}
+async function removeRelation(targetId: number) {
+    // Tombstone via POST kind=ignored — no confirm dialog; re-adding
+    // is one click via the + relation widget, low-stakes mistake.
+    return changeRelationKind(targetId, "ignored");
+}
+
+// Single shared Popover for per-chip kind/remove menu — track which
+// relation it currently anchors so the menu body re-renders correctly.
+const relationMenuRef = ref<InstanceType<typeof Popover> | null>(null);
+const relationMenuTarget = ref<{ target_ticket_id: number; kind: RelationKind } | null>(null);
+function openRelationMenu(
+    ev: Event,
+    r: { target_ticket_id: number; kind: RelationKind },
+) {
+    relationMenuTarget.value = { target_ticket_id: r.target_ticket_id, kind: r.kind };
+    relationMenuRef.value?.show(ev);
+}
+async function pickRelationKind(newKind: RelationKind) {
+    const t = relationMenuTarget.value;
+    if (!t) return;
+    relationMenuRef.value?.hide();
+    await changeRelationKind(t.target_ticket_id, newKind);
+}
+async function deleteFromRelationMenu() {
+    const t = relationMenuTarget.value;
+    if (!t) return;
+    relationMenuRef.value?.hide();
+    await removeRelation(t.target_ticket_id);
+}
+
 async function submitNewRelation() {
     if (!data.value) return;
     const raw = newRelationTarget.value.trim().replace(/^#?B?\.?/i, "");
@@ -1271,17 +1324,12 @@ async function copyTicketRef() {
                         <i class="pi pi-share-alt" />
                         Relations
                     </span>
-                    <a
+                    <RelationChip
                         v-for="r in data.ticket.relations ?? []"
                         :key="`${r.target_ticket_id}-${r.last_event_id}`"
-                        :href="`/b/${r.target_ticket_id}`"
-                        class="thread-relations__chip"
-                        :data-kind="r.kind"
-                        :title="`${TYPED_RELATION_LABELS[r.kind]} #B.${r.target_ticket_id} — set by ${r.by_agent ?? '?'} on ${new Date(r.last_event_at).toLocaleString()}`"
-                    >
-                        <span class="thread-relations__kind">{{ TYPED_RELATION_LABELS[r.kind] }}</span>
-                        <span class="thread-relations__target">#B.{{ r.target_ticket_id }}</span>
-                    </a>
+                        :relation="r"
+                        @open-menu="(payload) => openRelationMenu(payload.event, payload.relation)"
+                    />
                     <Button
                         v-if="!addRelationOpen"
                         icon="pi pi-plus"
@@ -1595,17 +1643,12 @@ async function copyTicketRef() {
                             <i class="pi pi-share-alt" />
                             Relations
                         </span>
-                        <a
+                        <RelationChip
                             v-for="r in data.ticket.relations ?? []"
                             :key="`hdr-${r.target_ticket_id}-${r.last_event_id}`"
-                            :href="`/b/${r.target_ticket_id}`"
-                            class="thread-relations__chip"
-                            :data-kind="r.kind"
-                            :title="`${TYPED_RELATION_LABELS[r.kind]} #B.${r.target_ticket_id}`"
-                        >
-                            <span class="thread-relations__kind">{{ TYPED_RELATION_LABELS[r.kind] }}</span>
-                            <span class="thread-relations__target">#B.{{ r.target_ticket_id }}</span>
-                        </a>
+                            :relation="r"
+                            @open-menu="(payload) => openRelationMenu(payload.event, payload.relation)"
+                        />
                         <Button
                             v-if="!addRelationOpen"
                             icon="pi pi-plus"
@@ -1807,6 +1850,37 @@ async function copyTicketRef() {
                 </template>
             </MessageComposer>
         </template>
+        <!-- #B.123 phase B.2.c: shared menu for per-chip change-kind /
+             remove. Anchored on demand to whichever chip triggered it. -->
+        <Popover ref="relationMenuRef">
+            <div class="relation-menu" v-if="relationMenuTarget">
+                <div class="relation-menu__title">
+                    Relation to <strong>#B.{{ relationMenuTarget.target_ticket_id }}</strong>
+                </div>
+                <div class="relation-menu__kinds">
+                    <button
+                        v-for="k in RELATION_KINDS.filter(x => x !== 'ignored')"
+                        :key="k"
+                        type="button"
+                        class="relation-menu__kind-btn"
+                        :class="{ 'relation-menu__kind-btn--current': k === relationMenuTarget.kind }"
+                        :disabled="addRelationBusy"
+                        @click="pickRelationKind(k)"
+                    >
+                        {{ TYPED_RELATION_LABELS[k] }}
+                    </button>
+                </div>
+                <button
+                    type="button"
+                    class="relation-menu__remove"
+                    :disabled="addRelationBusy"
+                    title="Remove this relation (posts an `ignored` tombstone — re-add anytime)"
+                    @click="deleteFromRelationMenu"
+                >
+                    <i class="pi pi-times" /> remove
+                </button>
+            </div>
+        </Popover>
     </div>
 </template>
 
@@ -1895,15 +1969,99 @@ async function copyTicketRef() {
 }
 .thread-relations__chip {
     display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.15rem 0.5rem;
+    align-items: stretch;
+    gap: 0;
     border-radius: 999px;
     font-size: 0.78rem;
-    text-decoration: none;
     border: 1px solid var(--p-content-border-color);
     color: var(--p-text-color);
     background: var(--p-surface-50);
+    overflow: hidden;
+}
+.thread-relations__chip-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.5rem;
+    text-decoration: none;
+    color: inherit;
+}
+.thread-relations__menu-btn {
+    padding: 0 0.5rem;
+    background: transparent;
+    border: 0;
+    border-left: 1px solid var(--p-content-border-color);
+    color: var(--p-text-muted-color);
+    cursor: pointer;
+    font-size: 0.7rem;
+    line-height: 1;
+}
+.thread-relations__menu-btn:hover {
+    background: var(--p-surface-100);
+    color: var(--p-text-color);
+}
+.aiball-dark .thread-relations__menu-btn:hover {
+    background: var(--p-surface-700);
+}
+.relation-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 14rem;
+}
+.relation-menu__title {
+    font-size: 0.82rem;
+    color: var(--p-text-muted-color);
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--p-content-border-color);
+}
+.relation-menu__kinds {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.relation-menu__kind-btn {
+    text-align: left;
+    padding: 0.25rem 0.5rem;
+    background: transparent;
+    border: 0;
+    border-radius: 0.3rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--p-text-color);
+}
+.relation-menu__kind-btn:hover:not(:disabled) {
+    background: var(--p-surface-100);
+}
+.aiball-dark .relation-menu__kind-btn:hover:not(:disabled) {
+    background: var(--p-surface-800);
+}
+.relation-menu__kind-btn--current {
+    font-weight: 600;
+    color: var(--p-primary-color);
+}
+.relation-menu__kind-btn--current::after {
+    content: " ✓";
+}
+.relation-menu__remove {
+    margin-top: 0.3rem;
+    padding: 0.3rem 0.5rem;
+    background: transparent;
+    border: 1px solid var(--p-red-500);
+    color: var(--p-red-500);
+    border-radius: 0.3rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    text-align: left;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+.relation-menu__remove:hover:not(:disabled) {
+    background: var(--p-red-50);
+}
+.aiball-dark .relation-menu__remove:hover:not(:disabled) {
+    background: rgba(255, 0, 0, 0.1);
 }
 .aiball-dark .thread-relations__chip { background: var(--p-surface-800); }
 .thread-relations__chip:hover { border-color: var(--p-primary-color); }
