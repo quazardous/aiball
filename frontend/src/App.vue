@@ -92,8 +92,14 @@ async function resolveAuthMode(): Promise<void> {
 
 // StatusFilter + SortBy types exported from components/InboxToolbar.vue.
 
+// #B.184 david: the previous "pending" default + per-user localStorage
+// stickiness meant projects with auto-approve (e.g. aiball itself)
+// landed on an empty moderation queue while the sidebar badges showed
+// dozens of open tickets — "compteurs ok mais rien dans les listes".
+// Default to "all" so users see content first; moderation queue stays
+// one filter-click away. Existing users keep their localStorage choice.
 const statusFilter = ref<StatusFilter>(
-    (localStorage.getItem("aiball.filter.status") as StatusFilter | null) ?? "pending",
+    (localStorage.getItem("aiball.filter.status") as StatusFilter | null) ?? "all",
 );
 const onlyOpen = ref(localStorage.getItem("aiball.filter.open") !== "0");
 /** Show snoozed tickets in the open inbox (per #B.329). Off by default
@@ -927,10 +933,13 @@ watch(showSnoozed, (v) => {
                         :search-active="searchActive"
                         :search-hits="searchHits"
                         :search-query="searchQuery"
+                        :status-filter="statusFilter"
+                        :only-open="onlyOpen"
                         @open-row="openThread"
                         @open-hit="openSearchHit"
                         @toggle-read="toggleRead"
                         @toggle-selected="toggleSelected"
+                        @reset-filters="statusFilter = 'all'; onlyOpen = true"
                     />
 
                     <PaginationBar

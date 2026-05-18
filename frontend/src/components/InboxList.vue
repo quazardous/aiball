@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Tag from "primevue/tag";
+import Button from "primevue/button";
 import Checkbox from "primevue/checkbox";
 import { type InboxRow, type SearchHit } from "../lib/api";
 import { relativeTime, snippetOf, titleOf } from "../lib/format";
@@ -8,6 +9,7 @@ import {
     INTENT_SEVERITY,
     LIFECYCLE_ICONS,
     STATUS_SEVERITY,
+    type StatusFilter,
     snoozedTooltip,
 } from "../lib/labels";
 import ListRow from "./ListRow.vue";
@@ -19,7 +21,7 @@ import TagBadge from "./TagBadge.vue";
 // access time so a switch through the URL still works at next render).
 const currentConsumer = () => localStorage.getItem("aiball.human_id") ?? "human";
 
-defineProps<{
+const props = defineProps<{
     loading: boolean;
     rows: InboxRow[];
     project: string | null;
@@ -27,6 +29,11 @@ defineProps<{
     searchActive: boolean;
     searchHits: SearchHit[];
     searchQuery: string;
+    // #B.184: surface the active filter in the empty state so the
+    // moderation-queue-by-default case ("compteurs ok mais rien dans
+    // les listes") is self-explanatory instead of a dead end.
+    statusFilter?: StatusFilter;
+    onlyOpen?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -34,7 +41,13 @@ const emit = defineEmits<{
     (e: "open-hit", hit: SearchHit): void;
     (e: "toggle-read", row: InboxRow): void;
     (e: "toggle-selected", id: number, value: boolean): void;
+    (e: "reset-filters"): void;
 }>();
+
+function filtersAreNarrowed(): boolean {
+    return (props.statusFilter !== undefined && props.statusFilter !== "all")
+        || props.onlyOpen === false;
+}
 
 </script>
 
@@ -50,7 +63,19 @@ const emit = defineEmits<{
         <i class="pi pi-inbox" style="font-size: 1.6rem" />
         <div>
             No tickets match your filters{{ project ? ` in ${project}` : "" }}.
+            <template v-if="statusFilter && statusFilter !== 'all'">
+                Active status filter: <strong>{{ statusFilter }}</strong>.
+            </template>
         </div>
+        <Button
+            v-if="filtersAreNarrowed()"
+            label="Show all open tickets"
+            icon="pi pi-filter-slash"
+            text
+            size="small"
+            @click="emit('reset-filters')"
+            style="margin-top: 0.6rem"
+        />
     </div>
 
     <a
