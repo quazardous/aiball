@@ -135,17 +135,25 @@ function readPane(): string {
         // plus pour faire quoi que ce soit" + "le sleep devrait etre
         // loop/state based pas promise (pour staker oublié c plus
         // facile)". State-based defer: arm the `busy-defer-until`
-        // marker, set the bar, exit. Timer's `tryWake` honors the
-        // marker on its next SSE ping / heartbeat tick — so the
-        // defer survives this process exiting (durable) and is
-        // inspectable (`cat busy-defer-until`). We don't write
-        // idle-since here (pane IS busy); the timer's heartbeat
-        // pane-probe will seed it once claude actually returns to
-        // the prompt.
+        // marker, exit. Timer's `tryWake` honors the marker on its
+        // next SSE ping / heartbeat tick — so the defer survives
+        // this process exiting (durable) and is inspectable
+        // (`cat busy-defer-until`).
+        //
+        // Bar display (#B.203 #me29ma david: "la barre marque busy
+        // alors qu'on a plus d'activité"): the Stop hook fires
+        // POST-turn so the footer is stale — by defer-arm time
+        // claude is most likely back at the prompt even if pane.busy
+        // snapshot still showed `esc to interrupt`. Show `[idle:wait]`
+        // to match what the human visually sees, and seed idle-since
+        // so subsequent state consumers (heartbeat probe, count
+        // refresh) treat claude as at the prompt. The defer marker
+        // still silently gates wakes during the window.
         if (pane.busy && PANE_BUSY_DELAY_MS > 0) {
             const until = armBusyDefer(sd!, PANE_BUSY_DELAY_MS);
-            setTmuxStatus(name!, "busy", "wait");
-            log(`  → BUSY-DEFER armed until=${until} became=busy:wait`);
+            writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            setTmuxStatus(name!, "idle", "wait");
+            log(`  → BUSY-DEFER armed until=${until} became=idle:wait`);
             emit();
         }
         const hasWork = await checkHasWork(checkCmd);
