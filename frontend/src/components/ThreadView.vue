@@ -1106,15 +1106,57 @@ async function copyTicketRef() {
         </div>
         <div v-else-if="!data && loading" class="aiball-empty">Loading…</div>
         <template v-else-if="data">
-            <!-- #B.133 follow-up (david "le titre à disparu"): in top-down
-                 the .thread-ticket card sinks to the bottom (order:4),
-                 dragging its in-article <h2> down with it. We lift a
-                 second copy of the title to the very top of the flex so
-                 the user always sees "which ticket am I on". The in-article
-                 title is hidden in top-down via CSS — never both visible. -->
-            <h2 v-if="topDown" class="thread-title thread-title--lifted">
-                {{ data.ticket.title }}
-            </h2>
+            <!-- #B.133 follow-ups: in top-down the .thread-ticket card sinks
+                 to the bottom (order:4), dragging its in-article <header>
+                 and <h2> down with it ("le titre à disparu", then "il
+                 manque les tags etc dans la version topdown"). We lift a
+                 second copy of the full headline (meta tags + title) to
+                 the top of the flex. The in-article copy is hidden in
+                 top-down via CSS — never both visible. -->
+            <div v-if="topDown" class="thread-headline thread-headline--lifted">
+                <header class="meta">
+                    <Tag
+                        :value="justCopiedTicket ? `copied #B.${data.ticket.id}` : `#B.${data.ticket.id}`"
+                        :severity="justCopiedTicket ? 'success' : 'secondary'"
+                        class="comment-ref-tag"
+                        role="button"
+                        tabindex="0"
+                        :title="`Click to copy this ticket's reference (#B.${data.ticket.id}) — paste it in any markdown body to link back here.`"
+                        @click="copyTicketRef"
+                        @keydown.enter.prevent="copyTicketRef"
+                        @keydown.space.prevent="copyTicketRef"
+                    />
+                    <Tag :value="data.ticket.project" severity="info" />
+                    <Tag
+                        :value="data.ticket.status"
+                        :severity="statusSeverity(data.ticket.status)"
+                    />
+                    <Tag
+                        v-if="data.ticket.status !== 'rejected' && data.ticket.closed && data.ticket.resolved"
+                        value="closed (resolved)"
+                        severity="success"
+                        icon="pi pi-check-circle"
+                    />
+                    <Tag
+                        v-else-if="data.ticket.status !== 'rejected' && data.ticket.closed"
+                        value="closed"
+                        severity="warn"
+                        icon="pi pi-lock"
+                    />
+                    <Tag
+                        v-else-if="data.ticket.resolved"
+                        value="resolved (pending close)"
+                        severity="success"
+                        icon="pi pi-check-circle"
+                    />
+                    <span v-if="data.ticket.by_agent">by {{ data.ticket.by_agent }}</span>
+                    <span class="spacer" />
+                    <span :title="data.ticket.created_at">
+                        {{ new Date(data.ticket.created_at).toLocaleString() }}
+                    </span>
+                </header>
+                <h2 class="thread-title">{{ data.ticket.title }}</h2>
+            </div>
             <article class="thread-ticket">
                 <header class="meta">
                     <Tag
@@ -1585,17 +1627,24 @@ async function copyTicketRef() {
    le body du ticket devrait être en bas non"). Composer sits just
    under the toolbar so the user types where the next comment lands.
    Re-orders the flex children — source order stays the same. */
-.thread-view--top-down .thread-title--lifted { order: -1; }
+.thread-view--top-down .thread-headline--lifted { order: -1; }
 .thread-view--top-down .thread-toolbar { order: 0; }
 .thread-view--top-down > .composer { order: 1; }
 .thread-view--top-down .thread-summary-banner { order: 2; }
 .thread-view--top-down .thread-no-comments,
 .thread-view--top-down .thread-comments { order: 3; }
 .thread-view--top-down .thread-ticket { order: 4; }
-/* In top-down, the lifted h2 above carries the title — hide the
-   in-article one to avoid showing it twice (top AND bottom). */
-.thread-view--top-down .thread-ticket .thread-title { display: none; }
-.thread-title--lifted {
+/* In top-down, the lifted headline above carries the meta tags and
+   title — hide the in-article copies to avoid showing them twice
+   (top AND bottom). */
+.thread-view--top-down .thread-ticket > header.meta,
+.thread-view--top-down .thread-ticket > .thread-title { display: none; }
+.thread-headline--lifted {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.thread-headline--lifted .thread-title {
     margin: 0;
     font-size: 1.4rem;
     line-height: 1.2;
@@ -1630,7 +1679,8 @@ async function copyTicketRef() {
  * same flex behaviour (chips left, date pushed right by .spacer).
  * Without this, the unstyled `<header class="meta">` rendered as a
  * block and the date glued itself behind the author name (per #B.325). */
-.thread-ticket > header.meta {
+.thread-ticket > header.meta,
+.thread-headline--lifted > header.meta {
     display: flex;
     gap: 0.5rem;
     align-items: center;
