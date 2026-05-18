@@ -120,6 +120,18 @@ function client(): AiballClient {
 async function tryWake(reason: string, manualWake = false): Promise<boolean> {
     if (!existsSync(idleMarkerPath(sd!))) return false;
     if (!manualWake && userIsTakingOver(sd!, userGraceSec)) return false;
+    // #B.198: catch the brief race where the idle marker has been
+    // written (Stop hook just fired) but claude is still mid-turn
+    // (a slash command, a hook in flight, or just hasn't repainted
+    // the prompt). Without this probe, a fast SSE ping landing in
+    // that window pastes a wake phrase on top of visible output —
+    // david: "même si claude est busy il se fait pop culture pingué".
+    // Skip the probe for manual wakes (file-marker bypass) since
+    // those are explicit user requests.
+    if (!manualWake) {
+        const paneText = capturePane();
+        if (paneText && paneFooterShowsBusy(paneText)) return false;
+    }
     if (!manualWake && !(await checkHasWork(checkCmd, client()))) return false;
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
