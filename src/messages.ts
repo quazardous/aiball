@@ -204,8 +204,18 @@ export function fanOutPings(msg: Message): void {
         for (const h of listHumans()) recipients.add(h);
     }
 
+    const authorIsHuman = isHuman(msg.by_agent);
     for (const r of recipients) {
         if (r === msg.by_agent) continue;
+        // #B.191: when a human posts (via the web UI or the CLI as
+        // themselves), don't ping OTHER human consumers — they all
+        // see the same project backlog as moderators, so a cross-human
+        // ping is just noise. Concretely: posting "as david" from the
+        // web UI used to ping the `human` Moderator consumer
+        // (david's other identity) and surface david's own posts as
+        // unread — david: "faux unread". Agent → human pings stay
+        // intact (that's the whole point of the moderation queue).
+        if (authorIsHuman && isHuman(r)) continue;
         insertPing(r, msg);
     }
 }
