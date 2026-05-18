@@ -177,40 +177,31 @@ export function userIsTakingOver(sd: string, graceSec: number): boolean {
 }
 
 /**
- * Lightweight "claude is busy / idle" display written into the tmux
- * status-left. Two states only on purpose (#B.144 — david: "debug
- * light, faut pas rendre trop complexe"):
+ * Lightweight tmux status-left display. Three states (#B.154 final
+ * collapse, david: "busy a pas de sens clair, pour moi busy égal
+ * working" → "garde busy"):
  *
- *   - `idle` → claude is at the prompt with no work pending
- *   - `busy` → claude is in a turn (or we just sent it work)
+ *   - `boot` (yellow) — transitional at spawn, before SessionStart
+ *   - `idle` (gray)   — claude at prompt, nothing to drain
+ *   - `busy` (green)  — claude is processing (post-prompt, post-
+ *     wake, or pane-verified mid-turn via `esc to interrupt`)
  *
- * Transitions happen on the same surfaces that drive idle-since:
- * Stop hook + SessionStart hook write `idle`/`busy` depending on
- * checkHasWork; the timer writes `busy` when it sends a wake. The
- * cli writes `busy` at startup so the bar isn't empty until the first
- * hook fires.
+ * The previous distinction between `busy` (queued/waiting, cyan) and
+ * `working` (verified active, green) was academic — from the user's
+ * point of view, "we sent something to claude" is the same as
+ * "claude is doing something". One green `busy` state, simpler.
+ *
+ * Transient phase suffixes still rendered via setTmuxStatus's third
+ * arg: `[busy:compacting]`, `[busy:rate-limit]`, `[boot:resume?]`.
  *
  * No-op when tmux is gone (loop was just rm'd) — never throw.
  */
-export type LoopStatus = "idle" | "busy" | "boot" | "working";
+export type LoopStatus = "idle" | "boot" | "busy";
 
-/**
- * tmux color palette per state (#B.146 / #B.149 / #B.154). David:
- * "la barre tmux devrait etre d'une couleur particulière si claude
- * est en train de travailler (vs idle)". Differentiate:
- *   - `working` (green) — claude actively mid-turn ("esc to
- *     interrupt"). The bar pops to show the user "claude IS doing
- *     stuff right now".
- *   - `busy` (cyan, brand) — scheduled/queued, between turns or
- *     waiting on backend (compacting / rate-limit / api-error).
- *   - `idle` (dark gray) — at prompt, nothing to drain.
- *   - `boot` (yellow) — transitional at spawn, before SessionStart.
- */
 const STATUS_COLORS: Record<LoopStatus, { bg: string; fg: string }> = {
-    working: { bg: "colour34",  fg: "colour15" },  // green / white (claude mid-turn)
-    busy:    { bg: "colour39",  fg: "colour15" },  // cyan / white (queued/waiting)
-    idle:    { bg: "colour240", fg: "colour15" },  // dark gray / white
-    boot:    { bg: "colour178", fg: "colour15" },  // yellow / white (transitional)
+    busy: { bg: "colour34",  fg: "colour15" },  // green / white (claude processing)
+    idle: { bg: "colour240", fg: "colour15" },  // dark gray / white (at prompt)
+    boot: { bg: "colour178", fg: "colour15" },  // yellow / white (transitional)
 };
 
 export function setTmuxStatus(

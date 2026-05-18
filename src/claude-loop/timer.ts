@@ -196,12 +196,10 @@ async function mainSse(): Promise<void> {
     // #B.149: track the "settled" status so the count-refresh below
     // doesn't reset bar to idle while claude is busy. tryWake flips
     // to busy on wake; we mirror that. Boot stays until settleBoot.
-    // #B.173 (david skybot bug): can also flip to `working` when the
-    // pane probe sees "esc to interrupt" mid-heartbeat, or back to
-    // `idle` when slash commands (e.g. /compact) returned without
-    // firing Stop. Critical because Claude Code's Stop hook doesn't
-    // fire for slash-command completion, leaving the bar stuck.
-    let settledStatus: "boot" | "idle" | "busy" | "working" = "boot";
+    // #B.173 (david skybot bug): heartbeat pane-probe flips between
+    // `busy` and `idle` based on `esc to interrupt`, covering slash
+    // commands (/compact, /clear) that don't fire Stop hook.
+    let settledStatus: "boot" | "idle" | "busy" = "boot";
     while (tmuxAlive()) {
         await sleep(interval * 1000);
         // Manual wake (claude-loop wake NAME): file marker, fires
@@ -219,7 +217,7 @@ async function mainSse(): Promise<void> {
         // #B.173: pane-probe correction. `esc to interrupt` is THE
         // authoritative claude-busy signal (david: "seul le esc to
         // interrupt est vraiment crucial dans le workflow"). Use the
-        // heartbeat to flip the bar between `working` and `idle`
+        // heartbeat to flip the bar between `busy` and `idle`
         // independently of hook events, so slash commands that don't
         // trigger Stop (/compact, /clear, …) don't leave us stuck.
         // Boot stays sticky until settleBoot — don't pull the rug.
@@ -237,7 +235,7 @@ async function mainSse(): Promise<void> {
         //     file-watch + JSON parse), and the `esc to interrupt`
         //     pane probe already covers the only critical case.
         //   - PostToolUse / PreToolUse hooks to differentiate
-        //     working:tool-use vs working:thinking: pure decoration.
+        //     busy:tool-use vs busy:thinking: pure decoration.
         //   - tmux pane-title / cursor-position events: claimed less
         //     fragile but requires custom tmux pipe-pane wiring; no
         //     concrete payoff over the existing capture-pane regex.
@@ -247,8 +245,8 @@ async function mainSse(): Promise<void> {
             const paneText = capturePane();
             if (paneText) {
                 const claudeWorking = /esc to interrupt/i.test(paneText);
-                if (claudeWorking && settledStatus !== "working") {
-                    settledStatus = "working";
+                if (claudeWorking && settledStatus !== "busy") {
+                    settledStatus = "busy";
                 } else if (!claudeWorking && settledStatus !== "idle") {
                     // Claude is at the prompt. Seed idle-since so the
                     // next tryWake has a clean gate and flip the bar.
