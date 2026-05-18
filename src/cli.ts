@@ -580,6 +580,12 @@ program
             const mode = payload.autopoll.volatile ? "volatile (one-shot)" : "persistent";
             const backlog = payload.autopoll.backlog ? "backlog-trigger" : "pings-only";
             process.stdout.write(`     mode=${mode}, ${backlog}, throttle=${payload.autopoll.throttle_seconds}s, tone=${payload.autopoll.tone}, recent=${payload.autopoll.include_recent_tickets}\n`);
+        } else if (!payload.config.found) {
+            // #B.154 david: when the Stop hook is wired but no
+            // .aiball.yaml exists, the project is half-set-up.
+            // Surface the activation command so the user doesn't
+            // have to dig into docs.
+            process.stdout.write(`     activate with: aiball autopoll init\n`);
         }
         process.stdout.write(`\nconsumer\n`);
         process.stdout.write(`  ${ok(!!payload.consumer.agent)} agent:   ${payload.consumer.agent ?? "(unresolved)"} ${payload.consumer.agent_source ? `[from ${payload.consumer.agent_source}]` : ""}\n`);

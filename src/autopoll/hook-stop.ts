@@ -86,10 +86,18 @@ async function main(): Promise<void> {
     const cwd = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
     const cfg = loadConfig(cwd);
 
+    // `enabled` is false unless an .aiball.yaml was found AND
+    // explicitly set it true — the SINGLE gate for "is autopoll on
+    // for this project". The previous `!consumer.agent` guard
+    // became redundant when loadConfig started applying a
+    // `<project>-claude` default (#B.154 unification, david).
     if (!cfg.autopoll.enabled) emit({});
-    if (!cfg.consumer.agent) emit({});
 
-    const agent = cfg.consumer.agent;
+    // loadConfig now guarantees agent + project non-null (`<project>-
+    // claude` default kicks in at the end of the chain), but the
+    // interface stays `string | null` so the internal walk can use
+    // `!cfg.consumer.agent` as a "still empty" check. Assert here.
+    const agent = cfg.consumer.agent!;
     const nowSec = Math.floor(Date.now() / 1000);
     const state = readState(agent);
 

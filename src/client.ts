@@ -11,7 +11,7 @@
  * if the architecture ever grows beyond local.
  */
 import { mkdirSync, writeFileSync, renameSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadConfig } from "./autopoll/config.js";
 import { createHash } from "node:crypto";
@@ -619,24 +619,13 @@ export function resolveDefaultProject(cwd = process.cwd()): string | null {
 }
 
 export function resolveAgentId(cwd = process.cwd()): string {
-    // Resolution chain (#B.154 david):
-    //   1. env AIBALL_AGENT (priority override)
-    //   2. .aiball.yaml consumer.agent (canonical) — via shared
-    //      loadConfig, which also handles the deprecated .mcp.json
-    //      env fallback
-    //   3. `<project>-claude` default, where project comes from the
-    //      same loadConfig chain (env > yaml > .mcp.json) and finally
-    //      basename(cwd)
-    //
-    // sha256(cwd) survives as the absolute last-resort fallback so
-    // we never throw from identity resolution.
-    if (process.env.AIBALL_AGENT) return process.env.AIBALL_AGENT;
+    // loadConfig does the full chain (env > .aiball.yaml > .mcp.json
+    // > `<project>-claude` default), so the agent field is always
+    // populated here. sha256(cwd) survives only as the
+    // never-throws fallback (#B.154 david: unified resolution).
     try {
         const cfg = loadConfig(cwd);
         if (cfg.consumer.agent) return cfg.consumer.agent;
-        const project = cfg.consumer.project ?? basename(cwd);
-        return `${project}-claude`;
-    } catch {
-        return createHash("sha256").update(cwd).digest("hex").slice(0, 12);
-    }
+    } catch { /* fall through */ }
+    return createHash("sha256").update(cwd).digest("hex").slice(0, 12);
 }

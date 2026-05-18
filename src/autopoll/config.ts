@@ -20,7 +20,7 @@
  * ```
  */
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, parse as parsePath, resolve } from "node:path";
+import { basename, dirname, join, parse as parsePath, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 export const CONFIG_FILENAME = ".aiball.yaml";
@@ -74,7 +74,7 @@ export interface AiballConfig {
     configPath: string | null;
 }
 
-export type ConsumerSource = "env" | "aiball.yaml" | "mcp.json";
+export type ConsumerSource = "env" | "aiball.yaml" | "mcp.json" | "default";
 
 const DEFAULTS: AiballConfig = {
     autopoll: {
@@ -253,6 +253,22 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             cfg.consumer.project = fromMcp;
             cfg.consumer.project_source = "mcp.json";
         }
+    }
+
+    // Final defaults (#B.154 david): project = basename(cwd),
+    // agent = `<project>-claude`. Single source so every consumer
+    // (autopoll, claude-loop, MCP server, aiball CLI) sees the same
+    // identity when nothing else resolves. Autopoll's "stay silent"
+    // signal moved off `!consumer.agent` (was redundant) to the
+    // proper gate: `!autopoll.enabled`, which is false when no
+    // .aiball.yaml is found.
+    if (!cfg.consumer.project) {
+        cfg.consumer.project = basename(projectDir);
+        cfg.consumer.project_source = "default";
+    }
+    if (!cfg.consumer.agent) {
+        cfg.consumer.agent = `${cfg.consumer.project}-claude`;
+        cfg.consumer.agent_source = "default";
     }
 
     return cfg;
