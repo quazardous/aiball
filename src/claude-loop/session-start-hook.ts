@@ -26,8 +26,9 @@
  *     here.
  */
 import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { AiballClient } from "../client.js";
-import { MUX_CMD, pickPingPhrase, pingsPath, tmuxName } from "./state.js";
+import { MUX_CMD, idleMarkerPath, pickPingPhrase, pingsPath, tmuxName } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -63,6 +64,11 @@ async function checkHasWork(): Promise<boolean> {
             spawnSync(MUX_CMD, [
                 "send-keys", "-t", `${tmuxName(name!)}.0`, phrase, "Enter",
             ], { stdio: "ignore" });
+        } else {
+            // Nothing to do at boot — mark idle so the timer takes
+            // over the watch immediately (no need to wait for claude's
+            // first Stop). Mirrors the Stop hook's "sleep" branch.
+            writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
         }
     } catch {
         /* swallow — never block startup */
