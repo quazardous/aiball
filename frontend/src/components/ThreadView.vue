@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
@@ -20,7 +20,7 @@ import { useSnooze } from "../lib/snooze";
 import { useResolutionFlow } from "../lib/resolutionFlow";
 import { useThreadRelations } from "../lib/threadRelations";
 import { useEditPanel } from "../lib/editPanel";
-import { isPeek } from "../lib/peek";
+import { useAutoMarkRead } from "../lib/autoMarkRead";
 import MarkdownView from "./MarkdownView.vue";
 import MessageComposer from "./MessageComposer.vue";
 
@@ -100,50 +100,9 @@ useBus("thread.refresh", ({ ticketId }) => {
     if (ticketId === props.ticketId) load();
 });
 
-// Auto-mark this ticket read after a short dwell (#B.91). Bounded
-// by up_to_id (#B.191) so comments arriving after the timer fires
-// keep their unseen ping — inbox row stays bold+green for new content.
-const AUTO_MARK_READ_MS = 2000;
-let autoMarkTimer: ReturnType<typeof setTimeout> | null = null;
-function scheduleAutoMarkRead() {
-    if (autoMarkTimer) clearTimeout(autoMarkTimer);
-    if (isPeek()) {
-        // Peek mode → don't touch the endorsed agent's seen-state.
-        return;
-    }
-    const id = props.ticketId;
-    autoMarkTimer = setTimeout(() => {
-        const snapshot = data.value;
-        const lastSeenId = snapshot && snapshot.ticket?.id === id
-            ? Math.max(
-                snapshot.ticket.id,
-                ...snapshot.comments.map((c) => c.id),
-              )
-            : undefined;
-        api.markTicketRead(id, lastSeenId)
-            .then(() => {
-                // Read state is per-consumer, so the server doesn't
-                // broadcast it on WS. Push it onto the bus so the
-                // sidebar/list badges follow.
-                bus.emit("read-state.changed", {
-                    ticket_id: id,
-                    consumer_id: localStorage.getItem("aiball.human_id") ?? "human",
-                    unread: false,
-                });
-                bus.emit("projects.refresh");
-                bus.emit("inbox.refresh");
-            })
-            .catch(() => {/* silent — read state is best-effort */});
-        autoMarkTimer = null;
-    }, AUTO_MARK_READ_MS);
-}
-watch(() => props.ticketId, scheduleAutoMarkRead, { immediate: true });
-onBeforeUnmount(() => {
-    if (autoMarkTimer) {
-        clearTimeout(autoMarkTimer);
-        autoMarkTimer = null;
-    }
-});
+// Auto-mark-as-read dwell timer (#B.91 / #B.191) — wired by the
+// composable; no surface in this file.
+useAutoMarkRead({ data, ticketId: () => props.ticketId });
 
 // Delegated to the shared severity catalog (#B.122) — the local
 // switch-case duplicated STATUS_SEVERITY from `lib/labels.ts`.
