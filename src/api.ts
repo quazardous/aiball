@@ -1592,6 +1592,18 @@ api.get("/tickets/:id", (req, res) => {
             if (m.kind !== "comment_added" || m.id === lastCommentId) return m;
             const meta = parseMeta(m.meta ?? null);
             const summaryUntil = meta.summary_until ?? null;
+            // Replacement is conditional on a summary being present.
+            // Without it, dropping the body would silently swallow the
+            // comment in brief reads — true for every human comment
+            // (humans are exempted from the summary_until requirement)
+            // AND for legacy pre-#B.130 agent comments. Keep the body
+            // in that case so brief mode is lossy-by-summary, not
+            // lossy-by-absence. The LAST comment's body is always
+            // shipped (handled by the early-return above) so the
+            // reader's "now" is always full.
+            if (!summaryUntil) {
+                return { ...m, summary_until: null } as typeof m;
+            }
             return { ...m, body: null, edited_body: null, summary_until: summaryUntil } as typeof m;
         });
     }
