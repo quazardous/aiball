@@ -40,9 +40,45 @@ function log(msg: string): void {
     } catch { /* nowhere to log */ }
 }
 
+// #B.154: probe the visible pane for claude-side states that
+// shouldn't get a wake. Compacting takes minutes (claude is busy
+// summarizing the session); rate-limited / API errors mean any new
+// send-keys will queue uselessly. Both surface in the tmux bar
+// as transient `[busy:compacting]` / `[busy:rate-limit]` etc and
+// suppress the auto-ping so we don't pile garbage into claude.
+function readPane(): string {
+    try {
+        const r = spawnSync(MUX_CMD, [
+            "capture-pane", "-t", `${tmuxName(name!)}.0`, "-p",
+        ], { encoding: "utf8" });
+        return r.stdout ?? "";
+    } catch { return ""; }
+}
+type PaneState = { kind: "compacting" | "rate-limit" | "api-error" | "normal"; info: string };
+function classifyPane(text: string): PaneState {
+    if (/Compacting|compacting conversation|Summarizing the conversation/i.test(text)) {
+        return { kind: "compacting", info: "compacting" };
+    }
+    if (/Rate limited|temporarily limiting requests/i.test(text)) {
+        return { kind: "rate-limit", info: "rate-limit" };
+    }
+    if (/API Error|APIError/i.test(text)) {
+        return { kind: "api-error", info: "api-error" };
+    }
+    return { kind: "normal", info: "" };
+}
+
 (async () => {
     log(`fire — checkCmd=${checkCmd}`);
     try {
+        const paneState = classifyPane(readPane());
+        if (paneState.kind !== "normal") {
+            // Suppress wake — claude is busy with something internal
+            // or blocked. Surface the state in the bar.
+            setTmuxStatus(name!, "busy", paneState.info);
+            log(`  pane state = ${paneState.kind} → suppress wake, status busy:${paneState.info}`);
+            emit();
+        }
         const hasWork = await checkHasWork(checkCmd);
         log(`  checkHasWork → ${hasWork}`);
         if (hasWork) {
