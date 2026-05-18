@@ -15,7 +15,109 @@ the human-readable narrative.
 
 ## [Unreleased]
 
-### Consumers panel: live activity column (`#B.177`)
+### Tailscale remote-access guide + helper (`#B.182`)
+
+aiball can now be reached from your phone (or any other device on
+your tailnet) without touching the daemon config or exposing
+anything to the public internet.
+
+- New `docs/TAILSCALE.md`: 6-step quickstart covering both sides —
+  host (install Tailscale, `aiball-tailscale up`) and client
+  (install the Tailscale app on phone/desktop, sign in to the same
+  account, enable the VPN, open the URL). Security model and
+  troubleshooting included.
+- New `bin/aiball-tailscale` helper wraps `tailscale serve` with
+  the daemon port auto-resolved from `AIBALL_PORT`, the systemd
+  `bind.conf` drop-in, or the 7777 default. Subcommands: `up`
+  (HTTPS on :443 by default, `--http` fallback for tailnets
+  without MagicDNS HTTPS certs), `down`, `status`.
+- `install.sh` now symlinks the helper into `~/.local/bin`
+  alongside the existing `aiball` symlink (and removes it on
+  uninstall).
+- README points to the new doc.
+
+aiball auth is unchanged — Tailscale handles the transport, the
+`bearerAuth` middleware still fires.
+
+### Sandbox loop demoted to experimental + ROADMAP extracted (`#B.183`)
+
+The "sandbox loop" / autonomous-multi-agent narrative was confusing
+new readers into thinking it was a current shipping feature. It's
+now clearly framed as experimental / forward-looking.
+
+- README trimmed: sandbox-loop section removed from the main flow,
+  Quickstart and current-features sections kept tight.
+- New `ROADMAP.md` holds the longer-term vision (sandbox loop,
+  multi-agent orchestration sketches) so it stays visible without
+  diluting the "what aiball does today" pitch.
+
+### claude-loop: all timeouts yaml-configurable + wake-key + OSC 52 clipboard (`#B.180`, `#B.181`)
+
+Three claude-loop fixes/improvements rolled together:
+
+- **All timeouts yaml-configurable** (#B.180). New `claude_loop:`
+  block in `.aiball.yaml` exposes the heartbeat tick and grace
+  windows (`interval_seconds`, `boot_grace_seconds`,
+  `user_grace_seconds`, `wake_in_flight_ttl_ms`) instead of
+  hard-coding them. Defaults preserved. `.aiball.yaml.example`
+  documents the block. Loaded via `loadConfig()` and threaded
+  through `project-context.ts` → `cli.ts` → `timer.ts` /
+  `stop-hook.ts`.
+- **Wake-keys no longer self-trigger user-grace** (#B.180). The
+  loop's own auto-wake `send-keys` was tripping the
+  `UserPromptSubmit` hook, marking `user-took-over` and locking
+  the loop into user-grace until a real human typed something.
+  The timer now sets a short-lived in-flight marker
+  (`wake_in_flight_ttl_ms`, default 2s) before send-keys; the hook
+  checks it and skips the takeover update when set.
+- **Tmux clipboard, local-tool first** (#B.181). claude-loop
+  sessions bind `MouseDragEnd1Pane` to `copy-pipe-no-clear` and
+  pipe the selection into a real local clipboard tool when
+  available — `wl-copy` on Wayland, `xclip`/`xsel` on X11,
+  `pbcopy` on macOS. `set-clipboard on` stays enabled as the OSC
+  52 SSH/remote fallback. The local-tool path fixes VTE-based
+  terminals (Ptyxis) that reject OSC 52 by default. Shift+drag
+  still works as the no-tmux fallback.
+
+### claude-loop: drop stale `working` state + recalibrate user-grace (`#B.185`)
+
+Two fixes against the bar getting stuck on `busy` after a turn ended:
+
+- **`working` pane-state retired from the Stop hook.** The
+  hook fires when claude has ENDED a turn — by definition not
+  working anymore — so probing the pane for `esc to interrupt`
+  there only caught stale footer text from the just-finished turn
+  and suppressed the `idle-since` write, leaving the bar pinned on
+  busy forever. `compacting` / `rate-limit` / `api-error` stay
+  because those are pane-persistent conditions claude legitimately
+  reports mid-turn.
+- **`esc to interrupt` regex scoped to the footer.** In `timer.ts`,
+  the heartbeat probe now matches only the last few non-empty
+  lines of the pane instead of the whole buffer — a stale
+  occurrence in scrollback can no longer pin `settledStatus=busy`
+  forever once the prompt has returned.
+- **User-grace default 300s → 60s.** David: "recalibre les défauts
+  du même ordre de grandeur". The 5-minute outlier surprised — a
+  single human keystroke silenced the wrapper for 5 minutes even
+  after the user had clearly moved on. 60s now matches the
+  heartbeat / boot-grace cadence; long enough to ride out normal
+  typing pauses. `.aiball.yaml` field unchanged.
+
+### Default status filter "all" + reset from empty list (`#B.184`)
+
+The inbox defaulted to `pending`, which meant projects with
+auto-approve (aiball itself, mostly) landed on an empty moderation
+queue while the sidebar badges screamed dozens of open tickets —
+"compteurs ok mais rien dans les listes". Now:
+
+- Default `statusFilter` is `all`. Users land on content first;
+  the moderation queue is one filter-click away. Existing users
+  keep their previous localStorage choice.
+- Empty `InboxList` rows now offer a "reset filters" button
+  (sets status → all, open → true) when the count mismatch with
+  the sidebar badges suggests filters are the cause.
+
+
 
 The consumers panel now shows two new pieces of information per row:
 last-seen (relative time since the consumer's last API call) and, for
