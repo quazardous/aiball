@@ -411,7 +411,7 @@ const flatComments = computed<Message[]>(() => {
 // pick the most recent one carrying `meta.summary_until`. That's the
 // canonical "current state of the thread" snippet to show as a
 // banner. Older summary_until values are invisible/lost (per david).
-const latestSummaryUntil = computed<{ text: string; by: string | null; ts: string } | null>(() => {
+const latestSummaryUntil = computed<{ text: string; by: string | null; ts: string; id: number } | null>(() => {
     if (!data.value) return null;
     let best: { text: string; by: string | null; ts: string; id: number } | null = null;
     for (const m of data.value.comments) {
@@ -440,7 +440,8 @@ const latestSummaryUntil = computed<{ text: string; by: string | null; ts: strin
  */
 type ThreadItem =
     | { kind: "comment"; msg: Message }
-    | { kind: "relation_group"; msgs: Message[] };
+    | { kind: "relation_group"; msgs: Message[] }
+    | { kind: "summary_banner" };
 
 function isRelationKind(k: Message["kind"]): boolean {
     return k === "ticket_sub_added" || k === "ticket_referenced";
@@ -475,21 +476,32 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const threadItems = computed<ThreadItem[]>(() => {
-    const items = flatComments.value;
+    // Walk the ASC-sorted comments and insert the TLDR banner right
+    // AFTER the carrier comment in source order. The optional reverse
+    // for top-down at the end keeps the banner between the carrier
+    // and the post-summary newer comments in both modes (david:
+    // "intercalé entre le commentaire qu'il porte et les suivants non
+    // encore pris en compte"). #B.130.
+    if (!data.value) return [];
+    const ascItems = [...data.value.comments].sort((a, b) => a.id - b.id);
+    const summaryCarrierId = latestSummaryUntil.value?.id ?? null;
     const out: ThreadItem[] = [];
     let i = 0;
-    while (i < items.length) {
-        const m = items[i];
+    while (i < ascItems.length) {
+        const m = ascItems[i];
         if (!isRelationKind(m.kind)) {
             out.push({ kind: "comment", msg: m });
+            if (m.id === summaryCarrierId) {
+                out.push({ kind: "summary_banner" });
+            }
             i++;
             continue;
         }
         // Collect a run of same-kind same-author events within 60s.
         const group: Message[] = [m];
         let j = i + 1;
-        while (j < items.length) {
-            const n = items[j];
+        while (j < ascItems.length) {
+            const n = ascItems[j];
             if (n.kind !== m.kind) break;
             if (n.by_agent !== m.by_agent) break;
             const dt = Math.abs(
@@ -500,9 +512,15 @@ const threadItems = computed<ThreadItem[]>(() => {
             j++;
         }
         out.push({ kind: "relation_group", msgs: group });
+        // Banner insertion also applies if the carrier was the last in
+        // a relation group (edge case: rare in practice — carriers are
+        // comment_added, not relations — but defensive).
+        if (group.some((x) => x.id === summaryCarrierId)) {
+            out.push({ kind: "summary_banner" });
+        }
         i = j;
     }
-    return out;
+    return topDown.value ? out.reverse() : out;
 });
 
 function shortTime(iso: string): string {
@@ -1530,20 +1548,14 @@ async function copyTicketRef() {
                 <MarkdownView :source="data.ticket.body" />
             </article>
 
-            <!-- #B.130: latest summary_until = canonical "current state
-                 of the thread". Shown once, between the ticket body
-                 and the comments list. Older summaries are invisible
-                 (per david: "c'est toujours le dernier qui a raison,
-                 les autres sont invisible perdu"). -->
-            <div
-                v-if="latestSummaryUntil"
-                class="thread-summary-banner"
-                :title="`Current-state summary by ${latestSummaryUntil.by ?? 'author'} at ${new Date(latestSummaryUntil.ts).toLocaleString()}. Older summaries are superseded.`"
-            >
-                <i class="pi pi-bookmark thread-summary-banner__icon" />
-                <span class="thread-summary-banner__label">tldr</span>
-                <span class="thread-summary-banner__text">{{ latestSummaryUntil.text }}</span>
-            </div>
+            <!-- #B.130 follow-up: the TLDR banner used to sit between
+                 the ticket body and the comments list. Now it's
+                 inserted INSIDE the comments list right after the
+                 comment that carries the latest summary_until — so
+                 post-summary comments visually fall on the "not yet
+                 summarized" side of the banner (david: "intercalé
+                 entre le commentaire qu'il porte et les suivants non
+                 encore pris en compte"). See threadItems builder. -->
 
             <div v-if="flatComments.length === 0" class="aiball-empty thread-no-comments">
                 No comments yet — be the first to reply.
@@ -1561,7 +1573,16 @@ async function copyTicketRef() {
                         />
                     </li>
                     <li
-                        v-else
+                        v-else-if="item.kind === 'summary_banner' && latestSummaryUntil"
+                        class="thread-summary-banner thread-summary-banner--inline"
+                        :title="`Current-state summary by ${latestSummaryUntil.by ?? 'author'} at ${new Date(latestSummaryUntil.ts).toLocaleString()}. Comments below (or above in top-down) are post-summary and not yet captured.`"
+                    >
+                        <i class="pi pi-bookmark thread-summary-banner__icon" />
+                        <span class="thread-summary-banner__label">tldr</span>
+                        <span class="thread-summary-banner__text">{{ latestSummaryUntil.text }}</span>
+                    </li>
+                    <li
+                        v-else-if="item.kind === 'relation_group'"
                         class="thread-relation-row"
                         :data-kind="item.msgs[0].kind"
                     >
@@ -1921,7 +1942,8 @@ async function copyTicketRef() {
    Re-orders the flex children — source order stays the same. */
 .thread-view--top-down .thread-toolbar { order: 0; }
 .thread-view--top-down > .composer { order: 1; }
-.thread-view--top-down .thread-summary-banner { order: 2; }
+/* (thread-summary-banner no longer needs a flex order — it's now an
+   inline LI inside .thread-comments, positioned by threadItems.) */
 .thread-view--top-down .thread-no-comments,
 .thread-view--top-down .thread-comments { order: 3; }
 .thread-view--top-down .thread-ticket { order: 4; }
