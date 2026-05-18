@@ -5,6 +5,7 @@ import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
 import Select from "primevue/select";
 import SplitButton from "primevue/splitbutton";
+import Menu from "primevue/menu";
 import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
 import { useToast } from "primevue/usetoast";
@@ -76,6 +77,9 @@ async function removeRelation(targetId: number) {
 // promote (#B.123 phase B.5) — no existing relation yet, the picker
 // creates one. Otherwise it carries the existing kind (chip edit).
 const relationMenuRef = ref<InstanceType<typeof Popover> | null>(null);
+// #B.139: refs for the popup-menu Accept buttons (replaced SplitButton).
+const activeAcceptMenuRef = ref<InstanceType<typeof Menu> | null>(null);
+const legacyAcceptMenuRef = ref<InstanceType<typeof Menu> | null>(null);
 const relationMenuTarget = ref<{ target_ticket_id: number; kind: RelationKind | null } | null>(null);
 function openRelationMenu(
     ev: Event,
@@ -773,11 +777,18 @@ async function acceptResolution(asKind?: "plan" | "resolution") {
 }
 
 // Menu items for the legacy pendingResolution path — same reclassify
-// idea as `acceptMenu` but reached when the active "resolution" is a
-// historical ticket_resolved row (not a comment+decision).
-const legacyAcceptMenu = computed(() => [
+// idea as the new-flow acceptMenu but reached when the active
+// "resolution" is a historical ticket_resolved row (not a comment+
+// decision). All variants live in the menu (#B.139 follow-up — no
+// hidden default on a main button).
+const fullLegacyAcceptMenu = computed(() => [
     {
-        label: "accept as plan (keep open)",
+        label: "accept resolution → close the ticket",
+        icon: "pi pi-check-circle",
+        command: () => { void acceptResolution(); },
+    },
+    {
+        label: "accept as plan → keep the ticket open",
         icon: "pi pi-compass",
         command: () => { void acceptResolution("plan"); },
     },
@@ -893,29 +904,46 @@ async function reclassifyActiveDecision(newKind: "plan" | "resolution") {
 //   - "just reclassify to <other-kind>" flips kind only, decision
 //     stays pending (per david: "je dois pouvoir requalifier en
 //     voici mon plan").
+// #B.139: SplitButton had a hidden "default" action on the main
+// button + alternates in the dropdown — david found the wording
+// unclear (clicking a dropdown item fires that action directly, but
+// the main label stays generic so the relationship is hard to read).
+// Replaced with Button + popup Menu where ALL accept variants are
+// explicit menu items including the "primary" path. The trigger
+// button just opens the menu; user picks the variant they want.
 const acceptMenu = computed(() => {
     const active = activeDecision.value;
     if (!active) return [];
     const items: { label: string; icon: string; command: () => void }[] = [];
     if (active.decision.kind === "resolution") {
         items.push({
-            label: "accept as plan (keep open)",
+            label: "accept resolution → close the ticket",
+            icon: "pi pi-check-circle",
+            command: () => { void acceptActiveDecision(); },
+        });
+        items.push({
+            label: "accept as plan → keep the ticket open",
             icon: "pi pi-compass",
             command: () => { void acceptActiveDecision("plan"); },
         });
         items.push({
-            label: "just reclassify as plan (still pending)",
+            label: "reclassify as plan → still pending",
             icon: "pi pi-pencil",
             command: () => { void reclassifyActiveDecision("plan"); },
         });
     } else if (active.decision.kind === "plan") {
         items.push({
-            label: "accept as resolution and close",
+            label: "accept plan → ticket stays open",
             icon: "pi pi-check-circle",
+            command: () => { void acceptActiveDecision(); },
+        });
+        items.push({
+            label: "accept as resolution → close the ticket",
+            icon: "pi pi-verified",
             command: () => { void acceptActiveDecision("resolution"); },
         });
         items.push({
-            label: "just reclassify as resolution (still pending)",
+            label: "reclassify as resolution → still pending",
             icon: "pi pi-pencil",
             command: () => { void reclassifyActiveDecision("resolution"); },
         });
@@ -1893,15 +1921,22 @@ async function copyTicketRef() {
                                 : `Type an explanation in the composer first — rejecting a ${activeDecision.decision.kind} needs a reason.`"
                             @click="rejectActiveDecision"
                         />
-                        <SplitButton
-                            :label="activeDecision.decision.kind === 'resolution' ? 'accept resolution and close' : `accept ${activeDecision.decision.kind}`"
+                        <Button
+                            :label="`accept ${activeDecision.decision.kind} ▾`"
                             icon="pi pi-verified"
                             severity="success"
                             size="small"
                             :loading="resolutionBusy"
+                            aria-haspopup="true"
+                            aria-controls="active-accept-menu"
+                            title="Pick how to accept this decision — see all variants in the menu"
+                            @click="(ev: MouseEvent) => activeAcceptMenuRef?.toggle(ev)"
+                        />
+                        <Menu
+                            id="active-accept-menu"
+                            ref="activeAcceptMenuRef"
                             :model="acceptMenu"
-                            menu-button-aria-label="Accept as different decision kind"
-                            @click="() => acceptActiveDecision()"
+                            :popup="true"
                         />
                     </template>
                     <template v-else-if="pendingResolution">
@@ -1918,15 +1953,22 @@ async function copyTicketRef() {
                                 : 'Type an explanation in the composer first — rejecting a proposal needs a reason.'"
                             @click="rejectResolution"
                         />
-                        <SplitButton
-                            label="accept resolution and close"
+                        <Button
+                            label="accept resolution ▾"
                             icon="pi pi-verified"
                             severity="success"
                             size="small"
                             :loading="resolutionBusy"
-                            :model="legacyAcceptMenu"
-                            menu-button-aria-label="Accept as different decision kind"
-                            @click="() => acceptResolution()"
+                            aria-haspopup="true"
+                            aria-controls="legacy-accept-menu"
+                            title="Pick how to accept — see all variants in the menu"
+                            @click="(ev: MouseEvent) => legacyAcceptMenuRef?.toggle(ev)"
+                        />
+                        <Menu
+                            id="legacy-accept-menu"
+                            ref="legacyAcceptMenuRef"
+                            :model="fullLegacyAcceptMenu"
+                            :popup="true"
                         />
                     </template>
                     <template v-else-if="data.ticket.status === 'rejected'">
