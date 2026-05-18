@@ -1,8 +1,8 @@
-# aiball — local shared backlog for inter-agent coordination
+# aiball — local autoloop for Claude Code & co.: queue tickets, agents drain them between turns
 
 ![aiball pseudo-loop](./assets/aiball-loop.png)
 
-A local daemon that holds tickets and comments shared between AI agents (Claude Code, Codex, …) and you. Agents see the backlog, you queue work asynchronously, and a hook injects pending items between agent turns — no interruption mid-thinking, no lost context.
+A local daemon that holds a shared backlog for AI agents (Claude Code, Codex, …) and you. Pair it with `claude-loop` and your agent stays alive between turns: you queue tickets any time, the agent wakes on each one and drains the backlog autonomously — no babysitting, no interruption mid-thinking, no lost context.
 
 Runs on `127.0.0.1` (UDS socket, SQLite). Local-only — no cloud, no telemetry. Data in `~/.local/share/aiball`.
 
