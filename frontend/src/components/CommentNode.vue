@@ -11,6 +11,12 @@ import { attachPasteImage } from "../lib/pasteImage";
 import { questionStats as computeQuestionStats } from "../lib/questions";
 import { readDecision } from "../lib/decisions";
 
+interface DeciderInfo {
+    action: "accepted" | "rejected";
+    target_id: number;
+    target_hashid: string | null;
+    target_kind: string;
+}
 const props = defineProps<{
     msg: Message;
     /**
@@ -19,6 +25,13 @@ const props = defineProps<{
      * so the eye lands on the most recent moderation request.
      */
     showPendingTag?: boolean;
+    /**
+     * #B.129 follow-up: when this comment is the one that triggered an
+     * accept/reject act on a PRIOR comment, ThreadView passes the
+     * decider info so we render a small "↪ accepted/rejected #C.XXX"
+     * chip. Null when not a decider comment.
+     */
+    decider?: DeciderInfo | null;
 }>();
 /**
  * Refresh fan-out after a state-mutating action on this comment. We
@@ -244,6 +257,18 @@ onBeforeUnmount(() => detachPaste?.());
                 :title="decision.status === 'pending'
                     ? `${msg.by_agent ?? 'someone'} tagged this comment as a ${decision.kind} — accept/reject pair is under the composer.`
                     : `${decision.kind} ${decision.status}${decision.decided_at ? ' at ' + new Date(decision.decided_at).toLocaleString() : ''}`"
+                style="font-size: 0.7rem; margin-left: 0.4rem"
+            />
+            <!-- #B.129 follow-up: small chip when this comment was the
+                 act that accepted/rejected a prior comment's decision.
+                 Heuristic match in ThreadView (same author + decided_at
+                 within 60s of this comment's created_at). -->
+            <Tag
+                v-if="decider"
+                :icon="decider.action === 'accepted' ? 'pi pi-check' : 'pi pi-times'"
+                :severity="decider.action === 'accepted' ? 'success' : 'danger'"
+                :value="`${decider.action} ${decider.target_kind}`"
+                :title="`This comment ${decider.action} the ${decider.target_kind} on ${decider.target_hashid ? '#C.' + decider.target_hashid : 'a prior comment'}`"
                 style="font-size: 0.7rem; margin-left: 0.4rem"
             />
             <!-- #B.130 follow-up: TLDR is now rendered as an inline

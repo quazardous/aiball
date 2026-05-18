@@ -9,7 +9,7 @@ import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
 import { useToast } from "primevue/usetoast";
 import { api, INTENTS, type Message, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
-import { findActiveDecision, type CommentDecision } from "../lib/decisions";
+import { findActiveDecision, readDecision, type CommentDecision } from "../lib/decisions";
 import { STATUS_SEVERITY } from "../lib/labels";
 import { topDown, toggleTopDown } from "../lib/prefs";
 import { RELATION_KINDS, RELATION_LABELS as TYPED_RELATION_LABELS, type RelationKind } from "../lib/relations";
@@ -405,6 +405,54 @@ const flatComments = computed<Message[]>(() => {
     if (!data.value) return [];
     const sorted = [...data.value.comments].sort((a, b) => a.id - b.id);
     return topDown.value ? sorted.reverse() : sorted;
+});
+
+// #B.129 follow-up: decorate the comment that triggered an accept/
+// reject act. Heuristic (frontend-only, no schema change): a comment
+// posted by user X within 60s AFTER a decision flipped to
+// accepted/rejected by X on a PRIOR comment is the "decider comment".
+// Build a Map<message_id, { action, target_id, target_hashid }>.
+// Limitation: 60s window can both false-positive (X commented for
+// unrelated reasons right after deciding) and false-negative (X took
+// >60s to type the explanation). Acceptable for v1; revisit if david
+// flags noise.
+interface DeciderInfo {
+    action: "accepted" | "rejected";
+    target_id: number;
+    target_hashid: string | null;
+    target_kind: string;
+}
+const decidersByMessage = computed<Map<number, DeciderInfo>>(() => {
+    const out = new Map<number, DeciderInfo>();
+    if (!data.value) return out;
+    const sorted = [...data.value.comments].sort((a, b) => a.id - b.id);
+    for (let i = 0; i < sorted.length; i++) {
+        const target = sorted[i];
+        if (target.kind !== "comment_added") continue;
+        const d = readDecision(target);
+        if (!d || d.status === "pending" || !d.decided_by || !d.decided_at) continue;
+        const decidedAt = new Date(d.decided_at).getTime();
+        // Find the next comment by d.decided_by within 60s
+        for (let j = i + 1; j < sorted.length; j++) {
+            const cand = sorted[j];
+            if (cand.kind !== "comment_added") continue;
+            if (cand.by_agent !== d.decided_by) continue;
+            const dt = new Date(cand.created_at).getTime() - decidedAt;
+            if (dt < -1000) continue; // candidate posted before the decide
+            if (dt > 60_000) break; // too late, give up
+            // Don't tag the decided comment itself (e.g. if the
+            // decision sat on the same author's prior comment).
+            if (cand.id === target.id) continue;
+            out.set(cand.id, {
+                action: d.status as "accepted" | "rejected",
+                target_id: target.id,
+                target_hashid: target.hashid ?? null,
+                target_kind: d.kind,
+            });
+            break;
+        }
+    }
+    return out;
 });
 
 // #B.130: latest summary_until wins. Scan all approved comments,
@@ -1595,6 +1643,7 @@ async function copyTicketRef() {
                         <CommentNode
                             :msg="item.msg"
                             :show-pending-tag="item.msg.id === latestPendingId"
+                            :decider="decidersByMessage.get(item.msg.id) ?? null"
                         />
                     </li>
                     <li
