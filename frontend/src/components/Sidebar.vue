@@ -33,6 +33,7 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: "select", value: string | null): void;
     (e: "open-panel", panel: SettingsPanel): void;
+    (e: "new-ticket"): void;
 }>();
 
 // #B.161: collapse the projects details by default on phones so the
@@ -62,7 +63,24 @@ const activeProjectLabel = computed(() => {
              by default on phone — saves the 30vh sidebar band for the
              active project's row only). -->
         <details class="sidebar-projects" :open="projectsOpen">
-            <summary class="sidebar-section-label">{{ activeProjectLabel }}</summary>
+            <summary class="sidebar-section-label">
+                <span class="sidebar-projects__label">{{ activeProjectLabel }}</span>
+                <!-- #B.161 follow-up: quick "+ new ticket" on the
+                     right of the project name when projects is
+                     collapsed on mobile — saves the user from
+                     scrolling past the inbox toolbar. Hidden on
+                     desktop (the InboxToolbar already exposes it
+                     there). @click.stop so the summary toggle
+                     doesn't fire. -->
+                <button
+                    type="button"
+                    class="sidebar-new-ticket"
+                    title="New ticket"
+                    @click.stop="emit('new-ticket')"
+                >
+                    <i class="pi pi-plus" />
+                </button>
+            </summary>
             <button
                 v-for="p in items"
                 :key="p.value ?? '__all__'"
@@ -168,33 +186,96 @@ const activeProjectLabel = computed(() => {
 .sidebar-projects > summary {
     cursor: pointer;
     list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.sidebar-projects__label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .sidebar-projects > summary::-webkit-details-marker {
     display: none;
 }
 .sidebar-projects > summary::before {
-    content: "▾ ";
+    content: "▾";
     color: var(--p-text-muted-color);
     font-size: 0.6rem;
-    margin-right: 0.25rem;
 }
 .sidebar-projects:not([open]) > summary::before {
-    content: "▸ ";
+    content: "▸";
+}
+.sidebar-new-ticket {
+    display: none;
+    background: transparent;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.3rem;
+    width: 1.6rem;
+    height: 1.6rem;
+    align-items: center;
+    justify-content: center;
+    color: var(--p-text-color);
+    cursor: pointer;
+    font-size: 0.75rem;
+}
+.sidebar-new-ticket:hover {
+    background: var(--p-surface-100);
+}
+.aiball-dark .sidebar-new-ticket:hover {
+    background: var(--p-surface-800);
+}
+@media (max-width: 720px) {
+    .sidebar-new-ticket {
+        display: inline-flex;
+    }
 }
 .sidebar-settings {
     display: flex;
     flex-direction: column;
 }
 @media (max-width: 720px) {
-    /* #B.161 mobile: settings stays a vertical text list (david:
-       "ça ça passe en dessous pas la peine de faire des icone juste
-       du texte comme avant en tabulaire vertical"). Just pushed to
-       the bottom of the sidebar band via margin-top: auto + a thin
-       top border to read as a footer separator. */
+    /* #B.161 mobile: settings becomes a horizontal icon-row anchored
+       at the very bottom of the viewport — david's "la partie
+       settings doit etre apres les tickets et le thread en footer
+       de page". Out of the sidebar's vertical flow entirely;
+       position: fixed lets it overlay nothing of value (toast
+       padding handles the visual margin). The aiball-main / sidebar
+       get extra bottom padding so content doesn't slide under. */
     .sidebar-settings {
-        margin-top: auto;
-        padding-top: 0.5rem;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        display: flex;
+        flex-direction: row;
+        justify-content: space-around;
+        align-items: stretch;
+        padding: 0.2rem 0.4rem;
+        background: var(--p-surface-50);
         border-top: 1px solid var(--p-content-border-color);
+        z-index: 5;
+    }
+    .aiball-dark .sidebar-settings {
+        background: var(--p-surface-900);
+    }
+    .sidebar-settings > .sidebar-section-label {
+        display: none;
+    }
+    .sidebar-settings > .sidebar-item {
+        flex: 1 1 0;
+        flex-direction: column;
+        gap: 0.1rem;
+        padding: 0.35rem 0.2rem;
+        font-size: 0.7rem;
+        text-align: center;
+        min-width: 0;
+        justify-content: center;
+    }
+    .sidebar-settings > .sidebar-item > i {
+        font-size: 1rem;
     }
 }
 .aiball-dark .aiball-sidebar {

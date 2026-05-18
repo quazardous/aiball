@@ -850,6 +850,7 @@ watch(showSnoozed, (v) => {
                 :project-page="projectPage"
                 @select="selectProject"
                 @open-panel="openPanel"
+                @new-ticket="panel = 'compose'"
             />
 
             <main class="aiball-main">
@@ -1028,6 +1029,16 @@ watch(showSnoozed, (v) => {
     }
     .aiball-main {
         padding: 0.5rem;
+        /* #B.161 footer: settings is position: fixed at viewport
+           bottom on mobile — leave room so the last ticket row /
+           composer doesn't get covered. ~3rem matches the footer
+           band height + a little breathing room. */
+        padding-bottom: 3.2rem;
+    }
+    .aiball-sidebar {
+        /* Same — sidebar's own scroll area shouldn't bleed under the
+           fixed settings footer. */
+        padding-bottom: 3.2rem;
     }
     /* #B.165: toasts go edge-to-edge on mobile (slim left/right safety
        margin), and the verbose footer line (consumer · ref · project)

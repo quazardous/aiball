@@ -190,9 +190,19 @@ function pickStrategy(v: Strategy) {
            controls to a third line — collapse it so all controls
            stay on at most two rows. #B.161 compact pass: tighter
            gap + smaller h1 + hide the strategy-select (rarely
-           changed; accessible via Project Settings). */
-        gap: 0.25rem 0.35rem;
+           changed; accessible via Project Settings). #B.161
+           follow-up: tighter inline gap between icon buttons on
+           the wrapped row (david: "beaucoup trop d'espace entre
+           les icone bouton ici"). */
+        gap: 0.2rem 0.15rem;
         padding: 0.35rem 0.45rem;
+    }
+    /* PrimeVue rounded buttons in the header (notif, dark, refresh,
+       auto-refresh) had visible inter-button space from their own
+       :not(:last-child) margin + the header gap. Strip margin so the
+       row reads as a tight cluster. */
+    .aiball-header .p-button.p-button-rounded {
+        margin: 0;
     }
     .aiball-header h1 {
         font-size: 1rem;
