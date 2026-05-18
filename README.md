@@ -88,7 +88,6 @@ Experimental / partial / planned surfaces: see [`ROADMAP.md`](./ROADMAP.md).
 
 ---
 
-
 ## Daemon lifecycle
 
 | | |
