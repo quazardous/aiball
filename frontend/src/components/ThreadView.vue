@@ -1942,6 +1942,21 @@ async function copyTicketRef() {
                     </div>
                 </template>
                 <template #extra-actions>
+                    <!-- #B.143: snooze is "mental-load relief" (david's
+                         framing) — should be reachable regardless of
+                         which decision/state the thread is in. Lives
+                         here so every branch below inherits it. -->
+                    <Button
+                        v-if="!data.ticket.closed && data.ticket.status !== 'rejected' && !isSnoozed"
+                        icon="pi pi-history"
+                        :label="hasBody ? 'comment and snooze' : 'snooze'"
+                        severity="info"
+                        size="small"
+                        text
+                        :loading="snoozeBusy"
+                        title="Set aside — type your context first if you want, then pick a duration. The ticket disappears from the open inbox until then."
+                        @click="openSnoozePopover"
+                    />
                     <template v-if="activeDecision">
                         <Button
                             icon="pi pi-times"
@@ -2034,17 +2049,9 @@ async function copyTicketRef() {
                         />
                     </template>
                     <template v-else>
-                        <Button
-                            v-if="!data.ticket.resolved && !data.ticket.blocked && !isSnoozed"
-                            icon="pi pi-history"
-                            :label="hasBody ? 'comment and snooze' : 'snooze'"
-                            severity="info"
-                            size="small"
-                            text
-                            :loading="snoozeBusy"
-                            title="Set aside — type your context first if you want, then pick a duration. The ticket disappears from the open inbox until then."
-                            @click="openSnoozePopover"
-                        />
+                        <!-- snooze button now lives at the top of
+                             #extra-actions (#B.143) so every state
+                             inherits it; no per-branch dupe here -->
                         <SplitButton
                             v-if="!data.ticket.resolved && !data.ticket.blocked"
                             :label="hasBody ? 'comment and mark resolved' : 'mark resolved'"
