@@ -97,7 +97,13 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
     const byAgent = typeof o.by_agent === "string" ? o.by_agent : null;
     const authorIsHuman = byAgent ? isHuman(byAgent) : false;
     if (kind === "comment_added") {
-        const provided = typeof o.summary_until === "string" ? o.summary_until.trim().slice(0, 200) : "";
+        // #B.130 follow-up: raised cap from 200 → 500 chars. David
+        // saw TLDR getting truncated mid-word ("...que CommentNode" →
+        // "...que Commen"). A whole-ticket-state framing (état global
+        // + in-progress + waiting on + open question) routinely runs
+        // 300-450 chars; 200 forced agents into action-framed deltas
+        // that were the exact failure mode david kept flagging.
+        const provided = typeof o.summary_until === "string" ? o.summary_until.trim().slice(0, 500) : "";
         if (!provided && !authorIsHuman) {
             return { error: "summary_until is required on comment_added for agent authors (one-line TLDR of the thread state up to this comment). Humans skip the requirement." };
         }
