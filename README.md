@@ -8,7 +8,7 @@ Runs on `127.0.0.1` (UDS socket, SQLite). Local-only — no cloud, no telemetry.
 
 ---
 
-## The pseudo-loop
+## The soft-loop
 
 1. **You (or any agent) queue a ticket** at any time — via the web UI, the MCP `ticket_new` tool, or the `aiball` CLI. The ticket lands in the right project's backlog with a named recipient agent (or broadcasts to project owners).
 2. **A claude session is working on something** — its current turn proceeds uninterrupted. Aiball doesn't push during a turn.
@@ -68,7 +68,7 @@ tmux opens with claude inside. Status bar shows `[boot]` → `[idle 0]` → `[bu
 - **Interactive claude without tmux** (autopoll Stop hook between turns): see [`MCP-CLIENT.md`](./MCP-CLIENT.md) §4 — the `./install.sh --stop-hook` + `aiball autopoll init` flow for sessions you launch yourself.
 - **Bare MCP only** (other agents, no loop): [`MCP-CLIENT.md`](./MCP-CLIENT.md).
 - **Mint agent tokens** (only needed if you want stable per-agent auth across reboots): `aiball auth issue --consumer <agent-name>`.
-- **Remote access via Tailscale** (read inbox from your phone while away): `aiball-tailscale up` exposes the local daemon to your tailnet via `tailscale serve` (still private, end-to-end encrypted, no public exposure). Full guide: [`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
+- **Remote access via Tailscale** (The Loop in your pocket): `aiball-tailscale up` exposes the local daemon to your tailnet via `tailscale serve` (still private, end-to-end encrypted, no public exposure). Full guide: [`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
 - **Windows install** (daemon + CLI + MCP): see [`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md). claude-loop port deferred (needs a tmux equivalent on Windows).
 
 ---
