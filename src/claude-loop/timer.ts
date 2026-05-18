@@ -134,7 +134,27 @@ function client(): AiballClient {
  * the check-cmd; only the idle-since gate stays because pinging over
  * a busy claude is always wrong.
  */
+// #B.205 david: "tous les event joue avec la meme balle (...) on
+// donne le premier les autre viendront plus tard au hook suivant".
+// In-flight mutex: when N SSE pings for DIFFERENT comments arrive in a
+// burst, all tryWake calls used to pass the synchronous gates and
+// queue at the `await checkHasWork` line — then all fired send-keys
+// once the network call returned, pasting N phrases. With the mutex,
+// only the first wake proceeds; concurrent attempts drop. The Stop
+// hook (or next heartbeat) sees pings still unread post-turn and
+// fires the next wake. Same ball, one at a time.
+let tryWakeInFlight: Promise<boolean> | null = null;
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint): Promise<boolean> {
+    if (tryWakeInFlight) {
+        log(`skip wake (${reason}) — coalesce: another wake in flight`);
+        return false;
+    }
+    tryWakeInFlight = tryWakeInner(reason, manualWake, hint).finally(() => {
+        tryWakeInFlight = null;
+    });
+    return tryWakeInFlight;
+}
+async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint): Promise<boolean> {
     if (!existsSync(idleMarkerPath(sd!))) return false;
     if (!manualWake && userIsTakingOver(sd!, userGraceSec)) return false;
     // #B.198 david: state-based busy defer set by the Stop hook when
