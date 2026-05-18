@@ -90,14 +90,18 @@ async function save() {
 
 <template>
     <div class="consumer-edit">
+        <nav class="consumer-edit__crumbs">
+            <a
+                href="/consumers"
+                class="consumer-edit__crumb-link"
+                @click.prevent="emit('close')"
+            >
+                <i class="pi pi-arrow-left" /> Consumers
+            </a>
+            <span class="consumer-edit__crumb-sep">/</span>
+            <span class="consumer-edit__crumb-current">{{ props.consumerId }}</span>
+        </nav>
         <header class="consumer-edit__head">
-            <Button
-                label="Back to consumers"
-                icon="pi pi-arrow-left"
-                text
-                size="small"
-                @click="emit('close')"
-            />
             <h2 class="consumer-edit__title">Edit consumer</h2>
         </header>
 
@@ -192,6 +196,30 @@ async function save() {
     display: flex;
     align-items: center;
     gap: 0.6rem;
+}
+.consumer-edit__crumbs {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+}
+.consumer-edit__crumb-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--p-primary-color);
+    text-decoration: none;
+}
+.consumer-edit__crumb-link:hover {
+    text-decoration: underline;
+}
+.consumer-edit__crumb-sep {
+    color: var(--p-text-muted-color);
+}
+.consumer-edit__crumb-current {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.85rem;
+    color: var(--p-text-muted-color);
 }
 .consumer-edit__title {
     margin: 0;
