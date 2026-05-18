@@ -2,7 +2,9 @@
 
 ![aiball pseudo-loop](./assets/aiball-loop.png)
 
-A local daemon that holds a shared backlog for AI agents (Claude Code, Codex, …) and you. Pair it with `claude-loop` and your agent stays alive between turns: you queue tickets any time, the agent wakes on each one and drains the backlog autonomously — no babysitting, no interruption mid-thinking, no lost context.
+A local daemon that holds a shared backlog for [Claude Code](https://docs.claude.com/en/docs/claude-code) and you. Pair it with `claude-loop` and your Claude session stays alive between turns: you queue tickets any time, claude wakes on each one and drains the backlog autonomously — no babysitting, no interruption mid-thinking, no lost context.
+
+> **Today, Claude Code is the only supported agent.** The protocol is generic (MCP + a small HTTP/CLI surface) so other CLI agents could plug in, but nothing else is wired or tested yet. If you're not running Claude Code, this is interesting reading at best.
 
 Runs on `127.0.0.1` (UDS socket, SQLite). Local-only — no cloud, no telemetry. Data in `~/.local/share/aiball`.
 
@@ -10,7 +12,7 @@ Runs on `127.0.0.1` (UDS socket, SQLite). Local-only — no cloud, no telemetry.
 
 ## The soft-loop
 
-1. **You (or any agent) queue a ticket** at any time — via the web UI, the MCP `ticket_new` tool, or the `aiball` CLI. The ticket lands in the right project's backlog with a named recipient agent (or broadcasts to project owners).
+1. **You (or another Claude session) queue a ticket** at any time — via the web UI, the MCP `ticket_new` tool, or the `aiball` CLI. The ticket lands in the right project's backlog addressed to a specific Claude session (by `consumer_id`) or broadcast to project owners.
 2. **A claude session is working on something** — its current turn proceeds uninterrupted. Aiball doesn't push during a turn.
 3. **End-of-turn `Stop` hook fires** (registered globally or per-loop via `claude-loop`). The hook checks the consumer's backlog. If non-empty, it surfaces pending tickets + pings into the next user-facing prompt — claude sees them as if you'd just typed "here's the backlog".
 4. **Claude drains the backlog**: reads tickets, posts replies (`ticket_reply`), proposes resolutions (`then: "resolved"`), closes its own (`then: "close"`). Each action emits events back to other subscribers.
@@ -61,13 +63,13 @@ Identity defaults to `<project>-claude` (matches `basename(cwd)`). Add a `consum
 claude-loop -- --resume       # anything after -- is forwarded to claude
 ```
 
-tmux opens with claude inside. Status bar shows `[boot]` → `[idle 0]` → `[busy]` based on real claude state (pane-probed). When a ticket lands via the web UI or another agent's MCP, claude wakes within ms and processes it. Detach with `Ctrl-B D`, re-attach with `claude-loop attach <name>`.
+tmux opens with claude inside. Status bar shows `[boot]` → `[idle 0]` → `[busy]` based on real claude state (pane-probed). When a ticket lands via the web UI or another claude session, claude wakes within ms and processes it. Detach with `Ctrl-B D`, re-attach with `claude-loop attach <name>`.
 
 ### Other setups
 
 - **Interactive claude without tmux** (autopoll Stop hook between turns): see [`MCP-CLIENT.md`](./MCP-CLIENT.md) §4 — the `./install.sh --stop-hook` + `aiball autopoll init` flow for sessions you launch yourself.
-- **Bare MCP only** (other agents, no loop): [`MCP-CLIENT.md`](./MCP-CLIENT.md).
-- **Mint agent tokens** (only needed if you want stable per-agent auth across reboots): `aiball auth issue --consumer <agent-name>`.
+- **Bare MCP** (no loop, useful for scripts / non-claude experiments — protocol works but only Claude Code is wired today): [`MCP-CLIENT.md`](./MCP-CLIENT.md).
+- **Mint consumer tokens** (only needed if you want stable per-consumer auth across reboots): `aiball auth issue --consumer <name>`.
 - **Remote access via Tailscale** (The Loop in your pocket): `aiball-tailscale up` exposes the local daemon to your tailnet via `tailscale serve` (still private, end-to-end encrypted, no public exposure). Full guide: [`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
 - **Windows install** (daemon + CLI + MCP): see [`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md). claude-loop port deferred (needs a tmux equivalent on Windows).
 
