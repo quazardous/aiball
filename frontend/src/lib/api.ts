@@ -189,6 +189,12 @@ export interface TicketRelation {
      *  rejected). Enriched server-side; backfill defaults to "open"
      *  when the stage isn't known. */
     target_stage?: TicketStage;
+    /** #B.197: true when this chip is the inverse view of an event
+     *  authored on the OTHER ticket (e.g. "#196 blocks #189" shows
+     *  on #189 as `depends_on #196` with reciprocal=true). Frontend
+     *  renders these visually distinct so the audit trail stays
+     *  readable. */
+    reciprocal?: boolean;
 }
 
 export interface SubTicketSummary {

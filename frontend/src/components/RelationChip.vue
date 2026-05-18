@@ -26,12 +26,15 @@ const STAGE_LABELS: Record<string, string> = {
 <template>
     <span
         class="thread-relations__chip"
+        :class="{ 'thread-relations__chip--reciprocal': relation.reciprocal }"
         :data-kind="relation.kind"
     >
         <a
             :href="`/b/${relation.target_ticket_id}`"
             class="thread-relations__chip-link"
-            :title="`Open #B.${relation.target_ticket_id} — ${RELATION_LABELS[relation.kind]}, set by ${relation.by_agent ?? '?'} on ${new Date(relation.last_event_at).toLocaleString()}`"
+            :title="relation.reciprocal
+                ? `Open #B.${relation.target_ticket_id} — reciprocal view of \`${RELATION_LABELS[relation.kind === 'blocks' ? 'depends_on' : relation.kind === 'depends_on' ? 'blocks' : relation.kind]}\` set on #B.${relation.target_ticket_id} by ${relation.by_agent ?? '?'} on ${new Date(relation.last_event_at).toLocaleString()}`
+                : `Open #B.${relation.target_ticket_id} — ${RELATION_LABELS[relation.kind]}, set by ${relation.by_agent ?? '?'} on ${new Date(relation.last_event_at).toLocaleString()}`"
         >
             <span class="thread-relations__kind">{{ RELATION_LABELS[relation.kind] }}</span>
             <span class="thread-relations__target">#B.{{ relation.target_ticket_id }}</span>
@@ -42,6 +45,7 @@ const STAGE_LABELS: Record<string, string> = {
             >{{ STAGE_LABELS[relation.target_stage] }}</span>
         </a>
         <button
+            v-if="!relation.reciprocal"
             type="button"
             class="thread-relations__menu-btn"
             title="Change kind or remove"

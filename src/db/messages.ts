@@ -394,7 +394,7 @@ export function insertRelationEvent(opts: {
  * Inserted as `approved` with `decided_by=auto` — typed relations
  * don't go through moderation (the audit lives in the message log).
  */
-import type { RelationKind } from "../relations.js";
+import { inverseRelationKind, type RelationKind } from "../relations.js";
 export function insertTypedRelation(opts: {
     source_ticket_id: number;
     target_ticket_id: number;
@@ -448,10 +448,17 @@ export interface ActiveRelation {
     last_event_id: number;
     last_event_at: string;
     by_agent: string | null;
+    /** #B.197: true when the chip is the reverse view of an event
+     *  authored from the OTHER ticket (e.g. "#196 blocks #189"
+     *  shows on #189 as `depends_on #196` with reciprocal=true).
+     *  The kind here is `inverseRelationKind(original)`. Direct
+     *  events have reciprocal absent/false. */
+    reciprocal?: boolean;
 }
 export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] {
     const db = getDb();
-    const rows = db.select({
+    // Direct edges: events authored ON this ticket pointing to a target.
+    const direct = db.select({
         id: schema.messages.id,
         createdAt: schema.messages.createdAt,
         byAgent: schema.messages.byAgent,
@@ -470,7 +477,7 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
     // a ticket may have at most one active relation per target — the
     // user changes kinds by posting a fresh event, not by adding more.
     const latestByTarget = new Map<number, ActiveRelation & { kindIsTombstone: boolean }>();
-    for (const r of rows) {
+    for (const r of direct) {
         if (!r.meta) continue;
         let parsedKind: string | undefined;
         try {
@@ -487,6 +494,59 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
             by_agent: r.byAgent,
             kindIsTombstone: parsedKind === "ignored",
         });
+    }
+    // Reciprocal edges (#B.197): events authored on OTHER tickets that
+    // point AT this ticket. Persisted one-way (relations.ts line 49
+    // "don't auto-flip on insert"), but semantically symmetric — a
+    // `blocks A→B` event means B is `depends_on A`. Pull the reverse
+    // pile, inverse the kind, expose with reciprocal=true so the
+    // frontend can render them visually distinct.
+    const reverse = db.select({
+        id: schema.messages.id,
+        createdAt: schema.messages.createdAt,
+        byAgent: schema.messages.byAgent,
+        ticketId: schema.messages.ticketId,
+        meta: schema.messages.meta,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.sourceTicketId, ticketId),
+            eq(schema.messages.kind, "ticket_relation"),
+            eq(schema.messages.status, "approved"),
+        ))
+        .orderBy(schema.messages.id)
+        .all();
+    const latestByOriginator = new Map<number, ActiveRelation & { kindIsTombstone: boolean }>();
+    for (const r of reverse) {
+        if (!r.meta || !r.ticketId) continue;
+        let parsedKind: string | undefined;
+        try {
+            const m = JSON.parse(r.meta) as { relation?: { kind?: string } };
+            parsedKind = m.relation?.kind;
+        } catch { continue; }
+        if (!parsedKind) continue;
+        const inversed = inverseRelationKind(parsedKind as RelationKind);
+        latestByOriginator.set(r.ticketId, {
+            target_ticket_id: r.ticketId,
+            kind: inversed,
+            last_event_id: r.id,
+            last_event_at: r.createdAt,
+            by_agent: r.byAgent,
+            reciprocal: true,
+            kindIsTombstone: parsedKind === "ignored",
+        });
+    }
+    // Dedup: if a direct relation already exists for the same target
+    // with the same effective kind, skip the reciprocal (symmetric
+    // kinds collide trivially; blocks/depends_on collide when both
+    // sides recorded the relation explicitly).
+    for (const [originator, rel] of latestByOriginator) {
+        const directHit = latestByTarget.get(originator);
+        if (directHit && directHit.kind === rel.kind && !directHit.kindIsTombstone) continue;
+        // Don't let a reciprocal override a tombstoned direct event —
+        // the user explicitly removed that link from this side.
+        if (directHit && directHit.kindIsTombstone) continue;
+        latestByTarget.set(originator, rel);
     }
     return Array.from(latestByTarget.values())
         .filter((r) => !r.kindIsTombstone)

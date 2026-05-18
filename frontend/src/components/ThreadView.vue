@@ -2276,6 +2276,18 @@ async function copyTicketRef() {
     background: var(--p-surface-50);
     overflow: hidden;
 }
+/* #B.197: reciprocal chips are the inverse view of an event authored
+   from the OTHER ticket. Dashed border + italic kind label so it's
+   instantly clear which side "owns" the link (and the user knows to
+   edit it from the originator, not from here — menu button hidden
+   server-side via v-if). */
+.thread-relations__chip--reciprocal {
+    border-style: dashed;
+    opacity: 0.85;
+}
+.thread-relations__chip--reciprocal .thread-relations__kind {
+    font-style: italic;
+}
 .thread-relations__chip-link {
     display: inline-flex;
     align-items: center;
