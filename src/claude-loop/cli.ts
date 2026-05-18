@@ -29,6 +29,7 @@ import { Command, Option } from "commander";
 import { AiballClient } from "../client.js";
 import {
     DEFAULT_CHECK_CMD,
+    isInternalCheckCmd,
     MUX_CMD,
     STATE_ROOT,
     defaultPingsPath,
@@ -447,9 +448,10 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
         process.stdout.write(`\n`);
     }
 
-    // Default aiball check → also dump the rich snapshot so the cause
-    // of a 0 is visible without re-running curl by hand.
-    if (checkCmd === DEFAULT_CHECK_CMD) {
+    // Internal SDK mode (default or legacy sentinel) → dump the
+    // rich snapshot so the cause of a 0 is visible without re-
+    // running curl by hand.
+    if (isInternalCheckCmd(checkCmd)) {
         try {
             const client = new AiballClient();
             const ping = await client.pingsCount() as { consumer_id: string; unread: number };
@@ -566,7 +568,7 @@ async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boo
     while (true) {
         tick += 1;
         const ts = new Date().toISOString();
-        if (checkCmd === DEFAULT_CHECK_CMD) {
+        if (isInternalCheckCmd(checkCmd)) {
             if (!aiballClient) aiballClient = new AiballClient();
             try {
                 const r = await aiballClient.pingsCount() as { consumer_id: string; unread: number };
@@ -629,7 +631,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option(
             "--check-cmd <cmd>",
             "Shell snippet — exit 0 = wake claude, non-zero = stay idle. " +
-                "Default: `aiball pings-count -q` (wake when there are unread pings). " +
+                "Default: empty = use the in-process AiballClient.pingsCount() (SSE-aware, fastpath). " +
                 "Pass `true` to ping unconditionally every tick.",
             DEFAULT_CHECK_CMD,
         )

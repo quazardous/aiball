@@ -24,7 +24,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { AiballClient } from "../client.js";
 import {
-    DEFAULT_CHECK_CMD,
+    isInternalCheckCmd,
     DEFAULT_USER_GRACE_SEC,
     MUX_CMD,
     checkHasWork,
@@ -224,7 +224,7 @@ async function mainPoll(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-    if (checkCmd === DEFAULT_CHECK_CMD) {
+    if (isInternalCheckCmd(checkCmd)) {
         await mainSse();
     } else {
         await mainPoll();

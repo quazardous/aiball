@@ -96,37 +96,39 @@ export function defaultPingsPath(): string {
 }
 
 /**
- * Default `--check-cmd` for the timer — gates the per-tick wake on
- * the aiball ping count for the current consumer. Exits 0 when there
- * are unread pings (= ping claude), non-zero when empty (= stay
- * idle). User can override with `--check-cmd '<shell>'`, or pass
- * `--check-cmd true` to ping unconditionally every tick. #B.63 v2.1.
+ * Legacy sentinel (#B.63 v2.1) — was the previous default. Kept as a
+ * back-compat marker so loops spawned before the SDK-default
+ * refactor (#B.154) still resolve to the in-process AiballClient
+ * path instead of trying to shell out to `aiball` (which would
+ * fork+exec the CLI on every tick — david: "c'est tres moche").
+ *
+ * NEW DEFAULT: empty string → AiballClient.pingsCount() directly.
+ * Any non-empty, non-sentinel string → shell out (custom check-cmd).
  */
-export const DEFAULT_CHECK_CMD = "aiball pings-count -q";
+export const DEFAULT_CHECK_CMD = "";
+const LEGACY_AIBALL_CHECK_CMD = "aiball pings-count -q";
 
 /**
  * The "is there work to drain?" gate used by every wake surface
- * (timer tick + SessionStart hook + Stop hook). #B.63 used to
- * duplicate this across all three callers; #B.141 extracted it
- * here so any tuning (timeout, retry, new fastpath kind) happens
- * once.
+ * (timer tick + SessionStart hook + Stop hook).
  *
  * Behavior:
- *   - Empty / `true` → always wake (legacy "pure timer" mode).
- *   - Default `aiball pings-count -q` → call AiballClient.pingsCount()
- *     in-process (no fork). Caller passes its own cached client to
- *     keep the keep-alive socket warm across ticks.
+ *   - Empty (default) OR the legacy `"aiball pings-count -q"`
+ *     sentinel → call AiballClient.pingsCount() in-process (no
+ *     fork). Caller passes its own cached client to keep the
+ *     keep-alive socket warm across ticks.
+ *   - `"true"` → always wake (legacy "pure timer" mode).
  *   - Anything else → shell out via `bash -c <cmd>`; exit 0 = work.
  *
- * Async because the in-process path returns a promise. Hooks await
- * it once and exit; the timer awaits it per tick.
+ * Async because the in-process path returns a promise.
  */
 export async function checkHasWork(
-    checkCmd: string,
+    checkCmd: string | null | undefined,
     client?: AiballClient,
 ): Promise<boolean> {
-    if (!checkCmd || checkCmd === "true") return true;
-    if (checkCmd === DEFAULT_CHECK_CMD) {
+    const cmd = checkCmd ?? "";
+    if (cmd === "true") return true;
+    if (cmd === "" || cmd === LEGACY_AIBALL_CHECK_CMD) {
         const c = client ?? new AiballClient();
         try {
             const r = await c.pingsCount() as { unread?: number };
@@ -135,8 +137,18 @@ export async function checkHasWork(
             return false;
         }
     }
-    const r = spawnSync("bash", ["-c", checkCmd], { stdio: "ignore" });
+    const r = spawnSync("bash", ["-c", cmd], { stdio: "ignore" });
     return r.status === 0;
+}
+
+/**
+ * True when the given check-cmd is the SDK-direct mode (empty or
+ * legacy sentinel). Used by the timer to decide SSE vs polling
+ * loop without re-comparing strings everywhere.
+ */
+export function isInternalCheckCmd(checkCmd: string | null | undefined): boolean {
+    const cmd = checkCmd ?? "";
+    return cmd === "" || cmd === LEGACY_AIBALL_CHECK_CMD;
 }
 
 /**
