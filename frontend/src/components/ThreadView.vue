@@ -96,11 +96,18 @@ useBus("ticket-ref.promote", (payload) => {
         target_ticket_id: payload.ticket_id,
         kind: existing?.kind ?? null,
     };
-    // Anchor the popover on the link element itself (2nd arg of
-    // Popover.show is the explicit target) so it lands next to the
-    // ref, not at the @contextmenu listener's host (.md-body). David
-    // #B.123: "le popup est pas bien accroché à la réf (loin)".
-    relationMenuRef.value?.show(payload.event, payload.target);
+    // Synthesize an event whose currentTarget IS the link. PrimeVue
+    // Popover stores event.currentTarget in this.eventTarget, then
+    // uses it for outside-click detection (eventTarget.contains(...)
+    // — anything inside is treated as "click on the trigger" and the
+    // popover stays open). With the raw @contextmenu event,
+    // currentTarget = .md-body, so EVERY click in the comment body
+    // kept the popover open (david #C.5aqzef: "si on clique à côté
+    // ça doit disparaitre"). Synthetic event with currentTarget =
+    // link element scopes the trigger to just the link → outside-
+    // click anywhere else now closes properly.
+    const fakeEvent = { currentTarget: payload.target, target: payload.target } as unknown as Event;
+    relationMenuRef.value?.show(fakeEvent, payload.target);
 });
 async function pickRelationKind(newKind: RelationKind) {
     const t = relationMenuTarget.value;
