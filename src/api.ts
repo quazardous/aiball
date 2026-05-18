@@ -98,7 +98,11 @@ import {
     type Strategy,
     type Tag,
     type Message,
+    insertTypedRelation,
+    listTypedRelationsForTicket,
+    type ActiveRelation,
 } from "./db.js";
+import { RELATION_KINDS, isRelationKind, type RelationKind } from "./relations.js";
 import express from "express";
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
@@ -1353,6 +1357,61 @@ api.post("/tickets/:id/unsnooze", (req: Request, res: Response) => {
     res.json({ ticket_id: id, postponed_until: null });
 });
 
+// ---- Typed inter-ticket relations (#B.123 phase B) ------------------------
+//
+// Append-only events: POST creates a new ticket_relation row. To change a
+// kind, POST a new event with the same target; the replay (listTypedRelations
+// ForTicket) keeps only the latest per target. To remove, POST kind=ignored
+// — acts as a tombstone in the replay. No PATCH/DELETE endpoint; the event
+// log is the source of truth.
+
+api.get("/tickets/:id/relations", (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "ticket id required" });
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    res.json({ ticket_id: id, relations: listTypedRelationsForTicket(id) });
+});
+
+api.post("/tickets/:id/relations", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "ticket id required" });
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    const body = (req.body ?? {}) as { target_ticket_id?: number; kind?: string };
+    const target = Number(body.target_ticket_id);
+    if (!Number.isFinite(target) || target <= 0) {
+        return res.status(400).json({ error: "target_ticket_id required (positive integer)" });
+    }
+    if (target === id) {
+        return res.status(400).json({ error: "a ticket cannot relate to itself" });
+    }
+    const kindStr = typeof body.kind === "string" ? body.kind : "";
+    if (!isRelationKind(kindStr)) {
+        return res.status(400).json({
+            error: `kind must be one of ${RELATION_KINDS.join(", ")}`,
+        });
+    }
+    const targetTicket = getMessage(target);
+    if (!targetTicket || targetTicket.kind !== "ticket_created") {
+        return res.status(404).json({ error: `target ticket #B.${target} not found` });
+    }
+    const caller = consumerOf(req);
+    const event = insertTypedRelation({
+        source_ticket_id: id,
+        target_ticket_id: target,
+        relation_kind: kindStr as RelationKind,
+        by_agent: caller,
+    });
+    if (!event) return res.status(500).json({ error: "failed to create relation event" });
+    broadcast({ type: "message_created", data: event });
+    res.json({
+        ticket_id: id,
+        event_id: event.id,
+        relations: listTypedRelationsForTicket(id),
+    });
+});
+
 api.get("/tickets/:id", (req, res) => {
     // The :id param accepts either:
     //   - an integer ticket id (#B<id>) → resolved directly,
@@ -1401,7 +1460,8 @@ api.get("/tickets/:id", (req, res) => {
                     m.kind === "ticket_resolved" ||
                     m.kind === "ticket_blocked" ||
                     m.kind === "ticket_sub_added" ||
-                    m.kind === "ticket_referenced") &&
+                    m.kind === "ticket_referenced" ||
+                    m.kind === "ticket_relation") &&
                 m.status !== "rejected",
         )
         .sort((a, b) => a.id - b.id);
@@ -1535,10 +1595,16 @@ api.get("/tickets/:id", (req, res) => {
             return { ...m, body: null, edited_body: null, summary_until: summaryUntil } as typeof m;
         });
     }
+    // #B.123 phase B: surface the active typed relations alongside the
+    // existing parent/sub-ticket lineage. Both shapes coexist during the
+    // migration window — UI is free to render either, frontend mirror
+    // (lib/relations.ts) carries the labels.
+    const typedRelations = listTypedRelationsForTicket(id);
     res.json({
         ticket: {
             ...headerBase,
             body: t.edited_body ?? t.body,
+            relations: typedRelations,
         },
         comments: outComments,
         focus_message_id: focusMessageId,

@@ -16,6 +16,7 @@ export const MESSAGE_KINDS = [
     "ticket_blocked",
     "ticket_sub_added",
     "ticket_referenced",
+    "ticket_relation",
 ] as const;
 export type MessageKind = typeof MESSAGE_KINDS[number];
 

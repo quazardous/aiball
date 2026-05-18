@@ -24,6 +24,11 @@ export const MESSAGE_KINDS = [
     "ticket_blocked",
     "ticket_sub_added",
     "ticket_referenced",
+    // #B.123 phase B: typed inter-ticket relation events
+    // (relates_to / depends_on / blocks / duplicates / ignored stored
+    // in meta.relation.kind). Lifecycle replay treats these as N-N graph
+    // edges, NOT as comments — see src/relations.ts.
+    "ticket_relation",
 ] as const;
 export type MessageKind = typeof MESSAGE_KINDS[number];
 

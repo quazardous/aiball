@@ -74,6 +74,9 @@ export {
 export {
     insertMessage,
     insertRelationEvent,
+    insertTypedRelation,
+    listTypedRelationsForTicket,
+    type ActiveRelation,
     getMessage,
     getMessageByHashid,
     listMessages,

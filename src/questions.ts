@@ -41,6 +41,7 @@ export interface QuestionAnswer {
 }
 
 import type { CommentDecision } from "./decisions.js";
+import type { TypedRelationMeta } from "./relations.js";
 
 export interface MessageMeta {
     questions?: Record<string, QuestionAnswer>;
@@ -55,6 +56,13 @@ export interface MessageMeta {
      *  reads. Settable at post-time via `summary_until` on the request
      *  body or retroactively via POST /api/messages/:id/summarize. */
     summary_until?: string;
+    /** Typed inter-ticket relation payload (#B.123 phase B). Only set
+     *  on rows with `kind = "ticket_relation"`. The relation's source
+     *  ticket is the row's `ticket_id`; the target is encoded in
+     *  meta.relation.target_ticket_id. Edits are append-only — to change
+     *  a kind, post a new ticket_relation; to remove, post one with
+     *  `kind = "ignored"` (or a tombstone — see relations.ts). */
+    relation?: TypedRelationMeta;
 }
 
 // `- [ ]` or `- [x]` line, optionally preceded by indent, optionally
@@ -199,6 +207,7 @@ export function serializeMeta(meta: MessageMeta): string | null {
     const hasQuestions = !!meta.questions && Object.keys(meta.questions).length > 0;
     const hasDecision = !!meta.decision;
     const hasSummary = typeof meta.summary_until === "string" && meta.summary_until.length > 0;
-    if (!hasQuestions && !hasDecision && !hasSummary) return null;
+    const hasRelation = !!meta.relation;
+    if (!hasQuestions && !hasDecision && !hasSummary && !hasRelation) return null;
     return JSON.stringify(meta);
 }

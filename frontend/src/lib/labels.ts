@@ -125,6 +125,7 @@ export const KIND_LABELS: Record<MessageKind, string> = {
     ticket_blocked: "blocked",
     ticket_sub_added: "sub-ticket",
     ticket_referenced: "reference",
+    ticket_relation: "relation",
 };
 
 export const KIND_ICONS: Record<MessageKind, string> = {
@@ -136,6 +137,7 @@ export const KIND_ICONS: Record<MessageKind, string> = {
     ticket_blocked: "pi pi-ban",
     ticket_sub_added: "pi pi-sitemap",
     ticket_referenced: "pi pi-link",
+    ticket_relation: "pi pi-share-alt",
 };
 
 export const INTENT_SEVERITY: Record<Intent, Severity> = {

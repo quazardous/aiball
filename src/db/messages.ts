@@ -366,6 +366,117 @@ export function insertRelationEvent(opts: {
     });
 }
 
+/**
+ * Insert a typed inter-ticket relation event (#B.123 phase B).
+ * Stores kind = `ticket_relation` with `meta.relation = {kind,
+ * target_ticket_id}` on the source ticket's thread. Append-only:
+ * to change a relation's kind, post a new event; the latest event
+ * per (source, target) tuple wins. To remove, post with
+ * `kind = "ignored"` (acts as a tombstone in the replay).
+ *
+ * Inserted as `approved` with `decided_by=auto` — typed relations
+ * don't go through moderation (the audit lives in the message log).
+ */
+import type { RelationKind } from "../relations.js";
+export function insertTypedRelation(opts: {
+    source_ticket_id: number;
+    target_ticket_id: number;
+    relation_kind: RelationKind;
+    by_agent: string | null;
+}): Message | null {
+    const db = getDb();
+    return db.transaction((tx) => {
+        const id = nextMessageId(tx);
+        const seq = (tx.select({
+            n: sql<number>`COALESCE(MAX(${schema.messages.displaySeq}), 0) + 1`,
+        }).from(schema.messages).where(eq(schema.messages.ticketId, opts.source_ticket_id)).get())?.n ?? 1;
+        const createdAt = nowIso();
+        const hashid = pickFreshHashid(tx);
+        const meta: MessageMeta = {
+            relation: {
+                kind: opts.relation_kind,
+                target_ticket_id: opts.target_ticket_id,
+            },
+        };
+        const inserted = tx.insert(schema.messages).values({
+            id,
+            ticketId: opts.source_ticket_id,
+            displaySeq: seq,
+            kind: "ticket_relation",
+            body: "",
+            byAgent: opts.by_agent ?? null,
+            status: "approved",
+            decidedAt: createdAt,
+            decidedBy: "auto",
+            createdAt,
+            hashid,
+            sourceTicketId: opts.target_ticket_id,
+            meta: serializeMeta(meta),
+        }).returning().get();
+        const parent = tx.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, opts.source_ticket_id)).get();
+        return messageRowToMessage(inserted, parent?.project ?? "");
+    });
+}
+
+/**
+ * Replay all `ticket_relation` events on a ticket and return the
+ * effective relation set: for each (source, target) pair, take the
+ * latest event; drop tombstones (kind=ignored). Returns the active
+ * relations sorted by most-recently-modified first.
+ */
+export interface ActiveRelation {
+    target_ticket_id: number;
+    kind: RelationKind;
+    last_event_id: number;
+    last_event_at: string;
+    by_agent: string | null;
+}
+export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] {
+    const db = getDb();
+    const rows = db.select({
+        id: schema.messages.id,
+        createdAt: schema.messages.createdAt,
+        byAgent: schema.messages.byAgent,
+        sourceTicketId: schema.messages.sourceTicketId,
+        meta: schema.messages.meta,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.ticketId, ticketId),
+            eq(schema.messages.kind, "ticket_relation"),
+            eq(schema.messages.status, "approved"),
+        ))
+        .orderBy(schema.messages.id)
+        .all();
+    // Latest-event-wins per (target). Key on target_ticket_id since
+    // a ticket may have at most one active relation per target — the
+    // user changes kinds by posting a fresh event, not by adding more.
+    const latestByTarget = new Map<number, ActiveRelation & { kindIsTombstone: boolean }>();
+    for (const r of rows) {
+        if (!r.meta) continue;
+        let parsedKind: string | undefined;
+        try {
+            const m = JSON.parse(r.meta) as { relation?: { kind?: string } };
+            parsedKind = m.relation?.kind;
+        } catch { continue; }
+        const target = r.sourceTicketId; // target stored in sourceTicketId per insertTypedRelation
+        if (!target || !parsedKind) continue;
+        latestByTarget.set(target, {
+            target_ticket_id: target,
+            kind: parsedKind as RelationKind,
+            last_event_id: r.id,
+            last_event_at: r.createdAt,
+            by_agent: r.byAgent,
+            kindIsTombstone: parsedKind === "ignored",
+        });
+    }
+    return Array.from(latestByTarget.values())
+        .filter((r) => !r.kindIsTombstone)
+        .map(({ kindIsTombstone: _, ...rest }) => rest)
+        .sort((a, b) => b.last_event_id - a.last_event_id);
+}
+
 export function noteMessage(id: number, note: string | null): Message | null {
     const db = getDb();
     const t = db.update(schema.tickets)
