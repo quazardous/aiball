@@ -224,22 +224,23 @@ const sortedRows = computed<Consumer[]>(() => {
             <div>No consumers yet — anyone who posts will be added here automatically.</div>
         </div>
 
-        <table v-else class="consumers-table">
+        <div v-else class="consumers-table-wrap">
+        <table class="consumers-table">
             <thead>
                 <tr>
                     <th class="sortable" @click="toggleSort('consumer_id')">
                         Consumer id <i :class="sortIcon('consumer_id')" />
                     </th>
-                    <th class="sortable" @click="toggleSort('kind')">
+                    <th class="sortable col-kind" @click="toggleSort('kind')">
                         Kind <i :class="sortIcon('kind')" />
                     </th>
-                    <th class="sortable" @click="toggleSort('display_name')">
+                    <th class="sortable col-display" @click="toggleSort('display_name')">
                         Display name <i :class="sortIcon('display_name')" />
                     </th>
                     <th class="sortable" @click="toggleSort('activity')">
                         Activity <i :class="sortIcon('activity')" />
                     </th>
-                    <th class="sortable" @click="toggleSort('enabled')">
+                    <th class="sortable col-enabled" @click="toggleSort('enabled')">
                         Active <i :class="sortIcon('enabled')" />
                     </th>
                     <th />
@@ -264,8 +265,8 @@ const sortedRows = computed<Consumer[]>(() => {
                             />
                         </div>
                     </td>
-                    <td>{{ r.kind }}</td>
-                    <td>{{ r.display_name ?? "" }}</td>
+                    <td class="col-kind">{{ r.kind }}</td>
+                    <td class="col-display">{{ r.display_name ?? "" }}</td>
                     <td class="activity-cell">
                         <div
                             class="activity-cell__seen"
@@ -281,7 +282,7 @@ const sortedRows = computed<Consumer[]>(() => {
                             class="activity-cell__state"
                         />
                     </td>
-                    <td>
+                    <td class="col-enabled">
                         <Tag
                             :value="r.enabled ? 'enabled' : 'blocked'"
                             :severity="r.enabled ? 'success' : 'danger'"
@@ -311,6 +312,7 @@ const sortedRows = computed<Consumer[]>(() => {
                 </tr>
             </tbody>
         </table>
+        </div>
     </div>
 </template>
 
@@ -430,5 +432,35 @@ const sortedRows = computed<Consumer[]>(() => {
 }
 .consumers-table .activity-cell__state {
     margin-top: 2px;
+}
+/* #B.193 mobile compaction — keep table inside viewport, scroll as a
+   last resort if a long consumer_id still overflows. */
+.consumers-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+}
+/* Phone-sized: drop the redundant columns. `kind` is already shown as
+   an inline tag next to the consumer id (moderator/sandbox); `display
+   name` is secondary and lives on the edit page; `enabled` is implicit
+   from `tr.is-blocked` row dimming. Tighter paddings + drop the
+   pinned height + min-width so rows stack without horizontal overflow. */
+@media (max-width: 640px) {
+    .consumers-table .col-kind,
+    .consumers-table .col-display,
+    .consumers-table .col-enabled {
+        display: none;
+    }
+    .consumers-table th,
+    .consumers-table td {
+        padding: 0.4rem 0.35rem;
+        height: auto;
+    }
+    .consumers-table .activity-cell {
+        min-width: 0;
+    }
+    .consumers-table .action-cell {
+        width: auto;
+        padding-right: 0.25rem;
+    }
 }
 </style>
