@@ -175,27 +175,34 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
                     title="Sort order"
                     @update:model-value="(v: SortBy) => emit('update:sortBy', v)"
                 />
+                <!-- #B.161 row-saver: search joins the filter body
+                     so the mobile layout becomes row 1 = [project,
+                     cog, filters, +new], row 2 = [all, open-only,
+                     recent, search]. David: "search à droite de
+                     recente activity, on gagne une ligne". On
+                     desktop the body is display: contents so search
+                     stays inline like before. -->
+                <span class="filter-search-wrap">
+                    <InputText
+                        :model-value="searchQuery"
+                        placeholder="Search…"
+                        size="small"
+                        class="filter-search"
+                        title="Free-text search across ticket titles, bodies and comments (whitespace = AND)"
+                        @update:model-value="(v: string | undefined) => emit('update:searchQuery', v ?? '')"
+                    />
+                    <button
+                        v-if="searchQuery"
+                        type="button"
+                        class="filter-search__clear"
+                        title="Clear search"
+                        @click="emit('update:searchQuery', '')"
+                    >
+                        <i class="pi pi-times" />
+                    </button>
+                </span>
             </div>
         </details>
-        <span class="filter-search-wrap">
-            <InputText
-                :model-value="searchQuery"
-                placeholder="Search…"
-                size="small"
-                class="filter-search"
-                title="Free-text search across ticket titles, bodies and comments (whitespace = AND)"
-                @update:model-value="(v: string | undefined) => emit('update:searchQuery', v ?? '')"
-            />
-            <button
-                v-if="searchQuery"
-                type="button"
-                class="filter-search__clear"
-                title="Clear search"
-                @click="emit('update:searchQuery', '')"
-            >
-                <i class="pi pi-times" />
-            </button>
-        </span>
         <span class="spacer" />
         <Button
             label="New ticket"

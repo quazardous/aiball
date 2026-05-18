@@ -40,25 +40,31 @@ const checkCmd = process.env.CL_CHECK_CMD ?? "true";
 const noStartup = process.env.CL_NO_STARTUP_PING === "1";
 if (!sd || !name) emit();
 
-// #B.149: Claude Code passes JSON on stdin including a `source` field
-// matching the matcher (startup / resume / clear). On `resume`, claude
-// has not actually reached the prompt yet — it's still showing the
-// resume-mode picker ("context compacted or as-is?"). If we send-keys
-// at that moment, the keys are typed into the picker; if we flip the
-// status to `[idle]`, the bar lies about the real state. David's bug
-// report: "ça passe idle avant que je choisisse le type de reprise".
-// Strategy: on resume, leave the bar in `[boot]` (set by cli.ts at
-// spawn) and skip the initial drain entirely — Stop hook (fires after
-// the first claude turn) will flip status correctly. New SSE pings
-// arriving post-picker still wake via the timer; pre-existing unread
-// gets drained by the user's first prompt or the next ping.
+// #B.149/#B.154: Claude Code passes JSON on stdin with a `source`
+// field (startup / resume / clear). On `resume`, claude shows a
+// resume-mode picker before reaching the prompt. David's #B.154
+// strategy: auto-dismiss the picker by sending Enter (= accept
+// default, typically "resume as-is") so we don't sit in [boot]
+// forever waiting for the user. Then fall through to the normal
+// startup logic. Configurable resume mode (compact / abort) is a
+// future follow-up via .aiball.yaml `claude_loop:` section.
 let source = "startup";
 try {
     const raw = readFileSync(0, "utf8");
     if (raw) source = (JSON.parse(raw) as { source?: string }).source ?? source;
 } catch { /* no stdin, assume startup */ }
 
-if (source === "resume") emit();
+if (source === "resume") {
+    // Wait a beat so claude has had time to render the picker, then
+    // send Enter to accept the default ("as-is"). Falls through to
+    // the normal check + status flip below.
+    try {
+        spawnSync("sleep", ["0.5"], { stdio: "ignore" });
+        spawnSync(MUX_CMD, [
+            "send-keys", "-t", `${tmuxName(name!)}.0`, "Enter",
+        ], { stdio: "ignore" });
+    } catch { /* swallow */ }
+}
 
 if (noStartup) {
     // Don't ping at boot, but still seed the idle state so the bar
