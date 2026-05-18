@@ -27,9 +27,12 @@ autopoll:
   volatile: false
 
   # Reminder cadence (ignored when volatile: true). 0 means "every
-  # Stop"; with persistent mode that's spammy. State persists in
-  # ~/.cache/aiball/autopoll-<agent>.json.
-  throttle_seconds: 30
+  # Stop"; with persistent mode that's spammy. Bumped #B.192 to 120s
+  # so fast back-and-forth conversations (each turn ≪ 30s) don't
+  # re-fire the standing reminder every turn — new pings and new
+  # open tickets still bypass the throttle and notify instantly.
+  # State persists in ~/.cache/aiball/autopoll-<agent>.json.
+  throttle_seconds: 120
 
   # How aggressively the hook nudges the agent.
   #

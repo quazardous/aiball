@@ -98,7 +98,15 @@ const DEFAULTS: AiballConfig = {
     autopoll: {
         enabled: true,
         volatile: false,
-        throttle_seconds: 30,
+        // #B.192 david: "y a des ping pop sauvage on dirait" — the 30s
+        // default meant the Stop hook re-fired the backlog reminder
+        // on basically every turn during a fast back-and-forth
+        // (each turn ≪ 30s, so throttle was always elapsed when no
+        // new ping had arrived). Bumped to 120s so the *new ping*
+        // and *new open ticket* triggers stay reactive (they bypass
+        // the throttle), while the standing reminder stops spamming
+        // every turn. New pings still wake instantly.
+        throttle_seconds: 120,
         include_recent_tickets: 3,
         backlog: true,
         tone: "directive",
