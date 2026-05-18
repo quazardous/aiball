@@ -29,25 +29,31 @@ use cases (drain backlog every few minutes), v1 is enough.
 ## Quickstart
 
 ```bash
-# Spawn a loop that pings every 60s with no check-cmd (= every tick fires)
-claude-loop start --name play
+# Spawn + attach (default). `Ctrl-B D` to detach without killing.
+claude-loop --name play
 
-# Spawn one bound to an aiball ping count check
-claude-loop start --name aiball-drain \
-    --interval 90 \
+# Same, but bound to an aiball ping count check
+claude-loop --name aiball-drain --interval 90 \
     --check-cmd 'aiball unread --pings --count-only | grep -qv "^0$"'
 
-# Inspect
+# Detach immediately (wrapper exits)
+claude-loop --no-attach --name bg
+
+# Skip the startup check-cmd (the timer pings only on its own schedule)
+claude-loop --no-startup-check --check-cmd '...'
+
+# Inspect / lifecycle
 claude-loop list
 claude-loop tail aiball-drain --lines 30
-claude-loop attach aiball-drain   # read-write attach (default)
-
-# Cleanup
+claude-loop attach aiball-drain
 claude-loop rm aiball-drain
 claude-loop prune                  # offers to delete orphan state dirs
 ```
 
-Attach uses regular tmux — `Ctrl-B D` to detach without killing.
+Default behavior on `start`: **attach immediately** + **run check-cmd
+once on launch** (if it returns 0 the very first wake-up message is
+"check the backlog" so claude starts useful). Flip via `--no-attach`
+or `--no-startup-check`.
 
 ---
 

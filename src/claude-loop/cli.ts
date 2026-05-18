@@ -79,6 +79,7 @@ interface StartOpts {
     checkCmd: string;
     pings?: string;
     attach?: boolean;
+    noStartupCheck?: boolean;
     claudeArgs: string[];
 }
 
@@ -170,24 +171,38 @@ function cmdStart(opts: StartOpts): void {
     child.unref();
     writeFileSync(timerPidPath(sd), String(child.pid) + "\n");
 
-    // Kick claude into action after SessionStart settles.
+    // Kick claude into action after SessionStart settles. If a
+    // check-cmd is set and reports work right now, fire a real ping
+    // immediately so the loop starts USEFUL — david: "claude-loop
+    // devrait aussi faire un check au début s'il y a des choses en
+    // attente". `--no-startup-check` opts out.
+    const startupNudge = (() => {
+        if (opts.noStartupCheck) return "ready when you are";
+        if (opts.checkCmd === "true") return "ready when you are";
+        const r = spawnSync("bash", ["-c", opts.checkCmd], { stdio: "ignore" });
+        return r.status === 0 ? "check the backlog" : "ready when you are";
+    })();
     spawnSync("bash", ["-c",
-        `(sleep 3 && ${shQuote(MUX_CMD)} send-keys -t ${shQuote(tname)} 'ready when you are' Enter) >/dev/null 2>&1 &`,
+        `(sleep 3 && ${shQuote(MUX_CMD)} send-keys -t ${shQuote(tname)} ${shQuote(startupNudge)} Enter) >/dev/null 2>&1 &`,
     ]);
 
-    process.stdout.write([
-        `loop '${name}' started`,
-        `  state:    ${sd}`,
-        `  interval: ${opts.interval}s`,
-        `  check:    ${opts.checkCmd === "true" ? "<pure timer>" : opts.checkCmd}`,
-        `  claude:   claude --permission-mode auto${passthrough ? " " + passthrough : ""}`,
-        `  attach:   ${MUX_CMD} attach -t ${tname}   (or: claude-loop attach ${name})`,
-        "",
-    ].join("\n"));
-
-    if (opts.attach) {
-        spawnSync(MUX_CMD, ["attach", "-t", tname], { stdio: "inherit" });
+    // Default behavior: attach. David: "par défaut claude-loop
+    // devrait s'attacher (on peut faire un flag inversé)".
+    // `--no-attach` opts out → wrapper exits, user re-attaches later.
+    if (opts.attach === false) {
+        process.stdout.write([
+            `loop '${name}' started (detached)`,
+            `  state:    ${sd}`,
+            `  interval: ${opts.interval}s`,
+            `  check:    ${opts.checkCmd === "true" ? "<pure timer>" : opts.checkCmd}`,
+            `  claude:   claude --permission-mode auto${passthrough ? " " + passthrough : ""}`,
+            `  attach:   ${MUX_CMD} attach -t ${tname}   (or: claude-loop attach ${name})`,
+            "",
+        ].join("\n"));
+        return;
     }
+    process.stdout.write(`loop '${name}' started — attaching... (Ctrl-B D to detach)\n`);
+    spawnSync(MUX_CMD, ["attach", "-t", tname], { stdio: "inherit" });
 }
 
 function cmdList(): void {
@@ -311,17 +326,24 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .addOption(new Option("--interval <sec>", "Poll interval seconds").default("60"))
         .option("--check-cmd <cmd>", "Shell snippet — exit 0 = wake claude", "true")
         .option("--pings <yaml>", "Path to custom ping-phrases YAML")
-        .option("--attach", "Attach to the tmux session after spawn")
+        // Commander conventionally turns `--no-foo` into `foo: false`;
+        // we want the default to be `attach=true` and `--no-attach`
+        // opts out. The default(true) makes commander accept either
+        // (--attach is silently no-op, --no-attach flips to false).
+        .option("--no-attach", "Don't attach after spawn (wrapper exits silently)")
+        .option("--no-startup-check", "Skip the initial check-cmd run on launch")
         .allowExcessArguments(false)
         .action((opts: {
-            name?: string; interval: string; checkCmd: string; pings?: string; attach?: boolean;
+            name?: string; interval: string; checkCmd: string; pings?: string;
+            attach: boolean; startupCheck: boolean;
         }) => {
             invoke({
                 name: opts.name,
                 interval: Math.max(1, Number(opts.interval)),
                 checkCmd: opts.checkCmd,
                 pings: opts.pings,
-                attach: opts.attach === true,
+                attach: opts.attach !== false,
+                noStartupCheck: opts.startupCheck === false,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });
