@@ -1,6 +1,6 @@
 <script setup lang="ts">
+import { ref, computed } from "vue";
 import Button from "primevue/button";
-import Select from "primevue/select";
 import IdentityPicker from "./IdentityPicker.vue";
 import type { Strategy } from "../lib/api";
 import { HEADER_BADGE_TOOLTIPS } from "../lib/labels";
@@ -9,9 +9,10 @@ export interface StrategyOption {
     label: string;
     value: Strategy;
     hint: string;
+    icon: string;
 }
 
-defineProps<{
+const props = defineProps<{
     connected: boolean;
     globalPendingCount: number;
     globalResolvedCount: number;
@@ -27,7 +28,6 @@ defineProps<{
     loading: boolean;
     autoRefresh: boolean;
 }>();
-
 const emit = defineEmits<{
     (e: "update:showSnoozed", v: boolean): void;
     (e: "update:strategy", v: Strategy): void;
@@ -37,6 +37,17 @@ const emit = defineEmits<{
     (e: "toggle-mute"): void;
     (e: "refresh"): void;
 }>();
+
+// #B.161: native <details> CSS dropdown for the strategy picker. The
+// summary shows the current strategy (icon + label on desktop,
+// icon-only on mobile via CSS). Body lists the options as buttons;
+// picking one emits update:strategy and closes the details.
+const strategyOpen = ref(false);
+const currentStrategy = computed(() => props.strategyOptions.find((o) => o.value === props.strategy));
+function pickStrategy(v: Strategy) {
+    emit("update:strategy", v);
+    strategyOpen.value = false;
+}
 </script>
 
 <template>
@@ -84,16 +95,33 @@ const emit = defineEmits<{
         >
             <i class="pi pi-history" /> {{ globalSnoozedCount }}
         </button>
-        <Select
-            :model-value="strategy"
-            :options="strategyOptions"
-            option-label="label"
-            option-value="value"
-            size="small"
-            class="strategy-select"
-            :title="strategyOptions.find(o => o.value === strategy)?.hint"
-            @update:model-value="(v: Strategy) => emit('update:strategy', v)"
-        />
+        <details
+            class="strategy-dropdown"
+            :open="strategyOpen"
+            :title="currentStrategy?.hint"
+            @toggle="(e: Event) => strategyOpen = (e.target as HTMLDetailsElement).open"
+        >
+            <summary class="strategy-dropdown__summary">
+                <i v-if="currentStrategy" :class="currentStrategy.icon" />
+                <span class="strategy-dropdown__label">{{ currentStrategy?.label ?? "..." }}</span>
+                <i class="pi pi-chevron-down strategy-dropdown__chev" />
+            </summary>
+            <div class="strategy-dropdown__menu">
+                <button
+                    v-for="o in strategyOptions"
+                    :key="o.value"
+                    type="button"
+                    class="strategy-dropdown__item"
+                    :class="{ 'strategy-dropdown__item--current': o.value === strategy }"
+                    :title="o.hint"
+                    @click="pickStrategy(o.value)"
+                >
+                    <i :class="o.icon" />
+                    <span>{{ o.label }}</span>
+                    <i v-if="o.value === strategy" class="pi pi-check strategy-dropdown__check" />
+                </button>
+            </div>
+        </details>
         <span class="spacer" />
         <Button
             v-if="!notifAllowed && !notifMuted"
@@ -172,8 +200,27 @@ const emit = defineEmits<{
     .aiball-header .spacer {
         display: none;
     }
-    .strategy-select {
-        display: none !important;
+    /* Compact strategy dropdown on mobile: icon-only summary, taps
+       expand the menu. The menu is `position: fixed` anchored to the
+       viewport's right edge so it stays on-screen regardless of where
+       the summary lives in the wrapped header row (was: position
+       absolute right:0 which aligned to the summary's right edge —
+       and the summary itself was near the viewport edge, so the menu
+       extended past it). (#B.161) */
+    .strategy-dropdown__label {
+        display: none;
+    }
+    .strategy-dropdown > summary {
+        padding: 0.3rem 0.4rem;
+        gap: 0.25rem;
+    }
+    .strategy-dropdown__menu {
+        position: fixed;
+        top: auto;
+        right: 0.5rem;
+        left: auto;
+        min-width: 12rem;
+        max-width: calc(100vw - 1rem);
     }
     .header-badge {
         font-size: 0.72rem;
@@ -201,9 +248,84 @@ const emit = defineEmits<{
 .connection-dot.offline {
     background: #ef4444;
 }
-.strategy-select {
-    min-width: 11rem;
+/* #B.161: strategy picker as a native <details> dropdown so it's
+   compact on mobile (icon-only summary) and full-label on desktop.
+   The browser handles open/close on summary click; outside-click
+   closing is delegated to the toggle event + a body-level click
+   listener (kept inline here via CSS-only behavior — clicking
+   another summary just doesn't close this one; user clicks again
+   to close. Acceptable trade-off for native dropdown). */
+.strategy-dropdown {
+    position: relative;
     margin-left: 0.4rem;
+}
+.strategy-dropdown > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.55rem;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.4rem;
+    background: var(--p-surface-0);
+    cursor: pointer;
+    font-size: 0.85rem;
+    list-style: none;
+    user-select: none;
+}
+.strategy-dropdown > summary::-webkit-details-marker { display: none; }
+.aiball-dark .strategy-dropdown > summary {
+    background: var(--p-surface-800);
+}
+.strategy-dropdown__chev {
+    font-size: 0.65rem;
+    color: var(--p-text-muted-color);
+    transition: transform 0.15s;
+}
+.strategy-dropdown[open] .strategy-dropdown__chev {
+    transform: rotate(180deg);
+}
+.strategy-dropdown__menu {
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    left: 0;
+    min-width: 14rem;
+    background: var(--p-content-background);
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.4rem;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+    z-index: 20;
+    padding: 0.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+.strategy-dropdown__item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    background: transparent;
+    border: 0;
+    border-radius: 0.3rem;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--p-text-color);
+}
+.strategy-dropdown__item:hover {
+    background: var(--p-surface-100);
+}
+.aiball-dark .strategy-dropdown__item:hover {
+    background: var(--p-surface-800);
+}
+.strategy-dropdown__item--current {
+    color: var(--p-primary-color);
+    font-weight: 600;
+}
+.strategy-dropdown__check {
+    margin-left: auto;
+    font-size: 0.75rem;
 }
 .header-badge {
     font-size: 0.78rem;

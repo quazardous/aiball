@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 
 export interface ProjectListItem {
     label: string;
@@ -23,7 +23,7 @@ export type SettingsPanel = "rules" | "tags" | "projects" | "consumers" | "compo
  */
 export type ProjectPage = "stats" | "settings";
 
-defineProps<{
+const props = defineProps<{
     items: ProjectListItem[];
     panel: SettingsPanel | null;
     project: string | null;
@@ -45,6 +45,14 @@ function syncProjectsOpen() {
 }
 onMounted(() => window.addEventListener("resize", syncProjectsOpen));
 onUnmounted(() => window.removeEventListener("resize", syncProjectsOpen));
+
+// #B.161 follow-up: when the details is collapsed, the summary shows
+// the active project so the user always knows where they are without
+// expanding. Falls back to "Projects" when the list is empty.
+const activeProjectLabel = computed(() => {
+    const active = props.items.find((p) => p.value === props.project);
+    return active?.label ?? "Projects";
+});
 </script>
 
 <template>
@@ -54,7 +62,7 @@ onUnmounted(() => window.removeEventListener("resize", syncProjectsOpen));
              by default on phone — saves the 30vh sidebar band for the
              active project's row only). -->
         <details class="sidebar-projects" :open="projectsOpen">
-            <summary class="sidebar-section-label">Projects</summary>
+            <summary class="sidebar-section-label">{{ activeProjectLabel }}</summary>
             <button
                 v-for="p in items"
                 :key="p.value ?? '__all__'"
@@ -178,35 +186,15 @@ onUnmounted(() => window.removeEventListener("resize", syncProjectsOpen));
     flex-direction: column;
 }
 @media (max-width: 720px) {
-    /* #B.161 mobile: settings becomes a horizontal icon row at the
-       bottom of the sidebar (the actual page footer is owned by
-       App.vue layout — this is the closest we get without splitting
-       the component). Compact icons only, the label tucked under via
-       smaller font so taps stay reachable. */
+    /* #B.161 mobile: settings stays a vertical text list (david:
+       "ça ça passe en dessous pas la peine de faire des icone juste
+       du texte comme avant en tabulaire vertical"). Just pushed to
+       the bottom of the sidebar band via margin-top: auto + a thin
+       top border to read as a footer separator. */
     .sidebar-settings {
         margin-top: auto;
         padding-top: 0.5rem;
         border-top: 1px solid var(--p-content-border-color);
-        flex-direction: row;
-        gap: 0.25rem;
-        flex-wrap: wrap;
-        align-items: stretch;
-    }
-    .sidebar-settings > .sidebar-section-label {
-        display: none;
-    }
-    .sidebar-settings > .sidebar-item {
-        flex: 1 1 0;
-        flex-direction: column;
-        gap: 0.15rem;
-        padding: 0.4rem 0.3rem;
-        font-size: 0.72rem;
-        text-align: center;
-        min-width: 0;
-        justify-content: center;
-    }
-    .sidebar-settings > .sidebar-item > i {
-        font-size: 1rem;
     }
 }
 .aiball-dark .aiball-sidebar {

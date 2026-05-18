@@ -267,21 +267,24 @@ export const SORT_OPTIONS: { label: string; value: SortBy }[] = [
 //  Strategy options (moderation strategy in the header)
 // =====================================================================
 
-export const STRATEGY_OPTIONS: { label: string; value: Strategy; hint: string }[] = [
+export const STRATEGY_OPTIONS: { label: string; value: Strategy; hint: string; icon: string }[] = [
     {
         label: "Manual approve",
         value: "manual",
         hint: "Every message goes to human review.",
+        icon: "pi pi-shield",
     },
     {
         label: "Auto approve",
         value: "auto",
         hint: "Everything is auto-approved (tickets and replies).",
+        icon: "pi pi-bolt",
     },
     {
         label: "Auto approve replies",
         value: "auto-reply",
         hint: "Replies auto-approved; new tickets need human review.",
+        icon: "pi pi-reply",
     },
 ];
 
