@@ -187,11 +187,12 @@ function cmdStart(opts: StartOpts): void {
     if (r.status !== 0) die("tmux new-session failed");
 
     // Status bar so a loop session is visually distinct. Initial
-    // state is idle (claude boots = waiting); SessionStart hook flips
-    // to busy if there's work to drain. Color + label are driven by
-    // setTmuxStatus (#B.146).
+    // state is `boot` (yellow, transitional) — claude is loading,
+    // hasn't reached the prompt yet, so `idle` would be misleading
+    // (#B.149). SessionStart hook flips to idle/busy once claude is
+    // actually ready. Color + label are driven by setTmuxStatus.
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-left-length", "60"], { stdio: "ignore" });
-    setTmuxStatus(name, "idle");
+    setTmuxStatus(name, "boot");
 
     // Detached timer process. Inherits CL_* env via the env file
     // sourced in the child shell. nohup-like: ignore SIGHUP, detach.
@@ -328,16 +329,17 @@ function cmdWake(name: string): void {
  * also breaks down the ping counters so the cause of a 0 is visible
  * (wrong agent? wrong project? actually no pings?).
  */
-async function cmdCheck(name: string | undefined, opts: { checkCmd?: string }): Promise<void> {
+async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; config?: boolean }): Promise<void> {
     let plateCheckCmd: string | undefined;
     let plateName: string | undefined;
+    let plate: Plate | null = null;
     if (name) {
         const sd = stateDirFor(name);
         if (existsSync(platePath(sd))) {
             try {
-                const p = readPlate(sd);
-                plateCheckCmd = p.check_cmd;
-                plateName = p.name;
+                plate = readPlate(sd);
+                plateCheckCmd = plate.check_cmd;
+                plateName = plate.name;
             } catch { /* ignore */ }
         }
     }
@@ -350,6 +352,34 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string }): 
     process.stdout.write(`  AIBALL_AGENT   : ${agentEnv}\n`);
     process.stdout.write(`  AIBALL_PROJECT : ${projectEnv}\n`);
     process.stdout.write(`\n`);
+
+    // #B.149: --config flag inspects the loop's state dir + the
+    // working dir for autopoll wiring so david can spot a missing
+    // .aiball.yaml or a hook that didn't register without having to
+    // dig into ~/.claude-loop/ by hand.
+    if (opts.config) {
+        if (!name) {
+            process.stdout.write(`  config check needs a loop name (claude-loop check <name> --config)\n`);
+        } else {
+            const sd = stateDirFor(name);
+            process.stdout.write(`  state dir: ${sd}\n`);
+            for (const f of ["plate.json", "env", "pings.yaml", "idle-since", "wake-requested", "user-took-over", "timer.pid", "timer.log"]) {
+                const p = join(sd, f);
+                process.stdout.write(`    ${f.padEnd(18)}  ${existsSync(p) ? "✓" : "—"}\n`);
+            }
+            if (plate) {
+                process.stdout.write(`\n  plate.json contents:\n`);
+                process.stdout.write(`    interval     : ${plate.interval}s\n`);
+                process.stdout.write(`    pings_path   : ${plate.pings_path}\n`);
+                process.stdout.write(`    cwd          : ${plate.cwd}\n`);
+                process.stdout.write(`    claude_args  : ${plate.claude_args.length === 0 ? "(none)" : plate.claude_args.join(" ")}\n`);
+            }
+            const cwd = plate?.cwd ?? process.cwd();
+            const aiballYaml = join(cwd, ".aiball.yaml");
+            process.stdout.write(`\n  ${aiballYaml}: ${existsSync(aiballYaml) ? "✓ present" : "— missing (autopoll Stop-hook won't fire here)"}\n`);
+        }
+        process.stdout.write(`\n`);
+    }
 
     // Default aiball check → also dump the rich snapshot so the cause
     // of a 0 is visible without re-running curl by hand.
@@ -571,7 +601,8 @@ async function main(): Promise<void> {
     program.command("check [name]")
         .description("Diagnose what the check-cmd would do right now (no claude spawn)")
         .option("--check-cmd <cmd>", "Override the check-cmd (default: from loop plate or DEFAULT_CHECK_CMD)")
-        .action((name: string | undefined, opts: { checkCmd?: string }) => cmdCheck(name, opts));
+        .option("--config", "Also inspect the loop's state dir + .aiball.yaml in its cwd (autopoll wiring)")
+        .action((name: string | undefined, opts: { checkCmd?: string; config?: boolean }) => cmdCheck(name, opts));
     program.command("trace")
         .description("Foreground gate evaluator — print WAKE/sleep every tick (no claude, no tmux)")
         .option("--check-cmd <cmd>", "Override the check-cmd (default: DEFAULT_CHECK_CMD)")

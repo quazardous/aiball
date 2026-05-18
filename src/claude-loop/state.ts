@@ -180,17 +180,21 @@ export function userIsTakingOver(sd: string, graceSec: number): boolean {
  *
  * No-op when tmux is gone (loop was just rm'd) — never throw.
  */
-export type LoopStatus = "idle" | "busy";
+export type LoopStatus = "idle" | "busy" | "boot";
 
 /**
- * tmux color palette per state (#B.146). Cyan (claude-loop brand)
- * stays for `busy` so an active loop pops; idle drops to dark gray
- * so a row of inactive loops fades into background. Both keep white
- * fg for legibility.
+ * tmux color palette per state (#B.146 / #B.149). Cyan (claude-loop
+ * brand) stays for `busy` so an active loop pops; idle drops to dark
+ * gray so a row of inactive loops fades into background. `boot` is
+ * yellow — transitional state set by cli.ts at spawn-time, before
+ * SessionStart hook fires and decides idle/busy. Without this, the
+ * bar reads `[idle]` while claude is actually booting MCP/UI prompts
+ * (david's #B.149: "ça devrait pas etre idle tout desuite").
  */
 const STATUS_COLORS: Record<LoopStatus, { bg: string; fg: string }> = {
-    busy: { bg: "colour39", fg: "colour15" },   // cyan / white (default brand)
+    busy: { bg: "colour39",  fg: "colour15" },  // cyan / white (default brand)
     idle: { bg: "colour240", fg: "colour15" },  // dark gray / white
+    boot: { bg: "colour178", fg: "colour15" },  // yellow / white (transitional)
 };
 
 export function setTmuxStatus(name: string, status: LoopStatus): void {
