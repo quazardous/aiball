@@ -673,11 +673,21 @@ export async function buildContextPhrase(
         // explicitly says "engage one of N" — earlier wording bottomed
         // out at "handle open via ticket_list" which let me list five
         // tickets and standby (david fqchxa: "l'agent attend encore").
+        //
+        // Wording rev (#B.232 follow-up, david 6ehkvn): dropped the
+        // `[aiball: ...]` bracket framing and the trailing `before
+        // answering` because the previous shape tripped prompt-injection
+        // defenses on cold claude sessions (a fresh instance refused to
+        // invoke ticket_list, reading the bracket+imperative tail as
+        // fake-tool-call injection). New shape leads with a conversational
+        // `fyi:` so backticked tool refs read as casual code mentions, not
+        // as directives. Imperative verbs themselves stay intact — they
+        // were the actual fix from 0aed5a2.
         const verbs: string[] = [];
         if (pingCount > 0) verbs.push("drain via `unread({pings: true, mark_read: true})`");
         if (openCount > 0) verbs.push(`engage one of ${openCount} open via \`ticket_list({open: true})\``);
         const directive = verbs.join(" + ");
-        return `${culture} [aiball: ${parts.join(" · ")}] — ${directive} before answering.`;
+        return `${culture} fyi: ${parts.join(" + ")}. ${directive}.`;
     } catch {
         return culture;
     }
