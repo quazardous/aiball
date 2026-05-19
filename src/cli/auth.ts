@@ -1,0 +1,151 @@
+/**
+ * `aiball auth` command group (carved out of cli.ts in #B.213 phase
+ * 3.A on 2026-05-19). Behavior-preserving move.
+ *
+ * Subcommands:
+ *   - `init`    — first-time setup, mints install token + prints URL
+ *   - `reinit`  — force a fresh install token (password reset / 2nd human)
+ *   - `issue`   — mint a long-lived agent or auth token
+ *   - `list`    — list every active token
+ *   - `revoke`  — delete a token by full string or unique prefix
+ *
+ * Exposed entry point: `registerAuthCommands(program)`. cli.ts calls
+ * this once during command-tree construction. `die` + `URL` are
+ * duplicated as tiny inlined helpers — same rationale as
+ * src/api/_helpers.ts pattern (3-5 lines each).
+ */
+import type { Command } from "commander";
+import {
+    anyHumanCredentials,
+    deleteToken,
+    getConsumer,
+    issueToken,
+    listTokens,
+} from "../db.js";
+
+const URL = process.env.AIBALL_URL ?? "http://127.0.0.1:7777";
+
+function die(msg: string): never {
+    process.stderr.write(`aiball: ${msg}\n`);
+    process.exit(1);
+}
+
+export function registerAuthCommands(program: Command): void {
+    const auth = program.command("auth").description("Bootstrap + token management");
+
+    auth.command("init")
+        .description(
+            "First-time setup. Mints an install token + prints the URL to open in a browser. Refuses if humans are already configured (use `auth reinit` to force).",
+        )
+        .option("--port <port>", "Daemon port for the printed URL", String(URL.match(/:(\d+)/)?.[1] ?? "7777"))
+        .option("--host <host>", "Hostname for the printed URL", "127.0.0.1")
+        .action((opts: { port: string; host: string }) => {
+            if (anyHumanCredentials()) {
+                die("auth init: already initialized. Use `aiball auth reinit` to force a fresh install token, or `aiball auth issue` to mint an agent token for a CLI/MCP client.");
+            }
+            const existing = listTokens({ kind: "install" });
+            const t = existing.length > 0 ? existing[0] : issueToken({
+                kind: "install",
+                label: "first-time init",
+                expires_at: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+            });
+            const setupUrl = `http://${opts.host}:${opts.port}/setup?t=${t.token}`;
+            process.stdout.write([
+                `aiball is ready for setup.`,
+                ``,
+                `  Open: ${setupUrl}`,
+                ``,
+                `Choose your login + password in the web form. The install token`,
+                `is one-shot and expires after 24h.`,
+                ``,
+            ].join("\n"));
+        });
+
+    auth.command("reinit")
+        .description(
+            "Force a fresh install token even if humans are already configured. Useful for password reset or onboarding a second human.",
+        )
+        .option("--port <port>", "Daemon port for the printed URL", String(URL.match(/:(\d+)/)?.[1] ?? "7777"))
+        .option("--host <host>", "Hostname for the printed URL", "127.0.0.1")
+        .action((opts: { port: string; host: string }) => {
+            const t = issueToken({
+                kind: "install",
+                label: "reinit",
+                expires_at: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+            });
+            const setupUrl = `http://${opts.host}:${opts.port}/setup?t=${t.token}`;
+            process.stdout.write([
+                `Fresh install token issued.`,
+                ``,
+                `  Open: ${setupUrl}`,
+                ``,
+                `One-shot, expires in 24h. Existing humans / sessions are untouched.`,
+                ``,
+            ].join("\n"));
+        });
+
+    auth.command("issue")
+        .description("Mint a long-lived agent token bound to a consumer. Used for CLI / MCP / sandbox clients.")
+        .requiredOption("--consumer <id>", "Existing consumer_id to bind the token to")
+        .option("--label <label>", "Human-readable label (e.g. 'laptop cli', 'sandbox-1')")
+        .option(
+            "--kind <kind>",
+            "Token kind: 'agent' (default) or 'auth' (web-style, normally minted by /login)",
+            "agent",
+        )
+        .action((opts: { consumer: string; label?: string; kind: string }) => {
+            const c = getConsumer(opts.consumer);
+            if (!c) die(`auth issue: consumer '${opts.consumer}' not found. Create it via Settings > Consumers or post a message first.`);
+            if (opts.kind !== "agent" && opts.kind !== "auth") {
+                die(`auth issue: --kind must be 'agent' or 'auth' (got '${opts.kind}')`);
+            }
+            const t = issueToken({
+                consumer_id: opts.consumer,
+                kind: opts.kind as "agent" | "auth",
+                label: opts.label ?? null,
+            });
+            process.stdout.write([
+                `Token issued for ${opts.consumer}:`,
+                ``,
+                `  ${t.token}`,
+                ``,
+                `Use it as: export AIBALL_TOKEN=${t.token}`,
+                `(or pass Authorization: Bearer ${t.token} on each API call)`,
+                ``,
+            ].join("\n"));
+        });
+
+    auth.command("list")
+        .description("List every active token (install + auth + agent)")
+        .action(() => {
+            const rows = listTokens();
+            if (rows.length === 0) {
+                process.stdout.write("(no tokens)\n");
+                return;
+            }
+            for (const t of rows) {
+                const exp = t.expires_at ? ` expires=${t.expires_at}` : "";
+                const last = t.last_used_at ? ` last=${t.last_used_at}` : " never used";
+                const lbl = t.label ? ` "${t.label}"` : "";
+                process.stdout.write(
+                    `${t.kind.padEnd(7)}  ${t.consumer_id ?? "(no consumer)"}  ${t.token}${lbl}${last}${exp}\n`,
+                );
+            }
+        });
+
+    auth.command("revoke <token-or-prefix>")
+        .description("Delete a token by its full string (or a unique prefix, e.g. 'aiball-abc1234')")
+        .action((needle: string) => {
+            const rows = listTokens();
+            const matches = rows.filter((t) => t.token === needle || t.token.startsWith(needle));
+            if (matches.length === 0) die(`auth revoke: no token matching '${needle}'`);
+            if (matches.length > 1) {
+                die(
+                    `auth revoke: prefix '${needle}' matches ${matches.length} tokens — be more specific:\n` +
+                        matches.map((t) => `  ${t.token} (${t.kind})`).join("\n"),
+                );
+            }
+            deleteToken(matches[0].token);
+            process.stdout.write(`revoked ${matches[0].token}\n`);
+        });
+}
