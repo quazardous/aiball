@@ -508,6 +508,27 @@ ticketsRouter.get("/tickets", (req, res) => {
     if (sinceIso) {
         result = result.filter((t) => t.created_at >= sinceIso);
     }
+    // #B.222 david 68km5s: when listing the actionable/open pool —
+    // i.e. the candidate set the wake-CTA or autopoll points the agent
+    // at — sort by priority desc (urgent → high → normal → low), then
+    // by id desc within each priority bucket. The general listing path
+    // (no open/actionable filter) keeps insertion order so existing
+    // browse callers aren't impacted. Priority strings normalize via
+    // PRIORITY_WEIGHT; unknown values fall back to "normal" weight.
+    if (onlyOpen || onlyActionable) {
+        const PRIORITY_WEIGHT: Record<string, number> = {
+            urgent: 4,
+            high: 3,
+            normal: 2,
+            low: 1,
+        };
+        result.sort((a, b) => {
+            const wA = PRIORITY_WEIGHT[a.priority ?? "normal"] ?? 2;
+            const wB = PRIORITY_WEIGHT[b.priority ?? "normal"] ?? 2;
+            if (wA !== wB) return wB - wA;
+            return b.id - a.id;
+        });
+    }
     if (limit !== undefined) result = result.slice(0, limit);
     res.json(result);
 });
