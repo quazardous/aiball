@@ -66,13 +66,8 @@ import {
     uploadStats,
     listOrphanUploads,
     deleteUploadRow,
-    listConsumers,
     getConsumer,
-    ensureConsumer,
     upsertConsumer,
-    updateConsumer,
-    deleteConsumer,
-    setConsumerState,
     isHuman,
     getPasswordHash,
     setPasswordHash,
@@ -82,8 +77,6 @@ import {
     deleteToken,
     listTokens,
     anyHumanCredentials,
-    type Consumer,
-    type ConsumerKind,
     type TokenKind,
     type MessageKind,
     type MessageStatus,
@@ -105,8 +98,9 @@ import { searchMessages } from "./search.js";
 import { fanOutPings, submitMessage, validateNewMessage, VALID_KINDS } from "./messages.js";
 import { parseMeta } from "./questions.js";
 import { isDecisionKind, type DecisionKind } from "./decisions.js";
-import { bearerAuth, hashPassword, verifyPassword, type AuthenticatedRequest } from "./auth.js";
-import { badRequest, notFound, withTags, withTagsOne } from "./api/_helpers.js";
+import { bearerAuth, hashPassword, verifyPassword } from "./auth.js";
+import { badRequest, consumerOf, notFound, withTags, withTagsOne } from "./api/_helpers.js";
+import { consumersRouter } from "./api/consumers.js";
 import { tagsRouter } from "./api/tags.js";
 
 export const api = Router();
@@ -442,14 +436,6 @@ api.patch("/settings/upload-max-bytes", (req: Request, res: Response) => {
  * that are reached before the middleware fires (shouldn't happen, but
  * cheap defense in depth).
  */
-function consumerOf(req: Request): string {
-    const ar = req as AuthenticatedRequest;
-    if (ar.consumer_id) return ar.consumer_id;
-    const headerVal = req.header("x-aiball-consumer");
-    if (typeof headerVal === "string" && headerVal.trim()) return headerVal.trim();
-    return process.env.AIBALL_HUMAN ?? "human";
-}
-
 api.get("/health", (_req, res) => {
     res.json({ ok: true, ts: new Date().toISOString() });
 });
@@ -1813,113 +1799,8 @@ function enrichRelationStages<T extends { id: number; kind: string; source_ticke
 }
 
 // -------- consumers (#B.79) -----------------------------------------------
-
-api.get("/consumers", (_req, res) => {
-    res.json(listConsumers());
-});
-
-api.post("/consumers", (req: Request, res: Response) => {
-    const { consumer_id, kind, display_name, enabled, note } = (req.body ?? {}) as {
-        consumer_id?: unknown;
-        kind?: unknown;
-        display_name?: unknown;
-        enabled?: unknown;
-        note?: unknown;
-    };
-    if (typeof consumer_id !== "string" || !consumer_id) {
-        return badRequest(res, "consumer_id required");
-    }
-    if (kind !== undefined && kind !== "human" && kind !== "agent" && kind !== "sandbox") {
-        return badRequest(res, "kind must be 'human', 'agent', or 'sandbox'");
-    }
-    const c = upsertConsumer({
-        consumer_id,
-        kind: kind as ConsumerKind | undefined,
-        display_name: typeof display_name === "string" ? display_name : null,
-        enabled: typeof enabled === "boolean" ? enabled : true,
-        note: typeof note === "string" ? note : null,
-    });
-    broadcast({ type: "consumer_changed", data: c });
-    res.json(c);
-});
-
-api.patch("/consumers/:consumer_id", (req: Request, res: Response) => {
-    const consumer_id = String(req.params.consumer_id);
-    const body = (req.body ?? {}) as {
-        kind?: unknown;
-        display_name?: unknown;
-        enabled?: unknown;
-        note?: unknown;
-    };
-    if (body.kind !== undefined && body.kind !== "human" && body.kind !== "agent" && body.kind !== "sandbox") {
-        return badRequest(res, "kind must be 'human', 'agent', or 'sandbox'");
-    }
-    const patch: {
-        kind?: ConsumerKind;
-        display_name?: string | null;
-        enabled?: boolean;
-        note?: string | null;
-    } = {};
-    if (body.kind !== undefined) patch.kind = body.kind as ConsumerKind;
-    if (body.display_name !== undefined) {
-        patch.display_name = body.display_name === null
-            ? null
-            : (typeof body.display_name === "string" ? body.display_name : null);
-    }
-    if (body.enabled !== undefined && typeof body.enabled === "boolean") {
-        patch.enabled = body.enabled;
-    }
-    if (body.note !== undefined) {
-        patch.note = body.note === null ? null : (typeof body.note === "string" ? body.note : null);
-    }
-    const updated: Consumer | null = updateConsumer(consumer_id, patch);
-    if (!updated) return notFound(res, "consumer not found");
-    broadcast({ type: "consumer_changed", data: updated });
-    res.json(updated);
-});
-
-api.delete("/consumers/:consumer_id", (req: Request, res: Response) => {
-    const consumer_id = String(req.params.consumer_id);
-    const c = getConsumer(consumer_id);
-    if (!c) return notFound(res, "consumer not found");
-    deleteConsumer(consumer_id);
-    broadcast({ type: "consumer_changed", data: { consumer_id, deleted: true } });
-    res.json({ consumer_id, deleted: true });
-});
-
-/**
- * #B.177 B1: claude-loop timer pushes its current state here on every
- * heartbeat tick (busy / idle / boot). `state_since` only advances on
- * transition; `state_updated_at` is touched every call (freshness
- * signal the UI uses for "offline" detection).
- *
- * Auth: own-state only — the resolved consumer (from header/token)
- * must match :consumer_id. Prevents one agent from spoofing another's
- * state. Humans can't push state (kind=human is silently rejected to
- * keep the UI semantic clean: state badges are for loop agents only).
- */
-api.put("/consumers/:consumer_id/state", (req: Request, res: Response) => {
-    const target = String(req.params.consumer_id);
-    const caller = consumerOf(req);
-    if (target !== caller) {
-        return res.status(403).json({ error: "can only push state for your own consumer_id" });
-    }
-    const c = getConsumer(caller);
-    if (!c) {
-        // ensureConsumer + auto-set state — bootstrap when a loop
-        // starts before the consumer has any post history.
-        ensureConsumer(caller);
-    } else if (c.kind === "human") {
-        return res.status(403).json({ error: "state push is for loop agents, not humans" });
-    }
-    const body = (req.body ?? {}) as { state?: unknown };
-    if (body.state !== "busy" && body.state !== "idle" && body.state !== "boot") {
-        return badRequest(res, "state must be one of: busy, idle, boot");
-    }
-    setConsumerState(caller, body.state);
-    broadcast({ type: "consumer_changed", data: { consumer_id: caller, state: body.state } });
-    res.json({ consumer_id: caller, state: body.state });
-});
+// Consumer CRUD + state-push moved to ./api/consumers.ts (#B.213 phase 1.B).
+api.use(consumersRouter);
 
 // -------- rules ------------------------------------------------------------
 
