@@ -25,20 +25,21 @@ For autonomous wrapping you actually want today, use
 [`claude-loop`](./README.md#quickstart--claude-loop-recommended).
 Sandbox is kept around for experimentation; caveat emptor.
 
-### claude-loop on Windows (`#B.178`)
+### Windows support (`#B.178`)
 
-Daemon-only Windows install scaffold ships (see
-[`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md)) — daemon + `aiball`
-CLI + `aiball-mcp` work, with the daemon registered as a per-user
-Scheduled Task.
+Full Windows install ships (see
+[`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md)) — daemon, `aiball` CLI,
+`aiball-mcp`, `claude-loop` wrapper, system-tray icon, all driven by
+`install.ps1` with `-Minimal` / `-Service` / `-System` / `-Symlink`
+variants.
 
-**Missing**: `claude-loop` wrapper port. Needs an adapter for a
-Windows-native multiplexer (psmux is the current candidate —
-<https://github.com/psmux/psmux>). The wrapper's tmux surface is
-small (~6 operations: new-session / send-keys / capture-pane /
-set-option / has-session / kill-session), so the port is ~50 LOC
-in `src/claude-loop/state.ts` once a multiplexer with that surface
-is confirmed.
+`claude-loop` works via [psmux](https://github.com/psmux/psmux), which
+ships a `tmux` alias compatible with the 6-7 ops the wrapper uses
+(`has-session`, `new-session -d -s NAME -c CWD`, `send-keys`,
+`capture-pane`, `set-option`, `bind-key`, `kill-session`). No code
+change in `state.ts` was needed — the existing `MUX_CMD` indirection
+(default `tmux`) finds psmux's alias automatically. Git Bash provides
+the `bash` shell for the inner command.
 
 ### `aiball check` autopoll deprecation warning symmetry (`#B.154`)
 

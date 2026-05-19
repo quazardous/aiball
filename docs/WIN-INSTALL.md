@@ -256,13 +256,42 @@ fallback Linux uses for non-UDS callers). The first install mint a
 token and stores it in `%APPDATA%\aiball\token` — `aiball` CLI and
 `aiball-mcp` read it from there.
 
+## claude-loop on Windows
+
+The autonomous-loop wrapper (`claude-loop start ...`) works on Windows
+through [psmux](https://github.com/psmux/psmux) (Rust-based tmux
+clone that ships a `tmux` alias) + Git Bash for the inner shell. The
+existing claude-loop code paths run unmodified because psmux's tmux
+compatibility covers our 6-7 ops (`has-session`, `new-session -d -s
+NAME -c CWD`, `send-keys`, `capture-pane`, `set-option`, `bind-key`,
+`kill-session`).
+
+Prereqs (one-time):
+
+```powershell
+winget install psmux            # multiplexer (ships `tmux` alias)
+# Git is already installed (it's a base prereq) — but make sure
+# Git Bash's bash.exe is on PATH so `tmux new-session ... bash -lc`
+# resolves. winget installs git.exe via C:\Program Files\Git\cmd\
+# but NOT bash.exe. Add it once:
+$gitBin = 'C:\Program Files\Git\bin'
+[Environment]::SetEnvironmentVariable('PATH', "$gitBin;$([Environment]::GetEnvironmentVariable('PATH','User'))", 'User')
+# Restart your shell for the change to take effect.
+```
+
+Then `claude-loop` works the same as on Linux:
+
+```powershell
+claude-loop start --name myloop --pings ./pings.yaml
+claude-loop list
+claude-loop attach myloop
+```
+
+Set `MUX_CMD=psmux` if you want to be explicit (default `tmux`
+resolves to psmux's alias anyway).
+
 ## What's NOT in the Windows path
 
-- **`claude-loop` wrapper** — the `claude-loop.cmd` launcher ships and
-  `claude-loop --help` works, but the wrapper needs tmux to actually
-  spawn anything. Use WSL2 if you want the autonomous-loop feature. The
-  Windows daemon + per-project `.mcp.json` + autopoll Stop hook give you
-  everything except the background loop.
 - **systemd**. A per-user Scheduled Task replaces it for the default
   path; an NSSM-managed Windows Service is also available via
   `-Service` / `-System` (see above). No socket-activation in either.
