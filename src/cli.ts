@@ -14,6 +14,9 @@ import { Command } from "commander";
 import { AiballClient } from "./client.js";
 import { registerSandboxCommands } from "./sandbox/cli.js";
 import { registerAuthCommands } from "./cli/auth.js";
+import { registerTicketCommands } from "./cli/ticket.js";
+import { registerAdminCommands } from "./cli/admin.js";
+import { registerAutopollCommands } from "./cli/autopoll.js";
 import {
     URL,
     die,
@@ -25,15 +28,10 @@ import {
     fmtSubscribe,
     fmtSubsList,
     fmtUnread,
-    fmtPostReceipt,
-    fmtTicketList,
-    fmtTicketThread,
-    fmtAutopollShow,
-    fmtRuleList,
-    fmtProjectList,
     buildClient,
     withProject,
     gOpts,
+    resolveInstallRoot,
 } from "./cli/_helpers.js";
 
 // =====================================================================
@@ -54,234 +52,13 @@ program
     );
 
 // =====================================================================
-// ticket subcommands
+// ticket subcommands → ./cli/ticket.ts (#B.213 phase 3.C).
+// rule + project + feed-path → ./cli/admin.ts (#B.213 phase 3.D).
+// autopoll subcommands → ./cli/autopoll.ts (#B.213 phase 3.E).
 // =====================================================================
-
-const ticket = program.command("ticket").description("Create / list / inspect tickets");
-
-ticket
-    .command("new")
-    .description("Create a new ticket")
-    .requiredOption("--title <title>", "Ticket title")
-    .option("--project <project>", "Project (default $AIBALL_PROJECT)")
-    .option("--body <body>", "Ticket body")
-    .option("--by <agent>", "Author override (default: resolved consumer id)")
-    .action(async (opts, cmd) => {
-        const globalOpts = gOpts(cmd);
-        const client = buildClient(globalOpts);
-        const project = withProject(client, opts.project);
-        const res = await client.postMessage({
-            project,
-            kind: "ticket_created",
-            title: opts.title,
-            ...(opts.body ? { body: opts.body } : {}),
-            by_agent: opts.by ?? client.agentId,
-        });
-        out(res, globalOpts, (v) => fmtPostReceipt(v, "ticket"));
-    });
-
-ticket
-    .command("comment")
-    .description("Post a comment on a ticket")
-    .requiredOption("--id <id>", "Ticket id")
-    .requiredOption("--body <body>", "Comment body")
-    .option("--project <project>", "Project (auto-resolved from ticket if daemon is up)")
-    .option("--parent <id>", "Parent message id (default: ticket id)")
-    .option("--by <agent>", "Author override")
-    .action(async (opts, cmd) => {
-        const client = buildClient(gOpts(cmd));
-        const ticketId = Number(opts.id);
-        let project = opts.project as string | undefined;
-        if (!project) {
-            try {
-                const m = (await client.getMessage(ticketId)) as { project?: string };
-                project = m?.project;
-            } catch {
-                /* fall through */
-            }
-            project ??= process.env.AIBALL_PROJECT;
-            if (!project) {
-                die(
-                    "ticket comment: --project required (daemon down, can't infer; or set AIBALL_PROJECT)",
-                );
-            }
-        }
-        const parent = opts.parent ? Number(opts.parent) : ticketId;
-        const res = await client.postMessage({
-            project,
-            kind: "comment_added",
-            body: opts.body,
-            by_agent: opts.by ?? client.agentId,
-            ticket_id: ticketId,
-            parent_id: parent,
-        });
-        out(res, gOpts(cmd), (v) => fmtPostReceipt(v, "comment"));
-    });
-
-ticket
-    .command("close")
-    .description("Close a ticket")
-    .requiredOption("--id <id>", "Ticket id")
-    .option("--project <project>", "Project (auto-resolved from ticket if daemon is up)")
-    .option("--by <agent>", "Author override")
-    .action(async (opts, cmd) => {
-        const client = buildClient(gOpts(cmd));
-        const ticketId = Number(opts.id);
-        let project = opts.project as string | undefined;
-        if (!project) {
-            try {
-                const m = (await client.getMessage(ticketId)) as { project?: string };
-                project = m?.project;
-            } catch {
-                /* fall through */
-            }
-            project ??= process.env.AIBALL_PROJECT;
-            if (!project) {
-                die(
-                    "ticket close: --project required (daemon down, can't infer; or set AIBALL_PROJECT)",
-                );
-            }
-        }
-        const res = await client.postMessage({
-            project,
-            kind: "ticket_closed",
-            by_agent: opts.by ?? client.agentId,
-            ticket_id: ticketId,
-            parent_id: ticketId,
-        });
-        out(res, gOpts(cmd), (v) => fmtPostReceipt(v, "close"));
-    });
-
-ticket
-    .command("list")
-    .description("List tickets (optionally filtered by project + status)")
-    .option("--project <project>")
-    .option("--status <status>", "pending|approved|rejected (uses /api/messages when set)")
-    .action(async (opts, cmd) => {
-        const globalOpts = gOpts(cmd);
-        const client = buildClient(globalOpts);
-        if (opts.status) {
-            const q: Record<string, string | number | undefined> = {
-                kind: "ticket_created",
-                status: opts.status,
-            };
-            if (opts.project) q.project = opts.project;
-            out(await client.listMessages(q), globalOpts, fmtTicketList);
-        } else {
-            const q: Record<string, string | undefined> = {};
-            if (opts.project) q.project = opts.project;
-            out(await client.listTickets(q), globalOpts, fmtTicketList);
-        }
-    });
-
-ticket
-    .command("get <id>")
-    .description("Fetch a ticket thread")
-    .action(async (id: string, _opts, cmd) => {
-        const globalOpts = gOpts(cmd);
-        const client = buildClient(globalOpts);
-        // Human view needs body + comments to be useful; JSON callers
-        // keep the legacy summary shape (header + comment_count).
-        const fetchFull = globalOpts.json !== true;
-        const t = await client.getTicket(Number(id), fetchFull ? { summary: false } : {});
-        out(t, globalOpts, fmtTicketThread);
-    });
-
-// =====================================================================
-// rule subcommands
-// =====================================================================
-
-const rule = program.command("rule").description("Moderation rule engine");
-
-rule.command("list").action(async (_opts, cmd) => {
-    const client = buildClient(gOpts(cmd));
-    out(await client.listRules(), gOpts(cmd), fmtRuleList);
-});
-
-rule
-    .command("add")
-    .requiredOption("--decision <decision>", "auto|review")
-    .option("--project <project>")
-    .option("--kind <kind>")
-    .option("--by <agent>")
-    .option("--note <note>")
-    .action(async (opts, cmd) => {
-        const client = buildClient(gOpts(cmd));
-        const r = await client.addRule({
-            decision: opts.decision as "auto" | "review",
-            ...(opts.project ? { match_project: opts.project } : {}),
-            ...(opts.kind ? { match_kind: opts.kind } : {}),
-            ...(opts.by ? { match_by_agent: opts.by } : {}),
-            ...(opts.note ? { note: opts.note } : {}),
-        });
-        out(r, gOpts(cmd), (v) => {
-            const x = v as { id?: number; decision?: string };
-            return `rule #${x.id ?? "?"} added (decision=${x.decision ?? "?"})`;
-        });
-    });
-
-rule
-    .command("del <id>")
-    .description("Delete a rule")
-    .action(async (id: string, _opts, cmd) => {
-        const client = buildClient(gOpts(cmd));
-        out(await client.deleteRule(Number(id)), gOpts(cmd), () => `rule #${id} deleted`);
-    });
-
-rule
-    .command("enable <id>")
-    .description("Enable a rule")
-    .action(async (id: string, _opts, cmd) => {
-        const client = buildClient(gOpts(cmd));
-        out(await client.toggleRule(Number(id), true), gOpts(cmd), () => `rule #${id} enabled`);
-    });
-
-rule
-    .command("disable <id>")
-    .description("Disable a rule")
-    .action(async (id: string, _opts, cmd) => {
-        const client = buildClient(gOpts(cmd));
-        out(await client.toggleRule(Number(id), false), gOpts(cmd), () => `rule #${id} disabled`);
-    });
-
-// =====================================================================
-// project + feed-path
-// =====================================================================
-
-const project = program.command("project").description("Project listing");
-project.command("list").action(async (_opts, cmd) => {
-    const client = buildClient(gOpts(cmd));
-    out(await client.listProjects(), gOpts(cmd), fmtProjectList);
-});
-
-project
-    .command("init [name]")
-    .description("Register a project explicitly (defaults name to basename of cwd)")
-    .option("--display-name <label>", "Human-friendly label shown in the UI")
-    .option("--description <text>", "Project description")
-    .action(async (
-        nameArg: string | undefined,
-        opts: { displayName?: string; description?: string },
-        cmd,
-    ) => {
-        const client = buildClient(gOpts(cmd));
-        const name = (nameArg ?? basename(userCwd())).trim();
-        if (!name) die("could not derive project name from cwd; pass it explicitly");
-        const row = await client.createProject(name, {
-            display_name: opts.displayName,
-            description: opts.description,
-        });
-        out(row, gOpts(cmd), (r) => `project "${r.name}" registered`);
-    });
-
-program
-    .command("feed-path <project>")
-    .description("Print the outbox feed path for tail -F")
-    .action(async (proj: string, _opts, cmd) => {
-        const client = buildClient(gOpts(cmd));
-        const r = (await client.feedPath(proj)) as { path: string };
-        process.stdout.write(r.path + "\n");
-    });
+registerTicketCommands(program);
+registerAdminCommands(program);
+registerAutopollCommands(program);
 
 // =====================================================================
 // whoami / subscriptions / unread
@@ -652,124 +429,6 @@ program
 // =====================================================================
 registerAuthCommands(program);
 
-// =====================================================================
-// autopoll subcommands — pilot per-project .aiball.yaml settings
-// =====================================================================
-
-const autopoll = program
-    .command("autopoll")
-    .description(
-        "Manage the per-project autopoll hook (Stop → drain pings). Operates on the closest .aiball.yaml walking up from cwd.",
-    );
-
-autopoll
-    .command("init")
-    .description("Write a starter .aiball.yaml at cwd if none is found up-tree")
-    .option("--force", "Overwrite an existing .aiball.yaml at cwd")
-    .action(async (opts: { force?: boolean }) => {
-        const { findConfigUpwards, CONFIG_FILENAME } = await import("./autopoll/config.js");
-        const existing = findConfigUpwards(userCwd());
-        const target = join(userCwd(), CONFIG_FILENAME);
-        if (existing && !opts.force) {
-            die(`already configured at ${existing} — re-run with --force to overwrite`);
-        }
-        // Resolve the install dir to find the example template.
-        const installRoot = resolveInstallRoot();
-        const example = join(installRoot, ".aiball.yaml.example");
-        if (!existsSync(example)) {
-            die(`example template missing at ${example}`);
-        }
-        writeFileSync(target, readFileSync(example, "utf8"));
-        process.stdout.write(`wrote ${target}\nedit it or pilot via 'aiball autopoll {enable|disable|tone|throttle}'\n`);
-    });
-
-autopoll
-    .command("show")
-    .description("Print resolved autopoll settings for cwd")
-    .action(async (_opts, cmd) => {
-        const { loadConfig } = await import("./autopoll/config.js");
-        const cfg = loadConfig(userCwd());
-        const payload = {
-            config_path: cfg.configPath,
-            autopoll: cfg.autopoll,
-            consumer: cfg.consumer,
-        };
-        out(payload, gOpts(cmd), fmtAutopollShow);
-    });
-
-autopoll
-    .command("enable")
-    .description("Set autopoll.enabled = true in .aiball.yaml")
-    .action(async () => setAutopollField("enabled", true));
-
-autopoll
-    .command("disable")
-    .description("Set autopoll.enabled = false in .aiball.yaml")
-    .action(async () => setAutopollField("enabled", false));
-
-autopoll
-    .command("tone <value>")
-    .description("Set autopoll.tone (hint | directive | imperative)")
-    .action(async (value: string) => {
-        if (value !== "hint" && value !== "directive" && value !== "imperative") {
-            die(`unknown tone '${value}' (expected hint | directive | imperative)`);
-        }
-        await setAutopollField("tone", value);
-    });
-
-autopoll
-    .command("throttle <seconds>")
-    .description("Set autopoll.throttle_seconds (integer ≥ 0)")
-    .action(async (seconds: string) => {
-        const n = Number.parseInt(seconds, 10);
-        if (!Number.isFinite(n) || n < 0) {
-            die(`throttle must be a non-negative integer, got '${seconds}'`);
-        }
-        await setAutopollField("throttle_seconds", n);
-    });
-
-autopoll
-    .command("volatile <value>")
-    .description("Set autopoll.volatile (true = one-shot per ping, false = persistent reminders)")
-    .action(async (value: string) => {
-        const v = value.toLowerCase();
-        if (v !== "true" && v !== "false") {
-            die(`volatile must be true or false, got '${value}'`);
-        }
-        await setAutopollField("volatile", v === "true");
-    });
-
-autopoll
-    .command("backlog <value>")
-    .description(
-        "Set autopoll.backlog (true = open-tickets count is also a notify trigger, not just context)",
-    )
-    .action(async (value: string) => {
-        const v = value.toLowerCase();
-        if (v !== "true" && v !== "false") {
-            die(`backlog must be true or false, got '${value}'`);
-        }
-        await setAutopollField("backlog", v === "true");
-    });
-
-async function setAutopollField(key: string, value: unknown): Promise<void> {
-    const { findConfigUpwards, CONFIG_FILENAME } = await import("./autopoll/config.js");
-    const yamlMod = await import("yaml");
-    let path = findConfigUpwards(userCwd());
-    if (!path) {
-        // Bootstrap: create a minimal .aiball.yaml at cwd so the user
-        // doesn't have to run init separately.
-        path = join(userCwd(), CONFIG_FILENAME);
-        writeFileSync(path, "autopoll: {}\n");
-        process.stdout.write(`created ${path}\n`);
-    }
-    const src = readFileSync(path, "utf8");
-    const doc = yamlMod.parseDocument(src);
-    if (!doc.has("autopoll")) doc.set("autopoll", { [key]: value });
-    else doc.setIn(["autopoll", key], value);
-    writeFileSync(path, doc.toString());
-    process.stdout.write(`${path}: autopoll.${key} = ${JSON.stringify(value)}\n`);
-}
 
 // =====================================================================
 // mcp + init subcommands — wire .mcp.json non-destructively (#B.175)
@@ -890,12 +549,6 @@ async function resolveIdentityHint(): Promise<string> {
     }
 }
 
-function resolveInstallRoot(): string {
-    // The bin/aiball wrapper cd's into the install dir before exec'ing
-    // tsx — process.cwd() at this point IS the install root. Easier
-    // and faster than walking up looking for package.json.
-    return process.cwd();
-}
 
 // =====================================================================
 // sandbox subcommands (delegated)

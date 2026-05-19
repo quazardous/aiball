@@ -38,6 +38,17 @@ export function jsonline(value: unknown): void {
 }
 
 /**
+ * Resolve the aiball install root. The `bin/aiball` wrapper cd's into
+ * the install dir before exec'ing tsx, so process.cwd() AT STARTUP is
+ * the install root — easier and faster than walking up looking for
+ * package.json. Subcommands that need the user's invocation dir use
+ * `userCwd()` (reads AIBALL_CWD which the wrapper preserves).
+ */
+export function resolveInstallRoot(): string {
+    return process.cwd();
+}
+
+/**
  * Output helper (#B.209). Human-readable text by default; JSON when the
  * global `--json` flag is set OR when no humanizer is registered for the
  * shape. Scripts that depended on the old JSON-default behaviour should
