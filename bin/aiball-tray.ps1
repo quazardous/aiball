@@ -82,7 +82,17 @@ $exit.Add_Click({
 })
 $ni.ContextMenuStrip = $menu
 
-# Convention: double-click on the tray icon = primary action (open UI).
+# Primary action — open the UI:
+#   - Single left-click on the icon (modern Win convention: Slack, Spotify).
+#   - Double-click also accepted as a fallback for muscle memory.
+# Right-click is reserved for the context menu (Windows handles that
+# automatically via ContextMenuStrip).
+$ni.Add_MouseClick({
+    param($sender, $e)
+    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+        Start-Process (Get-OpenUrl)
+    }
+})
 $ni.Add_MouseDoubleClick({ Start-Process (Get-OpenUrl) })
 
 # Hand control to the WinForms message loop. The script stays alive

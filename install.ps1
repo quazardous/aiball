@@ -436,8 +436,10 @@ if (-not $NoClaudeLoop) {
     if (-not (Get-Command tmux  -ErrorAction SilentlyContinue) -and `
         -not (Get-Command psmux -ErrorAction SilentlyContinue)) {
         Log "psmux not detected — installing via winget (claude-loop dep)"
+        # Name-based search (not --id) so we don't have to track the
+        # exact Publisher.Name slug — winget matches on name/moniker too.
         try {
-            & winget install --id psmux --silent `
+            & winget install psmux --silent `
                 --accept-source-agreements --accept-package-agreements 2>&1 | Out-Host
         } catch {
             Warn "winget install psmux failed: $($_.Exception.Message)"
@@ -446,7 +448,8 @@ if (-not $NoClaudeLoop) {
         if (-not (Get-Command tmux  -ErrorAction SilentlyContinue) -and `
             -not (Get-Command psmux -ErrorAction SilentlyContinue)) {
             Warn "psmux still not on PATH — claude-loop start won't work."
-            Warn "  Install manually: winget install --id psmux"
+            Warn "  Try: winget search psmux  (find the right package id)"
+            Warn "  Then: winget install <id>"
         } else {
             Log "psmux on PATH OK"
         }
