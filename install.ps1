@@ -74,13 +74,13 @@
     home dir).
 
 .PARAMETER Minimal
-    Light in-place install: daemon runs from this checkout directly
-    (no copy to %LOCALAPPDATA%\Programs\aiball, no CLI shims on PATH).
-    Still registers a Scheduled Task so the daemon actually runs and
-    the tray shortcut has something to point at. Trade-off: moving or
-    deleting the source repo breaks the daemon. Suits a dev workflow
-    where the repo IS the install. Incompatible with -Service / -System
-    / -Symlink (-Minimal is already in-place).
+    Light in-place install: daemon runs from this checkout directly,
+    no copy to %LOCALAPPDATA%\Programs\aiball. CLI shims, tray
+    shortcuts, Scheduled Task, sanity check, auth-init — all still
+    happen, just pointing at the source repo. Trade-off: moving or
+    deleting the source repo breaks the daemon AND the shims/tray.
+    Suits a dev workflow where the repo IS the install. Incompatible
+    with -Service / -System / -Symlink (-Minimal is already in-place).
 
 .PARAMETER NoTray
     Skip the tray shortcut creation (Desktop / Start Menu / Startup
@@ -571,27 +571,26 @@ CreateObject("WScript.Shell").Run "cmd /c """ & "$launcherPath" & """", 0, False
 Log "wrote hidden launcher wrapper: $vbsPath"
 
 # --- .cmd shims in $PrefixBin ---------------------------------------------
-# Tiny wrappers that exec the real .cmd in the install dir. No symlink
-# required — works without admin / Developer Mode.
-# Skipped under -Minimal (no PATH pollution; CLI usable via "$SrcDir\bin\aiball").
+# Tiny wrappers that exec the real .cmd in $AppDir\bin. No symlink
+# required — works without admin / Developer Mode. Same shim set under
+# -Minimal (points at $SrcDir\bin\*.cmd in that mode); without these
+# the user would have to type the full path to call aiball / claude-loop.
 
-if (-not $Minimal) {
-    if (-not (Test-Path $PrefixBin)) { New-Item -ItemType Directory -Force -Path $PrefixBin | Out-Null }
-    foreach ($name in $Shims) {
-        $target = Join-Path $PrefixLib "bin\$name.cmd"
-        if (-not (Test-Path $target)) {
-            Warn "expected shim source missing: $target — skipping $name.cmd"
-            continue
-        }
-        $shimPath = Join-Path $PrefixBin "$name.cmd"
-        $shimBody = @"
+if (-not (Test-Path $PrefixBin)) { New-Item -ItemType Directory -Force -Path $PrefixBin | Out-Null }
+foreach ($name in $Shims) {
+    $target = Join-Path $AppDir "bin\$name.cmd"
+    if (-not (Test-Path $target)) {
+        Warn "expected shim source missing: $target — skipping $name.cmd"
+        continue
+    }
+    $shimPath = Join-Path $PrefixBin "$name.cmd"
+    $shimBody = @"
 @echo off
 "$target" %*
 exit /b %errorlevel%
 "@
-        [System.IO.File]::WriteAllText($shimPath, ($shimBody -replace "`r?`n","`r`n"))
-        Log "wrote shim: $shimPath -> $target"
-    }
+    [System.IO.File]::WriteAllText($shimPath, ($shimBody -replace "`r?`n","`r`n"))
+    Log "wrote shim: $shimPath -> $target"
 }
 
 # --- tray shortcuts (Desktop / Start Menu / Startup folder) ----------------
@@ -765,10 +764,9 @@ if (-not $NoAuthInit) {
                 if (Test-Path $setupUrlFile) { Remove-Item $setupUrlFile -Force -ErrorAction SilentlyContinue }
             } else {
                 Log "daemon up. Running 'aiball auth init'"
-                # Full install puts shims on PATH at $PrefixBin\aiball.cmd;
-                # -Minimal skips shims, so call the in-source launcher direct.
-                $aiballCmd = if ($Minimal) { Join-Path $AppDir 'bin\aiball.cmd' } `
-                                     else { Join-Path $PrefixBin 'aiball.cmd' }
+                # Call the shim in $PrefixBin (added to PATH automatically
+                # on Win10+). Both -Minimal and full install put it there.
+                $aiballCmd = Join-Path $PrefixBin 'aiball.cmd'
                 $output = & $aiballCmd auth init --host $BindHost --port $Port 2>&1
                 $output | ForEach-Object { Write-Host $_ }   # mirror to console
                 # Parse the setup URL out of the output.
@@ -834,9 +832,7 @@ if ($Service) {
     Write-Host "  stop:        Stop-ScheduledTask -TaskName $TaskName"
 }
 Write-Host "  open:        http://${BindHost}:${Port}"
-if ($Minimal) {
-    Write-Host "  cli:         $AppDir\bin\aiball.cmd (no PATH shim under -Minimal)"
-}
+Write-Host "  cli:         aiball / aiball-mcp / claude-loop  (shims in $PrefixBin -> $AppDir\bin)"
 if (-not $sqliteOk) {
     Write-Host ''
     Write-Host '  Fix better-sqlite3 first (see warnings above), then:'
@@ -855,10 +851,6 @@ if (-not $sqliteOk) {
     } else {
         Write-Host "         Start-ScheduledTask -TaskName $TaskName"
     }
-    if ($Minimal) {
-        Write-Host "         & '$AppDir\bin\aiball.cmd' auth init --host $BindHost --port $Port"
-    } else {
-        Write-Host "         aiball auth init --host $BindHost --port $Port"
-    }
+    Write-Host "         aiball auth init --host $BindHost --port $Port"
 }
 Write-Host '----------------------------------------------------------------------'

@@ -75,14 +75,14 @@ pwsh -File install.ps1 -Minimal -AuthInit
 
 What it does (vs Path 3 default):
 - ❌ No copy to `%LOCALAPPDATA%\Programs\aiball` — daemon runs from this checkout in place.
-- ❌ No CLI shims in `%LOCALAPPDATA%\Microsoft\WindowsApps`. Call the CLI directly: `& $repo\bin\aiball.cmd ...`.
 - ✅ `npm install` in this checkout (idempotent if already done).
 - ✅ Scheduled Task registered, pointing at the checkout.
+- ✅ CLI shims in `%LOCALAPPDATA%\Microsoft\WindowsApps` (so `aiball` / `aiball-mcp` / `claude-loop` work from any shell), all pointing at `$repo\bin\*.cmd`.
 - ✅ Tray shortcuts (Desktop / Start Menu / Startup) — same Death Star icon as other paths.
 
-Trade-off: if you move/delete the checkout, the daemon stops working —
-no Uninstall needed first. Best fit for "I'm hacking on the code, just
-make it run".
+Trade-off: if you move/delete the checkout, the daemon AND the shims
+stop working — no Uninstall needed first, but the shims will error
+out. Best fit for "I'm hacking on the code, just make it run".
 
 Incompatible with `-Service` / `-System` / `-Symlink` (Minimal is
 already in-place).
