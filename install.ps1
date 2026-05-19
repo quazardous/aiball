@@ -861,9 +861,7 @@ if (-not $NoAuthInit) {
                 }
             }
         }
-        # else: daemon didn't come up — already warned in the start block.
     }
-}
 
 # --- launch the tray now ---------------------------------------------------
 # The Startup-folder shortcut fires at next logon, but the user just
