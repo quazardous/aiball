@@ -1215,6 +1215,20 @@ program
         process.stdout.write(`Run \`aiball check\` to verify everything resolves.\n`);
     });
 
+// `aiball stop-hook install [--global]` — standalone wiring command,
+// shared between `aiball init --stop-hook` and install.ps1 -StopHook.
+// Doesn't touch .mcp.json or .aiball.yaml — pure hook wiring. Suitable
+// for global installs where you don't want the project-local artifacts
+// to land in install.ps1's CWD.
+const stopHook = program.command("stop-hook").description("Manage the Claude Code Stop hook (autopoll trigger)");
+stopHook
+    .command("install")
+    .description("Wire skill/hooks/aiball-autopoll-stop into .claude/settings.json")
+    .option("--global", "Write to ~/.claude/settings.json (every Claude Code session). Default: project-local <PWD>/.claude/settings.json")
+    .action((opts: { global?: boolean }) => {
+        wireStopHook({ global: opts.global === true });
+    });
+
 /**
  * Wire the Claude Code Stop hook into .claude/settings.json so
  * autopoll triggers on session end. Picks the right wrapper extension

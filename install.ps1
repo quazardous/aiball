@@ -94,6 +94,14 @@
     install psmux + ensure bash is on PATH manually. Useful if you only
     want the daemon + tray and never plan to use the autonomous loop.
 
+.PARAMETER StopHook
+    Also wire the Claude Code Stop hook **globally** at
+    ~/.claude/settings.json so autopoll triggers in EVERY Claude Code
+    session on this machine. Equivalent of `aiball stop-hook install
+    --global`. For per-project wiring, use `aiball init --stop-hook` in
+    the project dir instead (cleaner — keeps the entry out of unrelated
+    projects).
+
 .PARAMETER Yes
     Skip interactive confirmations (--PurgeData prompt).
 
@@ -138,6 +146,7 @@ param(
     [switch] $Minimal,
     [switch] $NoTray,
     [switch] $NoClaudeLoop,
+    [switch] $StopHook,
     [switch] $Yes,
     [int]    $Port = 7777,
     [string] $BindHost = '127.0.0.1'
@@ -876,6 +885,22 @@ if (-not $NoTray -and (Test-Path $TrayCmd)) {
     } catch {
         Warn "failed to launch tray now: $($_.Exception.Message)"
         Warn "  it will start automatically at next logon (Startup folder shortcut)"
+    }
+}
+
+# --- global stop hook (opt-in) --------------------------------------------
+# -StopHook wires Claude Code's Stop hook into ~/.claude/settings.json
+# so autopoll triggers in EVERY Claude Code session on this machine.
+# Per-project wiring (cleaner) is via `aiball init --stop-hook` in the
+# project dir.
+
+if ($StopHook) {
+    Log "wiring global Claude Code Stop hook (~/.claude/settings.json)"
+    $aiballCmd = Join-Path $PrefixBin 'aiball.cmd'
+    if (Test-Path $aiballCmd) {
+        & $aiballCmd stop-hook install --global 2>&1 | ForEach-Object { Write-Host $_ }
+    } else {
+        Warn "aiball shim missing at $aiballCmd — can't wire stop hook"
     }
 }
 
