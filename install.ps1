@@ -176,6 +176,18 @@ function Remove-AiballService {
     }
 }
 
+function Update-PathFromRegistry {
+    # Pull the latest Machine + User PATH from the registry into the
+    # current process. Useful when a tool (NSSM, node, git) was just
+    # installed in a parent shell — child processes don't auto-refresh
+    # PATH from the registry on startup.
+    $machine = [Environment]::GetEnvironmentVariable('PATH','Machine')
+    $user    = [Environment]::GetEnvironmentVariable('PATH','User')
+    if ($machine -and $user) { $env:PATH = "$machine;$user" }
+    elseif ($machine)        { $env:PATH = $machine }
+    elseif ($user)           { $env:PATH = $user }
+}
+
 function Read-SecurePasswordPlain($prompt) {
     # SecureString -> plain text held briefly to pass to nssm. The plain
     # value is never persisted to disk; NSSM stashes it encrypted in LSA
@@ -251,6 +263,12 @@ if ($Uninstall) {
 }
 
 # --- install path -----------------------------------------------------------
+
+# Refresh PATH from the registry before prereq checks — handles the
+# common case of running install.ps1 right after `winget install ...`
+# in the same shell session (the new PATH otherwise only takes effect
+# in fresh shells).
+Update-PathFromRegistry
 
 Require-Cmd node
 Require-Cmd npm
