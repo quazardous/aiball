@@ -20,21 +20,19 @@
  * Logs to stdout (the launcher redirects to $STATE_DIR/timer.log).
  * Exits when the tmux session disappears.
  */
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { AiballClient } from "../client.js";
 import {
     isInternalCheckCmd,
     DEFAULT_USER_GRACE_SEC,
     MUX_CMD,
-    PANIC_RATE_LIMIT_MS,
     WAKE_COALESCE_WINDOW_MS,
     buildWakePhrase,
     checkHasWork,
     formatPaneSnapshot,
     idleMarkerPath,
     isDuplicateWakeHint,
-    lastPanicAtPath,
     lastWakeAtPath,
     paneFooterShowsBusy,
     pingsPath,
@@ -101,42 +99,32 @@ function pickPhrase(hint?: WakeHint): string {
  * a panic ticket precisely because they want claude interrupted
  * mid-turn, however busy claude appears to be.
  *
+ * No rate-limit, no humans-only gate — david (#w47f9m):
+ * "non (mais c'est pas un mécanisme qui doit etre plebicité)".
+ * Moderation already gates message creation; double-gating here
+ * would mostly trip legitimate cases. Comments on panic tickets
+ * inherit the same path via SSE — there's no comment-level panic
+ * because the UI doesn't surface it (david: "dans l'ui j'ai pas
+ * le panic pour les commente . donc evoque le en commentaire dans
+ * le code mais ticket only").
+ *
  * Flow:
- *   1. Rate-limit: PANIC_RATE_LIMIT_MS floor between consecutive
- *      panics (default 60s) so a runaway human can't bounce the
- *      pane in an Escape/repaint loop.
- *   2. Fetch the ticket body via the daemon — the SSE payload only
+ *   1. Fetch the ticket body via the daemon — the SSE payload only
  *      carries ids, but the "complete message" david asked for is
  *      the body itself, formatted for visual urgency on the pane.
- *   3. Send double-Escape — Claude Code's interrupt-this-turn chord.
- *   4. Wait ~500ms for the prompt to repaint.
- *   5. Paste the wrapped body via a tmux paste-buffer (preserves
+ *   2. Send double-Escape — Claude Code's interrupt-this-turn chord.
+ *   3. Wait ~500ms for the prompt to repaint.
+ *   4. Paste the wrapped body via a tmux paste-buffer (preserves
  *      newlines without the per-line Enter that `send-keys` would
  *      otherwise submit-on-first-newline). Fallback: single-line
  *      `send-keys` if `set-buffer` errored.
- *   6. Send Enter to submit.
- *
- * No mutex / coalesce with normal wakes: a panic is by contract
- * loud and immediate. Concurrent panic bursts collapse on the
- * rate-limit gate (the second panic within 60s drops).
+ *   5. Send Enter to submit.
  */
 async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
     if (!hint.ticket_id) {
         log(`skip panic (${reason}) — no ticket_id in hint`);
         return false;
     }
-    const lastPath = lastPanicAtPath(sd!);
-    if (existsSync(lastPath)) {
-        try {
-            const last = new Date(readFileSync(lastPath, "utf8").trim());
-            const elapsed = Date.now() - last.getTime();
-            if (Number.isFinite(elapsed) && elapsed < PANIC_RATE_LIMIT_MS) {
-                log(`skip panic (${reason}) — rate-limited (last ${Math.round(elapsed / 1000)}s ago, floor ${PANIC_RATE_LIMIT_MS / 1000}s)`);
-                return false;
-            }
-        } catch { /* unparseable marker — fall through and overwrite */ }
-    }
-    try { writeFileSync(lastPath, new Date().toISOString() + "\n"); } catch { /* fail open */ }
     let title = "";
     let body = "";
     let author = "(unknown)";
@@ -153,7 +141,7 @@ async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
     }
     const MAX_BODY = 4000;
     const trunc = body.length > MAX_BODY ? body.slice(0, MAX_BODY) + "…[truncated]" : body;
-    const msg = `🚨 PANIC INTERRUPT from ${author} — ticket #B.${hint.ticket_id} "${title}":\n${trunc}\n(poll #B.${hint.ticket_id} for full context)`;
+    const msg = `PANIC: ${author} interrupted you on ticket #B.${hint.ticket_id} "${title}"\n\n${trunc}\n\nPoll #B.${hint.ticket_id} for the full thread.`;
     spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Escape", "Escape"], { stdio: "ignore" });
     await sleep(500);
     const bufName = `panic_${Date.now()}`;

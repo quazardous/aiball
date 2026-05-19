@@ -180,17 +180,6 @@ export const PANE_BUSY_DELAY_MS = Math.max(0, Number(process.env.CL_PANE_BUSY_DE
  */
 export function busyDeferUntilPath(sd: string): string { return join(sd, "busy-defer-until"); }
 
-/** Last panic interrupt timestamp (#B.214). Rate-limit gate for the
- *  panic intent: a single human can spam-create panic tickets faster
- *  than claude can repaint after an Escape; without a floor between
- *  consecutive interrupts the pane bounces between Escape and repaint
- *  in a loop and the body never lands cleanly. One panic per
- *  PANIC_RATE_LIMIT_MS is a soft cap — bursts beyond that are
- *  dropped (logged, no wake fired). The pivot back from busy auto-
- *  cleans itself; nothing to delete. */
-export function lastPanicAtPath(sd: string): string { return join(sd, "last-panic-at"); }
-export const PANIC_RATE_LIMIT_MS = 60_000;
-
 /** Arm the defer gate so the next wake is blocked until `now + ms`.
  *  Writes the absolute target as ISO. Idempotent: pushes the existing
  *  gate forward if the new target is later, never shortens an existing
