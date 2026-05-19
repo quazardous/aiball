@@ -380,12 +380,29 @@ watch(searchQuery, () => {
     }, 220);
 });
 
+// #B.222 sxrz48: priority-aware client-side sort. Weight mirrors the
+// backend's /api/tickets order so the inbox + sidebar + wake-CTA all
+// agree on what "urgent first" means.
+const PRIORITY_WEIGHT: Record<string, number> = {
+    urgent: 4,
+    high: 3,
+    normal: 2,
+    low: 1,
+};
+
 const sortedRows = computed(() => {
     const r = [...rows.value];
     if (sortBy.value === "created_desc") {
         r.sort((a, b) => b.created_at.localeCompare(a.created_at));
     } else if (sortBy.value === "created_asc") {
         r.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    } else if (sortBy.value === "priority") {
+        r.sort((a, b) => {
+            const wA = PRIORITY_WEIGHT[a.priority ?? "normal"] ?? 2;
+            const wB = PRIORITY_WEIGHT[b.priority ?? "normal"] ?? 2;
+            if (wA !== wB) return wB - wA;
+            return b.created_at.localeCompare(a.created_at);
+        });
     }
     // "activity" is the API default; rows already arrive sorted that way.
     return r;

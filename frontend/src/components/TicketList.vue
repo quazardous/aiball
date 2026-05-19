@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
-import Select from "primevue/select";
 import Tag from "primevue/tag";
 import ToggleButton from "primevue/togglebutton";
 import { api, type Message, type TicketSummary } from "../lib/api";
@@ -16,31 +15,6 @@ const comments = ref<Message[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const onlyOpen = ref(true);
-
-// #B.222 sxrz48: sort dropdown. "activity" preserves prior behavior
-// (last-activity desc); "priority" sorts urgent → high → normal → low,
-// then by last-activity desc as tie-breaker. Persisted per-scope in
-// localStorage so david's choice survives reloads.
-type SortBy = "activity" | "priority";
-const SORT_STORAGE_KEY = "aiball.ticketList.sortBy";
-const sortBy = ref<SortBy>(
-    (typeof localStorage !== "undefined"
-        && (localStorage.getItem(SORT_STORAGE_KEY) as SortBy | null))
-    || "activity",
-);
-const SORT_OPTIONS: { label: string; value: SortBy }[] = [
-    { label: "Last activity", value: "activity" },
-    { label: "Priority", value: "priority" },
-];
-watch(sortBy, (v) => {
-    if (typeof localStorage !== "undefined") localStorage.setItem(SORT_STORAGE_KEY, v);
-});
-const PRIORITY_WEIGHT: Record<string, number> = {
-    urgent: 4,
-    high: 3,
-    normal: 2,
-    low: 1,
-};
 
 async function load() {
     loading.value = true;
@@ -102,27 +76,18 @@ const augmented = computed<Aug[]>(() => {
         if (c.created_at > cur.last) cur.last = c.created_at;
         counts.set(c.ticket_id, cur);
     }
-    const rows = tickets.value.map((t) => {
-        const c = counts.get(t.id) ?? { count: 0, last: "" };
-        return {
-            ...t,
-            commentCount: c.count,
-            lastActivity:
-                c.last && c.last > t.created_at ? c.last : t.created_at,
-            snippet: snippet(t.body),
-        };
-    });
-    if (sortBy.value === "priority") {
-        rows.sort((a, b) => {
-            const wA = PRIORITY_WEIGHT[a.priority ?? "normal"] ?? 2;
-            const wB = PRIORITY_WEIGHT[b.priority ?? "normal"] ?? 2;
-            if (wA !== wB) return wB - wA;
-            return b.lastActivity.localeCompare(a.lastActivity);
-        });
-    } else {
-        rows.sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
-    }
-    return rows;
+    return tickets.value
+        .map((t) => {
+            const c = counts.get(t.id) ?? { count: 0, last: "" };
+            return {
+                ...t,
+                commentCount: c.count,
+                lastActivity:
+                    c.last && c.last > t.created_at ? c.last : t.created_at,
+                snippet: snippet(t.body),
+            };
+        })
+        .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
 });
 </script>
 
@@ -136,15 +101,6 @@ const augmented = computed<Aug[]>(() => {
                 on-icon="pi pi-folder-open"
                 off-icon="pi pi-folder"
                 size="small"
-            />
-            <Select
-                v-model="sortBy"
-                :options="SORT_OPTIONS"
-                option-label="label"
-                option-value="value"
-                size="small"
-                title="Sort tickets by…"
-                style="min-width: 11rem"
             />
         </div>
 

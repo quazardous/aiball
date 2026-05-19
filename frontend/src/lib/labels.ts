@@ -281,7 +281,7 @@ export const BULK_ACTIONS_IN_ORDER: BulkAction[] = (
 // Moved out of App.vue inline definitions. Same shape, same labels.
 
 export type StatusFilter = "all" | "unread" | "pending" | "approved" | "rejected";
-export type SortBy = "activity" | "created_desc" | "created_asc";
+export type SortBy = "activity" | "priority" | "created_desc" | "created_asc";
 
 export const STATUS_FILTER_OPTIONS: { label: string; value: StatusFilter }[] = [
     { label: "All", value: "all" },
@@ -293,6 +293,10 @@ export const STATUS_FILTER_OPTIONS: { label: string; value: StatusFilter }[] = [
 
 export const SORT_OPTIONS: { label: string; value: SortBy }[] = [
     { label: "Recent activity", value: "activity" },
+    // #B.222 sxrz48 david: priority sort in the inbox. urgent → high
+    // → normal → low; ties broken by created_desc so a single bucket
+    // still surfaces the newest first.
+    { label: "Priority", value: "priority" },
     { label: "Newest first", value: "created_desc" },
     { label: "Oldest first", value: "created_asc" },
 ];
