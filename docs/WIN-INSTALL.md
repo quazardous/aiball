@@ -247,24 +247,33 @@ removes the opposite registration, so you never end up with two daemons
 fighting over port 7777. To go back to a Scheduled Task: just re-run
 without `-Service`.
 
-## Transport: UDS by default, TCP available
+## Transport: TCP, not UDS
 
-Windows 10 1803+ supports AF_UNIX in `net.createServer`, so the daemon
-listens on **both** TCP (`127.0.0.1:7777`) AND a Unix-domain socket at
-`%USERPROFILE%\.local\share\aiball\sock` — same as Linux. Same-user
-clients (CLI / MCP / claude-loop) connect via the socket and bypass
-the bearer-token auth path; the OS trust boundary comes from NTFS ACL
-inheritance (the parent profile dir is owner-only, and the sock file
-inherits that ACL).
+The Unix domain socket the Linux daemon uses doesn't have a clean
+counterpart on Windows. Node's `net.createServer.listen(path)` on
+Windows maps to **Named Pipes** (`\\.\pipe\…`), not AF_UNIX files, so
+trying to listen on a regular filesystem path (like `~/.local/share/
+aiball/sock`) gets `EACCES` — node mangles the path into an invalid
+pipe name. So the Windows daemon binds **TCP-only** on
+`127.0.0.1:7777` and clients authenticate with a bearer token.
 
-`-System` mode is the exception: LocalSystem creates the sock under
-`%PROGRAMDATA%\aiball\`, which per-user shims don't look at, so the
-launcher pins `AIBALL_SOCK=""` and the daemon stays TCP-only. Use
-the bearer-token CLI workflow (`aiball auth issue --consumer ...`) to
-authenticate clients in that mode.
+Auth workflow on a fresh install:
 
-Set `AIBALL_SOCK=""` in your shell to force TCP+token for testing or
-when running the daemon over a remote tunnel.
+1. `install.ps1` mints an install token and opens `/setup` in your
+   browser. Create your human account there.
+2. To use the CLI / MCP / claude-loop from a terminal, you need an
+   **agent token**. Open the browser already logged in to the daemon,
+   navigate to your user settings, and click **Issue CLI token**
+   (or call `POST /api/auth/issue` while authenticated as a human).
+3. Save the printed token to `%USERPROFILE%\.local\share\aiball\cli-env`
+   as a single line: `export AIBALL_TOKEN=aiball-...`
+4. New shells will pick it up automatically — the .cmd shims source
+   that file on every invocation.
+
+Advanced users can still opt in to a Named Pipe-based UDS by setting
+`AIBALL_SOCK=\\.\pipe\aiball-<something>` explicitly, but the shims'
+auto-detection only looks for a regular file at `$AIBALL_HOME/sock`,
+so pipe-mode requires manual wiring on the client side too.
 
 ## claude-loop on Windows
 

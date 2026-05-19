@@ -589,13 +589,9 @@ $launcherPath = Join-Path $LogDir 'daemon-launcher.cmd'
 # daemon's default `homedir()/.local/share/aiball` would resolve under
 # C:\Windows\system32\config\systemprofile — far from where the
 # installer put the data. Pin AIBALL_HOME explicitly in that mode so
-# the daemon writes/reads from %PROGRAMDATA%\aiball. Also pin
-# AIBALL_SOCK="" under -System so the daemon doesn't try to create a
-# UDS at %PROGRAMDATA%\aiball\sock that per-user shims (whose default
-# AIBALL_HOME is %USERPROFILE%\.local\share\aiball) wouldn't see —
-# -System users fall back to TCP+token by design.
+# the daemon writes/reads from %PROGRAMDATA%\aiball.
 $envOverrides = if ($System) {
-    "set `"AIBALL_HOME=$DataDir`"`r`nset `"AIBALL_SOCK=`""
+    "set `"AIBALL_HOME=$DataDir`""
 } else { '' }
 $launcherBody = @"
 @echo off
