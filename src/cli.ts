@@ -7,8 +7,8 @@
  * Global flag --human / -H swaps the active consumer to $AIBALL_HUMAN
  * (default "human"), so a single CLI invocation can play either side.
  */
-import { existsSync, statSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, mkdirSync, statSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";
@@ -729,7 +729,7 @@ program
                 };
                 for (const entry of s.hooks?.Stop ?? []) {
                     for (const h of entry.hooks ?? []) {
-                        if (h.command && /aiball-autopoll-stop\.sh$/.test(h.command)) {
+                        if (h.command && /aiball-autopoll-stop\.(sh|cmd)$/.test(h.command)) {
                             stopHookWired = true;
                             stopHookCommand = h.command;
                         }
@@ -833,9 +833,10 @@ program
         process.stdout.write(`  ${ok(!!payload.consumer.agent)} agent:   ${payload.consumer.agent ?? "(unresolved)"} ${payload.consumer.agent_source ? `[from ${payload.consumer.agent_source}]` : ""}\n`);
         process.stdout.write(`  ${ok(!!payload.consumer.project)} project: ${payload.consumer.project ?? "(unresolved)"} ${payload.consumer.project_source ? `[from ${payload.consumer.project_source}]` : ""}\n`);
         process.stdout.write(`\nstop hook (~/.claude/settings.json)\n`);
-        process.stdout.write(`  ${ok(payload.stop_hook.wired)} wired: ${payload.stop_hook.wired ? payload.stop_hook.command : "no aiball-autopoll-stop.sh entry"}\n`);
+        process.stdout.write(`  ${ok(payload.stop_hook.wired)} wired: ${payload.stop_hook.wired ? payload.stop_hook.command : "no aiball-autopoll-stop entry"}\n`);
         if (!payload.stop_hook.wired) {
-            process.stdout.write(`     enable with: ${resolveInstallRoot()}/install.sh --stop-hook\n`);
+            process.stdout.write(`     enable with: aiball init --stop-hook            (project-local)\n`);
+            process.stdout.write(`                   aiball init --stop-hook --global   (every Claude Code session)\n`);
         }
         process.stdout.write(`\ndaemon\n`);
         process.stdout.write(`  ${ok(payload.daemon.up)} reachable\n`);
@@ -1188,7 +1189,9 @@ program
     .command("init")
     .description("Bootstrap a project: write .mcp.json + .aiball.yaml (combines `mcp init` + `autopoll init`)")
     .option("--force", "Overwrite existing entries (passes through to both subactions)")
-    .action(async (opts: { force?: boolean }) => {
+    .option("--stop-hook", "Also wire Claude Code's Stop hook into .claude/settings.json so this project's autopoll triggers")
+    .option("--global", "With --stop-hook, write to ~/.claude/settings.json instead of <PWD>/.claude/settings.json (fires in every Claude Code session)")
+    .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean }) => {
         const force = opts.force === true;
         await mcpInitAction(force);
         // Inline minimal .aiball.yaml — don't pull the example
@@ -1205,9 +1208,69 @@ program
             writeFileSync(yamlPath, body);
             process.stdout.write(`${existsSync(yamlPath) && force ? "overwrote" : "created"} ${yamlPath} (autopoll enabled)\n`);
         }
+        if (opts.stopHook === true) {
+            wireStopHook({ global: opts.global === true });
+        }
         process.stdout.write(`\n${await resolveIdentityHint()}\n`);
         process.stdout.write(`Run \`aiball check\` to verify everything resolves.\n`);
     });
+
+/**
+ * Wire the Claude Code Stop hook into .claude/settings.json so
+ * autopoll triggers on session end. Picks the right wrapper extension
+ * for the platform (.cmd on Windows, .sh elsewhere). Idempotent —
+ * skips if the same hook command is already present. Project-local
+ * by default; --global writes to ~/.claude/settings.json instead.
+ *
+ * Cross-platform replacement for install.sh --stop-hook, so it works
+ * the same on the Windows install path (where install.sh doesn't run).
+ */
+function wireStopHook(opts: { global: boolean }): void {
+    const installRoot = resolveInstallRoot();
+    const ext = process.platform === "win32" ? "cmd" : "sh";
+    const hookTarget = join(installRoot, "skill", "hooks", `aiball-autopoll-stop.${ext}`);
+    if (!existsSync(hookTarget)) {
+        process.stdout.write(`stop-hook: target script missing at ${hookTarget} — install layout is broken\n`);
+        return;
+    }
+    const settingsPath = opts.global
+        ? join(homedir(), ".claude", "settings.json")
+        : join(userCwd(), ".claude", "settings.json");
+    const scopeLabel = opts.global ? `global (~/.claude/settings.json)` : `project (${settingsPath})`;
+
+    // Ensure parent dir exists. Read existing JSON or seed with {}.
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    interface HookEntry { type?: string; command?: string }
+    interface HookGroup  { matcher?: string; hooks?: HookEntry[] }
+    interface Settings   { hooks?: { Stop?: HookGroup[] } & Record<string, HookGroup[] | undefined> }
+    let settings: Settings = {};
+    if (existsSync(settingsPath)) {
+        try { settings = JSON.parse(readFileSync(settingsPath, "utf8")) as Settings; }
+        catch { settings = {}; }
+    }
+
+    const stopGroups = settings.hooks?.Stop ?? [];
+    const alreadyWired = stopGroups.some((g) =>
+        (g.hooks ?? []).some((h) => h.command === hookTarget),
+    );
+    if (alreadyWired) {
+        process.stdout.write(`stop-hook: already wired in ${scopeLabel}\n`);
+        return;
+    }
+
+    // Backup existing settings once per pass (skipped if already
+    // backed up earlier — matches install.sh's `cp -n` behavior).
+    if (existsSync(settingsPath)) {
+        const bak = `${settingsPath}.aiball-bak`;
+        if (!existsSync(bak)) writeFileSync(bak, readFileSync(settingsPath));
+    }
+
+    settings.hooks ??= {};
+    settings.hooks.Stop ??= [];
+    settings.hooks.Stop.push({ hooks: [{ type: "command", command: hookTarget }] });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+    process.stdout.write(`stop-hook: wired ${hookTarget} -> ${scopeLabel}\n`);
+}
 
 /**
  * Build the post-bootstrap "Next:" hint. Reads the resolved config so
