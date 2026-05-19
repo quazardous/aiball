@@ -541,6 +541,39 @@ export async function buildContextPhrase(
 }
 
 /**
+ * Inject a wake phrase into a tmux pane so Claude Code's TUI submits
+ * it as a single user prompt (#B.221 follow-up).
+ *
+ * Why this isn't just `send-keys <phrase> Enter`: when `<phrase>` is
+ * long (the new #B.221 state-CTA is ~130 chars), Claude Code's input
+ * handler appears to treat the fast send-keys burst as a paste and
+ * swallows the trailing Enter as paste-content rather than submit,
+ * leaving the text stuck in the prompt area. David's repro on
+ * #221 comment 9e76jx: "n'envoie pas enter et reste dans le prompt".
+ *
+ * Robust pattern (mirrors `tryPanic`): write the phrase into a tmux
+ * paste-buffer, paste it (bracketed paste — explicit start/end so the
+ * TUI knows the paste closed), sleep briefly for the prompt to
+ * repaint, then send a standalone Enter. Falls back to plain
+ * `send-keys <phrase>` if `set-buffer` failed (extremely rare).
+ *
+ * Used by every wake site: session-start-hook, stop-hook post-turn
+ * wake, timer no-hint wake, and SSE-hinted wakes — short phrases pay
+ * a ~200ms latency but consistency beats branching on length.
+ */
+export async function injectWakePhrase(paneTarget: string, phrase: string): Promise<void> {
+    const bufName = `wake_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    const setBuf = spawnSync(MUX_CMD, ["set-buffer", "-b", bufName, phrase], { stdio: "ignore" });
+    if (!setBuf.error && setBuf.status === 0) {
+        spawnSync(MUX_CMD, ["paste-buffer", "-b", bufName, "-d", "-t", paneTarget], { stdio: "ignore" });
+    } else {
+        spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, phrase], { stdio: "ignore" });
+    }
+    await new Promise<void>((res) => setTimeout(res, 200));
+    spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" });
+}
+
+/**
  * Optional context attached to a wake — typically the SSE ping
  * payload (`{ ticket_id, comment_id, comment_hashid, intent }`).
  * When present, the wake phrase names the concrete artifact instead

@@ -30,6 +30,7 @@ import {
     WAKE_COALESCE_WINDOW_MS,
     buildContextPhrase,
     buildWakePhrase,
+    injectWakePhrase,
     checkHasWork,
     formatPaneSnapshot,
     idleMarkerPath,
@@ -175,7 +176,7 @@ async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
     return true;
 }
 
-function sendKeys(phrase: string): void {
+async function sendKeys(phrase: string): Promise<void> {
     // #B.180: touch the wake-in-flight marker BEFORE send-keys so
     // UserPromptSubmit hook sees it when claude processes the wake
     // prompt and skips the user-took-over update. Without this, the
@@ -190,7 +191,7 @@ function sendKeys(phrase: string): void {
     try {
         writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n");
     } catch { /* ignore — coalesce will just fail open */ }
-    spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, phrase, "Enter"], { stdio: "ignore" });
+    await injectWakePhrase(`${tname}.0`, phrase);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -295,7 +296,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
     const phrase = await pickPhrase(hint);
-    sendKeys(phrase);
+    await sendKeys(phrase);
     // #B.198 david: "on cumule pas les event identique on les merge".
     // Persist the just-fired hint so subsequent SSE pings about the
     // same (ticket, comment) within `WAKE_COALESCE_WINDOW_MS` get

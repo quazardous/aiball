@@ -17,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, idleMarkerPath, lastWakeAtPath, pingsPath, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
+import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -193,9 +193,7 @@ function readPane(): string {
             // #B.198 fix A: also touch the coalesce marker so the
             // next Stop hook fire can detect "we just sent a wake".
             try { writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
-            spawnSync(MUX_CMD, [
-                "send-keys", "-t", `${tmuxName(name!)}.0`, phrase, "Enter",
-            ], { stdio: "ignore" });
+            await injectWakePhrase(`${tmuxName(name!)}.0`, phrase);
             setTmuxStatus(name!, "busy");
             log(`  → WAKE '${phrase}' became=busy`);
         } else {

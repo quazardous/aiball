@@ -28,7 +28,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { AiballClient } from "../client.js";
-import { MUX_CMD, buildContextPhrase, checkHasWork, idleMarkerPath, pingsPath, setTmuxStatus, tmuxName } from "./state.js";
+import { MUX_CMD, buildContextPhrase, checkHasWork, idleMarkerPath, injectWakePhrase, pingsPath, setTmuxStatus, tmuxName } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -121,9 +121,7 @@ if (noStartup) {
                 process.env.AIBALL_PROJECT ?? null,
                 pingsPath(sd!),
             );
-            spawnSync(MUX_CMD, [
-                "send-keys", "-t", `${tmuxName(name!)}.0`, phrase, "Enter",
-            ], { stdio: "ignore" });
+            await injectWakePhrase(`${tmuxName(name!)}.0`, phrase);
             setTmuxStatus(name!, "busy");
         } else {
             // Nothing to do at boot — mark idle so the timer takes
