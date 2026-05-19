@@ -57,3 +57,64 @@ wake_phrases:
   fyi:
     with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}."
     ticket_only:  "Heads-up on aiball ticket #{ticket}."
+
+# State-CTA slots assembled by claude-loop's `buildContextPhrase` when
+# a wake fires with no SSE artifact (timer heartbeat / stop-hook post
+# turn / session-start). Externalized per #B.232 cpaez7 so the wording
+# is dynamic and per-project tunable via `.aiball.yaml` → `prompts:`.
+#
+# Each slot accepts THREE shapes (russian-doll optional):
+#   string                  → no variation, same at every tone
+#   list[string]            → random pick, same pool for every tone
+#   { tone: list[string] }  → per-imperativity pool. Tone comes from
+#                             `.aiball.yaml` → `autopoll.tone`
+#                             (hint | directive | imperative). Missing
+#                             tone in the map → falls back to `directive`.
+#
+# Placeholders substituted at render time:
+#   {ping_count}    integer
+#   {ping_plural}   "" or "s"
+#   {open_count}    integer
+#   {open_plural}   "" or "s"
+#   {project_scope} "`<project>`" or "your scope"
+#
+# Why externalize (vs the prior hardcoded `[aiball: ...] — ... before
+# answering.` shape): the previous wording tripped prompt-injection
+# defenses on cold claude sessions (david 6ehkvn). With the templates
+# in yaml, ops can tune the lead/directive wording without a redeploy,
+# and the per-tone russian-doll lets projects scale directiveness.
+prompts:
+  # Conversational lead — separator between the culture phrase and
+  # the state report. Replaces the old `[aiball: ...]` bracket header.
+  # Object form: per-tone list for random pick within a tone bucket.
+  wake_state_lead:
+    hint:
+      - "btw,"
+      - "fyi,"
+      - "just so you know,"
+    directive:
+      - "fyi:"
+      - "heads up —"
+      - "quick note:"
+    imperative:
+      - "**heads up**:"
+      - "**ACTION**:"
+      - "**you've got**:"
+
+  # State parts — string form (no variation, identical at every tone).
+  # "aiball" baked into the phrase so the prompt explicitly names the
+  # tracker even when other trackers' MCPs are connected (david #B.230).
+  wake_state_pings: "{ping_count} unread aiball ping{ping_plural}"
+  wake_state_open:  "{open_count} open aiball ticket{open_plural} in {project_scope}"
+
+  # Directive verbs — list form, random pick across tones (proven
+  # imperative-style retained at every level, per 0aed5a2 fix against
+  # "agent listed and standby"). Variants swap the verb but keep the
+  # tool-call body identical so the agent still receives the exact
+  # argument shape.
+  wake_directive_drain:
+    - "drain via `unread({pings: true, mark_read: true})`"
+    - "ack via `unread({pings: true, mark_read: true})`"
+  wake_directive_engage:
+    - "engage one of {open_count} open via `ticket_list({open: true})`"
+    - "pick one of {open_count} open via `ticket_list({open: true})`"

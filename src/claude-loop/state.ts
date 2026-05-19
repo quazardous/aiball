@@ -14,8 +14,10 @@ import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSyn
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { loadConfig } from "../autopoll/config.js";
 import { AiballClient } from "../client.js";
 import type { Intent } from "../domain.js";
+import { loadPromptsFromYaml, mergePrompts, pickPrompt } from "../prompt-templates.js";
 
 export const STATE_ROOT = process.env.CLAUDE_LOOP_STATE_ROOT
     ?? join(homedir(), ".claude-loop");
@@ -658,12 +660,7 @@ export async function buildContextPhrase(
                 .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
             : 0;
         if (pingCount === 0 && openCount === 0) return culture;
-        const parts: string[] = [];
-        if (pingCount > 0) parts.push(`${pingCount} unread ping${pingCount === 1 ? "" : "s"}`);
-        if (openCount > 0) {
-            const scope = project ? `\`${project}\`` : "your scope";
-            parts.push(`${openCount} open ticket${openCount === 1 ? "" : "s"} in ${scope}`);
-        }
+
         // #B.232: when BOTH pings and open tickets are pending, chain
         // both directives so the agent doesn't drain pings and stop —
         // david's repro showed `en standby` after a clean drain while
@@ -680,14 +677,69 @@ export async function buildContextPhrase(
         // defenses on cold claude sessions (a fresh instance refused to
         // invoke ticket_list, reading the bracket+imperative tail as
         // fake-tool-call injection). New shape leads with a conversational
-        // `fyi:` so backticked tool refs read as casual code mentions, not
-        // as directives. Imperative verbs themselves stay intact — they
-        // were the actual fix from 0aed5a2.
+        // lead so backticked tool refs read as casual code mentions, not
+        // as directives. Imperative verbs stay intact — they were the
+        // actual fix from 0aed5a2.
+        //
+        // Templating layer (#B.232 cpaez7): wording is no longer
+        // hardcoded — slots come from `skill/claude-loop-pings.yaml`
+        // (`prompts:` block) with optional per-project override in
+        // `.aiball.yaml`. Tone (hint | directive | imperative) drives
+        // the russian-doll lookup for object-shape slots. Fallbacks
+        // mirror the prior hardcoded wording so a broken yaml still
+        // ships a sensible prompt.
+        const cfg = loadConfig();
+        const skillPrompts = loadPromptsFromYaml(pingsAbsPath);
+        const promptMap = mergePrompts(skillPrompts, cfg.prompts);
+        const tone = cfg.autopoll.tone;
+
+        const parts: string[] = [];
+        if (pingCount > 0) {
+            parts.push(pickPrompt(promptMap, "wake_state_pings", {
+                tone,
+                vars: {
+                    ping_count: pingCount,
+                    ping_plural: pingCount === 1 ? "" : "s",
+                },
+                fallback: `${pingCount} unread aiball ping${pingCount === 1 ? "" : "s"}`,
+            }));
+        }
+        if (openCount > 0) {
+            const scope = project ? `\`${project}\`` : "your scope";
+            parts.push(pickPrompt(promptMap, "wake_state_open", {
+                tone,
+                vars: {
+                    open_count: openCount,
+                    open_plural: openCount === 1 ? "" : "s",
+                    project_scope: scope,
+                },
+                fallback: `${openCount} open aiball ticket${openCount === 1 ? "" : "s"} in ${scope}`,
+            }));
+        }
+
         const verbs: string[] = [];
-        if (pingCount > 0) verbs.push("drain via `unread({pings: true, mark_read: true})`");
-        if (openCount > 0) verbs.push(`engage one of ${openCount} open via \`ticket_list({open: true})\``);
+        if (pingCount > 0) {
+            verbs.push(pickPrompt(promptMap, "wake_directive_drain", {
+                tone,
+                vars: { ping_count: pingCount },
+                fallback: "drain via `unread({pings: true, mark_read: true})`",
+            }));
+        }
+        if (openCount > 0) {
+            verbs.push(pickPrompt(promptMap, "wake_directive_engage", {
+                tone,
+                vars: { open_count: openCount },
+                fallback: `engage one of ${openCount} open via \`ticket_list({open: true})\``,
+            }));
+        }
         const directive = verbs.join(" + ");
-        return `${culture} fyi: ${parts.join(" + ")}. ${directive}.`;
+
+        const lead = pickPrompt(promptMap, "wake_state_lead", {
+            tone,
+            fallback: "fyi:",
+        });
+
+        return `${culture} ${lead} ${parts.join(" + ")}. ${directive}.`;
     } catch {
         return culture;
     }

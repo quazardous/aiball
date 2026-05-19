@@ -22,6 +22,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, parse as parsePath, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { loadPromptsFromYamlBlock, type PromptMap } from "../prompt-templates.js";
 
 export const CONFIG_FILENAME = ".aiball.yaml";
 
@@ -90,6 +91,15 @@ export interface AiballConfig {
     };
     /** Absolute path to the loaded `.aiball.yaml`, or null when none was found. */
     configPath: string | null;
+    /**
+     * Per-project override of the wake-CTA / state-prompt templates
+     * (#B.232 cpaez7). Merged over the skill defaults in
+     * `skill/claude-loop-pings.yaml` by the prompt-templates service.
+     * Empty map when the `.aiball.yaml` has no `prompts:` block — the
+     * skill defaults stand alone. Slot-grain replace (no deep merge
+     * inside a slot) so a user can swap shape forms freely.
+     */
+    prompts: PromptMap;
 }
 
 export type ConsumerSource = "env" | "aiball.yaml" | "mcp.json" | "default";
@@ -122,6 +132,7 @@ const DEFAULTS: AiballConfig = {
         wake_in_flight_ttl_ms: 2000,
     },
     configPath: null,
+    prompts: {},
 };
 
 export function findConfigUpwards(start: string): string | null {
@@ -205,6 +216,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         claude_loop: { ...DEFAULTS.claude_loop },
         mcp_json_deprecated: mcpJsonHasIdentityEnv(projectDir),
         configPath,
+        prompts: {},
     };
 
     // No .aiball.json → autopoll disabled. The hook wiring in
@@ -254,6 +266,12 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof cl.wake_in_flight_ttl_ms === "number" && cl.wake_in_flight_ttl_ms > 0) {
                 cfg.claude_loop.wake_in_flight_ttl_ms = cl.wake_in_flight_ttl_ms;
             }
+            // #B.232 cpaez7: per-project prompt template overrides. The
+            // service handles shape validation per slot and silently
+            // drops malformed entries, so we keep the wider config
+            // load resilient: a bad `prompts:` block doesn't disable
+            // the rest of the autopoll config.
+            cfg.prompts = loadPromptsFromYamlBlock(raw.prompts);
         } catch {
             /* malformed — fall back to defaults, hook stays silent */
         }
