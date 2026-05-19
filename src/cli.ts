@@ -43,6 +43,222 @@ function jsonline(value: unknown): void {
     process.stdout.write(JSON.stringify(value) + "\n");
 }
 
+/**
+ * Output helper (#B.209). Human-readable text by default; JSON when the
+ * global `--json` flag is set OR when no humanizer is registered for the
+ * shape. Scripts that depended on the old JSON-default behaviour should
+ * add `--json` to their `aiball …` invocations.
+ */
+function out<T>(value: T, opts: GlobalOpts, humanFn?: (v: T) => string): void {
+    if (opts.json === true || !humanFn) {
+        process.stdout.write(JSON.stringify(value) + "\n");
+        return;
+    }
+    const text = humanFn(value);
+    process.stdout.write(text.endsWith("\n") ? text : text + "\n");
+}
+
+function fmtBytes(n: number): string {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+    return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+// ---------------------------------------------------------------------
+// Humanizers (#B.209) — terse text formatters for non-JSON output.
+// Every formatter accepts the same shape as the corresponding `--json`
+// payload, so the JSON contract stays the source of truth.
+// ---------------------------------------------------------------------
+
+function fmtWhoami(v: { consumer_id: string; cwd: string; source: string; human: boolean; default_project: string | null }): string {
+    const lines = [
+        `consumer: ${v.consumer_id}`,
+        `project:  ${v.default_project ?? "(none)"}`,
+        `source:   ${v.source}`,
+        `cwd:      ${v.cwd}`,
+    ];
+    if (v.human) lines.push(`mode:     --human (acting as $AIBALL_HUMAN)`);
+    return lines.join("\n");
+}
+
+function fmtStatus(v: { daemon_up: boolean; url: string; paths: { home: string; db: string; db_size: number; spool_dir: string }; spool_pending: number }): string {
+    const lines = [
+        v.daemon_up ? `daemon: up at ${v.url}` : `daemon: DOWN (${v.url})`,
+        `home:   ${v.paths.home}`,
+        `db:     ${v.paths.db}${v.paths.db_size ? ` (${fmtBytes(v.paths.db_size)})` : " (missing)"}`,
+        `spool:  ${v.spool_pending} pending (${v.paths.spool_dir})`,
+    ];
+    return lines.join("\n");
+}
+
+function fmtSubscribe(v: { consumer_id: string; project: string; feed_path: string; subscription: unknown; monitor_command: string }): string {
+    const warn = (v.subscription as { warning?: string } | null)?.warning;
+    const lines = [
+        warn ? `! ${warn}` : `subscribed ${v.consumer_id} → ${v.project}`,
+        `feed:    ${v.feed_path}`,
+        `monitor: ${v.monitor_command}`,
+    ];
+    return lines.join("\n");
+}
+
+function fmtSubsList(v: unknown): string {
+    const rows = Array.isArray(v) ? v : [];
+    if (rows.length === 0) return "(no subscriptions)";
+    return rows
+        .map((r) => {
+            const s = r as { project?: string; role?: string };
+            return `- ${(s.project ?? "?").padEnd(24)} role=${s.role ?? "?"}`;
+        })
+        .join("\n");
+}
+
+function fmtUnread(v: unknown): string {
+    const rows = Array.isArray(v) ? v : [];
+    if (rows.length === 0) return "(nothing new)";
+    return rows.map((m) => fmtMessageRow(m as Record<string, unknown>)).join("\n");
+}
+
+function fmtPostReceipt(v: unknown, kind: "ticket" | "comment" | "close"): string {
+    const q = v as { queued?: boolean; file?: string };
+    if (q.queued) return `spooled to ${q.file} (daemon offline — will replay on next drain)`;
+    const m = v as { id?: number; ticket_id?: number; hashid?: string; project?: string; status?: string };
+    const target = kind === "ticket"
+        ? `ticket #${m.id ?? "?"}`
+        : kind === "close"
+            ? `ticket #${m.ticket_id ?? "?"} closed (event #${m.id ?? "?"})`
+            : `comment #${m.hashid ?? m.id ?? "?"} on ticket #${m.ticket_id ?? "?"}`;
+    const tail = m.status && m.status !== "approved" ? ` [status=${m.status}]` : "";
+    return `posted ${target}${m.project ? ` in ${m.project}` : ""}${tail}`;
+}
+
+function fmtTicketList(v: unknown): string {
+    const raw = v as { result?: unknown[] } | unknown[];
+    const rows = Array.isArray(raw) ? raw : Array.isArray(raw.result) ? raw.result : [];
+    if (rows.length === 0) return "(no tickets)";
+    return rows
+        .map((r) => {
+            const t = r as {
+                id?: number;
+                title?: string;
+                edited_title?: string;
+                by_agent?: string;
+                status?: string;
+                closed?: boolean;
+                tags?: unknown[];
+                sub_ticket_count?: number;
+            };
+            const flag = t.closed
+                ? "·"
+                : t.status === "pending"
+                    ? "?"
+                    : t.status === "rejected"
+                        ? "x"
+                        : "✓";
+            const title = (t.edited_title ?? t.title ?? "(no title)").slice(0, 80);
+            const tags = Array.isArray(t.tags) && t.tags.length ? ` [${t.tags.join(",")}]` : "";
+            const sub = t.sub_ticket_count ? ` (+${t.sub_ticket_count} sub)` : "";
+            return `${flag} #${String(t.id ?? "?").padStart(4)}  ${(t.by_agent ?? "?").padEnd(20)} ${title}${tags}${sub}`;
+        })
+        .join("\n");
+}
+
+function fmtTicketThread(v: unknown): string {
+    const x = v as {
+        ticket?: Record<string, unknown>;
+        comments?: unknown[];
+        comment_count?: number;
+    };
+    const t = x.ticket as Record<string, unknown> | undefined;
+    if (!t) return "(ticket not found)";
+    const id = t.id;
+    const title = t.edited_title ?? t.title ?? "(no title)";
+    const lines = [
+        `#${id} — ${title}`,
+        `by ${t.by_agent ?? "?"}  ${t.created_at ?? ""}  status=${t.status ?? "?"}${t.closed ? " (closed)" : ""}${t.resolved ? " (resolved)" : ""}`,
+    ];
+    if (Array.isArray(t.tags) && t.tags.length) lines.push(`tags: ${(t.tags as unknown[]).join(", ")}`);
+    if (t.body) lines.push("", String(t.body));
+    const comments = Array.isArray(x.comments) ? x.comments : [];
+    if (comments.length === 0) {
+        if (typeof x.comment_count === "number" && x.comment_count > 0) {
+            lines.push("", `(${x.comment_count} comments — pass --json or re-fetch with full=true)`);
+        }
+    } else {
+        lines.push("", `── ${comments.length} comment${comments.length === 1 ? "" : "s"} ──`);
+        for (const c of comments) {
+            const cc = c as Record<string, unknown>;
+            const hash = cc.hashid ? `#${cc.hashid}` : `#${cc.id}`;
+            lines.push("", `${hash}  ${cc.by_agent ?? "?"}  ${cc.created_at ?? ""}`);
+            if (cc.body) lines.push(String(cc.body));
+            else if (typeof cc.summary_until === "string") lines.push(`(summary_until) ${cc.summary_until}`);
+        }
+    }
+    return lines.join("\n");
+}
+
+function fmtMessageRow(m: Record<string, unknown>): string {
+    const ts = (m.created_at as string | undefined) ?? "";
+    const kind = (m.kind as string | undefined) ?? "?";
+    const by = (m.by_agent as string | undefined) ?? "?";
+    const tid = m.ticket_id ?? m.id;
+    const title = m.title ?? m.body;
+    const snippet = title ? String(title).split("\n")[0].slice(0, 80) : "";
+    return `${ts}  ${kind.padEnd(14)} #${tid}  ${by.padEnd(20)} ${snippet}`;
+}
+
+function fmtAutopollShow(v: { config_path: string | null; autopoll: Record<string, unknown>; consumer: Record<string, unknown> }): string {
+    const lines = [
+        `config: ${v.config_path ?? "(none found)"}`,
+        `autopoll:`,
+        ...Object.entries(v.autopoll).map(([k, val]) => `  ${k.padEnd(22)} = ${JSON.stringify(val)}`),
+        `consumer:`,
+        ...Object.entries(v.consumer).map(([k, val]) => `  ${k.padEnd(22)} = ${JSON.stringify(val)}`),
+    ];
+    return lines.join("\n");
+}
+
+function fmtRuleList(v: unknown): string {
+    const rows = Array.isArray(v) ? v : [];
+    if (rows.length === 0) return "(no rules)";
+    return rows
+        .map((r) => {
+            const x = r as {
+                id?: number;
+                decision?: string;
+                enabled?: boolean | number;
+                match_project?: string;
+                match_kind?: string;
+                match_by_agent?: string;
+                note?: string;
+            };
+            const status = x.enabled ? "on " : "off";
+            const filters = [
+                x.match_project ? `project=${x.match_project}` : null,
+                x.match_kind ? `kind=${x.match_kind}` : null,
+                x.match_by_agent ? `by=${x.match_by_agent}` : null,
+            ].filter(Boolean).join(" ");
+            return `${status} #${String(x.id).padStart(3)} ${(x.decision ?? "?").padEnd(7)} ${filters || "(matches everything)"}${x.note ? ` — ${x.note}` : ""}`;
+        })
+        .join("\n");
+}
+
+function fmtProjectList(v: unknown): string {
+    const rows = Array.isArray(v) ? v : [];
+    if (rows.length === 0) return "(no projects)";
+    return rows
+        .map((r) => {
+            const p = r as { project?: string; name?: string; open_count?: number; total?: number };
+            const name = p.project ?? p.name ?? "?";
+            const counts = [
+                typeof p.open_count === "number" ? `open=${p.open_count}` : null,
+                typeof p.total === "number" ? `total=${p.total}` : null,
+            ].filter(Boolean).join(" ");
+            return `- ${name}${counts ? `  ${counts}` : ""}`;
+        })
+        .join("\n");
+}
+
 /** Resolve the active consumer id, honouring --human and AIBALL_AGENT. */
 function buildClient(globalOpts: { human?: boolean }): AiballClient {
     if (globalOpts.human) {
@@ -62,6 +278,7 @@ function withProject(client: AiballClient, project: string | undefined): string 
 
 interface GlobalOpts {
     human?: boolean;
+    json?: boolean;
 }
 function gOpts(cmd: Command): GlobalOpts {
     // Walk up to root so subcommand contexts inherit --human.
@@ -81,6 +298,10 @@ program
     .option(
         "-H, --human",
         "Act as the human moderator (consumer_id and default --by become $AIBALL_HUMAN, default \"human\")",
+    )
+    .option(
+        "-J, --json",
+        "Machine-readable JSON output (default is human-readable text). Must be placed before the subcommand, e.g. `aiball --json status`.",
     );
 
 // =====================================================================
@@ -97,7 +318,8 @@ ticket
     .option("--body <body>", "Ticket body")
     .option("--by <agent>", "Author override (default: resolved consumer id)")
     .action(async (opts, cmd) => {
-        const client = buildClient(gOpts(cmd));
+        const globalOpts = gOpts(cmd);
+        const client = buildClient(globalOpts);
         const project = withProject(client, opts.project);
         const res = await client.postMessage({
             project,
@@ -106,7 +328,7 @@ ticket
             ...(opts.body ? { body: opts.body } : {}),
             by_agent: opts.by ?? client.agentId,
         });
-        jsonline(res);
+        out(res, globalOpts, (v) => fmtPostReceipt(v, "ticket"));
     });
 
 ticket
@@ -144,7 +366,7 @@ ticket
             ticket_id: ticketId,
             parent_id: parent,
         });
-        jsonline(res);
+        out(res, gOpts(cmd), (v) => fmtPostReceipt(v, "comment"));
     });
 
 ticket
@@ -178,7 +400,7 @@ ticket
             ticket_id: ticketId,
             parent_id: ticketId,
         });
-        jsonline(res);
+        out(res, gOpts(cmd), (v) => fmtPostReceipt(v, "close"));
     });
 
 ticket
@@ -187,18 +409,19 @@ ticket
     .option("--project <project>")
     .option("--status <status>", "pending|approved|rejected (uses /api/messages when set)")
     .action(async (opts, cmd) => {
-        const client = buildClient(gOpts(cmd));
+        const globalOpts = gOpts(cmd);
+        const client = buildClient(globalOpts);
         if (opts.status) {
             const q: Record<string, string | number | undefined> = {
                 kind: "ticket_created",
                 status: opts.status,
             };
             if (opts.project) q.project = opts.project;
-            jsonline(await client.listMessages(q));
+            out(await client.listMessages(q), globalOpts, fmtTicketList);
         } else {
             const q: Record<string, string | undefined> = {};
             if (opts.project) q.project = opts.project;
-            jsonline(await client.listTickets(q));
+            out(await client.listTickets(q), globalOpts, fmtTicketList);
         }
     });
 
@@ -206,8 +429,13 @@ ticket
     .command("get <id>")
     .description("Fetch a ticket thread")
     .action(async (id: string, _opts, cmd) => {
-        const client = buildClient(gOpts(cmd));
-        jsonline(await client.getTicket(Number(id)));
+        const globalOpts = gOpts(cmd);
+        const client = buildClient(globalOpts);
+        // Human view needs body + comments to be useful; JSON callers
+        // keep the legacy summary shape (header + comment_count).
+        const fetchFull = globalOpts.json !== true;
+        const t = await client.getTicket(Number(id), fetchFull ? { summary: false } : {});
+        out(t, globalOpts, fmtTicketThread);
     });
 
 // =====================================================================
@@ -218,7 +446,7 @@ const rule = program.command("rule").description("Moderation rule engine");
 
 rule.command("list").action(async (_opts, cmd) => {
     const client = buildClient(gOpts(cmd));
-    jsonline(await client.listRules());
+    out(await client.listRules(), gOpts(cmd), fmtRuleList);
 });
 
 rule
@@ -237,7 +465,10 @@ rule
             ...(opts.by ? { match_by_agent: opts.by } : {}),
             ...(opts.note ? { note: opts.note } : {}),
         });
-        jsonline(r);
+        out(r, gOpts(cmd), (v) => {
+            const x = v as { id?: number; decision?: string };
+            return `rule #${x.id ?? "?"} added (decision=${x.decision ?? "?"})`;
+        });
     });
 
 rule
@@ -245,7 +476,7 @@ rule
     .description("Delete a rule")
     .action(async (id: string, _opts, cmd) => {
         const client = buildClient(gOpts(cmd));
-        jsonline(await client.deleteRule(Number(id)));
+        out(await client.deleteRule(Number(id)), gOpts(cmd), () => `rule #${id} deleted`);
     });
 
 rule
@@ -253,7 +484,7 @@ rule
     .description("Enable a rule")
     .action(async (id: string, _opts, cmd) => {
         const client = buildClient(gOpts(cmd));
-        jsonline(await client.toggleRule(Number(id), true));
+        out(await client.toggleRule(Number(id), true), gOpts(cmd), () => `rule #${id} enabled`);
     });
 
 rule
@@ -261,7 +492,7 @@ rule
     .description("Disable a rule")
     .action(async (id: string, _opts, cmd) => {
         const client = buildClient(gOpts(cmd));
-        jsonline(await client.toggleRule(Number(id), false));
+        out(await client.toggleRule(Number(id), false), gOpts(cmd), () => `rule #${id} disabled`);
     });
 
 // =====================================================================
@@ -271,7 +502,7 @@ rule
 const project = program.command("project").description("Project listing");
 project.command("list").action(async (_opts, cmd) => {
     const client = buildClient(gOpts(cmd));
-    jsonline(await client.listProjects());
+    out(await client.listProjects(), gOpts(cmd), fmtProjectList);
 });
 
 program
@@ -289,7 +520,7 @@ program
 
 program
     .command("whoami")
-    .description("Print the consumer_id used here")
+    .description("Print the consumer_id used here (identity only — for daemon health use `aiball status`, for full config audit use `aiball check`)")
     .action(async (_opts, cmd) => {
         const globalOpts = gOpts(cmd);
         const client = buildClient(globalOpts);
@@ -301,13 +532,14 @@ program
         else if (cfg.consumer.agent_source === "aiball.yaml") source = ".aiball.yaml consumer.agent";
         else if (cfg.consumer.agent_source === "mcp.json") source = ".mcp.json env (DEPRECATED)";
         else source = "<basename(cwd)>-claude (default)";
-        jsonline({
+        const payload = {
             consumer_id: client.agentId,
             cwd: userCwd(),
             source,
             human: globalOpts.human === true,
             default_project: client.defaultProject,
-        });
+        };
+        out(payload, globalOpts, fmtWhoami);
     });
 
 program
@@ -329,13 +561,14 @@ program
             sub = { warning: "daemon unreachable, subscription not registered" };
         }
         const fp = (await client.feedPath(project)) as { path: string };
-        jsonline({
+        const payload = {
             consumer_id: client.agentId,
             project,
             feed_path: fp.path,
             subscription: sub,
             monitor_command: `tail -F -n 0 ${fp.path}`,
-        });
+        };
+        out(payload, gOpts(cmd), fmtSubscribe);
     });
 
 program
@@ -345,7 +578,11 @@ program
         const client = buildClient(gOpts(cmd));
         const project = client.resolveProject(proj);
         await client.unsubscribe(project);
-        jsonline({ unsubscribed: true, consumer_id: client.agentId, project });
+        out(
+            { unsubscribed: true, consumer_id: client.agentId, project },
+            gOpts(cmd),
+            (v) => `unsubscribed ${v.consumer_id} from ${v.project}`,
+        );
     });
 
 program
@@ -353,7 +590,7 @@ program
     .description("List this consumer's subscriptions")
     .action(async (_opts, cmd) => {
         const client = buildClient(gOpts(cmd));
-        jsonline(await client.mySubs());
+        out(await client.mySubs(), gOpts(cmd), fmtSubsList);
     });
 
 program
@@ -364,7 +601,7 @@ program
     .action(async (opts, cmd) => {
         const client = buildClient(gOpts(cmd));
         const project = withProject(client, opts.project);
-        jsonline(await client.unread(project, Number(opts.limit)));
+        out(await client.unread(project, Number(opts.limit)), gOpts(cmd), fmtUnread);
     });
 
 program
@@ -396,13 +633,16 @@ program
         if (!opts.all && !opts.upTo) {
             die("mark-read: provide --up-to N or --all");
         }
-        jsonline(
-            await client.markReadProject({
-                project,
-                ...(opts.all ? { all: true } : {}),
-                ...(opts.upTo ? { upToId: Number(opts.upTo) } : {}),
-            }),
-        );
+        const res = await client.markReadProject({
+            project,
+            ...(opts.all ? { all: true } : {}),
+            ...(opts.upTo ? { upToId: Number(opts.upTo) } : {}),
+        });
+        out(res, gOpts(cmd), (v) => {
+            const r = v as { acked?: number; consumer_id?: string };
+            const n = r.acked ?? 0;
+            return `marked ${n} message${n === 1 ? "" : "s"} read in ${project}${r.consumer_id ? ` (as ${r.consumer_id})` : ""}`;
+        });
     });
 
 // =====================================================================
@@ -418,7 +658,7 @@ function aiballHome(): string {
 
 program
     .command("status")
-    .description("Daemon up? Spool size? DB path?")
+    .description("Daemon liveness + spool/DB sizes (use `aiball check` for full project config audit, `aiball whoami` for identity only)")
     .action(async (_opts, cmd) => {
         const client = buildClient(gOpts(cmd));
         let up = false;
@@ -444,7 +684,7 @@ program
                 /* ignore */
             }
         }
-        jsonline({
+        const payload = {
             daemon_up: up,
             url: URL,
             paths: {
@@ -456,7 +696,8 @@ program
             },
             spool_pending: spoolCount,
             daemon: daemonInfo,
-        });
+        };
+        out(payload, gOpts(cmd), fmtStatus);
     });
 
 program
@@ -565,7 +806,8 @@ program
             },
         };
 
-        if (opts.json) {
+        // Honor either local `--json` (legacy) or the global `--json`.
+        if (opts.json || gOpts(cmd).json) {
             jsonline(payload);
             return;
         }
@@ -792,14 +1034,15 @@ autopoll
 autopoll
     .command("show")
     .description("Print resolved autopoll settings for cwd")
-    .action(async () => {
+    .action(async (_opts, cmd) => {
         const { loadConfig } = await import("./autopoll/config.js");
         const cfg = loadConfig(userCwd());
-        jsonline({
+        const payload = {
             config_path: cfg.configPath,
             autopoll: cfg.autopoll,
             consumer: cfg.consumer,
-        });
+        };
+        out(payload, gOpts(cmd), fmtAutopollShow);
     });
 
 autopoll
@@ -928,7 +1171,7 @@ mcp
     .option("--force", "Overwrite an existing aiball entry (drops any legacy env block — #B.154)")
     .action(async (opts: { force?: boolean }) => {
         await mcpInitAction(opts.force === true);
-        process.stdout.write(`\nNext: identity defaults to '${basename(userCwd())}-claude'. Override via .aiball.yaml keys 'consumer.agent' and 'consumer.project' if needed.\n`);
+        process.stdout.write(`\n${await resolveIdentityHint()}\n`);
     });
 
 /**
@@ -962,9 +1205,38 @@ program
             writeFileSync(yamlPath, body);
             process.stdout.write(`${existsSync(yamlPath) && force ? "overwrote" : "created"} ${yamlPath} (autopoll enabled)\n`);
         }
-        process.stdout.write(`\nNext: identity defaults to '${basename(userCwd())}-claude'. Override via .aiball.yaml keys 'consumer.agent' and 'consumer.project' if needed.\n`);
+        process.stdout.write(`\n${await resolveIdentityHint()}\n`);
         process.stdout.write(`Run \`aiball check\` to verify everything resolves.\n`);
     });
+
+/**
+ * Build the post-bootstrap "Next:" hint. Reads the resolved config so
+ * the hint shows the *actual* identity that will be used, not a
+ * generic `<basename(cwd)>-claude` template. #B.209: david set
+ * `consumer.project: m2m` in his .aiball.yaml to avoid an uppercase
+ * `M2M-claude` agent name, but the old hint still printed the
+ * template, which read as "your override was ignored".
+ */
+async function resolveIdentityHint(): Promise<string> {
+    try {
+        const { loadConfig } = await import("./autopoll/config.js");
+        const cfg = loadConfig(userCwd());
+        const agent = cfg.consumer.agent;
+        const project = cfg.consumer.project;
+        const sourceTag = cfg.consumer.agent_source
+            ? ` [from ${cfg.consumer.agent_source}]`
+            : "";
+        return [
+            `Next: identity resolves to '${agent}'${sourceTag}.`,
+            project
+                ? `      default project: '${project}'.`
+                : `      (no default project — set 'consumer.project' in .aiball.yaml or export AIBALL_PROJECT)`,
+            `      Override via .aiball.yaml keys 'consumer.agent' and 'consumer.project' if needed.`,
+        ].join("\n");
+    } catch {
+        return `Next: identity defaults to '${basename(userCwd())}-claude'. Override via .aiball.yaml keys 'consumer.agent' and 'consumer.project' if needed.`;
+    }
+}
 
 function resolveInstallRoot(): string {
     // The bin/aiball wrapper cd's into the install dir before exec'ing
