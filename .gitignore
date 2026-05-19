@@ -23,3 +23,6 @@ outbox/
 # .claude/ holds per-user Claude Code state (settings.local.json
 # permission allowlist, agent cache). Never committed.
 .claude/
+# Build artifact of scripts/make-icon.py — for human verification
+# only, the real icon is assets/aiball.ico.
+assets/aiball-preview.png
