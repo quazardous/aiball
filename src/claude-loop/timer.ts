@@ -327,7 +327,16 @@ async function mainSse(): Promise<void> {
         // encore du travail à ce moment".
         const defer = readBusyDefer(sd!);
         const sleepMs = defer ? Math.min(interval * 1000, defer.activeMs) : interval * 1000;
+        const sleptToDeferDeadline = defer !== null && sleepMs === defer.activeMs;
         await sleep(sleepMs);
+        // #B.212 david: when the heartbeat sleep was capped at the
+        // defer deadline, log the expiry so the log isn't silent
+        // between "BUSY-DEFER armed" and the next event. Without this,
+        // a 5s defer ending in a quiet window (no SSE ping, no work)
+        // produced no log at deadline — looked like the loop forgot.
+        if (sleptToDeferDeadline) {
+            log(`busy-defer window expired (slept ${sleepMs}ms) — checking work`);
+        }
         // Manual wake (claude-loop wake NAME): file marker, fires
         // even when SSE silent.
         if (existsSync(wakeRequestedPath(sd!))) {
@@ -442,7 +451,11 @@ async function mainPoll(): Promise<void> {
         // #B.205: cap sleep at busy-defer deadline (see mainSse note).
         const defer = readBusyDefer(sd!);
         const sleepMs = defer ? Math.min(interval * 1000, defer.activeMs) : interval * 1000;
+        const sleptToDeferDeadline = defer !== null && sleepMs === defer.activeMs;
         await sleep(sleepMs);
+        if (sleptToDeferDeadline) {
+            log(`busy-defer window expired (slept ${sleepMs}ms) — checking work`);
+        }
         const manualWake = existsSync(wakeRequestedPath(sd!));
         await tryWake(manualWake ? "manual" : "check-cmd hit", manualWake);
     }
