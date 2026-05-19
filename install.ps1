@@ -87,6 +87,13 @@
     folder). Default: shortcuts ARE created and the tray auto-launches
     at logon, following the convention of Slack / Discord / Spotify.
 
+.PARAMETER NoClaudeLoop
+    Skip installing the claude-loop wrapper's runtime deps (psmux via
+    winget + Git Bash's bash.exe on PATH). The claude-loop.cmd shim is
+    still installed, but `claude-loop start` will error out until you
+    install psmux + ensure bash is on PATH manually. Useful if you only
+    want the daemon + tray and never plan to use the autonomous loop.
+
 .PARAMETER Yes
     Skip interactive confirmations (--PurgeData prompt).
 
@@ -130,6 +137,7 @@ param(
     [switch] $System,
     [switch] $Minimal,
     [switch] $NoTray,
+    [switch] $NoClaudeLoop,
     [switch] $Yes,
     [int]    $Port = 7777,
     [string] $BindHost = '127.0.0.1'
@@ -416,6 +424,57 @@ if ($Service) {
         Die "-Service requires running install.ps1 from an elevated PowerShell (right-click -> Run as administrator). Even per-user services need admin to install."
     }
     Log "service mode: $(if ($System) { 'LocalSystem (global)' } else { 'current user (' + $env:USERNAME + ')' })"
+}
+
+# --- claude-loop runtime deps: psmux + bash on PATH ------------------------
+# We ship the claude-loop.cmd shim in every install path, so ensure its
+# deps are reachable. psmux ships a tmux alias, so claude-loop's
+# MUX_CMD=tmux (default) finds it. Git Bash provides bash for the inner
+# `bash -lc 'source env; exec claude'` command. -NoClaudeLoop opts out.
+
+if (-not $NoClaudeLoop) {
+    if (-not (Get-Command tmux  -ErrorAction SilentlyContinue) -and `
+        -not (Get-Command psmux -ErrorAction SilentlyContinue)) {
+        Log "psmux not detected — installing via winget (claude-loop dep)"
+        try {
+            & winget install --id psmux --silent `
+                --accept-source-agreements --accept-package-agreements 2>&1 | Out-Host
+        } catch {
+            Warn "winget install psmux failed: $($_.Exception.Message)"
+        }
+        Update-PathFromRegistry
+        if (-not (Get-Command tmux  -ErrorAction SilentlyContinue) -and `
+            -not (Get-Command psmux -ErrorAction SilentlyContinue)) {
+            Warn "psmux still not on PATH — claude-loop start won't work."
+            Warn "  Install manually: winget install --id psmux"
+        } else {
+            Log "psmux on PATH OK"
+        }
+    } else {
+        Log "psmux/tmux already on PATH"
+    }
+
+    # Git Bash: winget installs git.exe via C:\Program Files\Git\cmd\ but
+    # NOT bash.exe (which lives in C:\Program Files\Git\bin\). claude-loop
+    # spawns `bash -lc 'source env; exec claude'` so bash must be findable.
+    if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
+        $gitBin = 'C:\Program Files\Git\bin'
+        if (Test-Path (Join-Path $gitBin 'bash.exe')) {
+            $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+            if ($userPath -notlike "*$gitBin*") {
+                [Environment]::SetEnvironmentVariable('PATH', "$gitBin;$userPath", 'User')
+                Log "added $gitBin to user PATH (claude-loop needs bash)"
+            } else {
+                Log "Git Bash already in user PATH (will resolve in fresh shells)"
+            }
+            Update-PathFromRegistry
+        } else {
+            Warn "bash.exe not found — claude-loop start needs Git Bash."
+            Warn "  Install Git for Windows (winget install Git.Git) and re-run."
+        }
+    } else {
+        Log "bash already on PATH"
+    }
 }
 
 # Node version: hard fail <20 (matches package.json engines). better-

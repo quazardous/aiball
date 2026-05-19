@@ -163,7 +163,8 @@ aiball-daemon` (or a vite dev server) without re-running the installer.
 | `-Port 7780` | non-default daemon port |
 | `-BindHost 0.0.0.0` | listen on all interfaces (use with care; default is localhost) |
 | `-NoTray` | skip Desktop / Start Menu / Startup shortcut creation |
-| `-AuthInit` | start daemon + mint setup token |
+| `-NoClaudeLoop` | skip auto-install of psmux + Git Bash PATH (claude-loop deps) |
+| `-NoAuthInit` | skip auto-mint of setup token + auto-open browser |
 | `-Uninstall` | remove everything (keeps `%APPDATA%\aiball` data unless `-PurgeData`) |
 | `-PurgeData` | with `-Uninstall`, also wipe the data dir |
 | `-Yes` | skip interactive confirmations |
@@ -266,20 +267,16 @@ compatibility covers our 6-7 ops (`has-session`, `new-session -d -s
 NAME -c CWD`, `send-keys`, `capture-pane`, `set-option`, `bind-key`,
 `kill-session`).
 
-Prereqs (one-time):
+**`install.ps1` handles the deps automatically** (unless you pass
+`-NoClaudeLoop`):
 
-```powershell
-winget install psmux            # multiplexer (ships `tmux` alias)
-# Git is already installed (it's a base prereq) — but make sure
-# Git Bash's bash.exe is on PATH so `tmux new-session ... bash -lc`
-# resolves. winget installs git.exe via C:\Program Files\Git\cmd\
-# but NOT bash.exe. Add it once:
-$gitBin = 'C:\Program Files\Git\bin'
-[Environment]::SetEnvironmentVariable('PATH', "$gitBin;$([Environment]::GetEnvironmentVariable('PATH','User'))", 'User')
-# Restart your shell for the change to take effect.
-```
+- `winget install --id psmux` if `tmux`/`psmux` is missing from PATH.
+- Adds `C:\Program Files\Git\bin` (where Git Bash's `bash.exe` lives)
+  to your user PATH if not already there. winget Git install puts
+  git.exe in `Git\cmd\` but leaves `bash.exe` unreachable by default.
 
-Then `claude-loop` works the same as on Linux:
+After install, open a **fresh shell** (so it picks up the updated
+PATH) and `claude-loop` works the same as on Linux:
 
 ```powershell
 claude-loop start --name myloop --pings ./pings.yaml
@@ -289,6 +286,10 @@ claude-loop attach myloop
 
 Set `MUX_CMD=psmux` if you want to be explicit (default `tmux`
 resolves to psmux's alias anyway).
+
+Skip this with `-NoClaudeLoop` if you only want the daemon + tray
+(the `claude-loop.cmd` shim still ships, but `start` will error out
+until psmux + bash are reachable).
 
 ## What's NOT in the Windows path
 
