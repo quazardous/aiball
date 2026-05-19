@@ -20,11 +20,25 @@
  * ```
  */
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, parse as parsePath, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { loadPromptsFromYamlBlock, type PromptMap } from "../prompt-templates.js";
+import { loadPromptsFromYaml, loadPromptsFromYamlBlock, mergePrompts, type PromptMap } from "../prompt-templates.js";
 
 export const CONFIG_FILENAME = ".aiball.yaml";
+
+/**
+ * Global per-user config path (#B.232 7bxrr2, david "ok chemin").
+ * Honours XDG_CONFIG_HOME when set, else falls back to `$HOME/.config`.
+ * Currently sources only the `prompts:` block; the rest of the schema
+ * (autopoll / consumer / claude_loop) stays project-grained because
+ * those values are inherently per-repo (identity, throttle, hook
+ * timeouts).
+ */
+function globalConfigPath(): string {
+    const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+    return join(base, "aiball", "config.yaml");
+}
 
 export type AutopollTone = "hint" | "directive" | "imperative";
 const VALID_TONES: AutopollTone[] = ["hint", "directive", "imperative"];
@@ -276,6 +290,19 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             /* malformed — fall back to defaults, hook stays silent */
         }
     }
+
+    // #B.232 7bxrr2: prompts: chain has 3 layers — skill defaults
+    // (consumed in claude-loop), global per-user, per-project. Project
+    // wins over global; global wins over skill. Slot-grain replace at
+    // each step (consistent with mergePrompts).
+    //
+    // Global file (XDG-aware) sits between skill and project here so
+    // that any caller reading `cfg.prompts` gets the merged
+    // (global ⊕ project) view; the skill merge happens at the use site
+    // (e.g. `buildContextPhrase` in claude-loop). Missing global file
+    // → empty map, no-op for the merge.
+    const globalPrompts = loadPromptsFromYaml(globalConfigPath());
+    cfg.prompts = mergePrompts(globalPrompts, cfg.prompts);
 
     // Resolution chain (#B.154, david 2026-05-18):
     //   1. process.env.AIBALL_*  ← priority, for special cases

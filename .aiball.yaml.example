@@ -122,6 +122,20 @@ autopoll:
 # experiment with directiveness levels, or tune the prompt for a project
 # with multiple agents talking to claude.
 #
+# Resolution chain (#B.232 7bxrr2): three layers, project wins.
+#
+#   1. Skill defaults — shipped, in `skill/claude-loop-pings.yaml`.
+#                       Read at every wake by the central service.
+#   2. Global per-user — optional, at `$XDG_CONFIG_HOME/aiball/config.yaml`
+#                       or `~/.config/aiball/config.yaml`. Use this when
+#                       you want the SAME wording across every project
+#                       you work on (e.g. an "always-FR" preference).
+#   3. Per-project — this file's `prompts:` block. Overrides global +
+#                    skill, slot by slot.
+#
+# Slot-grain replace at each step (no deep merge inside a slot, so a
+# user can switch shape forms freely between layers).
+#
 # Each slot accepts THREE shapes (russian-doll optional):
 #
 #   string                  → no variation, identical at every tone.
