@@ -1228,11 +1228,20 @@ program
 function wireStopHook(opts: { global: boolean }): void {
     const installRoot = resolveInstallRoot();
     const ext = process.platform === "win32" ? "cmd" : "sh";
-    const hookTarget = join(installRoot, "skill", "hooks", `aiball-autopoll-stop.${ext}`);
-    if (!existsSync(hookTarget)) {
-        process.stdout.write(`stop-hook: target script missing at ${hookTarget} — install layout is broken\n`);
+    const hookTargetRaw = join(installRoot, "skill", "hooks", `aiball-autopoll-stop.${ext}`);
+    if (!existsSync(hookTargetRaw)) {
+        process.stdout.write(`stop-hook: target script missing at ${hookTargetRaw} — install layout is broken\n`);
         return;
     }
+    // Claude Code runs the Stop hook command via bash (even on Windows
+    // — Git Bash for the spawned shell). Bash treats backslashes as
+    // escape characters, so a JSON-encoded Windows path with `\\…`
+    // gets eaten to `CUsersdavid…`. Use forward slashes on Windows
+    // instead: both cmd.exe and bash handle `C:/path/to/file.cmd`
+    // correctly, and JSON encodes `/` as itself.
+    const hookTarget = process.platform === "win32"
+        ? hookTargetRaw.replace(/\\/g, "/")
+        : hookTargetRaw;
     const settingsPath = opts.global
         ? join(homedir(), ".claude", "settings.json")
         : join(userCwd(), ".claude", "settings.json");
@@ -1249,9 +1258,15 @@ function wireStopHook(opts: { global: boolean }): void {
         catch { settings = {}; }
     }
 
+    // Match by basename for idempotence — covers both backslash and
+    // forward-slash versions of the same path (handles users who
+    // previously wired via install.sh or by hand).
     const stopGroups = settings.hooks?.Stop ?? [];
     const alreadyWired = stopGroups.some((g) =>
-        (g.hooks ?? []).some((h) => h.command === hookTarget),
+        (g.hooks ?? []).some((h) =>
+            typeof h.command === "string" &&
+            /aiball-autopoll-stop\.(sh|cmd)$/.test(h.command),
+        ),
     );
     if (alreadyWired) {
         process.stdout.write(`stop-hook: already wired in ${scopeLabel}\n`);
