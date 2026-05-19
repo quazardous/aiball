@@ -114,3 +114,67 @@ autopoll:
 #   # Default 2000 (2s) — only reduce if your shell is faster than
 #   # 2s round-trip on send-keys → hook fire.
 #   wake_in_flight_ttl_ms: 2000
+
+# Wake-CTA / state-prompt template overrides (#B.232 cpaez7).
+# Optional per-project section. When absent, the skill-shipped defaults
+# in `skill/claude-loop-pings.yaml` apply — you don't need anything here
+# for the wake-CTA to work. Use this block to localize wording (FR/EN),
+# experiment with directiveness levels, or tune the prompt for a project
+# with multiple agents talking to claude.
+#
+# Each slot accepts THREE shapes (russian-doll optional):
+#
+#   string                  → no variation, identical at every tone.
+#                             Easiest form when you have one canonical
+#                             wording you trust.
+#   list[string]             → random pick from the pool every wake.
+#                              Use to inject variety so the prompt
+#                              feels less mechanical.
+#   { tone: list[string] }   → russian-doll, per-imperativity pool.
+#                              Tone comes from `autopoll.tone` above
+#                              (hint | directive | imperative). Missing
+#                              tone in the map → falls back to `directive`.
+#                              Each tone gets its own list (random
+#                              pick within).
+#
+# Placeholders substituted at render time (slot-specific):
+#
+#   {ping_count}    integer (e.g. 3)
+#   {ping_plural}   "" (when count == 1) or "s"
+#   {open_count}    integer (count of actionable tickets)
+#   {open_plural}   "" or "s"
+#   {project_scope} "`<project>`" or "your scope"
+#
+# Slot reference (all wake-CTA pieces — the central service composes
+# them as `{culture} {wake_state_lead} {state_parts}. {directive}.`):
+#
+#   wake_state_lead       → conversational lead between the culture
+#                            phrase and the state report. Replaces the
+#                            old `[aiball: ...]` bracket framing that
+#                            tripped prompt-injection defenses on cold
+#                            sessions (david 6ehkvn).
+#   wake_state_pings       → state part for unread pings.
+#   wake_state_open        → state part for open tickets.
+#   wake_directive_drain   → imperative verb for the drain action.
+#   wake_directive_engage  → imperative verb for the engage action.
+#
+# A missing slot in the override falls back to the skill defaults; a
+# slot in the override REPLACES the default for that slot (no deep merge
+# inside a slot, so you can switch shape forms freely).
+#
+# prompts:
+#   wake_state_lead:
+#     directive:
+#       - "fyi:"
+#       - "heads up —"
+#       - "quick note:"
+#     hint: ["btw,", "fyi,"]
+#     imperative: ["**heads up**:", "**ACTION**:"]
+#
+#   # String form (no variation, identical at every tone).
+#   wake_state_pings: "{ping_count} unread aiball ping{ping_plural}"
+#
+#   # List form (random pick, identical at every tone).
+#   wake_directive_drain:
+#     - "drain via `unread({pings: true, mark_read: true})`"
+#     - "ack via `unread({pings: true, mark_read: true})`"
