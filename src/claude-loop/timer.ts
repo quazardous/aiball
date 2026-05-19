@@ -395,7 +395,13 @@ async function mainSse(): Promise<void> {
     const BOOT_GRACE_MS = Math.max(0, Number(process.env.CL_BOOT_GRACE_SEC ?? 60)) * 1000;
     let bootSettled = false;
     const settleBoot = async () => {
-        if (bootSettled) return;
+        if (bootSettled) {
+            // #B.228: surface the skip so we know the pane probe
+            // already flipped bootSettled — otherwise the log goes
+            // dark at T+60s and it looks like settleBoot vanished.
+            log("settleBoot skipped — bootSettled already true (probe flipped earlier)");
+            return;
+        }
         bootSettled = true;
         log("boot grace elapsed — settling to idle/busy via check");
         // Seed idle-since so tryWake's gate passes; tryWake will
@@ -408,7 +414,13 @@ async function mainSse(): Promise<void> {
         // tryWake removes idle-since on wake; if it didn't fire,
         // we still want the bar to read [idle] not [boot].
         if (existsSync(idleMarkerPath(sd!))) {
+            // #B.228: log the bar flip so "barre reste jaune" repros
+            // surface either this line (it WAS flipped) or its
+            // absence (settleBoot didn't reach the idle-marker check).
+            log("settleBoot: idle-marker present → setTmuxStatus(idle)");
             setTmuxStatus(name!, "idle");
+        } else {
+            log("settleBoot: idle-marker missing after tryWake (wake fired?) — bar stays as set by wake path");
         }
     };
     setTimeout(() => { void settleBoot(); }, BOOT_GRACE_MS);
@@ -449,8 +461,15 @@ async function mainSse(): Promise<void> {
         // SSE-drop safety net: re-check the gate ourselves.
         if (!unsubscribe) reconnect();
         const woke = await tryWake("heartbeat");
-        if (woke) settledStatus = "busy";
-        else if (existsSync(idleMarkerPath(sd!))) settledStatus = "idle";
+        if (woke) {
+            if (settledStatus !== "busy") log(`heartbeat: woke=true settledStatus=${settledStatus}→busy`);
+            settledStatus = "busy";
+        } else if (existsSync(idleMarkerPath(sd!))) {
+            // #B.228: trace the boot→idle flip driven by the
+            // idle-marker (set by settleBoot or session-start-hook).
+            if (settledStatus !== "idle") log(`heartbeat: woke=false idle-marker present → settledStatus=${settledStatus}→idle`);
+            settledStatus = "idle";
+        }
         // Pane-probe (#B.173, refined #B.154 davids). `esc to
         // interrupt` is THE authoritative claude-busy signal
         // ("seul le esc to interrupt est vraiment crucial dans le
@@ -492,19 +511,39 @@ async function mainSse(): Promise<void> {
             const claudeWorking = paneFooterShowsBusy(paneText);
             const claudeReady = /Claude Code v|❯ |^> /m.test(paneText);
             if (claudeWorking && settledStatus !== "busy") {
+                // #B.228: trace probe-driven state flips so a
+                // "barre reste jaune" repro shows whether the
+                // probe ever fired and what it saw.
+                log(`probe: claudeWorking=true settledStatus=${settledStatus}→busy (bootSettled=true)`);
                 settledStatus = "busy";
                 bootSettled = true; // probe overrides boot grace
             } else if (claudeReady && !claudeWorking && settledStatus !== "idle") {
                 // Claude is at the prompt. Seed idle-since so the
                 // next tryWake has a clean gate and flip the bar.
+                log(`probe: claudeReady=true settledStatus=${settledStatus}→idle (bootSettled=true, writing idle-marker)`);
                 settledStatus = "idle";
                 bootSettled = true;
                 try {
                     const { writeFileSync } = await import("node:fs");
                     writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
                 } catch { /* ignore */ }
+            } else if (!claudeWorking && !claudeReady && settledStatus === "boot") {
+                // #B.228: ambiguous pane during boot — log once-ish
+                // so the repro shows the probe IS firing but the
+                // regex isn't matching. Cheap enough to log every
+                // tick during boot; goes quiet after settledStatus
+                // leaves "boot".
+                log(`probe: pane ambiguous (claudeReady=false claudeWorking=false) — settledStatus stays "boot"`);
             }
-            // Else: pane present but ambiguous → keep settledStatus.
+            // Else: pane present but ambiguous AND settledStatus
+            // already left "boot" → keep settledStatus (no log).
+        } else {
+            // #B.228: empty pane capture. capturePane() returns ""
+            // on failure — possibly tmux gone or capture errored.
+            // Useful signal for the "barre reste jaune" repro.
+            if (settledStatus === "boot") {
+                log(`probe: empty pane capture (capturePane failed) — settledStatus stays "boot"`);
+            }
         }
         // Refresh the bar with the current unread count (#B.149
         // david: "dans la barre mux on peut afficher le nombre de
