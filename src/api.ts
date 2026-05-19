@@ -10,20 +10,7 @@ import {
     reclassifyMessageDecision,
     setMessageSummary,
     listProjects,
-    insertRule,
-    listRules,
-    deleteRule,
-    setRuleEnabled,
-    upsertSubscription,
-    deleteSubscription,
-    listSubscriptions,
     listKnownAgents,
-    listUnread,
-    unreadCount,
-    pendingTicketsByAuthor,
-    markMessageSeen,
-    markAllSeenForProject,
-    markSeenUpToForProject,
     listMessageTags,
     tagsForMessages,
     getStrategy,
@@ -97,12 +84,16 @@ import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
 import { outboxPath, UPLOADS_DIR } from "./paths.js";
 import { searchMessages } from "./search.js";
-import { fanOutPings, submitMessage, validateNewMessage, VALID_KINDS } from "./messages.js";
+import { fanOutPings, submitMessage, validateNewMessage } from "./messages.js";
 import { parseMeta } from "./questions.js";
 import { isDecisionKind, type DecisionKind } from "./decisions.js";
 import { bearerAuth, hashPassword, verifyPassword } from "./auth.js";
 import { badRequest, consumerOf, notFound, withTags, withTagsOne } from "./api/_helpers.js";
+import { agentHelpersRouter } from "./api/agent-helpers.js";
 import { consumersRouter } from "./api/consumers.js";
+import { readTrackingRouter } from "./api/read-tracking.js";
+import { rulesRouter } from "./api/rules.js";
+import { subscriptionsRouter } from "./api/subscriptions.js";
 import { tagsRouter } from "./api/tags.js";
 
 export const api = Router();
@@ -1810,160 +1801,19 @@ function enrichRelationStages<T extends { id: number; kind: string; source_ticke
 // Consumer CRUD + state-push moved to ./api/consumers.ts (#B.213 phase 1.B).
 api.use(consumersRouter);
 
-// -------- rules ------------------------------------------------------------
+// -------- rules + agent helpers -------------------------------------------
+// Moderation rule CRUD → ./api/rules.ts; /feed-path → ./api/agent-helpers.ts
+// (#B.213 phase 1.C).
+api.use(rulesRouter);
+api.use(agentHelpersRouter);
 
-api.get("/rules", (_req, res) => {
-    res.json(listRules());
-});
-
-api.post("/rules", (req: Request, res: Response) => {
-    const { decision, match_project, match_kind, match_by_agent, position, note } =
-        req.body ?? {};
-    if (decision !== "auto" && decision !== "review") {
-        return badRequest(res, "decision must be 'auto' or 'review'");
-    }
-    if (match_kind && !VALID_KINDS.includes(match_kind)) {
-        return badRequest(res, `match_kind must be one of ${VALID_KINDS.join(", ")}`);
-    }
-    const r = insertRule({
-        decision,
-        match_project: match_project ?? null,
-        match_kind: match_kind ?? null,
-        match_by_agent: match_by_agent ?? null,
-        position: typeof position === "number" ? position : 0,
-        note: note ?? null,
-    });
-    broadcast({ type: "rule_changed", data: r });
-    res.status(201).json(r);
-});
-
-api.delete("/rules/:id", (req, res) => {
-    deleteRule(Number(req.params.id));
-    broadcast({ type: "rule_changed", data: { id: Number(req.params.id), deleted: true } });
-    res.status(204).end();
-});
-
-api.patch("/rules/:id", (req, res) => {
-    const { enabled } = req.body ?? {};
-    if (typeof enabled !== "boolean") {
-        return badRequest(res, "only `enabled: boolean` supported for now");
-    }
-    const r = setRuleEnabled(Number(req.params.id), enabled);
-    if (!r) return notFound(res);
-    broadcast({ type: "rule_changed", data: r });
-    res.json(r);
-});
-
-// -------- helpers for agents ----------------------------------------------
-
-api.get("/feed-path", (req, res) => {
-    const project = req.query.project as string | undefined;
-    if (!project) return badRequest(res, "project query required");
-    try {
-        res.json({ path: outboxPath(project) });
-    } catch (e) {
-        return badRequest(res, (e as Error).message);
-    }
-});
-
-// -------- subscriptions ---------------------------------------------------
-
-api.post("/subscriptions", (req: Request, res: Response) => {
-    const { consumer_id, project, role } = req.body ?? {};
-    if (typeof consumer_id !== "string" || !consumer_id) {
-        return badRequest(res, "consumer_id required");
-    }
-    if (typeof project !== "string" || !project) {
-        return badRequest(res, "project required");
-    }
-    let roleArg: "owner" | "follower" | undefined;
-    if (role !== undefined && role !== null) {
-        if (role !== "owner" && role !== "follower") {
-            return badRequest(res, "role must be 'owner' or 'follower'");
-        }
-        roleArg = role;
-    }
-    const sub = upsertSubscription(consumer_id, project, roleArg);
-    res.status(201).json(sub);
-});
-
-api.get("/subscriptions", (req: Request, res: Response) => {
-    const consumer_id = req.query.consumer_id as string | undefined;
-    res.json(listSubscriptions(consumer_id));
-});
-
-api.delete("/subscriptions", (req: Request, res: Response) => {
-    const { consumer_id, project } = req.query;
-    if (typeof consumer_id !== "string" || typeof project !== "string") {
-        return badRequest(res, "consumer_id and project query params required");
-    }
-    deleteSubscription(consumer_id, project);
-    res.status(204).end();
-});
-
-api.get("/unread", (req: Request, res: Response) => {
-    const consumer_id = req.query.consumer_id as string | undefined;
-    const project = req.query.project as string | undefined;
-    const limit = req.query.limit ? Number(req.query.limit) : 100;
-    if (!consumer_id || !project) {
-        return badRequest(res, "consumer_id and project required");
-    }
-    const messages = listUnread(consumer_id, project, limit);
-    res.json({
-        consumer_id,
-        project,
-        count: unreadCount(consumer_id, project),
-        messages: withTags(messages),
-    });
-});
-
-api.get("/unread/count", (req, res) => {
-    const consumer_id = req.query.consumer_id as string | undefined;
-    const project = req.query.project as string | undefined;
-    if (!consumer_id || !project) {
-        return badRequest(res, "consumer_id and project required");
-    }
-    res.json({
-        consumer_id,
-        project,
-        count: unreadCount(consumer_id, project),
-    });
-});
-
-api.get("/my-pending/count", (req, res) => {
-    const by_agent = req.query.by_agent as string | undefined;
-    if (!by_agent) return badRequest(res, "by_agent required");
-    res.json({ by_agent, count: pendingTicketsByAuthor(by_agent) });
-});
-
-api.post("/mark-read", (req: Request, res: Response) => {
-    const { consumer_id, project, message_id, up_to_id, all } = req.body ?? {};
-    if (typeof consumer_id !== "string") {
-        return badRequest(res, "consumer_id required");
-    }
-    if (typeof message_id === "number") {
-        const r = markMessageSeen(consumer_id, message_id);
-        return res.json({ consumer_id, message_id, ...r });
-    }
-    if (typeof up_to_id === "number") {
-        if (typeof project !== "string") {
-            return badRequest(res, "project required when up_to_id is set");
-        }
-        const r = markSeenUpToForProject(consumer_id, project, up_to_id);
-        return res.json({ consumer_id, project, up_to_id, ...r });
-    }
-    if (all === true) {
-        if (typeof project !== "string") {
-            return badRequest(res, "project required when all:true");
-        }
-        const r = markAllSeenForProject(consumer_id, project);
-        return res.json({ consumer_id, project, ...r });
-    }
-    return badRequest(
-        res,
-        "provide message_id (single ack), up_to_id with project (bulk ack up to id), or all:true with project (ack everything delivered)",
-    );
-});
+// -------- subscriptions + read-tracking ------------------------------------
+// Subscriptions CRUD → ./api/subscriptions.ts; read-state routes
+// (unread, mark-read, my-pending/count) → ./api/read-tracking.ts.
+// (#B.213 phase 1.D — split out the read-tracking routes that were
+// previously bundled under the misleading "subscriptions" header.)
+api.use(subscriptionsRouter);
+api.use(readTrackingRouter);
 
 // -------- tags ------------------------------------------------------------
 // Tag CRUD + message-tag association moved to ./api/tags.ts (#B.213 phase 1.A).
