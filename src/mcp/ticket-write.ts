@@ -76,11 +76,11 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "Urgency hint (#B.222) orthogonal to intent. urgent = drop everything to handle; high = next available turn; normal = default (omit); low = pick up when idle. Influences ticket_list sort + listPings secondary tiebreaker + poll my_pending order. Choose deliberately: most tickets are 'normal'.",
                     ),
-                broadcast: z
-                    .boolean()
+                scope: z
+                    .enum(["internal", "default", "broadcast"])
                     .optional()
                     .describe(
-                        "If true, the ticket is broadcast at creation: project followers (subscriptions.role=follower) get pings on it, in addition to project owners and explicit ticket subscribers. Default false (internal-only).",
+                        "Event scope (#B.245 tristate): `internal` = owners only + @mentions explicit; `default` = ticket subscribers + project owners + @mentions; `broadcast` = `default` + project followers. Default `'default'`. Set `'broadcast'` to surface a public/API-impacting ticket to followers from the start.",
                     ),
                 by_agent: z
                     .string()
@@ -101,7 +101,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
             },
         },
-        async ({ project, title, summary, body, intent, priority, broadcast, by_agent, parent_id, tags }) => {
+        async ({ project, title, summary, body, intent, priority, scope, by_agent, parent_id, tags }) => {
             const proj = client.resolveProject(project);
             const res = (await client.postMessage({
                 project: proj,
@@ -113,10 +113,8 @@ export function registerTicketWriteTools(server: McpServer): void {
                 priority,
                 by_agent: effectiveBy(by_agent),
                 parent_id,
+                scope,
             })) as { id?: number };
-            if (broadcast === true && typeof res?.id === "number") {
-                await client.setTicketBroadcast(res.id, true);
-            }
             if (tags && tags.length > 0 && typeof res?.id === "number") {
                 // PUT /api/messages/:id/tags accepts tag NAMES alongside ids
                 // — it resolves via getTagByName server-side. Unknown names
@@ -141,7 +139,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 stats = null;
             }
             const decorated: Record<string, unknown> = { ...res };
-            if (broadcast === true) decorated.broadcast = 1;
+            if (scope) decorated.scope = scope;
             if (stats) {
                 decorated.target_project = {
                     name: proj,
@@ -210,9 +208,15 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "Optional intent on the comment. `resolved` (#B.129) = tag the comment as a resolution decision (`meta.decision={kind:\"resolution\",status:\"pending\"}`); the reporter accept/reject — no separate ticket_resolved row anymore, the comment IS the proposal and the audit lives on it. `plan` (#B.243) = symmetric to `resolved` for plan proposals (`meta.decision={kind:\"plan\",status:\"pending\"}`): use it when the comment body describes HOW you intend to tackle the ticket and you want the reporter to validate the approach before you execute. Accepted plan = go-signal (the agent re-enters actionable to execute); pending plan gates actionable identically to pending resolution. `close` = close the ticket (reporter-only). `reopen` = bring a closed ticket back. `close`/`reopen` are still emitted as distinct lifecycle event rows; `resolved` and `plan` are comment+decision sidecars. There is no agent→human `blocked` option — post a plain comment with your question if you need info before proceeding.",
                     ),
+                scope: z
+                    .enum(["internal", "default", "broadcast"])
+                    .optional()
+                    .describe(
+                        "Event scope (#B.245 tristate). `internal` = owners only + @mentions explicit (@projet narrows to owners); `default` = ticket subscribers + project owners + @mentions; `broadcast` = `default` + project followers. **Default for replies is `'internal'`** (#ny8m8a: existing threads already have their audience, broad fan-out on every reply over-notifies). Pass `'default'` to ping subscribers + owners, or `'broadcast'` to also reach followers. Each comment decides its own fan-out independently.",
+                    ),
             },
         },
-        async ({ target_id, body, project, by_agent, summary_until, then }) => {
+        async ({ target_id, body, project, by_agent, summary_until, then, scope }) => {
             const target = (await client.getMessage(target_id)) as {
                 project: string;
                 kind: string;
@@ -270,6 +274,11 @@ export function registerTicketWriteTools(server: McpServer): void {
                 // close/reopen are lifecycle rows where the field has no
                 // meaning and the validator would reject it.
                 summary_until: kind === "comment_added" ? summary_until : undefined,
+                // #B.245 tristate: forward composer-side `scope`. Default
+                // `'internal'` for replies (#ny8m8a — existing threads have
+                // their audience, broad fan-out over-notifies). Callers
+                // pass `scope: 'default'` or `scope: 'broadcast'` to widen.
+                scope: scope ?? "internal",
             });
             return asText(res);
         },
@@ -334,7 +343,7 @@ export function registerTicketWriteTools(server: McpServer): void {
         "ticket_update",
         {
             description:
-                "Patch a ticket's persistent fields in one call. Pass only the fields you want to change. Each field has its own permission check enforced by the daemon — owner-bypass for edit (title/body/intent) and broadcast, reporter-or-human for snooze.\n\n`postponed_until` accepts either an ISO8601 timestamp (e.g. `2026-05-18T09:00:00Z`) or a relative shorthand (`+30m`, `+2h`, `+3d`, `+1w`, `+1mo`). Pass `null` to clear (un-snooze). Other clearable fields (`body`, `intent`) accept `null` the same way; `title` must remain non-empty.",
+                "Patch a ticket's persistent fields in one call. Pass only the fields you want to change. Each field has its own permission check enforced by the daemon — owner-bypass for edit (title/body/summary/intent/priority), reporter-or-human for snooze. Event `scope` is set at creation (or via `ticket_reply` on subsequent events) and isn't flipped retroactively here (#B.245).\n\n`postponed_until` accepts either an ISO8601 timestamp (e.g. `2026-05-18T09:00:00Z`) or a relative shorthand (`+30m`, `+2h`, `+3d`, `+1w`, `+1mo`). Pass `null` to clear (un-snooze). Other clearable fields (`body`, `intent`) accept `null` the same way; `title` must remain non-empty.",
             inputSchema: {
                 ticket_id: z
                     .number()
@@ -369,12 +378,6 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "New urgency hint (#B.222, owner-bypass). low / normal / high / urgent. Pass null to reset to 'normal'.",
                     ),
-                broadcast: z
-                    .boolean()
-                    .optional()
-                    .describe(
-                        "Flip broadcast flag (owner-bypass). true = project followers receive pings; false = internal-only.",
-                    ),
                 postponed_until: z
                     .string()
                     .nullable()
@@ -384,11 +387,11 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
             },
         },
-        async ({ ticket_id, title, summary, body, intent, priority, broadcast, postponed_until }) => {
+        async ({ ticket_id, title, summary, body, intent, priority, postponed_until }) => {
             const results: Record<string, unknown> = { ticket_id };
             // Each field maps to its own HTTP endpoint. Apply in this
-            // order: edit fields first (they may change the title/body the
-            // following flips display), then broadcast, then postpone.
+            // order: edit fields first (they may change the title/body
+            // the following flips display), then postpone.
             if (
                 title !== undefined ||
                 body !== undefined ||
@@ -397,9 +400,6 @@ export function registerTicketWriteTools(server: McpServer): void {
                 priority !== undefined
             ) {
                 results.edit = await client.edit(ticket_id, { title, summary, body, intent, priority });
-            }
-            if (broadcast !== undefined) {
-                results.broadcast = await client.setTicketBroadcast(ticket_id, broadcast);
             }
             if (postponed_until !== undefined) {
                 if (postponed_until === null || !postponed_until.trim()) {
@@ -410,7 +410,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 }
             }
             if (Object.keys(results).length === 1) {
-                throw new Error("ticket_update needs at least one field — pass title/body/intent/priority/broadcast/postponed_until");
+                throw new Error("ticket_update needs at least one field — pass title/body/intent/priority/postponed_until");
             }
             return asText(results);
         },

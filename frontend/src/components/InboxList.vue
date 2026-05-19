@@ -13,6 +13,7 @@ import {
     type StatusFilter,
     snoozedTooltip,
 } from "../lib/labels";
+import { scopeIcon, scopeTitle, type Scope } from "../lib/scope";
 import ListRow from "./ListRow.vue";
 import TagBadge from "./TagBadge.vue";
 
@@ -153,11 +154,19 @@ function filtersAreNarrowed(): boolean {
         <template #title>
             <span class="ticket-id">#B.{{ r.id }}</span>
             {{ titleOf(r) }}
+            <!-- #B.245: per-event scope badge. Only render for
+                 non-default scopes so the common case stays visually
+                 quiet. `internal` → muted "private" eye-slash;
+                 `broadcast` → loud megaphone. -->
             <i
-                v-if="r.broadcast"
-                class="pi pi-megaphone"
-                style="margin-left: 0.35rem; color: var(--p-blue-500); font-size: 0.85rem"
-                title="broadcast: project followers receive pings on this thread"
+                v-if="r.scope && r.scope !== 'default' && scopeIcon(r.scope as Scope)"
+                :class="['pi', scopeIcon(r.scope as Scope)]"
+                :style="{
+                    marginLeft: '0.35rem',
+                    color: r.scope === 'broadcast' ? 'var(--p-blue-500)' : 'var(--p-text-muted-color)',
+                    fontSize: '0.85rem',
+                }"
+                :title="scopeTitle(r.scope as Scope)"
             />
         </template>
         <template v-if="snippetOf(r)" #snippet>{{ snippetOf(r) }}</template>

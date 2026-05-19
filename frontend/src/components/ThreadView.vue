@@ -258,7 +258,6 @@ const {
 } = useResolutionFlow({ data, error, broadcastRefresh });
 
 
-const broadcastBusy = ref(false);
 // Snooze flow (#B.329) — popover ref + busy + the three "set aside"
 // verbs (preset duration / custom datetime / unsnooze). Lives in
 // lib/snooze.ts since the logic is self-contained around (data,
@@ -273,21 +272,6 @@ const {
     unsnooze,
     isSnoozed,
 } = useSnooze({ data, composerBody, postBodyAs, error });
-
-async function toggleBroadcast() {
-    if (!data.value) return;
-    const tid = data.value.ticket.id;
-    broadcastBusy.value = true;
-    try {
-        const next = !data.value.ticket.broadcast;
-        await api.setTicketBroadcast(tid, next);
-        broadcastRefresh(tid);
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        broadcastBusy.value = false;
-    }
-}
 
 const justCopiedTicket = ref(false);
 async function copyTicketRef() {
@@ -313,11 +297,9 @@ async function copyTicketRef() {
             :has-body="hasBody"
             :active-decision="activeDecision"
             :pending-resolution="pendingResolution"
-            :broadcast-busy="broadcastBusy"
             :snooze-busy="snoozeBusy"
             :resolution-busy="resolutionBusy"
             @back="emit('back')"
-            @toggle-broadcast="toggleBroadcast"
             @open-snooze="openSnoozePopover"
             @unsnooze="unsnooze"
             @reject-active="rejectActiveDecision"

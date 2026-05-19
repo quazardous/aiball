@@ -93,6 +93,8 @@ function decide(
     if (!updated) return notFound(res);
     if (status === "approved") {
         deliverToOutbox(updated);
+        // #B.245 tristate: fanOutPings itself bails out at `scope ===
+        // "internal"`, so the call is unconditional again.
         fanOutPings(updated);
     } else if (status === "rejected") {
         // At-insertion fan-out had already delivered pings to subscribers.

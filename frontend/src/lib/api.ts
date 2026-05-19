@@ -59,6 +59,10 @@ export interface Message {
      *  (#B.104) and decision-on-comment (#B.129). Parsed lazily by
      *  components that need it. */
     meta?: string | null;
+    /** #B.245 event scope tristate. `internal` = owners+@mentions
+     *  only; `default` = subscribers+owners+@mentions; `broadcast` =
+     *  + followers. Drives the per-card scope picto. */
+    scope?: "internal" | "default" | "broadcast";
     tags: Tag[];
 }
 
@@ -166,7 +170,8 @@ export interface TicketSummary {
     blocked?: boolean;
     blocked_by?: string | null;
     blocked_at?: string | null;
-    broadcast?: boolean;
+    /** #B.245 tristate scope. */
+    scope?: "internal" | "default" | "broadcast";
     /** Snooze (#B.329) — when set and in the future, the ticket is
      *  hidden from the open inbox until that timestamp. */
     postponed_until?: string | null;
@@ -256,7 +261,8 @@ export interface InboxRow {
      *  agent's plan was knocked back and the thread stays open
      *  pending a new direction. */
     latest_plan_rejected?: boolean;
-    broadcast?: boolean;
+    /** #B.245 tristate scope. */
+    scope?: "internal" | "default" | "broadcast";
     /** Per-consumer flag: ≥1 unseen ping on the thread for the requesting consumer. */
     unread?: boolean;
     /** Snooze flag (#B.329): true iff `postponed_until` is in the future.
@@ -482,8 +488,6 @@ export const api = {
         if (params.limit !== undefined) qs.set("limit", String(params.limit));
         return req<SearchHit[]>("GET", `/api/search?${qs.toString()}`);
     },
-    setTicketBroadcast: (id: number, broadcast: boolean) =>
-        req<TicketSummary>("PATCH", `/api/tickets/${id}`, { broadcast }),
     postponeTicket: (id: number, until: string) =>
         req<{ ticket_id: number; postponed_until: string }>(
             "POST",

@@ -12,7 +12,6 @@ import {
     listPendingResolutionDecisionsForTicket,
     applyMessageDecision,
     listPendingLifecycleForTicket,
-    isTicketBroadcast,
     deletePingsForMessage,
     ensureConsumer,
     isHuman,
@@ -117,6 +116,22 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
     } else if (o.summary_until !== undefined && o.summary_until !== null && o.summary_until !== "") {
         return { error: `summary_until only allowed on comment_added (got kind=${kind})` };
     }
+    // #B.245 tristate: composer-side `scope`. One of
+    // `internal | default | broadcast`. Applies to every kind
+    // (ticket_created and comment_added alike — each event decides
+    // its own fan-out per david #79h7zk). When absent, the column
+    // default `'default'` applies server-side; we forward `undefined`
+    // rather than coercing here.
+    let scope: "internal" | "default" | "broadcast" | undefined = undefined;
+    if (o.scope !== undefined && o.scope !== null) {
+        if (typeof o.scope !== "string") {
+            return { error: "scope must be a string" };
+        }
+        if (o.scope !== "internal" && o.scope !== "default" && o.scope !== "broadcast") {
+            return { error: "scope must be one of internal, default, broadcast" };
+        }
+        scope = o.scope as "internal" | "default" | "broadcast";
+    }
     return {
         project: o.project,
         kind,
@@ -132,6 +147,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         intent: kind === "ticket_created" ? intent : null,
         decision_kind: decisionKind,
         summary_until: summaryUntil,
+        scope,
     };
 }
 
@@ -170,30 +186,35 @@ function autoSubscribeAuthor(msg: Message): void {
  * because the fan-out runs at approval time, not at submission.
  */
 export function fanOutPings(msg: Message): void {
+    // #B.245 tristate: `internal` events skip subscriber fan-out
+    // entirely — only @mentions reach (via fanOutMentions, called
+    // separately at submit time). Moderators still see the row in
+    // the pending queue if it's not auto-approved; they just don't
+    // get a personal ping for it.
+    if (msg.scope === "internal") return;
+
     const recipients = new Set<string>();
 
-    const ticketId = msg.kind === "ticket_created"
-        ? msg.id
-        : msg.ticket_id;
-
     // Ticket subscribers: explicit thread follow always wins regardless of
-    // broadcast state. Skip on ticket_created since there's no thread yet
-    // (the creator is auto-subbed to their own ticket and self-filtered).
+    // event scope (above the per-event broadcast gate). Skip on
+    // ticket_created since there's no thread yet (the creator is
+    // auto-subbed to their own ticket and self-filtered).
     if (msg.kind !== "ticket_created" && msg.ticket_id !== null) {
         for (const sub of listTicketSubscribers(msg.ticket_id)) {
             recipients.add(sub);
         }
     }
 
-    // Project owners always see everything in their project.
+    // Project owners always see `default` and `broadcast` events.
     for (const sub of listProjectSubscribers(msg.project, { roles: ["owner"] })) {
         recipients.add(sub);
     }
 
-    // Project followers only see broadcast-flagged tickets. We resolve the
-    // flag on the parent ticket — for ticket_created msg.id IS the ticket;
-    // for comments/lifecycle we look up via msg.ticket_id.
-    if (ticketId !== null && isTicketBroadcast(ticketId)) {
+    // Project followers only see `broadcast`-scoped events — per-event
+    // decision now (post-#B.245), no longer derived from the ticket-wide
+    // flag. The previous ticket-level `broadcast` boolean was unified
+    // into this same tristate; each event decides its own follower reach.
+    if (msg.scope === "broadcast") {
         for (const sub of listProjectSubscribers(msg.project, { roles: ["follower"] })) {
             recipients.add(sub);
         }
@@ -366,6 +387,10 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
                 by_agent: msg.by_agent,
             });
             if (pseudo) {
+                // Inherit scope from the source event (#B.245) so an
+                // internal-scoped sub-ticket doesn't summon the parent
+                // thread's followers via its sub_added pseudo.
+                pseudo.scope = msg.scope;
                 fanOutPings(pseudo);
                 broadcast({ type: "message_created", data: pseudo });
             }
@@ -384,6 +409,13 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
             by_agent: msg.by_agent,
         });
         if (pseudo) {
+            // #B.245 tristate: when the source comment is internal, the
+            // cross-ref pseudo lives in the target thread but doesn't
+            // fan out — the referenced thread's subscribers shouldn't
+            // be summoned by a quiet/internal mention. The pseudo
+            // inherits the source scope so fanOutPings's own gate
+            // picks up the right behavior.
+            pseudo.scope = msg.scope;
             fanOutPings(pseudo);
             broadcast({ type: "message_created", data: pseudo });
         }
@@ -405,9 +437,17 @@ function fanOutMentions(msg: Message): void {
     const mentions = extractMentions(msg.body, msg.by_agent);
     if (mentions.length === 0) return;
     const knownProjects = new Set(listProjects());
+    // #B.245 tristate: at `internal` scope, @projet narrows to owners
+    // only (the whole point of the narrow scope — keep dev chatter
+    // off followers' inboxes). `default` and `broadcast` keep the
+    // wide owner+follower reach for @projet. @agent mentions are
+    // unaffected — they target a single consumer regardless of scope.
+    const projectRoles: ("owner" | "follower")[] = msg.scope === "internal"
+        ? ["owner"]
+        : ["owner", "follower"];
     for (const name of mentions) {
         if (knownProjects.has(name)) {
-            const subs = listProjectSubscribers(name, { roles: ["owner", "follower"] });
+            const subs = listProjectSubscribers(name, { roles: projectRoles });
             for (const sub of subs) {
                 if (sub === msg.by_agent) continue;
                 insertPing(sub, msg);
@@ -439,6 +479,9 @@ export function submitMessage(input: NewMessage): Message {
     // the (recipient, message_id) primary key), so the later approval-time
     // fan-out is a safe no-op. Pings on rejected messages are cleaned up by
     // the moderation handler (api.ts decide()).
+    //
+    // #B.245: internal-scoped messages bail out inside fanOutPings —
+    // only @mentions (via fanOutMentions below) reach them.
     fanOutPings(msg);
     // Always announce the message: every UI list (pending, approved, tickets,
     // open thread) wants to know that a new row exists, regardless of how

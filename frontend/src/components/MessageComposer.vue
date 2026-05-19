@@ -10,6 +10,7 @@ import MarkdownView from "./MarkdownView.vue";
 import { api, INTENTS, PRIORITIES, type Intent, type Priority } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
 import { attachPasteImage } from "../lib/pasteImage";
+import { SCOPES, scopeIcon, scopeTitle, type Scope } from "../lib/scope";
 import { uploadImage } from "../lib/upload";
 
 type Mode = "ticket" | "comment";
@@ -37,7 +38,44 @@ const title = ref("");
 // piggy-back on whatever the user has typed (e.g. "accept resolution and
 // close" reuses the body as the lifecycle event's comment).
 const body = defineModel<string>("body", { default: "" });
-const byAgent = ref(localStorage.getItem("aiball.human_id") ?? "human");
+// #B.245 tristate scope (unified internal/broadcast):
+//   internal  → owners only + @mentions explicites
+//   default   → ticket subs + project owners + @mentions
+//   broadcast → default + project followers
+//
+// David #79h7zk: "le widget gardera la dernière valeur choisie par
+// ticket" — the composer persists the last-chosen scope per-ticket
+// via localStorage so the user doesn't have to re-pick it on every
+// reply within a thread. New tickets get a per-project memory.
+// Initial fallback: replies → `internal` (existing thread already
+// has its audience); new tickets → `default`.
+const scopeStorageKey = computed(() => {
+    if (props.mode === "comment" && props.ticketId !== undefined) {
+        return `aiball.composer.scope.${props.ticketId}`;
+    }
+    return `aiball.composer.scope.new.${props.project}`;
+});
+function readPersistedScope(): Scope | null {
+    const raw = localStorage.getItem(scopeStorageKey.value);
+    if (raw === "internal" || raw === "default" || raw === "broadcast") return raw;
+    return null;
+}
+const scope = ref<Scope>(
+    readPersistedScope() ?? (props.mode === "comment" ? "internal" : "default"),
+);
+watch(scope, (next) => {
+    localStorage.setItem(scopeStorageKey.value, next);
+});
+// #B.245 fgum2c: dropdown with per-option pictograms (internal /
+// default / broadcast). Includes the icon class so the Select's
+// option/value templates can render the same glyph used everywhere
+// else (lists, cards).
+const scopeOptions = SCOPES.map((s) => ({
+    label: s,
+    value: s,
+    icon: scopeIcon(s),
+    title: scopeTitle(s),
+}));
 const intent = ref<Intent>("request");
 // #B.222: urgency hint orthogonal to intent. Default "normal" = invisible
 // when unchanged, so 90% of ticket-creates don't pay any visual weight.
@@ -119,8 +157,6 @@ const placeholder = computed(
             ? "Ticket body (optional) — markdown supported"
             : "Write a comment — markdown supported (gfm)"),
 );
-const roleLabel = computed(() => (isTicket.value ? "posting as" : "replying as"));
-
 // Per-thread / per-project draft persistence (per #B.94). The composer
 // preserves what's been typed across page refreshes and thread
 // navigation: a reply on `#B.42` keeps its own draft, a reply on
@@ -207,10 +243,13 @@ async function submit() {
     sending.value = true;
     error.value = null;
     try {
-        localStorage.setItem("aiball.human_id", byAgent.value);
-        // Goes through api.postMessage → req() so the bearer token +
-        // X-Aiball-Consumer header are attached. fetch() directly
-        // skipped both and produced 401s once auth became mandatory.
+        // Identity flows from localStorage (set by Setup/Login) →
+        // X-Aiball-Consumer header on every api request. The composer
+        // no longer edits it (#B.245 retired the "replying as"
+        // InputText); we still echo it as `by_agent` on the payload so
+        // the validator sees the same value the API helper would have
+        // resolved.
+        const author = localStorage.getItem("aiball.human_id") ?? "human";
         let createdId: number | null = null;
         if (isTicket.value) {
             const r = await api.postMessage({
@@ -222,7 +261,10 @@ async function submit() {
                 // Omit priority when it equals the default so the payload
                 // stays clean for the typical case.
                 ...(priority.value !== "normal" ? { priority: priority.value } : {}),
-                by_agent: byAgent.value || "human",
+                by_agent: author,
+                // #B.245 tristate. Forward only when non-default so the
+                // payload stays clean for the typical case.
+                ...(scope.value !== "default" ? { scope: scope.value } : {}),
             });
             createdId = typeof r?.id === "number" ? r.id : null;
         } else {
@@ -234,7 +276,9 @@ async function submit() {
                 ticket_id: props.ticketId,
                 parent_id: props.parentId ?? props.ticketId,
                 body: body.value,
-                by_agent: byAgent.value || "human",
+                by_agent: author,
+                // #B.245 tristate. Forward only when non-default.
+                ...(scope.value !== "default" ? { scope: scope.value } : {}),
             });
             createdId = typeof r?.id === "number" ? r.id : null;
         }
@@ -249,7 +293,7 @@ async function submit() {
             pendingAnswers.value.length > 0 &&
             !isTicket.value
         ) {
-            const answeredBy = byAgent.value || "human";
+            const answeredBy = author;
             for (const pa of pendingAnswers.value) {
                 try {
                     await api.markQuestionAnswered(pa.messageId, pa.questionId, {
@@ -485,13 +529,44 @@ async function onAttachPicked(ev: Event) {
             <slot name="headline" />
         </div>
         <div class="composer-meta">
-            <span class="field-label" style="margin: 0">{{ roleLabel }}</span>
-            <InputText
-                v-model="byAgent"
+            <Select
+                v-model="scope"
+                :options="scopeOptions"
+                option-label="label"
+                option-value="value"
                 size="small"
-                style="max-width: 12rem"
                 :disabled="sending"
-            />
+                aria-label="Event scope"
+                class="composer-scope"
+                title="Scope (#B.245) — composer remembers your last choice per ticket."
+            >
+                <template #value="slotProps">
+                    <span class="composer-scope-option">
+                        <i
+                            v-if="slotProps.value && scopeIcon(slotProps.value)"
+                            :class="['pi', scopeIcon(slotProps.value)]"
+                        />
+                        <span>{{ slotProps.value ?? "default" }}</span>
+                    </span>
+                </template>
+                <template #option="slotProps">
+                    <span
+                        class="composer-scope-option"
+                        :title="slotProps.option.title"
+                    >
+                        <i
+                            v-if="slotProps.option.icon"
+                            :class="['pi', slotProps.option.icon]"
+                            style="width: 1rem; text-align: center"
+                        />
+                        <i
+                            v-else
+                            style="width: 1rem; display: inline-block"
+                        />
+                        <span>{{ slotProps.option.label }}</span>
+                    </span>
+                </template>
+            </Select>
             <span class="spacer" />
             <ToggleButton
                 v-model="preview"
@@ -695,6 +770,14 @@ async function onAttachPicked(ev: Event) {
     display: flex;
     gap: 0.6rem;
     align-items: center;
+}
+.composer-scope {
+    min-width: 9rem;
+}
+.composer-scope-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
 }
 .composer-title-row {
     display: flex;

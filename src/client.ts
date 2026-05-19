@@ -187,11 +187,6 @@ export class AiballClient {
         }
     }
 
-    /** Flip a ticket's broadcast flag via the dedicated PATCH endpoint. */
-    setTicketBroadcast(ticket_id: number, broadcast: boolean) {
-        return this.http("PATCH", `/api/tickets/${ticket_id}`, { broadcast });
-    }
-
     /** Per-project subscriber + content stats (« nobody is listening » hint). */
     projectStats(project: string) {
         return this.http("GET", `/api/projects/${encodeURIComponent(project)}/stats`);

@@ -130,8 +130,7 @@ export {
 } from "./db/subscriptions.js";
 
 export {
-    isTicketBroadcast,
-    setTicketBroadcast,
+    getTicketScope,
     setTicketPostpone,
     getTicketPostpone,
     listExpiredPostpones,

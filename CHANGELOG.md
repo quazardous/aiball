@@ -15,6 +15,52 @@ the human-readable narrative.
 
 ## [Unreleased]
 
+### Per-event `scope` tristate replaces `broadcast` + `internal` (`#B.245`, `#B.240`)
+
+- One unified `scope` enum on every event row (tickets + messages),
+  three values:
+  - **`internal`** — owners only + `@mention` recipients
+    (`@projet` narrows to project **owners**, not followers). Used
+    for replies that don't need to spam the thread audience.
+  - **`default`** — ticket subscribers + project owners + `@mention`
+    recipients (the standard fan-out).
+  - **`broadcast`** — `default` + project followers (the prior
+    `tickets.broadcast = 1` semantic, now per-event).
+- **Composer** : `SelectButton` tristate replaces the legacy
+  "replying as" InputText (`#B.240`) and the short-lived `internal`
+  checkbox. The widget remembers the last value chosen **per
+  ticket** (`#79h7zk`) via localStorage
+  (`aiball.composer.scope.<ticketId>`), so you don't re-pick on
+  every reply. Initial fallbacks: replies → `internal`
+  (`#ny8m8a`); new tickets → `default`.
+- **MCP** : `ticket_new` + `ticket_reply` gain an optional
+  `scope: "internal" | "default" | "broadcast"` parameter. The
+  prior booleans (`broadcast` on `ticket_new`, the not-yet-released
+  `internal` on `ticket_reply`) stay accepted as deprecated aliases
+  — explicit `scope` wins when both are present. Default scope
+  for replies is `internal` for the same anti-overnotification
+  reason as the composer.
+- **Behavior change** : prior fan-out hinged on two unrelated
+  booleans — `tickets.broadcast` (followers vs. internal at the
+  ticket level) and the implicit "every comment notifies
+  subscribers + owners". After this, each event independently
+  decides. Replies default to `internal` so existing thread
+  audiences are no longer pinged on every back-and-forth; pick
+  `default` to ping them, `broadcast` to also reach followers.
+- **Schema** : `tickets.broadcast` and `_messages.internal` are
+  dropped in favor of `scope TEXT NOT NULL DEFAULT 'default' CHECK
+  (scope IN ('internal','default','broadcast'))` on both tables.
+  Backfill: `broadcast=1 → 'broadcast'`, `internal=1 → 'internal'`,
+  else `'default'`. Migrations: `0020_message_internal.sql` lands
+  the intermediate `internal` column; `0021_scope_tristate.sql`
+  unifies into `scope` and drops the now-redundant booleans.
+- Resolves the friction surfaced by `#B.245`: David typed
+  `@aiball ... j'ai un bug ici` to address the project, but the
+  active Claude session interpreted it as a personal task. With
+  `scope: internal` plus `@projet` narrowing, the same gesture now
+  explicitly addresses project owners without reaching the active
+  Claude or followers.
+
 ### MCP `ticket_reply` — `then: "plan"` (`#B.243`)
 
 - New value `"plan"` on the `then` enum of `ticket_reply`, symmetric to

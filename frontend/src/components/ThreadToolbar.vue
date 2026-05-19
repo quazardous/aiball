@@ -21,14 +21,12 @@ defineProps<{
     hasBody: boolean;
     activeDecision: { message: Message; decision: CommentDecision } | null;
     pendingResolution: Message | null;
-    broadcastBusy: boolean;
     snoozeBusy: boolean;
     resolutionBusy: boolean;
 }>();
 
 const emit = defineEmits<{
     (e: "back"): void;
-    (e: "toggle-broadcast"): void;
     (e: "open-snooze", event: MouseEvent): void;
     (e: "unsnooze"): void;
     (e: "reject-active"): void;
@@ -69,21 +67,11 @@ const emit = defineEmits<{
                 : 'Thread order (applies to ALL threads): oldest first (default). Click to flip to newest at top.'"
             @click="toggleTopDown"
         />
-        <Button
-            v-if="ticket.status === 'approved'"
-            icon="pi pi-megaphone"
-            :severity="ticket.broadcast ? 'success' : 'secondary'"
-            size="small"
-            :text="!ticket.broadcast"
-            rounded
-            class="broadcast-toggle"
-            :class="{ 'broadcast-toggle--off': !ticket.broadcast }"
-            :loading="broadcastBusy"
-            :title="ticket.broadcast
-                ? 'Broadcast ON: project followers receive pings on this thread. Click to make it internal-only.'
-                : 'Broadcast OFF (default): only project owners and explicit thread followers receive pings. Click to broadcast to all project followers.'"
-            @click="emit('toggle-broadcast')"
-        />
+        <!-- #B.245 fgum2c: the broadcast/megaphone toggle is gone.
+             Scope is per-event now — the composer's Select dropdown
+             carries it, and each event renders its own per-scope
+             picto in lists + cards. A ticket-wide flip no longer
+             matches the model. -->
         <Button
             v-if="ticket.status !== 'rejected' && !ticket.closed && !isSnoozed"
             icon="pi pi-history"

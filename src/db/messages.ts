@@ -62,6 +62,9 @@ export function insertMessage(m: NewMessage): Message {
                 priority: m.priority ?? "normal",
                 createdAt,
                 parentTicketId: m.parent_id ?? null,
+                // #B.245 tristate. Omit when caller didn't specify so
+                // the column default ('default') applies.
+                ...(m.scope ? { scope: m.scope } : {}),
             }).returning().get();
             return ticketRowToMessage(inserted);
         }
@@ -111,6 +114,11 @@ export function insertMessage(m: NewMessage): Message {
             createdAt,
             hashid,
             meta: metaInit,
+            // #B.245 tristate: composer-side `scope`. Lifecycle events
+            // (close/reopen) inherit it too — a "quiet close" at
+            // scope=internal is a valid use case. Omit when unset so
+            // the column default ('default') applies.
+            ...(m.scope ? { scope: m.scope } : {}),
         }).returning().get();
         // Resolve project via parent ticket for the legacy shape.
         const parent = tx.select({ project: schema.tickets.project })

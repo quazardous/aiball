@@ -109,10 +109,18 @@ export interface Message {
     priority?: Priority;
     display_seq: number;
     /**
-     * Broadcast flag for tickets (1 = ticket is broadcast to project
-     * followers, 0 = internal-only). Always 0 for non-ticket rows.
+     * Event scope (#B.245 tristate). One of `internal` / `default` /
+     * `broadcast`. Drives `fanOutPings` granularity per-event:
+     *
+     *   internal  → owners only + @mentions (no ticket subscribers,
+     *               no followers; @projet narrows to owners-only)
+     *   default   → ticket subscribers + project owners + @mentions
+     *   broadcast → default + project followers
+     *
+     * Carried on every row (tickets + _messages), since every event
+     * decides its own fan-out independently.
      */
-    broadcast: number;
+    scope: "internal" | "default" | "broadcast";
     /**
      * Public-facing alphanumeric ref for comments and lifecycle events
      * (#C<hashid>). NULL for tickets (which use their integer id directly
@@ -194,6 +202,12 @@ export interface NewMessage {
     /** #B.130 phase 1: author-supplied one-line TLDR. comment_added
      *  only — used by brief-mode reads to skip the full body. */
     summary_until?: string | null;
+    /** #B.245 tristate scope. `internal` = owners only + @mentions;
+     *  `default` = subs + owners + @mentions; `broadcast` = +
+     *  followers. Applies to every kind (ticket_created uses it the
+     *  same way comments do). When absent the column default
+     *  `'default'` applies. */
+    scope?: "internal" | "default" | "broadcast";
 }
 
 export interface NewRule {
@@ -396,7 +410,7 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         intent: (t.intent as Intent | null) ?? null,
         priority: (t.priority as Priority | undefined) ?? "normal",
         display_seq: t.displaySeq,
-        broadcast: t.broadcast ?? 0,
+        scope: ((t.scope as "internal" | "default" | "broadcast" | undefined) ?? "default"),
         hashid: null,
         postponed_until: t.postponedUntil ?? null,
         parent_ticket_id: t.parentTicketId ?? null,
@@ -427,7 +441,7 @@ export function messageRowToMessage(m: schema.Message, project: string): Message
         edited_body: m.editedBody,
         intent: null,
         display_seq: m.displaySeq,
-        broadcast: 0,
+        scope: ((m.scope as "internal" | "default" | "broadcast" | undefined) ?? "default"),
         hashid: m.hashid ?? null,
         source_ticket_id: m.sourceTicketId ?? null,
         meta: m.meta ?? null,

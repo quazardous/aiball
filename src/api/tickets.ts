@@ -25,7 +25,6 @@ import {
     tagsForMessages,
     type Message,
     type MessageStatus,
-    setTicketBroadcast,
     setTicketPostpone,
     listSubTickets,
     subTicketCounts,
@@ -323,7 +322,7 @@ ticketsRouter.get("/inbox", (req, res) => {
                 — cleared once the ticket is closed/rejected so the
                 badge represents "live unresolved rejection". */
             latest_plan_rejected: agg.latestPlanRejected && !(agg.closed || t.status === "rejected"),
-            broadcast: t.broadcast === 1,
+            scope: t.scope,
             // Per-consumer unread flag (≥1 unseen ping on the thread for
             // the caller, resolved from the X-Aiball-Consumer header).
             unread: unreadMap.get(t.id) ?? false,
@@ -471,7 +470,7 @@ ticketsRouter.get("/tickets", (req, res) => {
             status: m.status,
             created_at: m.created_at,
             closed: closedSet.has(m.id),
-            broadcast: m.broadcast === 1,
+            scope: m.scope,
             postponed,
             postponed_until: postponedUntil,
             intent: m.intent,
@@ -550,21 +549,6 @@ ticketsRouter.post("/tickets/:id/mark-unread", (req: Request, res: Response) => 
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
     const r = markTicketUnseen(consumerOf(req), id);
     res.json({ ticket_id: id, ...r });
-});
-
-ticketsRouter.patch("/tickets/:id", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const t = getMessage(id);
-    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
-    const { broadcast: bcast } = req.body ?? {};
-    if (typeof bcast !== "boolean") {
-        return badRequest(res, "broadcast (boolean) required");
-    }
-    const ok = setTicketBroadcast(id, bcast);
-    if (!ok) return notFound(res, "ticket not found");
-    const updated = getMessage(id);
-    if (updated) broadcast({ type: "message_edited", data: updated });
-    res.json(updated);
 });
 
 /**
@@ -817,7 +801,7 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         blocked,
         blocked_by: blocked ? blockedBy : null,
         blocked_at: blocked ? blockedAt : null,
-        broadcast: t.broadcast === 1,
+        scope: t.scope,
         postponed_until: t.postponed_until ?? null,
         intent: t.intent,
         priority: t.priority ?? "normal",

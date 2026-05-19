@@ -8,6 +8,7 @@ import ToggleButton from "primevue/togglebutton";
 import Tag from "primevue/tag";
 import { api, type Message } from "../lib/api";
 import { KIND_ICONS, KIND_LABELS, STATUS_SEVERITY } from "../lib/labels";
+import { scopeIcon, scopeTitle, type Scope } from "../lib/scope";
 import MarkdownView from "./MarkdownView.vue";
 import ListRow from "./ListRow.vue";
 import TagBadge from "./TagBadge.vue";
@@ -155,6 +156,20 @@ async function saveNote() {
         </template>
         <template #title>
             <span class="msg-id">#{{ message.id }}</span>
+            <!-- #B.245: per-event scope badge (internal / broadcast).
+                 Same glyph & semantics as the inbox list — only
+                 surfaces non-default scopes to keep the common case
+                 visually quiet. -->
+            <i
+                v-if="message.scope && message.scope !== 'default' && scopeIcon(message.scope as Scope)"
+                :class="['pi', scopeIcon(message.scope as Scope)]"
+                :style="{
+                    marginLeft: '0.3rem',
+                    color: message.scope === 'broadcast' ? 'var(--p-blue-500)' : 'var(--p-text-muted-color)',
+                    fontSize: '0.85rem',
+                }"
+                :title="scopeTitle(message.scope as Scope)"
+            />
             <span v-if="displayTitle">{{ displayTitle }}</span>
             <span v-else style="color: var(--p-text-muted-color); font-style: italic">
                 ({{ kindLabel }})
