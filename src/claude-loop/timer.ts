@@ -20,19 +20,21 @@
  * Logs to stdout (the launcher redirects to $STATE_DIR/timer.log).
  * Exits when the tmux session disappears.
  */
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { AiballClient } from "../client.js";
 import {
     isInternalCheckCmd,
     DEFAULT_USER_GRACE_SEC,
     MUX_CMD,
+    PANIC_RATE_LIMIT_MS,
     WAKE_COALESCE_WINDOW_MS,
     buildWakePhrase,
     checkHasWork,
     formatPaneSnapshot,
     idleMarkerPath,
     isDuplicateWakeHint,
+    lastPanicAtPath,
     lastWakeAtPath,
     paneFooterShowsBusy,
     pingsPath,
@@ -89,6 +91,84 @@ function capturePane(): string {
 
 function pickPhrase(hint?: WakeHint): string {
     return buildWakePhrase(hint, pingsPath(sd!));
+}
+
+/**
+ * Panic-interrupt path (#B.214). Triggered when an SSE ping arrives
+ * with `intent === "panic"`. Unlike `tryWake`, this DOES NOT honor
+ * any of the usual gates — busy-defer, capture-pane probe,
+ * user-grace, and checkHasWork are all skipped. The human posted
+ * a panic ticket precisely because they want claude interrupted
+ * mid-turn, however busy claude appears to be.
+ *
+ * Flow:
+ *   1. Rate-limit: PANIC_RATE_LIMIT_MS floor between consecutive
+ *      panics (default 60s) so a runaway human can't bounce the
+ *      pane in an Escape/repaint loop.
+ *   2. Fetch the ticket body via the daemon — the SSE payload only
+ *      carries ids, but the "complete message" david asked for is
+ *      the body itself, formatted for visual urgency on the pane.
+ *   3. Send double-Escape — Claude Code's interrupt-this-turn chord.
+ *   4. Wait ~500ms for the prompt to repaint.
+ *   5. Paste the wrapped body via a tmux paste-buffer (preserves
+ *      newlines without the per-line Enter that `send-keys` would
+ *      otherwise submit-on-first-newline). Fallback: single-line
+ *      `send-keys` if `set-buffer` errored.
+ *   6. Send Enter to submit.
+ *
+ * No mutex / coalesce with normal wakes: a panic is by contract
+ * loud and immediate. Concurrent panic bursts collapse on the
+ * rate-limit gate (the second panic within 60s drops).
+ */
+async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
+    if (!hint.ticket_id) {
+        log(`skip panic (${reason}) — no ticket_id in hint`);
+        return false;
+    }
+    const lastPath = lastPanicAtPath(sd!);
+    if (existsSync(lastPath)) {
+        try {
+            const last = new Date(readFileSync(lastPath, "utf8").trim());
+            const elapsed = Date.now() - last.getTime();
+            if (Number.isFinite(elapsed) && elapsed < PANIC_RATE_LIMIT_MS) {
+                log(`skip panic (${reason}) — rate-limited (last ${Math.round(elapsed / 1000)}s ago, floor ${PANIC_RATE_LIMIT_MS / 1000}s)`);
+                return false;
+            }
+        } catch { /* unparseable marker — fall through and overwrite */ }
+    }
+    try { writeFileSync(lastPath, new Date().toISOString() + "\n"); } catch { /* fail open */ }
+    let title = "";
+    let body = "";
+    let author = "(unknown)";
+    try {
+        const resp = await client().getTicket(hint.ticket_id, { summary: false }) as {
+            ticket?: { title?: string | null; body?: string | null; by_agent?: string | null };
+        };
+        title = resp?.ticket?.title ?? "";
+        body = resp?.ticket?.body ?? "";
+        author = resp?.ticket?.by_agent ?? "(unknown)";
+    } catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        log(`panic (${reason}) — getTicket failed: ${m} — interrupting with ref only`);
+    }
+    const MAX_BODY = 4000;
+    const trunc = body.length > MAX_BODY ? body.slice(0, MAX_BODY) + "…[truncated]" : body;
+    const msg = `🚨 PANIC INTERRUPT from ${author} — ticket #B.${hint.ticket_id} "${title}":\n${trunc}\n(poll #B.${hint.ticket_id} for full context)`;
+    spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Escape", "Escape"], { stdio: "ignore" });
+    await sleep(500);
+    const bufName = `panic_${Date.now()}`;
+    const setBuf = spawnSync(MUX_CMD, ["set-buffer", "-b", bufName, msg], { stdio: "ignore" });
+    if (setBuf.status === 0) {
+        spawnSync(MUX_CMD, ["paste-buffer", "-b", bufName, "-d", "-t", `${tname}.0`], { stdio: "ignore" });
+    } else {
+        const oneLine = msg.replace(/\n+/g, " ");
+        spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, oneLine], { stdio: "ignore" });
+    }
+    await sleep(200);
+    spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
+    setTmuxStatus(name!, "busy");
+    log(`panic (${reason}) → interrupted + injected body (${msg.length} chars) for ticket #B.${hint.ticket_id} by ${author}`);
+    return true;
 }
 
 function sendKeys(phrase: string): void {
@@ -247,6 +327,17 @@ async function mainSse(): Promise<void> {
         unsubscribe = client().subscribeEvents({
             onHello: (h) => { log(`SSE hello: unread=${h.unread}`); },
             onPing: (p) => {
+                // #B.214: panic intent → interrupt-this-turn path,
+                // bypasses every gate. Routed FIRST so the dup-hint
+                // coalesce below doesn't swallow a panic that
+                // happens to share a (ticket, comment) tuple with a
+                // recent normal wake. Rate-limit lives inside
+                // tryPanic itself (1/min floor).
+                if (p.intent === "panic") {
+                    log(`SSE ping received: ${JSON.stringify(p)} → tryPanic`);
+                    void tryPanic("sse:ping:panic", p);
+                    return;
+                }
                 // #B.198 david: "on cumule pas les event identique on
                 // les merge". When N SSE pings about the same
                 // (ticket, comment) arrive in a burst, only the first

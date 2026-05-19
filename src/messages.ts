@@ -72,6 +72,18 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         }
         intent = o.intent as Intent;
     }
+    // #B.214: `panic` intent triggers a mid-turn interrupt in claude-loop
+    // (Escape Escape + paste full body). Restrict to human consumers —
+    // agents panic-pinging each other is a cascade-interrupt vector
+    // (agent A wakes, agent B sees the work, posts panic to A, A
+    // interrupts mid-turn, repeat). Humans posting panic is deliberate
+    // by definition; agents have plenty of non-interrupt channels.
+    if (intent === "panic") {
+        const author = typeof o.by_agent === "string" ? o.by_agent : null;
+        if (!author || !isHuman(author)) {
+            return { error: "intent=panic is restricted to human consumers (see #B.214)" };
+        }
+    }
     // #B.129 decision-on-comment: validate optional `decision_kind`.
     // Only meaningful on comment_added today; other kinds drop it.
     let decisionKind: string | null = null;
