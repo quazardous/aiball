@@ -66,6 +66,15 @@
     %PROGRAMDATA%\aiball as the data dir (LocalSystem has no usable
     home dir).
 
+.PARAMETER Minimal
+    Light in-place install: daemon runs from this checkout directly
+    (no copy to %LOCALAPPDATA%\Programs\aiball, no CLI shims on PATH).
+    Still registers a Scheduled Task so the daemon actually runs and
+    the tray shortcut has something to point at. Trade-off: moving or
+    deleting the source repo breaks the daemon. Suits a dev workflow
+    where the repo IS the install. Incompatible with -Service / -System
+    / -Symlink (-Minimal is already in-place).
+
 .PARAMETER NoTray
     Skip the tray shortcut creation (Desktop / Start Menu / Startup
     folder). Default: shortcuts ARE created and the tray auto-launches
@@ -77,6 +86,12 @@
 .EXAMPLE
     PS> .\install.ps1
     Fresh user install (copy-mode, Scheduled Task at logon).
+
+.EXAMPLE
+    PS> .\install.ps1 -Minimal -AuthInit
+    Light in-place install — daemon runs from this checkout. Creates
+    tray shortcuts + starts the daemon + mints setup URL. No copy,
+    no PATH shims. Perfect for dev workflow.
 
 .EXAMPLE
     PS> .\install.ps1 -Symlink -AuthInit
@@ -105,6 +120,7 @@ param(
     [switch] $PurgeData,
     [switch] $Service,
     [switch] $System,
+    [switch] $Minimal,
     [switch] $NoTray,
     [switch] $Yes,
     [int]    $Port = 7777,
@@ -113,6 +129,22 @@ param(
 
 # -System implies -Service.
 if ($System) { $Service = $true }
+
+# -Minimal is an in-place install: daemon registered as a Scheduled
+# Task but pointing at $SrcDir directly (no copy, no CLI shims, no
+# PATH pollution). The tray shortcuts work because the daemon actually
+# runs. Trade-off: if you move/delete the source repo, the daemon
+# breaks. Suits a dev workflow where the repo IS the install.
+if ($Minimal) {
+    $bad = @()
+    if ($Service)  { $bad += '-Service (use full install for NSSM)' }
+    if ($System)   { $bad += '-System (use full install for LocalSystem)' }
+    if ($Symlink)  { $bad += '-Symlink (-Minimal is already in-place)' }
+    if ($bad) {
+        Write-Host "[aiball] -Minimal is incompatible with: $($bad -join ', ')" -ForegroundColor Red
+        exit 1
+    }
+}
 
 $ErrorActionPreference = 'Stop'
 
@@ -137,8 +169,14 @@ $Shims     = @('aiball', 'aiball-mcp', 'claude-loop')
 $DesktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop'))   'aiball.lnk'
 $StartLnk   = Join-Path ([Environment]::GetFolderPath('Programs'))  'aiball.lnk'
 $StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup'))   'aiball-tray.lnk'
-$AiballIco  = Join-Path $PrefixLib 'assets\aiball.ico'
-$TrayCmd    = Join-Path $PrefixLib 'bin\aiball-tray.cmd'
+# $AppDir = where the daemon source actually lives at runtime. Full
+# install copies the source to $PrefixLib; -Minimal uses $SrcDir
+# directly (no copy). Drives daemon-launcher.cmd's LIB var, the
+# scheduled task working dir, npm install location, sanity check
+# Push-Location, and the shortcut targets.
+$AppDir     = if ($Minimal) { $SrcDir } else { $PrefixLib }
+$AiballIco  = Join-Path $AppDir 'assets\aiball.ico'
+$TrayCmd    = Join-Path $AppDir 'bin\aiball-tray.cmd'
 
 # --- helpers ----------------------------------------------------------------
 
@@ -165,6 +203,26 @@ function Test-IsAdmin {
     $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     $p = New-Object System.Security.Principal.WindowsPrincipal($id)
     return $p.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Write-TrayShortcuts {
+    # Create the three tray .lnk shortcuts (Desktop / Start Menu /
+    # Startup folder) pointing at $TrayCmd with $AiballIco as the icon.
+    # Used by both the full install path and -Minimal.
+    if (-not (Test-Path $TrayCmd)) {
+        Warn "tray launcher not found at $TrayCmd — skipping shortcut creation"
+        return
+    }
+    $icoArg = if (Test-Path $AiballIco) { $AiballIco } else { $TrayCmd }
+    foreach ($parent in @((Split-Path $StartLnk -Parent), (Split-Path $StartupLnk -Parent))) {
+        if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+    }
+    New-AiballShortcut $DesktopLnk $TrayCmd $icoArg "aiball — open the local UI"
+    Log "wrote desktop shortcut: $DesktopLnk"
+    New-AiballShortcut $StartLnk   $TrayCmd $icoArg "aiball — open the local UI"
+    Log "wrote start menu shortcut: $StartLnk"
+    New-AiballShortcut $StartupLnk $TrayCmd $icoArg "aiball tray (autostart at logon)"
+    Log "wrote startup shortcut (autolaunch tray at logon): $StartupLnk"
 }
 
 function New-AiballShortcut($lnkPath, $target, $iconPath, $description) {
@@ -343,61 +401,66 @@ if ($nodeMajor -lt 20) { Die "node >=20 required, found v$nodeVerRaw" }
 # Reentrant: re-running with no flag preserves the existing layout.
 # Switching modes requires --Uninstall first (avoids silently flipping a
 # dev symlink into a prod copy or vice versa).
+# Skipped entirely under -Minimal (the daemon runs from $SrcDir in place).
 
-if (Test-Path $PrefixLib) {
-    $existing = Get-Item $PrefixLib -Force
-    $existingIsLink = ($existing.LinkType -eq 'SymbolicLink')
-    if ($existingIsLink -and -not $Symlink) {
-        Log "existing install at $PrefixLib is a symlink — keeping dev layout"
-        Log "  (re-run with --Uninstall first to switch to a prod copy)"
-        $Symlink = $true   # honor the existing layout for the rest of this run
-    } elseif (-not $existingIsLink -and $Symlink) {
-        Die "existing install at $PrefixLib is a real directory. --Uninstall first to switch to --Symlink."
+if (-not $Minimal) {
+    if (Test-Path $PrefixLib) {
+        $existing = Get-Item $PrefixLib -Force
+        $existingIsLink = ($existing.LinkType -eq 'SymbolicLink')
+        if ($existingIsLink -and -not $Symlink) {
+            Log "existing install at $PrefixLib is a symlink — keeping dev layout"
+            Log "  (re-run with --Uninstall first to switch to a prod copy)"
+            $Symlink = $true   # honor the existing layout for the rest of this run
+        } elseif (-not $existingIsLink -and $Symlink) {
+            Die "existing install at $PrefixLib is a real directory. --Uninstall first to switch to --Symlink."
+        }
     }
-}
 
-if ($Symlink) {
-    if (-not (Test-DeveloperMode) -and -not (Test-IsAdmin)) {
-        Die "--Symlink requires Developer Mode (Settings -> For Developers) or admin elevation."
+    if ($Symlink) {
+        if (-not (Test-DeveloperMode) -and -not (Test-IsAdmin)) {
+            Die "--Symlink requires Developer Mode (Settings -> For Developers) or admin elevation."
+        }
+        if (Test-Path $PrefixLib) { Remove-Item -Force $PrefixLib }
+        $parent = Split-Path $PrefixLib -Parent
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+        New-Item -ItemType SymbolicLink -Path $PrefixLib -Target $SrcDir | Out-Null
+        Log "symlinked $PrefixLib -> $SrcDir (dev install)"
+    } else {
+        Log "copying source to $PrefixLib"
+        if (Test-Path $PrefixLib) { Remove-Item -Recurse -Force $PrefixLib }
+        New-Item -ItemType Directory -Force -Path $PrefixLib | Out-Null
+        # Mirror rsync excludes from install.sh. Robocopy is the right tool
+        # (Copy-Item -Recurse is slow + chokes on long paths).
+        $robocopyArgs = @(
+            $SrcDir, $PrefixLib,
+            '/MIR',           # mirror tree
+            '/XD', 'node_modules', '.git', 'var', 'frontend\node_modules',
+            '/XF', '*.log', '.env',
+            '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'   # quiet
+        )
+        & robocopy.exe @robocopyArgs | Out-Null
+        # Robocopy exit codes: 0-7 are success (with caveats), 8+ are errors.
+        if ($LASTEXITCODE -ge 8) { Die "robocopy failed with exit $LASTEXITCODE" }
     }
-    if (Test-Path $PrefixLib) { Remove-Item -Force $PrefixLib }
-    $parent = Split-Path $PrefixLib -Parent
-    New-Item -ItemType Directory -Force -Path $parent | Out-Null
-    New-Item -ItemType SymbolicLink -Path $PrefixLib -Target $SrcDir | Out-Null
-    Log "symlinked $PrefixLib -> $SrcDir (dev install)"
 } else {
-    Log "copying source to $PrefixLib"
-    if (Test-Path $PrefixLib) { Remove-Item -Recurse -Force $PrefixLib }
-    New-Item -ItemType Directory -Force -Path $PrefixLib | Out-Null
-    # Mirror rsync excludes from install.sh. Robocopy is the right tool
-    # (Copy-Item -Recurse is slow + chokes on long paths).
-    $robocopyArgs = @(
-        $SrcDir, $PrefixLib,
-        '/MIR',           # mirror tree
-        '/XD', 'node_modules', '.git', 'var', 'frontend\node_modules',
-        '/XF', '*.log', '.env',
-        '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'   # quiet
-    )
-    & robocopy.exe @robocopyArgs | Out-Null
-    # Robocopy exit codes: 0-7 are success (with caveats), 8+ are errors.
-    if ($LASTEXITCODE -ge 8) { Die "robocopy failed with exit $LASTEXITCODE" }
+    Log "minimal install: running daemon in place from $SrcDir (no copy)"
 }
 
 # --- npm install + frontend build in the install dir ----------------------
 
-Log "running npm install in $PrefixLib"
-Push-Location $PrefixLib
+Log "running npm install in $AppDir"
+Push-Location $AppDir
 try {
     # No --silent here: npm install failures (compile errors, missing
     # bindings, etc.) need to be visible. The daemon won't start
     # without the deps, so we Die on non-zero exit.
     npm install --no-audit --no-fund
     if ($LASTEXITCODE -ne 0) {
-        Die "npm install failed in $PrefixLib (exit $LASTEXITCODE). The daemon needs the deps to run — fix the error above and re-run install.ps1."
+        Die "npm install failed in $AppDir (exit $LASTEXITCODE). The daemon needs the deps to run — fix the error above and re-run install.ps1."
     }
-    if (-not (Test-Path (Join-Path $PrefixLib 'frontend\dist\index.html'))) {
+    if (-not (Test-Path (Join-Path $AppDir 'frontend\dist\index.html'))) {
         Log "building frontend bundle (~30s)"
-        Push-Location (Join-Path $PrefixLib 'frontend')
+        Push-Location (Join-Path $AppDir 'frontend')
         try {
             npm install --no-audit --no-fund
             if ($LASTEXITCODE -ne 0) {
@@ -443,7 +506,7 @@ REM scheduled task / service. Redirects stdout+stderr into the log
 REM file. Rolls the log if it exceeds 8MB.
 
 set "LOG=$LogFile"
-set "LIB=$PrefixLib"
+set "LIB=$AppDir"
 
 cd /d "%LIB%"
 
@@ -467,48 +530,34 @@ Log "wrote daemon launcher: $launcherPath"
 # --- .cmd shims in $PrefixBin ---------------------------------------------
 # Tiny wrappers that exec the real .cmd in the install dir. No symlink
 # required — works without admin / Developer Mode.
+# Skipped under -Minimal (no PATH pollution; CLI usable via "$SrcDir\bin\aiball").
 
-if (-not (Test-Path $PrefixBin)) { New-Item -ItemType Directory -Force -Path $PrefixBin | Out-Null }
-foreach ($name in $Shims) {
-    $target = Join-Path $PrefixLib "bin\$name.cmd"
-    if (-not (Test-Path $target)) {
-        Warn "expected shim source missing: $target — skipping $name.cmd"
-        continue
-    }
-    $shimPath = Join-Path $PrefixBin "$name.cmd"
-    $shimBody = @"
+if (-not $Minimal) {
+    if (-not (Test-Path $PrefixBin)) { New-Item -ItemType Directory -Force -Path $PrefixBin | Out-Null }
+    foreach ($name in $Shims) {
+        $target = Join-Path $PrefixLib "bin\$name.cmd"
+        if (-not (Test-Path $target)) {
+            Warn "expected shim source missing: $target — skipping $name.cmd"
+            continue
+        }
+        $shimPath = Join-Path $PrefixBin "$name.cmd"
+        $shimBody = @"
 @echo off
 "$target" %*
 exit /b %errorlevel%
 "@
-    [System.IO.File]::WriteAllText($shimPath, ($shimBody -replace "`r?`n","`r`n"))
-    Log "wrote shim: $shimPath -> $target"
+        [System.IO.File]::WriteAllText($shimPath, ($shimBody -replace "`r?`n","`r`n"))
+        Log "wrote shim: $shimPath -> $target"
+    }
 }
 
 # --- tray shortcuts (Desktop / Start Menu / Startup folder) ----------------
-# Three shortcuts, all pointing at bin\aiball-tray.cmd with the Death
-# Star icon. Same .lnk regardless of daemon mode (Task vs Service) —
+# Three shortcuts, all pointing at $TrayCmd with the Death Star icon.
+# Same .lnk regardless of daemon mode (Task vs Service vs Minimal) —
 # consistent visible UX. `-NoTray` opts out entirely. Per-user only
 # (even with -System the shortcuts go in the installing user's profile).
 
-if (-not $NoTray) {
-    if (Test-Path $TrayCmd) {
-        $icoArg = if (Test-Path $AiballIco) { $AiballIco } else { $TrayCmd }   # fallback to cmd's (no) icon if .ico missing
-        New-AiballShortcut $DesktopLnk $TrayCmd $icoArg "aiball — open the local UI"
-        Log "wrote desktop shortcut: $DesktopLnk"
-        $startParent = Split-Path $StartLnk -Parent
-        if (-not (Test-Path $startParent)) { New-Item -ItemType Directory -Force -Path $startParent | Out-Null }
-        New-AiballShortcut $StartLnk $TrayCmd $icoArg "aiball — open the local UI"
-        Log "wrote start menu shortcut: $StartLnk"
-        $startupParent = Split-Path $StartupLnk -Parent
-        if (-not (Test-Path $startupParent)) { New-Item -ItemType Directory -Force -Path $startupParent | Out-Null }
-        New-AiballShortcut $StartupLnk $TrayCmd $icoArg "aiball tray (autostart at logon)"
-        Log "wrote startup shortcut (autolaunch tray at logon): $StartupLnk"
-    } else {
-        Warn "tray launcher not found at $TrayCmd — skipping shortcut creation"
-        Warn "  (expected to ship as part of source provisioning; check $PrefixLib\bin\)"
-    }
-}
+if (-not $NoTray) { Write-TrayShortcuts }
 
 # --- Scheduled Task OR Service (mutually exclusive) ------------------------
 # Only one runs the daemon. The opposite mode's registration is cleared
@@ -559,11 +608,11 @@ if ($Service) {
         }
     }
 
-    Log "registering scheduled task: $TaskName"
+    Log "registering scheduled task: $TaskName (daemon source: $AppDir)"
     $action   = New-ScheduledTaskAction `
         -Execute 'cmd.exe' `
         -Argument "/c `"$launcherPath`"" `
-        -WorkingDirectory $PrefixLib
+        -WorkingDirectory $AppDir
     $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $settings = New-ScheduledTaskSettingsSet `
         -StartWhenAvailable `
@@ -595,7 +644,7 @@ if ($Service) {
 # is what daemon.ts -> db.ts -> getDb() does at startup).
 
 Log "checking better-sqlite3 native binding"
-Push-Location $PrefixLib
+Push-Location $AppDir
 try {
     $probe = node -e "try { const D=require('better-sqlite3'); new D(':memory:'); console.log('OK') } catch(e) { console.error(e.message); process.exit(1) }" 2>&1
     if ($LASTEXITCODE -ne 0) {
@@ -604,7 +653,7 @@ try {
         Warn "The daemon will not start until this is fixed. Options:"
         Warn "  - bump better-sqlite3 in package.json to a version with"
         Warn "    prebuilts for your Node major (check npm)"
-        Warn "  - install VS Build Tools + rebuild in $PrefixLib :"
+        Warn "  - install VS Build Tools + rebuild in $AppDir :"
         Warn "      npm rebuild better-sqlite3 --build-from-source"
         Warn "  - pin Node to current LTS (winget install OpenJS.NodeJS.LTS)"
         if ($Service) {
@@ -651,7 +700,10 @@ if ($AuthInit) {
         }
         if ($up) {
             Log "daemon up. Running 'aiball auth init'"
-            $aiballCmd = Join-Path $PrefixBin 'aiball.cmd'
+            # Full install puts shims on PATH at $PrefixBin\aiball.cmd;
+            # -Minimal skips shims, so call the in-source launcher direct.
+            $aiballCmd = if ($Minimal) { Join-Path $AppDir 'bin\aiball.cmd' } `
+                                 else { Join-Path $PrefixBin 'aiball.cmd' }
             & $aiballCmd auth init --host $BindHost --port $Port
         } else {
             Warn "daemon did not respond at $healthUrl after 15s"
@@ -670,7 +722,11 @@ if ($sqliteOk) {
     Write-Host '[aiball] install complete (degraded — daemon disabled).' -ForegroundColor Yellow
 }
 Write-Host ''
-Write-Host "  install dir: $PrefixLib$(if ($Symlink) { '  (symlink -> ' + $SrcDir + ')' })"
+if ($Minimal) {
+    Write-Host "  mode:        minimal (in-place — daemon runs from $SrcDir)"
+} else {
+    Write-Host "  install dir: $PrefixLib$(if ($Symlink) { '  (symlink -> ' + $SrcDir + ')' })"
+}
 Write-Host "  data dir:    $DataDir"
 Write-Host "  log file:    $LogFile"
 if ($Service) {
@@ -684,6 +740,9 @@ if ($Service) {
     Write-Host "  stop:        Stop-ScheduledTask -TaskName $TaskName"
 }
 Write-Host "  open:        http://${BindHost}:${Port}"
+if ($Minimal) {
+    Write-Host "  cli:         $AppDir\bin\aiball.cmd (no PATH shim under -Minimal)"
+}
 if (-not $sqliteOk) {
     Write-Host ''
     Write-Host '  Fix better-sqlite3 first (see warnings above), then:'
@@ -702,6 +761,10 @@ if (-not $sqliteOk) {
     } else {
         Write-Host "         Start-ScheduledTask -TaskName $TaskName"
     }
-    Write-Host "         aiball auth init --host $BindHost --port $Port"
+    if ($Minimal) {
+        Write-Host "         & '$AppDir\bin\aiball.cmd' auth init --host $BindHost --port $Port"
+    } else {
+        Write-Host "         aiball auth init --host $BindHost --port $Port"
+    }
 }
 Write-Host '----------------------------------------------------------------------'

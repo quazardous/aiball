@@ -39,12 +39,12 @@ Five ways to run aiball on Windows, from "just try it" to "full integrated":
 | # | Path | Daemon | Tray | UI | Effort |
 |---|---|---|---|---|---|
 | 1 | **Portable** (no install) | `npm run dev` in a terminal | manual `bin\aiball-tray.cmd` | vite dev http://localhost:5173 | dev/hacking |
-| 2 | **Minimal tray** (manual shortcut) | run separately (any path) | shortcut you create yourself, with `aiball.ico` | http://127.0.0.1:7777 | 5 min |
-| 3 | **Default install** | Scheduled Task at logon | Desktop + Start Menu + Startup shortcuts (auto-created) | http://127.0.0.1:7777 | one command |
-| 4 | **Service install** | NSSM Windows Service | same as 3 | http://127.0.0.1:7777 | one command (admin) |
-| 5 | **Dev install** | Scheduled Task or Service, on symlinked source | same as 3 | http://127.0.0.1:7777 | one command (Dev Mode on) |
+| 2 | **Minimal** (`-Minimal`) | Scheduled Task pointing at this checkout | Desktop + Start Menu + Startup shortcuts | http://127.0.0.1:7777 | one command |
+| 3 | **Default install** | Scheduled Task pointing at copy in `%LOCALAPPDATA%` | same as 2 | http://127.0.0.1:7777 | one command |
+| 4 | **Service install** | NSSM Windows Service | same as 2 | http://127.0.0.1:7777 | one command (admin) |
+| 5 | **Dev install** (`-Symlink`) | Scheduled Task on symlinked copy | same as 2 | http://127.0.0.1:7777 | one command (Dev Mode on) |
 
-Same Death Star icon across 3/4/5 — consistent visible UX regardless of daemon mode.
+Same Death Star icon across 2/3/4/5 — consistent visible UX regardless of daemon mode. Path 1 needs no install at all.
 
 ### Path 1: Portable (no install)
 
@@ -65,26 +65,27 @@ Nothing is registered, no shortcuts created, no data dir created in
 your profile. Closing the terminals stops everything. Use this when
 you're hacking on the code itself.
 
-### Path 2: Minimal tray (manual shortcut, no install.ps1)
-
-If you just want the tray icon in your notification area pointing at a
-daemon you'll manage yourself (existing systemd-via-WSL, dev terminal,
-…), create the shortcut by hand:
+### Path 2: Minimal install (`-Minimal`)
 
 ```powershell
-# Edit the paths to where your clone lives:
-$repo = 'C:\Users\you\dev\aiball'
-$shell = New-Object -ComObject WScript.Shell
-$lnk = $shell.CreateShortcut("$env:USERPROFILE\Desktop\aiball.lnk")
-$lnk.TargetPath = "$repo\bin\aiball-tray.cmd"
-$lnk.WorkingDirectory = "$repo\bin"
-$lnk.IconLocation = "$repo\assets\aiball.ico,0"
-$lnk.WindowStyle = 7   # minimized — no console flash
-$lnk.Save()
+git clone https://github.com/quazardous/aiball.git
+cd aiball
+pwsh -File install.ps1 -Minimal -AuthInit
 ```
 
-Double-click the new Desktop shortcut → Death Star appears in the
-notification area. Right-click → Ouvrir dans le navigateur or Fermer.
+What it does (vs Path 3 default):
+- ❌ No copy to `%LOCALAPPDATA%\Programs\aiball` — daemon runs from this checkout in place.
+- ❌ No CLI shims in `%LOCALAPPDATA%\Microsoft\WindowsApps`. Call the CLI directly: `& $repo\bin\aiball.cmd ...`.
+- ✅ `npm install` in this checkout (idempotent if already done).
+- ✅ Scheduled Task registered, pointing at the checkout.
+- ✅ Tray shortcuts (Desktop / Start Menu / Startup) — same Death Star icon as other paths.
+
+Trade-off: if you move/delete the checkout, the daemon stops working —
+no Uninstall needed first. Best fit for "I'm hacking on the code, just
+make it run".
+
+Incompatible with `-Service` / `-System` / `-Symlink` (Minimal is
+already in-place).
 
 ### Path 3: Default install (Scheduled Task)
 
@@ -155,6 +156,10 @@ aiball-daemon` (or a vite dev server) without re-running the installer.
 
 | Flag | What |
 |---|---|
+| `-Minimal` | in-place install (no copy, no shims), daemon points at this checkout |
+| `-Service` | NSSM Windows Service instead of Scheduled Task (admin) |
+| `-System` | implies `-Service`, runs as LocalSystem (admin) |
+| `-Symlink` | symlink the install dir to this checkout (needs Dev Mode/admin) |
 | `-Port 7780` | non-default daemon port |
 | `-BindHost 0.0.0.0` | listen on all interfaces (use with care; default is localhost) |
 | `-NoTray` | skip Desktop / Start Menu / Startup shortcut creation |
