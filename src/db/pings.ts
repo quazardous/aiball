@@ -90,18 +90,30 @@ export function insertPing(
     // can swallow a duplicate). Subscribers (SSE) react in real-time —
     // no more polling-lag (#B.148 phase A).
     if (r.changes > 0) {
+        // #B.214 david: a `ticket_closed` / `ticket_referenced` /
+        // `ticket_sub_added` / `ticket_resolved` event on a panic
+        // ticket used to inherit the parent's intent, so closing a
+        // panic re-fired the mid-turn interrupt (claude-loop sees
+        // `intent: panic` and runs tryPanic). Only the kinds that
+        // carry actual user-authored content (the original post and
+        // its comments) propagate intent — lifecycle events stay
+        // intent-less so the wake-phrase builder defaults to a plain
+        // wake and panic interrupt is never triggered by a close.
+        const propagateIntent = msg.kind === "ticket_created" || msg.kind === "comment_added";
         let intent: Intent | undefined;
-        if (isTicket) {
-            intent = (msg.intent ?? undefined) as Intent | undefined;
-        } else if (msg.ticket_id) {
-            // Comment ping: pull the parent ticket's intent so the wake
-            // phrase can scale directiveness. One tiny indexed lookup
-            // per actual new ping — fine.
-            const t = db.select({ intent: schema.tickets.intent })
-                .from(schema.tickets)
-                .where(eq(schema.tickets.id, msg.ticket_id))
-                .get();
-            intent = (t?.intent ?? undefined) as Intent | undefined;
+        if (propagateIntent) {
+            if (isTicket) {
+                intent = (msg.intent ?? undefined) as Intent | undefined;
+            } else if (msg.ticket_id) {
+                // Comment ping: pull the parent ticket's intent so
+                // the wake phrase can scale directiveness. One tiny
+                // indexed lookup per actual new ping — fine.
+                const t = db.select({ intent: schema.tickets.intent })
+                    .from(schema.tickets)
+                    .where(eq(schema.tickets.id, msg.ticket_id))
+                    .get();
+                intent = (t?.intent ?? undefined) as Intent | undefined;
+            }
         }
         emitPing(recipient, {
             ticket_id: isTicket ? msg.id : (msg.ticket_id ?? undefined),
