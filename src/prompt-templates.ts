@@ -133,8 +133,37 @@ export interface PickOptions {
     vars?: Record<string, string | number>;
     /** Tone bucket (object-shape slots only). Falls back to `directive`. */
     tone?: AutopollTone;
+    /**
+     * Optional cardinality for CLDR-style two-slug pluralization
+     * (#B.232 hd7taf, david: "pour les plural on va utiliser carrément
+     * 2 slug de templates différent"). When set, the picker tries
+     * `${slot}_one` (when count === 1) or `${slot}_other` (else) BEFORE
+     * falling back to plain `${slot}`. Variants support the same 3
+     * shapes as a plain slot. Use this instead of a `{plural}` placeholder
+     * when singular/plural require different wording — French/English
+     * agreement, gendered forms, "no tickets" zero-case, etc.
+     */
+    count?: number;
     /** Fallback string when the slot is absent or unrenderable. */
     fallback?: string;
+}
+
+/**
+ * Resolve a slot entry — checks `_one` / `_other` variants first when a
+ * count is provided, then falls back to the plain slot. Returns null
+ * when nothing matches; caller uses its fallback.
+ */
+function resolveEntry(
+    map: PromptMap,
+    slot: string,
+    count: number | undefined,
+): PromptSlot | null {
+    if (typeof count === "number") {
+        const variantKey = count === 1 ? `${slot}_one` : `${slot}_other`;
+        const variant = map[variantKey];
+        if (variant != null) return variant;
+    }
+    return map[slot] ?? null;
 }
 
 /**
@@ -144,13 +173,18 @@ export interface PickOptions {
  *   - list[string] slot    → random pick + substitute + return
  *   - object{tone:list}    → tone lookup (or DEFAULT_TONE) → random pick → substitute
  *
- * Returns `opts.fallback ?? ""` when the slot is missing or an object-shape
- * slot has no list for the requested tone AND no fallback tone. The hot
- * wake path uses fallbacks like the prior hardcoded wording so a broken
- * yaml degrades gracefully instead of throwing inside the timer.
+ * When `opts.count` is provided, `${slot}_one` / `${slot}_other` variants
+ * are consulted FIRST (see `PickOptions.count`), and the plain `${slot}`
+ * acts as the no-variant fallback.
+ *
+ * Returns `opts.fallback ?? ""` when no candidate matches or the matched
+ * entry is unrenderable (empty list, missing tone bucket without a
+ * `directive` fallback). The hot wake path uses fallbacks like the prior
+ * hardcoded wording so a broken yaml degrades gracefully instead of
+ * throwing inside the timer.
  */
 export function pickPrompt(map: PromptMap, slot: string, opts: PickOptions = {}): string {
-    const entry = map[slot];
+    const entry = resolveEntry(map, slot, opts.count);
     const fallback = opts.fallback ?? "";
     if (entry == null) return fallback;
     const vars = opts.vars ?? {};

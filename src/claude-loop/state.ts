@@ -695,12 +695,14 @@ export async function buildContextPhrase(
 
         const parts: string[] = [];
         if (pingCount > 0) {
+            // count=pingCount routes to wake_state_pings_one /
+            // wake_state_pings_other (#B.232 hd7taf 2-slug
+            // pluralization). The plain wake_state_pings slot is the
+            // no-variant fallback if the yaml only defines one form.
             parts.push(pickPrompt(promptMap, "wake_state_pings", {
                 tone,
-                vars: {
-                    ping_count: pingCount,
-                    ping_plural: pingCount === 1 ? "" : "s",
-                },
+                count: pingCount,
+                vars: { ping_count: pingCount },
                 fallback: `${pingCount} unread aiball ping${pingCount === 1 ? "" : "s"}`,
             }));
         }
@@ -708,9 +710,9 @@ export async function buildContextPhrase(
             const scope = project ? `\`${project}\`` : "your scope";
             parts.push(pickPrompt(promptMap, "wake_state_open", {
                 tone,
+                count: openCount,
                 vars: {
                     open_count: openCount,
-                    open_plural: openCount === 1 ? "" : "s",
                     project_scope: scope,
                 },
                 fallback: `${openCount} open aiball ticket${openCount === 1 ? "" : "s"} in ${scope}`,

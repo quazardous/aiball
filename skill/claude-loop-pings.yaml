@@ -73,10 +73,21 @@ wake_phrases:
 #
 # Placeholders substituted at render time:
 #   {ping_count}    integer
-#   {ping_plural}   "" or "s"
 #   {open_count}    integer
-#   {open_plural}   "" or "s"
 #   {project_scope} "`<project>`" or "your scope"
+#
+# Pluralization (#B.232 hd7taf): pluralizable slots split into TWO
+# separate keys, NOT a `{plural}` placeholder. Suffixes:
+#
+#   {slot}_one     used when count === 1
+#   {slot}_other   used when count !== 1
+#
+# The picker consults these suffix-variants FIRST when the caller
+# passes `count`; the plain {slot} acts as a no-variant fallback.
+# Why 2 slugs vs `{ping_plural}`-style placeholder: lets each variant
+# carry its own wording, gender, article — useful for FR/EN agreement
+# ("1 ping aiball non lu" vs "3 pings aiball non lus") where the
+# placeholder hack would force template-string gymnastics.
 #
 # Why externalize (vs the prior hardcoded `[aiball: ...] — ... before
 # answering.` shape): the previous wording tripped prompt-injection
@@ -104,8 +115,15 @@ prompts:
   # State parts — string form (no variation, identical at every tone).
   # "aiball" baked into the phrase so the prompt explicitly names the
   # tracker even when other trackers' MCPs are connected (david #B.230).
-  wake_state_pings: "{ping_count} unread aiball ping{ping_plural}"
-  wake_state_open:  "{open_count} open aiball ticket{open_plural} in {project_scope}"
+  #
+  # Two-slug pluralization (#B.232 hd7taf): _one when count === 1,
+  # _other otherwise. The plain wake_state_pings / wake_state_open
+  # slots are intentionally absent here — the picker uses the suffix
+  # variants exclusively when the caller passes `count`.
+  wake_state_pings_one:   "1 unread aiball ping"
+  wake_state_pings_other: "{ping_count} unread aiball pings"
+  wake_state_open_one:    "1 open aiball ticket in {project_scope}"
+  wake_state_open_other:  "{open_count} open aiball tickets in {project_scope}"
 
   # Directive verbs — list form, random pick across tones (proven
   # imperative-style retained at every level, per 0aed5a2 fix against

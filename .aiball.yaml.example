@@ -140,10 +140,22 @@ autopoll:
 # Placeholders substituted at render time (slot-specific):
 #
 #   {ping_count}    integer (e.g. 3)
-#   {ping_plural}   "" (when count == 1) or "s"
 #   {open_count}    integer (count of actionable tickets)
-#   {open_plural}   "" or "s"
 #   {project_scope} "`<project>`" or "your scope"
+#
+# Pluralization (#B.232 hd7taf): when a slot's wording depends on a
+# count, split into TWO keys instead of using a `{plural}` placeholder.
+# The picker looks at the runtime count and chooses automatically:
+#
+#   {slot}_one     used when count === 1
+#   {slot}_other   used when count !== 1
+#
+# The plain `{slot}` (no suffix) acts as a no-variant fallback when
+# the yaml only defines one form. Variants support the same 3 shapes
+# (string, list, object{tone:list}). Useful for languages with
+# pluralization beyond a trailing "s": French agreement on multiple
+# words ("1 ping aiball non lu" vs "3 pings aiball non lus"), gendered
+# articles, "no tickets" zero-case (treated like _other by default).
 #
 # Slot reference (all wake-CTA pieces — the central service composes
 # them as `{culture} {wake_state_lead} {state_parts}. {directive}.`):
@@ -171,8 +183,9 @@ autopoll:
 #     hint: ["btw,", "fyi,"]
 #     imperative: ["**heads up**:", "**ACTION**:"]
 #
-#   # String form (no variation, identical at every tone).
-#   wake_state_pings: "{ping_count} unread aiball ping{ping_plural}"
+#   # 2-slug pluralization (#B.232 hd7taf).
+#   wake_state_pings_one:   "1 unread aiball ping"
+#   wake_state_pings_other: "{ping_count} unread aiball pings"
 #
 #   # List form (random pick, identical at every tone).
 #   wake_directive_drain:
