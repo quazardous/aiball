@@ -23,12 +23,6 @@ import {
     type Intent,
     type Priority,
     insertPing,
-    listPings,
-    markPingsRead,
-    unreadPingCount,
-    upsertTicketSubscription,
-    deleteTicketSubscription,
-    listTicketSubscriptions,
     listProjectsDetailed,
     createProject,
     getProject,
@@ -47,26 +41,7 @@ import {
     ticketUnreadFlags,
     deletePingsForMessage,
     getProjectStats,
-    getUploadMaxBytes,
-    setUploadMaxBytes,
-    UPLOAD_HARD_CAP_BYTES,
-    DEFAULT_UPLOAD_MAX_BYTES,
-    insertUpload,
-    uploadStats,
-    listOrphanUploads,
-    deleteUploadRow,
-    getConsumer,
-    upsertConsumer,
     isHuman,
-    getPasswordHash,
-    setPasswordHash,
-    touchLastLogin,
-    issueToken,
-    getToken,
-    deleteToken,
-    listTokens,
-    anyHumanCredentials,
-    type TokenKind,
     type MessageKind,
     type MessageStatus,
     type Strategy,
@@ -74,27 +49,27 @@ import {
     insertTypedRelation,
     listTypedRelationsForTicket,
 } from "./db.js";
-import { onPing } from "./event-bus.js";
 import { RELATION_KINDS, isRelationKind, type RelationKind } from "./relations.js";
-import express from "express";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
-import { join as joinPath } from "node:path";
-import { createHash } from "node:crypto";
+import { existsSync, unlinkSync } from "node:fs";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
-import { outboxPath, UPLOADS_DIR } from "./paths.js";
+import { outboxPath } from "./paths.js";
 import { searchMessages } from "./search.js";
 import { fanOutPings, submitMessage, validateNewMessage } from "./messages.js";
 import { parseMeta } from "./questions.js";
 import { isDecisionKind, type DecisionKind } from "./decisions.js";
-import { bearerAuth, hashPassword, verifyPassword } from "./auth.js";
+import { bearerAuth } from "./auth.js";
 import { badRequest, consumerOf, notFound, withTags, withTagsOne } from "./api/_helpers.js";
 import { agentHelpersRouter } from "./api/agent-helpers.js";
+import { authRouter } from "./api/auth.js";
 import { consumersRouter } from "./api/consumers.js";
+import { pingsRouter } from "./api/pings.js";
 import { readTrackingRouter } from "./api/read-tracking.js";
 import { rulesRouter } from "./api/rules.js";
 import { subscriptionsRouter } from "./api/subscriptions.js";
 import { tagsRouter } from "./api/tags.js";
+import { ticketSubscriptionsRouter } from "./api/ticket-subscriptions.js";
+import { uploadsRouter } from "./api/uploads.js";
 
 export const api = Router();
 
@@ -107,317 +82,15 @@ export const api = Router();
 api.use(bearerAuth);
 
 // =====================================================================
-// /api/auth/* — setup, login, logout, status
+// /api/auth/* + /api/me — moved to ./api/auth.ts (#B.213 phase 1.E).
 // =====================================================================
-
-/**
- * GET /api/auth/status — public probe. Tells the frontend whether the
- * daemon needs an install token (first boot, no humans yet) or is in
- * normal "login required" mode.
- */
-api.get("/auth/status", (req, res) => {
-    const ready = anyHumanCredentials();
-    const hasInstall = listTokens({ kind: "install" }).length > 0;
-    // Best-effort detection of the caller's auth state — if they pass
-    // a valid token, mention the consumer so the UI knows it's still
-    // logged in.
-    const tokenStr = (() => {
-        const a = req.header("authorization");
-        if (a && /^bearer\s+/i.test(a)) return a.replace(/^bearer\s+/i, "").trim();
-        return req.header("x-aiball-token") ?? null;
-    })();
-    let me: { consumer_id: string; kind: TokenKind } | null = null;
-    if (typeof tokenStr === "string" && tokenStr) {
-        const t = getToken(tokenStr);
-        if (t && t.kind !== "install" && t.consumer_id) {
-            me = { consumer_id: t.consumer_id, kind: t.kind };
-        }
-    }
-    res.json({
-        ready,
-        // True whenever a usable install token exists in the DB. Decoupled
-        // from `ready` so that `aiball auth reinit` (which mints a fresh
-        // install token even when humans already exist) reopens the
-        // /setup path. The frontend uses this to decide whether to show
-        // the setup form at all.
-        install_available: hasInstall,
-        me,
-    });
-});
-
-/**
- * POST /api/auth/setup — consume the bootstrap install token to create
- * the first human consumer. Body: {token, consumer_id, password,
- * display_name?}.
- */
-api.post("/auth/setup", async (req: Request, res: Response) => {
-    const { token, consumer_id, password, display_name } = (req.body ?? {}) as {
-        token?: unknown;
-        consumer_id?: unknown;
-        password?: unknown;
-        display_name?: unknown;
-    };
-    if (typeof token !== "string" || !token) {
-        return badRequest(res, "install token required");
-    }
-    if (typeof consumer_id !== "string" || !consumer_id || consumer_id.length > 64) {
-        return badRequest(res, "consumer_id required (1-64 chars)");
-    }
-    if (!/^[A-Za-z0-9._-]+$/.test(consumer_id)) {
-        return badRequest(res, "consumer_id must contain only A-Za-z0-9._-");
-    }
-    if (typeof password !== "string" || password.length < 6) {
-        return badRequest(res, "password required (min 6 chars)");
-    }
-    const installRow = getToken(token);
-    if (!installRow || installRow.kind !== "install") {
-        return res.status(401).json({ error: "invalid install token" });
-    }
-    // A valid install token is proof of CLI access (only `aiball auth
-    // init/reinit` mints one). CLI access already grants full power
-    // over the DB, so we allow overwriting an existing human's
-    // password — this is exactly what `aiball auth reinit` is for.
-    const hash = await hashPassword(password);
-    upsertConsumer({
-        consumer_id,
-        kind: "human",
-        display_name: typeof display_name === "string" && display_name ? display_name : null,
-        enabled: true,
-    });
-    setPasswordHash(consumer_id, hash);
-    touchLastLogin(consumer_id);
-    // Consume the install token + issue a fresh auth token.
-    deleteToken(token);
-    const auth = issueToken({ consumer_id, kind: "auth", label: "web setup" });
-    res.json({
-        token: auth.token,
-        consumer_id,
-    });
-});
-
-/**
- * POST /api/auth/login — exchange login+password for an auth token.
- * Body: {consumer_id, password}. Returns {token, consumer_id} on success.
- */
-api.post("/auth/login", async (req: Request, res: Response) => {
-    const { consumer_id, password } = (req.body ?? {}) as {
-        consumer_id?: unknown;
-        password?: unknown;
-    };
-    if (typeof consumer_id !== "string" || !consumer_id) {
-        return badRequest(res, "consumer_id required");
-    }
-    if (typeof password !== "string") {
-        return badRequest(res, "password required");
-    }
-    const c = getConsumer(consumer_id);
-    if (!c || !c.enabled || c.kind !== "human") {
-        // Same response shape on failure to avoid revealing enumeration.
-        return res.status(401).json({ error: "invalid credentials" });
-    }
-    const hash = getPasswordHash(consumer_id);
-    if (!hash) return res.status(401).json({ error: "invalid credentials" });
-    const ok = await verifyPassword(password, hash);
-    if (!ok) return res.status(401).json({ error: "invalid credentials" });
-    touchLastLogin(consumer_id);
-    const auth = issueToken({ consumer_id, kind: "auth", label: "web login" });
-    res.json({
-        token: auth.token,
-        consumer_id,
-    });
-});
-
-/**
- * POST /api/auth/logout — revoke the token used to authenticate.
- * Idempotent: succeeds even if the token is already gone.
- */
-api.post("/auth/logout", (req: Request, res: Response) => {
-    const a = req.header("authorization");
-    let token: string | null = null;
-    if (a && /^bearer\s+/i.test(a)) token = a.replace(/^bearer\s+/i, "").trim();
-    if (!token) token = req.header("x-aiball-token") ?? null;
-    if (token) deleteToken(token);
-    res.json({ ok: true });
-});
-
-/**
- * GET /api/me — current authenticated consumer + display info. Useful
- * for the frontend to render "Hello, David" without an extra lookup.
- */
-api.get("/me", (req: Request, res: Response) => {
-    const id = consumerOf(req);
-    const c = getConsumer(id);
-    if (!c) return res.status(404).json({ error: "consumer not found" });
-    res.json(c);
-});
+api.use(authRouter);
 
 // =====================================================================
-//                  Uploads (per #B.76)
+// Uploads + upload-max-bytes settings — moved to ./api/uploads.ts
+// (#B.213 phase 1.E).
 // =====================================================================
-
-/**
- * Allowed MIME → file extension. Only types we trust to render
- * inline in an <img> through marked + DOMPurify. JPEG covers JPG.
- * SVG is intentionally OUT — it can carry script.
- */
-const UPLOAD_MIME_TO_EXT: Record<string, string> = {
-    "image/png": "png",
-    "image/jpeg": "jpg",
-    "image/gif": "gif",
-    "image/webp": "webp",
-};
-
-/**
- * POST `/api/uploads` — accepts a raw image body keyed by `Content-Type`,
- * writes it content-addressable under `<AIBALL_HOME>/uploads/<sha256>.<ext>`,
- * returns `{ url, bytes, sha256 }`. The body must be the file bytes
- * directly (no multipart wrapper) — the frontend posts the Blob as the
- * fetch body with the right content-type. Cap is `getUploadMaxBytes()`,
- * defaulting to 10 MB (configurable via `/api/settings/upload-max-bytes`).
- *
- * Hash-addressable storage means duplicate uploads dedupe naturally and
- * the response URL doubles as a stable id for future referencing.
- */
-api.post(
-    "/uploads",
-    // Use raw body parser scoped to this route so the global json parser
-    // upstream doesn't try to eat the binary stream. The limit enforces
-    // the hard cap; the per-setting limit is checked after parsing.
-    express.raw({
-        type: () => true,
-        limit: UPLOAD_HARD_CAP_BYTES,
-    }),
-    (req: Request, res: Response) => {
-        const ct = (req.header("content-type") ?? "").toLowerCase().split(";")[0].trim();
-        const ext = UPLOAD_MIME_TO_EXT[ct];
-        if (!ext) {
-            return badRequest(
-                res,
-                `unsupported content-type "${ct}" — allowed: ${Object.keys(UPLOAD_MIME_TO_EXT).join(", ")}`,
-            );
-        }
-        const buf = req.body as Buffer | undefined;
-        if (!buf || !Buffer.isBuffer(buf) || buf.length === 0) {
-            return badRequest(res, "empty body");
-        }
-        const max = getUploadMaxBytes();
-        if (buf.length > max) {
-            return res.status(413).json({
-                error: `upload exceeds limit (${buf.length} > ${max} bytes)`,
-                max_bytes: max,
-                received_bytes: buf.length,
-            });
-        }
-        const sha = createHash("sha256").update(buf).digest("hex");
-        const filename = `${sha}.${ext}`;
-        const target = joinPath(UPLOADS_DIR, filename);
-        // Hash-addressable — if the file already exists, skip the write.
-        // Two callers uploading the same bytes converge on a single file.
-        if (!existsSync(target)) {
-            writeFileSync(target, buf);
-        }
-        // Track in the uploads table so GC can find orphans later.
-        // Idempotent: re-uploading the same bytes by a different author
-        // keeps the first author on record (the first writer wins, no
-        // need to mutate metadata).
-        insertUpload({
-            sha,
-            ext,
-            content_type: ct,
-            bytes: buf.length,
-            by_agent: consumerOf(req),
-            original_name: typeof req.header("x-aiball-upload-name") === "string"
-                ? req.header("x-aiball-upload-name")!.slice(0, 200)
-                : null,
-        });
-        res.status(201).json({
-            url: `/uploads/${filename}`,
-            sha256: sha,
-            bytes: buf.length,
-            content_type: ct,
-        });
-    },
-);
-
-api.get("/uploads/stats", (_req, res) => {
-    res.json(uploadStats());
-});
-
-/**
- * GC pass: find uploads not referenced anywhere in tickets / messages
- * bodies, delete both the on-disk file and the metadata row. A grace
- * window (default 5 min) protects very-recently-uploaded files that
- * the user hasn't yet pasted into a message.
- *
- * `dry_run: true` (or query `?dry_run=1`) only reports what would be
- * removed without touching anything.
- */
-api.post("/uploads/gc", (req: Request, res: Response) => {
-    const dryRun =
-        req.body?.dry_run === true ||
-        req.query.dry_run === "1" ||
-        req.query.dry_run === "true";
-    const graceMinutes = typeof req.body?.grace_minutes === "number"
-        ? Math.max(0, req.body.grace_minutes)
-        : 5;
-    const orphans = listOrphanUploads(graceMinutes);
-    let deletedFiles = 0;
-    let freedBytes = 0;
-    if (!dryRun) {
-        for (const u of orphans) {
-            const filename = `${u.sha}.${u.ext}`;
-            const path = joinPath(UPLOADS_DIR, filename);
-            try {
-                if (existsSync(path)) {
-                    unlinkSync(path);
-                    deletedFiles += 1;
-                    freedBytes += u.bytes;
-                }
-                deleteUploadRow(u.sha);
-            } catch (e) {
-                // Best-effort: log + keep going. A stale row left behind
-                // is harmless; we'll retry next GC.
-                console.error(`[uploads/gc] failed for ${filename}:`, e);
-            }
-        }
-    }
-    res.json({
-        dry_run: dryRun,
-        grace_minutes: graceMinutes,
-        candidates: orphans.length,
-        candidate_bytes: orphans.reduce((s, u) => s + u.bytes, 0),
-        deleted_files: deletedFiles,
-        freed_bytes: freedBytes,
-        orphans: orphans.map((u) => ({
-            sha: u.sha,
-            ext: u.ext,
-            bytes: u.bytes,
-            by_agent: u.by_agent,
-            created_at: u.created_at,
-        })),
-    });
-});
-
-api.get("/settings/upload-max-bytes", (_req, res) => {
-    res.json({
-        bytes: getUploadMaxBytes(),
-        default: DEFAULT_UPLOAD_MAX_BYTES,
-        hard_cap: UPLOAD_HARD_CAP_BYTES,
-    });
-});
-
-api.patch("/settings/upload-max-bytes", (req: Request, res: Response) => {
-    const { bytes } = (req.body ?? {}) as { bytes?: unknown };
-    if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) {
-        return badRequest(res, "bytes must be a positive number");
-    }
-    setUploadMaxBytes(bytes);
-    res.json({
-        bytes: getUploadMaxBytes(),
-        default: DEFAULT_UPLOAD_MAX_BYTES,
-        hard_cap: UPLOAD_HARD_CAP_BYTES,
-    });
-});
+api.use(uploadsRouter);
 
 /**
  * Resolve the calling consumer. After #B.94 this comes from the
@@ -1819,121 +1492,8 @@ api.use(readTrackingRouter);
 // Tag CRUD + message-tag association moved to ./api/tags.ts (#B.213 phase 1.A).
 api.use(tagsRouter);
 
-// -------- pings ------------------------------------------------------------
-
-api.get("/pings", (req, res) => {
-    const consumer = req.query.consumer_id as string | undefined;
-    if (!consumer) return badRequest(res, "consumer_id required");
-    const unreadOnly = req.query.unread === "1" || req.query.unread === "true";
-    const limit = req.query.limit ? Number(req.query.limit) : 100;
-    const pings = listPings({ recipient: consumer, unreadOnly, limit });
-    res.json({ consumer_id: consumer, count: pings.length, pings });
-});
-
-api.get("/pings/count", (req, res) => {
-    const consumer = req.query.consumer_id as string | undefined;
-    if (!consumer) return badRequest(res, "consumer_id required");
-    res.json({ consumer_id: consumer, unread: unreadPingCount(consumer) });
-});
-
-/**
- * Server-Sent Events stream for live ping notifications (#B.148
- * phase A). Long-lived connection per consumer; the daemon flushes a
- * `ping` event whenever `insertPing` fires for this consumer. Clients
- * (claude-loop timer, autopoll daemon, UI badge) react instantly
- * without polling.
- *
- * Wire format:
- *   event: hello
- *   data: {"consumer_id":"…","unread":N}
- *
- *   event: ping
- *   data: {"ticket_id":N,"intent":"request"}       // ticket ping
- *   data: {"ticket_id":N,"comment_id":N,"comment_hashid":"abcdef","intent":"panic"}
- *                              // comment ping — ticket_id is the
- *                              // parent ticket; comment_hashid is the
- *                              // public ref (`#<hashid>`); comment_id
- *                              // is the numeric `_messages.id` (kept
- *                              // for backward-compat — prefer hashid);
- *                              // intent is the PARENT ticket's intent
- *                              // (panic / request / question / fyi),
- *                              // so consumers can scale UI/wake-phrase
- *                              // urgency
- *
- *   :keepalive 30s              // SSE comment, ignored by parsers
- *
- * Keepalive every 30s prevents proxies/UDS buffers from killing the
- * idle stream. Client tears down the connection on its end.
- */
-api.get("/events", (req, res) => {
-    const consumer = req.query.consumer_id as string | undefined;
-    if (!consumer) return badRequest(res, "consumer_id required");
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.flushHeaders?.();
-    res.write(`event: hello\ndata: ${JSON.stringify({
-        consumer_id: consumer,
-        unread: unreadPingCount(consumer),
-    })}\n\n`);
-    const off = onPing(consumer, (payload) => {
-        res.write(`event: ping\ndata: ${JSON.stringify(payload)}\n\n`);
-    });
-    const ka = setInterval(() => {
-        res.write(`:keepalive ${new Date().toISOString()}\n\n`);
-    }, 30_000);
-    const cleanup = () => {
-        clearInterval(ka);
-        off();
-        try { res.end(); } catch { /* already closed */ }
-    };
-    req.on("close", cleanup);
-    req.on("error", cleanup);
-});
-
-api.post("/pings/mark-read", (req: Request, res: Response) => {
-    const consumer = req.body?.consumer_id as string | undefined;
-    if (!consumer) return badRequest(res, "consumer_id required");
-    const all = req.body?.all === true;
-    const upToId = typeof req.body?.up_to_id === "number" ? req.body.up_to_id : undefined;
-    if (!all && upToId === undefined) {
-        return badRequest(res, "provide up_to_id or all=true");
-    }
-    const r = markPingsRead({ recipient: consumer, all, upToId });
-    res.json({ consumer_id: consumer, ...r });
-});
-
-// -------- ticket subscriptions ---------------------------------------------
-
-api.get("/ticket-subscriptions", (req, res) => {
-    const consumer = req.query.consumer_id as string | undefined;
-    if (!consumer) return badRequest(res, "consumer_id required");
-    res.json({
-        consumer_id: consumer,
-        subscriptions: listTicketSubscriptions(consumer),
-    });
-});
-
-api.post("/ticket-subscriptions", (req: Request, res: Response) => {
-    const consumer = req.body?.consumer_id as string | undefined;
-    const ticket_id = req.body?.ticket_id;
-    if (!consumer) return badRequest(res, "consumer_id required");
-    if (typeof ticket_id !== "number") {
-        return badRequest(res, "ticket_id required (number)");
-    }
-    const t = getMessage(ticket_id);
-    if (!t || t.kind !== "ticket_created") {
-        return notFound(res, "ticket not found");
-    }
-    upsertTicketSubscription(consumer, ticket_id);
-    res.status(201).json({ consumer_id: consumer, ticket_id });
-});
-
-api.delete("/ticket-subscriptions/:ticket_id", (req, res) => {
-    const ticket_id = Number(req.params.ticket_id);
-    const consumer = req.query.consumer_id as string | undefined;
-    if (!consumer) return badRequest(res, "consumer_id required");
-    deleteTicketSubscription(consumer, ticket_id);
-    res.json({ consumer_id: consumer, ticket_id, removed: true });
-});
+// -------- pings + ticket subscriptions ------------------------------------
+// Ping list/count/SSE/mark-read → ./api/pings.ts; per-ticket subscription
+// CRUD → ./api/ticket-subscriptions.ts. (#B.213 phase 1.E)
+api.use(pingsRouter);
+api.use(ticketSubscriptionsRouter);
