@@ -309,9 +309,18 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // execs the TS hook via tsx) for THIS session only — no
     // pollution of the user's ~/.claude/settings.json.
     const root = selfRoot();
-    const stopHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/stop-hook.ts"))}`;
-    const sessionStartHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/session-start-hook.ts"))}`;
-    const userPromptSubmitHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/user-prompt-submit-hook.ts"))}`;
+    // #B.228 (m2m crash): we used to wrap each hook in `npx --no-install
+    // tsx`, but npx resolves `tsx` by walking up from the SPAWNED claude
+    // process's cwd. When that cwd is a project without tsx in its own
+    // node_modules (e.g. m2m), npx errors out with "npx canceled due
+    // to missing packages and no YES option", the SessionStart hook
+    // fails, and claude exits at boot (= the "barre reste jaune" bug
+    // surfaced as "loop exits in ~30s"). Call tsx via the absolute path
+    // inside the aiball install — bypasses npx's cwd-relative lookup.
+    const tsxBin = shQuote(join(root, "node_modules", ".bin", "tsx"));
+    const stopHookCmd = `${tsxBin} ${shQuote(join(root, "src/claude-loop/stop-hook.ts"))}`;
+    const sessionStartHookCmd = `${tsxBin} ${shQuote(join(root, "src/claude-loop/session-start-hook.ts"))}`;
+    const userPromptSubmitHookCmd = `${tsxBin} ${shQuote(join(root, "src/claude-loop/user-prompt-submit-hook.ts"))}`;
     const settings = {
         hooks: {
             // SessionStart fires once when claude has finished booting
@@ -394,7 +403,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const timerScript = join(root, "src/claude-loop/timer.ts");
     const child = spawn("bash", [
         "-lc",
-        `source ${shQuote(envPath(sd))} && exec npx --no-install tsx ${shQuote(timerScript)}`,
+        // #B.228 defensive: same fix as the hook commands above —
+        // call tsx via its absolute path so the timer can be respawned
+        // from any cwd (relevant for `claude-loop reload` called from a
+        // project dir without tsx in its node_modules).
+        `source ${shQuote(envPath(sd))} && exec ${tsxBin} ${shQuote(timerScript)}`,
     ], {
         detached: true,
         stdio: ["ignore", logFd, logFd],

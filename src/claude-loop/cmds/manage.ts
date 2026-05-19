@@ -108,9 +108,14 @@ export function cmdReload(name: string): void {
     const root = installRoot();
     const logFd = openSync(timerLogPath(sd), "a");
     const timerScript = join(root, "src/claude-loop/timer.ts");
+    // #B.228: call tsx via absolute path so reload works from any cwd
+    // (npx --no-install would fail when reload is invoked from a project
+    // dir without tsx in its own node_modules, same as the SessionStart
+    // hook bug that motivated the change in cli.ts cmdStart).
+    const tsxBin = shQuote(join(root, "node_modules", ".bin", "tsx"));
     const child = spawn("bash", [
         "-lc",
-        `source ${shQuote(envPath(sd))} && exec npx --no-install tsx ${shQuote(timerScript)}`,
+        `source ${shQuote(envPath(sd))} && exec ${tsxBin} ${shQuote(timerScript)}`,
     ], {
         detached: true,
         stdio: ["ignore", logFd, logFd],
