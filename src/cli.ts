@@ -928,7 +928,7 @@ mcp
     .option("--force", "Overwrite an existing aiball entry (drops any legacy env block — #B.154)")
     .action(async (opts: { force?: boolean }) => {
         await mcpInitAction(opts.force === true);
-        process.stdout.write(`\nNext: identity defaults to '${basename(userCwd())}-claude'. Override via .aiball.yaml consumer:* if needed.\n`);
+        process.stdout.write(`\nNext: identity defaults to '${basename(userCwd())}-claude'. Override via .aiball.yaml keys 'consumer.agent' and 'consumer.project' if needed.\n`);
     });
 
 /**
@@ -962,7 +962,7 @@ program
             writeFileSync(yamlPath, body);
             process.stdout.write(`${existsSync(yamlPath) && force ? "overwrote" : "created"} ${yamlPath} (autopoll enabled)\n`);
         }
-        process.stdout.write(`\nNext: identity defaults to '${basename(userCwd())}-claude'. Override via .aiball.yaml consumer:* if needed.\n`);
+        process.stdout.write(`\nNext: identity defaults to '${basename(userCwd())}-claude'. Override via .aiball.yaml keys 'consumer.agent' and 'consumer.project' if needed.\n`);
         process.stdout.write(`Run \`aiball check\` to verify everything resolves.\n`);
     });
 

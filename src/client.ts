@@ -619,6 +619,21 @@ function query(q: Record<string, string | number | undefined>): string {
 }
 
 /**
+ * The user's working directory, NOT the install dir. The bash
+ * launcher does `cd "$ROOT"` before exec'ing tsx (so `npx` resolves
+ * deps against the install tree), which makes `process.cwd()` point
+ * at the install dir. AIBALL_CWD is set by the wrapper to preserve
+ * the invoker's PWD — config resolution must walk up from there, not
+ * from the install dir (else every `aiball` call reads the install
+ * dir's own `.aiball.yaml`, masking the user's project). #B.207
+ * david: this was making `aiball whoami` return claude-aiball-dev /
+ * aiball from any cwd because the install's yaml carries those.
+ */
+function resolveUserCwd(): string {
+    return process.env.AIBALL_CWD ?? process.cwd();
+}
+
+/**
  * Resolve default project: env > .aiball.yaml > .mcp.json. Returns
  * null when nothing provides a project name — callers that NEED a
  * project (most ticket ops) will throw via `resolveProject()`. The
@@ -626,7 +641,7 @@ function query(q: Record<string, string | number | undefined>): string {
  * project name without explicit user intent (yaml or env) tends to
  * be ambiguous (e.g. running `aiball ticket new` from a tools dir).
  */
-export function resolveDefaultProject(cwd = process.cwd()): string | null {
+export function resolveDefaultProject(cwd = resolveUserCwd()): string | null {
     if (process.env.AIBALL_PROJECT) return process.env.AIBALL_PROJECT;
     try {
         const cfg = loadConfig(cwd);
@@ -636,7 +651,7 @@ export function resolveDefaultProject(cwd = process.cwd()): string | null {
     }
 }
 
-export function resolveAgentId(cwd = process.cwd()): string {
+export function resolveAgentId(cwd = resolveUserCwd()): string {
     // loadConfig does the full chain (env > .aiball.yaml > .mcp.json
     // > `<project>-claude` default), so the agent field is always
     // populated here. sha256(cwd) survives only as the
