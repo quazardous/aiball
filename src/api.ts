@@ -1585,9 +1585,14 @@ api.get("/tickets/:id", (req, res) => {
     // Verbosity (#B.87 palier 2): default is summary now — header only,
     // no body, no comments array. Pass `full=1` to opt back into the
     // full thread. Old `summary=0` accepted as the explicit override
-    // for symmetry with /api/tickets.
+    // for symmetry with /api/tickets. `brief=1` and `digest=1` both
+    // imply the thread shape too — opting into one of them means the
+    // caller wants the reshaped read, not the bare header.
     const fullThread =
-        req.query.full === "1" || req.query.summary === "0";
+        req.query.full === "1" ||
+        req.query.summary === "0" ||
+        req.query.brief === "1" ||
+        req.query.digest === "1";
     const summary = !fullThread;
     const headerBase = {
         id: t.id,
@@ -1625,52 +1630,116 @@ api.get("/tickets/:id", (req, res) => {
             focus_message_id: focusMessageId,
         });
     }
-    // #B.130 phase 2: brief mode. Returns the full ticket body PLUS
-    // a `comments` array where each comment_added is replaced by a
-    // slim header carrying `summary_until` (from meta.summary_until)
-    // instead of the full body. The body is preserved on the LAST
-    // comment so the reader still gets "current state". Lifecycle
-    // events (closed / reopened / resolved / blocked / sub-added /
-    // referenced) stay unchanged. No fallback: comments without
-    // meta.summary_until surface as `summary_until: null` and the
-    // consumer decides whether to refetch full.
+    // #B.130 phase 2: brief mode. Reshapes the thread to drop the
+    // already-summarized prefix and ship only the canonical pivot
+    // line + everything after it.
+    //
+    // #B.21X (this change): pivot-cut. Scan approved comment_added
+    // from newest → oldest, find the first one carrying
+    // meta.summary_until — that's the pivot. The pivot's contract
+    // ("ticket state AFTER this comment") makes it strictly lossless
+    // to drop every earlier comment_added: they're all captured in
+    // that one line. The pivot ships with body stripped (summary_until
+    // IS its body); every comment_added AFTER the pivot keeps its
+    // full body (that's the active "now" the reader needs).
+    //
+    // Lifecycle events (closed / reopened / resolved / blocked /
+    // sub-added / referenced / relation) are always kept regardless
+    // of position — they're small, semantically distinct, and not
+    // covered by summary_until.
+    //
+    // Fallback: if no comment in the thread carries summary_until
+    // (legacy threads, pure-human threads), revert to the legacy
+    // tail-based brief — keep the last `tail` bodies intact, collapse
+    // older comments with summary_until-when-present, keep bodies
+    // otherwise. So brief is never lossy-by-absence.
+    //
+    // #B.21X (this change): digest mode. `digest: true` returns the
+    // header plus an ordered `digest[]` of the thread's summary_until
+    // snapshots — bird's-eye progression for cross-ticket scans.
+    // Optional `digest_limit=N` trims to the last N snapshots. Ignored
+    // when full or brief is set.
     const brief = req.query.brief === "1";
-    // #B.202: `tail=N` keeps the N most-recent approved comment_added
-    // bodies (default 1 = legacy behaviour). Lets the reader scale
-    // brief reads on threads where summary_until isn't enough.
+    const digest = req.query.digest === "1";
+    if (digest && !brief) {
+        const limitRaw = req.query.digest_limit;
+        const limitParsed = typeof limitRaw === "string" ? Number.parseInt(limitRaw, 10) : NaN;
+        const limit = Number.isFinite(limitParsed) && limitParsed > 0 ? limitParsed : null;
+        const snapshots = threadMessages
+            .filter((m) => m.kind === "comment_added" && m.status === "approved")
+            .map((m) => {
+                const su = parseMeta(m.meta ?? null).summary_until;
+                if (!su) return null;
+                return {
+                    id: m.id,
+                    hashid: m.hashid,
+                    by_agent: m.by_agent,
+                    created_at: m.created_at,
+                    summary_until: su,
+                };
+            })
+            .filter((x): x is { id: number; hashid: string | null; by_agent: string; created_at: string; summary_until: string } => x !== null);
+        const trimmed = limit !== null ? snapshots.slice(-limit) : snapshots;
+        const commentCount = threadMessages.filter(
+            (m) => m.kind === "comment_added" && m.status !== "rejected",
+        ).length;
+        return res.json({
+            ticket: headerBase,
+            digest: trimmed,
+            digest_limit: limit ?? undefined,
+            comment_count: commentCount,
+            focus_message_id: focusMessageId,
+        });
+    }
+    // #B.202: `tail=N` survives for the no-pivot fallback path. When
+    // a pivot is found, tail is a no-op (the cut is semantic, not
+    // positional).
     const tailRaw = req.query.tail;
     const tailParsed = typeof tailRaw === "string" ? Number.parseInt(tailRaw, 10) : NaN;
     const tail = Number.isFinite(tailParsed) && tailParsed > 0 ? tailParsed : 1;
     let outComments = enrichRelationStages(withTags(threadMessages));
+    let pivotCommentId: number | null = null;
+    let pivotApplied = false;
     if (brief) {
-        // Keep the `tail` most-recent approved comment_added bodies
-        // intact so the reader sees the "now" tail; older comments
-        // collapse to summary_until.
-        const keepIds = new Set<number>();
-        const approvedIds = threadMessages
-            .filter((m) => m.kind === "comment_added" && m.status === "approved")
-            .map((m) => m.id)
-            .sort((a, b) => b - a)
-            .slice(0, tail);
-        for (const id of approvedIds) keepIds.add(id);
-        outComments = outComments.map((m) => {
-            if (m.kind !== "comment_added" || keepIds.has(m.id)) return m;
-            const meta = parseMeta(m.meta ?? null);
-            const summaryUntil = meta.summary_until ?? null;
-            // Replacement is conditional on a summary being present.
-            // Without it, dropping the body would silently swallow the
-            // comment in brief reads — true for every human comment
-            // (humans are exempted from the summary_until requirement)
-            // AND for legacy pre-#B.130 agent comments. Keep the body
-            // in that case so brief mode is lossy-by-summary, not
-            // lossy-by-absence. The LAST comment's body is always
-            // shipped (handled by the early-return above) so the
-            // reader's "now" is always full.
-            if (!summaryUntil) {
-                return { ...m, summary_until: null } as typeof m;
+        for (const m of [...threadMessages].reverse()) {
+            if (m.kind !== "comment_added" || m.status !== "approved") continue;
+            const su = parseMeta(m.meta ?? null).summary_until;
+            if (su) {
+                pivotCommentId = m.id;
+                break;
             }
-            return { ...m, body: null, edited_body: null, summary_until: summaryUntil } as typeof m;
-        });
+        }
+        if (pivotCommentId !== null) {
+            pivotApplied = true;
+            const cutId = pivotCommentId;
+            outComments = outComments
+                .filter((m) => m.kind !== "comment_added" || m.id >= cutId)
+                .map((m) => {
+                    if (m.kind !== "comment_added") return m;
+                    const su = parseMeta(m.meta ?? null).summary_until ?? null;
+                    if (m.id === cutId) {
+                        return { ...m, body: null, edited_body: null, summary_until: su } as typeof m;
+                    }
+                    return { ...m, summary_until: su } as typeof m;
+                });
+        } else {
+            const keepIds = new Set<number>();
+            const approvedIds = threadMessages
+                .filter((m) => m.kind === "comment_added" && m.status === "approved")
+                .map((m) => m.id)
+                .sort((a, b) => b - a)
+                .slice(0, tail);
+            for (const id of approvedIds) keepIds.add(id);
+            outComments = outComments.map((m) => {
+                if (m.kind !== "comment_added" || keepIds.has(m.id)) return m;
+                const meta = parseMeta(m.meta ?? null);
+                const summaryUntil = meta.summary_until ?? null;
+                if (!summaryUntil) {
+                    return { ...m, summary_until: null } as typeof m;
+                }
+                return { ...m, body: null, edited_body: null, summary_until: summaryUntil } as typeof m;
+            });
+        }
     }
     // #B.123 phase B: surface the active typed relations alongside the
     // existing parent/sub-ticket lineage. Each relation is enriched
@@ -1695,7 +1764,12 @@ api.get("/tickets/:id", (req, res) => {
         comments: outComments,
         focus_message_id: focusMessageId,
         brief,
-        tail: brief ? tail : undefined,
+        // `pivot_comment_id` surfaces the cut point when brief mode
+        // applied the pivot-cut. Null when brief fell back to the
+        // legacy tail-keep (no summary_until in thread). `tail` is
+        // only relevant in that fallback path.
+        pivot_comment_id: brief ? pivotCommentId : undefined,
+        tail: brief && !pivotApplied ? tail : undefined,
     });
 });
 

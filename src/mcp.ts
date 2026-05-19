@@ -645,7 +645,7 @@ server.registerTool(
     "ticket_get",
     {
         description:
-            "Get a ticket. **Default: header only** (no body, no comments) + `comment_count` — cheap probe of state. Pass `full: true` for the full thread (header with body + all approved comments). Pass `brief: true` for the **agent-friendly read** (#B.130): header + body + comments where each agent comment that carried a `summary_until` ships ONLY that snapshot (body replaced). The LAST comment always keeps its full body. Comments WITHOUT a summary_until (humans, who are exempt; pre-#B.130 history) keep their body too — so brief reads are never silently lossy.\n\n**How to use brief efficiently**: scan top→bottom. The latest snapshot + the last body is enough to resume the ticket — that's the contract `ticket_reply.summary_until` enforces. If you need an older body specifically (e.g. a long human comment in the middle of a thread), re-fetch with `full: true`. On very long human-heavy threads where brief still blows the budget, pair brief with `tail: N` (#B.202) to keep just the last N bodies — cheaper than `full`.",
+            "Get a ticket. **Default: header only** (no body, no comments) + `comment_count` — cheap probe of state. Pass `full: true` for the full thread (header with body + all approved comments). Pass `brief: true` for the **agent-friendly read** (#B.130 + pivot-cut): header + body + the latest `summary_until` snapshot + every comment_added AFTER that snapshot with full bodies. Everything earlier is dropped — the pivot's contract (\"ticket state AFTER this comment\") guarantees those bodies are already captured in the snapshot line. Lifecycle events (closed/resolved/sub-added/etc.) are always kept regardless of position.\n\n**How to use brief efficiently**: read the pivot's `summary_until` line + every comment after it (full bodies). That's the canonical resume point. The response surfaces `pivot_comment_id` so you can see where the cut happened. If the thread has no agent snapshot anywhere (legacy, pure-human), brief falls back to keeping the last `tail` bodies intact (default 1) and collapsing earlier ones — same behaviour as pre-pivot. If you need a body that was dropped, re-fetch with `full: true`.\n\nPass `digest: true` for a bird's-eye scan: header + ordered `digest[]` of every comment's `summary_until` snapshot (most useful across multiple tickets). Optional `digest_limit: N` keeps just the last N snapshots. Lossy by design — no bodies, no human comments without snapshots. Ignored if `brief` is also set.",
         inputSchema: {
             ticket_id: z.number().int(),
             full: z
@@ -658,7 +658,7 @@ server.registerTool(
                 .boolean()
                 .optional()
                 .describe(
-                    "If true, return the full thread but with each agent comment's body replaced by its `meta.summary_until` snapshot (the one-line ticket state AFTER that comment — see ticket_reply.summary_until contract). The LAST comment ALWAYS keeps its full body so you see the current 'now'. Comments without a summary_until (humans + pre-#B.130) keep their body — brief reads never silently drop content. Use this to scan long threads cheaply (~5x token reduction on threads with disciplined snapshots).",
+                    "Pivot-cut brief read. Finds the latest `meta.summary_until` snapshot in the thread, drops every comment_added BEFORE it (those are by contract already captured in the snapshot), and ships: header + body + the pivot's `summary_until` line + every comment AFTER the pivot with full bodies. Lifecycle events (closed/resolved/sub-added) always kept. Response includes `pivot_comment_id` so you see where the cut landed. Fallback when the thread has NO summary_until anywhere: legacy tail-keep — last `tail` bodies intact (default 1), older comments collapsed to summary_until-if-present. Strict superset of pre-pivot brief; never silently lossy.",
                 ),
             tail: z
                 .number()
@@ -666,16 +666,32 @@ server.registerTool(
                 .positive()
                 .optional()
                 .describe(
-                    "Brief-mode only (#B.202): keep the N most-recent comment bodies intact, not just the last one. Default 1 (legacy behaviour). Useful on long threads where the last comment + one snapshot isn't enough — bump to 3-5 to see recent back-and-forth without falling back to `full: true`. Ignored when `brief` is not set.",
+                    "Fallback-only (#B.202): when brief finds NO summary_until in the thread, keep the N most-recent comment bodies intact instead of just 1. Pure no-op when a pivot is found (pivot-cut already keeps every comment after the pivot with full body). Ignored when `brief` is not set.",
+                ),
+            digest: z
+                .boolean()
+                .optional()
+                .describe(
+                    "Bird's-eye digest: header + ordered `digest[]` of every comment's `summary_until` snapshot (id, hashid, by_agent, created_at, summary_until). Use to scan a long thread's STATE progression, or to peek at many tickets cheaply (5-10× lighter than brief on busy threads). Lossy by design: no bodies, no human comments without summaries. Ignored if `brief` is also set.",
+                ),
+            digest_limit: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe(
+                    "Digest-mode only: keep just the last N snapshots instead of all. Useful to bound the response when a ticket has dozens of agent comments.",
                 ),
         },
     },
-    async ({ ticket_id, full, brief, tail }) => {
+    async ({ ticket_id, full, brief, tail, digest, digest_limit }) => {
         return asText(
             await client.getTicket(ticket_id, {
-                summary: full !== true && brief !== true,
+                summary: full !== true && brief !== true && digest !== true,
                 brief: brief === true,
                 tail,
+                digest: digest === true,
+                digest_limit,
             }),
         );
     },

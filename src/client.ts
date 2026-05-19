@@ -235,7 +235,16 @@ export class AiballClient {
     listTickets(q: Record<string, string | undefined> = {}) {
         return this.http("GET", `/api/tickets${query(q)}`);
     }
-    getTicket(id: number, opts: { summary?: boolean; brief?: boolean; tail?: number } = {}) {
+    getTicket(
+        id: number,
+        opts: {
+            summary?: boolean;
+            brief?: boolean;
+            tail?: number;
+            digest?: boolean;
+            digest_limit?: number;
+        } = {},
+    ) {
         const q: Record<string, string | undefined> = {};
         // API default is now summary mode (#B.87). Caller passing
         // {summary: false} explicitly wants the full thread — send full=1.
@@ -243,15 +252,24 @@ export class AiballClient {
         // summary=1 when truthy for backward-compat with older daemons.
         if (opts.summary === false) q.full = "1";
         else if (opts.summary === true) q.summary = "1";
-        // #B.130 phase 2: brief mode = full thread but per-comment bodies
-        // replaced by `summary_line` (meta.summary) except the last one.
-        // Implies full=1 server-side. #B.202: optional `tail=N` keeps the
-        // N most-recent comment bodies (default 1).
+        // #B.130 phase 2 + #B.21X (pivot-cut): brief returns the thread
+        // shaped around the latest summary_until pivot — drops the
+        // already-summarized prefix, keeps full bodies after the pivot.
+        // Falls back to the legacy tail-keep when no summary exists in
+        // the thread. #B.202: `tail=N` only matters in that fallback.
         if (opts.brief) {
             q.full = "1";
             q.brief = "1";
             if (typeof opts.tail === "number" && opts.tail > 1) {
                 q.tail = String(Math.floor(opts.tail));
+            }
+        }
+        // #B.21X: digest = ordered list of summary_until snapshots
+        // (lossy by design, bird's-eye scan). Ignored if brief is set.
+        if (opts.digest && !opts.brief) {
+            q.digest = "1";
+            if (typeof opts.digest_limit === "number" && opts.digest_limit > 0) {
+                q.digest_limit = String(Math.floor(opts.digest_limit));
             }
         }
         return this.http("GET", `/api/tickets/${id}${query(q)}`);
