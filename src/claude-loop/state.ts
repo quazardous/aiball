@@ -575,9 +575,16 @@ export async function buildContextPhrase(
             const scope = project ? `\`${project}\`` : "your scope";
             parts.push(`${openCount} open ticket${openCount === 1 ? "" : "s"} in ${scope}`);
         }
-        const directive = pingCount > 0
-            ? "drain via `unread({pings: true, mark_read: true})`"
-            : "list via `ticket_list({open: true})`";
+        // #B.232: when BOTH pings and open tickets are pending, chain
+        // both directives so the agent doesn't drain pings and stop —
+        // david's repro showed `en standby` after a clean drain while
+        // 4 open tickets were still actionable. Wording stays imperative
+        // ("drain", "handle") on each leg so the agent treats both as
+        // tasks, not as informational decoration.
+        const verbs: string[] = [];
+        if (pingCount > 0) verbs.push("drain via `unread({pings: true, mark_read: true})`");
+        if (openCount > 0) verbs.push("handle open via `ticket_list({open: true})`");
+        const directive = verbs.join(" + ");
         return `${culture} [aiball: ${parts.join(" · ")}] — ${directive} before answering.`;
     } catch {
         return culture;
