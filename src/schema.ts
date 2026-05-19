@@ -43,6 +43,15 @@ export const projects = sqliteTable("projects", {
     createdAt: text("created_at").notNull(),
     /** consumer_id that registered the project (NULL for backfilled rows when no author was on file). */
     createdBy: text("created_by"),
+    /**
+     * Per-project response-strategy override (#B.224). NULL = inherit
+     * the global default. Stored as a typed column rather than a k/v
+     * settings row (the previous `strategy:<project>` hack); future
+     * per-project preferences (default_intent, default_priority, etc.)
+     * add their own columns and surface through the same
+     * `src/preferences.ts` SDK.
+     */
+    defaultStrategy: text("default_strategy"),
 });
 
 export const tickets = sqliteTable("tickets", {
