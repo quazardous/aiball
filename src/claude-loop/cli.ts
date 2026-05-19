@@ -192,7 +192,7 @@ function resolveCurrentLoopName(): string {
     die(`multiple loops in cwd ${cwd}: ${names}. Pass a name explicitly.`);
 }
 
-function cmdStart(opts: StartOpts): void {
+async function cmdStart(opts: StartOpts): Promise<void> {
     const name = opts.name ?? defaultName();
     const sd = stateDirFor(name);
     if (existsSync(sd)) {
@@ -208,6 +208,25 @@ function cmdStart(opts: StartOpts): void {
     applyToProcessEnv(ctx);
     warnIfDeprecated(ctx);
     const cwd = ctx.cwd;
+
+    // #B.216 david (979632): auto-register the project with the aiball
+    // daemon so `claude-loop start` in any dir surfaces a fresh entry
+    // in ProjectsPanel without a separate `aiball project init`. Best
+    // effort — daemon down or 409 (already registered) both swallow
+    // silently to a one-line status. Never blocks the loop spawn.
+    if (ctx.project) {
+        try {
+            await new AiballClient().createProject(ctx.project);
+            process.stdout.write(`aiball: registered project '${ctx.project}'\n`);
+        } catch (e) {
+            const m = e instanceof Error ? e.message : String(e);
+            if (/409|already exists/i.test(m)) {
+                process.stdout.write(`aiball: project '${ctx.project}' already registered\n`);
+            } else {
+                process.stdout.write(`aiball: project register skipped — ${m}\n`);
+            }
+        }
+    }
 
     // #B.154: housekeeping before spawn. (1) prune dead state dirs
     // so the user's ~/.claude-loop/ doesn't accumulate orphans from
