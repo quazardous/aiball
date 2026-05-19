@@ -264,6 +264,14 @@ export const BULK_ACTION_META: Record<BulkAction, BulkActionMeta> = {
         tooltip: "Reject the selected pending tickets (others skipped).",
         order: 41,
     },
+    link: {
+        label: "link",
+        icon: "pi pi-link",
+        severity: "info",
+        tooltip: "Link the selected tickets — the most recent gets `relates_to` edges to each of the others (star pattern). Rejected rows skipped.",
+        order: 25,
+        text: true,
+    },
 };
 
 /** Iterate the catalog in render order. mark_read/mark_unread are paired

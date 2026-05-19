@@ -28,7 +28,8 @@ export type BulkAction =
     | "mark_read"
     | "mark_unread"
     | "snooze"
-    | "unsnooze";
+    | "unsnooze"
+    | "link";
 
 export function canApprove(r: InboxRow): boolean {
     return isPending(r);
@@ -63,6 +64,16 @@ export function canMarkUnread(r: InboxRow): boolean {
 }
 
 /**
+ * Any non-rejected ticket can participate in a bulk-link star (#B.236
+ * dkrus4 — "le plus recent vois les autres"). The bulkAction handler
+ * adds the eligibility floor (need ≥ 2 selected to create any edge);
+ * the per-row predicate just gates which rows count.
+ */
+export function canLink(r: InboxRow): boolean {
+    return !isRejected(r);
+}
+
+/**
  * Dispatch table — single entry point used by `bulkApplicable` so the
  * caller can ask "can I do X on this row?" without a switch.
  */
@@ -75,6 +86,7 @@ export const BULK_PREDICATES: Record<BulkAction, (r: InboxRow) => boolean> = {
     mark_unread: canMarkUnread,
     snooze: canSnooze,
     unsnooze: canUnsnooze,
+    link: canLink,
 };
 
 export function canDo(action: BulkAction, r: InboxRow): boolean {
@@ -90,6 +102,7 @@ export const BULK_LABELS: Record<BulkAction, string> = {
     mark_unread: "mark unread",
     snooze: "snooze",
     unsnooze: "unsnooze",
+    link: "link",
 };
 
 /** Default snooze duration when the bulk button is clicked without a
@@ -142,6 +155,50 @@ export function useBulkActions(opts: {
         const selected = rows.value.filter((r) => selectedIds.value.has(r.id));
         if (!selected.length) return;
         bulkBusy.value = true;
+        // #B.236: bulk-link is special — it's a single STAR operation,
+        // not a per-row loop. Pick the most recent eligible row as the
+        // source and add `relates_to` edges from it to each of the
+        // others (david dkrus4 "le plus recent vois les autres").
+        if (action === "link") {
+            const eligible = selected.filter((r) => canLink(r));
+            // Sort newest-first by created_at. ISO8601 strings compare
+            // lexicographically the same way as their timestamps.
+            eligible.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+            const source = eligible[0];
+            const targets = eligible.slice(1);
+            let ok = 0, failed = 0;
+            const linkSkipped = selected.length - eligible.length;
+            try {
+                for (const t of targets) {
+                    try {
+                        await api.addRelation(source.id, t.id, "relates_to");
+                        ok++;
+                    } catch {
+                        failed++;
+                    }
+                }
+                let detail = "";
+                if (linkSkipped) detail += `${linkSkipped} skipped (rejected)`;
+                if (failed) detail += `${detail ? ", " : ""}${failed} failed`;
+                if (!targets.length && !linkSkipped) {
+                    detail = "need ≥ 2 tickets selected";
+                }
+                toast.add({
+                    severity: failed || !ok ? "warn" : "success",
+                    summary: ok
+                        ? `linked ${ok} ticket${ok === 1 ? "" : "s"} to #B.${source.id}`
+                        : "link: no edge created",
+                    detail: detail || undefined,
+                    life: 6000,
+                });
+                clearSelection();
+                bus.emit("inbox.refresh");
+                bus.emit("projects.refresh");
+            } finally {
+                bulkBusy.value = false;
+            }
+            return;
+        }
         let ok = 0, skipped = 0, failed = 0;
         try {
             for (const r of selected) {
@@ -222,16 +279,23 @@ export function useBulkActions(opts: {
         return n;
     }
 
-    const bulkCounts = computed(() => ({
-        approve: bulkApplicableCount("approve"),
-        reject: bulkApplicableCount("reject"),
-        close: bulkApplicableCount("close"),
-        reopen: bulkApplicableCount("reopen"),
-        mark_read: bulkApplicableCount("mark_read"),
-        mark_unread: bulkApplicableCount("mark_unread"),
-        snooze: bulkApplicableCount("snooze"),
-        unsnooze: bulkApplicableCount("unsnooze"),
-    }));
+    const bulkCounts = computed(() => {
+        // Link is shown only when ≥ 2 rows can participate — a single
+        // ticket can't be linked to itself. The button hides via the
+        // `counts[action]` truthiness check in BulkBar.
+        const linkable = bulkApplicableCount("link");
+        return {
+            approve: bulkApplicableCount("approve"),
+            reject: bulkApplicableCount("reject"),
+            close: bulkApplicableCount("close"),
+            reopen: bulkApplicableCount("reopen"),
+            mark_read: bulkApplicableCount("mark_read"),
+            mark_unread: bulkApplicableCount("mark_unread"),
+            snooze: bulkApplicableCount("snooze"),
+            unsnooze: bulkApplicableCount("unsnooze"),
+            link: linkable >= 2 ? linkable : 0,
+        };
+    });
 
     return {
         selectedIds,
