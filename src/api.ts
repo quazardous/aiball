@@ -50,6 +50,8 @@ import {
     deleteTicketSubscription,
     listTicketSubscriptions,
     listProjectsDetailed,
+    createProject,
+    getProject,
     deleteProject,
     getProjectStatsRich,
     purgeOldClosedTickets,
@@ -788,6 +790,43 @@ api.get("/projects", (req, res) => {
         return res.json(listProjectsDetailed(consumer));
     }
     res.json(listProjects());
+});
+
+/**
+ * Register a project explicitly (#B.216 phase A pass 2). The CLI's
+ * `aiball project init` and the Web UI's "Create project" button both
+ * land here. Soft registry — no FK to tickets — but having a row means
+ * the project shows up in listings before its first ticket is filed.
+ *
+ * Body: { name: string, display_name?: string, description?: string,
+ *         created_by?: string }
+ * 201 on success with the inserted row; 409 on duplicate name; 400 on
+ * empty/whitespace name.
+ */
+api.post("/projects", (req, res) => {
+    const raw = (req.body ?? {}) as {
+        name?: unknown;
+        display_name?: unknown;
+        description?: unknown;
+        created_by?: unknown;
+    };
+    if (typeof raw.name !== "string" || !raw.name.trim()) {
+        return res.status(400).json({ error: "name is required" });
+    }
+    const name = raw.name.trim();
+    if (/\s/.test(name)) {
+        return res.status(400).json({ error: "name must not contain whitespace" });
+    }
+    if (getProject(name)) {
+        return res.status(409).json({ error: `project ${name} already exists` });
+    }
+    const project = createProject({
+        name,
+        display_name: typeof raw.display_name === "string" ? raw.display_name : null,
+        description: typeof raw.description === "string" ? raw.description : null,
+        created_by: typeof raw.created_by === "string" ? raw.created_by : null,
+    });
+    res.status(201).json(project);
 });
 
 api.get("/projects/:name/stats", (req, res) => {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import Button from "primevue/button";
+import InputText from "primevue/inputtext";
 import { useToast } from "primevue/usetoast";
 import { api, type ProjectMeta } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
@@ -12,6 +13,9 @@ const confirming = ref<string | null>(null);
 const deleting = ref<string | null>(null);
 const confirmingPurge = ref<string | null>(null);
 const purging = ref<string | null>(null);
+const creating = ref(false);
+const newName = ref("");
+const creatingForm = ref(false);
 
 const emit = defineEmits<{
     (e: "open-stats", project: string): void;
@@ -96,6 +100,32 @@ async function confirmDelete(name: string) {
     }
 }
 
+async function submitCreate() {
+    const name = newName.value.trim();
+    if (!name) return;
+    creating.value = true;
+    try {
+        const row = await api.createProject(name);
+        toast.add({
+            severity: "success",
+            summary: `Project "${row.name}" registered`,
+            life: 4000,
+        });
+        newName.value = "";
+        creatingForm.value = false;
+        bus.emit("projects.refresh");
+    } catch (e) {
+        toast.add({
+            severity: "error",
+            summary: "Create failed",
+            detail: (e as Error).message,
+            life: 8000,
+        });
+    } finally {
+        creating.value = false;
+    }
+}
+
 function relativeTime(iso: string): string {
     const d = new Date(iso);
     const diff = Date.now() - d.getTime();
@@ -116,19 +146,54 @@ defineExpose({ load });
 <template>
     <div class="projects-panel">
         <header class="rules-explainer-block">
-            <h2 style="margin: 0">Projects</h2>
+            <div class="projects-header-row">
+                <h2 style="margin: 0">Projects</h2>
+                <Button
+                    v-if="!creatingForm"
+                    label="Create project"
+                    icon="pi pi-plus"
+                    size="small"
+                    @click="creatingForm = true"
+                />
+            </div>
             <p class="rules-explainer rules-explainer--muted">
-                One row per project that has at least one message. Sorted by latest
-                activity. Deleting a project hard-removes every message, comment,
-                close event, and project subscription it owns. Ticket-level pings
-                cascade away with the messages. The action is irreversible.
+                One row per project that has at least one message OR an explicit
+                registry entry. Sorted by latest activity. Deleting a project
+                hard-removes every message, comment, close event, and project
+                subscription it owns. Ticket-level pings cascade away with the
+                messages. The action is irreversible.
             </p>
+            <form v-if="creatingForm" class="create-project-form" @submit.prevent="submitCreate">
+                <InputText
+                    v-model="newName"
+                    placeholder="project-name"
+                    autofocus
+                    :disabled="creating"
+                />
+                <Button
+                    type="submit"
+                    label="Create"
+                    icon="pi pi-check"
+                    size="small"
+                    :loading="creating"
+                    :disabled="!newName.trim()"
+                />
+                <Button
+                    type="button"
+                    label="Cancel"
+                    size="small"
+                    severity="secondary"
+                    text
+                    :disabled="creating"
+                    @click="creatingForm = false; newName = ''"
+                />
+            </form>
         </header>
 
         <div v-if="loading && !rows.length" class="aiball-empty">Loading…</div>
         <div v-else-if="!rows.length" class="aiball-empty">
             <i class="pi pi-folder" style="font-size: 1.6rem" />
-            <div>No projects yet — create a ticket to populate one.</div>
+            <div>No projects yet — use "Create project" above or file a ticket.</div>
         </div>
 
         <table v-else class="projects-table">
@@ -244,6 +309,18 @@ defineExpose({ load });
     display: flex;
     flex-direction: column;
     gap: 0.8rem;
+}
+.projects-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+}
+.create-project-form {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
 }
 .projects-table {
     width: 100%;

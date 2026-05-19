@@ -339,6 +339,21 @@ export interface ProjectMeta {
 
 export const api = {
     listProjects: () => req<string[]>("GET", "/api/projects"),
+    /**
+     * Explicitly register a project (#B.216 phase A pass 2). 409 means
+     * the name already exists; 400 means empty/whitespace name.
+     */
+    createProject: (
+        name: string,
+        opts: { display_name?: string; description?: string; created_by?: string } = {},
+    ) =>
+        req<{
+            name: string;
+            display_name: string | null;
+            description: string | null;
+            created_at: string;
+            created_by: string | null;
+        }>("POST", "/api/projects", { name, ...opts }),
     listProjectsDetailed: (consumer_id?: string) => {
         const qs = consumer_id
             ? `?detailed=1&consumer_id=${encodeURIComponent(consumer_id)}`

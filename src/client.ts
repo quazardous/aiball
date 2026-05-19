@@ -278,6 +278,30 @@ export class AiballClient {
         return this.http("GET", "/api/projects");
     }
     /**
+     * Explicitly register a project (#B.216 phase A pass 2). The CLI's
+     * `aiball project init` and the Web UI's "Create project" button
+     * both go through here. Server returns 201 + the inserted row, or
+     * 409 if the name is already taken.
+     */
+    createProject(name: string, opts: {
+        display_name?: string;
+        description?: string;
+        created_by?: string;
+    } = {}) {
+        return this.http<{
+            name: string;
+            display_name: string | null;
+            description: string | null;
+            created_at: string;
+            created_by: string | null;
+        }>("POST", "/api/projects", {
+            name,
+            display_name: opts.display_name,
+            description: opts.description,
+            created_by: opts.created_by ?? this.agentId,
+        });
+    }
+    /**
      * Snooze a ticket until the given ISO8601 timestamp (per #B.329).
      * The ticket is hidden from the open inbox until the deadline; the
      * daemon's reveal cron clears the field at that point.

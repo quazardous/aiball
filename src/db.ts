@@ -94,12 +94,15 @@ export {
 } from "./db/messages.js";
 
 export {
+    type NewProjectInput,
     type ProjectMeta,
     type ProjectStatsRich,
+    createProject,
+    deleteProject,
+    getProject,
+    getProjectStatsRich,
     listProjects,
     listProjectsDetailed,
-    deleteProject,
-    getProjectStatsRich,
     purgeOldClosedTickets,
 } from "./db/projects.js";
 

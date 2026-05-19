@@ -9,13 +9,66 @@ import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 
+/**
+ * Project names known to the system. Reads from the explicit `projects`
+ * registry (#B.216 phase A pass 1) AND the legacy DISTINCT(tickets.project)
+ * path — soft FK by design, so an orphan ticket on an unregistered project
+ * is still visible here, and a freshly-created empty project (registered
+ * via CLI/UI before any ticket lands) is also visible.
+ */
 export function listProjects(): string[] {
     const db = getDb();
-    const rows = db.selectDistinct({ project: schema.tickets.project })
+    const registry = db.select({ name: schema.projects.name })
+        .from(schema.projects)
+        .all()
+        .map((r) => r.name);
+    const fromTickets = db.selectDistinct({ project: schema.tickets.project })
         .from(schema.tickets)
-        .orderBy(asc(schema.tickets.project))
-        .all();
-    return rows.map((r) => r.project);
+        .all()
+        .map((r) => r.project);
+    const merged = new Set<string>([...registry, ...fromTickets]);
+    return [...merged].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Insert a new project into the registry. Soft registry: no SQL FK ties
+ * tickets.project to this row, but the CLI / Web UI flows go through
+ * here to declare a project before its first ticket lands.
+ *
+ * Throws on duplicate name (PK collision) — caller decides whether to
+ * treat that as a 409 or surface it raw.
+ */
+export interface NewProjectInput {
+    name: string;
+    display_name?: string | null;
+    description?: string | null;
+    created_by?: string | null;
+}
+
+export function createProject(input: NewProjectInput): schema.Project {
+    const db = getDb();
+    const name = input.name.trim();
+    if (!name) throw new Error("project name is required");
+    const row: schema.NewProject = {
+        name,
+        displayName: input.display_name ?? null,
+        description: input.description ?? null,
+        createdAt: nowIso(),
+        createdBy: input.created_by ?? null,
+    };
+    db.insert(schema.projects).values(row).run();
+    const inserted = db.select().from(schema.projects)
+        .where(eq(schema.projects.name, name))
+        .get();
+    if (!inserted) throw new Error(`project ${name} disappeared after insert`);
+    return inserted;
+}
+
+export function getProject(name: string): schema.Project | undefined {
+    const db = getDb();
+    return db.select().from(schema.projects)
+        .where(eq(schema.projects.name, name))
+        .get();
 }
 
 export interface ProjectMeta {

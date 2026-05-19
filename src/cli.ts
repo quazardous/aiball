@@ -505,6 +505,26 @@ project.command("list").action(async (_opts, cmd) => {
     out(await client.listProjects(), gOpts(cmd), fmtProjectList);
 });
 
+project
+    .command("init [name]")
+    .description("Register a project explicitly (defaults name to basename of cwd)")
+    .option("--display-name <label>", "Human-friendly label shown in the UI")
+    .option("--description <text>", "Project description")
+    .action(async (
+        nameArg: string | undefined,
+        opts: { displayName?: string; description?: string },
+        cmd,
+    ) => {
+        const client = buildClient(gOpts(cmd));
+        const name = (nameArg ?? basename(userCwd())).trim();
+        if (!name) die("could not derive project name from cwd; pass it explicitly");
+        const row = await client.createProject(name, {
+            display_name: opts.displayName,
+            description: opts.description,
+        });
+        out(row, gOpts(cmd), (r) => `project "${r.name}" registered`);
+    });
+
 program
     .command("feed-path <project>")
     .description("Print the outbox feed path for tail -F")
