@@ -5,6 +5,14 @@ import Select from "primevue/select";
 import ToggleButton from "primevue/togglebutton";
 import InputText from "primevue/inputtext";
 import { type SortBy, type StatusFilter } from "../lib/labels";
+import { PRIORITIES, type Priority } from "../lib/api";
+
+/** #B.222 priority filter — "all" + each enum value. Owned here so
+ *  parents don't have to mirror PRIORITIES at every call-site. */
+const priorityFilterOptions: { label: string; value: "all" | Priority }[] = [
+    { label: "all priorities", value: "all" },
+    ...PRIORITIES.map((p) => ({ label: p, value: p as Priority })),
+];
 
 // Toolbar receives the options arrays as props so the parent can swap
 // them out if needed; the canonical defaults live in lib/labels.ts.
@@ -40,6 +48,8 @@ const props = defineProps<{
     /** Project picker — only used on mobile (sidebar is hidden there). */
     projectOptions: ProjectOption[];
     project: string | null;
+    /** #B.222 priority filter — "all" or one of the enum values. */
+    priorityFilter: "all" | Priority;
 }>();
 
 const emit = defineEmits<{
@@ -48,6 +58,7 @@ const emit = defineEmits<{
     (e: "update:sortBy", v: SortBy): void;
     (e: "update:searchQuery", v: string): void;
     (e: "update:project", v: string | null): void;
+    (e: "update:priorityFilter", v: "all" | Priority): void;
     (e: "open-current-settings"): void;
     (e: "new-ticket"): void;
 }>();
@@ -189,6 +200,19 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
                     class="filter-select"
                     title="Sort order"
                     @update:model-value="(v: SortBy) => emit('update:sortBy', v)"
+                />
+                <!-- #B.222: priority filter — narrows the inbox to a
+                     single urgency tier. Wired through to /api/inbox
+                     ?priority=… which filters server-side. -->
+                <Select
+                    :model-value="priorityFilter"
+                    :options="priorityFilterOptions"
+                    option-label="label"
+                    option-value="value"
+                    size="small"
+                    class="filter-select"
+                    title="Filter by priority"
+                    @update:model-value="(v: 'all' | Priority) => emit('update:priorityFilter', v)"
                 />
                 <!-- #B.161 row-saver: search joins the filter body
                      so the mobile layout becomes row 1 = [project,

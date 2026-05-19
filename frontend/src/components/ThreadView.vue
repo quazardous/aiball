@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
-import { api, INTENTS, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
+import { api, INTENTS, type Intent, type Priority, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
 import { topDown } from "../lib/prefs";
 import ThreadRelations from "./ThreadRelations.vue";
 import RelationKindMenu from "./RelationKindMenu.vue";
@@ -148,6 +148,21 @@ async function changeIntent(v: Intent | null) {
         error.value = (e as Error).message;
     } finally {
         intentBusy.value = false;
+    }
+}
+// #B.222: priority edit — parallel to intent. Owner-bypass server-side.
+const priorityBusy = ref(false);
+async function changePriority(v: Priority | null) {
+    if (!data.value) return;
+    const tid = data.value.ticket.id;
+    priorityBusy.value = true;
+    try {
+        await api.edit(tid, { priority: v });
+        broadcastRefresh(tid);
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        priorityBusy.value = false;
     }
 }
 function onTagsChanged(tags: TagType[]) {
@@ -448,9 +463,11 @@ async function copyTicketRef() {
                     :body-busy="bodyBusy"
                     :intent-busy="intentBusy"
                     :intent-options="intentOptions"
+                    :priority-busy="priorityBusy"
                     @save="saveAndCloseEdit"
                     @cancel="cancelEdit"
                     @intent-change="changeIntent"
+                    @priority-change="changePriority"
                     @tags-changed="onTagsChanged"
                 />
                 <MarkdownView :source="data.ticket.body" :self-ticket-id="data.ticket.id" />

@@ -16,7 +16,8 @@ import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import Textarea from "primevue/textarea";
 import TagPicker from "./TagPicker.vue";
-import type { Intent, Tag as TagType, TicketSummary } from "../lib/api";
+import type { Intent, Priority, Tag as TagType, TicketSummary } from "../lib/api";
+import { PRIORITIES } from "../lib/api";
 
 defineProps<{
     ticket: TicketSummary;
@@ -25,6 +26,11 @@ defineProps<{
     bodyBusy: boolean;
     intentBusy: boolean;
     intentOptions: { label: string; value: Intent | null }[];
+    /** Optional — when the parent doesn't pass this we synthesize a default
+     *  list at the bottom of the script so existing callsites don't have to
+     *  be touched to surface the priority editor. */
+    priorityOptions?: { label: string; value: Priority | null }[];
+    priorityBusy?: boolean;
 }>();
 const emit = defineEmits<{
     (e: "update:titleDraft", v: string): void;
@@ -32,8 +38,15 @@ const emit = defineEmits<{
     (e: "save"): void;
     (e: "cancel"): void;
     (e: "intent-change", v: Intent | null): void;
+    (e: "priority-change", v: Priority | null): void;
     (e: "tags-changed", tags: TagType[]): void;
 }>();
+
+// Default priority options synthesized here so the parent doesn't have
+// to thread them through — mirrors what intentOptions used to do before
+// the parent started passing them explicitly.
+const defaultPriorityOptions: { label: string; value: Priority | null }[] =
+    PRIORITIES.map((p) => ({ label: p, value: p }));
 
 const bodyTextareaRef = ref<{ $el?: HTMLTextAreaElement } | null>(null);
 defineExpose({ bodyTextareaRef });
@@ -80,6 +93,19 @@ defineExpose({ bodyTextareaRef });
                 :disabled="intentBusy"
                 style="min-width: 9rem"
                 @update:model-value="(v: Intent | null) => emit('intent-change', v)"
+            />
+        </div>
+        <div class="thread-edit-row">
+            <span class="thread-edit-label">Priority</span>
+            <Select
+                :model-value="ticket.priority ?? 'normal'"
+                :options="priorityOptions ?? defaultPriorityOptions"
+                option-label="label"
+                option-value="value"
+                size="small"
+                :disabled="priorityBusy"
+                style="min-width: 9rem"
+                @update:model-value="(v: Priority | null) => emit('priority-change', v)"
             />
         </div>
         <div class="thread-edit-row">

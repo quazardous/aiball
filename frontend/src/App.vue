@@ -110,6 +110,11 @@ const showSnoozed = ref(localStorage.getItem("aiball.show_snoozed") === "1");
 const sortBy = ref<SortBy>(
     (localStorage.getItem("aiball.filter.sort") as SortBy | null) ?? "activity",
 );
+// #B.222: priority filter — "all" (default) or one of the enum values.
+// Persisted in localStorage like the other filters.
+const priorityFilter = ref<"all" | import("./lib/api").Priority>(
+    (localStorage.getItem("aiball.filter.priority") as "all" | import("./lib/api").Priority | null) ?? "all",
+);
 // FTS5 search input. Empty → inbox mode. Debounced before triggering the
 // search endpoint so we don't fire a request on every keystroke.
 const searchQuery = ref("");
@@ -434,6 +439,8 @@ async function loadRows() {
             project: project.value ?? undefined,
             open: onlyOpen.value,
             include_postponed: showSnoozed.value,
+            // #B.222: forward priority filter; "all" → no narrowing.
+            ...(priorityFilter.value !== "all" ? { priority: priorityFilter.value } : {}),
         });
         if (statusFilter.value === "unread") {
             fetched = fetched.filter((r) => r.unread);
@@ -615,6 +622,7 @@ watch([statusFilter, onlyOpen, project], () => {
 localStorage.removeItem("aiball.filter.intent");
 
 watch(sortBy, (v) => localStorage.setItem("aiball.filter.sort", v));
+watch(priorityFilter, (v) => localStorage.setItem("aiball.filter.priority", v));
 
 // Debounce the search input so we don't fire a request on every keystroke
 // — 220ms gives a comfortable feel without showing stale results too long.
@@ -657,7 +665,7 @@ const pagedRows = computed(() =>
 // Any change to the filter set resets the cursor — otherwise a page-2
 // view followed by tightening the filter could leave the user staring
 // at an empty page.
-watch([statusFilter, onlyOpen, project, showSnoozed, sortBy, searchQuery],
+watch([statusFilter, onlyOpen, project, showSnoozed, sortBy, searchQuery, priorityFilter],
     () => { page.value = 1; });
 watch(pageSize, (v) => {
     localStorage.setItem("aiball.page_size", String(v));
@@ -966,11 +974,13 @@ watch(showSnoozed, (v) => {
                             open: p.open,
                             resolved: p.resolved,
                         }))"
+                        :priority-filter="priorityFilter"
                         @update:status-filter="statusFilter = $event"
                         @update:only-open="onlyOpen = $event"
                         @update:sort-by="sortBy = $event"
                         @update:search-query="searchQuery = $event"
                         @update:project="selectProject"
+                        @update:priority-filter="priorityFilter = $event"
                         @open-current-settings="project && openProjectPage(project, 'settings')"
                         @new-ticket="panel = 'compose'"
                     />

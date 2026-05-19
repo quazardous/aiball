@@ -8,7 +8,7 @@
  * Created from #C.2gpcsd ("y a beaucoup de magic string aussi et des
  * label etc"). Phase E of #B.332.
  */
-import type { InboxRow, Intent, Strategy } from "./api";
+import type { InboxRow, Intent, Priority, Strategy } from "./api";
 import type { MessageKind } from "./domain";
 import type { BulkAction } from "./ticket-actions";
 import type { LifecycleStage } from "./ticket-state";
@@ -166,6 +166,19 @@ export const INTENT_SEVERITY: Record<Intent, Severity> = {
     request: "info",
     question: "warn",
     fyi: "secondary",
+};
+
+/**
+ * Severity tint for priority badges (#B.222). Mirrors INTENT_SEVERITY's
+ * shape so badge call-sites stay symmetric. `normal` maps to "secondary"
+ * but the call-site is expected to skip rendering for the default so
+ * 90% of tickets stay visually clean.
+ */
+export const PRIORITY_SEVERITY: Record<Priority, Severity> = {
+    urgent: "danger",
+    high: "warn",
+    normal: "secondary",
+    low: "info",
 };
 
 // =====================================================================

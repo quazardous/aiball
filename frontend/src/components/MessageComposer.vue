@@ -7,7 +7,7 @@ import Textarea from "primevue/textarea";
 import ToggleButton from "primevue/togglebutton";
 import { useToast } from "primevue/usetoast";
 import MarkdownView from "./MarkdownView.vue";
-import { api, INTENTS, type Intent } from "../lib/api";
+import { api, INTENTS, PRIORITIES, type Intent, type Priority } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
 import { attachPasteImage } from "../lib/pasteImage";
 import { uploadImage } from "../lib/upload";
@@ -39,11 +39,19 @@ const title = ref("");
 const body = defineModel<string>("body", { default: "" });
 const byAgent = ref(localStorage.getItem("aiball.human_id") ?? "human");
 const intent = ref<Intent>("request");
+// #B.222: urgency hint orthogonal to intent. Default "normal" = invisible
+// when unchanged, so 90% of ticket-creates don't pay any visual weight.
+const priority = ref<Priority>("normal");
 const preview = ref(false);
 const sending = ref(false);
 const error = ref<string | null>(null);
 
 const intentOptions = INTENTS.map((p) => ({
+    label: p,
+    value: p,
+}));
+
+const priorityOptions = PRIORITIES.map((p) => ({
     label: p,
     value: p,
 }));
@@ -138,11 +146,15 @@ function loadDraft() {
                 title?: string;
                 body?: string;
                 intent?: Intent;
+                priority?: Priority;
             };
             title.value = typeof parsed.title === "string" ? parsed.title : "";
             body.value = typeof parsed.body === "string" ? parsed.body : "";
             if (parsed.intent && (INTENTS as readonly string[]).includes(parsed.intent)) {
                 intent.value = parsed.intent;
+            }
+            if (parsed.priority && (PRIORITIES as readonly string[]).includes(parsed.priority)) {
+                priority.value = parsed.priority;
             }
         } catch {
             // Corrupted draft — start fresh.
@@ -168,14 +180,21 @@ watch(
 // Mirror typing into sessionStorage. Cleared (instead of stored with
 // empty values) when both fields are empty so we don't leave
 // zero-content keys around.
-watch([title, body, intent], () => {
+watch([title, body, intent, priority], () => {
     const key = draftKey.value;
     if (isTicket.value) {
-        const empty = !title.value && !body.value && intent.value === "request";
+        const empty = !title.value && !body.value
+            && intent.value === "request"
+            && priority.value === "normal";
         if (empty) sessionStorage.removeItem(key);
         else sessionStorage.setItem(
             key,
-            JSON.stringify({ title: title.value, body: body.value, intent: intent.value }),
+            JSON.stringify({
+                title: title.value,
+                body: body.value,
+                intent: intent.value,
+                priority: priority.value,
+            }),
         );
     } else {
         if (!body.value) sessionStorage.removeItem(key);
@@ -200,6 +219,9 @@ async function submit() {
                 title: title.value.trim(),
                 body: body.value,
                 intent: intent.value,
+                // Omit priority when it equals the default so the payload
+                // stays clean for the typical case.
+                ...(priority.value !== "normal" ? { priority: priority.value } : {}),
                 by_agent: byAgent.value || "human",
             });
             createdId = typeof r?.id === "number" ? r.id : null;
@@ -497,6 +519,16 @@ async function onAttachPicked(ev: Event) {
                 size="small"
                 :disabled="sending"
                 style="min-width: 9rem"
+            />
+            <Select
+                v-model="priority"
+                :options="priorityOptions"
+                option-label="label"
+                option-value="value"
+                size="small"
+                :disabled="sending"
+                style="min-width: 9rem"
+                title="Priority (#B.222) — urgent / high / normal / low"
             />
         </div>
         <div v-if="!preview" class="composer-textarea-wrap">

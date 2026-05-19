@@ -312,6 +312,10 @@ api.get("/inbox", (req, res) => {
     const status = req.query.status as MessageStatus | undefined;
     const onlyOpen = req.query.open === "1";
     const intentFilter = req.query.intent as string | undefined;
+    // #B.222: optional priority filter — accepts a single value (low /
+    // normal / high / urgent) and narrows the list to tickets whose
+    // priority matches. "all" or absent = no filter.
+    const priorityFilter = req.query.priority as string | undefined;
     // Include snoozed tickets in the open-inbox view (per #B.329). The
     // toggle in the header flips this on so a moderator can see what's
     // currently set aside. Default off — snoozed rows are hidden the
@@ -527,6 +531,7 @@ api.get("/inbox", (req, res) => {
             created_at: t.created_at,
             status: t.status,
             intent: t.intent,
+            priority: t.priority ?? "normal",
             closed: agg.closed || t.status === "rejected",
             // Same rationale as the /tickets/:id handler: resolved stays
             // true after close so the UI can distinguish "closed because
@@ -593,6 +598,9 @@ api.get("/inbox", (req, res) => {
     }
     if (intentFilter && intentFilter !== "all") {
         rows = rows.filter((r) => r.intent === intentFilter);
+    }
+    if (priorityFilter && priorityFilter !== "all") {
+        rows = rows.filter((r) => (r.priority ?? "normal") === priorityFilter);
     }
 
     rows.sort((a, b) => b.last_activity.localeCompare(a.last_activity));
@@ -693,6 +701,7 @@ api.get("/tickets", (req, res) => {
             postponed,
             postponed_until: postponedUntil,
             intent: m.intent,
+            priority: m.priority ?? "normal",
             parent_ticket_id: m.parent_ticket_id ?? null,
             sub_ticket_count: childCounts.get(m.id) ?? 0,
             tags: tagsMap.get(m.id) ?? [],
@@ -1012,6 +1021,7 @@ api.get("/tickets/:id", (req, res) => {
         broadcast: t.broadcast === 1,
         postponed_until: t.postponed_until ?? null,
         intent: t.intent,
+        priority: t.priority ?? "normal",
         parent_ticket_id: t.parent_ticket_id ?? null,
         sub_tickets: listSubTickets(t.id),
         tags: listMessageTags(t.id),

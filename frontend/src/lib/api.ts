@@ -13,14 +13,16 @@ export {
     MESSAGE_KINDS,
     MESSAGE_STATUSES,
     INTENTS,
+    PRIORITIES,
     STRATEGIES,
     isMessageKind,
     isMessageStatus,
     isIntent,
+    isPriority,
     isStrategy,
 } from "./domain";
-export type { MessageKind, MessageStatus, Intent, Strategy } from "./domain";
-import type { MessageKind, MessageStatus, Intent, Strategy } from "./domain";
+export type { MessageKind, MessageStatus, Intent, Priority, Strategy } from "./domain";
+import type { MessageKind, MessageStatus, Intent, Priority, Strategy } from "./domain";
 
 export interface Message {
     id: number;
@@ -40,6 +42,10 @@ export interface Message {
     edited_title: string | null;
     edited_body: string | null;
     intent: Intent | null;
+    /** Per-ticket urgency hint (#B.222). Tickets only; defaults to
+     *  "normal" at the SQL layer if absent. Comments and lifecycle
+     *  events omit this field on the wire. */
+    priority?: Priority;
     /** Public ref for comments / lifecycle events. NULL for tickets. */
     hashid?: string | null;
     /** Set on `ticket_sub_added` / `ticket_referenced` pseudo-comments —
@@ -165,6 +171,8 @@ export interface TicketSummary {
      *  hidden from the open inbox until that timestamp. */
     postponed_until?: string | null;
     intent: Intent | null;
+    /** Urgency hint (#B.222). Defaults to "normal" server-side. */
+    priority?: Priority;
     /** Parent ticket id when this ticket is a sub-ticket. Rendered as
      *  "Sub-ticket of #B.NN" metadata in the thread header. */
     parent_ticket_id?: number | null;
@@ -231,6 +239,8 @@ export interface InboxRow {
     created_at: string;
     status: MessageStatus;
     intent: Intent | null;
+    /** Urgency hint (#B.222). Defaults to "normal" server-side. */
+    priority?: Priority;
     closed: boolean;
     resolved?: boolean;
     /** Agent signalled "I'm stuck, your call" (#B.119). */
@@ -285,6 +295,8 @@ export interface PostMessageInput {
     ticket_id?: number;
     parent_id?: number;
     intent?: Intent | null;
+    /** #B.222 urgency hint (ticket_created only; defaults to "normal"). */
+    priority?: Priority;
     /** #B.129 — tag a comment as a decision proposal at post-time
      *  (server validates: `"plan" | "resolution"`, comment_added only). */
     decision_kind?: "plan" | "resolution";
@@ -426,6 +438,7 @@ export const api = {
             status?: string;
             open?: boolean;
             intent?: string;
+            priority?: Priority;
             include_postponed?: boolean;
         } = {},
     ) => {
@@ -434,6 +447,7 @@ export const api = {
         if (params.status) qs.set("status", params.status);
         if (params.open) qs.set("open", "1");
         if (params.intent) qs.set("intent", params.intent);
+        if (params.priority) qs.set("priority", params.priority);
         if (params.include_postponed) qs.set("include_postponed", "1");
         const q = qs.toString();
         return req<InboxRow[]>("GET", `/api/inbox${q ? "?" + q : ""}`);
@@ -518,7 +532,7 @@ export const api = {
      *  or already terminal. */
     reclassify: (id: number, new_kind: "plan" | "resolution") =>
         req<Message>("POST", `/api/messages/${id}/reclassify`, { new_kind }),
-    edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null }) =>
+    edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>
         req<Message>("POST", `/api/messages/${id}/note`, { note }),

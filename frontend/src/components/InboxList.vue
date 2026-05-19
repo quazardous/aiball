@@ -7,6 +7,7 @@ import { relativeTime, snippetOf, titleOf } from "../lib/format";
 import { attentionOf, lifecycleStage } from "../lib/ticket-state";
 import {
     INTENT_SEVERITY,
+    PRIORITY_SEVERITY,
     LIFECYCLE_ICONS,
     STATUS_SEVERITY,
     type StatusFilter,
@@ -161,7 +162,7 @@ function filtersAreNarrowed(): boolean {
         </template>
         <template v-if="snippetOf(r)" #snippet>{{ snippetOf(r) }}</template>
         <template
-            v-if="r.status !== 'approved' || r.intent || r.tags.length || !project"
+            v-if="r.status !== 'approved' || r.intent || (r.priority && r.priority !== 'normal') || r.tags.length || !project"
             #chips
         >
             <Tag
@@ -174,6 +175,14 @@ function filtersAreNarrowed(): boolean {
                 v-if="r.intent"
                 :value="r.intent"
                 :severity="r.intent ? INTENT_SEVERITY[r.intent] : 'secondary'"
+                style="font-size: 0.7rem"
+            />
+            <!-- #B.222: priority badge — hidden when "normal" (default) so
+                 the chip row stays clean for the 90% of unprioritized tickets. -->
+            <Tag
+                v-if="r.priority && r.priority !== 'normal'"
+                :value="r.priority"
+                :severity="PRIORITY_SEVERITY[r.priority]"
                 style="font-size: 0.7rem"
             />
             <TagBadge
