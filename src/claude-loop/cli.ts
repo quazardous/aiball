@@ -322,9 +322,18 @@ function cmdStart(opts: StartOpts): void {
     // claude passthrough args. Shell-escape per-arg so the inline
     // bash command keeps them intact.
     const passthrough = opts.claudeArgs.map(shQuote).join(" ");
+    // CL_CLAUDE_CMD lets you swap the binary+flags (everything before
+    // --settings) for debugging: see what the inner command receives
+    // without claude repainting the screen. Useful values:
+    //   bash -c 'echo "args: $*"; sleep 99' --
+    //   bash -c 'cat <<< "$*"; read' --
+    // Default = real claude. Read once at spawn time, baked into the
+    // session's inner command (so a fresh `claude-loop start` picks
+    // up the current env, but in-flight loops stay as-spawned).
+    const claudeBin = process.env.CL_CLAUDE_CMD ?? "claude --permission-mode auto";
     const innerCmd =
         `source ${shQuote(envPath(sd))}; ` +
-        `exec claude --permission-mode auto --settings ${shQuote(settingsJson)}` +
+        `exec ${claudeBin} --settings ${shQuote(settingsJson)}` +
         (passthrough ? ` ${passthrough}` : "");
 
     const tname = tmuxName(name);
