@@ -35,6 +35,8 @@ import {
     defaultPingsPath,
     envPath,
     idleMarkerPath,
+    installRootSha,
+    isLoopStale,
     pickPingPhrase,
     pingsPath,
     platePath,
@@ -265,6 +267,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         pings_path: pingsPath(sd),
         cwd,
         claude_args: opts.claudeArgs,
+        // #B.225: stamp the install-root SHA so `list` / `check` can
+        // flag the daemon when source moves past what its timer loaded.
+        started_at_sha: installRootSha(),
     };
     writePlate(sd, plate);
 
@@ -427,24 +432,45 @@ function cmdList(): void {
         process.stdout.write("(no loops)\n");
         return;
     }
+    // #B.225 ghost detection: compute the install-root SHA once for the
+    // whole listing so each plate's stamped sha can be diffed against
+    // it. Null when not a git checkout — we just skip the stale chip.
+    const currentSha = installRootSha();
     const entries = readdirSync(STATE_ROOT).sort();
     let found = 0;
+    let staleCount = 0;
     for (const name of entries) {
         const sd = stateDirFor(name);
         if (!existsSync(platePath(sd))) continue;
         let plate: Plate;
         try { plate = readPlate(sd); } catch { continue; }
-        const alive = tmuxAlive(name) ? "alive" : "dead";
+        const alive = tmuxAlive(name);
+        const aliveStr = alive ? "alive" : "dead";
         const idle = existsSync(idleMarkerPath(sd))
             ? `idle since ${readFileSync(idleMarkerPath(sd), "utf8").trim()}`
             : "—";
+        // Stale only matters for alive loops — a dead loop's timer is
+        // gone, restart picks up current source by definition.
+        const stale = alive && isLoopStale(plate);
+        const staleTag = stale ? " [stale]" : "";
+        if (stale) staleCount++;
         process.stdout.write(
-            `${name.padEnd(24)}  ${alive.padEnd(5)}  ${plate.interval}s  ${idle}\n`,
+            `${name.padEnd(24)}  ${aliveStr.padEnd(5)}${staleTag.padEnd(8)}  ${plate.interval}s  ${idle}\n`,
         );
         process.stdout.write(`${"".padEnd(24)}  dir=${plate.cwd}\n`);
+        if (stale && plate.started_at_sha && currentSha) {
+            process.stdout.write(
+                `${"".padEnd(24)}  source has moved since boot: ${plate.started_at_sha.slice(0, 7)} → ${currentSha.slice(0, 7)} (restart to pick up changes)\n`,
+            );
+        }
         found++;
     }
     if (found === 0) process.stdout.write("(no loops)\n");
+    if (staleCount > 0) {
+        process.stdout.write(
+            `\n${staleCount} stale loop${staleCount === 1 ? "" : "s"} detected — restart with \`claude-loop rm <name> && claude-loop start <name>\` to reload source.\n`,
+        );
+    }
 }
 
 function cmdAttach(name: string): void {
@@ -787,6 +813,17 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
                 process.stdout.write(`    pings_path   : ${plate.pings_path}\n`);
                 process.stdout.write(`    cwd          : ${plate.cwd}\n`);
                 process.stdout.write(`    claude_args  : ${plate.claude_args.length === 0 ? "(none)" : plate.claude_args.join(" ")}\n`);
+                // #B.225 ghost detection: surface stamped SHA + diff vs
+                // current install-root HEAD so a stale daemon is
+                // visible without grepping plate.json by hand.
+                const stamped = plate.started_at_sha ?? null;
+                const current = installRootSha();
+                process.stdout.write(`    started_at_sha: ${stamped ?? "(unset — pre-#B.225 loop)"}\n`);
+                if (stamped && current && stamped !== current) {
+                    process.stdout.write(`    !! source has moved since boot: ${stamped.slice(0, 7)} → ${current.slice(0, 7)} (restart to reload)\n`);
+                } else if (stamped && current && stamped === current) {
+                    process.stdout.write(`    install-root HEAD: ${current.slice(0, 7)} (in sync)\n`);
+                }
             }
             const cwd = plate?.cwd ?? process.cwd();
             const aiballYaml = join(cwd, ".aiball.yaml");

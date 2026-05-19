@@ -65,6 +65,50 @@ export interface Plate {
      * can reproduce the original invocation.
      */
     claude_args: string[];
+    /**
+     * git SHA of the claude-loop install root at the moment `cmdStart`
+     * ran (#B.225 ghost detection). Used by `cmdList` / `cmdCheck` to
+     * flag a running daemon whose timer was loaded from a source that
+     * has since moved — the symptom that bit david on #225 (timer
+     * stuck pre-`e1acaa3` paste-buffer fix). Optional: null when the
+     * install root isn't a git checkout (binary install) or `git` is
+     * missing.
+     */
+    started_at_sha?: string | null;
+}
+
+/**
+ * Resolve the current git SHA of the claude-loop install root, or
+ * null when we can't (not a checkout, git missing, anything). Cheap
+ * — spawned once at boot and once per `list`/`check` invocation.
+ */
+export function installRootSha(): string | null {
+    try {
+        const r = spawnSync("git", ["-C", installRoot(), "rev-parse", "HEAD"], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+        });
+        if (r.status !== 0) return null;
+        const sha = (r.stdout ?? "").trim();
+        return sha && /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * True iff the plate carries a `started_at_sha` AND the current install
+ * root SHA differs from it — i.e. the loop's daemon timer was loaded
+ * from a source that has since been updated, so the running code may
+ * lag the repo. Null in either spot returns false (we can't claim
+ * staleness without evidence both ways).
+ */
+export function isLoopStale(plate: Plate): boolean {
+    const at = plate.started_at_sha ?? null;
+    if (!at) return false;
+    const now = installRootSha();
+    if (!now) return false;
+    return at !== now;
 }
 
 export function platePath(sd: string): string { return join(sd, "plate.json"); }

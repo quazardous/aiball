@@ -34,6 +34,7 @@ import {
     checkHasWork,
     formatPaneSnapshot,
     idleMarkerPath,
+    installRootSha,
     isDuplicateWakeHint,
     lastWakeAtPath,
     paneFooterShowsBusy,
@@ -320,6 +321,11 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
  */
 async function mainSse(): Promise<void> {
     log(`timer started — SSE mode (heartbeat ${interval}s), check-cmd: ${checkCmd || "(internal SDK)"}`);
+    // #B.225: log the install-root SHA so `--log` shows what version
+    // of the timer is actually running. `cmdList` / `cmdCheck` diff
+    // this against the live HEAD to flag a ghost daemon.
+    const bootSha = installRootSha();
+    if (bootSha) log(`timer source: install-root SHA ${bootSha.slice(0, 7)}`);
     let unsubscribe: (() => void) | null = null;
     let lastConnectAt = 0;
     const reconnect = () => {
@@ -540,6 +546,9 @@ async function mainSse(): Promise<void> {
  */
 async function mainPoll(): Promise<void> {
     log(`timer started — polling mode (tick ${interval}s), check-cmd: ${checkCmd}`);
+    // #B.225: same boot SHA log as mainSse — see comment there.
+    const bootSha = installRootSha();
+    if (bootSha) log(`timer source: install-root SHA ${bootSha.slice(0, 7)}`);
     // Same startup safety net as SSE mode (#B.148): drain any
     // pre-existing work right away instead of waiting `interval`s.
     await tryWake("startup");
