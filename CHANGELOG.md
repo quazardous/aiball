@@ -15,6 +15,24 @@ the human-readable narrative.
 
 ## [Unreleased]
 
+### MCP `ticket_reply` — `then: "plan"` (`#B.243`)
+
+- New value `"plan"` on the `then` enum of `ticket_reply`, symmetric to
+  `"resolved"`: tags the comment as a *plan proposal* with
+  `meta.decision = { kind: "plan", status: "pending" }`. The reporter
+  validates the approach via accept/reject under the composer before
+  the agent executes.
+- Sémantique go-signal : accepted plan = the ticket re-enters
+  `actionable: true` so the agent picks it back up; pending plan gates
+  actionable identically to a pending resolution. Closes the
+  agent-side asymmetry surfaced by `#B.239` (the doc on `actionable`
+  already excluded "pending plan proposals" but the tool exposed only
+  `resolved`).
+- Server-side was already prepared (`DECISION_KINDS` accepted `"plan"`
+  since the decision-on-comment lifecycle landed in `#B.129`) —
+  enabling it is purely an MCP enum extension, ~6 net lines in
+  `src/mcp/ticket-write.ts`.
+
 ### Consumers panel rework (`#B.193`, `#B.194`)
 
 - "Add consumer" form retired — daemon auto-inserts on first sight,

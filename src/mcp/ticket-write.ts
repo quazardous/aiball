@@ -164,7 +164,7 @@ export function registerTicketWriteTools(server: McpServer): void {
         "ticket_reply",
         {
             description:
-                "Post a reply within a ticket thread. `target_id` is either a ticket id (→ top-level comment on the ticket) or a comment id (→ nested reply to that specific comment, Gmail-style). Both produce a comment_added; only parent_id differs.\n\n**`summary_until` is required** (#B.130). It's a one-line **ticket state snapshot AFTER this comment lands** — written so a future agent (or you on next session) can resume the ticket from JUST this line, without re-reading any prior body. NOT a summary of what you just said. See the `summary_until` schema description below for the contract + good/bad examples. The API rejects comment_added without it (HTTP 400).\n\nOptional `then` lets the author tag the comment with a decision intent or chain a unilateral state mutation, in the same call:\n- `then: \"resolved\"` — tag the comment as a *resolution decision* (#B.129). The comment carries `meta.decision={kind:\"resolution\",status:\"pending\"}` and the reporter validates it via accept/reject. Closing the ticket auto-accepts any dangling resolution decisions. The 'decision-on-comment' paradigm: the audit lives in the thread, no separate lifecycle row.\n- `then: \"close\"` — close the ticket. Owner-bypass when posted by the reporter.\n- `then: \"reopen\"` — reopen a closed ticket (resets resolved too).\n\nUse `then: \"resolved\"` instead of separate reply + ticket_close when finishing work on someone else's ticket: a single call posts the explanation comment AND tags it as a pending resolution proposal. The reporter sees ONE accept/reject pair under the composer.\n\nIf you need more info before you can proceed, just post a plain comment with your question — there is no agent→human \"blocked\" signal anymore (it induced misuse where agents temporized with blocked instead of asking; the conversational comment IS the right primitive).",
+                "Post a reply within a ticket thread. `target_id` is either a ticket id (→ top-level comment on the ticket) or a comment id (→ nested reply to that specific comment, Gmail-style). Both produce a comment_added; only parent_id differs.\n\n**`summary_until` is required** (#B.130). It's a one-line **ticket state snapshot AFTER this comment lands** — written so a future agent (or you on next session) can resume the ticket from JUST this line, without re-reading any prior body. NOT a summary of what you just said. See the `summary_until` schema description below for the contract + good/bad examples. The API rejects comment_added without it (HTTP 400).\n\nOptional `then` lets the author tag the comment with a decision intent or chain a unilateral state mutation, in the same call:\n- `then: \"resolved\"` — tag the comment as a *resolution decision* (#B.129). The comment carries `meta.decision={kind:\"resolution\",status:\"pending\"}` and the reporter validates it via accept/reject. Closing the ticket auto-accepts any dangling resolution decisions. The 'decision-on-comment' paradigm: the audit lives in the thread, no separate lifecycle row.\n- `then: \"plan\"` — tag the comment as a *plan proposal* (#B.243), symmetric to `resolved` but for HOW-to rather than DONE. The comment carries `meta.decision={kind:\"plan\",status:\"pending\"}` and the reporter validates the approach before execution. Accepted plan = go-signal (the ticket re-enters actionable so the agent picks it up to execute); pending plan gates actionable just like a pending resolution.\n- `then: \"close\"` — close the ticket. Owner-bypass when posted by the reporter.\n- `then: \"reopen\"` — reopen a closed ticket (resets resolved too).\n\nUse `then: \"resolved\"` when you've completed the work and propose to close; use `then: \"plan\"` when you've sketched HOW you'll tackle the ticket and want the reporter to validate the approach first. Both post a single comment that also functions as a pending proposal — the reporter sees ONE accept/reject pair under the composer instead of two separate steps.\n\nIf you need more info before you can proceed, just post a plain comment with your question — there is no agent→human \"blocked\" signal anymore (it induced misuse where agents temporized with blocked instead of asking; the conversational comment IS the right primitive).",
             inputSchema: {
                 target_id: z
                     .number()
@@ -205,10 +205,10 @@ export function registerTicketWriteTools(server: McpServer): void {
                         ].join("\n"),
                     ),
                 then: z
-                    .enum(["resolved", "close", "reopen"])
+                    .enum(["resolved", "plan", "close", "reopen"])
                     .optional()
                     .describe(
-                        "Optional intent on the comment. `resolved` (#B.129) = tag the comment as a resolution decision (`meta.decision={kind:\"resolution\",status:\"pending\"}`); the reporter accept/reject — no separate ticket_resolved row anymore, the comment IS the proposal and the audit lives on it. `close` = close the ticket (reporter-only). `reopen` = bring a closed ticket back. `close`/`reopen` are still emitted as distinct lifecycle event rows; `resolved` is a comment+decision sidecar. There is no agent→human `blocked` option — post a plain comment with your question if you need info before proceeding.",
+                        "Optional intent on the comment. `resolved` (#B.129) = tag the comment as a resolution decision (`meta.decision={kind:\"resolution\",status:\"pending\"}`); the reporter accept/reject — no separate ticket_resolved row anymore, the comment IS the proposal and the audit lives on it. `plan` (#B.243) = symmetric to `resolved` for plan proposals (`meta.decision={kind:\"plan\",status:\"pending\"}`): use it when the comment body describes HOW you intend to tackle the ticket and you want the reporter to validate the approach before you execute. Accepted plan = go-signal (the agent re-enters actionable to execute); pending plan gates actionable identically to pending resolution. `close` = close the ticket (reporter-only). `reopen` = bring a closed ticket back. `close`/`reopen` are still emitted as distinct lifecycle event rows; `resolved` and `plan` are comment+decision sidecars. There is no agent→human `blocked` option — post a plain comment with your question if you need info before proceeding.",
                     ),
             },
         },
@@ -250,12 +250,13 @@ export function registerTicketWriteTools(server: McpServer): void {
             // question — the conversational thread covers it naturally.
             const kind: string = !then
                 ? "comment_added"
-                : then === "resolved"
+                : then === "resolved" || then === "plan"
                   ? "comment_added"
                   : then === "close"
                     ? "ticket_closed"
                     : "ticket_reopened";
-            const decision_kind = then === "resolved" ? "resolution" : undefined;
+            const decision_kind =
+                then === "resolved" ? "resolution" : then === "plan" ? "plan" : undefined;
             const proj = project ?? target.project;
             const res = await client.postMessage({
                 project: proj,
