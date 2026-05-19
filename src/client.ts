@@ -581,6 +581,7 @@ export class AiballClient {
             body?: string | null;
             summary?: string | null;
             intent?: string | null;
+            priority?: string | null;
         },
     ) {
         return this.http("POST", `/api/messages/${id}/edit`, fields);

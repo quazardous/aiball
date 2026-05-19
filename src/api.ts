@@ -32,7 +32,9 @@ import {
     setProjectStrategy,
     STRATEGIES,
     INTENTS,
+    PRIORITIES,
     type Intent,
+    type Priority,
     insertPing,
     listPings,
     markPingsRead,
@@ -564,21 +566,27 @@ api.post("/messages/:id/edit", (req, res) => {
     const id = Number(req.params.id);
     const existing = getMessage(id);
     if (!existing) return notFound(res);
-    const { title, body, summary, intent } = req.body ?? {};
+    const { title, body, summary, intent, priority } = req.body ?? {};
     if (
         title === undefined &&
         body === undefined &&
         summary === undefined &&
-        intent === undefined
+        intent === undefined &&
+        priority === undefined
     ) {
-        return badRequest(res, "provide title, body, summary, and/or intent");
+        return badRequest(res, "provide title, body, summary, intent, and/or priority");
     }
     if (intent !== undefined && intent !== null) {
         if (typeof intent !== "string" || !INTENTS.includes(intent as Intent)) {
             return badRequest(res, `intent must be one of ${INTENTS.join(", ")}`);
         }
     }
-    const updated = editMessage(id, { title, body, summary, intent });
+    if (priority !== undefined && priority !== null) {
+        if (typeof priority !== "string" || !PRIORITIES.includes(priority as Priority)) {
+            return badRequest(res, `priority must be one of ${PRIORITIES.join(", ")}`);
+        }
+    }
+    const updated = editMessage(id, { title, body, summary, intent, priority });
     if (!updated) return notFound(res);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });

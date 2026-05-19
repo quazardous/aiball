@@ -21,6 +21,7 @@ import {
     type MessageKind,
     type MessageStatus,
     type NewMessage,
+    type Priority,
 } from "./connection.js";
 import {
     injectMarkers,
@@ -297,6 +298,9 @@ export function editMessage(
         body?: string | null;
         summary?: string | null;
         intent?: Intent | null;
+        /** #B.222: urgency hint. Tickets only; ignored on comments. NULL
+         *  resets to the schema default 'normal' (= no override). */
+        priority?: Priority | null;
     },
 ): Message | null {
     const db = getDb();
@@ -315,6 +319,13 @@ export function editMessage(
     // gates this edit is the same gate that protects title/body anyway.
     if (fields.summary !== undefined) ticketPatch.summary = fields.summary;
     if (fields.intent !== undefined) ticketPatch.intent = fields.intent;
+    if (fields.priority !== undefined) {
+        // NULL clears back to the schema default 'normal'. The CHECK
+        // constraint at the SQL layer rejects bogus values; api.ts +
+        // mcp validate up front so the column is never touched with
+        // garbage from here.
+        ticketPatch.priority = fields.priority ?? "normal";
+    }
     if (Object.keys(ticketPatch).length > 0) {
         const t = db.update(schema.tickets)
             .set(ticketPatch)

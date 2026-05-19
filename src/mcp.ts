@@ -447,6 +447,13 @@ server.registerTool(
                 .nullable()
                 .optional()
                 .describe("New intent label (owner-bypass)."),
+            priority: z
+                .enum(["low", "normal", "high", "urgent"])
+                .nullable()
+                .optional()
+                .describe(
+                    "New urgency hint (#B.222, owner-bypass). low / normal / high / urgent. Pass null to reset to 'normal'.",
+                ),
             broadcast: z
                 .boolean()
                 .optional()
@@ -462,7 +469,7 @@ server.registerTool(
                 ),
         },
     },
-    async ({ ticket_id, title, summary, body, intent, broadcast, postponed_until }) => {
+    async ({ ticket_id, title, summary, body, intent, priority, broadcast, postponed_until }) => {
         const results: Record<string, unknown> = { ticket_id };
         // Each field maps to its own HTTP endpoint. Apply in this
         // order: edit fields first (they may change the title/body the
@@ -471,9 +478,10 @@ server.registerTool(
             title !== undefined ||
             body !== undefined ||
             summary !== undefined ||
-            intent !== undefined
+            intent !== undefined ||
+            priority !== undefined
         ) {
-            results.edit = await client.edit(ticket_id, { title, summary, body, intent });
+            results.edit = await client.edit(ticket_id, { title, summary, body, intent, priority });
         }
         if (broadcast !== undefined) {
             results.broadcast = await client.setTicketBroadcast(ticket_id, broadcast);
@@ -487,7 +495,7 @@ server.registerTool(
             }
         }
         if (Object.keys(results).length === 1) {
-            throw new Error("ticket_update needs at least one field — pass title/body/intent/broadcast/postponed_until");
+            throw new Error("ticket_update needs at least one field — pass title/body/intent/priority/broadcast/postponed_until");
         }
         return asText(results);
     },
