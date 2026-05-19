@@ -146,14 +146,40 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         .all();
 
     const byProject = new Map<string, ProjectMeta>();
-    for (const t of ticketAgg) {
-        byProject.set(t.project, {
-            name: t.project,
-            last_activity: t.last_activity ?? "",
-            ticket_count: Number(t.ticket_count),
+    // #B.227: seed from the projects registry first so a freshly-
+    // registered empty project (auto-register at claude-loop start,
+    // or `aiball project init`) still surfaces in the sidebar with
+    // zero counts. Before this seed, byProject was built only from
+    // ticket/message aggs and empty projects silently disappeared.
+    const registry = db.select({
+        name: schema.projects.name,
+        created_at: schema.projects.createdAt,
+    }).from(schema.projects).all();
+    for (const r of registry) {
+        byProject.set(r.name, {
+            name: r.name,
+            last_activity: r.created_at ?? "",
+            ticket_count: 0,
             comment_count: 0,
-            pending_count: Number(t.ticket_pending) || 0,
+            pending_count: 0,
         });
+    }
+    for (const t of ticketAgg) {
+        const existing = byProject.get(t.project);
+        const last = t.last_activity ?? "";
+        if (existing) {
+            existing.ticket_count = Number(t.ticket_count);
+            existing.pending_count = Number(t.ticket_pending) || 0;
+            if (last && last > existing.last_activity) existing.last_activity = last;
+        } else {
+            byProject.set(t.project, {
+                name: t.project,
+                last_activity: last,
+                ticket_count: Number(t.ticket_count),
+                comment_count: 0,
+                pending_count: Number(t.ticket_pending) || 0,
+            });
+        }
     }
     for (const m of messageAgg) {
         const cur = byProject.get(m.project);
