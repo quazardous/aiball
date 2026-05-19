@@ -28,7 +28,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { AiballClient } from "../client.js";
-import { MUX_CMD, buildContextPhrase, checkHasWork, idleMarkerPath, injectWakePhrase, pingsPath, setTmuxStatus, tmuxName } from "./state.js";
+import { MUX_CMD, buildContextPhrase, checkHasWork, idleMarkerPath, injectWakePhrase, pingsPath, recordOpenWakeCount, setTmuxStatus, tmuxName } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -107,7 +107,8 @@ if (noStartup) {
 
 (async () => {
     try {
-        if (await checkHasWork(checkCmd, undefined, process.env.AIBALL_PROJECT ?? null)) {
+        const gate = await checkHasWork(checkCmd, undefined, process.env.AIBALL_PROJECT ?? null, sd!);
+        if (gate.has) {
             // #B.221 david: bare cultural phrases ("Allons-y!" / "tap
             // tap") gave claude zero operational context — she would
             // greet back and burn a turn before noticing the inbox.
@@ -122,6 +123,9 @@ if (noStartup) {
                 pingsPath(sd!),
             );
             await injectWakePhrase(`${tmuxName(name!)}.0`, phrase);
+            // #B.232 ch887f: bump watermark so the timer heartbeat
+            // doesn't immediately re-wake on the same open tickets.
+            if (gate.openCount > 0) recordOpenWakeCount(sd!, gate.openCount);
             setTmuxStatus(name!, "busy");
         } else {
             // Nothing to do at boot — mark idle so the timer takes

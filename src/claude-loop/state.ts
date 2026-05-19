@@ -166,6 +166,41 @@ export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env.CL_WAKE_CO
  */
 export function lastWakeHintPath(sd: string): string { return join(sd, "last-wake-hint"); }
 
+/**
+ * Session-volatile watermark for the open-tickets wake gate (#B.232
+ * david ch887f: "il faut un mécanisme pour les ack et qu'ils ne
+ * reviennent plus pour cette session si c'est du bruit, mémoire
+ * volatile au daemon par exemple"). Stores the open-ticket count that
+ * was already mentioned in a wake CTA in this loop session. The gate
+ * fires on open tickets only when the current count EXCEEDS this
+ * watermark (i.e. a NEW ticket landed since the last time claude was
+ * pinged about open work) — drained pings still wake unconditionally.
+ *
+ * Lifetime = the state dir. `claude-loop rm` wipes it; restart of the
+ * same loop name keeps it (which matches david's intent: if you saw
+ * the same N tickets last session, don't re-fire on the next).
+ */
+export function lastOpenWakeCountPath(sd: string): string {
+    return join(sd, "last-open-wake-count");
+}
+
+/** Read the watermark; 0 when missing/unparseable (treat as "never woken"). */
+export function readLastOpenWakeCount(sd: string): number {
+    try {
+        const v = Number(readFileSync(lastOpenWakeCountPath(sd), "utf8").trim());
+        return Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
+    } catch {
+        return 0;
+    }
+}
+
+/** Persist the watermark after a successful wake. Best-effort. */
+export function recordOpenWakeCount(sd: string, count: number): void {
+    try {
+        writeFileSync(lastOpenWakeCountPath(sd), `${Math.max(0, Math.floor(count))}\n`);
+    } catch { /* gate fails-open next tick, not fatal */ }
+}
+
 /** Persist the hint that just triggered a wake. Pass `undefined` to
  *  no-op (we only want hinted wakes in the dedup ledger; un-hinted
  *  pop-culture wakes coalesce via `lastWakeAtPath` already). */
@@ -322,14 +357,32 @@ const LEGACY_AIBALL_CHECK_CMD = "aiball pings-count -q";
  * true if EITHER pings>0 OR open>0 — the wake CTA already mentions
  * both via `buildContextPhrase`, so the chained directive
  * ("drain via unread + handle open via ticket_list") lands cleanly.
+ *
+ * #B.232 (david ch887f): when `sd` is provided, the open-tickets leg
+ * is suppressed if `openCount <= watermark` (already-acked open
+ * tickets don't re-fire on every heartbeat). Watermark drops with
+ * openCount so a closed-then-reopened ticket re-triggers correctly.
+ * Caller bumps the watermark via `recordOpenWakeCount(sd, openCount)`
+ * after a successful wake (post send-keys, in the same site that
+ * writes `last-wake-at`).
+ *
+ * Returns `{ has, pingsCount, openCount }` so the caller can persist
+ * the watermark without a second round-trip; legacy shell-out branch
+ * returns counts=0 since they aren't observable.
  */
+export interface CheckHasWorkResult {
+    has: boolean;
+    pingsCount: number;
+    openCount: number;
+}
 export async function checkHasWork(
     checkCmd: string | null | undefined,
     client?: AiballClient,
     project?: string | null,
-): Promise<boolean> {
+    sd?: string | null,
+): Promise<CheckHasWorkResult> {
     const cmd = checkCmd ?? "";
-    if (cmd === "true") return true;
+    if (cmd === "true") return { has: true, pingsCount: 0, openCount: 0 };
     if (cmd === "" || cmd === LEGACY_AIBALL_CHECK_CMD) {
         const c = client ?? new AiballClient();
         try {
@@ -341,19 +394,32 @@ export async function checkHasWork(
                     actionable_count?: number;
                 }>>,
             ]);
-            if ((pingsR.unread ?? 0) > 0) return true;
+            const pingsCount = pingsR.unread ?? 0;
             const openCount = Array.isArray(projects)
                 ? projects
                     .filter((p) => !project || p.name === project)
                     .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
                 : 0;
-            return openCount > 0;
+            if (pingsCount > 0) return { has: true, pingsCount, openCount };
+            // Open-tickets leg: gate by watermark when sd is available
+            // so the same N idle tickets don't wake every heartbeat.
+            if (sd) {
+                const watermark = readLastOpenWakeCount(sd);
+                if (openCount < watermark) {
+                    // Tickets were closed — lower the watermark so a
+                    // future climb correctly re-triggers. Best-effort.
+                    recordOpenWakeCount(sd, openCount);
+                    return { has: false, pingsCount, openCount };
+                }
+                return { has: openCount > watermark, pingsCount, openCount };
+            }
+            return { has: openCount > 0, pingsCount, openCount };
         } catch {
-            return false;
+            return { has: false, pingsCount: 0, openCount: 0 };
         }
     }
     const r = spawnSync("bash", ["-c", cmd], { stdio: "ignore" });
-    return r.status === 0;
+    return { has: r.status === 0, pingsCount: 0, openCount: 0 };
 }
 
 /**

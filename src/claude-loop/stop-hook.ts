@@ -17,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
+import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -157,9 +157,9 @@ function readPane(): string {
             log(`  → BUSY-DEFER armed until=${until} became=idle:wait`);
             emit();
         }
-        const hasWork = await checkHasWork(checkCmd, undefined, process.env.AIBALL_PROJECT ?? null);
-        log(`  checkHasWork=${hasWork}`);
-        if (hasWork) {
+        const gate = await checkHasWork(checkCmd, undefined, process.env.AIBALL_PROJECT ?? null, sd!);
+        log(`  checkHasWork=${gate.has} (pings=${gate.pingsCount} open=${gate.openCount})`);
+        if (gate.has) {
             // #B.198 fix A: coalesce. If the previous wake fired
             // within the coalesce window, this Stop hook is the tail
             // of a burst (N events were unread, each turn drained one
@@ -194,6 +194,8 @@ function readPane(): string {
             // next Stop hook fire can detect "we just sent a wake".
             try { writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
             await injectWakePhrase(`${tmuxName(name!)}.0`, phrase);
+            // #B.232 ch887f: bump open-tickets watermark post-wake.
+            if (gate.openCount > 0) recordOpenWakeCount(sd!, gate.openCount);
             setTmuxStatus(name!, "busy");
             log(`  → WAKE '${phrase}' became=busy`);
         } else {

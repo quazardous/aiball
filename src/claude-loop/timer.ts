@@ -40,6 +40,8 @@ import {
     paneFooterShowsBusy,
     pingsPath,
     readBusyDefer,
+    readLastOpenWakeCount,
+    recordOpenWakeCount,
     recordWakeHint,
     setTmuxStatus,
     snapshotPane,
@@ -290,9 +292,20 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             }
         }
     }
-    if (!manualWake && !(await checkHasWork(checkCmd, client(), process.env.AIBALL_PROJECT ?? null))) {
-        log(`skip wake (${reason}) — checkHasWork returned false (no unread pings and no open tickets)`);
-        return false;
+    let gateOpenCount = 0;
+    if (!manualWake) {
+        const gate = await checkHasWork(
+            checkCmd,
+            client(),
+            process.env.AIBALL_PROJECT ?? null,
+            sd!,
+        );
+        if (!gate.has) {
+            const watermark = readLastOpenWakeCount(sd!);
+            log(`skip wake (${reason}) — checkHasWork returned false (pings=${gate.pingsCount} open=${gate.openCount} watermark=${watermark})`);
+            return false;
+        }
+        gateOpenCount = gate.openCount;
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
@@ -303,6 +316,11 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // same (ticket, comment) within `WAKE_COALESCE_WINDOW_MS` get
     // dropped at `onPing` (event-layer merge, no DB write).
     recordWakeHint(sd!, hint);
+    // #B.232 ch887f: bump the open-tickets watermark so the same N
+    // tickets don't re-fire the gate on every heartbeat. Only when
+    // we observed the count via the SDK path (manual/legacy wakes
+    // leave gateOpenCount=0 → watermark drops, which is fine).
+    if (gateOpenCount > 0) recordOpenWakeCount(sd!, gateOpenCount);
     setTmuxStatus(name!, "busy");
     log(`wake (${reason}) → '${phrase}'`);
     return true;
