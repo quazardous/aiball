@@ -20,3 +20,6 @@ outbox/
 # project binding. Use .mcp.json.example as the committed template;
 # copy + edit AIBALL_AGENT / AIBALL_PROJECT on first install. #B.166
 .mcp.json
+# .claude/ holds per-user Claude Code state (settings.local.json
+# permission allowlist, agent cache). Never committed.
+.claude/
