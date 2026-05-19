@@ -120,8 +120,10 @@ Service path if you want one of:
 ### Per-user service (`-Service`)
 
 ```powershell
-winget install NSSM.NSSM         # prereq, one-time
-pwsh -File install.ps1 -Service  # prompts for your Windows password
+winget install NSSM.NSSM                       # prereq, one-time
+# from an elevated (admin) PowerShell — even per-user services need
+# admin to register with the SCM:
+pwsh -File install.ps1 -Service                # prompts for your Windows password
 ```
 
 The password is stored encrypted in **LSA Secrets** by Windows (the same

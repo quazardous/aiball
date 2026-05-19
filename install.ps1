@@ -52,11 +52,12 @@
 
 .PARAMETER Service
     Install the daemon as a Windows Service (via NSSM) instead of a
-    Scheduled Task. Default account is the current user; prompts for
-    your Windows password (stored encrypted in LSA, not on disk). Heads
-    up: if you change your Windows password later, the service stops
-    working until you re-run install.ps1 -Service. NSSM is a prereq:
-    `winget install NSSM.NSSM`.
+    Scheduled Task. **Requires admin elevation** — even per-user services
+    need admin to register with the SCM. Default account is the current
+    user; prompts for your Windows password (stored encrypted in LSA, not
+    on disk). Heads up: if you change your Windows password later, the
+    service stops working until you re-run install.ps1 -Service. NSSM is
+    a prereq: `winget install NSSM.NSSM`.
 
 .PARAMETER System
     Implies -Service. Runs the daemon as LocalSystem instead of your
@@ -77,7 +78,7 @@
     Dev install + start daemon + mint setup URL.
 
 .EXAMPLE
-    PS> .\install.ps1 -Service
+    PS> .\install.ps1 -Service    # run from elevated PowerShell
     Install as Windows Service running as current user (NSSM, prompts
     for password). Removes any pre-existing scheduled task.
 
@@ -276,10 +277,14 @@ Require-Cmd git
 
 if ($Service) {
     Require-Cmd nssm   # `winget install NSSM.NSSM` if missing
-    if ($System -and -not (Test-IsAdmin)) {
-        Die "-System requires running install.ps1 from an elevated PowerShell (right-click -> Run as administrator)."
+    # Creating ANY Windows service requires admin (NSSM can't bypass
+    # the SCM permission requirement). The -System flag changes the
+    # account the service runs as, but the install itself always
+    # needs elevation.
+    if (-not (Test-IsAdmin)) {
+        Die "-Service requires running install.ps1 from an elevated PowerShell (right-click -> Run as administrator). Even per-user services need admin to install."
     }
-    Log "service mode: $(if ($System) { 'LocalSystem (global, admin)' } else { 'current user (' + $env:USERNAME + ')' })"
+    Log "service mode: $(if ($System) { 'LocalSystem (global)' } else { 'current user (' + $env:USERNAME + ')' })"
 }
 
 # Node version: hard fail <20 (matches package.json engines), warn >=24
