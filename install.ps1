@@ -50,20 +50,45 @@
 .PARAMETER Host
     Daemon bind host. Default 127.0.0.1.
 
+.PARAMETER Service
+    Install the daemon as a Windows Service (via NSSM) instead of a
+    Scheduled Task. Default account is the current user; prompts for
+    your Windows password (stored encrypted in LSA, not on disk). Heads
+    up: if you change your Windows password later, the service stops
+    working until you re-run install.ps1 -Service. NSSM is a prereq:
+    `winget install NSSM.NSSM`.
+
+.PARAMETER System
+    Implies -Service. Runs the daemon as LocalSystem instead of your
+    user account — no password needed, survives Windows password
+    changes, runs at boot before login. Requires admin elevation. Uses
+    %PROGRAMDATA%\aiball as the data dir (LocalSystem has no usable
+    home dir).
+
 .PARAMETER Yes
     Skip interactive confirmations (--PurgeData prompt).
 
 .EXAMPLE
     PS> .\install.ps1
-    Fresh user install (copy-mode).
+    Fresh user install (copy-mode, Scheduled Task at logon).
 
 .EXAMPLE
     PS> .\install.ps1 -Symlink -AuthInit
     Dev install + start daemon + mint setup URL.
 
 .EXAMPLE
+    PS> .\install.ps1 -Service
+    Install as Windows Service running as current user (NSSM, prompts
+    for password). Removes any pre-existing scheduled task.
+
+.EXAMPLE
+    PS> .\install.ps1 -System    # run from elevated PowerShell
+    Install as Windows Service running as LocalSystem. No password,
+    boots before login, data dir under %PROGRAMDATA%\aiball.
+
+.EXAMPLE
     PS> .\install.ps1 -Uninstall
-    Remove install + scheduled task; keep data.
+    Remove install + scheduled task / service; keep data.
 #>
 
 [CmdletBinding()]
@@ -72,10 +97,15 @@ param(
     [switch] $AuthInit,
     [switch] $Uninstall,
     [switch] $PurgeData,
+    [switch] $Service,
+    [switch] $System,
     [switch] $Yes,
     [int]    $Port = 7777,
     [string] $BindHost = '127.0.0.1'
 )
+
+# -System implies -Service.
+if ($System) { $Service = $true }
 
 $ErrorActionPreference = 'Stop'
 
@@ -84,10 +114,15 @@ $ErrorActionPreference = 'Stop'
 $SrcDir    = $PSScriptRoot
 $PrefixLib = Join-Path $env:LOCALAPPDATA 'Programs\aiball'
 $PrefixBin = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'   # on PATH by default
-$DataDir   = Join-Path $env:APPDATA      'aiball'
-$LogDir    = Join-Path $env:LOCALAPPDATA 'aiball'
+# -System runs as LocalSystem which has no usable home dir, so data
+# goes under %PROGRAMDATA%. Per-user installs keep %APPDATA%.
+$DataDir   = if ($System) { Join-Path $env:PROGRAMDATA 'aiball' } `
+                     else { Join-Path $env:APPDATA      'aiball' }
+$LogDir    = if ($System) { Join-Path $env:PROGRAMDATA 'aiball\logs' } `
+                     else { Join-Path $env:LOCALAPPDATA 'aiball' }
 $LogFile   = Join-Path $LogDir           'daemon.log'
-$TaskName  = 'aiball-daemon'
+$TaskName  = 'aiball-daemon'   # scheduled task name (and service name — separate namespaces in Windows)
+$SvcName   = 'aiball-daemon'
 $Shims     = @('aiball', 'aiball-mcp', 'claude-loop')
 
 # --- helpers ----------------------------------------------------------------
@@ -117,13 +152,52 @@ function Test-IsAdmin {
     return $p.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Test-ServiceExists($name) {
+    return [bool] (Get-Service -Name $name -ErrorAction SilentlyContinue)
+}
+
+function Test-TaskExists($name) {
+    return [bool] (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue)
+}
+
+function Remove-AiballTask {
+    if (Test-TaskExists $TaskName) {
+        try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop } catch { }
+        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+        Log "removed scheduled task: $TaskName"
+    }
+}
+
+function Remove-AiballService {
+    if (Test-ServiceExists $SvcName) {
+        try { & nssm stop $SvcName confirm 2>&1 | Out-Null } catch { }
+        & nssm remove $SvcName confirm 2>&1 | Out-Null
+        Log "removed service: $SvcName"
+    }
+}
+
+function Read-SecurePasswordPlain($prompt) {
+    # SecureString -> plain text held briefly to pass to nssm. The plain
+    # value is never persisted to disk; NSSM stashes it encrypted in LSA
+    # Secrets after we hand it off.
+    $sec = Read-Host $prompt -AsSecureString
+    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+    try {
+        return [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+}
+
 # --- uninstall path ---------------------------------------------------------
 
 if ($Uninstall) {
-    Log "stopping scheduled task $TaskName (if present)"
-    Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | ForEach-Object {
-        try { Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop } catch { }
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    Log "removing daemon registration (scheduled task and/or service)"
+    Remove-AiballTask
+    if (Get-Command nssm -ErrorAction SilentlyContinue) {
+        Remove-AiballService
+    } elseif (Test-ServiceExists $SvcName) {
+        Warn "service $SvcName exists but nssm is not in PATH — install NSSM and re-run -Uninstall, or remove manually via 'sc.exe delete $SvcName' (admin)"
     }
 
     foreach ($name in $Shims) {
@@ -147,21 +221,31 @@ if ($Uninstall) {
         }
     }
 
-    if (Test-Path $LogDir) {
-        # Logs go with the install — DataDir is the durable bit.
-        Remove-Item -Recurse -Force $LogDir
-        Log "removed log dir: $LogDir"
+    # Logs may live in either location depending on whether the install
+    # was -System (PROGRAMDATA) or per-user (LOCALAPPDATA). Clean both
+    # so uninstall is correct regardless of which flag the user passes.
+    foreach ($d in @((Join-Path $env:LOCALAPPDATA 'aiball'),
+                     (Join-Path $env:PROGRAMDATA  'aiball\logs'))) {
+        if (Test-Path $d) {
+            Remove-Item -Recurse -Force $d
+            Log "removed log dir: $d"
+        }
     }
 
-    if ($PurgeData -and (Test-Path $DataDir)) {
-        if (-not $Yes) {
-            $resp = Read-Host "delete data dir $DataDir (DB + uploads)? [y/N]"
-            if ($resp -notmatch '^[yY]') { Warn "kept data dir"; exit 0 }
+    # Same story for data dirs: check both. PurgeData applies to both.
+    $dataCandidates = @((Join-Path $env:APPDATA     'aiball'),
+                        (Join-Path $env:PROGRAMDATA 'aiball')) | Where-Object { Test-Path $_ }
+    if ($PurgeData) {
+        foreach ($d in $dataCandidates) {
+            if (-not $Yes) {
+                $resp = Read-Host "delete data dir $d (DB + uploads)? [y/N]"
+                if ($resp -notmatch '^[yY]') { Warn "kept $d"; continue }
+            }
+            Remove-Item -Recurse -Force $d
+            Log "removed data dir: $d"
         }
-        Remove-Item -Recurse -Force $DataDir
-        Log "removed data dir: $DataDir"
-    } elseif (Test-Path $DataDir) {
-        Warn "data dir kept at $DataDir (pass --PurgeData to remove)"
+    } else {
+        foreach ($d in $dataCandidates) { Warn "data dir kept at $d (pass --PurgeData to remove)" }
     }
     exit 0
 }
@@ -171,6 +255,14 @@ if ($Uninstall) {
 Require-Cmd node
 Require-Cmd npm
 Require-Cmd git
+
+if ($Service) {
+    Require-Cmd nssm   # `winget install NSSM.NSSM` if missing
+    if ($System -and -not (Test-IsAdmin)) {
+        Die "-System requires running install.ps1 from an elevated PowerShell (right-click -> Run as administrator)."
+    }
+    Log "service mode: $(if ($System) { 'LocalSystem (global, admin)' } else { 'current user (' + $env:USERNAME + ')' })"
+}
 
 # Node version: hard fail <20 (matches package.json engines), warn >=24
 # (better-sqlite3@11.x ships prebuilt bindings up to Node 22; Node 24
@@ -276,13 +368,19 @@ Log "ensured log dir:  $LogDir"
 # --Symlink installs don't pollute the source tree with a generated .cmd.
 
 $launcherPath = Join-Path $LogDir 'daemon-launcher.cmd'
+# -System runs as LocalSystem which has no usable home dir, so the
+# daemon's default `homedir()/.local/share/aiball` would resolve under
+# C:\Windows\system32\config\systemprofile — far from where the
+# installer put the data. Pin AIBALL_HOME explicitly in that mode so
+# the daemon writes/reads from %PROGRAMDATA%\aiball.
+$homeOverride = if ($System) { "set `"AIBALL_HOME=$DataDir`"" } else { '' }
 $launcherBody = @"
 @echo off
 setlocal EnableExtensions
 
 REM Auto-generated by install.ps1 — runs the aiball daemon for the
-REM Scheduled Task. Redirects stdout+stderr into the log file. Roll
-REM the log if it exceeds 8MB.
+REM scheduled task / service. Redirects stdout+stderr into the log
+REM file. Rolls the log if it exceeds 8MB.
 
 set "LOG=$LogFile"
 set "LIB=$PrefixLib"
@@ -298,6 +396,7 @@ if exist "%LOG%" (
 
 set "AIBALL_PORT=$Port"
 set "AIBALL_HOST=$BindHost"
+$homeOverride
 
 echo [%date% %time%] launching aiball daemon (port $Port) >> "%LOG%"
 npx.cmd --no-install tsx src\daemon.ts >> "%LOG%" 2>&1
@@ -326,34 +425,82 @@ exit /b %errorlevel%
     Log "wrote shim: $shimPath -> $target"
 }
 
-# --- Scheduled Task ---------------------------------------------------------
+# --- Scheduled Task OR Service (mutually exclusive) ------------------------
+# Only one runs the daemon. The opposite mode's registration is cleared
+# so we never have two daemons fighting over port $Port.
 
-Log "registering scheduled task: $TaskName"
-$action   = New-ScheduledTaskAction `
-    -Execute 'cmd.exe' `
-    -Argument "/c `"$launcherPath`"" `
-    -WorkingDirectory $PrefixLib
-$trigger  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$settings = New-ScheduledTaskSettingsSet `
-    -StartWhenAvailable `
-    -RestartCount 5 `
-    -RestartInterval (New-TimeSpan -Minutes 1) `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 0)   # 0 = unlimited
-$principal = New-ScheduledTaskPrincipal `
-    -UserId $env:USERNAME `
-    -LogonType Interactive `
-    -RunLevel Limited
+if ($Service) {
+    if (Test-TaskExists $TaskName) {
+        Warn "switching from scheduled task to service — removing existing task"
+        Remove-AiballTask
+    }
+    # Re-create cleanly (NSSM install fails if the service exists).
+    Remove-AiballService
 
-# Re-register if it already exists (Register-ScheduledTask -Force replaces).
-Register-ScheduledTask `
-    -TaskName $TaskName `
-    -Action $action `
-    -Trigger $trigger `
-    -Settings $settings `
-    -Principal $principal `
-    -Description "aiball daemon (#B.178). Logs to $LogFile." `
-    -Force | Out-Null
-Log "scheduled task registered (AtLogOn, restart x5 every 1min)"
+    Log "installing Windows Service: $SvcName (via nssm)"
+    & nssm install $SvcName 'cmd.exe' '/c' $launcherPath | Out-Null
+    if ($LASTEXITCODE -ne 0) { Die "nssm install failed (exit $LASTEXITCODE)" }
+    & nssm set $SvcName AppDirectory $PrefixLib       | Out-Null
+    & nssm set $SvcName Description "aiball daemon (#B.178). Logs to $LogFile" | Out-Null
+    & nssm set $SvcName Start SERVICE_AUTO_START      | Out-Null
+    # Restart on any exit with 60s delay (mirrors the scheduled task
+    # restart-x5-every-1min policy in spirit; NSSM is open-ended).
+    & nssm set $SvcName AppExit Default Restart       | Out-Null
+    & nssm set $SvcName AppRestartDelay 60000         | Out-Null
+
+    if ($System) {
+        & nssm set $SvcName ObjectName LocalSystem    | Out-Null
+        Log "service runs as LocalSystem (admin, global)"
+    } else {
+        Log "service runs as $env:USERDOMAIN\$env:USERNAME — Windows needs your password to log in this account non-interactively at boot"
+        Log "the password is stored encrypted in LSA Secrets (never plaintext on disk), but if you change your Windows password later you'll need to re-run install.ps1 -Service to re-set it"
+        $plainPass = Read-SecurePasswordPlain "Windows password for $env:USERNAME"
+        try {
+            & nssm set $SvcName ObjectName "$env:USERDOMAIN\$env:USERNAME" $plainPass | Out-Null
+            if ($LASTEXITCODE -ne 0) { Die "nssm set ObjectName failed (exit $LASTEXITCODE) — check the password" }
+        } finally {
+            $plainPass = $null   # best-effort clear from PS memory
+            [System.GC]::Collect()
+        }
+    }
+    Log "service installed (SERVICE_AUTO_START, restart on any exit + 60s delay)"
+} else {
+    if (Test-ServiceExists $SvcName) {
+        Warn "switching from service to scheduled task — removing existing service"
+        if (Get-Command nssm -ErrorAction SilentlyContinue) {
+            Remove-AiballService
+        } else {
+            Die "service $SvcName exists but nssm is not in PATH — install NSSM and re-run, or manually remove via 'sc.exe delete $SvcName' (admin)"
+        }
+    }
+
+    Log "registering scheduled task: $TaskName"
+    $action   = New-ScheduledTaskAction `
+        -Execute 'cmd.exe' `
+        -Argument "/c `"$launcherPath`"" `
+        -WorkingDirectory $PrefixLib
+    $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $settings = New-ScheduledTaskSettingsSet `
+        -StartWhenAvailable `
+        -RestartCount 5 `
+        -RestartInterval (New-TimeSpan -Minutes 1) `
+        -ExecutionTimeLimit (New-TimeSpan -Hours 0)   # 0 = unlimited
+    $principal = New-ScheduledTaskPrincipal `
+        -UserId $env:USERNAME `
+        -LogonType Interactive `
+        -RunLevel Limited
+
+    # Re-register if it already exists (Register-ScheduledTask -Force replaces).
+    Register-ScheduledTask `
+        -TaskName $TaskName `
+        -Action $action `
+        -Trigger $trigger `
+        -Settings $settings `
+        -Principal $principal `
+        -Description "aiball daemon (#B.178). Logs to $LogFile." `
+        -Force | Out-Null
+    Log "scheduled task registered (AtLogOn, restart x5 every 1min)"
+}
 
 # --- sanity check: better-sqlite3 native binding --------------------------
 # The daemon will fail to start if the native binding isn't built for
@@ -373,9 +520,18 @@ try {
         Warn "  - downgrade Node to 22 LTS (winget install OpenJS.NodeJS.LTS)"
         Warn "  - install VS Build Tools, then in $PrefixLib :"
         Warn "      npm rebuild better-sqlite3 --build-from-source"
-        Warn "Disabling the scheduled task so it doesn't restart-loop at logon."
-        Warn "Once fixed, re-enable with: Enable-ScheduledTask -TaskName $TaskName"
-        Disable-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
+        if ($Service) {
+            Warn "Stopping the service and switching it to Manual start so it"
+            Warn "doesn't restart-loop. Once fixed, re-enable with:"
+            Warn "  Set-Service -Name $SvcName -StartupType Automatic"
+            Warn "  Start-Service $SvcName"
+            try { & nssm stop $SvcName confirm 2>&1 | Out-Null } catch { }
+            Set-Service -Name $SvcName -StartupType Manual -ErrorAction SilentlyContinue
+        } else {
+            Warn "Disabling the scheduled task so it doesn't restart-loop at logon."
+            Warn "Once fixed, re-enable with: Enable-ScheduledTask -TaskName $TaskName"
+            Disable-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Out-Null
+        }
         $sqliteOk = $false
     } else {
         Log "better-sqlite3 native binding loads OK"
@@ -389,8 +545,13 @@ if ($AuthInit) {
     if (-not $sqliteOk) {
         Warn "skipping --AuthInit because the daemon can't start (better-sqlite3)"
     } else {
-        Log "starting daemon via $TaskName"
-        Start-ScheduledTask -TaskName $TaskName
+        if ($Service) {
+            Log "starting service $SvcName"
+            Start-Service -Name $SvcName
+        } else {
+            Log "starting daemon via $TaskName"
+            Start-ScheduledTask -TaskName $TaskName
+        }
         $healthUrl = "http://${BindHost}:${Port}/api/health"
         Log "waiting for daemon health at $healthUrl (up to 15s)"
         $up = $false
@@ -425,19 +586,35 @@ Write-Host ''
 Write-Host "  install dir: $PrefixLib$(if ($Symlink) { '  (symlink -> ' + $SrcDir + ')' })"
 Write-Host "  data dir:    $DataDir"
 Write-Host "  log file:    $LogFile"
-Write-Host "  daemon:      Get-ScheduledTask -TaskName $TaskName"
-Write-Host "  start:       Start-ScheduledTask -TaskName $TaskName"
-Write-Host "  stop:        Stop-ScheduledTask -TaskName $TaskName"
+if ($Service) {
+    $acct = if ($System) { 'LocalSystem' } else { "$env:USERDOMAIN\$env:USERNAME" }
+    Write-Host "  daemon:      Get-Service -Name $SvcName   (runs as $acct)"
+    Write-Host "  start:       Start-Service -Name $SvcName"
+    Write-Host "  stop:        Stop-Service -Name $SvcName"
+} else {
+    Write-Host "  daemon:      Get-ScheduledTask -TaskName $TaskName"
+    Write-Host "  start:       Start-ScheduledTask -TaskName $TaskName"
+    Write-Host "  stop:        Stop-ScheduledTask -TaskName $TaskName"
+}
 Write-Host "  open:        http://${BindHost}:${Port}"
 if (-not $sqliteOk) {
     Write-Host ''
     Write-Host '  Fix better-sqlite3 first (see warnings above), then:'
-    Write-Host "         Enable-ScheduledTask -TaskName $TaskName"
-    Write-Host "         Start-ScheduledTask  -TaskName $TaskName"
+    if ($Service) {
+        Write-Host "         Set-Service -Name $SvcName -StartupType Automatic"
+        Write-Host "         Start-Service -Name $SvcName"
+    } else {
+        Write-Host "         Enable-ScheduledTask -TaskName $TaskName"
+        Write-Host "         Start-ScheduledTask  -TaskName $TaskName"
+    }
 } elseif (-not $AuthInit) {
     Write-Host ''
     Write-Host '  Next: start the daemon, then mint a setup token:'
-    Write-Host "         Start-ScheduledTask -TaskName $TaskName"
+    if ($Service) {
+        Write-Host "         Start-Service -Name $SvcName"
+    } else {
+        Write-Host "         Start-ScheduledTask -TaskName $TaskName"
+    }
     Write-Host "         aiball auth init --host $BindHost --port $Port"
 }
 Write-Host '----------------------------------------------------------------------'
