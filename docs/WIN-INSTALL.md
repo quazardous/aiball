@@ -83,14 +83,81 @@ What it does (mirror of `install.sh`):
 
 ## Daemon lifecycle
 
+Scheduled Task (default — no flag at install):
+
 | | |
 | --- | --- |
 | Start  | `Start-ScheduledTask -TaskName aiball-daemon` |
 | Stop   | `Stop-ScheduledTask -TaskName aiball-daemon` |
 | Status | `Get-ScheduledTask -TaskName aiball-daemon \| Get-ScheduledTaskInfo` |
-| Logs   | `%LOCALAPPDATA%\aiball\daemon.log` (rolled by the scheduled task) |
+| Logs   | `%LOCALAPPDATA%\aiball\daemon.log` (rolled at 8MB by the launcher) |
 | Data   | `%APPDATA%\aiball\` (SQLite DB, uploads, spool) |
 | Check  | `aiball check` |
+
+Windows Service (`-Service` or `-System` at install):
+
+| | |
+| --- | --- |
+| Start  | `Start-Service -Name aiball-daemon` |
+| Stop   | `Stop-Service -Name aiball-daemon` |
+| Status | `Get-Service -Name aiball-daemon` (or `services.msc`) |
+| Logs   | `%LOCALAPPDATA%\aiball\daemon.log` (`-Service`) or `%PROGRAMDATA%\aiball\logs\daemon.log` (`-System`) |
+| Data   | `%APPDATA%\aiball\` (`-Service`) or `%PROGRAMDATA%\aiball\` (`-System`) |
+| Check  | `aiball check` |
+
+## Service mode
+
+By default the daemon runs from a per-user Scheduled Task (zero admin, no
+password, restart-x5 on failure). For most usage that's fine. Pick the
+Service path if you want one of:
+
+- Daemon up **at boot**, before any login.
+- Daemon **survives logout**.
+- Native `services.msc` visibility.
+- LocalSystem-scoped DataDir (one daemon for the whole machine, multiple
+  Windows accounts share it).
+
+### Per-user service (`-Service`)
+
+```powershell
+winget install NSSM.NSSM                       # prereq, one-time
+# from an elevated (admin) PowerShell — even per-user services need
+# admin to register with the SCM:
+pwsh -File install.ps1 -Service                # prompts for your Windows password
+```
+
+The password is stored encrypted in **LSA Secrets** by Windows (the same
+store used for cached credentials and service accounts) — not in
+plaintext on disk anywhere. Only the SCM reads it back to start the
+service.
+
+**Pitfall**: if you change your Windows password later, the service
+**stops working** until you re-run `install.ps1 -Service` to re-set it.
+There's no way around that for non-system accounts; it's the same gotcha
+that affects any service running under a user account.
+
+### LocalSystem service (`-System`)
+
+```powershell
+winget install NSSM.NSSM                     # prereq, one-time
+# from an elevated (admin) PowerShell:
+pwsh -File install.ps1 -System
+```
+
+No password, no per-user account, survives password changes. Trade-off:
+
+- Data lives at `%PROGRAMDATA%\aiball\` (shared across users), not your
+  `%APPDATA%\aiball\`.
+- Requires admin to install (one-time).
+- The daemon runs with full system privileges — fine because it's a
+  local-only TCP listener, but worth knowing.
+
+### Switching between modes
+
+Re-running `install.ps1` (with or without `-Service`) automatically
+removes the opposite registration, so you never end up with two daemons
+fighting over port 7777. To go back to a Scheduled Task: just re-run
+without `-Service`.
 
 ## Transport: TCP, not UDS
 
@@ -109,17 +176,15 @@ token and stores it in `%APPDATA%\aiball\token` — `aiball` CLI and
   spawn anything. Use WSL2 if you want the autonomous-loop feature. The
   Windows daemon + per-project `.mcp.json` + autopoll Stop hook give you
   everything except the background loop.
-- **systemd**. A per-user Scheduled Task replaces it. No socket-activation;
-  the daemon launches at logon and stays up until logout.
+- **systemd**. A per-user Scheduled Task replaces it for the default
+  path; an NSSM-managed Windows Service is also available via
+  `-Service` / `-System` (see above). No socket-activation in either.
 - **`aiball-tailscale`** — the bash helper that wraps `tailscale serve`
   (see [`docs/TAILSCALE.md`](TAILSCALE.md)) is Linux/macOS-only: it
   reads the daemon port from the systemd drop-in, which doesn't exist
   on Windows. To expose the Windows daemon over Tailscale today,
   configure `tailscale serve` manually pointing at
   `http://127.0.0.1:7777` — same security model, just no helper script.
-- **Windows Service**. Not yet — a Scheduled Task is the v1 choice
-  (lighter, no admin required, scoped to the logged-in user). NSSM
-  service-manager support is on the roadmap if there's demand.
 
 ## Troubleshooting
 
