@@ -340,20 +340,53 @@ export function listUnread(
 
 /**
  * Count the tickets posted by `by_agent` that are still pending
- * moderation. Cheap (single COUNT, indexed on by_agent + status). Used
- * by the MCP `_status` block so an author sees, in passing, whether
- * their submissions are still waiting on a moderator.
+ * moderation AND not currently closed. Used by the MCP `_status`
+ * block so an author sees, in passing, whether their submissions
+ * are still waiting on a moderator.
+ *
+ * #B.218: a pending ticket that was closed (e.g. agent created +
+ * self-closed before approval, or moderator closed without
+ * accepting) is no longer in the moderation queue — exclude it
+ * to keep the count honest. Reopen restores it: a ticket is
+ * "currently closed" iff the latest close event is more recent
+ * than the latest reopen event for the same ticket.
  */
 export function pendingTicketsByAuthor(by_agent: string): number {
-    const r = getDb()
-        .select({ n: sql<number>`COUNT(*)` })
+    const db = getDb();
+    const pendingRows = db.select({ id: schema.tickets.id })
         .from(schema.tickets)
         .where(and(
             eq(schema.tickets.byAgent, by_agent),
             eq(schema.tickets.status, "pending"),
         ))
-        .get();
-    return Number(r?.n ?? 0);
+        .all();
+    if (pendingRows.length === 0) return 0;
+    const pendingIds = pendingRows.map((r) => r.id);
+    const lifecycle = db.select({
+        ticket_id: schema.messages.ticketId,
+        kind: schema.messages.kind,
+        id: schema.messages.id,
+    })
+        .from(schema.messages)
+        .where(and(
+            inArray(schema.messages.ticketId, pendingIds),
+            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
+            eq(schema.messages.status, "approved"),
+        ))
+        .all();
+    const lastClose = new Map<number, number>();
+    const lastReopen = new Map<number, number>();
+    for (const ev of lifecycle) {
+        if (ev.ticket_id == null) continue;
+        const map = ev.kind === "ticket_closed" ? lastClose : lastReopen;
+        const prev = map.get(ev.ticket_id) ?? 0;
+        if (ev.id > prev) map.set(ev.ticket_id, ev.id);
+    }
+    return pendingIds.filter((id) => {
+        const c = lastClose.get(id) ?? 0;
+        const r = lastReopen.get(id) ?? 0;
+        return c <= r;
+    }).length;
 }
 
 export function unreadCount(consumer_id: string, project: string): number {

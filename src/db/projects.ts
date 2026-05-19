@@ -5,7 +5,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 
@@ -167,6 +167,28 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
                 blockedByTicket.set(ev.ticket_id, true);
             }
         }
+    }
+
+    // #B.218: subtract pending tickets that are currently closed from
+    // pending_count. The SQL agg above counts every pending ticket
+    // regardless of close state — a moderator who closed a pending
+    // ticket without approving (wontfix / abandoned) still saw it in
+    // the badge. Walk the pending tickets, check lifecycle, decrement
+    // per-project pending_count when closed-without-reopen.
+    const pendingTickets = db.select({
+        id: schema.tickets.id,
+        project: schema.tickets.project,
+    })
+        .from(schema.tickets)
+        .where(and(
+            eq(schema.tickets.status, "pending"),
+            or(isNull(schema.tickets.postponedUntil), lte(schema.tickets.postponedUntil, nowIsoStr)),
+        ))
+        .all();
+    for (const t of pendingTickets) {
+        if (closedByTicket.get(t.id) !== true) continue;
+        const cur = byProject.get(t.project);
+        if (cur && cur.pending_count > 0) cur.pending_count -= 1;
     }
 
     // #B.129 phase 2: layer decision-on-comment resolutions on top of
