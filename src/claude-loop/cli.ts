@@ -345,8 +345,20 @@ function cmdStart(opts: StartOpts): void {
         (passthrough ? ` ${passthrough}` : "");
 
     const tname = tmuxName(name);
+    // Resolve bash via absolute path on Windows. The user's PATH is
+    // unreliable here: the WSL launcher (C:\Windows\System32\bash.exe)
+    // sits in machine PATH and preempts Git Bash; and psmux's server
+    // is persistent — once it started with a given PATH, subsequent
+    // new-session calls use that PATH, not the caller's. Hardcoding
+    // the Git Bash absolute path on Windows bypasses both issues.
+    let bashCmd = "bash";
+    if (process.platform === "win32") {
+        const gitBash = "C:\\Program Files\\Git\\bin\\bash.exe";
+        if (existsSync(gitBash)) bashCmd = gitBash;
+        // else fall back to "bash" and hope the PATH is sane.
+    }
     const r = spawnSync(MUX_CMD, [
-        "new-session", "-d", "-s", tname, "-c", cwd, "bash", "-lc", innerCmd,
+        "new-session", "-d", "-s", tname, "-c", cwd, bashCmd, "-lc", innerCmd,
     ]);
     if (r.status !== 0) die("tmux new-session failed");
 
