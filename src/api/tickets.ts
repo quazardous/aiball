@@ -40,6 +40,7 @@ import {
     insertTypedRelation,
     listTypedRelationsForTicket,
 } from "../db.js";
+import { computeActionableTicketIds } from "../db/projects.js";
 import { RELATION_KINDS, isRelationKind, type RelationKind } from "../relations.js";
 import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
@@ -376,6 +377,14 @@ ticketsRouter.get("/inbox", (req, res) => {
 ticketsRouter.get("/tickets", (req, res) => {
     const project = req.query.project as string | undefined;
     const onlyOpen = req.query.open === "1";
+    // #B.232 #234 david: actionable=1 is a stricter form of open=1
+    // that ALSO excludes resolved-pending, blocked, and gated tickets
+    // (mirrors actionable_count semantics on the sidebar). Used by the
+    // wake-CTA so the agent's candidate pool excludes tickets already
+    // in awaiting-validation state. Frontend keeps open=1 for the
+    // broader "everything not lifecycle-closed" view (david still needs
+    // to see resolution proposals to act on them).
+    const onlyActionable = req.query.actionable === "1";
     // Default: when `open=1`, snoozed tickets are hidden (same rule as
     // the inbox). Pass `include_postponed=1` to surface them anyway.
     const includePostponed = req.query.include_postponed === "1";
@@ -478,6 +487,10 @@ ticketsRouter.get("/tickets", (req, res) => {
     let result = tickets;
     if (onlyOpen) {
         result = result.filter((t) => !t.closed && (includePostponed || !t.postponed));
+    }
+    if (onlyActionable) {
+        const { actionableIds } = computeActionableTicketIds();
+        result = result.filter((t) => actionableIds.has(t.id));
     }
     if (tagsFilter && tagsFilter.length > 0) {
         const requiredSet = new Set(tagsFilter.map((s) => s.toLowerCase()));

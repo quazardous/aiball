@@ -15,13 +15,17 @@ export function registerTicketReadTools(server: McpServer): void {
         "ticket_list",
         {
             description:
-                "List tickets, optionally filtered by project, tags, author, status, title substring, or `since` (created_at >= ISO8601). Snoozed tickets excluded by default when `open: true` — pass `include_snoozed: true` to surface them. Tag filter is AND-semantic. **Default: header-only rows** (id, title, summary, status, parent, sub_count, tags) — no bodies. Pass `full: true` to include `body` per row. Use ticket_get for one full thread.",
+                "List tickets, optionally filtered by project, tags, author, status, title substring, or `since` (created_at >= ISO8601). Snoozed tickets excluded by default when `open: true` — pass `include_snoozed: true` to surface them. **`actionable: true`** (#B.232 #234) is stricter than `open`: also excludes tickets with a pending resolution proposal, blocked tickets, and tickets gated by an open dependency — i.e. the candidate pool the wake-CTA points at. Tag filter is AND-semantic. **Default: header-only rows** (id, title, summary, status, parent, sub_count, tags) — no bodies. Pass `full: true` to include `body` per row. Use ticket_get for one full thread.",
             inputSchema: {
                 project: z.string().optional(),
                 open: z
                     .boolean()
                     .optional()
                     .describe("If true, only tickets that have not been closed."),
+                actionable: z
+                    .boolean()
+                    .optional()
+                    .describe("If true, only tickets where the agent actually has work to do: not closed, not snoozed, NOT in awaiting-validation state (no pending resolution/plan proposal), not blocked, not gated by an open dependency. Strictly tighter than `open: true`. Matches the actionable_count surfaced on the sidebar."),
                 include_snoozed: z
                     .boolean()
                     .optional()
@@ -74,6 +78,7 @@ export function registerTicketReadTools(server: McpServer): void {
         async ({
             project,
             open,
+            actionable,
             include_snoozed,
             tags,
             full,
@@ -86,6 +91,7 @@ export function registerTicketReadTools(server: McpServer): void {
             const list = await client.listTickets({
                 project,
                 open: open ? "1" : undefined,
+                actionable: actionable ? "1" : undefined,
                 include_postponed: include_snoozed ? "1" : undefined,
                 tags: tags && tags.length > 0 ? tags.join(",") : undefined,
                 // Default (no flag) → summary mode on the API side. `full: true`

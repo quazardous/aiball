@@ -729,7 +729,7 @@ export async function buildContextPhrase(
             verbs.push(pickPrompt(promptMap, "wake_directive_engage", {
                 tone,
                 vars: { open_count: openCount },
-                fallback: `engage one of ${openCount} open via \`ticket_list({open: true})\``,
+                fallback: `engage one of ${openCount} actionable via \`ticket_list({actionable: true})\``,
             }));
         }
         const directive = verbs.join(" + ");

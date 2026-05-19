@@ -837,3 +837,160 @@ export function getProjectStatsRich(project: string): ProjectStatsRich {
         auto_approved_pct: autoApprovedPct,
     };
 }
+
+/**
+ * Per-ticket actionable set (#B.232 #234 david). Mirrors the
+ * actionable_count gating already computed inside `listProjectsDetailed`
+ * but exposes the SET of ticket ids instead of per-project counts, so
+ * the /api/tickets endpoint and the MCP `ticket_list` tool can filter
+ * the result list on the same semantic as the sidebar badge.
+ *
+ * A ticket is actionable when it is:
+ *   - approved (passed moderation)
+ *   - NOT closed (no approved ticket_closed without a later ticket_reopened)
+ *   - NOT snoozed (postponed_until in the future)
+ *   - NOT resolved (no pending/approved ticket_resolved row AND no
+ *     comment_added carrying meta.decision.kind="resolution" in
+ *     pending/accepted status)
+ *   - NOT blocked (no pending/approved ticket_blocked)
+ *   - NOT gated by an active depends_on / blocks relation to an open
+ *     blocker (#B.123 phase B.4)
+ *
+ * Returns both sets so callers can distinguish "open but not actionable"
+ * (e.g. a pending resolution-proposal awaiting reporter accept) from
+ * "fully closed". `openIds` ⊇ `actionableIds`.
+ *
+ * Logic intentionally duplicates the relevant chunk of
+ * `listProjectsDetailed` rather than refactoring it — the original
+ * function is load-bearing for the sidebar and a split would touch too
+ * many call sites for this slice. Divergence risk is small (the
+ * lifecycle rules are stable) and tests cover the count path.
+ */
+export interface ActionableTicketSet {
+    /** All open ticket ids regardless of resolution/blocked/gated state. */
+    openIds: Set<number>;
+    /** Subset of openIds that pass every actionable gate. */
+    actionableIds: Set<number>;
+}
+
+export function computeActionableTicketIds(): ActionableTicketSet {
+    const db = getDb();
+    const nowStr = nowIso();
+
+    // Lifecycle replay (mirrors listProjectsDetailed lines 201-249).
+    const lifecycle = db.select({
+        ticket_id: schema.messages.ticketId,
+        kind: schema.messages.kind,
+        status: schema.messages.status,
+        id: schema.messages.id,
+    })
+        .from(schema.messages)
+        .where(
+            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened", "ticket_resolved", "ticket_blocked"]),
+        )
+        .orderBy(asc(schema.messages.id))
+        .all();
+    const closedByTicket = new Map<number, boolean>();
+    const resolvedByTicket = new Map<number, boolean>();
+    const blockedByTicket = new Map<number, boolean>();
+    for (const ev of lifecycle) {
+        if (ev.kind === "ticket_closed") {
+            if (ev.status === "approved") closedByTicket.set(ev.ticket_id, true);
+        } else if (ev.kind === "ticket_reopened") {
+            if (ev.status === "approved") {
+                closedByTicket.set(ev.ticket_id, false);
+                resolvedByTicket.set(ev.ticket_id, false);
+                blockedByTicket.set(ev.ticket_id, false);
+            }
+        } else if (ev.kind === "ticket_resolved") {
+            if (ev.status === "approved" || ev.status === "pending") {
+                resolvedByTicket.set(ev.ticket_id, true);
+            }
+        } else if (ev.kind === "ticket_blocked") {
+            if (ev.status === "approved" || ev.status === "pending") {
+                blockedByTicket.set(ev.ticket_id, true);
+            }
+        }
+    }
+
+    // Decision-on-comment resolutions (#B.129 phase 2).
+    const resolutionComments = db.select({
+        ticket_id: schema.messages.ticketId,
+        meta: schema.messages.meta,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.kind, "comment_added"),
+            eq(schema.messages.status, "approved"),
+        ))
+        .all();
+    for (const c of resolutionComments) {
+        if (!c.meta) continue;
+        try {
+            const m = JSON.parse(c.meta) as { decision?: { kind?: string; status?: string } };
+            const d = m.decision;
+            if (d?.kind === "resolution" && (d.status === "pending" || d.status === "accepted")) {
+                resolvedByTicket.set(c.ticket_id, true);
+            }
+        } catch { /* malformed meta, skip */ }
+    }
+
+    // Open set: approved + not lifecycle-closed + not snoozed.
+    const tickets = db.select({
+        id: schema.tickets.id,
+        status: schema.tickets.status,
+        postponedUntil: schema.tickets.postponedUntil,
+    }).from(schema.tickets).all();
+    const openIds = new Set<number>();
+    for (const t of tickets) {
+        if (t.status !== "approved") continue;
+        if (closedByTicket.get(t.id) === true) continue;
+        if (t.postponedUntil && t.postponedUntil > nowStr) continue;
+        openIds.add(t.id);
+    }
+
+    // Relation gating: depends_on / blocks chains to an open blocker
+    // suppress the dependent from the actionable set (#B.123 phase B.4).
+    const latestRelations = db.select({
+        sourceTicketId: schema.messages.ticketId,
+        targetTicketId: schema.messages.sourceTicketId,
+        meta: schema.messages.meta,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.kind, "ticket_relation"),
+            eq(schema.messages.status, "approved"),
+        ))
+        .orderBy(schema.messages.id)
+        .all();
+    const latestPerPair = new Map<string, { source: number; target: number; kind: string }>();
+    for (const r of latestRelations) {
+        if (!r.meta || !r.targetTicketId) continue;
+        let kind: string | undefined;
+        try {
+            const m = JSON.parse(r.meta) as { relation?: { kind?: string } };
+            kind = m.relation?.kind;
+        } catch { continue; }
+        if (!kind) continue;
+        latestPerPair.set(`${r.sourceTicketId}-${r.targetTicketId}`, {
+            source: r.sourceTicketId,
+            target: r.targetTicketId,
+            kind,
+        });
+    }
+    const gatedByBlocker = new Set<number>();
+    for (const r of latestPerPair.values()) {
+        if (r.kind === "depends_on" && openIds.has(r.target)) gatedByBlocker.add(r.source);
+        else if (r.kind === "blocks" && openIds.has(r.source)) gatedByBlocker.add(r.target);
+    }
+
+    const actionableIds = new Set<number>();
+    for (const id of openIds) {
+        if (resolvedByTicket.get(id) === true) continue;
+        if (blockedByTicket.get(id) === true) continue;
+        if (gatedByBlocker.has(id)) continue;
+        actionableIds.add(id);
+    }
+
+    return { openIds, actionableIds };
+}

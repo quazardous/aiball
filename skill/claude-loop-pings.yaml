@@ -116,5 +116,5 @@ prompts:
     - "drain via `unread({pings: true, mark_read: true})`"
     - "ack via `unread({pings: true, mark_read: true})`"
   wake_directive_engage:
-    - "engage one of {open_count} open via `ticket_list({open: true})`"
-    - "pick one of {open_count} open via `ticket_list({open: true})`"
+    - "engage one of {open_count} actionable via `ticket_list({actionable: true})`"
+    - "pick one of {open_count} actionable via `ticket_list({actionable: true})`"
