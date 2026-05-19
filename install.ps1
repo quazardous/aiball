@@ -386,8 +386,14 @@ if ($Uninstall) {
         }
     }
 
-    # Same story for data dirs: check both. PurgeData applies to both.
-    $dataCandidates = @((Join-Path $env:APPDATA     'aiball'),
+    # Same story for data dirs: check all three. PurgeData applies
+    # to whichever exist. USERPROFILE\.local\share is the current
+    # per-user data dir (matches the daemon's homedir() default);
+    # APPDATA\aiball is a legacy location from earlier install.ps1
+    # revisions (might still exist on machines that ran older
+    # installers); PROGRAMDATA\aiball is the -System path.
+    $dataCandidates = @((Join-Path $env:USERPROFILE '.local\share\aiball'),
+                        (Join-Path $env:APPDATA     'aiball'),
                         (Join-Path $env:PROGRAMDATA 'aiball')) | Where-Object { Test-Path $_ }
     if ($PurgeData) {
         foreach ($d in $dataCandidates) {
