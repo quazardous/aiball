@@ -1,0 +1,29 @@
+/**
+ * Shared HTTP / payload-shaping helpers used across the api/* sub-routers
+ * (#B.213 phase 1). Kept tiny — anything domain-specific belongs in the
+ * sub-router that owns it, not here.
+ */
+import type { Response } from "express";
+import { listMessageTags, tagsForMessages, type Tag } from "../db.js";
+
+export function badRequest(res: Response, msg: string): Response {
+    return res.status(400).json({ error: msg });
+}
+
+export function notFound(res: Response, msg = "not found"): Response {
+    return res.status(404).json({ error: msg });
+}
+
+/**
+ * Decorate one or many messages with their tags so callers can render
+ * them without an N+1 round-trip. Uses one bulk SELECT regardless of
+ * the number of messages.
+ */
+export function withTags<T extends { id: number }>(rows: T[]): (T & { tags: Tag[] })[] {
+    const map = tagsForMessages(rows.map((r) => r.id));
+    return rows.map((r) => ({ ...r, tags: map.get(r.id) ?? [] }));
+}
+
+export function withTagsOne<T extends { id: number }>(row: T): T & { tags: Tag[] } {
+    return { ...row, tags: listMessageTags(row.id) };
+}

@@ -24,16 +24,7 @@ import {
     markMessageSeen,
     markAllSeenForProject,
     markSeenUpToForProject,
-    listTags,
-    getTag,
-    getTagByName,
-    insertTag,
-    updateTag,
-    deleteTag,
     listMessageTags,
-    addMessageTag,
-    removeMessageTag,
-    setMessageTags,
     tagsForMessages,
     getStrategy,
     setStrategy,
@@ -97,7 +88,6 @@ import {
     type MessageKind,
     type MessageStatus,
     type Strategy,
-    type Tag,
     type Message,
     insertTypedRelation,
     listTypedRelationsForTicket,
@@ -116,27 +106,8 @@ import { fanOutPings, submitMessage, validateNewMessage, VALID_KINDS } from "./m
 import { parseMeta } from "./questions.js";
 import { isDecisionKind, type DecisionKind } from "./decisions.js";
 import { bearerAuth, hashPassword, verifyPassword, type AuthenticatedRequest } from "./auth.js";
-
-function badRequest(res: Response, msg: string): Response {
-    return res.status(400).json({ error: msg });
-}
-
-function notFound(res: Response, msg = "not found"): Response {
-    return res.status(404).json({ error: msg });
-}
-
-/**
- * Decorate one or many messages with their tags so callers can render
- * them without an N+1 round-trip. Uses one bulk SELECT regardless of
- * the number of messages.
- */
-function withTags<T extends { id: number }>(rows: T[]): (T & { tags: Tag[] })[] {
-    const map = tagsForMessages(rows.map((r) => r.id));
-    return rows.map((r) => ({ ...r, tags: map.get(r.id) ?? [] }));
-}
-function withTagsOne<T extends { id: number }>(row: T): T & { tags: Tag[] } {
-    return { ...row, tags: listMessageTags(row.id) };
-}
+import { badRequest, notFound, withTags, withTagsOne } from "./api/_helpers.js";
+import { tagsRouter } from "./api/tags.js";
 
 export const api = Router();
 
@@ -2106,120 +2077,8 @@ api.post("/mark-read", (req: Request, res: Response) => {
 });
 
 // -------- tags ------------------------------------------------------------
-
-function resolveTagRef(ref: unknown): Tag | null {
-    if (typeof ref === "number") return getTag(ref);
-    if (typeof ref === "string") {
-        return getTagByName(ref) ?? null;
-    }
-    return null;
-}
-
-api.get("/tags", (_req, res) => {
-    res.json(listTags());
-});
-
-api.post("/tags", (req: Request, res: Response) => {
-    const { name, color, note, position } = req.body ?? {};
-    if (typeof name !== "string" || !name.trim()) {
-        return badRequest(res, "name required");
-    }
-    if (getTagByName(name.trim())) {
-        return badRequest(res, `tag '${name}' already exists`);
-    }
-    const t = insertTag({
-        name: name.trim(),
-        color: typeof color === "string" ? color : null,
-        note: typeof note === "string" ? note : null,
-        position: typeof position === "number" ? position : 0,
-    });
-    broadcast({ type: "tag_changed", data: t });
-    res.status(201).json(t);
-});
-
-api.patch("/tags/:id", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const { name, color, note, position } = req.body ?? {};
-    if (name !== undefined && (typeof name !== "string" || !name.trim())) {
-        return badRequest(res, "name must be a non-empty string");
-    }
-    if (typeof name === "string") {
-        const conflict = getTagByName(name.trim());
-        if (conflict && conflict.id !== id) {
-            return badRequest(res, `tag '${name}' already exists`);
-        }
-    }
-    const updated = updateTag(id, {
-        name: typeof name === "string" ? name.trim() : undefined,
-        color: color === null || typeof color === "string" ? color : undefined,
-        note: note === null || typeof note === "string" ? note : undefined,
-        position: typeof position === "number" ? position : undefined,
-    });
-    if (!updated) return notFound(res);
-    broadcast({ type: "tag_changed", data: updated });
-    res.json(updated);
-});
-
-api.delete("/tags/:id", (req, res) => {
-    const id = Number(req.params.id);
-    if (!getTag(id)) return notFound(res);
-    deleteTag(id);
-    broadcast({ type: "tag_changed", data: { id, deleted: true } });
-    res.status(204).end();
-});
-
-api.get("/messages/:id/tags", (req, res) => {
-    const id = Number(req.params.id);
-    if (!getMessage(id)) return notFound(res);
-    res.json(listMessageTags(id));
-});
-
-api.put("/messages/:id/tags", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const m = getMessage(id);
-    if (!m) return notFound(res);
-    const { tag_ids, set_by } = req.body ?? {};
-    if (!Array.isArray(tag_ids)) {
-        return badRequest(res, "tag_ids must be an array of ids");
-    }
-    const ids: number[] = [];
-    for (const r of tag_ids) {
-        const tag = typeof r === "number" ? getTag(r) : getTagByName(String(r));
-        if (!tag) return badRequest(res, `unknown tag: ${r}`);
-        ids.push(tag.id);
-    }
-    setMessageTags(id, ids, typeof set_by === "string" ? set_by : null);
-    const tags = listMessageTags(id);
-    broadcast({ type: "message_tagged", data: { message_id: id, tags } });
-    res.json(tags);
-});
-
-api.post("/messages/:id/tags", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    const m = getMessage(id);
-    if (!m) return notFound(res);
-    const { tag, set_by } = req.body ?? {};
-    const t = resolveTagRef(tag);
-    if (!t) return badRequest(res, `unknown tag: ${tag}`);
-    addMessageTag(id, t.id, typeof set_by === "string" ? set_by : null);
-    const tags = listMessageTags(id);
-    broadcast({ type: "message_tagged", data: { message_id: id, tags } });
-    res.status(201).json(tags);
-});
-
-api.delete("/messages/:id/tags/:tag", (req, res) => {
-    const id = Number(req.params.id);
-    const m = getMessage(id);
-    if (!m) return notFound(res);
-    const tagRef = req.params.tag;
-    const t =
-        /^\d+$/.test(tagRef) ? getTag(Number(tagRef)) : getTagByName(tagRef);
-    if (!t) return notFound(res, `unknown tag: ${tagRef}`);
-    removeMessageTag(id, t.id);
-    const tags = listMessageTags(id);
-    broadcast({ type: "message_tagged", data: { message_id: id, tags } });
-    res.json(tags);
-});
+// Tag CRUD + message-tag association moved to ./api/tags.ts (#B.213 phase 1.A).
+api.use(tagsRouter);
 
 // -------- pings ------------------------------------------------------------
 
