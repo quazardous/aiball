@@ -2,10 +2,10 @@
 import { computed, onMounted, provide, ref, watch } from "vue";
 import Toast from "primevue/toast";
 import { useToast } from "primevue/usetoast";
-import { api, STRATEGIES, type InboxRow, type Message, type ProjectMeta, type Strategy } from "./lib/api";
+import { api, type InboxRow, type ProjectMeta, type Strategy } from "./lib/api";
 import { useNotifications } from "./lib/notifications";
 import { useRouting } from "./lib/router";
-import { useWs } from "./lib/ws";
+import { useInboxWs } from "./lib/inbox-ws";
 import { bus, useBus } from "./lib/bus";
 import { isPeek } from "./lib/peek";
 import BulkBar from "./components/BulkBar.vue";
@@ -337,70 +337,11 @@ const {
 // `bus` events. Consumers (this file's own list/sidebar/toaster, plus any
 // future component) subscribe to the bus where they're defined. See
 // `lib/bus.ts` for the typed event map.
-const { connected } = useWs((ev) => {
-    if (ev.type === "rule_changed") {
-        bus.emit("rules.refresh");
-        return;
-    }
-    if (ev.type === "tag_changed") {
-        // Tag catalog touched (rename, color, delete) — refresh the
-        // tags panel and any open TagPicker. Don't touch inbox/projects
-        // here: the catalog change doesn't move per-project counts.
-        bus.emit("tags.refresh");
-        return;
-    }
-    if (ev.type === "message_tagged") {
-        // A message gained/lost tags. The catalog itself is unchanged,
-        // but the open thread (if it contains this message) and the
-        // inbox row need to redraw their tag chips. The server sends
-        // `{ message_id, tags }` — no ticket_id — so we trigger a
-        // defensive thread.refresh on whatever's currently open, plus
-        // an inbox refresh. Cheap and self-correcting.
-        const tagged = ev.data as { message_id?: number; ticket_id?: number } | undefined;
-        if (tagged?.ticket_id !== undefined) {
-            bus.emit("thread.refresh", { ticketId: tagged.ticket_id });
-        } else if (openTicketId.value !== null) {
-            bus.emit("thread.refresh", { ticketId: openTicketId.value });
-        }
-        bus.emit("inbox.refresh");
-        return;
-    }
-    if (ev.type === "strategy_changed") {
-        const s = (ev.data as { strategy?: Strategy } | undefined)?.strategy;
-        if (s && (STRATEGIES as readonly string[]).includes(s)) strategy.value = s;
-        return;
-    }
-    if (ev.type === "project_deleted") {
-        const deleted = (ev.data as { project?: string } | undefined)?.project;
-        if (deleted) bus.emit("project.deleted", { project: deleted });
-        bus.emit("projects.refresh");
-        bus.emit("inbox.refresh");
-        return;
-    }
-    // Remaining events are message-shaped (`message_created`,
-    // `message_decided`, `message_edited`, `message_noted`).
-    const data = ev.data as Message | undefined;
-    if (!data || typeof data !== "object") return;
-    if (ev.type === "message_created") bus.emit("message.arrived", data);
-    else if (ev.type === "message_decided") bus.emit("message.decided", data);
-    if (data.ticket_id !== null && data.ticket_id !== undefined) {
-        bus.emit("thread.refresh", { ticketId: data.ticket_id });
-    }
-    if (data.kind === "ticket_created") {
-        bus.emit("thread.refresh", { ticketId: data.id });
-    }
-    bus.emit("inbox.refresh");
-    bus.emit("projects.refresh");
-});
-
-// Catch up after a WS reconnect (mobile freeze most commonly) —
-// any event missed while the socket was down won't replay (#B.191).
-watch(connected, (now, prev) => {
-    if (now && prev === false) {
-        bus.emit("inbox.refresh");
-        bus.emit("projects.refresh");
-    }
-});
+// #B.213 phase A.3: WS event dispatcher moved to lib/inbox-ws.ts.
+// `useInboxWs(...)` takes the strategy ref (for strategy_changed) and
+// openTicketId (for message_tagged → thread.refresh fallback) and
+// returns the same `connected` signal we expose to the template.
+const { connected } = useInboxWs({ strategy, openTicketId });
 
 // Local consumers — same effects as before, just driven by the bus now.
 useBus("projects.refresh", () => { loadProjects(); });
