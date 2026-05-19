@@ -669,21 +669,24 @@ type WakeTemplates = Record<Intent, WakeTemplate>;
  * `skill/claude-loop-pings.yaml`.
  */
 const DEFAULT_WAKE_TEMPLATES: WakeTemplates = {
+    // #B.230: must mention "aiball" explicitly so claude doesn't
+    // confuse the ticket id with another tracker (mantis, etc.) when
+    // the project has multiple MCP-exposed trackers configured.
     panic: {
-        with_comment: "URGENT: ticket #{ticket} needs you — new comment #{comment}.",
-        ticket_only: "URGENT: ticket #{ticket} needs you.",
+        with_comment: "URGENT: aiball ticket #{ticket} needs you — new comment #{comment}.",
+        ticket_only: "URGENT: aiball ticket #{ticket} needs you.",
     },
     request: {
-        with_comment: "Handle ticket #{ticket} — new comment #{comment}.",
-        ticket_only: "Handle ticket #{ticket}.",
+        with_comment: "Handle aiball ticket #{ticket} — new comment #{comment}.",
+        ticket_only: "Handle aiball ticket #{ticket}.",
     },
     question: {
-        with_comment: "Ticket #{ticket} waits for your answer — comment #{comment}.",
-        ticket_only: "Ticket #{ticket} waits for your answer.",
+        with_comment: "aiball ticket #{ticket} waits for your answer — comment #{comment}.",
+        ticket_only: "aiball ticket #{ticket} waits for your answer.",
     },
     fyi: {
-        with_comment: "Heads-up on ticket #{ticket} — new comment #{comment}.",
-        ticket_only: "Heads-up on ticket #{ticket}.",
+        with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}.",
+        ticket_only: "Heads-up on aiball ticket #{ticket}.",
     },
 };
 
