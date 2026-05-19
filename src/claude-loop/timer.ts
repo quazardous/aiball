@@ -155,8 +155,19 @@ async function tryWake(reason: string, manualWake = false, hint?: WakeHint): Pro
     return tryWakeInFlight;
 }
 async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint): Promise<boolean> {
-    if (!existsSync(idleMarkerPath(sd!))) return false;
-    if (!manualWake && userIsTakingOver(sd!, userGraceSec)) return false;
+    // #B.211 david: previously these two gates returned silently. The
+    // log only showed `SSE ping received: ... → tryWake` and then
+    // nothing for the same reason — david couldn't tell if the wake
+    // was deferred, skipped, or actually fired. Log every skip with
+    // a short reason so the log is self-explaining.
+    if (!existsSync(idleMarkerPath(sd!))) {
+        log(`skip wake (${reason}) — no idle marker (claude is busy or boot grace not yet elapsed)`);
+        return false;
+    }
+    if (!manualWake && userIsTakingOver(sd!, userGraceSec)) {
+        log(`skip wake (${reason}) — user-grace active (user typed within ${userGraceSec}s)`);
+        return false;
+    }
     // #B.198 david: state-based busy defer set by the Stop hook when
     // the FIRE-time pane still showed `esc to interrupt`. We honor
     // it on every tryWake path EXCEPT manual (file-marker is an
@@ -193,7 +204,10 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             }
         }
     }
-    if (!manualWake && !(await checkHasWork(checkCmd, client()))) return false;
+    if (!manualWake && !(await checkHasWork(checkCmd, client()))) {
+        log(`skip wake (${reason}) — checkHasWork returned false (no unread pings)`);
+        return false;
+    }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
     const phrase = pickPhrase(hint);

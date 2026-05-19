@@ -482,20 +482,52 @@ async function followPane(name: string, lines: number): Promise<void> {
     }
 }
 
+/**
+ * GNU tail prints chatty status lines on stderr when a watched file
+ * disappears (claude-loop restart deletes the session's state dir):
+ * "became inaccessible" / "est devenu inaccessible", "cannot use
+ * inotify" / "impossible d'utiliser inotify", "reverting to polling"
+ * / "retour à l'interrogation active". Tail itself keeps working via
+ * polling — these are warnings, not errors — but they clutter the
+ * `claude-loop --log` view. #B.210. We drop the known noise and let
+ * any other stderr (real errors) through.
+ */
+const TAIL_NOISE_RE =
+    /became inaccessible|est devenu inaccessible|cannot use inotify|impossible d'utiliser inotify|reverting to polling|retour à l'interrogation active|le répertoire contenant le fichier|directory containing the watched file/i;
+
+function pipeFilteredStderr(child: import("node:child_process").ChildProcess): void {
+    if (!child.stderr) return;
+    let carry = "";
+    child.stderr.on("data", (chunk: Buffer) => {
+        const text = carry + chunk.toString("utf8");
+        const out = text.split("\n");
+        carry = out.pop() ?? "";
+        for (const l of out) {
+            if (!l) continue;
+            if (TAIL_NOISE_RE.test(l)) continue;
+            process.stderr.write(`${l}\n`);
+        }
+    });
+    child.stderr.on("end", () => {
+        if (carry && !TAIL_NOISE_RE.test(carry)) process.stderr.write(`${carry}\n`);
+    });
+}
+
 function followFile(path: string, lines: number, prefix?: string): Promise<void> {
     return new Promise((resolve, reject) => {
         const child = spawn("tail", ["-n", String(lines), "-F", path], {
-            stdio: prefix ? ["ignore", "pipe", "inherit"] : "inherit",
+            stdio: ["ignore", "pipe", "pipe"],
         });
-        if (prefix && child.stdout) {
+        pipeFilteredStderr(child);
+        if (child.stdout) {
             let carry = "";
             child.stdout.on("data", (chunk: Buffer) => {
                 const text = carry + chunk.toString("utf8");
                 const lines = text.split("\n");
                 carry = lines.pop() ?? "";
-                for (const l of lines) process.stdout.write(`${prefix}${l}\n`);
+                for (const l of lines) process.stdout.write(`${prefix ?? ""}${l}\n`);
             });
-            child.stdout.on("end", () => { if (carry) process.stdout.write(`${prefix}${carry}\n`); });
+            child.stdout.on("end", () => { if (carry) process.stdout.write(`${prefix ?? ""}${carry}\n`); });
         }
         child.on("error", reject);
         child.on("exit", (code) => code === 0 || code === null ? resolve() : reject(new Error(`tail exited ${code}`)));
@@ -554,8 +586,9 @@ async function cmdTail(name: string, lines: number, which: TailMode, follow: boo
         const runFollow = async (path: string, tag: string): Promise<void> => {
             return new Promise((resolveP, rejectP) => {
                 const child = spawn("tail", ["-n", String(lines), "-F", path], {
-                    stdio: ["ignore", "pipe", "inherit"],
+                    stdio: ["ignore", "pipe", "pipe"],
                 });
+                pipeFilteredStderr(child);
                 let carry = "";
                 child.stdout?.on("data", (chunk: Buffer) => {
                     const text = carry + chunk.toString("utf8");
