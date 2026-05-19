@@ -61,6 +61,14 @@ export const tickets = sqliteTable("tickets", {
     summary: text("summary"),
     byAgent: text("by_agent"),
     intent: text("intent"),
+    /**
+     * Urgency hint orthogonal to `intent` (#B.222). Enum gated at the
+     * SQL layer via CHECK constraint (low / normal / high / urgent).
+     * Backfilled to 'normal' for pre-existing rows. Used by listMessages
+     * ticket sort + listPings secondary parent-priority sort + poll
+     * my_pending_tickets sort.
+     */
+    priority: text("priority").notNull().default("normal"),
     status: text("status").notNull().default("pending"),
     createdAt: text("created_at").notNull(),
     decidedAt: text("decided_at"),
@@ -111,6 +119,7 @@ export const tickets = sqliteTable("tickets", {
     index("idx_tickets_status").on(t.status),
     index("idx_tickets_postponed").on(t.postponedUntil),
     index("idx_tickets_parent").on(t.parentTicketId),
+    index("idx_tickets_priority").on(t.priority),
 ]);
 
 export const messages = sqliteTable("_messages", {

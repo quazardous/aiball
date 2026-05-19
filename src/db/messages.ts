@@ -58,6 +58,7 @@ export function insertMessage(m: NewMessage): Message {
                 summary: m.summary ?? null,
                 byAgent: m.by_agent ?? null,
                 intent: m.intent ?? null,
+                priority: m.priority ?? "normal",
                 createdAt,
                 parentTicketId: m.parent_id ?? null,
             }).returning().get();
@@ -164,7 +165,21 @@ export function listMessages(filters: {
         if (filters.by_agent) conds.push(eq(schema.tickets.byAgent, filters.by_agent));
         let q = db.select().from(schema.tickets).$dynamic();
         if (conds.length) q = q.where(and(...conds));
-        const rows = q.orderBy(desc(schema.tickets.id)).all();
+        // #B.222: sort by urgency hint first (urgent > high > normal > low),
+        // panic-intent kept separate as a secondary tiebreaker so a
+        // `priority: low` panic ticket still surfaces above a calm
+        // urgent one — david: panic = bouton rouge orthogonal au reste.
+        // CASE expr because text-alpha sort would scramble the enum
+        // (urgent / normal / low / high alphabetical).
+        const priorityCase = sql`CASE ${schema.tickets.priority}
+            WHEN 'urgent' THEN 4
+            WHEN 'high'   THEN 3
+            WHEN 'normal' THEN 2
+            WHEN 'low'    THEN 1
+            ELSE 0
+        END`;
+        const panicCase = sql`CASE WHEN ${schema.tickets.intent} = 'panic' THEN 1 ELSE 0 END`;
+        const rows = q.orderBy(desc(panicCase), desc(priorityCase), desc(schema.tickets.id)).all();
         for (const r of rows) out.push(ticketRowToMessage(r));
     }
 

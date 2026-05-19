@@ -124,6 +124,12 @@ server.registerTool(
                 .describe(
                     "panic = immediate blocker; question = needs an answer; request = action expected (default intent); fyi = informational, no action expected.",
                 ),
+            priority: z
+                .enum(["low", "normal", "high", "urgent"])
+                .optional()
+                .describe(
+                    "Urgency hint (#B.222) orthogonal to intent. urgent = drop everything to handle; high = next available turn; normal = default (omit); low = pick up when idle. Influences ticket_list sort + listPings secondary tiebreaker + poll my_pending order. Choose deliberately: most tickets are 'normal'.",
+                ),
             broadcast: z
                 .boolean()
                 .optional()
@@ -149,7 +155,7 @@ server.registerTool(
                 ),
         },
     },
-    async ({ project, title, summary, body, intent, broadcast, by_agent, parent_id, tags }) => {
+    async ({ project, title, summary, body, intent, priority, broadcast, by_agent, parent_id, tags }) => {
         const proj = client.resolveProject(project);
         const res = (await client.postMessage({
             project: proj,
@@ -158,6 +164,7 @@ server.registerTool(
             summary,
             body,
             intent,
+            priority,
             by_agent: effectiveBy(by_agent),
             parent_id,
         })) as { id?: number };

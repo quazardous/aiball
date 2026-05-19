@@ -33,10 +33,12 @@ import {
     MESSAGE_STATUSES,
     RULE_DECISIONS,
     INTENTS,
+    PRIORITIES,
     STRATEGIES,
     isMessageKind,
     isMessageStatus,
     isIntent,
+    isPriority,
     isStrategy,
 } from "../domain.js";
 import type {
@@ -44,6 +46,7 @@ import type {
     MessageStatus,
     RuleDecision,
     Intent,
+    Priority,
     Strategy,
 } from "../domain.js";
 export {
@@ -51,13 +54,15 @@ export {
     MESSAGE_STATUSES,
     RULE_DECISIONS,
     INTENTS,
+    PRIORITIES,
     STRATEGIES,
     isMessageKind,
     isMessageStatus,
     isIntent,
+    isPriority,
     isStrategy,
 };
-export type { MessageKind, MessageStatus, RuleDecision, Intent, Strategy };
+export type { MessageKind, MessageStatus, RuleDecision, Intent, Priority, Strategy };
 
 /** Drizzle row types (internal) re-exported for callers that handle the
  *  split shapes natively. The legacy union JSON shape is `Message` below. */
@@ -96,6 +101,12 @@ export interface Message {
     edited_title: string | null;
     edited_body: string | null;
     intent: Intent | null;
+    /**
+     * Urgency hint (#B.222) — tickets only, always set (DB default
+     * 'normal'). NULL on the wire only for non-ticket rows where it
+     * doesn't apply. Read by listMessages / poll / listPings sorts.
+     */
+    priority?: Priority;
     display_seq: number;
     /**
      * Broadcast flag for tickets (1 = ticket is broadcast to project
@@ -172,6 +183,9 @@ export interface NewMessage {
     summary?: string | null;
     by_agent?: string | null;
     intent?: Intent | null;
+    /** #B.222 urgency hint — tickets only. Defaults to 'normal' at the
+     *  SQL layer if omitted. Ignored for non-ticket kinds. */
+    priority?: Priority | null;
     /** #B.129 decision-on-comment: author tags a comment as decisional
      *  at post-time (`plan` / `resolution` / extensible). Stored in
      *  `meta.decision = {kind, status:"pending"}` so the reporter can
@@ -380,6 +394,7 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         edited_title: t.editedTitle,
         edited_body: t.editedBody,
         intent: (t.intent as Intent | null) ?? null,
+        priority: (t.priority as Priority | undefined) ?? "normal",
         display_seq: t.displaySeq,
         broadcast: t.broadcast ?? 0,
         hashid: null,
