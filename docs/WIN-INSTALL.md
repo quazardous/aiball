@@ -32,46 +32,136 @@ steps.
 
 Clone the repo and run the installer:
 
+### Pick an install path
+
+Five ways to run aiball on Windows, from "just try it" to "full integrated":
+
+| # | Path | Daemon | Tray | UI | Effort |
+|---|---|---|---|---|---|
+| 1 | **Portable** (no install) | `npm run dev` in a terminal | manual `bin\aiball-tray.cmd` | vite dev http://localhost:5173 | dev/hacking |
+| 2 | **Minimal tray** (manual shortcut) | run separately (any path) | shortcut you create yourself, with `aiball.ico` | http://127.0.0.1:7777 | 5 min |
+| 3 | **Default install** | Scheduled Task at logon | Desktop + Start Menu + Startup shortcuts (auto-created) | http://127.0.0.1:7777 | one command |
+| 4 | **Service install** | NSSM Windows Service | same as 3 | http://127.0.0.1:7777 | one command (admin) |
+| 5 | **Dev install** | Scheduled Task or Service, on symlinked source | same as 3 | http://127.0.0.1:7777 | one command (Dev Mode on) |
+
+Same Death Star icon across 3/4/5 — consistent visible UX regardless of daemon mode.
+
+### Path 1: Portable (no install)
+
 ```powershell
 git clone https://github.com/quazardous/aiball.git
 cd aiball
-pwsh -File install.ps1               # fresh install (copy mode)
-pwsh -File install.ps1 -Symlink      # dev install (needs Developer Mode)
-pwsh -File install.ps1 -AuthInit     # also mint the first-time setup token
-pwsh -File install.ps1 -Uninstall    # remove (keeps %APPDATA%\aiball data)
+npm install
+npm --prefix frontend install
+# Terminal A — daemon
+npm run dev
+# Terminal B — vite dev server (HMR, http://localhost:5173)
+npm --prefix frontend run dev
+# Optional: tray icon in any other terminal
+.\bin\aiball-tray.cmd
 ```
 
-What it does (mirror of `install.sh`):
-1. Verifies prereqs (`node >=20`, `npm`, `git`). Warns if Node `>=24` —
-   see the Node LTS rationale above.
+Nothing is registered, no shortcuts created, no data dir created in
+your profile. Closing the terminals stops everything. Use this when
+you're hacking on the code itself.
+
+### Path 2: Minimal tray (manual shortcut, no install.ps1)
+
+If you just want the tray icon in your notification area pointing at a
+daemon you'll manage yourself (existing systemd-via-WSL, dev terminal,
+…), create the shortcut by hand:
+
+```powershell
+# Edit the paths to where your clone lives:
+$repo = 'C:\Users\you\dev\aiball'
+$shell = New-Object -ComObject WScript.Shell
+$lnk = $shell.CreateShortcut("$env:USERPROFILE\Desktop\aiball.lnk")
+$lnk.TargetPath = "$repo\bin\aiball-tray.cmd"
+$lnk.WorkingDirectory = "$repo\bin"
+$lnk.IconLocation = "$repo\assets\aiball.ico,0"
+$lnk.WindowStyle = 7   # minimized — no console flash
+$lnk.Save()
+```
+
+Double-click the new Desktop shortcut → Death Star appears in the
+notification area. Right-click → Ouvrir dans le navigateur or Fermer.
+
+### Path 3: Default install (Scheduled Task)
+
+```powershell
+git clone https://github.com/quazardous/aiball.git
+cd aiball
+pwsh -File install.ps1             # daemon at logon, tray shortcuts auto-created
+pwsh -File install.ps1 -AuthInit   # same but also starts the daemon + mints setup URL
+```
+
+What it does:
+1. Verifies prereqs (`node >=20`, `npm`, `git`).
 2. Copies the source tree to `%LOCALAPPDATA%\Programs\aiball\` via
-   `robocopy /MIR` (or symlinks with `-Symlink` — requires Developer Mode
-   or admin). Reentrant: existing symlink kept as dev layout unless
-   `-Uninstall` first.
+   `robocopy /MIR` (or symlinks with `-Symlink` — see Path 5).
 3. Runs `npm install` in the install dir. Dies loudly if it fails
-   (the daemon can't start without deps). Builds the frontend bundle
-   if `frontend/dist/index.html` is missing; failures here are downgraded
-   to a warning (daemon still serves the API, just not the SPA).
-4. Creates `%APPDATA%\aiball\` (DB + uploads) and `%LOCALAPPDATA%\aiball\`
-   (logs + daemon launcher).
+   (daemon needs the deps). Builds the frontend bundle if missing;
+   failures here only Warn (daemon still serves the API, no SPA).
+4. Creates `%APPDATA%\aiball\` (DB + uploads) and
+   `%LOCALAPPDATA%\aiball\` (logs + daemon launcher).
 5. Writes `.cmd` shims in `%LOCALAPPDATA%\Microsoft\WindowsApps\` for
-   `aiball`, `aiball-mcp`, `claude-loop` (already on `PATH` by default
-   on modern Windows). Thin wrappers — no admin / Dev Mode needed.
-6. Registers a **per-user Scheduled Task** `aiball-daemon` that auto-runs
-   at logon (restart x5 every 1min on failure). View / control via Task
-   Scheduler or:
+   `aiball`, `aiball-mcp`, `claude-loop` (already on `PATH` by default).
+6. Writes **tray shortcuts** with the Death Star icon
+   (`-NoTray` to skip):
+   - `~\Desktop\aiball.lnk`
+   - `~\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\aiball.lnk`
+   - `~\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\aiball-tray.lnk`
+     (auto-launches the tray at logon — Slack/Discord/Spotify convention)
+7. Registers a **per-user Scheduled Task** `aiball-daemon` that auto-runs
+   at logon (restart x5 every 1min on failure). View / control:
    ```powershell
    Start-ScheduledTask -TaskName aiball-daemon
    Stop-ScheduledTask  -TaskName aiball-daemon
    Get-ScheduledTask   -TaskName aiball-daemon | Get-ScheduledTaskInfo
    ```
-7. **Sanity check**: actually constructs a `new Database(':memory:')`
-   to flush out missing native bindings (the JS module loads fine even
-   when the `.node` binding is absent — only construction triggers the
-   lookup). If it fails, the scheduled task is **auto-disabled** so it
-   doesn't restart-loop at logon. Recovery command is printed.
-8. With `-AuthInit`: starts the task, waits up to 15s for `/api/health`,
+8. **Sanity check**: actually constructs a `new Database(':memory:')`
+   to flush out missing native bindings. If it fails, the task is
+   **auto-disabled** so it doesn't restart-loop at logon. Recovery
+   command is printed.
+9. With `-AuthInit`: starts the task, waits up to 15s for `/api/health`,
    then runs `aiball auth init` and prints the setup URL.
+
+### Path 4: Service install (Windows Service via NSSM)
+
+```powershell
+winget install NSSM.NSSM                       # prereq, one-time
+# from an elevated (admin) PowerShell:
+pwsh -File install.ps1 -Service                # current user (prompts password)
+# OR:
+pwsh -File install.ps1 -System                 # LocalSystem (no password)
+```
+
+See the **Service mode** section below for the per-user vs LocalSystem
+trade-off and the password pitfall. Tray shortcuts identical to Path 3.
+
+### Path 5: Dev install (symlink)
+
+```powershell
+# Enable Developer Mode first (Settings -> System -> For Developers),
+# then:
+pwsh -File install.ps1 -Symlink
+```
+
+Symlinks `%LOCALAPPDATA%\Programs\aiball` to your repo checkout, so
+edits to `src/` and `frontend/src/` are picked up by a `Restart-Service
+aiball-daemon` (or a vite dev server) without re-running the installer.
+
+### Useful flags (all paths 3/4/5)
+
+| Flag | What |
+|---|---|
+| `-Port 7780` | non-default daemon port |
+| `-BindHost 0.0.0.0` | listen on all interfaces (use with care; default is localhost) |
+| `-NoTray` | skip Desktop / Start Menu / Startup shortcut creation |
+| `-AuthInit` | start daemon + mint setup token |
+| `-Uninstall` | remove everything (keeps `%APPDATA%\aiball` data unless `-PurgeData`) |
+| `-PurgeData` | with `-Uninstall`, also wipe the data dir |
+| `-Yes` | skip interactive confirmations |
 
 ## Daemon lifecycle
 

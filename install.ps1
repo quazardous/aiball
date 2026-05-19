@@ -66,6 +66,11 @@
     %PROGRAMDATA%\aiball as the data dir (LocalSystem has no usable
     home dir).
 
+.PARAMETER NoTray
+    Skip the tray shortcut creation (Desktop / Start Menu / Startup
+    folder). Default: shortcuts ARE created and the tray auto-launches
+    at logon, following the convention of Slack / Discord / Spotify.
+
 .PARAMETER Yes
     Skip interactive confirmations (--PurgeData prompt).
 
@@ -100,6 +105,7 @@ param(
     [switch] $PurgeData,
     [switch] $Service,
     [switch] $System,
+    [switch] $NoTray,
     [switch] $Yes,
     [int]    $Port = 7777,
     [string] $BindHost = '127.0.0.1'
@@ -126,6 +132,14 @@ $TaskName  = 'aiball-daemon'   # scheduled task name (and service name — separ
 $SvcName   = 'aiball-daemon'
 $Shims     = @('aiball', 'aiball-mcp', 'claude-loop')
 
+# Tray shortcut destinations (all per-user; -System install still puts
+# shortcuts in the installing user's profile, not LocalSystem's).
+$DesktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop'))   'aiball.lnk'
+$StartLnk   = Join-Path ([Environment]::GetFolderPath('Programs'))  'aiball.lnk'
+$StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup'))   'aiball-tray.lnk'
+$AiballIco  = Join-Path $PrefixLib 'assets\aiball.ico'
+$TrayCmd    = Join-Path $PrefixLib 'bin\aiball-tray.cmd'
+
 # --- helpers ----------------------------------------------------------------
 
 function Log($msg)  { Write-Host "[aiball] $msg" -ForegroundColor Cyan }
@@ -151,6 +165,28 @@ function Test-IsAdmin {
     $id = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     $p = New-Object System.Security.Principal.WindowsPrincipal($id)
     return $p.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function New-AiballShortcut($lnkPath, $target, $iconPath, $description) {
+    # .lnk creation via WScript.Shell COM. The shortcut's IconLocation
+    # is what shows the Death Star — .cmd files don't carry icons
+    # themselves, the .lnk is where branding lives.
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+        $shortcut = $shell.CreateShortcut($lnkPath)
+        try {
+            $shortcut.TargetPath = $target
+            $shortcut.WorkingDirectory = Split-Path $target -Parent
+            $shortcut.IconLocation = "$iconPath,0"
+            $shortcut.Description = $description
+            $shortcut.WindowStyle = 7   # 7 = minimized — no console flash on launch
+            $shortcut.Save()
+        } finally {
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shortcut) | Out-Null
+        }
+    } finally {
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
+    }
 }
 
 function Test-ServiceExists($name) {
@@ -218,6 +254,13 @@ if ($Uninstall) {
         if (Test-Path $path) {
             Remove-Item $path -Force
             Log "removed shim: $path"
+        }
+    }
+
+    foreach ($lnk in @($DesktopLnk, $StartLnk, $StartupLnk)) {
+        if (Test-Path $lnk) {
+            Remove-Item $lnk -Force
+            Log "removed shortcut: $lnk"
         }
     }
 
@@ -440,6 +483,31 @@ exit /b %errorlevel%
 "@
     [System.IO.File]::WriteAllText($shimPath, ($shimBody -replace "`r?`n","`r`n"))
     Log "wrote shim: $shimPath -> $target"
+}
+
+# --- tray shortcuts (Desktop / Start Menu / Startup folder) ----------------
+# Three shortcuts, all pointing at bin\aiball-tray.cmd with the Death
+# Star icon. Same .lnk regardless of daemon mode (Task vs Service) —
+# consistent visible UX. `-NoTray` opts out entirely. Per-user only
+# (even with -System the shortcuts go in the installing user's profile).
+
+if (-not $NoTray) {
+    if (Test-Path $TrayCmd) {
+        $icoArg = if (Test-Path $AiballIco) { $AiballIco } else { $TrayCmd }   # fallback to cmd's (no) icon if .ico missing
+        New-AiballShortcut $DesktopLnk $TrayCmd $icoArg "aiball — open the local UI"
+        Log "wrote desktop shortcut: $DesktopLnk"
+        $startParent = Split-Path $StartLnk -Parent
+        if (-not (Test-Path $startParent)) { New-Item -ItemType Directory -Force -Path $startParent | Out-Null }
+        New-AiballShortcut $StartLnk $TrayCmd $icoArg "aiball — open the local UI"
+        Log "wrote start menu shortcut: $StartLnk"
+        $startupParent = Split-Path $StartupLnk -Parent
+        if (-not (Test-Path $startupParent)) { New-Item -ItemType Directory -Force -Path $startupParent | Out-Null }
+        New-AiballShortcut $StartupLnk $TrayCmd $icoArg "aiball tray (autostart at logon)"
+        Log "wrote startup shortcut (autolaunch tray at logon): $StartupLnk"
+    } else {
+        Warn "tray launcher not found at $TrayCmd — skipping shortcut creation"
+        Warn "  (expected to ship as part of source provisioning; check $PrefixLib\bin\)"
+    }
 }
 
 # --- Scheduled Task OR Service (mutually exclusive) ------------------------
