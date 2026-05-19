@@ -28,6 +28,7 @@ import {
     DEFAULT_USER_GRACE_SEC,
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
+    buildContextPhrase,
     buildWakePhrase,
     checkHasWork,
     formatPaneSnapshot,
@@ -87,8 +88,23 @@ function capturePane(): string {
     }
 }
 
-function pickPhrase(hint?: WakeHint): string {
-    return buildWakePhrase(hint, pingsPath(sd!));
+// #B.221: when the SSE hint carries a ticket_id, `buildWakePhrase`
+// renders the directive template ("Handle ticket #X — comment #Y.")
+// — already context-rich, no wrap needed. When there's no hint
+// (heartbeat re-check, manual wake, SSE-drop safety net), we used to
+// fall back to a bare culture phrase from `pickPingPhrase`. That left
+// claude with the same no-context greeting bug session-start had.
+// Now we route the no-hint path through `buildContextPhrase` so the
+// wake carries unread/open counts + a drain directive too. Async
+// because the wrap helper queries the daemon; tryWakeInner already
+// awaits checkHasWork so adding another await here is a no-op.
+async function pickPhrase(hint?: WakeHint): Promise<string> {
+    if (hint?.ticket_id) return buildWakePhrase(hint, pingsPath(sd!));
+    return buildContextPhrase(
+        client(),
+        process.env.AIBALL_PROJECT ?? null,
+        pingsPath(sd!),
+    );
 }
 
 /**
@@ -278,7 +294,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
-    const phrase = pickPhrase(hint);
+    const phrase = await pickPhrase(hint);
     sendKeys(phrase);
     // #B.198 david: "on cumule pas les event identique on les merge".
     // Persist the just-fired hint so subsequent SSE pings about the

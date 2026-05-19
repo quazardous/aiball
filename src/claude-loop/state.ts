@@ -491,6 +491,56 @@ export function pickPingPhrase(pingsAbsPath: string): string {
 }
 
 /**
+ * Wrap a random culture phrase with inline aiball state + a drain
+ * directive (#B.221). Used by every wake path that doesn't already
+ * have an SSE `WakeHint` to anchor the prompt: session-start,
+ * post-turn stop-hook, and the timer's heartbeat fallback. Without
+ * this, the wake fires a bare cultural one-liner ("Excellent.",
+ * "*tap tap* this thing on?") and claude greets back with no
+ * awareness of the pings/tickets sitting in the inbox.
+ *
+ * Falls back to the plain culture phrase if the daemon is unreachable
+ * or both counts come back zero — never blocks the wake on a missing
+ * daemon, and never invents a directive when there's nothing to do.
+ */
+export async function buildContextPhrase(
+    client: AiballClient,
+    project: string | null,
+    pingsAbsPath: string,
+): Promise<string> {
+    const culture = pickPingPhrase(pingsAbsPath);
+    try {
+        const [pingsR, projects] = await Promise.all([
+            client.pingsCount() as Promise<{ unread?: number }>,
+            client.listProjectsDetailed() as Promise<Array<{
+                name: string;
+                open_count?: number;
+                actionable_count?: number;
+            }>>,
+        ]);
+        const pingCount = typeof pingsR?.unread === "number" ? pingsR.unread : 0;
+        const openCount = Array.isArray(projects)
+            ? projects
+                .filter((p) => !project || p.name === project)
+                .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
+            : 0;
+        if (pingCount === 0 && openCount === 0) return culture;
+        const parts: string[] = [];
+        if (pingCount > 0) parts.push(`${pingCount} unread ping${pingCount === 1 ? "" : "s"}`);
+        if (openCount > 0) {
+            const scope = project ? `\`${project}\`` : "your scope";
+            parts.push(`${openCount} open ticket${openCount === 1 ? "" : "s"} in ${scope}`);
+        }
+        const directive = pingCount > 0
+            ? "drain via `unread({pings: true, mark_read: true})`"
+            : "list via `ticket_list({open: true})`";
+        return `${culture} [aiball: ${parts.join(" · ")}] — ${directive} before answering.`;
+    } catch {
+        return culture;
+    }
+}
+
+/**
  * Optional context attached to a wake — typically the SSE ping
  * payload (`{ ticket_id, comment_id, comment_hashid, intent }`).
  * When present, the wake phrase names the concrete artifact instead

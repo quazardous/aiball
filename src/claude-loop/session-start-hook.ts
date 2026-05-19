@@ -28,7 +28,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { AiballClient } from "../client.js";
-import { MUX_CMD, checkHasWork, idleMarkerPath, pickPingPhrase, pingsPath, setTmuxStatus, tmuxName } from "./state.js";
+import { MUX_CMD, buildContextPhrase, checkHasWork, idleMarkerPath, pingsPath, setTmuxStatus, tmuxName } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -105,54 +105,22 @@ if (noStartup) {
     emit();
 }
 
-// #B.221 david: the first ping after boot used to be a bare cultural
-// phrase ("Allons-y!" / "tap tap"), zero operational context. Claude
-// would greet back ("Ready when you are") and a turn or two would
-// burn before any work was identified. We now wrap the culture phrase
-// with an inline state summary + a drain directive, so the very first
-// turn is oriented toward the work waiting in the inbox.
-//
-// Falls back to the plain culture phrase if the daemon is unreachable
-// or counts come back empty — never blocks boot on a missing daemon.
-async function buildBootPhrase(): Promise<string> {
-    const culture = pickPingPhrase(pingsPath(sd!));
-    try {
-        const project = process.env.AIBALL_PROJECT ?? null;
-        const client = new AiballClient();
-        const [pingsR, projects] = await Promise.all([
-            client.pingsCount() as Promise<{ unread?: number }>,
-            client.listProjectsDetailed() as Promise<Array<{
-                name: string;
-                open_count?: number;
-                actionable_count?: number;
-            }>>,
-        ]);
-        const pingCount = typeof pingsR?.unread === "number" ? pingsR.unread : 0;
-        const openCount = Array.isArray(projects)
-            ? projects
-                .filter((p) => !project || p.name === project)
-                .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
-            : 0;
-        if (pingCount === 0 && openCount === 0) return culture;
-        const parts: string[] = [];
-        if (pingCount > 0) parts.push(`${pingCount} unread ping${pingCount === 1 ? "" : "s"}`);
-        if (openCount > 0) {
-            const scope = project ? `\`${project}\`` : "your scope";
-            parts.push(`${openCount} open ticket${openCount === 1 ? "" : "s"} in ${scope}`);
-        }
-        const directive = pingCount > 0
-            ? "drain via `unread({pings: true, mark_read: true})`"
-            : "list via `ticket_list({open: true})`";
-        return `${culture} [aiball: ${parts.join(" · ")}] — ${directive} before answering.`;
-    } catch {
-        return culture;
-    }
-}
-
 (async () => {
     try {
         if (await checkHasWork(checkCmd)) {
-            const phrase = await buildBootPhrase();
+            // #B.221 david: bare cultural phrases ("Allons-y!" / "tap
+            // tap") gave claude zero operational context — she would
+            // greet back and burn a turn before noticing the inbox.
+            // `buildContextPhrase` wraps the culture phrase with the
+            // current unread/open counts + a drain directive so the
+            // very first turn is oriented toward pending work.
+            // Same helper now feeds stop-hook + timer fallback so the
+            // wrapping is consistent across every no-hint wake path.
+            const phrase = await buildContextPhrase(
+                new AiballClient(),
+                process.env.AIBALL_PROJECT ?? null,
+                pingsPath(sd!),
+            );
             spawnSync(MUX_CMD, [
                 "send-keys", "-t", `${tmuxName(name!)}.0`, phrase, "Enter",
             ], { stdio: "ignore" });

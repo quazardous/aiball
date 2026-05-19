@@ -16,7 +16,8 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, checkHasWork, formatPaneSnapshot, idleMarkerPath, lastWakeAtPath, pickPingPhrase, pingsPath, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
+import { AiballClient } from "../client.js";
+import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, idleMarkerPath, lastWakeAtPath, pingsPath, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -176,7 +177,16 @@ function readPane(): string {
                 emit();
             }
             // Work still pending — ping immediately, don't enter idle.
-            const phrase = pickPingPhrase(pingsPath(sd!));
+            // #B.221: wrap the culture phrase with state CTA so the
+            // post-turn wake carries the same operational context as
+            // the boot ping (counts + drain directive). Without this
+            // the wake fires a bare "Excellent." and claude greets
+            // back with no awareness of pending pings.
+            const phrase = await buildContextPhrase(
+                new AiballClient(),
+                process.env.AIBALL_PROJECT ?? null,
+                pingsPath(sd!),
+            );
             // #B.180: mark this send-keys as auto-wake so the
             // UserPromptSubmit hook skips user-took-over.
             try { writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
