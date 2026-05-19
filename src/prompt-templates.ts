@@ -112,14 +112,30 @@ export function mergePrompts(base: PromptMap, override: PromptMap): PromptMap {
 }
 
 /**
- * Substitute `{key}` placeholders in `tpl` with stringified `vars[key]`.
- * Unknown placeholders are left intact so a wording typo doesn't blank
- * the render — the operator sees the literal `{foo}` in the prompt and
- * can correct the yaml.
+ * Substitute `{key}` placeholders in `tpl`. Resolution order per
+ * placeholder occurrence:
+ *
+ *   1. `vars[key]` if present                  → caller-provided values
+ *   2. `resolve(key)` if provided and !== undef → lazy / magic tokens
+ *   3. the literal `{key}` is left intact       → operator-visible typo
+ *
+ * The `resolve` callback (#B.232 jdhdxq) lets a caller plug "magic"
+ * tokens like `{culture}` — a random pop-culture ping phrase — without
+ * pre-injecting them via `vars` at every call site. Called fresh per
+ * occurrence so `{culture}` appearing twice in a template can yield
+ * two different picks if the resolver is non-idempotent.
  */
-function substitute(tpl: string, vars: Record<string, string | number>): string {
+function substitute(
+    tpl: string,
+    vars: Record<string, string | number>,
+    resolve?: (key: string) => string | undefined,
+): string {
     return tpl.replace(/\{(\w+)\}/g, (m, key: string) => {
         if (Object.prototype.hasOwnProperty.call(vars, key)) return String(vars[key]);
+        if (resolve) {
+            const v = resolve(key);
+            if (v !== undefined) return v;
+        }
         return m;
     });
 }
@@ -144,6 +160,15 @@ export interface PickOptions {
      * agreement, gendered forms, "no tickets" zero-case, etc.
      */
     count?: number;
+    /**
+     * Lazy resolver for placeholders not present in `vars` (#B.232 jdhdxq).
+     * Called for each `{key}` occurrence the picker can't find in `vars`;
+     * return a string to substitute, or `undefined` to leave the
+     * placeholder intact. Use for magic tokens like `{culture}` that pull
+     * from an external pool (e.g. ping_messages random pick) without
+     * forcing every caller to pre-inject them via vars.
+     */
+    resolve?: (key: string) => string | undefined;
     /** Fallback string when the slot is absent or unrenderable. */
     fallback?: string;
 }
@@ -188,14 +213,15 @@ export function pickPrompt(map: PromptMap, slot: string, opts: PickOptions = {})
     const fallback = opts.fallback ?? "";
     if (entry == null) return fallback;
     const vars = opts.vars ?? {};
-    if (typeof entry === "string") return substitute(entry, vars);
+    const resolve = opts.resolve;
+    if (typeof entry === "string") return substitute(entry, vars, resolve);
     if (Array.isArray(entry)) {
         if (entry.length === 0) return fallback;
-        return substitute(pickRandom(entry), vars);
+        return substitute(pickRandom(entry), vars, resolve);
     }
     // Object form
     const tone = opts.tone ?? DEFAULT_TONE;
     const list = entry[tone] ?? entry[DEFAULT_TONE];
     if (!list || list.length === 0) return fallback;
-    return substitute(pickRandom(list), vars);
+    return substitute(pickRandom(list), vars, resolve);
 }

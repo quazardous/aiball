@@ -158,9 +158,17 @@ autopoll:
 # articles, "no tickets" zero-case (treated like _other by default).
 #
 # Slot reference (all wake-CTA pieces — the central service composes
-# them as `{culture} {wake_state_lead} {state_parts}. {directive}.`):
+# them via the `wake_master` assembly template, falling back to a
+# hardcoded `{culture} {lead} {state}. {directive}.` shape):
 #
-#   wake_state_lead       → conversational lead between the culture
+#   wake_master            → assembly template. Composes the rendered
+#                            sub-parts. Supports placeholders:
+#                            {culture} (random pop-culture ping —
+#                            auto-resolved from ping_messages),
+#                            {lead}, {state}, {directive}.
+#                            Use the list shape to vary the sentence
+#                            structure across wakes.
+#   wake_state_lead        → conversational lead between the culture
 #                            phrase and the state report. Replaces the
 #                            old `[aiball: ...]` bracket framing that
 #                            tripped prompt-injection defenses on cold
@@ -169,6 +177,12 @@ autopoll:
 #   wake_state_open        → state part for open tickets.
 #   wake_directive_drain   → imperative verb for the drain action.
 #   wake_directive_engage  → imperative verb for the engage action.
+#
+# Magic placeholder (#B.232 jdhdxq): `{culture}` resolves to a random
+# pick from `ping_messages` (the pop-culture phrase pool defined in
+# `skill/claude-loop-pings.yaml`). Drop it into any slot — wake_master
+# leads with it by default, but a custom wake_state_lead like
+# `"{culture}, fyi:"` also works.
 #
 # A missing slot in the override falls back to the skill defaults; a
 # slot in the override REPLACES the default for that slot (no deep merge

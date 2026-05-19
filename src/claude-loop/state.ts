@@ -735,13 +735,27 @@ export async function buildContextPhrase(
             }));
         }
         const directive = verbs.join(" + ");
+        const state = parts.join(" + ");
 
         const lead = pickPrompt(promptMap, "wake_state_lead", {
             tone,
             fallback: "fyi:",
         });
 
-        return `${culture} ${lead} ${parts.join(" + ")}. ${directive}.`;
+        // #B.232 jdhdxq: top-level assembly via the `wake_master` slot.
+        // Sub-parts (culture / lead / state / directive) ship to the
+        // template as vars; `{culture}` also resolves via the `resolve`
+        // callback when the template embeds it standalone (so a custom
+        // wake_master that uses {culture} inline in addition to / instead
+        // of the leading position keeps working). Fallback assembly
+        // matches the prior hardcoded layout so a broken yaml still
+        // emits a usable wake.
+        return pickPrompt(promptMap, "wake_master", {
+            tone,
+            vars: { culture, lead, state, directive },
+            resolve: (key) => key === "culture" ? pickPingPhrase(pingsAbsPath) : undefined,
+            fallback: `${culture} ${lead} ${state}. ${directive}.`,
+        });
     } catch {
         return culture;
     }

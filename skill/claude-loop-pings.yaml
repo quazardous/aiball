@@ -136,3 +136,21 @@ prompts:
   wake_directive_engage:
     - "engage one of {open_count} actionable via `ticket_list({actionable: true})`"
     - "pick one of {open_count} actionable via `ticket_list({actionable: true})`"
+
+  # Top-level assembly template (#B.232 jdhdxq). Composes the rendered
+  # sub-parts into the final wake-CTA. Placeholders:
+  #   {culture}    pop-culture phrase from ping_messages (auto-resolved
+  #                via the `resolve` callback — see pickPrompt). Override
+  #                ping_messages above to control the pool.
+  #   {lead}       rendered wake_state_lead (per-tone bucket).
+  #   {state}      assembled state parts ("3 unread pings + 5 open
+  #                tickets in `aiball`"), joined by the caller.
+  #   {directive}  assembled directive verbs ("drain via … + engage one
+  #                of 5 via …"), joined by the caller.
+  #
+  # When the slot is absent, the caller falls back to a hardcoded
+  # `"{culture} {lead} {state}. {directive}."` assembly so the wake
+  # never returns blank.
+  wake_master:
+    - "{culture} {lead} {state}. {directive}."
+    - "{culture} {state}. {directive}."
