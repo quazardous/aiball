@@ -508,10 +508,14 @@ export function listPings(opts: {
         .where(and(...ticketConds))
         .all();
 
+    // #B.214 (a): pull the PARENT ticket's intent on every comment ping
+    // so we can panic-fastpass the merged list. The comment row's own
+    // intent column is almost always null (intent lives on the ticket).
     const messageHits = db.select({
         ping: schema.pings,
         m: schema.messages,
         project: schema.tickets.project,
+        parent_intent: schema.tickets.intent,
     })
         .from(schema.pings)
         .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
@@ -519,23 +523,39 @@ export function listPings(opts: {
         .where(and(...messageConds))
         .all();
 
-    const out: Ping[] = [
+    // #B.214 david "a+c": sort panic-first, then chronological reverse.
+    // Panic-tagged tickets bubble to the top of the merged list so the
+    // agent doesn't drain 9 regular pings before seeing the red button.
+    // Tie-breaker keeps the existing newest-first behaviour intact for
+    // both buckets.
+    type Keyed = { ping: Ping; is_panic: boolean };
+    const keyed: Keyed[] = [
         ...ticketHits.map((r) => ({
-            recipient: r.ping.recipient,
-            message_id: r.ping.ticketId!,
-            created_at: r.ping.createdAt,
-            seen_at: r.ping.seenAt,
-            message: ticketRowToMessage(r.t),
+            ping: {
+                recipient: r.ping.recipient,
+                message_id: r.ping.ticketId!,
+                created_at: r.ping.createdAt,
+                seen_at: r.ping.seenAt,
+                message: ticketRowToMessage(r.t),
+            },
+            is_panic: r.t.intent === "panic",
         })),
         ...messageHits.map((r) => ({
-            recipient: r.ping.recipient,
-            message_id: r.ping.commentId!,
-            created_at: r.ping.createdAt,
-            seen_at: r.ping.seenAt,
-            message: messageRowToMessage(r.m, r.project),
+            ping: {
+                recipient: r.ping.recipient,
+                message_id: r.ping.commentId!,
+                created_at: r.ping.createdAt,
+                seen_at: r.ping.seenAt,
+                message: messageRowToMessage(r.m, r.project),
+            },
+            is_panic: r.parent_intent === "panic",
         })),
     ];
-    out.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    keyed.sort((a, b) => {
+        if (a.is_panic !== b.is_panic) return a.is_panic ? -1 : 1;
+        return b.ping.created_at.localeCompare(a.ping.created_at);
+    });
+    const out: Ping[] = keyed.map((k) => k.ping);
     if (opts.limit) return out.slice(0, opts.limit);
     return out;
 }
