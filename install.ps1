@@ -793,47 +793,54 @@ try {
 
 # --- post-install: auth-init ---------------------------------------------
 
-# Default behavior since user feedback: always run auth init on a fresh
-# install (skipped only with -NoAuthInit, or if the sanity check
-# disabled the daemon). Writes the setup URL to $LogDir\setup-url.txt
-# so the tray can pick it up later, and auto-opens it in the browser
-# so the user lands directly on the setup form.
+# Start the daemon unconditionally (unless the sanity check failed) so
+# claude-loop / aiball / aiball-mcp work right after install. This is
+# decoupled from -NoAuthInit, which only controls the auth init step.
 $setupUrlFile = Join-Path $LogDir 'setup-url.txt'
+$up = $false
+if ($sqliteOk) {
+    if ($Service) {
+        Log "starting service $SvcName"
+        Start-Service -Name $SvcName
+    } else {
+        Log "starting daemon via $TaskName"
+        Start-ScheduledTask -TaskName $TaskName
+    }
+    $healthUrl  = "http://${BindHost}:${Port}/api/health"
+    $statusUrl  = "http://${BindHost}:${Port}/api/auth/status"
+    Log "waiting for daemon health at $healthUrl (up to 15s)"
+    for ($i = 0; $i -lt 15; $i++) {
+        Start-Sleep -Seconds 1
+        try {
+            Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 1 | Out-Null
+            $up = $true; break
+        } catch { }
+    }
+    if (-not $up) {
+        Warn "daemon did not respond at $healthUrl after 15s"
+        Warn "check the log: $LogFile"
+    }
+}
+
+# Auth init is a separate concern: mint a token + open the setup URL
+# in the browser. Default behavior on a fresh install; -NoAuthInit
+# opts out (for headless / re-install / already-set-up scenarios).
 if (-not $NoAuthInit) {
     if (-not $sqliteOk) {
         Warn "skipping auth init because the daemon can't start (better-sqlite3)"
-    } else {
-        if ($Service) {
-            Log "starting service $SvcName"
-            Start-Service -Name $SvcName
+    } elseif ($up) {
+        # Only mint a token if not already set up. /api/auth/status
+        # is public and returns { ready, install_available, me }.
+        $alreadyReady = $false
+        try {
+            $st = Invoke-RestMethod -Uri $statusUrl -TimeoutSec 2
+            $alreadyReady = [bool] $st.ready
+        } catch { }
+        if ($alreadyReady) {
+            Log "aiball is already set up (humans configured) — skipping auth init"
+            if (Test-Path $setupUrlFile) { Remove-Item $setupUrlFile -Force -ErrorAction SilentlyContinue }
         } else {
-            Log "starting daemon via $TaskName"
-            Start-ScheduledTask -TaskName $TaskName
-        }
-        $healthUrl  = "http://${BindHost}:${Port}/api/health"
-        $statusUrl  = "http://${BindHost}:${Port}/api/auth/status"
-        Log "waiting for daemon health at $healthUrl (up to 15s)"
-        $up = $false
-        for ($i = 0; $i -lt 15; $i++) {
-            Start-Sleep -Seconds 1
-            try {
-                Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 1 | Out-Null
-                $up = $true; break
-            } catch { }
-        }
-        if ($up) {
-            # Only mint a token if not already set up. /api/auth/status
-            # is public and returns { ready, install_available, me }.
-            $alreadyReady = $false
-            try {
-                $st = Invoke-RestMethod -Uri $statusUrl -TimeoutSec 2
-                $alreadyReady = [bool] $st.ready
-            } catch { }
-            if ($alreadyReady) {
-                Log "aiball is already set up (humans configured) — skipping auth init"
-                if (Test-Path $setupUrlFile) { Remove-Item $setupUrlFile -Force -ErrorAction SilentlyContinue }
-            } else {
-                Log "daemon up. Running 'aiball auth init'"
+            Log "daemon up. Running 'aiball auth init'"
                 # Call the shim in $PrefixBin (added to PATH automatically
                 # on Win10+). Both -Minimal and full install put it there.
                 $aiballCmd = Join-Path $PrefixBin 'aiball.cmd'
@@ -853,10 +860,8 @@ if (-not $NoAuthInit) {
                     }
                 }
             }
-        } else {
-            Warn "daemon did not respond at $healthUrl after 15s"
-            Warn "check the log: $LogFile"
         }
+        # else: daemon didn't come up — already warned in the start block.
     }
 }
 
