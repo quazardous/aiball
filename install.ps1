@@ -170,9 +170,11 @@ $SrcDir    = $PSScriptRoot
 $PrefixLib = Join-Path $env:LOCALAPPDATA 'Programs\aiball'
 $PrefixBin = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'   # on PATH by default
 # -System runs as LocalSystem which has no usable home dir, so data
-# goes under %PROGRAMDATA%. Per-user installs keep %APPDATA%.
+# goes under %PROGRAMDATA%. Per-user installs use the same Linux-style
+# path the daemon defaults to (homedir()/.local/share/aiball) so the
+# shims, daemon, and CLI all agree without any AIBALL_HOME juggling.
 $DataDir   = if ($System) { Join-Path $env:PROGRAMDATA 'aiball' } `
-                     else { Join-Path $env:APPDATA      'aiball' }
+                     else { Join-Path $env:USERPROFILE '.local\share\aiball' }
 $LogDir    = if ($System) { Join-Path $env:PROGRAMDATA 'aiball\logs' } `
                      else { Join-Path $env:LOCALAPPDATA 'aiball' }
 $LogFile   = Join-Path $LogDir           'daemon.log'
@@ -587,8 +589,14 @@ $launcherPath = Join-Path $LogDir 'daemon-launcher.cmd'
 # daemon's default `homedir()/.local/share/aiball` would resolve under
 # C:\Windows\system32\config\systemprofile — far from where the
 # installer put the data. Pin AIBALL_HOME explicitly in that mode so
-# the daemon writes/reads from %PROGRAMDATA%\aiball.
-$homeOverride = if ($System) { "set `"AIBALL_HOME=$DataDir`"" } else { '' }
+# the daemon writes/reads from %PROGRAMDATA%\aiball. Also pin
+# AIBALL_SOCK="" under -System so the daemon doesn't try to create a
+# UDS at %PROGRAMDATA%\aiball\sock that per-user shims (whose default
+# AIBALL_HOME is %USERPROFILE%\.local\share\aiball) wouldn't see —
+# -System users fall back to TCP+token by design.
+$envOverrides = if ($System) {
+    "set `"AIBALL_HOME=$DataDir`"`r`nset `"AIBALL_SOCK=`""
+} else { '' }
 $launcherBody = @"
 @echo off
 setlocal EnableExtensions
@@ -611,7 +619,7 @@ if exist "%LOG%" (
 
 set "AIBALL_PORT=$Port"
 set "AIBALL_HOST=$BindHost"
-$homeOverride
+$envOverrides
 
 echo [%date% %time%] launching aiball daemon (port $Port) >> "%LOG%"
 npx.cmd --no-install tsx src\daemon.ts >> "%LOG%" 2>&1

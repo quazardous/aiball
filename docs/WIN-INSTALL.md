@@ -247,15 +247,24 @@ removes the opposite registration, so you never end up with two daemons
 fighting over port 7777. To go back to a Scheduled Task: just re-run
 without `-Service`.
 
-## Transport: TCP, not UDS
+## Transport: UDS by default, TCP available
 
-The Unix domain socket the Linux daemon uses doesn't have a clean
-counterpart on Windows that node's `net.createServer` can listen on
-identically across all versions. The Windows daemon binds **TCP-only**
-on `127.0.0.1:7777` with an auth-token authentication path (the same
-fallback Linux uses for non-UDS callers). The first install mint a
-token and stores it in `%APPDATA%\aiball\token` — `aiball` CLI and
-`aiball-mcp` read it from there.
+Windows 10 1803+ supports AF_UNIX in `net.createServer`, so the daemon
+listens on **both** TCP (`127.0.0.1:7777`) AND a Unix-domain socket at
+`%USERPROFILE%\.local\share\aiball\sock` — same as Linux. Same-user
+clients (CLI / MCP / claude-loop) connect via the socket and bypass
+the bearer-token auth path; the OS trust boundary comes from NTFS ACL
+inheritance (the parent profile dir is owner-only, and the sock file
+inherits that ACL).
+
+`-System` mode is the exception: LocalSystem creates the sock under
+`%PROGRAMDATA%\aiball\`, which per-user shims don't look at, so the
+launcher pins `AIBALL_SOCK=""` and the daemon stays TCP-only. Use
+the bearer-token CLI workflow (`aiball auth issue --consumer ...`) to
+authenticate clients in that mode.
+
+Set `AIBALL_SOCK=""` in your shell to force TCP+token for testing or
+when running the daemon over a remote tunnel.
 
 ## claude-loop on Windows
 
