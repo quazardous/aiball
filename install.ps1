@@ -287,20 +287,14 @@ if ($Service) {
     Log "service mode: $(if ($System) { 'LocalSystem (global)' } else { 'current user (' + $env:USERNAME + ')' })"
 }
 
-# Node version: hard fail <20 (matches package.json engines), warn >=24
-# (better-sqlite3@11.x ships prebuilt bindings up to Node 22; Node 24
-# requires either downgrade or `npm rebuild` with VS Build Tools).
+# Node version: hard fail <20 (matches package.json engines). better-
+# sqlite3 v12 ships prebuilt bindings for Node 22/24 (and forward as
+# they release prebuilds for new majors). The sanity check below
+# catches the rare case where a brand-new Node major lands without
+# prebuilds yet.
 $nodeVerRaw = (node --version) -replace '^v',''
 $nodeMajor  = [int]($nodeVerRaw.Split('.')[0])
 if ($nodeMajor -lt 20) { Die "node >=20 required, found v$nodeVerRaw" }
-if ($nodeMajor -ge 24) {
-    Warn "node v$nodeVerRaw detected — better-sqlite3 prebuilt bindings"
-    Warn "may not exist for this version. If the daemon fails to start"
-    Warn "with 'Could not locate the bindings file', either:"
-    Warn "  - downgrade to Node 22 LTS (winget install OpenJS.NodeJS.LTS), or"
-    Warn "  - install VS Build Tools and run 'npm rebuild better-sqlite3'"
-    Warn "  - inside $PrefixLib"
-}
 
 # --- install dir provisioning ----------------------------------------------
 # Reentrant: re-running with no flag preserves the existing layout.
@@ -540,9 +534,11 @@ try {
         Warn "better-sqlite3 native binding failed to load:"
         Warn "  $probe"
         Warn "The daemon will not start until this is fixed. Options:"
-        Warn "  - downgrade Node to 22 LTS (winget install OpenJS.NodeJS.LTS)"
-        Warn "  - install VS Build Tools, then in $PrefixLib :"
+        Warn "  - bump better-sqlite3 in package.json to a version with"
+        Warn "    prebuilts for your Node major (check npm)"
+        Warn "  - install VS Build Tools + rebuild in $PrefixLib :"
         Warn "      npm rebuild better-sqlite3 --build-from-source"
+        Warn "  - pin Node to current LTS (winget install OpenJS.NodeJS.LTS)"
         if ($Service) {
             Warn "Stopping the service and switching it to Manual start so it"
             Warn "doesn't restart-loop. Once fixed, re-enable with:"

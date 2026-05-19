@@ -12,7 +12,7 @@
 Most prereqs install via `winget` (Windows 10 1809+ / Windows 11):
 
 ```powershell
-winget install OpenJS.NodeJS.LTS    # node + npm — LTS, NOT latest (see below)
+winget install OpenJS.NodeJS.LTS    # node + npm (any Node >=20 works)
 winget install Git.Git              # for cloning the repo
 ```
 
@@ -22,19 +22,11 @@ You'll also need:
   exercised.
 - A **terminal** that handles ANSI colors (Windows Terminal, recommended).
 
-### Why Node LTS (22), not latest (24+)
-
-`better-sqlite3` ships **prebuilt native bindings** only up to the current
-LTS major (22 as of 2026-05). On Node 24+, `npm install` falls back to
-compiling from source via `node-gyp`, which requires **VS Build Tools**
-("Desktop development with C++" workload — a multi-GB install). Without
-those tools, `npm install` dies with `find VS ... could not use PowerShell
-to find Visual Studio 2017 or newer` and the daemon can't start.
-
-The installer detects this case and warns at the top, then again with a
-clear recovery message after `npm install` fails. If you want bleeding-edge
-Node anyway, either install VS Build Tools or run `npm rebuild
-better-sqlite3 --build-from-source` inside `%LOCALAPPDATA%\Programs\aiball`.
+Any Node >=20 works (`better-sqlite3` v12+ ships prebuilts for both
+Node 22 and 24 — no compile step needed). The installer runs a sanity
+check post-install that catches the rare case where a brand-new Node
+major lands without prebuilts yet, and prints actionable recovery
+steps.
 
 ## Install
 
@@ -189,17 +181,26 @@ token and stores it in `%APPDATA%\aiball\token` — `aiball` CLI and
 ## Troubleshooting
 
 - **Install ends with `[aiball] install complete (degraded — daemon
-  disabled)`** → the better-sqlite3 sanity check failed. The scheduled
-  task was auto-disabled so it doesn't restart-loop at next logon. Fix
-  per the Node-LTS rationale above (downgrade to Node 22 or install VS
-  Build Tools + `npm rebuild`), then:
+  disabled)`** → the better-sqlite3 sanity check failed (no prebuilt
+  binding for your Node major). The scheduled task was auto-disabled
+  so it doesn't restart-loop at next logon. Three fixes, in order of
+  effort:
+  1. Bump `better-sqlite3` in `package.json` if a newer version has
+     prebuilts for your Node major (`npm view better-sqlite3 versions`)
+  2. Install **VS Build Tools** ("Desktop development with C++" workload)
+     and `npm rebuild better-sqlite3 --build-from-source` in
+     `%LOCALAPPDATA%\Programs\aiball`
+  3. Pin Node to current LTS (`winget install OpenJS.NodeJS.LTS`)
+
+  Then re-enable:
   ```powershell
   Enable-ScheduledTask -TaskName aiball-daemon
   Start-ScheduledTask  -TaskName aiball-daemon
   ```
 - **`npm install failed in ... (exit 1)` during install** → almost
-  always `node-gyp` failing to find Visual Studio on Node 24+. Same fix
-  as above.
+  always `node-gyp` falling back to source compilation without VS Build
+  Tools. Same fixes as above (bump dep version, install VS Build Tools,
+  or downgrade Node).
 - **Frontend `npm run build` fails with `received "../../.../index.html"`
   under `-Symlink`** → known vite-with-symlinks upstream issue.
   Workarounds: (a) run install in copy mode (no `-Symlink`), OR (b)
