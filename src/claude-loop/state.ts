@@ -356,7 +356,7 @@ const LEGACY_AIBALL_CHECK_CMD = "aiball pings-count -q";
  * claude in `idle` while there was still work. Now the gate returns
  * true if EITHER pings>0 OR open>0 — the wake CTA already mentions
  * both via `buildContextPhrase`, so the chained directive
- * ("drain via unread + handle open via ticket_list") lands cleanly.
+ * ("drain via unread + engage one of N open via ticket_list") lands cleanly.
  *
  * #B.232 (david ch887f): when `sd` is provided, the open-tickets leg
  * is suppressed if `openCount <= watermark` (already-acked open
@@ -668,11 +668,14 @@ export async function buildContextPhrase(
         // both directives so the agent doesn't drain pings and stop —
         // david's repro showed `en standby` after a clean drain while
         // 4 open tickets were still actionable. Wording stays imperative
-        // ("drain", "handle") on each leg so the agent treats both as
-        // tasks, not as informational decoration.
+        // ("drain", "engage") on each leg so the agent treats both as
+        // tasks, not as informational decoration. The open-tickets leg
+        // explicitly says "engage one of N" — earlier wording bottomed
+        // out at "handle open via ticket_list" which let me list five
+        // tickets and standby (david fqchxa: "l'agent attend encore").
         const verbs: string[] = [];
         if (pingCount > 0) verbs.push("drain via `unread({pings: true, mark_read: true})`");
-        if (openCount > 0) verbs.push("handle open via `ticket_list({open: true})`");
+        if (openCount > 0) verbs.push(`engage one of ${openCount} open via \`ticket_list({open: true})\``);
         const directive = verbs.join(" + ");
         return `${culture} [aiball: ${parts.join(" · ")}] — ${directive} before answering.`;
     } catch {
