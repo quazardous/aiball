@@ -493,7 +493,7 @@ async function followPane(name: string, lines: number): Promise<void> {
  * any other stderr (real errors) through.
  */
 const TAIL_NOISE_RE =
-    /became inaccessible|est devenu inaccessible|cannot use inotify|impossible d'utiliser inotify|reverting to polling|retour à l'interrogation active|le répertoire contenant le fichier|directory containing the watched file/i;
+    /became inaccessible|est devenu inaccessible|cannot use inotify|impossible d'utiliser inotify|reverting to polling|retour à l'interrogation active|le répertoire contenant le fichier|directory containing the watched file|tail: cannot open .* for reading: No such file or directory|tail: impossible d'ouvrir .* en lecture: Aucun fichier ou dossier de ce nom/i;
 
 function pipeFilteredStderr(child: import("node:child_process").ChildProcess): void {
     if (!child.stderr) return;
