@@ -8,7 +8,7 @@ import { useWs } from "./lib/ws";
 import { bus, useBus } from "./lib/bus";
 import { isPeek } from "./lib/peek";
 import BulkBar from "./components/BulkBar.vue";
-import { type BulkAction, canDo } from "./lib/ticket-actions";
+import { type BulkAction, useBulkActions } from "./lib/ticket-actions";
 import {
     STATUS_FILTER_OPTIONS,
     SORT_OPTIONS,
@@ -192,9 +192,12 @@ function openProjectPage(p: string, page: ProjectPage) {
     openTicketId.value = null;
 }
 
-const selectedIds = ref<Set<number>>(new Set());
-const bulkBusy = ref(false);
-
+// Bulk-selection state + dispatch moved to lib/ticket-actions.ts as
+// `useBulkActions(...)` (#B.213 phase A.1). Selected ids, busy flag,
+// toggle/clear/selectAll, bulkAction handler, applicability counts +
+// the `bulkCounts` computed all come from the composable. Wired below
+// once `rows` + `pagedRows` are in scope.
+//
 // Auto-refresh: optional 60s heartbeat that triggers a refresh of the
 // current view. WS push already keeps things fresh; this is a fallback
 // for environments where the WS may have silently dropped.
@@ -249,127 +252,6 @@ const inListView = computed(
 watch(inListView, (now, prev) => {
     if (now && !prev) loadRows();
 });
-
-function toggleSelected(id: number, v: boolean) {
-    const next = new Set(selectedIds.value);
-    if (v) next.add(id);
-    else next.delete(id);
-    selectedIds.value = next;
-}
-function clearSelection() {
-    selectedIds.value = new Set();
-}
-function selectAllVisible() {
-    // "Visible" = the current page's rows. With pagination on, selecting
-    // "all" across every page would be surprising; the user sees 25 rows
-    // and expects the button to act on those. To select across pages,
-    // they can paginate + select-all again — selectedIds persists.
-    selectedIds.value = new Set(pagedRows.value.map((r) => r.id));
-}
-const BULK_LABELS: Record<BulkAction, string> = {
-    approve: "approve",
-    reject: "reject",
-    close: "close",
-    reopen: "reopen",
-    mark_read: "mark read",
-    mark_unread: "mark unread",
-    snooze: "snooze",
-    unsnooze: "unsnooze",
-};
-
-/** Default snooze duration when the bulk button is clicked without a
- *  picker — matches the "+3d" preset of the thread popover. */
-const BULK_SNOOZE_DEFAULT_MS = 3 * 86_400_000;
-
-/**
- * Per-row applicability test for each bulk action. Rows that don't
- * pass are silently skipped (no API call, no error), per #B.327: a
- * bulk action should never refuse the whole batch because some rows
- * weren't eligible — it just acts on the ones it can.
- */
-async function bulkAction(action: BulkAction) {
-    const selected = rows.value.filter((r) => selectedIds.value.has(r.id));
-    if (!selected.length) return;
-    bulkBusy.value = true;
-    let ok = 0, skipped = 0, failed = 0;
-    try {
-        for (const r of selected) {
-            if (!canDo(action, r)) {
-                skipped++;
-                continue;
-            }
-            try {
-                switch (action) {
-                    case "approve":
-                        await api.approve(r.id);
-                        break;
-                    case "reject":
-                        await api.reject(r.id);
-                        break;
-                    case "close":
-                        await api.postMessage({
-                            project: r.project,
-                            kind: "ticket_closed",
-                            ticket_id: r.id,
-                            parent_id: r.id,
-                        });
-                        break;
-                    case "reopen":
-                        await api.postMessage({
-                            project: r.project,
-                            kind: "ticket_reopened",
-                            ticket_id: r.id,
-                            parent_id: r.id,
-                        });
-                        break;
-                    case "mark_read":
-                        await api.markTicketRead(r.id);
-                        break;
-                    case "mark_unread":
-                        await api.markTicketUnread(r.id);
-                        break;
-                    case "snooze":
-                        await api.postponeTicket(
-                            r.id,
-                            new Date(Date.now() + BULK_SNOOZE_DEFAULT_MS).toISOString(),
-                        );
-                        break;
-                    case "unsnooze":
-                        await api.unsnoozeTicket(r.id);
-                        break;
-                }
-                ok++;
-            } catch {
-                failed++;
-            }
-        }
-        const label = BULK_LABELS[action];
-        let detail = "";
-        if (skipped) detail += `${skipped} skipped (not applicable)`;
-        if (failed) detail += `${detail ? ", " : ""}${failed} failed`;
-        toast.add({
-            severity: failed ? "warn" : "success",
-            summary: `${label}: ${ok} ticket${ok === 1 ? "" : "s"}`,
-            detail: detail || undefined,
-            life: 6000,
-        });
-        clearSelection();
-        bus.emit("inbox.refresh");
-        bus.emit("projects.refresh");
-    } finally {
-        bulkBusy.value = false;
-    }
-}
-
-/** Count how many selected rows would actually be touched by `action`.
- *  Used to disable the bulk button when no row is eligible. */
-function bulkApplicableCount(action: BulkAction): number {
-    let n = 0;
-    for (const r of rows.value) {
-        if (selectedIds.value.has(r.id) && canDo(action, r)) n++;
-    }
-    return n;
-}
 
 watch(project, (v) => {
     if (v) localStorage.setItem("aiball.project", v);
@@ -662,6 +544,19 @@ const pagedRows = computed(() =>
     ),
 );
 
+// #B.213 phase A.1: bulk-selection state + dispatch wired now that
+// both `rows` and `pagedRows` are in scope. selectAllVisible needs
+// pagedRows; the rest only need rows.
+const {
+    selectedIds,
+    bulkBusy,
+    toggleSelected,
+    clearSelection,
+    selectAllVisible,
+    bulkAction,
+    bulkCounts,
+} = useBulkActions({ rows, pagedRows });
+
 // Any change to the filter set resets the cursor — otherwise a page-2
 // view followed by tightening the filter could leave the user staring
 // at an empty page.
@@ -774,16 +669,7 @@ async function toggleRead(r: InboxRow) {
     }
 }
 
-const bulkCounts = computed(() => ({
-    approve: bulkApplicableCount("approve"),
-    reject: bulkApplicableCount("reject"),
-    close: bulkApplicableCount("close"),
-    reopen: bulkApplicableCount("reopen"),
-    mark_read: bulkApplicableCount("mark_read"),
-    mark_unread: bulkApplicableCount("mark_unread"),
-    snooze: bulkApplicableCount("snooze"),
-    unsnooze: bulkApplicableCount("unsnooze"),
-}));
+// bulkCounts now comes from useBulkActions (defined above with rows + pagedRows).
 
 /** When the user toggled "show snoozed" on, the open count includes
  *  snoozed tickets (they reappear in the lists and badges). Off by
