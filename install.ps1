@@ -32,9 +32,16 @@
     instead of copying. Requires Developer Mode (Settings → Update &
     Security → For Developers) OR running as Administrator.
 
+.PARAMETER NoAuthInit
+    Skip the auto-setup-token step. By default (when humans aren't yet
+    configured), the installer mints an install token, prints + writes
+    the setup URL, and auto-opens it in your browser so you land
+    directly on the setup form. Pass -NoAuthInit for headless installs
+    where you'll do the bootstrap manually later (`aiball auth init`).
+
 .PARAMETER AuthInit
-    After install, start the daemon, wait for it to be reachable, mint a
-    one-time install token and print the setup URL.
+    Deprecated alias kept for backwards compat — auth init is now the
+    default. The flag is silently honored, no-op.
 
 .PARAMETER Uninstall
     Remove shims, scheduled task, and the install dir. Leaves the data
@@ -115,7 +122,8 @@
 [CmdletBinding()]
 param(
     [switch] $Symlink,
-    [switch] $AuthInit,
+    [switch] $AuthInit,        # back-compat no-op (default behavior now)
+    [switch] $NoAuthInit,
     [switch] $Uninstall,
     [switch] $PurgeData,
     [switch] $Service,
@@ -694,9 +702,15 @@ try {
 
 # --- post-install: auth-init ---------------------------------------------
 
-if ($AuthInit) {
+# Default behavior since user feedback: always run auth init on a fresh
+# install (skipped only with -NoAuthInit, or if the sanity check
+# disabled the daemon). Writes the setup URL to $LogDir\setup-url.txt
+# so the tray can pick it up later, and auto-opens it in the browser
+# so the user lands directly on the setup form.
+$setupUrlFile = Join-Path $LogDir 'setup-url.txt'
+if (-not $NoAuthInit) {
     if (-not $sqliteOk) {
-        Warn "skipping --AuthInit because the daemon can't start (better-sqlite3)"
+        Warn "skipping auth init because the daemon can't start (better-sqlite3)"
     } else {
         if ($Service) {
             Log "starting service $SvcName"
@@ -705,7 +719,8 @@ if ($AuthInit) {
             Log "starting daemon via $TaskName"
             Start-ScheduledTask -TaskName $TaskName
         }
-        $healthUrl = "http://${BindHost}:${Port}/api/health"
+        $healthUrl  = "http://${BindHost}:${Port}/api/health"
+        $statusUrl  = "http://${BindHost}:${Port}/api/auth/status"
         Log "waiting for daemon health at $healthUrl (up to 15s)"
         $up = $false
         for ($i = 0; $i -lt 15; $i++) {
@@ -716,12 +731,38 @@ if ($AuthInit) {
             } catch { }
         }
         if ($up) {
-            Log "daemon up. Running 'aiball auth init'"
-            # Full install puts shims on PATH at $PrefixBin\aiball.cmd;
-            # -Minimal skips shims, so call the in-source launcher direct.
-            $aiballCmd = if ($Minimal) { Join-Path $AppDir 'bin\aiball.cmd' } `
-                                 else { Join-Path $PrefixBin 'aiball.cmd' }
-            & $aiballCmd auth init --host $BindHost --port $Port
+            # Only mint a token if not already set up. /api/auth/status
+            # is public and returns { ready, install_available, me }.
+            $alreadyReady = $false
+            try {
+                $st = Invoke-RestMethod -Uri $statusUrl -TimeoutSec 2
+                $alreadyReady = [bool] $st.ready
+            } catch { }
+            if ($alreadyReady) {
+                Log "aiball is already set up (humans configured) — skipping auth init"
+                if (Test-Path $setupUrlFile) { Remove-Item $setupUrlFile -Force -ErrorAction SilentlyContinue }
+            } else {
+                Log "daemon up. Running 'aiball auth init'"
+                # Full install puts shims on PATH at $PrefixBin\aiball.cmd;
+                # -Minimal skips shims, so call the in-source launcher direct.
+                $aiballCmd = if ($Minimal) { Join-Path $AppDir 'bin\aiball.cmd' } `
+                                     else { Join-Path $PrefixBin 'aiball.cmd' }
+                $output = & $aiballCmd auth init --host $BindHost --port $Port 2>&1
+                $output | ForEach-Object { Write-Host $_ }   # mirror to console
+                # Parse the setup URL out of the output.
+                $urlMatch = $output | Select-String -Pattern 'http[s]?://[^\s]+' -AllMatches | Select-Object -First 1
+                if ($urlMatch) {
+                    $setupUrl = $urlMatch.Matches[0].Value
+                    [System.IO.File]::WriteAllText($setupUrlFile, $setupUrl)
+                    Log "setup URL persisted to: $setupUrlFile"
+                    try {
+                        Start-Process $setupUrl
+                        Log "opened setup URL in your default browser"
+                    } catch {
+                        Warn "failed to open browser automatically — copy/paste the URL above"
+                    }
+                }
+            }
         } else {
             Warn "daemon did not respond at $healthUrl after 15s"
             Warn "check the log: $LogFile"
@@ -784,9 +825,9 @@ if (-not $sqliteOk) {
         Write-Host "         Enable-ScheduledTask -TaskName $TaskName"
         Write-Host "         Start-ScheduledTask  -TaskName $TaskName"
     }
-} elseif (-not $AuthInit) {
+} elseif ($NoAuthInit) {
     Write-Host ''
-    Write-Host '  Next: start the daemon, then mint a setup token:'
+    Write-Host '  Next (-NoAuthInit was passed): start the daemon, then mint a setup token:'
     if ($Service) {
         Write-Host "         Start-Service -Name $SvcName"
     } else {

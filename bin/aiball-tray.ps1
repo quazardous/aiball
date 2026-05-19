@@ -31,6 +31,33 @@ if (-not $createdNew) {
 $port = if ($env:AIBALL_PORT) { $env:AIBALL_PORT } else { '7777' }
 $url  = "http://127.0.0.1:$port"
 
+# Resolve the URL to open in the browser. Strategy:
+#   1. Hit /api/auth/status (public). If ready=true, use root URL.
+#   2. If ready=false AND a setup-url.txt file exists (written by
+#      install.ps1 when it minted the install token), use that —
+#      lands the user directly on the setup form, no token typing.
+#   3. Otherwise (daemon unreachable, or no setup file), fall back
+#      to the root URL — the SPA will show its own "needs setup" UI.
+# Resolved fresh every time the menu is invoked so state changes
+# (setup completed mid-session, token rotated, …) are picked up.
+$setupFileCandidates = @(
+    (Join-Path $env:LOCALAPPDATA 'aiball\setup-url.txt'),
+    (Join-Path $env:PROGRAMDATA  'aiball\logs\setup-url.txt')
+)
+function Get-OpenUrl {
+    try {
+        $st = Invoke-RestMethod -Uri "$url/api/auth/status" -TimeoutSec 1
+        if ($st.ready) { return $url }
+    } catch { return $url }   # daemon unreachable — fall back
+    foreach ($f in $setupFileCandidates) {
+        if (Test-Path $f) {
+            $line = (Get-Content $f -ErrorAction SilentlyContinue | Select-Object -First 1)
+            if ($line) { return $line.Trim() }
+        }
+    }
+    return $url
+}
+
 $ni = New-Object System.Windows.Forms.NotifyIcon
 # Try the bundled .ico first; fall back to a stock SystemIcons placeholder
 # if it's missing (e.g. fresh clone before scripts/make-icon.py ran).
@@ -45,7 +72,7 @@ $ni.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $open = $menu.Items.Add("Ouvrir dans le navigateur")
-$open.Add_Click({ Start-Process $url })
+$open.Add_Click({ Start-Process (Get-OpenUrl) })
 $menu.Items.Add("-") | Out-Null   # separator
 $exit = $menu.Items.Add("Fermer")
 $exit.Add_Click({
@@ -56,7 +83,7 @@ $exit.Add_Click({
 $ni.ContextMenuStrip = $menu
 
 # Convention: double-click on the tray icon = primary action (open UI).
-$ni.Add_MouseDoubleClick({ Start-Process $url })
+$ni.Add_MouseDoubleClick({ Start-Process (Get-OpenUrl) })
 
 # Hand control to the WinForms message loop. The script stays alive
 # until "Fermer" is clicked. Release the singleton mutex on exit so a
