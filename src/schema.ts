@@ -19,6 +19,32 @@ import { sqliteTable, integer, text, primaryKey, index, uniqueIndex } from "driz
  * tables, but app-level cleanup runs in deleteProject.
  */
 
+/**
+ * #B.216 phase A pass 1: explicit project registry.
+ *
+ * Until pass 1 a "project" existed implicitly — the set of distinct
+ * values of `tickets.project`. The new `projects` table is the first
+ * place where a project can be declared BEFORE any ticket is filed,
+ * which is what the CLI `aiball project init` and the Web UI's
+ * "Create project" button need.
+ *
+ * Soft registry by design: `tickets.project` stays a free TEXT column
+ * (no SQL FK), so legacy tickets keep working and an orphan ticket on
+ * an unregistered project still inserts. Listings + the new POST
+ * endpoint (pass 2) read from this table; the implicit-project path
+ * stays available as a fallback.
+ */
+export const projects = sqliteTable("projects", {
+    /** Immutable lookup key — must match `tickets.project`. */
+    name: text("name").primaryKey(),
+    /** Optional human-friendly label for the UI ("Aiball BAL"). */
+    displayName: text("display_name"),
+    description: text("description"),
+    createdAt: text("created_at").notNull(),
+    /** consumer_id that registered the project (NULL for backfilled rows when no author was on file). */
+    createdBy: text("created_by"),
+});
+
 export const tickets = sqliteTable("tickets", {
     id: integer("id").primaryKey(),
     project: text("project").notNull(),
@@ -334,6 +360,9 @@ export const tokens = sqliteTable("tokens", {
 ]);
 
 // ---- inferred types ------------------------------------------------------
+
+export type Project = typeof projects.$inferSelect;
+export type NewProject = typeof projects.$inferInsert;
 
 export type Ticket = typeof tickets.$inferSelect;
 export type NewTicket = typeof tickets.$inferInsert;

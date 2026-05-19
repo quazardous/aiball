@@ -120,6 +120,13 @@
       "when": 1779300000000,
       "tag": "0016_dedupe_cross_human_pings",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1779400000000,
+      "tag": "0017_projects",
+      "breakpoints": true
     }
   ]
 }
