@@ -3,6 +3,7 @@ import { computed, onMounted, provide, ref, watch } from "vue";
 import Toast from "primevue/toast";
 import { useToast } from "primevue/usetoast";
 import { api, STRATEGIES, type InboxRow, type Message, type ProjectMeta, type Strategy } from "./lib/api";
+import { useNotifications } from "./lib/notifications";
 import { useRouting } from "./lib/router";
 import { useWs } from "./lib/ws";
 import { bus, useBus } from "./lib/bus";
@@ -131,38 +132,9 @@ const strategyOptions = STRATEGY_OPTIONS;
 // SettingsPanel type lives in components/Sidebar.vue.
 const panel = ref<SettingsPanel | null>(null);
 
-// OS notifications: lazily ask permission on first interaction so we don't
-// spam the user with a permission popup at boot.
-const notifAllowed = ref(
-    typeof Notification !== "undefined" && Notification.permission === "granted",
-);
-const notifMuted = ref(localStorage.getItem("aiball.notifMuted") === "1");
-function toggleMute() {
-    notifMuted.value = !notifMuted.value;
-    localStorage.setItem("aiball.notifMuted", notifMuted.value ? "1" : "0");
-}
-async function ensureNotifPermission() {
-    if (typeof Notification === "undefined") return false;
-    if (Notification.permission === "granted") {
-        notifAllowed.value = true;
-        return true;
-    }
-    if (Notification.permission === "denied") return false;
-    const r = await Notification.requestPermission();
-    notifAllowed.value = r === "granted";
-    return notifAllowed.value;
-}
-function fireOsNotif(title: string, body: string) {
-    if (notifMuted.value) return;
-    if (typeof Notification === "undefined") return;
-    if (Notification.permission !== "granted") return;
-    if (document.hasFocus()) return; // page already visible, toast is enough
-    try {
-        new Notification(title, { body, tag: "aiball" });
-    } catch {
-        /* ignore */
-    }
-}
+// OS notifications + arrival toasts moved to lib/notifications.ts as
+// `useNotifications({ project })` (#B.213 phase A.2). The composable
+// is wired BELOW once `project` is in scope.
 
 const projects = ref<ProjectMeta[]>([]);
 const myConsumerId = (() => {
@@ -351,65 +323,15 @@ function refresh() {
     }
 }
 
-function shortKindLabel(m: Message): string {
-    switch (m.kind) {
-        case "ticket_created":
-            return "ticket";
-        case "comment_added":
-            return "comment";
-        case "ticket_closed":
-            return "ticket close";
-    }
-    return m.kind;
-}
-
-// #B.194: auto-approve projects emit message_created (pending) then
-// message_decided (approved) in quick succession → two toasts per
-// message. Hold the pending toast 250ms; if a decision lands first,
-// cancel the pending and only show the decision.
-const pendingArrivalTimers = new Map<number, ReturnType<typeof setTimeout>>();
-const PENDING_TOAST_HOLD_MS = 250;
-
-function notifyArrival(m: Message) {
-    const inScope = !project.value || project.value === m.project;
-    if (!inScope) return;
-
-    if (m.status !== "pending") {
-        const t = pendingArrivalTimers.get(m.id);
-        if (t) {
-            clearTimeout(t);
-            pendingArrivalTimers.delete(m.id);
-        }
-        renderArrivalToast(m);
-        return;
-    }
-
-    if (pendingArrivalTimers.has(m.id)) return;
-    const t = setTimeout(() => {
-        pendingArrivalTimers.delete(m.id);
-        renderArrivalToast(m);
-    }, PENDING_TOAST_HOLD_MS);
-    pendingArrivalTimers.set(m.id, t);
-}
-
-function renderArrivalToast(m: Message) {
-    const who = m.by_agent ?? "unknown";
-    const k = shortKindLabel(m);
-    const summary = m.title ?? (m.body ? m.body.slice(0, 80) : `new ${k}`);
-    const ref =
-        m.kind === "ticket_created"
-            ? `#B.${m.id}`
-            : `#C.${m.hashid ?? m.id}`;
-    const detail = `${who} · ${ref} · ${m.project}`;
-
-    toast.add({
-        severity: m.status === "pending" ? "warn" : "info",
-        summary: `${k}${m.status === "pending" ? " pending review" : ""}: ${summary}`,
-        detail,
-        life: 8000,
-    });
-    fireOsNotif(`aiball — ${k}`, `${summary}\n${detail}`);
-}
+// #B.213 phase A.2: arrival toasts + OS notifications wired now that
+// `project` is in scope (needed for the in-scope filter).
+const {
+    notifAllowed,
+    notifMuted,
+    toggleMute,
+    ensureNotifPermission,
+    notifyArrival,
+} = useNotifications({ project });
 
 // WS handler is now a thin relay: turn WebSocket events into high-level
 // `bus` events. Consumers (this file's own list/sidebar/toaster, plus any
