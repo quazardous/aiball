@@ -111,6 +111,12 @@ token and stores it in `%APPDATA%\aiball\token` — `aiball` CLI and
   everything except the background loop.
 - **systemd**. A per-user Scheduled Task replaces it. No socket-activation;
   the daemon launches at logon and stays up until logout.
+- **`aiball-tailscale`** — the bash helper that wraps `tailscale serve`
+  (see [`docs/TAILSCALE.md`](TAILSCALE.md)) is Linux/macOS-only: it
+  reads the daemon port from the systemd drop-in, which doesn't exist
+  on Windows. To expose the Windows daemon over Tailscale today,
+  configure `tailscale serve` manually pointing at
+  `http://127.0.0.1:7777` — same security model, just no helper script.
 - **Windows Service**. Not yet — a Scheduled Task is the v1 choice
   (lighter, no admin required, scoped to the logged-in user). NSSM
   service-manager support is on the roadmap if there's demand.
