@@ -271,6 +271,24 @@ function Remove-AiballTask {
     }
 }
 
+function Stop-AiballOnPort($port) {
+    # Stop-ScheduledTask sends a terminate but the daemon's node.exe
+    # process can take a moment to release file handles (daemon.log
+    # specifically), which then breaks Remove-Item on $LogDir. Kill
+    # whatever still holds the daemon port — defensive cleanup before
+    # touching files.
+    try {
+        $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+        foreach ($c in $conns) {
+            try {
+                Stop-Process -Id $c.OwningProcess -Force -ErrorAction Stop
+                Log "killed lingering daemon process (pid $($c.OwningProcess)) on port $port"
+            } catch { }
+        }
+        if ($conns) { Start-Sleep -Milliseconds 500 }   # let the OS release the handles
+    } catch { }
+}
+
 function Remove-AiballService {
     if (Test-ServiceExists $SvcName) {
         try { & nssm stop $SvcName confirm 2>&1 | Out-Null } catch { }
@@ -314,6 +332,10 @@ if ($Uninstall) {
     } elseif (Test-ServiceExists $SvcName) {
         Warn "service $SvcName exists but nssm is not in PATH — install NSSM and re-run -Uninstall, or remove manually via 'sc.exe delete $SvcName' (admin)"
     }
+    # After stopping the task/service, the daemon process may still be
+    # holding the log file. Kill anything left on the configured port
+    # so the LogDir Remove-Item below doesn't trip over locked handles.
+    Stop-AiballOnPort $Port
 
     foreach ($name in $Shims) {
         $path = Join-Path $PrefixBin "$name.cmd"
