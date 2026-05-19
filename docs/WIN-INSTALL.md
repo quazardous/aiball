@@ -260,15 +260,19 @@ pipe name. So the Windows daemon binds **TCP-only** on
 Auth workflow on a fresh install:
 
 1. `install.ps1` mints an install token and opens `/setup` in your
-   browser. Create your human account there.
-2. To use the CLI / MCP / claude-loop from a terminal, you need an
-   **agent token**. Open the browser already logged in to the daemon,
-   navigate to your user settings, and click **Issue CLI token**
-   (or call `POST /api/auth/issue` while authenticated as a human).
-3. Save the printed token to `%USERPROFILE%\.local\share\aiball\cli-env`
-   as a single line: `export AIBALL_TOKEN=aiball-...`
-4. New shells will pick it up automatically — the .cmd shims source
-   that file on every invocation.
+   browser. Create your human account (login + password) there.
+2. When you submit the form, the daemon **auto-writes** an agent
+   token to `%USERPROFILE%\.local\share\aiball\cli-env` (the file
+   the .cmd shims source on every invocation). CLI / MCP /
+   claude-loop pick it up automatically in any new shell.
+3. If the file already exists (manually managed), the auto-write
+   skips it — your config is left alone.
+
+`-System` is the exception: the daemon runs as LocalSystem and
+writes cli-env under `%PROGRAMDATA%\aiball\` where per-user shims
+don't look. Do the manual workflow there: from a browser logged into
+the daemon, mint a CLI token via your user settings, then save it as
+`export AIBALL_TOKEN=...` in `%USERPROFILE%\.local\share\aiball\cli-env`.
 
 Advanced users can still opt in to a Named Pipe-based UDS by setting
 `AIBALL_SOCK=\\.\pipe\aiball-<something>` explicitly, but the shims'

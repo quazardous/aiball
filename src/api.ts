@@ -108,7 +108,7 @@ import { join as joinPath } from "node:path";
 import { createHash } from "node:crypto";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
-import { outboxPath, UPLOADS_DIR } from "./paths.js";
+import { AIBALL_HOME, outboxPath, UPLOADS_DIR } from "./paths.js";
 import { searchMessages } from "./search.js";
 import { fanOutPings, submitMessage, validateNewMessage, VALID_KINDS } from "./messages.js";
 import { parseMeta } from "./questions.js";
@@ -229,6 +229,26 @@ api.post("/auth/setup", async (req: Request, res: Response) => {
     // Consume the install token + issue a fresh auth token.
     deleteToken(token);
     const auth = issueToken({ consumer_id, kind: "auth", label: "web setup" });
+
+    // Auto-write cli-env so the CLI/MCP/claude-loop running in the
+    // same user context (typical local install) get a working agent
+    // token without a manual `aiball auth issue` + paste-to-file
+    // step. Idempotent: if cli-env already exists we don't touch
+    // it — respects users who manage their own. Only fires when the
+    // daemon writes to a path the same user can read (per-user
+    // install). -System / LocalSystem installs write to PROGRAMDATA
+    // where per-user shims don't look, so the user still does the
+    // manual workflow there — documented in WIN-INSTALL.md.
+    try {
+        const cliEnv = joinPath(AIBALL_HOME, "cli-env");
+        if (!existsSync(cliEnv)) {
+            const agent = issueToken({ consumer_id, kind: "agent", label: "cli (auto-issued at first setup)" });
+            writeFileSync(cliEnv, `export AIBALL_TOKEN=${agent.token}\n`, { mode: 0o600 });
+        }
+    } catch {
+        // Non-fatal — the user can always issue + write manually.
+    }
+
     res.json({
         token: auth.token,
         consumer_id,
