@@ -13,6 +13,21 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+# Singleton: bail out silently if another tray instance is already
+# running. Without this, every double-click of the Desktop shortcut
+# (or install re-run, or logon firing the Startup folder while a
+# previous tray still exists) stacks another icon. Mutex pattern
+# matches the way Slack / Discord / VS Code handle launching a
+# second instance — second one exits silently.
+$mutexName = 'Local\aiball-tray-singleton'
+$createdNew = $false
+$singletonMutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+if (-not $createdNew) {
+    # Another instance owns the mutex. Drop ours and exit.
+    $singletonMutex.Dispose()
+    exit 0
+}
+
 $port = if ($env:AIBALL_PORT) { $env:AIBALL_PORT } else { '7777' }
 $url  = "http://127.0.0.1:$port"
 
@@ -44,5 +59,13 @@ $ni.ContextMenuStrip = $menu
 $ni.Add_MouseDoubleClick({ Start-Process $url })
 
 # Hand control to the WinForms message loop. The script stays alive
-# until "Fermer" is clicked.
-[System.Windows.Forms.Application]::Run()
+# until "Fermer" is clicked. Release the singleton mutex on exit so a
+# fresh launch can take over cleanly.
+try {
+    [System.Windows.Forms.Application]::Run()
+} finally {
+    if ($singletonMutex) {
+        try { $singletonMutex.ReleaseMutex() } catch { }
+        $singletonMutex.Dispose()
+    }
+}
