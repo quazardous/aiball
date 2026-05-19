@@ -579,14 +579,27 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
     if (isInternalCheckCmd(checkCmd)) {
         try {
             const client = new AiballClient();
-            const ping = await client.pingsCount() as { consumer_id: string; unread: number };
-            const subs = await client.mySubs() as Array<{
-                project?: string;
-                role?: string;
-                ticket_id?: number;
-            }>;
+            const [ping, subs, projects] = await Promise.all([
+                client.pingsCount() as Promise<{ consumer_id: string; unread: number }>,
+                client.mySubs() as Promise<Array<{
+                    project?: string;
+                    role?: string;
+                    ticket_id?: number;
+                }>>,
+                client.listProjectsDetailed().catch(() => []) as Promise<Array<{
+                    name: string;
+                    open_count?: number;
+                    actionable_count?: number;
+                }>>,
+            ]);
+            const openCount = Array.isArray(projects)
+                ? projects
+                    .filter((p) => !ctx.project || p.name === ctx.project)
+                    .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
+                : 0;
             process.stdout.write(`  resolved consumer_id  : ${ping.consumer_id}\n`);
             process.stdout.write(`  unread pings (this consumer): ${ping.unread}\n`);
+            process.stdout.write(`  open tickets (actionable${ctx.project ? `, project=${ctx.project}` : ", all subs"}): ${openCount}\n`);
             const projectSubs = subs.filter((s) => s.project && !s.ticket_id);
             process.stdout.write(`  project subscriptions :\n`);
             if (projectSubs.length === 0) {
@@ -597,7 +610,15 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
                 }
             }
             process.stdout.write(`\n`);
-            const verdict = ping.unread > 0 ? "WAKE (work to drain)" : "SLEEP (nothing)";
+            const hasWork = ping.unread > 0 || openCount > 0;
+            const verdictReason = ping.unread > 0 && openCount > 0
+                ? "pings + open tickets"
+                : ping.unread > 0
+                    ? "pings to drain"
+                    : openCount > 0
+                        ? "open tickets to handle"
+                        : "nothing";
+            const verdict = hasWork ? `WAKE (${verdictReason})` : "SLEEP (nothing)";
             process.stdout.write(`  verdict: ${verdict}\n`);
             const hasProjectSub = ctx.project !== null && projectSubs.some((s) => s.project === ctx.project);
             if (ctx.project && !hasProjectSub) {
@@ -606,7 +627,7 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
             if (projectSubs.length === 0) {
                 process.stdout.write(`  hint   : consumer '${ping.consumer_id}' looks ephemeral (random fallback?). Set AIBALL_AGENT to a stable id and subscribe it to the projects you care about.\n`);
             }
-            process.exit(ping.unread > 0 ? 0 : 1);
+            process.exit(hasWork ? 0 : 1);
         } catch (e) {
             process.stderr.write(`  ERROR: ${(e as Error).message ?? String(e)}\n`);
             process.exit(2);
@@ -674,9 +695,22 @@ async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boo
         if (isInternalCheckCmd(checkCmd)) {
             if (!aiballClient) aiballClient = new AiballClient();
             try {
-                const r = await aiballClient.pingsCount() as { consumer_id: string; unread: number };
-                const verdict = r.unread > 0 ? "WAKE" : "sleep";
-                process.stdout.write(`[${ts}] tick ${tick}: consumer=${r.consumer_id} unread=${r.unread} → ${verdict}\n`);
+                const [r, projects] = await Promise.all([
+                    aiballClient.pingsCount() as Promise<{ consumer_id: string; unread: number }>,
+                    aiballClient.listProjectsDetailed().catch(() => []) as Promise<Array<{
+                        name: string;
+                        open_count?: number;
+                        actionable_count?: number;
+                    }>>,
+                ]);
+                const openCount = Array.isArray(projects)
+                    ? projects
+                        .filter((p) => !ctx.project || p.name === ctx.project)
+                        .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
+                    : 0;
+                const hasWork = r.unread > 0 || openCount > 0;
+                const verdict = hasWork ? "WAKE" : "sleep";
+                process.stdout.write(`[${ts}] tick ${tick}: consumer=${r.consumer_id} unread=${r.unread} open=${openCount} → ${verdict}\n`);
             } catch (e) {
                 process.stdout.write(`[${ts}] tick ${tick}: ERROR ${(e as Error).message ?? String(e)} → sleep\n`);
             }

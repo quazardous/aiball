@@ -157,7 +157,7 @@ function readPane(): string {
             log(`  → BUSY-DEFER armed until=${until} became=idle:wait`);
             emit();
         }
-        const hasWork = await checkHasWork(checkCmd);
+        const hasWork = await checkHasWork(checkCmd, undefined, process.env.AIBALL_PROJECT ?? null);
         log(`  checkHasWork=${hasWork}`);
         if (hasWork) {
             // #B.198 fix A: coalesce. If the previous wake fired

@@ -290,8 +290,8 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             }
         }
     }
-    if (!manualWake && !(await checkHasWork(checkCmd, client()))) {
-        log(`skip wake (${reason}) — checkHasWork returned false (no unread pings)`);
+    if (!manualWake && !(await checkHasWork(checkCmd, client(), process.env.AIBALL_PROJECT ?? null))) {
+        log(`skip wake (${reason}) — checkHasWork returned false (no unread pings and no open tickets)`);
         return false;
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }

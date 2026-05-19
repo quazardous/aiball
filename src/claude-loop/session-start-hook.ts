@@ -107,7 +107,7 @@ if (noStartup) {
 
 (async () => {
     try {
-        if (await checkHasWork(checkCmd)) {
+        if (await checkHasWork(checkCmd, undefined, process.env.AIBALL_PROJECT ?? null)) {
             // #B.221 david: bare cultural phrases ("Allons-y!" / "tap
             // tap") gave claude zero operational context — she would
             // greet back and burn a turn before noticing the inbox.

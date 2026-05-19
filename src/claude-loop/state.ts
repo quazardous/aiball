@@ -313,18 +313,41 @@ const LEGACY_AIBALL_CHECK_CMD = "aiball pings-count -q";
  *   - Anything else → shell out via `bash -c <cmd>`; exit 0 = work.
  *
  * Async because the in-process path returns a promise.
+ *
+ * #B.232 (david dd8rdd): the internal-SDK path also factors in
+ * open-ticket count (actionable) alongside unread pings. Repro:
+ * david drained pings cleanly with 4 open tickets still actionable;
+ * the timer heartbeat then reported `no unread pings` and parked
+ * claude in `idle` while there was still work. Now the gate returns
+ * true if EITHER pings>0 OR open>0 — the wake CTA already mentions
+ * both via `buildContextPhrase`, so the chained directive
+ * ("drain via unread + handle open via ticket_list") lands cleanly.
  */
 export async function checkHasWork(
     checkCmd: string | null | undefined,
     client?: AiballClient,
+    project?: string | null,
 ): Promise<boolean> {
     const cmd = checkCmd ?? "";
     if (cmd === "true") return true;
     if (cmd === "" || cmd === LEGACY_AIBALL_CHECK_CMD) {
         const c = client ?? new AiballClient();
         try {
-            const r = await c.pingsCount() as { unread?: number };
-            return (r.unread ?? 0) > 0;
+            const [pingsR, projects] = await Promise.all([
+                c.pingsCount() as Promise<{ unread?: number }>,
+                c.listProjectsDetailed().catch(() => []) as Promise<Array<{
+                    name: string;
+                    open_count?: number;
+                    actionable_count?: number;
+                }>>,
+            ]);
+            if ((pingsR.unread ?? 0) > 0) return true;
+            const openCount = Array.isArray(projects)
+                ? projects
+                    .filter((p) => !project || p.name === project)
+                    .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
+                : 0;
+            return openCount > 0;
         } catch {
             return false;
         }
