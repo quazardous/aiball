@@ -56,6 +56,11 @@ def _inject_sock_path():
     return os.path.join(sd, "inject.sock") if sd else ""
 
 
+def _proxy_alive_path():
+    sd = _state_dir()
+    return os.path.join(sd, "proxy-alive") if sd else ""
+
+
 def is_typing_keystroke(data: bytes) -> bool:
     """Vrai si `data` ressemble à de la frappe humaine de TEXTE.
 
@@ -85,6 +90,23 @@ def touch_marker():
             f.write(datetime.datetime.now().isoformat() + "\n")
     except OSError:
         pass  # le badge ne s'affichera juste pas — jamais bloquant
+
+
+def drop_proxy_alive():
+    """Marqueur de présence (#269 tcn5ej) déposé dès que le fork PTY a
+    réussi → existence = GROUND TRUTH « le pane tourne sous le proxy ».
+    La décision de lancement côté TS peut mentir (le fail-safe os.execvp
+    ci-dessous se substitue à claude sans proxy si le PTY échoue), seul ce
+    fichier prouve que le pont est réellement en place. setTmuxStatus le lit
+    pour peindre le glyphe proxy ; on l'efface au cleanup."""
+    p = _proxy_alive_path()
+    if not p:
+        return
+    try:
+        with open(p, "w") as f:
+            f.write(str(os.getpid()) + "\n")
+    except OSError:
+        pass  # le glyphe ne s'affichera juste pas — jamais bloquant
 
 
 def get_winsize(fd: int) -> bytes:
@@ -130,6 +152,10 @@ def main(argv):
             os._exit(127)
 
     # --- parent : le pont ---
+    # Le fork a réussi → on FRONTE réellement claude : dépose le marqueur
+    # proxy-alive avant tout le reste (le setup socket/termios qui suit peut
+    # échouer, mais le pont, lui, est en place).
+    drop_proxy_alive()
     # Propage la taille de fenêtre courante au PTY de claude.
     set_winsize(master_fd, get_winsize(sys.stdout.fileno()))
 
@@ -175,6 +201,12 @@ def main(argv):
             try:
                 termios.tcsetattr(stdin_fd, termios.TCSAFLUSH, old_termios)
             except (termios.error, OSError):
+                pass
+        pap = _proxy_alive_path()
+        if pap:
+            try:
+                os.unlink(pap)
+            except OSError:
                 pass
         if inject_srv is not None:
             try:

@@ -129,6 +129,12 @@ export function humanTypingPath(sd: string): string { return join(sd, "human-typ
 // Present ⇒ the pane runs under the proxy (injection goes here instead of
 // tmux send-keys; the proxy owns the human-typing marker).
 export function injectSockPath(sd: string): string { return join(sd, "inject.sock"); }
+// #269 (tcn5ej): presence marker dropped by the PTY proxy right after a
+// successful pty.fork, removed at cleanup. Existence ⇒ the pane really runs
+// under the proxy — GROUND TRUTH, vs the TS launch decision which can lie (the
+// proxy self-falls-back to exec-claude if PTY init fails). Read by
+// setTmuxStatus to paint the discreet proxy glyph.
+export function proxyAlivePath(sd: string): string { return join(sd, "proxy-alive"); }
 export function timerPidPath(sd: string): string { return join(sd, "timer.pid"); }
 export function timerLogPath(sd: string): string { return join(sd, "timer.log"); }
 /**
@@ -479,6 +485,13 @@ export function userIsTakingOver(sd: string, graceSec: number): boolean {
  */
 export const HUMAN_TYPING_TTL_SEC = 5;
 
+/** Is the pane really running under the PTY proxy right now? (#269)
+ *  Existence-based: the proxy drops the marker after a successful fork and
+ *  unlinks it at cleanup — no TTL, the file's presence IS the fact. */
+export function proxyIsAlive(sd: string): boolean {
+    return existsSync(proxyAlivePath(sd));
+}
+
 /** Is a human typing in the pane right now (within the TTL)? (#264) */
 export function humanIsTyping(sd: string, ttlSec = HUMAN_TYPING_TTL_SEC): boolean {
     const p = humanTypingPath(sd);
@@ -552,9 +565,18 @@ export function setTmuxStatus(
     const badge = sd && humanIsTyping(sd)
         ? `#[bg=${c.bg},fg=colour196]stop`   // red font — human present, loop yields
         : `#[bg=${c.bg},fg=colour178]loop`;  // yellow font — autonomous loop running
+    // #269 (tcn5ej, david "je vois pas le symbol proxy"): discreet glyph when
+    // the pane really runs under the PTY proxy (ground truth = proxy-alive
+    // marker, NOT the TS launch decision). Light-gray ⇄ reads on idle/busy/boot
+    // bg without competing with the loud loop/stop badge. Absent ⇒ the pane is
+    // on the direct-launch fallback (no proxy → idle-only detection).
+    const proxyGlyph = sd && proxyIsAlive(sd)
+        ? `#[bg=${c.bg},fg=colour250] ⇄`
+        : "";
     const left =
         `#[bg=${c.bg},fg=${c.fg}] claude-` +
         badge +
+        proxyGlyph +
         `#[bg=${c.bg},fg=${c.fg}] · ${name} ${tag} `;
     spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-left", left], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-bg", c.bg], { stdio: "ignore" });
