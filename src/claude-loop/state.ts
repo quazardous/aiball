@@ -12,7 +12,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { loadConfig } from "../autopoll/config.js";
 import { AiballClient } from "../client.js";
@@ -319,8 +320,13 @@ export function writePlate(sd: string, p: Plate): void {
 
 /** Resolve the install root by walking up from this module. */
 export function installRoot(): string {
-    // src/claude-loop/state.ts → up 2 = repo root
-    const here = resolve(new URL(".", import.meta.url).pathname);
+    // src/claude-loop/state.ts → up 2 = repo root.
+    // Use fileURLToPath rather than `new URL(...).pathname` because on
+    // Windows the latter returns "/C:/path/..." (URL-style absolute
+    // path with a leading slash), which path.resolve then mis-parses
+    // — `resolve("/C:/...", "..", "..")` produces "C:\C:\..." with
+    // a duplicated drive letter. fileURLToPath does the right thing.
+    const here = dirname(fileURLToPath(import.meta.url));
     return resolve(here, "..", "..");
 }
 

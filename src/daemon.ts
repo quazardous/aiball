@@ -45,9 +45,12 @@ const PORT = Number(process.env.AIBALL_PORT ?? 7777);
 // Same-uid clients (CLI, MCP wrapper) connect here and bypass bearer auth —
 // the OS already enforces the trust boundary via chmod 600. Set
 // AIBALL_SOCK="" to disable. Defaults to $AIBALL_HOME/sock — except on
-// Windows, where docs/WIN-INSTALL.md mandates TCP-only (#B.178) since
-// chmod is a no-op and the trust model can't be enforced the same way.
-// Advanced users can still opt in by setting AIBALL_SOCK explicitly.
+// Windows, where `net.createServer.listen(path)` maps onto Named Pipes
+// (`\\.\pipe\…`), not AF_UNIX files. Trying to listen on a regular
+// filesystem path under the user profile gets EACCES because node
+// mangles it into an invalid pipe name. So Windows stays TCP-only by
+// default; advanced users can still opt in by setting AIBALL_SOCK to a
+// valid `\\.\pipe\…` path explicitly.
 const SOCK_PATH = (() => {
     const v = process.env.AIBALL_SOCK;
     if (v === "") return null; // explicit opt-out

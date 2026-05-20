@@ -32,6 +32,9 @@ import {
 } from "../db.js";
 import { hashPassword, verifyPassword } from "../auth.js";
 import { badRequest, consumerOf } from "./_helpers.js";
+import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { AIBALL_HOME } from "../paths.js";
 
 export const authRouter = Router();
 
@@ -110,6 +113,24 @@ authRouter.post("/auth/setup", async (req: Request, res: Response) => {
     touchLastLogin(consumer_id);
     deleteToken(token);
     const auth = issueToken({ consumer_id, kind: "auth", label: "web setup" });
+
+    // Auto-write cli-env so the CLI/MCP/claude-loop running in the
+    // same user context (typical local install) get a working agent
+    // token without a manual `aiball auth issue` + paste-to-file
+    // step. Idempotent: if cli-env already exists we don't touch
+    // it — respects users who manage their own. -System / LocalSystem
+    // installs write to PROGRAMDATA where per-user shims don't look, so
+    // the user still does the manual workflow there (WIN-INSTALL.md).
+    try {
+        const cliEnv = join(AIBALL_HOME, "cli-env");
+        if (!existsSync(cliEnv)) {
+            const agent = issueToken({ consumer_id, kind: "agent", label: "cli (auto-issued at first setup)" });
+            writeFileSync(cliEnv, `export AIBALL_TOKEN=${agent.token}\n`, { mode: 0o600 });
+        }
+    } catch {
+        // Non-fatal — the user can always issue + write manually.
+    }
+
     res.json({
         token: auth.token,
         consumer_id,

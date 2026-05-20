@@ -9,10 +9,11 @@
  *
  * Exposed entry point: `registerBootstrapCommands(program)`.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { homedir } from "node:os";
 import type { Command } from "commander";
-import { die, userCwd } from "./_helpers.js";
+import { die, userCwd, resolveInstallRoot } from "./_helpers.js";
 
 /**
  * Shared `mcp init` body so both `aiball mcp init` and the combined
@@ -109,7 +110,9 @@ export function registerBootstrapCommands(program: Command): void {
         .command("init")
         .description("Bootstrap a project: write .mcp.json + .aiball.yaml (combines `mcp init` + `autopoll init`)")
         .option("--force", "Overwrite existing entries (passes through to both subactions)")
-        .action(async (opts: { force?: boolean }) => {
+        .option("--stop-hook", "Also wire Claude Code's Stop hook into .claude/settings.json so this project's autopoll triggers")
+        .option("--global", "With --stop-hook, write to ~/.claude/settings.json instead of <PWD>/.claude/settings.json (fires in every Claude Code session)")
+        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean }) => {
             const force = opts.force === true;
             await mcpInitAction(force);
             // Inline minimal .aiball.yaml — don't pull the example
@@ -126,7 +129,96 @@ export function registerBootstrapCommands(program: Command): void {
                 writeFileSync(yamlPath, body);
                 process.stdout.write(`${existsSync(yamlPath) && force ? "overwrote" : "created"} ${yamlPath} (autopoll enabled)\n`);
             }
+            if (opts.stopHook === true) {
+                wireStopHook({ global: opts.global === true });
+            }
             process.stdout.write(`\n${await resolveIdentityHint()}\n`);
             process.stdout.write(`Run \`aiball check\` to verify everything resolves.\n`);
         });
+
+    // `aiball stop-hook install [--global]` — standalone wiring command,
+    // shared between `aiball init --stop-hook` and install.ps1 -StopHook.
+    // Doesn't touch .mcp.json or .aiball.yaml — pure hook wiring. Suitable
+    // for global installs where you don't want the project-local artifacts
+    // to land in install.ps1's CWD.
+    const stopHook = program.command("stop-hook").description("Manage the Claude Code Stop hook (autopoll trigger)");
+    stopHook
+        .command("install")
+        .description("Wire skill/hooks/aiball-autopoll-stop into .claude/settings.json")
+        .option("--global", "Write to ~/.claude/settings.json (every Claude Code session). Default: project-local <PWD>/.claude/settings.json")
+        .action((opts: { global?: boolean }) => {
+            wireStopHook({ global: opts.global === true });
+        });
+}
+
+/**
+ * Wire the Claude Code Stop hook into .claude/settings.json so
+ * autopoll triggers on session end. Picks the right wrapper extension
+ * for the platform (.cmd on Windows, .sh elsewhere). Idempotent —
+ * skips if the same hook command is already present. Project-local
+ * by default; --global writes to ~/.claude/settings.json instead.
+ *
+ * Cross-platform replacement for install.sh --stop-hook, so it works
+ * the same on the Windows install path (where install.sh doesn't run).
+ */
+function wireStopHook(opts: { global: boolean }): void {
+    const installRoot = resolveInstallRoot();
+    const ext = process.platform === "win32" ? "cmd" : "sh";
+    const hookTargetRaw = join(installRoot, "skill", "hooks", `aiball-autopoll-stop.${ext}`);
+    if (!existsSync(hookTargetRaw)) {
+        process.stdout.write(`stop-hook: target script missing at ${hookTargetRaw} — install layout is broken\n`);
+        return;
+    }
+    // Claude Code runs the Stop hook command via bash (even on Windows
+    // — Git Bash for the spawned shell). Bash treats backslashes as
+    // escape characters, so a JSON-encoded Windows path with `\\…`
+    // gets eaten to `CUsersdavid…`. Use forward slashes on Windows
+    // instead: both cmd.exe and bash handle `C:/path/to/file.cmd`
+    // correctly, and JSON encodes `/` as itself.
+    const hookTarget = process.platform === "win32"
+        ? hookTargetRaw.replace(/\\/g, "/")
+        : hookTargetRaw;
+    const settingsPath = opts.global
+        ? join(homedir(), ".claude", "settings.json")
+        : join(userCwd(), ".claude", "settings.json");
+    const scopeLabel = opts.global ? `global (~/.claude/settings.json)` : `project (${settingsPath})`;
+
+    // Ensure parent dir exists. Read existing JSON or seed with {}.
+    mkdirSync(dirname(settingsPath), { recursive: true });
+    interface HookEntry { type?: string; command?: string }
+    interface HookGroup  { matcher?: string; hooks?: HookEntry[] }
+    interface Settings   { hooks?: { Stop?: HookGroup[] } & Record<string, HookGroup[] | undefined> }
+    let settings: Settings = {};
+    if (existsSync(settingsPath)) {
+        try { settings = JSON.parse(readFileSync(settingsPath, "utf8")) as Settings; }
+        catch { settings = {}; }
+    }
+
+    // Match by basename for idempotence — covers both backslash and
+    // forward-slash versions of the same path (handles users who
+    // previously wired via install.sh or by hand).
+    const stopGroups = settings.hooks?.Stop ?? [];
+    const alreadyWired = stopGroups.some((g) =>
+        (g.hooks ?? []).some((h) =>
+            typeof h.command === "string" &&
+            /aiball-autopoll-stop\.(sh|cmd)$/.test(h.command),
+        ),
+    );
+    if (alreadyWired) {
+        process.stdout.write(`stop-hook: already wired in ${scopeLabel}\n`);
+        return;
+    }
+
+    // Backup existing settings once per pass (skipped if already
+    // backed up earlier — matches install.sh's `cp -n` behavior).
+    if (existsSync(settingsPath)) {
+        const bak = `${settingsPath}.aiball-bak`;
+        if (!existsSync(bak)) writeFileSync(bak, readFileSync(settingsPath));
+    }
+
+    settings.hooks ??= {};
+    settings.hooks.Stop ??= [];
+    settings.hooks.Stop.push({ hooks: [{ type: "command", command: hookTarget }] });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+    process.stdout.write(`stop-hook: wired ${hookTarget} -> ${scopeLabel}\n`);
 }
