@@ -350,16 +350,14 @@ function cmdStart(opts: StartOpts): void {
     // session's inner command (so a fresh `claude-loop start` picks
     // up the current env, but in-flight loops stay as-spawned).
     const claudeBin = process.env.CL_CLAUDE_CMD ?? "claude --permission-mode auto";
-    // The `{ … } 2>> inner.log` block traces (set -x) and captures
-    // the pre-exec phase (source env failure, claude-binary lookup
-    // failure surface here) without redirecting claude's own stdio
-    // after exec — claude needs a real TTY for its alt-screen UI.
-    // Read $stateDir/inner.log post-mortem if the session dies fast.
-    const innerLog = join(sd, "inner.log");
+    // IMPORTANT: no `{ … }` brace groups here. psmux interprets a
+    // command starting with `{` as a PowerShell script block and
+    // base64-UTF16-encodes it for `powershell -EncodedCommand`, which
+    // then reaches bash as a bogus option and dies with
+    // "invalid option name". Keep the inner command a flat sequence
+    // of `;`-separated statements so psmux passes it through verbatim.
     const innerCmd =
-        `{ set -x; ` +
         `source ${shQuote(envPath(sd))}; ` +
-        `} 2>> ${shQuote(innerLog)} && ` +
         `exec ${claudeBin} --settings ${shQuote(settingsJson)}` +
         (passthrough ? ` ${passthrough}` : "");
 
