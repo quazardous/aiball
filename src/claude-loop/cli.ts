@@ -376,9 +376,21 @@ function cmdStart(opts: StartOpts): void {
     // then reaches bash as a bogus option and dies with
     // "invalid option name". Keep the inner command a flat sequence
     // of `;`-separated statements so psmux passes it through verbatim.
+    // Pass --settings as a FILE PATH, not inline JSON. The settings
+    // JSON contains double quotes, braces, backslash-escaped Windows
+    // paths AND shQuote'd single quotes (from the hook command paths).
+    // Passing that inline means it has to survive: shQuote → bash -lc
+    // string → psmux argv reconstruction (node spawnSync builds a
+    // Windows command line, psmux re-parses it). That round-trip
+    // mangles the nested quoting on Windows and claude gets invalid
+    // JSON → exits → pane dies → session reaped in ~30ms (#B.178 win).
+    // A plain file path has none of those characters, so it round-trips
+    // cleanly. claude's --settings accepts a path or inline JSON.
+    const settingsFile = join(sd, "claude-settings.json");
+    writeFileSync(settingsFile, settingsJson);
     const innerCmd =
         `source ${shQuote(envPath(sd))}; ` +
-        `exec ${claudeBin} --settings ${shQuote(settingsJson)}` +
+        `exec ${claudeBin} --settings ${shQuote(settingsFile)}` +
         (passthrough ? ` ${passthrough}` : "");
 
     const tname = tmuxName(name);
