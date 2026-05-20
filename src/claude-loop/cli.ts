@@ -68,6 +68,25 @@ function has(cmd: string): boolean {
     return spawnSync("command", ["-v", cmd], { shell: true }).status === 0;
 }
 
+/**
+ * Convert a Windows path to its 8.3 short form (no spaces). psmux
+ * splits the command at spaces when it rebuilds the CreateProcess
+ * command line, so an absolute path like "C:\Program Files\Git\bin\
+ * bash.exe" gets truncated to "C:\Program". The 8.3 name
+ * ("C:\PROGRA~1\Git\bin\bash.exe") sidesteps that. No-op on non-Windows
+ * or for paths that already lack spaces. Falls back to the input if
+ * the conversion fails (8.3 generation disabled on the volume, etc.).
+ */
+function toShortPathWin(p: string): string {
+    if (process.platform !== "win32" || !p.includes(" ")) return p;
+    try {
+        const out = spawnSync("cmd.exe", ["/c", `for %I in ("${p}") do @echo %~sI`], { encoding: "utf8" });
+        const short = (out.stdout ?? "").trim();
+        if (short && existsSync(short)) return short;
+    } catch { /* fall through to raw path */ }
+    return p;
+}
+
 // Pick the local clipboard tool tmux should pipe selections into. OSC 52
 // (`set-clipboard on`) works in some terminals (Alacritty, Windows
 // Terminal, kitty, recent gnome-terminal) but is rejected by default
@@ -350,11 +369,15 @@ function cmdStart(opts: StartOpts): void {
     // sits in machine PATH and preempts Git Bash; and psmux's server
     // is persistent — once it started with a given PATH, subsequent
     // new-session calls use that PATH, not the caller's. Hardcoding
-    // the Git Bash absolute path on Windows bypasses both issues.
+    // the Git Bash absolute path on Windows bypasses both issues —
+    // BUT psmux splits the command at spaces when it rebuilds the
+    // CreateProcess command line, so "C:\Program Files\…\bash.exe"
+    // becomes "C:\Program" + bogus args. Convert to the 8.3 short
+    // path (C:\PROGRA~1\…) which has no spaces.
     let bashCmd = "bash";
     if (process.platform === "win32") {
         const gitBash = "C:\\Program Files\\Git\\bin\\bash.exe";
-        if (existsSync(gitBash)) bashCmd = gitBash;
+        if (existsSync(gitBash)) bashCmd = toShortPathWin(gitBash);
         // else fall back to "bash" and hope the PATH is sane.
     }
     const r = spawnSync(MUX_CMD, [
