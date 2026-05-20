@@ -554,33 +554,40 @@ export function setTmuxStatus(
     }
     const tn = tmuxName(name);
     const c = STATUS_COLORS[status];
-    // #264 (david #ex273m): human-presence axis as a coloured WORD, no
-    // brackets, no background highlight — just the font tinted over the
-    // loop-state bar: `loop` yellow while the loop runs autonomously,
-    // `stop` red when a human is typing in the pane (the loop yields).
-    // The rest of the bar (claude- · name [status]) keeps its idle/boot/busy
-    // colour, so human-present coexists with the loop state rather than being
-    // a 4th LoopStatus.
     const sd = process.env.CL_STATE_DIR;
-    const badge = sd && humanIsTyping(sd)
-        ? `#[bg=${c.bg},fg=colour196]stop`   // red font — human present, loop yields
-        : `#[bg=${c.bg},fg=colour178]loop`;  // yellow font — autonomous loop running
-    // #269 (tcn5ej, david "je vois pas le symbol proxy"): discreet glyph when
-    // the pane really runs under the PTY proxy (ground truth = proxy-alive
-    // marker, NOT the TS launch decision). Light-gray ⇄ reads on idle/busy/boot
-    // bg without competing with the loud loop/stop badge. Absent ⇒ the pane is
-    // on the direct-launch fallback (no proxy → idle-only detection).
-    const proxyGlyph = sd && proxyIsAlive(sd)
-        ? `#[bg=${c.bg},fg=colour250] ⇄`
-        : "";
-    const left =
-        `#[bg=${c.bg},fg=${c.fg}] claude-` +
-        badge +
-        proxyGlyph +
-        `#[bg=${c.bg},fg=${c.fg}] · ${name} ${tag} `;
-    spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-left", left], { stdio: "ignore" });
-    spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-bg", c.bg], { stdio: "ignore" });
-    spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-fg", c.fg], { stdio: "ignore" });
+    const proxyAlive = !!sd && proxyIsAlive(sd);
+    const setOpt = (opt: string, val: string) =>
+        spawnSync(MUX_CMD, ["set-option", "-t", tn, opt, val], { stdio: "ignore" });
+
+    // #274: `status-left` is a STATIC format that references per-owner tmux
+    // user-options. The PTY proxy repaints `@cl_human` INSTANTLY on the
+    // first keystroke (it owns that segment while alive — see pty-proxy.py);
+    // TS owns the rest. The bar's bg comes from `status-bg` (set per state
+    // below), so the proxy's fg-only `@cl_human` renders on the current
+    // state colour without the proxy ever knowing it. The fg is reset to
+    // white (`c.fg`) after the human/proxy segments so `· name [state]`
+    // keeps the neutral tint.
+    setOpt(
+        "status-left",
+        `#[fg=${c.fg}] claude-#{@cl_human}#{@cl_proxy}#[fg=${c.fg}] · ${name} #{@cl_state} `,
+    );
+    setOpt("status-bg", c.bg);
+    setOpt("status-fg", c.fg);
+    // Loop-state tag (#B.149/#B.154): `[idle 3]` / `[boot:resume?]` etc.
+    setOpt("@cl_state", `#[fg=${c.fg}]${tag}`);
+    // #269 (tcn5ej): discreet ⇄ when the pane really runs under the proxy
+    // (ground truth = proxy-alive marker). Absent ⇒ direct-launch fallback.
+    setOpt("@cl_proxy", proxyAlive ? `#[fg=colour250] ⇄` : "");
+    // #264 human-presence WORD: `loop` (yellow) autonomous / `stop` (red)
+    // human typing. The proxy owns this segment live when present (instant,
+    // busy included); in DEGRADED mode (no proxy) TS paints it from the
+    // pane-diff typing marker (timer detectHumanTyping, ≤HUMAN_POLL_MS) —
+    // skipped when the proxy is alive so the two never fight over it.
+    if (!proxyAlive) {
+        setOpt("@cl_human", sd && humanIsTyping(sd)
+            ? `#[fg=colour196]stop`
+            : `#[fg=colour178]loop`);
+    }
 }
 
 /**

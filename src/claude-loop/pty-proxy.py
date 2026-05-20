@@ -40,6 +40,7 @@ import socket
 import termios
 import fcntl
 import datetime
+import subprocess
 
 
 def _state_dir():
@@ -90,6 +91,52 @@ def touch_marker():
             f.write(datetime.datetime.now().isoformat() + "\n")
     except OSError:
         pass  # le badge ne s'affichera juste pas — jamais bloquant
+
+
+# --- Peinture directe du segment human de la barre tmux (#274) ---
+# Le proxy POSSÈDE le segment `@cl_human` quand il est vivant : il le
+# repeint INSTANTANÉMENT dès la 1re touche (pas de poll, pas de round-trip
+# par le timer TS). setTmuxStatus côté TS référence `#{@cl_human}` dans un
+# status-left statique et NE le touche pas tant que le proxy tourne
+# (proxy-alive présent) → zéro bagarre. La couleur de fond vient de
+# `status-bg` (état idle/busy/boot piloté par le TS), donc on n'écrit que
+# le fg du mot. En mode dégradé (pas de proxy), c'est le TS qui peint
+# `@cl_human` via le pane-diff — ce code-ci ne tourne tout simplement pas.
+HUMAN_TTL_SEC = 5  # doit suivre HUMAN_TYPING_TTL_SEC côté TS
+
+# Mots fg-only (le bg = status-bg). Doivent rester alignés avec
+# setTmuxStatus (state.ts) : stop=colour196 rouge, loop=colour178 jaune.
+_HUMAN_STOP = "#[fg=colour196]stop"
+_HUMAN_LOOP = "#[fg=colour178]loop"
+
+
+def _mux_argv():
+    # MUX_CMD peut être un binaire ou "tmux -L sock" → on split sur l'espace.
+    return (os.environ.get("MUX_CMD") or "tmux").split()
+
+
+def paint_human(typing: bool):
+    """Écrit `@cl_human` sur la session tmux + force un refresh immédiat.
+
+    No-op silencieux si la cible tmux est inconnue ou si tmux échoue — la
+    barre ne doit JAMAIS pouvoir casser le pont I/O de la session live."""
+    target = os.environ.get("CL_TMUX") or ""
+    if not target:
+        return
+    word = _HUMAN_STOP if typing else _HUMAN_LOOP
+    mux = _mux_argv()
+    try:
+        subprocess.run(
+            mux + ["set-option", "-t", target, "@cl_human", word],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+        # -S = rafraîchit la ligne de statut des clients attachés.
+        subprocess.run(
+            mux + ["refresh-client", "-S"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+    except OSError:
+        pass
 
 
 def drop_proxy_alive():
@@ -156,6 +203,9 @@ def main(argv):
     # proxy-alive avant tout le reste (le setup socket/termios qui suit peut
     # échouer, mais le pont, lui, est en place).
     drop_proxy_alive()
+    # On possède désormais le segment human de la barre : on le pose à
+    # `loop` au repos (claim d'ownership avant que le TS voie proxy-alive).
+    paint_human(False)
     # Propage la taille de fenêtre courante au PTY de claude.
     set_winsize(master_fd, get_winsize(sys.stdout.fileno()))
 
@@ -196,7 +246,17 @@ def main(argv):
     inject_conns = []
     stdin_open = True
 
+    # #274 état du segment human : on ne repeint QUE sur transition (1 appel
+    # tmux par flip, pas par touche) et on l'efface après HUMAN_TTL_SEC sans
+    # frappe via le timeout du select.
+    human_shown = False
+    last_keystroke = 0.0
+
     def cleanup():
+        # Rends la main sur le segment human : `loop` au repos, sinon le mot
+        # `stop` resterait figé après la mort du proxy (le TS reprend la main
+        # via proxy-alive disparu).
+        paint_human(False)
         if old_termios is not None:
             try:
                 termios.tcsetattr(stdin_fd, termios.TCSAFLUSH, old_termios)
@@ -226,10 +286,21 @@ def main(argv):
             if inject_srv is not None:
                 rfds.append(inject_srv)
             rfds.extend(inject_conns)
+            # Timeout = temps restant avant d'effacer le badge `stop`, quand
+            # un humain a tapé récemment ; sinon on bloque (None).
+            timeout = None
+            if human_shown:
+                timeout = max(0.0, HUMAN_TTL_SEC - (datetime.datetime.now().timestamp() - last_keystroke))
             try:
-                ready, _, _ = select.select(rfds, [], [])
+                ready, _, _ = select.select(rfds, [], [], timeout)
             except (InterruptedError, OSError):
                 continue  # SIGWINCH etc. interrompent select
+
+            # 0) Expiration du badge human : pas de frappe depuis HUMAN_TTL_SEC
+            #    → on rebascule `loop` (une seule transition).
+            if human_shown and (datetime.datetime.now().timestamp() - last_keystroke) >= HUMAN_TTL_SEC:
+                paint_human(False)
+                human_shown = False
 
             # 1) Frappe humaine (tmux → nous → claude).
             if stdin_fd in ready:
@@ -240,6 +311,10 @@ def main(argv):
                 if data:
                     if is_typing_keystroke(data):
                         touch_marker()
+                        last_keystroke = datetime.datetime.now().timestamp()
+                        if not human_shown:
+                            paint_human(True)  # transition loop→stop, instantané
+                            human_shown = True
                     os.write(master_fd, data)
                 else:
                     # EOF stdin : on arrête de le poller (claude tourne

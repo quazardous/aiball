@@ -302,6 +302,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // a random uuid via AiballClient.
         ...(ctx.agent ? [`export AIBALL_AGENT=${shQuote(ctx.agent)}`] : []),
         ...(ctx.project ? [`export AIBALL_PROJECT=${shQuote(ctx.project)}`] : []),
+        // #274: the PTY proxy paints the human-presence segment of the
+        // tmux bar directly (instant on keystroke). It needs the session
+        // target + the tmux binary to call `set-option @cl_human` /
+        // `refresh-client`. Harmless when no proxy runs (degraded mode).
+        `export CL_TMUX=${shQuote(tmuxName(name))}`,
+        `export MUX_CMD=${shQuote(MUX_CMD)}`,
         "",
     ];
     writeFileSync(envPath(sd), envLines.join("\n"));
@@ -394,6 +400,13 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // (#B.149). SessionStart hook flips to idle/busy once claude is
     // actually ready. Color + label are driven by setTmuxStatus.
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-left-length", "60"], { stdio: "ignore" });
+    // #274: seed the per-owner status-left segments so the static format
+    // setTmuxStatus installs never renders an unset `#{@cl_*}` (empty is
+    // fine; unset would show literally on some tmux). The proxy and
+    // setTmuxStatus take ownership from here.
+    for (const [opt, val] of [["@cl_human", "#[fg=colour178]loop"], ["@cl_proxy", ""], ["@cl_state", ""]]) {
+        spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
+    }
     // #B.176 (david): mouse mode ON for the session so the scroll
     // wheel actually scrolls the pane buffer instead of being
     // translated to Up/Down arrow keys. Scoped per-session — we
