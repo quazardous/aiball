@@ -11,6 +11,7 @@
  * passed verbatim to the spawned `claude`.
  */
 import { spawn, spawnSync } from "node:child_process";
+import { commandExists } from "../sysdeps.js";
 import {
     copyFileSync,
     existsSync,
@@ -67,7 +68,7 @@ function need(cmd: string): void {
 }
 
 function has(cmd: string): boolean {
-    return spawnSync("command", ["-v", cmd], { shell: true }).status === 0;
+    return commandExists(cmd);
 }
 
 // Pick the local clipboard tool tmux should pipe selections into. OSC 52
@@ -553,6 +554,22 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
     if (ctx.config_path) {
         process.stdout.write(`  .aiball.yaml   : ${ctx.config_path}\n`);
     }
+    // #269 (david ftprf7): surface the PTY-proxy dependency. The proxy
+    // gives live human-typing detection (busy included) + socket wake
+    // injection; it needs python3 + the shipped proxy script. When either
+    // is missing `start` silently falls back to launching claude directly
+    // (pane-diff detection, idle-only) — so flag it here, same probe the
+    // launch uses.
+    const hasPython = commandExists("python3");
+    const proxyScript = join(selfRoot(), "src/claude-loop/pty-proxy.py");
+    const hasProxyScript = existsSync(proxyScript);
+    const proxyActive = hasPython && hasProxyScript;
+    process.stdout.write(`  python3        : ${hasPython ? "✓ available" : "— MISSING"}\n`);
+    process.stdout.write(`  PTY proxy      : ${
+        proxyActive
+            ? "✓ active (live human-typing detection + socket wake injection)"
+            : `— inactive → fallback direct launch (${hasPython ? "proxy script missing" : "python3 missing"}); pane-diff detection, idle-only`
+    }\n`);
     process.stdout.write(`\n`);
 
     // #B.149: --config flag inspects the loop's state dir + the
@@ -758,6 +775,10 @@ function splitClaudeArgs(argv: string[]): { wrapper: string[]; passthrough: stri
 function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
     return new Command()
         .description("Spawn a new claude-loop (default subcommand)")
+        // #269 zcxndk: accept the name positionally too — david typed
+        // `claude-loop start test-pty` and hit "too many arguments". The
+        // `--name` option still works and takes precedence when both given.
+        .argument("[name]", "Loop name — positional alias for --name (e.g. `claude-loop start test-pty`)")
         .option("--name <name>", "Loop name (default: auto-generated)")
         .addOption(new Option(
             "--interval <sec>",
@@ -784,13 +805,13 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             "Seconds to stay out of the way after the human submits a prompt (default from .aiball.yaml `claude_loop.user_grace_seconds`, 60 if unset — #B.180, recalibrated #B.185)",
         ))
         .allowExcessArguments(false)
-        .action((opts: {
+        .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
             attach: boolean; startupPing: boolean; userGrace?: string; force?: boolean;
             resumeMode?: string;
         }) => {
             invoke({
-                name: opts.name,
+                name: opts.name ?? nameArg,
                 interval: opts.interval !== undefined ? Math.max(1, Number(opts.interval)) : null,
                 checkCmd: opts.checkCmd,
                 pings: opts.pings,

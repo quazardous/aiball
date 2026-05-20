@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";
+import { commandExists } from "./sysdeps.js";
 import { registerSandboxCommands } from "./sandbox/cli.js";
 import { registerAuthCommands } from "./cli/auth.js";
 import { registerTicketCommands } from "./cli/ticket.js";
@@ -209,6 +210,14 @@ program
                 up: daemonUp,
                 unread_pings: pings,
             },
+            // #269 (david ftprf7): runtime deps. python3 powers the
+            // claude-loop PTY proxy (live human-typing detection + socket
+            // wake injection); without it the loop falls back to direct
+            // launch + pane-diff (idle-only). Same probe the proxy launch
+            // uses (src/sysdeps.ts).
+            dependencies: {
+                python3: commandExists("python3"),
+            },
             // #B.154: deprecation surface — `.mcp.json` env block is
             // the legacy identity-injection mechanism; users should
             // migrate to `.aiball.yaml consumer:*`. Independent of
@@ -255,6 +264,14 @@ program
         if (payload.daemon.up && payload.consumer.agent) {
             process.stdout.write(`  ${ok(payload.daemon.unread_pings === 0)} unread pings for ${payload.consumer.agent}: ${payload.daemon.unread_pings ?? "?"}\n`);
         }
+        process.stdout.write(`\ndependencies\n`);
+        process.stdout.write(
+            `  ${ok(payload.dependencies.python3)} python3: ${
+                payload.dependencies.python3
+                    ? "available (claude-loop PTY proxy enabled)"
+                    : "MISSING — claude-loop falls back to direct launch (no live human-typing detection)"
+            }\n`,
+        );
         if (payload.deprecation.mcp_json_env_block) {
             process.stdout.write(
                 `\ndeprecation\n` +
