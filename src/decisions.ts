@@ -77,6 +77,59 @@ export function reclassifyDecision(
     };
 }
 
+/**
+ * Promote an undecorated comment into a decision (#B.256). Differs
+ * from `reclassifyDecision` / `applyDecision`: those throw when the
+ * comment has no prior decision, since reclassify/decide both assume
+ * a decision exists. `promoteToDecision` is the post-hoc tag flow —
+ * the reporter looks at a regular comment and either marks it as a
+ * pending proposal (`status` omitted → pending) or as already-
+ * accepted (`status="accepted"` → tagged + decided in one shot).
+ *
+ * If a decision already exists on the comment, this delegates to
+ * the existing helpers so the API surface is symmetric:
+ *   - `status` undefined → reclassify (kind only, must stay pending).
+ *   - `status` set        → applyDecision (kind + final status).
+ *
+ * Returns the new decision block + whether anything changed (no-op
+ * when the target state matches what's already there).
+ */
+export function promoteToDecision(
+    current: CommentDecision | undefined,
+    kind: DecisionKind,
+    status?: Exclude<DecisionStatus, "pending">,
+    by?: string,
+    at?: string,
+): { decision: CommentDecision; changed: boolean } {
+    if (current) {
+        if (status === undefined) {
+            return reclassifyDecision(current, kind);
+        }
+        if (by === undefined || at === undefined) {
+            throw new Error("promote with status= requires `by` and `at`");
+        }
+        return applyDecision(current, status, by, at, kind);
+    }
+    if (status === undefined) {
+        return {
+            decision: { kind, status: "pending" },
+            changed: true,
+        };
+    }
+    if (by === undefined || at === undefined) {
+        throw new Error("promote with status= requires `by` and `at`");
+    }
+    return {
+        decision: {
+            kind,
+            status,
+            decided_by: by,
+            decided_at: at,
+        },
+        changed: true,
+    };
+}
+
 export function applyDecision(
     current: CommentDecision | undefined,
     next: DecisionStatus,

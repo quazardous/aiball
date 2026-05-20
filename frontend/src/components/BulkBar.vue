@@ -37,7 +37,10 @@ const readToggleAction = computed<BulkAction>(() =>
 </script>
 
 <template>
-    <div class="bulk-bar bulk-bar--bottom">
+    <div
+        class="bulk-bar bulk-bar--bottom"
+        :class="{ 'bulk-bar--has-selection': selectedSize > 0 }"
+    >
         <Button
             :label="selectedSize ? 'clear' : 'select all'"
             :icon="selectedSize ? 'pi pi-minus' : 'pi pi-list'"
@@ -106,6 +109,30 @@ const readToggleAction = computed<BulkAction>(() =>
     top: auto;
     bottom: 0;
     margin-top: 0.4rem;
+}
+
+/* #B.255 fazk7z: on phone, the bar is purely a feedback panel for
+   long-press selection — hide it entirely when nothing is selected
+   so the inbox doesn't carry a permanent footer for a UX that's
+   gesture-driven. Desktop still shows the "select all" button as a
+   discoverable affordance. */
+@media (max-width: 720px) {
+    .bulk-bar:not(.bulk-bar--has-selection) {
+        display: none;
+    }
+    /* #B.255 hekhbc: don't cram every action button onto one row —
+       on phone the actions get crushed in width. Let them wrap into
+       an "icon panel" laid out across multiple rows below the
+       count. The spacer pseudo-breaks the line so the action group
+       always starts on its own row, regardless of selection size. */
+    .bulk-bar {
+        flex-wrap: wrap;
+        row-gap: 0.4rem;
+    }
+    .bulk-bar .spacer {
+        flex: 0 0 100%;
+        height: 0;
+    }
 }
 .bulk-count {
     font-size: 0.85rem;

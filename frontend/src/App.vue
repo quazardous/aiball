@@ -2,13 +2,13 @@
 import { computed, onMounted, provide, ref, watch } from "vue";
 import Toast from "primevue/toast";
 import { useToast } from "primevue/usetoast";
-import { api, STRATEGIES, type InboxRow, type Message, type ProjectMeta, type Strategy } from "./lib/api";
+import { api, type InboxRow, type ProjectMeta, type Strategy } from "./lib/api";
+import { useNotifications } from "./lib/notifications";
 import { useRouting } from "./lib/router";
-import { useWs } from "./lib/ws";
+import { useInboxWs } from "./lib/inbox-ws";
 import { bus, useBus } from "./lib/bus";
-import { isPeek } from "./lib/peek";
 import BulkBar from "./components/BulkBar.vue";
-import { type BulkAction, canDo } from "./lib/ticket-actions";
+import { type BulkAction, useBulkActions } from "./lib/ticket-actions";
 import {
     STATUS_FILTER_OPTIONS,
     SORT_OPTIONS,
@@ -110,6 +110,11 @@ const showSnoozed = ref(localStorage.getItem("aiball.show_snoozed") === "1");
 const sortBy = ref<SortBy>(
     (localStorage.getItem("aiball.filter.sort") as SortBy | null) ?? "activity",
 );
+// #B.222: priority filter — "all" (default) or one of the enum values.
+// Persisted in localStorage like the other filters.
+const priorityFilter = ref<"all" | import("./lib/api").Priority>(
+    (localStorage.getItem("aiball.filter.priority") as "all" | import("./lib/api").Priority | null) ?? "all",
+);
 // FTS5 search input. Empty → inbox mode. Debounced before triggering the
 // search endpoint so we don't fire a request on every keystroke.
 const searchQuery = ref("");
@@ -126,38 +131,9 @@ const strategyOptions = STRATEGY_OPTIONS;
 // SettingsPanel type lives in components/Sidebar.vue.
 const panel = ref<SettingsPanel | null>(null);
 
-// OS notifications: lazily ask permission on first interaction so we don't
-// spam the user with a permission popup at boot.
-const notifAllowed = ref(
-    typeof Notification !== "undefined" && Notification.permission === "granted",
-);
-const notifMuted = ref(localStorage.getItem("aiball.notifMuted") === "1");
-function toggleMute() {
-    notifMuted.value = !notifMuted.value;
-    localStorage.setItem("aiball.notifMuted", notifMuted.value ? "1" : "0");
-}
-async function ensureNotifPermission() {
-    if (typeof Notification === "undefined") return false;
-    if (Notification.permission === "granted") {
-        notifAllowed.value = true;
-        return true;
-    }
-    if (Notification.permission === "denied") return false;
-    const r = await Notification.requestPermission();
-    notifAllowed.value = r === "granted";
-    return notifAllowed.value;
-}
-function fireOsNotif(title: string, body: string) {
-    if (notifMuted.value) return;
-    if (typeof Notification === "undefined") return;
-    if (Notification.permission !== "granted") return;
-    if (document.hasFocus()) return; // page already visible, toast is enough
-    try {
-        new Notification(title, { body, tag: "aiball" });
-    } catch {
-        /* ignore */
-    }
-}
+// OS notifications + arrival toasts moved to lib/notifications.ts as
+// `useNotifications({ project })` (#B.213 phase A.2). The composable
+// is wired BELOW once `project` is in scope.
 
 const projects = ref<ProjectMeta[]>([]);
 const myConsumerId = (() => {
@@ -187,9 +163,12 @@ function openProjectPage(p: string, page: ProjectPage) {
     openTicketId.value = null;
 }
 
-const selectedIds = ref<Set<number>>(new Set());
-const bulkBusy = ref(false);
-
+// Bulk-selection state + dispatch moved to lib/ticket-actions.ts as
+// `useBulkActions(...)` (#B.213 phase A.1). Selected ids, busy flag,
+// toggle/clear/selectAll, bulkAction handler, applicability counts +
+// the `bulkCounts` computed all come from the composable. Wired below
+// once `rows` + `pagedRows` are in scope.
+//
 // Auto-refresh: optional 60s heartbeat that triggers a refresh of the
 // current view. WS push already keeps things fresh; this is a fallback
 // for environments where the WS may have silently dropped.
@@ -244,127 +223,6 @@ const inListView = computed(
 watch(inListView, (now, prev) => {
     if (now && !prev) loadRows();
 });
-
-function toggleSelected(id: number, v: boolean) {
-    const next = new Set(selectedIds.value);
-    if (v) next.add(id);
-    else next.delete(id);
-    selectedIds.value = next;
-}
-function clearSelection() {
-    selectedIds.value = new Set();
-}
-function selectAllVisible() {
-    // "Visible" = the current page's rows. With pagination on, selecting
-    // "all" across every page would be surprising; the user sees 25 rows
-    // and expects the button to act on those. To select across pages,
-    // they can paginate + select-all again — selectedIds persists.
-    selectedIds.value = new Set(pagedRows.value.map((r) => r.id));
-}
-const BULK_LABELS: Record<BulkAction, string> = {
-    approve: "approve",
-    reject: "reject",
-    close: "close",
-    reopen: "reopen",
-    mark_read: "mark read",
-    mark_unread: "mark unread",
-    snooze: "snooze",
-    unsnooze: "unsnooze",
-};
-
-/** Default snooze duration when the bulk button is clicked without a
- *  picker — matches the "+3d" preset of the thread popover. */
-const BULK_SNOOZE_DEFAULT_MS = 3 * 86_400_000;
-
-/**
- * Per-row applicability test for each bulk action. Rows that don't
- * pass are silently skipped (no API call, no error), per #B.327: a
- * bulk action should never refuse the whole batch because some rows
- * weren't eligible — it just acts on the ones it can.
- */
-async function bulkAction(action: BulkAction) {
-    const selected = rows.value.filter((r) => selectedIds.value.has(r.id));
-    if (!selected.length) return;
-    bulkBusy.value = true;
-    let ok = 0, skipped = 0, failed = 0;
-    try {
-        for (const r of selected) {
-            if (!canDo(action, r)) {
-                skipped++;
-                continue;
-            }
-            try {
-                switch (action) {
-                    case "approve":
-                        await api.approve(r.id);
-                        break;
-                    case "reject":
-                        await api.reject(r.id);
-                        break;
-                    case "close":
-                        await api.postMessage({
-                            project: r.project,
-                            kind: "ticket_closed",
-                            ticket_id: r.id,
-                            parent_id: r.id,
-                        });
-                        break;
-                    case "reopen":
-                        await api.postMessage({
-                            project: r.project,
-                            kind: "ticket_reopened",
-                            ticket_id: r.id,
-                            parent_id: r.id,
-                        });
-                        break;
-                    case "mark_read":
-                        await api.markTicketRead(r.id);
-                        break;
-                    case "mark_unread":
-                        await api.markTicketUnread(r.id);
-                        break;
-                    case "snooze":
-                        await api.postponeTicket(
-                            r.id,
-                            new Date(Date.now() + BULK_SNOOZE_DEFAULT_MS).toISOString(),
-                        );
-                        break;
-                    case "unsnooze":
-                        await api.unsnoozeTicket(r.id);
-                        break;
-                }
-                ok++;
-            } catch {
-                failed++;
-            }
-        }
-        const label = BULK_LABELS[action];
-        let detail = "";
-        if (skipped) detail += `${skipped} skipped (not applicable)`;
-        if (failed) detail += `${detail ? ", " : ""}${failed} failed`;
-        toast.add({
-            severity: failed ? "warn" : "success",
-            summary: `${label}: ${ok} ticket${ok === 1 ? "" : "s"}`,
-            detail: detail || undefined,
-            life: 6000,
-        });
-        clearSelection();
-        bus.emit("inbox.refresh");
-        bus.emit("projects.refresh");
-    } finally {
-        bulkBusy.value = false;
-    }
-}
-
-/** Count how many selected rows would actually be touched by `action`.
- *  Used to disable the bulk button when no row is eligible. */
-function bulkApplicableCount(action: BulkAction): number {
-    let n = 0;
-    for (const r of rows.value) {
-        if (selectedIds.value.has(r.id) && canDo(action, r)) n++;
-    }
-    return n;
-}
 
 watch(project, (v) => {
     if (v) localStorage.setItem("aiball.project", v);
@@ -434,6 +292,8 @@ async function loadRows() {
             project: project.value ?? undefined,
             open: onlyOpen.value,
             include_postponed: showSnoozed.value,
+            // #B.222: forward priority filter; "all" → no narrowing.
+            ...(priorityFilter.value !== "all" ? { priority: priorityFilter.value } : {}),
         });
         if (statusFilter.value === "unread") {
             fetched = fetched.filter((r) => r.unread);
@@ -462,134 +322,25 @@ function refresh() {
     }
 }
 
-function shortKindLabel(m: Message): string {
-    switch (m.kind) {
-        case "ticket_created":
-            return "ticket";
-        case "comment_added":
-            return "comment";
-        case "ticket_closed":
-            return "ticket close";
-    }
-    return m.kind;
-}
-
-// #B.194: auto-approve projects emit message_created (pending) then
-// message_decided (approved) in quick succession → two toasts per
-// message. Hold the pending toast 250ms; if a decision lands first,
-// cancel the pending and only show the decision.
-const pendingArrivalTimers = new Map<number, ReturnType<typeof setTimeout>>();
-const PENDING_TOAST_HOLD_MS = 250;
-
-function notifyArrival(m: Message) {
-    const inScope = !project.value || project.value === m.project;
-    if (!inScope) return;
-
-    if (m.status !== "pending") {
-        const t = pendingArrivalTimers.get(m.id);
-        if (t) {
-            clearTimeout(t);
-            pendingArrivalTimers.delete(m.id);
-        }
-        renderArrivalToast(m);
-        return;
-    }
-
-    if (pendingArrivalTimers.has(m.id)) return;
-    const t = setTimeout(() => {
-        pendingArrivalTimers.delete(m.id);
-        renderArrivalToast(m);
-    }, PENDING_TOAST_HOLD_MS);
-    pendingArrivalTimers.set(m.id, t);
-}
-
-function renderArrivalToast(m: Message) {
-    const who = m.by_agent ?? "unknown";
-    const k = shortKindLabel(m);
-    const summary = m.title ?? (m.body ? m.body.slice(0, 80) : `new ${k}`);
-    const ref =
-        m.kind === "ticket_created"
-            ? `#B.${m.id}`
-            : `#C.${m.hashid ?? m.id}`;
-    const detail = `${who} · ${ref} · ${m.project}`;
-
-    toast.add({
-        severity: m.status === "pending" ? "warn" : "info",
-        summary: `${k}${m.status === "pending" ? " pending review" : ""}: ${summary}`,
-        detail,
-        life: 8000,
-    });
-    fireOsNotif(`aiball — ${k}`, `${summary}\n${detail}`);
-}
+// #B.213 phase A.2: arrival toasts + OS notifications wired now that
+// `project` is in scope (needed for the in-scope filter).
+const {
+    notifAllowed,
+    notifMuted,
+    toggleMute,
+    ensureNotifPermission,
+    notifyArrival,
+} = useNotifications({ project });
 
 // WS handler is now a thin relay: turn WebSocket events into high-level
 // `bus` events. Consumers (this file's own list/sidebar/toaster, plus any
 // future component) subscribe to the bus where they're defined. See
 // `lib/bus.ts` for the typed event map.
-const { connected } = useWs((ev) => {
-    if (ev.type === "rule_changed") {
-        bus.emit("rules.refresh");
-        return;
-    }
-    if (ev.type === "tag_changed") {
-        // Tag catalog touched (rename, color, delete) — refresh the
-        // tags panel and any open TagPicker. Don't touch inbox/projects
-        // here: the catalog change doesn't move per-project counts.
-        bus.emit("tags.refresh");
-        return;
-    }
-    if (ev.type === "message_tagged") {
-        // A message gained/lost tags. The catalog itself is unchanged,
-        // but the open thread (if it contains this message) and the
-        // inbox row need to redraw their tag chips. The server sends
-        // `{ message_id, tags }` — no ticket_id — so we trigger a
-        // defensive thread.refresh on whatever's currently open, plus
-        // an inbox refresh. Cheap and self-correcting.
-        const tagged = ev.data as { message_id?: number; ticket_id?: number } | undefined;
-        if (tagged?.ticket_id !== undefined) {
-            bus.emit("thread.refresh", { ticketId: tagged.ticket_id });
-        } else if (openTicketId.value !== null) {
-            bus.emit("thread.refresh", { ticketId: openTicketId.value });
-        }
-        bus.emit("inbox.refresh");
-        return;
-    }
-    if (ev.type === "strategy_changed") {
-        const s = (ev.data as { strategy?: Strategy } | undefined)?.strategy;
-        if (s && (STRATEGIES as readonly string[]).includes(s)) strategy.value = s;
-        return;
-    }
-    if (ev.type === "project_deleted") {
-        const deleted = (ev.data as { project?: string } | undefined)?.project;
-        if (deleted) bus.emit("project.deleted", { project: deleted });
-        bus.emit("projects.refresh");
-        bus.emit("inbox.refresh");
-        return;
-    }
-    // Remaining events are message-shaped (`message_created`,
-    // `message_decided`, `message_edited`, `message_noted`).
-    const data = ev.data as Message | undefined;
-    if (!data || typeof data !== "object") return;
-    if (ev.type === "message_created") bus.emit("message.arrived", data);
-    else if (ev.type === "message_decided") bus.emit("message.decided", data);
-    if (data.ticket_id !== null && data.ticket_id !== undefined) {
-        bus.emit("thread.refresh", { ticketId: data.ticket_id });
-    }
-    if (data.kind === "ticket_created") {
-        bus.emit("thread.refresh", { ticketId: data.id });
-    }
-    bus.emit("inbox.refresh");
-    bus.emit("projects.refresh");
-});
-
-// Catch up after a WS reconnect (mobile freeze most commonly) —
-// any event missed while the socket was down won't replay (#B.191).
-watch(connected, (now, prev) => {
-    if (now && prev === false) {
-        bus.emit("inbox.refresh");
-        bus.emit("projects.refresh");
-    }
-});
+// #B.213 phase A.3: WS event dispatcher moved to lib/inbox-ws.ts.
+// `useInboxWs(...)` takes the strategy ref (for strategy_changed) and
+// openTicketId (for message_tagged → thread.refresh fallback) and
+// returns the same `connected` signal we expose to the template.
+const { connected } = useInboxWs({ strategy, openTicketId });
 
 // Local consumers — same effects as before, just driven by the bus now.
 useBus("projects.refresh", () => { loadProjects(); });
@@ -615,6 +366,7 @@ watch([statusFilter, onlyOpen, project], () => {
 localStorage.removeItem("aiball.filter.intent");
 
 watch(sortBy, (v) => localStorage.setItem("aiball.filter.sort", v));
+watch(priorityFilter, (v) => localStorage.setItem("aiball.filter.priority", v));
 
 // Debounce the search input so we don't fire a request on every keystroke
 // — 220ms gives a comfortable feel without showing stale results too long.
@@ -627,12 +379,29 @@ watch(searchQuery, () => {
     }, 220);
 });
 
+// #B.222 sxrz48: priority-aware client-side sort. Weight mirrors the
+// backend's /api/tickets order so the inbox + sidebar + wake-CTA all
+// agree on what "urgent first" means.
+const PRIORITY_WEIGHT: Record<string, number> = {
+    urgent: 4,
+    high: 3,
+    normal: 2,
+    low: 1,
+};
+
 const sortedRows = computed(() => {
     const r = [...rows.value];
     if (sortBy.value === "created_desc") {
         r.sort((a, b) => b.created_at.localeCompare(a.created_at));
     } else if (sortBy.value === "created_asc") {
         r.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    } else if (sortBy.value === "priority") {
+        r.sort((a, b) => {
+            const wA = PRIORITY_WEIGHT[a.priority ?? "normal"] ?? 2;
+            const wB = PRIORITY_WEIGHT[b.priority ?? "normal"] ?? 2;
+            if (wA !== wB) return wB - wA;
+            return b.created_at.localeCompare(a.created_at);
+        });
     }
     // "activity" is the API default; rows already arrive sorted that way.
     return r;
@@ -654,10 +423,23 @@ const pagedRows = computed(() =>
     ),
 );
 
+// #B.213 phase A.1: bulk-selection state + dispatch wired now that
+// both `rows` and `pagedRows` are in scope. selectAllVisible needs
+// pagedRows; the rest only need rows.
+const {
+    selectedIds,
+    bulkBusy,
+    toggleSelected,
+    clearSelection,
+    selectAllVisible,
+    bulkAction,
+    bulkCounts,
+} = useBulkActions({ rows, pagedRows });
+
 // Any change to the filter set resets the cursor — otherwise a page-2
 // view followed by tightening the filter could leave the user staring
 // at an empty page.
-watch([statusFilter, onlyOpen, project, showSnoozed, sortBy, searchQuery],
+watch([statusFilter, onlyOpen, project, showSnoozed, sortBy, searchQuery, priorityFilter],
     () => { page.value = 1; });
 watch(pageSize, (v) => {
     localStorage.setItem("aiball.page_size", String(v));
@@ -732,14 +514,6 @@ function openSearchHit(hit: import("./lib/api").SearchHit) {
  * is a frequent need.
  */
 async function toggleRead(r: InboxRow) {
-    if (isPeek()) {
-        // Peek mode → don't touch the endorsed agent's seen-state.
-        // We still flip the local row so the UI gives feedback, but
-        // no API call goes out and the next inbox refresh will
-        // reconcile from the server.
-        r.unread = !r.unread;
-        return;
-    }
     const wasUnread = r.unread === true;
     r.unread = !wasUnread;
     try {
@@ -766,16 +540,7 @@ async function toggleRead(r: InboxRow) {
     }
 }
 
-const bulkCounts = computed(() => ({
-    approve: bulkApplicableCount("approve"),
-    reject: bulkApplicableCount("reject"),
-    close: bulkApplicableCount("close"),
-    reopen: bulkApplicableCount("reopen"),
-    mark_read: bulkApplicableCount("mark_read"),
-    mark_unread: bulkApplicableCount("mark_unread"),
-    snooze: bulkApplicableCount("snooze"),
-    unsnooze: bulkApplicableCount("unsnooze"),
-}));
+// bulkCounts now comes from useBulkActions (defined above with rows + pagedRows).
 
 /** When the user toggled "show snoozed" on, the open count includes
  *  snoozed tickets (they reappear in the lists and badges). Off by
@@ -966,11 +731,13 @@ watch(showSnoozed, (v) => {
                             open: p.open,
                             resolved: p.resolved,
                         }))"
+                        :priority-filter="priorityFilter"
                         @update:status-filter="statusFilter = $event"
                         @update:only-open="onlyOpen = $event"
                         @update:sort-by="sortBy = $event"
                         @update:search-query="searchQuery = $event"
                         @update:project="selectProject"
+                        @update:priority-filter="priorityFilter = $event"
                         @open-current-settings="project && openProjectPage(project, 'settings')"
                         @new-ticket="panel = 'compose'"
                     />
@@ -1163,13 +930,12 @@ watch(showSnoozed, (v) => {
         background: var(--p-surface-100);
     }
 
-    /* #B.161: bulk actions (per-row checkbox + "select all" footer)
-       are awkward on a phone — hide them entirely. The thread view
-       still offers per-ticket actions for individual ops. */
+    /* #B.161 → #B.255 update: the per-row checkbox stays hidden on
+       phone (long-press is the entry mechanism now), but the bulk
+       action bar MUST surface once selection mode is active —
+       otherwise the long-press gesture has no visible outcome on
+       mobile. David #rvssy2. */
     .list-row__select {
-        display: none !important;
-    }
-    .bulk-bar {
         display: none !important;
     }
 }

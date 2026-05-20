@@ -20,10 +20,25 @@
  * ```
  */
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, parse as parsePath, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { loadPromptsFromYaml, loadPromptsFromYamlBlock, mergePrompts, type PromptMap } from "../prompt-templates.js";
 
 export const CONFIG_FILENAME = ".aiball.yaml";
+
+/**
+ * Global per-user config path (#B.232 7bxrr2, david "ok chemin").
+ * Honours XDG_CONFIG_HOME when set, else falls back to `$HOME/.config`.
+ * Currently sources only the `prompts:` block; the rest of the schema
+ * (autopoll / consumer / claude_loop) stays project-grained because
+ * those values are inherently per-repo (identity, throttle, hook
+ * timeouts).
+ */
+export function globalConfigPath(): string {
+    const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
+    return join(base, "aiball", "config.yaml");
+}
 
 export type AutopollTone = "hint" | "directive" | "imperative";
 const VALID_TONES: AutopollTone[] = ["hint", "directive", "imperative"];
@@ -90,6 +105,15 @@ export interface AiballConfig {
     };
     /** Absolute path to the loaded `.aiball.yaml`, or null when none was found. */
     configPath: string | null;
+    /**
+     * Per-project override of the wake-CTA / state-prompt templates
+     * (#B.232 cpaez7). Merged over the shipped defaults in
+     * `config/defaults/claude-loop-pings.yaml` by the prompt-templates service.
+     * Empty map when the `.aiball.yaml` has no `prompts:` block — the
+     * defaults stand alone. Slot-grain replace (no deep merge
+     * inside a slot) so a user can swap shape forms freely.
+     */
+    prompts: PromptMap;
 }
 
 export type ConsumerSource = "env" | "aiball.yaml" | "mcp.json" | "default";
@@ -122,6 +146,7 @@ const DEFAULTS: AiballConfig = {
         wake_in_flight_ttl_ms: 2000,
     },
     configPath: null,
+    prompts: {},
 };
 
 export function findConfigUpwards(start: string): string | null {
@@ -205,6 +230,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         claude_loop: { ...DEFAULTS.claude_loop },
         mcp_json_deprecated: mcpJsonHasIdentityEnv(projectDir),
         configPath,
+        prompts: {},
     };
 
     // No .aiball.json → autopoll disabled. The hook wiring in
@@ -254,10 +280,29 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof cl.wake_in_flight_ttl_ms === "number" && cl.wake_in_flight_ttl_ms > 0) {
                 cfg.claude_loop.wake_in_flight_ttl_ms = cl.wake_in_flight_ttl_ms;
             }
+            // #B.232 cpaez7: per-project prompt template overrides. The
+            // service handles shape validation per slot and silently
+            // drops malformed entries, so we keep the wider config
+            // load resilient: a bad `prompts:` block doesn't disable
+            // the rest of the autopoll config.
+            cfg.prompts = loadPromptsFromYamlBlock(raw.prompts);
         } catch {
             /* malformed — fall back to defaults, hook stays silent */
         }
     }
+
+    // #B.232 7bxrr2: prompts: chain has 3 layers — shipped defaults
+    // (config/defaults/, consumed in claude-loop), global per-user, per-project.
+    // Project wins over global; global wins over defaults. Slot-grain replace at
+    // each step (consistent with mergePrompts).
+    //
+    // Global file (XDG-aware) sits between defaults and project here so
+    // that any caller reading `cfg.prompts` gets the merged
+    // (global ⊕ project) view; the defaults merge happens at the use site
+    // (e.g. `buildContextPhrase` in claude-loop). Missing global file
+    // → empty map, no-op for the merge.
+    const globalPrompts = loadPromptsFromYaml(globalConfigPath());
+    cfg.prompts = mergePrompts(globalPrompts, cfg.prompts);
 
     // Resolution chain (#B.154, david 2026-05-18):
     //   1. process.env.AIBALL_*  ← priority, for special cases

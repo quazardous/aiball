@@ -10,7 +10,7 @@
  * | wake | reload | check | trace | prune`. Anything after `--` is
  * passed verbatim to the spawned `claude`.
  */
-import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
     copyFileSync,
     existsSync,
@@ -20,7 +20,6 @@ import {
     rmSync,
     writeFileSync,
 } from "node:fs";
-import { createInterface } from "node:readline/promises";
 import { dirname, join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -35,6 +34,8 @@ import {
     defaultPingsPath,
     envPath,
     idleMarkerPath,
+    installRootSha,
+    isLoopStale,
     pickPingPhrase,
     pingsPath,
     platePath,
@@ -44,11 +45,12 @@ import {
     timerLogPath,
     timerPidPath,
     tmuxName,
-    wakeRequestedPath,
     writePlate,
     ensureDir,
     type Plate,
 } from "./state.js";
+import { cmdTail, type TailMode } from "./cmds/tail.js";
+import { cmdPrune, cmdReload, cmdRm, cmdWake } from "./cmds/manage.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -211,7 +213,7 @@ function resolveCurrentLoopName(): string {
     die(`multiple loops in cwd ${cwd}: ${names}. Pass a name explicitly.`);
 }
 
-function cmdStart(opts: StartOpts): void {
+async function cmdStart(opts: StartOpts): Promise<void> {
     const name = opts.name ?? defaultName();
     const sd = stateDirFor(name);
     if (existsSync(sd)) {
@@ -227,6 +229,25 @@ function cmdStart(opts: StartOpts): void {
     applyToProcessEnv(ctx);
     warnIfDeprecated(ctx);
     const cwd = ctx.cwd;
+
+    // #B.216 david (979632): auto-register the project with the aiball
+    // daemon so `claude-loop start` in any dir surfaces a fresh entry
+    // in ProjectsPanel without a separate `aiball project init`. Best
+    // effort — daemon down or 409 (already registered) both swallow
+    // silently to a one-line status. Never blocks the loop spawn.
+    if (ctx.project) {
+        try {
+            await new AiballClient().createProject(ctx.project);
+            process.stdout.write(`aiball: registered project '${ctx.project}'\n`);
+        } catch (e) {
+            const m = e instanceof Error ? e.message : String(e);
+            if (/409|already exists/i.test(m)) {
+                process.stdout.write(`aiball: project '${ctx.project}' already registered\n`);
+            } else {
+                process.stdout.write(`aiball: project register skipped — ${m}\n`);
+            }
+        }
+    }
 
     // #B.154: housekeeping before spawn. (1) prune dead state dirs
     // so the user's ~/.claude-loop/ doesn't accumulate orphans from
@@ -265,6 +286,9 @@ function cmdStart(opts: StartOpts): void {
         pings_path: pingsPath(sd),
         cwd,
         claude_args: opts.claudeArgs,
+        // #B.225: stamp the install-root SHA so `list` / `check` can
+        // flag the daemon when source moves past what its timer loaded.
+        started_at_sha: installRootSha(),
     };
     writePlate(sd, plate);
 
@@ -304,9 +328,6 @@ function cmdStart(opts: StartOpts): void {
     // execs the TS hook via tsx) for THIS session only — no
     // pollution of the user's ~/.claude/settings.json.
     const root = selfRoot();
-    const stopHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/stop-hook.ts"))}`;
-    const sessionStartHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/session-start-hook.ts"))}`;
-    const userPromptSubmitHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/user-prompt-submit-hook.ts"))}`;
     // NOTE (#B.178 win): claude-loop runs claude in a DETACHED mux pane
     // where nobody can answer claude's interactive first-run gates (the
     // ".mcp.json found — trust? [1/2/3]" menu, theme picker, "update
@@ -327,6 +348,28 @@ function cmdStart(opts: StartOpts): void {
     // the project dir to clear the one-time gates (documented in
     // docs/WIN-INSTALL.md). After that claude boots straight to its
     // prompt and claude-loop works.
+    //
+    // #B.228 (m2m crash): we used to wrap each hook in `npx --no-install
+    // tsx`, but npx resolves `tsx` by walking up from the SPAWNED claude
+    // process's cwd. When that cwd is a project without tsx in its own
+    // node_modules (e.g. m2m), npx errors out with "npx canceled due
+    // to missing packages and no YES option", the SessionStart hook
+    // fails, and claude exits at boot (= the "barre reste jaune" bug
+    // surfaced as "loop exits in ~30s"). Call tsx via the absolute path
+    // inside the aiball install — bypasses npx's cwd-relative lookup.
+    //
+    // hookPath() forward-slashes the path on Windows. `join` yields a
+    // backslash path there, and claude may run the hook command via
+    // Git Bash (where a backslash command path is unreliable). Forward
+    // slashes work in cmd.exe, Git Bash AND node/tsx, so they're safe
+    // for both the tsx binary and the .ts script argument.
+    const hookPath = (p: string) =>
+        shQuote(process.platform === "win32" ? p.replace(/\\/g, "/") : p);
+    const tsxBin = hookPath(join(root, "node_modules", ".bin", "tsx"));
+    const stopHookCmd = `${tsxBin} ${hookPath(join(root, "src/claude-loop/stop-hook.ts"))}`;
+    const sessionStartHookCmd = `${tsxBin} ${hookPath(join(root, "src/claude-loop/session-start-hook.ts"))}`;
+    const userPromptSubmitHookCmd = `${tsxBin} ${hookPath(join(root, "src/claude-loop/user-prompt-submit-hook.ts"))}`;
+    const askBlockHookCmd = `${tsxBin} ${hookPath(join(root, "src/claude-loop/pretooluse-hook.ts"))}`;
     const settings = {
         hooks: {
             // SessionStart fires once when claude has finished booting
@@ -354,6 +397,16 @@ function cmdStart(opts: StartOpts): void {
             // display matches reality without waiting for the next
             // Stop tick (#B.145 v2.2).
             UserPromptSubmit: [{ hooks: [{ type: "command", command: userPromptSubmitHookCmd }] }],
+            // PreToolUse on AskUserQuestion (#264): in an AUTONOMOUS loop
+            // (no human in front) a multi-choice dialog stalls — nobody
+            // clicks. The hook denies it ONLY when no human is taking
+            // over and redirects the agent to ask via an aiball ticket
+            // comment. Fail-open: human present (userIsTakingOver) or any
+            // doubt → allow, so interactive sessions keep the feature.
+            // Registered here (loop settings) so it's scoped to loops.
+            PreToolUse: [
+                { matcher: "AskUserQuestion", hooks: [{ type: "command", command: askBlockHookCmd }] },
+            ],
         },
     };
     const settingsJson = JSON.stringify(settings);
@@ -460,7 +513,11 @@ function cmdStart(opts: StartOpts): void {
     const timerScript = join(root, "src/claude-loop/timer.ts");
     const child = spawn("bash", [
         "-lc",
-        `source ${shQuote(envPath(sd))} && exec npx --no-install tsx ${shQuote(timerScript)}`,
+        // #B.228 defensive: same fix as the hook commands above —
+        // call tsx via its absolute path so the timer can be respawned
+        // from any cwd (relevant for `claude-loop reload` called from a
+        // project dir without tsx in its node_modules).
+        `source ${shQuote(envPath(sd))} && exec ${tsxBin} ${shQuote(timerScript)}`,
     ], {
         detached: true,
         stdio: ["ignore", logFd, logFd],
@@ -498,24 +555,45 @@ function cmdList(): void {
         process.stdout.write("(no loops)\n");
         return;
     }
+    // #B.225 ghost detection: compute the install-root SHA once for the
+    // whole listing so each plate's stamped sha can be diffed against
+    // it. Null when not a git checkout — we just skip the stale chip.
+    const currentSha = installRootSha();
     const entries = readdirSync(STATE_ROOT).sort();
     let found = 0;
+    let staleCount = 0;
     for (const name of entries) {
         const sd = stateDirFor(name);
         if (!existsSync(platePath(sd))) continue;
         let plate: Plate;
         try { plate = readPlate(sd); } catch { continue; }
-        const alive = tmuxAlive(name) ? "alive" : "dead";
+        const alive = tmuxAlive(name);
+        const aliveStr = alive ? "alive" : "dead";
         const idle = existsSync(idleMarkerPath(sd))
             ? `idle since ${readFileSync(idleMarkerPath(sd), "utf8").trim()}`
             : "—";
+        // Stale only matters for alive loops — a dead loop's timer is
+        // gone, restart picks up current source by definition.
+        const stale = alive && isLoopStale(plate);
+        const staleTag = stale ? " [stale]" : "";
+        if (stale) staleCount++;
         process.stdout.write(
-            `${name.padEnd(24)}  ${alive.padEnd(5)}  ${plate.interval}s  ${idle}\n`,
+            `${name.padEnd(24)}  ${aliveStr.padEnd(5)}${staleTag.padEnd(8)}  ${plate.interval}s  ${idle}\n`,
         );
         process.stdout.write(`${"".padEnd(24)}  dir=${plate.cwd}\n`);
+        if (stale && plate.started_at_sha && currentSha) {
+            process.stdout.write(
+                `${"".padEnd(24)}  source has moved since boot: ${plate.started_at_sha.slice(0, 7)} → ${currentSha.slice(0, 7)} (reload to pick up changes)\n`,
+            );
+        }
         found++;
     }
     if (found === 0) process.stdout.write("(no loops)\n");
+    if (staleCount > 0) {
+        process.stdout.write(
+            `\n${staleCount} stale loop${staleCount === 1 ? "" : "s"} detected — run \`claude-loop reload <name>\` to reload source in place (keeps the claude conversation; loops also auto-reload at their next idle tick).\n`,
+        );
+    }
 }
 
 function cmdAttach(name: string): void {
@@ -523,279 +601,7 @@ function cmdAttach(name: string): void {
     spawnSync(MUX_CMD, ["attach", "-t", tmuxName(name)], { stdio: "inherit" });
 }
 
-type TailMode = "pane" | "timer" | "stop-hook" | "log";
 
-/**
- * Print lines that appeared in `now` but weren't in `prev` (#B.198
- * follow). The pane buffer scrolls, so we anchor by finding the
- * longest suffix of `prev` that matches a prefix of `now` — anything
- * past that anchor is new content. Empty `prev` → first poll, dump
- * everything. No overlap → content scrolled past faster than we
- * polled, dump everything (best-effort, missed lines stay lost).
- */
-function paneDelta(prev: string, now: string): string {
-    if (!prev) return now;
-    if (prev === now) return "";
-    const a = prev.split("\n");
-    const b = now.split("\n");
-    for (let k = Math.min(a.length, b.length); k > 0; k--) {
-        let match = true;
-        for (let i = 0; i < k; i++) {
-            if (a[a.length - k + i] !== b[i]) { match = false; break; }
-        }
-        if (match) return b.slice(k).join("\n");
-    }
-    return now;
-}
-
-async function followPane(name: string, lines: number): Promise<void> {
-    let prev = "";
-    let printedInitial = false;
-    // Best-effort cleanup on Ctrl-C — let the SIGINT propagate.
-    process.on("SIGINT", () => process.exit(0));
-    while (true) {
-        if (!tmuxAlive(name)) die(`loop '${name}' no longer alive`);
-        const r = spawnSync(MUX_CMD, ["capture-pane", "-t", `${tmuxName(name)}.0`, "-p"], {
-            encoding: "utf8",
-        }) as SpawnSyncReturns<string>;
-        if (r.status !== 0) die(`capture-pane failed for ${tmuxName(name)}`);
-        const buf = r.stdout ?? "";
-        if (!printedInitial) {
-            const all = buf.split("\n");
-            process.stdout.write(all.slice(-lines).join("\n") + "\n");
-            prev = buf;
-            printedInitial = true;
-        } else {
-            const delta = paneDelta(prev, buf);
-            if (delta) {
-                process.stdout.write(delta + (delta.endsWith("\n") ? "" : "\n"));
-                prev = buf;
-            }
-        }
-        await new Promise((res) => setTimeout(res, 500));
-    }
-}
-
-/**
- * GNU tail prints chatty status lines on stderr when a watched file
- * disappears (claude-loop restart deletes the session's state dir):
- * "became inaccessible" / "est devenu inaccessible", "cannot use
- * inotify" / "impossible d'utiliser inotify", "reverting to polling"
- * / "retour à l'interrogation active". Tail itself keeps working via
- * polling — these are warnings, not errors — but they clutter the
- * `claude-loop --log` view. #B.210. We drop the known noise and let
- * any other stderr (real errors) through.
- */
-const TAIL_NOISE_RE =
-    /became inaccessible|est devenu inaccessible|cannot use inotify|impossible d'utiliser inotify|reverting to polling|retour à l'interrogation active|le répertoire contenant le fichier|directory containing the watched file|tail: cannot open .* for reading: No such file or directory|tail: impossible d'ouvrir .* en lecture: Aucun fichier ou dossier de ce nom/i;
-
-function pipeFilteredStderr(child: import("node:child_process").ChildProcess): void {
-    if (!child.stderr) return;
-    let carry = "";
-    child.stderr.on("data", (chunk: Buffer) => {
-        const text = carry + chunk.toString("utf8");
-        const out = text.split("\n");
-        carry = out.pop() ?? "";
-        for (const l of out) {
-            if (!l) continue;
-            if (TAIL_NOISE_RE.test(l)) continue;
-            process.stderr.write(`${l}\n`);
-        }
-    });
-    child.stderr.on("end", () => {
-        if (carry && !TAIL_NOISE_RE.test(carry)) process.stderr.write(`${carry}\n`);
-    });
-}
-
-function followFile(path: string, lines: number, prefix?: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const child = spawn("tail", ["-n", String(lines), "-F", path], {
-            stdio: ["ignore", "pipe", "pipe"],
-        });
-        pipeFilteredStderr(child);
-        if (child.stdout) {
-            let carry = "";
-            child.stdout.on("data", (chunk: Buffer) => {
-                const text = carry + chunk.toString("utf8");
-                const lines = text.split("\n");
-                carry = lines.pop() ?? "";
-                for (const l of lines) process.stdout.write(`${prefix ?? ""}${l}\n`);
-            });
-            child.stdout.on("end", () => { if (carry) process.stdout.write(`${prefix ?? ""}${carry}\n`); });
-        }
-        child.on("error", reject);
-        child.on("exit", (code) => code === 0 || code === null ? resolve() : reject(new Error(`tail exited ${code}`)));
-        process.on("SIGINT", () => { child.kill("SIGINT"); process.exit(0); });
-    });
-}
-
-async function cmdTail(name: string, lines: number, which: TailMode, follow: boolean): Promise<void> {
-    if (which === "timer" || which === "stop-hook") {
-        const log = which === "timer"
-            ? timerLogPath(stateDirFor(name))
-            : join(stateDirFor(name), "stop-hook.log");
-        const label = which === "timer" ? "timer log" : "stop-hook log";
-        if (!existsSync(log)) {
-            if (!follow) die(`no ${label} at ${log}`);
-            // Follow mode: tail -F handles a not-yet-existent file
-            // (waits for it to appear). Helpful when the Stop hook
-            // hasn't fired yet — user can leave it running.
-        }
-        if (!follow) {
-            const all = readFileSync(log, "utf8").split("\n");
-            process.stdout.write(all.slice(-lines).join("\n") + "\n");
-            return;
-        }
-        await followFile(log, lines, undefined);
-        return;
-    }
-    if (which === "log") {
-        const sd = stateDirFor(name);
-        const timer = timerLogPath(sd);
-        const hook = join(sd, "stop-hook.log");
-        // Prefixes name the source explicitly (#B.198, david: "il
-        // faut quand meme dire le nom du hook"). Order is now
-        // `<timestamp> <tag> <rest>` (david: "ça serait plus pratique
-        // cet ordre heure [type event]"): we pull any leading ISO
-        // timestamp out of the body line and reinject it BEFORE the
-        // tag, so all sources show one consistent time column.
-        const TIMER_TAG = "[timer]    ";
-        const HOOK_TAG  = "[stop-hook]";
-        const ISO_RE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\s+/;
-        function reformat(line: string, tag: string): string {
-            const m = ISO_RE.exec(line);
-            if (m) return `${m[1]} ${tag} ${line.slice(m[0].length)}`;
-            // No leading timestamp (older/foreign lines) — synthesize
-            // a placeholder so columns still line up.
-            return `${" ".repeat(24)} ${tag} ${line}`;
-        }
-        if (!follow) {
-            for (const [p, tag] of [[timer, TIMER_TAG], [hook, HOOK_TAG]] as const) {
-                if (!existsSync(p)) continue;
-                const all = readFileSync(p, "utf8").split("\n");
-                for (const l of all.slice(-lines)) process.stdout.write(`${reformat(l, tag)}\n`);
-            }
-            return;
-        }
-        const runFollow = async (path: string, tag: string): Promise<void> => {
-            return new Promise((resolveP, rejectP) => {
-                const child = spawn("tail", ["-n", String(lines), "-F", path], {
-                    stdio: ["ignore", "pipe", "pipe"],
-                });
-                pipeFilteredStderr(child);
-                let carry = "";
-                child.stdout?.on("data", (chunk: Buffer) => {
-                    const text = carry + chunk.toString("utf8");
-                    const out = text.split("\n");
-                    carry = out.pop() ?? "";
-                    for (const l of out) process.stdout.write(`${reformat(l, tag)}\n`);
-                });
-                child.stdout?.on("end", () => {
-                    if (carry) process.stdout.write(`${reformat(carry, tag)}\n`);
-                });
-                child.on("error", rejectP);
-                child.on("exit", (code) => code === 0 || code === null ? resolveP() : rejectP(new Error(`tail exited ${code}`)));
-                process.on("SIGINT", () => { child.kill("SIGINT"); process.exit(0); });
-            });
-        };
-        await Promise.race([
-            runFollow(timer, TIMER_TAG),
-            runFollow(hook, HOOK_TAG),
-        ]);
-        return;
-    }
-    // pane mode
-    if (!tmuxAlive(name)) {
-        die(`loop '${name}' not alive (use --timer / --stop-hook / --log to inspect logs instead)`);
-    }
-    if (!follow) {
-        const r = spawnSync(MUX_CMD, ["capture-pane", "-t", `${tmuxName(name)}.0`, "-p"], {
-            encoding: "utf8",
-        }) as SpawnSyncReturns<string>;
-        if (r.status !== 0) die(`capture-pane failed for ${tmuxName(name)}`);
-        const all = (r.stdout ?? "").split("\n");
-        process.stdout.write(all.slice(-lines).join("\n") + "\n");
-        return;
-    }
-    await followPane(name, lines);
-}
-
-function cmdRm(name: string, force: boolean): void {
-    const sd = stateDirFor(name);
-    spawnSync(MUX_CMD, ["kill-session", "-t", tmuxName(name)], { stdio: "ignore" });
-    if (existsSync(timerPidPath(sd))) {
-        try {
-            const pid = Number(readFileSync(timerPidPath(sd), "utf8").trim());
-            if (Number.isFinite(pid) && pid > 0) process.kill(pid);
-        } catch { /* already dead */ }
-    }
-    if (existsSync(sd)) {
-        rmSync(sd, { recursive: true, force: true });
-        process.stdout.write(`removed loop '${name}'\n`);
-    } else if (!force) {
-        die(`no state dir at ${sd} (use --force to silence)`);
-    }
-}
-
-function cmdWake(name: string): void {
-    if (!tmuxAlive(name)) die(`loop '${name}' not alive`);
-    const sd = stateDirFor(name);
-    // Don't clear idle-since: the timer's first check is
-    // `if (!idle-since) continue` — wiping it would make the next
-    // tick SKIP instead of fire (regression noted in concept review).
-    // We only need wake-requested set; timer reads it as a check-cmd
-    // bypass. If claude is mid-turn (no idle-since), wake is queued
-    // until claude finishes and the Stop hook decides what to do.
-    writeFileSync(wakeRequestedPath(sd), new Date().toISOString());
-    const plate = (() => { try { return readPlate(sd); } catch { return null; } })();
-    const interval = plate?.interval ?? 60;
-    process.stdout.write(
-        `wake requested for '${name}' (fires at next timer tick when claude is idle, up to ${interval}s)\n`,
-    );
-}
-
-/**
- * Respawn just the detached timer process without touching claude.
- * Needed because `tsx` doesn't hot-reload (#B.198): when timer.ts or
- * state.ts changes, the running timer keeps the old code in memory
- * until restarted — but `rm + start` kills claude too, losing the
- * conversation. `reload` kills the recorded timer pid and re-execs a
- * fresh one using the same env file the loop was started with, so the
- * tmux session + claude pane stay intact.
- */
-function cmdReload(name: string): void {
-    if (!tmuxAlive(name)) {
-        die(`loop '${name}' not alive (use 'start' to spawn a fresh one)`);
-    }
-    const sd = stateDirFor(name);
-    if (!existsSync(platePath(sd))) die(`no state dir at ${sd}`);
-    if (!existsSync(envPath(sd))) die(`no env file at ${envPath(sd)} — loop is broken, use rm + start`);
-
-    let oldPid: number | null = null;
-    if (existsSync(timerPidPath(sd))) {
-        const raw = Number(readFileSync(timerPidPath(sd), "utf8").trim());
-        if (Number.isFinite(raw) && raw > 0) oldPid = raw;
-    }
-    if (oldPid !== null) {
-        try { process.kill(oldPid); } catch { /* already dead */ }
-    }
-
-    const root = selfRoot();
-    const logFd = openSync(timerLogPath(sd), "a");
-    const timerScript = join(root, "src/claude-loop/timer.ts");
-    const child = spawn("bash", [
-        "-lc",
-        `source ${shQuote(envPath(sd))} && exec npx --no-install tsx ${shQuote(timerScript)}`,
-    ], {
-        detached: true,
-        stdio: ["ignore", logFd, logFd],
-    });
-    child.unref();
-    writeFileSync(timerPidPath(sd), String(child.pid) + "\n");
-
-    const killed = oldPid !== null ? ` (killed old pid ${oldPid})` : "";
-    process.stdout.write(`timer for '${name}' respawned${killed} — new pid ${child.pid}\n`);
-}
 
 /**
  * Diagnostic subcommand (#B.149). Answers "what would the timer do
@@ -858,6 +664,17 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
                 process.stdout.write(`    pings_path   : ${plate.pings_path}\n`);
                 process.stdout.write(`    cwd          : ${plate.cwd}\n`);
                 process.stdout.write(`    claude_args  : ${plate.claude_args.length === 0 ? "(none)" : plate.claude_args.join(" ")}\n`);
+                // #B.225 ghost detection: surface stamped SHA + diff vs
+                // current install-root HEAD so a stale daemon is
+                // visible without grepping plate.json by hand.
+                const stamped = plate.started_at_sha ?? null;
+                const current = installRootSha();
+                process.stdout.write(`    started_at_sha: ${stamped ?? "(unset — pre-#B.225 loop)"}\n`);
+                if (stamped && current && stamped !== current) {
+                    process.stdout.write(`    !! source has moved since boot: ${stamped.slice(0, 7)} → ${current.slice(0, 7)} (restart to reload)\n`);
+                } else if (stamped && current && stamped === current) {
+                    process.stdout.write(`    install-root HEAD: ${current.slice(0, 7)} (in sync)\n`);
+                }
             }
             const cwd = plate?.cwd ?? process.cwd();
             const aiballYaml = join(cwd, ".aiball.yaml");
@@ -872,14 +689,27 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
     if (isInternalCheckCmd(checkCmd)) {
         try {
             const client = new AiballClient();
-            const ping = await client.pingsCount() as { consumer_id: string; unread: number };
-            const subs = await client.mySubs() as Array<{
-                project?: string;
-                role?: string;
-                ticket_id?: number;
-            }>;
+            const [ping, subs, projects] = await Promise.all([
+                client.pingsCount() as Promise<{ consumer_id: string; unread: number }>,
+                client.mySubs() as Promise<Array<{
+                    project?: string;
+                    role?: string;
+                    ticket_id?: number;
+                }>>,
+                client.listProjectsDetailed().catch(() => []) as Promise<Array<{
+                    name: string;
+                    open_count?: number;
+                    actionable_count?: number;
+                }>>,
+            ]);
+            const openCount = Array.isArray(projects)
+                ? projects
+                    .filter((p) => !ctx.project || p.name === ctx.project)
+                    .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
+                : 0;
             process.stdout.write(`  resolved consumer_id  : ${ping.consumer_id}\n`);
             process.stdout.write(`  unread pings (this consumer): ${ping.unread}\n`);
+            process.stdout.write(`  open tickets (actionable${ctx.project ? `, project=${ctx.project}` : ", all subs"}): ${openCount}\n`);
             const projectSubs = subs.filter((s) => s.project && !s.ticket_id);
             process.stdout.write(`  project subscriptions :\n`);
             if (projectSubs.length === 0) {
@@ -890,7 +720,15 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
                 }
             }
             process.stdout.write(`\n`);
-            const verdict = ping.unread > 0 ? "WAKE (work to drain)" : "SLEEP (nothing)";
+            const hasWork = ping.unread > 0 || openCount > 0;
+            const verdictReason = ping.unread > 0 && openCount > 0
+                ? "pings + open tickets"
+                : ping.unread > 0
+                    ? "pings to drain"
+                    : openCount > 0
+                        ? "open tickets to handle"
+                        : "nothing";
+            const verdict = hasWork ? `WAKE (${verdictReason})` : "SLEEP (nothing)";
             process.stdout.write(`  verdict: ${verdict}\n`);
             const hasProjectSub = ctx.project !== null && projectSubs.some((s) => s.project === ctx.project);
             if (ctx.project && !hasProjectSub) {
@@ -899,7 +737,7 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
             if (projectSubs.length === 0) {
                 process.stdout.write(`  hint   : consumer '${ping.consumer_id}' looks ephemeral (random fallback?). Set AIBALL_AGENT to a stable id and subscribe it to the projects you care about.\n`);
             }
-            process.exit(ping.unread > 0 ? 0 : 1);
+            process.exit(hasWork ? 0 : 1);
         } catch (e) {
             process.stderr.write(`  ERROR: ${(e as Error).message ?? String(e)}\n`);
             process.exit(2);
@@ -967,9 +805,22 @@ async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boo
         if (isInternalCheckCmd(checkCmd)) {
             if (!aiballClient) aiballClient = new AiballClient();
             try {
-                const r = await aiballClient.pingsCount() as { consumer_id: string; unread: number };
-                const verdict = r.unread > 0 ? "WAKE" : "sleep";
-                process.stdout.write(`[${ts}] tick ${tick}: consumer=${r.consumer_id} unread=${r.unread} → ${verdict}\n`);
+                const [r, projects] = await Promise.all([
+                    aiballClient.pingsCount() as Promise<{ consumer_id: string; unread: number }>,
+                    aiballClient.listProjectsDetailed().catch(() => []) as Promise<Array<{
+                        name: string;
+                        open_count?: number;
+                        actionable_count?: number;
+                    }>>,
+                ]);
+                const openCount = Array.isArray(projects)
+                    ? projects
+                        .filter((p) => !ctx.project || p.name === ctx.project)
+                        .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
+                    : 0;
+                const hasWork = r.unread > 0 || openCount > 0;
+                const verdict = hasWork ? "WAKE" : "sleep";
+                process.stdout.write(`[${ts}] tick ${tick}: consumer=${r.consumer_id} unread=${r.unread} open=${openCount} → ${verdict}\n`);
             } catch (e) {
                 process.stdout.write(`[${ts}] tick ${tick}: ERROR ${(e as Error).message ?? String(e)} → sleep\n`);
             }
@@ -983,32 +834,6 @@ async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boo
     }
 }
 
-async function cmdPrune(): Promise<void> {
-    if (!existsSync(STATE_ROOT)) {
-        process.stdout.write("nothing to prune\n");
-        return;
-    }
-    const orphans: string[] = [];
-    for (const name of readdirSync(STATE_ROOT)) {
-        if (!tmuxAlive(name)) orphans.push(name);
-    }
-    if (orphans.length === 0) {
-        process.stdout.write("nothing to prune\n");
-        return;
-    }
-    process.stdout.write(`orphan state dirs (no tmux): ${orphans.join(" ")}\n`);
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const ans = await rl.question("remove them? [y/N] ");
-    rl.close();
-    if (!/^[Yy]$/.test(ans.trim())) {
-        process.stdout.write("aborted\n");
-        return;
-    }
-    for (const n of orphans) {
-        rmSync(stateDirFor(n), { recursive: true, force: true });
-    }
-    process.stdout.write(`pruned ${orphans.length} orphan(s)\n`);
-}
 
 // Commander wiring. `start` is the default — bare `claude-loop` (or
 // `claude-loop --name foo -- --model opus`) runs start. Anything

@@ -9,13 +9,66 @@ import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 
+/**
+ * Project names known to the system. Reads from the explicit `projects`
+ * registry (#B.216 phase A pass 1) AND the legacy DISTINCT(tickets.project)
+ * path — soft FK by design, so an orphan ticket on an unregistered project
+ * is still visible here, and a freshly-created empty project (registered
+ * via CLI/UI before any ticket lands) is also visible.
+ */
 export function listProjects(): string[] {
     const db = getDb();
-    const rows = db.selectDistinct({ project: schema.tickets.project })
+    const registry = db.select({ name: schema.projects.name })
+        .from(schema.projects)
+        .all()
+        .map((r) => r.name);
+    const fromTickets = db.selectDistinct({ project: schema.tickets.project })
         .from(schema.tickets)
-        .orderBy(asc(schema.tickets.project))
-        .all();
-    return rows.map((r) => r.project);
+        .all()
+        .map((r) => r.project);
+    const merged = new Set<string>([...registry, ...fromTickets]);
+    return [...merged].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Insert a new project into the registry. Soft registry: no SQL FK ties
+ * tickets.project to this row, but the CLI / Web UI flows go through
+ * here to declare a project before its first ticket lands.
+ *
+ * Throws on duplicate name (PK collision) — caller decides whether to
+ * treat that as a 409 or surface it raw.
+ */
+export interface NewProjectInput {
+    name: string;
+    display_name?: string | null;
+    description?: string | null;
+    created_by?: string | null;
+}
+
+export function createProject(input: NewProjectInput): schema.Project {
+    const db = getDb();
+    const name = input.name.trim();
+    if (!name) throw new Error("project name is required");
+    const row: schema.NewProject = {
+        name,
+        displayName: input.display_name ?? null,
+        description: input.description ?? null,
+        createdAt: nowIso(),
+        createdBy: input.created_by ?? null,
+    };
+    db.insert(schema.projects).values(row).run();
+    const inserted = db.select().from(schema.projects)
+        .where(eq(schema.projects.name, name))
+        .get();
+    if (!inserted) throw new Error(`project ${name} disappeared after insert`);
+    return inserted;
+}
+
+export function getProject(name: string): schema.Project | undefined {
+    const db = getDb();
+    return db.select().from(schema.projects)
+        .where(eq(schema.projects.name, name))
+        .get();
 }
 
 export interface ProjectMeta {
@@ -93,14 +146,40 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         .all();
 
     const byProject = new Map<string, ProjectMeta>();
-    for (const t of ticketAgg) {
-        byProject.set(t.project, {
-            name: t.project,
-            last_activity: t.last_activity ?? "",
-            ticket_count: Number(t.ticket_count),
+    // #B.227: seed from the projects registry first so a freshly-
+    // registered empty project (auto-register at claude-loop start,
+    // or `aiball project init`) still surfaces in the sidebar with
+    // zero counts. Before this seed, byProject was built only from
+    // ticket/message aggs and empty projects silently disappeared.
+    const registry = db.select({
+        name: schema.projects.name,
+        created_at: schema.projects.createdAt,
+    }).from(schema.projects).all();
+    for (const r of registry) {
+        byProject.set(r.name, {
+            name: r.name,
+            last_activity: r.created_at ?? "",
+            ticket_count: 0,
             comment_count: 0,
-            pending_count: Number(t.ticket_pending) || 0,
+            pending_count: 0,
         });
+    }
+    for (const t of ticketAgg) {
+        const existing = byProject.get(t.project);
+        const last = t.last_activity ?? "";
+        if (existing) {
+            existing.ticket_count = Number(t.ticket_count);
+            existing.pending_count = Number(t.ticket_pending) || 0;
+            if (last && last > existing.last_activity) existing.last_activity = last;
+        } else {
+            byProject.set(t.project, {
+                name: t.project,
+                last_activity: last,
+                ticket_count: Number(t.ticket_count),
+                comment_count: 0,
+                pending_count: Number(t.ticket_pending) || 0,
+            });
+        }
     }
     for (const m of messageAgg) {
         const cur = byProject.get(m.project);
@@ -142,7 +221,7 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         .orderBy(asc(schema.messages.id))
         .all();
     const closedByTicket = new Map<number, boolean>();
-    const resolvedByTicket = new Map<number, boolean>();
+    const gatedByDecisionByTicket = new Map<number, boolean>();
     const blockedByTicket = new Map<number, boolean>();
     for (const ev of lifecycle) {
         if (ev.kind === "ticket_closed") {
@@ -152,13 +231,13 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         } else if (ev.kind === "ticket_reopened") {
             if (ev.status === "approved") {
                 closedByTicket.set(ev.ticket_id, false);
-                resolvedByTicket.set(ev.ticket_id, false);
+                gatedByDecisionByTicket.set(ev.ticket_id, false);
                 blockedByTicket.set(ev.ticket_id, false);
             }
         } else if (ev.kind === "ticket_resolved") {
             // Pending OR approved counts as "agent done".
             if (ev.status === "approved" || ev.status === "pending") {
-                resolvedByTicket.set(ev.ticket_id, true);
+                gatedByDecisionByTicket.set(ev.ticket_id, true);
             }
         } else if (ev.kind === "ticket_blocked") {
             // ticket_blocked is always auto-approved (it's a signal,
@@ -197,7 +276,7 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     // proposed done" — same effect on actionable_count as a legacy
     // ticket_resolved row. We can't reliably re-do the
     // reopen-clears-resolved ordering here without re-sorting events,
-    // but the existing replay already cleared resolvedByTicket on the
+    // but the existing replay already cleared gatedByDecisionByTicket on the
     // last reopen seen; a NEW resolution comment after that reopen
     // will set it again here, which is the correct semantic.
     const resolutionComments = db.select({
@@ -217,8 +296,15 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         try {
             const m = JSON.parse(c.meta) as { decision?: { kind?: string; status?: string } };
             const d = m.decision;
-            if (d?.kind === "resolution" && (d.status === "pending" || d.status === "accepted")) {
-                resolvedByTicket.set(c.ticket_id, true);
+            // #B.242: gate actionable on any pending validation across decision
+            // kinds. Resolution stays excluded on `accepted` too (short window
+            // before close); plan:accepted is the GO-signal so it re-enters
+            // actionable for the agent to execute.
+            const isResolutionGated =
+                d?.kind === "resolution" && (d.status === "pending" || d.status === "accepted");
+            const isPlanPending = d?.kind === "plan" && d.status === "pending";
+            if (isResolutionGated || isPlanPending) {
+                gatedByDecisionByTicket.set(c.ticket_id, true);
             }
         } catch { /* malformed meta, skip */ }
     }
@@ -350,10 +436,10 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         //   - a resolved/blocked ticket doesn't nag (#B.119)
         //   - a ticket waiting on an unfinished dependency doesn't
         //     surface as work to do (gating clears when blocker closes)
-        const isResolved = resolvedByTicket.get(t.id) === true;
+        const isGatedByDecision = gatedByDecisionByTicket.get(t.id) === true;
         const isBlocked = blockedByTicket.get(t.id) === true;
         const isGated = gatedByBlocker.has(t.id);
-        if (!isResolved && !isBlocked && !isGated) {
+        if (!isGatedByDecision && !isBlocked && !isGated) {
             actionablePerProject.set(t.project, (actionablePerProject.get(t.project) ?? 0) + 1);
         }
     }
@@ -757,4 +843,168 @@ export function getProjectStatsRich(project: string): ProjectStatsRich {
         top_intents: topIntents,
         auto_approved_pct: autoApprovedPct,
     };
+}
+
+/**
+ * Per-ticket actionable set (#B.232 #234 david). Mirrors the
+ * actionable_count gating already computed inside `listProjectsDetailed`
+ * but exposes the SET of ticket ids instead of per-project counts, so
+ * the /api/tickets endpoint and the MCP `ticket_list` tool can filter
+ * the result list on the same semantic as the sidebar badge.
+ *
+ * A ticket is actionable when it is:
+ *   - approved (passed moderation)
+ *   - NOT closed (no approved ticket_closed without a later ticket_reopened)
+ *   - NOT snoozed (postponed_until in the future)
+ *   - NOT resolved (no pending/approved ticket_resolved row AND no
+ *     comment_added carrying meta.decision.kind="resolution" in
+ *     pending/accepted status)
+ *   - NOT blocked (no pending/approved ticket_blocked)
+ *   - NOT gated by an active depends_on / blocks relation to an open
+ *     blocker (#B.123 phase B.4)
+ *
+ * Returns both sets so callers can distinguish "open but not actionable"
+ * (e.g. a pending resolution-proposal awaiting reporter accept) from
+ * "fully closed". `openIds` ⊇ `actionableIds`.
+ *
+ * Logic intentionally duplicates the relevant chunk of
+ * `listProjectsDetailed` rather than refactoring it — the original
+ * function is load-bearing for the sidebar and a split would touch too
+ * many call sites for this slice. Divergence risk is small (the
+ * lifecycle rules are stable) and tests cover the count path.
+ */
+export interface ActionableTicketSet {
+    /** All open ticket ids regardless of resolution/blocked/gated state. */
+    openIds: Set<number>;
+    /** Subset of openIds that pass every actionable gate. */
+    actionableIds: Set<number>;
+}
+
+export function computeActionableTicketIds(): ActionableTicketSet {
+    const db = getDb();
+    const nowStr = nowIso();
+
+    // Lifecycle replay (mirrors listProjectsDetailed lines 201-249).
+    const lifecycle = db.select({
+        ticket_id: schema.messages.ticketId,
+        kind: schema.messages.kind,
+        status: schema.messages.status,
+        id: schema.messages.id,
+    })
+        .from(schema.messages)
+        .where(
+            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened", "ticket_resolved", "ticket_blocked"]),
+        )
+        .orderBy(asc(schema.messages.id))
+        .all();
+    const closedByTicket = new Map<number, boolean>();
+    const gatedByDecisionByTicket = new Map<number, boolean>();
+    const blockedByTicket = new Map<number, boolean>();
+    for (const ev of lifecycle) {
+        if (ev.kind === "ticket_closed") {
+            if (ev.status === "approved") closedByTicket.set(ev.ticket_id, true);
+        } else if (ev.kind === "ticket_reopened") {
+            if (ev.status === "approved") {
+                closedByTicket.set(ev.ticket_id, false);
+                gatedByDecisionByTicket.set(ev.ticket_id, false);
+                blockedByTicket.set(ev.ticket_id, false);
+            }
+        } else if (ev.kind === "ticket_resolved") {
+            if (ev.status === "approved" || ev.status === "pending") {
+                gatedByDecisionByTicket.set(ev.ticket_id, true);
+            }
+        } else if (ev.kind === "ticket_blocked") {
+            if (ev.status === "approved" || ev.status === "pending") {
+                blockedByTicket.set(ev.ticket_id, true);
+            }
+        }
+    }
+
+    // Decision-on-comment resolutions (#B.129 phase 2).
+    const resolutionComments = db.select({
+        ticket_id: schema.messages.ticketId,
+        meta: schema.messages.meta,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.kind, "comment_added"),
+            eq(schema.messages.status, "approved"),
+        ))
+        .all();
+    for (const c of resolutionComments) {
+        if (!c.meta) continue;
+        try {
+            const m = JSON.parse(c.meta) as { decision?: { kind?: string; status?: string } };
+            const d = m.decision;
+            // #B.242: gate actionable on any pending validation across decision
+            // kinds. Resolution stays excluded on `accepted` too (short window
+            // before close); plan:accepted is the GO-signal so it re-enters
+            // actionable for the agent to execute.
+            const isResolutionGated =
+                d?.kind === "resolution" && (d.status === "pending" || d.status === "accepted");
+            const isPlanPending = d?.kind === "plan" && d.status === "pending";
+            if (isResolutionGated || isPlanPending) {
+                gatedByDecisionByTicket.set(c.ticket_id, true);
+            }
+        } catch { /* malformed meta, skip */ }
+    }
+
+    // Open set: approved + not lifecycle-closed + not snoozed.
+    const tickets = db.select({
+        id: schema.tickets.id,
+        status: schema.tickets.status,
+        postponedUntil: schema.tickets.postponedUntil,
+    }).from(schema.tickets).all();
+    const openIds = new Set<number>();
+    for (const t of tickets) {
+        if (t.status !== "approved") continue;
+        if (closedByTicket.get(t.id) === true) continue;
+        if (t.postponedUntil && t.postponedUntil > nowStr) continue;
+        openIds.add(t.id);
+    }
+
+    // Relation gating: depends_on / blocks chains to an open blocker
+    // suppress the dependent from the actionable set (#B.123 phase B.4).
+    const latestRelations = db.select({
+        sourceTicketId: schema.messages.ticketId,
+        targetTicketId: schema.messages.sourceTicketId,
+        meta: schema.messages.meta,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.kind, "ticket_relation"),
+            eq(schema.messages.status, "approved"),
+        ))
+        .orderBy(schema.messages.id)
+        .all();
+    const latestPerPair = new Map<string, { source: number; target: number; kind: string }>();
+    for (const r of latestRelations) {
+        if (!r.meta || !r.targetTicketId) continue;
+        let kind: string | undefined;
+        try {
+            const m = JSON.parse(r.meta) as { relation?: { kind?: string } };
+            kind = m.relation?.kind;
+        } catch { continue; }
+        if (!kind) continue;
+        latestPerPair.set(`${r.sourceTicketId}-${r.targetTicketId}`, {
+            source: r.sourceTicketId,
+            target: r.targetTicketId,
+            kind,
+        });
+    }
+    const gatedByBlocker = new Set<number>();
+    for (const r of latestPerPair.values()) {
+        if (r.kind === "depends_on" && openIds.has(r.target)) gatedByBlocker.add(r.source);
+        else if (r.kind === "blocks" && openIds.has(r.source)) gatedByBlocker.add(r.target);
+    }
+
+    const actionableIds = new Set<number>();
+    for (const id of openIds) {
+        if (gatedByDecisionByTicket.get(id) === true) continue;
+        if (blockedByTicket.get(id) === true) continue;
+        if (gatedByBlocker.has(id)) continue;
+        actionableIds.add(id);
+    }
+
+    return { openIds, actionableIds };
 }

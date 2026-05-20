@@ -43,6 +43,15 @@ export const projects = sqliteTable("projects", {
     createdAt: text("created_at").notNull(),
     /** consumer_id that registered the project (NULL for backfilled rows when no author was on file). */
     createdBy: text("created_by"),
+    /**
+     * Per-project response-strategy override (#B.224). NULL = inherit
+     * the global default. Stored as a typed column rather than a k/v
+     * settings row (the previous `strategy:<project>` hack); future
+     * per-project preferences (default_intent, default_priority, etc.)
+     * add their own columns and surface through the same
+     * `src/preferences.ts` SDK.
+     */
+    defaultStrategy: text("default_strategy"),
 });
 
 export const tickets = sqliteTable("tickets", {
@@ -61,6 +70,14 @@ export const tickets = sqliteTable("tickets", {
     summary: text("summary"),
     byAgent: text("by_agent"),
     intent: text("intent"),
+    /**
+     * Urgency hint orthogonal to `intent` (#B.222). Enum gated at the
+     * SQL layer via CHECK constraint (low / normal / high / urgent).
+     * Backfilled to 'normal' for pre-existing rows. Used by listMessages
+     * ticket sort + listPings secondary parent-priority sort + poll
+     * my_pending_tickets sort.
+     */
+    priority: text("priority").notNull().default("normal"),
     status: text("status").notNull().default("pending"),
     createdAt: text("created_at").notNull(),
     decidedAt: text("decided_at"),
@@ -70,16 +87,16 @@ export const tickets = sqliteTable("tickets", {
     editedTitle: text("edited_title"),
     editedBody: text("edited_body"),
     /**
-     * Boolean flag (0 = internal, 1 = broadcast). Internal tickets only ping
-     * project owners and explicit ticket subscribers. Broadcast tickets also
-     * ping followers (default project subscription level), so non-team
-     * agents stay aware of e.g. API changes without being spammed by
-     * internal dev chatter.
+     * Event scope (#B.245 tristate, replaces the legacy `broadcast`
+     * boolean). One of `internal` / `default` / `broadcast` — see
+     * `_messages.scope` for the same enum and its fan-out semantics.
+     * On a ticket, this scopes the ticket_created event itself; each
+     * comment in the thread carries its own `scope` independently.
      *
-     * Flipping this flag is NOT retroactive — followers only start getting
-     * pings on the *next* activity after the flag flips.
+     * Flipping this is NOT retroactive — followers only start getting
+     * pings on the *next* activity at `broadcast` scope.
      */
-    broadcast: integer("broadcast").notNull().default(0),
+    scope: text("scope").notNull().default("default"),
     /**
      * Snooze / postpone (per #B.329). When set to an ISO8601 timestamp in
      * the future, the ticket is hidden from the open-inbox view (treated
@@ -111,6 +128,7 @@ export const tickets = sqliteTable("tickets", {
     index("idx_tickets_status").on(t.status),
     index("idx_tickets_postponed").on(t.postponedUntil),
     index("idx_tickets_parent").on(t.parentTicketId),
+    index("idx_tickets_priority").on(t.priority),
 ]);
 
 export const messages = sqliteTable("_messages", {
@@ -148,6 +166,20 @@ export const messages = sqliteTable("_messages", {
     sourceTicketId: integer("source_ticket_id").references(() => tickets.id, { onDelete: "cascade" }),
     /** Sidecar JSON metadata (#B.104). Same shape as `tickets.meta`. */
     meta: text("meta"),
+    /**
+     * Event scope (#B.245 tristate). One of:
+     *   `internal`  — owners only + @mentions explicites; @projet
+     *                 narrows to project owners (not followers).
+     *   `default`   — ticket subscribers + project owners + @mentions
+     *                 (the standard fan-out).
+     *   `broadcast` — `default` + project followers.
+     *
+     * Composer remembers the last value chosen per-ticket (#79h7zk).
+     * Replies default to `internal` (existing threads have their
+     * audience, broad fan-out on every reply over-notifies). New
+     * tickets default to `default`.
+     */
+    scope: text("scope").notNull().default("default"),
 }, (t) => [
     uniqueIndex("idx_messages_ticket_display").on(t.ticketId, t.displaySeq),
     index("idx_messages_ticket").on(t.ticketId),

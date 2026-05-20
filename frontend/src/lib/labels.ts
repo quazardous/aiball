@@ -8,7 +8,7 @@
  * Created from #C.2gpcsd ("y a beaucoup de magic string aussi et des
  * label etc"). Phase E of #B.332.
  */
-import type { InboxRow, Intent, Strategy } from "./api";
+import type { InboxRow, Intent, Priority, Strategy } from "./api";
 import type { MessageKind } from "./domain";
 import type { BulkAction } from "./ticket-actions";
 import type { LifecycleStage } from "./ticket-state";
@@ -168,6 +168,19 @@ export const INTENT_SEVERITY: Record<Intent, Severity> = {
     fyi: "secondary",
 };
 
+/**
+ * Severity tint for priority badges (#B.222). Mirrors INTENT_SEVERITY's
+ * shape so badge call-sites stay symmetric. `normal` maps to "secondary"
+ * but the call-site is expected to skip rendering for the default so
+ * 90% of tickets stay visually clean.
+ */
+export const PRIORITY_SEVERITY: Record<Priority, Severity> = {
+    urgent: "danger",
+    high: "warn",
+    normal: "secondary",
+    low: "info",
+};
+
 // =====================================================================
 //  Bulk action metadata
 // =====================================================================
@@ -251,6 +264,14 @@ export const BULK_ACTION_META: Record<BulkAction, BulkActionMeta> = {
         tooltip: "Reject the selected pending tickets (others skipped).",
         order: 41,
     },
+    link: {
+        label: "link",
+        icon: "pi pi-link",
+        severity: "info",
+        tooltip: "Link the selected tickets — the most recent gets `relates_to` edges to each of the others (star pattern). Rejected rows skipped.",
+        order: 25,
+        text: true,
+    },
 };
 
 /** Iterate the catalog in render order. mark_read/mark_unread are paired
@@ -268,7 +289,7 @@ export const BULK_ACTIONS_IN_ORDER: BulkAction[] = (
 // Moved out of App.vue inline definitions. Same shape, same labels.
 
 export type StatusFilter = "all" | "unread" | "pending" | "approved" | "rejected";
-export type SortBy = "activity" | "created_desc" | "created_asc";
+export type SortBy = "activity" | "priority" | "created_desc" | "created_asc";
 
 export const STATUS_FILTER_OPTIONS: { label: string; value: StatusFilter }[] = [
     { label: "All", value: "all" },
@@ -280,6 +301,10 @@ export const STATUS_FILTER_OPTIONS: { label: string; value: StatusFilter }[] = [
 
 export const SORT_OPTIONS: { label: string; value: SortBy }[] = [
     { label: "Recent activity", value: "activity" },
+    // #B.222 sxrz48 david: priority sort in the inbox. urgent → high
+    // → normal → low; ties broken by created_desc so a single bucket
+    // still surfaces the newest first.
+    { label: "Priority", value: "priority" },
     { label: "Newest first", value: "created_desc" },
     { label: "Oldest first", value: "created_asc" },
 ];

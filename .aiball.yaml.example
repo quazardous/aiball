@@ -114,3 +114,146 @@ autopoll:
 #   # Default 2000 (2s) — only reduce if your shell is faster than
 #   # 2s round-trip on send-keys → hook fire.
 #   wake_in_flight_ttl_ms: 2000
+
+# Wake-CTA / state-prompt template overrides (#B.232 cpaez7).
+# Optional per-project section. When absent, the skill-shipped defaults
+# in `config/defaults/claude-loop-pings.yaml` apply — you don't need anything here
+# for the wake-CTA to work. Use this block to localize wording (FR/EN),
+# experiment with directiveness levels, or tune the prompt for a project
+# with multiple agents talking to claude.
+#
+# Resolution chain (#B.232 7bxrr2): three layers, project wins.
+#
+#   1. Shipped defaults — at `config/defaults/claude-loop-pings.yaml`.
+#                        Read at every wake by the central service.
+#   2. Global per-user — optional, at `$XDG_CONFIG_HOME/aiball/config.yaml`
+#                       or `~/.config/aiball/config.yaml`. Use this when
+#                       you want the SAME wording across every project
+#                       you work on (e.g. an "always-FR" preference).
+#   3. Per-project — this file's `prompts:` block. Overrides global +
+#                    defaults, slot by slot.
+#
+# Slot-grain replace at each step (no deep merge inside a slot, so a
+# user can switch shape forms freely between layers).
+#
+# Each slot accepts THREE shapes (russian-doll optional):
+#
+#   string                  → no variation, identical at every tone.
+#                             Easiest form when you have one canonical
+#                             wording you trust.
+#   list[string]             → random pick from the pool every wake.
+#                              Use to inject variety so the prompt
+#                              feels less mechanical.
+#   { tone: list[string] }   → russian-doll, per-imperativity pool.
+#                              Tone comes from `autopoll.tone` above
+#                              (hint | directive | imperative). Missing
+#                              tone in the map → falls back to `directive`.
+#                              Each tone gets its own list (random
+#                              pick within).
+#
+# Placeholders substituted at render time (slot-specific):
+#
+#   {ping_count}    integer (e.g. 3)
+#   {open_count}    integer (count of actionable tickets)
+#   {project_scope} "`<project>`" or "your scope"
+#
+# Pluralization (#B.232 hd7taf): when a slot's wording depends on a
+# count, split into TWO keys instead of using a `{plural}` placeholder.
+# The picker looks at the runtime count and chooses automatically:
+#
+#   {slot}_one     used when count === 1
+#   {slot}_other   used when count !== 1
+#
+# The plain `{slot}` (no suffix) acts as a no-variant fallback when
+# the yaml only defines one form. Variants support the same 3 shapes
+# (string, list, object{tone:list}). Useful for languages with
+# pluralization beyond a trailing "s": French agreement on multiple
+# words ("1 ping aiball non lu" vs "3 pings aiball non lus"), gendered
+# articles, "no tickets" zero-case (treated like _other by default).
+#
+# Slot reference (all wake-CTA pieces — the central service composes
+# them via the `wake_master` assembly template, falling back to a
+# hardcoded `{culture} {lead} {state}. {directive}.` shape):
+#
+#   wake_master            → assembly template. Composes the rendered
+#                            sub-parts. Supports placeholders:
+#                            {culture} (random pop-culture ping —
+#                            auto-resolved from ping_messages),
+#                            {lead}, {state}, {directive}.
+#                            Use the list shape to vary the sentence
+#                            structure across wakes.
+#   wake_state_lead        → conversational lead between the culture
+#                            phrase and the state report. Replaces the
+#                            old `[aiball: ...]` bracket framing that
+#                            tripped prompt-injection defenses on cold
+#                            sessions (david 6ehkvn).
+#   wake_state_pings       → state part for unread pings.
+#   wake_state_open        → state part for open tickets.
+#   wake_directive_drain   → imperative verb for the drain action.
+#   wake_directive_engage  → imperative verb for the engage action.
+#
+# Magic placeholder (#B.232 jdhdxq): `{culture}` resolves to a random
+# pick from `ping_messages` (the pop-culture phrase pool defined in
+# `skill/claude-loop-pings.yaml`). Drop it into any slot — wake_master
+# leads with it by default, but a custom wake_state_lead like
+# `"{culture}, fyi:"` also works.
+#
+# A missing slot in the override falls back to the skill defaults; a
+# slot in the override REPLACES the default for that slot (no deep merge
+# inside a slot, so you can switch shape forms freely).
+#
+# prompts:
+#   wake_state_lead:
+#     directive:
+#       - "fyi:"
+#       - "heads up —"
+#       - "quick note:"
+#     hint: ["btw,", "fyi,"]
+#     imperative: ["**heads up**:", "**ACTION**:"]
+#
+#   # 2-slug pluralization (#B.232 hd7taf).
+#   wake_state_pings_one:   "1 unread aiball ping"
+#   wake_state_pings_other: "{ping_count} unread aiball pings"
+#
+#   # List form (random pick, identical at every tone).
+#   wake_directive_drain:
+#     - "drain via `unread({pings: true, mark_read: true})`"
+#     - "ack via `unread({pings: true, mark_read: true})`"
+
+# Ticket-text linkifier patterns (#B.235). Same 3-layer chain as
+# `prompts:` — shipped defaults at `config/defaults/claude-loop-pings.yaml`,
+# global at `~/.config/aiball/config.yaml`, per-project here. Merge is by
+# `id`: shipped defaults are non-removable (they always run as fallback);
+# entries here either OVERRIDE a default by reusing the same id, or ADD
+# a new linkifier with a fresh id.
+#
+# Regex is validated at load (`new RegExp(match)`). Invalid entries log
+# to stderr and are dropped — the rest of the merge still ships.
+#
+# Fields:
+#   id         stable identifier
+#   match      ECMAScript regex source
+#   canonical  visible label template — `{1}`, `{2}` reference capture
+#              groups (1-indexed). `{0}` = whole match.
+#   href       optional URL template (same `{N}` syntax). Captures are
+#              URL-encoded before insertion. When omitted, the match is
+#              styled but not wrapped in <a>.
+#   class      optional CSS class on the rendered element
+#
+# Example overrides:
+#
+# formatting:
+#   patterns:
+#     # Override the canonical form of an existing pattern (id=ticket).
+#     - id: ticket
+#       match: "#[Bb][._/-]?(\\d+)\\b"
+#       canonical: "[B-{1}]"
+#       href: "/b/{1}"
+#       class: "ticket-ref"
+#
+#     # Add a project-specific pattern (e.g. JIRA references).
+#     - id: jira
+#       match: "\\b(PROJ-\\d+)\\b"
+#       canonical: "{1}"
+#       href: "https://jira.example.com/browse/{1}"
+#       class: "external-ref"

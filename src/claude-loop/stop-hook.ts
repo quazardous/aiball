@@ -16,7 +16,8 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, checkHasWork, formatPaneSnapshot, idleMarkerPath, lastWakeAtPath, pickPingPhrase, pingsPath, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
+import { AiballClient } from "../client.js";
+import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -156,9 +157,9 @@ function readPane(): string {
             log(`  → BUSY-DEFER armed until=${until} became=idle:wait`);
             emit();
         }
-        const hasWork = await checkHasWork(checkCmd);
-        log(`  checkHasWork=${hasWork}`);
-        if (hasWork) {
+        const gate = await checkHasWork(checkCmd, undefined, process.env.AIBALL_PROJECT ?? null, sd!);
+        log(`  checkHasWork=${gate.has} (pings=${gate.pingsCount} open=${gate.openCount})`);
+        if (gate.has) {
             // #B.198 fix A: coalesce. If the previous wake fired
             // within the coalesce window, this Stop hook is the tail
             // of a burst (N events were unread, each turn drained one
@@ -176,16 +177,25 @@ function readPane(): string {
                 emit();
             }
             // Work still pending — ping immediately, don't enter idle.
-            const phrase = pickPingPhrase(pingsPath(sd!));
+            // #B.221: wrap the culture phrase with state CTA so the
+            // post-turn wake carries the same operational context as
+            // the boot ping (counts + drain directive). Without this
+            // the wake fires a bare "Excellent." and claude greets
+            // back with no awareness of pending pings.
+            const phrase = await buildContextPhrase(
+                new AiballClient(),
+                process.env.AIBALL_PROJECT ?? null,
+                pingsPath(sd!),
+            );
             // #B.180: mark this send-keys as auto-wake so the
             // UserPromptSubmit hook skips user-took-over.
             try { writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
             // #B.198 fix A: also touch the coalesce marker so the
             // next Stop hook fire can detect "we just sent a wake".
             try { writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
-            spawnSync(MUX_CMD, [
-                "send-keys", "-t", `${tmuxName(name!)}.0`, phrase, "Enter",
-            ], { stdio: "ignore" });
+            await injectWakePhrase(`${tmuxName(name!)}.0`, phrase);
+            // #B.232 ch887f: bump open-tickets watermark post-wake.
+            if (gate.openCount > 0) recordOpenWakeCount(sd!, gate.openCount);
             setTmuxStatus(name!, "busy");
             log(`  → WAKE '${phrase}' became=busy`);
         } else {

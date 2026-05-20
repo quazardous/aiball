@@ -15,8 +15,10 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { loadConfig } from "../autopoll/config.js";
 import { AiballClient } from "../client.js";
 import type { Intent } from "../domain.js";
+import { loadPromptsFromYaml, mergePrompts, pickPrompt } from "../prompt-templates.js";
 
 export const STATE_ROOT = process.env.CLAUDE_LOOP_STATE_ROOT
     ?? join(homedir(), ".claude-loop");
@@ -66,6 +68,50 @@ export interface Plate {
      * can reproduce the original invocation.
      */
     claude_args: string[];
+    /**
+     * git SHA of the claude-loop install root at the moment `cmdStart`
+     * ran (#B.225 ghost detection). Used by `cmdList` / `cmdCheck` to
+     * flag a running daemon whose timer was loaded from a source that
+     * has since moved — the symptom that bit david on #225 (timer
+     * stuck pre-`e1acaa3` paste-buffer fix). Optional: null when the
+     * install root isn't a git checkout (binary install) or `git` is
+     * missing.
+     */
+    started_at_sha?: string | null;
+}
+
+/**
+ * Resolve the current git SHA of the claude-loop install root, or
+ * null when we can't (not a checkout, git missing, anything). Cheap
+ * — spawned once at boot and once per `list`/`check` invocation.
+ */
+export function installRootSha(): string | null {
+    try {
+        const r = spawnSync("git", ["-C", installRoot(), "rev-parse", "HEAD"], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+        });
+        if (r.status !== 0) return null;
+        const sha = (r.stdout ?? "").trim();
+        return sha && /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * True iff the plate carries a `started_at_sha` AND the current install
+ * root SHA differs from it — i.e. the loop's daemon timer was loaded
+ * from a source that has since been updated, so the running code may
+ * lag the repo. Null in either spot returns false (we can't claim
+ * staleness without evidence both ways).
+ */
+export function isLoopStale(plate: Plate): boolean {
+    const at = plate.started_at_sha ?? null;
+    if (!at) return false;
+    const now = installRootSha();
+    if (!now) return false;
+    return at !== now;
 }
 
 export function platePath(sd: string): string { return join(sd, "plate.json"); }
@@ -74,6 +120,11 @@ export function pingsPath(sd: string): string { return join(sd, "pings.yaml"); }
 export function idleMarkerPath(sd: string): string { return join(sd, "idle-since"); }
 export function wakeRequestedPath(sd: string): string { return join(sd, "wake-requested"); }
 export function userTookOverPath(sd: string): string { return join(sd, "user-took-over"); }
+// #264: near-live "a human is typing in the tmux pane" marker. Touched
+// by the timer's detection poll when the prompt area changes while
+// at-prompt; read by setTmuxStatus to paint the bicolor human chip and
+// usable as a finer human-present signal than the submit-time user-took-over.
+export function humanTypingPath(sd: string): string { return join(sd, "human-typing"); }
 export function timerPidPath(sd: string): string { return join(sd, "timer.pid"); }
 export function timerLogPath(sd: string): string { return join(sd, "timer.log"); }
 /**
@@ -122,6 +173,41 @@ export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env.CL_WAKE_CO
  * the JSON body stays free of timestamps.
  */
 export function lastWakeHintPath(sd: string): string { return join(sd, "last-wake-hint"); }
+
+/**
+ * Session-volatile watermark for the open-tickets wake gate (#B.232
+ * david ch887f: "il faut un mécanisme pour les ack et qu'ils ne
+ * reviennent plus pour cette session si c'est du bruit, mémoire
+ * volatile au daemon par exemple"). Stores the open-ticket count that
+ * was already mentioned in a wake CTA in this loop session. The gate
+ * fires on open tickets only when the current count EXCEEDS this
+ * watermark (i.e. a NEW ticket landed since the last time claude was
+ * pinged about open work) — drained pings still wake unconditionally.
+ *
+ * Lifetime = the state dir. `claude-loop rm` wipes it; restart of the
+ * same loop name keeps it (which matches david's intent: if you saw
+ * the same N tickets last session, don't re-fire on the next).
+ */
+export function lastOpenWakeCountPath(sd: string): string {
+    return join(sd, "last-open-wake-count");
+}
+
+/** Read the watermark; 0 when missing/unparseable (treat as "never woken"). */
+export function readLastOpenWakeCount(sd: string): number {
+    try {
+        const v = Number(readFileSync(lastOpenWakeCountPath(sd), "utf8").trim());
+        return Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
+    } catch {
+        return 0;
+    }
+}
+
+/** Persist the watermark after a successful wake. Best-effort. */
+export function recordOpenWakeCount(sd: string, count: number): void {
+    try {
+        writeFileSync(lastOpenWakeCountPath(sd), `${Math.max(0, Math.floor(count))}\n`);
+    } catch { /* gate fails-open next tick, not fatal */ }
+}
 
 /** Persist the hint that just triggered a wake. Pass `undefined` to
  *  no-op (we only want hinted wakes in the dedup ledger; un-hinted
@@ -246,7 +332,7 @@ export function installRoot(): string {
 
 /** Path to the default ping phrases yaml shipped with the install. */
 export function defaultPingsPath(): string {
-    return join(installRoot(), "skill", "claude-loop-pings.yaml");
+    return join(installRoot(), "config", "defaults", "claude-loop-pings.yaml");
 }
 
 /**
@@ -275,24 +361,78 @@ const LEGACY_AIBALL_CHECK_CMD = "aiball pings-count -q";
  *   - Anything else → shell out via `bash -c <cmd>`; exit 0 = work.
  *
  * Async because the in-process path returns a promise.
+ *
+ * #B.232 (david dd8rdd): the internal-SDK path also factors in
+ * open-ticket count (actionable) alongside unread pings. Repro:
+ * david drained pings cleanly with 4 open tickets still actionable;
+ * the timer heartbeat then reported `no unread pings` and parked
+ * claude in `idle` while there was still work. Now the gate returns
+ * true if EITHER pings>0 OR open>0 — the wake CTA already mentions
+ * both via `buildContextPhrase`, so the chained directive
+ * ("drain via unread + engage one of N open via ticket_list") lands cleanly.
+ *
+ * #B.232 (david ch887f): when `sd` is provided, the open-tickets leg
+ * is suppressed if `openCount <= watermark` (already-acked open
+ * tickets don't re-fire on every heartbeat). Watermark drops with
+ * openCount so a closed-then-reopened ticket re-triggers correctly.
+ * Caller bumps the watermark via `recordOpenWakeCount(sd, openCount)`
+ * after a successful wake (post send-keys, in the same site that
+ * writes `last-wake-at`).
+ *
+ * Returns `{ has, pingsCount, openCount }` so the caller can persist
+ * the watermark without a second round-trip; legacy shell-out branch
+ * returns counts=0 since they aren't observable.
  */
+export interface CheckHasWorkResult {
+    has: boolean;
+    pingsCount: number;
+    openCount: number;
+}
 export async function checkHasWork(
     checkCmd: string | null | undefined,
     client?: AiballClient,
-): Promise<boolean> {
+    project?: string | null,
+    sd?: string | null,
+): Promise<CheckHasWorkResult> {
     const cmd = checkCmd ?? "";
-    if (cmd === "true") return true;
+    if (cmd === "true") return { has: true, pingsCount: 0, openCount: 0 };
     if (cmd === "" || cmd === LEGACY_AIBALL_CHECK_CMD) {
         const c = client ?? new AiballClient();
         try {
-            const r = await c.pingsCount() as { unread?: number };
-            return (r.unread ?? 0) > 0;
+            const [pingsR, projects] = await Promise.all([
+                c.pingsCount() as Promise<{ unread?: number }>,
+                c.listProjectsDetailed().catch(() => []) as Promise<Array<{
+                    name: string;
+                    open_count?: number;
+                    actionable_count?: number;
+                }>>,
+            ]);
+            const pingsCount = pingsR.unread ?? 0;
+            const openCount = Array.isArray(projects)
+                ? projects
+                    .filter((p) => !project || p.name === project)
+                    .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
+                : 0;
+            if (pingsCount > 0) return { has: true, pingsCount, openCount };
+            // Open-tickets leg: gate by watermark when sd is available
+            // so the same N idle tickets don't wake every heartbeat.
+            if (sd) {
+                const watermark = readLastOpenWakeCount(sd);
+                if (openCount < watermark) {
+                    // Tickets were closed — lower the watermark so a
+                    // future climb correctly re-triggers. Best-effort.
+                    recordOpenWakeCount(sd, openCount);
+                    return { has: false, pingsCount, openCount };
+                }
+                return { has: openCount > watermark, pingsCount, openCount };
+            }
+            return { has: openCount > 0, pingsCount, openCount };
         } catch {
-            return false;
+            return { has: false, pingsCount: 0, openCount: 0 };
         }
     }
     const r = spawnSync("bash", ["-c", cmd], { stdio: "ignore" });
-    return r.status === 0;
+    return { has: r.status === 0, pingsCount: 0, openCount: 0 };
 }
 
 /**
@@ -327,6 +467,25 @@ export function userIsTakingOver(sd: string, graceSec: number): boolean {
     if (!existsSync(p)) return false;
     try {
         return (Date.now() - statSync(p).mtimeMs) < graceSec * 1000;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * #264: short TTL for the near-live "human typing" chip. The detection
+ * poll refreshes the marker while the human types; once they stop, the
+ * chip lingers ~this long then clears. Kept short so the bar tracks
+ * typing closely (vs the 60s submit-grace of user-took-over).
+ */
+export const HUMAN_TYPING_TTL_SEC = 5;
+
+/** Is a human typing in the pane right now (within the TTL)? (#264) */
+export function humanIsTyping(sd: string, ttlSec = HUMAN_TYPING_TTL_SEC): boolean {
+    const p = humanTypingPath(sd);
+    if (!existsSync(p)) return false;
+    try {
+        return (Date.now() - statSync(p).mtimeMs) < ttlSec * 1000;
     } catch {
         return false;
     }
@@ -381,9 +540,23 @@ export function setTmuxStatus(
     } else if (typeof countOrInfo === "string" && countOrInfo) {
         tag = `[${status}:${countOrInfo}]`;
     }
-    const left = ` CLAUDE-LOOP · ${name} ${tag} `;
     const tn = tmuxName(name);
     const c = STATUS_COLORS[status];
+    // #264 (david #ex273m): human-presence axis as a coloured WORD, no
+    // brackets, no background highlight — just the font tinted over the
+    // loop-state bar: `loop` yellow while the loop runs autonomously,
+    // `stop` red when a human is typing in the pane (the loop yields).
+    // The rest of the bar (claude- · name [status]) keeps its idle/boot/busy
+    // colour, so human-present coexists with the loop state rather than being
+    // a 4th LoopStatus.
+    const sd = process.env.CL_STATE_DIR;
+    const badge = sd && humanIsTyping(sd)
+        ? `#[bg=${c.bg},fg=colour196]stop`   // red font — human present, loop yields
+        : `#[bg=${c.bg},fg=colour178]loop`;  // yellow font — autonomous loop running
+    const left =
+        `#[bg=${c.bg},fg=${c.fg}] claude-` +
+        badge +
+        `#[bg=${c.bg},fg=${c.fg}] · ${name} ${tag} `;
     spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-left", left], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-bg", c.bg], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-fg", c.fg], { stdio: "ignore" });
@@ -497,6 +670,175 @@ export function pickPingPhrase(pingsAbsPath: string): string {
 }
 
 /**
+ * Wrap a random culture phrase with inline aiball state + a drain
+ * directive (#B.221). Used by every wake path that doesn't already
+ * have an SSE `WakeHint` to anchor the prompt: session-start,
+ * post-turn stop-hook, and the timer's heartbeat fallback. Without
+ * this, the wake fires a bare cultural one-liner ("Excellent.",
+ * "*tap tap* this thing on?") and claude greets back with no
+ * awareness of the pings/tickets sitting in the inbox.
+ *
+ * Falls back to the plain culture phrase if the daemon is unreachable
+ * or both counts come back zero — never blocks the wake on a missing
+ * daemon, and never invents a directive when there's nothing to do.
+ */
+export async function buildContextPhrase(
+    client: AiballClient,
+    project: string | null,
+    pingsAbsPath: string,
+): Promise<string> {
+    const culture = pickPingPhrase(pingsAbsPath);
+    try {
+        const [pingsR, projects] = await Promise.all([
+            client.pingsCount() as Promise<{ unread?: number }>,
+            client.listProjectsDetailed() as Promise<Array<{
+                name: string;
+                open_count?: number;
+                actionable_count?: number;
+            }>>,
+        ]);
+        const pingCount = typeof pingsR?.unread === "number" ? pingsR.unread : 0;
+        const openCount = Array.isArray(projects)
+            ? projects
+                .filter((p) => !project || p.name === project)
+                .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
+            : 0;
+        if (pingCount === 0 && openCount === 0) return culture;
+
+        // #B.232: when BOTH pings and open tickets are pending, chain
+        // both directives so the agent doesn't drain pings and stop —
+        // david's repro showed `en standby` after a clean drain while
+        // 4 open tickets were still actionable. Wording stays imperative
+        // ("drain", "engage") on each leg so the agent treats both as
+        // tasks, not as informational decoration. The open-tickets leg
+        // explicitly says "engage one of N" — earlier wording bottomed
+        // out at "handle open via ticket_list" which let me list five
+        // tickets and standby (david fqchxa: "l'agent attend encore").
+        //
+        // Wording rev (#B.232 follow-up, david 6ehkvn): dropped the
+        // `[aiball: ...]` bracket framing and the trailing `before
+        // answering` because the previous shape tripped prompt-injection
+        // defenses on cold claude sessions (a fresh instance refused to
+        // invoke ticket_list, reading the bracket+imperative tail as
+        // fake-tool-call injection). New shape leads with a conversational
+        // lead so backticked tool refs read as casual code mentions, not
+        // as directives. Imperative verbs stay intact — they were the
+        // actual fix from 0aed5a2.
+        //
+        // Templating layer (#B.232 cpaez7): wording is no longer
+        // hardcoded — slots come from `config/defaults/claude-loop-pings.yaml`
+        // (`prompts:` block) with optional per-project override in
+        // `.aiball.yaml`. Tone (hint | directive | imperative) drives
+        // the russian-doll lookup for object-shape slots. Fallbacks
+        // mirror the prior hardcoded wording so a broken yaml still
+        // ships a sensible prompt.
+        const cfg = loadConfig();
+        const skillPrompts = loadPromptsFromYaml(pingsAbsPath);
+        const promptMap = mergePrompts(skillPrompts, cfg.prompts);
+        const tone = cfg.autopoll.tone;
+
+        const parts: string[] = [];
+        if (pingCount > 0) {
+            // count=pingCount routes to wake_state_pings_one /
+            // wake_state_pings_other (#B.232 hd7taf 2-slug
+            // pluralization). The plain wake_state_pings slot is the
+            // no-variant fallback if the yaml only defines one form.
+            parts.push(pickPrompt(promptMap, "wake_state_pings", {
+                tone,
+                count: pingCount,
+                vars: { ping_count: pingCount },
+                fallback: `${pingCount} unread aiball ping${pingCount === 1 ? "" : "s"}`,
+            }));
+        }
+        if (openCount > 0) {
+            const scope = project ? `\`${project}\`` : "your scope";
+            parts.push(pickPrompt(promptMap, "wake_state_open", {
+                tone,
+                count: openCount,
+                vars: {
+                    open_count: openCount,
+                    project_scope: scope,
+                },
+                fallback: `${openCount} open aiball ticket${openCount === 1 ? "" : "s"} in ${scope}`,
+            }));
+        }
+
+        const verbs: string[] = [];
+        if (pingCount > 0) {
+            verbs.push(pickPrompt(promptMap, "wake_directive_drain", {
+                tone,
+                vars: { ping_count: pingCount },
+                fallback: "drain via `unread({pings: true, mark_read: true})`",
+            }));
+        }
+        if (openCount > 0) {
+            verbs.push(pickPrompt(promptMap, "wake_directive_engage", {
+                tone,
+                vars: { open_count: openCount },
+                fallback: `engage one of ${openCount} actionable via \`ticket_list({actionable: true})\``,
+            }));
+        }
+        const directive = verbs.join(" + ");
+        const state = parts.join(" + ");
+
+        const lead = pickPrompt(promptMap, "wake_state_lead", {
+            tone,
+            fallback: "fyi:",
+        });
+
+        // #B.232 jdhdxq: top-level assembly via the `wake_master` slot.
+        // Sub-parts (culture / lead / state / directive) ship to the
+        // template as vars; `{culture}` also resolves via the `resolve`
+        // callback when the template embeds it standalone (so a custom
+        // wake_master that uses {culture} inline in addition to / instead
+        // of the leading position keeps working). Fallback assembly
+        // matches the prior hardcoded layout so a broken yaml still
+        // emits a usable wake.
+        return pickPrompt(promptMap, "wake_master", {
+            tone,
+            vars: { culture, lead, state, directive },
+            resolve: (key) => key === "culture" ? pickPingPhrase(pingsAbsPath) : undefined,
+            fallback: `${culture} ${lead} ${state}. ${directive}.`,
+        });
+    } catch {
+        return culture;
+    }
+}
+
+/**
+ * Inject a wake phrase into a tmux pane so Claude Code's TUI submits
+ * it as a single user prompt (#B.221 follow-up).
+ *
+ * Why this isn't just `send-keys <phrase> Enter`: when `<phrase>` is
+ * long (the new #B.221 state-CTA is ~130 chars), Claude Code's input
+ * handler appears to treat the fast send-keys burst as a paste and
+ * swallows the trailing Enter as paste-content rather than submit,
+ * leaving the text stuck in the prompt area. David's repro on
+ * #221 comment 9e76jx: "n'envoie pas enter et reste dans le prompt".
+ *
+ * Robust pattern (mirrors `tryPanic`): write the phrase into a tmux
+ * paste-buffer, paste it (bracketed paste — explicit start/end so the
+ * TUI knows the paste closed), sleep briefly for the prompt to
+ * repaint, then send a standalone Enter. Falls back to plain
+ * `send-keys <phrase>` if `set-buffer` failed (extremely rare).
+ *
+ * Used by every wake site: session-start-hook, stop-hook post-turn
+ * wake, timer no-hint wake, and SSE-hinted wakes — short phrases pay
+ * a ~200ms latency but consistency beats branching on length.
+ */
+export async function injectWakePhrase(paneTarget: string, phrase: string): Promise<void> {
+    const bufName = `wake_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+    const setBuf = spawnSync(MUX_CMD, ["set-buffer", "-b", bufName, phrase], { stdio: "ignore" });
+    if (!setBuf.error && setBuf.status === 0) {
+        spawnSync(MUX_CMD, ["paste-buffer", "-b", bufName, "-d", "-t", paneTarget], { stdio: "ignore" });
+    } else {
+        spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, phrase], { stdio: "ignore" });
+    }
+    await new Promise<void>((res) => setTimeout(res, 200));
+    spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" });
+}
+
+/**
  * Optional context attached to a wake — typically the SSE ping
  * payload (`{ ticket_id, comment_id, comment_hashid, intent }`).
  * When present, the wake phrase names the concrete artifact instead
@@ -545,24 +887,27 @@ type WakeTemplates = Record<Intent, WakeTemplate>;
  * géré en config yaml" — the YAML is authoritative; this fallback
  * only kicks in if the YAML is missing the section, never overrides
  * a YAML that has it). Kept in sync with the defaults shipped in
- * `skill/claude-loop-pings.yaml`.
+ * `config/defaults/claude-loop-pings.yaml`.
  */
 const DEFAULT_WAKE_TEMPLATES: WakeTemplates = {
+    // #B.230: must mention "aiball" explicitly so claude doesn't
+    // confuse the ticket id with another tracker (mantis, etc.) when
+    // the project has multiple MCP-exposed trackers configured.
     panic: {
-        with_comment: "URGENT: ticket #{ticket} needs you — new comment #{comment}.",
-        ticket_only: "URGENT: ticket #{ticket} needs you.",
+        with_comment: "URGENT: aiball ticket #{ticket} needs you — new comment #{comment}.",
+        ticket_only: "URGENT: aiball ticket #{ticket} needs you.",
     },
     request: {
-        with_comment: "Handle ticket #{ticket} — new comment #{comment}.",
-        ticket_only: "Handle ticket #{ticket}.",
+        with_comment: "Handle aiball ticket #{ticket} — new comment #{comment}.",
+        ticket_only: "Handle aiball ticket #{ticket}.",
     },
     question: {
-        with_comment: "Ticket #{ticket} waits for your answer — comment #{comment}.",
-        ticket_only: "Ticket #{ticket} waits for your answer.",
+        with_comment: "aiball ticket #{ticket} waits for your answer — comment #{comment}.",
+        ticket_only: "aiball ticket #{ticket} waits for your answer.",
     },
     fyi: {
-        with_comment: "Heads-up on ticket #{ticket} — new comment #{comment}.",
-        ticket_only: "Heads-up on ticket #{ticket}.",
+        with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}.",
+        ticket_only: "Heads-up on aiball ticket #{ticket}.",
     },
 };
 

@@ -257,28 +257,17 @@ export function subTicketCounts(parentIds: number[]): Map<number, number> {
 // =====================================================================
 
 /**
- * Read the broadcast flag of a ticket. Returns false for missing rows,
- * tolerates the column being absent on very old DBs that haven't run the
- * 0002 migration yet (though such DBs shouldn't exist in practice — the
- * migrator runs at boot).
+ * Read the scope of a ticket. Returns 'default' for missing rows
+ * (#B.245 tristate). The fan-out only treats `scope === 'broadcast'`
+ * as the trigger for follower delivery; `internal` keeps the ticket
+ * out of even the owner default path.
  */
-export function isTicketBroadcast(ticketId: number): boolean {
-    const row = getDb().select({ broadcast: schema.tickets.broadcast })
+export function getTicketScope(ticketId: number): "internal" | "default" | "broadcast" {
+    const row = getDb().select({ scope: schema.tickets.scope })
         .from(schema.tickets)
         .where(eq(schema.tickets.id, ticketId))
         .get();
-    return row ? row.broadcast === 1 : false;
-}
-
-/**
- * Update the broadcast flag of a ticket. Returns true if the row exists.
- */
-export function setTicketBroadcast(ticketId: number, value: boolean): boolean {
-    const res = getDb().update(schema.tickets)
-        .set({ broadcast: value ? 1 : 0 })
-        .where(eq(schema.tickets.id, ticketId))
-        .run();
-    return res.changes > 0;
+    return (row?.scope as "internal" | "default" | "broadcast" | undefined) ?? "default";
 }
 
 // =====================================================================

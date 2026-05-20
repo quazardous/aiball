@@ -159,7 +159,7 @@ The hooks and the timer all read the same `env` file so they share
 
 ## Wake phrases
 
-Random pick per wake from `skill/claude-loop-pings.yaml`:
+Random pick per wake from `config/defaults/claude-loop-pings.yaml`:
 
 ```yaml
 ping_messages:
@@ -188,7 +188,7 @@ src/claude-loop/
   session-start-hook.ts                 # boot gate: check-cmd → ping or idle
   stop-hook.ts                          # turn-end gate: same logic
   timer.ts                              # detached ticker; AiballClient fastpath
-skill/claude-loop-pings.yaml            # default wake phrases
+config/defaults/claude-loop-pings.yaml  # default wake phrases
 docs/CLAUDE-LOOP.md                     # this file
 ```
 

@@ -1,0 +1,199 @@
+# claude-loop default ping phrases (#B.63 v1). Override per-loop via
+# `claude-loop start --pings /path/to/custom.yaml`. Picked at random
+# on each wake-up — the message itself is purely cosmetic; the only
+# functional effect is to trigger a new claude turn.
+ping_messages:
+  - "What's up, Doc?"
+  - "Wake up, Neo."
+  - "Hello, Dave."
+  - "Make it so."
+  - "Allons-y!"
+  - "Geronimo!"
+  - "It's alive!"
+  - "Anybody out there?"
+  - "Beep boop."
+  - "Yabba dabba doo!"
+  - "*tap tap* this thing on?"
+  - "Pop quiz, hotshot."
+  - "I'll be in your tmux."
+  - "Ping?"
+  - "Resistance is futile (drain the backlog)."
+  - "Live long and process tickets."
+  - "Hodor."
+  - "Excellent."
+  - "Engage."
+  - "Houston, we have an idle session."
+
+# Wake phrases used when the SSE ping carries a concrete artifact
+# (ticket id, optionally a comment hashid). Per-intent so the
+# directiveness of the prompt scales with the parent ticket's intent
+# (#B.198 david: "le niveau de directivité est géré en config yaml").
+#
+# Tokens:
+#   {ticket}  → integer ticket id (e.g. `198`)
+#   {comment} → comment hashid WITHOUT the leading `#` (e.g. `agpgpg`)
+#
+# Two slots per intent:
+#   with_comment → used when both ticket and comment are known
+#   ticket_only  → used when only the ticket is known (root ping)
+#
+# If an intent is missing from this map, claude-loop falls back to
+# the `request` row. If the whole `wake_phrases` block is missing
+# (e.g. a pings.yaml shipped before this section was added), the
+# code uses its hardcoded defaults in state.ts.
+wake_phrases:
+  # #B.230 david: prompts must explicitly mention "aiball" so claude
+  # doesn't confuse the ticket id with other trackers' (mantis, github
+  # issues, jira…) when the project has multiple MCP-exposed trackers.
+  panic:
+    with_comment: "URGENT: aiball ticket #{ticket} needs you — new comment #{comment}."
+    ticket_only:  "URGENT: aiball ticket #{ticket} needs you."
+  request:
+    with_comment: "Handle aiball ticket #{ticket} — new comment #{comment}."
+    ticket_only:  "Handle aiball ticket #{ticket}."
+  question:
+    with_comment: "aiball ticket #{ticket} waits for your answer — comment #{comment}."
+    ticket_only:  "aiball ticket #{ticket} waits for your answer."
+  fyi:
+    with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}."
+    ticket_only:  "Heads-up on aiball ticket #{ticket}."
+
+# State-CTA slots assembled by claude-loop's `buildContextPhrase` when
+# a wake fires with no SSE artifact (timer heartbeat / stop-hook post
+# turn / session-start). Externalized per #B.232 cpaez7 so the wording
+# is dynamic and per-project tunable via `.aiball.yaml` → `prompts:`.
+#
+# Each slot accepts THREE shapes (russian-doll optional):
+#   string                  → no variation, same at every tone
+#   list[string]            → random pick, same pool for every tone
+#   { tone: list[string] }  → per-imperativity pool. Tone comes from
+#                             `.aiball.yaml` → `autopoll.tone`
+#                             (hint | directive | imperative). Missing
+#                             tone in the map → falls back to `directive`.
+#
+# Placeholders substituted at render time:
+#   {ping_count}    integer
+#   {open_count}    integer
+#   {project_scope} "`<project>`" or "your scope"
+#
+# Pluralization (#B.232 hd7taf): pluralizable slots split into TWO
+# separate keys, NOT a `{plural}` placeholder. Suffixes:
+#
+#   {slot}_one     used when count === 1
+#   {slot}_other   used when count !== 1
+#
+# The picker consults these suffix-variants FIRST when the caller
+# passes `count`; the plain {slot} acts as a no-variant fallback.
+# Why 2 slugs vs `{ping_plural}`-style placeholder: lets each variant
+# carry its own wording, gender, article — useful for FR/EN agreement
+# ("1 ping aiball non lu" vs "3 pings aiball non lus") where the
+# placeholder hack would force template-string gymnastics.
+#
+# Why externalize (vs the prior hardcoded `[aiball: ...] — ... before
+# answering.` shape): the previous wording tripped prompt-injection
+# defenses on cold claude sessions (david 6ehkvn). With the templates
+# in yaml, ops can tune the lead/directive wording without a redeploy,
+# and the per-tone russian-doll lets projects scale directiveness.
+prompts:
+  # Conversational lead — separator between the culture phrase and
+  # the state report. Replaces the old `[aiball: ...]` bracket header.
+  # Object form: per-tone list for random pick within a tone bucket.
+  wake_state_lead:
+    hint:
+      - "btw,"
+      - "fyi,"
+      - "just so you know,"
+    directive:
+      - "fyi:"
+      - "heads up —"
+      - "quick note:"
+    imperative:
+      - "**heads up**:"
+      - "**ACTION**:"
+      - "**you've got**:"
+
+  # State parts — string form (no variation, identical at every tone).
+  # "aiball" baked into the phrase so the prompt explicitly names the
+  # tracker even when other trackers' MCPs are connected (david #B.230).
+  #
+  # Two-slug pluralization (#B.232 hd7taf): _one when count === 1,
+  # _other otherwise. The plain wake_state_pings / wake_state_open
+  # slots are intentionally absent here — the picker uses the suffix
+  # variants exclusively when the caller passes `count`.
+  wake_state_pings_one:   "1 unread aiball ping"
+  wake_state_pings_other: "{ping_count} unread aiball pings"
+  wake_state_open_one:    "1 open aiball ticket in {project_scope}"
+  wake_state_open_other:  "{open_count} open aiball tickets in {project_scope}"
+
+  # Directive verbs — list form, random pick across tones (proven
+  # imperative-style retained at every level, per 0aed5a2 fix against
+  # "agent listed and standby"). Variants swap the verb but keep the
+  # tool-call body identical so the agent still receives the exact
+  # argument shape.
+  wake_directive_drain:
+    - "drain via `unread({pings: true, mark_read: true})`"
+    - "ack via `unread({pings: true, mark_read: true})`"
+  wake_directive_engage:
+    - "engage one of {open_count} actionable via `ticket_list({actionable: true})`"
+    - "pick one of {open_count} actionable via `ticket_list({actionable: true})`"
+
+  # Top-level assembly template (#B.232 jdhdxq). Composes the rendered
+  # sub-parts into the final wake-CTA. Placeholders:
+  #   {culture}    pop-culture phrase from ping_messages (auto-resolved
+  #                via the `resolve` callback — see pickPrompt). Override
+  #                ping_messages above to control the pool.
+  #   {lead}       rendered wake_state_lead (per-tone bucket).
+  #   {state}      assembled state parts ("3 unread pings + 5 open
+  #                tickets in `aiball`"), joined by the caller.
+  #   {directive}  assembled directive verbs ("drain via … + engage one
+  #                of 5 via …"), joined by the caller.
+  #
+  # When the slot is absent, the caller falls back to a hardcoded
+  # `"{culture} {lead} {state}. {directive}."` assembly so the wake
+  # never returns blank.
+  wake_master:
+    - "{culture} {lead} {state}. {directive}."
+    - "{culture} {state}. {directive}."
+
+# Ticket-text formatting patterns (#B.235). Linkifies refs like #B.123,
+# #C.<hashid>, @mention in ticket bodies and comments. Lives in the same
+# 3-layer override chain as `prompts:` (shipped defaults → ~/.config →
+# per-project .aiball.yaml). Patterns are merged by `id`: shipped defaults
+# are non-removable (the in-code fallback in `src/formatting.ts` always
+# runs first); higher layers override `canonical`/`href`/`class` by reusing
+# the same id, or ADD a new pattern with a fresh id.
+#
+# Regex is validated at load time (`new RegExp(match)`). Invalid entries
+# log to stderr and are dropped; the rest of the merge proceeds.
+#
+# Fields per pattern:
+#   id         stable identifier — same id across layers = override
+#   match      ECMAScript regex source
+#   canonical  visible label template; `{N}` references capture group N
+#              (1-indexed). `{0}` = the whole match.
+#   href       optional URL template (same `{N}` syntax). When set, the
+#              label is wrapped in <a>. Captures are URL-encoded before
+#              insertion to keep XSS surface narrow.
+#   class      optional CSS class on the rendered element
+#
+# The block below mirrors the in-code defaults verbatim — listing them
+# here so authors can SEE what the linkifier recognizes and tune it
+# without touching the source. To override (e.g. change the canonical
+# form to `[B-123]`), copy the entry into ~/.config/aiball/config.yaml
+# or .aiball.yaml with the same id and edited fields.
+formatting:
+  patterns:
+    - id: ticket
+      match: "#[Bb]?[._/-]?(\\d+)\\b"
+      canonical: "#{1}"
+      href: "/b/{1}"
+      class: "ticket-ref"
+    - id: comment
+      match: "#[Cc][._/-]?([a-hjkmnp-z2-9]{4,8})\\b"
+      canonical: "#C.{1}"
+      href: "/b/{1}"
+      class: "comment-ref"
+    - id: mention
+      match: "(?<![\\w@>\"'/])@([a-zA-Z0-9_-]{2,64})\\b"
+      canonical: "@{1}"
+      class: "mention"

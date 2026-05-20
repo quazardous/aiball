@@ -13,14 +13,16 @@ export {
     MESSAGE_KINDS,
     MESSAGE_STATUSES,
     INTENTS,
+    PRIORITIES,
     STRATEGIES,
     isMessageKind,
     isMessageStatus,
     isIntent,
+    isPriority,
     isStrategy,
 } from "./domain";
-export type { MessageKind, MessageStatus, Intent, Strategy } from "./domain";
-import type { MessageKind, MessageStatus, Intent, Strategy } from "./domain";
+export type { MessageKind, MessageStatus, Intent, Priority, Strategy } from "./domain";
+import type { MessageKind, MessageStatus, Intent, Priority, Strategy } from "./domain";
 
 export interface Message {
     id: number;
@@ -40,6 +42,10 @@ export interface Message {
     edited_title: string | null;
     edited_body: string | null;
     intent: Intent | null;
+    /** Per-ticket urgency hint (#B.222). Tickets only; defaults to
+     *  "normal" at the SQL layer if absent. Comments and lifecycle
+     *  events omit this field on the wire. */
+    priority?: Priority;
     /** Public ref for comments / lifecycle events. NULL for tickets. */
     hashid?: string | null;
     /** Set on `ticket_sub_added` / `ticket_referenced` pseudo-comments —
@@ -53,6 +59,10 @@ export interface Message {
      *  (#B.104) and decision-on-comment (#B.129). Parsed lazily by
      *  components that need it. */
     meta?: string | null;
+    /** #B.245 event scope tristate. `internal` = owners+@mentions
+     *  only; `default` = subscribers+owners+@mentions; `broadcast` =
+     *  + followers. Drives the per-card scope picto. */
+    scope?: "internal" | "default" | "broadcast";
     tags: Tag[];
 }
 
@@ -160,11 +170,14 @@ export interface TicketSummary {
     blocked?: boolean;
     blocked_by?: string | null;
     blocked_at?: string | null;
-    broadcast?: boolean;
+    /** #B.245 tristate scope. */
+    scope?: "internal" | "default" | "broadcast";
     /** Snooze (#B.329) — when set and in the future, the ticket is
      *  hidden from the open inbox until that timestamp. */
     postponed_until?: string | null;
     intent: Intent | null;
+    /** Urgency hint (#B.222). Defaults to "normal" server-side. */
+    priority?: Priority;
     /** Parent ticket id when this ticket is a sub-ticket. Rendered as
      *  "Sub-ticket of #B.NN" metadata in the thread header. */
     parent_ticket_id?: number | null;
@@ -231,6 +244,8 @@ export interface InboxRow {
     created_at: string;
     status: MessageStatus;
     intent: Intent | null;
+    /** Urgency hint (#B.222). Defaults to "normal" server-side. */
+    priority?: Priority;
     closed: boolean;
     resolved?: boolean;
     /** Agent signalled "I'm stuck, your call" (#B.119). */
@@ -246,7 +261,8 @@ export interface InboxRow {
      *  agent's plan was knocked back and the thread stays open
      *  pending a new direction. */
     latest_plan_rejected?: boolean;
-    broadcast?: boolean;
+    /** #B.245 tristate scope. */
+    scope?: "internal" | "default" | "broadcast";
     /** Per-consumer flag: ≥1 unseen ping on the thread for the requesting consumer. */
     unread?: boolean;
     /** Snooze flag (#B.329): true iff `postponed_until` is in the future.
@@ -285,6 +301,8 @@ export interface PostMessageInput {
     ticket_id?: number;
     parent_id?: number;
     intent?: Intent | null;
+    /** #B.222 urgency hint (ticket_created only; defaults to "normal"). */
+    priority?: Priority;
     /** #B.129 — tag a comment as a decision proposal at post-time
      *  (server validates: `"plan" | "resolution"`, comment_added only). */
     decision_kind?: "plan" | "resolution";
@@ -339,6 +357,21 @@ export interface ProjectMeta {
 
 export const api = {
     listProjects: () => req<string[]>("GET", "/api/projects"),
+    /**
+     * Explicitly register a project (#B.216 phase A pass 2). 409 means
+     * the name already exists; 400 means empty/whitespace name.
+     */
+    createProject: (
+        name: string,
+        opts: { display_name?: string; description?: string; created_by?: string } = {},
+    ) =>
+        req<{
+            name: string;
+            display_name: string | null;
+            description: string | null;
+            created_at: string;
+            created_by: string | null;
+        }>("POST", "/api/projects", { name, ...opts }),
     listProjectsDetailed: (consumer_id?: string) => {
         const qs = consumer_id
             ? `?detailed=1&consumer_id=${encodeURIComponent(consumer_id)}`
@@ -411,6 +444,7 @@ export const api = {
             status?: string;
             open?: boolean;
             intent?: string;
+            priority?: Priority;
             include_postponed?: boolean;
         } = {},
     ) => {
@@ -419,6 +453,7 @@ export const api = {
         if (params.status) qs.set("status", params.status);
         if (params.open) qs.set("open", "1");
         if (params.intent) qs.set("intent", params.intent);
+        if (params.priority) qs.set("priority", params.priority);
         if (params.include_postponed) qs.set("include_postponed", "1");
         const q = qs.toString();
         return req<InboxRow[]>("GET", `/api/inbox${q ? "?" + q : ""}`);
@@ -453,8 +488,6 @@ export const api = {
         if (params.limit !== undefined) qs.set("limit", String(params.limit));
         return req<SearchHit[]>("GET", `/api/search?${qs.toString()}`);
     },
-    setTicketBroadcast: (id: number, broadcast: boolean) =>
-        req<TicketSummary>("PATCH", `/api/tickets/${id}`, { broadcast }),
     postponeTicket: (id: number, until: string) =>
         req<{ ticket_id: number; postponed_until: string }>(
             "POST",
@@ -503,7 +536,21 @@ export const api = {
      *  or already terminal. */
     reclassify: (id: number, new_kind: "plan" | "resolution") =>
         req<Message>("POST", `/api/messages/${id}/reclassify`, { new_kind }),
-    edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null }) =>
+    /** Promote an undecorated comment to a decision (#B.256).
+     *  `status` omitted → tag as pending. `status` set → tag +
+     *  decide in one gesture. Works whether the comment had a
+     *  prior decision or not. */
+    promoteMessage: (
+        id: number,
+        kind: "plan" | "resolution",
+        status?: "accepted" | "rejected",
+    ) =>
+        req<Message>("POST", `/api/messages/${id}/promote`, { kind, status }),
+    /** Untag a comment — drops `meta.decision` (#B.256 dzm3ef).
+     *  409 when the decision is already terminal. */
+    untagMessage: (id: number) =>
+        req<Message>("POST", `/api/messages/${id}/untag`, {}),
+    edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>
         req<Message>("POST", `/api/messages/${id}/note`, { note }),

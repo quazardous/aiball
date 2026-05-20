@@ -15,6 +15,125 @@ the human-readable narrative.
 
 ## [Unreleased]
 
+### claude-loop: human-presence bar badge + AskUserQuestion gating (`#264`)
+
+- The tmux status bar shows a font-tinted **`loop`** (yellow —
+  autonomous loop running) / **`stop`** (red — a human is typing in the
+  pane) word, no brackets, over the idle/boot/busy state colour.
+- In an autonomous loop (no human in front), Claude Code's
+  `AskUserQuestion` multi-choice dialog is denied via a PreToolUse hook
+  and the agent is redirected to ask on the aiball ticket thread.
+  Interactive sessions (human present) keep the dialog — fail-open.
+
+### Approving a pending ticket embarks the typed comment (`#270`)
+
+- Approving (or rejecting) a pending ticket from the thread view now
+  posts whatever was typed in the composer as a comment, instead of
+  silently dropping it.
+
+### Data-driven ticket-text linkifier (`#B.235`)
+
+- `#B.NNN` / ref linkification in ticket text is no longer hardcoded in
+  the UI — it comes from a 3-layer config chain (shipped
+  `config/defaults/claude-loop-pings.yaml` → global
+  `~/.config/aiball/config.yaml` → per-project `.aiball.yaml`
+  `formatting:`). New `formatting[]` config block + the patterns are
+  served to the frontend at boot.
+
+### Config home — single `GET /api/config` (`#235`)
+
+- One boot-time config endpoint replaces the per-slice config routers
+  (formatting, strategy, upload limit). Config writes stay on their
+  targeted PATCH endpoints.
+
+### Unified notification service (`#260`, `#261`)
+
+- Fan-out, `@mention`, and decision pings move to a single notification
+  service layered above the db primitives. Accepting/rejecting a
+  decision on a comment now notifies the author (previously silent).
+
+### Post-hoc comment classification (`#B.256`)
+
+- Reporters can promote an undecorated comment to a plan/resolution
+  decision, flip its kind, or untag a pending one — via a per-comment
+  "classify" menu.
+
+### Mobile bulk selection via long-press (`#B.255`)
+
+- On phones, long-press a row (~500 ms) to start a bulk selection; the
+  bulk bar surfaces only when a selection is active. The legacy
+  "peek" mode is removed and the identity picker is slimmed to
+  current-consumer + logout.
+
+### claude-loop wake phrases relocated to `config/defaults/` (`#B.232`)
+
+- Default wake-CTA phrases move from `skill/claude-loop-pings.yaml` to
+  `config/defaults/claude-loop-pings.yaml` (same 3-layer override
+  chain); `.aiball.yaml.example` + docs updated.
+
+### Per-event `scope` tristate replaces `broadcast` + `internal` (`#B.245`, `#B.240`)
+
+- One unified `scope` enum on every event row (tickets + messages),
+  three values:
+  - **`internal`** — owners only + `@mention` recipients
+    (`@projet` narrows to project **owners**, not followers). Used
+    for replies that don't need to spam the thread audience.
+  - **`default`** — ticket subscribers + project owners + `@mention`
+    recipients (the standard fan-out).
+  - **`broadcast`** — `default` + project followers (the prior
+    `tickets.broadcast = 1` semantic, now per-event).
+- **Composer** : `Select` tristate dropdown (replaces the legacy
+  "replying as" InputText `#B.240` and the short-lived `internal`
+  checkbox). The widget remembers the last value chosen **per
+  ticket** (`#79h7zk`) via localStorage
+  (`aiball.composer.scope.<ticketId>`), so you don't re-pick on
+  every reply. Initial fallback is `default` for every mode
+  (`#253` — david: replies should fan out like a normal post, the
+  earlier ny8m8a directive favouring `internal`-by-default was
+  reversed after live trial).
+- **MCP** : `ticket_new` + `ticket_reply` gain an optional
+  `scope: "internal" | "default" | "broadcast"` parameter. Default
+  `default` for both — pass `internal` to narrow to owners + explicit
+  @mentions, `broadcast` to also reach followers.
+- **Behavior change** : prior fan-out hinged on two unrelated
+  booleans — `tickets.broadcast` (followers vs. internal at the
+  ticket level) and the implicit "every comment notifies
+  subscribers + owners". After this, each event independently
+  decides. Replies default to `internal` so existing thread
+  audiences are no longer pinged on every back-and-forth; pick
+  `default` to ping them, `broadcast` to also reach followers.
+- **Schema** : `tickets.broadcast` and `_messages.internal` are
+  dropped in favor of `scope TEXT NOT NULL DEFAULT 'default' CHECK
+  (scope IN ('internal','default','broadcast'))` on both tables.
+  Backfill: `broadcast=1 → 'broadcast'`, `internal=1 → 'internal'`,
+  else `'default'`. Migrations: `0020_message_internal.sql` lands
+  the intermediate `internal` column; `0021_scope_tristate.sql`
+  unifies into `scope` and drops the now-redundant booleans.
+- Resolves the friction surfaced by `#B.245`: David typed
+  `@aiball ... j'ai un bug ici` to address the project, but the
+  active Claude session interpreted it as a personal task. With
+  `scope: internal` plus `@projet` narrowing, the same gesture now
+  explicitly addresses project owners without reaching the active
+  Claude or followers.
+
+### MCP `ticket_reply` — `then: "plan"` (`#B.243`)
+
+- New value `"plan"` on the `then` enum of `ticket_reply`, symmetric to
+  `"resolved"`: tags the comment as a *plan proposal* with
+  `meta.decision = { kind: "plan", status: "pending" }`. The reporter
+  validates the approach via accept/reject under the composer before
+  the agent executes.
+- Sémantique go-signal : accepted plan = the ticket re-enters
+  `actionable: true` so the agent picks it back up; pending plan gates
+  actionable identically to a pending resolution. Closes the
+  agent-side asymmetry surfaced by `#B.239` (the doc on `actionable`
+  already excluded "pending plan proposals" but the tool exposed only
+  `resolved`).
+- Server-side was already prepared (`DECISION_KINDS` accepted `"plan"`
+  since the decision-on-comment lifecycle landed in `#B.129`) —
+  enabling it is purely an MCP enum extension, ~6 net lines in
+  `src/mcp/ticket-write.ts`.
+
 ### Consumers panel rework (`#B.193`, `#B.194`)
 
 - "Add consumer" form retired — daemon auto-inserts on first sight,

@@ -72,13 +72,18 @@ const emit = defineEmits<{ (e: "start-edit"): void }>();
         </div>
     </template>
     <div
-        v-if="ticket.intent || (ticket.tags && ticket.tags.length) || showEditButton"
+        v-if="ticket.intent || (ticket.priority && ticket.priority !== 'normal') || (ticket.tags && ticket.tags.length) || showEditButton"
         class="thread-meta-extra"
     >
         <Tag
             v-if="ticket.intent"
             :value="ticket.intent"
             :severity="ticket.intent === 'panic' ? 'danger' : 'info'"
+        />
+        <Tag
+            v-if="ticket.priority && ticket.priority !== 'normal'"
+            :value="ticket.priority"
+            :severity="ticket.priority === 'urgent' ? 'danger' : ticket.priority === 'high' ? 'warn' : 'info'"
         />
         <span
             v-for="t in ticket.tags ?? []"

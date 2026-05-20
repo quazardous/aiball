@@ -201,4 +201,39 @@ onMounted(load);
     font-size: 0.85rem;
     color: var(--p-text-muted-color);
 }
+
+/* #B.254: lighten the layout on narrow viewports — shrink padding,
+   collapse the section's max-width gate, trim the H2, full-width the
+   strategy Select so it follows the section instead of the desktop
+   min-width. */
+@media (max-width: 720px) {
+    .project-settings {
+        gap: 0.6rem;
+    }
+    .project-settings__header h2 {
+        font-size: 1.05rem;
+    }
+    .project-settings__back {
+        padding: 0.2rem 0.4rem;
+        font-size: 0.78rem;
+    }
+    .project-settings__section {
+        padding: 0.7rem 0.8rem;
+        max-width: none;
+        gap: 0.4rem;
+    }
+    .project-settings__section h3 {
+        font-size: 0.78rem;
+    }
+    .project-settings__hint {
+        font-size: 0.82rem;
+    }
+    .project-settings__strategy-select {
+        min-width: 0;
+        width: 100%;
+    }
+    .project-settings__state {
+        font-size: 0.8rem;
+    }
+}
 </style>

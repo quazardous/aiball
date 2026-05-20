@@ -7,14 +7,10 @@
  * content). Pure side-effect composable: it wires a watcher that
  * resets the timer on ticketId change and an onBeforeUnmount cleanup.
  * Nothing to destructure on the call site.
- *
- * Peek mode (?peek=1 in the URL) bypasses the timer entirely —
- * read-state belongs to the endorsed agent, not the human observer.
  */
 import { onBeforeUnmount, watch, type Ref } from "vue";
 import { api, type ThreadView as ThreadViewData } from "./api";
 import { bus } from "./bus";
-import { isPeek } from "./peek";
 
 const AUTO_MARK_READ_MS = 2000;
 
@@ -28,10 +24,6 @@ export function useAutoMarkRead({ data, ticketId }: UseAutoMarkReadArgs): void {
 
     function schedule() {
         if (timer) clearTimeout(timer);
-        if (isPeek()) {
-            // Peek mode → don't touch the endorsed agent's seen-state.
-            return;
-        }
         const id = ticketId();
         timer = setTimeout(() => {
             const snapshot = data.value;

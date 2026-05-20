@@ -187,11 +187,6 @@ export class AiballClient {
         }
     }
 
-    /** Flip a ticket's broadcast flag via the dedicated PATCH endpoint. */
-    setTicketBroadcast(ticket_id: number, broadcast: boolean) {
-        return this.http("PATCH", `/api/tickets/${ticket_id}`, { broadcast });
-    }
-
     /** Per-project subscriber + content stats (« nobody is listening » hint). */
     projectStats(project: string) {
         return this.http("GET", `/api/projects/${encodeURIComponent(project)}/stats`);
@@ -276,6 +271,30 @@ export class AiballClient {
     }
     listProjects() {
         return this.http("GET", "/api/projects");
+    }
+    /**
+     * Explicitly register a project (#B.216 phase A pass 2). The CLI's
+     * `aiball project init` and the Web UI's "Create project" button
+     * both go through here. Server returns 201 + the inserted row, or
+     * 409 if the name is already taken.
+     */
+    createProject(name: string, opts: {
+        display_name?: string;
+        description?: string;
+        created_by?: string;
+    } = {}) {
+        return this.http<{
+            name: string;
+            display_name: string | null;
+            description: string | null;
+            created_at: string;
+            created_by: string | null;
+        }>("POST", "/api/projects", {
+            name,
+            display_name: opts.display_name,
+            description: opts.description,
+            created_by: opts.created_by ?? this.agentId,
+        });
     }
     /**
      * Snooze a ticket until the given ISO8601 timestamp (per #B.329).
@@ -567,6 +586,7 @@ export class AiballClient {
             body?: string | null;
             summary?: string | null;
             intent?: string | null;
+            priority?: string | null;
         },
     ) {
         return this.http("POST", `/api/messages/${id}/edit`, fields);

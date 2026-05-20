@@ -33,23 +33,33 @@
  * per-menu settings flags. Interim: user runs `claude` once to clear
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { existsSync, openSync, unlinkSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import {
     isInternalCheckCmd,
     DEFAULT_USER_GRACE_SEC,
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
+    buildContextPhrase,
     buildWakePhrase,
+    injectWakePhrase,
     checkHasWork,
     formatPaneSnapshot,
     idleMarkerPath,
+    humanTypingPath,
+    humanIsTyping,
+    installRoot,
+    installRootSha,
+    isLoopStale,
     isDuplicateWakeHint,
     lastWakeAtPath,
     paneFooterShowsBusy,
     pingsPath,
     readBusyDefer,
+    readLastOpenWakeCount,
+    recordOpenWakeCount,
     recordWakeHint,
     setTmuxStatus,
     snapshotPane,
@@ -57,6 +67,12 @@ import {
     userIsTakingOver,
     wakeInFlightPath,
     wakeRequestedPath,
+    readPlate,
+    writePlate,
+    envPath,
+    timerLogPath,
+    timerPidPath,
+    type Plate,
     type WakeHint,
 } from "./state.js";
 
@@ -100,8 +116,73 @@ function capturePane(): string {
     }
 }
 
-function pickPhrase(hint?: WakeHint): string {
-    return buildWakePhrase(hint, pingsPath(sd!));
+function shQuote(s: string): string {
+    return "'" + s.replace(/'/g, `'\\''`) + "'";
+}
+
+/**
+ * #251: self-reload on stale source. Called from the heartbeat ONLY when
+ * claude is idle with nothing to wake on — the safe lull david asked for
+ * ("il faut le faire que quand claude-loop passe en idle, cad rien à
+ * faire"). If the install root's git SHA has moved since this timer
+ * booted, re-exec a fresh timer in place: the tmux session + claude pane
+ * are untouched (the conversation survives), only the long-lived timer
+ * process — which holds stale code in memory since tsx doesn't hot-reload
+ * (#B.198) — is recycled.
+ *
+ * Re-stamps `plate.started_at_sha` to the current HEAD BEFORE respawning
+ * so the fresh timer boots in-sync and doesn't immediately reload again.
+ * That restamp is also the natural debounce against a burst of commits:
+ * each reload jumps straight to the latest SHA. No-ops on non-git installs
+ * (`isLoopStale` is false when `installRootSha` can't resolve), leaving
+ * binary deployments on manual `claude-loop reload`.
+ *
+ * Does not return when it reloads — the process exits after handing off.
+ */
+function selfReloadIfStale(): void {
+    let plate: Plate;
+    try { plate = readPlate(sd!); } catch { return; }
+    if (!isLoopStale(plate)) return;
+    const sha = installRootSha();
+    log(
+        `source moved since boot (${(plate.started_at_sha ?? "?").slice(0, 7)} → ${(sha ?? "?").slice(0, 7)}) ` +
+        `and loop is idle — self-reloading timer`,
+    );
+    if (sha) {
+        plate.started_at_sha = sha;
+        try { writePlate(sd!, plate); } catch { /* best effort — fresh timer would just reload once more */ }
+    }
+    const root = installRoot();
+    const logFd = openSync(timerLogPath(sd!), "a");
+    const timerScript = join(root, "src/claude-loop/timer.ts");
+    const tsxBin = shQuote(join(root, "node_modules", ".bin", "tsx"));
+    const child = spawn("bash", [
+        "-lc",
+        `source ${shQuote(envPath(sd!))} && exec ${tsxBin} ${shQuote(timerScript)}`,
+    ], { detached: true, stdio: ["ignore", logFd, logFd] });
+    child.unref();
+    writeFileSync(timerPidPath(sd!), String(child.pid) + "\n");
+    log(`timer respawned — new pid ${child.pid}, exiting old`);
+    process.exit(0);
+}
+
+// #B.221: when the SSE hint carries a ticket_id, `buildWakePhrase`
+// renders the directive template ("Handle ticket #X — comment #Y.")
+// — already context-rich, no wrap needed. When there's no hint
+// (heartbeat re-check, manual wake, SSE-drop safety net), we used to
+// fall back to a bare culture phrase from `pickPingPhrase`. That left
+// claude with the same no-context greeting bug session-start had.
+// Now we route the no-hint path through `buildContextPhrase` so the
+// wake carries unread/open counts + a drain directive too. Async
+// because the wrap helper queries the daemon; tryWakeInner already
+// awaits checkHasWork so adding another await here is a no-op.
+async function pickPhrase(hint?: WakeHint): Promise<string> {
+    if (hint?.ticket_id) return buildWakePhrase(hint, pingsPath(sd!));
+    return buildContextPhrase(
+        client(),
+        process.env.AIBALL_PROJECT ?? null,
+        pingsPath(sd!),
+    );
 }
 
 /**
@@ -172,7 +253,10 @@ async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
     return true;
 }
 
-function sendKeys(phrase: string): void {
+// #264: timestamp of the loop's last send-keys, so the human-typing
+// detector can exclude the loop's own injected text from "a human typed".
+let lastSendAt = 0;
+async function sendKeys(phrase: string): Promise<void> {
     // #B.180: touch the wake-in-flight marker BEFORE send-keys so
     // UserPromptSubmit hook sees it when claude processes the wake
     // prompt and skips the user-took-over update. Without this, the
@@ -187,11 +271,60 @@ function sendKeys(phrase: string): void {
     try {
         writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n");
     } catch { /* ignore — coalesce will just fail open */ }
-    spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, phrase, "Enter"], { stdio: "ignore" });
+    lastSendAt = Date.now();
+    await injectWakePhrase(`${tname}.0`, phrase);
 }
 
 function sleep(ms: number): Promise<void> {
     return new Promise((res) => setTimeout(res, ms));
+}
+
+// #264 (david #c5fgha "ok B"): near-live detection of a human typing in
+// the pane, via pane-diff. While claude is AT THE PROMPT (idle marker
+// present = not mid-turn, no output streaming), poll the bottom of the
+// pane; if it changes and the loop didn't just send-keys, a human is
+// typing → refresh the human-typing marker (drives the bicolor bar chip
+// in setTmuxStatus, and is a finer human-present signal than the
+// submit-time user-took-over). Fail-safe: never throws — it must not
+// disturb the wake loop. NOTE: only reliable at the prompt; detecting
+// typing WHILE claude streams is out of scope for pane-diff.
+const HUMAN_POLL_MS = 1500;
+let prevPaneTail = "";
+let humanChipShown = false;
+function recentlySentKeys(): boolean {
+    return Date.now() - lastSendAt < 3000;
+}
+function detectHumanTyping(): void {
+    try {
+        if (!existsSync(idleMarkerPath(sd!))) {
+            // Mid-turn / streaming → reset baseline so the post-busy
+            // prompt isn't diffed against a stale pre-busy capture.
+            prevPaneTail = "";
+            return;
+        }
+        const pane = capturePane();
+        if (!pane) return;
+        const tail = pane
+            .split("\n")
+            .map((l) => l.trimEnd())
+            .filter((l) => l.length > 0)
+            .slice(-4)
+            .join("\n");
+        if (prevPaneTail && tail !== prevPaneTail && !recentlySentKeys()) {
+            try {
+                writeFileSync(humanTypingPath(sd!), new Date().toISOString() + "\n");
+            } catch { /* ignore — chip just won't show */ }
+            log("human-typing detected (prompt area changed at idle)");
+        }
+        prevPaneTail = tail;
+        // Edge-repaint the bicolor chip when it appears / clears (the
+        // marker expires ~HUMAN_TYPING_TTL_SEC after the last keystroke).
+        const showing = humanIsTyping(sd!);
+        if (showing !== humanChipShown) {
+            setTmuxStatus(name!, "idle");
+            humanChipShown = showing;
+        }
+    } catch { /* never throw from the detection poll */ }
 }
 
 // Cached client for the default-path direct API call (no fork). The
@@ -285,19 +418,35 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             }
         }
     }
-    if (!manualWake && !(await checkHasWork(checkCmd, client()))) {
-        log(`skip wake (${reason}) — checkHasWork returned false (no unread pings)`);
-        return false;
+    let gateOpenCount = 0;
+    if (!manualWake) {
+        const gate = await checkHasWork(
+            checkCmd,
+            client(),
+            process.env.AIBALL_PROJECT ?? null,
+            sd!,
+        );
+        if (!gate.has) {
+            const watermark = readLastOpenWakeCount(sd!);
+            log(`skip wake (${reason}) — checkHasWork returned false (pings=${gate.pingsCount} open=${gate.openCount} watermark=${watermark})`);
+            return false;
+        }
+        gateOpenCount = gate.openCount;
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
-    const phrase = pickPhrase(hint);
-    sendKeys(phrase);
+    const phrase = await pickPhrase(hint);
+    await sendKeys(phrase);
     // #B.198 david: "on cumule pas les event identique on les merge".
     // Persist the just-fired hint so subsequent SSE pings about the
     // same (ticket, comment) within `WAKE_COALESCE_WINDOW_MS` get
     // dropped at `onPing` (event-layer merge, no DB write).
     recordWakeHint(sd!, hint);
+    // #B.232 ch887f: bump the open-tickets watermark so the same N
+    // tickets don't re-fire the gate on every heartbeat. Only when
+    // we observed the count via the SDK path (manual/legacy wakes
+    // leave gateOpenCount=0 → watermark drops, which is fine).
+    if (gateOpenCount > 0) recordOpenWakeCount(sd!, gateOpenCount);
     setTmuxStatus(name!, "busy");
     log(`wake (${reason}) → '${phrase}'`);
     return true;
@@ -316,6 +465,11 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
  */
 async function mainSse(): Promise<void> {
     log(`timer started — SSE mode (heartbeat ${interval}s), check-cmd: ${checkCmd || "(internal SDK)"}`);
+    // #B.225: log the install-root SHA so `--log` shows what version
+    // of the timer is actually running. `cmdList` / `cmdCheck` diff
+    // this against the live HEAD to flag a ghost daemon.
+    const bootSha = installRootSha();
+    if (bootSha) log(`timer source: install-root SHA ${bootSha.slice(0, 7)}`);
     let unsubscribe: (() => void) | null = null;
     let lastConnectAt = 0;
     const reconnect = () => {
@@ -385,7 +539,13 @@ async function mainSse(): Promise<void> {
     const BOOT_GRACE_MS = Math.max(0, Number(process.env.CL_BOOT_GRACE_SEC ?? 60)) * 1000;
     let bootSettled = false;
     const settleBoot = async () => {
-        if (bootSettled) return;
+        if (bootSettled) {
+            // #B.228: surface the skip so we know the pane probe
+            // already flipped bootSettled — otherwise the log goes
+            // dark at T+60s and it looks like settleBoot vanished.
+            log("settleBoot skipped — bootSettled already true (probe flipped earlier)");
+            return;
+        }
         bootSettled = true;
         log("boot grace elapsed — settling to idle/busy via check");
         // Seed idle-since so tryWake's gate passes; tryWake will
@@ -398,10 +558,20 @@ async function mainSse(): Promise<void> {
         // tryWake removes idle-since on wake; if it didn't fire,
         // we still want the bar to read [idle] not [boot].
         if (existsSync(idleMarkerPath(sd!))) {
+            // #B.228: log the bar flip so "barre reste jaune" repros
+            // surface either this line (it WAS flipped) or its
+            // absence (settleBoot didn't reach the idle-marker check).
+            log("settleBoot: idle-marker present → setTmuxStatus(idle)");
             setTmuxStatus(name!, "idle");
+        } else {
+            log("settleBoot: idle-marker missing after tryWake (wake fired?) — bar stays as set by wake path");
         }
     };
     setTimeout(() => { void settleBoot(); }, BOOT_GRACE_MS);
+    // #264: near-live human-typing detection poll (bicolor bar chip).
+    // Independent of the wake heartbeat — fast cadence so the chip
+    // tracks typing closely. Fail-safe (detectHumanTyping never throws).
+    setInterval(detectHumanTyping, HUMAN_POLL_MS);
     // #B.149: track the "settled" status so the count-refresh below
     // doesn't reset bar to idle while claude is busy. tryWake flips
     // to busy on wake; we mirror that. Boot stays until settleBoot.
@@ -439,8 +609,22 @@ async function mainSse(): Promise<void> {
         // SSE-drop safety net: re-check the gate ourselves.
         if (!unsubscribe) reconnect();
         const woke = await tryWake("heartbeat");
-        if (woke) settledStatus = "busy";
-        else if (existsSync(idleMarkerPath(sd!))) settledStatus = "idle";
+        if (woke) {
+            if (settledStatus !== "busy") log(`heartbeat: woke=true settledStatus=${settledStatus}→busy`);
+            settledStatus = "busy";
+        } else if (existsSync(idleMarkerPath(sd!))) {
+            // #B.228: trace the boot→idle flip driven by the
+            // idle-marker (set by settleBoot or session-start-hook).
+            if (settledStatus !== "idle") log(`heartbeat: woke=false idle-marker present → settledStatus=${settledStatus}→idle`);
+            settledStatus = "idle";
+            // #251: idle + nothing to wake on = the safe lull to pick up
+            // new code. Re-execs the timer in place if the source SHA
+            // moved since boot (claude pane untouched). Never mid-turn
+            // (idle-marker gates it), never when there's work (a wake
+            // would have fired above → woke=true → this branch skipped).
+            // Exits the process on reload, so it must come last here.
+            selfReloadIfStale();
+        }
         // Pane-probe (#B.173, refined #B.154 davids). `esc to
         // interrupt` is THE authoritative claude-busy signal
         // ("seul le esc to interrupt est vraiment crucial dans le
@@ -482,19 +666,39 @@ async function mainSse(): Promise<void> {
             const claudeWorking = paneFooterShowsBusy(paneText);
             const claudeReady = /Claude Code v|❯ |^> /m.test(paneText);
             if (claudeWorking && settledStatus !== "busy") {
+                // #B.228: trace probe-driven state flips so a
+                // "barre reste jaune" repro shows whether the
+                // probe ever fired and what it saw.
+                log(`probe: claudeWorking=true settledStatus=${settledStatus}→busy (bootSettled=true)`);
                 settledStatus = "busy";
                 bootSettled = true; // probe overrides boot grace
             } else if (claudeReady && !claudeWorking && settledStatus !== "idle") {
                 // Claude is at the prompt. Seed idle-since so the
                 // next tryWake has a clean gate and flip the bar.
+                log(`probe: claudeReady=true settledStatus=${settledStatus}→idle (bootSettled=true, writing idle-marker)`);
                 settledStatus = "idle";
                 bootSettled = true;
                 try {
                     const { writeFileSync } = await import("node:fs");
                     writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
                 } catch { /* ignore */ }
+            } else if (!claudeWorking && !claudeReady && settledStatus === "boot") {
+                // #B.228: ambiguous pane during boot — log once-ish
+                // so the repro shows the probe IS firing but the
+                // regex isn't matching. Cheap enough to log every
+                // tick during boot; goes quiet after settledStatus
+                // leaves "boot".
+                log(`probe: pane ambiguous (claudeReady=false claudeWorking=false) — settledStatus stays "boot"`);
             }
-            // Else: pane present but ambiguous → keep settledStatus.
+            // Else: pane present but ambiguous AND settledStatus
+            // already left "boot" → keep settledStatus (no log).
+        } else {
+            // #B.228: empty pane capture. capturePane() returns ""
+            // on failure — possibly tmux gone or capture errored.
+            // Useful signal for the "barre reste jaune" repro.
+            if (settledStatus === "boot") {
+                log(`probe: empty pane capture (capturePane failed) — settledStatus stays "boot"`);
+            }
         }
         // Refresh the bar with the current unread count (#B.149
         // david: "dans la barre mux on peut afficher le nombre de
@@ -536,6 +740,9 @@ async function mainSse(): Promise<void> {
  */
 async function mainPoll(): Promise<void> {
     log(`timer started — polling mode (tick ${interval}s), check-cmd: ${checkCmd}`);
+    // #B.225: same boot SHA log as mainSse — see comment there.
+    const bootSha = installRootSha();
+    if (bootSha) log(`timer source: install-root SHA ${bootSha.slice(0, 7)}`);
     // Same startup safety net as SSE mode (#B.148): drain any
     // pre-existing work right away instead of waiting `interval`s.
     await tryWake("startup");
@@ -549,7 +756,10 @@ async function mainPoll(): Promise<void> {
             log(`busy-defer window expired (slept ${sleepMs}ms) — checking work`);
         }
         const manualWake = existsSync(wakeRequestedPath(sd!));
-        await tryWake(manualWake ? "manual" : "check-cmd hit", manualWake);
+        const woke = await tryWake(manualWake ? "manual" : "check-cmd hit", manualWake);
+        // #251: same idle-gated self-reload as mainSse — pick up moved
+        // source only in the lull (no wake fired AND claude is idle).
+        if (!woke && existsSync(idleMarkerPath(sd!))) selfReloadIfStale();
     }
     log("tmux session gone — timer exiting");
 }

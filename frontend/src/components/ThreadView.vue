@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
-import { api, INTENTS, type Intent, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
+import { api, INTENTS, type Intent, type Priority, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
 import { topDown } from "../lib/prefs";
 import ThreadRelations from "./ThreadRelations.vue";
 import RelationKindMenu from "./RelationKindMenu.vue";
@@ -121,8 +121,17 @@ async function decide(action: "approve" | "reject") {
     const tid = data.value.ticket.id;
     decideBusy.value = true;
     try {
+        // #270: embark whatever the user typed in the composer as a
+        // comment, the same way every resolution verb does (resolutionFlow
+        // "every handler embarks any typed text before the action"). The
+        // moderation decide() handler used to fire api.approve/reject only
+        // and silently drop the typed comment.
+        if (composerBody.value.trim()) {
+            await postBodyAs("comment_added");
+        }
         if (action === "approve") await api.approve(tid);
         else await api.reject(tid);
+        composerBody.value = "";
         broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
@@ -148,6 +157,21 @@ async function changeIntent(v: Intent | null) {
         error.value = (e as Error).message;
     } finally {
         intentBusy.value = false;
+    }
+}
+// #B.222: priority edit — parallel to intent. Owner-bypass server-side.
+const priorityBusy = ref(false);
+async function changePriority(v: Priority | null) {
+    if (!data.value) return;
+    const tid = data.value.ticket.id;
+    priorityBusy.value = true;
+    try {
+        await api.edit(tid, { priority: v });
+        broadcastRefresh(tid);
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        priorityBusy.value = false;
     }
 }
 function onTagsChanged(tags: TagType[]) {
@@ -243,7 +267,6 @@ const {
 } = useResolutionFlow({ data, error, broadcastRefresh });
 
 
-const broadcastBusy = ref(false);
 // Snooze flow (#B.329) — popover ref + busy + the three "set aside"
 // verbs (preset duration / custom datetime / unsnooze). Lives in
 // lib/snooze.ts since the logic is self-contained around (data,
@@ -258,21 +281,6 @@ const {
     unsnooze,
     isSnoozed,
 } = useSnooze({ data, composerBody, postBodyAs, error });
-
-async function toggleBroadcast() {
-    if (!data.value) return;
-    const tid = data.value.ticket.id;
-    broadcastBusy.value = true;
-    try {
-        const next = !data.value.ticket.broadcast;
-        await api.setTicketBroadcast(tid, next);
-        broadcastRefresh(tid);
-    } catch (e) {
-        error.value = (e as Error).message;
-    } finally {
-        broadcastBusy.value = false;
-    }
-}
 
 const justCopiedTicket = ref(false);
 async function copyTicketRef() {
@@ -298,11 +306,9 @@ async function copyTicketRef() {
             :has-body="hasBody"
             :active-decision="activeDecision"
             :pending-resolution="pendingResolution"
-            :broadcast-busy="broadcastBusy"
             :snooze-busy="snoozeBusy"
             :resolution-busy="resolutionBusy"
             @back="emit('back')"
-            @toggle-broadcast="toggleBroadcast"
             @open-snooze="openSnoozePopover"
             @unsnooze="unsnooze"
             @reject-active="rejectActiveDecision"
@@ -448,9 +454,11 @@ async function copyTicketRef() {
                     :body-busy="bodyBusy"
                     :intent-busy="intentBusy"
                     :intent-options="intentOptions"
+                    :priority-busy="priorityBusy"
                     @save="saveAndCloseEdit"
                     @cancel="cancelEdit"
                     @intent-change="changeIntent"
+                    @priority-change="changePriority"
                     @tags-changed="onTagsChanged"
                 />
                 <MarkdownView :source="data.ticket.body" :self-ticket-id="data.ticket.id" />

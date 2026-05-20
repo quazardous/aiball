@@ -41,6 +41,19 @@ export type RuleDecision = typeof RULE_DECISIONS[number];
 export const INTENTS = ["panic", "request", "question", "fyi"] as const;
 export type Intent = typeof INTENTS[number];
 
+/**
+ * Per-ticket urgency hint (#B.222). Orthogonal to `intent` (the ticket's
+ * nature). David framing (49dh42): "la priorité est juste à indiquer à
+ * claude pour le moment via le mcp" — used by listMessages /
+ * listPings (parent.priority secondary) / poll my_pending sorts so
+ * claude tombe sur l'urgent en premier.
+ *
+ * `normal` is the migration backfill default; pick another only when
+ * the ticket actually carries an urgency signal.
+ */
+export const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
+export type Priority = typeof PRIORITIES[number];
+
 export const STRATEGIES = ["manual", "auto", "auto-reply"] as const;
 export type Strategy = typeof STRATEGIES[number];
 
@@ -52,6 +65,9 @@ export function isMessageStatus(s: string): s is MessageStatus {
 }
 export function isIntent(s: string): s is Intent {
     return (INTENTS as readonly string[]).includes(s);
+}
+export function isPriority(s: string): s is Priority {
+    return (PRIORITIES as readonly string[]).includes(s);
 }
 export function isStrategy(s: string): s is Strategy {
     return (STRATEGIES as readonly string[]).includes(s);

@@ -7,11 +7,13 @@ import { relativeTime, snippetOf, titleOf } from "../lib/format";
 import { attentionOf, lifecycleStage } from "../lib/ticket-state";
 import {
     INTENT_SEVERITY,
+    PRIORITY_SEVERITY,
     LIFECYCLE_ICONS,
     STATUS_SEVERITY,
     type StatusFilter,
     snoozedTooltip,
 } from "../lib/labels";
+import { scopeIcon, scopeTitle, type Scope } from "../lib/scope";
 import ListRow from "./ListRow.vue";
 import TagBadge from "./TagBadge.vue";
 
@@ -47,6 +49,19 @@ const emit = defineEmits<{
 function filtersAreNarrowed(): boolean {
     return (props.statusFilter !== undefined && props.statusFilter !== "all")
         || props.onlyOpen === false;
+}
+
+// #B.255 bwsbc4: once at least one row is selected, the list is in
+// "selection mode" — a normal tap toggles selection instead of
+// opening the ticket. Drop to zero selected and tap reverts to its
+// usual "open the row" behaviour. The mobile UX matches what users
+// expect from Gmail / iOS Mail when a bulk batch is in flight.
+function onRowClick(r: InboxRow) {
+    if (props.selectedIds.size > 0) {
+        emit("toggle-selected", r.id, !props.selectedIds.has(r.id));
+        return;
+    }
+    emit("open-row", r);
 }
 
 </script>
@@ -111,7 +126,8 @@ function filtersAreNarrowed(): boolean {
         :unread="r.unread"
         :closed="r.closed"
         :attention="attentionOf(r)"
-        @click="emit('open-row', r)"
+        @click="onRowClick(r)"
+        @long-press="emit('toggle-selected', r.id, !selectedIds.has(r.id))"
     >
         <template #select>
             <Checkbox
@@ -152,16 +168,24 @@ function filtersAreNarrowed(): boolean {
         <template #title>
             <span class="ticket-id">#B.{{ r.id }}</span>
             {{ titleOf(r) }}
+            <!-- #B.245: per-event scope badge. Only render for
+                 non-default scopes so the common case stays visually
+                 quiet. `internal` → muted "private" eye-slash;
+                 `broadcast` → loud megaphone. -->
             <i
-                v-if="r.broadcast"
-                class="pi pi-megaphone"
-                style="margin-left: 0.35rem; color: var(--p-blue-500); font-size: 0.85rem"
-                title="broadcast: project followers receive pings on this thread"
+                v-if="r.scope && r.scope !== 'default' && scopeIcon(r.scope as Scope)"
+                :class="['pi', scopeIcon(r.scope as Scope)]"
+                :style="{
+                    marginLeft: '0.35rem',
+                    color: r.scope === 'broadcast' ? 'var(--p-blue-500)' : 'var(--p-text-muted-color)',
+                    fontSize: '0.85rem',
+                }"
+                :title="scopeTitle(r.scope as Scope)"
             />
         </template>
         <template v-if="snippetOf(r)" #snippet>{{ snippetOf(r) }}</template>
         <template
-            v-if="r.status !== 'approved' || r.intent || r.tags.length || !project"
+            v-if="r.status !== 'approved' || r.intent || (r.priority && r.priority !== 'normal') || r.tags.length || !project"
             #chips
         >
             <Tag
@@ -174,6 +198,14 @@ function filtersAreNarrowed(): boolean {
                 v-if="r.intent"
                 :value="r.intent"
                 :severity="r.intent ? INTENT_SEVERITY[r.intent] : 'secondary'"
+                style="font-size: 0.7rem"
+            />
+            <!-- #B.222: priority badge — hidden when "normal" (default) so
+                 the chip row stays clean for the 90% of unprioritized tickets. -->
+            <Tag
+                v-if="r.priority && r.priority !== 'normal'"
+                :value="r.priority"
+                :severity="PRIORITY_SEVERITY[r.priority]"
                 style="font-size: 0.7rem"
             />
             <TagBadge

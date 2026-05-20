@@ -14,11 +14,13 @@ export {
     getRawSqlite,
     nowIso,
     INTENTS,
+    PRIORITIES,
     type Message,
     type MessageKind,
     type MessageStatus,
     type RuleDecision,
     type Intent,
+    type Priority,
     type TicketRow,
     type MessageRow,
     type SubscriptionRole,
@@ -88,18 +90,23 @@ export {
     noteMessage,
     markQuestionAnswered,
     applyMessageDecision,
+    promoteMessageToDecision,
     reclassifyMessageDecision,
+    removeMessageDecision,
     setMessageSummary,
     listPendingResolutionDecisionsForTicket,
 } from "./db/messages.js";
 
 export {
+    type NewProjectInput,
     type ProjectMeta,
     type ProjectStatsRich,
+    createProject,
+    deleteProject,
+    getProject,
+    getProjectStatsRich,
     listProjects,
     listProjectsDetailed,
-    deleteProject,
-    getProjectStatsRich,
     purgeOldClosedTickets,
 } from "./db/projects.js";
 
@@ -125,8 +132,7 @@ export {
 } from "./db/subscriptions.js";
 
 export {
-    isTicketBroadcast,
-    setTicketBroadcast,
+    getTicketScope,
     setTicketPostpone,
     getTicketPostpone,
     listExpiredPostpones,
