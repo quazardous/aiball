@@ -78,6 +78,7 @@ export {
     insertRelationEvent,
     insertTypedRelation,
     listTypedRelationsForTicket,
+    lineageWouldCycle,
     backfillParentTicketRelations,
     type ActiveRelation,
     getMessage,

@@ -38,6 +38,7 @@ import {
     isHuman,
     insertTypedRelation,
     listTypedRelationsForTicket,
+    lineageWouldCycle,
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
 import { RELATION_KINDS, isRelationKind, isLineageRelationKind, type RelationKind } from "../relations.js";
@@ -649,6 +650,46 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
         return res.status(404).json({ error: `target ticket #B.${target} not found` });
     }
     const caller = consumerOf(req);
+    // Permission (#275): mirror the edit/snooze gate (isHuman bypass +
+    // reporter), but accept the reporter of EITHER end — a relation links
+    // two tickets, and standing on one of them is enough to attach the
+    // other (e.g. file your own ticket as child_of someone else's). Human
+    // moderators bypass entirely; the UI is human-driven, so this doesn't
+    // change its behaviour.
+    if (
+        !isHuman(caller) &&
+        t.by_agent !== caller &&
+        targetTicket.by_agent !== caller
+    ) {
+        return res.status(403).json({
+            error: `only a registered human moderator or the reporter of #B.${id} (${t.by_agent}) / #B.${target} (${targetTicket.by_agent}) can relate them`,
+        });
+    }
+    // Anti-cycle (#275): lineage (child_of/parent_of) must stay a DAG.
+    // Reject an edge that would close a loop. parent_of is the mirror of
+    // child_of, so swap (child, parent) for the check.
+    if (kindStr === "child_of" && lineageWouldCycle(id, target)) {
+        return res.status(409).json({
+            error: `#B.${id} child_of #B.${target} would create a lineage cycle`,
+        });
+    }
+    if (kindStr === "parent_of" && lineageWouldCycle(target, id)) {
+        return res.status(409).json({
+            error: `#B.${id} parent_of #B.${target} would create a lineage cycle`,
+        });
+    }
+    // Idempotency (#275): at most one active edge per (source, target).
+    // Re-posting the same active kind, or removing (ignored) an edge that
+    // isn't there, is a no-op — don't append a redundant event.
+    const before = listTypedRelationsForTicket(id);
+    if (kindStr === "ignored") {
+        if (!before.some((r) => r.target_ticket_id === target)) {
+            return res.json({ ticket_id: id, event_id: null, noop: true, relations: before });
+        }
+    } else if (before.some((r) => r.target_ticket_id === target && r.kind === kindStr)) {
+        const dup = before.find((r) => r.target_ticket_id === target && r.kind === kindStr)!;
+        return res.json({ ticket_id: id, event_id: dup.last_event_id, noop: true, relations: before });
+    }
     const event = insertTypedRelation({
         source_ticket_id: id,
         target_ticket_id: target,

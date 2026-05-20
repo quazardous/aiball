@@ -1,7 +1,7 @@
 /**
  * aiball MCP server (stdio transport).
  *
- * Exposes a minimal-surface API (12 tools total) so any MCP-capable agent
+ * Exposes a minimal-surface API (14 tools total) so any MCP-capable agent
  * can post tickets, follow threads, and consume activity without shelling
  * out. Tool clusters live under ./mcp/* — see registerXxxTools imports
  * below. This file stays a thin orchestrator: helpers + server creation
@@ -19,6 +19,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { client } from "./mcp/_helpers.js";
 import { registerTicketWriteTools } from "./mcp/ticket-write.js";
 import { registerTicketReadTools } from "./mcp/ticket-read.js";
+import { registerTicketRelationTools } from "./mcp/ticket-relations.js";
 import { registerSubscriptionTools } from "./mcp/subscription.js";
 import { registerInboxTools } from "./mcp/inbox.js";
 
@@ -30,6 +31,7 @@ const server = new McpServer({
 // Tool clusters (#B.213 phase 4 — extracted from this file).
 registerTicketWriteTools(server);
 registerTicketReadTools(server);
+registerTicketRelationTools(server);
 registerSubscriptionTools(server);
 registerInboxTools(server);
 

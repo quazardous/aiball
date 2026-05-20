@@ -316,6 +316,22 @@ export class AiballClient {
         );
     }
     /**
+     * Create or change a typed relation (#275) from `ticket_id` → `target`.
+     * Append-only: posting the same active kind is a server-side no-op;
+     * `kind="ignored"` removes the edge (tombstone). Mirrors
+     * POST /api/tickets/:id/relations. The daemon enforces self-relation,
+     * kind validity, target existence, reporter-or-human permission, the
+     * lineage cycle guard, and idempotency.
+     */
+    relate(ticket_id: number, target_ticket_id: number, kind: string) {
+        return this.http<{
+            ticket_id: number;
+            event_id: number | null;
+            noop?: boolean;
+            relations: unknown[];
+        }>("POST", `/api/tickets/${ticket_id}/relations`, { target_ticket_id, kind });
+    }
+    /**
      * Same endpoint with `detailed=1` — returns objects with counts
      * (ticket_count, open_count, pending_count, last_activity…) instead
      * of bare names. Used by poll() to surface per-project workload.

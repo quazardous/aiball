@@ -156,7 +156,8 @@ export function registerTicketWriteTools(server: McpServer): void {
     // per #B.76 — they were both setters on persistent ticket fields, so
     // they naturally fold into a single patch-style tool (along with the
     // edit verb that was on the MCP roadmap). The dedicated tools are
-    // removed; surface stays at 12.
+    // removed. (Surface later grew to 14 with ticket_relate/ticket_unrelate,
+    // #275 — see src/mcp/ticket-relations.ts.)
 
     server.registerTool(
         "ticket_reply",

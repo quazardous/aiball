@@ -589,6 +589,35 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
 }
 
 /**
+ * Cycle guard for lineage edges (#275). Returns true if adding the edge
+ * "childId child_of parentId" would close a loop — i.e. childId is
+ * already an ancestor of parentId (walking `child_of` edges upward from
+ * parentId via the active relation set). The relations endpoint uses it
+ * to reject pathological lineage that the manual MCP/UI path could
+ * otherwise introduce; auto sub-ticket creation can't trip it (a fresh
+ * child has no descendants yet). A `parent_of` request is the mirror —
+ * the caller swaps (child, parent).
+ *
+ * The `seen` set also makes the walk terminate on a pre-existing cycle
+ * (defensive — the guard should keep the graph acyclic, but a legacy row
+ * shouldn't hang the daemon).
+ */
+export function lineageWouldCycle(childId: number, parentId: number): boolean {
+    const seen = new Set<number>();
+    const stack: number[] = [parentId];
+    while (stack.length) {
+        const cur = stack.pop()!;
+        if (cur === childId) return true;
+        if (seen.has(cur)) continue;
+        seen.add(cur);
+        for (const rel of listTypedRelationsForTicket(cur)) {
+            if (rel.kind === "child_of") stack.push(rel.target_ticket_id);
+        }
+    }
+    return false;
+}
+
+/**
  * One-shot migration: backfill `child_of` lineage relations from the
  * legacy `parent_ticket_id` FK column (#271). For every ticket with
  * `parent_ticket_id` set, ensure a `child_of` event exists from the
