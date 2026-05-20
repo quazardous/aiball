@@ -90,7 +90,9 @@ export {
     noteMessage,
     markQuestionAnswered,
     applyMessageDecision,
+    promoteMessageToDecision,
     reclassifyMessageDecision,
+    removeMessageDecision,
     setMessageSummary,
     listPendingResolutionDecisionsForTicket,
 } from "./db/messages.js";

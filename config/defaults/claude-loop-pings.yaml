@@ -154,3 +154,46 @@ prompts:
   wake_master:
     - "{culture} {lead} {state}. {directive}."
     - "{culture} {state}. {directive}."
+
+# Ticket-text formatting patterns (#B.235). Linkifies refs like #B.123,
+# #C.<hashid>, @mention in ticket bodies and comments. Lives in the same
+# 3-layer override chain as `prompts:` (shipped defaults → ~/.config →
+# per-project .aiball.yaml). Patterns are merged by `id`: shipped defaults
+# are non-removable (the in-code fallback in `src/formatting.ts` always
+# runs first); higher layers override `canonical`/`href`/`class` by reusing
+# the same id, or ADD a new pattern with a fresh id.
+#
+# Regex is validated at load time (`new RegExp(match)`). Invalid entries
+# log to stderr and are dropped; the rest of the merge proceeds.
+#
+# Fields per pattern:
+#   id         stable identifier — same id across layers = override
+#   match      ECMAScript regex source
+#   canonical  visible label template; `{N}` references capture group N
+#              (1-indexed). `{0}` = the whole match.
+#   href       optional URL template (same `{N}` syntax). When set, the
+#              label is wrapped in <a>. Captures are URL-encoded before
+#              insertion to keep XSS surface narrow.
+#   class      optional CSS class on the rendered element
+#
+# The block below mirrors the in-code defaults verbatim — listing them
+# here so authors can SEE what the linkifier recognizes and tune it
+# without touching the source. To override (e.g. change the canonical
+# form to `[B-123]`), copy the entry into ~/.config/aiball/config.yaml
+# or .aiball.yaml with the same id and edited fields.
+formatting:
+  patterns:
+    - id: ticket
+      match: "#[Bb]?[._/-]?(\\d+)\\b"
+      canonical: "#{1}"
+      href: "/b/{1}"
+      class: "ticket-ref"
+    - id: comment
+      match: "#[Cc][._/-]?([a-hjkmnp-z2-9]{4,8})\\b"
+      canonical: "#C.{1}"
+      href: "/b/{1}"
+      class: "comment-ref"
+    - id: mention
+      match: "(?<![\\w@>\"'/])@([a-zA-Z0-9_-]{2,64})\\b"
+      canonical: "@{1}"
+      class: "mention"

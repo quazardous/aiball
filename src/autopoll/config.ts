@@ -35,7 +35,7 @@ export const CONFIG_FILENAME = ".aiball.yaml";
  * those values are inherently per-repo (identity, throttle, hook
  * timeouts).
  */
-function globalConfigPath(): string {
+export function globalConfigPath(): string {
     const base = process.env.XDG_CONFIG_HOME || join(homedir(), ".config");
     return join(base, "aiball", "config.yaml");
 }
@@ -107,10 +107,10 @@ export interface AiballConfig {
     configPath: string | null;
     /**
      * Per-project override of the wake-CTA / state-prompt templates
-     * (#B.232 cpaez7). Merged over the skill defaults in
-     * `skill/claude-loop-pings.yaml` by the prompt-templates service.
+     * (#B.232 cpaez7). Merged over the shipped defaults in
+     * `config/defaults/claude-loop-pings.yaml` by the prompt-templates service.
      * Empty map when the `.aiball.yaml` has no `prompts:` block — the
-     * skill defaults stand alone. Slot-grain replace (no deep merge
+     * defaults stand alone. Slot-grain replace (no deep merge
      * inside a slot) so a user can swap shape forms freely.
      */
     prompts: PromptMap;
@@ -291,14 +291,14 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         }
     }
 
-    // #B.232 7bxrr2: prompts: chain has 3 layers — skill defaults
-    // (consumed in claude-loop), global per-user, per-project. Project
-    // wins over global; global wins over skill. Slot-grain replace at
+    // #B.232 7bxrr2: prompts: chain has 3 layers — shipped defaults
+    // (config/defaults/, consumed in claude-loop), global per-user, per-project.
+    // Project wins over global; global wins over defaults. Slot-grain replace at
     // each step (consistent with mergePrompts).
     //
-    // Global file (XDG-aware) sits between skill and project here so
+    // Global file (XDG-aware) sits between defaults and project here so
     // that any caller reading `cfg.prompts` gets the merged
-    // (global ⊕ project) view; the skill merge happens at the use site
+    // (global ⊕ project) view; the defaults merge happens at the use site
     // (e.g. `buildContextPhrase` in claude-loop). Missing global file
     // → empty map, no-op for the merge.
     const globalPrompts = loadPromptsFromYaml(globalConfigPath());

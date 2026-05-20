@@ -7,7 +7,6 @@ import { useNotifications } from "./lib/notifications";
 import { useRouting } from "./lib/router";
 import { useInboxWs } from "./lib/inbox-ws";
 import { bus, useBus } from "./lib/bus";
-import { isPeek } from "./lib/peek";
 import BulkBar from "./components/BulkBar.vue";
 import { type BulkAction, useBulkActions } from "./lib/ticket-actions";
 import {
@@ -515,14 +514,6 @@ function openSearchHit(hit: import("./lib/api").SearchHit) {
  * is a frequent need.
  */
 async function toggleRead(r: InboxRow) {
-    if (isPeek()) {
-        // Peek mode → don't touch the endorsed agent's seen-state.
-        // We still flip the local row so the UI gives feedback, but
-        // no API call goes out and the next inbox refresh will
-        // reconcile from the server.
-        r.unread = !r.unread;
-        return;
-    }
     const wasUnread = r.unread === true;
     r.unread = !wasUnread;
     try {
@@ -939,13 +930,12 @@ watch(showSnoozed, (v) => {
         background: var(--p-surface-100);
     }
 
-    /* #B.161: bulk actions (per-row checkbox + "select all" footer)
-       are awkward on a phone — hide them entirely. The thread view
-       still offers per-ticket actions for individual ops. */
+    /* #B.161 → #B.255 update: the per-row checkbox stays hidden on
+       phone (long-press is the entry mechanism now), but the bulk
+       action bar MUST surface once selection mode is active —
+       otherwise the long-press gesture has no visible outcome on
+       mobile. David #rvssy2. */
     .list-row__select {
-        display: none !important;
-    }
-    .bulk-bar {
         display: none !important;
     }
 }

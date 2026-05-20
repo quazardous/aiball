@@ -117,21 +117,21 @@ autopoll:
 
 # Wake-CTA / state-prompt template overrides (#B.232 cpaez7).
 # Optional per-project section. When absent, the skill-shipped defaults
-# in `skill/claude-loop-pings.yaml` apply — you don't need anything here
+# in `config/defaults/claude-loop-pings.yaml` apply — you don't need anything here
 # for the wake-CTA to work. Use this block to localize wording (FR/EN),
 # experiment with directiveness levels, or tune the prompt for a project
 # with multiple agents talking to claude.
 #
 # Resolution chain (#B.232 7bxrr2): three layers, project wins.
 #
-#   1. Skill defaults — shipped, in `skill/claude-loop-pings.yaml`.
-#                       Read at every wake by the central service.
+#   1. Shipped defaults — at `config/defaults/claude-loop-pings.yaml`.
+#                        Read at every wake by the central service.
 #   2. Global per-user — optional, at `$XDG_CONFIG_HOME/aiball/config.yaml`
 #                       or `~/.config/aiball/config.yaml`. Use this when
 #                       you want the SAME wording across every project
 #                       you work on (e.g. an "always-FR" preference).
 #   3. Per-project — this file's `prompts:` block. Overrides global +
-#                    skill, slot by slot.
+#                    defaults, slot by slot.
 #
 # Slot-grain replace at each step (no deep merge inside a slot, so a
 # user can switch shape forms freely between layers).
@@ -219,3 +219,41 @@ autopoll:
 #   wake_directive_drain:
 #     - "drain via `unread({pings: true, mark_read: true})`"
 #     - "ack via `unread({pings: true, mark_read: true})`"
+
+# Ticket-text linkifier patterns (#B.235). Same 3-layer chain as
+# `prompts:` — shipped defaults at `config/defaults/claude-loop-pings.yaml`,
+# global at `~/.config/aiball/config.yaml`, per-project here. Merge is by
+# `id`: shipped defaults are non-removable (they always run as fallback);
+# entries here either OVERRIDE a default by reusing the same id, or ADD
+# a new linkifier with a fresh id.
+#
+# Regex is validated at load (`new RegExp(match)`). Invalid entries log
+# to stderr and are dropped — the rest of the merge still ships.
+#
+# Fields:
+#   id         stable identifier
+#   match      ECMAScript regex source
+#   canonical  visible label template — `{1}`, `{2}` reference capture
+#              groups (1-indexed). `{0}` = whole match.
+#   href       optional URL template (same `{N}` syntax). Captures are
+#              URL-encoded before insertion. When omitted, the match is
+#              styled but not wrapped in <a>.
+#   class      optional CSS class on the rendered element
+#
+# Example overrides:
+#
+# formatting:
+#   patterns:
+#     # Override the canonical form of an existing pattern (id=ticket).
+#     - id: ticket
+#       match: "#[Bb][._/-]?(\\d+)\\b"
+#       canonical: "[B-{1}]"
+#       href: "/b/{1}"
+#       class: "ticket-ref"
+#
+#     # Add a project-specific pattern (e.g. JIRA references).
+#     - id: jira
+#       match: "\\b(PROJ-\\d+)\\b"
+#       canonical: "{1}"
+#       href: "https://jira.example.com/browse/{1}"
+#       class: "external-ref"

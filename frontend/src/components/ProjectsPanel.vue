@@ -209,20 +209,20 @@ defineExpose({ load });
             </thead>
             <tbody>
                 <tr v-for="p in rows" :key="p.name">
-                    <td>
+                    <td data-label="Project">
                         <i class="pi pi-folder" style="margin-right: 0.4rem" />
                         <strong>{{ p.name }}</strong>
                     </td>
-                    <td :title="p.last_activity">{{ relativeTime(p.last_activity) }}</td>
-                    <td>{{ p.ticket_count }}</td>
-                    <td>{{ p.comment_count }}</td>
-                    <td>
+                    <td data-label="Last activity" :title="p.last_activity">{{ relativeTime(p.last_activity) }}</td>
+                    <td data-label="Tickets">{{ p.ticket_count }}</td>
+                    <td data-label="Comments">{{ p.comment_count }}</td>
+                    <td data-label="Pending">
                         <span v-if="p.pending_count > 0" class="pending-pill">
                             {{ p.pending_count }}
                         </span>
                         <span v-else style="color: var(--p-text-muted-color)">—</span>
                     </td>
-                    <td class="action-cell">
+                    <td data-label="" class="action-cell">
                         <template v-if="confirming === p.name">
                             <span class="confirm-text">Really delete?</span>
                             <Button
@@ -365,5 +365,84 @@ defineExpose({ load });
     padding: 0.1rem 0.45rem;
     font-size: 0.78rem;
     font-weight: 600;
+}
+
+/* #B.254 — narrow viewports : 2-line cards, no attribute labels
+   (david #5c8hp5 : "Les cartes sont grosses et vides, utilises des
+   cartes sur 2 lignes pas plus. Laisse tomber les noms des attributs
+   évident"). Layout :
+     Line 1 : [📁 name]  · [time]  · [tickets] [comments] [pending pill]
+     Line 2 : [⚙] [📊] [🗑️ purge] [🗑️ delete]                       */
+@media (max-width: 720px) {
+    .projects-panel {
+        gap: 0.6rem;
+    }
+    .rules-explainer {
+        font-size: 0.82rem;
+    }
+    .create-project-form {
+        flex-wrap: wrap;
+    }
+    .create-project-form :deep(.p-inputtext) {
+        flex: 1 1 100%;
+        min-width: 0;
+    }
+    .projects-table thead {
+        display: none;
+    }
+    .projects-table,
+    .projects-table tbody,
+    .projects-table tr {
+        display: block;
+        width: 100%;
+    }
+    .projects-table tr {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.25rem 0.7rem;
+        border: 1px solid var(--p-content-border-color);
+        border-radius: 0.5rem;
+        padding: 0.45rem 0.65rem;
+        margin-bottom: 0.5rem;
+        background: var(--p-surface-50);
+    }
+    .projects-table td {
+        flex: 0 0 auto;
+        padding: 0;
+        border: none;
+        text-align: left !important;
+        width: auto !important;
+        min-height: 0;
+        display: inline-flex;
+        align-items: baseline;
+    }
+    .projects-table td::before {
+        display: none !important;
+    }
+    /* Line 1 cells — name first, time + counts after. */
+    .projects-table td[data-label="Project"] {
+        font-size: 0.95rem;
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .projects-table td[data-label="Last activity"],
+    .projects-table td[data-label="Tickets"],
+    .projects-table td[data-label="Comments"] {
+        color: var(--p-text-muted-color);
+        font-size: 0.78rem;
+    }
+    /* Drop the en-dash placeholder when there's nothing pending —
+       on the compact card it just becomes noise next to the counts. */
+    .projects-table td[data-label="Pending"] {
+        font-size: 0.78rem;
+    }
+    /* Line 2 — actions forced onto their own row. */
+    .projects-table td.action-cell {
+        flex: 1 0 100%;
+        justify-content: flex-end;
+        margin-top: 0.1rem;
+        min-width: 0;
+    }
 }
 </style>

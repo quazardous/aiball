@@ -82,7 +82,30 @@ export function useNotifications(opts: { project: Ref<string | null> }) {
     const pendingArrivalTimers = new Map<number, ReturnType<typeof setTimeout>>();
     const PENDING_TOAST_HOLD_MS = 250;
 
+    // #B.257: defensive dedup at render time. Whatever the source of a
+    // duplicate `message_created`/`message_decided` arrival — multiple
+    // WS sockets (tailscale + LAN, visibility-reconnect race), server
+    // re-broadcast on tag/edit, double-bus emission — we never want
+    // two toasts for the SAME (message.id, status). Track recent
+    // renders with a short window so a real status transition
+    // (pending → approved) still gets through (the pending hold above
+    // already collapses that case, but if it did slip past, the new
+    // status gives a fresh key).
+    const renderedRecently = new Map<string, number>();
+    const RENDER_DEDUP_MS = 4000;
+
     function renderArrivalToast(m: Message) {
+        const dedupKey = `${m.id}:${m.status}`;
+        const now = Date.now();
+        const last = renderedRecently.get(dedupKey);
+        if (last !== undefined && now - last < RENDER_DEDUP_MS) return;
+        renderedRecently.set(dedupKey, now);
+        // Lazy GC: prune anything older than the window so the map
+        // doesn't grow unbounded on a long-lived session.
+        for (const [k, ts] of renderedRecently) {
+            if (now - ts >= RENDER_DEDUP_MS) renderedRecently.delete(k);
+        }
+
         const who = m.by_agent ?? "unknown";
         const k = shortKindLabel(m);
         const summary = m.title ?? (m.body ? m.body.slice(0, 80) : `new ${k}`);

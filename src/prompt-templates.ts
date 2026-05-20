@@ -1,7 +1,7 @@
 /**
  * Central prompt-template service (#B.232 cpaez7).
  *
- * Loads wake-CTA / state-prompt templates from `skill/claude-loop-pings.yaml`
+ * Loads wake-CTA / state-prompt templates from `config/defaults/claude-loop-pings.yaml`
  * (defaults) and merges any per-project override from `.aiball.yaml` →
  * `prompts:` (see `src/autopoll/config.ts`).
  *

@@ -536,6 +536,20 @@ export const api = {
      *  or already terminal. */
     reclassify: (id: number, new_kind: "plan" | "resolution") =>
         req<Message>("POST", `/api/messages/${id}/reclassify`, { new_kind }),
+    /** Promote an undecorated comment to a decision (#B.256).
+     *  `status` omitted → tag as pending. `status` set → tag +
+     *  decide in one gesture. Works whether the comment had a
+     *  prior decision or not. */
+    promoteMessage: (
+        id: number,
+        kind: "plan" | "resolution",
+        status?: "accepted" | "rejected",
+    ) =>
+        req<Message>("POST", `/api/messages/${id}/promote`, { kind, status }),
+    /** Untag a comment — drops `meta.decision` (#B.256 dzm3ef).
+     *  409 when the decision is already terminal. */
+    untagMessage: (id: number) =>
+        req<Message>("POST", `/api/messages/${id}/untag`, {}),
     edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>

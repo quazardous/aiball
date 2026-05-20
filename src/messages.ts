@@ -3,10 +3,6 @@ import {
     insertMessage,
     insertRelationEvent,
     updateMessageStatus,
-    insertPing,
-    listTicketSubscribers,
-    listProjects,
-    listProjectSubscribers,
     upsertTicketSubscription,
     listPendingResolvedForTicket,
     listPendingResolutionDecisionsForTicket,
@@ -15,7 +11,6 @@ import {
     deletePingsForMessage,
     ensureConsumer,
     isHuman,
-    listHumans,
     INTENTS,
     type Message,
     type NewMessage,
@@ -26,6 +21,7 @@ import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
 import { evaluate } from "./rules.js";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
+import { fanOutPings, fanOutMentions } from "./notifications.js";
 
 // User-postable subset of MESSAGE_KINDS: excludes `ticket_sub_added`
 // and `ticket_referenced` (daemon-emitted on relations) AND
@@ -165,83 +161,6 @@ function autoSubscribeAuthor(msg: Message): void {
 }
 
 /**
- * Fan out delivery rows (in the `pings` table) for every recipient that
- * should learn about this newly-approved message. Recipients are the union
- * of:
- *   - ticket subscribers (people following the thread directly — they always
- *     get pings on threads they explicitly follow, regardless of broadcast).
- *   - project owners (subscriptions.role = "owner" — agents that maintain
- *     this project, they want to see every movement, internal or not).
- *   - project followers (subscriptions.role = "follower"), but only when
- *     the parent ticket has its `broadcast` flag set to 1. This keeps
- *     internal dev chatter out of external agents' inboxes while still
- *     letting public/API-impacting tickets reach them.
- * minus the message author themself (no self-ping).
- *
- * Each ping row is per-recipient with its own `seen_at`, so consumption is
- * independent across consumers. Called only when a message becomes approved.
- *
- * This is the SOLE delivery mechanism — there is no cursor model anywhere.
- * Pending-then-approved messages always reach every interested consumer
- * because the fan-out runs at approval time, not at submission.
- */
-export function fanOutPings(msg: Message): void {
-    // #B.245 tristate: `internal` events skip subscriber fan-out
-    // entirely — only @mentions reach (via fanOutMentions, called
-    // separately at submit time). Moderators still see the row in
-    // the pending queue if it's not auto-approved; they just don't
-    // get a personal ping for it.
-    if (msg.scope === "internal") return;
-
-    const recipients = new Set<string>();
-
-    // Ticket subscribers: explicit thread follow always wins regardless of
-    // event scope (above the per-event broadcast gate). Skip on
-    // ticket_created since there's no thread yet (the creator is
-    // auto-subbed to their own ticket and self-filtered).
-    if (msg.kind !== "ticket_created" && msg.ticket_id !== null) {
-        for (const sub of listTicketSubscribers(msg.ticket_id)) {
-            recipients.add(sub);
-        }
-    }
-
-    // Project owners always see `default` and `broadcast` events.
-    for (const sub of listProjectSubscribers(msg.project, { roles: ["owner"] })) {
-        recipients.add(sub);
-    }
-
-    // Project followers only see `broadcast`-scoped events — per-event
-    // decision now (post-#B.245), no longer derived from the ticket-wide
-    // flag. The previous ticket-level `broadcast` boolean was unified
-    // into this same tristate; each event decides its own follower reach.
-    if (msg.scope === "broadcast") {
-        for (const sub of listProjectSubscribers(msg.project, { roles: ["follower"] })) {
-            recipients.add(sub);
-        }
-    }
-
-    // Pending messages also ping every registered human moderator (#B.79)
-    // so they show up as unread in the moderation queue even when not
-    // subscribed to the project. Approved messages don't need this —
-    // the regular subscriber fan-out already covers what humans care
-    // about.
-    if (msg.status === "pending") {
-        for (const h of listHumans()) recipients.add(h);
-    }
-
-    const authorIsHuman = msg.by_agent != null && isHuman(msg.by_agent);
-    // #B.191: when a human posts, skip pings to other humans — they
-    // share the moderator backlog, so cross-human pings are noise.
-    // Hoist the human set so we don't SELECT once per recipient.
-    const humanSet = authorIsHuman ? new Set(listHumans()) : null;
-    for (const r of recipients) {
-        if (r === msg.by_agent) continue;
-        if (humanSet?.has(r)) continue;
-        insertPing(r, msg);
-    }
-}
-
-/**
  * Lifecycle events authored by the ticket's original creator (close /
  * reopen / resolved) skip moderation — the author already had authority
  * over the thread. Other agents posting these events still go through the
@@ -302,35 +221,6 @@ function assertCloseAuthority(input: NewMessage): void {
  * `selfTicketId` is excluded so a body that mentions its own ticket
  * (e.g. "see also #B.42") doesn't trigger a self-referenced event.
  */
-/**
- * Extract `@<name>` mentions from a body, outside backticks/fences.
- * The disambiguation between agent and project is done by the caller
- * via project lookup (`@<name>` matching a known project → project
- * mention; otherwise → agent mention).
- *
- * Names accept word chars, dash and underscore, 2..64 long.
- * Self-mentions (the author's own consumer_id) are skipped.
- */
-function extractMentions(
-    body: string | null | undefined,
-    selfAgent: string | null,
-): string[] {
-    if (!body) return [];
-    const stripped = body
-        .replace(/```[\s\S]*?```/g, "")
-        .replace(/`[^`]*`/g, "");
-    const out = new Set<string>();
-    // Boundary: start of input or a non-word non-`@` char (so `email@x`
-    // and `@@name` don't get caught).
-    const re = /(?:^|[^\w@])@([a-zA-Z0-9_-]{2,64})\b/g;
-    for (const m of stripped.matchAll(re)) {
-        const name = m[1];
-        if (selfAgent && name === selfAgent) continue;
-        out.add(name);
-    }
-    return [...out];
-}
-
 function extractTicketRefs(
     body: string | null | undefined,
     selfTicketId: number,
@@ -418,45 +308,6 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
             pseudo.scope = msg.scope;
             fanOutPings(pseudo);
             broadcast({ type: "message_created", data: pseudo });
-        }
-    }
-}
-
-/**
- * Force-deliver pings to `@<name>` mentions in the body (per #B.71).
- * Disambiguation:
- *   - `@<name>` matching a known project → ping every owner+follower of
- *     that project (broadcast-style, but limited to the project membership).
- *   - Otherwise → ping the consumer named directly, even if not subscribed
- *     to anything (forced one-shot delivery).
- *
- * Self-mention is filtered. Existing pings (from the normal subscriber
- * fan-out) dedup naturally via insertPing's onConflictDoNothing.
- */
-function fanOutMentions(msg: Message): void {
-    const mentions = extractMentions(msg.body, msg.by_agent);
-    if (mentions.length === 0) return;
-    const knownProjects = new Set(listProjects());
-    // #B.245 tristate: at `internal` scope, @projet narrows to owners
-    // only (the whole point of the narrow scope — keep dev chatter
-    // off followers' inboxes). `default` and `broadcast` keep the
-    // wide owner+follower reach for @projet. @agent mentions are
-    // unaffected — they target a single consumer regardless of scope.
-    const projectRoles: ("owner" | "follower")[] = msg.scope === "internal"
-        ? ["owner"]
-        : ["owner", "follower"];
-    for (const name of mentions) {
-        if (knownProjects.has(name)) {
-            const subs = listProjectSubscribers(name, { roles: projectRoles });
-            for (const sub of subs) {
-                if (sub === msg.by_agent) continue;
-                insertPing(sub, msg);
-            }
-        } else {
-            // Treated as a consumer_id. We forcibly insert a ping even if
-            // the recipient isn't subscribed to anything — that's the
-            // whole point of the @-mention feature.
-            insertPing(name, msg);
         }
     }
 }

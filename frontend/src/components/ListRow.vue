@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useSlots } from "vue";
+import { ref, useSlots } from "vue";
 
 defineProps<{
     selected?: boolean;
@@ -17,9 +17,86 @@ defineProps<{
 }>();
 const emit = defineEmits<{
     (e: "click", ev: MouseEvent): void;
+    /** #B.255 — long-press on touch devices (~500ms hold without
+     *  scrolling). The consumer wires this to toggle bulk selection
+     *  so phone users don't have to aim at the tiny checkbox. */
+    (e: "long-press", ev: TouchEvent): void;
 }>();
 
 const slots = useSlots();
+
+// #B.255 long-touch bulk selection. Mobile-only flow:
+//   1. `touchstart`  → arm a 500 ms timer + capture origin coords.
+//   2. `touchmove`   → cancel if the finger moves > 10 px (= scroll).
+//   3. `touchend`    → cancel if released before the timer fires
+//                      (regular tap, browser will emit `click`
+//                      separately).
+//   4. timer fires   → emit `long-press`, suppress the upcoming
+//                      `click` via `suppressClick`, snap the visual
+//                      cue off.
+// Desktop is unaffected — none of this listens to `mousedown`.
+const LONG_PRESS_MS = 500;
+const MOVE_TOLERANCE_PX = 10;
+const isLongPressing = ref(false);
+let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+let touchOrigin: { x: number; y: number } | null = null;
+let suppressClick = false;
+
+function cancelLongPress() {
+    if (longPressTimer !== null) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+    }
+    touchOrigin = null;
+    isLongPressing.value = false;
+}
+
+function onTouchStart(ev: TouchEvent) {
+    if (ev.touches.length !== 1) return;
+    // #B.255 qp5hqv: clear any stale `suppressClick` left over from a
+    // prior long-press. The suppression must only consume the
+    // SYNTHETIC click that mobile browsers auto-fire after touchend —
+    // a fresh user touch starts a new interaction and the next click
+    // is a real tap (deselecting the just-long-pressed row is the
+    // canonical case).
+    suppressClick = false;
+    const t = ev.touches[0];
+    touchOrigin = { x: t.clientX, y: t.clientY };
+    isLongPressing.value = true;
+    longPressTimer = setTimeout(() => {
+        suppressClick = true;
+        isLongPressing.value = false;
+        longPressTimer = null;
+        emit("long-press", ev);
+    }, LONG_PRESS_MS);
+}
+
+function onTouchMove(ev: TouchEvent) {
+    if (!touchOrigin || longPressTimer === null) return;
+    const t = ev.touches[0];
+    const dx = Math.abs(t.clientX - touchOrigin.x);
+    const dy = Math.abs(t.clientY - touchOrigin.y);
+    if (dx > MOVE_TOLERANCE_PX || dy > MOVE_TOLERANCE_PX) {
+        cancelLongPress();
+    }
+}
+
+function onTouchEnd() {
+    // If the timer hasn't fired, this is a tap → let the click pass
+    // through. If it has fired, `suppressClick` was set and the
+    // next click handler short-circuits.
+    cancelLongPress();
+}
+
+function onClick(ev: MouseEvent) {
+    if (suppressClick) {
+        suppressClick = false;
+        ev.stopPropagation();
+        ev.preventDefault();
+        return;
+    }
+    emit("click", ev);
+}
 </script>
 
 <template>
@@ -30,11 +107,16 @@ const slots = useSlots();
             'list-row--unread': unread,
             'list-row--closed': closed,
             'list-row--danger': danger,
+            'list-row--long-pressing': isLongPressing,
             'list-row--attention-moderation': attention === 'moderation',
             'list-row--attention-resolution': attention === 'resolution',
             'list-row--attention-comments': attention === 'comments',
         }"
-        @click="emit('click', $event)"
+        @click="onClick"
+        @touchstart.passive="onTouchStart"
+        @touchmove.passive="onTouchMove"
+        @touchend="onTouchEnd"
+        @touchcancel="onTouchEnd"
     >
         <div class="list-row__line list-row__line--title">
             <span v-if="slots.from" class="list-row__from"><slot name="from" /></span>
@@ -86,9 +168,18 @@ const slots = useSlots();
 .list-row:hover {
     background: var(--p-surface-100);
 }
+/* #B.255 qp5hqv: selected state — flashy orange glow (david: la
+   couleur verte ressemblait à un état existant). Inset box-shadow
+   gives a 2px loud border without affecting layout; outer shadow
+   gives the glow halo. Background stays subtle so the glow does the
+   visual work. */
 .list-row--selected,
 .list-row--selected:hover {
-    background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+    background: color-mix(in srgb, var(--p-orange-500) 6%, transparent);
+    box-shadow:
+        inset 0 0 0 2px var(--p-orange-500),
+        0 0 6px color-mix(in srgb, var(--p-orange-500) 60%, transparent);
+    position: relative;
 }
 .list-row--unread .list-row__from,
 .list-row--unread .list-row__title {
@@ -224,5 +315,37 @@ const slots = useSlots();
     .list-row__time,
     .list-row__meta { display: inline-flex; }
     .list-row__actions { display: flex; }
+    /* #B.255: suppress the native long-press menu (Copy / Share …)
+       on touch since we hijack the same gesture for bulk select. */
+    .list-row {
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+}
+
+/* #B.255 long-press visual cue. While the finger is held (500 ms
+   window), the row tints with a subtle accent and grows a left
+   ribbon that fills toward the trigger threshold. When the long-press
+   fires the row flips to its --selected state via the consumer's
+   bulk toggle; until then this is the only feedback. */
+.list-row--long-pressing {
+    background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
+    position: relative;
+}
+.list-row--long-pressing::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--p-primary-color);
+    animation: list-row-long-press 0.5s linear forwards;
+    pointer-events: none;
+}
+@keyframes list-row-long-press {
+    from { transform: scaleY(0); transform-origin: top; }
+    to   { transform: scaleY(1); transform-origin: top; }
 }
 </style>

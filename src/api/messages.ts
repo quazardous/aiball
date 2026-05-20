@@ -25,11 +25,12 @@ import {
     deletePingsForMessage,
     editMessage,
     getMessage,
-    insertPing,
     listMessages,
     markQuestionAnswered,
     noteMessage,
+    promoteMessageToDecision,
     reclassifyMessageDecision,
+    removeMessageDecision,
     setMessageSummary,
     updateMessageStatus,
     type Intent,
@@ -38,7 +39,8 @@ import {
     type Priority,
 } from "../db.js";
 import { isDecisionKind, type DecisionKind } from "../decisions.js";
-import { fanOutPings, submitMessage, validateNewMessage } from "../messages.js";
+import { submitMessage, validateNewMessage } from "../messages.js";
+import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
 import { broadcast } from "../ws.js";
 import { badRequest, consumerOf, notFound, withTags, withTagsOne } from "./_helpers.js";
@@ -102,15 +104,12 @@ function decide(
         // stops surfacing as unread on their inboxes.
         deletePingsForMessage(id);
     }
-    // Transition ping: notify the message author that a moderator (human)
-    // decided their submission. Skip if the author IS the moderator (close
-    // the loop on bypass-humain posts that somehow ended up in the queue).
-    if (
-        updated.by_agent &&
-        updated.by_agent !== "human" &&
-        (status === "approved" || status === "rejected")
-    ) {
-        insertPing(updated.by_agent, updated);
+    // Transition ping: notify the message author that a moderator decided
+    // their submission. Routed through the notification service (#260) so
+    // every "decide on someone's post" path notifies the author the same
+    // way — moderation here, decision-on-comment in POST /decide.
+    if (status === "approved" || status === "rejected") {
+        notifyDecision(updated, consumerOf(req));
     }
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_decided", data: decorated });
@@ -227,6 +226,10 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
     try {
         const updated = applyMessageDecision(id, body.status, by, newKind);
         if (!updated) return notFound(res);
+        // #260/#261: notify the proposal's author that their plan/resolution
+        // was accepted (go-signal to execute) or rejected (ball back in
+        // their court). Same service the moderation decide() path uses.
+        notifyDecision(updated, by);
         const decorated = withTagsOne(updated);
         broadcast({ type: "message_edited", data: decorated });
         res.json(decorated);
@@ -285,6 +288,61 @@ messagesRouter.post("/messages/:id/reclassify", (req: Request, res: Response) =>
     }
     try {
         const updated = reclassifyMessageDecision(id, body.new_kind);
+        if (!updated) return notFound(res);
+        const decorated = withTagsOne(updated);
+        broadcast({ type: "message_edited", data: decorated });
+        res.json(decorated);
+    } catch (e) {
+        return res.status(409).json({ error: (e as Error).message });
+    }
+});
+
+/**
+ * Promote an existing comment to a decision (#B.256). Two flows:
+ *   - `body = { kind }`           — tag as pending plan/resolution
+ *   - `body = { kind, status }`   — tag + decide in one gesture
+ *     where status ∈ { "accepted", "rejected" }.
+ *
+ * Used by the per-comment "classify" dropdown in MessageCard.vue.
+ * Reporter-only by convention (the frontend gates the affordance);
+ * the daemon doesn't second-guess that here.
+ */
+messagesRouter.post("/messages/:id/promote", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
+    const body = (req.body ?? {}) as { kind?: unknown; status?: unknown };
+    if (typeof body.kind !== "string" || !isDecisionKind(body.kind)) {
+        return badRequest(res, "kind must be a valid decision kind");
+    }
+    let status: "accepted" | "rejected" | undefined;
+    if (body.status !== undefined && body.status !== null) {
+        if (body.status !== "accepted" && body.status !== "rejected") {
+            return badRequest(res, "status must be accepted or rejected (omit for pending)");
+        }
+        status = body.status;
+    }
+    try {
+        const by = consumerOf(req);
+        const updated = promoteMessageToDecision(id, body.kind, status, by);
+        if (!updated) return notFound(res);
+        const decorated = withTagsOne(updated);
+        broadcast({ type: "message_edited", data: decorated });
+        res.json(decorated);
+    } catch (e) {
+        return res.status(409).json({ error: (e as Error).message });
+    }
+});
+
+/**
+ * Untag a comment — clear its `meta.decision` (#B.256 dzm3ef). Only
+ * pending decisions can be untagged; terminal ones (accepted /
+ * rejected) keep the audit row.
+ */
+messagesRouter.post("/messages/:id/untag", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
+    try {
+        const updated = removeMessageDecision(id);
         if (!updated) return notFound(res);
         const decorated = withTagsOne(updated);
         broadcast({ type: "message_edited", data: decorated });

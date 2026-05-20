@@ -51,6 +51,19 @@ function filtersAreNarrowed(): boolean {
         || props.onlyOpen === false;
 }
 
+// #B.255 bwsbc4: once at least one row is selected, the list is in
+// "selection mode" — a normal tap toggles selection instead of
+// opening the ticket. Drop to zero selected and tap reverts to its
+// usual "open the row" behaviour. The mobile UX matches what users
+// expect from Gmail / iOS Mail when a bulk batch is in flight.
+function onRowClick(r: InboxRow) {
+    if (props.selectedIds.size > 0) {
+        emit("toggle-selected", r.id, !props.selectedIds.has(r.id));
+        return;
+    }
+    emit("open-row", r);
+}
+
 </script>
 
 <template>
@@ -113,7 +126,8 @@ function filtersAreNarrowed(): boolean {
         :unread="r.unread"
         :closed="r.closed"
         :attention="attentionOf(r)"
-        @click="emit('open-row', r)"
+        @click="onRowClick(r)"
+        @long-press="emit('toggle-selected', r.id, !selectedIds.has(r.id))"
     >
         <template #select>
             <Checkbox

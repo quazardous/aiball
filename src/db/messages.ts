@@ -31,7 +31,7 @@ import {
     type MessageMeta,
     type QuestionAnswer,
 } from "../questions.js";
-import { applyDecision, reclassifyDecision, type DecisionStatus } from "../decisions.js";
+import { applyDecision, promoteToDecision, reclassifyDecision, type DecisionStatus } from "../decisions.js";
 
 export function insertMessage(m: NewMessage): Message {
     const db = getDb();
@@ -806,6 +806,88 @@ export function reclassifyMessageDecision(
             return messageRowToMessage(m, parent?.project ?? "");
         }
         meta.decision = r.decision;
+        tx.update(schema.messages)
+            .set({ meta: serializeMeta(meta) })
+            .where(eq(schema.messages.id, messageId))
+            .run();
+        const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!fresh) return null;
+        const parent = tx.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
+        return messageRowToMessage(fresh, parent?.project ?? "");
+    });
+}
+
+/**
+ * Promote an undecorated comment to a decision (#B.256). When the
+ * comment has no prior `meta.decision`, this creates one (pending if
+ * `status` is omitted, terminal if "accepted" / "rejected" is passed).
+ * When it already has a decision, delegates to reclassify (status
+ * omitted) or applyDecision (status set) so the same endpoint can
+ * funnel both flows.
+ *
+ * Throws when the existing decision is already terminal AND the new
+ * status would change it — the post-hoc gesture isn't supposed to
+ * undo a final decision (re-tag requires a new comment).
+ */
+export function promoteMessageToDecision(
+    messageId: number,
+    kind: import("../decisions.js").DecisionKind,
+    status: Exclude<DecisionStatus, "pending"> | undefined,
+    by: string,
+): Message | null {
+    const db = getDb();
+    return db.transaction((tx) => {
+        const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!m) return null;
+        if (m.kind !== "comment_added") {
+            throw new Error("promote only applies to comment_added");
+        }
+        const meta = parseMeta(m.meta ?? null);
+        const at = new Date().toISOString();
+        const r = promoteToDecision(meta.decision, kind, status, by, at);
+        if (!r.changed) {
+            const parent = tx.select({ project: schema.tickets.project })
+                .from(schema.tickets).where(eq(schema.tickets.id, m.ticketId)).get();
+            return messageRowToMessage(m, parent?.project ?? "");
+        }
+        meta.decision = r.decision;
+        tx.update(schema.messages)
+            .set({ meta: serializeMeta(meta) })
+            .where(eq(schema.messages.id, messageId))
+            .run();
+        const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!fresh) return null;
+        const parent = tx.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
+        return messageRowToMessage(fresh, parent?.project ?? "");
+    });
+}
+
+/**
+ * Untag a comment — drops `meta.decision` entirely (#B.256 dzm3ef).
+ * Idempotent (no-op when nothing to remove). Throws when the
+ * existing decision is already terminal — the audit row stays in
+ * the thread, removal would erase that history. Pending decisions
+ * can be cleanly removed.
+ */
+export function removeMessageDecision(messageId: number): Message | null {
+    const db = getDb();
+    return db.transaction((tx) => {
+        const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!m) return null;
+        const meta = parseMeta(m.meta ?? null);
+        if (!meta.decision) {
+            const parent = tx.select({ project: schema.tickets.project })
+                .from(schema.tickets).where(eq(schema.tickets.id, m.ticketId)).get();
+            return messageRowToMessage(m, parent?.project ?? "");
+        }
+        if (meta.decision.status !== "pending") {
+            throw new Error(
+                `cannot remove a ${meta.decision.status} decision — the audit row must persist`,
+            );
+        }
+        meta.decision = undefined;
         tx.update(schema.messages)
             .set({ meta: serializeMeta(meta) })
             .where(eq(schema.messages.id, messageId))

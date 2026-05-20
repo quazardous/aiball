@@ -5,8 +5,8 @@
  *
  * Holds:
  *   - the singleton `AiballClient` used by every tool;
- *   - `SANDBOX_MODE` + `effectiveBy()` (locks `by_agent` on writes
- *     when AIBALL_MCP_MODE=sandbox, per #B.63);
+ *   - `effectiveBy()` — locks `by_agent` on every write to the
+ *     resolved agent id (#240; was sandbox-only per #B.63);
  *   - `microStatus()` — the "is anything waiting" probe injected
  *     into every tool response;
  *   - `asText()` — wraps a payload (+ microStatus) into the MCP
@@ -17,18 +17,20 @@ import { AiballClient } from "../client.js";
 export const client = new AiballClient();
 
 /**
- * Hardened sandbox mode (#B.63). When AIBALL_MCP_MODE=sandbox is set,
- * the server locks `by_agent` on every write to the resolved agent
- * id — preventing an autonomous sub-agent from impersonating the
- * human, another agent, or a fabricated identity. Whatever the agent
- * passes in the param is ignored. Normal mode (unset) keeps the
- * previous behavior where `by_agent` is an optional override.
+ * Resolve the author identity for every MCP write. The stored `by_agent`
+ * is always the resolved agent id (`client.agentId`, from AIBALL_AGENT /
+ * cwd hash); a caller-supplied `by_agent` is ignored.
+ *
+ * Why ignore it (#240): the self-ping filter in `fanOutPings`
+ * (`src/messages.ts`) skips the author by strict `recipient === by_agent`
+ * equality. A cosmetic override (e.g. "claude" while the consumer is
+ * "skybot-claude") mismatches that equality, so the agent received its
+ * own comments back as personal pings. Locking the author to the consumer
+ * id closes the drift. Previously this lock was opt-in via
+ * AIBALL_MCP_MODE=sandbox (#B.63); #240 made it the only behavior.
  */
-export const SANDBOX_MODE = process.env.AIBALL_MCP_MODE === "sandbox";
-
-export function effectiveBy(provided: string | undefined): string {
-    if (SANDBOX_MODE) return client.agentId;
-    return provided ?? client.agentId;
+export function effectiveBy(_provided?: string): string {
+    return client.agentId;
 }
 
 /**

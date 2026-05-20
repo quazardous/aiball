@@ -47,8 +47,10 @@ const body = defineModel<string>("body", { default: "" });
 // ticket" — the composer persists the last-chosen scope per-ticket
 // via localStorage so the user doesn't have to re-pick it on every
 // reply within a thread. New tickets get a per-project memory.
-// Initial fallback: replies → `internal` (existing thread already
-// has its audience); new tickets → `default`.
+// Initial fallback: `default` for every mode (#253 — david: replies
+// should default to `default`, not `internal`. The prior ny8m8a
+// directive favouring `internal` for replies was reversed once david
+// tried it live).
 const scopeStorageKey = computed(() => {
     if (props.mode === "comment" && props.ticketId !== undefined) {
         return `aiball.composer.scope.${props.ticketId}`;
@@ -60,9 +62,7 @@ function readPersistedScope(): Scope | null {
     if (raw === "internal" || raw === "default" || raw === "broadcast") return raw;
     return null;
 }
-const scope = ref<Scope>(
-    readPersistedScope() ?? (props.mode === "comment" ? "internal" : "default"),
-);
+const scope = ref<Scope>(readPersistedScope() ?? "default");
 watch(scope, (next) => {
     localStorage.setItem(scopeStorageKey.value, next);
 });

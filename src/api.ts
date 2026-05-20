@@ -28,6 +28,7 @@ import { badRequest } from "./api/_helpers.js";
 import { agentHelpersRouter } from "./api/agent-helpers.js";
 import { authRouter } from "./api/auth.js";
 import { consumersRouter } from "./api/consumers.js";
+import { configRouter } from "./api/config.js";
 import { messagesRouter } from "./api/messages.js";
 import { pingsRouter } from "./api/pings.js";
 import { readTrackingRouter } from "./api/read-tracking.js";
@@ -273,6 +274,13 @@ api.use(ticketsRouter);
 // -------- consumers (#B.79) -----------------------------------------------
 // Consumer CRUD + state-push moved to ./api/consumers.ts (#B.213 phase 1.B).
 api.use(consumersRouter);
+
+// -------- config home (#235) ----------------------------------------------
+// `GET /api/config` is the single boot-time config read for the frontend:
+// merged linkifier patterns (#B.235) + strategy + upload cap, in one call.
+// Replaces the former one-router-per-config-slice drift (#cpd7zw). Config
+// writes stay on their targeted PATCH endpoints.
+api.use(configRouter);
 
 // -------- rules + agent helpers -------------------------------------------
 // Moderation rule CRUD → ./api/rules.ts; /feed-path → ./api/agent-helpers.ts

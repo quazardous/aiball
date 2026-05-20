@@ -212,7 +212,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .enum(["internal", "default", "broadcast"])
                     .optional()
                     .describe(
-                        "Event scope (#B.245 tristate). `internal` = owners only + @mentions explicit (@projet narrows to owners); `default` = ticket subscribers + project owners + @mentions; `broadcast` = `default` + project followers. **Default for replies is `'internal'`** (#ny8m8a: existing threads already have their audience, broad fan-out on every reply over-notifies). Pass `'default'` to ping subscribers + owners, or `'broadcast'` to also reach followers. Each comment decides its own fan-out independently.",
+                        "Event scope (#B.245 tristate). `internal` = owners only + @mentions explicit (@projet narrows to owners); `default` = ticket subscribers + project owners + @mentions; `broadcast` = `default` + project followers. **Default `'default'`** (#253 — replies behave like the standard fan-out). Pass `'internal'` to narrow (no subs/followers ping, only @mentions), or `'broadcast'` to widen to followers. Each comment decides its own fan-out independently.",
                     ),
             },
         },
@@ -274,11 +274,12 @@ export function registerTicketWriteTools(server: McpServer): void {
                 // close/reopen are lifecycle rows where the field has no
                 // meaning and the validator would reject it.
                 summary_until: kind === "comment_added" ? summary_until : undefined,
-                // #B.245 tristate: forward composer-side `scope`. Default
-                // `'internal'` for replies (#ny8m8a — existing threads have
-                // their audience, broad fan-out over-notifies). Callers
-                // pass `scope: 'default'` or `scope: 'broadcast'` to widen.
-                scope: scope ?? "internal",
+                // #B.245 tristate: forward composer-side `scope`.
+                // Default `'default'` (#253 — david reversed the prior
+                // ny8m8a directive for `'internal'`-by-default; replies
+                // should fan out to subscribers like a normal post,
+                // explicit `scope` to narrow or broaden).
+                scope: scope ?? "default",
             });
             return asText(res);
         },

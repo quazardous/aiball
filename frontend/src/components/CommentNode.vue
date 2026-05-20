@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import Button from "primevue/button";
+import SplitButton from "primevue/splitbutton";
 import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
 import { useToast } from "primevue/usetoast";
@@ -96,6 +97,63 @@ const decisionChipSeverity = computed(() => {
     if (d.status === "accepted") return "success";
     if (d.status === "rejected") return "danger";
     return "warn"; // pending
+});
+
+// #B.256: post-hoc "classify" affordance — transform a plain comment
+// into a plan/resolution decision, flip its kind, or untag it. Mirrors
+// the backend `promoteToDecision` polymorphism (create when absent,
+// reclassify/apply when pending). Hidden once the decision is terminal
+// (accepted/rejected): re-tagging then 409s and the audit row must
+// persist; posting a fresh comment is the escape. David #x5g34g
+// (available with a pending decision too), #dzm3ef (untag), #nkcnfq
+// (pi-refresh icon = "transform", not "tag").
+const canClassify = computed(
+    () =>
+        props.msg.kind === "comment_added"
+        && (!decision.value || decision.value.status === "pending"),
+);
+const classifyBusy = ref(false);
+async function promote(kind: "plan" | "resolution", status?: "accepted" | "rejected") {
+    classifyBusy.value = true;
+    try {
+        await api.promoteMessage(props.msg.id, kind, status);
+        broadcastRefresh();
+    } finally {
+        classifyBusy.value = false;
+    }
+}
+async function untag() {
+    classifyBusy.value = true;
+    try {
+        await api.untagMessage(props.msg.id);
+        broadcastRefresh();
+    } finally {
+        classifyBusy.value = false;
+    }
+}
+// #B.256 / #266 yzfvud: the classify SplitButton adapts to the current
+// decision. `classifyActions[0]` is the primary (button), the rest is the
+// chevron menu. We DROP "tag as pending <kind>" for the kind this comment
+// is ALREADY tagged as (a pending plan re-offering "tag as pending plan"
+// is a no-op that confused the reader — david #266).
+const classifyActions = computed(() => {
+    const d = decision.value;
+    const pendingKind = d?.status === "pending" ? d.kind : null;
+    const items: { label: string; icon: string; command: () => void }[] = [];
+    if (pendingKind !== "plan") {
+        items.push({ label: "tag as pending plan", icon: "pi pi-refresh", command: () => { void promote("plan"); } });
+    }
+    if (pendingKind !== "resolution") {
+        items.push({ label: "tag as pending resolution", icon: "pi pi-tag", command: () => { void promote("resolution"); } });
+    }
+    items.push({ label: "tag + accept as plan", icon: "pi pi-check", command: () => { void promote("plan", "accepted"); } });
+    items.push({ label: "tag + accept as resolution", icon: "pi pi-check", command: () => { void promote("resolution", "accepted"); } });
+    // #B.256 dzm3ef: offer "remove tag" only on a pending decision —
+    // terminal ones are not un-taggable (backend 409s).
+    if (d && d.status === "pending") {
+        items.push({ label: "remove tag", icon: "pi pi-trash", command: () => { void untag(); } });
+    }
+    return items;
 });
 
 async function copyRef() {
@@ -368,6 +426,21 @@ onBeforeUnmount(() => detachPaste?.());
                 severity="secondary"
                 text
                 @click="startEdit"
+            />
+            <!-- #B.256: classify dropdown next to the edit pencil —
+                 transform this comment into a plan/resolution decision.
+                 pi-refresh = "transform" (david #nkcnfq); chevron menu
+                 carries the variants + "remove tag" when pending. -->
+            <SplitButton
+                v-if="canClassify"
+                :label="classifyActions[0].label"
+                icon="pi pi-refresh"
+                size="small"
+                severity="secondary"
+                text
+                :model="classifyActions.slice(1)"
+                :loading="classifyBusy"
+                @click="classifyActions[0].command()"
             />
         </div>
     </div>

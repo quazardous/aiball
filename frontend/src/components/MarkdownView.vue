@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { marked, type Tokens } from "marked";
 import DOMPurify from "dompurify";
 import { bus } from "../lib/bus";
 import { promoteTrigger } from "../lib/prefs";
 import { extractQuestions } from "../lib/questions";
+import { applyPostSanitize, markedInstance, patterns } from "../lib/formatting";
 
 /**
  * `messageId` + `questionsClickable` opt the body into the #B.104
@@ -28,122 +28,17 @@ const props = defineProps<{
     selfTicketId?: number;
 }>();
 
-marked.setOptions({
-    gfm: true,
-    breaks: true,
-});
-
-interface MsgRefToken extends Tokens.Generic {
-    type: "msgRef";
-    raw: string;
-    kind: "ticket" | "comment";
-    label: string;
-    /** Backend lookup key — integer for tickets, string hashid for comments. */
-    ref: string;
-}
-
-// Linkify cross-message refs in body text → /b/<ref>. The API resolves
-// either an integer (ticket id or legacy comment id) or a comment hashid;
-// in all three cases the route lands on the parent thread.
-//
-// Canonical render uses a **dot** between the sigil and the id/hashid
-// (`#B.123`, `#C.xk7q3a`) for readability. Authors can type any of these
-// equivalent separator characters and they all parse the same way:
-//   - `#B.123` / `#C.xk7q3a` (canonical, dot)
-//   - `#B/123` / `#C/xk7q3a` (slash)
-//   - `#B_123` / `#C_xk7q3a` (underscore)
-//   - `#B-123` / `#C-xk7q3a` (dash)
-//   - `#B123`  / `#Cxk7q3a`  (legacy, no separator)
-//
-// The bare `#123` form is NOT matched: it produced too many false
-// positives in prose ("item #9", "step #2") per #B.62 follow-up.
-// Authors must type the sigil letter to get a linkified ref.
-//
-// Matching is case-insensitive on the sigil letter only. Runs as an inline
-// marked extension so codespans, fenced blocks, and existing markdown
-// links are tokenized first. The trailing \b prevents matches inside hex
-// colors (#abc, #123abc).
-const HASHID_CHARS = "a-hjkmnp-z2-9"; // matches src/db.ts HASHID_ALPHABET
-const SEP = "[._/-]?"; // optional separator between sigil and id/hashid
-marked.use({
-    extensions: [
-        {
-            name: "msgRef",
-            level: "inline",
-            start(src: string) {
-                const m = src.match(new RegExp(`#(?:[bBcC])?[._/-]?[\\d${HASHID_CHARS}]`, "i"));
-                return m?.index;
-            },
-            tokenizer(src: string): MsgRefToken | undefined {
-                // Canonical comment hashid first: #C[sep]?<4-8 chars from
-                // the hashid alphabet> (case-insensitive).
-                const hashMatch = new RegExp(
-                    `^#[Cc]${SEP}([${HASHID_CHARS}]{4,8})\\b`,
-                    "i",
-                ).exec(src);
-                if (hashMatch) {
-                    const hash = hashMatch[1].toLowerCase();
-                    return {
-                        type: "msgRef",
-                        raw: hashMatch[0],
-                        kind: "comment",
-                        label: `#C.${hash}`,
-                        ref: hash,
-                    };
-                }
-                // Numeric forms — letter REQUIRED (bare `#NN` no longer
-                // linkifies per #B.62 follow-up: too many prose false
-                // positives like "item #9").
-                const numMatch = new RegExp(`^#([bBcC])${SEP}(\\d+)\\b`).exec(src);
-                if (!numMatch) return undefined;
-                const prefix = numMatch[1].toUpperCase();
-                const kind: "ticket" | "comment" = prefix === "C" ? "comment" : "ticket";
-                const letter = kind === "comment" ? "C" : "B";
-                return {
-                    type: "msgRef",
-                    raw: numMatch[0],
-                    kind,
-                    label: `#${letter}.${numMatch[2]}`,
-                    ref: numMatch[2],
-                };
-            },
-            renderer(token) {
-                const t = token as MsgRefToken;
-                const cls = t.kind === "ticket" ? "ticket-ref" : "comment-ref";
-                return `<a href="/b/${t.ref}" class="${cls}">${t.label}</a>`;
-            },
-        },
-    ],
-});
-
-// Patterns to linkify `#B.NNN` / `#C.<hashid>` refs that ended up inside
-// a `<code>` span because the author wrapped them in backticks. The
-// inline marked extension above intentionally skips codespans (per
-// Markdown semantics, backticks mean "literal, don't interpret") — but
-// in practice writers reach for backticks to *style* a ref while still
-// wanting the link. Compromise: keep the codespan styling and wrap it
-// in an anchor so the eye sees `#B.276` and the cursor opens the
-// thread. Outside-of-code refs are still handled by the marked
-// extension as before.
-const TICKET_CODE_RE = /<code>#([Bb])([._/-]?)(\d+)<\/code>/g;
-const COMMENT_CODE_RE = /<code>#([Cc])([._/-]?)([a-hjkmnp-z2-9]{4,8})<\/code>/gi;
-// `@<name>` mention highlighter (per #B.71). Scans the SANITIZED html
-// (after marked + DOMPurify) so HTML tags can't be smuggled through.
-// Won't match inside <code>…</code> spans because those contain literal
-// `&lt;` / `&gt;` already and the lookbehind here requires a non-word
-// non-`@` char or start-of-string just before the `@`. Anchor tags
-// (<a href="…">) typically have `=` before so they're skipped too.
-//
-// The backend fires the actual ping fan-out (forcing delivery to the
-// mentioned consumer or to the project's owners + followers); this UI
-// styling is purely visual so the author can see WHICH mentions will
-// trigger pings.
-const MENTION_RE = /(^|[^\w@>"'\/])@([a-zA-Z0-9_-]{2,64})\b/g;
-
+// Linkify cross-message refs (`#B.123`, `#C.<hashid>`) and `@mentions`.
+// The patterns are no longer hardcoded here — they come from the merged
+// config (`GET /api/config`, #B.235) via `../lib/formatting`, which seeds
+// in-code defaults synchronously and swaps in the effective set once the
+// fetch resolves. `markedInstance` carries the inline link extensions;
+// `applyPostSanitize` handles the post-sanitize passes (codespan refs +
+// `@mention` spans). Both are reactive so a live config change re-renders.
 const html = computed(() => {
     const src = props.source ?? "";
     if (!src) return "";
-    const raw = marked.parse(src, { async: false }) as string;
+    const raw = markedInstance.value.parse(src, { async: false }) as string;
     const sanitized = DOMPurify.sanitize(raw, {
         ALLOWED_TAGS: [
             "h1", "h2", "h3", "h4", "h5", "h6",
@@ -158,17 +53,7 @@ const html = computed(() => {
         ALLOWED_ATTR: ["href", "title", "alt", "src", "type", "checked", "disabled", "class"],
         ALLOW_DATA_ATTR: false,
     });
-    return sanitized
-        .replace(TICKET_CODE_RE, (_, _letter, sep, id) =>
-            `<a class="ticket-ref ticket-ref--code" href="/b/${id}"><code>#B${sep}${id}</code></a>`,
-        )
-        .replace(COMMENT_CODE_RE, (_, _letter, sep, hash) => {
-            const h = hash.toLowerCase();
-            return `<a class="comment-ref comment-ref--code" href="/b/${h}"><code>#C${sep}${hash}</code></a>`;
-        })
-        .replace(MENTION_RE, (_, lead, name) =>
-            `${lead}<span class="mention" title="Mention — fan-out ping fires on insertion.">@${name}</span>`,
-        );
+    return applyPostSanitize(sanitized, patterns.value);
 });
 
 // Intercept clicks on internal links (any /b/N, /rules, /tags, /projects, etc.)

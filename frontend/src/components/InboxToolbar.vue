@@ -88,8 +88,14 @@ function pickProject(v: string | null) {
 // desktop, default-collapsed on mobile; resize keeps the state in
 // sync if the viewport crosses the breakpoint.
 const filtersExpanded = ref(typeof window === "undefined" || window.innerWidth > 720);
+// #259: the new-ticket button label is full ("New Ticket") on desktop,
+// short ("New") on phone where horizontal room is scarce — the pi-plus
+// icon already conveys "create". Same 720px breakpoint as the filters
+// collapse, kept in sync on resize.
+const isPhone = ref(typeof window !== "undefined" && window.innerWidth <= 720);
 function syncFilters() {
     filtersExpanded.value = window.innerWidth > 720;
+    isPhone.value = window.innerWidth <= 720;
 }
 onMounted(() => window.addEventListener("resize", syncFilters));
 onUnmounted(() => window.removeEventListener("resize", syncFilters));
@@ -165,11 +171,15 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
         >
             <i class="pi pi-filter" /> filters
         </button>
+        <!-- #259: full "New Ticket" on desktop, short "New" on phone
+             (the pi-plus icon already conveys "create" where room is
+             scarce). #B.258 shortened it everywhere; now responsive. -->
         <Button
             class="filter-new-ticket"
-            label="New ticket"
+            :label="isPhone ? 'New' : 'New Ticket'"
             icon="pi pi-plus"
             size="small"
+            title="New ticket"
             @click="emit('new-ticket')"
         />
         <div class="filters-body" :class="{ 'filters-body--collapsed': !filtersExpanded }">

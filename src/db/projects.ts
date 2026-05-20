@@ -221,7 +221,7 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         .orderBy(asc(schema.messages.id))
         .all();
     const closedByTicket = new Map<number, boolean>();
-    const resolvedByTicket = new Map<number, boolean>();
+    const gatedByDecisionByTicket = new Map<number, boolean>();
     const blockedByTicket = new Map<number, boolean>();
     for (const ev of lifecycle) {
         if (ev.kind === "ticket_closed") {
@@ -231,13 +231,13 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         } else if (ev.kind === "ticket_reopened") {
             if (ev.status === "approved") {
                 closedByTicket.set(ev.ticket_id, false);
-                resolvedByTicket.set(ev.ticket_id, false);
+                gatedByDecisionByTicket.set(ev.ticket_id, false);
                 blockedByTicket.set(ev.ticket_id, false);
             }
         } else if (ev.kind === "ticket_resolved") {
             // Pending OR approved counts as "agent done".
             if (ev.status === "approved" || ev.status === "pending") {
-                resolvedByTicket.set(ev.ticket_id, true);
+                gatedByDecisionByTicket.set(ev.ticket_id, true);
             }
         } else if (ev.kind === "ticket_blocked") {
             // ticket_blocked is always auto-approved (it's a signal,
@@ -276,7 +276,7 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
     // proposed done" — same effect on actionable_count as a legacy
     // ticket_resolved row. We can't reliably re-do the
     // reopen-clears-resolved ordering here without re-sorting events,
-    // but the existing replay already cleared resolvedByTicket on the
+    // but the existing replay already cleared gatedByDecisionByTicket on the
     // last reopen seen; a NEW resolution comment after that reopen
     // will set it again here, which is the correct semantic.
     const resolutionComments = db.select({
@@ -296,8 +296,15 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         try {
             const m = JSON.parse(c.meta) as { decision?: { kind?: string; status?: string } };
             const d = m.decision;
-            if (d?.kind === "resolution" && (d.status === "pending" || d.status === "accepted")) {
-                resolvedByTicket.set(c.ticket_id, true);
+            // #B.242: gate actionable on any pending validation across decision
+            // kinds. Resolution stays excluded on `accepted` too (short window
+            // before close); plan:accepted is the GO-signal so it re-enters
+            // actionable for the agent to execute.
+            const isResolutionGated =
+                d?.kind === "resolution" && (d.status === "pending" || d.status === "accepted");
+            const isPlanPending = d?.kind === "plan" && d.status === "pending";
+            if (isResolutionGated || isPlanPending) {
+                gatedByDecisionByTicket.set(c.ticket_id, true);
             }
         } catch { /* malformed meta, skip */ }
     }
@@ -429,10 +436,10 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         //   - a resolved/blocked ticket doesn't nag (#B.119)
         //   - a ticket waiting on an unfinished dependency doesn't
         //     surface as work to do (gating clears when blocker closes)
-        const isResolved = resolvedByTicket.get(t.id) === true;
+        const isGatedByDecision = gatedByDecisionByTicket.get(t.id) === true;
         const isBlocked = blockedByTicket.get(t.id) === true;
         const isGated = gatedByBlocker.has(t.id);
-        if (!isResolved && !isBlocked && !isGated) {
+        if (!isGatedByDecision && !isBlocked && !isGated) {
             actionablePerProject.set(t.project, (actionablePerProject.get(t.project) ?? 0) + 1);
         }
     }
@@ -891,7 +898,7 @@ export function computeActionableTicketIds(): ActionableTicketSet {
         .orderBy(asc(schema.messages.id))
         .all();
     const closedByTicket = new Map<number, boolean>();
-    const resolvedByTicket = new Map<number, boolean>();
+    const gatedByDecisionByTicket = new Map<number, boolean>();
     const blockedByTicket = new Map<number, boolean>();
     for (const ev of lifecycle) {
         if (ev.kind === "ticket_closed") {
@@ -899,12 +906,12 @@ export function computeActionableTicketIds(): ActionableTicketSet {
         } else if (ev.kind === "ticket_reopened") {
             if (ev.status === "approved") {
                 closedByTicket.set(ev.ticket_id, false);
-                resolvedByTicket.set(ev.ticket_id, false);
+                gatedByDecisionByTicket.set(ev.ticket_id, false);
                 blockedByTicket.set(ev.ticket_id, false);
             }
         } else if (ev.kind === "ticket_resolved") {
             if (ev.status === "approved" || ev.status === "pending") {
-                resolvedByTicket.set(ev.ticket_id, true);
+                gatedByDecisionByTicket.set(ev.ticket_id, true);
             }
         } else if (ev.kind === "ticket_blocked") {
             if (ev.status === "approved" || ev.status === "pending") {
@@ -929,8 +936,15 @@ export function computeActionableTicketIds(): ActionableTicketSet {
         try {
             const m = JSON.parse(c.meta) as { decision?: { kind?: string; status?: string } };
             const d = m.decision;
-            if (d?.kind === "resolution" && (d.status === "pending" || d.status === "accepted")) {
-                resolvedByTicket.set(c.ticket_id, true);
+            // #B.242: gate actionable on any pending validation across decision
+            // kinds. Resolution stays excluded on `accepted` too (short window
+            // before close); plan:accepted is the GO-signal so it re-enters
+            // actionable for the agent to execute.
+            const isResolutionGated =
+                d?.kind === "resolution" && (d.status === "pending" || d.status === "accepted");
+            const isPlanPending = d?.kind === "plan" && d.status === "pending";
+            if (isResolutionGated || isPlanPending) {
+                gatedByDecisionByTicket.set(c.ticket_id, true);
             }
         } catch { /* malformed meta, skip */ }
     }
@@ -986,7 +1000,7 @@ export function computeActionableTicketIds(): ActionableTicketSet {
 
     const actionableIds = new Set<number>();
     for (const id of openIds) {
-        if (resolvedByTicket.get(id) === true) continue;
+        if (gatedByDecisionByTicket.get(id) === true) continue;
         if (blockedByTicket.get(id) === true) continue;
         if (gatedByBlocker.has(id)) continue;
         actionableIds.add(id);
