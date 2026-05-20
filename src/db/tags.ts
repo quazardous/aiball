@@ -25,19 +25,9 @@ export interface NewTag {
     position?: number;
 }
 
-/** Closed-list initial tags. Created once by `bootstrap()` when the
- *  tags table is empty. Exported so the connection bootstrap can seed
- *  them; not part of the public API. */
-export const DEFAULT_TAGS: NewTag[] = [
-    { name: "bug", color: "#ef4444", note: "something is broken", position: 1 },
-    { name: "feature", color: "#10b981", note: "new capability", position: 2 },
-    { name: "question", color: "#3b82f6", note: "needs clarification", position: 3 },
-    { name: "docs", color: "#8b5cf6", note: "documentation work", position: 4 },
-    { name: "urgent", color: "#f59e0b", note: "needs attention now", position: 5 },
-    { name: "discussion", color: "#6b7280", note: "design / architecture talk", position: 6 },
-    { name: "wontfix", color: "#9ca3af", note: "decided not to act", position: 7 },
-    { name: "done", color: "#22c55e", note: "completed", position: 8 },
-];
+// The classic catalog (bug/feature/urgent/…) was moved to the shipped
+// dist config in #223 cj2kp2 — see `config/defaults/tags.yaml`. The DB
+// bootstrap seeds rows from there via `loadShippedDefaultTags()`.
 
 function tagRowToTag(t: schema.Tag): Tag {
     return {

@@ -7,6 +7,25 @@ export interface Tag {
     created_at: string;
 }
 
+/**
+ * Merged tag-catalog row (#223) returned by `GET /tags?project=`. Config
+ * tags come from the yaml chain — read-only, non-deletable, `id: null`,
+ * `source: "config"`; DB tags carry their real id and `source: "db"`.
+ */
+export interface CatalogTag {
+    id: number | null;
+    name: string;
+    color: string | null;
+    position: number;
+    note: string | null;
+    created_at: string | null;
+    source: "config" | "db";
+    /** Config tags only: the config-default color an override diverges from (#223 zcjqgp). */
+    config_color?: string | null;
+    /** Config tags only: true when a DB row overrides the config color. */
+    color_overridden?: boolean;
+}
+
 // Business enums are centralised in `./domain.ts` (#B.122). Re-export
 // them here so existing consumers that import from `./api` still work.
 export {
@@ -584,6 +603,15 @@ export const api = {
         req<Rule>("PATCH", `/api/rules/${id}`, { enabled }),
 
     listTags: () => req<Tag[]>("GET", "/api/tags"),
+    // Merged config+DB catalog for the Tags admin panel (#223). Pass a
+    // project name to scope, or "_global" for the cross-project view.
+    listTagCatalog: (project: string) =>
+        req<CatalogTag[]>("GET", `/api/tags?project=${encodeURIComponent(project)}`),
+    // Config-tag override (#223 zcjqgp): color/order are editable even for
+    // config tags; the override is keyed by name. `color: null` resets to
+    // the config default.
+    overrideTag: (body: { name: string; color?: string | null; position?: number }) =>
+        req<Tag>("PUT", "/api/tags/override", body),
     addTag: (body: { name: string; color?: string; note?: string; position?: number }) =>
         req<Tag>("POST", "/api/tags", body),
     updateTag: (

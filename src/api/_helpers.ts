@@ -15,6 +15,10 @@ export function notFound(res: Response, msg = "not found"): Response {
     return res.status(404).json({ error: msg });
 }
 
+export function conflict(res: Response, msg: string): Response {
+    return res.status(409).json({ error: msg });
+}
+
 /**
  * Decorate one or many messages with their tags so callers can render
  * them without an N+1 round-trip. Uses one bulk SELECT regardless of

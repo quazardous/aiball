@@ -257,3 +257,46 @@ autopoll:
 #       canonical: "{1}"
 #       href: "https://jira.example.com/browse/{1}"
 #       class: "external-ref"
+
+# Config-defined tags (#223). Tags declared here show up in the Tags
+# admin panel as READ-ONLY entries (a lock badge, no delete) next to the
+# DB tags you create from the UI. Use them to ship a curated component
+# catalog (`claude-code`, `mcp`, `daemon`, `hook`, …) that can't be
+# accidentally deleted.
+#
+# Inheritance is COMPOSITE — every layer ADDS (unlike `prompts:` /
+# `formatting:`, which replace slot-by-slot). Three layers, low→high:
+#   0. shipped dist    — `config/defaults/tags.yaml` (the classic catalog:
+#                        bug / feature / urgent / … — read-only, ships with
+#                        the install)
+#   1. global per-user — `~/.config/aiball/config.yaml` → tags:
+#   2. per-project     — this file's `tags:` block
+#
+# A tag's display order follows the LAST layer that mentions it (restate
+# a tag to move it to the end); color/note carry over from earlier layers
+# when a later one omits them.
+#
+# Each entry is a bare name or an object with optional `color` / `note`:
+#   - claude-code
+#   - { name: mcp, color: "#7e57c2", note: "MCP server surface" }
+#
+# PER-PROJECT scope: the daemon resolves config from a SINGLE cwd, so it
+# only ever reads ONE project's `.aiball.yaml`. To declare tags for other
+# projects (the Tags panel has a project selector spanning all of them),
+# use the project-keyed map in the GLOBAL file:
+#
+#   # ~/.config/aiball/config.yaml
+#   tags:
+#     global:                      # apply to every project
+#       - bug
+#       - { name: mcp, color: "#7e57c2" }
+#     projects:
+#       aiball: [frontend, daemon, hook]
+#       m2m:    [{ name: datamart, note: "BI sync" }]
+#
+# In THIS per-project file, a bare list is shorthand for "tags for this
+# project" (it won't leak to siblings):
+#
+# tags:
+#   - claude-code
+#   - { name: hook, color: "#0ea5e9", note: "settings.json hooks" }

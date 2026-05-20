@@ -17,7 +17,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import * as schema from "../schema.js";
 import { DB_PATH, ensureDirs } from "../paths.js";
-import { DEFAULT_TAGS } from "./tags.js";
+import { loadShippedDefaultTags } from "../config-tags.js";
 
 // =====================================================================
 // Public types — re-exported from db.ts so consumers don't dig into
@@ -278,19 +278,23 @@ function bootstrap(db: BetterSQLite3Database<typeof schema>): void {
         .onConflictDoNothing()
         .run();
 
-    // Seed the closed-list tag catalog on a fresh DB.
+    // Seed the classic tag catalog on a fresh DB from the shipped dist
+    // config (#223 cj2kp2 — the canonical definition lives in
+    // config/defaults/tags.yaml). The rows exist so these everyday tags
+    // stay applicable to tickets (apply path is FK-by-id); the catalog
+    // surfaces them as config-owned / non-deletable via the merge.
     const haveTags = db.select({ n: sql<number>`COUNT(*)` }).from(schema.tags).get();
     if ((haveTags?.n ?? 0) === 0) {
         const now = nowIso();
-        for (const t of DEFAULT_TAGS) {
+        loadShippedDefaultTags().forEach((t, i) => {
             db.insert(schema.tags).values({
                 name: t.name,
                 color: t.color ?? null,
-                position: t.position ?? 0,
+                position: i + 1,
                 note: t.note ?? null,
                 createdAt: now,
             }).run();
-        }
+        });
     }
 
     // Backfill hashids for any pre-0003 _messages row that doesn't have one.

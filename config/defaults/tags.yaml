@@ -1,0 +1,25 @@
+# Shipped default tag catalog (#223). This is the LOWEST layer of the
+# tags config chain:
+#
+#   dist (this file) → global ~/.config/aiball/config.yaml → per-project .aiball.yaml
+#
+# Inheritance is COMPOSITE — upper layers ADD tags (and may restate one to
+# re-color / re-order it). Everything declared here is config-owned:
+# read-only and non-deletable in the Tags admin panel (edit this file, or
+# add to an upper layer, instead).
+#
+# On a fresh database these are also seeded as DB rows so they can be
+# applied to tickets (the apply path is FK-by-id); the seed mirrors the
+# definitions below, so colors stay consistent between the catalog and the
+# ticket badges.
+#
+# Shape: a bare name, or `{ name, color?, note? }`.
+tags:
+  - { name: bug, color: "#ef4444", note: "something is broken" }
+  - { name: feature, color: "#10b981", note: "new capability" }
+  - { name: question, color: "#3b82f6", note: "needs clarification" }
+  - { name: docs, color: "#8b5cf6", note: "documentation work" }
+  - { name: urgent, color: "#f59e0b", note: "needs attention now" }
+  - { name: discussion, color: "#6b7280", note: "design / architecture talk" }
+  - { name: wontfix, color: "#9ca3af", note: "decided not to act" }
+  - { name: done, color: "#22c55e", note: "completed" }

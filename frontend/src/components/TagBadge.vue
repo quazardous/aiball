@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { Tag } from "../lib/api";
+
+// Minimal structural shape: the badge only renders name/color/note, so it
+// accepts both DB `Tag` and the read-only catalog `CatalogTag` (#223).
+type BadgeTag = { name: string; color: string | null; note?: string | null };
 
 const props = defineProps<{
-    tag: Tag;
+    tag: BadgeTag;
     removable?: boolean;
     size?: "sm" | "md";
 }>();
-const emit = defineEmits<{ (e: "remove", tag: Tag): void }>();
+const emit = defineEmits<{ (e: "remove", tag: BadgeTag): void }>();
 
 // Compute readable foreground color from the tag's hex (very rough — sRGB
 // luminance). Falls back to neutral when the tag has no color.

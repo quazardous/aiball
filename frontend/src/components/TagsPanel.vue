@@ -2,28 +2,56 @@
 import { onMounted, ref } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
-import { api, type Tag } from "../lib/api";
+import Select from "primevue/select";
+import { api, type CatalogTag } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
 import TagBadge from "./TagBadge.vue";
 
-const tags = ref<Tag[]>([]);
+const tags = ref<CatalogTag[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
+
+// Project scope (#223). `_global` shows config global tags + DB tags; a
+// project name folds in that project's config tags too. The picker mirrors
+// the sentinel pattern from ProjectSettingsPage (Select can't bind null).
+const GLOBAL_SENTINEL = "_global";
+const project = ref<string>(GLOBAL_SENTINEL);
+const projects = ref<string[]>([]);
+const projectOptions = ref<{ label: string; value: string }[]>([]);
+
+const isConfig = (t: CatalogTag) => t.source === "config";
 
 const newName = ref("");
 const newColor = ref("#3b82f6");
 const newNote = ref("");
 
+async function loadProjects() {
+    try {
+        projects.value = await api.listProjects();
+        projectOptions.value = [
+            { label: "All projects (global)", value: GLOBAL_SENTINEL },
+            ...projects.value.map((p) => ({ label: p, value: p })),
+        ];
+    } catch {
+        projectOptions.value = [{ label: "All projects (global)", value: GLOBAL_SENTINEL }];
+    }
+}
+
 async function load() {
     loading.value = true;
     try {
-        tags.value = await api.listTags();
+        tags.value = await api.listTagCatalog(project.value);
         error.value = null;
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
         loading.value = false;
     }
+}
+
+function onProjectChange(v: string) {
+    project.value = v;
+    void load();
 }
 
 async function add() {
@@ -43,7 +71,10 @@ async function add() {
     }
 }
 
-async function save(t: Tag, fields: Partial<Tag>) {
+// Name + note are config-owned for config tags (read-only); only DB tags
+// can edit them. Color + order are editable for BOTH (#223 zcjqgp).
+async function save(t: CatalogTag, fields: Partial<CatalogTag>) {
+    if (isConfig(t) || t.id == null) return;
     try {
         await api.updateTag(t.id, fields);
         bus.emit("tags.refresh");
@@ -52,7 +83,20 @@ async function save(t: Tag, fields: Partial<Tag>) {
     }
 }
 
-async function del(t: Tag) {
+// Color edit routes by source: config tags persist a name-keyed override
+// (DB row, color wins over the config default); DB tags patch by id.
+async function saveColor(t: CatalogTag, color: string) {
+    try {
+        if (isConfig(t)) await api.overrideTag({ name: t.name, color });
+        else if (t.id != null) await api.updateTag(t.id, { color });
+        bus.emit("tags.refresh");
+    } catch (e) {
+        error.value = (e as Error).message;
+    }
+}
+
+async function del(t: CatalogTag) {
+    if (isConfig(t) || t.id == null) return; // config tags are non-deletable
     if (!confirm(`Delete tag '${t.name}'? Any message currently tagged loses it.`))
         return;
     try {
@@ -63,39 +107,47 @@ async function del(t: Tag) {
     }
 }
 
-// #B.250 vcyqn7: reorder via ↑/↓ buttons on each row instead of a
-// raw "position" InputText (the numeric column was unusable on
-// mobile and unintuitive on desktop). We swap positions with the
-// adjacent neighbor and let the WS broadcast refresh the list.
-async function move(t: Tag, dir: -1 | 1) {
-    const sorted = [...tags.value].sort((a, b) => a.position - b.position);
-    const idx = sorted.findIndex((x) => x.id === t.id);
+// #B.250 vcyqn7: reorder via ↑/↓ buttons. Swap positions with the adjacent
+// neighbor and let the WS broadcast refresh. Works across BOTH sources
+// (#223 zcjqgp): config tags persist the new position as a name-keyed
+// override, DB tags patch by id.
+function allSorted(): CatalogTag[] {
+    return [...tags.value].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
+}
+async function persistPosition(t: CatalogTag, position: number) {
+    if (isConfig(t)) await api.overrideTag({ name: t.name, position });
+    else if (t.id != null) await api.updateTag(t.id, { position });
+}
+async function move(t: CatalogTag, dir: -1 | 1) {
+    const sorted = allSorted();
+    const idx = sorted.findIndex((x) => x === t);
     if (idx < 0) return;
     const swapIdx = idx + dir;
     if (swapIdx < 0 || swapIdx >= sorted.length) return;
     const other = sorted[swapIdx];
     try {
-        // Two sequential updates; the order matters only for the WS
-        // event log (no constraint conflict on positions).
-        await api.updateTag(t.id, { position: other.position });
-        await api.updateTag(other.id, { position: t.position });
+        await persistPosition(t, other.position);
+        await persistPosition(other, t.position);
         bus.emit("tags.refresh");
     } catch (e) {
         error.value = (e as Error).message;
     }
 }
-function canMoveUp(t: Tag): boolean {
-    const sorted = [...tags.value].sort((a, b) => a.position - b.position);
-    return sorted.length > 1 && sorted[0]?.id !== t.id;
+function canMoveUp(t: CatalogTag): boolean {
+    const sorted = allSorted();
+    return sorted.length > 1 && sorted[0] !== t;
 }
-function canMoveDown(t: Tag): boolean {
-    const sorted = [...tags.value].sort((a, b) => a.position - b.position);
-    return sorted.length > 1 && sorted[sorted.length - 1]?.id !== t.id;
+function canMoveDown(t: CatalogTag): boolean {
+    const sorted = allSorted();
+    return sorted.length > 1 && sorted[sorted.length - 1] !== t;
 }
 
 // Self-refresh on bus events (WS-driven or local mutations).
 useBus("tags.refresh", () => load());
-onMounted(load);
+onMounted(() => {
+    void loadProjects();
+    void load();
+});
 </script>
 
 <template>
@@ -106,13 +158,27 @@ onMounted(load);
                 Tags are a <strong>closed list</strong>: you (the human moderator) define what
                 tags exist. Agents can only apply existing tags — they can't invent new ones.
                 Use them to group tickets (bug / feature / urgent / done) and as a hook for
-                automation rules later on.
+                automation rules later on. Tags marked
+                <i class="pi pi-lock" style="font-size: 0.75em" /> come from the config files
+                (<code>.aiball.yaml</code> → <code>tags:</code>): their name is fixed and they
+                can't be deleted, but you can still recolor and reorder them here — an
+                overridden color shows a <span class="tags-override-dot">●</span> marker.
             </p>
         </header>
 
         <section class="rules-section">
             <div class="rules-section-head">
                 <h3>Catalog ({{ tags.length }})</h3>
+                <div class="tags-project-picker">
+                    <label class="field-label">project</label>
+                    <Select
+                        :model-value="project"
+                        :options="projectOptions"
+                        option-label="label"
+                        option-value="value"
+                        @update:model-value="onProjectChange"
+                    />
+                </div>
             </div>
 
             <div v-if="!tags.length" class="aiball-empty">No tags defined yet.</div>
@@ -130,27 +196,45 @@ onMounted(load);
                         </tr>
                     </thead>
                     <tbody>
-                        <tr v-for="t in tags" :key="t.id">
-                            <td data-label="preview"><TagBadge :tag="t" /></td>
+                        <tr v-for="t in tags" :key="t.id ?? `config:${t.name}`">
+                            <td data-label="preview">
+                                <span class="tags-preview-cell">
+                                    <TagBadge :tag="t" />
+                                    <i
+                                        v-if="isConfig(t)"
+                                        class="pi pi-lock tags-lock"
+                                        title="Defined in config — read-only here"
+                                    />
+                                </span>
+                            </td>
                             <td data-label="name">
                                 <InputText
                                     :model-value="t.name"
                                     size="small"
+                                    :disabled="isConfig(t)"
                                     @change="(e: Event) => save(t, { name: (e.target as HTMLInputElement).value })"
                                 />
                             </td>
                             <td data-label="color">
-                                <input
-                                    type="color"
-                                    :value="t.color ?? '#888888'"
-                                    @change="(e: Event) => save(t, { color: (e.target as HTMLInputElement).value })"
-                                />
+                                <span class="tags-color-cell">
+                                    <input
+                                        type="color"
+                                        :value="t.color ?? '#888888'"
+                                        @change="(e: Event) => saveColor(t, (e.target as HTMLInputElement).value)"
+                                    />
+                                    <span
+                                        v-if="t.color_overridden"
+                                        class="tags-override-dot"
+                                        :title="`Color overridden — config default ${t.config_color ?? '(none)'}`"
+                                    >●</span>
+                                </span>
                             </td>
                             <td data-label="note">
                                 <InputText
                                     :model-value="t.note ?? ''"
                                     size="small"
                                     placeholder="(optional)"
+                                    :disabled="isConfig(t)"
                                     @change="(e: Event) => save(t, { note: (e.target as HTMLInputElement).value || null })"
                                 />
                             </td>
@@ -185,6 +269,8 @@ onMounted(load);
                                     text
                                     rounded
                                     size="small"
+                                    :disabled="isConfig(t)"
+                                    :title="isConfig(t) ? 'Config tag — remove it from the yaml' : `Delete '${t.name}'`"
                                     @click="del(t)"
                                 />
                             </td>
@@ -196,6 +282,11 @@ onMounted(load);
 
         <section class="rules-section">
             <h3>Add a tag</h3>
+            <p class="rules-explainer" style="margin-top: 0">
+                New tags are added to the global DB catalog (visible in every project).
+                Project-scoped or non-deletable tags live in the config files — see
+                <code>.aiball.yaml.example</code>.
+            </p>
             <div class="rule-builder">
                 <div class="builder-cond">
                     <label class="field-label">name</label>
@@ -257,6 +348,33 @@ onMounted(load);
 }
 .tags-table-wrap {
     width: 100%;
+}
+.tags-project-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+.tags-project-picker .field-label {
+    margin: 0;
+}
+.tags-preview-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.tags-lock {
+    color: var(--p-text-muted-color);
+    font-size: 0.75rem;
+}
+.tags-color-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+.tags-override-dot {
+    color: var(--p-primary-color);
+    font-size: 0.7rem;
+    line-height: 1;
 }
 .tags-order-controls {
     display: inline-flex;
