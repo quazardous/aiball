@@ -121,8 +121,17 @@ async function decide(action: "approve" | "reject") {
     const tid = data.value.ticket.id;
     decideBusy.value = true;
     try {
+        // #270: embark whatever the user typed in the composer as a
+        // comment, the same way every resolution verb does (resolutionFlow
+        // "every handler embarks any typed text before the action"). The
+        // moderation decide() handler used to fire api.approve/reject only
+        // and silently drop the typed comment.
+        if (composerBody.value.trim()) {
+            await postBodyAs("comment_added");
+        }
         if (action === "approve") await api.approve(tid);
         else await api.reject(tid);
+        composerBody.value = "";
         broadcastRefresh(tid);
     } catch (e) {
         error.value = (e as Error).message;
