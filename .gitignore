@@ -23,3 +23,7 @@ outbox/
 # .claude/ holds per-user Claude Code state (settings.local.json
 # permission allowlist, agent cache). Never committed.
 .claude/
+# Python bytecode cache. The claude-loop PTY proxy is run with `python3
+# -B` so this shouldn't appear, but ignore it defensively. #269
+__pycache__/
+*.pyc

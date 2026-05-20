@@ -37,6 +37,7 @@ import {
     idleMarkerPath,
     humanTypingPath,
     humanIsTyping,
+    injectSockPath,
     installRoot,
     installRootSha,
     isLoopStale,
@@ -283,6 +284,13 @@ function recentlySentKeys(): boolean {
 }
 function detectHumanTyping(): void {
     try {
+        // #269: when the PTY proxy fronts claude it feeds the human-typing
+        // marker directly (live, busy included) and wake injection bypasses
+        // tmux stdin — so this pane-diff heuristic is both redundant AND
+        // wrong here (it would flag socket-injected wakes as human typing,
+        // since recentlySentKeys only tracks tmux send-keys). The proxy owns
+        // the marker; skip. Pane-diff stays the fallback for non-proxy loops.
+        if (existsSync(injectSockPath(sd!))) return;
         if (!existsSync(idleMarkerPath(sd!))) {
             // Mid-turn / streaming → reset baseline so the post-busy
             // prompt isn't diffed against a stale pre-busy capture.

@@ -10,6 +10,7 @@
  * - `timer.log`   — stdout/stderr of the timer
  */
 import { spawnSync } from "node:child_process";
+import { connect as netConnect } from "node:net";
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -124,6 +125,10 @@ export function userTookOverPath(sd: string): string { return join(sd, "user-too
 // at-prompt; read by setTmuxStatus to paint the bicolor human chip and
 // usable as a finer human-present signal than the submit-time user-took-over.
 export function humanTypingPath(sd: string): string { return join(sd, "human-typing"); }
+// #269: UDS control socket the PTY proxy listens on for wake injection.
+// Present ⇒ the pane runs under the proxy (injection goes here instead of
+// tmux send-keys; the proxy owns the human-typing marker).
+export function injectSockPath(sd: string): string { return join(sd, "inject.sock"); }
 export function timerPidPath(sd: string): string { return join(sd, "timer.pid"); }
 export function timerLogPath(sd: string): string { return join(sd, "timer.log"); }
 /**
@@ -821,6 +826,17 @@ export async function buildContextPhrase(
  * a ~200ms latency but consistency beats branching on length.
  */
 export async function injectWakePhrase(paneTarget: string, phrase: string): Promise<void> {
+    // #269: when the pane runs under the PTY proxy, deliver the wake
+    // straight to claude's PTY via the proxy's control socket — that
+    // bypasses tmux stdin, so the proxy's human-typing detector never
+    // mistakes our own injection for a human keystroke (#efuuau). Fall
+    // back to the tmux paste/send-keys path for loops not under the proxy
+    // (no socket) or if the socket write fails.
+    const sd = process.env.CL_STATE_DIR;
+    if (sd) {
+        const sock = injectSockPath(sd);
+        if (existsSync(sock) && await injectViaSocket(sock, phrase)) return;
+    }
     const bufName = `wake_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const setBuf = spawnSync(MUX_CMD, ["set-buffer", "-b", bufName, phrase], { stdio: "ignore" });
     if (!setBuf.error && setBuf.status === 0) {
@@ -830,6 +846,46 @@ export async function injectWakePhrase(paneTarget: string, phrase: string): Prom
     }
     await new Promise<void>((res) => setTimeout(res, 200));
     spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" });
+}
+
+/**
+ * #269: write a wake phrase to the PTY proxy's UDS injection socket.
+ * Mirrors the tmux dance — phrase, a brief pause for the TUI to settle,
+ * then a carriage return to submit. Resolves `false` on any error (so the
+ * caller falls back to the tmux path) and never throws.
+ */
+function injectViaSocket(sockPath: string, phrase: string): Promise<boolean> {
+    return new Promise((resolve) => {
+        let settled = false;
+        let sock: ReturnType<typeof netConnect>;
+        const finish = (ok: boolean): void => {
+            if (settled) return;
+            settled = true;
+            try { sock?.end(); } catch { /* ignore */ }
+            resolve(ok);
+        };
+        try {
+            sock = netConnect(sockPath);
+        } catch {
+            resolve(false);
+            return;
+        }
+        const timer = setTimeout(() => finish(false), 2000);
+        sock.on("error", () => { clearTimeout(timer); finish(false); });
+        sock.on("connect", async () => {
+            try {
+                sock.write(phrase);
+                await new Promise<void>((r) => setTimeout(r, 200));
+                sock.write("\r");
+                await new Promise<void>((r) => setTimeout(r, 30));
+                clearTimeout(timer);
+                finish(true);
+            } catch {
+                clearTimeout(timer);
+                finish(false);
+            }
+        });
+    });
 }
 
 /**

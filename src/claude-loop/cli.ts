@@ -366,10 +366,20 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // claude passthrough args. Shell-escape per-arg so the inline
     // bash command keeps them intact.
     const passthrough = opts.claudeArgs.map(shQuote).join(" ");
-    const innerCmd =
-        `source ${shQuote(envPath(sd))}; ` +
-        `exec claude --permission-mode auto --settings ${shQuote(settingsJson)}` +
+    const claudeCmd =
+        `claude --permission-mode auto --settings ${shQuote(settingsJson)}` +
         (passthrough ? ` ${passthrough}` : "");
+    // #269: front claude with the PTY proxy so claude-loop detects human
+    // typing live (busy included) and injects wakes through the proxy's
+    // socket instead of tmux stdin. Requires python3; if it (or the proxy
+    // script) is missing we launch claude directly. The proxy itself also
+    // self-falls-back to exec-claude if PTY init fails — the pane is never
+    // bricked. `-B` so no __pycache__ is written next to the proxy.
+    const proxyPath = join(root, "src/claude-loop/pty-proxy.py");
+    const launch = has("python3") && existsSync(proxyPath)
+        ? `exec python3 -B ${shQuote(proxyPath)} -- ${claudeCmd}`
+        : `exec ${claudeCmd}`;
+    const innerCmd = `source ${shQuote(envPath(sd))}; ${launch}`;
 
     const tname = tmuxName(name);
     const r = spawnSync(MUX_CMD, [
