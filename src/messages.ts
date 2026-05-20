@@ -2,6 +2,7 @@ import {
     getMessage,
     insertMessage,
     insertRelationEvent,
+    insertTypedRelation,
     updateMessageStatus,
     upsertTicketSubscription,
     listPendingResolvedForTicket,
@@ -283,6 +284,26 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
                 pseudo.scope = msg.scope;
                 fanOutPings(pseudo);
                 broadcast({ type: "message_created", data: pseudo });
+            }
+            // #271: dual-write the lineage into the typed-relations graph
+            // so the parent/child link surfaces as a chip (read-only),
+            // unifying with every other relation. `child_of` from the new
+            // child → parent; the parent sees the reciprocal `parent_of`.
+            // The ticket_sub_added pseudo above remains the timeline log;
+            // this event drives the relations cartouche. Lineage relations
+            // are filtered out of the timeline in the thread API so we
+            // don't double-log. Best-effort — a failure here mustn't block
+            // the ticket from being created.
+            try {
+                insertTypedRelation({
+                    source_ticket_id: msg.id,
+                    target_ticket_id: parent.id,
+                    relation_kind: "child_of",
+                    by_agent: msg.by_agent,
+                });
+            } catch {
+                /* lineage relation is best-effort; the FK + sub_added log
+                   already record the link */
             }
         }
     }

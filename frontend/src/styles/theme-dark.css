@@ -172,6 +172,11 @@
 .aiball-dark .thread-relations__chip[data-kind="duplicates"] {
     background: rgba(255, 99, 99, 0.12);
 }
+/* #271: structural lineage chips (sub-ticket parent/child) — indigo. */
+.aiball-dark .thread-relations__chip[data-kind="child_of"],
+.aiball-dark .thread-relations__chip[data-kind="parent_of"] {
+    background: rgba(99, 102, 241, 0.15);
+}
 .aiball-dark .thread-relations__stage {
     background: var(--p-surface-700);
 }

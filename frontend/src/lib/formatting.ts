@@ -136,6 +136,27 @@ export const patterns = ref<FormattingPattern[]>(DEFAULTS);
 export const markedInstance = ref<Marked>(buildMarked(DEFAULTS));
 
 /**
+ * Format a bare ticket id as a ticket reference using the configured
+ * `ticket` pattern's canonical template (#272). Markdown bodies already
+ * render `#B.NNN` / `#NNN` through this config (e.g. canonical `#{1}`
+ * drops the legacy `B.`); UI chrome that prints a ticket ref outside a
+ * body — relation chips, the change-kind menu, relation timeline rows —
+ * used to hardcode `#B.${id}` and so ignored the project's format. Route
+ * those through here instead.
+ *
+ * Reads the reactive `patterns` ref, so callers used inside a template
+ * expression re-render when the config loads. Falls back to the dotted
+ * `#B.${id}` legacy form if the `ticket` pattern is somehow absent.
+ */
+export function formatTicketRef(id: number | string): string {
+    const p = patterns.value.find((x) => x.id === "ticket");
+    if (!p) return `#B.${id}`;
+    // {1} = the numeric id (the ticket pattern's capture group); {0} = a
+    // plausible whole match for canonicals that reference it.
+    return subst(p.canonical, [`#${id}`, String(id)]);
+}
+
+/**
  * Fetch the effective config from the backend and swap in the merged
  * patterns. Silent no-op on failure — the in-code DEFAULTS stay live, so
  * linkifying never breaks just because the endpoint hiccuped.

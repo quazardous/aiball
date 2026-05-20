@@ -6,9 +6,10 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { and, asc, eq, inArray, isNotNull, lte, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, lte, ne } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
+import { listTypedRelationsForTicket } from "./messages.js";
 
 // =====================================================================
 //  Sub-tickets (per #B.62 follow-up)
@@ -196,12 +197,21 @@ export function getTicketBookends(opts: {
 }
 
 /**
- * List direct children of a ticket (rows with parent_ticket_id = parentId),
- * with their lifecycle-derived `closed` flag. Rejected children are
- * filtered out. Ordered by id ASC (chronological).
+ * List direct children of a ticket, with their lifecycle-derived `closed`
+ * flag. Rejected children are filtered out. Ordered by id ASC.
+ *
+ * #271: lineage is read from the typed-relations graph, not the legacy
+ * `parent_ticket_id` FK — the parent sees its children as reciprocal
+ * `parent_of` chips (each child authored a `child_of` event). This keeps
+ * the recap and the relations cartouche in sync (the bug they used to
+ * drift on) and lets Phase 3 drop the FK column.
  */
 export function listSubTickets(parentId: number): SubTicketSummary[] {
     const db = getDb();
+    const childIds = listTypedRelationsForTicket(parentId)
+        .filter((r) => r.kind === "parent_of")
+        .map((r) => r.target_ticket_id);
+    if (childIds.length === 0) return [];
     const rows = db.select({
         id: schema.tickets.id,
         title: schema.tickets.title,
@@ -209,11 +219,11 @@ export function listSubTickets(parentId: number): SubTicketSummary[] {
         status: schema.tickets.status,
     })
         .from(schema.tickets)
-        .where(eq(schema.tickets.parentTicketId, parentId))
-        .orderBy(asc(schema.tickets.id))
+        .where(inArray(schema.tickets.id, childIds))
         .all();
-    if (rows.length === 0) return [];
     const filtered = rows.filter((r) => r.status !== "rejected");
+    if (filtered.length === 0) return [];
+    filtered.sort((a, b) => a.id - b.id);
     const stages = getTicketStages(filtered.map((r) => r.id));
     return filtered.map((r) => {
         const stage = stages.get(r.id) ?? "open";
@@ -231,23 +241,56 @@ export function listSubTickets(parentId: number): SubTicketSummary[] {
  * Count direct children per parent ticket, in one shot. Rejected children
  * are excluded (symmetric with listSubTickets). Used by the ticket list
  * endpoint to surface lineage without paying a per-row N+1.
+ *
+ * #271: derived from the relations graph. Pull every ticket_relation
+ * event authored on a child pointing at one of the parents (the child's
+ * `child_of` event has sourceTicketId = parent), replay latest-per-pair,
+ * keep the surviving `child_of` links, exclude rejected children.
  */
 export function subTicketCounts(parentIds: number[]): Map<number, number> {
     const out = new Map<number, number>();
     if (parentIds.length === 0) return out;
-    const rows = getDb().select({
-        parentId: schema.tickets.parentTicketId,
-        count: sql<number>`COUNT(*)`,
+    const db = getDb();
+    const events = db.select({
+        child: schema.messages.ticketId,
+        parent: schema.messages.sourceTicketId,
+        meta: schema.messages.meta,
+        id: schema.messages.id,
     })
-        .from(schema.tickets)
+        .from(schema.messages)
         .where(and(
-            inArray(schema.tickets.parentTicketId, parentIds),
-            ne(schema.tickets.status, "rejected"),
+            eq(schema.messages.kind, "ticket_relation"),
+            eq(schema.messages.status, "approved"),
+            inArray(schema.messages.sourceTicketId, parentIds),
         ))
-        .groupBy(schema.tickets.parentTicketId)
+        .orderBy(asc(schema.messages.id))
         .all();
-    for (const r of rows) {
-        if (r.parentId !== null) out.set(r.parentId, Number(r.count));
+    // Latest event wins per (parent, child) pair.
+    const latest = new Map<string, { parent: number; child: number; kind: string | undefined }>();
+    for (const e of events) {
+        if (e.parent === null || e.child === null) continue;
+        let kind: string | undefined;
+        try {
+            kind = (JSON.parse(e.meta ?? "{}") as { relation?: { kind?: string } }).relation?.kind;
+        } catch { kind = undefined; }
+        latest.set(`${e.parent}:${e.child}`, { parent: e.parent, child: e.child, kind });
+    }
+    const childOfPairs = Array.from(latest.values()).filter((p) => p.kind === "child_of");
+    if (childOfPairs.length === 0) return out;
+    const childIds = Array.from(new Set(childOfPairs.map((p) => p.child)));
+    const rejected = new Set(
+        db.select({ id: schema.tickets.id })
+            .from(schema.tickets)
+            .where(and(
+                inArray(schema.tickets.id, childIds),
+                eq(schema.tickets.status, "rejected"),
+            ))
+            .all()
+            .map((r) => r.id),
+    );
+    for (const p of childOfPairs) {
+        if (rejected.has(p.child)) continue;
+        out.set(p.parent, (out.get(p.parent) ?? 0) + 1);
     }
     return out;
 }

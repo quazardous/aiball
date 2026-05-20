@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Popover from "primevue/popover";
 import { api, INTENTS, type Intent, type Priority, type Tag as TagType, type ThreadView as ThreadViewData } from "../lib/api";
 import { topDown } from "../lib/prefs";
+import { formatTicketRef } from "../lib/formatting";
 import ThreadRelations from "./ThreadRelations.vue";
 import RelationKindMenu from "./RelationKindMenu.vue";
 import ThreadHeader from "./ThreadHeader.vue";
@@ -213,8 +214,8 @@ const {
 // (chronological/top-down), decidersByMessage (60s decide→comment
 // heuristic), latestSummaryUntil (latest tldr carrier), threadItems
 // (relation group collapse + banner insertion), latestPendingId.
-// STAGE_LABELS is re-exported from there for the sub-tickets recap
-// below.
+// STAGE_LABELS is re-exported from there and threaded down to
+// ThreadCommentsList for relation-row stage badges.
 const {
     flatComments,
     decidersByMessage,
@@ -223,22 +224,10 @@ const {
     latestPendingId,
 } = useThreadItems(data);
 
-/**
- * Sub-tickets panel collapse state (per #B.62 reopen — accordion).
- * Auto-collapse when the list has more than 5 children so the header
- * stays compact; small lists stay open by default. The user can
- * always toggle via the chevron.
- */
-const subTicketsExpanded = ref(false);
-function onSubTicketsToggle(ev: Event) {
-    subTicketsExpanded.value = (ev.target as HTMLDetailsElement).open;
-}
-const subTicketsPendingCount = computed(() =>
-    (data.value?.ticket.sub_tickets ?? []).filter((s) => s.status === "pending").length,
-);
-const subTicketsClosedCount = computed(() =>
-    (data.value?.ticket.sub_tickets ?? []).filter((s) => s.closed).length,
-);
+// #271: the standalone parent-ref + sub-ticket accordion are gone —
+// lineage now renders as read-only `child_of` / `parent_of` chips in the
+// relations cartouche (ThreadRelations), so it stays in sync with every
+// other relation instead of drifting as a parallel header widget.
 
 // Resolution / decision flow (#B.196 Layer 3) — composer body +
 // busy flag + every accept/reject/close/reopen verb + the menus and
@@ -285,7 +274,7 @@ const {
 const justCopiedTicket = ref(false);
 async function copyTicketRef() {
     if (!data.value) return;
-    const ref_ = `#B.${data.value.ticket.id}`;
+    const ref_ = formatTicketRef(data.value.ticket.id);
     try {
         await navigator.clipboard.writeText(ref_);
         justCopiedTicket.value = true;
@@ -370,58 +359,12 @@ async function copyTicketRef() {
                     :just-copied="justCopiedTicket"
                     @copy="copyTicketRef"
                 />
-                <div
-                    v-if="data.ticket.parent_ticket_id"
-                    class="thread-parent-ref"
-                    title="This ticket is a sub-ticket — click to open the parent thread."
-                >
-                    <i class="pi pi-sitemap" />
-                    <span>Sub-ticket of</span>
-                    <a :href="`/b/${data.ticket.parent_ticket_id}`" class="thread-parent-ref__link">
-                        #B.{{ data.ticket.parent_ticket_id }}
-                    </a>
-                </div>
-                <details
-                    v-if="data.ticket.sub_tickets && data.ticket.sub_tickets.length > 0"
-                    class="thread-sub-tickets"
-                    :open="subTicketsExpanded"
-                    @toggle="onSubTicketsToggle"
-                >
-                    <summary class="thread-sub-tickets__header">
-                        <i
-                            class="pi thread-sub-tickets__chevron"
-                            :class="subTicketsExpanded ? 'pi-chevron-down' : 'pi-chevron-right'"
-                        />
-                        <i class="pi pi-sitemap" />
-                        <span>{{ data.ticket.sub_tickets.length }} sub-ticket{{ data.ticket.sub_tickets.length > 1 ? 's' : '' }}</span>
-                        <!-- Surface counts inline so the user doesn't have to
-                             expand just to see "how much pending?". -->
-                        <span v-if="subTicketsPendingCount" class="thread-sub-tickets__hint">
-                            · {{ subTicketsPendingCount }} pending
-                        </span>
-                        <span v-if="subTicketsClosedCount" class="thread-sub-tickets__hint">
-                            · {{ subTicketsClosedCount }} closed
-                        </span>
-                    </summary>
-                    <ul class="thread-sub-tickets__list">
-                        <li
-                            v-for="sub in data.ticket.sub_tickets"
-                            :key="sub.id"
-                            class="thread-sub-tickets__item"
-                            :class="{
-                                'thread-sub-tickets__item--closed': sub.stage === 'closed' || sub.stage === 'closed-resolved' || sub.stage === 'rejected',
-                            }"
-                        >
-                            <a :href="`/b/${sub.id}`" class="thread-sub-tickets__id">#B.{{ sub.id }}</a>
-                            <span class="thread-sub-tickets__title">{{ sub.title }}</span>
-                            <span
-                                v-if="sub.stage !== 'open' && STAGE_LABELS[sub.stage]"
-                                class="thread-sub-tickets__tag"
-                                :data-stage="sub.stage"
-                            >{{ STAGE_LABELS[sub.stage] }}</span>
-                        </li>
-                    </ul>
-                </details>
+                <!-- #271: the parent-ref ("Sub-ticket of #B.x") and the
+                     sub-ticket accordion used to live here, fed by the
+                     legacy parent_ticket_id FK — a second, drift-prone
+                     view of the same lineage the relations cartouche
+                     already shows. Both are gone; lineage now appears as
+                     read-only `child_of` / `parent_of` chips below. -->
                 <!-- #B.123 phase B.2 / #B.196 split: relations cartouche
                      extracted to ThreadRelations.vue. State is hoisted so
                      the top-down mirror instance below shares the same

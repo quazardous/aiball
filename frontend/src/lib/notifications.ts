@@ -22,6 +22,7 @@
 import { ref, type Ref } from "vue";
 import { useToast } from "primevue/usetoast";
 import type { Message } from "./api";
+import { formatTicketRef } from "./formatting";
 
 function shortKindLabel(m: Message): string {
     switch (m.kind) {
@@ -111,7 +112,7 @@ export function useNotifications(opts: { project: Ref<string | null> }) {
         const summary = m.title ?? (m.body ? m.body.slice(0, 80) : `new ${k}`);
         const ref =
             m.kind === "ticket_created"
-                ? `#B.${m.id}`
+                ? formatTicketRef(m.id)
                 : `#C.${m.hashid ?? m.id}`;
         const detail = `${who} · ${ref} · ${m.project}`;
 

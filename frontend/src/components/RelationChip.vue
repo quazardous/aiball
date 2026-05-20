@@ -1,10 +1,19 @@
 <script setup lang="ts">
-import { RELATION_LABELS, type RelationKind } from "../lib/relations";
+import { computed } from "vue";
+import { RELATION_LABELS, isLineageRelationKind, type RelationKind } from "../lib/relations";
+import { formatTicketRef } from "../lib/formatting";
 import type { TicketRelation } from "../lib/api";
 
-defineProps<{
+const props = defineProps<{
     relation: TicketRelation;
 }>();
+
+// #271: structural lineage (child_of / parent_of) is auto-managed on
+// sub-ticket creation — it has no change-kind / remove menu (you change
+// it by re-parenting the sub-ticket, not by editing a chip).
+const editable = computed(
+    () => !props.relation.reciprocal && !isLineageRelationKind(props.relation.kind),
+);
 
 const emit = defineEmits<{
     (e: "open-menu", payload: { event: Event; relation: { target_ticket_id: number; kind: RelationKind } }): void;
@@ -33,11 +42,11 @@ const STAGE_LABELS: Record<string, string> = {
             :href="`/b/${relation.target_ticket_id}`"
             class="thread-relations__chip-link"
             :title="relation.reciprocal
-                ? `Open #B.${relation.target_ticket_id} — reciprocal view of \`${RELATION_LABELS[relation.kind === 'blocks' ? 'depends_on' : relation.kind === 'depends_on' ? 'blocks' : relation.kind]}\` set on #B.${relation.target_ticket_id} by ${relation.by_agent ?? '?'} on ${new Date(relation.last_event_at).toLocaleString()}`
-                : `Open #B.${relation.target_ticket_id} — ${RELATION_LABELS[relation.kind]}, set by ${relation.by_agent ?? '?'} on ${new Date(relation.last_event_at).toLocaleString()}`"
+                ? `Open ${formatTicketRef(relation.target_ticket_id)} — reciprocal view of \`${RELATION_LABELS[relation.kind === 'blocks' ? 'depends_on' : relation.kind === 'depends_on' ? 'blocks' : relation.kind]}\` set on ${formatTicketRef(relation.target_ticket_id)} by ${relation.by_agent ?? '?'} on ${new Date(relation.last_event_at).toLocaleString()}`
+                : `Open ${formatTicketRef(relation.target_ticket_id)} — ${RELATION_LABELS[relation.kind]}, set by ${relation.by_agent ?? '?'} on ${new Date(relation.last_event_at).toLocaleString()}`"
         >
             <span class="thread-relations__kind">{{ RELATION_LABELS[relation.kind] }}</span>
-            <span class="thread-relations__target">#B.{{ relation.target_ticket_id }}</span>
+            <span class="thread-relations__target">{{ formatTicketRef(relation.target_ticket_id) }}</span>
             <span
                 v-if="relation.target_stage && relation.target_stage !== 'open' && STAGE_LABELS[relation.target_stage]"
                 class="thread-relations__stage"
@@ -45,7 +54,7 @@ const STAGE_LABELS: Record<string, string> = {
             >{{ STAGE_LABELS[relation.target_stage] }}</span>
         </a>
         <button
-            v-if="!relation.reciprocal"
+            v-if="editable"
             type="button"
             class="thread-relations__menu-btn"
             title="Change kind or remove"

@@ -420,6 +420,12 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         }
     }
 
+    // #265: per-consumer "I replied last → awaiting someone else" gate,
+    // applied to actionable_count exactly like the SET path
+    // (computeActionableTicketIds). Only when a consumer is in scope;
+    // global callers keep pre-#265 behaviour.
+    const lastAuthorByTicket = consumer_id ? lastNonLifecycleAuthorByTicket() : null;
+
     for (const t of openCounts) {
         if (t.status !== "approved") continue;
         const closedByLifecycle = closedByTicket.get(t.id) === true;
@@ -432,14 +438,18 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         openPerProject.set(t.project, (openPerProject.get(t.project) ?? 0) + 1);
         // Actionable = open and NOT marked resolved/blocked by an agent
         // AND not gated by an active depends_on to an open blocker
-        // (#B.123 phase B.4). The autopoll trigger uses this so:
+        // (#B.123 phase B.4) AND not awaiting-someone-else for this
+        // consumer (#265). The autopoll trigger uses this so:
         //   - a resolved/blocked ticket doesn't nag (#B.119)
         //   - a ticket waiting on an unfinished dependency doesn't
         //     surface as work to do (gating clears when blocker closes)
+        //   - a ticket where the agent already replied last doesn't nag
+        //     while it's in the human's court (#239 conversational case)
         const isGatedByDecision = gatedByDecisionByTicket.get(t.id) === true;
         const isBlocked = blockedByTicket.get(t.id) === true;
         const isGated = gatedByBlocker.has(t.id);
-        if (!isGatedByDecision && !isBlocked && !isGated) {
+        const isAwaitingOther = !!lastAuthorByTicket && lastAuthorByTicket.get(t.id) === consumer_id;
+        if (!isGatedByDecision && !isBlocked && !isGated && !isAwaitingOther) {
             actionablePerProject.set(t.project, (actionablePerProject.get(t.project) ?? 0) + 1);
         }
     }
@@ -880,7 +890,49 @@ export interface ActionableTicketSet {
     actionableIds: Set<number>;
 }
 
-export function computeActionableTicketIds(): ActionableTicketSet {
+/**
+ * #265: per-ticket author of the latest *authored* event — the ticket
+ * body itself (its creator), or the most recent approved `comment_added`.
+ * Lifecycle / relation / cross-ref pseudo-events don't count; only
+ * content someone actually wrote. Drives the per-consumer `actionable`
+ * gate: a ticket whose last authored event is by the requesting consumer
+ * is "awaiting someone else", so it drops out of *that consumer's*
+ * actionable pool — the agent that just replied stops being nagged
+ * (the conversational case from #239), and a viewer's count excludes
+ * what they last answered.
+ *
+ * Ticket ids and message ids live in separate id spaces (migration 0007),
+ * so "latest" is resolved by construction: seed every ticket with its
+ * creator, then let approved `comment_added` rows (always chronologically
+ * after the ticket) override in id order — last write wins.
+ */
+export function lastNonLifecycleAuthorByTicket(): Map<number, string | null> {
+    const db = getDb();
+    const out = new Map<number, string | null>();
+    const ticketRows = db.select({
+        id: schema.tickets.id,
+        byAgent: schema.tickets.byAgent,
+    }).from(schema.tickets).all();
+    for (const t of ticketRows) out.set(t.id, t.byAgent);
+    const comments = db.select({
+        ticketId: schema.messages.ticketId,
+        byAgent: schema.messages.byAgent,
+    })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.kind, "comment_added"),
+            eq(schema.messages.status, "approved"),
+        ))
+        .orderBy(asc(schema.messages.id))
+        .all();
+    for (const c of comments) {
+        if (c.ticketId == null) continue;
+        out.set(c.ticketId, c.byAgent);
+    }
+    return out;
+}
+
+export function computeActionableTicketIds(consumerId?: string): ActionableTicketSet {
     const db = getDb();
     const nowStr = nowIso();
 
@@ -998,11 +1050,17 @@ export function computeActionableTicketIds(): ActionableTicketSet {
         else if (r.kind === "blocks" && openIds.has(r.source)) gatedByBlocker.add(r.target);
     }
 
+    // #265: per-consumer "I replied last → awaiting someone else" gate.
+    // Only computed when a consumer is in scope (anonymous / token-less
+    // callers keep the global, pre-#265 behaviour — zero regression).
+    const lastAuthor = consumerId ? lastNonLifecycleAuthorByTicket() : null;
+
     const actionableIds = new Set<number>();
     for (const id of openIds) {
         if (gatedByDecisionByTicket.get(id) === true) continue;
         if (blockedByTicket.get(id) === true) continue;
         if (gatedByBlocker.has(id)) continue;
+        if (lastAuthor && lastAuthor.get(id) === consumerId) continue;
         actionableIds.add(id);
     }
 

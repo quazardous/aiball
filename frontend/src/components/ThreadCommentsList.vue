@@ -8,6 +8,7 @@
  */
 import type { Message } from "../lib/api";
 import type { DeciderInfo, ThreadItem } from "../lib/threadItems";
+import { formatTicketRef } from "../lib/formatting";
 import CommentNode from "./CommentNode.vue";
 
 defineProps<{
@@ -103,7 +104,7 @@ function shortTime(iso: string): string {
                                 v-if="decodeRelationEvent(m).target !== null"
                                 :href="`/b/${decodeRelationEvent(m).target}`"
                                 class="thread-relation-row__ref"
-                            >#B.{{ decodeRelationEvent(m).target }}</a>
+                            >{{ formatTicketRef(decodeRelationEvent(m).target as number) }}</a>
                             <template v-if="i2 < item.msgs.length - 1">,</template>
                         </template>
                     </span>
@@ -121,7 +122,7 @@ function shortTime(iso: string): string {
                             :href="`/b/${m.source_ticket_id}`"
                             class="thread-relation-row__ref"
                         >
-                            #B.{{ m.source_ticket_id }}<span
+                            {{ formatTicketRef(m.source_ticket_id as number) }}<span
                                 v-if="m.source_ticket_stage && m.source_ticket_stage !== 'open'"
                                 class="thread-relation-row__stage"
                                 :data-stage="m.source_ticket_stage"

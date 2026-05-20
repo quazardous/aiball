@@ -11,7 +11,8 @@
  *   - !== null → opened from an existing chip's menu, "change kind" or
  *               "remove" the relation.
  */
-import { RELATION_KINDS, RELATION_LABELS, type RelationKind } from "../lib/relations";
+import { RELATION_KINDS, RELATION_LABELS, isLineageRelationKind, type RelationKind } from "../lib/relations";
+import { formatTicketRef } from "../lib/formatting";
 
 defineProps<{
     target: { target_ticket_id: number; kind: RelationKind | null } | null;
@@ -24,7 +25,11 @@ const emit = defineEmits<{
     (e: "remove"): void;
 }>();
 
-const pickableKinds = RELATION_KINDS.filter((x) => x !== "ignored");
+// `ignored` is the tombstone (handled by the remove button), and the
+// lineage kinds (#271) are auto-managed — neither is manually pickable.
+const pickableKinds = RELATION_KINDS.filter(
+    (x) => x !== "ignored" && !isLineageRelationKind(x),
+);
 </script>
 
 <template>
@@ -42,10 +47,10 @@ const pickableKinds = RELATION_KINDS.filter((x) => x !== "ignored");
         <div class="relation-menu__title">
             <template v-if="target.kind === null">
                 Promote ref to relation —
-                <strong>#B.{{ target.target_ticket_id }}</strong>
+                <strong>{{ formatTicketRef(target.target_ticket_id) }}</strong>
             </template>
             <template v-else>
-                Relation to <strong>#B.{{ target.target_ticket_id }}</strong>
+                Relation to <strong>{{ formatTicketRef(target.target_ticket_id) }}</strong>
             </template>
             <div v-if="targetTitle" class="relation-menu__target-title">
                 {{ targetTitle }}

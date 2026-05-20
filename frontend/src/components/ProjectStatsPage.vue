@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { api } from "../lib/api";
+import { formatTicketRef } from "../lib/formatting";
 
 const props = defineProps<{
     project: string;
@@ -133,7 +134,7 @@ const topIntentMax = computed(() =>
                         <dt>Oldest open</dt>
                         <dd>
                             <a :href="`/b/${stats.oldest_open.id}`" class="project-stats__ref">
-                                #B.{{ stats.oldest_open.id }}
+                                {{ formatTicketRef(stats.oldest_open.id) }}
                             </a>
                             <span class="project-stats__title">{{ stats.oldest_open.title }}</span>
                             <span class="project-stats__meta">

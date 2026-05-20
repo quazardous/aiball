@@ -113,16 +113,16 @@ function main(): void {
         else console.log("no frontend build found (dev mode)");
         drainSpool();
         watchSpool();
-        // #B.123 phase B.3: backfill typed `depends_on` relations from
-        // legacy parent_ticket_id rows. Idempotent — only inserts when
-        // no relation event between the pair already exists.
+        // #271: backfill typed `child_of` lineage relations from legacy
+        // parent_ticket_id rows (upgrading the old #B.123 `depends_on`
+        // backfill). Idempotent — settled re-runs insert nothing.
         try {
             const n = backfillParentTicketRelations();
             if (n > 0) {
-                console.log(`backfilled ${n} parent→depends_on relation(s)`);
+                console.log(`backfilled ${n} parent→child_of relation(s)`);
             }
         } catch (e) {
-            console.error("parent→depends_on backfill failed:", e);
+            console.error("parent→child_of backfill failed:", e);
         }
         // Run the postpone reveal cron once at boot (in case the daemon
         // was down past a deadline), then every 60s after. 60s is fine

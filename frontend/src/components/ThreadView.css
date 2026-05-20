@@ -151,6 +151,13 @@
     border-color: var(--p-red-500);
     background: var(--p-red-50);
 }
+/* #271: structural lineage chips (sub-ticket parent/child). Indigo to
+   echo the old parent-ref/accordion accent these chips replace. */
+.thread-relations__chip[data-kind="child_of"],
+.thread-relations__chip[data-kind="parent_of"] {
+    border-color: var(--p-indigo-300);
+    background: color-mix(in srgb, var(--p-indigo-500) 10%, transparent);
+}
 .thread-relations__kind {
     font-weight: 600;
     color: var(--p-text-muted-color);
@@ -225,132 +232,11 @@
     font-size: 1.3rem;
     font-weight: 600;
 }
-/* Sub-ticket lineage indicator, shown above the title when
- * data.ticket.parent_ticket_id is set. Subtle so the title stays
- * dominant — this is structural metadata, not a banner. */
-.thread-parent-ref {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    align-self: flex-start;
-    padding: 0.15rem 0.5rem;
-    border-left: 2px solid var(--p-indigo-300);
-    background: color-mix(in srgb, var(--p-indigo-500) 10%, transparent);
-    border-radius: 0 0.25rem 0.25rem 0;
-    font-size: 0.82rem;
-    color: var(--p-text-muted-color);
-}
-.thread-parent-ref i {
-    font-size: 0.85em;
-}
-.thread-parent-ref__link {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    color: var(--p-primary-color);
-    text-decoration: none;
-    font-weight: 600;
-}
-.thread-parent-ref__link:hover {
-    text-decoration: underline;
-}
-/* Parent-side recap of children (mirrors thread-parent-ref). Shown
- * above the title when the ticket has sub-tickets. */
-.thread-sub-tickets {
-    align-self: stretch;
-    padding: 0.4rem 0.6rem;
-    border-left: 2px solid var(--p-indigo-300);
-    background: color-mix(in srgb, var(--p-indigo-500) 7%, transparent);
-    border-radius: 0 0.25rem 0.25rem 0;
-    font-size: 0.85rem;
-}
-.thread-sub-tickets__header {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    font-weight: 600;
-    color: var(--p-text-color);
-    cursor: pointer;
-    user-select: none;
-    list-style: none;
-}
-/* Hide the native disclosure triangle so our chevron is the only
- * affordance — consistent across browsers. */
-.thread-sub-tickets__header::-webkit-details-marker { display: none; }
-.thread-sub-tickets > .thread-sub-tickets__header {
-    margin-bottom: 0;
-}
-.thread-sub-tickets[open] > .thread-sub-tickets__header {
-    margin-bottom: 0.3rem;
-}
-.thread-sub-tickets__chevron {
-    font-size: 0.75em;
-    color: var(--p-text-muted-color);
-}
-.thread-sub-tickets__hint {
-    font-weight: 400;
-    color: var(--p-text-muted-color);
-    font-size: 0.92em;
-}
-.thread-sub-tickets__list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-}
-.thread-sub-tickets__item {
-    display: flex;
-    align-items: baseline;
-    gap: 0.4rem;
-    color: var(--p-text-color);
-}
-.thread-sub-tickets__item--closed {
-    opacity: 0.6;
-}
-.thread-sub-tickets__id {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    color: var(--p-primary-color);
-    text-decoration: none;
-    font-weight: 600;
-    flex: 0 0 auto;
-}
-.thread-sub-tickets__id:hover {
-    text-decoration: underline;
-}
-.thread-sub-tickets__title {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.thread-sub-tickets__tag {
-    font-size: 0.72rem;
-    padding: 0.05rem 0.4rem;
-    border-radius: 0.25rem;
-    background: color-mix(in srgb, var(--p-surface-500) 18%, transparent);
-    color: var(--p-text-color);
-}
-.thread-sub-tickets__tag[data-stage="pending"] {
-    background: color-mix(in srgb, var(--p-yellow-500) 25%, transparent);
-    color: var(--p-yellow-700);
-}
-.thread-sub-tickets__tag[data-stage="closed"],
-.thread-sub-tickets__tag[data-stage="closed-resolved"] {
-    background: color-mix(in srgb, var(--p-orange-500) 20%, transparent);
-    color: var(--p-orange-700);
-}
-.thread-sub-tickets__tag[data-stage="resolved"] {
-    background: color-mix(in srgb, var(--p-green-500) 22%, transparent);
-    color: var(--p-green-700);
-}
-.thread-sub-tickets__tag[data-stage="snoozed"] {
-    background: color-mix(in srgb, var(--p-indigo-500) 22%, transparent);
-    color: var(--p-indigo-700);
-}
-.thread-sub-tickets__tag[data-stage="rejected"] {
-    background: color-mix(in srgb, var(--p-red-500) 20%, transparent);
-    color: var(--p-red-700);
-}
+/* #271: the .thread-parent-ref ("Sub-ticket of #B.x") and
+   .thread-sub-tickets accordion styles lived here. Both widgets were
+   removed in favour of read-only child_of / parent_of relation chips
+   (see .thread-relations__chip[data-kind="child_of" | "parent_of"]
+   above), so their CSS is gone too. */
 .thread-no-comments { padding: 1rem; }
 .comment-card--focused {
     box-shadow: 0 0 0 2px var(--p-primary-color);

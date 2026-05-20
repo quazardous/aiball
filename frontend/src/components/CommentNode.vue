@@ -11,6 +11,7 @@ import { bus } from "../lib/bus";
 import { attachPasteImage } from "../lib/pasteImage";
 import { questionStats as computeQuestionStats } from "../lib/questions";
 import { readDecision } from "../lib/decisions";
+import { formatTicketRef } from "../lib/formatting";
 
 interface DeciderInfo {
     action: "accepted" | "rejected";
@@ -343,7 +344,7 @@ onBeforeUnmount(() => detachPaste?.());
                 v-if="LIFECYCLE_LABELS[msg.kind].showSource && msg.source_ticket_id"
                 :href="`/b/${msg.source_ticket_id}`"
                 class="comment-lifecycle__ref"
-            >#B.{{ msg.source_ticket_id }}</a>
+            >{{ formatTicketRef(msg.source_ticket_id) }}</a>
         </div>
         <div v-if="editing" class="comment-edit">
             <Textarea

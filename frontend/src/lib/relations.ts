@@ -9,11 +9,23 @@ export const RELATION_KINDS = [
     "blocks",
     "duplicates",
     "ignored",
+    "child_of",
+    "parent_of",
 ] as const;
 export type RelationKind = typeof RELATION_KINDS[number];
 
 export function isRelationKind(s: string): s is RelationKind {
     return (RELATION_KINDS as readonly string[]).includes(s);
+}
+
+/**
+ * Structural lineage kinds (#271) — auto-written on sub-ticket creation,
+ * rendered read-only (no kebab menu) and excluded from the manual
+ * add-relation picker. Mirror of `LINEAGE_RELATION_KINDS` in src/.
+ */
+export const LINEAGE_RELATION_KINDS: readonly RelationKind[] = ["child_of", "parent_of"];
+export function isLineageRelationKind(k: string): boolean {
+    return (LINEAGE_RELATION_KINDS as readonly string[]).includes(k);
 }
 
 export interface TypedRelationMeta {
@@ -24,6 +36,8 @@ export interface TypedRelationMeta {
 export function inverseRelationKind(k: RelationKind): RelationKind {
     if (k === "depends_on") return "blocks";
     if (k === "blocks") return "depends_on";
+    if (k === "child_of") return "parent_of";
+    if (k === "parent_of") return "child_of";
     return k;
 }
 
@@ -37,6 +51,8 @@ export const RELATION_LABELS: Record<RelationKind, string> = {
     blocks: "blocks",
     duplicates: "duplicates",
     ignored: "ignored",
+    child_of: "child of",
+    parent_of: "parent of",
 };
 
 /**
@@ -49,4 +65,6 @@ export const RELATION_SEVERITY: Record<RelationKind, "info" | "warn" | "danger" 
     blocks: "warn",
     duplicates: "danger",
     ignored: "secondary",
+    child_of: "secondary",
+    parent_of: "secondary",
 };

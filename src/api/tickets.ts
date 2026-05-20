@@ -40,7 +40,7 @@ import {
     listTypedRelationsForTicket,
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
-import { RELATION_KINDS, isRelationKind, type RelationKind } from "../relations.js";
+import { RELATION_KINDS, isRelationKind, isLineageRelationKind, type RelationKind } from "../relations.js";
 import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
 import { badRequest, consumerOf, notFound, withTags } from "./_helpers.js";
@@ -488,7 +488,10 @@ ticketsRouter.get("/tickets", (req, res) => {
         result = result.filter((t) => !t.closed && (includePostponed || !t.postponed));
     }
     if (onlyActionable) {
-        const { actionableIds } = computeActionableTicketIds();
+        // #265: scope the actionable gate to the requesting consumer so a
+        // ticket where they authored the latest content (awaiting someone
+        // else) drops out of THEIR pool.
+        const { actionableIds } = computeActionableTicketIds(consumerOf(req));
         result = result.filter((t) => actionableIds.has(t.id));
     }
     if (tagsFilter && tagsFilter.length > 0) {
@@ -711,7 +714,13 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
                     m.kind === "ticket_sub_added" ||
                     m.kind === "ticket_referenced" ||
                     m.kind === "ticket_relation") &&
-                m.status !== "rejected",
+                m.status !== "rejected" &&
+                // #271: lineage relations (child_of/parent_of) are surfaced
+                // as chips in the relations cartouche; the ticket_sub_added
+                // pseudo already logs the link in the timeline, so drop the
+                // parallel relation event here to avoid a redundant row.
+                !(m.kind === "ticket_relation" &&
+                    isLineageRelationKind(parseMeta(m.meta ?? null).relation?.kind ?? "")),
         )
         .sort((a, b) => a.id - b.id);
     // Lifecycle replay restricted to approved events for the header

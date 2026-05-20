@@ -5,6 +5,7 @@ import Checkbox from "primevue/checkbox";
 import { type InboxRow, type SearchHit } from "../lib/api";
 import { relativeTime, snippetOf, titleOf } from "../lib/format";
 import { attentionOf, lifecycleStage } from "../lib/ticket-state";
+import { formatTicketRef } from "../lib/formatting";
 import {
     INTENT_SEVERITY,
     PRIORITY_SEVERITY,
@@ -102,7 +103,7 @@ function onRowClick(r: InboxRow) {
     >
         <div class="search-hit__head">
             <span class="ticket-id">
-                {{ hit.kind === 'comment' ? `#C.${hit.hashid ?? hit.id}` : `#B.${hit.ticket_id}` }}
+                {{ hit.kind === 'comment' ? `#C.${hit.hashid ?? hit.id}` : formatTicketRef(hit.ticket_id) }}
             </span>
             <Tag :value="hit.project" severity="info" style="font-size: 0.7rem" />
             <Tag
@@ -166,7 +167,7 @@ function onRowClick(r: InboxRow) {
         </template>
         <template v-if="r.by_agent" #from>{{ r.by_agent }}</template>
         <template #title>
-            <span class="ticket-id">#B.{{ r.id }}</span>
+            <span class="ticket-id">{{ formatTicketRef(r.id) }}</span>
             {{ titleOf(r) }}
             <!-- #B.245: per-event scope badge. Only render for
                  non-default scopes so the common case stays visually

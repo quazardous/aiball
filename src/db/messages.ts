@@ -589,22 +589,27 @@ export function listTypedRelationsForTicket(ticketId: number): ActiveRelation[] 
 }
 
 /**
- * One-shot migration (#B.123 phase B.3): backfill `depends_on` typed
- * relations from the legacy `parent_ticket_id` FK column. For every
- * ticket with `parent_ticket_id` set, ensure a `depends_on` event
- * exists from the child to the parent (only inserts when no active
- * relation between the same pair is already in place — idempotent).
+ * One-shot migration: backfill `child_of` lineage relations from the
+ * legacy `parent_ticket_id` FK column (#271). For every ticket with
+ * `parent_ticket_id` set, ensure a `child_of` event exists from the
+ * child to the parent (the parent sees the reciprocal `parent_of`).
  *
- * Called at daemon boot. Best-effort: per-row failures are swallowed
- * (we log a count) so a malformed sidecar doesn't kill the daemon.
- * Returns the number of relations newly inserted (0 on re-run).
+ * Supersedes the #B.123 phase B.3 backfill, which seeded `depends_on`
+ * for the same pairs — semantically wrong (a sub-ticket isn't *blocked*
+ * by its parent) and it spuriously gated sub-tickets out of `actionable`
+ * while the parent stayed open. This pass UPGRADES those system-authored
+ * `depends_on` events to `child_of`: a fresh event with a higher id wins
+ * the latest-per-pair replay, which both retags the chip and clears the
+ * gate (child_of is inert for gating). User-authored relations between a
+ * child/parent pair are left untouched.
  *
- * After this migration, the lifecycle replay and the new typed-
- * relations API treat both shapes uniformly. The legacy column stays
- * in the schema (read-only) for backwards compat; new sub-tickets
- * coming through `ticket_new(parent_ticket_id)` still set both for
- * now (a follow-up can flip the writes to relations-only once we're
- * confident the read paths agree).
+ * Called at daemon boot. Idempotent — re-runs find the `child_of` already
+ * in place and skip. Best-effort: per-row failures are swallowed so a
+ * malformed sidecar doesn't kill the daemon. Returns the number of
+ * relations newly inserted (0 on a settled re-run).
+ *
+ * The legacy column stays in the schema (write-only) for now; Phase 3
+ * (#271) drops it once we're confident the read paths agree.
  */
 export function backfillParentTicketRelations(): number {
     const db = getDb();
@@ -620,10 +625,11 @@ export function backfillParentTicketRelations(): number {
     for (const t of parents) {
         const parent = t.parent;
         if (parent === null) continue;
-        // Check if an active (any kind) ticket_relation already exists
-        // for this (child, parent) pair — we replay latest-per-target.
+        // Latest active ticket_relation event for this (child → parent)
+        // pair — drives the latest-per-target replay.
         const existing = db.select({
             meta: schema.messages.meta,
+            byAgent: schema.messages.byAgent,
             id: schema.messages.id,
         })
             .from(schema.messages)
@@ -635,17 +641,25 @@ export function backfillParentTicketRelations(): number {
             ))
             .orderBy(desc(schema.messages.id))
             .limit(1)
-            .all();
-        if (existing.length > 0) {
-            // Already migrated (or user explicitly set a relation
-            // between these two — don't overwrite their choice).
-            continue;
+            .get();
+        if (existing) {
+            let kind: string | undefined;
+            try {
+                kind = (JSON.parse(existing.meta ?? "{}") as { relation?: { kind?: string } }).relation?.kind;
+            } catch { kind = undefined; }
+            // Already migrated → idempotent no-op.
+            if (kind === "child_of") continue;
+            // User explicitly set a relation between this pair — respect
+            // their choice, don't clobber it with auto lineage.
+            if (existing.byAgent !== null) continue;
+            // Else: the legacy system-authored `depends_on` backfill —
+            // fall through to insert a `child_of` that supersedes it.
         }
         try {
             insertTypedRelation({
                 source_ticket_id: t.id,
                 target_ticket_id: parent,
-                relation_kind: "depends_on",
+                relation_kind: "child_of",
                 by_agent: null, // system-authored backfill
             });
             inserted++;

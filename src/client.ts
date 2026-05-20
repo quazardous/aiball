@@ -329,12 +329,16 @@ export class AiballClient {
             pending_count: number;
             open_count?: number;
             /** Subset of `open_count` excluding agent-resolved tickets
-             *  (#B.119). Used by the autopoll hook so the agent
-             *  isn't nagged about tickets already in the human's court. */
+             *  (#B.119) AND, since #265, tickets where THIS agent
+             *  authored the latest content (in the human's court). Used
+             *  by the autopoll hook so the agent isn't nagged about
+             *  tickets already awaiting the human. */
             actionable_count?: number;
             snoozed_count?: number;
             resolved_count?: number;
-        }>>("GET", "/api/projects?detailed=1");
+            // #265: scope to our own agent id so the actionable_count is
+            // "actionable for me" (the conversational gate is per-consumer).
+        }>>("GET", `/api/projects?detailed=1&consumer_id=${encodeURIComponent(this.agentId)}`);
     }
     feedPath(project: string) {
         return this.http<{ path: string }>(

@@ -14,6 +14,15 @@
  *   target is the canonical one. Often paired with a close.
  * - `ignored` — explicit "we considered linking these and chose not
  *   to". Useful to suppress false-positive `#B.NNN` auto-ref linkifies.
+ * - `child_of` / `parent_of` — structural lineage (#271). A sub-ticket
+ *   is `child_of` its parent; the inverse view on the parent is
+ *   `parent_of`. These supersede the legacy `parent_ticket_id` FK +
+ *   accordion: lineage now lives in the same N-N graph as every other
+ *   relation, so the thread shows it once (as a chip) instead of twice.
+ *   Unlike `depends_on`/`blocks`, they do NOT gate `actionable` — a
+ *   sub-ticket is not blocked by its parent being open. They're written
+ *   automatically on sub-ticket creation (never via the manual add-form)
+ *   and render read-only.
  *
  * Events are stored as `messages` rows with `kind = "ticket_relation"`
  * and `meta = { relation: { kind, target_ticket_id } }`. The current
@@ -31,8 +40,21 @@ export const RELATION_KINDS = [
     "blocks",
     "duplicates",
     "ignored",
+    "child_of",
+    "parent_of",
 ] as const;
 export type RelationKind = typeof RELATION_KINDS[number];
+
+/**
+ * Structural lineage kinds (#271) — the relation-graph successors of the
+ * legacy `parent_ticket_id` FK. Auto-written on sub-ticket creation,
+ * rendered read-only, excluded from the manual add-form, and (unlike
+ * depends_on/blocks) inert for `actionable` gating.
+ */
+export const LINEAGE_RELATION_KINDS: readonly RelationKind[] = ["child_of", "parent_of"];
+export function isLineageRelationKind(k: string): boolean {
+    return (LINEAGE_RELATION_KINDS as readonly string[]).includes(k);
+}
 
 export function isRelationKind(s: string): s is RelationKind {
     return (RELATION_KINDS as readonly string[]).includes(s);
@@ -55,5 +77,7 @@ export interface TypedRelationMeta {
 export function inverseRelationKind(k: RelationKind): RelationKind {
     if (k === "depends_on") return "blocks";
     if (k === "blocks") return "depends_on";
+    if (k === "child_of") return "parent_of";
+    if (k === "parent_of") return "child_of";
     return k;
 }

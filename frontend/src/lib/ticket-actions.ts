@@ -19,6 +19,7 @@ import { useToast } from "primevue/usetoast";
 import { api, type InboxRow } from "./api";
 import { bus } from "./bus";
 import { isClosed, isOpen, isPending, isRejected, isSnoozed, isUnread } from "./ticket-state";
+import { formatTicketRef } from "./formatting";
 
 export type BulkAction =
     | "approve"
@@ -186,7 +187,7 @@ export function useBulkActions(opts: {
                 toast.add({
                     severity: failed || !ok ? "warn" : "success",
                     summary: ok
-                        ? `linked ${ok} ticket${ok === 1 ? "" : "s"} to #B.${source.id}`
+                        ? `linked ${ok} ticket${ok === 1 ? "" : "s"} to ${formatTicketRef(source.id)}`
                         : "link: no edge created",
                     detail: detail || undefined,
                     life: 6000,

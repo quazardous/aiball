@@ -16,7 +16,7 @@ import { useToast } from "primevue/usetoast";
 import type Popover from "primevue/popover";
 import { api, type ThreadView as ThreadViewData } from "./api";
 import { useBus } from "./bus";
-import { RELATION_KINDS, RELATION_LABELS, type RelationKind } from "./relations";
+import { RELATION_KINDS, RELATION_LABELS, isLineageRelationKind, type RelationKind } from "./relations";
 
 interface UseThreadRelationsArgs {
     data: Ref<ThreadViewData | null>;
@@ -34,10 +34,14 @@ export function useThreadRelations({ data, load }: UseThreadRelationsArgs) {
     const newRelationTarget = ref("");
     const newRelationKind = ref<RelationKind>("relates_to");
     const addRelationBusy = ref(false);
-    const relationKindOptions = RELATION_KINDS.map((k) => ({
-        label: RELATION_LABELS[k],
-        value: k,
-    }));
+    // #271: lineage kinds (child_of / parent_of) are auto-written on
+    // sub-ticket creation and aren't offered in the manual add-form.
+    const relationKindOptions = RELATION_KINDS
+        .filter((k) => !isLineageRelationKind(k))
+        .map((k) => ({
+            label: RELATION_LABELS[k],
+            value: k,
+        }));
 
     // #B.123 phase B.2.c: change-kind / remove on each relation chip.
     // Posting a NEW ticket_relation event with the same target

@@ -14,6 +14,7 @@
 import Tag from "primevue/tag";
 import type { TicketSummary } from "../lib/api";
 import { STATUS_SEVERITY, type Severity } from "../lib/labels";
+import { formatTicketRef } from "../lib/formatting";
 
 defineProps<{
     ticket: TicketSummary;
@@ -32,12 +33,12 @@ function statusSeverity(s: "pending" | "approved" | "rejected"): Severity {
 <template>
     <header class="meta">
         <Tag
-            :value="justCopied ? `copied #B.${ticket.id}` : `#B.${ticket.id}`"
+            :value="justCopied ? `copied ${formatTicketRef(ticket.id)}` : formatTicketRef(ticket.id)"
             :severity="justCopied ? 'success' : 'secondary'"
             class="comment-ref-tag"
             role="button"
             tabindex="0"
-            :title="`Click to copy this ticket's reference (#B.${ticket.id}) — paste it in any markdown body to link back here.`"
+            :title="`Click to copy this ticket's reference (${formatTicketRef(ticket.id)}) — paste it in any markdown body to link back here.`"
             @click="emit('copy')"
             @keydown.enter.prevent="emit('copy')"
             @keydown.space.prevent="emit('copy')"
