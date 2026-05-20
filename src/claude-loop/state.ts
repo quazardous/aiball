@@ -486,10 +486,33 @@ export function userIsTakingOver(sd: string, graceSec: number): boolean {
 export const HUMAN_TYPING_TTL_SEC = 5;
 
 /** Is the pane really running under the PTY proxy right now? (#269)
- *  Existence-based: the proxy drops the marker after a successful fork and
- *  unlinks it at cleanup — no TTL, the file's presence IS the fact. */
+ *  The proxy drops the marker (stamped with its PID, see pty-proxy.py) after
+ *  a successful fork and unlinks it at cleanup. Existence alone was the fact
+ *  — but a proxy killed with -9 (or OOM'd) never runs cleanup, so the stale
+ *  marker pinned `proxyIsAlive` true forever: TS kept abdicating `@cl_human`
+ *  to a dead proxy that could no longer paint it, freezing the bar on a bare
+ *  `claude-` (#278). So verify the stamped PID is actually alive; a dead/
+ *  missing/legacy-unstamped marker hands the segment back to TS degraded
+ *  painting. */
 export function proxyIsAlive(sd: string): boolean {
-    return existsSync(proxyAlivePath(sd));
+    const p = proxyAlivePath(sd);
+    let raw: string;
+    try {
+        raw = readFileSync(p, "utf8");
+    } catch {
+        return false; // no marker → not under the proxy
+    }
+    const pid = Number.parseInt(raw.trim(), 10);
+    // Legacy markers (pre-PID stamp) → fall back to existence so we never
+    // drop a genuinely-live proxy's segment on the format change alone.
+    if (!Number.isInteger(pid) || pid <= 0) return true;
+    try {
+        process.kill(pid, 0); // signal 0 = liveness probe, sends nothing
+        return true;
+    } catch (e) {
+        // ESRCH = the process is gone; EPERM = alive but not ours (still up).
+        return (e as NodeJS.ErrnoException).code === "EPERM";
+    }
 }
 
 /** Is a human typing in the pane right now (within the TTL)? (#264) */
@@ -567,9 +590,16 @@ export function setTmuxStatus(
     // state colour without the proxy ever knowing it. The fg is reset to
     // white (`c.fg`) after the human/proxy segments so `· name [state]`
     // keeps the neutral tint.
+    // `#{@cl_human}` carries the human-presence WORD (loop/stop, painted by
+    // the proxy live or by the degraded-mode block below). It can be empty
+    // for a beat — proxy forked but hasn't painted yet, CL_TMUX unset so the
+    // proxy's paint no-ops, or a state race — and an empty option rendered a
+    // bare `claude-` (#278). Default it to the autonomous `loop` word at the
+    // FORMAT level so the bar always reads at least `claude-loop`; a real
+    // painted value (loop/stop) still wins via the conditional.
     setOpt(
         "status-left",
-        `#[fg=${c.fg}] claude-#{@cl_human}#{@cl_proxy}#[fg=${c.fg}] · ${name} #{@cl_state} `,
+        `#[fg=${c.fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour178]loop}#{@cl_proxy}#[fg=${c.fg}] · ${name} #{@cl_state} `,
     );
     setOpt("status-bg", c.bg);
     setOpt("status-fg", c.fg);
