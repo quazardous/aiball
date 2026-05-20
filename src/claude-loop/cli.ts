@@ -321,6 +321,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const stopHookCmd = `${tsxBin} ${shQuote(join(root, "src/claude-loop/stop-hook.ts"))}`;
     const sessionStartHookCmd = `${tsxBin} ${shQuote(join(root, "src/claude-loop/session-start-hook.ts"))}`;
     const userPromptSubmitHookCmd = `${tsxBin} ${shQuote(join(root, "src/claude-loop/user-prompt-submit-hook.ts"))}`;
+    const askBlockHookCmd = `${tsxBin} ${shQuote(join(root, "src/claude-loop/pretooluse-hook.ts"))}`;
     const settings = {
         hooks: {
             // SessionStart fires once when claude has finished booting
@@ -348,6 +349,16 @@ async function cmdStart(opts: StartOpts): Promise<void> {
             // display matches reality without waiting for the next
             // Stop tick (#B.145 v2.2).
             UserPromptSubmit: [{ hooks: [{ type: "command", command: userPromptSubmitHookCmd }] }],
+            // PreToolUse on AskUserQuestion (#264): in an AUTONOMOUS loop
+            // (no human in front) a multi-choice dialog stalls — nobody
+            // clicks. The hook denies it ONLY when no human is taking
+            // over and redirects the agent to ask via an aiball ticket
+            // comment. Fail-open: human present (userIsTakingOver) or any
+            // doubt → allow, so interactive sessions keep the feature.
+            // Registered here (loop settings) so it's scoped to loops.
+            PreToolUse: [
+                { matcher: "AskUserQuestion", hooks: [{ type: "command", command: askBlockHookCmd }] },
+            ],
         },
     };
     const settingsJson = JSON.stringify(settings);
@@ -473,7 +484,7 @@ function cmdList(): void {
         process.stdout.write(`${"".padEnd(24)}  dir=${plate.cwd}\n`);
         if (stale && plate.started_at_sha && currentSha) {
             process.stdout.write(
-                `${"".padEnd(24)}  source has moved since boot: ${plate.started_at_sha.slice(0, 7)} → ${currentSha.slice(0, 7)} (restart to pick up changes)\n`,
+                `${"".padEnd(24)}  source has moved since boot: ${plate.started_at_sha.slice(0, 7)} → ${currentSha.slice(0, 7)} (reload to pick up changes)\n`,
             );
         }
         found++;
@@ -481,7 +492,7 @@ function cmdList(): void {
     if (found === 0) process.stdout.write("(no loops)\n");
     if (staleCount > 0) {
         process.stdout.write(
-            `\n${staleCount} stale loop${staleCount === 1 ? "" : "s"} detected — restart with \`claude-loop rm <name> && claude-loop start <name>\` to reload source.\n`,
+            `\n${staleCount} stale loop${staleCount === 1 ? "" : "s"} detected — run \`claude-loop reload <name>\` to reload source in place (keeps the claude conversation; loops also auto-reload at their next idle tick).\n`,
         );
     }
 }

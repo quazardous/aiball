@@ -119,6 +119,11 @@ export function pingsPath(sd: string): string { return join(sd, "pings.yaml"); }
 export function idleMarkerPath(sd: string): string { return join(sd, "idle-since"); }
 export function wakeRequestedPath(sd: string): string { return join(sd, "wake-requested"); }
 export function userTookOverPath(sd: string): string { return join(sd, "user-took-over"); }
+// #264: near-live "a human is typing in the tmux pane" marker. Touched
+// by the timer's detection poll when the prompt area changes while
+// at-prompt; read by setTmuxStatus to paint the bicolor human chip and
+// usable as a finer human-present signal than the submit-time user-took-over.
+export function humanTypingPath(sd: string): string { return join(sd, "human-typing"); }
 export function timerPidPath(sd: string): string { return join(sd, "timer.pid"); }
 export function timerLogPath(sd: string): string { return join(sd, "timer.log"); }
 /**
@@ -321,7 +326,7 @@ export function installRoot(): string {
 
 /** Path to the default ping phrases yaml shipped with the install. */
 export function defaultPingsPath(): string {
-    return join(installRoot(), "skill", "claude-loop-pings.yaml");
+    return join(installRoot(), "config", "defaults", "claude-loop-pings.yaml");
 }
 
 /**
@@ -462,6 +467,25 @@ export function userIsTakingOver(sd: string, graceSec: number): boolean {
 }
 
 /**
+ * #264: short TTL for the near-live "human typing" chip. The detection
+ * poll refreshes the marker while the human types; once they stop, the
+ * chip lingers ~this long then clears. Kept short so the bar tracks
+ * typing closely (vs the 60s submit-grace of user-took-over).
+ */
+export const HUMAN_TYPING_TTL_SEC = 5;
+
+/** Is a human typing in the pane right now (within the TTL)? (#264) */
+export function humanIsTyping(sd: string, ttlSec = HUMAN_TYPING_TTL_SEC): boolean {
+    const p = humanTypingPath(sd);
+    if (!existsSync(p)) return false;
+    try {
+        return (Date.now() - statSync(p).mtimeMs) < ttlSec * 1000;
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Lightweight tmux status-left display. Three states (#B.154 final
  * collapse, david: "busy a pas de sens clair, pour moi busy égal
  * working" → "garde busy"):
@@ -510,9 +534,23 @@ export function setTmuxStatus(
     } else if (typeof countOrInfo === "string" && countOrInfo) {
         tag = `[${status}:${countOrInfo}]`;
     }
-    const left = ` CLAUDE-LOOP · ${name} ${tag} `;
     const tn = tmuxName(name);
     const c = STATUS_COLORS[status];
+    // #264 (david #ex273m): human-presence axis as a coloured WORD, no
+    // brackets, no background highlight — just the font tinted over the
+    // loop-state bar: `loop` yellow while the loop runs autonomously,
+    // `stop` red when a human is typing in the pane (the loop yields).
+    // The rest of the bar (claude- · name [status]) keeps its idle/boot/busy
+    // colour, so human-present coexists with the loop state rather than being
+    // a 4th LoopStatus.
+    const sd = process.env.CL_STATE_DIR;
+    const badge = sd && humanIsTyping(sd)
+        ? `#[bg=${c.bg},fg=colour196]stop`   // red font — human present, loop yields
+        : `#[bg=${c.bg},fg=colour178]loop`;  // yellow font — autonomous loop running
+    const left =
+        `#[bg=${c.bg},fg=${c.fg}] claude-` +
+        badge +
+        `#[bg=${c.bg},fg=${c.fg}] · ${name} ${tag} `;
     spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-left", left], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-bg", c.bg], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tn, "status-fg", c.fg], { stdio: "ignore" });
@@ -682,7 +720,7 @@ export async function buildContextPhrase(
         // actual fix from 0aed5a2.
         //
         // Templating layer (#B.232 cpaez7): wording is no longer
-        // hardcoded — slots come from `skill/claude-loop-pings.yaml`
+        // hardcoded — slots come from `config/defaults/claude-loop-pings.yaml`
         // (`prompts:` block) with optional per-project override in
         // `.aiball.yaml`. Tone (hint | directive | imperative) drives
         // the russian-doll lookup for object-shape slots. Fallbacks
@@ -843,7 +881,7 @@ type WakeTemplates = Record<Intent, WakeTemplate>;
  * géré en config yaml" — the YAML is authoritative; this fallback
  * only kicks in if the YAML is missing the section, never overrides
  * a YAML that has it). Kept in sync with the defaults shipped in
- * `skill/claude-loop-pings.yaml`.
+ * `config/defaults/claude-loop-pings.yaml`.
  */
 const DEFAULT_WAKE_TEMPLATES: WakeTemplates = {
     // #B.230: must mention "aiball" explicitly so claude doesn't

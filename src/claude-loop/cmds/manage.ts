@@ -22,8 +22,10 @@ import {
     STATE_ROOT,
     envPath,
     installRoot,
+    installRootSha,
     platePath,
     readPlate,
+    writePlate,
     stateDirFor,
     timerLogPath,
     timerPidPath,
@@ -104,6 +106,18 @@ export function cmdReload(name: string): void {
     if (oldPid !== null) {
         try { process.kill(oldPid); } catch { /* already dead */ }
     }
+
+    // #251: re-stamp the plate's source SHA so a reloaded loop drops the
+    // `[stale]` chip in `list` (and won't immediately self-reload). The
+    // fresh timer is loaded from the current source, so it IS in sync.
+    try {
+        const plate = readPlate(sd);
+        const sha = installRootSha();
+        if (sha && plate.started_at_sha !== sha) {
+            plate.started_at_sha = sha;
+            writePlate(sd, plate);
+        }
+    } catch { /* no plate / not a git checkout — leave staleness as-is */ }
 
     const root = installRoot();
     const logFd = openSync(timerLogPath(sd), "a");
