@@ -19,6 +19,19 @@
  *
  * Logs to stdout (the launcher redirects to $STATE_DIR/timer.log).
  * Exits when the tmux session disappears.
+ *
+ * PRIMARY TODO (#B.178 win) — generic stuck-at-menu detection:
+ * claude's interactive first-run gates (MCP-trust [1/2/3], theme
+ * picker, "update available", trust-folder, expired login, resume
+ * picker, …) block boot in a detached session — nobody is attached to
+ * answer, so claude never reaches its prompt and the loop looks dead.
+ * This timer already capture-pane's every tick, so it's the right
+ * place to: after boot-grace, detect that claude is NOT at its ready
+ * prompt, capture the offending screen, surface it (log + ping the
+ * human via aiball), and optionally send a conservative key. That
+ * generalizes to menus that don't exist yet — the durable fix vs
+ * per-menu settings flags. Interim: user runs `claude` once to clear
+ * the one-time gates (see docs/WIN-INSTALL.md).
  */
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";

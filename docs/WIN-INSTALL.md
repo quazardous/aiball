@@ -309,6 +309,28 @@ claude-loop attach myloop
 Set `MUX_CMD=psmux` if you want to be explicit (default `tmux`
 resolves to psmux's alias anyway).
 
+### ⚠️ First, clear claude's one-time prompts (important)
+
+claude-loop runs claude in a **detached** mux pane — nobody is
+attached to answer claude's interactive first-run gates. If claude
+would show any of these, the loop silently stalls (claude waits at the
+prompt, never finishes booting):
+
+- `New MCP server found in .mcp.json — trust it? [1/2/3]`
+- theme picker (first ever run)
+- "trust the files in this folder?"
+- "update available" / login-expired prompts
+
+**Quick win**: in your project directory, run plain `claude` **once**,
+answer those prompts (pick "1" to trust the project MCP server, set
+your theme, etc.), then exit (`/exit` or Ctrl-C). After that claude
+boots straight to its prompt and `claude-loop start` works.
+
+> Generic detection of these menus (so claude-loop notices a stuck
+> claude, surfaces the blocking screen, and pings you) is the planned
+> durable fix — see the TODO in `src/claude-loop/timer.ts`. Until then,
+> the one-time `claude` run is the reliable workaround.
+
 Skip this with `-NoClaudeLoop` if you only want the daemon + tray
 (the `claude-loop.cmd` shim still ships, but `start` will error out
 until psmux + bash are reachable).

@@ -307,6 +307,26 @@ function cmdStart(opts: StartOpts): void {
     const stopHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/stop-hook.ts"))}`;
     const sessionStartHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/session-start-hook.ts"))}`;
     const userPromptSubmitHookCmd = `npx --no-install tsx ${shQuote(join(root, "src/claude-loop/user-prompt-submit-hook.ts"))}`;
+    // NOTE (#B.178 win): claude-loop runs claude in a DETACHED mux pane
+    // where nobody can answer claude's interactive first-run gates (the
+    // ".mcp.json found — trust? [1/2/3]" menu, theme picker, "update
+    // available", trust-folder, expired-login, …). Any such menu blocks
+    // boot: claude sits at the prompt, the SessionStart hook never fires,
+    // and the loop never progresses (looks "dead").
+    //
+    // PRIMARY TARGET (TODO): generic stuck-at-menu detection in the
+    // timer — it already capture-pane's every tick, so it can notice
+    // claude hasn't reached its ready prompt after boot-grace, surface
+    // the offending menu (log + ping the human), and optionally send a
+    // conservative key. That future-proofs against menus that don't
+    // exist yet, instead of whack-a-mole per-menu settings flags
+    // (enableAllProjectMcpServers etc. — rejected: also auto-trusts
+    // EVERY project MCP server, a security footgun).
+    //
+    // INTERIM quick-win: the user runs `claude` once interactively in
+    // the project dir to clear the one-time gates (documented in
+    // docs/WIN-INSTALL.md). After that claude boots straight to its
+    // prompt and claude-loop works.
     const settings = {
         hooks: {
             // SessionStart fires once when claude has finished booting
