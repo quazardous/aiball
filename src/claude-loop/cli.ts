@@ -378,8 +378,16 @@ function cmdStart(opts: StartOpts): void {
         if (existsSync(gitBash)) bashCmd = toShortPathWin(gitBash);
         // else fall back to "bash" and hope the PATH is sane.
     }
+    // The `--` separator is REQUIRED for psmux: without it, psmux
+    // collects the positional command args and joins them with spaces
+    // into one string, which destroys the `bash -lc "<multi-word cmd>"`
+    // arg boundaries (bash then runs just `source` and dies, killing
+    // the pane → session reaped in seconds). With `--`, psmux keeps the
+    // raw argv and execs it directly. Harmless on Linux tmux (standard
+    // getopt end-of-options marker). Verified on Windows: `sleep` stays
+    // alive with `--`, dies instantly without.
     const r = spawnSync(MUX_CMD, [
-        "new-session", "-d", "-s", tname, "-c", cwd, bashCmd, "-lc", innerCmd,
+        "new-session", "-d", "-s", tname, "-c", cwd, "--", bashCmd, "-lc", innerCmd,
     ]);
     if (r.status !== 0) die("tmux new-session failed");
 
