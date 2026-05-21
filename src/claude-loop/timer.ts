@@ -717,12 +717,17 @@ async function mainSse(): Promise<void> {
         }
         // #B.177 B1: heartbeat push of current state to the daemon
         // so the consumers panel shows `[busy]`/`[idle]`/`[boot]` per
-        // agent + an "offline" badge after 60s without a push.
+        // agent + an "offline" badge after the heartbeat goes stale.
         // Fire on EVERY tick (not just transitions) — the daemon
         // updates `state_updated_at` always, freshness signal for
         // the UI's offline detector.
+        // #280: also push live human-presence so the panel can render
+        // `human` vs autonomous `loop` while the heartbeat is fresh —
+        // same signal the tmux bar uses for its loop/stop word (a human
+        // typing now, or within user-grace after a manual prompt).
         try {
-            await client().pushState(settledStatus);
+            const human = userIsTakingOver(sd!, userGraceSec) || humanIsTyping(sd!);
+            await client().pushState(settledStatus, human);
         } catch { /* daemon down or transient — next tick retries */ }
     }
     log("tmux session gone — timer exiting");

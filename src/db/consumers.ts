@@ -31,6 +31,10 @@ export interface Consumer {
     state_since?: string | null;
     /** #B.177 B1: last state heartbeat — UI uses this for offline detection. */
     state_updated_at?: string | null;
+    /** #280: live human-presence — true when a human is driving the loop
+     *  (typing / within user-grace) at the last heartbeat. null = never
+     *  reported / not a loop agent. */
+    state_human?: boolean | null;
     created_at: string;
     updated_at: string;
 }
@@ -48,6 +52,7 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         state: (r.state as ConsumerState | null) ?? null,
         state_since: r.stateSince,
         state_updated_at: r.stateUpdatedAt,
+        state_human: r.stateHuman == null ? null : r.stateHuman === 1,
         created_at: r.createdAt,
         updated_at: r.updatedAt,
     };
@@ -99,7 +104,7 @@ export function touchLastSeen(consumer_id: string): void {
  * call, `state_updated_at` is touched — the heartbeat freshness
  * signal the UI uses for "offline" detection.
  */
-export function setConsumerState(consumer_id: string, state: ConsumerState): void {
+export function setConsumerState(consumer_id: string, state: ConsumerState, human?: boolean): void {
     if (!consumer_id) return;
     const now = nowIso();
     const cur = getDb().select({ state: schema.consumers.state })
@@ -112,6 +117,9 @@ export function setConsumerState(consumer_id: string, state: ConsumerState): voi
         stateUpdatedAt: now,
         updatedAt: now,
     };
+    // #280: only touch the human flag when the caller reports it (the loop
+    // timer always does); legacy callers leave it untouched.
+    if (human !== undefined) patch.stateHuman = human ? 1 : 0;
     if (changed) patch.stateSince = now;
     getDb().update(schema.consumers)
         .set(patch)

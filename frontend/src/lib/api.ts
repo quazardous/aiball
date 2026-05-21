@@ -351,9 +351,15 @@ export interface Consumer {
     state_since?: string | null;
     /**
      * #B.177 B1: ISO8601 of last heartbeat. UI computes "offline"
-     * when `now - state_updated_at > 60s`.
+     * when `now - state_updated_at` exceeds the offline threshold.
      */
     state_updated_at?: string | null;
+    /**
+     * #280: live human-presence at the last heartbeat — true when a human
+     * is driving the loop (typing / within user-grace). null = never
+     * reported. Drives the `human` vs `loop` badge.
+     */
+    state_human?: boolean | null;
     created_at: string;
     updated_at: string;
 }

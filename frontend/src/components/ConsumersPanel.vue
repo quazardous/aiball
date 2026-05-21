@@ -16,10 +16,14 @@ const emit = defineEmits<{
     (e: "close-edit"): void;
 }>();
 
-// #B.177: how long without a state heartbeat before we render the
-// loop agent as "offline" in the Activity badge. Matches david's
-// 60s default from the design comment on the ticket.
-const OFFLINE_THRESHOLD_MS = 60_000;
+// #B.177 / #280: how long without a state heartbeat before we render a
+// loop agent as "offline". The claude-loop timer heartbeats every
+// CL_INTERVAL (default 30s), so the old 60s gave only a 2-tick margin —
+// a single delayed tick (slow pingsCount/pushState, daemon blip, GC)
+// flickered a BUSY agent to "offline" (david #280 "marqué idle/offline
+// alors que je les vois busy"). Widen to ~4× the default heartbeat so
+// normal jitter never reads as offline.
+const OFFLINE_THRESHOLD_MS = 120_000;
 
 // Tick-clock so "2 min ago" updates without re-fetching the API.
 const now = ref(Date.now());
@@ -107,41 +111,57 @@ function isMcpActive(r: Consumer): boolean {
     return Number.isFinite(t) && now.value - t <= OFFLINE_THRESHOLD_MS;
 }
 
-/** "Offline" = the claude-loop timer's heartbeat stopped (state
- *  stale > OFFLINE_THRESHOLD_MS) AND nothing fresh on the MCP side
- *  either. Without the last_seen_at cross-check we'd lie when the
- *  agent runs without claude-loop (no timer, no heartbeat — but it
- *  IS posting via MCP), which is the david report on #B.193. */
-function isOffline(r: Consumer): boolean {
-    return !!r.state && !isHeartbeatFresh(r) && !isMcpActive(r);
+/**
+ * #280 david "loop vs stop/human": the badge mixed two orthogonal axes.
+ * Split them — `loopMode` answers WHO is driving (autonomous loop / a
+ * human / nobody), independent of the busy/idle ACTIVITY:
+ *   - heartbeat fresh + live human flag → `human` (a human is driving the
+ *     loop right now — typing / within user-grace);
+ *   - heartbeat fresh, no human flag    → `loop` (autonomous);
+ *   - heartbeat stale but still calling the API → `human` (loop stopped /
+ *     human took over — agent alive without an auto-loop heartbeat);
+ *   - heartbeat stale AND API silent    → `offline` (truly gone).
+ * This is what kills the false "offline while I see it busy": a manually
+ * driven (or stale-but-active) agent now reads `human`, not `offline`.
+ */
+type LoopMode = "loop" | "human" | "offline";
+function loopMode(r: Consumer): LoopMode {
+    if (isHeartbeatFresh(r)) return r.state_human ? "human" : "loop";
+    return isMcpActive(r) ? "human" : "offline";
 }
 
-/** Render the state badge only when it carries meaning — a fresh
- *  heartbeat (show the actual state), or a confirmed offline
- *  (heartbeat AND MCP both silent). Stale heartbeat + active MCP =
- *  agent alive without claude-loop, no badge (the activity column
- *  already shows "Ns ago" which is the truthful signal). */
+/** Show the badge for any consumer that has ever reported a loop state
+ *  (humans / non-loop agents have state=null → no badge). */
 function shouldShowStateBadge(r: Consumer): boolean {
-    return !!r.state && (isHeartbeatFresh(r) || isOffline(r));
+    return !!r.state;
 }
 
 function loopBadgeLabel(r: Consumer): string {
-    if (isOffline(r)) return "offline";
-    return r.state ?? "";
+    const mode = loopMode(r);
+    if (mode === "offline") return "offline";
+    if (mode === "human") return "human";
+    return `loop · ${r.state}`; // loop · busy / loop · idle / loop · boot
 }
 
 function loopBadgeSeverity(r: Consumer): "info" | "secondary" | "warn" {
-    if (isOffline(r)) return "secondary";
-    if (r.state === "busy") return "info";    // electric blue — matches tmux bar
-    if (r.state === "boot") return "warn";    // yellow
-    return "secondary";                        // idle = gray
+    const mode = loopMode(r);
+    if (mode === "offline") return "secondary";       // gray
+    if (mode === "human") return "warn";              // orange — human-driven
+    if (r.state === "busy") return "info";            // electric blue — matches tmux bar
+    if (r.state === "boot") return "warn";            // yellow
+    return "secondary";                                // loop idle = gray
 }
 
 function loopBadgeTooltip(r: Consumer): string {
     if (!r.state) return "no claude-loop activity recorded";
-    if (isOffline(r))
-        return `last heartbeat ${relativeTime(r.state_updated_at)} — timer likely down`;
-    return `${r.state} since ${relativeTime(r.state_since)}`;
+    const mode = loopMode(r);
+    if (mode === "offline")
+        return `last heartbeat ${relativeTime(r.state_updated_at)} — loop timer likely down`;
+    if (mode === "human")
+        return isHeartbeatFresh(r)
+            ? `human driving this loop (${r.state}) — heartbeat ${relativeTime(r.state_updated_at)}`
+            : `loop not heartbeating but active via API ${relativeTime(r.last_seen_at)} — human-driven / loop stopped`;
+    return `autonomous loop — ${r.state} since ${relativeTime(r.state_since)}`;
 }
 
 const hasLoopAgents = computed(() => rows.value.some((r) => !!r.state));

@@ -449,11 +449,11 @@ export class AiballClient {
      * Best-effort: failures are not surfaced to the caller, the timer
      * heartbeats again on the next tick.
      */
-    pushState(state: "busy" | "idle" | "boot") {
-        return this.http<{ consumer_id: string; state: string }>(
+    pushState(state: "busy" | "idle" | "boot", human?: boolean) {
+        return this.http<{ consumer_id: string; state: string; human?: boolean }>(
             "PUT",
             `/api/consumers/${encodeURIComponent(this.agentId)}/state`,
-            { state },
+            human === undefined ? { state } : { state, human },
         );
     }
 

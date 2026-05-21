@@ -365,6 +365,14 @@ export const consumers = sqliteTable("consumers", {
      * which moves on any API call (e.g. an MCP `ticket_get`).
      */
     stateUpdatedAt: text("state_updated_at"),
+    /**
+     * #280: live human-presence flag pushed alongside `state` on each
+     * heartbeat. 1 = a human is currently driving this loop (typing /
+     * within user-grace), 0 = autonomous. NULL when never reported
+     * (legacy rows, non-loop consumers). Lets the consumers page show
+     * `human` vs `loop` even while the heartbeat is fresh.
+     */
+    stateHuman: integer("state_human"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (t) => [
