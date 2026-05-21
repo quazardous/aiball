@@ -33,11 +33,12 @@ The wording is **config-driven** via the layered `.aiball.yaml`:
 
 ```yaml
 workflow:
-  hint_branch: true     # hint a dedicated branch + PR (default)
-  hint_worktree: false  # also mention a worktree (off — too technical)
+  hint_branch: false    # hint a dedicated branch + PR (default off — opt in)
+  hint_worktree: false  # also mention a worktree (default off — too technical)
 ```
 
-Both off → no hint. `request`/other intents get no workflow hint.
+**Both default to `false`** → no branch hint on feature wakes unless a project
+opts in. `request`/other intents never get a workflow hint.
 
 ## Deploy reality
 

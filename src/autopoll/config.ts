@@ -156,10 +156,10 @@ const DEFAULTS: AiballConfig = {
         user_grace_seconds: 60,
         wake_in_flight_ttl_ms: 2000,
     },
-    // #319: feature tickets hint a branch + PR by default; worktree off
-    // (too technical). Per-project override in `.aiball.yaml` `workflow:`.
+    // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
+    // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.
     workflow: {
-        hint_branch: true,
+        hint_branch: false,
         hint_worktree: false,
     },
     configPath: null,
