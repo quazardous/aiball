@@ -49,6 +49,7 @@ import {
     formatPaneSnapshot,
     idleMarkerPath,
     humanTypingPath,
+    userTookOverPath,
     humanIsTyping,
     injectSockPath,
     installRoot,
@@ -332,6 +333,10 @@ function detectHumanTyping(): void {
         if (prevPaneTail && tail !== prevPaneTail && !recentlySentKeys()) {
             try {
                 writeFileSync(humanTypingPath(sd!), new Date().toISOString() + "\n");
+                // #315: typing also ARMS the user-grace (degraded-mode parity
+                // with the proxy's touch_user_grace) so the bar does
+                // stop → wait → loop, not stop → loop. Skipped under --no-wait.
+                if (!NO_WAIT) writeFileSync(userTookOverPath(sd!), new Date().toISOString() + "\n");
             } catch { /* ignore — chip just won't show */ }
             log("human-typing detected (prompt area changed at idle)");
         }
