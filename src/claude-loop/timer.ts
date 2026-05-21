@@ -405,7 +405,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         log(`skip wake (${reason}) — boot-grace ${leftS}s left (--wait: letting the human take over)`);
         return false;
     }
-    if (!manualWake && userIsTakingOver(sd!, userGraceSec)) {
+    if (!manualWake && !NO_WAIT && userIsTakingOver(sd!, userGraceSec)) {
         log(`skip wake (${reason}) — user-grace active (user typed within ${userGraceSec}s)`);
         return false;
     }

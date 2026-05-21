@@ -107,9 +107,12 @@ HUMAN_TTL_SEC = 5  # doit suivre HUMAN_TYPING_TTL_SEC côté TS
 # Mots fg-only (le bg = status-bg). Doivent rester alignés avec
 # setTmuxStatus / humanBarWord (state.ts) — #302 : stop=rouge, wait=jaune,
 # loop=vert.
-_HUMAN_STOP = "#[fg=colour196]stop"
-_HUMAN_WAIT = "#[fg=colour178]wait"
-_HUMAN_LOOP = "#[fg=colour40]loop"
+_HUMAN_STOP = "#[fg=colour196,bg=colour16]stop"
+_HUMAN_WAIT = "#[fg=colour178,bg=colour16]wait"
+_HUMAN_LOOP = "#[fg=colour40,bg=colour16]loop"
+# #302: --no-wait (CL_WAIT=0) = no human at the terminal → toujours `loop`
+# (on ignore frappe + user-grace), aligné avec humanBarWord côté TS.
+_NO_WAIT = os.environ.get("CL_WAIT") == "0"
 
 
 def _user_grace_remaining():
@@ -132,8 +135,10 @@ def _user_grace_remaining():
 
 
 def _rest_word():
-    """Mot au repos (pas de frappe) : `wait` dans la fenêtre user-grace,
-    sinon `loop`."""
+    """Mot au repos (pas de frappe) : `loop` si --no-wait ; sinon `wait` dans
+    la fenêtre user-grace, sinon `loop`."""
+    if _NO_WAIT:
+        return _HUMAN_LOOP
     return _HUMAN_WAIT if _user_grace_remaining() > 0.0 else _HUMAN_LOOP
 
 
@@ -354,7 +359,9 @@ def main(argv):
                     if is_typing_keystroke(data):
                         touch_marker()
                         last_keystroke = datetime.datetime.now().timestamp()
-                        if current_word != _HUMAN_STOP:
+                        # #302: under --no-wait we never show `stop` (no human
+                        # assumed) — stay `loop`.
+                        if not _NO_WAIT and current_word != _HUMAN_STOP:
                             _paint_word(_HUMAN_STOP)  # transition →stop, instantané
                             current_word = _HUMAN_STOP
                     os.write(master_fd, data)

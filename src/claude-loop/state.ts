@@ -576,9 +576,15 @@ const STATUS_COLORS: Record<LoopStatus, { bg: string; fg: string }> = {
  * two in sync.
  */
 export function humanBarWord(sd: string | undefined, graceSec: number): string {
-    if (sd && humanIsTyping(sd)) return "#[fg=colour196]stop";
-    if (sd && userIsTakingOver(sd, graceSec)) return "#[fg=colour178]wait";
-    return "#[fg=colour40]loop";
+    // #302: --no-wait (CL_WAIT=0) assumes NO human at the terminal → always
+    // autonomous `loop`, ignoring the typing / user-grace markers. (david:
+    // the bar showed `wait` under --no-wait while pings fired — incoherent.)
+    // #302 david: black bg (colour16) behind the word so it stays readable
+    // over any bar state colour (busy blue / idle gray / boot yellow).
+    if (process.env.CL_WAIT === "0") return "#[fg=colour40,bg=colour16]loop";
+    if (sd && humanIsTyping(sd)) return "#[fg=colour196,bg=colour16]stop";
+    if (sd && userIsTakingOver(sd, graceSec)) return "#[fg=colour178,bg=colour16]wait";
+    return "#[fg=colour40,bg=colour16]loop";
 }
 
 export function setTmuxStatus(
@@ -611,7 +617,7 @@ export function setTmuxStatus(
     // TS owns the rest. The bar's bg comes from `status-bg` (set per state
     // below), so the proxy's fg-only `@cl_human` renders on the current
     // state colour without the proxy ever knowing it. The fg is reset to
-    // white (`c.fg`) after the human/proxy segments so `· name [state]`
+    // white (`c.fg`) after the human/proxy segments so `name [state]`
     // keeps the neutral tint.
     // `#{@cl_human}` carries the human-presence WORD (loop/stop, painted by
     // the proxy live or by the degraded-mode block below). It can be empty
@@ -620,9 +626,22 @@ export function setTmuxStatus(
     // bare `claude-` (#278). Default it to the autonomous `loop` word at the
     // FORMAT level so the bar always reads at least `claude-loop`; a real
     // painted value (loop/stop) still wins via the conditional.
+    //
+    // #302 (gmwffh) layout: the bar OPENS in the active state colour, a
+    // shade-block GRADIENT fades active→black (`▓▒░`), then a black `island`
+    // holds ` claude-WORD `, then a gradient fades black→active (`░▒▓`), then
+    // the rest of the bar resumes in the state colour. No more ` · ` separator.
+    // david (gmwffh) wanted a "bande sportive / dégradé" feel, not the sharp
+    // half-block edge. Shade blocks (Block Elements, U+2591/2/3) over powerline
+    // PUA glyphs so the gradient renders without a Nerd-patched font: each cell
+    // is fg=active over bg=black, ▓=75% / ▒=50% / ░=25% active → smooth fade.
     setOpt(
         "status-left",
-        `#[fg=${c.fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour40]loop}#{@cl_proxy}#[fg=${c.fg}] · ${name} #{@cl_state} `,
+        // #302: commas inside the false-branch `#[…]` MUST be escaped `#,` —
+        // tmux splits `#{?cond,then,else}` on commas, so an unescaped one broke
+        // the `loop` fallback entirely (the #278 bare-`claude-` guard never
+        // actually fired). Escaped, the fallback renders when @cl_human is unset.
+        `#[bg=${c.bg}] #[fg=${c.bg},bg=colour16]▓▒░#[fg=${c.fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour40#,bg=colour16]loop} #[fg=${c.bg},bg=colour16]░▒▓#[bg=${c.bg}]#{@cl_proxy}#[fg=${c.fg}] ${name} #{@cl_state} `,
     );
     setOpt("status-bg", c.bg);
     setOpt("status-fg", c.fg);
