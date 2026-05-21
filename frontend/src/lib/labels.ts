@@ -166,6 +166,7 @@ export const INTENT_SEVERITY: Record<Intent, Severity> = {
     request: "info",
     question: "warn",
     fyi: "secondary",
+    feature: "success", // #319: green — new feature work (branch + PR)
 };
 
 /**

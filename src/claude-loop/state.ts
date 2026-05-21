@@ -1102,9 +1102,15 @@ const DEFAULT_WAKE_TEMPLATES: WakeTemplates = {
         with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}.",
         ticket_only: "Heads-up on aiball ticket #{ticket}.",
     },
+    // #319: feature work. Base wording; buildWakePhrase appends the config-driven
+    // branch hint (workflow.hint_branch / hint_worktree) for this intent.
+    feature: {
+        with_comment: "Build aiball feature ticket #{ticket} — new comment #{comment}.",
+        ticket_only: "Build aiball feature ticket #{ticket}.",
+    },
 };
 
-const WAKE_INTENTS: readonly Intent[] = ["panic", "request", "question", "fyi"];
+const WAKE_INTENTS: readonly Intent[] = ["panic", "request", "question", "fyi", "feature"];
 
 function isWakeTemplate(x: unknown): x is WakeTemplate {
     return !!x && typeof x === "object"
