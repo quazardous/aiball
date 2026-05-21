@@ -20,8 +20,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "node --import tsx --import ./src/test-support/bootstrap.ts --test \"src/**/*.test.ts\"",
-    "test:watch": "node --import tsx --import ./src/test-support/bootstrap.ts --test --watch \"src/**/*.test.ts\""
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "test:watch": "node --import tsx --test --watch \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
