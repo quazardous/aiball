@@ -30,3 +30,7 @@ __pycache__/
 # Build artifact of scripts/make-icon.py — for human verification
 # only, the real icon is assets/aiball.ico.
 assets/aiball-preview.png
+# Rust build output for the Windows ConPTY proxy (#281, strategy B). The
+# compiled cl-pty-proxy.exe is a platform-specific artifact built locally
+# (or by install.ps1); never committed.
+windows/cl-pty-proxy/target/
