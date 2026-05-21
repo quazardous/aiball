@@ -77,6 +77,10 @@ export function insertPing(
         // the THREAD's urgency, not the comment's.
         intent?: Intent | null;
     },
+    /** #296: who caused this ping — the post author for fan-out, the decider
+     *  for a decision/moderation notification. Drives the self-ping filter
+     *  (`actor == recipient` ⇒ hidden). Null when unknown (legacy/unset). */
+    actor?: string | null,
 ): void {
     const isTicket = msg.kind === "ticket_created";
     const db = getDb();
@@ -84,6 +88,7 @@ export function insertPing(
         recipient,
         ticketId: isTicket ? msg.id : null,
         commentId: isTicket ? null : msg.id,
+        actor: actor ?? null,
         createdAt: nowIso(),
     }).onConflictDoNothing().run();
     // Only emit when the row was actually inserted (onConflictDoNothing
@@ -320,8 +325,8 @@ export function listUnread(
             isNull(schema.pings.seenAt),
             eq(schema.tickets.project, project),
             or(
-                isNull(schema.tickets.byAgent),
-                ne(schema.tickets.byAgent, consumer_id),
+                isNull(schema.pings.actor),
+                ne(schema.pings.actor, consumer_id),
             ),
         ))
         .all();
@@ -336,8 +341,8 @@ export function listUnread(
             isNull(schema.pings.seenAt),
             eq(schema.tickets.project, project),
             or(
-                isNull(schema.messages.byAgent),
-                ne(schema.messages.byAgent, consumer_id),
+                isNull(schema.pings.actor),
+                ne(schema.pings.actor, consumer_id),
             ),
         ))
         .all();
@@ -411,8 +416,8 @@ export function unreadCount(consumer_id: string, project: string): number {
             isNull(schema.pings.seenAt),
             eq(schema.tickets.project, project),
             or(
-                isNull(schema.tickets.byAgent),
-                ne(schema.tickets.byAgent, consumer_id),
+                isNull(schema.pings.actor),
+                ne(schema.pings.actor, consumer_id),
             ),
         )).get();
     const m = db.select({ n: sql<number>`COUNT(*)` })
@@ -424,8 +429,8 @@ export function unreadCount(consumer_id: string, project: string): number {
             isNull(schema.pings.seenAt),
             eq(schema.tickets.project, project),
             or(
-                isNull(schema.messages.byAgent),
-                ne(schema.messages.byAgent, consumer_id),
+                isNull(schema.pings.actor),
+                ne(schema.pings.actor, consumer_id),
             ),
         )).get();
     return Number(t?.n ?? 0) + Number(m?.n ?? 0);
@@ -490,15 +495,15 @@ export function listPings(opts: {
     const ticketConds = [
         ...baseConds,
         or(
-            isNull(schema.tickets.byAgent),
-            ne(schema.tickets.byAgent, opts.recipient),
+            isNull(schema.pings.actor),
+            ne(schema.pings.actor, opts.recipient),
         ),
     ];
     const messageConds = [
         ...baseConds,
         or(
-            isNull(schema.messages.byAgent),
-            ne(schema.messages.byAgent, opts.recipient),
+            isNull(schema.pings.actor),
+            ne(schema.pings.actor, opts.recipient),
         ),
     ];
 
@@ -569,8 +574,8 @@ export function unreadPingCount(recipient: string): number {
             eq(schema.pings.recipient, recipient),
             isNull(schema.pings.seenAt),
             or(
-                isNull(schema.tickets.byAgent),
-                ne(schema.tickets.byAgent, recipient),
+                isNull(schema.pings.actor),
+                ne(schema.pings.actor, recipient),
             ),
         )).get();
     const m = db.select({ n: sql<number>`COUNT(*)` })
@@ -580,8 +585,8 @@ export function unreadPingCount(recipient: string): number {
             eq(schema.pings.recipient, recipient),
             isNull(schema.pings.seenAt),
             or(
-                isNull(schema.messages.byAgent),
-                ne(schema.messages.byAgent, recipient),
+                isNull(schema.pings.actor),
+                ne(schema.pings.actor, recipient),
             ),
         )).get();
     return Number(t?.n ?? 0) + Number(m?.n ?? 0);

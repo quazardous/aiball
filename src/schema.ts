@@ -282,6 +282,14 @@ export const pings = sqliteTable("pings", {
     /** Set when the ping points at a comment in a thread. NULL for
      *  ticket-level pings. */
     commentId: integer("comment_id"),
+    /**
+     * #296: who CAUSED this ping (the post author for fan-out, the decider
+     * for a decision/moderation notification). The self-ping filter hides a
+     * ping only when `actor == recipient` — so a decision taken by SOMEONE
+     * ELSE on your comment is no longer mistaken for a self-ping and is
+     * surfaced/woken. NULL on legacy rows (treated as non-self → shown).
+     */
+    actor: text("actor"),
     createdAt: text("created_at").notNull(),
     seenAt: text("seen_at"),
 }, (t) => [

@@ -169,6 +169,13 @@
       "when": 1780000000000,
       "tag": "0023_consumer_state_human",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1780100000000,
+      "tag": "0024_pings_actor",
+      "breakpoints": true
     }
   ]
 }

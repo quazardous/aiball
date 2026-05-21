@@ -126,7 +126,8 @@ export function fanOutPings(msg: Message): void {
     for (const r of recipients) {
         if (r === msg.by_agent) continue;
         if (humanSet?.has(r)) continue;
-        insertPing(r, msg);
+        // #296: actor = the post author who triggered this fan-out.
+        insertPing(r, msg, msg.by_agent);
     }
 }
 
@@ -158,13 +159,13 @@ export function fanOutMentions(msg: Message): void {
             const subs = listProjectSubscribers(name, { roles: projectRoles });
             for (const sub of subs) {
                 if (sub === msg.by_agent) continue;
-                insertPing(sub, msg);
+                insertPing(sub, msg, msg.by_agent);
             }
         } else {
             // Treated as a consumer_id. We forcibly insert a ping even if
             // the recipient isn't subscribed to anything — that's the
             // whole point of the @-mention feature.
-            insertPing(name, msg);
+            insertPing(name, msg, msg.by_agent);
         }
     }
 }
@@ -190,5 +191,8 @@ export function notifyDecision(msg: Message, decidedBy?: string | null): void {
     if (!msg.by_agent) return;
     if (isHuman(msg.by_agent)) return;
     if (decidedBy && msg.by_agent === decidedBy) return;
-    insertPing(msg.by_agent, msg);
+    // #296: actor = the decider (NOT the author). The ping targets the
+    // author about their own comment, but since actor != recipient it is no
+    // longer treated as a self-ping → it surfaces and wakes the agent.
+    insertPing(msg.by_agent, msg, decidedBy ?? null);
 }
