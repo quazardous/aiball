@@ -45,6 +45,7 @@ import { submitMessage, validateNewMessage } from "../messages.js";
 import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
 import { broadcast } from "../ws.js";
+import { emitLifecycle } from "../event-bus.js";
 import { badRequest, consumerOf, notFound, withTags, withTagsOne } from "./_helpers.js";
 
 export const messagesRouter = Router();
@@ -115,6 +116,9 @@ function decide(
     }
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_decided", data: decorated });
+    // #321 phase 2 (additive): a moderator approved/rejected a pending message
+    // → emit so the rules engine (#322) can react to the now-live message.
+    emitLifecycle({ op: "decided", message: decorated });
     res.json(decorated);
 }
 
