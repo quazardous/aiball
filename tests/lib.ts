@@ -68,6 +68,18 @@ export async function decide(token: string, messageId: number, status: "accepted
     return JSON.parse(text) as Record<string, unknown>;
 }
 
+/** Move a ticket to another project (#294): POST /api/tickets/:id/move. */
+export async function move(token: string, ticketId: number, project: string): Promise<Record<string, unknown>> {
+    const r = await fetch(`${BASE}/api/tickets/${ticketId}/move`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({ project }),
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`POST /api/tickets/${ticketId}/move → ${r.status}: ${text}`);
+    return JSON.parse(text) as Record<string, unknown>;
+}
+
 /** Parse a message's `meta` (JSON string or object) to read `.decision`. */
 export function metaDecision(m: Record<string, unknown>): { kind?: string; status?: string } | null {
     const raw = m.meta;
