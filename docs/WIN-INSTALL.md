@@ -12,7 +12,7 @@
 Most prereqs install via `winget` (Windows 10 1809+ / Windows 11):
 
 ```powershell
-winget install OpenJS.NodeJS.LTS    # node + npm — LTS, NOT latest (see below)
+winget install OpenJS.NodeJS.LTS    # node + npm (any Node >=20 works)
 winget install Git.Git              # for cloning the repo
 ```
 
@@ -22,64 +22,152 @@ You'll also need:
   exercised.
 - A **terminal** that handles ANSI colors (Windows Terminal, recommended).
 
-### Why Node LTS (22), not latest (24+)
-
-`better-sqlite3` ships **prebuilt native bindings** only up to the current
-LTS major (22 as of 2026-05). On Node 24+, `npm install` falls back to
-compiling from source via `node-gyp`, which requires **VS Build Tools**
-("Desktop development with C++" workload — a multi-GB install). Without
-those tools, `npm install` dies with `find VS ... could not use PowerShell
-to find Visual Studio 2017 or newer` and the daemon can't start.
-
-The installer detects this case and warns at the top, then again with a
-clear recovery message after `npm install` fails. If you want bleeding-edge
-Node anyway, either install VS Build Tools or run `npm rebuild
-better-sqlite3 --build-from-source` inside `%LOCALAPPDATA%\Programs\aiball`.
+Any Node >=20 works (`better-sqlite3` v12+ ships prebuilts for both
+Node 22 and 24 — no compile step needed). The installer runs a sanity
+check post-install that catches the rare case where a brand-new Node
+major lands without prebuilts yet, and prints actionable recovery
+steps.
 
 ## Install
 
 Clone the repo and run the installer:
 
+### Pick an install path
+
+Five ways to run aiball on Windows, from "just try it" to "full integrated":
+
+| # | Path | Daemon | Tray | UI | Effort |
+|---|---|---|---|---|---|
+| 1 | **Portable** (no install) | `npm run dev` in a terminal | manual `bin\aiball-tray.cmd` | vite dev http://localhost:5173 | dev/hacking |
+| 2 | **Minimal** (`-Minimal`) | Scheduled Task pointing at this checkout | Desktop + Start Menu + Startup shortcuts | http://127.0.0.1:7777 | one command |
+| 3 | **Default install** | Scheduled Task pointing at copy in `%LOCALAPPDATA%` | same as 2 | http://127.0.0.1:7777 | one command |
+| 4 | **Service install** | NSSM Windows Service | same as 2 | http://127.0.0.1:7777 | one command (admin) |
+| 5 | **Dev install** (`-Symlink`) | Scheduled Task on symlinked copy | same as 2 | http://127.0.0.1:7777 | one command (Dev Mode on) |
+
+Same Death Star icon across 2/3/4/5 — consistent visible UX regardless of daemon mode. Path 1 needs no install at all.
+
+### Path 1: Portable (no install)
+
 ```powershell
 git clone https://github.com/quazardous/aiball.git
 cd aiball
-pwsh -File install.ps1               # fresh install (copy mode)
-pwsh -File install.ps1 -Symlink      # dev install (needs Developer Mode)
-pwsh -File install.ps1 -AuthInit     # also mint the first-time setup token
-pwsh -File install.ps1 -Uninstall    # remove (keeps %APPDATA%\aiball data)
+npm install
+npm --prefix frontend install
+# Terminal A — daemon
+npm run dev
+# Terminal B — vite dev server (HMR, http://localhost:5173)
+npm --prefix frontend run dev
+# Optional: tray icon in any other terminal
+.\bin\aiball-tray.cmd
 ```
 
-What it does (mirror of `install.sh`):
-1. Verifies prereqs (`node >=20`, `npm`, `git`). Warns if Node `>=24` —
-   see the Node LTS rationale above.
+Nothing is registered, no shortcuts created, no data dir created in
+your profile. Closing the terminals stops everything. Use this when
+you're hacking on the code itself.
+
+### Path 2: Minimal install (`-Minimal`)
+
+```powershell
+git clone https://github.com/quazardous/aiball.git
+cd aiball
+pwsh -File install.ps1 -Minimal -AuthInit
+```
+
+What it does (vs Path 3 default):
+- ❌ No copy to `%LOCALAPPDATA%\Programs\aiball` — daemon runs from this checkout in place.
+- ✅ `npm install` in this checkout (idempotent if already done).
+- ✅ Scheduled Task registered, pointing at the checkout.
+- ✅ CLI shims in `%LOCALAPPDATA%\Microsoft\WindowsApps` (so `aiball` / `aiball-mcp` / `claude-loop` work from any shell), all pointing at `$repo\bin\*.cmd`.
+- ✅ Tray shortcuts (Desktop / Start Menu / Startup) — same Death Star icon as other paths.
+
+Trade-off: if you move/delete the checkout, the daemon AND the shims
+stop working — no Uninstall needed first, but the shims will error
+out. Best fit for "I'm hacking on the code, just make it run".
+
+Incompatible with `-Service` / `-System` / `-Symlink` (Minimal is
+already in-place).
+
+### Path 3: Default install (Scheduled Task)
+
+```powershell
+git clone https://github.com/quazardous/aiball.git
+cd aiball
+pwsh -File install.ps1             # daemon at logon, tray shortcuts auto-created
+pwsh -File install.ps1 -AuthInit   # same but also starts the daemon + mints setup URL
+```
+
+What it does:
+1. Verifies prereqs (`node >=20`, `npm`, `git`).
 2. Copies the source tree to `%LOCALAPPDATA%\Programs\aiball\` via
-   `robocopy /MIR` (or symlinks with `-Symlink` — requires Developer Mode
-   or admin). Reentrant: existing symlink kept as dev layout unless
-   `-Uninstall` first.
+   `robocopy /MIR` (or symlinks with `-Symlink` — see Path 5).
 3. Runs `npm install` in the install dir. Dies loudly if it fails
-   (the daemon can't start without deps). Builds the frontend bundle
-   if `frontend/dist/index.html` is missing; failures here are downgraded
-   to a warning (daemon still serves the API, just not the SPA).
-4. Creates `%APPDATA%\aiball\` (DB + uploads) and `%LOCALAPPDATA%\aiball\`
-   (logs + daemon launcher).
+   (daemon needs the deps). Builds the frontend bundle if missing;
+   failures here only Warn (daemon still serves the API, no SPA).
+4. Creates `%APPDATA%\aiball\` (DB + uploads) and
+   `%LOCALAPPDATA%\aiball\` (logs + daemon launcher).
 5. Writes `.cmd` shims in `%LOCALAPPDATA%\Microsoft\WindowsApps\` for
-   `aiball`, `aiball-mcp`, `claude-loop` (already on `PATH` by default
-   on modern Windows). Thin wrappers — no admin / Dev Mode needed.
-6. Registers a **per-user Scheduled Task** `aiball-daemon` that auto-runs
-   at logon (restart x5 every 1min on failure). View / control via Task
-   Scheduler or:
+   `aiball`, `aiball-mcp`, `claude-loop` (already on `PATH` by default).
+6. Writes **tray shortcuts** with the Death Star icon
+   (`-NoTray` to skip):
+   - `~\Desktop\aiball.lnk`
+   - `~\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\aiball.lnk`
+   - `~\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\aiball-tray.lnk`
+     (auto-launches the tray at logon — Slack/Discord/Spotify convention)
+7. Registers a **per-user Scheduled Task** `aiball-daemon` that auto-runs
+   at logon (restart x5 every 1min on failure). View / control:
    ```powershell
    Start-ScheduledTask -TaskName aiball-daemon
    Stop-ScheduledTask  -TaskName aiball-daemon
    Get-ScheduledTask   -TaskName aiball-daemon | Get-ScheduledTaskInfo
    ```
-7. **Sanity check**: actually constructs a `new Database(':memory:')`
-   to flush out missing native bindings (the JS module loads fine even
-   when the `.node` binding is absent — only construction triggers the
-   lookup). If it fails, the scheduled task is **auto-disabled** so it
-   doesn't restart-loop at logon. Recovery command is printed.
-8. With `-AuthInit`: starts the task, waits up to 15s for `/api/health`,
+8. **Sanity check**: actually constructs a `new Database(':memory:')`
+   to flush out missing native bindings. If it fails, the task is
+   **auto-disabled** so it doesn't restart-loop at logon. Recovery
+   command is printed.
+9. With `-AuthInit`: starts the task, waits up to 15s for `/api/health`,
    then runs `aiball auth init` and prints the setup URL.
+
+### Path 4: Service install (Windows Service via NSSM)
+
+```powershell
+winget install NSSM.NSSM                       # prereq, one-time
+# from an elevated (admin) PowerShell:
+pwsh -File install.ps1 -Service                # current user (prompts password)
+# OR:
+pwsh -File install.ps1 -System                 # LocalSystem (no password)
+```
+
+See the **Service mode** section below for the per-user vs LocalSystem
+trade-off and the password pitfall. Tray shortcuts identical to Path 3.
+
+### Path 5: Dev install (symlink)
+
+```powershell
+# Enable Developer Mode first (Settings -> System -> For Developers),
+# then:
+pwsh -File install.ps1 -Symlink
+```
+
+Symlinks `%LOCALAPPDATA%\Programs\aiball` to your repo checkout, so
+edits to `src/` and `frontend/src/` are picked up by a `Restart-Service
+aiball-daemon` (or a vite dev server) without re-running the installer.
+
+### Useful flags (all paths 3/4/5)
+
+| Flag | What |
+|---|---|
+| `-Minimal` | in-place install (no copy, no shims), daemon points at this checkout |
+| `-Service` | NSSM Windows Service instead of Scheduled Task (admin) |
+| `-System` | implies `-Service`, runs as LocalSystem (admin) |
+| `-Symlink` | symlink the install dir to this checkout (needs Dev Mode/admin) |
+| `-Port 7780` | non-default daemon port |
+| `-BindHost 0.0.0.0` | listen on all interfaces (use with care; default is localhost) |
+| `-NoTray` | skip Desktop / Start Menu / Startup shortcut creation |
+| `-NoClaudeLoop` | skip auto-install of psmux + Git Bash PATH (claude-loop deps) |
+| `-NoAuthInit` | skip auto-mint of setup token + auto-open browser |
+| `-Uninstall` | remove everything (keeps `%APPDATA%\aiball` data unless `-PurgeData`) |
+| `-PurgeData` | with `-Uninstall`, also wipe the data dir |
+| `-Yes` | skip interactive confirmations |
 
 ## Daemon lifecycle
 
@@ -162,20 +250,93 @@ without `-Service`.
 ## Transport: TCP, not UDS
 
 The Unix domain socket the Linux daemon uses doesn't have a clean
-counterpart on Windows that node's `net.createServer` can listen on
-identically across all versions. The Windows daemon binds **TCP-only**
-on `127.0.0.1:7777` with an auth-token authentication path (the same
-fallback Linux uses for non-UDS callers). The first install mint a
-token and stores it in `%APPDATA%\aiball\token` — `aiball` CLI and
-`aiball-mcp` read it from there.
+counterpart on Windows. Node's `net.createServer.listen(path)` on
+Windows maps to **Named Pipes** (`\\.\pipe\…`), not AF_UNIX files, so
+trying to listen on a regular filesystem path (like `~/.local/share/
+aiball/sock`) gets `EACCES` — node mangles the path into an invalid
+pipe name. So the Windows daemon binds **TCP-only** on
+`127.0.0.1:7777` and clients authenticate with a bearer token.
+
+Auth workflow on a fresh install:
+
+1. `install.ps1` mints an install token and opens `/setup` in your
+   browser. Create your human account (login + password) there.
+2. When you submit the form, the daemon **auto-writes** an agent
+   token to `%USERPROFILE%\.local\share\aiball\cli-env` (the file
+   the .cmd shims source on every invocation). CLI / MCP /
+   claude-loop pick it up automatically in any new shell.
+3. If the file already exists (manually managed), the auto-write
+   skips it — your config is left alone.
+
+`-System` is the exception: the daemon runs as LocalSystem and
+writes cli-env under `%PROGRAMDATA%\aiball\` where per-user shims
+don't look. Do the manual workflow there: from a browser logged into
+the daemon, mint a CLI token via your user settings, then save it as
+`export AIBALL_TOKEN=...` in `%USERPROFILE%\.local\share\aiball\cli-env`.
+
+Advanced users can still opt in to a Named Pipe-based UDS by setting
+`AIBALL_SOCK=\\.\pipe\aiball-<something>` explicitly, but the shims'
+auto-detection only looks for a regular file at `$AIBALL_HOME/sock`,
+so pipe-mode requires manual wiring on the client side too.
+
+## claude-loop on Windows
+
+The autonomous-loop wrapper (`claude-loop start ...`) works on Windows
+through [psmux](https://github.com/psmux/psmux) (Rust-based tmux
+clone that ships a `tmux` alias) + Git Bash for the inner shell. The
+existing claude-loop code paths run unmodified because psmux's tmux
+compatibility covers our 6-7 ops (`has-session`, `new-session -d -s
+NAME -c CWD`, `send-keys`, `capture-pane`, `set-option`, `bind-key`,
+`kill-session`).
+
+**`install.ps1` handles the deps automatically** (unless you pass
+`-NoClaudeLoop`):
+
+- `winget install --id psmux` if `tmux`/`psmux` is missing from PATH.
+- Adds `C:\Program Files\Git\bin` (where Git Bash's `bash.exe` lives)
+  to your user PATH if not already there. winget Git install puts
+  git.exe in `Git\cmd\` but leaves `bash.exe` unreachable by default.
+
+After install, open a **fresh shell** (so it picks up the updated
+PATH) and `claude-loop` works the same as on Linux:
+
+```powershell
+claude-loop start --name myloop --pings ./pings.yaml
+claude-loop list
+claude-loop attach myloop
+```
+
+Set `MUX_CMD=psmux` if you want to be explicit (default `tmux`
+resolves to psmux's alias anyway).
+
+### ⚠️ First, clear claude's one-time prompts (important)
+
+claude-loop runs claude in a **detached** mux pane — nobody is
+attached to answer claude's interactive first-run gates. If claude
+would show any of these, the loop silently stalls (claude waits at the
+prompt, never finishes booting):
+
+- `New MCP server found in .mcp.json — trust it? [1/2/3]`
+- theme picker (first ever run)
+- "trust the files in this folder?"
+- "update available" / login-expired prompts
+
+**Quick win**: in your project directory, run plain `claude` **once**,
+answer those prompts (pick "1" to trust the project MCP server, set
+your theme, etc.), then exit (`/exit` or Ctrl-C). After that claude
+boots straight to its prompt and `claude-loop start` works.
+
+> Generic detection of these menus (so claude-loop notices a stuck
+> claude, surfaces the blocking screen, and pings you) is the planned
+> durable fix — see the TODO in `src/claude-loop/timer.ts`. Until then,
+> the one-time `claude` run is the reliable workaround.
+
+Skip this with `-NoClaudeLoop` if you only want the daemon + tray
+(the `claude-loop.cmd` shim still ships, but `start` will error out
+until psmux + bash are reachable).
 
 ## What's NOT in the Windows path
 
-- **`claude-loop` wrapper** — the `claude-loop.cmd` launcher ships and
-  `claude-loop --help` works, but the wrapper needs tmux to actually
-  spawn anything. Use WSL2 if you want the autonomous-loop feature. The
-  Windows daemon + per-project `.mcp.json` + autopoll Stop hook give you
-  everything except the background loop.
 - **systemd**. A per-user Scheduled Task replaces it for the default
   path; an NSSM-managed Windows Service is also available via
   `-Service` / `-System` (see above). No socket-activation in either.
@@ -189,17 +350,26 @@ token and stores it in `%APPDATA%\aiball\token` — `aiball` CLI and
 ## Troubleshooting
 
 - **Install ends with `[aiball] install complete (degraded — daemon
-  disabled)`** → the better-sqlite3 sanity check failed. The scheduled
-  task was auto-disabled so it doesn't restart-loop at next logon. Fix
-  per the Node-LTS rationale above (downgrade to Node 22 or install VS
-  Build Tools + `npm rebuild`), then:
+  disabled)`** → the better-sqlite3 sanity check failed (no prebuilt
+  binding for your Node major). The scheduled task was auto-disabled
+  so it doesn't restart-loop at next logon. Three fixes, in order of
+  effort:
+  1. Bump `better-sqlite3` in `package.json` if a newer version has
+     prebuilts for your Node major (`npm view better-sqlite3 versions`)
+  2. Install **VS Build Tools** ("Desktop development with C++" workload)
+     and `npm rebuild better-sqlite3 --build-from-source` in
+     `%LOCALAPPDATA%\Programs\aiball`
+  3. Pin Node to current LTS (`winget install OpenJS.NodeJS.LTS`)
+
+  Then re-enable:
   ```powershell
   Enable-ScheduledTask -TaskName aiball-daemon
   Start-ScheduledTask  -TaskName aiball-daemon
   ```
 - **`npm install failed in ... (exit 1)` during install** → almost
-  always `node-gyp` failing to find Visual Studio on Node 24+. Same fix
-  as above.
+  always `node-gyp` falling back to source compilation without VS Build
+  Tools. Same fixes as above (bump dep version, install VS Build Tools,
+  or downgrade Node).
 - **Frontend `npm run build` fails with `received "../../.../index.html"`
   under `-Symlink`** → known vite-with-symlinks upstream issue.
   Workarounds: (a) run install in copy mode (no `-Symlink`), OR (b)

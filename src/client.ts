@@ -482,16 +482,26 @@ export class AiballClient {
         onHello?: (payload: { consumer_id: string; unread: number }) => void;
         onError?: (err: Error) => void;
     }): () => void {
-        if (!this.socketPath) {
-            throw new Error("subscribeEvents requires UDS (AIBALL_SOCK)");
-        }
         const path = `/api/events?consumer_id=${encodeURIComponent(this.agentId)}`;
-        const req = httpRequest({
-            socketPath: this.socketPath,
-            path,
-            method: "GET",
-            headers: { "x-aiball-consumer": this.agentId },
-        }, (res: IncomingMessage) => {
+        // Same UDS-or-TCP split as the rest of the client. UDS is
+        // auth-free (the daemon trusts same-uid callers); TCP needs
+        // the bearer token. SSE works identically on both transports.
+        const headers: Record<string, string> = { "x-aiball-consumer": this.agentId };
+        let reqOpts: import("node:http").RequestOptions;
+        if (this.socketPath) {
+            reqOpts = { socketPath: this.socketPath, path, method: "GET", headers };
+        } else {
+            const u = new URL(this.url);
+            if (this.token) headers["authorization"] = `Bearer ${this.token}`;
+            reqOpts = {
+                host: u.hostname,
+                port: u.port ? Number(u.port) : (u.protocol === "https:" ? 443 : 80),
+                path,
+                method: "GET",
+                headers,
+            };
+        }
+        const req = httpRequest(reqOpts, (res: IncomingMessage) => {
             if ((res.statusCode ?? 0) >= 400) {
                 handlers.onError?.(new Error(`SSE ${path} → ${res.statusCode}`));
                 req.destroy();

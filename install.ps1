@@ -32,9 +32,16 @@
     instead of copying. Requires Developer Mode (Settings → Update &
     Security → For Developers) OR running as Administrator.
 
+.PARAMETER NoAuthInit
+    Skip the auto-setup-token step. By default (when humans aren't yet
+    configured), the installer mints an install token, prints + writes
+    the setup URL, and auto-opens it in your browser so you land
+    directly on the setup form. Pass -NoAuthInit for headless installs
+    where you'll do the bootstrap manually later (`aiball auth init`).
+
 .PARAMETER AuthInit
-    After install, start the daemon, wait for it to be reachable, mint a
-    one-time install token and print the setup URL.
+    Deprecated alias kept for backwards compat — auth init is now the
+    default. The flag is silently honored, no-op.
 
 .PARAMETER Uninstall
     Remove shims, scheduled task, and the install dir. Leaves the data
@@ -66,12 +73,47 @@
     %PROGRAMDATA%\aiball as the data dir (LocalSystem has no usable
     home dir).
 
+.PARAMETER Minimal
+    Light in-place install: daemon runs from this checkout directly,
+    no copy to %LOCALAPPDATA%\Programs\aiball. CLI shims, tray
+    shortcuts, Scheduled Task, sanity check, auth-init — all still
+    happen, just pointing at the source repo. Trade-off: moving or
+    deleting the source repo breaks the daemon AND the shims/tray.
+    Suits a dev workflow where the repo IS the install. Incompatible
+    with -Service / -System / -Symlink (-Minimal is already in-place).
+
+.PARAMETER NoTray
+    Skip the tray shortcut creation (Desktop / Start Menu / Startup
+    folder). Default: shortcuts ARE created and the tray auto-launches
+    at logon, following the convention of Slack / Discord / Spotify.
+
+.PARAMETER NoClaudeLoop
+    Skip installing the claude-loop wrapper's runtime deps (psmux via
+    winget + Git Bash's bash.exe on PATH). The claude-loop.cmd shim is
+    still installed, but `claude-loop start` will error out until you
+    install psmux + ensure bash is on PATH manually. Useful if you only
+    want the daemon + tray and never plan to use the autonomous loop.
+
+.PARAMETER StopHook
+    Also wire the Claude Code Stop hook **globally** at
+    ~/.claude/settings.json so autopoll triggers in EVERY Claude Code
+    session on this machine. Equivalent of `aiball stop-hook install
+    --global`. For per-project wiring, use `aiball init --stop-hook` in
+    the project dir instead (cleaner — keeps the entry out of unrelated
+    projects).
+
 .PARAMETER Yes
     Skip interactive confirmations (--PurgeData prompt).
 
 .EXAMPLE
     PS> .\install.ps1
     Fresh user install (copy-mode, Scheduled Task at logon).
+
+.EXAMPLE
+    PS> .\install.ps1 -Minimal -AuthInit
+    Light in-place install — daemon runs from this checkout. Creates
+    tray shortcuts + starts the daemon + mints setup URL. No copy,
+    no PATH shims. Perfect for dev workflow.
 
 .EXAMPLE
     PS> .\install.ps1 -Symlink -AuthInit
@@ -95,11 +137,16 @@
 [CmdletBinding()]
 param(
     [switch] $Symlink,
-    [switch] $AuthInit,
+    [switch] $AuthInit,        # back-compat no-op (default behavior now)
+    [switch] $NoAuthInit,
     [switch] $Uninstall,
     [switch] $PurgeData,
     [switch] $Service,
     [switch] $System,
+    [switch] $Minimal,
+    [switch] $NoTray,
+    [switch] $NoClaudeLoop,
+    [switch] $StopHook,
     [switch] $Yes,
     [int]    $Port = 7777,
     [string] $BindHost = '127.0.0.1'
@@ -107,6 +154,22 @@ param(
 
 # -System implies -Service.
 if ($System) { $Service = $true }
+
+# -Minimal is an in-place install: daemon registered as a Scheduled
+# Task but pointing at $SrcDir directly (no copy, no CLI shims, no
+# PATH pollution). The tray shortcuts work because the daemon actually
+# runs. Trade-off: if you move/delete the source repo, the daemon
+# breaks. Suits a dev workflow where the repo IS the install.
+if ($Minimal) {
+    $bad = @()
+    if ($Service)  { $bad += '-Service (use full install for NSSM)' }
+    if ($System)   { $bad += '-System (use full install for LocalSystem)' }
+    if ($Symlink)  { $bad += '-Symlink (-Minimal is already in-place)' }
+    if ($bad) {
+        Write-Host "[aiball] -Minimal is incompatible with: $($bad -join ', ')" -ForegroundColor Red
+        exit 1
+    }
+}
 
 $ErrorActionPreference = 'Stop'
 
@@ -116,15 +179,31 @@ $SrcDir    = $PSScriptRoot
 $PrefixLib = Join-Path $env:LOCALAPPDATA 'Programs\aiball'
 $PrefixBin = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'   # on PATH by default
 # -System runs as LocalSystem which has no usable home dir, so data
-# goes under %PROGRAMDATA%. Per-user installs keep %APPDATA%.
+# goes under %PROGRAMDATA%. Per-user installs use the same Linux-style
+# path the daemon defaults to (homedir()/.local/share/aiball) so the
+# shims, daemon, and CLI all agree without any AIBALL_HOME juggling.
 $DataDir   = if ($System) { Join-Path $env:PROGRAMDATA 'aiball' } `
-                     else { Join-Path $env:APPDATA      'aiball' }
+                     else { Join-Path $env:USERPROFILE '.local\share\aiball' }
 $LogDir    = if ($System) { Join-Path $env:PROGRAMDATA 'aiball\logs' } `
                      else { Join-Path $env:LOCALAPPDATA 'aiball' }
 $LogFile   = Join-Path $LogDir           'daemon.log'
 $TaskName  = 'aiball-daemon'   # scheduled task name (and service name — separate namespaces in Windows)
 $SvcName   = 'aiball-daemon'
 $Shims     = @('aiball', 'aiball-mcp', 'claude-loop')
+
+# Tray shortcut destinations (all per-user; -System install still puts
+# shortcuts in the installing user's profile, not LocalSystem's).
+$DesktopLnk = Join-Path ([Environment]::GetFolderPath('Desktop'))   'aiball.lnk'
+$StartLnk   = Join-Path ([Environment]::GetFolderPath('Programs'))  'aiball.lnk'
+$StartupLnk = Join-Path ([Environment]::GetFolderPath('Startup'))   'aiball-tray.lnk'
+# $AppDir = where the daemon source actually lives at runtime. Full
+# install copies the source to $PrefixLib; -Minimal uses $SrcDir
+# directly (no copy). Drives daemon-launcher.cmd's LIB var, the
+# scheduled task working dir, npm install location, sanity check
+# Push-Location, and the shortcut targets.
+$AppDir     = if ($Minimal) { $SrcDir } else { $PrefixLib }
+$AiballIco  = Join-Path $AppDir 'assets\aiball.ico'
+$TrayCmd    = Join-Path $AppDir 'bin\aiball-tray.cmd'
 
 # --- helpers ----------------------------------------------------------------
 
@@ -153,6 +232,48 @@ function Test-IsAdmin {
     return $p.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Write-TrayShortcuts {
+    # Create the three tray .lnk shortcuts (Desktop / Start Menu /
+    # Startup folder) pointing at $TrayCmd with $AiballIco as the icon.
+    # Used by both the full install path and -Minimal.
+    if (-not (Test-Path $TrayCmd)) {
+        Warn "tray launcher not found at $TrayCmd — skipping shortcut creation"
+        return
+    }
+    $icoArg = if (Test-Path $AiballIco) { $AiballIco } else { $TrayCmd }
+    foreach ($parent in @((Split-Path $StartLnk -Parent), (Split-Path $StartupLnk -Parent))) {
+        if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+    }
+    New-AiballShortcut $DesktopLnk $TrayCmd $icoArg "aiball — open the local UI"
+    Log "wrote desktop shortcut: $DesktopLnk"
+    New-AiballShortcut $StartLnk   $TrayCmd $icoArg "aiball — open the local UI"
+    Log "wrote start menu shortcut: $StartLnk"
+    New-AiballShortcut $StartupLnk $TrayCmd $icoArg "aiball tray (autostart at logon)"
+    Log "wrote startup shortcut (autolaunch tray at logon): $StartupLnk"
+}
+
+function New-AiballShortcut($lnkPath, $target, $iconPath, $description) {
+    # .lnk creation via WScript.Shell COM. The shortcut's IconLocation
+    # is what shows the Death Star — .cmd files don't carry icons
+    # themselves, the .lnk is where branding lives.
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+        $shortcut = $shell.CreateShortcut($lnkPath)
+        try {
+            $shortcut.TargetPath = $target
+            $shortcut.WorkingDirectory = Split-Path $target -Parent
+            $shortcut.IconLocation = "$iconPath,0"
+            $shortcut.Description = $description
+            $shortcut.WindowStyle = 7   # 7 = minimized — no console flash on launch
+            $shortcut.Save()
+        } finally {
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shortcut) | Out-Null
+        }
+    } finally {
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
+    }
+}
+
 function Test-ServiceExists($name) {
     return [bool] (Get-Service -Name $name -ErrorAction SilentlyContinue)
 }
@@ -167,6 +288,24 @@ function Remove-AiballTask {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
         Log "removed scheduled task: $TaskName"
     }
+}
+
+function Stop-AiballOnPort($port) {
+    # Stop-ScheduledTask sends a terminate but the daemon's node.exe
+    # process can take a moment to release file handles (daemon.log
+    # specifically), which then breaks Remove-Item on $LogDir. Kill
+    # whatever still holds the daemon port — defensive cleanup before
+    # touching files.
+    try {
+        $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+        foreach ($c in $conns) {
+            try {
+                Stop-Process -Id $c.OwningProcess -Force -ErrorAction Stop
+                Log "killed lingering daemon process (pid $($c.OwningProcess)) on port $port"
+            } catch { }
+        }
+        if ($conns) { Start-Sleep -Milliseconds 500 }   # let the OS release the handles
+    } catch { }
 }
 
 function Remove-AiballService {
@@ -212,12 +351,23 @@ if ($Uninstall) {
     } elseif (Test-ServiceExists $SvcName) {
         Warn "service $SvcName exists but nssm is not in PATH — install NSSM and re-run -Uninstall, or remove manually via 'sc.exe delete $SvcName' (admin)"
     }
+    # After stopping the task/service, the daemon process may still be
+    # holding the log file. Kill anything left on the configured port
+    # so the LogDir Remove-Item below doesn't trip over locked handles.
+    Stop-AiballOnPort $Port
 
     foreach ($name in $Shims) {
         $path = Join-Path $PrefixBin "$name.cmd"
         if (Test-Path $path) {
             Remove-Item $path -Force
             Log "removed shim: $path"
+        }
+    }
+
+    foreach ($lnk in @($DesktopLnk, $StartLnk, $StartupLnk)) {
+        if (Test-Path $lnk) {
+            Remove-Item $lnk -Force
+            Log "removed shortcut: $lnk"
         }
     }
 
@@ -245,8 +395,14 @@ if ($Uninstall) {
         }
     }
 
-    # Same story for data dirs: check both. PurgeData applies to both.
-    $dataCandidates = @((Join-Path $env:APPDATA     'aiball'),
+    # Same story for data dirs: check all three. PurgeData applies
+    # to whichever exist. USERPROFILE\.local\share is the current
+    # per-user data dir (matches the daemon's homedir() default);
+    # APPDATA\aiball is a legacy location from earlier install.ps1
+    # revisions (might still exist on machines that ran older
+    # installers); PROGRAMDATA\aiball is the -System path.
+    $dataCandidates = @((Join-Path $env:USERPROFILE '.local\share\aiball'),
+                        (Join-Path $env:APPDATA     'aiball'),
                         (Join-Path $env:PROGRAMDATA 'aiball')) | Where-Object { Test-Path $_ }
     if ($PurgeData) {
         foreach ($d in $dataCandidates) {
@@ -287,80 +443,133 @@ if ($Service) {
     Log "service mode: $(if ($System) { 'LocalSystem (global)' } else { 'current user (' + $env:USERNAME + ')' })"
 }
 
-# Node version: hard fail <20 (matches package.json engines), warn >=24
-# (better-sqlite3@11.x ships prebuilt bindings up to Node 22; Node 24
-# requires either downgrade or `npm rebuild` with VS Build Tools).
+# --- claude-loop runtime deps: psmux + bash on PATH ------------------------
+# We ship the claude-loop.cmd shim in every install path, so ensure its
+# deps are reachable. psmux ships a tmux alias, so claude-loop's
+# MUX_CMD=tmux (default) finds it. Git Bash provides bash for the inner
+# `bash -lc 'source env; exec claude'` command. -NoClaudeLoop opts out.
+
+if (-not $NoClaudeLoop) {
+    if (-not (Get-Command tmux  -ErrorAction SilentlyContinue) -and `
+        -not (Get-Command psmux -ErrorAction SilentlyContinue)) {
+        Log "psmux not detected — installing via winget (claude-loop dep)"
+        # Name-based search (not --id) so we don't have to track the
+        # exact Publisher.Name slug — winget matches on name/moniker too.
+        try {
+            & winget install psmux --silent `
+                --accept-source-agreements --accept-package-agreements 2>&1 | Out-Host
+        } catch {
+            Warn "winget install psmux failed: $($_.Exception.Message)"
+        }
+        Update-PathFromRegistry
+        if (-not (Get-Command tmux  -ErrorAction SilentlyContinue) -and `
+            -not (Get-Command psmux -ErrorAction SilentlyContinue)) {
+            Warn "psmux still not on PATH — claude-loop start won't work."
+            Warn "  Try: winget search psmux  (find the right package id)"
+            Warn "  Then: winget install <id>"
+        } else {
+            Log "psmux on PATH OK"
+        }
+    } else {
+        Log "psmux/tmux already on PATH"
+    }
+
+    # Git Bash: winget installs git.exe via C:\Program Files\Git\cmd\ but
+    # NOT bash.exe (which lives in C:\Program Files\Git\bin\). claude-loop
+    # spawns `bash -lc 'source env; exec claude'` so bash must be findable.
+    if (-not (Get-Command bash -ErrorAction SilentlyContinue)) {
+        $gitBin = 'C:\Program Files\Git\bin'
+        if (Test-Path (Join-Path $gitBin 'bash.exe')) {
+            $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+            if ($userPath -notlike "*$gitBin*") {
+                [Environment]::SetEnvironmentVariable('PATH', "$gitBin;$userPath", 'User')
+                Log "added $gitBin to user PATH (claude-loop needs bash)"
+            } else {
+                Log "Git Bash already in user PATH (will resolve in fresh shells)"
+            }
+            Update-PathFromRegistry
+        } else {
+            Warn "bash.exe not found — claude-loop start needs Git Bash."
+            Warn "  Install Git for Windows (winget install Git.Git) and re-run."
+        }
+    } else {
+        Log "bash already on PATH"
+    }
+}
+
+# Node version: hard fail <20 (matches package.json engines). better-
+# sqlite3 v12 ships prebuilt bindings for Node 22/24 (and forward as
+# they release prebuilds for new majors). The sanity check below
+# catches the rare case where a brand-new Node major lands without
+# prebuilds yet.
 $nodeVerRaw = (node --version) -replace '^v',''
 $nodeMajor  = [int]($nodeVerRaw.Split('.')[0])
 if ($nodeMajor -lt 20) { Die "node >=20 required, found v$nodeVerRaw" }
-if ($nodeMajor -ge 24) {
-    Warn "node v$nodeVerRaw detected — better-sqlite3 prebuilt bindings"
-    Warn "may not exist for this version. If the daemon fails to start"
-    Warn "with 'Could not locate the bindings file', either:"
-    Warn "  - downgrade to Node 22 LTS (winget install OpenJS.NodeJS.LTS), or"
-    Warn "  - install VS Build Tools and run 'npm rebuild better-sqlite3'"
-    Warn "  - inside $PrefixLib"
-}
 
 # --- install dir provisioning ----------------------------------------------
 # Reentrant: re-running with no flag preserves the existing layout.
 # Switching modes requires --Uninstall first (avoids silently flipping a
 # dev symlink into a prod copy or vice versa).
+# Skipped entirely under -Minimal (the daemon runs from $SrcDir in place).
 
-if (Test-Path $PrefixLib) {
-    $existing = Get-Item $PrefixLib -Force
-    $existingIsLink = ($existing.LinkType -eq 'SymbolicLink')
-    if ($existingIsLink -and -not $Symlink) {
-        Log "existing install at $PrefixLib is a symlink — keeping dev layout"
-        Log "  (re-run with --Uninstall first to switch to a prod copy)"
-        $Symlink = $true   # honor the existing layout for the rest of this run
-    } elseif (-not $existingIsLink -and $Symlink) {
-        Die "existing install at $PrefixLib is a real directory. --Uninstall first to switch to --Symlink."
+if (-not $Minimal) {
+    if (Test-Path $PrefixLib) {
+        $existing = Get-Item $PrefixLib -Force
+        $existingIsLink = ($existing.LinkType -eq 'SymbolicLink')
+        if ($existingIsLink -and -not $Symlink) {
+            Log "existing install at $PrefixLib is a symlink — keeping dev layout"
+            Log "  (re-run with --Uninstall first to switch to a prod copy)"
+            $Symlink = $true   # honor the existing layout for the rest of this run
+        } elseif (-not $existingIsLink -and $Symlink) {
+            Die "existing install at $PrefixLib is a real directory. --Uninstall first to switch to --Symlink."
+        }
     }
-}
 
-if ($Symlink) {
-    if (-not (Test-DeveloperMode) -and -not (Test-IsAdmin)) {
-        Die "--Symlink requires Developer Mode (Settings -> For Developers) or admin elevation."
+    if ($Symlink) {
+        if (-not (Test-DeveloperMode) -and -not (Test-IsAdmin)) {
+            Die "--Symlink requires Developer Mode (Settings -> For Developers) or admin elevation."
+        }
+        if (Test-Path $PrefixLib) { Remove-Item -Force $PrefixLib }
+        $parent = Split-Path $PrefixLib -Parent
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+        New-Item -ItemType SymbolicLink -Path $PrefixLib -Target $SrcDir | Out-Null
+        Log "symlinked $PrefixLib -> $SrcDir (dev install)"
+    } else {
+        Log "copying source to $PrefixLib"
+        if (Test-Path $PrefixLib) { Remove-Item -Recurse -Force $PrefixLib }
+        New-Item -ItemType Directory -Force -Path $PrefixLib | Out-Null
+        # Mirror rsync excludes from install.sh. Robocopy is the right tool
+        # (Copy-Item -Recurse is slow + chokes on long paths).
+        $robocopyArgs = @(
+            $SrcDir, $PrefixLib,
+            '/MIR',           # mirror tree
+            '/XD', 'node_modules', '.git', 'var', 'frontend\node_modules',
+            '/XF', '*.log', '.env',
+            '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'   # quiet
+        )
+        & robocopy.exe @robocopyArgs | Out-Null
+        # Robocopy exit codes: 0-7 are success (with caveats), 8+ are errors.
+        if ($LASTEXITCODE -ge 8) { Die "robocopy failed with exit $LASTEXITCODE" }
     }
-    if (Test-Path $PrefixLib) { Remove-Item -Force $PrefixLib }
-    $parent = Split-Path $PrefixLib -Parent
-    New-Item -ItemType Directory -Force -Path $parent | Out-Null
-    New-Item -ItemType SymbolicLink -Path $PrefixLib -Target $SrcDir | Out-Null
-    Log "symlinked $PrefixLib -> $SrcDir (dev install)"
 } else {
-    Log "copying source to $PrefixLib"
-    if (Test-Path $PrefixLib) { Remove-Item -Recurse -Force $PrefixLib }
-    New-Item -ItemType Directory -Force -Path $PrefixLib | Out-Null
-    # Mirror rsync excludes from install.sh. Robocopy is the right tool
-    # (Copy-Item -Recurse is slow + chokes on long paths).
-    $robocopyArgs = @(
-        $SrcDir, $PrefixLib,
-        '/MIR',           # mirror tree
-        '/XD', 'node_modules', '.git', 'var', 'frontend\node_modules',
-        '/XF', '*.log', '.env',
-        '/NFL', '/NDL', '/NJH', '/NJS', '/NC', '/NS', '/NP'   # quiet
-    )
-    & robocopy.exe @robocopyArgs | Out-Null
-    # Robocopy exit codes: 0-7 are success (with caveats), 8+ are errors.
-    if ($LASTEXITCODE -ge 8) { Die "robocopy failed with exit $LASTEXITCODE" }
+    Log "minimal install: running daemon in place from $SrcDir (no copy)"
 }
 
 # --- npm install + frontend build in the install dir ----------------------
 
-Log "running npm install in $PrefixLib"
-Push-Location $PrefixLib
+Log "running npm install in $AppDir"
+Push-Location $AppDir
 try {
     # No --silent here: npm install failures (compile errors, missing
     # bindings, etc.) need to be visible. The daemon won't start
     # without the deps, so we Die on non-zero exit.
     npm install --no-audit --no-fund
     if ($LASTEXITCODE -ne 0) {
-        Die "npm install failed in $PrefixLib (exit $LASTEXITCODE). The daemon needs the deps to run — fix the error above and re-run install.ps1."
+        Die "npm install failed in $AppDir (exit $LASTEXITCODE). The daemon needs the deps to run — fix the error above and re-run install.ps1."
     }
-    if (-not (Test-Path (Join-Path $PrefixLib 'frontend\dist\index.html'))) {
+    if (-not (Test-Path (Join-Path $AppDir 'frontend\dist\index.html'))) {
         Log "building frontend bundle (~30s)"
-        Push-Location (Join-Path $PrefixLib 'frontend')
+        Push-Location (Join-Path $AppDir 'frontend')
         try {
             npm install --no-audit --no-fund
             if ($LASTEXITCODE -ne 0) {
@@ -396,7 +605,9 @@ $launcherPath = Join-Path $LogDir 'daemon-launcher.cmd'
 # C:\Windows\system32\config\systemprofile — far from where the
 # installer put the data. Pin AIBALL_HOME explicitly in that mode so
 # the daemon writes/reads from %PROGRAMDATA%\aiball.
-$homeOverride = if ($System) { "set `"AIBALL_HOME=$DataDir`"" } else { '' }
+$envOverrides = if ($System) {
+    "set `"AIBALL_HOME=$DataDir`""
+} else { '' }
 $launcherBody = @"
 @echo off
 setlocal EnableExtensions
@@ -406,7 +617,7 @@ REM scheduled task / service. Redirects stdout+stderr into the log
 REM file. Rolls the log if it exceeds 8MB.
 
 set "LOG=$LogFile"
-set "LIB=$PrefixLib"
+set "LIB=$AppDir"
 
 cd /d "%LIB%"
 
@@ -419,7 +630,7 @@ if exist "%LOG%" (
 
 set "AIBALL_PORT=$Port"
 set "AIBALL_HOST=$BindHost"
-$homeOverride
+$envOverrides
 
 echo [%date% %time%] launching aiball daemon (port $Port) >> "%LOG%"
 npx.cmd --no-install tsx src\daemon.ts >> "%LOG%" 2>&1
@@ -427,13 +638,28 @@ npx.cmd --no-install tsx src\daemon.ts >> "%LOG%" 2>&1
 [System.IO.File]::WriteAllText($launcherPath, ($launcherBody -replace "`r?`n","`r`n"))
 Log "wrote daemon launcher: $launcherPath"
 
+# Hidden wrapper: cmd.exe /c .cmd shows a console window when launched
+# by the Scheduled Task — ugly. wscript.exe + a tiny .vbs that does
+# Shell.Run "cmd /c ...", 0 (= SW_HIDE) runs the .cmd with no window.
+# Classic Windows pattern for headless background scripts.
+$vbsPath = Join-Path $LogDir 'daemon-launcher.vbs'
+$vbsBody = @"
+' Auto-generated by install.ps1 — launches daemon-launcher.cmd with
+' no visible console window (the third arg "0" = SW_HIDE).
+CreateObject("WScript.Shell").Run "cmd /c """ & "$launcherPath" & """", 0, False
+"@
+[System.IO.File]::WriteAllText($vbsPath, ($vbsBody -replace "`r?`n","`r`n"))
+Log "wrote hidden launcher wrapper: $vbsPath"
+
 # --- .cmd shims in $PrefixBin ---------------------------------------------
-# Tiny wrappers that exec the real .cmd in the install dir. No symlink
-# required — works without admin / Developer Mode.
+# Tiny wrappers that exec the real .cmd in $AppDir\bin. No symlink
+# required — works without admin / Developer Mode. Same shim set under
+# -Minimal (points at $SrcDir\bin\*.cmd in that mode); without these
+# the user would have to type the full path to call aiball / claude-loop.
 
 if (-not (Test-Path $PrefixBin)) { New-Item -ItemType Directory -Force -Path $PrefixBin | Out-Null }
 foreach ($name in $Shims) {
-    $target = Join-Path $PrefixLib "bin\$name.cmd"
+    $target = Join-Path $AppDir "bin\$name.cmd"
     if (-not (Test-Path $target)) {
         Warn "expected shim source missing: $target — skipping $name.cmd"
         continue
@@ -447,6 +673,14 @@ exit /b %errorlevel%
     [System.IO.File]::WriteAllText($shimPath, ($shimBody -replace "`r?`n","`r`n"))
     Log "wrote shim: $shimPath -> $target"
 }
+
+# --- tray shortcuts (Desktop / Start Menu / Startup folder) ----------------
+# Three shortcuts, all pointing at $TrayCmd with the Death Star icon.
+# Same .lnk regardless of daemon mode (Task vs Service vs Minimal) —
+# consistent visible UX. `-NoTray` opts out entirely. Per-user only
+# (even with -System the shortcuts go in the installing user's profile).
+
+if (-not $NoTray) { Write-TrayShortcuts }
 
 # --- Scheduled Task OR Service (mutually exclusive) ------------------------
 # Only one runs the daemon. The opposite mode's registration is cleared
@@ -497,11 +731,15 @@ if ($Service) {
         }
     }
 
-    Log "registering scheduled task: $TaskName"
+    Log "registering scheduled task: $TaskName (daemon source: $AppDir)"
+    # Use wscript.exe + the .vbs wrapper instead of cmd.exe directly so
+    # no console window flashes when the task fires interactively at
+    # logon. cmd.exe is still what ultimately runs the launcher — vbs
+    # just hides the host window.
     $action   = New-ScheduledTaskAction `
-        -Execute 'cmd.exe' `
-        -Argument "/c `"$launcherPath`"" `
-        -WorkingDirectory $PrefixLib
+        -Execute 'wscript.exe' `
+        -Argument "`"$vbsPath`"" `
+        -WorkingDirectory $AppDir
     $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
     $settings = New-ScheduledTaskSettingsSet `
         -StartWhenAvailable `
@@ -533,16 +771,18 @@ if ($Service) {
 # is what daemon.ts -> db.ts -> getDb() does at startup).
 
 Log "checking better-sqlite3 native binding"
-Push-Location $PrefixLib
+Push-Location $AppDir
 try {
     $probe = node -e "try { const D=require('better-sqlite3'); new D(':memory:'); console.log('OK') } catch(e) { console.error(e.message); process.exit(1) }" 2>&1
     if ($LASTEXITCODE -ne 0) {
         Warn "better-sqlite3 native binding failed to load:"
         Warn "  $probe"
         Warn "The daemon will not start until this is fixed. Options:"
-        Warn "  - downgrade Node to 22 LTS (winget install OpenJS.NodeJS.LTS)"
-        Warn "  - install VS Build Tools, then in $PrefixLib :"
+        Warn "  - bump better-sqlite3 in package.json to a version with"
+        Warn "    prebuilts for your Node major (check npm)"
+        Warn "  - install VS Build Tools + rebuild in $AppDir :"
         Warn "      npm rebuild better-sqlite3 --build-from-source"
+        Warn "  - pin Node to current LTS (winget install OpenJS.NodeJS.LTS)"
         if ($Service) {
             Warn "Stopping the service and switching it to Manual start so it"
             Warn "doesn't restart-loop. Once fixed, re-enable with:"
@@ -564,35 +804,103 @@ try {
 
 # --- post-install: auth-init ---------------------------------------------
 
-if ($AuthInit) {
-    if (-not $sqliteOk) {
-        Warn "skipping --AuthInit because the daemon can't start (better-sqlite3)"
+# Start the daemon unconditionally (unless the sanity check failed) so
+# claude-loop / aiball / aiball-mcp work right after install. This is
+# decoupled from -NoAuthInit, which only controls the auth init step.
+$setupUrlFile = Join-Path $LogDir 'setup-url.txt'
+$up = $false
+if ($sqliteOk) {
+    if ($Service) {
+        Log "starting service $SvcName"
+        Start-Service -Name $SvcName
     } else {
-        if ($Service) {
-            Log "starting service $SvcName"
-            Start-Service -Name $SvcName
+        Log "starting daemon via $TaskName"
+        Start-ScheduledTask -TaskName $TaskName
+    }
+    $healthUrl  = "http://${BindHost}:${Port}/api/health"
+    $statusUrl  = "http://${BindHost}:${Port}/api/auth/status"
+    Log "waiting for daemon health at $healthUrl (up to 15s)"
+    for ($i = 0; $i -lt 15; $i++) {
+        Start-Sleep -Seconds 1
+        try {
+            Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 1 | Out-Null
+            $up = $true; break
+        } catch { }
+    }
+    if (-not $up) {
+        Warn "daemon did not respond at $healthUrl after 15s"
+        Warn "check the log: $LogFile"
+    }
+}
+
+# Auth init is a separate concern: mint a token + open the setup URL
+# in the browser. Default behavior on a fresh install; -NoAuthInit
+# opts out (for headless / re-install / already-set-up scenarios).
+if (-not $NoAuthInit) {
+    if (-not $sqliteOk) {
+        Warn "skipping auth init because the daemon can't start (better-sqlite3)"
+    } elseif ($up) {
+        # Only mint a token if not already set up. /api/auth/status
+        # is public and returns { ready, install_available, me }.
+        $alreadyReady = $false
+        try {
+            $st = Invoke-RestMethod -Uri $statusUrl -TimeoutSec 2
+            $alreadyReady = [bool] $st.ready
+        } catch { }
+        if ($alreadyReady) {
+            Log "aiball is already set up (humans configured) — skipping auth init"
+            if (Test-Path $setupUrlFile) { Remove-Item $setupUrlFile -Force -ErrorAction SilentlyContinue }
         } else {
-            Log "starting daemon via $TaskName"
-            Start-ScheduledTask -TaskName $TaskName
-        }
-        $healthUrl = "http://${BindHost}:${Port}/api/health"
-        Log "waiting for daemon health at $healthUrl (up to 15s)"
-        $up = $false
-        for ($i = 0; $i -lt 15; $i++) {
-            Start-Sleep -Seconds 1
-            try {
-                Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 1 | Out-Null
-                $up = $true; break
-            } catch { }
-        }
-        if ($up) {
             Log "daemon up. Running 'aiball auth init'"
-            $aiballCmd = Join-Path $PrefixBin 'aiball.cmd'
-            & $aiballCmd auth init --host $BindHost --port $Port
-        } else {
-            Warn "daemon did not respond at $healthUrl after 15s"
-            Warn "check the log: $LogFile"
+                # Call the shim in $PrefixBin (added to PATH automatically
+                # on Win10+). Both -Minimal and full install put it there.
+                $aiballCmd = Join-Path $PrefixBin 'aiball.cmd'
+                $output = & $aiballCmd auth init --host $BindHost --port $Port 2>&1
+                $output | ForEach-Object { Write-Host $_ }   # mirror to console
+                # Parse the setup URL out of the output.
+                $urlMatch = $output | Select-String -Pattern 'http[s]?://[^\s]+' -AllMatches | Select-Object -First 1
+                if ($urlMatch) {
+                    $setupUrl = $urlMatch.Matches[0].Value
+                    [System.IO.File]::WriteAllText($setupUrlFile, $setupUrl)
+                    Log "setup URL persisted to: $setupUrlFile"
+                    try {
+                        Start-Process $setupUrl
+                        Log "opened setup URL in your default browser"
+                    } catch {
+                        Warn "failed to open browser automatically — copy/paste the URL above"
+                    }
+                }
+            }
         }
+    }
+
+# --- launch the tray now ---------------------------------------------------
+# The Startup-folder shortcut fires at next logon, but the user just
+# installed — they expect to see the icon NOW. Launch it explicitly so
+# it appears in the notification area (or overflow) right away.
+if (-not $NoTray -and (Test-Path $TrayCmd)) {
+    try {
+        Start-Process -FilePath $TrayCmd -WindowStyle Hidden
+        Log "launched tray (icon should appear in the notification area)"
+    } catch {
+        Warn "failed to launch tray now: $($_.Exception.Message)"
+        Warn "  it will start automatically at next logon (Startup folder shortcut)"
+    }
+}
+
+# --- global stop hook (opt-in) --------------------------------------------
+# -StopHook wires Claude Code's Stop hook into ~/.claude/settings.json
+# so autopoll triggers in EVERY Claude Code session on this machine.
+# Per-project wiring (cleaner) is via `aiball init --stop-hook` in the
+# project dir.
+
+if ($StopHook) {
+    Log "wiring global Claude Code Stop hook (~/.claude/settings.json)"
+    $aiballCmd = Join-Path $PrefixBin 'aiball.cmd'
+    if (Test-Path $aiballCmd) {
+        & $aiballCmd stop-hook install --global 2>&1 | ForEach-Object { Write-Host $_ }
+    } else {
+        Warn "aiball shim missing at $aiballCmd — can't wire stop hook"
     }
 }
 
@@ -606,7 +914,11 @@ if ($sqliteOk) {
     Write-Host '[aiball] install complete (degraded — daemon disabled).' -ForegroundColor Yellow
 }
 Write-Host ''
-Write-Host "  install dir: $PrefixLib$(if ($Symlink) { '  (symlink -> ' + $SrcDir + ')' })"
+if ($Minimal) {
+    Write-Host "  mode:        minimal (in-place — daemon runs from $SrcDir)"
+} else {
+    Write-Host "  install dir: $PrefixLib$(if ($Symlink) { '  (symlink -> ' + $SrcDir + ')' })"
+}
 Write-Host "  data dir:    $DataDir"
 Write-Host "  log file:    $LogFile"
 if ($Service) {
@@ -620,6 +932,7 @@ if ($Service) {
     Write-Host "  stop:        Stop-ScheduledTask -TaskName $TaskName"
 }
 Write-Host "  open:        http://${BindHost}:${Port}"
+Write-Host "  cli:         aiball / aiball-mcp / claude-loop  (shims in $PrefixBin -> $AppDir\bin)"
 if (-not $sqliteOk) {
     Write-Host ''
     Write-Host '  Fix better-sqlite3 first (see warnings above), then:'
@@ -630,9 +943,9 @@ if (-not $sqliteOk) {
         Write-Host "         Enable-ScheduledTask -TaskName $TaskName"
         Write-Host "         Start-ScheduledTask  -TaskName $TaskName"
     }
-} elseif (-not $AuthInit) {
+} elseif ($NoAuthInit) {
     Write-Host ''
-    Write-Host '  Next: start the daemon, then mint a setup token:'
+    Write-Host '  Next (-NoAuthInit was passed): start the daemon, then mint a setup token:'
     if ($Service) {
         Write-Host "         Start-Service -Name $SvcName"
     } else {

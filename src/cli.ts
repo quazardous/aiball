@@ -29,7 +29,6 @@ import {
     fmtStatus,
     buildClient,
     gOpts,
-    resolveInstallRoot,
 } from "./cli/_helpers.js";
 
 // =====================================================================
@@ -143,7 +142,7 @@ program
                 };
                 for (const entry of s.hooks?.Stop ?? []) {
                     for (const h of entry.hooks ?? []) {
-                        if (h.command && /aiball-autopoll-stop\.sh$/.test(h.command)) {
+                        if (h.command && /aiball-autopoll-stop\.(sh|cmd)$/.test(h.command)) {
                             stopHookWired = true;
                             stopHookCommand = h.command;
                         }
@@ -255,9 +254,10 @@ program
         process.stdout.write(`  ${ok(!!payload.consumer.agent)} agent:   ${payload.consumer.agent ?? "(unresolved)"} ${payload.consumer.agent_source ? `[from ${payload.consumer.agent_source}]` : ""}\n`);
         process.stdout.write(`  ${ok(!!payload.consumer.project)} project: ${payload.consumer.project ?? "(unresolved)"} ${payload.consumer.project_source ? `[from ${payload.consumer.project_source}]` : ""}\n`);
         process.stdout.write(`\nstop hook (~/.claude/settings.json)\n`);
-        process.stdout.write(`  ${ok(payload.stop_hook.wired)} wired: ${payload.stop_hook.wired ? payload.stop_hook.command : "no aiball-autopoll-stop.sh entry"}\n`);
+        process.stdout.write(`  ${ok(payload.stop_hook.wired)} wired: ${payload.stop_hook.wired ? payload.stop_hook.command : "no aiball-autopoll-stop entry"}\n`);
         if (!payload.stop_hook.wired) {
-            process.stdout.write(`     enable with: ${resolveInstallRoot()}/install.sh --stop-hook\n`);
+            process.stdout.write(`     enable with: aiball init --stop-hook            (project-local)\n`);
+            process.stdout.write(`                   aiball init --stop-hook --global   (every Claude Code session)\n`);
         }
         process.stdout.write(`\ndaemon\n`);
         process.stdout.write(`  ${ok(payload.daemon.up)} reachable\n`);

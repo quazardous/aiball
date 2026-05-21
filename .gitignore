@@ -27,3 +27,6 @@ outbox/
 # -B` so this shouldn't appear, but ignore it defensively. #269
 __pycache__/
 *.pyc
+# Build artifact of scripts/make-icon.py — for human verification
+# only, the real icon is assets/aiball.ico.
+assets/aiball-preview.png

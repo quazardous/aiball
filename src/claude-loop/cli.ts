@@ -71,6 +71,25 @@ function has(cmd: string): boolean {
     return commandExists(cmd);
 }
 
+/**
+ * Convert a Windows path to its 8.3 short form (no spaces). psmux
+ * splits the command at spaces when it rebuilds the CreateProcess
+ * command line, so an absolute path like "C:\Program Files\Git\bin\
+ * bash.exe" gets truncated to "C:\Program". The 8.3 name
+ * ("C:\PROGRA~1\Git\bin\bash.exe") sidesteps that. No-op on non-Windows
+ * or for paths that already lack spaces. Falls back to the input if
+ * the conversion fails (8.3 generation disabled on the volume, etc.).
+ */
+function toShortPathWin(p: string): string {
+    if (process.platform !== "win32" || !p.includes(" ")) return p;
+    try {
+        const out = spawnSync("cmd.exe", ["/c", `for %I in ("${p}") do @echo %~sI`], { encoding: "utf8" });
+        const short = (out.stdout ?? "").trim();
+        if (short && existsSync(short)) return short;
+    } catch { /* fall through to raw path */ }
+    return p;
+}
+
 // Pick the local clipboard tool tmux should pipe selections into. OSC 52
 // (`set-clipboard on`) works in some terminals (Alacritty, Windows
 // Terminal, kitty, recent gnome-terminal) but is rejected by default
@@ -316,6 +335,27 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // execs the TS hook via tsx) for THIS session only — no
     // pollution of the user's ~/.claude/settings.json.
     const root = selfRoot();
+    // NOTE (#B.178 win): claude-loop runs claude in a DETACHED mux pane
+    // where nobody can answer claude's interactive first-run gates (the
+    // ".mcp.json found — trust? [1/2/3]" menu, theme picker, "update
+    // available", trust-folder, expired-login, …). Any such menu blocks
+    // boot: claude sits at the prompt, the SessionStart hook never fires,
+    // and the loop never progresses (looks "dead").
+    //
+    // PRIMARY TARGET (TODO): generic stuck-at-menu detection in the
+    // timer — it already capture-pane's every tick, so it can notice
+    // claude hasn't reached its ready prompt after boot-grace, surface
+    // the offending menu (log + ping the human), and optionally send a
+    // conservative key. That future-proofs against menus that don't
+    // exist yet, instead of whack-a-mole per-menu settings flags
+    // (enableAllProjectMcpServers etc. — rejected: also auto-trusts
+    // EVERY project MCP server, a security footgun).
+    //
+    // INTERIM quick-win: the user runs `claude` once interactively in
+    // the project dir to clear the one-time gates (documented in
+    // docs/WIN-INSTALL.md). After that claude boots straight to its
+    // prompt and claude-loop works.
+    //
     // #B.228 (m2m crash): we used to wrap each hook in `npx --no-install
     // tsx`, but npx resolves `tsx` by walking up from the SPAWNED claude
     // process's cwd. When that cwd is a project without tsx in its own
@@ -324,11 +364,19 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // fails, and claude exits at boot (= the "barre reste jaune" bug
     // surfaced as "loop exits in ~30s"). Call tsx via the absolute path
     // inside the aiball install — bypasses npx's cwd-relative lookup.
-    const tsxBin = shQuote(join(root, "node_modules", ".bin", "tsx"));
-    const stopHookCmd = `${tsxBin} ${shQuote(join(root, "src/claude-loop/stop-hook.ts"))}`;
-    const sessionStartHookCmd = `${tsxBin} ${shQuote(join(root, "src/claude-loop/session-start-hook.ts"))}`;
-    const userPromptSubmitHookCmd = `${tsxBin} ${shQuote(join(root, "src/claude-loop/user-prompt-submit-hook.ts"))}`;
-    const askBlockHookCmd = `${tsxBin} ${shQuote(join(root, "src/claude-loop/pretooluse-hook.ts"))}`;
+    //
+    // hookPath() forward-slashes the path on Windows. `join` yields a
+    // backslash path there, and claude may run the hook command via
+    // Git Bash (where a backslash command path is unreliable). Forward
+    // slashes work in cmd.exe, Git Bash AND node/tsx, so they're safe
+    // for both the tsx binary and the .ts script argument.
+    const hookPath = (p: string) =>
+        shQuote(process.platform === "win32" ? p.replace(/\\/g, "/") : p);
+    const tsxBin = hookPath(join(root, "node_modules", ".bin", "tsx"));
+    const stopHookCmd = `${tsxBin} ${hookPath(join(root, "src/claude-loop/stop-hook.ts"))}`;
+    const sessionStartHookCmd = `${tsxBin} ${hookPath(join(root, "src/claude-loop/session-start-hook.ts"))}`;
+    const userPromptSubmitHookCmd = `${tsxBin} ${hookPath(join(root, "src/claude-loop/user-prompt-submit-hook.ts"))}`;
+    const askBlockHookCmd = `${tsxBin} ${hookPath(join(root, "src/claude-loop/pretooluse-hook.ts"))}`;
     const settings = {
         hooks: {
             // SessionStart fires once when claude has finished booting
@@ -373,8 +421,38 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // claude passthrough args. Shell-escape per-arg so the inline
     // bash command keeps them intact.
     const passthrough = opts.claudeArgs.map(shQuote).join(" ");
+    // CL_CLAUDE_CMD lets you swap the binary+flags (everything before
+    // --settings) for debugging: see what the inner command receives
+    // without claude repainting the screen. Useful values:
+    //   bash -c 'echo "args: $*"; sleep 99' --
+    //   bash -c 'cat <<< "$*"; read' --
+    // Default = real claude. Read once at spawn time, baked into the
+    // session's inner command (so a fresh `claude-loop start` picks
+    // up the current env, but in-flight loops stay as-spawned).
+    const claudeBin = process.env.CL_CLAUDE_CMD ?? "claude --permission-mode auto";
+    // IMPORTANT: no `{ … }` brace groups here. psmux interprets a
+    // command starting with `{` as a PowerShell script block and
+    // base64-UTF16-encodes it for `powershell -EncodedCommand`, which
+    // then reaches bash as a bogus option and dies with
+    // "invalid option name". Keep the inner command a flat sequence
+    // of `;`-separated statements so psmux passes it through verbatim.
+    // Pass --settings as a FILE PATH, not inline JSON. The settings
+    // JSON contains double quotes, braces, backslash-escaped Windows
+    // paths AND shQuote'd single quotes (from the hook command paths).
+    // Passing that inline means it has to survive: shQuote → bash -lc
+    // string → psmux argv reconstruction (node spawnSync builds a
+    // Windows command line, psmux re-parses it). That round-trip
+    // mangles the nested quoting on Windows and claude gets invalid
+    // JSON → exits → pane dies → session reaped in ~30ms (#B.178 win).
+    // A plain file path has none of those characters, so it round-trips
+    // cleanly. claude's --settings accepts a path or inline JSON.
+    const settingsFile = join(sd, "claude-settings.json");
+    writeFileSync(settingsFile, settingsJson);
+    // Merge #269 (PTY proxy) + #B.178 (win): build claudeCmd from the
+    // file-based settings (Windows-safe) + CL_CLAUDE_CMD override; the
+    // PTY-proxy block below wraps this claudeCmd and prepends `source env`.
     const claudeCmd =
-        `claude --permission-mode auto --settings ${shQuote(settingsJson)}` +
+        `${claudeBin} --settings ${shQuote(settingsFile)}` +
         (passthrough ? ` ${passthrough}` : "");
     // #269: front claude with the PTY proxy so claude-loop detects human
     // typing live (busy included) and injects wakes through the proxy's
@@ -389,8 +467,32 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const innerCmd = `source ${shQuote(envPath(sd))}; ${launch}`;
 
     const tname = tmuxName(name);
+    // Resolve bash via absolute path on Windows. The user's PATH is
+    // unreliable here: the WSL launcher (C:\Windows\System32\bash.exe)
+    // sits in machine PATH and preempts Git Bash; and psmux's server
+    // is persistent — once it started with a given PATH, subsequent
+    // new-session calls use that PATH, not the caller's. Hardcoding
+    // the Git Bash absolute path on Windows bypasses both issues —
+    // BUT psmux splits the command at spaces when it rebuilds the
+    // CreateProcess command line, so "C:\Program Files\…\bash.exe"
+    // becomes "C:\Program" + bogus args. Convert to the 8.3 short
+    // path (C:\PROGRA~1\…) which has no spaces.
+    let bashCmd = "bash";
+    if (process.platform === "win32") {
+        const gitBash = "C:\\Program Files\\Git\\bin\\bash.exe";
+        if (existsSync(gitBash)) bashCmd = toShortPathWin(gitBash);
+        // else fall back to "bash" and hope the PATH is sane.
+    }
+    // The `--` separator is REQUIRED for psmux: without it, psmux
+    // collects the positional command args and joins them with spaces
+    // into one string, which destroys the `bash -lc "<multi-word cmd>"`
+    // arg boundaries (bash then runs just `source` and dies, killing
+    // the pane → session reaped in seconds). With `--`, psmux keeps the
+    // raw argv and execs it directly. Harmless on Linux tmux (standard
+    // getopt end-of-options marker). Verified on Windows: `sleep` stays
+    // alive with `--`, dies instantly without.
     const r = spawnSync(MUX_CMD, [
-        "new-session", "-d", "-s", tname, "-c", cwd, "bash", "-lc", innerCmd,
+        "new-session", "-d", "-s", tname, "-c", cwd, "--", bashCmd, "-lc", innerCmd,
     ]);
     if (r.status !== 0) die("tmux new-session failed");
 

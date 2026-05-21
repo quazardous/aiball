@@ -6,6 +6,17 @@ REM CWD preservation + AIBALL_SOCK/cli-env resolution as the bash
 REM script, so cmd.exe / PowerShell users get the same behavior as Git
 REM Bash users. Invokes the TS CLI via tsx.
 
+REM claude-loop's inner command (run by tmux/psmux new-session) is
+REM `bash -lc 'source env; exec claude --settings <json>'`. The bash
+REM it needs is Git Bash. Problem: Windows ships a WSL bash launcher
+REM at %SystemRoot%\System32\bash.exe which sits in machine PATH and
+REM preempts Git\bin in user PATH. WSL launcher tries to exec
+REM /bin/bash inside a (often missing) WSL distro and dies. So:
+REM prepend Git\bin to PATH in THIS process so the chain
+REM cmd -> npx tsx cli.ts -> spawn(psmux) -> bash resolves to Git
+REM Bash via PATH inheritance.
+if exist "C:\Program Files\Git\bin\bash.exe" set "PATH=C:\Program Files\Git\bin;%PATH%"
+
 set "BIN_DIR=%~dp0"
 for %%I in ("%BIN_DIR%..") do set "ROOT=%%~fI"
 
