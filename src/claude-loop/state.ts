@@ -721,17 +721,18 @@ export function paneFooterShowsBusy(paneText: string, footerLines = 5): boolean 
 }
 
 /**
- * Special pane states surfaced by Claude Code that should suppress
+ * Special INTERNAL pane states (not errors) that should suppress
  * auto-wakes regardless of the `esc to interrupt` mid-turn signal.
  *
  *   - `compacting`  — `/compact` or auto-compact summarizing the
- *     transcript; the next prompt has to wait for it to finish.
- *   - `rate-limit`  — Anthropic backend throttling; any new send-keys
- *     just queues uselessly.
- *   - `api-error`   — transient API failure visible to the user; same
- *     reasoning, don't pile on.
+ *     transcript; the next prompt has to wait for it to finish. It
+ *     resolves itself, so we just suppress while visible (no backoff).
+ *
+ * Error states that CRASH the turn (rate-limit, api-error, overloaded)
+ * moved out of here to `error-backoff.ts` (#332): they need a dumb
+ * exponential backoff + resume, not a flat suppress-while-visible.
  */
-export type PaneSpecial = "compacting" | "rate-limit" | "api-error";
+export type PaneSpecial = "compacting";
 
 export interface PaneSnapshot {
     /** True iff the pane footer shows `esc to interrupt` — claude is
@@ -742,8 +743,8 @@ export interface PaneSnapshot {
 }
 
 /**
- * Classify the special states (compacting / rate-limit / api-error)
- * visible in the captured pane text. Centralized here (#B.198 david:
+ * Classify the internal special state (compacting) visible in the
+ * captured pane text. Centralized here (#B.198 david:
  * "fait un etat/funcion/serrvice global qui sert aussi pour le
  * business") so the Stop hook, the timer, and the autopoll hook all
  * agree on what counts as "claude is internally busy and shouldn't
@@ -754,12 +755,8 @@ export function classifyPaneSpecial(text: string): PaneSpecial | null {
     if (/Compacting|compacting conversation|Summarizing the conversation/i.test(text)) {
         return "compacting";
     }
-    if (/Rate limited|temporarily limiting requests/i.test(text)) {
-        return "rate-limit";
-    }
-    if (/API Error|APIError/i.test(text)) {
-        return "api-error";
-    }
+    // rate-limit / api-error / overloaded are handled by error-backoff.ts
+    // (#332) — they're errors, not internal busy states.
     return null;
 }
 

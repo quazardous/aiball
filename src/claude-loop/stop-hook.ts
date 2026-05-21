@@ -18,6 +18,7 @@ import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
+import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -104,9 +105,28 @@ function readPane(): string {
 }
 
 (async () => {
-    const pane = snapshotPane(readPane());
+    const paneText = readPane();
+    const pane = snapshotPane(paneText);
     log(`FIRE — ${classifyTurn()} | ${formatPaneSnapshot(pane)} | checkCmd=${checkCmd}`);
     try {
+        // #332: a recognized API/backend error crashed this turn. Don't
+        // re-ping (it hammers the API and pops claude out of the flow).
+        // Arm a dumb exponential backoff defer; the timer resumes after
+        // the window. Still erroring → counter grows the next wait.
+        const errId = matchPaneError(paneText);
+        if (errId) {
+            const bo = armErrorBackoff(sd!, errId);
+            // Claude is back at the prompt after the crashed turn — seed
+            // idle-since so the timer is allowed to re-ping once the
+            // backoff window elapses (it gates on the idle marker).
+            writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            setTmuxStatus(name!, "busy", `retry ${bo.attempts}`);
+            log(`  → ERROR-BACKOFF '${errId}' ${bo.ms}ms (attempt ${bo.attempts}) until=${bo.untilIso} became=busy:retry ${bo.attempts}`);
+            emit();
+        }
+        // No error in the pane → the flow recovered; clear any backoff
+        // counter so the next error restarts at the base delay.
+        resetErrorBackoff(sd!);
         if (pane.special !== null) {
             // Suppress wake — claude is doing something internal
             // (compacting, etc.) or blocked on backend. Surface the
