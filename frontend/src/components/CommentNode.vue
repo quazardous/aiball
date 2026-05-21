@@ -277,11 +277,11 @@ const confirm = useConfirm();
 const deleteBusy = ref(false);
 function confirmDelete() {
     confirm.require({
-        header: "Supprimer le commentaire",
-        message: "Supprimer ce commentaire ? Il sera retiré du fil (les agents ne le verront plus).",
+        header: "Delete comment",
+        message: "Delete this comment? It will be removed from the thread (agents won't see it).",
         icon: "pi pi-trash",
-        acceptLabel: "Supprimer",
-        rejectLabel: "Annuler",
+        acceptLabel: "Delete",
+        rejectLabel: "Cancel",
         acceptClass: "p-button-danger",
         accept: () => { void doDelete(); },
     });
@@ -294,7 +294,7 @@ async function doDelete() {
     } catch (e) {
         toast.add({
             severity: "error",
-            summary: "Suppression échouée",
+            summary: "Delete failed",
             detail: (e as Error).message,
             life: 5000,
         });
@@ -392,7 +392,7 @@ async function doDelete() {
              server-side; meta.deleted carries who/when). -->
         <div v-if="deleted" class="comment-tombstone">
             <i class="pi pi-trash" />
-            <em>commentaire supprimé<span v-if="deleted.by"> par {{ deleted.by }}</span></em>
+            <em>comment deleted<span v-if="deleted.by"> by {{ deleted.by }}</span></em>
         </div>
         <div v-if="editing" class="comment-edit">
             <Textarea

@@ -49,6 +49,7 @@ import {
     formatPaneSnapshot,
     idleMarkerPath,
     humanTypingPath,
+    userTookOverPath,
     humanIsTyping,
     injectSockPath,
     installRoot,
@@ -65,6 +66,7 @@ import {
     setTmuxStatus,
     snapshotPane,
     tmuxName,
+    humanPresenceWord,
     userIsTakingOver,
     wakeInFlightPath,
     wakeRequestedPath,
@@ -331,6 +333,10 @@ function detectHumanTyping(): void {
         if (prevPaneTail && tail !== prevPaneTail && !recentlySentKeys()) {
             try {
                 writeFileSync(humanTypingPath(sd!), new Date().toISOString() + "\n");
+                // #315: typing also ARMS the user-grace (degraded-mode parity
+                // with the proxy's touch_user_grace) so the bar does
+                // stop → wait → loop, not stop → loop. Skipped under --no-wait.
+                if (!NO_WAIT) writeFileSync(userTookOverPath(sd!), new Date().toISOString() + "\n");
             } catch { /* ignore — chip just won't show */ }
             log("human-typing detected (prompt area changed at idle)");
         }
@@ -759,7 +765,10 @@ async function mainSse(): Promise<void> {
         // typing now, or within user-grace after a manual prompt).
         try {
             const human = userIsTakingOver(sd!, userGraceSec) || humanIsTyping(sd!);
-            await client().pushState(settledStatus, human);
+            // #310: also push the 3-state presence word (stop/wait/loop) so the
+            // consumers page mirrors the tmux bar, not just the binary human flag.
+            const humanWord = humanPresenceWord(sd, userGraceSec);
+            await client().pushState(settledStatus, human, humanWord);
         } catch { /* daemon down or transient — next tick retries */ }
     }
     log("tmux session gone — timer exiting");

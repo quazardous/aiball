@@ -456,11 +456,18 @@ export class AiballClient {
      * Best-effort: failures are not surfaced to the caller, the timer
      * heartbeats again on the next tick.
      */
-    pushState(state: "busy" | "idle" | "boot", human?: boolean) {
-        return this.http<{ consumer_id: string; state: string; human?: boolean }>(
+    pushState(
+        state: "busy" | "idle" | "boot",
+        human?: boolean,
+        humanWord?: "stop" | "wait" | "loop",
+    ) {
+        const body: { state: string; human?: boolean; human_word?: string } = { state };
+        if (human !== undefined) body.human = human;
+        if (humanWord !== undefined) body.human_word = humanWord;
+        return this.http<{ consumer_id: string; state: string; human?: boolean; human_word?: string }>(
             "PUT",
             `/api/consumers/${encodeURIComponent(this.agentId)}/state`,
-            human === undefined ? { state } : { state, human },
+            body,
         );
     }
 

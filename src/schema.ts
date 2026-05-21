@@ -381,6 +381,15 @@ export const consumers = sqliteTable("consumers", {
      * `human` vs `loop` even while the heartbeat is fresh.
      */
     stateHuman: integer("state_human"),
+    /**
+     * #310: the 3-state human-presence WORD pushed alongside `state` —
+     * `stop` (human typing) / `wait` (user-grace or boot-grace, auto-pings
+     * frozen) / `loop` (autonomous). Mirrors the tmux bar's presence chip so
+     * the consumers page shows the same vocabulary. NULL when never reported
+     * (legacy rows, non-loop consumers, or a loop still on the pre-#310 timer
+     * that only pushes the `state_human` boolean).
+     */
+    stateHumanWord: text("state_human_word"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (t) => [

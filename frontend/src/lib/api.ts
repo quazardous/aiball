@@ -360,6 +360,12 @@ export interface Consumer {
      * reported. Drives the `human` vs `loop` badge.
      */
     state_human?: boolean | null;
+    /**
+     * #310: 3-state human-presence word (stop/wait/loop) at the last
+     * heartbeat — mirrors the tmux bar's presence chip. null = never reported
+     * / pre-#310 loop (fall back to `state_human` for the binary view).
+     */
+    state_human_word?: "stop" | "wait" | "loop" | null;
     created_at: string;
     updated_at: string;
 }

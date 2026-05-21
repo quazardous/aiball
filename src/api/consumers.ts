@@ -116,13 +116,18 @@ consumersRouter.put("/consumers/:consumer_id/state", (req: Request, res: Respons
     } else if (c.kind === "human") {
         return res.status(403).json({ error: "state push is for loop agents, not humans" });
     }
-    const body = (req.body ?? {}) as { state?: unknown; human?: unknown };
+    const body = (req.body ?? {}) as { state?: unknown; human?: unknown; human_word?: unknown };
     if (body.state !== "busy" && body.state !== "idle" && body.state !== "boot") {
         return badRequest(res, "state must be one of: busy, idle, boot");
     }
     // #280: optional live human-presence flag pushed alongside the state.
     const human = typeof body.human === "boolean" ? body.human : undefined;
-    setConsumerState(caller, body.state, human);
-    broadcast({ type: "consumer_changed", data: { consumer_id: caller, state: body.state, human } });
-    res.json({ consumer_id: caller, state: body.state, human });
+    // #310: optional 3-state presence word (stop/wait/loop), mirrors the bar.
+    const humanWord =
+        body.human_word === "stop" || body.human_word === "wait" || body.human_word === "loop"
+            ? body.human_word
+            : undefined;
+    setConsumerState(caller, body.state, human, humanWord);
+    broadcast({ type: "consumer_changed", data: { consumer_id: caller, state: body.state, human, human_word: humanWord } });
+    res.json({ consumer_id: caller, state: body.state, human, human_word: humanWord });
 });

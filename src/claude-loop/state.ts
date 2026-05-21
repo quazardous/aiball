@@ -589,24 +589,34 @@ const PROC_START_MS = Date.now();
  * pty-proxy.py, which OWNS this segment while the proxy is alive — keep the
  * two in sync.
  */
-export function humanBarWord(sd: string | undefined, graceSec: number): string {
-    // #302: --no-wait (CL_WAIT=0) assumes NO human at the terminal → always
-    // autonomous `loop`, ignoring the typing / user-grace markers. (david:
-    // the bar showed `wait` under --no-wait while pings fired — incoherent.)
-    // #302 david: black bg (colour16) behind the word so it stays readable
-    // over any bar state colour (busy blue / idle gray / boot yellow).
-    if (process.env.CL_WAIT === "0") return "#[fg=colour40,bg=colour16]loop";
-    if (sd && humanIsTyping(sd)) return "#[fg=colour196,bg=colour16]stop";
-    // #305: during boot-grace (--wait) the timer freezes ALL auto-wakes so the
-    // human can take over at launch — the same "auto-pings frozen" state as
-    // user-grace, so the bar reads `wait` from the first frame instead of `loop`
-    // (david: "démarre directement sans phase wait"). Mirrors pty-proxy.py
-    // _boot_grace_remaining, which owns this segment when the proxy is alive;
-    // this branch covers degraded/no-proxy mode.
+/**
+ * #310: the bare 3-state presence WORD (`stop` / `wait` / `loop`), decoupled
+ * from the tmux colour formatting so the SAME logic feeds both the bar
+ * (humanBarWord below) and the heartbeat push to the consumers page
+ * (timer.ts → pushState). Keep in sync with pty-proxy.py's _rest_word.
+ *   - `stop` — a human is typing NOW (human-typing < 5s)
+ *   - `wait` — auto-pings FROZEN: boot-grace window (#305) OR user-grace
+ *   - `loop` — autonomous (managed mode), incl. --no-wait
+ */
+export function humanPresenceWord(sd: string | undefined, graceSec: number): "stop" | "wait" | "loop" {
+    // #302: --no-wait (CL_WAIT=0) assumes NO human at the terminal → always loop.
+    if (process.env.CL_WAIT === "0") return "loop";
+    if (sd && humanIsTyping(sd)) return "stop";
+    // #305: boot-grace freezes auto-wakes at launch → same "frozen" state as
+    // user-grace, so the word reads `wait` during the window.
     const bootGraceMs = Math.max(0, Number(process.env.CL_BOOT_GRACE_SEC ?? 60)) * 1000;
-    if (Date.now() - PROC_START_MS < bootGraceMs) return "#[fg=colour178,bg=colour16]wait";
-    if (sd && userIsTakingOver(sd, graceSec)) return "#[fg=colour178,bg=colour16]wait";
-    return "#[fg=colour40,bg=colour16]loop";
+    if (Date.now() - PROC_START_MS < bootGraceMs) return "wait";
+    if (sd && userIsTakingOver(sd, graceSec)) return "wait";
+    return "loop";
+}
+
+export function humanBarWord(sd: string | undefined, graceSec: number): string {
+    // #302 david: black bg (colour16) behind the word so it stays readable over
+    // any bar state colour (busy blue / idle gray / boot yellow). fg encodes the
+    // word: stop=red / wait=yellow / loop=green. Logic lives in humanPresenceWord.
+    const word = humanPresenceWord(sd, graceSec);
+    const fg = word === "stop" ? "colour196" : word === "wait" ? "colour178" : "colour40";
+    return `#[fg=${fg},bg=colour16]${word}`;
 }
 
 export function setTmuxStatus(

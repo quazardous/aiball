@@ -82,7 +82,7 @@ interface ParsedQuery {
     empty: boolean;
 }
 
-function parseQuery(raw: string): ParsedQuery {
+export function parseQuery(raw: string): ParsedQuery {
     const tokens = raw
         .trim()
         .split(/\s+/)

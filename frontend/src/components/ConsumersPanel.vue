@@ -136,20 +136,31 @@ function shouldShowStateBadge(r: Consumer): boolean {
     return !!r.state;
 }
 
-function loopBadgeLabel(r: Consumer): string {
-    const mode = loopMode(r);
-    if (mode === "offline") return "offline";
-    if (mode === "human") return "human";
-    return `loop · ${r.state}`; // loop · busy / loop · idle / loop · boot
+// #310: mirror the tmux bar's TWO chips — a presence tag (stop/wait/loop) +
+// an activity tag (idle/busy/boot), with the same colour mapping — when the
+// heartbeat is fresh. When stale, fall back to a single offline / stale-active
+// badge (the per-chip detail is no longer meaningful once the timer is silent).
+function presenceLabel(r: Consumer): string {
+    // Prefer the 3-state word (#310); fall back to the legacy binary flag for
+    // loops still on the pre-#310 timer (word null) so the badge never breaks.
+    return r.state_human_word ?? (r.state_human ? "human" : "loop");
 }
-
-function loopBadgeSeverity(r: Consumer): "info" | "secondary" | "warn" {
-    const mode = loopMode(r);
-    if (mode === "offline") return "secondary";       // gray
-    if (mode === "human") return "warn";              // orange — human-driven
-    if (r.state === "busy") return "info";            // electric blue — matches tmux bar
-    if (r.state === "boot") return "warn";            // yellow
-    return "secondary";                                // loop idle = gray
+function presenceSeverity(r: Consumer): "danger" | "warn" | "success" {
+    const w = presenceLabel(r);
+    if (w === "stop") return "danger";                 // red — human typing
+    if (w === "wait" || w === "human") return "warn";  // yellow — frozen / human present
+    return "success";                                  // green — autonomous loop
+}
+function activitySeverity(r: Consumer): "info" | "warn" | "secondary" {
+    if (r.state === "busy") return "info";             // electric blue — matches tmux bar
+    if (r.state === "boot") return "warn";             // yellow
+    return "secondary";                                // idle = gray
+}
+function staleBadge(r: Consumer): { label: string; severity: "warn" | "secondary" } {
+    // heartbeat stale → loop timer silent. MCP-active ⇒ human-driven, else gone.
+    return isMcpActive(r)
+        ? { label: "human", severity: "warn" }
+        : { label: "offline", severity: "secondary" };
 }
 
 function loopBadgeTooltip(r: Consumer): string {
@@ -314,13 +325,32 @@ const sortedRows = computed<Consumer[]>(() => {
                         >
                             {{ relativeTime(r.last_seen_at) }}
                         </div>
-                        <Tag
-                            v-if="shouldShowStateBadge(r)"
-                            :value="loopBadgeLabel(r)"
-                            :severity="loopBadgeSeverity(r)"
-                            :title="loopBadgeTooltip(r)"
-                            class="activity-cell__state"
-                        />
+                        <template v-if="shouldShowStateBadge(r)">
+                            <!-- #310: fresh heartbeat → presence (stop/wait/loop)
+                                 + activity (idle/busy/boot), same vocab+colours as
+                                 the tmux bar. Stale → single offline/stale badge. -->
+                            <template v-if="isHeartbeatFresh(r)">
+                                <Tag
+                                    :value="presenceLabel(r)"
+                                    :severity="presenceSeverity(r)"
+                                    :title="loopBadgeTooltip(r)"
+                                    class="activity-cell__state"
+                                />
+                                <Tag
+                                    :value="r.state ?? ''"
+                                    :severity="activitySeverity(r)"
+                                    :title="loopBadgeTooltip(r)"
+                                    class="activity-cell__state"
+                                />
+                            </template>
+                            <Tag
+                                v-else
+                                :value="staleBadge(r).label"
+                                :severity="staleBadge(r).severity"
+                                :title="loopBadgeTooltip(r)"
+                                class="activity-cell__state"
+                            />
+                        </template>
                     </td>
                     <td class="col-enabled">
                         <Tag
