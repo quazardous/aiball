@@ -564,6 +564,23 @@ const STATUS_COLORS: Record<LoopStatus, { bg: string; fg: string }> = {
     boot: { bg: "colour178", fg: "colour15" },  // yellow / white (transitional)
 };
 
+/**
+ * #302: the 3-state human-presence WORD for the tmux bar (`@cl_human`),
+ * symmetric with the gating semantics david asked to surface:
+ *   - `stop` (red colour196)    — a human is typing NOW (human-typing < 5s)
+ *   - `wait` (yellow colour178) — within the user-grace window after a submit
+ *                                 (user-took-over < graceSec) → auto-pings FROZEN
+ *   - `loop` (green colour40)   — autonomous, gate open (managed mode)
+ * fg-only (the bg comes from status-bg / the loop state). Mirrored in
+ * pty-proxy.py, which OWNS this segment while the proxy is alive — keep the
+ * two in sync.
+ */
+export function humanBarWord(sd: string | undefined, graceSec: number): string {
+    if (sd && humanIsTyping(sd)) return "#[fg=colour196]stop";
+    if (sd && userIsTakingOver(sd, graceSec)) return "#[fg=colour178]wait";
+    return "#[fg=colour40]loop";
+}
+
 export function setTmuxStatus(
     name: string,
     status: LoopStatus,
@@ -605,7 +622,7 @@ export function setTmuxStatus(
     // painted value (loop/stop) still wins via the conditional.
     setOpt(
         "status-left",
-        `#[fg=${c.fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour178]loop}#{@cl_proxy}#[fg=${c.fg}] · ${name} #{@cl_state} `,
+        `#[fg=${c.fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour40]loop}#{@cl_proxy}#[fg=${c.fg}] · ${name} #{@cl_state} `,
     );
     setOpt("status-bg", c.bg);
     setOpt("status-fg", c.fg);
@@ -614,15 +631,15 @@ export function setTmuxStatus(
     // #269 (tcn5ej): discreet ⇄ when the pane really runs under the proxy
     // (ground truth = proxy-alive marker). Absent ⇒ direct-launch fallback.
     setOpt("@cl_proxy", proxyAlive ? `#[fg=colour250] ⇄` : "");
-    // #264 human-presence WORD: `loop` (yellow) autonomous / `stop` (red)
-    // human typing. The proxy owns this segment live when present (instant,
-    // busy included); in DEGRADED mode (no proxy) TS paints it from the
-    // pane-diff typing marker (timer detectHumanTyping, ≤HUMAN_POLL_MS) —
-    // skipped when the proxy is alive so the two never fight over it.
+    // #264/#302 human-presence WORD (3 états): `stop` (red) human typing /
+    // `wait` (yellow) user-grace window, auto-pings frozen / `loop` (green)
+    // autonomous gate-open. The proxy owns this segment live when present
+    // (instant, busy included); in DEGRADED mode (no proxy) TS paints it
+    // from the markers — skipped when the proxy is alive so the two never
+    // fight over it.
     if (!proxyAlive) {
-        setOpt("@cl_human", sd && humanIsTyping(sd)
-            ? `#[fg=colour196]stop`
-            : `#[fg=colour178]loop`);
+        const graceSec = Math.max(0, Number(process.env.CL_USER_GRACE_SEC ?? DEFAULT_USER_GRACE_SEC));
+        setOpt("@cl_human", humanBarWord(sd, graceSec));
     }
 }
 
