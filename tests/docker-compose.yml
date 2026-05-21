@@ -1,0 +1,34 @@
+# #324 — e2e test stack. Run from the repo root:
+#   docker compose -f tests/docker-compose.yml up --build
+#
+# The `daemon` service runs the REAL aiball (createApp) in an isolated
+# container; `agent-sim` containers (added next) drive it through the business
+# API. Everything test-specific is injected via env + volumes — zero changes to
+# production code (#fryynv). The test env (NODE_ENV=test) frames test mode; a
+# fresh ephemeral DB volume keeps it separate from dev.
+services:
+  daemon:
+    build:
+      context: ..
+      dockerfile: tests/Dockerfile
+    environment:
+      NODE_ENV: test
+      AIBALL_HOME: /data          # isolated, ephemeral DB (volume below)
+      AIBALL_HOST: 0.0.0.0
+      AIBALL_PORT: "7777"
+      AIBALL_SOCK: ""             # no UDS in-container → bearer-token auth only
+    volumes:
+      - ..:/app                   # live source (createApp, routes, …)
+      - /app/node_modules         # preserve the image's native node_modules
+      - aiball-test-data:/data    # ephemeral test DB, separate from dev
+    ports:
+      - "17777:7777"              # isolated host port (NOT the live 7777)
+    healthcheck:
+      # /api/health is a PUBLIC path (no auth) — good liveness probe.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:7777/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  aiball-test-data:
