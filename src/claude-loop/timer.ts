@@ -78,7 +78,6 @@ import {
     type Plate,
     type WakeHint,
 } from "./state.js";
-import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 
 const sd = process.env.CL_STATE_DIR;
 const name = process.env.CL_NAME;
@@ -439,29 +438,19 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     if (!manualWake) {
         const paneText = capturePane();
         if (paneText) {
-            // #332: a recognized API/backend error crashed the turn.
-            // Re-pinging immediately hammers the API and pops claude out
-            // of the flow ("sort de la cinématique"). Arm a dumb
-            // exponential backoff defer instead; the next heartbeat
-            // after the window re-pings = resume. Still erroring → the
-            // counter grows the next wait; pane clean → reset below.
-            const errId = matchPaneError(paneText);
-            if (errId) {
-                const bo = armErrorBackoff(sd!, errId);
-                setTmuxStatus(name!, "busy", `retry ${bo.attempts}`);
-                log(`skip wake (${reason}) — pane error '${errId}', backoff ${bo.ms}ms (attempt ${bo.attempts}, until ${bo.untilIso})`);
-                return false;
-            }
-            // No error in the pane → if we were backing off, the flow
-            // recovered: clear the counter so the next error restarts at
-            // the base delay.
-            resetErrorBackoff(sd!);
             const snap = snapshotPane(paneText);
             // Both `busy` (esc-to-interrupt mid-turn) and the `special`
             // internal state (compacting) are reasons to skip — same
             // family of "claude is internally busy". Log the snapshot so
             // david sees why a wake was withheld (#B.198 david: "ajoute
             // la detection esc to interrupt dans les log").
+            //
+            // #335: pane-error detection does NOT live here. The Stop
+            // hook owns it (it fires on turn-end = when a real API error
+            // aborts a turn). Re-scanning on every heartbeat made a
+            // static error keyword in the pane re-arm an ever-growing
+            // backoff that starved SSE wakes. The timer only honors the
+            // busy-defer the Stop hook armed.
             if (snap.busy || snap.special !== null) {
                 log(`skip wake (${reason}) — ${formatPaneSnapshot(snap)}`);
                 return false;

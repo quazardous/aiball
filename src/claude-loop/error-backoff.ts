@@ -38,19 +38,44 @@ export interface ErrorPattern {
 /**
  * Error strings that crash the turn / flow. Ordered; first match wins
  * (only decides which `id` lands in the log — handling is uniform).
- * Seeds the three david called out plus the backend-overload variant;
+ * Seeds the ones david called out plus the backend-overload variant;
  * extend here, nowhere else.
+ *
+ * #335: patterns must be SPECIFIC. A bare `\b529\b` (or lone
+ * "Overloaded") matched any pane that happened to contain the number /
+ * word — including a session literally discussing API errors — and
+ * tripped the backoff falsely. `overloaded_error` is the API's error
+ * type token, which doesn't show up in normal prose.
  */
 export const ERROR_PATTERNS: ErrorPattern[] = [
     { id: "rate-limit", match: /Rate limited|temporarily limiting requests/i },
-    { id: "overloaded", match: /Overloaded|overloaded_error|\b529\b/i },
+    { id: "overloaded", match: /overloaded_error/i },
     { id: "api-error", match: /API Error|APIError/i },
 ];
 
-/** First error id whose pattern matches `text`, or null if clean. */
-export function matchPaneError(text: string): string | null {
+/** Last `footerLines` non-empty lines — mirrors `paneFooterShowsBusy`
+ *  (state.ts). #335: error banners are transient bottom-of-screen
+ *  output, so we only look at the footer. Scanning the WHOLE pane
+ *  matched the same words sitting in scrollback / conversation /
+ *  rendered code and self-tripped the backoff. */
+function footerOf(text: string, footerLines: number): string {
+    return text
+        .split("\n")
+        .map((l) => l.trimEnd())
+        .filter((l) => l.length > 0)
+        .slice(-footerLines)
+        .join("\n");
+}
+
+/**
+ * First error id whose pattern matches the pane FOOTER, or null. The
+ * footer window is a bit deeper than the busy probe (5) because a
+ * crashed-turn banner sits just above the prompt box at turn-end.
+ */
+export function matchPaneError(text: string, footerLines = 8): string | null {
+    const footer = footerOf(text, footerLines);
     for (const p of ERROR_PATTERNS) {
-        if (p.match.test(text)) return p.id;
+        if (p.match.test(footer)) return p.id;
     }
     return null;
 }
