@@ -335,6 +335,28 @@ Skip this with `-NoClaudeLoop` if you only want the daemon + tray
 (the `claude-loop.cmd` shim still ships, but `start` will error out
 until psmux + bash are reachable).
 
+### Optional: live human-typing detection (ConPTY proxy)
+
+By default, claude-loop on Windows detects "a human is typing in the pane"
+by diffing `capture-pane` — which only works while claude is idle. For
+**live** detection (busy included) plus cleaner wake injection, build the
+Rust ConPTY proxy (`windows/cl-pty-proxy`, #281 — see
+[`docs/PTY-PROXY-WINDOWS.md`](PTY-PROXY-WINDOWS.md)):
+
+```powershell
+# One time: Rust GNU toolchain (no MSVC / VS Build Tools needed).
+winget install Rustlang.Rustup        # or: rustup-init -y --default-host x86_64-pc-windows-gnu
+rustup default stable-x86_64-pc-windows-gnu
+
+# Build the proxy (claude-loop picks it up automatically next launch):
+cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml
+```
+
+It's an optional enhancement — without it claude-loop still works, just
+with idle-only typing detection. `claude-loop check` reports whether the
+proxy is active. The binary isn't committed (it's platform-specific;
+`target/` is gitignored), so each machine builds it once.
+
 ## What's NOT in the Windows path
 
 - **systemd**. A per-user Scheduled Task replaces it for the default

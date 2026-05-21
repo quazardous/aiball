@@ -454,16 +454,28 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const claudeCmd =
         `${claudeBin} --settings ${shQuote(settingsFile)}` +
         (passthrough ? ` ${passthrough}` : "");
-    // #269: front claude with the PTY proxy so claude-loop detects human
-    // typing live (busy included) and injects wakes through the proxy's
-    // socket instead of tmux stdin. Requires python3; if it (or the proxy
-    // script) is missing we launch claude directly. The proxy itself also
-    // self-falls-back to exec-claude if PTY init fails — the pane is never
-    // bricked. `-B` so no __pycache__ is written next to the proxy.
-    const proxyPath = join(root, "src/claude-loop/pty-proxy.py");
-    const launch = has("python3") && existsSync(proxyPath)
-        ? `exec python3 -B ${shQuote(proxyPath)} -- ${claudeCmd}`
-        : `exec ${claudeCmd}`;
+    // #269/#281: front claude with the PTY proxy so claude-loop detects
+    // human typing live (busy included) and injects wakes through the
+    // proxy's control channel instead of tmux/psmux stdin. Two backends:
+    //   - Unix  → src/claude-loop/pty-proxy.py (Python stdlib, AF_UNIX).
+    //     Requires python3; `-B` so no __pycache__ next to the proxy.
+    //   - Windows → windows/cl-pty-proxy (Rust ConPTY, named pipe; #281
+    //     strategy B). Built artifact, not committed — see WIN-INSTALL.md.
+    //     Gated on platform (the Python proxy's pty/termios are POSIX-only
+    //     and would crash the pane on Windows) AND on the .exe existing, so
+    //     an un-built checkout cleanly falls back to direct claude.
+    // Either proxy ALSO self-falls-back to exec-claude if PTY init fails —
+    // the pane is never bricked. Missing proxy → launch claude directly.
+    const pyProxy = join(root, "src/claude-loop/pty-proxy.py");
+    const winProxyExe = join(root, "windows", "cl-pty-proxy", "target", "release", "cl-pty-proxy.exe");
+    let launch: string;
+    if (process.platform === "win32" && existsSync(winProxyExe)) {
+        launch = `exec ${hookPath(winProxyExe)} -- ${claudeCmd}`;
+    } else if (process.platform !== "win32" && has("python3") && existsSync(pyProxy)) {
+        launch = `exec python3 -B ${shQuote(pyProxy)} -- ${claudeCmd}`;
+    } else {
+        launch = `exec ${claudeCmd}`;
+    }
     const innerCmd = `source ${shQuote(envPath(sd))}; ${launch}`;
 
     const tname = tmuxName(name);
@@ -669,22 +681,32 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
     if (ctx.config_path) {
         process.stdout.write(`  .aiball.yaml   : ${ctx.config_path}\n`);
     }
-    // #269 (david ftprf7): surface the PTY-proxy dependency. The proxy
-    // gives live human-typing detection (busy included) + socket wake
-    // injection; it needs python3 + the shipped proxy script. When either
-    // is missing `start` silently falls back to launching claude directly
-    // (pane-diff detection, idle-only) — so flag it here, same probe the
-    // launch uses.
-    const hasPython = commandExists("python3");
-    const proxyScript = join(selfRoot(), "src/claude-loop/pty-proxy.py");
-    const hasProxyScript = existsSync(proxyScript);
-    const proxyActive = hasPython && hasProxyScript;
-    process.stdout.write(`  python3        : ${hasPython ? "✓ available" : "— MISSING"}\n`);
-    process.stdout.write(`  PTY proxy      : ${
-        proxyActive
-            ? "✓ active (live human-typing detection + socket wake injection)"
-            : `— inactive → fallback direct launch (${hasPython ? "proxy script missing" : "python3 missing"}); pane-diff detection, idle-only`
-    }\n`);
+    // #269/#281 (david ftprf7): surface the PTY-proxy dependency. The proxy
+    // gives live human-typing detection (busy included) + control-channel
+    // wake injection. When inactive, `start` falls back to launching claude
+    // directly (pane-diff detection, idle-only) — flag it here, same probe
+    // the launch uses. Windows = Rust ConPTY proxy (#281 strategy B); Unix =
+    // Python proxy (needs python3 + the shipped script).
+    if (process.platform === "win32") {
+        const winProxyExe = join(selfRoot(), "windows", "cl-pty-proxy", "target", "release", "cl-pty-proxy.exe");
+        const hasWinProxy = existsSync(winProxyExe);
+        process.stdout.write(`  ConPTY proxy   : ${
+            hasWinProxy
+                ? "✓ active (live human-typing detection + named-pipe wake injection)"
+                : "— inactive → fallback direct launch (cl-pty-proxy.exe not built — run `cargo build --release` in windows/cl-pty-proxy); pane-diff detection, idle-only"
+        }\n`);
+    } else {
+        const hasPython = commandExists("python3");
+        const proxyScript = join(selfRoot(), "src/claude-loop/pty-proxy.py");
+        const hasProxyScript = existsSync(proxyScript);
+        const proxyActive = hasPython && hasProxyScript;
+        process.stdout.write(`  python3        : ${hasPython ? "✓ available" : "— MISSING"}\n`);
+        process.stdout.write(`  PTY proxy      : ${
+            proxyActive
+                ? "✓ active (live human-typing detection + socket wake injection)"
+                : `— inactive → fallback direct launch (${hasPython ? "proxy script missing" : "python3 missing"}); pane-diff detection, idle-only`
+        }\n`);
+    }
     process.stdout.write(`\n`);
 
     // #B.149: --config flag inspects the loop's state dir + the

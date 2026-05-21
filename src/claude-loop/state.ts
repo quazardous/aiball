@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { loadConfig } from "../autopoll/config.js";
@@ -130,6 +130,14 @@ export function humanTypingPath(sd: string): string { return join(sd, "human-typ
 // Present ⇒ the pane runs under the proxy (injection goes here instead of
 // tmux send-keys; the proxy owns the human-typing marker).
 export function injectSockPath(sd: string): string { return join(sd, "inject.sock"); }
+// #281 (strategy B): Windows has no AF_UNIX file sockets, so the Rust
+// ConPTY proxy listens on a NAMED PIPE instead. Both sides derive the
+// name from the loop name (= basename of the state dir, == CL_NAME).
+// Can't be stat'd like a file, so callers gate on proxyIsAlive() rather
+// than existsSync(). Used by injectWakePhrase on win32 only.
+export function injectPipeName(sd: string): string {
+    return `\\\\.\\pipe\\cl-inject-${basename(sd)}`;
+}
 // #269 (tcn5ej): presence marker dropped by the PTY proxy right after a
 // successful pty.fork, removed at cleanup. Existence ⇒ the pane really runs
 // under the proxy — GROUND TRUTH, vs the TS launch decision which can lie (the
@@ -892,15 +900,25 @@ export async function buildContextPhrase(
  */
 export async function injectWakePhrase(paneTarget: string, phrase: string): Promise<void> {
     // #269: when the pane runs under the PTY proxy, deliver the wake
-    // straight to claude's PTY via the proxy's control socket — that
-    // bypasses tmux stdin, so the proxy's human-typing detector never
-    // mistakes our own injection for a human keystroke (#efuuau). Fall
-    // back to the tmux paste/send-keys path for loops not under the proxy
-    // (no socket) or if the socket write fails.
+    // straight to claude's PTY via the proxy's control channel — that
+    // bypasses tmux/psmux stdin, so the proxy's human-typing detector
+    // never mistakes our own injection for a human keystroke (#efuuau).
+    // Fall back to the tmux paste/send-keys path for loops not under the
+    // proxy or if the write fails.
     const sd = process.env.CL_STATE_DIR;
     if (sd) {
-        const sock = injectSockPath(sd);
-        if (existsSync(sock) && await injectViaSocket(sock, phrase)) return;
+        if (process.platform === "win32") {
+            // #281 strategy B: Windows uses a named pipe. It can't be
+            // stat'd, so gate on the proxy-alive PID marker instead of
+            // existsSync(); a dead/absent proxy → fall through to send-keys.
+            if (proxyIsAlive(sd)) {
+                const pipe = injectPipeName(sd);
+                if (await injectViaSocket(pipe, phrase)) return;
+            }
+        } else {
+            const sock = injectSockPath(sd);
+            if (existsSync(sock) && await injectViaSocket(sock, phrase)) return;
+        }
     }
     const bufName = `wake_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const setBuf = spawnSync(MUX_CMD, ["set-buffer", "-b", bufName, phrase], { stdio: "ignore" });

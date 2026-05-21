@@ -1,0 +1,166 @@
+# claude-loop PTY proxy on Windows (ConPTY)
+
+> The Windows sibling of [`docs/PTY-PROXY.md`](PTY-PROXY.md). Same feature —
+> tell **a human typing** apart from **claude's output** and from **the
+> loop's own wake injection**, live, even while claude is busy streaming —
+> but built on **ConPTY** + a **named pipe** instead of POSIX `pty` +
+> `AF_UNIX`. (#281)
+
+---
+
+## Why a separate implementation
+
+The Unix proxy (`src/claude-loop/pty-proxy.py`) is Python stdlib only:
+`pty.fork()`, `termios`, `select`, `AF_UNIX`. **None of those exist on
+Windows** — `import pty` itself fails (it pulls in `termios`). So on
+Windows the launch path can't reuse it, and a clean room implementation is
+needed. Two facts shaped the design:
+
+1. **Python stdlib has no ConPTY.** Replicating the "zero dependency"
+   elegance of the Unix proxy in Python on Windows is impossible —
+   you'd need `pywinpty` (a native wheel) or hand-rolled `ctypes`. So the
+   language advantage is gone; we pick the tool that fits the platform.
+2. **psmux is already built on ConPTY** (via the `portable-pty` crate).
+   Writing the proxy in Rust on the same `portable-pty` layer means we
+   inherit a battle-tested ConPTY abstraction instead of re-deriving it.
+
+Result: `windows/cl-pty-proxy/` — a small Rust binary, **strategy B** (see
+"Strategy A" at the bottom for the cleaner long-term plan).
+
+## Where it sits
+
+```
+terminal → psmux → ConPTY(psmux) → [cl-pty-proxy] → ConPTY(claude) → claude
+```
+
+psmux launches the pane child as `cl-pty-proxy.exe -- claude …` instead of
+`claude …`. The proxy allocates a **second, nested ConPTY** that it owns
+and runs claude inside it, bridging the three channels:
+
+| Channel | Source → sink | Side effect |
+|---|---|---|
+| **Human keystrokes** | proxy stdin (from psmux) → claude ConPTY | touch `human-typing` marker + paint `@cl_human` red `stop` (if it's real text), then forward |
+| **claude output** | claude ConPTY → proxy stdout (to psmux) | forwarded raw |
+| **Wake injection** | named pipe `\\.\pipe\cl-inject-<name>` → claude ConPTY | forwarded, **marker untouched** |
+
+Because the human's keystrokes and claude's output arrive on **physically
+distinct handles** (the proxy's stdin vs. the inner ConPTY's output), the
+proxy can label every byte by origin — busy or idle — which psmux's
+`capture-pane` (rendered output only) never could. The wake moves off
+`send-keys` (which would land on the proxy's stdin, indistinguishable from
+a human) onto a dedicated **named pipe**, so the only thing on stdin is the
+human. Channel separation is physical, not heuristic.
+
+## The win32-input-mode wrinkle (the Windows-specific gotcha)
+
+On Unix the human's keystrokes arrive as raw VT bytes — `v` is `0x76`, so
+"is this text?" is a one-byte check. **Under psmux/ConPTY they do not.**
+With `ENABLE_VIRTUAL_TERMINAL_INPUT`, conhost delivers keystrokes in
+[**win32-input-mode**](https://github.com/microsoft/terminal/blob/main/doc/specs/%234999%20-%20Improved%20keyboard%20handling%20in%20Conpty.md)
+encoding:
+
+```
+ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _
+```
+
+e.g. typing `h` arrives as `ESC[72;35;104;1;0;1_` — the `104` is the
+unicode code point, the `1` after it is key-down. **Every keystroke starts
+with ESC**, so the naive "first byte is printable" test classifies all
+typing as non-text and never fires the marker.
+
+So `is_typing_keystroke` (in `windows/cl-pty-proxy/src/main.rs`) handles
+both encodings:
+
+- **Raw VT** — leading printable byte → text (fallback for non-ConPTY).
+- **win32-input-mode** — parse each `_`-terminated CSI, read field 3 (Uc)
+  and field 4 (Kd); flag the chunk when any sequence is a **key-down of a
+  printable code point**. DSR responses (`…R`), arrows (Uc=0), Enter
+  (Uc=13), Ctrl-combos, etc. are correctly ignored.
+
+This is the single most important Windows-specific detail; it's covered by
+unit tests (`cargo test`) built from real captured sequences.
+
+> Forwarding is unaffected — the proxy passes the win32-input-mode bytes
+> through verbatim and claude's conhost decodes them. Only **detection**
+> needed the parser. Likewise, injected raw text (`ver\r`) written to
+> claude's ConPTY input is decoded into keystrokes by conhost.
+
+## Markers & status (parity with #269 / #274 / #278)
+
+- `human-typing` — timestamp file touched on every real text keystroke;
+  read by `state.ts::humanIsTyping` (5 s TTL), drives the bicolor bar word.
+- `@cl_human` — the proxy repaints this psmux user-option instantly
+  (`loop` yellow ↔ `stop` red) and clears it after the TTL, exactly like
+  the Unix proxy's #274 path. `MUX_CMD` + `CL_TMUX` come from the loop env.
+- `proxy-alive` — PID-stamped presence marker dropped after a successful
+  fork, removed at graceful exit. `state.ts::proxyIsAlive` probes the PID's
+  liveness, so a proxy killed with `TerminateProcess` (no cleanup) leaves a
+  stale marker that is correctly read as dead — same contract as #278.
+
+## Fail-safe
+
+If ConPTY allocation or the claude spawn fails, the proxy runs claude
+directly with inherited stdio and propagates its exit code — the live pane
+is never bricked (the analogue of the Unix proxy's `os.execvp` fallback).
+
+## How it's wired into claude-loop
+
+- `cli.ts` launch — on `win32`, if `windows/cl-pty-proxy/target/release/
+  cl-pty-proxy.exe` exists, the pane runs `exec <proxy.exe> -- <claudeCmd>`;
+  otherwise it falls back to launching claude directly. The Python proxy
+  branch is gated to non-Windows (its POSIX APIs would crash the pane).
+- `state.ts::injectWakePhrase` — on `win32`, gate on `proxyIsAlive(sd)`
+  (a named pipe can't be `stat`-ed) and write the wake to
+  `injectPipeName(sd)` = `\\.\pipe\cl-inject-<name>` via Node `net`
+  (named pipes are first-class in Node `net`, no native dep). Falls back to
+  the psmux paste/`send-keys` path otherwise.
+- `claude-loop check` — reports the ConPTY proxy as active/inactive on
+  Windows, same probe the launch uses.
+
+## Build
+
+Not committed (it's a platform-specific binary; `target/` is gitignored).
+Build it with the Rust **GNU** toolchain (no MSVC / VS Build Tools needed):
+
+```powershell
+rustup default stable-x86_64-pc-windows-gnu   # one time
+cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml
+```
+
+`claude-loop start` picks it up automatically on the next launch. Without
+it, claude-loop still works — it just falls back to the idle-only pane-diff
+detection (`claude-loop check` will say so).
+
+## Known limitation — double conhost
+
+claude runs under a **second** ConPTY nested inside psmux's ConPTY, so its
+output is rendered by two conhosts in series (claude's conhost → proxy
+stdout → psmux's conhost). Basic rendering, the DSR cursor handshake, and
+resize all work, but complex TUI cases (alt-screen churn, rapid resize) can
+glitch. This double-translation tax is inherent to *any* nested-proxy
+approach on Windows and is the reason strategy A exists.
+
+---
+
+## Strategy A (proposed psmux-native approach, future PR)
+
+The nested proxy reconstructs, at the PTY layer, a separation **psmux
+already has natively** — it is the multiplexer, so it already routes human
+client keystrokes and `send-keys`/`paste-buffer` injection through
+*different code paths*:
+
+- human keystrokes: `input.rs::forward_key_to_active` → `pane.writer.write_all`
+- injection: `commands.rs` (`send-keys`/`paste-buffer`) → `send_text_to_active` / `send_paste_to_active`
+
+So instead of a second ConPTY, psmux itself can emit the human-typing
+signal: in `forward_key_to_active`, when the key is real text, touch
+`<state_dir>/human-typing` (and/or set `@cl_human=stop` + refresh) — gated
+on a pane option like `@cl_state_dir`, set by `cli.ts` at `new-session`
+(it already seeds `@cl_human` / `@cl_proxy` / `@cl_state`). claude-loop's
+existing `humanIsTyping` reads the marker unchanged.
+
+Benefits over strategy B: **no second process, no nested ConPTY, no double
+translation, no native dep** beyond psmux. It's strictly less code than the
+Unix proxy. The cost is a change to psmux (Rust). Strategy B ships the
+feature now and validates the end-to-end wiring (markers, named-pipe
+injection, status painting) that strategy A would reuse verbatim.
