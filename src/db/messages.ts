@@ -353,6 +353,49 @@ export function editMessage(
 }
 
 /**
+ * Soft-delete a comment (#309). Human-only (enforced at the HTTP layer).
+ * Flips status → `rejected` (so the row is excluded everywhere that already
+ * drops rejected — counts / gates / brief / MCP reads) AND stamps
+ * `meta.deleted={by,at}`. The marker distinguishes a user-deletion from a
+ * moderation reject so the UI thread can re-surface it as a tombstone (only
+ * with `?include_deleted=1`); the thread builder strips the body before
+ * shipping it, the original stays in the row for audit.
+ *
+ * Guards: only `comment_added`; refuses a comment carrying a FINALIZED
+ * (accepted/rejected) decision — that decision row IS the audit and must
+ * persist. A pending or absent decision is fine. Returns the updated
+ * Message, or null when the id isn't a `comment_added`.
+ */
+export function deleteComment(id: number, by: string): Message | null {
+    const db = getDb();
+    return db.transaction((tx) => {
+        const m = tx.select().from(schema.messages).where(eq(schema.messages.id, id)).get();
+        if (!m || m.kind !== "comment_added") return null;
+        const meta = parseMeta(m.meta ?? null);
+        if (meta.decision && meta.decision.status !== "pending") {
+            throw new Error(
+                `cannot delete a comment carrying a ${meta.decision.status} decision — the audit must persist`,
+            );
+        }
+        meta.deleted = { by, at: new Date().toISOString() };
+        tx.update(schema.messages)
+            .set({
+                status: "rejected",
+                decidedBy: "human",
+                decidedAt: new Date().toISOString(),
+                meta: serializeMeta(meta),
+            })
+            .where(eq(schema.messages.id, id))
+            .run();
+        const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, id)).get();
+        if (!fresh) return null;
+        const parent = tx.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
+        return messageRowToMessage(fresh, parent?.project ?? "");
+    });
+}
+
+/**
  * Move a whole ticket thread to another project (#294). The project lives
  * ONLY on the ticket head row (`tickets.project`); messages derive their
  * project by joining `ticket_id` → tickets, so the move is a single head

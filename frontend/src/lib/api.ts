@@ -498,7 +498,9 @@ export const api = {
     // The UI always needs the full thread (body + comments) — the
     // summary default that landed in 0.5.x (#B.87) targets agents, not
     // the moderator browser. Force full=1.
-    getTicket: (id: number) => req<ThreadView>("GET", `/api/tickets/${id}?full=1`),
+    // #309: include_deleted=1 surfaces user-deleted comments as tombstones in
+    // the moderator UI (agents/MCP never pass it, so they don't see them).
+    getTicket: (id: number) => req<ThreadView>("GET", `/api/tickets/${id}?full=1&include_deleted=1`),
     search: (params: {
         q: string;
         project?: string;
@@ -529,6 +531,10 @@ export const api = {
      *  human only. Returns the moved ticket header (with its new project). */
     moveTicket: (id: number, project: string) =>
         req<Message>("POST", `/api/tickets/${id}/move`, { project }),
+    /** Delete a comment (#309) — human moderator only. Soft-delete (the
+     *  comment becomes a tombstone in the UI, invisible to agents/MCP). */
+    deleteComment: (id: number) =>
+        req<Message>("POST", `/api/messages/${id}/delete`, {}),
     postMessage: (body: PostMessageInput) =>
         req<Message>("POST", "/api/messages", body),
     /** Add (or supersede) a typed inter-ticket relation (#B.123 phase B).

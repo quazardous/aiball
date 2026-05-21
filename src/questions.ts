@@ -63,6 +63,14 @@ export interface MessageMeta {
      *  a kind, post a new ticket_relation; to remove, post one with
      *  `kind = "ignored"` (or a tombstone — see relations.ts). */
     relation?: TypedRelationMeta;
+    /** #309: user-deletion marker. Set when a human moderator deletes a
+     *  comment from the UI. The row is soft-deleted (status flips to
+     *  `rejected` so it's excluded everywhere — counts, gates, brief, MCP
+     *  reads — exactly like a moderation reject), and this sidecar both
+     *  records the audit (who/when) AND distinguishes a user-deletion from
+     *  a moderation reject so the UI thread can render a tombstone for it
+     *  (re-surfaced only with `?include_deleted=1`). */
+    deleted?: { by: string; at: string };
 }
 
 // `- [ ]` or `- [x]` line, optionally preceded by indent, optionally
@@ -208,6 +216,7 @@ export function serializeMeta(meta: MessageMeta): string | null {
     const hasDecision = !!meta.decision;
     const hasSummary = typeof meta.summary_until === "string" && meta.summary_until.length > 0;
     const hasRelation = !!meta.relation;
-    if (!hasQuestions && !hasDecision && !hasSummary && !hasRelation) return null;
+    const hasDeleted = !!meta.deleted;
+    if (!hasQuestions && !hasDecision && !hasSummary && !hasRelation && !hasDeleted) return null;
     return JSON.stringify(meta);
 }

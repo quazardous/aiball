@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, provide, ref, watch } from "vue";
 import Toast from "primevue/toast";
+import ConfirmDialog from "primevue/confirmdialog";
 import { useToast } from "primevue/usetoast";
 import { api, type InboxRow, type ProjectMeta, type Strategy } from "./lib/api";
 import { useNotifications } from "./lib/notifications";
@@ -805,6 +806,8 @@ watch(showSnoozed, (v) => {
         </div>
 
         <Toast position="top-right" />
+        <!-- #309: global confirm dialog (used by the comment delete button). -->
+        <ConfirmDialog />
     </div>
 </template>
 

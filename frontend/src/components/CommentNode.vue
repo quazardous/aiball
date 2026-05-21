@@ -5,6 +5,7 @@ import SplitButton from "primevue/splitbutton";
 import Tag from "primevue/tag";
 import Textarea from "primevue/textarea";
 import { useToast } from "primevue/usetoast";
+import { useConfirm } from "primevue/useconfirm";
 import MarkdownView from "./MarkdownView.vue";
 import { api, type Message } from "../lib/api";
 import { bus } from "../lib/bus";
@@ -260,6 +261,47 @@ watch(editTextareaRef, (instance) => {
     });
 });
 onBeforeUnmount(() => detachPaste?.());
+
+// #309: delete a comment (human moderator only — the backend enforces it).
+// The thread builder ships deleted comments (with ?include_deleted=1) body-
+// stripped + carrying meta.deleted, so we render a tombstone and hide the
+// body/actions. Deletion goes through a confirm dialog ("avec confirmation").
+const deleted = computed<{ by: string; at: string } | null>(() => {
+    try {
+        return (JSON.parse(props.msg.meta ?? "{}") as { deleted?: { by: string; at: string } }).deleted ?? null;
+    } catch {
+        return null;
+    }
+});
+const confirm = useConfirm();
+const deleteBusy = ref(false);
+function confirmDelete() {
+    confirm.require({
+        header: "Supprimer le commentaire",
+        message: "Supprimer ce commentaire ? Il sera retiré du fil (les agents ne le verront plus).",
+        icon: "pi pi-trash",
+        acceptLabel: "Supprimer",
+        rejectLabel: "Annuler",
+        acceptClass: "p-button-danger",
+        accept: () => { void doDelete(); },
+    });
+}
+async function doDelete() {
+    deleteBusy.value = true;
+    try {
+        await api.deleteComment(props.msg.id);
+        broadcastRefresh();
+    } catch (e) {
+        toast.add({
+            severity: "error",
+            summary: "Suppression échouée",
+            detail: (e as Error).message,
+            life: 5000,
+        });
+    } finally {
+        deleteBusy.value = false;
+    }
+}
 </script>
 
 <template>
@@ -346,6 +388,12 @@ onBeforeUnmount(() => detachPaste?.());
                 class="comment-lifecycle__ref"
             >{{ formatTicketRef(msg.source_ticket_id) }}</a>
         </div>
+        <!-- #309: tombstone for a user-deleted comment (body is stripped
+             server-side; meta.deleted carries who/when). -->
+        <div v-if="deleted" class="comment-tombstone">
+            <i class="pi pi-trash" />
+            <em>commentaire supprimé<span v-if="deleted.by"> par {{ deleted.by }}</span></em>
+        </div>
         <div v-if="editing" class="comment-edit">
             <Textarea
                 ref="editTextareaRef"
@@ -417,7 +465,7 @@ onBeforeUnmount(() => detachPaste?.());
             />
         </div>
         <div
-            v-if="!editing && msg.kind === 'comment_added'"
+            v-if="!editing && msg.kind === 'comment_added' && !deleted"
             class="comment-actions"
         >
             <Button
@@ -427,6 +475,17 @@ onBeforeUnmount(() => detachPaste?.());
                 severity="secondary"
                 text
                 @click="startEdit"
+            />
+            <!-- #309: delete a comment (human moderator only — backend
+                 enforced) with a confirm dialog. -->
+            <Button
+                label="delete"
+                icon="pi pi-trash"
+                size="small"
+                severity="danger"
+                text
+                :loading="deleteBusy"
+                @click="confirmDelete"
             />
             <!-- #B.256: classify dropdown next to the edit pencil —
                  transform this comment into a plan/resolution decision.
@@ -446,3 +505,15 @@ onBeforeUnmount(() => detachPaste?.());
         </div>
     </div>
 </template>
+
+<style scoped>
+/* #309: muted placeholder shown in place of a deleted comment's body. */
+.comment-tombstone {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem 0.1rem;
+    color: var(--p-text-muted-color, #888);
+    font-size: 0.85rem;
+}
+</style>

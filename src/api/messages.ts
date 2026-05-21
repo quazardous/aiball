@@ -22,9 +22,11 @@ import {
     INTENTS,
     PRIORITIES,
     applyMessageDecision,
+    deleteComment,
     deletePingsForMessage,
     editMessage,
     getMessage,
+    isHuman,
     listMessages,
     markQuestionAnswered,
     noteMessage,
@@ -145,6 +147,41 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
     }
     const updated = editMessage(id, { title, body, summary, intent, priority });
     if (!updated) return notFound(res);
+    const decorated = withTagsOne(updated);
+    broadcast({ type: "message_edited", data: decorated });
+    res.json(decorated);
+});
+
+/**
+ * Delete a comment (#309) — UI affordance, **human moderator only**. Soft
+ * deletes (status → rejected + meta.deleted) so the comment vanishes from
+ * counts / gates / brief / MCP reads, but the UI thread re-surfaces it as a
+ * tombstone (GET /api/tickets/:id?include_deleted=1). Pings are wiped. Only
+ * `comment_added`; refuses a comment carrying a finalized decision.
+ *
+ *   POST /api/messages/:id/delete   (no body)
+ */
+messagesRouter.post("/messages/:id/delete", (req, res) => {
+    const id = Number(req.params.id);
+    const existing = getMessage(id);
+    if (!existing) return notFound(res);
+    if (existing.kind !== "comment_added") {
+        return badRequest(res, "only comments can be deleted");
+    }
+    const caller = consumerOf(req);
+    if (!isHuman(caller)) {
+        return res.status(403).json({
+            error: "only a registered human moderator can delete a comment",
+        });
+    }
+    let updated;
+    try {
+        updated = deleteComment(id, caller);
+    } catch (e) {
+        return badRequest(res, (e as Error).message);
+    }
+    if (!updated) return notFound(res);
+    deletePingsForMessage(id);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });
     res.json(decorated);

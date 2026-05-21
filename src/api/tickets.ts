@@ -773,6 +773,9 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
     // Thread feed = comments + lifecycle events, inline. Lifecycle events
     // (close / reopen / resolved) are rendered as system rows in the UI so
     // the reader can see who flipped the state and when. Order: ASC by id.
+    // #309: the UI opts into seeing user-deleted comments (as tombstones)
+    // via ?include_deleted=1; default (and every MCP read) never sees them.
+    const includeDeleted = req.query.include_deleted === "1";
     const threadMessages = all
         .filter(
             (m) =>
@@ -785,7 +788,13 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
                     m.kind === "ticket_sub_added" ||
                     m.kind === "ticket_referenced" ||
                     m.kind === "ticket_relation") &&
-                m.status !== "rejected" &&
+                // rejected rows are hidden — EXCEPT user-deletions (#309): a
+                // comment with meta.deleted is re-surfaced as a tombstone, but
+                // only when the UI explicitly asks (include_deleted).
+                (m.status !== "rejected" ||
+                    (includeDeleted &&
+                        m.kind === "comment_added" &&
+                        !!parseMeta(m.meta ?? null).deleted)) &&
                 // #271: lineage relations (child_of/parent_of) are surfaced
                 // as chips in the relations cartouche; the ticket_sub_added
                 // pseudo already logs the link in the timeline, so drop the
@@ -1014,6 +1023,14 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
             });
         }
     }
+    // #309: user-deleted comments (only present when include_deleted=1) ship
+    // as tombstones — strip the body so the UI shows a placeholder, never the
+    // original text. `meta.deleted` stays so the frontend renders the marker.
+    outComments = outComments.map((m) =>
+        m.kind === "comment_added" && parseMeta(m.meta ?? null).deleted
+            ? ({ ...m, body: null, edited_body: null } as typeof m)
+            : m,
+    );
     // #B.123 phase B: surface the active typed relations alongside the
     // existing parent/sub-ticket lineage. Each relation is enriched
     // with the target ticket's lifecycle stage (open / closed /
