@@ -55,28 +55,54 @@ export interface SearchOptions {
 }
 
 /**
- * Sanitize a free-form user query into something safe for the FTS5
- * `MATCH` operator. FTS5 supports a query language with prefix `*`,
- * boolean operators, etc.; but a stray bracket or unbalanced quote
- * throws SQL errors. The simplest safe path is to:
- *   - lowercase / trim,
- *   - split on whitespace,
- *   - wrap each non-empty token in double quotes (so FTS5 treats them
- *     as phrase literals), and let FTS5 implicitly AND them.
- * This keeps the surface intuitive ("hashid envelope" finds rows
- * containing both terms) at the cost of losing power-user syntax. We
- * can revisit if needed.
+ * #285: the FTS tables now use the `trigram` tokenizer (migration 0022),
+ * so a quoted token in a `MATCH` query does SUBSTRING matching — `"broad"`
+ * hits "broadcast", `"cast"` hits "broadcast" too. That's the whole point:
+ * the old `unicode61` tokenizer only matched whole words.
+ *
+ * Trigram caveat: it indexes 3-char windows, so a search token MUST be ≥3
+ * chars to use the index — a 1-2 char token in `MATCH` matches nothing
+ * (verified: returns empty, not an error). So we split the query:
+ *   - tokens ≥3 chars  → quoted phrase literals in `MATCH` (FTS5 ANDs them).
+ *   - tokens 1-2 chars → applied as `LIKE %tok%` narrowing on the base
+ *     columns (so they still filter without breaking the trigram MATCH).
+ * When the WHOLE query is short tokens, there's no usable MATCH term, so
+ * `searchMessages` falls back to a pure `LIKE` scan of the base tables.
+ *
+ * Quoting chars (`"()\*`) are stripped first so a stray bracket / unbalanced
+ * quote can't throw a `MATCH` syntax error.
  */
-function sanitizeFtsQuery(raw: string): string | null {
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    const tokens = trimmed
+interface ParsedQuery {
+    /** FTS5 MATCH string built from the ≥3-char tokens, or null when the
+     *  query has none (→ caller takes the LIKE-only fallback path). */
+    match: string | null;
+    /** 1-2 char tokens, applied as LIKE narrowing on base columns. */
+    likeTokens: string[];
+    /** True when the query has no usable tokens at all (→ empty result). */
+    empty: boolean;
+}
+
+function parseQuery(raw: string): ParsedQuery {
+    const tokens = raw
+        .trim()
         .split(/\s+/)
-        // strip FTS5 quoting characters so the wrap below can't escape
-        .map((t) => t.replace(/["()\\]/g, ""))
+        // strip FTS5 quoting / prefix chars so the wrap below can't escape
+        .map((t) => t.replace(/["()\\*]/g, ""))
         .filter((t) => t.length > 0);
-    if (tokens.length === 0) return null;
-    return tokens.map((t) => `"${t}"`).join(" ");
+    const long = tokens.filter((t) => t.length >= 3);
+    const short = tokens.filter((t) => t.length < 3);
+    return {
+        match: long.length > 0 ? long.map((t) => `"${t}"`).join(" ") : null,
+        likeTokens: short,
+        empty: tokens.length === 0,
+    };
+}
+
+/** Build a `LIKE` argument for a token, escaping the LIKE wildcards so a
+ *  literal `%`/`_`/`\` in the search term doesn't act as a wildcard. The
+ *  SQL side pairs this with `ESCAPE '\'`. */
+function likeArg(token: string): string {
+    return "%" + token.replace(/[\\%_]/g, (c) => "\\" + c) + "%";
 }
 
 interface TicketHitRow {
@@ -116,15 +142,31 @@ export function searchMessages(
     rawQuery: string,
     opts: SearchOptions = {},
 ): SearchHit[] {
-    const matchQuery = sanitizeFtsQuery(rawQuery);
-    if (!matchQuery) return [];
+    const q = parseQuery(rawQuery);
+    if (q.empty) return [];
     const limit = Math.max(1, Math.min(200, opts.limit ?? 50));
 
     const sqlite = getRawSqlite();
 
-    // Tickets first.
-    const ticketWhere: string[] = ["tickets_fts MATCH ?", "t.status != 'rejected'"];
-    const ticketArgs: unknown[] = [matchQuery];
+    // FTS path when there's at least one ≥3-char token (trigram MATCH does
+    // the substring work); otherwise (query is only 1-2 char tokens) fall
+    // back to a plain LIKE scan of the base tables — no trigram index to
+    // lean on, but it keeps short fragments working without a syntax error.
+    const fts = q.match !== null;
+
+    // ---- Tickets ----
+    const ticketWhere: string[] = [];
+    const ticketArgs: unknown[] = [];
+    if (q.match) {
+        ticketWhere.push("tickets_fts MATCH ?");
+        ticketArgs.push(q.match);
+    }
+    ticketWhere.push("t.status != 'rejected'");
+    for (const tok of q.likeTokens) {
+        ticketWhere.push("(t.title LIKE ? ESCAPE '\\' OR t.body LIKE ? ESCAPE '\\')");
+        const a = likeArg(tok);
+        ticketArgs.push(a, a);
+    }
     if (opts.project) {
         ticketWhere.push("t.project = ?");
         ticketArgs.push(opts.project);
@@ -144,23 +186,28 @@ export function searchMessages(
             t.created_at      AS created_at,
             t.status          AS status,
             t.intent          AS intent,
-            snippet(tickets_fts, -1, '<mark>', '</mark>', '…', 24) AS snippet,
-            tickets_fts.rank  AS rank
-        FROM tickets_fts
-        JOIN tickets t ON t.id = tickets_fts.rowid
+            ${fts ? "snippet(tickets_fts, -1, '<mark>', '</mark>', '…', 24)" : "substr(COALESCE(t.body, t.title, ''), 1, 120)"} AS snippet,
+            ${fts ? "tickets_fts.rank" : "0"} AS rank
+        ${fts ? "FROM tickets_fts JOIN tickets t ON t.id = tickets_fts.rowid" : "FROM tickets t"}
         WHERE ${ticketWhere.join(" AND ")}
-        ORDER BY rank
+        ${fts ? "ORDER BY rank" : "ORDER BY t.id DESC"}
         LIMIT ?
     `).all(...ticketArgs) as TicketHitRow[];
 
     // Then comments / lifecycle bodies. Reject filter + open filter is
     // applied to the *parent* ticket (the comment itself isn't gated).
-    const msgWhere: string[] = [
-        "messages_fts MATCH ?",
-        "m.status != 'rejected'",
-        "t.status != 'rejected'",
-    ];
-    const msgArgs: unknown[] = [matchQuery];
+    const msgWhere: string[] = [];
+    const msgArgs: unknown[] = [];
+    if (q.match) {
+        msgWhere.push("messages_fts MATCH ?");
+        msgArgs.push(q.match);
+    }
+    msgWhere.push("m.status != 'rejected'");
+    msgWhere.push("t.status != 'rejected'");
+    for (const tok of q.likeTokens) {
+        msgWhere.push("m.body LIKE ? ESCAPE '\\'");
+        msgArgs.push(likeArg(tok));
+    }
     if (opts.project) {
         msgWhere.push("t.project = ?");
         msgArgs.push(opts.project);
@@ -181,13 +228,11 @@ export function searchMessages(
             m.status            AS status,
             t.project           AS project,
             t.status            AS ticket_status,
-            snippet(messages_fts, -1, '<mark>', '</mark>', '…', 24) AS snippet,
-            messages_fts.rank   AS rank
-        FROM messages_fts
-        JOIN _messages m ON m.id = messages_fts.rowid
-        JOIN tickets   t ON t.id = m.ticket_id
+            ${fts ? "snippet(messages_fts, -1, '<mark>', '</mark>', '…', 24)" : "substr(COALESCE(m.body, ''), 1, 120)"} AS snippet,
+            ${fts ? "messages_fts.rank" : "0"} AS rank
+        ${fts ? "FROM messages_fts JOIN _messages m ON m.id = messages_fts.rowid JOIN tickets t ON t.id = m.ticket_id" : "FROM _messages m JOIN tickets t ON t.id = m.ticket_id"}
         WHERE ${msgWhere.join(" AND ")}
-        ORDER BY rank
+        ${fts ? "ORDER BY rank" : "ORDER BY m.id DESC"}
         LIMIT ?
     `).all(...msgArgs) as MessageHitRow[];
 
