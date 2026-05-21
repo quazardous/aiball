@@ -21,7 +21,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
-    "test:watch": "node --import tsx --test --watch \"src/**/*.test.ts\""
+    "test:watch": "node --import tsx --test --watch \"src/**/*.test.ts\"",
+    "test:e2e": "bash tests/run-e2e.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
