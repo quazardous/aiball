@@ -273,6 +273,10 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
         notifyDecision(updated, by);
         const decorated = withTagsOne(updated);
         broadcast({ type: "message_edited", data: decorated });
+        // #321 phase 2 (additive): a plan/resolution decision changed (accept/
+        // reject/reclassify) → emit so #322's rules can react (e.g. re-attribute
+        // when a plan is accepted). The `meta.decision` carries the new state.
+        emitLifecycle({ op: "decided", message: decorated });
         res.json(decorated);
     } catch (e) {
         // Domain-level conflict (no decision present, or already
