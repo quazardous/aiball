@@ -82,6 +82,34 @@ async function resolveIdentityHint(): Promise<string> {
     }
 }
 
+/**
+ * Shared body of `aiball init` (#B.175), reused verbatim by `claude-loop init`
+ * (#304 — david: "alias de aiball init"). Writes .mcp.json + a minimal
+ * .aiball.yaml, optionally wires the Stop hook, then prints the identity hint.
+ */
+export async function bootstrapInit(opts: { force?: boolean; stopHook?: boolean; global?: boolean }): Promise<void> {
+    const force = opts.force === true;
+    await mcpInitAction(force);
+    // Inline minimal .aiball.yaml — the verbose annotated template lives at
+    // .aiball.yaml.example; the bootstrap stays tight.
+    const yamlPath = join(userCwd(), ".aiball.yaml");
+    if (existsSync(yamlPath) && !force) {
+        process.stdout.write(`${yamlPath}: already exists — re-run with --force to overwrite\n`);
+    } else {
+        const body =
+            "# Bootstrapped by `aiball init`. See .aiball.yaml.example for the full annotated template.\n" +
+            "autopoll:\n" +
+            "  enabled: true\n";
+        writeFileSync(yamlPath, body);
+        process.stdout.write(`${existsSync(yamlPath) && force ? "overwrote" : "created"} ${yamlPath} (autopoll enabled)\n`);
+    }
+    if (opts.stopHook === true) {
+        wireStopHook({ global: opts.global === true });
+    }
+    process.stdout.write(`\n${await resolveIdentityHint()}\n`);
+    process.stdout.write(`Run \`aiball check\` to verify everything resolves.\n`);
+}
+
 export function registerBootstrapCommands(program: Command): void {
     const mcp = program
         .command("mcp")
@@ -113,27 +141,7 @@ export function registerBootstrapCommands(program: Command): void {
         .option("--stop-hook", "Also wire Claude Code's Stop hook into .claude/settings.json so this project's autopoll triggers")
         .option("--global", "With --stop-hook, write to ~/.claude/settings.json instead of <PWD>/.claude/settings.json (fires in every Claude Code session)")
         .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean }) => {
-            const force = opts.force === true;
-            await mcpInitAction(force);
-            // Inline minimal .aiball.yaml — don't pull the example
-            // template here, that one is reference doc with 60+ lines
-            // of comments. The bootstrap should be tight.
-            const yamlPath = join(userCwd(), ".aiball.yaml");
-            if (existsSync(yamlPath) && !force) {
-                process.stdout.write(`${yamlPath}: already exists — re-run with --force to overwrite\n`);
-            } else {
-                const body =
-                    "# Bootstrapped by `aiball init`. See .aiball.yaml.example for the full annotated template.\n" +
-                    "autopoll:\n" +
-                    "  enabled: true\n";
-                writeFileSync(yamlPath, body);
-                process.stdout.write(`${existsSync(yamlPath) && force ? "overwrote" : "created"} ${yamlPath} (autopoll enabled)\n`);
-            }
-            if (opts.stopHook === true) {
-                wireStopHook({ global: opts.global === true });
-            }
-            process.stdout.write(`\n${await resolveIdentityHint()}\n`);
-            process.stdout.write(`Run \`aiball check\` to verify everything resolves.\n`);
+            await bootstrapInit(opts);
         });
 
     // `aiball stop-hook install [--global]` — standalone wiring command,

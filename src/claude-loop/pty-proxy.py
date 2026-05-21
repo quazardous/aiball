@@ -105,9 +105,41 @@ def touch_marker():
 HUMAN_TTL_SEC = 5  # doit suivre HUMAN_TYPING_TTL_SEC côté TS
 
 # Mots fg-only (le bg = status-bg). Doivent rester alignés avec
-# setTmuxStatus (state.ts) : stop=colour196 rouge, loop=colour178 jaune.
-_HUMAN_STOP = "#[fg=colour196]stop"
-_HUMAN_LOOP = "#[fg=colour178]loop"
+# setTmuxStatus / humanBarWord (state.ts) — #302 : stop=rouge, wait=jaune,
+# loop=vert.
+_HUMAN_STOP = "#[fg=colour196,bg=colour16]stop"
+_HUMAN_WAIT = "#[fg=colour178,bg=colour16]wait"
+_HUMAN_LOOP = "#[fg=colour40,bg=colour16]loop"
+# #302: --no-wait (CL_WAIT=0) = no human at the terminal → toujours `loop`
+# (on ignore frappe + user-grace), aligné avec humanBarWord côté TS.
+_NO_WAIT = os.environ.get("CL_WAIT") == "0"
+
+
+def _user_grace_remaining():
+    """#302 : secondes de user-grace restantes (marqueur `user-took-over`
+    < CL_USER_GRACE_SEC), 0.0 hors-grâce. Permet au proxy de peindre `wait`
+    (jaune) tant que la fenêtre tient, puis `loop` (vert) une fois expirée."""
+    sd = os.environ.get("CL_STATE_DIR") or ""
+    if not sd:
+        return 0.0
+    try:
+        grace = float(os.environ.get("CL_USER_GRACE_SEC") or "60")
+    except ValueError:
+        grace = 60.0
+    try:
+        mtime = os.stat(os.path.join(sd, "user-took-over")).st_mtime
+    except OSError:
+        return 0.0
+    rem = grace - (datetime.datetime.now().timestamp() - mtime)
+    return rem if rem > 0.0 else 0.0
+
+
+def _rest_word():
+    """Mot au repos (pas de frappe) : `loop` si --no-wait ; sinon `wait` dans
+    la fenêtre user-grace, sinon `loop`."""
+    if _NO_WAIT:
+        return _HUMAN_LOOP
+    return _HUMAN_WAIT if _user_grace_remaining() > 0.0 else _HUMAN_LOOP
 
 
 def _mux_argv():
@@ -115,15 +147,14 @@ def _mux_argv():
     return (os.environ.get("MUX_CMD") or "tmux").split()
 
 
-def paint_human(typing: bool):
-    """Écrit `@cl_human` sur la session tmux + force un refresh immédiat.
+def _paint_word(word):
+    """Écrit `@cl_human = word` sur la session tmux + force un refresh.
 
     No-op silencieux si la cible tmux est inconnue ou si tmux échoue — la
     barre ne doit JAMAIS pouvoir casser le pont I/O de la session live."""
     target = os.environ.get("CL_TMUX") or ""
     if not target:
         return
-    word = _HUMAN_STOP if typing else _HUMAN_LOOP
     mux = _mux_argv()
     try:
         subprocess.run(
@@ -137,6 +168,14 @@ def paint_human(typing: bool):
         )
     except OSError:
         pass
+
+
+def paint_human(typing: bool):
+    """Compat (#302) : `stop` si frappe en cours, sinon le mot au repos
+    (`wait` pendant la user-grace, sinon `loop`). Appelé au démarrage et au
+    cleanup ; les transitions fines sont pilotées dans la boucle via
+    `_paint_word` + `current_word`."""
+    _paint_word(_HUMAN_STOP if typing else _rest_word())
 
 
 def drop_proxy_alive():
@@ -246,10 +285,11 @@ def main(argv):
     inject_conns = []
     stdin_open = True
 
-    # #274 état du segment human : on ne repeint QUE sur transition (1 appel
-    # tmux par flip, pas par touche) et on l'efface après HUMAN_TTL_SEC sans
-    # frappe via le timeout du select.
-    human_shown = False
+    # #274/#302 état du segment human : on ne repeint QUE sur transition.
+    # `current_word` = dernier mot peint (stop/wait/loop). Le select se
+    # réveille à l'expiration de la frappe (5 s) puis de la user-grace pour
+    # enchaîner stop→wait→loop sans round-trip par le TS.
+    current_word = _HUMAN_LOOP
     last_keystroke = 0.0
 
     def cleanup():
@@ -286,21 +326,28 @@ def main(argv):
             if inject_srv is not None:
                 rfds.append(inject_srv)
             rfds.extend(inject_conns)
-            # Timeout = temps restant avant d'effacer le badge `stop`, quand
-            # un humain a tapé récemment ; sinon on bloque (None).
-            timeout = None
-            if human_shown:
-                timeout = max(0.0, HUMAN_TTL_SEC - (datetime.datetime.now().timestamp() - last_keystroke))
+            # Timeout = prochain changement de mot : d'abord l'expiration de
+            # la frappe (5 s → ré-évalue wait/loop), puis l'expiration de la
+            # user-grace (wait→loop). Sinon on bloque (None). (#302)
+            now_ts = datetime.datetime.now().timestamp()
+            typing_rem = HUMAN_TTL_SEC - (now_ts - last_keystroke)
+            if typing_rem > 0.0:
+                timeout = typing_rem
+            else:
+                grace_rem = _user_grace_remaining()
+                timeout = grace_rem if grace_rem > 0.0 else None
             try:
                 ready, _, _ = select.select(rfds, [], [], timeout)
             except (InterruptedError, OSError):
                 continue  # SIGWINCH etc. interrompent select
 
-            # 0) Expiration du badge human : pas de frappe depuis HUMAN_TTL_SEC
-            #    → on rebascule `loop` (une seule transition).
-            if human_shown and (datetime.datetime.now().timestamp() - last_keystroke) >= HUMAN_TTL_SEC:
-                paint_human(False)
-                human_shown = False
+            # 0) Hors-frappe (>HUMAN_TTL_SEC) → mot au repos (`wait` pendant la
+            #    user-grace, sinon `loop`) ; repeint seulement sur transition. (#302)
+            if (datetime.datetime.now().timestamp() - last_keystroke) >= HUMAN_TTL_SEC:
+                want = _rest_word()
+                if want != current_word:
+                    _paint_word(want)
+                    current_word = want
 
             # 1) Frappe humaine (tmux → nous → claude).
             if stdin_fd in ready:
@@ -312,9 +359,11 @@ def main(argv):
                     if is_typing_keystroke(data):
                         touch_marker()
                         last_keystroke = datetime.datetime.now().timestamp()
-                        if not human_shown:
-                            paint_human(True)  # transition loop→stop, instantané
-                            human_shown = True
+                        # #302: under --no-wait we never show `stop` (no human
+                        # assumed) — stay `loop`.
+                        if not _NO_WAIT and current_word != _HUMAN_STOP:
+                            _paint_word(_HUMAN_STOP)  # transition →stop, instantané
+                            current_word = _HUMAN_STOP
                     os.write(master_fd, data)
                 else:
                     # EOF stdin : on arrête de le poller (claude tourne
