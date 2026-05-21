@@ -23,6 +23,7 @@ import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
 import { evaluate } from "./rules.js";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
+import { emitLifecycle } from "./event-bus.js";
 import { fanOutPings, fanOutMentions } from "./notifications.js";
 
 // User-postable subset of MESSAGE_KINDS: excludes `ticket_sub_added`
@@ -459,6 +460,11 @@ export function submitMessage(input: NewMessage): Message {
             }
         }
     }
+    // #321 phase 1: emit the lifecycle event once the message has landed (and
+    // its moderation status resolved). `msg.kind` discriminates the transition
+    // (ticket_created / comment_added / ticket_closed / decision …). Additive —
+    // alongside the inline fanOutPings/broadcast above; #322 will subscribe.
+    emitLifecycle({ op: "created", message: msg });
     return msg;
 }
 
@@ -485,5 +491,8 @@ export function moveTicketTo(
         broadcast({ type: "message_created", data: res.event });
     }
     broadcast({ type: "message_edited", data: res.ticket });
+    // #321 phase 1: the ticket changed project — emit so the rules engine can
+    // re-evaluate attribution on the new project (#322).
+    emitLifecycle({ op: "moved", message: res.ticket });
     return res.ticket;
 }
