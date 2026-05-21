@@ -459,6 +459,46 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
     .filter-search-wrap {
         flex: 1 1 auto;
     }
+    /* #288 david "la partie choix projet et filtre est un peu petite —
+       plus 20%": scale the row-1 controls (project picker, cog, filters
+       chip, New) ~1.2× on phone for legibility + bigger tap targets.
+       FONT sizes are the +20%; HORIZONTAL padding/gaps are kept tight so
+       the bigger controls still fit New on row 1 (david #9zsw3m: "le new
+       est à la ligne — resserre les margin/padding horizontaux autour du
+       bouton filter"). */
+    .filters-bar {
+        gap: 0.35rem;              /* was 0.5 — claw back inter-item space */
+    }
+    .filter-project-dropdown > summary {
+        font-size: 1.02rem;        /* 0.85 × 1.2 */
+        padding: 0.36rem 0.5rem;   /* vertical bumped, horizontal kept tight */
+        max-width: 14rem;
+    }
+    .filter-project-dropdown__chev {
+        font-size: 0.78rem;        /* 0.65 × 1.2 */
+    }
+    .filter-project-dropdown__badge {
+        font-size: 0.84rem;        /* 0.7 × 1.2 */
+        padding: 0.12rem 0.34rem;  /* horizontal trimmed (×4 badges adds up) */
+    }
+    .filter-project-settings {
+        width: 2.15rem;            /* 1.8 × 1.2 */
+        height: 2.15rem;
+    }
+    .filter-project-settings .pi {
+        font-size: 1.15rem;
+    }
+    .filters-chip {
+        font-size: 0.94rem;        /* 0.78 × 1.2 — size kept */
+        padding: 0.24rem 0.15rem;  /* horizontal squeezed hard (david's ask) */
+    }
+    .filter-new-ticket {
+        font-size: 0.95rem;
+        padding: 0.42rem 0.6rem;
+    }
+    .filter-new-ticket .p-button-icon {
+        font-size: 1.05rem;
+    }
 }
 .filter-select {
     min-width: 9rem;
