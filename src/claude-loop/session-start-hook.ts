@@ -39,6 +39,10 @@ const sd = process.env.CL_STATE_DIR;
 const name = process.env.CL_NAME;
 const checkCmd = process.env.CL_CHECK_CMD ?? "true";
 const noStartup = process.env.CL_NO_STARTUP_PING === "1";
+// #302: --wait (default) → don't eager-ping at boot; the timer's boot-settle
+// (grace-aware, after BOOT_GRACE) handles the startup wake so the human gets
+// the take-over window. --no-wait (CL_WAIT=0) = no human → eager inject below.
+const noWait = process.env.CL_WAIT === "0";
 if (!sd || !name) emit();
 
 // #B.149/#B.154: Claude Code passes JSON on stdin with a `source`
@@ -98,6 +102,18 @@ if (noStartup) {
     // Don't ping at boot, but still seed the idle state so the bar
     // doesn't carry over the cli's startup placeholder and so the
     // timer's idle-since watch starts immediately.
+    try {
+        writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+        setTmuxStatus(name!, "idle");
+    } catch { /* swallow */ }
+    emit();
+}
+
+// #302: --wait (default) — don't eager-ping at boot. Seed idle + bar; the
+// timer's boot-settle (grace-aware) fires the startup wake at the end of the
+// boot-grace ONLY if the human hasn't taken over. --no-wait falls through to
+// the eager inject below (unattended → drain immediately).
+if (!noWait) {
     try {
         writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
         setTmuxStatus(name!, "idle");

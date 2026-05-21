@@ -135,6 +135,9 @@ interface StartOpts {
     pings?: string;
     attach?: boolean;
     noStartupPing?: boolean;
+    /** #302: false = `--no-wait` (no human at the terminal → eager boot
+     *  drain, no boot-grace deferral). Default/undefined = `--wait`. */
+    wait?: boolean;
     /**
      * User-grace seconds. null = use the resolved
      * `.aiball.yaml claude_loop.user_grace_seconds` default (#B.180).
@@ -304,6 +307,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // Read by the SessionStart hook to decide whether to ping at
         // boot. Empty / unset = ping (per default). "1" = stay silent.
         `export CL_NO_STARTUP_PING=${shQuote(opts.noStartupPing ? "1" : "")}`,
+        // #302: --no-wait → "0" (no human at the terminal: eager boot drain,
+        // no boot-grace deferral). Default --wait → "1". Read by the timer
+        // (boot-grace gate) + the SessionStart hook (eager-inject gate).
+        `export CL_WAIT=${shQuote(opts.wait === false ? "0" : "1")}`,
         // Seconds the timer stays out of the way after the human
         // submits a prompt (UserPromptSubmit hook refreshes the
         // user-took-over marker). 0 disables the grace.
@@ -919,11 +926,13 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             "--user-grace <sec>",
             "Seconds to stay out of the way after the human submits a prompt (default from .aiball.yaml `claude_loop.user_grace_seconds`, 60 if unset — #B.180, recalibrated #B.185)",
         ))
+        // #302: commander convention `--no-wait` flips wait→false.
+        .option("--no-wait", "Assume no human at the terminal: drain pre-existing pings eagerly at boot instead of waiting out the boot-grace for a human take-over (#302). Default: --wait.")
         .allowExcessArguments(false)
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
             attach: boolean; startupPing: boolean; userGrace?: string; force?: boolean;
-            resumeMode?: string;
+            resumeMode?: string; wait: boolean;
         }) => {
             invoke({
                 name: opts.name ?? nameArg,
@@ -935,6 +944,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 userGraceSec: opts.userGrace !== undefined ? Math.max(0, Number(opts.userGrace)) : null,
                 force: opts.force === true,
                 resumeMode: opts.resumeMode,
+                wait: opts.wait,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });

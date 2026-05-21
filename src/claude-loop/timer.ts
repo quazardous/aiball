@@ -89,6 +89,16 @@ if (!sd || !name || !intervalRaw) {
 const interval = Math.max(1, Number(intervalRaw));
 const tname = tmuxName(name);
 
+// #302: --no-wait (CL_WAIT=0) assumes NO human at the terminal → eager boot
+// drain, no boot-grace deferral. Default (--wait): during the first
+// CL_BOOT_GRACE_SEC after launch, tryWake holds off ALL auto-wakes so the
+// human has the take-over window — only `boot-settle` (grace-aware) fires at
+// the end of the window. Fixes #302 (auto-ping firing at startup while the
+// bar shows `wait`).
+const NO_WAIT = process.env.CL_WAIT === "0";
+const BOOT_GRACE_MS = Math.max(0, Number(process.env.CL_BOOT_GRACE_SEC ?? 60)) * 1000;
+const BOOT_TIME = Date.now();
+
 function log(msg: string): void {
     // #B.198 david: timer lines were missing timestamps — added at
     // the head to match stop-hook.log and to let `--log` reorder as
@@ -386,6 +396,15 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         log(`skip wake (${reason}) — no idle marker (claude is busy or boot grace not yet elapsed)`);
         return false;
     }
+    // #302: boot-grace window (--wait default). Hold off EVERY auto-wake for
+    // the first BOOT_GRACE_MS so the human can take over at launch; only
+    // `boot-settle` (fired AT the window's end, grace-aware) gets through.
+    // --no-wait (NO_WAIT) skips this → eager drain for unattended loops.
+    if (!manualWake && !NO_WAIT && (Date.now() - BOOT_TIME) < BOOT_GRACE_MS) {
+        const leftS = Math.ceil((BOOT_GRACE_MS - (Date.now() - BOOT_TIME)) / 1000);
+        log(`skip wake (${reason}) — boot-grace ${leftS}s left (--wait: letting the human take over)`);
+        return false;
+    }
     if (!manualWake && userIsTakingOver(sd!, userGraceSec)) {
         log(`skip wake (${reason}) — user-grace active (user typed within ${userGraceSec}s)`);
         return false;
@@ -543,8 +562,8 @@ async function mainSse(): Promise<void> {
     // input within the window updates user-took-over → tryWake's
     // user-grace gate skips the wake (the user is actively driving).
     // #B.180: yaml-configurable via `.aiball.yaml claude_loop.boot_grace_seconds`.
-    // Env-var override read here at boot; cli.ts writes the resolved value.
-    const BOOT_GRACE_MS = Math.max(0, Number(process.env.CL_BOOT_GRACE_SEC ?? 60)) * 1000;
+    // Env-var override read at boot (module-level `BOOT_GRACE_MS`); cli.ts
+    // writes the resolved value.
     let bootSettled = false;
     const settleBoot = async () => {
         if (bootSettled) {
