@@ -22,9 +22,13 @@ if [ "$ok" != "1" ]; then
     exit 1
 fi
 
-# scenarios run INSIDE the daemon container (shared DB + localhost daemon)
-compose exec -T daemon npx tsx tests/scenario-fanout.ts
-code=$?
+# scenarios run INSIDE the daemon container (shared DB + localhost daemon).
+# Each uses a distinct project, so they don't interfere on the shared daemon.
+code=0
+for s in tests/scenario-*.ts; do
+    echo "=== $(basename "$s") ==="
+    if ! compose exec -T daemon npx tsx "$s"; then code=1; fi
+done
 
 compose down -v
 exit $code
