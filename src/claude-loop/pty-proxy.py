@@ -113,6 +113,11 @@ _HUMAN_LOOP = "#[fg=colour40,bg=colour16]loop"
 # #302: --no-wait (CL_WAIT=0) = no human at the terminal → toujours `loop`
 # (on ignore frappe + user-grace), aligné avec humanBarWord côté TS.
 _NO_WAIT = os.environ.get("CL_WAIT") == "0"
+# #305: début de la fenêtre boot-grace = import du proxy (≈ boot du loop).
+# Sans --no-wait, le timer gèle TOUS les auto-pings pendant les
+# CL_BOOT_GRACE_SEC premières secondes (laisse l'humain prendre la main au
+# lancement) → la barre doit lire `wait`, pas `loop`, tant que la fenêtre tient.
+_BOOT_TS = datetime.datetime.now().timestamp()
 
 
 def _user_grace_remaining():
@@ -134,12 +139,29 @@ def _user_grace_remaining():
     return rem if rem > 0.0 else 0.0
 
 
+def _boot_grace_remaining():
+    """#305 : secondes de boot-grace restantes (CL_BOOT_GRACE_SEC depuis le
+    démarrage du proxy), 0.0 hors-fenêtre ou sous --no-wait. Symétrique de
+    _user_grace_remaining : la barre peint `wait` tant qu'il reste du temps,
+    puis `loop` une fois la fenêtre écoulée."""
+    if _NO_WAIT:
+        return 0.0
+    try:
+        grace = float(os.environ.get("CL_BOOT_GRACE_SEC") or "60")
+    except ValueError:
+        grace = 60.0
+    rem = grace - (datetime.datetime.now().timestamp() - _BOOT_TS)
+    return rem if rem > 0.0 else 0.0
+
+
 def _rest_word():
-    """Mot au repos (pas de frappe) : `loop` si --no-wait ; sinon `wait` dans
-    la fenêtre user-grace, sinon `loop`."""
+    """Mot au repos (pas de frappe) : `loop` si --no-wait ; sinon `wait`
+    pendant la boot-grace (#305) OU la fenêtre user-grace, sinon `loop`."""
     if _NO_WAIT:
         return _HUMAN_LOOP
-    return _HUMAN_WAIT if _user_grace_remaining() > 0.0 else _HUMAN_LOOP
+    if _boot_grace_remaining() > 0.0 or _user_grace_remaining() > 0.0:
+        return _HUMAN_WAIT
+    return _HUMAN_LOOP
 
 
 def _mux_argv():
@@ -287,9 +309,11 @@ def main(argv):
 
     # #274/#302 état du segment human : on ne repeint QUE sur transition.
     # `current_word` = dernier mot peint (stop/wait/loop). Le select se
-    # réveille à l'expiration de la frappe (5 s) puis de la user-grace pour
-    # enchaîner stop→wait→loop sans round-trip par le TS.
-    current_word = _HUMAN_LOOP
+    # réveille à l'expiration de la frappe (5 s), de la boot-grace (#305) puis
+    # de la user-grace pour enchaîner stop→wait→loop sans round-trip par le TS.
+    # Init aligné sur ce que paint_human(False) vient de peindre (≈ `wait` si
+    # on démarre en boot-grace, sinon `loop`) → pas de repeint redondant.
+    current_word = _rest_word()
     last_keystroke = 0.0
 
     def cleanup():
@@ -327,15 +351,16 @@ def main(argv):
                 rfds.append(inject_srv)
             rfds.extend(inject_conns)
             # Timeout = prochain changement de mot : d'abord l'expiration de
-            # la frappe (5 s → ré-évalue wait/loop), puis l'expiration de la
-            # user-grace (wait→loop). Sinon on bloque (None). (#302)
+            # la frappe (5 s → ré-évalue wait/loop), puis la plus proche des
+            # fins de boot-grace (#305) / user-grace (wait→loop). Sinon on
+            # bloque (None). (#302/#305)
             now_ts = datetime.datetime.now().timestamp()
             typing_rem = HUMAN_TTL_SEC - (now_ts - last_keystroke)
             if typing_rem > 0.0:
                 timeout = typing_rem
             else:
-                grace_rem = _user_grace_remaining()
-                timeout = grace_rem if grace_rem > 0.0 else None
+                rems = [r for r in (_boot_grace_remaining(), _user_grace_remaining()) if r > 0.0]
+                timeout = min(rems) if rems else None
             try:
                 ready, _, _ = select.select(rfds, [], [], timeout)
             except (InterruptedError, OSError):
