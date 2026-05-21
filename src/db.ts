@@ -92,6 +92,7 @@ export {
     updateMessageStatus,
     editMessage,
     moveTicket,
+    deleteComment,
     noteMessage,
     markQuestionAnswered,
     applyMessageDecision,
