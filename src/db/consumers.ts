@@ -14,6 +14,9 @@ export type ConsumerKind = "human" | "agent" | "sandbox";
 
 export type ConsumerState = "boot" | "idle" | "busy";
 
+/** #310: 3-state human-presence word, mirrors the tmux bar's presence chip. */
+export type HumanWord = "stop" | "wait" | "loop";
+
 export interface Consumer {
     consumer_id: string;
     kind: ConsumerKind;
@@ -35,6 +38,10 @@ export interface Consumer {
      *  (typing / within user-grace) at the last heartbeat. null = never
      *  reported / not a loop agent. */
     state_human?: boolean | null;
+    /** #310: 3-state human-presence word (stop/wait/loop) at the last
+     *  heartbeat — mirrors the tmux bar. null = never reported / pre-#310 loop
+     *  (fall back to `state_human` for the binary view). */
+    state_human_word?: HumanWord | null;
     created_at: string;
     updated_at: string;
 }
@@ -53,6 +60,7 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         state_since: r.stateSince,
         state_updated_at: r.stateUpdatedAt,
         state_human: r.stateHuman == null ? null : r.stateHuman === 1,
+        state_human_word: (r.stateHumanWord as HumanWord | null) ?? null,
         created_at: r.createdAt,
         updated_at: r.updatedAt,
     };
@@ -104,7 +112,12 @@ export function touchLastSeen(consumer_id: string): void {
  * call, `state_updated_at` is touched — the heartbeat freshness
  * signal the UI uses for "offline" detection.
  */
-export function setConsumerState(consumer_id: string, state: ConsumerState, human?: boolean): void {
+export function setConsumerState(
+    consumer_id: string,
+    state: ConsumerState,
+    human?: boolean,
+    humanWord?: HumanWord,
+): void {
     if (!consumer_id) return;
     const now = nowIso();
     const cur = getDb().select({ state: schema.consumers.state })
@@ -120,6 +133,8 @@ export function setConsumerState(consumer_id: string, state: ConsumerState, huma
     // #280: only touch the human flag when the caller reports it (the loop
     // timer always does); legacy callers leave it untouched.
     if (human !== undefined) patch.stateHuman = human ? 1 : 0;
+    // #310: the finer 3-state presence word, pushed alongside the boolean.
+    if (humanWord !== undefined) patch.stateHumanWord = humanWord;
     if (changed) patch.stateSince = now;
     getDb().update(schema.consumers)
         .set(patch)

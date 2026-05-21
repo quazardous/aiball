@@ -65,6 +65,7 @@ import {
     setTmuxStatus,
     snapshotPane,
     tmuxName,
+    humanPresenceWord,
     userIsTakingOver,
     wakeInFlightPath,
     wakeRequestedPath,
@@ -759,7 +760,10 @@ async function mainSse(): Promise<void> {
         // typing now, or within user-grace after a manual prompt).
         try {
             const human = userIsTakingOver(sd!, userGraceSec) || humanIsTyping(sd!);
-            await client().pushState(settledStatus, human);
+            // #310: also push the 3-state presence word (stop/wait/loop) so the
+            // consumers page mirrors the tmux bar, not just the binary human flag.
+            const humanWord = humanPresenceWord(sd, userGraceSec);
+            await client().pushState(settledStatus, human, humanWord);
         } catch { /* daemon down or transient — next tick retries */ }
     }
     log("tmux session gone — timer exiting");
