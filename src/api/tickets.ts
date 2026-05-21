@@ -23,6 +23,7 @@ import {
     listMessages,
     listMessageTags,
     tagsForMessages,
+    resolveAttachments,
     type Message,
     type MessageStatus,
     setTicketPostpone,
@@ -998,13 +999,27 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         ...r,
         target_stage: targetStages.get(r.target_ticket_id) ?? "open",
     }));
+    // #283: resolve `/uploads/<sha>.<ext>` refs in the bodies we're about to
+    // ship into ready-to-open attachments, so a cold-start agent doesn't have
+    // to reverse-engineer where the file lives on disk. `local` is true only
+    // for same-host (UDS / local-trust) callers — then `uri` is a `file://`
+    // path; remote/browser callers get the HTTP ref. Only scan the bodies
+    // actually present in the response (brief mode collapses pre-pivot ones).
+    const ticketBody = t.edited_body ?? t.body;
+    const localTrust =
+        (req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true;
+    const attachments = resolveAttachments(
+        [ticketBody, ...outComments.map((c) => c.edited_body ?? c.body)],
+        localTrust,
+    );
     res.json({
         ticket: {
             ...headerBase,
-            body: t.edited_body ?? t.body,
+            body: ticketBody,
             relations: typedRelationsWithStage,
         },
         comments: outComments,
+        attachments,
         focus_message_id: focusMessageId,
         brief,
         // `pivot_comment_id` surfaces the cut point when brief mode

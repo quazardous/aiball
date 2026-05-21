@@ -51,10 +51,13 @@ export {
     type UploadRow,
     type UploadInsert,
     type UploadStats,
+    type ResolvedAttachment,
     insertUpload,
     uploadStats,
     listOrphanUploads,
     deleteUploadRow,
+    getUploadsByShas,
+    resolveAttachments,
 } from "./db/uploads.js";
 
 export {

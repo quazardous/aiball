@@ -5,8 +5,12 @@
  *
  * Extracted from db.ts (#B.332 Phase A).
  */
-import { eq, like, or } from "drizzle-orm";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { eq, inArray, like, or } from "drizzle-orm";
 import * as schema from "../schema.js";
+import { UPLOADS_DIR } from "../paths.js";
 import { getDb } from "./connection.js";
 import { nowIso } from "./connection.js";
 
@@ -153,4 +157,99 @@ export function listOrphanUploads(graceMinutes = 5): UploadRow[] {
 
 export function deleteUploadRow(sha: string): void {
     getDb().delete(schema.uploads).where(eq(schema.uploads.sha, sha)).run();
+}
+
+/** Batch metadata lookup by content hash. Used to enrich the attachments
+ *  surfaced on a ticket read (#283). Missing shas are simply absent from
+ *  the map — the caller still emits the attachment from the URL alone. */
+export function getUploadsByShas(shas: string[]): Map<string, UploadRow> {
+    const out = new Map<string, UploadRow>();
+    if (shas.length === 0) return out;
+    const rows = getDb().select().from(schema.uploads)
+        .where(inArray(schema.uploads.sha, shas))
+        .all();
+    for (const r of rows) {
+        out.set(r.sha, {
+            sha: r.sha,
+            ext: r.ext,
+            content_type: r.contentType,
+            bytes: r.bytes,
+            by_agent: r.byAgent,
+            original_name: r.originalName,
+            created_at: r.createdAt,
+        });
+    }
+    return out;
+}
+
+/**
+ * A `/uploads/<sha>.<ext>` reference resolved to something an agent can
+ * actually open (#283). David: a cold-start agent wasted ~90s reverse-
+ * engineering where an uploaded screenshot lived on disk — the body only
+ * carries the daemon HTTP path, not the filesystem path.
+ *
+ * `local` tells the consumer how to read `uri`:
+ *   - `local: true`  → `uri` is a `file://` path on THIS host; read it
+ *     directly (the agent's `Read` tool). Emitted only for same-host
+ *     callers (UDS / local-trust) AND when the file is actually on disk.
+ *   - `local: false` → `uri` is the HTTP `ref`; fetch it over the wire.
+ *     (Remote daemon, or file missing locally.)
+ * david #84u7kg: "il faut un moyen de dire uri est local dans la reponse"
+ * — hence the explicit flag rather than guessing from the string.
+ */
+export interface ResolvedAttachment {
+    sha: string;
+    ext: string;
+    content_type: string | null;
+    bytes: number | null;
+    /** The literal `/uploads/<sha>.<ext>` reference as it appears in the body. */
+    ref: string;
+    /** `file://<abs>` when `local`, else the HTTP `ref`. */
+    uri: string;
+    /** True ⇒ `uri` is a local filesystem path readable directly. */
+    local: boolean;
+}
+
+const UPLOAD_REF_RE = /\/uploads\/([a-f0-9]{64})\.([a-zA-Z0-9]{1,8})/g;
+
+/**
+ * Scan a set of message bodies for `/uploads/<sha>.<ext>` references and
+ * return one resolved attachment per distinct upload (#283). `localTrust`
+ * is the caller's transport verdict (true for UDS / same-host): when true
+ * and the file exists on disk, the attachment carries a `file://` `uri` the
+ * agent can `Read` directly; otherwise it falls back to the HTTP `ref`.
+ */
+export function resolveAttachments(
+    bodies: (string | null | undefined)[],
+    localTrust: boolean,
+): ResolvedAttachment[] {
+    const found = new Map<string, string>(); // sha → ext (first seen)
+    for (const body of bodies) {
+        if (!body) continue;
+        UPLOAD_REF_RE.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = UPLOAD_REF_RE.exec(body)) !== null) {
+            if (!found.has(m[1])) found.set(m[1], m[2]);
+        }
+    }
+    if (found.size === 0) return [];
+    const metas = getUploadsByShas([...found.keys()]);
+    const out: ResolvedAttachment[] = [];
+    for (const [sha, refExt] of found) {
+        const meta = metas.get(sha);
+        const ext = meta?.ext ?? refExt;
+        const ref = `/uploads/${sha}.${ext}`;
+        const abs = join(UPLOADS_DIR, `${sha}.${ext}`);
+        const local = localTrust && existsSync(abs);
+        out.push({
+            sha,
+            ext,
+            content_type: meta?.content_type ?? null,
+            bytes: meta?.bytes ?? null,
+            ref,
+            uri: local ? pathToFileURL(abs).href : ref,
+            local,
+        });
+    }
+    return out;
 }

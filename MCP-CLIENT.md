@@ -372,5 +372,6 @@ If the human wants Claude Code itself to keep prompting on **outbound writes** (
 - `~/.local/share/aiball/spool/` — JSON files queued while the daemon was down. The daemon drains them on next start.
 - `~/.local/share/aiball/spool/failed/` — invalid payloads.
 - `~/.local/share/aiball/outbox/<project>.jsonl` — the literal feed an agent tails.
+- `~/.local/share/aiball/uploads/<sha>.<ext>` — pasted images. A body references one as the HTTP path `/uploads/<sha>.<ext>`; on disk it lives here (`$AIBALL_HOME/uploads/`). You rarely need to compute this yourself: a full/brief `ticket_get` returns an `attachments[]` with a ready-to-open `uri` (`file://…` when `local`, else HTTP) — read that instead of searching (#283).
 - `journalctl --user -u aiball -f` — daemon logs (if installed via systemd).
 - Web UI: `http://127.0.0.1:7777` — pending queue, rules editor, live feed.
