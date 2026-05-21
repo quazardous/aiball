@@ -26,6 +26,7 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
 import { AiballClient } from "../client.js";
+import { bootstrapInit } from "../cli/bootstrap.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
 import {
     DEFAULT_CHECK_CMD,
@@ -969,7 +970,7 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--reload") wrapper[0] = "reload";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "check", "trace", "prune", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "check", "trace", "prune", "init", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -1018,6 +1019,14 @@ async function main(): Promise<void> {
         .option("--events", "Open SSE and tail every aiball event live (no gate eval)")
         .action((opts: { checkCmd?: string; interval?: string; once?: boolean; events?: boolean }) => cmdTrace(opts));
     program.command("prune").description("Interactively clean orphan state dirs").action(cmdPrune);
+    // #304 david: alias for `aiball init` — bootstrap a project (.mcp.json +
+    // .aiball.yaml) without leaving the claude-loop workflow. Shares the body.
+    program.command("init")
+        .description("Alias for `aiball init` — bootstrap this project (.mcp.json + .aiball.yaml)")
+        .option("--force", "Overwrite existing entries")
+        .option("--stop-hook", "Also wire Claude Code's Stop hook into .claude/settings.json")
+        .option("--global", "With --stop-hook, write to ~/.claude/settings.json (every Claude Code session)")
+        .action((opts: { force?: boolean; stopHook?: boolean; global?: boolean }) => bootstrapInit(opts));
 
     // -h / --help at top level → root help, not start help.
     if (sub === "-h" || sub === "--help" || sub === "help") {
