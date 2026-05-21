@@ -142,7 +142,7 @@ approach on Windows and is the reason strategy A exists.
 
 ---
 
-## Strategy A (proposed psmux-native approach, future PR)
+## Strategy A — psmux-native (implemented, no nested PTY)
 
 The nested proxy reconstructs, at the PTY layer, a separation **psmux
 already has natively** — it is the multiplexer, so it already routes human
@@ -152,15 +152,24 @@ client keystrokes and `send-keys`/`paste-buffer` injection through
 - human keystrokes: `input.rs::forward_key_to_active` → `pane.writer.write_all`
 - injection: `commands.rs` (`send-keys`/`paste-buffer`) → `send_text_to_active` / `send_paste_to_active`
 
-So instead of a second ConPTY, psmux itself can emit the human-typing
-signal: in `forward_key_to_active`, when the key is real text, touch
-`<state_dir>/human-typing` (and/or set `@cl_human=stop` + refresh) — gated
-on a pane option like `@cl_state_dir`, set by `cli.ts` at `new-session`
-(it already seeds `@cl_human` / `@cl_proxy` / `@cl_state`). claude-loop's
-existing `humanIsTyping` reads the marker unchanged.
+So instead of a second ConPTY, psmux itself emits the signal. Proposed
+upstream as **[psmux/psmux#309](https://github.com/psmux/psmux/pull/309)**:
+a session option `@human-input-marker <file>` that psmux touches (mtime,
+throttled ~200 ms) on every real human **text** keystroke — never on
+`send-keys`/`paste-buffer`. claude-loop sets it at `new-session` to its
+existing `<state_dir>/human-typing` path (`cli.ts`), so the existing
+`humanIsTyping` / `setTmuxStatus` / `pushState` readers work **unchanged**.
 
 Benefits over strategy B: **no second process, no nested ConPTY, no double
-translation, no native dep** beyond psmux. It's strictly less code than the
-Unix proxy. The cost is a change to psmux (Rust). Strategy B ships the
-feature now and validates the end-to-end wiring (markers, named-pipe
-injection, status painting) that strategy A would reuse verbatim.
+translation, no native dep** beyond psmux. The classifier is trivial too —
+psmux already has the *decoded* `KeyCode::Char`, so unlike the proxy it
+needs no win32-input-mode parsing.
+
+Version-safe coexistence: older psmux (and tmux) just store the unknown
+`@human-input-marker` option and ignore it, so the idle-only pane-diff
+fallback still applies — no regression. Once psmux#309 ships in a release,
+the pane-diff write can be disabled (version-gated) so the native marker is
+the sole source.
+
+Strategy B stays as the fallback for psmux builds without the feature, and
+it validated the markers / status wiring that strategy A reuses verbatim.
