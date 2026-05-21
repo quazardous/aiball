@@ -525,6 +525,10 @@ export const api = {
             `/api/tickets/${id}/unsnooze`,
             {},
         ),
+    /** Move a ticket (whole thread) to another project (#294). Reporter-or-
+     *  human only. Returns the moved ticket header (with its new project). */
+    moveTicket: (id: number, project: string) =>
+        req<Message>("POST", `/api/tickets/${id}/move`, { project }),
     postMessage: (body: PostMessageInput) =>
         req<Message>("POST", "/api/messages", body),
     /** Add (or supersede) a typed inter-ticket relation (#B.123 phase B).

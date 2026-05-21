@@ -322,6 +322,27 @@ export function registerTicketWriteTools(server: McpServer): void {
         },
     );
 
+    server.registerTool(
+        "ticket_move",
+        {
+            description:
+                "Move a whole ticket thread to another project — re-route a misclassified ticket (#294). The thread, its comments and their hashids are preserved; only the project (and the per-project display number) change, plus an in-thread audit comment. Reporter-or-human only (the caller identity is the authenticated consumer). Use this instead of close+recreate, which would lose the thread.",
+            inputSchema: {
+                ticket_id: z
+                    .number()
+                    .int()
+                    .describe("Ticket id (the integer in #B.<id>)."),
+                project: z
+                    .string()
+                    .describe("Destination project name (must differ from the current one)."),
+            },
+        },
+        async ({ ticket_id, project }) => {
+            const res = await client.moveTicket(ticket_id, project);
+            return asText(res);
+        },
+    );
+
     /**
      * Patch a ticket's persistent fields (per #B.76). Replaces the dedicated
      * `ticket_postpone`, `ticket_broadcast`, and the planned `ticket_edit`

@@ -316,6 +316,13 @@ export class AiballClient {
         );
     }
     /**
+     * Move a ticket (whole thread) to another project (#294). Reporter-or-
+     * human only (enforced daemon-side via the x-aiball-consumer identity).
+     */
+    moveTicket(ticket_id: number, project: string) {
+        return this.http("POST", `/api/tickets/${ticket_id}/move`, { project });
+    }
+    /**
      * Create or change a typed relation (#275) from `ticket_id` → `target`.
      * Append-only: posting the same active kind is a server-side no-op;
      * `kind="ignored"` removes the edge (tombstone). Mirrors

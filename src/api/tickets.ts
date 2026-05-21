@@ -46,6 +46,7 @@ import { RELATION_KINDS, isRelationKind, isLineageRelationKind, type RelationKin
 import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
 import { badRequest, consumerOf, notFound, withTags } from "./_helpers.js";
+import { moveTicketTo } from "../messages.js";
 
 export const ticketsRouter = Router();
 
@@ -609,6 +610,34 @@ ticketsRouter.post("/tickets/:id/unsnooze", (req: Request, res: Response) => {
     const updated = getMessage(id);
     if (updated) broadcast({ type: "message_edited", data: updated });
     res.json({ ticket_id: id, postponed_until: null });
+});
+
+/**
+ * Move a ticket (whole thread) to another project (#294). Reporter-or-human
+ * only — same authority as postpone/close. The project lives only on the
+ * head, so the move is a head update (project + fresh display_seq) plus an
+ * in-thread audit comment; broadcast lets both project views update live.
+ */
+ticketsRouter.post("/tickets/:id/move", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    const caller = consumerOf(req);
+    if (!isHuman(caller) && t.by_agent !== caller) {
+        return res.status(403).json({
+            error: `only the ticket reporter (${t.by_agent}) or a registered human moderator can move this ticket`,
+        });
+    }
+    const { project } = (req.body ?? {}) as { project?: unknown };
+    if (typeof project !== "string" || !project.trim()) {
+        return badRequest(res, "project (non-empty string) required");
+    }
+    const target = project.trim();
+    if (target === t.project) {
+        return badRequest(res, `ticket is already in project "${target}"`);
+    }
+    const updated = moveTicketTo(id, target, caller);
+    res.json(updated);
 });
 
 // ---- Typed inter-ticket relations (#B.123 phase B) ------------------------
