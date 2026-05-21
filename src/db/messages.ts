@@ -361,10 +361,14 @@ export function editMessage(
  * with `?include_deleted=1`); the thread builder strips the body before
  * shipping it, the original stays in the row for audit.
  *
- * Guards: only `comment_added`; refuses a comment carrying a FINALIZED
- * (accepted/rejected) decision — that decision row IS the audit and must
- * persist. A pending or absent decision is fine. Returns the updated
- * Message, or null when the id isn't a `comment_added`.
+ * Guard: only `comment_added` (lifecycle events aren't deletable). Comments
+ * carrying a decision (plan/resolution, any status) ARE deletable — david
+ * #xkjr7m: "lève la restriction sur les commentaires avec des états". The
+ * row is soft-kept (status→rejected), so its `hashid` still resolves and
+ * `#C<hashid>` refs don't orphan; a deleted accepted-resolution simply drops
+ * out of the lifecycle replay (status≠approved), so the ticket reverts to
+ * unresolved — expected. Returns the updated Message, or null when the id
+ * isn't a `comment_added`.
  */
 export function deleteComment(id: number, by: string): Message | null {
     const db = getDb();
@@ -372,11 +376,6 @@ export function deleteComment(id: number, by: string): Message | null {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, id)).get();
         if (!m || m.kind !== "comment_added") return null;
         const meta = parseMeta(m.meta ?? null);
-        if (meta.decision && meta.decision.status !== "pending") {
-            throw new Error(
-                `cannot delete a comment carrying a ${meta.decision.status} decision — the audit must persist`,
-            );
-        }
         meta.deleted = { by, at: new Date().toISOString() };
         tx.update(schema.messages)
             .set({
@@ -446,7 +445,7 @@ export function moveTicket(
             ticketId,
             displaySeq: mseq,
             kind: "comment_added",
-            body: `🔀 Ticket déplacé de \`${from}\` → \`${targetProject}\`.`,
+            body: `🔀 Ticket moved from \`${from}\` to \`${targetProject}\`.`,
             byAgent: byAgent ?? null,
             status: "approved",
             decidedAt: createdAt,
