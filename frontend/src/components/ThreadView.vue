@@ -175,6 +175,36 @@ async function changePriority(v: Priority | null) {
         priorityBusy.value = false;
     }
 }
+// #294: move-to-project. Destinations are loaded lazily the first time
+// the edit panel opens (watch below) so the Select can offer them.
+const projectOptions = ref<{ label: string; value: string }[]>([]);
+const moveBusy = ref(false);
+async function loadProjectOptions() {
+    if (projectOptions.value.length) return;
+    try {
+        const list = await api.listProjectsDetailed(
+            localStorage.getItem("aiball.human_id") ?? "human",
+        );
+        projectOptions.value = list.map((p) => ({ label: p.name, value: p.name }));
+    } catch {
+        /* non-fatal — the Select just stays empty (row hidden) */
+    }
+}
+async function changeProject(v: string) {
+    if (!data.value || !v || v === data.value.ticket.project) return;
+    const tid = data.value.ticket.id;
+    moveBusy.value = true;
+    try {
+        await api.moveTicket(tid, v);
+        // The ticket left this project; refresh inbox/sidebar + thread.
+        broadcastRefresh(tid);
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        moveBusy.value = false;
+    }
+}
+watch(editing, (v) => { if (v) void loadProjectOptions(); });
 function onTagsChanged(tags: TagType[]) {
     if (data.value) data.value.ticket.tags = tags;
 }
@@ -398,10 +428,13 @@ async function copyTicketRef() {
                     :intent-busy="intentBusy"
                     :intent-options="intentOptions"
                     :priority-busy="priorityBusy"
+                    :project-options="projectOptions"
+                    :move-busy="moveBusy"
                     @save="saveAndCloseEdit"
                     @cancel="cancelEdit"
                     @intent-change="changeIntent"
                     @priority-change="changePriority"
+                    @move-change="changeProject"
                     @tags-changed="onTagsChanged"
                 />
                 <MarkdownView :source="data.ticket.body" :self-ticket-id="data.ticket.id" />

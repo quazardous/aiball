@@ -353,6 +353,73 @@ export function editMessage(
 }
 
 /**
+ * Move a whole ticket thread to another project (#294). The project lives
+ * ONLY on the ticket head row (`tickets.project`); messages derive their
+ * project by joining `ticket_id` → tickets, so the move is a single head
+ * UPDATE: `project` + a fresh `display_seq` in the destination (the
+ * UNIQUE(project, display_seq) constraint forbids reusing the source seq).
+ * Comments, hashids and the per-ticket message numbering are untouched —
+ * the whole thread follows the head.
+ *
+ * Records an in-thread audit as a system `comment_added` (auto-approved,
+ * `meta.moved={from,to,by}`) so the timeline shows the move without needing
+ * a brand-new lifecycle kind (and it renders through the existing comment
+ * path everywhere). Returns `{ ticket, event }` — `event` is null when
+ * `from === target` (no-op). Returns null when `ticketId` isn't a ticket.
+ * Permission + fan-out/broadcast are the caller's job (see moveTicketTo).
+ */
+export function moveTicket(
+    ticketId: number,
+    targetProject: string,
+    byAgent: string | null,
+): { ticket: Message; event: Message | null } | null {
+    const db = getDb();
+    return db.transaction((tx) => {
+        const t = tx.select().from(schema.tickets).where(eq(schema.tickets.id, ticketId)).get();
+        if (!t) return null;
+        const from = t.project;
+        if (from === targetProject) {
+            return { ticket: ticketRowToMessage(t), event: null };
+        }
+        // Fresh display_seq in the destination project (MAX+1), so the
+        // moved ticket doesn't collide with an existing (project, seq).
+        const seq = (tx.select({
+            n: sql<number>`COALESCE(MAX(${schema.tickets.displaySeq}), 0) + 1`,
+        }).from(schema.tickets).where(eq(schema.tickets.project, targetProject)).get())?.n ?? 1;
+        const moved = tx.update(schema.tickets)
+            .set({ project: targetProject, displaySeq: seq })
+            .where(eq(schema.tickets.id, ticketId))
+            .returning().get();
+        // In-thread audit comment (system-authored, auto-approved). Derives
+        // the NEW project via the head we just updated.
+        const id = nextMessageId(tx);
+        const mseq = (tx.select({
+            n: sql<number>`COALESCE(MAX(${schema.messages.displaySeq}), 0) + 1`,
+        }).from(schema.messages).where(eq(schema.messages.ticketId, ticketId)).get())?.n ?? 1;
+        const createdAt = nowIso();
+        const hashid = pickFreshHashid(tx);
+        const ev = tx.insert(schema.messages).values({
+            id,
+            ticketId,
+            displaySeq: mseq,
+            kind: "comment_added",
+            body: `🔀 Ticket déplacé de \`${from}\` → \`${targetProject}\`.`,
+            byAgent: byAgent ?? null,
+            status: "approved",
+            decidedAt: createdAt,
+            decidedBy: "auto",
+            createdAt,
+            hashid,
+            meta: JSON.stringify({ moved: { from, to: targetProject, by: byAgent ?? null } }),
+        }).returning().get();
+        return {
+            ticket: ticketRowToMessage(moved),
+            event: messageRowToMessage(ev, targetProject),
+        };
+    });
+}
+
+/**
  * Insert a relation-event pseudo-comment (`ticket_sub_added` or
  * `ticket_referenced`) on the target thread. These rows are not user
  * input — the daemon auto-emits them when:

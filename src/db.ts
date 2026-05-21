@@ -91,6 +91,7 @@ export {
     listPendingResolvedForTicket,
     updateMessageStatus,
     editMessage,
+    moveTicket,
     noteMessage,
     markQuestionAnswered,
     applyMessageDecision,

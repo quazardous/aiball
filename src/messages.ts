@@ -1,6 +1,7 @@
 import {
     getMessage,
     insertMessage,
+    moveTicket,
     insertRelationEvent,
     insertTypedRelation,
     updateMessageStatus,
@@ -459,4 +460,30 @@ export function submitMessage(input: NewMessage): Message {
         }
     }
     return msg;
+}
+
+/**
+ * Orchestrate a ticket move (#294): mutate the head + post the audit
+ * comment via moveTicket(), then re-fan the audit to the DESTINATION
+ * project and broadcast so BOTH the source and destination project views
+ * update live (source drops the ticket, destination picks it up).
+ *
+ * Returns the moved ticket header. Permission (reporter-or-human) and
+ * target validation are the caller's job — see the `/tickets/:id/move`
+ * route, which mirrors the postpone/unsnooze authority check. Throws
+ * "ticket not found" when the id doesn't resolve to a ticket.
+ */
+export function moveTicketTo(
+    ticketId: number,
+    targetProject: string,
+    byAgent: string | null,
+): Message {
+    const res = moveTicket(ticketId, targetProject, byAgent);
+    if (!res) throw new Error("ticket not found");
+    if (res.event) {
+        fanOutPings(res.event);
+        broadcast({ type: "message_created", data: res.event });
+    }
+    broadcast({ type: "message_edited", data: res.ticket });
+    return res.ticket;
 }
