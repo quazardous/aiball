@@ -564,12 +564,18 @@ const STATUS_COLORS: Record<LoopStatus, { bg: string; fg: string }> = {
     boot: { bg: "colour178", fg: "colour15" },  // yellow / white (transitional)
 };
 
+// #305: this module is imported by the timer at launch, so its load time ≈
+// loop boot for the process that owns setTmuxStatus. humanBarWord's degraded
+// (no-proxy) boot-grace branch measures against it — see below.
+const PROC_START_MS = Date.now();
+
 /**
- * #302: the 3-state human-presence WORD for the tmux bar (`@cl_human`),
+ * #302/#305: the 3-state human-presence WORD for the tmux bar (`@cl_human`),
  * symmetric with the gating semantics david asked to surface:
  *   - `stop` (red colour196)    — a human is typing NOW (human-typing < 5s)
- *   - `wait` (yellow colour178) — within the user-grace window after a submit
- *                                 (user-took-over < graceSec) → auto-pings FROZEN
+ *   - `wait` (yellow colour178) — auto-pings FROZEN: either the boot-grace
+ *                                 window at launch (#305) OR the user-grace
+ *                                 window after a submit (user-took-over < graceSec)
  *   - `loop` (green colour40)   — autonomous, gate open (managed mode)
  * fg-only (the bg comes from status-bg / the loop state). Mirrored in
  * pty-proxy.py, which OWNS this segment while the proxy is alive — keep the
@@ -583,6 +589,14 @@ export function humanBarWord(sd: string | undefined, graceSec: number): string {
     // over any bar state colour (busy blue / idle gray / boot yellow).
     if (process.env.CL_WAIT === "0") return "#[fg=colour40,bg=colour16]loop";
     if (sd && humanIsTyping(sd)) return "#[fg=colour196,bg=colour16]stop";
+    // #305: during boot-grace (--wait) the timer freezes ALL auto-wakes so the
+    // human can take over at launch — the same "auto-pings frozen" state as
+    // user-grace, so the bar reads `wait` from the first frame instead of `loop`
+    // (david: "démarre directement sans phase wait"). Mirrors pty-proxy.py
+    // _boot_grace_remaining, which owns this segment when the proxy is alive;
+    // this branch covers degraded/no-proxy mode.
+    const bootGraceMs = Math.max(0, Number(process.env.CL_BOOT_GRACE_SEC ?? 60)) * 1000;
+    if (Date.now() - PROC_START_MS < bootGraceMs) return "#[fg=colour178,bg=colour16]wait";
     if (sd && userIsTakingOver(sd, graceSec)) return "#[fg=colour178,bg=colour16]wait";
     return "#[fg=colour40,bg=colour16]loop";
 }
