@@ -221,7 +221,10 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         .orderBy(asc(schema.messages.id))
         .all();
     const closedByTicket = new Map<number, boolean>();
-    const gatedByDecisionByTicket = new Map<number, boolean>();
+    // #273: latest-decision-wins gate (legacy ticket_resolved/reopened +
+    // decision-on-comment, last signal per ticket). Replaces the old
+    // monotonic gate that the lifecycle loop + decision block used to set.
+    const gatedByDecisionByTicket = decisionGateByTicket();
     const blockedByTicket = new Map<number, boolean>();
     for (const ev of lifecycle) {
         if (ev.kind === "ticket_closed") {
@@ -231,13 +234,7 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         } else if (ev.kind === "ticket_reopened") {
             if (ev.status === "approved") {
                 closedByTicket.set(ev.ticket_id, false);
-                gatedByDecisionByTicket.set(ev.ticket_id, false);
                 blockedByTicket.set(ev.ticket_id, false);
-            }
-        } else if (ev.kind === "ticket_resolved") {
-            // Pending OR approved counts as "agent done".
-            if (ev.status === "approved" || ev.status === "pending") {
-                gatedByDecisionByTicket.set(ev.ticket_id, true);
             }
         } else if (ev.kind === "ticket_blocked") {
             // ticket_blocked is always auto-approved (it's a signal,
@@ -270,44 +267,8 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         if (cur && cur.pending_count > 0) cur.pending_count -= 1;
     }
 
-    // #B.129 phase 2: layer decision-on-comment resolutions on top of
-    // the lifecycle replay. A comment with `meta.decision.kind=
-    // "resolution"` in any status (pending or accepted) means "agent
-    // proposed done" — same effect on actionable_count as a legacy
-    // ticket_resolved row. We can't reliably re-do the
-    // reopen-clears-resolved ordering here without re-sorting events,
-    // but the existing replay already cleared gatedByDecisionByTicket on the
-    // last reopen seen; a NEW resolution comment after that reopen
-    // will set it again here, which is the correct semantic.
-    const resolutionComments = db.select({
-        ticket_id: schema.messages.ticketId,
-        meta: schema.messages.meta,
-        status: schema.messages.status,
-        id: schema.messages.id,
-    })
-        .from(schema.messages)
-        .where(and(
-            eq(schema.messages.kind, "comment_added"),
-            eq(schema.messages.status, "approved"),
-        ))
-        .all();
-    for (const c of resolutionComments) {
-        if (!c.meta) continue;
-        try {
-            const m = JSON.parse(c.meta) as { decision?: { kind?: string; status?: string } };
-            const d = m.decision;
-            // #B.242: gate actionable on any pending validation across decision
-            // kinds. Resolution stays excluded on `accepted` too (short window
-            // before close); plan:accepted is the GO-signal so it re-enters
-            // actionable for the agent to execute.
-            const isResolutionGated =
-                d?.kind === "resolution" && (d.status === "pending" || d.status === "accepted");
-            const isPlanPending = d?.kind === "plan" && d.status === "pending";
-            if (isResolutionGated || isPlanPending) {
-                gatedByDecisionByTicket.set(c.ticket_id, true);
-            }
-        } catch { /* malformed meta, skip */ }
-    }
+    // #273: the decision-on-comment gate now lives in decisionGateByTicket()
+    // (latest-decision-wins), folded into gatedByDecisionByTicket above.
 
     // Pending resolution proposals: tickets with at least one
     // resolution awaiting reporter accept. Two shapes since #B.129
@@ -932,6 +893,72 @@ export function lastNonLifecycleAuthorByTicket(): Map<number, string | null> {
     return out;
 }
 
+/**
+ * Per-ticket actionable gate driven by the LATEST decision signal (#273).
+ * Walks every gate-relevant message — legacy `ticket_resolved` /
+ * `ticket_reopened` lifecycle rows AND decision-on-comment
+ * (`meta.decision`) — in id order and keeps the LAST signal per ticket
+ * ("latest decision wins", the backend mirror of the frontend
+ * `findActiveDecision`).
+ *
+ * Replaces the previous monotonic behaviour (#B.242) where ANY pending
+ * decision set the gate forever: a stale older `resolution:pending` then
+ * kept a ticket out of actionable even after the reporter accepted a
+ * NEWER plan. With latest-wins, an accepted plan (the GO-signal) un-gates
+ * the ticket because it is the most recent decision, regardless of older
+ * dangling proposals.
+ *
+ * Signal per message (last in id order wins):
+ *   - ticket_reopened (approved)                          → UNGATE
+ *   - ticket_resolved (approved|pending)                  → GATE
+ *   - resolution:pending | resolution:accepted            → GATE
+ *   - plan:pending                                        → GATE
+ *   - resolution:rejected | plan:accepted | plan:rejected → UNGATE
+ * Everything else carries no signal (skipped).
+ *
+ * `accepted` resolution still gates (short window before close);
+ * `accepted` plan is the GO-signal so it un-gates for the agent to execute.
+ */
+export function decisionGateByTicket(): Map<number, boolean> {
+    const db = getDb();
+    const rows = db.select({
+        ticketId: schema.messages.ticketId,
+        kind: schema.messages.kind,
+        status: schema.messages.status,
+        meta: schema.messages.meta,
+    })
+        .from(schema.messages)
+        .where(inArray(schema.messages.kind, ["ticket_resolved", "ticket_reopened", "comment_added"]))
+        .orderBy(asc(schema.messages.id))
+        .all();
+    const gated = new Map<number, boolean>();
+    for (const r of rows) {
+        if (r.ticketId == null) continue;
+        let signal: boolean | null = null;
+        if (r.kind === "ticket_reopened") {
+            if (r.status === "approved") signal = false;
+        } else if (r.kind === "ticket_resolved") {
+            if (r.status === "approved" || r.status === "pending") signal = true;
+        } else if (r.kind === "comment_added") {
+            if (r.status !== "approved" || !r.meta) continue;
+            try {
+                const m = JSON.parse(r.meta) as { decision?: { kind?: string; status?: string } };
+                const d = m.decision;
+                if (!d) continue;
+                if (d.kind === "resolution") {
+                    if (d.status === "pending" || d.status === "accepted") signal = true;
+                    else if (d.status === "rejected") signal = false;
+                } else if (d.kind === "plan") {
+                    if (d.status === "pending") signal = true;
+                    else if (d.status === "accepted" || d.status === "rejected") signal = false;
+                }
+            } catch { continue; }
+        }
+        if (signal !== null) gated.set(r.ticketId, signal);
+    }
+    return gated;
+}
+
 export function computeActionableTicketIds(consumerId?: string): ActionableTicketSet {
     const db = getDb();
     const nowStr = nowIso();
@@ -950,7 +977,10 @@ export function computeActionableTicketIds(consumerId?: string): ActionableTicke
         .orderBy(asc(schema.messages.id))
         .all();
     const closedByTicket = new Map<number, boolean>();
-    const gatedByDecisionByTicket = new Map<number, boolean>();
+    // #273: latest-decision-wins gate (legacy ticket_resolved/reopened +
+    // decision-on-comment, last signal per ticket). Replaces the old
+    // monotonic gate that the lifecycle loop + decision block used to set.
+    const gatedByDecisionByTicket = decisionGateByTicket();
     const blockedByTicket = new Map<number, boolean>();
     for (const ev of lifecycle) {
         if (ev.kind === "ticket_closed") {
@@ -958,47 +988,13 @@ export function computeActionableTicketIds(consumerId?: string): ActionableTicke
         } else if (ev.kind === "ticket_reopened") {
             if (ev.status === "approved") {
                 closedByTicket.set(ev.ticket_id, false);
-                gatedByDecisionByTicket.set(ev.ticket_id, false);
                 blockedByTicket.set(ev.ticket_id, false);
-            }
-        } else if (ev.kind === "ticket_resolved") {
-            if (ev.status === "approved" || ev.status === "pending") {
-                gatedByDecisionByTicket.set(ev.ticket_id, true);
             }
         } else if (ev.kind === "ticket_blocked") {
             if (ev.status === "approved" || ev.status === "pending") {
                 blockedByTicket.set(ev.ticket_id, true);
             }
         }
-    }
-
-    // Decision-on-comment resolutions (#B.129 phase 2).
-    const resolutionComments = db.select({
-        ticket_id: schema.messages.ticketId,
-        meta: schema.messages.meta,
-    })
-        .from(schema.messages)
-        .where(and(
-            eq(schema.messages.kind, "comment_added"),
-            eq(schema.messages.status, "approved"),
-        ))
-        .all();
-    for (const c of resolutionComments) {
-        if (!c.meta) continue;
-        try {
-            const m = JSON.parse(c.meta) as { decision?: { kind?: string; status?: string } };
-            const d = m.decision;
-            // #B.242: gate actionable on any pending validation across decision
-            // kinds. Resolution stays excluded on `accepted` too (short window
-            // before close); plan:accepted is the GO-signal so it re-enters
-            // actionable for the agent to execute.
-            const isResolutionGated =
-                d?.kind === "resolution" && (d.status === "pending" || d.status === "accepted");
-            const isPlanPending = d?.kind === "plan" && d.status === "pending";
-            if (isResolutionGated || isPlanPending) {
-                gatedByDecisionByTicket.set(c.ticket_id, true);
-            }
-        } catch { /* malformed meta, skip */ }
     }
 
     // Open set: approved + not lifecycle-closed + not snoozed.
