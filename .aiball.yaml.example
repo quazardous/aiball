@@ -120,10 +120,11 @@ autopoll:
 # you tune the wording per project without forcing a workflow; layered like
 # claude_loop (defaults → this file). request/other intents get no hint.
 # workflow:
-#   # Hint to build feature tickets on a dedicated branch + PR. Default true.
-#   hint_branch: true
-#   # Hint to use a git worktree (off by default — too technical). Default false.
+#   # Hint to build feature tickets on a dedicated branch + PR. Default false.
+#   hint_branch: false
+#   # Also mention a git worktree (too technical). Default false.
 #   hint_worktree: false
+#   # (both false → no branch hint on feature wakes; opt in per project)
 
 # Wake-CTA / state-prompt template overrides (#B.232 cpaez7).
 # Optional per-project section. When absent, the skill-shipped defaults
