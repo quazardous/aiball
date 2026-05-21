@@ -103,6 +103,17 @@ export interface AiballConfig {
         /** Wake-in-flight marker TTL (#B.180). CL_WAKE_IN_FLIGHT_TTL_MS. */
         wake_in_flight_ttl_ms: number;
     };
+    /**
+     * #319: workflow hints surfaced by claude-loop at wake for `feature`-intent
+     * tickets. Layered like the rest (defaults → project `.aiball.yaml`). Wording
+     * stays low-level/non-technical; `hint_worktree` off by default.
+     */
+    workflow: {
+        /** Hint to build feature tickets on a dedicated branch + PR. */
+        hint_branch: boolean;
+        /** Hint to use a git worktree (off by default — too technical). */
+        hint_worktree: boolean;
+    };
     /** Absolute path to the loaded `.aiball.yaml`, or null when none was found. */
     configPath: string | null;
     /**
@@ -144,6 +155,12 @@ const DEFAULTS: AiballConfig = {
         boot_grace_seconds: 60,
         user_grace_seconds: 60,
         wake_in_flight_ttl_ms: 2000,
+    },
+    // #319: feature tickets hint a branch + PR by default; worktree off
+    // (too technical). Per-project override in `.aiball.yaml` `workflow:`.
+    workflow: {
+        hint_branch: true,
+        hint_worktree: false,
     },
     configPath: null,
     prompts: {},
@@ -228,6 +245,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         autopoll: { ...DEFAULTS.autopoll },
         consumer: { ...DEFAULTS.consumer },
         claude_loop: { ...DEFAULTS.claude_loop },
+        workflow: { ...DEFAULTS.workflow },
         mcp_json_deprecated: mcpJsonHasIdentityEnv(projectDir),
         configPath,
         prompts: {},
@@ -280,6 +298,10 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof cl.wake_in_flight_ttl_ms === "number" && cl.wake_in_flight_ttl_ms > 0) {
                 cfg.claude_loop.wake_in_flight_ttl_ms = cl.wake_in_flight_ttl_ms;
             }
+            // #319: workflow hint flags (layered like claude_loop above).
+            const wf = (raw.workflow ?? {}) as Record<string, unknown>;
+            if (typeof wf.hint_branch === "boolean") cfg.workflow.hint_branch = wf.hint_branch;
+            if (typeof wf.hint_worktree === "boolean") cfg.workflow.hint_worktree = wf.hint_worktree;
             // #B.232 cpaez7: per-project prompt template overrides. The
             // service handles shape validation per slot and silently
             // drops malformed entries, so we keep the wider config
