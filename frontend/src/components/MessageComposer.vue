@@ -7,6 +7,7 @@ import Textarea from "primevue/textarea";
 import ToggleButton from "primevue/togglebutton";
 import { useToast } from "primevue/usetoast";
 import MarkdownView from "./MarkdownView.vue";
+import TagPicker from "./TagPicker.vue";
 import { api, INTENTS, PRIORITIES, type Intent, type Priority } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
 import { attachPasteImage } from "../lib/pasteImage";
@@ -80,6 +81,8 @@ const intent = ref<Intent>("request");
 // #B.222: urgency hint orthogonal to intent. Default "normal" = invisible
 // when unchanged, so 90% of ticket-creates don't pay any visual weight.
 const priority = ref<Priority>("normal");
+// #292: tags chosen for a NEW ticket (deferred — applied after create).
+const ticketTagIds = ref<number[]>([]);
 const preview = ref(false);
 const sending = ref(false);
 const error = ref<string | null>(null);
@@ -267,6 +270,16 @@ async function submit() {
                 ...(scope.value !== "default" ? { scope: scope.value } : {}),
             });
             createdId = typeof r?.id === "number" ? r.id : null;
+            // #292: apply the tags chosen in the composer to the freshly
+            // created ticket (deferred — it had no id until now). Best-effort:
+            // the ticket is already posted, so a tag failure only warns.
+            if (createdId !== null && ticketTagIds.value.length > 0) {
+                try {
+                    await api.setMessageTags(createdId, ticketTagIds.value, author);
+                } catch (e) {
+                    console.warn("[composer] failed to apply tags to new ticket:", e);
+                }
+            }
         } else {
             // Capture the comment's id too — needed by #B.104 to fill
             // the `answered_in` audit field on the parent's meta.
@@ -314,6 +327,7 @@ async function submit() {
         sessionStorage.removeItem(draftKey.value);
         title.value = "";
         body.value = "";
+        ticketTagIds.value = [];
         preview.value = false;
         pendingAnswers.value = [];
         // Refresh fan-out: WS will fire for everyone, but emitting
@@ -606,6 +620,12 @@ async function onAttachPicked(ev: Event) {
                 title="Priority (#B.222) — urgent / high / normal / low"
             />
         </div>
+        <!-- #292: pick tags at creation time (deferred TagPicker — applied
+             once the ticket has an id, on submit). Ticket mode only. -->
+        <div v-if="isTicket && !preview" class="composer-tags-row">
+            <span class="composer-tags-label">tags</span>
+            <TagPicker v-model:selectedIds="ticketTagIds" />
+        </div>
         <div v-if="!preview" class="composer-textarea-wrap">
             <Textarea
                 ref="bodyTextareaRef"
@@ -783,6 +803,17 @@ async function onAttachPicked(ev: Event) {
     display: flex;
     gap: 0.5rem;
     align-items: center;
+}
+/* #292: tag-picker row in the new-ticket composer. */
+.composer-tags-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.composer-tags-label {
+    font-size: 0.78rem;
+    color: var(--p-text-muted-color);
 }
 .composer-title {
     flex: 1;
