@@ -121,7 +121,7 @@ export function registerTicketReadTools(server: McpServer): void {
                     .optional()
                     .describe("If true, include hits whose parent ticket is currently snoozed. Default false."),
                 intent: z
-                    .enum(["panic", "request", "question", "fyi"])
+                    .enum(["panic", "request", "question", "fyi", "feature"])
                     .optional()
                     .describe("Filter on intent of the parent ticket."),
                 limit: z.number().int().min(1).max(200).optional().describe("Max hits to return. Default 50, hard cap 200."),

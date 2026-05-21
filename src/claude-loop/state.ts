@@ -1102,9 +1102,15 @@ const DEFAULT_WAKE_TEMPLATES: WakeTemplates = {
         with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}.",
         ticket_only: "Heads-up on aiball ticket #{ticket}.",
     },
+    // #319: feature work. Base wording; buildWakePhrase appends the config-driven
+    // branch hint (workflow.hint_branch / hint_worktree) for this intent.
+    feature: {
+        with_comment: "Build aiball feature ticket #{ticket} — new comment #{comment}.",
+        ticket_only: "Build aiball feature ticket #{ticket}.",
+    },
 };
 
-const WAKE_INTENTS: readonly Intent[] = ["panic", "request", "question", "fyi"];
+const WAKE_INTENTS: readonly Intent[] = ["panic", "request", "question", "fyi", "feature"];
 
 function isWakeTemplate(x: unknown): x is WakeTemplate {
     return !!x && typeof x === "object"
@@ -1163,7 +1169,22 @@ export function buildWakePhrase(hint: WakeHint | undefined, pingsAbsPath: string
     const templates = loadWakeTemplates(pingsAbsPath) ?? DEFAULT_WAKE_TEMPLATES;
     const slot = templates[intent] ?? templates.request ?? DEFAULT_WAKE_TEMPLATES.request;
     const tpl = commentHashid ? slot.with_comment : slot.ticket_only;
-    return tpl
+    let phrase = tpl
         .replace(/\{ticket\}/g, String(ticketId))
         .replace(/\{comment\}/g, commentHashid ?? "");
+    // #319: for `feature` tickets, claude-loop "habille" the wake with a
+    // config-driven branch hint (workflow.hint_branch / hint_worktree, from the
+    // layered .aiball.yaml). Wording is non-technical + project-tunable
+    // (worktree off by default); the "not on main" nudge enforces the
+    // no-runtime-switch rule. request/other intents get nothing extra.
+    if (intent === "feature") {
+        const wf = loadConfig().workflow;
+        const where = wf.hint_worktree
+            ? "a dedicated worktree + PR"
+            : wf.hint_branch
+                ? "a dedicated branch + PR"
+                : null;
+        if (where) phrase += ` 🌿 Feature: build it in ${where}, not on main.`;
+    }
+    return phrase;
 }

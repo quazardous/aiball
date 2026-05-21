@@ -38,7 +38,11 @@ export type MessageStatus = typeof MESSAGE_STATUSES[number];
 export const RULE_DECISIONS = ["auto", "review"] as const;
 export type RuleDecision = typeof RULE_DECISIONS[number];
 
-export const INTENTS = ["panic", "request", "question", "fyi"] as const;
+// #319: `feature` is a workflow-posture marker (not just a label) — a feature
+// ticket is built isolated (branch + PR); `request` (default) & the rest are
+// mainstream (edit `main` live, small always-green increments). claude-loop
+// surfaces a config-driven branch hint for `feature` tickets at wake time.
+export const INTENTS = ["panic", "request", "question", "fyi", "feature"] as const;
 export type Intent = typeof INTENTS[number];
 
 /**

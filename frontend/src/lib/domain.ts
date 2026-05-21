@@ -23,7 +23,9 @@ export type MessageKind = typeof MESSAGE_KINDS[number];
 export const MESSAGE_STATUSES = ["pending", "approved", "rejected"] as const;
 export type MessageStatus = typeof MESSAGE_STATUSES[number];
 
-export const INTENTS = ["panic", "request", "question", "fyi"] as const;
+// #319: `feature` = workflow-posture marker (branch+PR vs mainstream). Mirror
+// of src/domain.ts — keep in sync.
+export const INTENTS = ["panic", "request", "question", "fyi", "feature"] as const;
 export type Intent = typeof INTENTS[number];
 
 /**

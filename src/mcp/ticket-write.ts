@@ -65,10 +65,10 @@ export function registerTicketWriteTools(server: McpServer): void {
                     ),
                 body: z.string().optional().describe("Ticket body / description"),
                 intent: z
-                    .enum(["panic", "request", "question", "fyi"])
+                    .enum(["panic", "request", "question", "fyi", "feature"])
                     .optional()
                     .describe(
-                        "panic = immediate blocker; question = needs an answer; request = action expected (default intent); fyi = informational, no action expected.",
+                        "panic = immediate blocker; question = needs an answer; request = action expected (default intent); fyi = informational, no action expected; feature = code work built isolated (branch + PR), per #319.",
                     ),
                 priority: z
                     .enum(["low", "normal", "high", "urgent"])
@@ -390,7 +390,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .optional()
                     .describe("New body (owner-bypass). Pass null to clear."),
                 intent: z
-                    .enum(["panic", "request", "question", "fyi"])
+                    .enum(["panic", "request", "question", "fyi", "feature"])
                     .nullable()
                     .optional()
                     .describe("New intent label (owner-bypass)."),
