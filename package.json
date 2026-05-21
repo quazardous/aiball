@@ -19,7 +19,9 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "test:watch": "node --import tsx --test --watch \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
