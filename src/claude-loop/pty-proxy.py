@@ -447,6 +447,15 @@ def main(argv):
     # on démarre en boot-grace, sinon `loop`) → pas de repeint redondant.
     current_word = _rest_word()
     last_keystroke = 0.0
+    # #345 (david #xvswug): on ne « swallow » pas, on BUFFERISE. La 1re combo
+    # d'un afk_key à 2 combos (ex. le 1er ESC de `esc esc`) n'est PAS forwardée
+    # tout de suite : on la garde ici jusqu'à la fenêtre afk. Si la 2e combo
+    # suit → le combo réussit → on n'envoie RIEN (ni rewind, ni interruption).
+    # Sinon (échec) → flush différé vers claude (= la frappe nue, juste retardée
+    # de ≤ afk_window). `pending` = octets en attente, `pending_deadline` = quand
+    # flusher si rien ne complète le combo.
+    pending = None
+    pending_deadline = 0.0
 
     def cleanup():
         # Rends la main sur le segment human : `loop` au repos, sinon le mot
@@ -493,6 +502,13 @@ def main(argv):
             else:
                 rems = [r for r in (_boot_grace_remaining(), _user_grace_remaining()) if r > 0.0]
                 timeout = min(rems) if rems else None
+            # #345: si une 1re combo est bufferisée, on doit se réveiller à sa
+            # deadline pour la flusher même si plus aucune frappe n'arrive.
+            if pending is not None:
+                flush_rem = pending_deadline - now_ts
+                if flush_rem < 0.0:
+                    flush_rem = 0.0
+                timeout = flush_rem if timeout is None else min(timeout, flush_rem)
             try:
                 ready, _, _ = select.select(rfds, [], [], timeout)
             except (InterruptedError, OSError):
@@ -506,6 +522,17 @@ def main(argv):
                     _paint_word(want)
                     current_word = want
 
+            # 0.5) #345 (david #xvswug): 1re combo bufferisée dont la fenêtre afk
+            #      a expiré SANS 2e combo, et aucun stdin ce tour → combo échoué.
+            #      Flush différé vers claude (= la frappe nue, ex. ESC = interruption,
+            #      juste retardée de ≤ afk_window). Si du stdin est prêt, on laisse
+            #      le handler ci-dessous décider (succès du combo / autre touche).
+            if (pending is not None and stdin_fd not in ready
+                    and datetime.datetime.now().timestamp() >= pending_deadline):
+                os.write(master_fd, pending)
+                pending = None
+                pending_deadline = 0.0
+
             # 1) Frappe humaine (tmux → nous → claude).
             if stdin_fd in ready:
                 try:
@@ -513,43 +540,75 @@ def main(argv):
                 except OSError:
                     data = b""
                 if data:
-                    if _afk.feed(data, datetime.datetime.now().timestamp()):
-                        # #351 (david #5pq7tb): the SUCCESSFUL afk combo is
-                        # EXCLUDED from keystroke/presence detection — it means
-                        # "away". Set the marker and DROP any presence its first
-                        # keystroke armed; never touch_user_grace for this one.
+                    now_k = datetime.datetime.now().timestamp()
+                    if _afk.feed(data, now_k):
+                        # #351/#345: le combo afk a RÉUSSI. (david #5pq7tb) il est
+                        # EXCLU de la détection présence — il veut dire "away". On
+                        # n'envoie RIEN à claude : ni le buffer (1re combo), ni cette
+                        # frappe → pas de rewind (`esc esc`), pas d'interruption. On
+                        # pose le marqueur afk et on largue toute présence armée par
+                        # la 1re combo.
                         set_afk()
                         clear_user_grace()
+                        pending = None
+                        pending_deadline = 0.0
                         want = _rest_word()
                         if want != current_word:
                             _paint_word(want)
                             current_word = want
-                    elif is_typing_keystroke(data):
-                        clear_afk()  # any real keystroke = the human is back
-                        touch_marker()
-                        last_keystroke = datetime.datetime.now().timestamp()
-                        # #315/#345: typing arms the user-grace (prolongs the
-                        # presence timeout) so the bar does stop → wait → loop.
-                        # Armed even under --no-wait — NO_WAIT only skips the
-                        # boot-grace, not yielding to a human who's actually here.
-                        touch_user_grace()
-                        if current_word != _HUMAN_STOP:
-                            _paint_word(_HUMAN_STOP)  # transition →stop, instantané
-                            current_word = _HUMAN_STOP
-                    elif _ESC_TAKEOVER and _is_lone_esc(data):
-                        # #345: a bare ESC = human interrupt / takeover. It's
-                        # filtered out of is_typing_keystroke (control byte), so
-                        # arm the user-grace explicitly → the loop backs off for
-                        # CL_USER_GRACE_SEC and the bar reads `wait`. (The 1st
-                        # ESC of an afk sequence lands here; a 2nd ESC completes
-                        # the combo above, which then clears this presence.)
+                    elif (len(_AFK_COMBOS) >= 2 and _afk.first_at is not None
+                          and data == _AFK_COMBOS[0]):
+                        # #345: 1re combo d'une séquence à 2 → on la BUFFERISE au
+                        # lieu de la forwarder (deadline = fenêtre afk). On arme
+                        # quand même la présence tout de suite (l'humain agit) : si
+                        # ça devient un combo afk, le bloc ci-dessus la larguera.
+                        pending = data
+                        pending_deadline = now_k + _AFK_WINDOW_MS / 1000.0
                         clear_afk()
-                        touch_user_grace()
-                        want = _rest_word()
+                        typing = is_typing_keystroke(data)
+                        if typing:
+                            touch_marker()
+                            last_keystroke = now_k
+                            touch_user_grace()
+                        elif _ESC_TAKEOVER and _is_lone_esc(data):
+                            touch_user_grace()
+                        want = _HUMAN_STOP if typing else _rest_word()
                         if want != current_word:
                             _paint_word(want)
                             current_word = want
-                    os.write(master_fd, data)
+                    else:
+                        # Frappe ordinaire. Si une 1re combo était en attente, le
+                        # combo a ÉCHOUÉ (cette touche n'est pas la 2e) → flush
+                        # différé du buffer AVANT cette frappe (ordre préservé),
+                        # puis traitement normal.
+                        if pending is not None:
+                            os.write(master_fd, pending)
+                            pending = None
+                            pending_deadline = 0.0
+                        if is_typing_keystroke(data):
+                            clear_afk()  # any real keystroke = the human is back
+                            touch_marker()
+                            last_keystroke = now_k
+                            # #315/#345: typing arms the user-grace (prolongs the
+                            # presence timeout) so the bar does stop → wait → loop.
+                            # Armed even under --no-wait — NO_WAIT only skips the
+                            # boot-grace, not yielding to a human who's actually here.
+                            touch_user_grace()
+                            if current_word != _HUMAN_STOP:
+                                _paint_word(_HUMAN_STOP)  # transition →stop, instantané
+                                current_word = _HUMAN_STOP
+                        elif _ESC_TAKEOVER and _is_lone_esc(data):
+                            # #345: a bare ESC = human interrupt / takeover. It's
+                            # filtered out of is_typing_keystroke (control byte), so
+                            # arm the user-grace explicitly → the loop backs off for
+                            # CL_USER_GRACE_SEC and the bar reads `wait`.
+                            clear_afk()
+                            touch_user_grace()
+                            want = _rest_word()
+                            if want != current_word:
+                                _paint_word(want)
+                                current_word = want
+                        os.write(master_fd, data)
                 else:
                     # EOF stdin : on arrête de le poller (claude tourne
                     # encore — on garde le pont sortie + injection vivant).

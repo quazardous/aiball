@@ -41,6 +41,14 @@ keystroke clears it. `afk_key` uses VS Code notation (`+` for modifiers,
 space for a 2-combo sequence; `afk_window_ms` bounds the gap). Parser +
 detector are unit-tested; see [`docs/CONFIGS.md`](docs/CONFIGS.md).
 
+The AFK combo is now **buffered, not forwarded**: the proxy holds the first
+keystroke of the combo for up to `afk_window_ms`. If the combo completes,
+*nothing* reaches claude — so the default `"esc esc"` no longer leaks through
+to trigger claude's own Esc-Esc rewind. If it doesn't complete, the buffered
+keystroke is flushed through unchanged (a lone ESC still interrupts claude,
+just deferred by ≤ the window). Net effect with the default: a successful
+`esc esc` flags you away silently; keyboard rewind moves to `/rewind`.
+
 ### Manage a ticket's subscriptions + owner from the thread
 
 A **manage** button in the thread header opens an **inline panel** (in place,
