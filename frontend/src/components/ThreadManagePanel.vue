@@ -94,7 +94,7 @@ async function changeOwner(next: string | null) {
                         label="mute all"
                         icon="pi pi-bell-slash"
                         size="small"
-                        severity="secondary"
+                        severity="warn"
                         :disabled="busy || subs.length === 0"
                         @click="setAll(true)"
                     />
@@ -102,7 +102,7 @@ async function changeOwner(next: string | null) {
                         label="unmute all"
                         icon="pi pi-bell"
                         size="small"
-                        severity="secondary"
+                        severity="success"
                         :disabled="busy || subs.length === 0"
                         @click="setAll(false)"
                     />
