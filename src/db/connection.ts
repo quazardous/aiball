@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import * as schema from "../schema.js";
+import { LAST_ACTOR_ACTION_KINDS } from "./last-actor-gate.js";
 import { DB_PATH, ensureDirs } from "../paths.js";
 import { loadShippedDefaultTags } from "../config-tags.js";
 
@@ -326,10 +327,8 @@ function bootstrap(db: BetterSQLite3Database<typeof schema>): void {
  *   - decision accept/reject: the decider via `meta.decision.{decided_by,decided_at}`.
  * Structural events (relation / sub_added / referenced) and the `auto`
  * moderation marker don't count as actions (see docs/TICKET_LIFECYCLE.md §4.2).
+ * `LAST_ACTOR_ACTION_KINDS` is the single source of truth (last-actor-gate.ts).
  */
-export const LAST_ACTOR_ACTION_KINDS = new Set([
-    "comment_added", "ticket_closed", "ticket_reopened", "ticket_resolved", "ticket_blocked",
-]);
 function backfillLastActor(db: BetterSQLite3Database<typeof schema>): void {
     const pending = db.select({
         id: schema.tickets.id,

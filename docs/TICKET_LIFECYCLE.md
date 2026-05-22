@@ -1,9 +1,10 @@
 # Ticket lifecycle & the `actionable` model
 
-> **Status: TARGET design.** This doc writes down where we want the ticket
-> lifecycle + the per-consumer `actionable` gate to land (#374). The current
-> implementation diverges in known ways — see [§7 Current vs target](#7-current-vs-target-the-fix-checklist).
-> Write the target first, *then* we correct the code.
+> **Status: IMPLEMENTED (#374).** The `last_actor` model below is live: the
+> denormalized column + backfill (migration 0027), `bumpLastActor` at every
+> action chokepoint, the §4.1 gate (`last_actor` + sole-participant) in
+> `computeActionableTicketIds`, and the §1 open-count invariant in the wake.
+> §7 records the original gap and the landed fix for history.
 
 aiball is **event-sourced**: a ticket is a row, and everything that happens to
 it is an append-only message/event. The ticket's "state" (open, resolved,
@@ -185,20 +186,24 @@ original author). Consequences:
   read `last_author = agent` → gated out (the §4.1 sole-participant clause is the
   fix; note `last_actor` alone does **not** cover this).
 
-**Target work** (separate `then:plan` — *puis on corrige*):
+**Landed** (#374, the `last_actor` column variant — `decide` keeps mutating
+meta in place rather than emitting a `decided` event):
 
-1. Introduce a stored **`last_actor` / `last_actor_at`** on the ticket (or, the
-   event-sourcing-pure variant: have `decide` **emit a `decided` event** so
-   every action has an actor-bearing row and the artefact-comment asymmetry
-   disappears).
-2. **Bump it on every action** — message append paths **and** the decide path.
-   (Denormalization risk = write-discipline; funnel through the chokepoints.)
-3. Implement the §4.1 rule (whose-court **+** sole-participant backlog).
-4. Switch `computeActionableTicketIds` onto it; retire
-   `lastNonLifecycleAuthorByTicket`; fold the decision-gate (#273/#358) where
-   §4.3 subsumes it (keep relation/blocked).
-5. **Migration + one-time backfill** (replay events incl. `decided_by`) — note
-   migrations run only at daemon boot.
+1. ✅ Stored **`last_actor` / `last_actor_at`** on the ticket — migration 0027,
+   backfilled idempotently at boot (`460ca45`).
+2. ✅ **Bumped on every action** — `bumpLastActor` at `insertMessage`
+   (create + comment/lifecycle) and `applyMessageDecision` (decider) (`460ca45`).
+3. ✅ The §4.1 rule (whose-court **+** sole-participant) — `lastActorExclusions`
+   (`a12ec65`).
+4. ✅ `computeActionableTicketIds` switched onto it; `lastNonLifecycleAuthorByTicket`
+   retired; decision-gate (#273/#358) folded in, relation/blocked kept (`a12ec65`).
+5. ✅ Migration + one-time backfill (replays `decided_by`) (`460ca45`).
+6. ✅ The §1 open-count invariant in the wake (`buildContextPhrase`) — open and
+   actionable stated distinctly (`3e709a3`).
+
+Validated live: the actionable pool went 1 → 12 (#305 reopened bug + the
+self-authored e2e backlog surfaced; dialogue tickets stay gated). Pure unit
+tests cover the decision-gate (#358) and the last-actor exclusion rule.
 
 **Related:** #265 (per-consumer actionable), #273 (latest-decision gate), #358
 (decision-pending gate + recency), #305 (reopened bug invisible), #370/#374

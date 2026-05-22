@@ -7,7 +7,8 @@
  */
 import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
-import { getDb, nowIso, LAST_ACTOR_ACTION_KINDS } from "./connection.js";
+import { getDb, nowIso } from "./connection.js";
+import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
 import { listHumans } from "./consumers.js";
 import { computeDecisionGate } from "./decision-gate.js";
 
@@ -865,13 +866,11 @@ export interface ActionableTicketSet {
 function foreignActorTickets(consumerId: string): Set<number> {
     const db = getDb();
     const out = new Set<number>();
-    const isForeign = (a: string | null | undefined): boolean =>
-        !!a && a !== "auto" && a !== consumerId;
     for (const t of db.select({
         id: schema.tickets.id,
         byAgent: schema.tickets.byAgent,
     }).from(schema.tickets).all()) {
-        if (isForeign(t.byAgent)) out.add(t.id);
+        if (isForeignActor(t.byAgent, consumerId)) out.add(t.id);
     }
     for (const m of db.select({
         ticketId: schema.messages.ticketId,
@@ -881,16 +880,16 @@ function foreignActorTickets(consumerId: string): Set<number> {
         meta: schema.messages.meta,
     }).from(schema.messages).where(eq(schema.messages.status, "approved")).all()) {
         if (m.ticketId == null) continue;
-        if (LAST_ACTOR_ACTION_KINDS.has(m.kind) && isForeign(m.byAgent)) {
-            out.add(m.ticketId);
-        }
+        let decisionStatus: string | null = null;
+        let decidedBy: string | null = null;
         if (m.meta) {
             try {
                 const d = (JSON.parse(m.meta) as { decision?: { status?: string; decided_by?: string } }).decision;
-                if (d && (d.status === "accepted" || d.status === "rejected") && isForeign(d.decided_by)) {
-                    out.add(m.ticketId);
-                }
+                if (d) { decisionStatus = d.status ?? null; decidedBy = d.decided_by ?? null; }
             } catch { /* malformed meta — skip */ }
+        }
+        if (eventHasForeignActor({ kind: m.kind, byAgent: m.byAgent, decisionStatus, decidedBy }, consumerId)) {
+            out.add(m.ticketId);
         }
     }
     return out;
@@ -918,7 +917,7 @@ export function lastActorExclusions(consumerId: string): Set<number> {
     const hasForeign = foreignActorTickets(consumerId);
     const out = new Set<number>();
     for (const r of rows) {
-        if (r.lastActor === consumerId && hasForeign.has(r.id)) out.add(r.id);
+        if (isExcludedForConsumer(r.lastActor, hasForeign.has(r.id), consumerId)) out.add(r.id);
     }
     return out;
 }
