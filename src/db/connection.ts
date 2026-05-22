@@ -327,7 +327,7 @@ function bootstrap(db: BetterSQLite3Database<typeof schema>): void {
  * Structural events (relation / sub_added / referenced) and the `auto`
  * moderation marker don't count as actions (see docs/TICKET_LIFECYCLE.md §4.2).
  */
-const LAST_ACTOR_ACTION_KINDS = new Set([
+export const LAST_ACTOR_ACTION_KINDS = new Set([
     "comment_added", "ticket_closed", "ticket_reopened", "ticket_resolved", "ticket_blocked",
 ]);
 function backfillLastActor(db: BetterSQLite3Database<typeof schema>): void {

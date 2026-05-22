@@ -7,7 +7,9 @@
  */
 import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
-import { getDb, nowIso } from "./connection.js";
+import { getDb, nowIso, LAST_ACTOR_ACTION_KINDS } from "./connection.js";
+import { listHumans } from "./consumers.js";
+import { computeDecisionGate } from "./decision-gate.js";
 
 /**
  * Project names known to the system. Reads from the explicit `projects`
@@ -381,11 +383,11 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         }
     }
 
-    // #265: per-consumer "I replied last → awaiting someone else" gate,
+    // #265/#374: per-consumer "I acted last → awaiting someone else" gate,
     // applied to actionable_count exactly like the SET path
     // (computeActionableTicketIds). Only when a consumer is in scope;
-    // global callers keep pre-#265 behaviour.
-    const lastAuthorByTicket = consumer_id ? lastNonLifecycleAuthorByTicket() : null;
+    // global callers keep pre-#265 behaviour. #374: last_actor + sole-participant.
+    const awaitingOtherSet = consumer_id ? lastActorExclusions(consumer_id) : null;
 
     for (const t of openCounts) {
         if (t.status !== "approved") continue;
@@ -409,7 +411,7 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         const isGatedByDecision = gatedByDecisionByTicket.get(t.id) === true;
         const isBlocked = blockedByTicket.get(t.id) === true;
         const isGated = gatedByBlocker.has(t.id);
-        const isAwaitingOther = !!lastAuthorByTicket && lastAuthorByTicket.get(t.id) === consumer_id;
+        const isAwaitingOther = !!awaitingOtherSet && awaitingOtherSet.has(t.id);
         if (!isGatedByDecision && !isBlocked && !isGated && !isAwaitingOther) {
             actionablePerProject.set(t.project, (actionablePerProject.get(t.project) ?? 0) + 1);
         }
@@ -852,43 +854,71 @@ export interface ActionableTicketSet {
 }
 
 /**
- * #265: per-ticket author of the latest *authored* event — the ticket
- * body itself (its creator), or the most recent approved `comment_added`.
- * Lifecycle / relation / cross-ref pseudo-events don't count; only
- * content someone actually wrote. Drives the per-consumer `actionable`
- * gate: a ticket whose last authored event is by the requesting consumer
- * is "awaiting someone else", so it drops out of *that consumer's*
- * actionable pool — the agent that just replied stops being nagged
- * (the conversational case from #239), and a viewer's count excludes
- * what they last answered.
- *
- * Ticket ids and message ids live in separate id spaces (migration 0007),
- * so "latest" is resolved by construction: seed every ticket with its
- * creator, then let approved `comment_added` rows (always chronologically
- * after the ticket) override in id order — last write wins.
+ * #374: tickets where a counterpart (some actor other than `consumerId`) has
+ * acted — i.e. `consumerId` is NOT the sole participant. An "action" is a
+ * comment / lifecycle event author or a decision decider; structural events
+ * (relation / sub_added / referenced) and the `auto` moderation marker don't
+ * count (see docs/TICKET_LIFECYCLE.md §4.2). Used to tell apart "I replied,
+ * awaiting you" (counterpart exists → gate me out) from "my own untouched
+ * task" (sole participant → keep it actionable, the #370 backlog case).
  */
-export function lastNonLifecycleAuthorByTicket(): Map<number, string | null> {
+function foreignActorTickets(consumerId: string): Set<number> {
     const db = getDb();
-    const out = new Map<number, string | null>();
-    const ticketRows = db.select({
+    const out = new Set<number>();
+    const isForeign = (a: string | null | undefined): boolean =>
+        !!a && a !== "auto" && a !== consumerId;
+    for (const t of db.select({
         id: schema.tickets.id,
         byAgent: schema.tickets.byAgent,
-    }).from(schema.tickets).all();
-    for (const t of ticketRows) out.set(t.id, t.byAgent);
-    const comments = db.select({
+    }).from(schema.tickets).all()) {
+        if (isForeign(t.byAgent)) out.add(t.id);
+    }
+    for (const m of db.select({
         ticketId: schema.messages.ticketId,
         byAgent: schema.messages.byAgent,
-    })
-        .from(schema.messages)
-        .where(and(
-            eq(schema.messages.kind, "comment_added"),
-            eq(schema.messages.status, "approved"),
-        ))
-        .orderBy(asc(schema.messages.id))
-        .all();
-    for (const c of comments) {
-        if (c.ticketId == null) continue;
-        out.set(c.ticketId, c.byAgent);
+        kind: schema.messages.kind,
+        status: schema.messages.status,
+        meta: schema.messages.meta,
+    }).from(schema.messages).where(eq(schema.messages.status, "approved")).all()) {
+        if (m.ticketId == null) continue;
+        if (LAST_ACTOR_ACTION_KINDS.has(m.kind) && isForeign(m.byAgent)) {
+            out.add(m.ticketId);
+        }
+        if (m.meta) {
+            try {
+                const d = (JSON.parse(m.meta) as { decision?: { status?: string; decided_by?: string } }).decision;
+                if (d && (d.status === "accepted" || d.status === "rejected") && isForeign(d.decided_by)) {
+                    out.add(m.ticketId);
+                }
+            } catch { /* malformed meta — skip */ }
+        }
+    }
+    return out;
+}
+
+/**
+ * #374: per-consumer "whose court" exclusion set — replaces the comment-only
+ * `lastNonLifecycleAuthorByTicket` (#265). A ticket is excluded from C's
+ * actionable pool iff **C took the last action AND a counterpart exists**:
+ *
+ *   exclude  ⟺  ticket.last_actor === C  AND  C is not the sole participant.
+ *
+ * Reads the denormalized `tickets.last_actor` (maintained at every action
+ * chokepoint, #374) — so a human reopen / accept / close now correctly hands
+ * the ball back to the agent (fixes #305, which the old comment-only heuristic
+ * missed). When C is the sole participant (their own un-answered task), the
+ * ticket stays actionable — the #370 backlog case.
+ */
+export function lastActorExclusions(consumerId: string): Set<number> {
+    const db = getDb();
+    const rows = db.select({
+        id: schema.tickets.id,
+        lastActor: schema.tickets.lastActor,
+    }).from(schema.tickets).all();
+    const hasForeign = foreignActorTickets(consumerId);
+    const out = new Set<number>();
+    for (const r of rows) {
+        if (r.lastActor === consumerId && hasForeign.has(r.id)) out.add(r.id);
     }
     return out;
 }
@@ -926,37 +956,17 @@ export function decisionGateByTicket(): Map<number, boolean> {
         kind: schema.messages.kind,
         status: schema.messages.status,
         meta: schema.messages.meta,
+        byAgent: schema.messages.byAgent,
     })
         .from(schema.messages)
         .where(inArray(schema.messages.kind, ["ticket_resolved", "ticket_reopened", "comment_added"]))
         .orderBy(asc(schema.messages.id))
         .all();
-    const gated = new Map<number, boolean>();
-    for (const r of rows) {
-        if (r.ticketId == null) continue;
-        let signal: boolean | null = null;
-        if (r.kind === "ticket_reopened") {
-            if (r.status === "approved") signal = false;
-        } else if (r.kind === "ticket_resolved") {
-            if (r.status === "approved" || r.status === "pending") signal = true;
-        } else if (r.kind === "comment_added") {
-            if (r.status !== "approved" || !r.meta) continue;
-            try {
-                const m = JSON.parse(r.meta) as { decision?: { kind?: string; status?: string } };
-                const d = m.decision;
-                if (!d) continue;
-                if (d.kind === "resolution") {
-                    if (d.status === "pending" || d.status === "accepted") signal = true;
-                    else if (d.status === "rejected") signal = false;
-                } else if (d.kind === "plan") {
-                    if (d.status === "pending") signal = true;
-                    else if (d.status === "accepted" || d.status === "rejected") signal = false;
-                }
-            } catch { continue; }
-        }
-        if (signal !== null) gated.set(r.ticketId, signal);
-    }
-    return gated;
+    // #358 : la logique de rejeu vit dans decision-gate.ts (pure, testée). On
+    // bâtit le set humain une fois pour que le yield-sur-commentaire ne tape
+    // pas la table consumers à chaque ligne.
+    const humans = new Set(listHumans());
+    return computeDecisionGate(rows, (id) => humans.has(id));
 }
 
 export function computeActionableTicketIds(consumerId?: string): ActionableTicketSet {
@@ -1046,17 +1056,19 @@ export function computeActionableTicketIds(consumerId?: string): ActionableTicke
         else if (r.kind === "blocks" && openIds.has(r.source)) gatedByBlocker.add(r.target);
     }
 
-    // #265: per-consumer "I replied last → awaiting someone else" gate.
-    // Only computed when a consumer is in scope (anonymous / token-less
-    // callers keep the global, pre-#265 behaviour — zero regression).
-    const lastAuthor = consumerId ? lastNonLifecycleAuthorByTicket() : null;
+    // #265/#374: per-consumer "I acted last → awaiting someone else" gate,
+    // now driven by `last_actor` + sole-participant (a human reopen/accept/
+    // close hands the ball back — #305; an own untouched task stays mine —
+    // #370). Only computed when a consumer is in scope (anonymous / token-
+    // less callers keep the global, pre-#265 behaviour — zero regression).
+    const awaitingOtherSet = consumerId ? lastActorExclusions(consumerId) : null;
 
     const actionableIds = new Set<number>();
     for (const id of openIds) {
         if (gatedByDecisionByTicket.get(id) === true) continue;
         if (blockedByTicket.get(id) === true) continue;
         if (gatedByBlocker.has(id)) continue;
-        if (lastAuthor && lastAuthor.get(id) === consumerId) continue;
+        if (awaitingOtherSet && awaitingOtherSet.has(id)) continue;
         actionableIds.add(id);
     }
 
