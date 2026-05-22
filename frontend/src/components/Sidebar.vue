@@ -63,6 +63,11 @@ const activeProjectLabel = computed(() => {
 function onProjectsSummaryClick(e: Event) {
     if (window.innerWidth > 720) e.preventDefault();
 }
+
+// #341: aiball version, injected at build time from the repo-root
+// package.json (see vite.config.ts `define`). Falls back gracefully if
+// the define is somehow absent (dev server without the constant).
+const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ : "dev";
 </script>
 
 <template>
@@ -186,6 +191,12 @@ function onProjectsSummaryClick(e: Event) {
                 <span>Consumers</span>
             </button>
         </div>
+
+        <!-- Version footer (#341). Source: repo-root package.json, injected
+             at build time via vite `define` (__AIBALL_VERSION__). -->
+        <div class="sidebar-version" :title="`aiball ${appVersion}`">
+            aiball v{{ appVersion }}
+        </div>
     </aside>
 </template>
 
@@ -205,6 +216,15 @@ function onProjectsSummaryClick(e: Event) {
        the bottom via margin-top: auto on mobile. */
     display: flex;
     flex-direction: column;
+}
+.sidebar-version {
+    /* #341: small, muted build version pinned under the settings band. */
+    margin-top: 0.6rem;
+    padding: 0.35rem 0.4rem 0;
+    border-top: 1px solid var(--p-content-border-color);
+    font-size: 0.72rem;
+    color: var(--p-text-muted-color);
+    letter-spacing: 0.02em;
 }
 .sidebar-projects {
     /* #B.161: <details> default styling — chevron tighter. */

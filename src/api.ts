@@ -25,6 +25,7 @@ import { outboxPath } from "./paths.js";
 import { searchMessages } from "./search.js";
 import { bearerAuth } from "./auth.js";
 import { badRequest } from "./api/_helpers.js";
+import { AIBALL_VERSION } from "./version.js";
 import { agentHelpersRouter } from "./api/agent-helpers.js";
 import { authRouter } from "./api/auth.js";
 import { consumersRouter } from "./api/consumers.js";
@@ -71,7 +72,7 @@ api.use(uploadsRouter);
  * cheap defense in depth).
  */
 api.get("/health", (_req, res) => {
-    res.json({ ok: true, ts: new Date().toISOString() });
+    res.json({ ok: true, ts: new Date().toISOString(), version: AIBALL_VERSION });
 });
 
 api.get("/strategy", (_req, res) => {

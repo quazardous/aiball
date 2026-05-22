@@ -4,626 +4,395 @@ Notable changes to aiball — the MCP surface, HTTP API, UI, and CLI.
 
 **Style**: human-friendly, synthetic. Each entry is a short paragraph or a
 handful of bullets describing what changed for users / integrators, not a
-file-by-file diff. If you want details, see the linked tickets or
-`git log`. Dates are YYYY-MM-DD; format inspired by Keep a Changelog.
+file-by-file diff. Dates are YYYY-MM-DD; format inspired by Keep a
+Changelog.
 
-Multi-component changes get listed under one date even when individual
-versions diverge — qcmp.yaml tracks per-component versions; this file is
-the human-readable narrative.
+**Versioning**: the source of truth is the repo-root `package.json` (the
+`aiball` component in `qcmp.yaml`). The running version is surfaced via
+`aiball --version`, `GET /api/health`, and the web UI footer. Frontend and
+other components track their own versions; this file is the human-readable
+narrative for the product as a whole.
 
 ---
 
 ## [Unreleased]
 
-### Docs refresh — README pitch, hero, keystroke-detection, roadmap (`#341`)
+_Nothing yet._
+
+---
+
+## [0.7.0] — 2026-05-22
+
+Agent presence you can see, a version you can read.
+
+### Version surfaced across the app
+
+aiball now reports its own version everywhere instead of hiding it in
+`package.json`:
+
+- `aiball --version` (also `-v`) prints it from the CLI.
+- `GET /api/health` returns `{ ok, ts, version }`.
+- The web UI shows `aiball v<x.y.z>` in the sidebar footer.
+
+Single source of truth is the repo-root `package.json`; it's injected into
+the frontend bundle at build time so the footer needs no runtime fetch.
+
+### claude-loop: human-presence bar + keystroke detection + AskUserQuestion gating
+
+- The tmux status bar carries a font-tinted human-presence word —
+  **`loop`** (green, autonomous), **`wait`** (yellow, auto-pings frozen
+  during a grace window), **`stop`** (red, a human is typing in the pane) —
+  over the idle/boot/busy state colour.
+- Live keystroke detection tells a human typing apart from claude's output
+  and from the loop's own wake injection, so the wrapper never `send-keys`
+  a ping over a prompt you're mid-typing.
+- In an autonomous loop (no human in front), Claude Code's
+  `AskUserQuestion` multi-choice dialog is denied via a PreToolUse hook and
+  the agent is redirected to ask on the aiball ticket thread. Interactive
+  sessions (human present) keep the dialog — fail-open.
+
+### Docs refresh — README, keystroke-detection, roadmap
 
 - **README** rewritten lean: *what you can do* (loop / pilot like GitHub /
   gate & monitor / take over), *quickstart* — now showing the tokenized
   `/setup?t=…` first-user URL — plus Tailscale, an *under the hood*
   paragraph (hooks + tmux + PTY proxy), and a nano-roadmap. New hero image.
-- **`docs/CLAUDE-LOOP.md`** now documents keystroke detection: the
-  user-grace gate, the live `human-typing` marker, the `stop`/`wait`/`loop`
-  bar word, and the headless AskUserQuestion gate; file map + state-layout
-  table brought up to date.
+- **`docs/CLAUDE-LOOP.md`** now documents keystroke detection end to end:
+  the user-grace gate, the live `human-typing` marker, the
+  `stop`/`wait`/`loop` bar word, and the headless AskUserQuestion gate;
+  file map + state-layout table brought up to date.
 - **`docs/PTY-PROXY.md`** de-staled (3-state badge, shipped status,
-  `detectHumanTyping` kept as a degraded fallback); fixed the
-  `user-prompt-submit-hook` grace default in its doc comment (60s).
-- **`ROADMAP.md`** reworked: dropped items that already shipped (consumer
-  state push `#B.177`, sandbox auto-respawn), consolidated Windows, added
-  multiple-agents-on-one-folder (sandbox + worktree) and a web-terminal
-  item, plus a Direction section.
+  `detectHumanTyping` kept as a degraded fallback).
+- **`ROADMAP.md`** reworked: dropped items that already shipped, consolidated
+  Windows, added multiple-agents-on-one-folder (sandbox + worktree) and a
+  web-terminal item, plus a Direction section.
 
-### claude-loop: human-presence bar badge + AskUserQuestion gating (`#264`)
+---
 
-- The tmux status bar shows a font-tinted **`loop`** (yellow —
-  autonomous loop running) / **`stop`** (red — a human is typing in the
-  pane) word, no brackets, over the idle/boot/busy state colour.
-- In an autonomous loop (no human in front), Claude Code's
-  `AskUserQuestion` multi-choice dialog is denied via a PreToolUse hook
-  and the agent is redirected to ask on the aiball ticket thread.
-  Interactive sessions (human present) keep the dialog — fail-open.
+## [0.6.3] — 2026-05-20
 
-### Approving a pending ticket embarks the typed comment (`#270`)
+Per-event scope, notifications, and a pile of UI polish.
 
-- Approving (or rejecting) a pending ticket from the thread view now
-  posts whatever was typed in the composer as a comment, instead of
-  silently dropping it.
+### Per-event `scope` tristate replaces `broadcast` + `internal`
 
-### Data-driven ticket-text linkifier (`#B.235`)
+- One unified `scope` enum on every event row (tickets + messages), three
+  values:
+  - **`internal`** — owners only + `@mention` recipients (`@projet`
+    narrows to project **owners**, not followers). For replies that don't
+    need to spam the thread audience.
+  - **`default`** — ticket subscribers + project owners + `@mention`
+    recipients (the standard fan-out).
+  - **`broadcast`** — `default` + project followers.
+- **Composer**: a tristate dropdown that remembers the last value chosen
+  per ticket (localStorage), so you don't re-pick on every reply. Initial
+  fallback is `default` for every mode — replies should fan out like a
+  normal post.
+- **MCP**: `ticket_new` + `ticket_reply` gain an optional
+  `scope: "internal" | "default" | "broadcast"` parameter, default
+  `default`.
+- **Schema**: `tickets.broadcast` and `_messages.internal` are dropped in
+  favour of `scope TEXT NOT NULL DEFAULT 'default'` on both tables.
+  Backfill: `broadcast=1 → 'broadcast'`, `internal=1 → 'internal'`, else
+  `'default'` (migrations `0020_message_internal.sql`,
+  `0021_scope_tristate.sql`).
 
-- `#B.NNN` / ref linkification in ticket text is no longer hardcoded in
-  the UI — it comes from a 3-layer config chain (shipped
-  `config/defaults/claude-loop-pings.yaml` → global
-  `~/.config/aiball/config.yaml` → per-project `.aiball.yaml`
-  `formatting:`). New `formatting[]` config block + the patterns are
-  served to the frontend at boot.
+### MCP `ticket_reply` — `then: "plan"`
 
-### Config home — single `GET /api/config` (`#235`)
+- New value `"plan"` on the `then` enum, symmetric to `"resolved"`: tags
+  the comment as a *plan proposal* with `meta.decision = { kind: "plan",
+  status: "pending" }`. The reporter validates the approach via
+  accept/reject before the agent executes.
+- Go-signal semantics: an accepted plan re-enters the ticket into
+  `actionable: true` so the agent picks it back up; a pending plan gates
+  actionable identically to a pending resolution.
+
+### Unified notification service
+
+- Fan-out, `@mention`, and decision pings move to a single notification
+  service layered above the db primitives. Accepting or rejecting a
+  decision on a comment now notifies the author (previously silent).
+
+### Config home — single `GET /api/config`
 
 - One boot-time config endpoint replaces the per-slice config routers
   (formatting, strategy, upload limit). Config writes stay on their
   targeted PATCH endpoints.
 
-### Unified notification service (`#260`, `#261`)
+### Data-driven ticket-text linkifier
 
-- Fan-out, `@mention`, and decision pings move to a single notification
-  service layered above the db primitives. Accepting/rejecting a
-  decision on a comment now notifies the author (previously silent).
+- Ref linkification in ticket text is no longer hardcoded in the UI — it
+  comes from a 3-layer config chain (shipped
+  `config/defaults/claude-loop-pings.yaml` → global
+  `~/.config/aiball/config.yaml` → per-project `.aiball.yaml`
+  `formatting:`). New `formatting[]` config block served to the frontend
+  at boot.
 
-### Post-hoc comment classification (`#B.256`)
+### Post-hoc comment classification
 
 - Reporters can promote an undecorated comment to a plan/resolution
   decision, flip its kind, or untag a pending one — via a per-comment
   "classify" menu.
 
-### Mobile bulk selection via long-press (`#B.255`)
+### Approving a pending ticket embarks the typed comment
 
-- On phones, long-press a row (~500 ms) to start a bulk selection; the
-  bulk bar surfaces only when a selection is active. The legacy
-  "peek" mode is removed and the identity picker is slimmed to
-  current-consumer + logout.
+- Approving (or rejecting) a pending ticket from the thread view now posts
+  whatever was typed in the composer as a comment, instead of silently
+  dropping it.
 
-### claude-loop wake phrases relocated to `config/defaults/` (`#B.232`)
+### Consumers panel rework
 
-- Default wake-CTA phrases move from `skill/claude-loop-pings.yaml` to
-  `config/defaults/claude-loop-pings.yaml` (same 3-layer override
-  chain); `.aiball.yaml.example` + docs updated.
+- "Add consumer" form retired — the daemon auto-inserts on first sight,
+  humans go through the setup screen or `aiball auth issue`.
+- Default sort flipped to activity-desc (the real triage view).
+- Toolbar checkbox "Hide consumers idle > 1 week" (default ON) with an
+  "N shown / M total" count so the filter never silently hides a row.
+- New dedicated edit page at `/consumers/<id>` (per-row pencil button) with
+  a breadcrumb header; the list table is now read-only.
 
-### Per-event `scope` tristate replaces `broadcast` + `internal` (`#B.245`, `#B.240`)
+### Mobile polish
 
-- One unified `scope` enum on every event row (tickets + messages),
-  three values:
-  - **`internal`** — owners only + `@mention` recipients
-    (`@projet` narrows to project **owners**, not followers). Used
-    for replies that don't need to spam the thread audience.
-  - **`default`** — ticket subscribers + project owners + `@mention`
-    recipients (the standard fan-out).
-  - **`broadcast`** — `default` + project followers (the prior
-    `tickets.broadcast = 1` semantic, now per-event).
-- **Composer** : `Select` tristate dropdown (replaces the legacy
-  "replying as" InputText `#B.240` and the short-lived `internal`
-  checkbox). The widget remembers the last value chosen **per
-  ticket** (`#79h7zk`) via localStorage
-  (`aiball.composer.scope.<ticketId>`), so you don't re-pick on
-  every reply. Initial fallback is `default` for every mode
-  (`#253` — david: replies should fan out like a normal post, the
-  earlier ny8m8a directive favouring `internal`-by-default was
-  reversed after live trial).
-- **MCP** : `ticket_new` + `ticket_reply` gain an optional
-  `scope: "internal" | "default" | "broadcast"` parameter. Default
-  `default` for both — pass `internal` to narrow to owners + explicit
-  @mentions, `broadcast` to also reach followers.
-- **Behavior change** : prior fan-out hinged on two unrelated
-  booleans — `tickets.broadcast` (followers vs. internal at the
-  ticket level) and the implicit "every comment notifies
-  subscribers + owners". After this, each event independently
-  decides. Replies default to `internal` so existing thread
-  audiences are no longer pinged on every back-and-forth; pick
-  `default` to ping them, `broadcast` to also reach followers.
-- **Schema** : `tickets.broadcast` and `_messages.internal` are
-  dropped in favor of `scope TEXT NOT NULL DEFAULT 'default' CHECK
-  (scope IN ('internal','default','broadcast'))` on both tables.
-  Backfill: `broadcast=1 → 'broadcast'`, `internal=1 → 'internal'`,
-  else `'default'`. Migrations: `0020_message_internal.sql` lands
-  the intermediate `internal` column; `0021_scope_tristate.sql`
-  unifies into `scope` and drops the now-redundant booleans.
-- Resolves the friction surfaced by `#B.245`: David typed
-  `@aiball ... j'ai un bug ici` to address the project, but the
-  active Claude session interpreted it as a personal task. With
-  `scope: internal` plus `@projet` narrowing, the same gesture now
-  explicitly addresses project owners without reaching the active
-  Claude or followers.
+- Long-press a row (~500 ms) on phones to start a bulk selection; the bulk
+  bar surfaces only when a selection is active. The legacy "peek" mode is
+  removed and the identity picker slimmed to current-consumer + logout.
+- "← Back to inbox" link above every settings panel; auto-approve projects
+  no longer fire two toasts per event.
+- Mobile inbox stays fresh after a phone sleep: a `visibilitychange`
+  listener tears down a zombie WebSocket and reconnects immediately;
+  server-side WS pings every 25s keep middleboxes from killing idle TCP.
 
-### MCP `ticket_reply` — `then: "plan"` (`#B.243`)
+### claude-loop + autopoll
 
-- New value `"plan"` on the `then` enum of `ticket_reply`, symmetric to
-  `"resolved"`: tags the comment as a *plan proposal* with
-  `meta.decision = { kind: "plan", status: "pending" }`. The reporter
-  validates the approach via accept/reject under the composer before
-  the agent executes.
-- Sémantique go-signal : accepted plan = the ticket re-enters
-  `actionable: true` so the agent picks it back up; pending plan gates
-  actionable identically to a pending resolution. Closes the
-  agent-side asymmetry surfaced by `#B.239` (the doc on `actionable`
-  already excluded "pending plan proposals" but the tool exposed only
-  `resolved`).
-- Server-side was already prepared (`DECISION_KINDS` accepted `"plan"`
-  since the decision-on-comment lifecycle landed in `#B.129`) —
-  enabling it is purely an MCP enum extension, ~6 net lines in
-  `src/mcp/ticket-write.ts`.
+- Default wake-CTA phrases move to `config/defaults/claude-loop-pings.yaml`
+  (same 3-layer override chain).
+- Autopoll is quieter when there's nothing new: default
+  `autopoll.throttle_seconds` raised 30s → 120s; inside tmux the Stop hook
+  probes the pane footer for "esc to interrupt" before firing. New pings
+  and new open tickets still bypass the throttle and notify instantly.
 
-### Consumers panel rework (`#B.193`, `#B.194`)
+---
 
-- "Add consumer" form retired — daemon auto-inserts on first sight,
-  humans go through setup-screen or `aiball auth issue`.
-- Default sort flipped to activity-desc ("who's been around lately"
-  is the real triage view).
-- Toolbar checkbox "Hide consumers idle > 1 week" (default ON) with
-  an "N shown / M total" count so the filter never silently hides
-  a row you're looking for.
-- New dedicated edit page at `/consumers/<id>` (pi-pencil button
-  per row) with a "← Consumers / <id>" breadcrumb header — full
-  form for kind / display_name / note / enabled plus read-only
-  created_at + last_seen_at.
-- The list table is now read-only — every edit goes through the
-  detail page. Kept the kind/display_name inline editors initially
-  but david: "la liste a plus besoin d'être éditable, je veux une
-  page détail édition d'un consumer" → removed.
-- Header blurb trimmed from a 13-line moderation primer to two
-  sentences (the old text pushed the table below the fold on phone).
+## [0.6.2] — 2026-05-18
 
-### Mobile navigation polish (`#B.194`)
+Remote access from your phone, and pre-publication polish.
 
-- "← Back to inbox" link rendered above every settings panel
-  (Projects / Rules / Tags / Consumers). The sidebar lives in the
-  mobile footer band and is easy to miss; the panels used to look
-  like dead-ends.
-- Auto-approve projects no longer fire two toasts per event. The
-  "pending review" toast holds for 250ms; if a decision lands in
-  that window, the pending timer is canceled and only the decision
-  shows.
+### Remote access via Tailscale
 
-### Internal cleanup (continued)
+aiball can now be reached from your phone (or any tailnet device) without
+exposing the daemon to the public internet.
 
-- `claudeStillWorking()` pane probe in the autopoll Stop hook now
-  forks tmux once instead of twice — `capture-pane` defaults to
-  the active pane in the current session when no `-t` is given,
-  so the prior `display-message` round-trip was unnecessary.
-
-### Autopoll is quieter when there's nothing new (`#B.192`)
-
-The Stop hook used to re-fire the "Backlog: N open ticket"
-reminder on basically every turn during fast back-and-forth.
-Two fixes:
-
-- Default `autopoll.throttle_seconds` raised 30s → 120s so the
-  standing reminder doesn't spam during sub-minute turns. New
-  pings and new open tickets still bypass the throttle and notify
-  instantly.
-- Inside tmux, the hook now probes the pane footer for "esc to
-  interrupt" before firing. Still mid-work → skip. For the
-  throttle-elapsed reminder we also reset the throttle counter,
-  so we wait another full window after busy clears instead of
-  re-checking on every Stop.
-
-### Mobile inbox stays fresh after a phone sleep (`#B.191`)
-
-- WS reconnect: a `visibilitychange` listener catches the case
-  where mobile browsers freeze a backgrounded tab and silently
-  drop the socket. When the tab returns the client tears down the
-  zombie socket and reconnects immediately instead of waiting for
-  the exponential backoff.
-- Server-side WebSocket pings every 25s plus per-socket liveness
-  via pong: keeps middleboxes (mobile carriers, Tailscale serve,
-  corp proxies) from killing idle TCP, and lets the server notice
-  half-dead clients on its own.
-- On a fresh WS connection the inbox + projects re-fetch so any
-  event missed during the outage gets reconciled.
-- Auto-mark-read on the thread dwell is now bounded by `up_to_id`
-  — comments arriving AFTER you opened the thread keep their
-  unseen ping so the inbox row stays bold+green for the new
-  content. The envelope toggle still acks the whole thread.
-
-### Internal cleanup
-
-- Shared `paneFooterShowsBusy()` helper in `claude-loop/state.ts`
-  used by the heartbeat timer AND the autopoll Stop hook
-  (#B.185 / #B.192 follow-up).
-- `/simplify` pass on the post-v0.6.2 commits: aggressive comment
-  prune (~130 lines of #B.xxx narration trimmed), `markTicketSeen`
-  collapsed with optional `upTo` (DB function de-dup), N+1 lookup
-  fixed in `fanOutPings` via a hoisted human set, `CONSUMER_KIND_OPTIONS`
-  exported once.
-
-## [0.6.2] - 2026-05-18
-
-### No more "faux unread" on the human's own posts (`#B.191`)
-
-Posting from the web UI as a display alias (e.g. "as david")
-used to ping the registered `human` Moderator consumer — the
-same person under a different identity — and surface the author's
-own posts as unread. fanOutPings now skips cross-human pings; a
-one-shot migration (`0016_dedupe_cross_human_pings`) backfilled
-the existing rows. Agent → human pings are unchanged.
-
-### Remote access from your phone via Tailscale (`#B.182`)
-
-aiball can now be reached from your phone (or any tailnet device)
-without exposing the daemon to the public internet.
-
-- New `bin/aiball-tailscale` helper wraps `tailscale serve` with
-  the daemon port auto-resolved. `up` / `down` / `status`
-  subcommands; HTTPS on :443 by default, `--http` fallback when
-  MagicDNS HTTPS certs aren't enabled.
-- New `docs/TAILSCALE.md` quickstart covering both host (install
-  Tailscale + run helper) and client (install the app on
-  phone/desktop, sign in to the same account, enable VPN, open
-  URL).
+- New `bin/aiball-tailscale` helper wraps `tailscale serve` with the daemon
+  port auto-resolved. `up` / `down` / `status` subcommands; HTTPS on :443
+  by default, `--http` fallback when MagicDNS HTTPS certs aren't enabled.
+- New `docs/TAILSCALE.md` quickstart covering both host and client setup.
 - `install.sh` symlinks the helper alongside `aiball`.
 
-aiball auth (password / bearer) is unchanged — Tailscale handles
-the transport, the middleware still fires.
+aiball auth (password / bearer) is unchanged — Tailscale handles the
+transport, the middleware still fires.
 
-### README pre-publication polish (`#B.183`, `#B.189`)
+### README pre-publication polish
 
-The "sandbox loop" / autonomous-multi-agent narrative was framing
-aiball as something it isn't yet — moved to a new `ROADMAP.md`,
-README trimmed to current shipping features. Internal ticket refs
-stripped from user-facing copy. Mobile/Tailscale flow surfaced in
-"What's in the box".
+The autonomous-multi-agent narrative was framing aiball as something it
+isn't yet — moved to a new `ROADMAP.md`, README trimmed to current shipping
+features, internal references stripped from user-facing copy.
 
-### Mobile UI fixes (`#B.187`, `#B.188`)
+### claude-loop refinements
 
-Two cuts after testing the new mobile flow:
+- **All timeouts yaml-configurable**: a `claude_loop:` block in
+  `.aiball.yaml` exposes the heartbeat tick and grace windows
+  (`interval_seconds`, `boot_grace_seconds`, `user_grace_seconds`,
+  `wake_in_flight_ttl_ms`). The loop's own auto-wake `send-keys` no longer
+  self-triggers user-grace.
+- **Clipboard**: drag-select in a pane copies to the system clipboard via
+  `wl-copy` / `xclip` / `pbcopy` when available (fixes VTE terminals that
+  reject OSC 52); OSC 52 stays as the SSH/remote fallback.
+- **Status bar no longer stuck on `busy`**: the Stop-hook pane probe is
+  scoped to the live footer so stale "esc to interrupt" text can't pin the
+  bar. Default heartbeat tick dropped 60s → 30s; `user_grace_seconds`
+  recalibrated 300s → 60s.
 
-- Toast notifications now sit at the bottom on phone with proper
-  margins (the mobile CSS block had the wrong media query and
-  never fired).
-- New-ticket form: title + intent select stack vertically below
-  720px instead of overflowing off the right edge.
+### Inbox + UI
 
-### claude-loop: all timeouts yaml-configurable (`#B.180`)
+- Inbox defaults to "all" status (auto-approve projects used to land users
+  on an empty list while the sidebar showed dozens of open tickets); empty
+  rows offer a "Show all open tickets" reset button.
+- Mobile fixes: toasts sit at the bottom on phone with proper margins; the
+  new-ticket form stacks vertically below 720px instead of overflowing.
+- No more "faux unread" on the human's own posts: posting as a display
+  alias no longer pings the registered `human` consumer (one-shot migration
+  `0016_dedupe_cross_human_pings` backfilled existing rows).
 
-New `claude_loop:` block in `.aiball.yaml` exposes the heartbeat
-tick and grace windows (`interval_seconds`, `boot_grace_seconds`,
-`user_grace_seconds`, `wake_in_flight_ttl_ms`). Fixed alongside:
-the loop's own auto-wake `send-keys` no longer self-triggers
-user-grace (it had been locking the wrapper out until a real
-human keystroke arrived).
+### Ops
 
-### claude-loop: tmux clipboard via local tool with OSC 52 fallback (`#B.181`)
+- GitHub ruleset on the main branch blocks force-push and deletion. The
+  direct-push workflow is unchanged.
 
-Drag-select in a claude-loop pane now copies to the system
-clipboard. Pipes through `wl-copy` / `xclip` / `pbcopy` when
-available (fixes VTE terminals like Ptyxis that reject OSC 52);
-OSC 52 stays as the SSH/remote fallback. Shift+drag still works
-as the no-tmux escape hatch.
+---
 
-### claude-loop: status bar no longer stuck on `busy` (`#B.185`)
+## [0.6.1] — 2026-05-16
 
-After a few turns the bar could get pinned on `busy` even when
-Claude was idle, because the Stop hook re-probed the pane for
-"esc to interrupt" and matched stale footer text from the
-just-finished turn. The probe is now scoped to the live footer
-and the obsolete `working` pane-state was retired. Default
-heartbeat tick `interval_seconds` also dropped from 60s → 30s
-(the bar was lagging visibly behind real state changes);
-`user_grace_seconds` recalibrated from 300s → 60s (5-minute
-outlier; one keystroke silenced the wrapper for 5min).
+Mobile-ready UI, a unified identity chain, and live consumer activity.
 
-### Inbox: default to "all" status + reset-from-empty filter (`#B.184`)
+### Mobile-responsive UI pass
 
-The inbox defaulted to `pending`, which on auto-approve projects
-(aiball itself) landed users on an empty list while the sidebar
-badges showed dozens of open tickets. Now defaults to `all`;
-empty rows offer a "Show all open tickets" reset button when
-filters are narrowed.
+First-pass mobile readiness for tailscale/phone access, audited at 500px:
 
-### Main branch protected (`#B.186`)
+- **Header** wraps on narrow viewports; at <720px the strategy select
+  hides (reachable via Project Settings), badges compact, controls fit on
+  at most two rows.
+- **Sidebar** projects list collapses to a `<details>` dropdown on mobile;
+  the settings section becomes a footer band.
+- **Toasts** go edge-to-edge with the detail footer hidden on mobile.
+- Misc alignment fixes (consumers panel row borders, relation-promote
+  popover reset on navigation with an explicit close button).
 
-GitHub ruleset on `quazardous/aiball` blocks force-push and
-deletion on `main`. Direct-push workflow unchanged.
-
-
-
-The consumers panel now shows two new pieces of information per row:
-last-seen (relative time since the consumer's last API call) and, for
-claude-loop agents, a live state badge — `busy` (electric blue,
-matches the tmux bar), `boot` (yellow), `idle` (gray), or `offline`
-(gray, no heartbeat in the last 60s).
-
-- Backend: `last_seen_at` touched in the auth middleware on every
-  authenticated request. New `PUT /api/consumers/:id/state` endpoint
-  for claude-loop's timer to push its `settledStatus` on each tick
-  (own-state only — humans rejected, the badge surface is for loop
-  agents).
-- Frontend: new "Activity" column in `ConsumersPanel.vue` with a
-  tick-clock for relative-time freshness (no re-fetch) plus a full
-  re-fetch every ~30s. Existing "State" column renamed to "Active"
-  (it's the enable/block toggle). Column headers are clickable to
-  sort by id / kind / display name / activity / active.
-- Migration: 0015 adds `last_seen_at`, `state`, `state_since`,
-  `state_updated_at` to the consumers table.
-
-### Project bootstrap CLI (`#B.175`)
-
-Three new commands consolidate the per-project wiring:
-
-- `aiball mcp init` — merges the aiball entry into `.mcp.json`
-  non-destructively (preserves any existing MCP servers, idempotent,
-  `--force` rewrites to canonical form which drops the legacy
-  `mcpServers.aiball.env` block per #B.154).
-- `aiball autopoll init` — copies the annotated `.aiball.yaml`
-  template (already shipped, unchanged here).
-- `aiball init` — Quickstart wrapper. Calls `mcp init` then writes
-  a minimal `.aiball.yaml` (`autopoll: enabled: true`).
-
-README Quickstart §2 now a single line: `aiball init`.
-
-### Tmux mouse mode in claude-loop sessions (`#B.176`)
-
-`claude-loop start` now sets `mouse on` per-session (scoped, no
-`.tmux.conf` impact). Scroll wheel scrolls the pane buffer instead
-of getting translated to Up/Down arrow keys.
-
-### Unified identity resolution chain (`#B.154`)
+### Unified identity resolution chain
 
 `.aiball.yaml consumer.*` is now the canonical source for `consumer_id`
 and default project across every aiball surface (autopoll, claude-loop,
-`aiball` CLI, MCP server). The chain, applied entirely in
-`src/autopoll/config.ts:loadConfig()`:
+`aiball` CLI, MCP server). The chain, applied in `loadConfig()`:
 
-1. `process.env.AIBALL_AGENT` / `AIBALL_PROJECT` — priority override
-   for special cases
+1. `AIBALL_AGENT` / `AIBALL_PROJECT` env — priority override
 2. `.aiball.yaml consumer.agent` / `consumer.project` — canonical
-3. `.mcp.json mcpServers.aiball.env.*` — DEPRECATED (still works,
-   `aiball check` + `claude-loop` warn on stderr)
+3. `.mcp.json mcpServers.aiball.env.*` — DEPRECATED (still works, warns on
+   stderr)
 4. Defaults: project = `basename(cwd)`; agent = `<project>-claude`
 
-`aiball check` now surfaces the source of each resolved field
-(`[from aiball.yaml/env/mcp.json/default]`), a dedicated
-`deprecation` section when `.mcp.json` carries the legacy env block,
-and an activation hint (`activate with: aiball autopoll init`) when
-the Stop hook is wired but no `.aiball.yaml` is present.
+`aiball check` now surfaces the source of each resolved field, a dedicated
+deprecation section, and an activation hint when the Stop hook is wired but
+no `.aiball.yaml` is present.
 
-Migration: drop the `mcpServers.aiball.env` block from `.mcp.json`,
-add a `consumer:` block to `.aiball.yaml`. See `.aiball.yaml.example`.
+### claude-loop status & pane awareness
 
-### claude-loop status & pane awareness (`#B.154`)
+- Status colours in the tmux bar (`boot` / `idle` / `busy`) with phase
+  suffixes (`[busy:compacting]` / `[busy:rate-limit]` /
+  `[boot:resume?]` …).
+- Resume-picker auto-dismiss on `--resume` (SessionStart hook detects the
+  picker and sends Down+Enter, per `CL_RESUME_MODE`).
+- Heartbeat pane-probe each tick flips the bar based on "esc to interrupt",
+  catching slash commands (like `/compact`) where Claude Code's Stop hook
+  doesn't fire.
+- New `ProjectContext` service centralizes cwd + identity resolution.
 
-- **Status colors** in the tmux bar: `[boot]` (yellow) → `[idle]` (gray)
-  → `[busy]` (cyan, queued/waiting) → `[working]` (green, claude
-  actively mid-turn per `esc to interrupt`). Plus phase suffixes
-  `[busy:compacting]` / `[busy:rate-limit]` / `[busy:api-error]` and
-  resume picker phases (`[boot:resume?]`, `[boot:pick→as-is]`, …).
-- **Resume picker auto-dismiss** on `--resume`: SessionStart hook
-  detects the picker text and sends Down+Enter (or Enter, per
-  `CL_RESUME_MODE`).
-- **Heartbeat pane-probe**: every tick the timer reads pane content
-  and flips the bar between `working` ↔ `idle` based on
-  `esc to interrupt`. Catches the case where Claude Code's Stop hook
-  doesn't fire (slash commands like `/compact`), so the bar no longer
-  sticks at `[busy]` after a slash command returns.
-- **Bootstrap refactor**: new `ProjectContext` service centralizes
-  cwd + identity resolution for cmdStart / cmdCheck / cmdTrace
-  (previously duplicated with subtle drift).
+### Rejected decisions surfaced in the inbox
 
-### Rejected decisions surfaced in the inbox (`#B.168`, `#B.173`)
+When the reporter rejects an agent's resolution proposal and the thread
+stays open, the row shows a red × badge ("I rejected, work still on the
+table"). Same surface for plan decisions (amber badge). Latest-wins: a
+fresh proposal supersedes prior rejected ones; cleared once the ticket is
+closed or rejected.
 
-When the reporter rejects an agent's resolution proposal and the
-thread stays open, the row now shows a red × badge
-(`rejected-resolved`) so the reporter sees "I rejected, work still
-on the table". Same surface for plan decisions
-(`rejected-plan`, amber `pi-ban` badge — distinct from agent-
-escalation red).
+### Project bootstrap CLI + consumer activity
 
-Latest-wins semantics: a fresh proposal supersedes prior rejected
-ones on the badge. Cleared once the ticket is closed or rejected.
+- Three commands consolidate per-project wiring: `aiball mcp init` (merges
+  the aiball entry into `.mcp.json` non-destructively), `aiball autopoll
+  init` (copies the annotated `.aiball.yaml` template), and `aiball init`
+  (quickstart wrapper). README quickstart §2 becomes a single line.
+- `claude-loop start` sets `mouse on` per-session (scoped) so the scroll
+  wheel scrolls the pane buffer.
+- The consumers panel shows two new pieces of info per row: last-seen
+  (relative time since the last API call) and, for claude-loop agents, a
+  live state badge (`busy` / `boot` / `idle` / `offline`). A new
+  `PUT /api/consumers/:id/state` endpoint lets the timer push its state
+  each tick (migration `0015` adds the columns).
 
-### SSE event-bus — daemon push, kill the polling lag (`#B.148`)
+---
 
-The daemon now exposes a Server-Sent-Events stream at
-`GET /api/events?consumer_id=X`. New ping insertions emit a `ping` event
-to every subscriber for that recipient in real time (sub-10ms end-to-end
-in smoke tests, FIFO-ordered, no drops).
+## [0.6.0] — 2026-05-14
 
-- **Daemon side**: `src/event-bus.ts` (typed EventEmitter), `insertPing`
-  emits on successful insert (skips `onConflictDoNothing` duplicates),
-  `/api/events` endpoint with `hello` boot frame + 30s keepalive + clean
-  teardown on close/error.
-- **Client side**: `AiballClient.subscribeEvents({onPing, onHello?,
-  onError?}): unsubscribe` opens an SSE stream over UDS, parses frames,
-  invokes callbacks. No built-in reconnect — caller decides.
-- **claude-loop timer** now picks SSE mode automatically when the
-  check-cmd is the default `aiball pings-count -q`. Wake fires
-  ~immediately on a new ping. Heartbeat (interval) stays as a safety
-  net for `wake-requested` files + SSE-drop reconnect. Custom check-cmds
-  keep the legacy polling loop.
+claude-loop, the SSE event-bus, and typed inter-ticket relations.
 
-Latency before: worst-case `CL_INTERVAL` (60s default). Latency after:
-~1ms (DB insert → emit → SSE flush → wake).
-
-### claude-loop diagnostic toolkit (`#B.149`, `#B.154`)
-
-Two new subcommands to debug "loop stays idle, why?" without spawning a
-claude session:
-
-- `claude-loop check [name]` — one-shot report: resolved consumer_id,
-  unread pings count, project subscriptions, verdict (WAKE/SLEEP), plus
-  contextual hints when AIBALL_PROJECT is set but the consumer has no
-  subscription on it.
-- `claude-loop trace [--events] [--once] [--interval N]` — foreground
-  gate evaluator. Default prints WAKE/sleep every N seconds. `--events`
-  opens SSE and tails every incoming event raw (no claude, no tmux —
-  pure observation).
-
-`bin/claude-loop` launcher now resolves `AIBALL_SOCK` (same logic as
-`bin/aiball`), so `claude-loop check` works standalone without the
-daemon's auth-via-token path.
-
-### claude-loop SessionStart matcher fix (`#B.148`)
-
-Hook matcher was `"startup"` only, so `claude --resume` (matcher
-`"resume"`) and `claude --continue`/`/clear` (matcher `"clear"`) skipped
-the boot drain entirely. Combined with SSE only delivering NEW pings
-(existing unread don't replay at connect), loops stayed `[idle]` after
-resume even with work waiting. Fix: register the hook against the three
-matchers (array form). Plus the timer now does an immediate `tryWake`
-right after subscribing, as a defensive catch-up when SessionStart
-misses.
-
-Also: `claude-loop start --user-grace <sec>` CLI option (`#B.145`),
-inline `UserPromptSubmit` hook refreshing a `user-took-over` marker; the
-timer skips wakes while the marker is fresh (default 300s) so the
-wrapper doesn't send-keys over a human-driven prompt.
-
-### Mobile-responsive UI pass (`#B.161`, `#B.150`, `#B.158`, `#B.159`, `#B.165`)
-
-First-pass mobile readiness for tailscale/phone access. Audited live at
-500px viewport, fixed several breaks:
-
-- **Header** wraps on narrow viewports (was clipping the strategy
-  dropdown). At <720px: strategy select hidden (accessible via Project
-  Settings), badges compacted, h1 smaller, spacer collapsed. All
-  controls visible on at most two rows.
-- **Sidebar** projects list collapses to a CSS `<details>` dropdown on
-  mobile (open by default on desktop). Settings section becomes a
-  horizontal icon-row pushed to the bottom of the sidebar band —
-  matches david's "settings should read as footer" intent without
-  splitting the component.
-- **Toasts** go edge-to-edge with detail footer hidden on mobile (the
-  summary already carries the kind + ref).
-- **Consumers panel** border-bottom now aligns across all cells on
-  every row (was a 7px drift from a leaked `display: flex` rule in
-  ProjectsPanel — scoped selectors with `.consumers-table` prefix fix
-  it).
-- **Relation-promote popover** survives navigation no more — Popover
-  state hidden + reset on `ticketId` watcher. Plus an explicit close X
-  button top-right.
-
-### ticket_referenced dedupe (`#B.153`)
-
-`insertRelationEvent` now skips inserting a `ticket_referenced` row
-when one already exists for the same (target, source) pair — fixes the
-"referenced from #B.NN, #B.NN" rendering noise when a source ticket
-edits or re-mentions the same target across multiple comments.
-
-### README + hero image (`#B.157`)
-
-- New title: `aiball — local backlog for inter-agent coordination`
-- Hero diagram at the top (`assets/aiball-loop.png`)
-- Pseudo-loop section rewritten with the SSE + claude-loop + MCP
-  primitives now shipped
-- "Two key innovations" (decision-on-comment + SSE event-bus) +
-  "Useful primitives for Claude Code users" + "Why not slack-bot" sub-
-  sections aligned with the diagram
-- GitHub repo description updated to match
-
-### claude-loop — new generic tickable wrapper (`#B.63`)
+### claude-loop — generic tickable wrapper
 
 `claude-loop` wraps a Claude Code session in a tmux loop that wakes itself
-when idle. Built generic but ships aiball-aware by default — the timer
-checks `aiball pings-count` each tick and pings claude only when there's
-work to drain (no unnecessary nags). Pure timer mode still available via
-`--check-cmd true`. Direct in-process AiballClient call when using the
-default check (no fork per tick).
+when there's work. Built generic but ships aiball-aware by default — the
+timer checks `aiball pings-count` each tick and pings claude only when
+there's a backlog to drain. Pure-timer mode via `--check-cmd true`.
 
-Defaults: spawn + attach + random pop-culture wake-up phrase ("Hello,
-Dave." / "Make it so." / "Allons-y!" — 20 phrases in
-`skill/claude-loop-pings.yaml`, overridable). `--no-attach` / `--no-
-startup-ping` / `--interval N` / `--check-cmd '<shell>'` / `--pings
-<yaml>` for fine control. Anything after `--` is forwarded to `claude`
-(e.g., `claude-loop -- --model opus -p "hello"`).
+Defaults: spawn + attach + a random pop-culture wake phrase. `--no-attach`
+/ `--no-startup-ping` / `--interval N` / `--check-cmd '<shell>'` / `--pings
+<yaml>` for fine control; anything after `--` is forwarded to `claude`.
+State lives in `~/.claude-loop/<NAME>/`; an inline `claude --settings` JSON
+registers SessionStart + Stop hooks scoped to that session — no pollution
+of the user's `.claude/settings.json`. Subcommands:
+`start | list | attach | tail | rm | wake | prune`.
 
-Wired into the existing install pipeline (`install.sh` symlinks
-`~/.local/bin/claude-loop`; `--uninstall` cleans all three CLIs).
+### SSE event-bus — daemon push, kill the polling lag
 
-Architecture mirrors `aiball`: `bin/claude-loop` is a thin bash launcher
-→ `tsx src/claude-loop/cli.ts`. State lives in `~/.claude-loop/<NAME>/`
-(plate.json, env, pings.yaml, idle-since, timer.log). Inline `claude
---settings` JSON registers SessionStart + Stop hooks scoped to that
-session — no pollution of the user's `.claude/settings.json`.
+The daemon exposes a Server-Sent-Events stream at
+`GET /api/events?consumer_id=X`. New ping insertions emit a `ping` event to
+every subscriber for that recipient in real time (FIFO-ordered, no drops).
+The claude-loop timer picks SSE mode automatically when the check-cmd is
+the default, so a wake fires ~immediately on a new ping; the heartbeat
+interval stays as a safety net for `wake-requested` files and SSE-drop
+reconnect.
 
-- **SessionStart hook** replaces the fragile `sleep 3 && send-keys` race
-  for the startup ping. Fires when claude is actually ready (after MCP
-  trust prompts etc), gates on the same check-cmd as the timer.
-- **Stop hook** writes an `idle-since` marker each turn; the timer
-  consults it before considering a wake.
-- **`aiball pings-count`** new CLI subcommand: prints the unread ping
-  count, exits 0 when > 0 (= work to drain), 1 when 0. Shell-pipeline
-  friendly.
+Latency before: worst-case `CL_INTERVAL` (60s default). After: ~1ms (DB
+insert → emit → SSE flush → wake).
 
-Subcommands: `start | list | attach | tail | rm | wake | prune`.
+### claude-loop diagnostic toolkit
 
-### Typed inter-ticket relations (`#B.123`)
+- `claude-loop check [name]` — one-shot report: resolved consumer_id,
+  unread ping count, subscriptions, WAKE/SLEEP verdict + hints.
+- `claude-loop trace [--events]` — foreground gate evaluator;
+  `--events` opens SSE and tails every incoming event raw.
 
-New `ticket_relation` event kind backed by an N-N event-sourced graph.
-Five kinds: `relates_to | depends_on | blocks | duplicates | ignored`.
-UI cartouche in the thread header with per-chip change-kind menu +
-remove (tombstone via `kind=ignored`). Right-click on any `#B.NN` link
-in a comment body opens a promote popover anchored on the link with the
-target's title fetched lazily. Chips display the target's lifecycle
-stage badge (closed / closed-resolved / rejected / snoozed).
+Also: the SessionStart hook is registered against the `startup` / `resume`
+/ `clear` matchers so `claude --resume` / `--continue` no longer skip the
+boot drain; an inline `UserPromptSubmit` hook refreshes a `user-took-over`
+marker so the timer doesn't `send-keys` over a human-driven prompt.
 
-Backfill at daemon boot: existing `parent_ticket_id` rows get a
-`depends_on` relation event so the new graph subsumes the legacy sub-
-ticket shape. Idempotent. `actionable_count` now excludes tickets with
-an active `depends_on` to an open blocker.
+### Typed inter-ticket relations
+
+New `ticket_relation` event kind backed by an N-N event-sourced graph. Five
+kinds: `relates_to | depends_on | blocks | duplicates | ignored`. UI
+cartouche in the thread header with a per-chip change-kind menu + remove.
+Right-click any ticket link in a comment to open a promote popover. Chips
+show the target's lifecycle stage. Backfill at boot: existing
+`parent_ticket_id` rows get a `depends_on` relation so the graph subsumes
+the legacy sub-ticket shape; `actionable_count` excludes tickets with an
+active `depends_on` to an open blocker.
 
 ### Wording + UI polish
 
-- **summary_until cap removed** (`#B.130`) — was 200 → 500 → none; now
-  a free-text field like `body`. MCP description carries a state-vs-
-  action contract with good/bad examples to coach agents on framing.
-- **TLDR banner intercalé** between the carrier comment and the post-
-  summary comments (`#B.130`). Older `summary_until` values stay
-  invisible by design — latest wins.
-- **Brief mode lossless** (`#B.130`) — comments without a
-  `summary_until` (humans, pre-`#B.130`) keep their body instead of
-  returning `null`. Brief mode is now lossy-by-summary, never lossy-by-
-  absence.
-- **SplitButton accept wording** (`#B.139`) — main label now reads
-  "accept resolution → close" (arrow notation makes the effect
-  explicit); dropdown lists all variants including the default as the
-  first item so users have two equivalent paths.
-- **Decider chip** (`#B.129`) — a comment that triggered an
-  accept/reject act now carries a small severity-colored chip pointing
-  at the target (frontend-only heuristic, 60s window). Suppressed when
-  the comment already carries its own decision chip — no dupes.
-- **Search respects `open` filter** (`#B.135`) — previously only
-  excluded rejected tickets; now also excludes lifecycle-closed.
-- **Sidebar counters consistent** (`#B.138`) — `resolved_count` badge
-  now also excludes snoozed tickets, matching the inbox list.
+- `summary_until` length cap removed — now a free-text field like `body`,
+  with a state-vs-action contract in the MCP description.
+- A TLDR banner is intercalated between the carrier comment and the
+  post-summary comments; older `summary_until` values stay invisible
+  (latest wins). Brief mode keeps human/legacy comment bodies instead of
+  returning `null`.
+- SplitButton accept wording now reads "accept resolution → close".
+- A decider chip points at the target of an accept/reject act.
+- Search and the sidebar counters now both exclude lifecycle-closed and
+  snoozed tickets, matching the inbox list.
+- New title + hero diagram on the README, aligned with the shipped SSE +
+  claude-loop + MCP primitives.
 
 ---
 
 ## [0.5.0] — 2026-05-12
 
-Autonomous sandboxes + lighter MCP surface.
+Autonomous sandboxes + a lighter MCP surface.
 
-- **Sandbox loop** (`#B.63`): `aiball sandbox start --tickets "10,11"` spawns
-  a Claude session in tmux that works through the listed tickets without
-  asking "now what?" — uses `--permission-mode auto` + per-session hooks
-  passed via `claude --settings`, no pollution of your project repo.
-  Tinted status-bar (orange for the real loop, blue for `sandbox plain`
-  mux tests). Sub-commands: `start / plain / list / attach / tail / rm /
-  prune`. Inline read-only attach by default. `--worktree` for isolation.
+- **Sandbox loop**: `aiball sandbox start --tickets "10,11"` spawns a
+  Claude session in tmux that works through the listed tickets without
+  asking "now what?" — `--permission-mode auto` + per-session hooks passed
+  via `claude --settings`, no pollution of your project repo. Tinted
+  status bar; subcommands `start / plain / list / attach / tail / rm /
+  prune`; read-only attach by default; `--worktree` for isolation.
 - **Hardened MCP in sandbox mode**: `AIBALL_MCP_MODE=sandbox` locks
   `by_agent` to the resolved agent id on every write — no impersonation
   from inside an autonomous agent.
 - **MCP token diet**: `ticket_get` / `ticket_list` / `poll` accept
-  `summary: true` (drop bodies, keep headers + counts). `poll()` scopes
-  to `AIBALL_PROJECT` by default; pass `all_projects: true` to widen.
-  `unread` gains `count_only` and `mark_all`.
-- **`ticket_list` filters** (`#B.84`): `by_agent`, `status` (incl. `any`),
-  `title_contains`, `limit`. Combine with `summary: true` for cheap
-  index lookups.
+  `summary: true` (drop bodies, keep headers + counts). `poll()` scopes to
+  `AIBALL_PROJECT` by default; `unread` gains `count_only` and `mark_all`.
+- **`ticket_list` filters**: `by_agent`, `status` (incl. `any`),
+  `title_contains`, `limit`.
 - **`aiball sandbox` ships as a TS CLI**: `bin/aiball` is now a thin tsx
-  launcher (commander), shared infrastructure with the sandbox sub-group.
-- **Per-project purge** (`#B.77`): `POST /api/projects/:name/purge` and
-  UI button to drop tickets closed more than 1 year (configurable).
-- **Snooze fixes**: pending tickets can be snoozed (`#B.78`); the
-  "hide snoozed" toggle in the inbox correctly hides them on every tab.
+  launcher (commander), shared with the sandbox sub-group.
+- **Per-project purge**: `POST /api/projects/:name/purge` + UI button to
+  drop tickets closed more than 1 year (configurable).
+- **Snooze fixes**: pending tickets can be snoozed; the "hide snoozed"
+  toggle hides them on every tab.
 
 ---
 
@@ -631,30 +400,25 @@ Autonomous sandboxes + lighter MCP surface.
 
 Sub-tickets, ticket relations, per-project pulse, audit done.
 
-- **Sub-tickets** (`#B.61`): tickets can have a `parent_ticket_id`;
-  the parent's thread surfaces a sub-tickets accordion with the
-  lifecycle stage of each child.
-- **Backlinks** (`#B.62`): mentioning `#B.NN` in a body posts a
-  `ticket_referenced` pseudo-comment on the target, with the source
-  ticket's current stage rendered as a badge.
-- **Per-project stats page** (`#B.60`): Mantis-style pulse (oldest open,
-  avg age, resolution rate, top reporters / tags / intents,
-  auto-approved %). Opens from a chart button on each Settings >
-  Projects row.
-- **Cohesive MCP setters** (`#B.76`): `ticket_postpone` + `ticket_broadcast`
-  folded into `ticket_update({title?, body?, intent?, broadcast?,
-  postponed_until?})`. Added `ticket_decide(target_id, approve|reject)`
-  as the single moderation tool. Surface stays at 12 tools.
-- **Tags via MCP** (`#B.67`, `#B.73`): `ticket_new({tags: […]})` resolves
-  by name; `ticket_list({tags: […]})` filters AND-semantic.
-- **`my_pending_comments` in `poll()`** (`#B.69`): pending comments by
-  the agent surface alongside pending tickets.
-- **@-mention autocomplete in composer** (`#B.71`); global open-ticket
-  count badge in the header (`#B.75`); `poll()` slim default + bookends
-  (`#B.68`); drizzle migrations guide at `docs/MIGRATIONS.md` (`#B.72`).
-- **Audit `#B.332` closed**: monolithic `App.vue` / `db.ts` / business
-  libs / label catalog / CSS split into per-feature locations. New code
-  follows the established layout.
+- **Sub-tickets**: tickets can have a `parent_ticket_id`; the parent's
+  thread surfaces a sub-tickets accordion with each child's lifecycle
+  stage.
+- **Backlinks**: mentioning a ticket ref in a body posts a
+  `ticket_referenced` pseudo-comment on the target, with the source's
+  current stage as a badge.
+- **Per-project stats page**: Mantis-style pulse (oldest open, avg age,
+  resolution rate, top reporters / tags / intents, auto-approved %).
+- **Cohesive MCP setters**: `ticket_postpone` + `ticket_broadcast` folded
+  into `ticket_update({title?, body?, intent?, broadcast?,
+  postponed_until?})`. Added `ticket_decide(target_id, approve|reject)` as
+  the single moderation tool. Surface stays at 12 tools.
+- **Tags via MCP**: `ticket_new({tags: […]})` resolves by name;
+  `ticket_list({tags: […]})` filters AND-semantic.
+- **`my_pending_comments` in `poll()`**; @-mention autocomplete in the
+  composer; global open-ticket count badge in the header; `poll()` slim
+  default + bookends; drizzle migrations guide at `docs/MIGRATIONS.md`.
+- **Monolith split**: `App.vue` / `db.ts` / business libs / label catalog
+  / CSS split into per-feature locations. New code follows the layout.
 
 ---
 
@@ -662,13 +426,10 @@ Sub-tickets, ticket relations, per-project pulse, audit done.
 
 Reopen a closed ticket.
 
-- New `MessageKind`: `ticket_reopened`. Symmetric with `ticket_closed`;
-  the derived `closed` state of a ticket is the latest approved
-  close-or-reopen event.
-- Owner can reopen their own ticket without moderation (generalises
-  the earlier owner-can-close).
-- Frontend `ThreadView` shows a **reopen** button (`pi-unlock`) when
-  `approved && closed`.
+- New `MessageKind`: `ticket_reopened`, symmetric with `ticket_closed`; the
+  derived `closed` state is the latest approved close-or-reopen event.
+- The owner can reopen their own ticket without moderation.
+- Frontend `ThreadView` shows a reopen button when `approved && closed`.
 
 ---
 
@@ -677,13 +438,12 @@ Reopen a closed ticket.
 Killing the cursor — project feed delivery becomes per-message.
 
 - When a message is approved, the daemon inserts a `pings` row for every
-  ticket + project subscriber (deduplicated, minus the author), each row
-  with its own `seen_at`. No more cursor-based skip-ahead footguns.
-- `subscriptions.last_seen_id` is preserved but dormant. A migration
+  ticket + project subscriber (deduplicated, minus the author), each with
+  its own `seen_at`. No more cursor-based skip-ahead footguns.
+- `subscriptions.last_seen_id` is preserved but dormant; a migration
   backfills `pings` rows so existing subscribers don't lose their backlog.
 - MCP: `unread({ mark_read: true })` acks the slice it just returned,
-  per-message. `up_to_id` / `all` removed from the MCP surface (kept on
-  the HTTP API for CLI bulk use, now operating on existing rows only).
+  per-message.
 
 ---
 
@@ -692,27 +452,22 @@ Killing the cursor — project feed delivery becomes per-message.
 Major MCP surface consolidation. Active agents must `/mcp reconnect`.
 
 - **Folded into `poll`**: `whoami`, `status`, `my_subscriptions`,
-  `list_projects`. `mark_read` folded into `unread({mark_read: true})`.
-  `ticket_comment` folded into `ticket_reply` (the `target_id` can be
-  a ticket id or a comment id).
+  `list_projects`. `mark_read` folded into `unread({mark_read: true})`;
+  `ticket_comment` folded into `ticket_reply` (the `target_id` can be a
+  ticket id or a comment id).
 - **Pings (lineage notifications)**: when a message is approved, every
   ticket subscriber gets a `pings` row (per-recipient `seen_at`).
-  Transition pings on approve/reject. Auto-subscribe-on-post.
-- **Owner / human bypass**: `ticket_closed` from the ticket's creator
-  auto-approves; posts whose `by_agent` matches `$AIBALL_HUMAN` (CSV
-  allowed) skip moderation.
-- **Moderation strategy**: `manual | auto | auto-reply` (default
-  `auto-reply` for comments; tickets and closes still go through
-  review by default).
+  Auto-subscribe-on-post.
+- **Owner / human bypass**: a `ticket_closed` from the creator
+  auto-approves; posts whose `by_agent` matches `$AIBALL_HUMAN` skip
+  moderation.
+- **Moderation strategy**: `manual | auto | auto-reply`.
 - **Micro-status on every MCP response**: `_status: {unread_project,
   unread_pings, project}` prepended so the agent sees what's waiting
   without an extra call.
-- Frontend: unified inbox list (Status + Priority filters), routing
-  with push-state, projects panel with delete-with-confirm,
-  `#N` linkify in markdown, WebSocket events.
-- HTTP API surface: `/api/inbox`, `/api/strategy`, `/api/pings*`,
-  `/api/ticket-subscriptions`, `/api/projects?detailed=1`,
-  `DELETE /api/projects/:name`, `/api/messages?by_agent=X`.
+- Frontend: unified inbox list (Status + Priority filters), push-state
+  routing, projects panel with delete-with-confirm, markdown linkify,
+  WebSocket events.
 
 ---
 

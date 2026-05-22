@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";
+import { AIBALL_VERSION } from "./version.js";
 import { commandExists } from "./sysdeps.js";
 import { registerSandboxCommands } from "./sandbox/cli.js";
 import { registerAuthCommands } from "./cli/auth.js";
@@ -39,6 +40,7 @@ const program = new Command();
 program
     .name("aiball")
     .description("CLI for the inter-agent BAL daemon")
+    .version(AIBALL_VERSION, "-v, --version", "print the aiball version and exit")
     .option(
         "-H, --human",
         "Act as the human moderator (consumer_id and default --by become $AIBALL_HUMAN, default \"human\")",
