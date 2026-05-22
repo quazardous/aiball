@@ -1,108 +1,87 @@
-# aiball — soft autoloop for Claude Code: the Never-Ending Story
+# aiball — pilot your Claude Code agents like a GitHub board
 
-![aiball pseudo-loop](./assets/aiball-loop.png)
+![AIBALL — an event-driven layer for persistent, per-project coding agents: pilot N claude-loop sessions, one per repo, all monitorable from one local-first ticket board](./assets/aiball-hero.png)
 
-A local daemon that holds a shared backlog for [Claude Code](https://docs.claude.com/en/docs/claude-code) and you. Pair it with `claude-loop` and your Claude session stays alive between turns: you queue tickets any time, claude wakes on each one and drains the backlog autonomously — no babysitting, no interruption mid-thinking, no lost context.
+A local-first board that turns Claude Code sessions into persistent,
+remotely-pilotable agents — one per project. Queue work, watch them drain
+it, accept or reject what they propose, all from one place.
 
-> **Today, Claude Code is the only supported agent.** The protocol is generic (MCP + a small HTTP/CLI surface) so other CLI agents could plug in, but nothing else is wired or tested yet. If you're not running Claude Code, this is interesting reading at best.
+> Runs on `127.0.0.1` (SQLite + UDS socket); data stays in
+> `~/.local/share/aiball` — no cloud, no telemetry. Claude Code is the
+> only wired agent today.
 
-Runs on `127.0.0.1` (UDS socket, SQLite). Storage stays on your machine in `~/.local/share/aiball` (no cloud backend), no telemetry.
+## What you can do
 
----
+- **Loop** — pair a session with `claude-loop` and it stays alive between
+  turns: queue tickets any time, the agent wakes on each (SSE event-bus,
+  no polling lag) and drains the backlog autonomously. No babysitting, no
+  interruption mid-turn.
+- **Pilot like GitHub** — tickets + threaded comments per project, with
+  decisions that ride on the comment: the agent proposes a resolution or
+  a plan, you accept / reject in place. The thread is the audit trail.
+- **Gate & monitor** — the consumers panel shows every session and
+  whether it's looping, waiting, or busy. See what your agents are doing
+  and steer them — from your laptop or your phone.
+- **Same old, same old** — or just use the terminal as usual. Aiball will
+  notice and stop bothering you while you take over.
 
-## The soft-loop
-
-1. **You (or another Claude session) queue a ticket** at any time — via the web UI, the MCP `ticket_new` tool, or the `aiball` CLI. The ticket lands in the right project's backlog addressed to a specific Claude session (by `consumer_id`) or broadcast to project owners.
-2. **A claude session is working on something** — its current turn proceeds uninterrupted. Aiball doesn't push during a turn.
-3. **End-of-turn `Stop` hook fires** (registered globally or per-loop via `claude-loop`). The hook checks the consumer's backlog. If non-empty, it surfaces pending tickets + pings into the next user-facing prompt — claude sees them as if you'd just typed "here's the backlog".
-4. **Claude drains the backlog**: reads tickets, posts replies (`ticket_reply`), proposes resolutions (`then: "resolved"`), closes its own (`then: "close"`). Each action emits events back to other subscribers.
-5. **Loop continues** until no actionable tickets remain. Session ends cleanly with full context preserved.
-
-The interaction model shifts from "interrupt with the next instruction" to "queue the next instruction so it lands when the agent is ready."
-
-**Two key design choices**:
-- **Decisions live on the comments** — when an agent proposes a resolution, the tag rides on the comment itself instead of a separate "decision" row. The reporter accepts or rejects in place, and the audit trail stays inside the thread where it was made.
-- **SSE event-bus** — `claude-loop` sessions subscribe to `/api/events` and wake instantly on new pings, no polling lag.
-
-**Useful primitives for Claude Code users**:
-- `claude-loop start` — wrap a tmux + claude session that auto-drains aiball pings
-- `claude-loop check` — diagnose subscriptions / unread state without spawning claude
-- `claude-loop trace --events` — live tail of SSE events (debug)
-- MCP tools — `poll` (snapshot), `unread`, `ticket_get`, `ticket_reply`, `ticket_new`, `subscribe`
-
-**Why not slack-bot / email / issue-tracker?** Zero latency (local), per-consumer privacy (no shared inbox), event-driven (no polling), and the agent never sees an interruption mid-context.
-
----
-
-## Quickstart — `claude-loop` (recommended)
-
-The productivity unlock. A tmux wrapper that keeps claude alive between tickets: queue twenty things over the day, walk away, claude wakes on each ping (SSE event-bus, no polling lag) and drains them. No hook config to babysit, no session to re-launch — the token quota becomes the only ceiling.
-
-### 1. Install (one-time)
+## Quickstart
 
 ```bash
+# 1. Install (one-time): daemon + bins (aiball, aiball-mcp, claude-loop)
 git clone https://github.com/quazardous/aiball.git && cd aiball
-./install.sh --auth-init      # daemon (systemd user unit) + bins (aiball, aiball-mcp, claude-loop) + invite link
+./install.sh --auth-init   # mints a one-shot install token + prints a setup URL
+# Open the printed *tokenized* URL to choose your first login + password:
+#   http://127.0.0.1:7777/setup?t=<token>   (one-shot, expires in 24h)
+# Lost it? re-mint with: aiball auth init
+
+# 2. Wire a project (per repo): writes .mcp.json + .aiball.yaml (idempotent)
+cd <your-project> && aiball init
+
+# 3. Launch a session in the loop (anything after -- is forwarded to claude)
+claude-loop -- --resume
 ```
 
-Then open <http://127.0.0.1:7777> in your browser and follow the invite to create your human moderator account.
+tmux opens with claude inside; the status bar tracks real state
+(`boot` → `idle` → `busy`, plus a `stop` / `wait` / `loop` human-presence
+word). Detach with `Ctrl-B D`, re-attach with `claude-loop attach <name>`.
+Run `aiball check` to verify wiring. Other setups (bare MCP, autopoll Stop
+hook) live in [`MCP-CLIENT.md`](./MCP-CLIENT.md); the loop internals in
+[`docs/CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md).
 
-### 2. Wire your project (per repo)
+## Remote (Tailscale)
 
-```bash
-cd <your-project>
-aiball init               # writes .mcp.json + .aiball.yaml (idempotent, preserves existing MCP servers)
-```
+The loop in your pocket: `aiball-tailscale up` exposes the local daemon to
+your tailnet via `tailscale serve` — read the inbox, moderate, queue
+tickets from your phone. Storage stays local; private, end-to-end
+encrypted, no public exposure. Guide:
+[`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
 
-Identity defaults to `<project>-claude` (matches `basename(cwd)`). Add a `consumer:` block to `.aiball.yaml` if you want explicit overrides — see [`.aiball.yaml.example`](./.aiball.yaml.example).
+## Under the hood
 
-### 3. Launch claude in the loop
+No magic. `claude-loop` runs claude inside **tmux** and installs two
+session-scoped Claude Code **hooks** (`SessionStart` + `Stop`): at every
+turn-end the Stop hook checks your backlog and, if there's work, wakes
+claude with the next ping (a detached timer heartbeats too). To interleave
+those pings without typing over you, a small **PTY proxy** sits between
+tmux and claude and watches the input stream — it tells *your* keystrokes
+apart from claude's output, holds pings back while you're typing (a grace
+window), and injects wakes straight into claude's PTY. Details:
+[`docs/CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md) +
+[`docs/PTY-PROXY.md`](./docs/PTY-PROXY.md).
 
-```bash
-claude-loop -- --resume       # anything after -- is forwarded to claude
-```
+## Roadmap
 
-tmux opens with claude inside. Status bar shows `[boot]` → `[idle 0]` → `[busy]` based on real claude state (pane-probed). When a ticket lands via the web UI or another claude session, claude wakes within ms and processes it. Detach with `Ctrl-B D`, re-attach with `claude-loop attach <name>`.
+The short version (full list in [`ROADMAP.md`](./ROADMAP.md)):
 
-### Other setups
-
-- **Interactive claude without tmux** (autopoll Stop hook between turns): see [`MCP-CLIENT.md`](./MCP-CLIENT.md) §4 — the `./install.sh --stop-hook` + `aiball autopoll init` flow for sessions you launch yourself.
-- **Bare MCP** (no loop, useful for scripts / non-claude experiments — protocol works but only Claude Code is wired today): [`MCP-CLIENT.md`](./MCP-CLIENT.md).
-- **Mint consumer tokens** (only needed if you want stable per-consumer auth across reboots): `aiball auth issue --consumer <name>`.
-- **Remote access via Tailscale** (The Loop in your pocket): `aiball-tailscale up` exposes the local daemon to your tailnet via `tailscale serve` (storage still local on your machine; private, end-to-end encrypted, no public exposure). Full guide: [`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
-- **Windows install** (daemon + CLI + MCP): see [`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md). claude-loop port deferred (needs a tmux equivalent on Windows).
-
----
-
-## What's in the box
-
-- **Tickets + threaded comments** scoped per project. Markdown (GFM, sanitized), pasteable images, auto-linkified cross-references (`#B.<id>` for tickets, `#C.<hash>` for comments), sub-tickets.
-- **Read the inbox from your phone** when away — Tailscale-private, end-to-end encrypted, no public internet exposure. [Setup guide](./docs/TAILSCALE.md).
-- **Moderation**: rules + per-project strategy (`manual` / `auto` / `auto-reply`).
-- **Lifecycle signals**: `resolved` proposal, `blocked` escalation, snooze, reopen — each with its own icon.
-- **Clickable Q&A**: GFM `- [ ]` items in a ticket body become click-to-quote questions; the audit lives in a sidecar.
-- **Autopoll Stop hook**: the agent processes the backlog between turns until empty (see above).
-- **Search** (FTS5), **per-project stats**, **CLI** with offline spool fallback.
-
-Experimental / partial / planned surfaces: see [`ROADMAP.md`](./ROADMAP.md).
-
----
-
-## Daemon lifecycle
-
-| | |
-| --- | --- |
-| Start | `systemctl --user start aiball` |
-| Stop  | `systemctl --user stop aiball` |
-| Logs  | `journalctl --user -u aiball -f` |
-| Data  | `~/.local/share/aiball/` |
-| Check | `aiball check` (config + hook wiring + agent id + daemon reachability) |
-
----
+- **Windows** — install ships; `claude-loop` runs via psmux / WSL2
+  (experimental, hardening — [`docs/WIN-INSTALL.md`](./docs/WIN-INSTALL.md)).
+- **Sandboxed autonomous agent** — `aiball sandbox` runs an agent against
+  a fixed plate of tickets (experimental — [`docs/SANDBOX.md`](./docs/SANDBOX.md)).
 
 ## Status
 
-Experimental. APIs and schema still moving — see git log. Issues + ideas welcome.
+Experimental — APIs and schema still moving. Issues + ideas welcome.
 
 ## License
 

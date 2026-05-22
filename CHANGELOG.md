@@ -15,6 +15,24 @@ the human-readable narrative.
 
 ## [Unreleased]
 
+### Docs refresh — README pitch, hero, keystroke-detection, roadmap (`#341`)
+
+- **README** rewritten lean: *what you can do* (loop / pilot like GitHub /
+  gate & monitor / take over), *quickstart* — now showing the tokenized
+  `/setup?t=…` first-user URL — plus Tailscale, an *under the hood*
+  paragraph (hooks + tmux + PTY proxy), and a nano-roadmap. New hero image.
+- **`docs/CLAUDE-LOOP.md`** now documents keystroke detection: the
+  user-grace gate, the live `human-typing` marker, the `stop`/`wait`/`loop`
+  bar word, and the headless AskUserQuestion gate; file map + state-layout
+  table brought up to date.
+- **`docs/PTY-PROXY.md`** de-staled (3-state badge, shipped status,
+  `detectHumanTyping` kept as a degraded fallback); fixed the
+  `user-prompt-submit-hook` grace default in its doc comment (60s).
+- **`ROADMAP.md`** reworked: dropped items that already shipped (consumer
+  state push `#B.177`, sandbox auto-respawn), consolidated Windows, added
+  multiple-agents-on-one-folder (sandbox + worktree) and a web-terminal
+  item, plus a Direction section.
+
 ### claude-loop: human-presence bar badge + AskUserQuestion gating (`#264`)
 
 - The tmux status bar shows a font-tinted **`loop`** (yellow —

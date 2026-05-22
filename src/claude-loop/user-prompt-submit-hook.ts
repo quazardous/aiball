@@ -7,7 +7,7 @@
  *   1. **user-took-over tracking** — refresh the `user-took-over`
  *      marker (mtime = now) when the prompt came from the HUMAN.
  *      The timer + Stop hook honor a grace window
- *      (CL_USER_GRACE_SEC, default 300s) and skip auto-pings while
+ *      (CL_USER_GRACE_SEC, default 60s) and skip auto-pings while
  *      the human is recently active. Prevents the wrapper from
  *      `send-keys`-ing a wake-up over a prompt the human is mid-
  *      typing.

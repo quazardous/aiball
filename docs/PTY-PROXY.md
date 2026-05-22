@@ -9,10 +9,12 @@
 
 ## Why it exists
 
-claude-loop paints a tmux bar badge to show human presence: `loop`
-(yellow, the loop runs autonomously) vs `stop` (red, a human is typing
-in the pane, so the loop should yield). To do that it must answer one
-question continuously: **is a human typing right now?**
+claude-loop paints a tmux bar word to show human presence — `loop`
+(green, autonomous) / `wait` (yellow, auto-pings frozen during a grace
+window) / `stop` (red, a human is typing in the pane, so the loop
+yields). To paint `stop` it must answer one question continuously:
+**is a human typing right now?** (Full word mapping in
+[`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md#3-the-tmux-bar-word--stop--wait--loop).)
 
 The first implementation (`timer.ts::detectHumanTyping`) answered it by
 **pane-diffing** — capturing the bottom of the tmux pane every ~1.5 s
@@ -82,8 +84,8 @@ Channel separation is now *physical*, not heuristic — `lastSendAt` /
 
 The proxy writes a timestamp to `$CL_STATE_DIR/human-typing` on every
 real keystroke. It's read by `state.ts::humanIsTyping` (mtime within
-`HUMAN_TYPING_TTL_SEC`, 5 s) and drives the bicolor bar badge in
-`setTmuxStatus` (`loop` yellow / `stop` red).
+`HUMAN_TYPING_TTL_SEC`, 5 s) and drives the human-presence word in
+`setTmuxStatus` (`stop` red while fresh; `wait`/`loop` otherwise).
 
 Only **text** keystrokes flip it: the filter `is_typing_keystroke`
 skips ESC / control bytes (`< 0x20`, includes arrows, Ctrl-combos, Tab,
@@ -126,16 +128,17 @@ MIT.)
 - `state.ts::injectWakePhrase` writes to `$CL_STATE_DIR/inject.sock`
   instead of `tmux send-keys`, with a `send-keys` fallback for loops not
   started via the proxy.
-- `detectHumanTyping` / `lastSendAt` / `recentlySentKeys` are removed —
-  the marker is now fed by the proxy on real keystrokes, the single
-  reliable source, busy included.
+- The fragile `lastSendAt` / `recentlySentKeys` send-time heuristics are
+  gone — the proxy feeds the marker on real keystrokes, busy included.
+  The timer's `detectHumanTyping` pane-diff poll stays as a **degraded
+  fallback** for loops not started under the proxy (idle-only, ~1.5s).
 
-> **Status (2026-05-20):** the proxy itself is committed and
-> standalone-verified (output forwarding, exit-code propagation, and the
-> channel-separation contract: socket injection reaches claude without
-> touching the marker; real stdin typing touches it; control keys
-> don't). The `cli.ts` wiring + `injectWakePhrase` refactor + cleanup are
-> the remaining integration step.
+> **Status:** shipped and wired. `cli.ts` launches the pane through the
+> proxy with a strict fallback to plain `claude` (Unix → `pty-proxy.py`;
+> Windows → the Rust ConPTY proxy, see `PTY-PROXY-WINDOWS.md`),
+> `injectWakePhrase` writes to `inject.sock`, and `proxyIsAlive` (a
+> PID-stamped `proxy-alive` marker) is the ground truth for who paints
+> the bar's human segment.
 
 ## Limitations
 

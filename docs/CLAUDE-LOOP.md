@@ -54,14 +54,20 @@ pop-culture phrase. Non-zero → mark idle, wait.
                       (back to "waits at prompt")
 
          in parallel, every CL_INTERVAL seconds:
-         ┌──────────────────────────────────────────┐
-         │ timer process: idle-since present?       │
-         │   ├─ no  → skip tick (claude is busy)    │
-         │   └─ yes → wake-requested or check-cmd? │
-         │            ├─ yes → send-keys phrase     │
-         │            └─ no  → skip tick (stay idle)│
-         └──────────────────────────────────────────┘
+         ┌────────────────────────────────────────────────┐
+         │ timer process: idle-since present?             │
+         │   ├─ no  → skip tick (claude is busy)          │
+         │   └─ yes → human present? (user-grace /        │
+         │            human-typing / busy-defer)          │
+         │            ├─ yes → skip tick (yield to human) │
+         │            └─ no  → wake-requested / check-cmd?│
+         │                     ├─ yes → wake phrase       │
+         │                     └─ no  → skip (stay idle)  │
+         └────────────────────────────────────────────────┘
 ```
+
+The "human present?" branch is the keystroke-detection gate — see
+[Human presence & keystroke detection](#human-presence--keystroke-detection).
 
 **Three wake sources**, all gated through the same `checkHasWork()`
 function (except `wake` which is unconditional):
@@ -137,6 +143,78 @@ shelled out per tick — no fastpath, but anything works.
 
 ---
 
+## Human presence & keystroke detection
+
+`claude-loop`'s one hard rule: **never `send-keys` a wake over a human
+who's at the keyboard**. Injecting "What's up, Doc?" into the middle of
+a prompt you're typing is worse than useless. Three signals keep the
+loop deferential, coarsest to finest.
+
+### 1. User-grace (submit-time) — `#B.145`
+
+The `UserPromptSubmit` hook fires on every prompt submitted in the pane
+— yours *and* the loop's own auto-wake. When the prompt came from a
+**human**, the hook stamps the `user-took-over` marker (mtime = now).
+The timer and the Stop hook check `userIsTakingOver()` and skip their
+auto-wake while that marker is fresher than `CL_USER_GRACE_SEC`
+(default **60s**). Every prompt you submit re-arms the window, so an
+active session stays wake-free until you've been quiet for a minute.
+
+The catch (`#B.180`): the loop's *own* wake also triggers
+`UserPromptSubmit`, which would stamp `user-took-over` and freeze the
+next wake for a full grace window — self-inflicted. Fix: every wake path
+touches a `wake-in-flight` marker right before injecting; the hook sees
+it (TTL `CL_WAKE_IN_FLIGHT_TTL_MS`, default 2s), recognizes the prompt as
+the loop's own, and skips the `user-took-over` stamp.
+
+### 2. Live keystroke detection (`human-typing`) — `#264` / `#269`
+
+User-grace only updates at *submit* time. To know a human is typing
+**right now** — before they hit Enter, even mid-turn — the loop keeps a
+near-live `human-typing` marker (TTL `HUMAN_TYPING_TTL_SEC`, 5s). Two
+feeders, best-to-worst:
+
+- **PTY proxy (preferred).** When the pane runs under the PTY proxy,
+  every real text keystroke is detected at the terminal layer and stamps
+  the marker — works even while claude is streaming, and the proxy's own
+  socket-injected wakes never trip it. Full mechanism in
+  [`PTY-PROXY.md`](./PTY-PROXY.md).
+- **Degraded pane-diff (fallback).** With no proxy, the timer's
+  `detectHumanTyping` poll captures the pane every ~1.5s and stamps the
+  marker when the prompt area changes at idle. Idle-only, and can't
+  separate your keystrokes from the loop's own injection as cleanly —
+  exactly the blind spot the proxy was built to close.
+
+### 3. The tmux bar word — `stop` / `wait` / `loop`
+
+Both signals collapse into one human-presence word on the status bar
+(`humanPresenceWord`):
+
+| Word   | Colour | Meaning                                                       |
+|--------|--------|--------------------------------------------------------------|
+| `stop` | red    | a human is typing **now** (`human-typing` < 5s)              |
+| `wait` | yellow | auto-pings **frozen** — boot-grace at launch *or* user-grace |
+| `loop` | green  | autonomous, gate open (managed mode / `--no-wait`)           |
+
+When the proxy is alive it paints this segment live (instant on the
+first keystroke); otherwise the timer paints it from the markers.
+
+### AskUserQuestion in a headless loop — `#264`
+
+The same `userIsTakingOver()` signal gates Claude's `AskUserQuestion`
+tool via a `PreToolUse` hook. In an autonomous loop with **no human**,
+a multi-choice dialog would stall forever (nobody to click), so the hook
+**denies** it and redirects Claude to ask on the aiball ticket thread
+instead. With a human present (inside the grace window) the dialog is
+**allowed** — best of both worlds, not an amputation.
+
+(Orthogonal third gate: the Stop hook / timer also read `esc to
+interrupt` in the pane footer and arm a `busy-defer-until` window so a
+wake isn't fired while claude is visibly mid-turn. That's claude-busy,
+not human-present, but it's the other reason a tick may skip.)
+
+---
+
 ## State layout
 
 `~/.claude-loop/<NAME>/` (override via `CLAUDE_LOOP_STATE_ROOT`):
@@ -148,6 +226,15 @@ shelled out per tick — no fastpath, but anything works.
 | `pings.yaml`      | cli on start    | copy of the wake-phrase pool              |
 | `idle-since`      | Stop / SessionStart sleep branch | claude is at prompt since X |
 | `wake-requested`  | `claude-loop wake` | one-shot trigger for the next tick    |
+| `user-took-over`  | UserPromptSubmit hook | last HUMAN submit (user-grace gate)    |
+| `wake-in-flight`  | timer / Stop before send-keys | "this wake is ours" (≤2s, `#B.180`) |
+| `human-typing`    | PTY proxy / timer poll | a human is typing now (TTL 5s)        |
+| `inject.sock`     | PTY proxy       | UDS the proxy listens on for wake injection |
+| `proxy-alive`     | PTY proxy       | proxy is really fronting claude (PID-stamped) |
+| `busy-defer-until`| Stop hook       | absolute time the wake-defer gate reopens |
+| `last-wake-at`    | any wake path   | wake-coalesce window (`#B.198`)           |
+| `last-wake-hint`  | any wake path   | dedup identical SSE pings (`#B.198`)      |
+| `last-open-wake-count` | wake path  | open-ticket watermark (`#B.232`)          |
 | `timer.pid`       | cli on start    | pid of the detached timer (used by `rm`)  |
 | `timer.log`       | timer (stdout/err) | inspect via `tail --timer`             |
 
@@ -183,12 +270,18 @@ do. The wrapper doesn't try to know what "work" is.
 ```
 bin/claude-loop                         # thin bash launcher → tsx
 src/claude-loop/
-  cli.ts                                # Commander CLI surface
-  state.ts                              # Plate + helpers + pickPingPhrase + DEFAULT_CHECK_CMD
+  cli.ts                                # Commander CLI surface; wires hooks + PTY proxy
+  state.ts                              # Plate + markers + grace/typing helpers + wake phrases
+  project-context.ts                    # resolve cwd + aiball identity (agent, project)
   session-start-hook.ts                 # boot gate: check-cmd → ping or idle
-  stop-hook.ts                          # turn-end gate: same logic
-  timer.ts                              # detached ticker; AiballClient fastpath
-config/defaults/claude-loop-pings.yaml  # default wake phrases
+  stop-hook.ts                          # turn-end gate: same logic + busy-defer
+  user-prompt-submit-hook.ts            # human-submit → user-took-over (user-grace)
+  pretooluse-hook.ts                    # gate AskUserQuestion in a headless loop
+  timer.ts                              # detached ticker; AiballClient fastpath; typing poll
+  error-backoff.ts                      # exponential retry on pane crash (rate-limit/api-error)
+  pty-proxy.py                          # Unix PTY proxy: live keystroke detection (see PTY-PROXY.md)
+config/defaults/claude-loop-pings.yaml  # default wake phrases + prompt templates
+windows/cl-pty-proxy/                    # Windows ConPTY proxy (Rust, named pipe — #281)
 docs/CLAUDE-LOOP.md                     # this file
 ```
 
@@ -229,6 +322,10 @@ Install symlinks `~/.local/bin/claude-loop` alongside `aiball` and
 
 ## See also
 
+- `docs/PTY-PROXY.md` — the pseudo-terminal proxy that powers live
+  keystroke detection (the `human-typing` marker), telling a human
+  typing apart from claude's output and from the loop's own injection.
+  `docs/PTY-PROXY-WINDOWS.md` covers the Rust ConPTY port.
 - `docs/SANDBOX.md` — `aiball sandbox`, the aiball-specific
   specialization that predates `claude-loop`. Refactoring it to use
   `claude-loop` underneath is a noted follow-up.
