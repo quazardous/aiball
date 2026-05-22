@@ -39,6 +39,7 @@ Root:
 - [`WORKFLOW.md`](./docs/WORKFLOW.md) — `feature` vs mainstream dev workflow (intent-driven; never switch the runtime checkout's branch).
 - [`MIGRATIONS.md`](./docs/MIGRATIONS.md) — drizzle/SQLite migration conventions.
 - [`I18N.md`](./docs/I18N.md) — i18n policy (English-only today) + proposed approach.
+- [`TICKET_LIFECYCLE.md`](./docs/TICKET_LIFECYCLE.md) — TARGET design: ticket states/events + the per-consumer `actionable` gate (`last_actor` model unifying #265/#273/#358).
 
 ## Conventions
 
