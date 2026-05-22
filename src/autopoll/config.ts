@@ -105,6 +105,18 @@ export interface AiballConfig {
         /** #345: treat a bare ESC in the pane as a human takeover (arms the
          *  user-grace so the loop yields). PTY-proxy only. CL_ESC_TAKEOVER. */
         esc_takeover: boolean;
+        /** #351: AskUserQuestion is allowed in-loop only if a human acted
+         *  within this window (else redirect-to-ticket). Longer than
+         *  user_grace — a stalled question is cheap vs a lost one.
+         *  CL_ASK_GRACE_SEC. */
+        ask_grace_seconds: number;
+        /** #351: key/combo that flags the human AFK (→ immediate redirect).
+         *  VS Code notation: `+` joins modifiers, a space = a 2-combo
+         *  sequence (e.g. "esc esc", "ctrl+a"). CL_AFK_KEY. */
+        afk_key: string;
+        /** #351: max ms between the two combos of an afk_key sequence
+         *  (ignored for a single combo). CL_AFK_WINDOW_MS. */
+        afk_window_ms: number;
     };
     /**
      * #319: workflow hints surfaced by claude-loop at wake for `feature`-intent
@@ -159,6 +171,10 @@ const DEFAULTS: AiballConfig = {
         user_grace_seconds: 60,
         wake_in_flight_ttl_ms: 2000,
         esc_takeover: true,
+        // #351: 10-min ask-grace, AFK = double-ESC within 400ms.
+        ask_grace_seconds: 600,
+        afk_key: "esc esc",
+        afk_window_ms: 400,
     },
     // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
     // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.
@@ -304,6 +320,16 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             }
             if (typeof cl.esc_takeover === "boolean") {
                 cfg.claude_loop.esc_takeover = cl.esc_takeover;
+            }
+            // #351: ask-grace + AFK combo.
+            if (typeof cl.ask_grace_seconds === "number" && cl.ask_grace_seconds >= 0) {
+                cfg.claude_loop.ask_grace_seconds = cl.ask_grace_seconds;
+            }
+            if (typeof cl.afk_key === "string" && cl.afk_key.trim()) {
+                cfg.claude_loop.afk_key = cl.afk_key.trim();
+            }
+            if (typeof cl.afk_window_ms === "number" && cl.afk_window_ms > 0) {
+                cfg.claude_loop.afk_window_ms = cl.afk_window_ms;
             }
             // #319: workflow hint flags (layered like claude_loop above).
             const wf = (raw.workflow ?? {}) as Record<string, unknown>;
