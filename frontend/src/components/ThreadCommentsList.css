@@ -44,6 +44,15 @@
 }
 .thread-summary-banner__text {
     flex: 1;
+    min-width: 0;
+}
+/* #353: keep the markdown-rendered tldr compact — no block paragraph margins
+   so it stays a tight banner line. */
+.thread-summary-banner__text :is(p, ul, ol) {
+    margin: 0;
+}
+.thread-summary-banner__text :is(ul, ol) {
+    padding-left: 1.1rem;
 }
 /*
  * Compact, single-line rendering for machine-generated relation

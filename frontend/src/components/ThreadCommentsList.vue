@@ -10,6 +10,7 @@ import type { Message } from "../lib/api";
 import type { DeciderInfo, ThreadItem } from "../lib/threadItems";
 import { formatTicketRef } from "../lib/formatting";
 import CommentNode from "./CommentNode.vue";
+import MarkdownView from "./MarkdownView.vue";
 
 defineProps<{
     items: ThreadItem[];
@@ -88,7 +89,9 @@ function shortTime(iso: string): string {
             >
                 <i class="pi pi-bookmark thread-summary-banner__icon" />
                 <span class="thread-summary-banner__label">tldr</span>
-                <span class="thread-summary-banner__text">{{ latestSummaryUntil.text }}</span>
+                <!-- #353: render summary_until as markdown (sanitized) for
+                     readability — agents still read the raw text via MCP. -->
+                <MarkdownView class="thread-summary-banner__text" :source="latestSummaryUntil.text" />
             </li>
             <li
                 v-else-if="item.kind === 'relation_group'"
