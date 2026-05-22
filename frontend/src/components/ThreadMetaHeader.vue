@@ -44,6 +44,13 @@ function statusSeverity(s: "pending" | "approved" | "rejected"): Severity {
             @keydown.space.prevent="emit('copy')"
         />
         <Tag :value="ticket.project" severity="info" />
+        <!-- #362 : l'intent vit dans la cartouche du haut (avec projet
+             + statut), plus dans la bande de tags sous le titre. -->
+        <Tag
+            v-if="ticket.intent"
+            :value="ticket.intent"
+            :severity="ticket.intent === 'panic' ? 'danger' : 'info'"
+        />
         <Tag
             :value="ticket.status"
             :severity="statusSeverity(ticket.status)"

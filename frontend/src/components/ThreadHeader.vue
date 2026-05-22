@@ -73,15 +73,12 @@ const emit = defineEmits<{
             — hidden from the open inbox until then.
         </div>
     </template>
+    <!-- #362 : l'intent est remonté dans ThreadMetaHeader (cartouche du
+         haut) ; cette bande ne porte plus que priority + tags. -->
     <div
-        v-if="ticket.intent || (ticket.priority && ticket.priority !== 'normal') || (ticket.tags && ticket.tags.length) || showEditButton"
+        v-if="(ticket.priority && ticket.priority !== 'normal') || (ticket.tags && ticket.tags.length) || showEditButton"
         class="thread-meta-extra"
     >
-        <Tag
-            v-if="ticket.intent"
-            :value="ticket.intent"
-            :severity="ticket.intent === 'panic' ? 'danger' : 'info'"
-        />
         <Tag
             v-if="ticket.priority && ticket.priority !== 'normal'"
             :value="ticket.priority"
