@@ -853,11 +853,19 @@ export async function buildContextPhrase(
             }) as Promise<Array<{ id: number; title?: string }>>,
         ]);
         const pingCount = typeof pingsR?.unread === "number" ? pingsR.unread : 0;
-        const openCount = Array.isArray(projects)
-            ? projects
-                .filter((p) => !project || p.name === project)
-                .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
-            : 0;
+        // #374 (#kjsejy): open and actionable are DISTINCT counts. We always
+        // state the TRUE open count when waking so a gated backlog (open>0,
+        // actionable=0) never reads as "nothing to do"; `actionableCount`
+        // drives the engage directive (only point the agent at work in its
+        // court). Each falls back to the other for older daemons.
+        const sumBy = (key: "actionable_count" | "open_count"): number =>
+            Array.isArray(projects)
+                ? projects
+                    .filter((p) => !project || p.name === project)
+                    .reduce((acc, p) => acc + (p[key] ?? p.open_count ?? p.actionable_count ?? 0), 0)
+                : 0;
+        const actionableCount = sumBy("actionable_count");
+        const openCount = sumBy("open_count");
         if (pingCount === 0 && openCount === 0) return culture;
 
         // #B.232: when BOTH pings and open tickets are pending, chain
@@ -907,14 +915,20 @@ export async function buildContextPhrase(
         }
         if (openCount > 0) {
             const scope = project ? `\`${project}\`` : "your scope";
+            // #374: always state OPEN; append "(N to handle)" when fewer are
+            // actionable so a gated backlog stays visible without over-claiming.
+            const courtNote = actionableCount < openCount
+                ? ` (${actionableCount} to handle)`
+                : "";
             parts.push(pickPrompt(promptMap, "wake_state_open", {
                 tone,
                 count: openCount,
                 vars: {
                     open_count: openCount,
+                    actionable_count: actionableCount,
                     project_scope: scope,
                 },
-                fallback: `${openCount} open aiball ticket${openCount === 1 ? "" : "s"} in ${scope}`,
+                fallback: `${openCount} open aiball ticket${openCount === 1 ? "" : "s"} in ${scope}${courtNote}`,
             }));
         }
 
@@ -926,24 +940,27 @@ export async function buildContextPhrase(
                 fallback: "drain via `unread({pings: true, mark_read: true})`",
             }));
         }
-        if (openCount > 0) {
+        if (actionableCount > 0) {
             // #371: name the FIFO head (head_id/head_title) so the directive
             // points at ONE specific ticket — the oldest at top priority —
             // instead of "one of N" (which let the agent grab the newest).
-            // All three vars stay exposed so the YAML slot can be overridden
+            // All vars stay exposed so the YAML slot can be overridden
             // per project — count-style or custom flavor (#371 david: les
-            // prompts sont pilotés par le yaml, overridables).
+            // prompts sont pilotés par le yaml, overridables). #374: gated on
+            // actionableCount (only engage real work-in-court); open_count
+            // exposed too so a slot can mention the wider backlog.
             const head = Array.isArray(headRows) ? headRows[0] : undefined;
             verbs.push(pickPrompt(promptMap, "wake_directive_engage", {
                 tone,
                 vars: {
                     open_count: openCount,
+                    actionable_count: actionableCount,
                     head_id: head?.id ?? "",
                     head_title: head?.title ?? "",
                 },
                 fallback: head
-                    ? `engage #${head.id} first (top of the FIFO queue) via \`ticket_list({actionable: true})\``
-                    : `engage one of ${openCount} actionable via \`ticket_list({actionable: true})\``,
+                    ? `engage #${head.id} first — top of the work order (${actionableCount} in your court) — via \`ticket_list({actionable: true})\``
+                    : `engage one of ${actionableCount} actionable via \`ticket_list({actionable: true})\``,
             }));
         }
         const directive = verbs.join(" + ");
