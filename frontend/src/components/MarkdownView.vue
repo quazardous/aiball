@@ -67,6 +67,14 @@ async function onClick(ev: MouseEvent) {
     if (!href || !href.startsWith("/")) return;
     ev.preventDefault();
 
+    // #361 : sur tactile, le tap émule un mouseover qui arme le timer
+    // hover-promote ; on le désarme avant de naviguer pour que le
+    // popover n'apparaisse pas APRÈS la redirection SPA.
+    if (hoverTimer !== null) {
+        window.clearTimeout(hoverTimer);
+        hoverTimer = null;
+    }
+
     // /b/<hashid> needs server-side resolution to the parent ticket id
     // because the SPA router stores openTicketId as integer. We let the
     // backend do the lookup, then redirect to the canonical /b/<intId>
@@ -137,6 +145,10 @@ function onContextMenu(ev: MouseEvent) {
 let hoverTimer: number | null = null;
 function onMouseOver(ev: MouseEvent) {
     if (promoteTrigger.value !== "hover") return;
+    // #361 : pas de hover-promote sur les appareils sans survol réel
+    // (tactile). Là le tap émule un mouseover qui ouvrirait le popover
+    // juste après la navigation, le laissant collé à l'écran.
+    if (window.matchMedia?.("(hover: none)").matches) return;
     const hit = ticketRefFromEvent(ev);
     if (!hit) return;
     // Small delay so brushing past links doesn't trigger the popover.
