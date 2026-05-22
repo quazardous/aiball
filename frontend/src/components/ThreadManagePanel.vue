@@ -147,33 +147,36 @@ async function changeOwner(next: string | null) {
             </ul>
         </div>
 
-        <div class="tmp-section">
-            <span class="tmp-label">Owner</span>
-            <Select
-                :model-value="owner"
-                :options="agents"
-                filter
-                placeholder="(reporter)"
-                :disabled="busy"
-                @update:model-value="changeOwner"
-            />
-            <small class="tmp-hint">
-                Reassign the ticket's reporter/owner. The new owner is subscribed
-                and can close/reopen.
-            </small>
-        </div>
+        <!-- #377: owner + project side by side on desktop, one per line on smartphone. -->
+        <div class="tmp-pair">
+            <div class="tmp-section">
+                <span class="tmp-label">Owner</span>
+                <Select
+                    :model-value="owner"
+                    :options="agents"
+                    filter
+                    placeholder="(reporter)"
+                    :disabled="busy"
+                    @update:model-value="changeOwner"
+                />
+                <small class="tmp-hint">
+                    Reassign the ticket's reporter/owner. The new owner is subscribed
+                    and can close/reopen.
+                </small>
+            </div>
 
-        <div v-if="(projectOptions?.length ?? 0) > 0" class="tmp-section">
-            <span class="tmp-label">Project</span>
-            <Select
-                :model-value="ticket.project"
-                :options="projectOptions"
-                option-label="label"
-                option-value="value"
-                :disabled="busy || moveBusy"
-                @update:model-value="(v: string) => emit('move-change', v)"
-            />
-            <small class="tmp-hint">Moves the whole thread to another project (#294).</small>
+            <div v-if="(projectOptions?.length ?? 0) > 0" class="tmp-section">
+                <span class="tmp-label">Project</span>
+                <Select
+                    :model-value="ticket.project"
+                    :options="projectOptions"
+                    option-label="label"
+                    option-value="value"
+                    :disabled="busy || moveBusy"
+                    @update:model-value="(v: string) => emit('move-change', v)"
+                />
+                <small class="tmp-hint">Moves the whole thread to another project (#294).</small>
+            </div>
         </div>
     </div>
 </template>
@@ -193,6 +196,13 @@ async function changeOwner(next: string | null) {
 .tmp-title { font-weight: 600; display: inline-flex; gap: 0.4rem; align-items: center; }
 .tmp-error { color: var(--p-red-500, #e5484d); font-size: 0.8rem; }
 .tmp-section { display: flex; flex-direction: column; gap: 0.5rem; }
+/* #377: owner + project pair — stacked (one per line) on smartphone,
+ * side by side from the desktop breakpoint (721px, app convention). */
+.tmp-pair { display: flex; flex-direction: column; gap: 1rem; }
+@media (min-width: 721px) {
+    .tmp-pair { flex-direction: row; gap: 1rem; align-items: flex-start; }
+    .tmp-pair > .tmp-section { flex: 1; min-width: 0; }
+}
 .tmp-section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
 .tmp-actions { display: inline-flex; gap: 0.4rem; }
 .tmp-label { font-weight: 600; font-size: 0.85rem; }

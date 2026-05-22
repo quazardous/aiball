@@ -82,31 +82,35 @@ defineExpose({ bodyTextareaRef });
                 @keydown.escape.prevent="emit('cancel')"
             />
         </div>
-        <div class="thread-edit-row">
-            <span class="thread-edit-label">Intent</span>
-            <Select
-                :model-value="ticket.intent"
-                :options="intentOptions"
-                option-label="label"
-                option-value="value"
-                size="small"
-                :disabled="intentBusy"
-                style="min-width: 9rem"
-                @update:model-value="(v: Intent | null) => emit('intent-change', v)"
-            />
-        </div>
-        <div class="thread-edit-row">
-            <span class="thread-edit-label">Priority</span>
-            <Select
-                :model-value="ticket.priority ?? 'normal'"
-                :options="priorityOptions ?? defaultPriorityOptions"
-                option-label="label"
-                option-value="value"
-                size="small"
-                :disabled="priorityBusy"
-                style="min-width: 9rem"
-                @update:model-value="(v: Priority | null) => emit('priority-change', v)"
-            />
+        <!-- #377: intent + priority side by side on desktop, stacked on
+             smartphone (one widget per line). -->
+        <div class="thread-edit-pair">
+            <div class="thread-edit-row">
+                <span class="thread-edit-label">Intent</span>
+                <Select
+                    :model-value="ticket.intent"
+                    :options="intentOptions"
+                    option-label="label"
+                    option-value="value"
+                    size="small"
+                    :disabled="intentBusy"
+                    style="min-width: 9rem"
+                    @update:model-value="(v: Intent | null) => emit('intent-change', v)"
+                />
+            </div>
+            <div class="thread-edit-row">
+                <span class="thread-edit-label">Priority</span>
+                <Select
+                    :model-value="ticket.priority ?? 'normal'"
+                    :options="priorityOptions ?? defaultPriorityOptions"
+                    option-label="label"
+                    option-value="value"
+                    size="small"
+                    :disabled="priorityBusy"
+                    style="min-width: 9rem"
+                    @update:model-value="(v: Priority | null) => emit('priority-change', v)"
+                />
+            </div>
         </div>
         <div class="thread-edit-row">
             <span class="thread-edit-label">Tags</span>

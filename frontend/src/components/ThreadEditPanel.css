@@ -21,6 +21,17 @@
     align-items: flex-start;
     gap: 0.6rem;
 }
+/* #377: pair two rows (intent + priority). Mobile-first = stacked (one widget
+ * per line); side by side from the desktop breakpoint (721px, app convention). */
+.thread-edit-pair {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+@media (min-width: 721px) {
+    .thread-edit-pair { flex-direction: row; gap: 1.2rem; }
+    .thread-edit-pair > .thread-edit-row { flex: 1; min-width: 0; }
+}
 .thread-edit-label {
     font-size: 0.85rem;
     color: var(--p-text-muted-color);
