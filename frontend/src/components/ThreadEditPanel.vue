@@ -31,10 +31,6 @@ defineProps<{
      *  be touched to surface the priority editor. */
     priorityOptions?: { label: string; value: Priority | null }[];
     priorityBusy?: boolean;
-    /** #294: destinations for the "move to project" Select. When empty/
-     *  absent the move row is hidden (the parent loads it lazily on edit). */
-    projectOptions?: { label: string; value: string }[];
-    moveBusy?: boolean;
 }>();
 const emit = defineEmits<{
     (e: "update:titleDraft", v: string): void;
@@ -43,7 +39,6 @@ const emit = defineEmits<{
     (e: "cancel"): void;
     (e: "intent-change", v: Intent | null): void;
     (e: "priority-change", v: Priority | null): void;
-    (e: "move-change", v: string): void;
     (e: "tags-changed", tags: TagType[]): void;
 }>();
 
@@ -112,20 +107,6 @@ defineExpose({ bodyTextareaRef });
                 style="min-width: 9rem"
                 @update:model-value="(v: Priority | null) => emit('priority-change', v)"
             />
-        </div>
-        <div v-if="(projectOptions?.length ?? 0) > 0" class="thread-edit-row">
-            <span class="thread-edit-label">Project</span>
-            <Select
-                :model-value="ticket.project"
-                :options="projectOptions"
-                option-label="label"
-                option-value="value"
-                size="small"
-                :disabled="moveBusy"
-                style="min-width: 9rem"
-                @update:model-value="(v: string) => emit('move-change', v)"
-            />
-            <span class="thread-edit-hint" style="margin-left: 0.5rem">moves the whole thread (#294)</span>
         </div>
         <div class="thread-edit-row">
             <span class="thread-edit-label">Tags</span>

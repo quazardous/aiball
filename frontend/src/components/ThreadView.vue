@@ -207,7 +207,9 @@ async function changeProject(v: string) {
         moveBusy.value = false;
     }
 }
-watch(editing, (v) => { if (v) void loadProjectOptions(); });
+// #377: project move now lives in the manage panel, so load its options when
+// the manage panel opens (was: on edit).
+watch(managing, (v) => { if (v) void loadProjectOptions(); });
 function onTagsChanged(tags: TagType[]) {
     if (data.value) data.value.ticket.tags = tags;
 }
@@ -426,6 +428,9 @@ async function copyTicketRef() {
                 <ThreadManagePanel
                     v-if="managing"
                     :ticket="data.ticket"
+                    :project-options="projectOptions"
+                    :move-busy="moveBusy"
+                    @move-change="changeProject"
                     @close="managing = false"
                 />
                 <ThreadEditPanel
@@ -438,13 +443,10 @@ async function copyTicketRef() {
                     :intent-busy="intentBusy"
                     :intent-options="intentOptions"
                     :priority-busy="priorityBusy"
-                    :project-options="projectOptions"
-                    :move-busy="moveBusy"
                     @save="saveAndCloseEdit"
                     @cancel="cancelEdit"
                     @intent-change="changeIntent"
                     @priority-change="changePriority"
-                    @move-change="changeProject"
                     @tags-changed="onTagsChanged"
                 />
                 <MarkdownView :source="data.ticket.body" :self-ticket-id="data.ticket.id" />

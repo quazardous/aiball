@@ -5,16 +5,29 @@
  *   - lists the ticket's EXPLICIT subscriptions (follows + mutes) and lets
  *     you mute/unmute each one individually (per-subscription, per david);
  *   - mute-all / unmute-all convenience widget on top;
- *   - reassign the ticket owner (= by_agent / reporter).
- * Self-contained: fetches its own data and calls the API directly.
+ *   - reassign the ticket owner (= by_agent / reporter);
+ *   - move the whole thread to another project (#377 — relocated here from the
+ *     edit panel: it's a management action, not a content edit).
+ * Subscriptions + owner are self-contained (own fetch + API). The project move
+ * is parent-wired (projectOptions + move-change) so it reuses ThreadView's
+ * tested move+refresh path.
  */
 import { ref, onMounted } from "vue";
 import Button from "primevue/button";
 import Select from "primevue/select";
 import { api, type TicketSummary } from "../lib/api";
 
-const props = defineProps<{ ticket: TicketSummary }>();
-const emit = defineEmits<{ (e: "close"): void }>();
+const props = defineProps<{
+    ticket: TicketSummary;
+    /** #377/#294: destinations for the "move to project" Select (parent loads
+     *  lazily when the manage panel opens). Empty/absent → the row is hidden. */
+    projectOptions?: { label: string; value: string }[];
+    moveBusy?: boolean;
+}>();
+const emit = defineEmits<{
+    (e: "close"): void;
+    (e: "move-change", v: string): void;
+}>();
 
 interface SubRow { consumer_id: string; muted: boolean; subscribed_at: string }
 const subs = ref<SubRow[]>([]);
@@ -148,6 +161,19 @@ async function changeOwner(next: string | null) {
                 Reassign the ticket's reporter/owner. The new owner is subscribed
                 and can close/reopen.
             </small>
+        </div>
+
+        <div v-if="(projectOptions?.length ?? 0) > 0" class="tmp-section">
+            <span class="tmp-label">Project</span>
+            <Select
+                :model-value="ticket.project"
+                :options="projectOptions"
+                option-label="label"
+                option-value="value"
+                :disabled="busy || moveBusy"
+                @update:model-value="(v: string) => emit('move-change', v)"
+            />
+            <small class="tmp-hint">Moves the whole thread to another project (#294).</small>
         </div>
     </div>
 </template>
