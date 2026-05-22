@@ -121,6 +121,20 @@ def touch_user_grace():
         pass
 
 
+def clear_user_grace():
+    """#351 (david #5pq7tb): drop the presence marker. Used when the AFK combo
+    fires — the successful combo is EXCLUDED from keystroke/presence detection,
+    so we also remove any user-grace its first keystroke (e.g. the 1st ESC of
+    `esc esc`) armed. Result: AFK = away, no lingering 'present'."""
+    sd = os.environ.get("CL_STATE_DIR") or ""
+    if not sd:
+        return
+    try:
+        os.remove(os.path.join(sd, "user-took-over"))
+    except OSError:
+        pass
+
+
 # --- Peinture directe du segment human de la barre tmux (#274) ---
 # Le proxy POSSÈDE le segment `@cl_human` quand il est vivant : il le
 # repeint INSTANTANÉMENT dès la 1re touche (pas de poll, pas de round-trip
@@ -491,20 +505,25 @@ def main(argv):
                 except OSError:
                     data = b""
                 if data:
-                    # #351: AFK combo → mark away; any other real keystroke
-                    # clears it (the human is back). Forwarding to claude is
-                    # unchanged below — we only observe.
                     if _afk.feed(data, datetime.datetime.now().timestamp()):
+                        # #351 (david #5pq7tb): the SUCCESSFUL afk combo is
+                        # EXCLUDED from keystroke/presence detection — it means
+                        # "away". Set the marker and DROP any presence its first
+                        # keystroke armed; never touch_user_grace for this one.
                         set_afk()
-                    elif is_typing_keystroke(data) or (_ESC_TAKEOVER and _is_lone_esc(data)):
-                        clear_afk()
-                    if is_typing_keystroke(data):
+                        clear_user_grace()
+                        want = _rest_word()
+                        if want != current_word:
+                            _paint_word(want)
+                            current_word = want
+                    elif is_typing_keystroke(data):
+                        clear_afk()  # any real keystroke = the human is back
                         touch_marker()
                         last_keystroke = datetime.datetime.now().timestamp()
-                        # #315/#345: typing arms the user-grace so the bar does
-                        # stop → wait → loop. Armed even under --no-wait now —
-                        # NO_WAIT only skips the boot-grace, not yielding to a
-                        # human who's actually here.
+                        # #315/#345: typing arms the user-grace (prolongs the
+                        # presence timeout) so the bar does stop → wait → loop.
+                        # Armed even under --no-wait — NO_WAIT only skips the
+                        # boot-grace, not yielding to a human who's actually here.
                         touch_user_grace()
                         if current_word != _HUMAN_STOP:
                             _paint_word(_HUMAN_STOP)  # transition →stop, instantané
@@ -513,7 +532,10 @@ def main(argv):
                         # #345: a bare ESC = human interrupt / takeover. It's
                         # filtered out of is_typing_keystroke (control byte), so
                         # arm the user-grace explicitly → the loop backs off for
-                        # CL_USER_GRACE_SEC and the bar reads `wait`.
+                        # CL_USER_GRACE_SEC and the bar reads `wait`. (The 1st
+                        # ESC of an afk sequence lands here; a 2nd ESC completes
+                        # the combo above, which then clears this presence.)
+                        clear_afk()
                         touch_user_grace()
                         want = _rest_word()
                         if want != current_word:
