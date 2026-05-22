@@ -173,7 +173,9 @@ async function changeOwner(next: string | null) {
 .tmp-hint { color: var(--p-text-muted-color); font-size: 0.72rem; line-height: 1.2; }
 .tmp-empty { color: var(--p-text-muted-color); font-size: 0.82rem; margin: 0; }
 .tmp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
-.tmp-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.2rem 0.3rem; border-radius: 4px; }
+.tmp-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.3rem 0.4rem; border-radius: 4px; }
+/* #352: zebra striping on the subscriber rows for readability. */
+.tmp-row:nth-child(even) { background: var(--p-surface-100); }
 .tmp-row.muted { opacity: 0.7; }
 .tmp-consumer { font-family: var(--font-mono, monospace); font-size: 0.85rem; }
 </style>
