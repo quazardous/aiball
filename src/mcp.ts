@@ -22,10 +22,18 @@ import { registerTicketReadTools } from "./mcp/ticket-read.js";
 import { registerTicketRelationTools } from "./mcp/ticket-relations.js";
 import { registerSubscriptionTools } from "./mcp/subscription.js";
 import { registerInboxTools } from "./mcp/inbox.js";
+import { AIBALL_VERSION } from "./version.js";
+
+// `aiball-mcp --version` / `-v`: the launcher forwards argv through, so
+// honor it before the stdio transport claims stdout.
+if (process.argv.slice(2).some((a) => a === "--version" || a === "-v")) {
+    process.stdout.write(AIBALL_VERSION + "\n");
+    process.exit(0);
+}
 
 const server = new McpServer({
     name: "aiball",
-    version: "0.2.0",
+    version: AIBALL_VERSION,
 });
 
 // Tool clusters (#B.213 phase 4 — extracted from this file).

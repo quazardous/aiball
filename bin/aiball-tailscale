@@ -85,10 +85,25 @@ cmd_status() {
     tailscale serve status || true
 }
 
+# Print the aiball version (source of truth: repo-root package.json, the
+# qcmp `aiball` component). Resolves through the ~/.local/bin symlink.
+print_version() {
+    local self="$0"
+    while [[ -L "$self" ]]; do
+        local t; t="$(readlink "$self")"
+        if [[ "$t" = /* ]]; then self="$t"; else self="$(dirname "$self")/$t"; fi
+    done
+    local root; root="$(cd "$(dirname "$self")/.." && pwd)"
+    local v; v="$(grep -m1 '"version"' "$root/package.json" 2>/dev/null \
+        | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+    echo "${v:-unknown}"
+}
+
 case "${1:-}" in
     up)     shift; cmd_up "$@" ;;
     down)   shift; cmd_down ;;
     status) shift; cmd_status ;;
+    -v|--version|version) print_version ;;
     -h|--help|"")
         sed -n '1,/^set -e/p' "$0" | sed 's/^# \?//'
         ;;

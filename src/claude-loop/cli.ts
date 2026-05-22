@@ -26,6 +26,7 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
 import { AiballClient } from "../client.js";
+import { AIBALL_VERSION } from "../version.js";
 import { bootstrapInit } from "../cli/bootstrap.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
 import {
@@ -309,10 +310,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // Read by the SessionStart hook to decide whether to ping at
         // boot. Empty / unset = ping (per default). "1" = stay silent.
         `export CL_NO_STARTUP_PING=${shQuote(opts.noStartupPing ? "1" : "")}`,
-        // #302: --no-wait → "0" (no human at the terminal: eager boot drain,
-        // no boot-grace deferral). Default --wait → "1". Read by the timer
+        // #302/#343: CL_WAIT="1" ONLY when --wait is explicitly passed.
+        // Default (and explicit --no-wait) → "0": no human at the terminal,
+        // eager boot drain, no boot-grace deferral. Read by the timer
         // (boot-grace gate) + the SessionStart hook (eager-inject gate).
-        `export CL_WAIT=${shQuote(opts.wait === false ? "0" : "1")}`,
+        `export CL_WAIT=${shQuote(opts.wait ? "1" : "0")}`,
         // Seconds the timer stays out of the way after the human
         // submits a prompt (UserPromptSubmit hook refreshes the
         // user-took-over marker). 0 disables the grace.
@@ -958,8 +960,12 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             "--user-grace <sec>",
             "Seconds to stay out of the way after the human submits a prompt (default from .aiball.yaml `claude_loop.user_grace_seconds`, 60 if unset — #B.180, recalibrated #B.185)",
         ))
-        // #302: commander convention `--no-wait` flips wait→false.
-        .option("--no-wait", "Assume no human at the terminal: drain pre-existing pings eagerly at boot instead of waiting out the boot-grace for a human take-over (#302). Default: --wait.")
+        // #302/#343: --no-wait is now the DEFAULT (the loop is autonomous
+        // far more often than human-driven). `--wait` (defined first so it
+        // owns the falsy default) opts back into the boot-grace; `--no-wait`
+        // stays accepted as the explicit/back-compat form.
+        .option("--wait", "Wait out the boot-grace for a possible human take-over before draining pre-existing pings at boot (#302). Opt-in — the default is --no-wait.")
+        .option("--no-wait", "(default since #343) Assume no human at the terminal: eager boot drain, no boot-grace deferral.")
         .allowExcessArguments(false)
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
@@ -1009,6 +1015,7 @@ async function main(): Promise<void> {
     const program = new Command()
         .name("claude-loop")
         .description("Wrap a Claude Code session in a tmux loop that wakes itself when idle (#B.63)")
+        .version(AIBALL_VERSION, "-v, --version", "print the aiball version and exit")
         .helpOption("-h, --help", "Show help");
     program.addCommand(buildStartCommand((opts) => cmdStart({ ...opts, claudeArgs: passthrough })).name("start"));
     program.command("list").description("List all known loops").action(cmdList);

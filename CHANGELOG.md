@@ -17,7 +17,19 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
-_Nothing yet._
+### `--version` on every CLI
+
+`aiball`, `claude-loop`, `aiball-mcp`, and `aiball-tailscale` all accept
+`--version` / `-v`, printing the aiball version (source of truth: the
+repo-root `package.json`, the qcmp `aiball` component). The MCP server now
+advertises that version too, instead of a stale hardcoded one.
+
+### claude-loop defaults to `--no-wait`
+
+A loop is autonomous far more often than human-driven, so `claude-loop`
+now assumes no human at the terminal by default — eager boot drain, no
+boot-grace deferral. Pass `--wait` to opt back into the boot-grace for a
+human take-over (`--no-wait` is still accepted as the explicit form).
 
 ---
 
