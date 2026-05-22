@@ -7,6 +7,7 @@
  * Extracted from db.ts (#B.332 Phase A.2).
  */
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import * as schema from "../schema.js";
 import {
     getDb,
@@ -32,6 +33,28 @@ import {
     type QuestionAnswer,
 } from "../questions.js";
 import { applyDecision, promoteToDecision, reclassifyDecision, type DecisionStatus } from "../decisions.js";
+
+/**
+ * #374: record `actor` as the ticket's last actor at time `at`. Called from
+ * every action chokepoint (comment/lifecycle append in `insertMessage`, plus
+ * decision accept/reject in `applyMessageDecision`). No-op when there's no real
+ * actor: a null author or the `auto` moderation marker doesn't move whose-court
+ * (an auto-approved comment's actor is its author, passed by the caller).
+ * Latest write wins — actions arrive in chronological order, so a plain
+ * overwrite keeps `last_actor` monotonic. See docs/TICKET_LIFECYCLE.md §4.2.
+ */
+function bumpLastActor(
+    tx: BaseSQLiteDatabase<"sync", any, typeof schema>,
+    ticketId: number,
+    actor: string | null,
+    at: string,
+): void {
+    if (!actor || actor === "auto") return;
+    tx.update(schema.tickets)
+        .set({ lastActor: actor, lastActorAt: at })
+        .where(eq(schema.tickets.id, ticketId))
+        .run();
+}
 
 export function insertMessage(m: NewMessage): Message {
     const db = getDb();
@@ -62,6 +85,9 @@ export function insertMessage(m: NewMessage): Message {
                 priority: m.priority ?? "normal",
                 createdAt,
                 parentTicketId: m.parent_id ?? null,
+                // #374: the creator is the first "last actor" on the ticket.
+                lastActor: m.by_agent ?? null,
+                lastActorAt: createdAt,
                 // #B.245 tristate. Omit when caller didn't specify so
                 // the column default ('default') applies.
                 ...(m.scope ? { scope: m.scope } : {}),
@@ -120,6 +146,11 @@ export function insertMessage(m: NewMessage): Message {
             // the column default ('default') applies.
             ...(m.scope ? { scope: m.scope } : {}),
         }).returning().get();
+        // #374: every comment + lifecycle event (closed/reopened/resolved/
+        // blocked) reaching this branch is an ACTION → the author is now the
+        // ticket's last actor. (Relation/sub/referenced/move events take other
+        // insert paths and are structural, not actions — see TICKET_LIFECYCLE.)
+        bumpLastActor(tx, m.ticket_id, m.by_agent ?? null, createdAt);
         // Resolve project via parent ticket for the legacy shape.
         const parent = tx.select({ project: schema.tickets.project })
             .from(schema.tickets).where(eq(schema.tickets.id, m.ticket_id)).get();
@@ -1099,7 +1130,8 @@ export function applyMessageDecision(
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
         if (!m) return null;
         const meta = parseMeta(m.meta ?? null);
-        const r = applyDecision(meta.decision, status, decidedBy, new Date().toISOString(), newKind);
+        const decidedAt = new Date().toISOString();
+        const r = applyDecision(meta.decision, status, decidedBy, decidedAt, newKind);
         if (!r.changed) {
             // idempotent re-decide — return current row unchanged
             const parent = tx.select({ project: schema.tickets.project })
@@ -1111,6 +1143,11 @@ export function applyMessageDecision(
             .set({ meta: serializeMeta(meta) })
             .where(eq(schema.messages.id, messageId))
             .run();
+        // #374: accepting/rejecting a decision is an ACTION by the decider —
+        // they're now the ticket's last actor (this is what makes a reopened
+        // bug / accepted plan return to the agent's court). `auto` deciders
+        // (e.g. dangling-resolution auto-accept on close) are skipped.
+        bumpLastActor(tx, m.ticketId, decidedBy, decidedAt);
         const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
         if (!fresh) return null;
         const parent = tx.select({ project: schema.tickets.project })

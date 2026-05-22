@@ -122,6 +122,17 @@ export const tickets = sqliteTable("tickets", {
      * pattern, no new table for every new metadata kind.
      */
     meta: text("meta"),
+    /**
+     * #374: denormalized "last actor" — the consumer who took the LAST
+     * action on this ticket (post a comment, accept/reject a decision,
+     * close / reopen / resolve / block). Drives the per-consumer
+     * `actionable` gate (actionable iff `lastActor != me` OR sole
+     * participant). Maintained by `bumpLastActor` at every action
+     * chokepoint; backfilled idempotently at boot. NULL only on rows that
+     * never saw a non-auto actor. See docs/TICKET_LIFECYCLE.md.
+     */
+    lastActor: text("last_actor"),
+    lastActorAt: text("last_actor_at"),
 }, (t) => [
     uniqueIndex("idx_tickets_project_display").on(t.project, t.displaySeq),
     index("idx_tickets_project").on(t.project),

@@ -312,6 +312,64 @@ function bootstrap(db: BetterSQLite3Database<typeof schema>): void {
             .where(eq(schema.messages.id, row.id))
             .run();
     }
+
+    backfillLastActor(db);
+}
+
+/**
+ * #374: seed `tickets.last_actor` for rows that predate the column. Idempotent
+ * — only touches rows where `last_actor IS NULL`, so it no-ops after the first
+ * boot (new tickets get their actor live via `bumpLastActor`). Replays each
+ * ticket's events and keeps the actor of the LATEST action:
+ *   - ticket creation (the floor): author + created_at;
+ *   - comments + lifecycle (closed/reopened/resolved/blocked): author;
+ *   - decision accept/reject: the decider via `meta.decision.{decided_by,decided_at}`.
+ * Structural events (relation / sub_added / referenced) and the `auto`
+ * moderation marker don't count as actions (see docs/TICKET_LIFECYCLE.md §4.2).
+ */
+const LAST_ACTOR_ACTION_KINDS = new Set([
+    "comment_added", "ticket_closed", "ticket_reopened", "ticket_resolved", "ticket_blocked",
+]);
+function backfillLastActor(db: BetterSQLite3Database<typeof schema>): void {
+    const pending = db.select({
+        id: schema.tickets.id,
+        byAgent: schema.tickets.byAgent,
+        createdAt: schema.tickets.createdAt,
+    }).from(schema.tickets).where(isNull(schema.tickets.lastActor)).all();
+    for (const t of pending) {
+        let actor: string | null = t.byAgent ?? null;
+        let at: string = t.createdAt;
+        const msgs = db.select({
+            byAgent: schema.messages.byAgent,
+            createdAt: schema.messages.createdAt,
+            kind: schema.messages.kind,
+            meta: schema.messages.meta,
+        }).from(schema.messages).where(eq(schema.messages.ticketId, t.id)).all();
+        for (const msg of msgs) {
+            // The event's own author action (ISO timestamps compare chronologically).
+            if (LAST_ACTOR_ACTION_KINDS.has(msg.kind)
+                && msg.byAgent && msg.byAgent !== "auto" && msg.createdAt >= at) {
+                actor = msg.byAgent;
+                at = msg.createdAt;
+            }
+            // A decision accept/reject recorded in this comment's meta.
+            if (msg.meta) {
+                try {
+                    const d = (JSON.parse(msg.meta) as { decision?: { status?: string; decided_by?: string; decided_at?: string } }).decision;
+                    if (d && (d.status === "accepted" || d.status === "rejected")
+                        && d.decided_by && d.decided_by !== "auto"
+                        && d.decided_at && d.decided_at >= at) {
+                        actor = d.decided_by;
+                        at = d.decided_at;
+                    }
+                } catch { /* malformed meta — skip */ }
+            }
+        }
+        db.update(schema.tickets)
+            .set({ lastActor: actor, lastActorAt: at })
+            .where(eq(schema.tickets.id, t.id))
+            .run();
+    }
 }
 
 /**
