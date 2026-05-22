@@ -114,6 +114,17 @@ autopoll:
 #   # Default 2000 (2s) — only reduce if your shell is faster than
 #   # 2s round-trip on send-keys → hook fire.
 #   wake_in_flight_ttl_ms: 2000
+#
+#   # ESC takeover (#345). When ON, pressing ESC in the loop pane (the
+#   # gesture you use to interrupt claude / take over) arms the
+#   # user-grace window — the loop stops auto-pinging for
+#   # `user_grace_seconds` so it doesn't barge back in over you, and the
+#   # tmux bar reads `wait`. ESC is otherwise invisible to the wrapper
+#   # (it's a control byte, not a prompt submit). Requires the PTY proxy
+#   # (the default launch path; without it ESC can't be detected).
+#   # Default true — set false to keep ESC purely a claude interrupt
+#   # with no effect on the loop.
+#   esc_takeover: true
 
 # Workflow hints (#319). claude-loop "habille" the WAKE of a `feature`-intent
 # ticket with a branch hint ("🌿 Feature: build it in …, not on main."). Lets

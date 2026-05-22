@@ -17,6 +17,27 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### claude-loop yields to a human again — ESC takeover + grace fixes
+
+Pressing ESC in a loop pane (to interrupt claude / take over) used to be
+invisible to the wrapper — it's a control byte, not a prompt submit — so
+the loop would re-ping and undo your interrupt. Now:
+
+- **ESC = takeover**: under the PTY proxy, a bare ESC arms the user-grace
+  window, so the loop backs off for `user_grace_seconds` and the tmux bar
+  reads `wait`. Config-gated via `.aiball.yaml claude_loop.esc_takeover`
+  (default on).
+- **`--no-wait` no longer ignores a present human**: it now skips only the
+  boot-grace, not the user-grace. A human who types, submits, or hits ESC
+  still makes the loop yield — previously `--no-wait` (the new default)
+  silently disabled that.
+- **The wake-gate also yields to live typing** (the `human-typing` marker),
+  not only to a submitted prompt.
+- The tmux bar shows `stop` / `wait` even under `--no-wait` when a human is
+  actually present.
+
+Windows ConPTY-proxy parity for ESC-takeover is a follow-up.
+
 ### `--version` on every CLI
 
 `aiball`, `claude-loop`, `aiball-mcp`, and `aiball-tailscale` all accept

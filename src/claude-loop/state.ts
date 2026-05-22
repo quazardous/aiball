@@ -599,13 +599,15 @@ const PROC_START_MS = Date.now();
  *   - `loop` — autonomous (managed mode), incl. --no-wait
  */
 export function humanPresenceWord(sd: string | undefined, graceSec: number): "stop" | "wait" | "loop" {
-    // #302: --no-wait (CL_WAIT=0) assumes NO human at the terminal → always loop.
-    if (process.env.CL_WAIT === "0") return "loop";
+    // #345 D: a present human is reflected even under --no-wait (CL_WAIT=0).
+    // NO_WAIT only suppresses the boot-grace `wait` (no human assumed AT
+    // LAUNCH); live typing → `stop` and an armed user-grace → `wait` still show.
     if (sd && humanIsTyping(sd)) return "stop";
-    // #305: boot-grace freezes auto-wakes at launch → same "frozen" state as
-    // user-grace, so the word reads `wait` during the window.
+    const noWait = process.env.CL_WAIT === "0";
+    // #305: boot-grace freezes auto-wakes at launch → `wait` during the window,
+    // but only when we're actually waiting for a human at boot (not --no-wait).
     const bootGraceMs = Math.max(0, Number(process.env.CL_BOOT_GRACE_SEC ?? 60)) * 1000;
-    if (Date.now() - PROC_START_MS < bootGraceMs) return "wait";
+    if (!noWait && Date.now() - PROC_START_MS < bootGraceMs) return "wait";
     if (sd && userIsTakingOver(sd, graceSec)) return "wait";
     return "loop";
 }

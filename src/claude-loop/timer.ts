@@ -333,10 +333,11 @@ function detectHumanTyping(): void {
         if (prevPaneTail && tail !== prevPaneTail && !recentlySentKeys()) {
             try {
                 writeFileSync(humanTypingPath(sd!), new Date().toISOString() + "\n");
-                // #315: typing also ARMS the user-grace (degraded-mode parity
-                // with the proxy's touch_user_grace) so the bar does
-                // stop → wait → loop, not stop → loop. Skipped under --no-wait.
-                if (!NO_WAIT) writeFileSync(userTookOverPath(sd!), new Date().toISOString() + "\n");
+                // #315/#345 A: typing also ARMS the user-grace (degraded-mode
+                // parity with the proxy's touch_user_grace) so the bar does
+                // stop → wait → loop. Armed even under --no-wait now: NO_WAIT
+                // only disables the boot-grace, not yielding to a present human.
+                writeFileSync(userTookOverPath(sd!), new Date().toISOString() + "\n");
             } catch { /* ignore — chip just won't show */ }
             log("human-typing detected (prompt area changed at idle)");
         }
@@ -411,8 +412,18 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         log(`skip wake (${reason}) — boot-grace ${leftS}s left (--wait: letting the human take over)`);
         return false;
     }
-    if (!manualWake && !NO_WAIT && userIsTakingOver(sd!, userGraceSec)) {
-        log(`skip wake (${reason}) — user-grace active (user typed within ${userGraceSec}s)`);
+    // #345 A: user-grace is honored regardless of NO_WAIT — --no-wait only
+    // skips the boot-grace (above), it must NOT make the loop barge over a
+    // human who just typed / submitted / hit ESC (the regression #343 added).
+    if (!manualWake && userIsTakingOver(sd!, userGraceSec)) {
+        log(`skip wake (${reason}) — user-grace active (human acted within ${userGraceSec}s)`);
+        return false;
+    }
+    // #345 B: also yield to a human typing RIGHT NOW (live human-typing
+    // marker), which the gate never consulted before — so a wake couldn't be
+    // held off mid-keystroke between submits.
+    if (!manualWake && humanIsTyping(sd!)) {
+        log(`skip wake (${reason}) — human typing right now`);
         return false;
     }
     // #B.198 david: state-based busy defer set by the Stop hook when

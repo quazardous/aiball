@@ -284,6 +284,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const userGraceSec = opts.userGraceSec ?? ctx.claude_loop.user_grace_seconds;
     const bootGraceSec = ctx.claude_loop.boot_grace_seconds; // no CLI flag yet — yaml-only
     const wakeInFlightTtlMs = ctx.claude_loop.wake_in_flight_ttl_ms; // yaml-only
+    const escTakeover = ctx.claude_loop.esc_takeover; // #345, yaml-only
 
     const plate: Plate = {
         name,
@@ -322,6 +323,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // #B.180: boot-grace + wake-in-flight TTL, yaml-only knobs.
         `export CL_BOOT_GRACE_SEC=${shQuote(String(bootGraceSec))}`,
         `export CL_WAKE_IN_FLIGHT_TTL_MS=${shQuote(String(wakeInFlightTtlMs))}`,
+        // #345: bare ESC in the pane = human takeover (PTY proxy arms user-grace).
+        `export CL_ESC_TAKEOVER=${shQuote(escTakeover ? "1" : "0")}`,
         // #B.154: resume picker auto-dismiss mode. Read by the
         // SessionStart hook when source=resume.
         `export CL_RESUME_MODE=${shQuote(opts.resumeMode ?? "as-is")}`,

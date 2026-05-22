@@ -82,6 +82,17 @@ def is_typing_keystroke(data: bytes) -> bool:
     return True
 
 
+def _is_lone_esc(data: bytes) -> bool:
+    """#345 : vrai si `data` est une touche ESC « nue » (interruption claude),
+    PAS une séquence CSI/SS3 (flèches, F-keys → ESC[ / ESCO). On veut armer la
+    reprise humaine sur un ESC d'interruption, pas sur une navigation."""
+    if not data or data[0] != 0x1B:
+        return False
+    if len(data) == 1:
+        return True
+    return data[1] not in (0x5B, 0x4F)  # 0x5B='[' (CSI), 0x4F='O' (SS3)
+
+
 def touch_marker():
     p = _marker_path()
     if not p:
@@ -127,9 +138,14 @@ HUMAN_TTL_SEC = 5  # doit suivre HUMAN_TYPING_TTL_SEC côté TS
 _HUMAN_STOP = "#[fg=colour196,bg=colour16]stop"
 _HUMAN_WAIT = "#[fg=colour178,bg=colour16]wait"
 _HUMAN_LOOP = "#[fg=colour40,bg=colour16]loop"
-# #302: --no-wait (CL_WAIT=0) = no human at the terminal → toujours `loop`
-# (on ignore frappe + user-grace), aligné avec humanBarWord côté TS.
+# #302/#345: --no-wait (CL_WAIT=0) skips only the boot-grace; a present human
+# (live typing → `stop`, armed user-grace → `wait`) is still reflected, aligned
+# with humanPresenceWord (state.ts).
 _NO_WAIT = os.environ.get("CL_WAIT") == "0"
+# #345: a bare ESC on stdin = human interrupt/takeover → arm the user-grace.
+# Config-gated via .aiball.yaml `claude_loop.esc_takeover` (default on);
+# CL_ESC_TAKEOVER="0" disables it.
+_ESC_TAKEOVER = (os.environ.get("CL_ESC_TAKEOVER") or "1") != "0"
 # #305: début de la fenêtre boot-grace = import du proxy (≈ boot du loop).
 # Sans --no-wait, le timer gèle TOUS les auto-pings pendant les
 # CL_BOOT_GRACE_SEC premières secondes (laisse l'humain prendre la main au
@@ -172,10 +188,9 @@ def _boot_grace_remaining():
 
 
 def _rest_word():
-    """Mot au repos (pas de frappe) : `loop` si --no-wait ; sinon `wait`
-    pendant la boot-grace (#305) OU la fenêtre user-grace, sinon `loop`."""
-    if _NO_WAIT:
-        return _HUMAN_LOOP
+    """Mot au repos (pas de frappe) : `wait` pendant la boot-grace (#305, nulle
+    sous --no-wait) OU la fenêtre user-grace (#345 : armée même sous --no-wait,
+    ex. après un ESC), sinon `loop`."""
     if _boot_grace_remaining() > 0.0 or _user_grace_remaining() > 0.0:
         return _HUMAN_WAIT
     return _HUMAN_LOOP
@@ -401,15 +416,24 @@ def main(argv):
                     if is_typing_keystroke(data):
                         touch_marker()
                         last_keystroke = datetime.datetime.now().timestamp()
-                        # #302: under --no-wait we never show `stop` / arm the
-                        # grace (no human assumed) — stay `loop`. #315: typing
-                        # arms the user-grace so the bar does stop → wait → loop
-                        # (not stop → loop) once the 5 s typing TTL lapses.
-                        if not _NO_WAIT:
-                            touch_user_grace()
-                            if current_word != _HUMAN_STOP:
-                                _paint_word(_HUMAN_STOP)  # transition →stop, instantané
-                                current_word = _HUMAN_STOP
+                        # #315/#345: typing arms the user-grace so the bar does
+                        # stop → wait → loop. Armed even under --no-wait now —
+                        # NO_WAIT only skips the boot-grace, not yielding to a
+                        # human who's actually here.
+                        touch_user_grace()
+                        if current_word != _HUMAN_STOP:
+                            _paint_word(_HUMAN_STOP)  # transition →stop, instantané
+                            current_word = _HUMAN_STOP
+                    elif _ESC_TAKEOVER and _is_lone_esc(data):
+                        # #345: a bare ESC = human interrupt / takeover. It's
+                        # filtered out of is_typing_keystroke (control byte), so
+                        # arm the user-grace explicitly → the loop backs off for
+                        # CL_USER_GRACE_SEC and the bar reads `wait`.
+                        touch_user_grace()
+                        want = _rest_word()
+                        if want != current_word:
+                            _paint_word(want)
+                            current_word = want
                     os.write(master_fd, data)
                 else:
                     # EOF stdin : on arrête de le poller (claude tourne

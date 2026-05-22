@@ -102,6 +102,9 @@ export interface AiballConfig {
         user_grace_seconds: number;
         /** Wake-in-flight marker TTL (#B.180). CL_WAKE_IN_FLIGHT_TTL_MS. */
         wake_in_flight_ttl_ms: number;
+        /** #345: treat a bare ESC in the pane as a human takeover (arms the
+         *  user-grace so the loop yields). PTY-proxy only. CL_ESC_TAKEOVER. */
+        esc_takeover: boolean;
     };
     /**
      * #319: workflow hints surfaced by claude-loop at wake for `feature`-intent
@@ -155,6 +158,7 @@ const DEFAULTS: AiballConfig = {
         boot_grace_seconds: 60,
         user_grace_seconds: 60,
         wake_in_flight_ttl_ms: 2000,
+        esc_takeover: true,
     },
     // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
     // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.
@@ -297,6 +301,9 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             }
             if (typeof cl.wake_in_flight_ttl_ms === "number" && cl.wake_in_flight_ttl_ms > 0) {
                 cfg.claude_loop.wake_in_flight_ttl_ms = cl.wake_in_flight_ttl_ms;
+            }
+            if (typeof cl.esc_takeover === "boolean") {
+                cfg.claude_loop.esc_takeover = cl.esc_takeover;
             }
             // #319: workflow hint flags (layered like claude_loop above).
             const wf = (raw.workflow ?? {}) as Record<string, unknown>;
