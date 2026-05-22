@@ -125,7 +125,7 @@ async function changeOwner(next: string | null) {
                         :icon="row.muted ? 'pi pi-bell-slash' : 'pi pi-bell'"
                         :label="row.muted ? 'muted' : 'active'"
                         size="small"
-                        :severity="row.muted ? 'warn' : 'secondary'"
+                        :severity="row.muted ? 'warn' : 'success'"
                         text
                         :disabled="busy"
                         @click="toggleMute(row)"
