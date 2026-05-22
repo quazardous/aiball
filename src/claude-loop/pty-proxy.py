@@ -237,6 +237,14 @@ class _AfkDetector:
 
 _afk = _AfkDetector(_AFK_COMBOS, _AFK_WINDOW_MS)
 clear_afk()  # #351: drop any stale afk marker left by a previous run, on boot
+# #357: idem pour la présence. Depuis #345 (aafe511), `user-took-over` pilote
+# le mot `wait` MÊME sous --no-wait (avant : --no-wait => toujours `loop`).
+# Un proxy qui relance dans le même CL_STATE_DIR (claude crash/resume au sein
+# d'un loop vivant) héritait du marqueur de la session précédente → la barre
+# bootait en `wait` et le timer gelait ses auto-pings. Au boot AUCUN humain
+# n'a (encore) pris la main pour CE run ; toute présence est stale → on la
+# largue, comme clear_afk. S'il est réellement là, sa 1re frappe/ESC ré-arme.
+clear_user_grace()  # #357: pas de présence stale héritée → boot en `loop`, pas `wait`
 
 # #305: début de la fenêtre boot-grace = import du proxy (≈ boot du loop).
 # Sans --no-wait, le timer gèle TOUS les auto-pings pendant les

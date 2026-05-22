@@ -17,6 +17,16 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Fix: a relaunched loop no longer boots stuck in `wait`
+
+Since the ESC-takeover work, a present human's `wait` state is reflected even
+under `--no-wait` — but the presence marker was never cleared at proxy boot
+(unlike the AFK marker). So a proxy respawned in the same loop (claude
+crash/resume) inherited the previous session's "human took over", and the bar
+booted into `wait` with auto-pings frozen even though nobody was there. The
+PTY proxy now drops any stale presence marker on boot (symmetric to the AFK
+cleanup); a human who's actually present re-arms it on their first keystroke.
+
 ### AskUserQuestion no longer blocked when you're present — ask-grace + AFK key
 
 In a `claude-loop` session, the `AskUserQuestion` dialog used to be gated on
