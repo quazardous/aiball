@@ -558,6 +558,19 @@ export const api = {
             `/api/tickets/${ticketId}/owner`,
             { by_agent },
         ),
+    /** #352: a ticket's explicit subscriptions (follows + mutes). Moderator-only. */
+    ticketSubscriptions: (ticketId: number) =>
+        req<{ ticket_id: number; subscriptions: { consumer_id: string; muted: boolean; subscribed_at: string }[] }>(
+            "GET",
+            `/api/tickets/${ticketId}/subscriptions`,
+        ),
+    /** #352: mute/unmute one SPECIFIC subscriber's subscription on a ticket. */
+    muteSubscription: (ticketId: number, consumerId: string, muted: boolean) =>
+        req<{ consumer_id: string; ticket_id: number; muted: boolean }>(
+            "POST",
+            "/api/ticket-subscriptions",
+            { consumer_id: consumerId, ticket_id: ticketId, muted },
+        ),
     /** Delete a comment (#309) — human moderator only. Soft-delete (the
      *  comment becomes a tombstone in the UI, invisible to agents/MCP). */
     deleteComment: (id: number) =>

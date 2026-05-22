@@ -17,20 +17,21 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
-### Manage a ticket's subscription + owner from the thread
+### Manage a ticket's subscriptions + owner from the thread
 
-Next to "edit message" in the thread header, a single **manage** control
-(distinct from editing content) now lets you:
+A **manage** button in the thread header opens an **inline panel** (in place,
+like the edit editor) for moderators:
 
-- **Mute / unmute** the thread's notifications — a mute silences its pings
-  **even if you're a project owner** (the fan-out honours an explicit mute
-  over the owner role), so you can opt out of a single noisy thread.
-- **Change the ticket's owner** (its reporter / `by_agent`) — reassigning it
-  transfers owner-bypass (close/reopen) and subscribes the new owner.
-  Moderator-only.
+- **Per-subscription mute** — lists the ticket's explicit subscriptions and
+  mutes / unmutes each subscriber individually, plus a **mute-all / unmute-all**
+  shortcut. A mute silences that subscriber's pings on the thread **even if
+  they're a project owner** (the fan-out honours an explicit mute over the
+  owner role).
+- **Change the ticket's owner** (its reporter / `by_agent`) — transfers
+  owner-bypass (close/reopen) and subscribes the new owner.
 
-Backed by a `muted` flag on `ticket_subscriptions` (migration 0026), a
-`GET /api/ticket-subscriptions/:id` state probe, and `POST /api/tickets/:id/owner`.
+Backed by a `muted` flag on `ticket_subscriptions` (migration 0026),
+`GET /api/tickets/:id/subscriptions`, and `POST /api/tickets/:id/owner`.
 
 ### claude-loop yields to a human again — ESC takeover + grace fixes
 

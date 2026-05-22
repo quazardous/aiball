@@ -219,6 +219,28 @@ export function getTicketSubscriptionState(
     return row.muted ? "muted" : "followed";
 }
 
+/**
+ * #352: every EXPLICIT subscription on a ticket (one row per follow/mute),
+ * for the moderator's inline manage panel. Owners pinged purely by project
+ * role have no row here (david: "abonnement explicite uniquement").
+ */
+export function listTicketSubscriptionsForTicket(ticket_id: number): {
+    consumer_id: string;
+    muted: boolean;
+    subscribed_at: string;
+}[] {
+    return getDb().select({
+        consumer_id: schema.ticketSubscriptions.consumerId,
+        muted: schema.ticketSubscriptions.muted,
+        subscribed_at: schema.ticketSubscriptions.subscribedAt,
+    })
+        .from(schema.ticketSubscriptions)
+        .where(eq(schema.ticketSubscriptions.ticketId, ticket_id))
+        .orderBy(desc(schema.ticketSubscriptions.subscribedAt))
+        .all()
+        .map((r) => ({ consumer_id: r.consumer_id, muted: !!r.muted, subscribed_at: r.subscribed_at }));
+}
+
 export function deleteTicketSubscription(
     consumer_id: string,
     ticket_id: number,

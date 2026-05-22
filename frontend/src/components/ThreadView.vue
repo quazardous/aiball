@@ -10,6 +10,7 @@ import ThreadRelations from "./ThreadRelations.vue";
 import RelationKindMenu from "./RelationKindMenu.vue";
 import ThreadHeader from "./ThreadHeader.vue";
 import ThreadEditPanel from "./ThreadEditPanel.vue";
+import ThreadManagePanel from "./ThreadManagePanel.vue";
 import ThreadCommentsList from "./ThreadCommentsList.vue";
 import ThreadMetaHeader from "./ThreadMetaHeader.vue";
 import ThreadActionsDock from "./ThreadActionsDock.vue";
@@ -142,6 +143,8 @@ async function decide(action: "approve" | "reject") {
 }
 
 const editing = ref(false);
+// #352: inline "manage subscriptions + owner" panel, mirrors `editing`.
+const managing = ref(false);
 const intentBusy = ref(false);
 const intentOptions = [
     { label: "(no intent)", value: null },
@@ -416,7 +419,14 @@ async function copyTicketRef() {
                     show-banners
                     show-edit-button
                     :editing="editing"
+                    :managing="managing"
                     @start-edit="editing = true"
+                    @start-manage="managing = true"
+                />
+                <ThreadManagePanel
+                    v-if="managing"
+                    :ticket="data.ticket"
+                    @close="managing = false"
                 />
                 <ThreadEditPanel
                     v-if="editing"

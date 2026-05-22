@@ -136,6 +136,7 @@ export {
     listTicketSubscriptions,
     mutedConsumersForTicket,
     getTicketSubscriptionState,
+    listTicketSubscriptionsForTicket,
     listKnownAgents,
 } from "./db/subscriptions.js";
 

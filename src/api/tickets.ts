@@ -42,6 +42,7 @@ import {
     lineageWouldCycle,
     setTicketOwner,
     upsertTicketSubscription,
+    listTicketSubscriptionsForTicket,
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
 import { RELATION_KINDS, isRelationKind, isLineageRelationKind, type RelationKind } from "../relations.js";
@@ -69,6 +70,19 @@ ticketsRouter.post("/tickets/:id/owner", (req: Request, res: Response) => {
     setTicketOwner(id, by_agent);
     upsertTicketSubscription(by_agent, id);
     res.json({ ticket_id: id, by_agent });
+});
+
+/**
+ * #352: list a ticket's EXPLICIT subscriptions (follows + mutes), for the
+ * moderator's inline manage panel. Moderator-only — it manages who else gets
+ * pinged. Owners pinged by project role aren't listed (explicit-only, david).
+ */
+ticketsRouter.get("/tickets/:id/subscriptions", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!isHuman(consumerOf(req))) {
+        return res.status(403).json({ error: "subscription management is moderator-only" });
+    }
+    res.json({ ticket_id: id, subscriptions: listTicketSubscriptionsForTicket(id) });
 });
 
 /**
