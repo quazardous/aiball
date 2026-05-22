@@ -6,6 +6,10 @@ After=network.target
 Type=simple
 WorkingDirectory=%h/.local/lib/aiball
 ExecStart=/usr/bin/env npx --no-install tsx %h/.local/lib/aiball/src/daemon.ts
+# #354: bring up enabled+autostart remote-access providers (tailscale, …)
+# when the daemon starts. No-op when no `providers:` block is configured in
+# ~/.config/aiball/config.yaml. Leading `-` = never fail the unit on this.
+ExecStartPost=-/usr/bin/env %h/.local/bin/aiball providers up
 Restart=on-failure
 RestartSec=2
 Environment=AIBALL_HOST=127.0.0.1

@@ -21,6 +21,7 @@ import { registerAdminCommands } from "./cli/admin.js";
 import { registerAutopollCommands } from "./cli/autopoll.js";
 import { registerBootstrapCommands } from "./cli/bootstrap.js";
 import { registerConsumerCommands } from "./cli/consumer.js";
+import { registerProviderCommands } from "./cli/providers.js";
 import {
     URL,
     die,
@@ -59,6 +60,7 @@ registerTicketCommands(program);
 registerAdminCommands(program);
 registerAutopollCommands(program);
 registerConsumerCommands(program);
+registerProviderCommands(program);
 
 // =====================================================================
 // status / drain

@@ -12,7 +12,7 @@ commented template [`.aiball.yaml.example`](../.aiball.yaml.example).
 | --- | --- | --- |
 | `config/defaults/claude-loop-pings.yaml` | shipped (in the install) | wake phrases (`ping_messages`), wake-CTA templates (`prompts:`/`wake_phrases:`), linkifier patterns (`formatting:`) |
 | `config/defaults/tags.yaml` | shipped | the read-only base tag catalog |
-| `~/.config/aiball/config.yaml` | global, per-user (honours `XDG_CONFIG_HOME`) | `prompts:`, `formatting:`, `tags:` — settings you want identical across every project |
+| `~/.config/aiball/config.yaml` | global, per-user (honours `XDG_CONFIG_HOME`) | `prompts:`, `formatting:`, `tags:`, `providers:` — settings you want identical across every project / host-level |
 | `.aiball.yaml` | per-project (walks up from cwd, like git) | `autopoll:`, `consumer:`, `claude_loop:`, `workflow:`, `prompts:`, `formatting:`, `tags:` |
 | `.mcp.json` → `mcpServers.aiball.env` | per-project | **DEPRECATED** identity fallback (`AIBALL_AGENT`/`AIBALL_PROJECT`) |
 | env vars | process | `AIBALL_AGENT`/`AIBALL_PROJECT` (identity override), `AIBALL_URL`/`AIBALL_SOCK`/`AIBALL_HOME`/`AIBALL_HUMAN`, `CL_*` (claude-loop children), `XDG_CONFIG_HOME` |
@@ -71,6 +71,34 @@ prompts/formatting, every layer **adds**. Config tags render read-only
 (lock badge) in the Tags panel. The global file can declare tags per
 project via a `tags: { global: [...], projects: { name: [...] } }` map;
 a bare list in `.aiball.yaml` means "tags for this project".
+
+### Remote-access providers — `providers:` — *global only (host-level, #354)*
+Remote access exposes the whole machine's daemon, so this block lives in the
+**global** config only (`~/.config/aiball/config.yaml`), not per-project.
+v1 implements **tailscale** and **autostart only** (bring up at daemon
+start; supervision/re-up is a follow-up). The systemd unit's
+`ExecStartPost` runs `aiball providers up`, so an enabled+autostart provider
+comes up whenever the daemon (re)starts. No-op when the block is absent.
+
+```yaml
+# ~/.config/aiball/config.yaml
+providers:
+  tailscale:
+    enabled: true       # default true when the block is present
+    autostart: true     # bring up with the daemon (ExecStartPost). default true
+    mode: https         # https (default) | http  → aiball-tailscale up [--http]
+    # port: 8443        # optional listen port override → --port
+  # cloudflared: { … }  # future, same shape
+```
+
+Manage from the CLI: `aiball providers status | up [--all] | down`. A present
+provider block defaults `enabled`/`autostart` to true (declaring it = wanting
+it). The bring-up reuses `bin/aiball-tailscale` (see [`TAILSCALE.md`](./TAILSCALE.md)).
+
+> Activation note: the `ExecStartPost` lives in the shipped unit
+> (`systemd/aiball.service`). An existing install picks it up after a re-run
+> of `install.sh` (regenerates the unit + `daemon-reload`); then a daemon
+> (re)start brings the provider up.
 
 ## State / data dirs (not config, but related)
 
