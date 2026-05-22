@@ -489,11 +489,33 @@ ticketsRouter.get("/tickets", (req, res) => {
         kind: "ticket_closed",
         project,
     });
-    const closedSet = new Set(closes.map((c) => c.ticket_id));
+    // #371 follow-up: net closed state must replay reopen too, else a
+    // reopened ticket still reads `closed: true` (this handler only checked
+    // ticket_closed, unlike /inbox which replays the full lifecycle). The
+    // new tiering surfaced it — #305 was reopened yet sorted into the open
+    // tier while still flagged closed. Replay closed+reopened in id order.
+    const reopens = listMessages({
+        status: "approved",
+        kind: "ticket_reopened",
+        project,
+    });
+    const closedSet = new Set<number>();
+    for (const ev of [...closes, ...reopens].sort((a, b) => a.id - b.id)) {
+        if (ev.ticket_id == null) continue;
+        if (ev.kind === "ticket_closed") closedSet.add(ev.ticket_id);
+        else closedSet.delete(ev.ticket_id);
+    }
     const nowStr = new Date().toISOString();
 
     const tagsMap = tagsForMessages(created.map((m) => m.id));
     const childCounts = subTicketCounts(created.map((m) => m.id));
+    // #371 david: every row carries its per-consumer work-landscape flags —
+    // `unread` (≥1 unseen ping for this consumer) and `actionable` (in this
+    // consumer's actionable pool). Computed once; the ordering below tiers
+    // the list by them (unread → actionable → other-open → rest).
+    const consumerId = consumerOf(req);
+    const unreadMap = ticketUnreadFlags(consumerId, created.map((m) => m.id));
+    const { openIds, actionableIds } = computeActionableTicketIds(consumerId);
     const tickets = created.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;
@@ -515,6 +537,10 @@ ticketsRouter.get("/tickets", (req, res) => {
             priority: m.priority ?? "normal",
             parent_ticket_id: m.parent_ticket_id ?? null,
             sub_ticket_count: childCounts.get(m.id) ?? 0,
+            // #371: per-consumer landscape flags (nested: unread ⊂ actionable
+            // ⊂ open). Let the caller slice the one list itself.
+            unread: unreadMap.get(m.id) ?? false,
+            actionable: actionableIds.has(m.id),
             tags: tagsMap.get(m.id) ?? [],
         };
         if (summary) return base;
@@ -526,10 +552,9 @@ ticketsRouter.get("/tickets", (req, res) => {
         result = result.filter((t) => !t.closed && (includePostponed || !t.postponed));
     }
     if (onlyActionable) {
-        // #265: scope the actionable gate to the requesting consumer so a
-        // ticket where they authored the latest content (awaiting someone
-        // else) drops out of THEIR pool.
-        const { actionableIds } = computeActionableTicketIds(consumerOf(req));
+        // #265: scope the actionable gate to the requesting consumer (the
+        // `actionableIds` set computed once above). A ticket where they
+        // authored the latest content (awaiting someone else) drops out.
         result = result.filter((t) => actionableIds.has(t.id));
     }
     if (tagsFilter && tagsFilter.length > 0) {
@@ -548,25 +573,37 @@ ticketsRouter.get("/tickets", (req, res) => {
     if (sinceIso) {
         result = result.filter((t) => t.created_at >= sinceIso);
     }
-    // #B.222 david 68km5s: when listing the actionable/open pool —
-    // i.e. the candidate set the wake-CTA or autopoll points the agent
-    // at — sort by priority desc (urgent → high → normal → low), then
-    // by id desc within each priority bucket. The general listing path
-    // (no open/actionable filter) keeps insertion order so existing
-    // browse callers aren't impacted. Priority strings normalize via
-    // PRIORITY_WEIGHT; unknown values fall back to "normal" weight.
-    if (onlyOpen || onlyActionable) {
+    // #B.222 + #371 david: order the list as a WORK LANDSCAPE. Outer key =
+    // tier (greedy — each ticket appears once, in the highest tier it
+    // qualifies for):
+    //   0 unread → 1 actionable (¬unread) → 2 other open (¬unread ¬actionable)
+    //   → 3 the rest (closed / snoozed / non-approved — sinks to the bottom).
+    // Inner key within a tier = work order: priority desc (urgent→low), then
+    // id ASC (oldest first, as a tiebreak). NB: "FIFO" was the wrong term
+    // (david kyudpg) — it's the GET's work order; explicit priority still
+    // wins. The `open`/`actionable` filters above only SUBSET the rows; this
+    // orders whatever's left. Sets are nested: unread ⊂ actionable ⊂ open.
+    {
         const PRIORITY_WEIGHT: Record<string, number> = {
             urgent: 4,
             high: 3,
             normal: 2,
             low: 1,
         };
+        const tierOf = (id: number): number => {
+            if (unreadMap.get(id)) return 0;
+            if (actionableIds.has(id)) return 1;
+            if (openIds.has(id)) return 2;
+            return 3;
+        };
         result.sort((a, b) => {
+            const tA = tierOf(a.id);
+            const tB = tierOf(b.id);
+            if (tA !== tB) return tA - tB;
             const wA = PRIORITY_WEIGHT[a.priority ?? "normal"] ?? 2;
             const wB = PRIORITY_WEIGHT[b.priority ?? "normal"] ?? 2;
             if (wA !== wB) return wB - wA;
-            return b.id - a.id;
+            return a.id - b.id;
         });
     }
     if (limit !== undefined) result = result.slice(0, limit);

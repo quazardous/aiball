@@ -133,9 +133,16 @@ prompts:
   wake_directive_drain:
     - "drain via `unread({pings: true, mark_read: true})`"
     - "ack via `unread({pings: true, mark_read: true})`"
+  # #371 (david kyudpg): ticket_list({actionable}) returns tickets in WORK
+  # ORDER (priority desc, then oldest-first as tiebreak) — NOT "FIFO" (that
+  # term is wrong; the GET's order is what matters). The wake names the head
+  # of that order (#{head_id}) so the agent takes the first to handle, not the
+  # newest/loudest. "actionable" is the "in your court" subset of open —
+  # nested sets, smallest→largest: unread ⊂ actionable ⊂ open. Vars:
+  # {head_id} {head_title} {open_count} — override freely.
   wake_directive_engage:
-    - "engage one of {open_count} actionable via `ticket_list({actionable: true})`"
-    - "pick one of {open_count} actionable via `ticket_list({actionable: true})`"
+    - "engage #{head_id} first — top of the work order ({open_count} actionable) — via `ticket_list({actionable: true})`"
+    - "start with #{head_id} — first in the GET's work order — via `ticket_list({actionable: true})`"
 
   # Top-level assembly template (#B.232 jdhdxq). Composes the rendered
   # sub-parts into the final wake-CTA. Placeholders:

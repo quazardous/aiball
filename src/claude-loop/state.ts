@@ -836,13 +836,21 @@ export async function buildContextPhrase(
 ): Promise<string> {
     const culture = pickPingPhrase(pingsAbsPath);
     try {
-        const [pingsR, projects] = await Promise.all([
+        const [pingsR, projects, headRows] = await Promise.all([
             client.pingsCount() as Promise<{ unread?: number }>,
             client.listProjectsDetailed() as Promise<Array<{
                 name: string;
                 open_count?: number;
                 actionable_count?: number;
             }>>,
+            // #371: head of the FIFO queue (oldest at top priority, after the
+            // id-asc sort) so the wake NAMES the ticket to engage instead of a
+            // bare count — kills the agent's recency bias toward the newest.
+            client.listTickets({
+                actionable: "true",
+                project: project ?? undefined,
+                limit: "1",
+            }) as Promise<Array<{ id: number; title?: string }>>,
         ]);
         const pingCount = typeof pingsR?.unread === "number" ? pingsR.unread : 0;
         const openCount = Array.isArray(projects)
@@ -919,10 +927,23 @@ export async function buildContextPhrase(
             }));
         }
         if (openCount > 0) {
+            // #371: name the FIFO head (head_id/head_title) so the directive
+            // points at ONE specific ticket — the oldest at top priority —
+            // instead of "one of N" (which let the agent grab the newest).
+            // All three vars stay exposed so the YAML slot can be overridden
+            // per project — count-style or custom flavor (#371 david: les
+            // prompts sont pilotés par le yaml, overridables).
+            const head = Array.isArray(headRows) ? headRows[0] : undefined;
             verbs.push(pickPrompt(promptMap, "wake_directive_engage", {
                 tone,
-                vars: { open_count: openCount },
-                fallback: `engage one of ${openCount} actionable via \`ticket_list({actionable: true})\``,
+                vars: {
+                    open_count: openCount,
+                    head_id: head?.id ?? "",
+                    head_title: head?.title ?? "",
+                },
+                fallback: head
+                    ? `engage #${head.id} first (top of the FIFO queue) via \`ticket_list({actionable: true})\``
+                    : `engage one of ${openCount} actionable via \`ticket_list({actionable: true})\``,
             }));
         }
         const directive = verbs.join(" + ");
