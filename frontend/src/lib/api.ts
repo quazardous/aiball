@@ -537,6 +537,27 @@ export const api = {
      *  human only. Returns the moved ticket header (with its new project). */
     moveTicket: (id: number, project: string) =>
         req<Message>("POST", `/api/tickets/${id}/move`, { project }),
+    // ---- ticket subscription / mute + owner (#352) -----------------------
+    /** Current consumer's relationship to a ticket: "followed" | "muted" | null. */
+    ticketSubState: (ticketId: number) =>
+        req<{ consumer_id: string; ticket_id: number; state: "followed" | "muted" | null }>(
+            "GET",
+            `/api/ticket-subscriptions/${ticketId}?consumer_id=${encodeURIComponent(currentConsumer())}`,
+        ),
+    /** Follow (muted=false) or mute (muted=true) a ticket for the current consumer. */
+    setTicketSub: (ticketId: number, muted: boolean) =>
+        req<{ consumer_id: string; ticket_id: number; muted: boolean }>(
+            "POST",
+            "/api/ticket-subscriptions",
+            { consumer_id: currentConsumer(), ticket_id: ticketId, muted },
+        ),
+    /** Reassign a ticket's owner (= by_agent). Moderator-only server-side (#352). */
+    changeTicketOwner: (ticketId: number, by_agent: string) =>
+        req<{ ticket_id: number; by_agent: string }>(
+            "POST",
+            `/api/tickets/${ticketId}/owner`,
+            { by_agent },
+        ),
     /** Delete a comment (#309) — human moderator only. Soft-delete (the
      *  comment becomes a tombstone in the UI, invisible to agents/MCP). */
     deleteComment: (id: number) =>

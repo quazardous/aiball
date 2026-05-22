@@ -134,6 +134,8 @@ export {
     deleteTicketSubscription,
     listTicketSubscribers,
     listTicketSubscriptions,
+    mutedConsumersForTicket,
+    getTicketSubscriptionState,
     listKnownAgents,
 } from "./db/subscriptions.js";
 
@@ -144,6 +146,7 @@ export {
     listExpiredPostpones,
     listSubTickets,
     subTicketCounts,
+    setTicketOwner,
     getTicketStages,
     getTicketBookends,
     type SubTicketSummary,

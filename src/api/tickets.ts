@@ -40,6 +40,8 @@ import {
     insertTypedRelation,
     listTypedRelationsForTicket,
     lineageWouldCycle,
+    setTicketOwner,
+    upsertTicketSubscription,
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
 import { RELATION_KINDS, isRelationKind, isLineageRelationKind, type RelationKind } from "../relations.js";
@@ -49,6 +51,25 @@ import { badRequest, consumerOf, notFound, withTags } from "./_helpers.js";
 import { moveTicketTo } from "../messages.js";
 
 export const ticketsRouter = Router();
+
+/**
+ * #352: change a ticket's owner (= its `by_agent` / reporter — no model
+ * change). Human-moderator only. Subscribes the new owner so they get the
+ * thread's pings; owner-bypass (close/reopen) follows `by_agent`.
+ */
+ticketsRouter.post("/tickets/:id/owner", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!isHuman(consumerOf(req))) {
+        return res.status(403).json({ error: "owner change is moderator-only" });
+    }
+    const by_agent = typeof req.body?.by_agent === "string" ? req.body.by_agent.trim() : "";
+    if (!by_agent) return badRequest(res, "by_agent required (non-empty string)");
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    setTicketOwner(id, by_agent);
+    upsertTicketSubscription(by_agent, id);
+    res.json({ ticket_id: id, by_agent });
+});
 
 /**
  * Inbox bookends: oldest + newest non-rejected ticket matching the

@@ -17,6 +17,21 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Manage a ticket's subscription + owner from the thread
+
+Next to "edit message" in the thread header, a single **manage** control
+(distinct from editing content) now lets you:
+
+- **Mute / unmute** the thread's notifications — a mute silences its pings
+  **even if you're a project owner** (the fan-out honours an explicit mute
+  over the owner role), so you can opt out of a single noisy thread.
+- **Change the ticket's owner** (its reporter / `by_agent`) — reassigning it
+  transfers owner-bypass (close/reopen) and subscribes the new owner.
+  Moderator-only.
+
+Backed by a `muted` flag on `ticket_subscriptions` (migration 0026), a
+`GET /api/ticket-subscriptions/:id` state probe, and `POST /api/tickets/:id/owner`.
+
 ### claude-loop yields to a human again — ESC takeover + grace fixes
 
 Pressing ESC in a loop pane (to interrupt claude / take over) used to be

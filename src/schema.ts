@@ -254,6 +254,10 @@ export const ticketSubscriptions = sqliteTable("ticket_subscriptions", {
     consumerId: text("consumer_id").notNull(),
     ticketId: integer("ticket_id").notNull().references(() => tickets.id, { onDelete: "cascade" }),
     subscribedAt: text("subscribed_at").notNull(),
+    // #352: 1 = mute. A muted row suppresses pings for this consumer on this
+    // ticket EVEN when they'd otherwise be pinged by project-owner/subscriber
+    // role (fanOutPings honors it). 0 = explicit follow. No row = role-default.
+    muted: integer("muted").notNull().default(0),
 }, (t) => [
     primaryKey({ columns: [t.consumerId, t.ticketId] }),
     index("idx_ticket_subs_ticket").on(t.ticketId),

@@ -7,6 +7,7 @@ import { Router, type Request, type Response } from "express";
 import {
     deleteTicketSubscription,
     getMessage,
+    getTicketSubscriptionState,
     listTicketSubscriptions,
     upsertTicketSubscription,
 } from "../db.js";
@@ -34,8 +35,23 @@ ticketSubscriptionsRouter.post("/ticket-subscriptions", (req: Request, res: Resp
     if (!t || t.kind !== "ticket_created") {
         return notFound(res, "ticket not found");
     }
-    upsertTicketSubscription(consumer, ticket_id);
-    res.status(201).json({ consumer_id: consumer, ticket_id });
+    // #352: muted=true mutes (suppress pings even by role); default false = follow.
+    const muted = req.body?.muted === true;
+    upsertTicketSubscription(consumer, ticket_id, muted);
+    res.status(201).json({ consumer_id: consumer, ticket_id, muted });
+});
+
+// #352: the current consumer's relationship to one ticket — "followed" /
+// "muted" / null (role-default). Drives the ThreadHeader manage toggle.
+ticketSubscriptionsRouter.get("/ticket-subscriptions/:ticket_id", (req, res) => {
+    const ticket_id = Number(req.params.ticket_id);
+    const consumer = req.query.consumer_id as string | undefined;
+    if (!consumer) return badRequest(res, "consumer_id required");
+    res.json({
+        consumer_id: consumer,
+        ticket_id,
+        state: getTicketSubscriptionState(consumer, ticket_id),
+    });
 });
 
 ticketSubscriptionsRouter.delete("/ticket-subscriptions/:ticket_id", (req, res) => {

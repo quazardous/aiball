@@ -24,6 +24,7 @@ import {
     listProjects,
     listProjectSubscribers,
     listTicketSubscribers,
+    mutedConsumersForTicket,
     type Message,
 } from "./db.js";
 
@@ -116,6 +117,13 @@ export function fanOutPings(msg: Message): void {
     // about.
     if (msg.status === "pending") {
         for (const h of listHumans()) recipients.add(h);
+    }
+
+    // #352: explicit mutes beat role + subscription. Remove anyone who muted
+    // this ticket — the only way a project owner (pinged by role above) can
+    // silence a single thread. Applied last so it overrides every add path.
+    if (msg.ticket_id !== null) {
+        for (const m of mutedConsumersForTicket(msg.ticket_id)) recipients.delete(m);
     }
 
     const authorIsHuman = msg.by_agent != null && isHuman(msg.by_agent);

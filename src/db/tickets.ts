@@ -238,6 +238,19 @@ export function listSubTickets(parentId: number): SubTicketSummary[] {
 }
 
 /**
+ * #352: reassign a ticket's owner — which IS its `by_agent` / reporter (no
+ * model change, per david). owner-bypass (close/reopen) and auto-subscribe
+ * follow `by_agent`, so updating it transfers authority. The API layer gates
+ * this to the human moderator and subscribes the new owner.
+ */
+export function setTicketOwner(ticket_id: number, by_agent: string): void {
+    getDb().update(schema.tickets)
+        .set({ byAgent: by_agent })
+        .where(eq(schema.tickets.id, ticket_id))
+        .run();
+}
+
+/**
  * Count direct children per parent ticket, in one shot. Rejected children
  * are excluded (symmetric with listSubTickets). Used by the ticket list
  * endpoint to surface lineage without paying a per-row N+1.

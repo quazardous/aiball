@@ -167,12 +167,56 @@ export function getProjectStats(project: string): ProjectStats {
 export function upsertTicketSubscription(
     consumer_id: string,
     ticket_id: number,
+    muted = false,
 ): void {
+    // #352: muted is part of the conflict update so toggling follow↔mute on an
+    // existing row flips it (keeps the original subscribed_at).
     getDb().insert(schema.ticketSubscriptions).values({
         consumerId: consumer_id,
         ticketId: ticket_id,
         subscribedAt: nowIso(),
-    }).onConflictDoNothing().run();
+        muted: muted ? 1 : 0,
+    }).onConflictDoUpdate({
+        target: [schema.ticketSubscriptions.consumerId, schema.ticketSubscriptions.ticketId],
+        set: { muted: muted ? 1 : 0 },
+    }).run();
+}
+
+/**
+ * #352: consumers who have explicitly MUTED this ticket (muted=1). The
+ * fan-out subtracts these so a mute beats the project-owner / subscriber
+ * role — the only way an owner can silence one thread.
+ */
+export function mutedConsumersForTicket(ticket_id: number): Set<string> {
+    const rows = getDb().select({ consumer_id: schema.ticketSubscriptions.consumerId })
+        .from(schema.ticketSubscriptions)
+        .where(and(
+            eq(schema.ticketSubscriptions.ticketId, ticket_id),
+            eq(schema.ticketSubscriptions.muted, 1),
+        ))
+        .all();
+    return new Set(rows.map((r) => r.consumer_id));
+}
+
+/**
+ * #352: the current consumer's relationship to a ticket:
+ *   - "muted"    — explicit mute row (suppresses pings even by role)
+ *   - "followed" — explicit follow row
+ *   - null       — no row (role-default applies)
+ */
+export function getTicketSubscriptionState(
+    consumer_id: string,
+    ticket_id: number,
+): "followed" | "muted" | null {
+    const row = getDb().select({ muted: schema.ticketSubscriptions.muted })
+        .from(schema.ticketSubscriptions)
+        .where(and(
+            eq(schema.ticketSubscriptions.consumerId, consumer_id),
+            eq(schema.ticketSubscriptions.ticketId, ticket_id),
+        ))
+        .get();
+    if (!row) return null;
+    return row.muted ? "muted" : "followed";
 }
 
 export function deleteTicketSubscription(
