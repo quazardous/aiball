@@ -17,6 +17,20 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### AskUserQuestion no longer blocked when you're present — ask-grace + AFK key
+
+In a `claude-loop` session, the `AskUserQuestion` dialog used to be gated on
+the 60s wake user-grace, so a long agent turn could outlast it and wrongly
+redirect a legitimate question. It now uses a dedicated, longer
+**`ask_grace_seconds`** (default 600 = 10 min) — a present-but-quiet human
+still gets the dialog; only a genuine silence falls back to "ask via a ticket
+comment". And a configurable **AFK combo** (`afk_key`, default `"esc esc"`)
+lets you flag yourself away *immediately* — the PTY proxy watches stdin for
+the combo and writes an `afk` marker the gate honours until any other
+keystroke clears it. `afk_key` uses VS Code notation (`+` for modifiers,
+space for a 2-combo sequence; `afk_window_ms` bounds the gap). Parser +
+detector are unit-tested; see [`docs/CONFIGS.md`](docs/CONFIGS.md).
+
 ### Manage a ticket's subscriptions + owner from the thread
 
 A **manage** button in the thread header opens an **inline panel** (in place,

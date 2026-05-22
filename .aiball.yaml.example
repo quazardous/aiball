@@ -125,6 +125,25 @@ autopoll:
 #   # Default true — set false to keep ESC purely a claude interrupt
 #   # with no effect on the loop.
 #   esc_takeover: true
+#
+#   # AskUserQuestion gate (#351). In a loop, the multi-choice dialog is
+#   # allowed only if a human acted within ask_grace_seconds; past that it
+#   # redirects the agent to ask via a ticket comment. Longer than
+#   # user_grace_seconds — a stalled question is cheap vs a lost one.
+#   # Default 600 (10 min).
+#   ask_grace_seconds: 600
+#
+#   # AFK combo (#351): press it to flag yourself away IMMEDIATELY (the
+#   # AskUserQuestion gate redirects without waiting for the timeout); any
+#   # other keystroke clears it ("I'm back"). VS Code notation: `+` joins
+#   # modifiers, a space = a 2-combo sequence (e.g. "esc esc", "ctrl+a").
+#   # Only what the terminal emits as distinct bytes is supported (esc,
+#   # ctrl+<char>, f-keys, literals). Requires the PTY proxy. Default "esc esc".
+#   afk_key: "esc esc"
+#
+#   # Max milliseconds between the two combos of an afk_key sequence
+#   # (ignored for a single combo). Default 400.
+#   afk_window_ms: 400
 
 # Workflow hints (#319). claude-loop "habille" the WAKE of a `feature`-intent
 # ticket with a branch hint ("🌿 Feature: build it in …, not on main."). Lets

@@ -146,6 +146,84 @@ _NO_WAIT = os.environ.get("CL_WAIT") == "0"
 # Config-gated via .aiball.yaml `claude_loop.esc_takeover` (default on);
 # CL_ESC_TAKEOVER="0" disables it.
 _ESC_TAKEOVER = (os.environ.get("CL_ESC_TAKEOVER") or "1") != "0"
+
+# #351: AFK detection. CL_AFK_SPEC = JSON list of combos (each a list of byte
+# ints, produced by the TS parseAfkKey); CL_AFK_WINDOW_MS = max gap (ms)
+# between the two combos of a sequence. On the combo we write the `afk`
+# marker (the PreToolUse hook then redirects AskUserQuestion → ticket); any
+# OTHER keystroke clears it (the human is back). Mirrors afk-key.ts.
+import json as _json
+try:
+    _AFK_COMBOS = [bytes(c) for c in _json.loads(os.environ.get("CL_AFK_SPEC") or "[]")]
+except Exception:
+    _AFK_COMBOS = []
+try:
+    _AFK_WINDOW_MS = int(os.environ.get("CL_AFK_WINDOW_MS") or "400")
+except ValueError:
+    _AFK_WINDOW_MS = 400
+
+
+def _afk_path():
+    sd = os.environ.get("CL_STATE_DIR") or ""
+    return os.path.join(sd, "afk") if sd else ""
+
+
+def set_afk():
+    p = _afk_path()
+    if not p:
+        return
+    try:
+        with open(p, "w") as f:
+            f.write(datetime.datetime.now().isoformat() + "\n")
+    except OSError:
+        pass
+
+
+def clear_afk():
+    p = _afk_path()
+    if not p:
+        return
+    try:
+        os.remove(p)
+    except OSError:
+        pass
+
+
+class _AfkDetector:
+    """Per-keystroke exact-match detector (mirror of afk-key.ts AfkDetector).
+
+    Fed ONE keystroke's bytes at a time with an injected `now` (seconds).
+    A single combo fires on exact match; a 2-combo sequence fires when the
+    2nd combo lands within `window_ms` of the 1st. Any other keystroke breaks
+    a pending sequence."""
+
+    def __init__(self, combos, window_ms):
+        self.combos = combos
+        self.window_ms = window_ms
+        self.first_at = None
+
+    def feed(self, data, now):
+        if not self.combos:
+            return False
+        c1 = self.combos[0]
+        c2 = self.combos[1] if len(self.combos) > 1 else None
+        if c2 is None:
+            return data == c1
+        if (self.first_at is not None
+                and (now - self.first_at) * 1000 <= self.window_ms
+                and data == c2):
+            self.first_at = None
+            return True
+        if data == c1:
+            self.first_at = now
+            return False
+        self.first_at = None
+        return False
+
+
+_afk = _AfkDetector(_AFK_COMBOS, _AFK_WINDOW_MS)
+clear_afk()  # #351: drop any stale afk marker left by a previous run, on boot
+
 # #305: début de la fenêtre boot-grace = import du proxy (≈ boot du loop).
 # Sans --no-wait, le timer gèle TOUS les auto-pings pendant les
 # CL_BOOT_GRACE_SEC premières secondes (laisse l'humain prendre la main au
@@ -413,6 +491,13 @@ def main(argv):
                 except OSError:
                     data = b""
                 if data:
+                    # #351: AFK combo → mark away; any other real keystroke
+                    # clears it (the human is back). Forwarding to claude is
+                    # unchanged below — we only observe.
+                    if _afk.feed(data, datetime.datetime.now().timestamp()):
+                        set_afk()
+                    elif is_typing_keystroke(data) or (_ESC_TAKEOVER and _is_lone_esc(data)):
+                        clear_afk()
                     if is_typing_keystroke(data):
                         touch_marker()
                         last_keystroke = datetime.datetime.now().timestamp()

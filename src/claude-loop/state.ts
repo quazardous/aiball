@@ -121,6 +121,10 @@ export function pingsPath(sd: string): string { return join(sd, "pings.yaml"); }
 export function idleMarkerPath(sd: string): string { return join(sd, "idle-since"); }
 export function wakeRequestedPath(sd: string): string { return join(sd, "wake-requested"); }
 export function userTookOverPath(sd: string): string { return join(sd, "user-took-over"); }
+/** #351: AFK marker — the human flagged themselves absent via the afk_key
+ *  combo. The PTY proxy writes it on the combo and deletes it on any other
+ *  activity (and on boot), so its mere existence means "currently away". */
+export function afkPath(sd: string): string { return join(sd, "afk"); }
 // #264: near-live "a human is typing in the tmux pane" marker. Touched
 // by the timer's detection poll when the prompt area changes while
 // at-prompt; read by setTmuxStatus to paint the bicolor human chip and
@@ -489,6 +493,18 @@ export function userIsTakingOver(sd: string, graceSec: number): boolean {
     } catch {
         return false;
     }
+}
+
+/** #351: default ask-grace (10 min). The AskUserQuestion window — longer
+ *  than the wake user-grace (60s) because a stalled question is cheap vs a
+ *  lost one. Overridable via `claude_loop.ask_grace_seconds` / CL_ASK_GRACE_SEC. */
+export const DEFAULT_ASK_GRACE_SEC = 600;
+
+/** #351: true when the human has flagged AFK and nothing has cleared it.
+ *  Existence = active (the proxy deletes the marker on any other keystroke
+ *  and on boot). Lets the AskUserQuestion gate redirect even within ask-grace. */
+export function afkActive(sd: string): boolean {
+    return existsSync(afkPath(sd));
 }
 
 /**

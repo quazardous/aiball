@@ -21,7 +21,7 @@
  * always exits 0 — a hook failure must never block a tool call.
  */
 import { readFileSync } from "node:fs";
-import { DEFAULT_USER_GRACE_SEC, userIsTakingOver } from "./state.js";
+import { DEFAULT_ASK_GRACE_SEC, afkActive, userIsTakingOver } from "./state.js";
 
 function allow(): never {
     process.stdout.write("{}\n");
@@ -55,21 +55,27 @@ try {
     // Not inside a loop → interactive session, a human can answer. Allow.
     if (!sd) allow();
 
+    const redirect =
+        "AskUserQuestion (multi-choice dialog) stalls the autonomous aiball loop — no human is in front to click an answer. " +
+        "Post your question as an aiball ticket comment instead (ticket_reply on the relevant ticket); the conversation IS the channel. " +
+        "When a human is present (interactive session) this dialog is allowed.";
+
+    // #351: the human explicitly flagged AFK (the afk_key combo, e.g.
+    // double-ESC) → they've stepped away even if they were just active.
+    // Redirect immediately rather than stall on a dialog nobody will click.
+    if (afkActive(sd)) deny(redirect);
+
+    // #351: AskUserQuestion uses the longer ASK-grace (default 10 min), not
+    // the 60s wake user-grace — a present-but-quiet human should still get
+    // the dialog; only a silent timeout (departure) falls back to redirect.
     const graceSec = Math.max(
         0,
-        Number(process.env.CL_USER_GRACE_SEC ?? DEFAULT_USER_GRACE_SEC),
+        Number(process.env.CL_ASK_GRACE_SEC ?? DEFAULT_ASK_GRACE_SEC),
     );
-    // Human typed within the grace window → they're in front; let the
-    // dialog through (best of both worlds).
     if (userIsTakingOver(sd, graceSec)) allow();
 
-    // Autonomous loop, no human → the dialog would stall the loop.
-    // Redirect to the ticket thread.
-    deny(
-        "AskUserQuestion (multi-choice dialog) stalls the autonomous aiball loop — no human is in front to click an answer. " +
-            "Post your question as an aiball ticket comment instead (ticket_reply on the relevant ticket); the conversation IS the channel. " +
-            "When a human is present (interactive session) this dialog is allowed.",
-    );
+    // Autonomous loop / human long-gone → the dialog would stall. Redirect.
+    deny(redirect);
 } catch {
     allow();
 }

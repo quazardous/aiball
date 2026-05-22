@@ -29,6 +29,7 @@ import { AiballClient } from "../client.js";
 import { AIBALL_VERSION } from "../version.js";
 import { bootstrapInit } from "../cli/bootstrap.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
+import { parseAfkKey } from "./afk-key.js";
 import {
     DEFAULT_CHECK_CMD,
     isInternalCheckCmd,
@@ -285,6 +286,19 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const bootGraceSec = ctx.claude_loop.boot_grace_seconds; // no CLI flag yet — yaml-only
     const wakeInFlightTtlMs = ctx.claude_loop.wake_in_flight_ttl_ms; // yaml-only
     const escTakeover = ctx.claude_loop.esc_takeover; // #345, yaml-only
+    const askGraceSec = ctx.claude_loop.ask_grace_seconds; // #351, yaml-only
+    // #351: parse afk_key → byte combos for the PTY proxy. A bad spec logs +
+    // disables AFK (empty spec) rather than failing the whole launch.
+    let afkSpecJson = "";
+    try {
+        afkSpecJson = JSON.stringify(
+            parseAfkKey(ctx.claude_loop.afk_key, ctx.claude_loop.afk_window_ms).combos,
+        );
+    } catch (e) {
+        process.stderr.write(
+            `claude-loop: invalid afk_key "${ctx.claude_loop.afk_key}" — AFK disabled (${(e as Error).message})\n`,
+        );
+    }
 
     const plate: Plate = {
         name,
@@ -325,6 +339,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export CL_WAKE_IN_FLIGHT_TTL_MS=${shQuote(String(wakeInFlightTtlMs))}`,
         // #345: bare ESC in the pane = human takeover (PTY proxy arms user-grace).
         `export CL_ESC_TAKEOVER=${shQuote(escTakeover ? "1" : "0")}`,
+        // #351: ask-grace gates AskUserQuestion (PreToolUse hook); the afk
+        // spec + window drive the PTY proxy's AFK detection → `afk` marker.
+        `export CL_ASK_GRACE_SEC=${shQuote(String(askGraceSec))}`,
+        `export CL_AFK_SPEC=${shQuote(afkSpecJson)}`,
+        `export CL_AFK_WINDOW_MS=${shQuote(String(ctx.claude_loop.afk_window_ms))}`,
         // #B.154: resume picker auto-dismiss mode. Read by the
         // SessionStart hook when source=resume.
         `export CL_RESUME_MODE=${shQuote(opts.resumeMode ?? "as-is")}`,

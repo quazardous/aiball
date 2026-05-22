@@ -45,7 +45,22 @@ Keys: `enabled`, `volatile`, `throttle_seconds`, `include_recent_tickets`,
 Code defaults → `.aiball.yaml` `claude_loop:` → CLI flags (`--interval`,
 `--user-grace`) and `CL_*` env (which the timer/hook child processes read).
 Keys: `interval_seconds`, `boot_grace_seconds`, `user_grace_seconds`,
-`wake_in_flight_ttl_ms`, `esc_takeover`. See [`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md).
+`wake_in_flight_ttl_ms`, `esc_takeover`, `ask_grace_seconds`, `afk_key`,
+`afk_window_ms`. See [`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md).
+
+**AskUserQuestion gate + AFK (#351).** In a loop, `AskUserQuestion` is allowed
+only if a human acted within `ask_grace_seconds` (default 600 = 10 min, longer
+than the wake user-grace — a stalled question is cheap vs a lost one); past
+that it redirects the agent to ask via a ticket comment. `afk_key` lets you
+flag yourself away *immediately* (no waiting for the timeout): the PTY proxy
+watches stdin for the combo and, on match, writes an `afk` marker that the
+gate honours until any other keystroke clears it. `afk_key` uses VS Code
+notation — `+` joins modifiers, a space is a 2-combo sequence (default
+`"esc esc"`); `afk_window_ms` (default 400) bounds the gap between the two
+combos. Since the proxy only sees the terminal's **byte stream**, the
+supported subset is what maps to distinct bytes (`esc`, `ctrl+<char>`,
+f-keys, literals); `shift`/`alt+shift`/`ctrl+shift` aren't distinguishable
+without the kitty/win32 keyboard protocol.
 
 ### Workflow hints — `workflow:` — *defaults → yaml*
 `hint_branch`, `hint_worktree` (both off by default). See
