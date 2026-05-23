@@ -457,6 +457,16 @@ export function ticketUnreadFlags(
         eq(schema.pings.recipient, consumer_id),
         isNull(schema.pings.seenAt),
         inArray(schema.pings.ticketId, ticket_ids),
+        // #355: ne pas allumer le flag unread de la rangée sur sa propre
+        // action. Aligne ticketUnreadFlags sur unreadCount / listUnread /
+        // listPings, qui excluent tous le self-ping via la colonne actor
+        // (legacy actor=null conservé). Sans ça, un self-ping (ex. #241,
+        // agent sous by_agent override) allume la rangée mais pas le badge
+        // sidebar ni le feed → "mon commentaire est unread pour moi-même".
+        or(
+            isNull(schema.pings.actor),
+            ne(schema.pings.actor, consumer_id),
+        ),
     )).all();
     for (const r of rootHits) if (r.ticket_id !== null) out.set(r.ticket_id, true);
     // Pings on comments → join _messages to map back to ticket_id.
@@ -469,6 +479,11 @@ export function ticketUnreadFlags(
             eq(schema.pings.recipient, consumer_id),
             isNull(schema.pings.seenAt),
             inArray(schema.messages.ticketId, ticket_ids),
+            // #355: même exclusion self-actor que rootHits ci-dessus.
+            or(
+                isNull(schema.pings.actor),
+                ne(schema.pings.actor, consumer_id),
+            ),
         ))
         .all();
     for (const r of commentHits) out.set(r.ticket_id, true);
