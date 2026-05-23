@@ -118,6 +118,14 @@ export class AfkDetector {
         const [c1, c2] = this.spec.combos;
         if (!c2) return bytesEqual(bytes, c1); // single combo
 
+        // #381: combo COALESCED into one read — the PTY can deliver both combos
+        // in a single chunk (e.g. a fast `esc esc` → [0x1b,0x1b]), where `bytes`
+        // matches neither c1 nor c2 and arming became batching-dependent
+        // ("sometimes it corrupts"). Recognize the concatenation → fire at once.
+        if (bytesEqual(bytes, [...c1, ...c2])) {
+            this.firstAt = null;
+            return true;
+        }
         // Second combo arrived in time → fire.
         if (
             this.firstAt !== null &&

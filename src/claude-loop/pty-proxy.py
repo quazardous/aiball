@@ -223,6 +223,14 @@ class _AfkDetector:
         c2 = self.combos[1] if len(self.combos) > 1 else None
         if c2 is None:
             return data == c1
+        # #381 : combo COALESCÉ en un seul read. Le PTY peut livrer les 2 combos
+        # d'un coup (ex. `esc esc` tapé vite → b"\x1b\x1b" en un read) ; sans ça
+        # `data` (2 octets) ne matchait NI c1 NI c2 → l'armement était
+        # non-déterministe selon le batching (« parfois ça se corrompt »). On
+        # reconnaît la concaténation → succès immédiat, atomique.
+        if data == c1 + c2:
+            self.first_at = None
+            return True
         if (self.first_at is not None
                 and (now - self.first_at) * 1000 <= self.window_ms
                 and data == c2):
@@ -251,6 +259,280 @@ clear_user_grace()  # #357: pas de présence stale héritée → boot en `loop`,
 # CL_BOOT_GRACE_SEC premières secondes (laisse l'humain prendre la main au
 # lancement) → la barre doit lire `wait`, pas `loop`, tant que la fenêtre tient.
 _BOOT_TS = datetime.datetime.now().timestamp()
+
+
+def _note_wake_injected():
+    """#305 (david j8xhrh : « vu que claude-loop balance un wake c'est qu'il
+    sait qu'il est en mode loop »). Un wake injecté PROUVE que le gate est
+    ouvert : le timer/stop-hook ne pinge QUE hors user-grace ET hors boot-grace
+    (cf. tryWake, timer.ts:418/425). La barre n'a donc pas à maintenir un état
+    d'attente PARALLÈLE qui peut diverger et latcher `wait` (le bug #305) ; le
+    wake fait AUTORITÉ. On largue les deux raisons d'attente — boot-grace
+    (neutralisée) + user-grace stale (marqueur retiré) — pour que `_rest_word`
+    retombe sur `loop` et n'« annule » pas le repeint au tour suivant. La
+    prochaine VRAIE frappe humaine ré-armera la présence (→ stop/wait)."""
+    global _BOOT_TS
+    _BOOT_TS = 0.0          # boot-grace révolue par décision du wake-decider
+    clear_user_grace()     # user-grace stale → la barre ne doit plus lire `wait`
+
+
+# === #360 : cœur de décision PUR + diag NDJSON + replay (tests hors tmux) ===
+#
+# david (#360) : « rendre la couche détection PURE et attaquable hors tmux →
+# tests unitaires sur des séquences capturées ». L'ancienne logique frappe→
+# action vivait inline dans la boucle `select` de main(), mêlée à `os.write`,
+# aux fichiers-marqueurs et à tmux — impossible à rejouer/asserter. On l'isole
+# ici dans `_Decider` : il NE FAIT RIEN (pas d'I/O), il RETOURNE les actions
+# (octets à forwarder, markers afk/user-grace, intention de mot) ; l'appelant
+# — main() en live OU `--replay` hors tmux — les applique. Même code testé en
+# live et en test → zéro dérive de mirror (cf. _AfkDetector ↔ afk-key.ts).
+
+
+def _proxy_log_path():
+    """Chemin du log diag NDJSON, ou "" si désactivé. Activé via env
+    `CL_PROXY_LOG=<fichier>` (append) — observation pure, zéro impact
+    comportement quand absent."""
+    return os.environ.get("CL_PROXY_LOG") or ""
+
+
+def _decision_record(dec):
+    """Aplati une Decision en dict NDJSON-able (octets → hex). Format partagé
+    par le logger live et le mode --replay → mêmes fixtures des deux côtés."""
+    raw = dec.get("raw") or b""
+    fwd = dec.get("forward") or b""
+    buf = dec.get("buffer")
+    return {
+        "t": round(dec.get("now", 0.0), 6),
+        "event": dec.get("event"),
+        "raw": raw.hex(),
+        "forward": fwd.hex(),
+        "buffer": buf.hex() if buf else None,
+        "markers": dec.get("markers", []),
+        "word": dec.get("word"),
+        "afk_fired": dec.get("afk_fired", False),
+        "typing": dec.get("typing", False),
+        "lone_esc": dec.get("lone_esc", False),
+        "buffered_first": dec.get("buffered_first", False),
+    }
+
+
+def _emit_log(dec):
+    """Append une Decision au log diag si CL_PROXY_LOG est posé. Best-effort —
+    le diag ne doit JAMAIS casser le pont I/O de la session live."""
+    p = _proxy_log_path()
+    if not p:
+        return
+    try:
+        with open(p, "a") as f:
+            f.write(_json.dumps(_decision_record(dec)) + "\n")
+    except OSError:
+        pass
+
+
+# Tokens nommés acceptés par --replay (sous-ensemble de afk-key.ts NAMED).
+_REPLAY_TOKENS = {
+    "esc": b"\x1b", "tab": b"\x09", "enter": b"\x0d", "ret": b"\x0d",
+    "space": b"\x20", "bs": b"\x7f", "backspace": b"\x7f",
+    "del": b"\x1b\x5b\x33\x7e",
+}
+
+
+def _token_to_bytes(tok):
+    """Convertit un token de séquence --replay en octets : nom (`esc`,`tab`…),
+    hex (`1b`, `1b1b`), sinon littéral UTF-8 (`a`, `qq`)."""
+    t = tok.lower()
+    if t in _REPLAY_TOKENS:
+        return _REPLAY_TOKENS[t]
+    try:
+        return bytes.fromhex(tok)
+    except ValueError:
+        return tok.encode()
+
+
+class _Decider:
+    """Cœur PUR : frappe (ou tick) → actions, sans aucun effet de bord (#360).
+
+    Mirror EXACT des branches de l'ancienne boucle stdin (succès combo AFK /
+    bufferisation 1re combo / frappe ordinaire + flush différé). Les effets
+    sont décrits, pas exécutés :
+      - `forward`  : octets à écrire vers claude MAINTENANT (inclut un pending
+                     flushé) ;
+      - `buffer`   : octets nouvellement bufferisés (1re combo en attente) ;
+      - `markers`  : actions ordonnées parmi set_afk / clear_afk / touch_marker
+                     / touch_user_grace / clear_user_grace ;
+      - `word`     : intention de mot — "stop" (frappe), "rest" (recalcul
+                     wait/loop selon grace) ou None (inchangé). La RÉSOLUTION
+                     de "rest" est contextuelle (fichiers en live, grace logique
+                     en replay) → le Decider reste pur.
+    État porté : le détecteur AFK, le buffer pending + sa deadline, et
+    `last_keystroke` (lu par main() pour le timeout du select)."""
+
+    def __init__(self, afk, afk_combos, esc_takeover, window_ms):
+        self.afk = afk
+        self.afk_combos = afk_combos
+        self.esc_takeover = esc_takeover
+        self.window_ms = window_ms
+        self.pending = None
+        self.pending_deadline = 0.0
+        self.last_keystroke = 0.0
+        # #381 : état afk LOGIQUE (le proxy est seul à écrire le marqueur après
+        # le clear_afk de boot → ce booléen reste en phase avec le fichier). Sert
+        # à TOGGLE sur le combo (on↔off) au lieu d'un set systématique.
+        self.afk_active = False
+
+    def on_stdin(self, data, now):
+        d = {"event": "stdin", "now": now, "raw": data,
+             "forward": b"", "buffer": None, "markers": [], "word": None,
+             "afk_fired": False, "typing": False, "lone_esc": False,
+             "buffered_first": False}
+
+        # (a) Le combo AFK RÉUSSIT → on n'envoie RIEN à claude (ni buffer, ni
+        #     cette frappe : pas de rewind `esc esc`, pas d'interruption). #381 :
+        #     le combo TOGGLE l'afk (on↔off) au lieu de le poser systématiquement
+        #     — sinon `esc esc` ne pouvait que l'ARMER, jamais le lever (david :
+        #     « esc esc toggle [on] mais après une seule pression suffit [off] »).
+        if self.afk.feed(data, now):
+            d["afk_fired"] = True
+            if self.afk_active:           # était away → on REVIENT
+                d["markers"] += ["clear_afk", "touch_user_grace"]
+                self.afk_active = False
+            else:                          # était présent → on PART
+                d["markers"] += ["set_afk", "clear_user_grace"]
+                self.afk_active = True
+            self.pending = None
+            self.pending_deadline = 0.0
+            d["word"] = "rest"
+            return d
+
+        # (b) 1re combo d'une séquence à 2 → on la BUFFERISE (au lieu de la
+        #     forwarder) jusqu'à la fenêtre afk. #381 : on NE touche PAS l'afk
+        #     ici — ce 1er octet est AMBIGU (peut compléter le combo → toggle, ou
+        #     rester un ESC nu → takeover). Clear prématuré = c'était LUI qui
+        #     faisait qu'une seule pression suffisait à lever l'afk. La présence,
+        #     elle, est armée tout de suite (l'humain agit) ; un succès au coup
+        #     suivant la corrigera (clear_user_grace).
+        if (len(self.afk_combos) >= 2 and self.afk.first_at is not None
+                and data == self.afk_combos[0]):
+            self.pending = data
+            self.pending_deadline = now + self.window_ms / 1000.0
+            d["buffer"] = data
+            d["buffered_first"] = True
+            typing = is_typing_keystroke(data)
+            d["typing"] = typing
+            if typing:
+                d["markers"] += ["touch_marker", "touch_user_grace"]
+                self.last_keystroke = now
+            elif self.esc_takeover and _is_lone_esc(data):
+                d["lone_esc"] = True
+                d["markers"].append("touch_user_grace")
+            d["word"] = "stop" if typing else "rest"
+            return d
+
+        # (c) Frappe ordinaire. Si une 1re combo était bufferisée, le combo a
+        #     ÉCHOUÉ (cette touche n'est pas la 2e) → flush différé AVANT cette
+        #     frappe (ordre préservé), puis traitement normal.
+        if self.pending is not None:
+            d["forward"] += self.pending
+            self.pending = None
+            self.pending_deadline = 0.0
+        if is_typing_keystroke(data):
+            d["typing"] = True
+            d["markers"] += ["clear_afk", "touch_marker", "touch_user_grace"]
+            self.afk_active = False   # toute frappe texte = l'humain est de retour
+            self.last_keystroke = now
+            d["word"] = "stop"
+        elif self.esc_takeover and _is_lone_esc(data):
+            d["lone_esc"] = True
+            d["markers"] += ["clear_afk", "touch_user_grace"]
+            self.afk_active = False
+            d["word"] = "rest"
+        d["forward"] += data
+        return d
+
+    def on_flush(self, now):
+        """Tick idle : flush différé du pending si sa deadline est passée
+        (combo échoué par timeout). L'appelant ne l'invoque que lorsqu'aucun
+        stdin n'est prêt ce tour (parité avec l'ancienne boucle)."""
+        d = {"event": "flush", "now": now, "raw": b"",
+             "forward": b"", "buffer": None, "markers": [], "word": None}
+        if self.pending is not None and now >= self.pending_deadline:
+            d["forward"] = self.pending
+            self.pending = None
+            self.pending_deadline = 0.0
+        return d
+
+
+def _run_replay(args):
+    """#360 : rejoue une séquence de frappes HORS tmux/claude à travers le cœur
+    de décision PUR (`_Decider`) et émet le verdict NDJSON sur stdout — une
+    ligne par event. La spec AFK vient de l'env (CL_AFK_SPEC / CL_AFK_WINDOW_MS
+    / CL_ESC_TAKEOVER / CL_USER_GRACE_SEC) exactement comme en live.
+
+    Format d'entrée (fichier en argument, sinon stdin), une ligne par event :
+        <delay_ms> <token>
+    où delay_ms = écart depuis l'event précédent (horloge virtuelle ms) et
+    token = nom (`esc`,`tab`…) | hex (`1b`,`1b1b`) | littéral, ou `-`/`tick`
+    pour un tick idle (déclenche le flush du pending). Lignes vides / `#…`
+    ignorées.
+
+    Le verdict ajoute `afk_active` et `word_resolved` (wait/loop/stop) reconstruits
+    depuis les markers + une horloge de grace LOGIQUE, pour asserter l'état sans
+    toucher au filesystem."""
+    path = None
+    for a in args:
+        if not a.startswith("-"):
+            path = a
+            break
+    src = open(path) if path else sys.stdin
+    afk = _AfkDetector(_AFK_COMBOS, _AFK_WINDOW_MS)
+    decider = _Decider(afk, _AFK_COMBOS, _ESC_TAKEOVER, _AFK_WINDOW_MS)
+    try:
+        grace = float(os.environ.get("CL_USER_GRACE_SEC") or "60")
+    except ValueError:
+        grace = 60.0
+    clock = 0.0
+    afk_active = False
+    grace_until = 0.0
+    try:
+        for line in src:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(None, 1)
+            try:
+                delay = float(parts[0])
+            except ValueError:
+                continue
+            clock += delay / 1000.0
+            token = parts[1].strip() if len(parts) > 1 else "-"
+            if token in ("-", "tick", "flush"):
+                dec = decider.on_flush(clock)
+            else:
+                dec = decider.on_stdin(_token_to_bytes(token), clock)
+            # Reconstruit l'état logique afk/grace depuis les markers émis.
+            for m in dec.get("markers", []):
+                if m == "set_afk":
+                    afk_active = True
+                elif m == "clear_afk":
+                    afk_active = False
+                elif m == "touch_user_grace":
+                    grace_until = clock + grace
+                elif m == "clear_user_grace":
+                    grace_until = 0.0
+            rec = _decision_record(dec)
+            word = dec.get("word")
+            rec["afk_active"] = afk_active
+            rec["word_resolved"] = (
+                "stop" if word == "stop"
+                else ("wait" if grace_until > clock else "loop") if word == "rest"
+                else None
+            )
+            sys.stdout.write(_json.dumps(rec) + "\n")
+        sys.stdout.flush()
+    finally:
+        if path:
+            src.close()
+    return 0
 
 
 def _user_grace_remaining():
@@ -365,7 +647,13 @@ def set_winsize(fd: int, winsize: bytes):
 
 
 def main(argv):
-    cmd = argv[1:]
+    args = argv[1:]
+    # #360 : mode diag HEADLESS — rejoue une séquence de frappes à travers le
+    # cœur de décision pur (pas de pty.fork, pas de tmux, pas de claude) et émet
+    # le verdict NDJSON. Sert aux tests de la couche détection (#381 esc esc…).
+    if args and args[0] == "--replay":
+        return _run_replay(args[1:])
+    cmd = args
     # `--` séparateur optionnel : `pty-proxy.py -- claude …`
     if cmd and cmd[0] == "--":
         cmd = cmd[1:]
@@ -446,16 +734,14 @@ def main(argv):
     # Init aligné sur ce que paint_human(False) vient de peindre (≈ `wait` si
     # on démarre en boot-grace, sinon `loop`) → pas de repeint redondant.
     current_word = _rest_word()
-    last_keystroke = 0.0
-    # #345 (david #xvswug): on ne « swallow » pas, on BUFFERISE. La 1re combo
-    # d'un afk_key à 2 combos (ex. le 1er ESC de `esc esc`) n'est PAS forwardée
-    # tout de suite : on la garde ici jusqu'à la fenêtre afk. Si la 2e combo
-    # suit → le combo réussit → on n'envoie RIEN (ni rewind, ni interruption).
-    # Sinon (échec) → flush différé vers claude (= la frappe nue, juste retardée
-    # de ≤ afk_window). `pending` = octets en attente, `pending_deadline` = quand
-    # flusher si rien ne complète le combo.
-    pending = None
-    pending_deadline = 0.0
+    # #360 : la décision frappe→action vit désormais dans le cœur PUR `_Decider`
+    # (mirror exact de l'ancienne boucle inline ; bufferisation #345 incluse —
+    # la 1re combo d'un afk_key à 2 (ex. 1er ESC de `esc esc`) est gardée jusqu'à
+    # la fenêtre afk, puis flushée si le combo échoue). Le Decider porte l'état
+    # AFK + le buffer `pending`/deadline + `last_keystroke` (lu plus bas pour le
+    # timeout du select). main n'APPLIQUE que les actions via apply_decision() →
+    # un seul endroit touche l'I/O ; le cœur reste rejouable/asservable (#381).
+    decider = _Decider(_afk, _AFK_COMBOS, _ESC_TAKEOVER, _AFK_WINDOW_MS)
 
     def cleanup():
         # Rends la main sur le segment human : `loop` au repos, sinon le mot
@@ -483,6 +769,36 @@ def main(argv):
             except OSError:
                 pass
 
+    def apply_decision(dec):
+        """#360 : exécute les EFFETS d'une Decision (markers afk/présence,
+        forward vers claude, peinture du mot) puis log diag. SEUL endroit qui
+        touche l'I/O — le `_Decider` qui la produit, lui, reste pur."""
+        nonlocal current_word
+        for m in dec.get("markers", []):
+            if m == "set_afk":
+                set_afk()
+            elif m == "clear_afk":
+                clear_afk()
+            elif m == "touch_marker":
+                touch_marker()
+            elif m == "touch_user_grace":
+                touch_user_grace()
+            elif m == "clear_user_grace":
+                clear_user_grace()
+        if dec.get("forward"):
+            os.write(master_fd, dec["forward"])
+        word = dec.get("word")
+        if word == "stop":
+            if current_word != _HUMAN_STOP:
+                _paint_word(_HUMAN_STOP)
+                current_word = _HUMAN_STOP
+        elif word == "rest":
+            want = _rest_word()
+            if want != current_word:
+                _paint_word(want)
+                current_word = want
+        _emit_log(dec)
+
     try:
         while True:
             rfds = [master_fd]
@@ -496,7 +812,7 @@ def main(argv):
             # fins de boot-grace (#305) / user-grace (wait→loop). Sinon on
             # bloque (None). (#302/#305)
             now_ts = datetime.datetime.now().timestamp()
-            typing_rem = HUMAN_TTL_SEC - (now_ts - last_keystroke)
+            typing_rem = HUMAN_TTL_SEC - (now_ts - decider.last_keystroke)
             if typing_rem > 0.0:
                 timeout = typing_rem
             else:
@@ -504,8 +820,8 @@ def main(argv):
                 timeout = min(rems) if rems else None
             # #345: si une 1re combo est bufferisée, on doit se réveiller à sa
             # deadline pour la flusher même si plus aucune frappe n'arrive.
-            if pending is not None:
-                flush_rem = pending_deadline - now_ts
+            if decider.pending is not None:
+                flush_rem = decider.pending_deadline - now_ts
                 if flush_rem < 0.0:
                     flush_rem = 0.0
                 timeout = flush_rem if timeout is None else min(timeout, flush_rem)
@@ -516,7 +832,7 @@ def main(argv):
 
             # 0) Hors-frappe (>HUMAN_TTL_SEC) → mot au repos (`wait` pendant la
             #    user-grace, sinon `loop`) ; repeint seulement sur transition. (#302)
-            if (datetime.datetime.now().timestamp() - last_keystroke) >= HUMAN_TTL_SEC:
+            if (datetime.datetime.now().timestamp() - decider.last_keystroke) >= HUMAN_TTL_SEC:
                 want = _rest_word()
                 if want != current_word:
                     _paint_word(want)
@@ -527,11 +843,10 @@ def main(argv):
             #      Flush différé vers claude (= la frappe nue, ex. ESC = interruption,
             #      juste retardée de ≤ afk_window). Si du stdin est prêt, on laisse
             #      le handler ci-dessous décider (succès du combo / autre touche).
-            if (pending is not None and stdin_fd not in ready
-                    and datetime.datetime.now().timestamp() >= pending_deadline):
-                os.write(master_fd, pending)
-                pending = None
-                pending_deadline = 0.0
+            if decider.pending is not None and stdin_fd not in ready:
+                dec = decider.on_flush(datetime.datetime.now().timestamp())
+                if dec["forward"]:
+                    apply_decision(dec)
 
             # 1) Frappe humaine (tmux → nous → claude).
             if stdin_fd in ready:
@@ -540,75 +855,10 @@ def main(argv):
                 except OSError:
                     data = b""
                 if data:
-                    now_k = datetime.datetime.now().timestamp()
-                    if _afk.feed(data, now_k):
-                        # #351/#345: le combo afk a RÉUSSI. (david #5pq7tb) il est
-                        # EXCLU de la détection présence — il veut dire "away". On
-                        # n'envoie RIEN à claude : ni le buffer (1re combo), ni cette
-                        # frappe → pas de rewind (`esc esc`), pas d'interruption. On
-                        # pose le marqueur afk et on largue toute présence armée par
-                        # la 1re combo.
-                        set_afk()
-                        clear_user_grace()
-                        pending = None
-                        pending_deadline = 0.0
-                        want = _rest_word()
-                        if want != current_word:
-                            _paint_word(want)
-                            current_word = want
-                    elif (len(_AFK_COMBOS) >= 2 and _afk.first_at is not None
-                          and data == _AFK_COMBOS[0]):
-                        # #345: 1re combo d'une séquence à 2 → on la BUFFERISE au
-                        # lieu de la forwarder (deadline = fenêtre afk). On arme
-                        # quand même la présence tout de suite (l'humain agit) : si
-                        # ça devient un combo afk, le bloc ci-dessus la larguera.
-                        pending = data
-                        pending_deadline = now_k + _AFK_WINDOW_MS / 1000.0
-                        clear_afk()
-                        typing = is_typing_keystroke(data)
-                        if typing:
-                            touch_marker()
-                            last_keystroke = now_k
-                            touch_user_grace()
-                        elif _ESC_TAKEOVER and _is_lone_esc(data):
-                            touch_user_grace()
-                        want = _HUMAN_STOP if typing else _rest_word()
-                        if want != current_word:
-                            _paint_word(want)
-                            current_word = want
-                    else:
-                        # Frappe ordinaire. Si une 1re combo était en attente, le
-                        # combo a ÉCHOUÉ (cette touche n'est pas la 2e) → flush
-                        # différé du buffer AVANT cette frappe (ordre préservé),
-                        # puis traitement normal.
-                        if pending is not None:
-                            os.write(master_fd, pending)
-                            pending = None
-                            pending_deadline = 0.0
-                        if is_typing_keystroke(data):
-                            clear_afk()  # any real keystroke = the human is back
-                            touch_marker()
-                            last_keystroke = now_k
-                            # #315/#345: typing arms the user-grace (prolongs the
-                            # presence timeout) so the bar does stop → wait → loop.
-                            # Armed even under --no-wait — NO_WAIT only skips the
-                            # boot-grace, not yielding to a human who's actually here.
-                            touch_user_grace()
-                            if current_word != _HUMAN_STOP:
-                                _paint_word(_HUMAN_STOP)  # transition →stop, instantané
-                                current_word = _HUMAN_STOP
-                        elif _ESC_TAKEOVER and _is_lone_esc(data):
-                            # #345: a bare ESC = human interrupt / takeover. It's
-                            # filtered out of is_typing_keystroke (control byte), so
-                            # arm the user-grace explicitly → the loop backs off for
-                            # CL_USER_GRACE_SEC and the bar reads `wait`.
-                            clear_afk()
-                            touch_user_grace()
-                            want = _rest_word()
-                            if want != current_word:
-                                _paint_word(want)
-                                current_word = want
-                        os.write(master_fd, data)
+                    # #360 : toute la logique frappe→action (succès combo AFK /
+                    # bufferisation 1re combo / frappe ordinaire + flush) est dans
+                    # le cœur PUR `_Decider` ; main n'applique que le résultat.
+                    apply_decision(decider.on_stdin(data, datetime.datetime.now().timestamp()))
                 else:
                     # EOF stdin : on arrête de le poller (claude tourne
                     # encore — on garde le pont sortie + injection vivant).
@@ -642,6 +892,19 @@ def main(argv):
                         chunk = b""
                     if chunk:
                         os.write(master_fd, chunk)
+                        # #305 (david j8xhrh): un wake injecté = preuve que le
+                        # gate est ouvert → la barre suit la décision du wake,
+                        # pas son propre latch. On force `loop` et on largue les
+                        # raisons d'attente (boot/user-grace) pour que le tour
+                        # suivant ne repeigne pas `wait`.
+                        _note_wake_injected()
+                        if current_word != _HUMAN_LOOP:
+                            _paint_word(_HUMAN_LOOP)
+                            current_word = _HUMAN_LOOP
+                        _emit_log({"event": "inject",
+                                   "now": datetime.datetime.now().timestamp(),
+                                   "raw": chunk, "forward": chunk,
+                                   "markers": ["note_wake_injected"], "word": "loop"})
                     else:
                         inject_conns.remove(conn)
                         try:

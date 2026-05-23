@@ -54,6 +54,14 @@ test("detector: 2nd combo past the window does not fire (restarts)", () => {
     assert.equal(d.feed([0x1b], 600), true); // now within window of the restart
 });
 
+test("detector: #381 coalesced combo in one read fires (esc esc → [1b,1b])", () => {
+    const d = new AfkDetector(parseAfkKey("esc esc", 400));
+    assert.equal(d.feed([0x1b, 0x1b], 0), true); // both ESC in one chunk → fire at once
+    // distinct 2-combo coalesced too
+    const d2 = new AfkDetector(parseAfkKey("ctrl+a d", 400));
+    assert.equal(d2.feed([0x01, 0x64], 0), true); // ctrl+a then d, one chunk → fire
+});
+
 test("detector: an intervening keystroke resets the pending sequence", () => {
     const d = new AfkDetector(parseAfkKey("esc esc", 400));
     assert.equal(d.feed([0x1b], 0), false);

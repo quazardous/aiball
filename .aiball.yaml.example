@@ -133,9 +133,11 @@ autopoll:
 #   # Default 600 (10 min).
 #   ask_grace_seconds: 600
 #
-#   # AFK combo (#351): press it to flag yourself away IMMEDIATELY (the
-#   # AskUserQuestion gate redirects without waiting for the timeout); any
-#   # other keystroke clears it ("I'm back"). VS Code notation: `+` joins
+#   # AFK combo (#351): press it to TOGGLE yourself away/back IMMEDIATELY (the
+#   # AskUserQuestion gate redirects while away, without waiting for the timeout);
+#   # resuming typing also clears it ("I'm back"). #381: the combo flips
+#   # away↔back and is robust to the keys arriving coalesced in one read.
+#   # VS Code notation: `+` joins
 #   # modifiers, a space = a 2-combo sequence (e.g. "esc esc", "ctrl+a").
 #   # Only what the terminal emits as distinct bytes is supported (esc,
 #   # ctrl+<char>, f-keys, literals). Requires the PTY proxy. Default "esc esc".

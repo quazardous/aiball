@@ -17,6 +17,40 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Fix: AFK combo is a real toggle, robust to coalesced keystrokes (#381)
+
+The `afk_key` combo (default `esc esc`) was a one-way switch: pressing it again
+couldn't turn AFK back off (the combo always *set* the marker), while a single
+ESC could *clear* it — so "esc esc to go away" worked once, then a stray press
+flipped it. Two causes: the combo branch set instead of toggling, and the
+buffered first keystroke cleared the marker prematurely (before the combo even
+resolved). Both fixed — the combo now **toggles** away↔back, and a lone ESC no
+longer touches AFK (it still reaches claude as an interrupt; resuming typing
+still clears AFK). The detector also recognizes the combo when the terminal
+delivers both keystrokes **coalesced in one read** (`esc esc` → `\x1b\x1b`),
+which previously made arming non-deterministic with the PTY's batching.
+
+### PTY-proxy diagnostic & replay tooling (#360)
+
+The proxy's keystroke→action logic (AFK detection, first-combo buffering,
+presence `stop`/`wait`/`loop`, ESC-takeover) is now isolated in a **pure
+decider** decoupled from all I/O, making the detection layer testable outside
+tmux. `pty-proxy.py --replay` drives it from a timed sequence and emits one
+**NDJSON verdict per event** (no tmux/claude); `CL_PROXY_LOG=<file>` makes the
+live proxy log the same format. `pty-proxy.test.ts` shells real sequences
+through `--replay` and asserts the verdicts — the Python counterpart to
+`afk-key.test.ts`, testing the real code with no mirror to drift. See the
+"Diagnostic & replay" section in [`docs/PTY-PROXY.md`](docs/PTY-PROXY.md).
+
+### Fix: the tmux bar no longer lies `wait` while the loop is pinging (#305)
+
+When the PTY proxy owned the bar's human segment, the presence word could latch
+on `wait` after the grace window expired — even as the loop was actively waking
+claude (proof the gate was open). Now an injected wake is **authoritative**:
+since the timer only pings outside user-grace *and* boot-grace, receiving a wake
+means the loop is autonomous, so the proxy drops both wait-reasons and repaints
+`loop` — no parallel presence state to diverge, no periodic re-assert needed.
+
 ### Fix: a relaunched loop no longer boots stuck in `wait`
 
 Since the ESC-takeover work, a present human's `wait` state is reflected even
@@ -36,8 +70,8 @@ redirect a legitimate question. It now uses a dedicated, longer
 still gets the dialog; only a genuine silence falls back to "ask via a ticket
 comment". And a configurable **AFK combo** (`afk_key`, default `"esc esc"`)
 lets you flag yourself away *immediately* — the PTY proxy watches stdin for
-the combo and writes an `afk` marker the gate honours until any other
-keystroke clears it. `afk_key` uses VS Code notation (`+` for modifiers,
+the combo and toggles an `afk` marker the gate honours (see the #381 entry
+above for the toggle semantics). `afk_key` uses VS Code notation (`+` for modifiers,
 space for a 2-combo sequence; `afk_window_ms` bounds the gap). Parser +
 detector are unit-tested; see [`docs/CONFIGS.md`](docs/CONFIGS.md).
 

@@ -140,6 +140,48 @@ MIT.)
 > PID-stamped `proxy-alive` marker) is the ground truth for who paints
 > the bar's human segment.
 
+## Diagnostic & replay (#360)
+
+The proxy's keystroke→action logic — AFK-combo detection, the #345
+first-combo buffering, presence (`stop`/`wait`/`loop`), ESC-takeover —
+lives in a **pure decider** (`_Decider`) decoupled from all I/O: it
+takes a keystroke (or idle tick) + a clock and **returns the actions**
+(bytes to forward, AFK/user-grace marker ops, bar-word intent); the
+live loop is the only thing that executes them. Two surfaces fall out
+of that seam:
+
+- **Live logger** — set `CL_PROXY_LOG=<file>` and the running proxy
+  appends one **NDJSON** record per event (raw bytes hex, what it
+  forwarded, marker ops, the verdict flags `afk_fired` / `typing` /
+  `lone_esc` / `buffered_first`). Observation-only; absent ⇒ zero cost.
+- **Headless replay** — `pty-proxy.py --replay [file]` drives the *same*
+  decider from a timed sequence (no `pty.fork`, no tmux, no claude) and
+  prints the NDJSON verdicts (plus reconstructed `afk_active` /
+  `word_resolved`). The AFK spec comes from the env exactly as live
+  (`CL_AFK_SPEC` / `CL_AFK_WINDOW_MS` / `CL_ESC_TAKEOVER` /
+  `CL_USER_GRACE_SEC`).
+
+Sequence format, one event per line:
+
+```
+<delay_ms> <token>
+```
+
+`delay_ms` advances a virtual clock from the previous event; `token` is
+a named key (`esc`, `tab`, …), raw hex (`1b`, `1b1b`), a literal
+(`a`, `qq`), or `-` / `tick` for an idle tick (fires the buffered
+flush). `#`-comments and blank lines are ignored. Example:
+
+```bash
+printf '0 esc\n100 esc\n' | python3 src/claude-loop/pty-proxy.py --replay
+# → 1st ESC buffered; 2nd within the window fires the AFK combo (set_afk)
+```
+
+This is what makes the detection layer testable outside tmux —
+`pty-proxy.test.ts` shells real sequences through `--replay` and
+asserts the verdicts (the Python equivalent of `afk-key.test.ts`,
+without a TS mirror to drift).
+
 ## Limitations
 
 - Linux/Unix only by design (Windows = psmux, separate).
