@@ -11,6 +11,7 @@ import {
     INTENTS,
     type Intent,
     listProjectsDetailed,
+    isRootActive,
     createProject,
     getProject,
     deleteProject,
@@ -237,6 +238,10 @@ api.post("/projects/:name/launch", (req, res) => {
     const knownRoots = meta?.roots ?? [];
     if (!root || !knownRoots.includes(root)) {
         return badRequest(res, `root must be one of this project's known local roots: ${JSON.stringify(knownRoots)}`);
+    }
+    // #393 (3c): refuse a second loop at the same root — one is already running.
+    if (isRootActive(root)) {
+        return res.status(409).json({ error: "a claude-loop is already running for this root" });
     }
     try {
         const bin = join(installRoot(), "bin", "claude-loop");

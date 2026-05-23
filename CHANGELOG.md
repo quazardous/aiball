@@ -17,6 +17,18 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Local projects — running indicator + single-loop launch gate (#393)
+
+- The projects list now shows, at a glance, **whether a claude-loop is currently
+  running** for a project (not just whether its root is known): the sidebar
+  desktop chip turns **green and pulses** when live, stays a dim grey when the
+  root is known but stopped. `/api/projects?detailed` exposes a new `running`
+  flag (a rooted consumer heartbeated within 120 s).
+- The **launch button is gated** when a loop is already live at a root — the
+  project detail page shows a `running` status instead of a launch button, and
+  `POST /api/projects/:name/launch` rejects with **409** if a loop is already
+  heartbeating at that root (no accidental duplicate).
+
 ## [0.8.0] — 2026-05-23
 
 ### aiball proxy-node mode — a local daemon that relays to a remote (#394)

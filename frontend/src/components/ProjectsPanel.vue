@@ -281,11 +281,13 @@ defineExpose({ load });
                             />
                             <Button
                                 icon="pi pi-desktop"
-                                severity="secondary"
+                                :severity="p.running ? 'success' : 'secondary'"
                                 text
                                 rounded
                                 size="small"
-                                title="Project detail — local loops + roots (#393)"
+                                :title="p.running
+                                    ? 'A claude-loop is running here — open project detail (#393)'
+                                    : 'Project detail — local loops + roots (#393)'"
                                 @click="emit('open-detail', p.name)"
                             />
                             <Button

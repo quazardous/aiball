@@ -113,6 +113,7 @@ export {
     getProjectStatsRich,
     listProjects,
     listProjectsDetailed,
+    isRootActive,
     purgeOldClosedTickets,
 } from "./db/projects.js";
 
