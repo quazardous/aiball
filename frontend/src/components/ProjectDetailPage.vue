@@ -56,6 +56,11 @@ function presence(c: Consumer): string {
     return `${c.state ?? "?"} · ${word}`;
 }
 
+// #393 (3c): a root is "running" when one of its loops is online → no relaunch.
+function rootIsRunning(root: string): boolean {
+    return (loopsByRoot.value.get(root) ?? []).some(isOnline);
+}
+
 async function launch(root: string) {
     launching.value = root;
     flash.value = null;
@@ -78,7 +83,8 @@ async function launch(root: string) {
                 <i class="pi pi-arrow-left" /> back
             </button>
             <h2>{{ project }} — detail</h2>
-            <span v-if="meta?.local" class="project-detail__local"><i class="pi pi-desktop" /> local</span>
+            <span v-if="meta?.running" class="project-detail__local is-running"><i class="pi pi-desktop" /> running</span>
+            <span v-else-if="meta?.local" class="project-detail__local"><i class="pi pi-desktop" /> local</span>
             <div class="project-detail__actions">
                 <button type="button" class="project-detail__refresh" title="Refresh" @click="load">
                     <i class="pi pi-refresh" />
@@ -100,7 +106,11 @@ async function launch(root: string) {
             <section v-for="root in roots" :key="root" class="project-detail__root">
                 <div class="project-detail__root-head">
                     <code class="project-detail__path">{{ root }}</code>
+                    <span v-if="rootIsRunning(root)" class="project-detail__running">
+                        <i class="pi pi-circle-fill" /> running
+                    </span>
                     <button
+                        v-else
                         type="button"
                         class="project-detail__launch"
                         :disabled="launching === root"
@@ -155,6 +165,10 @@ async function launch(root: string) {
     color: var(--p-primary-contrast-color);
     border-radius: 999px;
     padding: 0.1rem 0.5rem;
+}
+.project-detail__local.is-running {
+    background: var(--p-green-500, #22c55e);
+    color: #fff;
 }
 .project-detail__back {
     display: inline-flex;
@@ -224,6 +238,25 @@ async function launch(root: string) {
     white-space: nowrap;
 }
 .project-detail__launch:disabled { opacity: 0.6; cursor: default; }
+/* #393 (3c): a loop is live at this root → show status instead of a launch. */
+.project-detail__running {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--p-green-600, #16a34a);
+    white-space: nowrap;
+}
+.project-detail__running .pi {
+    font-size: 0.6rem;
+    animation: project-detail-pulse 2s ease-in-out infinite;
+}
+@keyframes project-detail-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
 .project-detail__loops {
     list-style: none;
     margin: 0;

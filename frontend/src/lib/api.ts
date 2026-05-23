@@ -392,6 +392,9 @@ export interface ProjectMeta {
     local?: boolean;
     /** #393: the distinct loop root(s) known for this project (consumers.cwd). */
     roots?: string[];
+    /** #393 (3c): a claude-loop is **currently running** for this project (a
+     *  rooted consumer heartbeated recently). Distinct from `local`. */
+    running?: boolean;
 }
 
 export const api = {

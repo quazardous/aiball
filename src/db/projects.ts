@@ -118,6 +118,27 @@ export interface ProjectMeta {
     /** #393: distinct loop roots known for this project (from `consumers.cwd`).
      *  Usually one (a dir = one project). Empty/undefined when not local. */
     roots?: string[];
+    /** #393 (3c): true when a claude-loop is **currently running** for this
+     *  project — a rooted consumer heartbeated within RUNNING_WINDOW_MS.
+     *  Distinct from `local` (root known, loop maybe stopped). */
+    running?: boolean;
+}
+
+/** #393 (3c): a loop is "running" when its consumer heartbeated this recently. */
+const RUNNING_WINDOW_MS = 120_000;
+
+/** #393 (3c): is a claude-loop currently heartbeating at this exact root?
+ *  Used to gate launch (no duplicate) + the per-project `running` flag. */
+export function isRootActive(root: string): boolean {
+    if (!root) return false;
+    const cutoff = new Date(Date.now() - RUNNING_WINDOW_MS).toISOString();
+    const row = getDb().select({ cwd: schema.consumers.cwd })
+        .from(schema.consumers)
+        .where(sql`${schema.consumers.cwd} = ${root}
+            AND ${schema.consumers.stateUpdatedAt} IS NOT NULL
+            AND ${schema.consumers.stateUpdatedAt} >= ${cutoff}`)
+        .get();
+    return !!row;
 }
 
 export function listProjectsDetailed(consumer_id?: string, landscape = false): ProjectMeta[] {
@@ -577,9 +598,24 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
         .where(rootedCwd)
         .groupBy(schema.tickets.project, schema.consumers.cwd)
         .all()) addRoot(r.project, r.cwd);
+    // #393 (3c): which roots have a currently-heartbeating loop → `running`.
+    const cutoff = new Date(Date.now() - RUNNING_WINDOW_MS).toISOString();
+    const freshRoots = new Set<string>();
+    for (const c of db.select({ cwd: schema.consumers.cwd })
+        .from(schema.consumers)
+        .where(sql`${schema.consumers.cwd} IS NOT NULL AND ${schema.consumers.cwd} != ''
+            AND ${schema.consumers.stateUpdatedAt} IS NOT NULL
+            AND ${schema.consumers.stateUpdatedAt} >= ${cutoff}`)
+        .all()) {
+        if (c.cwd) freshRoots.add(c.cwd);
+    }
     for (const p of byProject.values()) {
         const s = rootsByProject.get(p.name);
-        if (s && s.size > 0) { p.local = true; p.roots = [...s]; }
+        if (s && s.size > 0) {
+            p.local = true;
+            p.roots = [...s];
+            p.running = p.roots.some((r) => freshRoots.has(r));
+        }
     }
 
     return [...byProject.values()].sort((a, b) =>

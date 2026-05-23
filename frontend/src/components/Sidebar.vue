@@ -12,6 +12,8 @@ export interface ProjectListItem {
     snoozed: number;
     /** #393: a claude-loop with a known root runs in this project (local). */
     local?: boolean;
+    /** #393 (3c): a claude-loop is currently running (rooted consumer fresh). */
+    running?: boolean;
 }
 
 export type SettingsPanel = "rules" | "tags" | "projects" | "consumers" | "compose";
@@ -128,9 +130,11 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
                 <span class="sidebar-item-label">{{ p.label }}</span>
                 <span
                     v-if="p.local && p.value"
-                    class="sidebar-badge sidebar-badge--local"
+                    :class="['sidebar-badge', p.running ? 'sidebar-badge--running' : 'sidebar-badge--local']"
                     role="button"
-                    title="local — a claude-loop runs here. Click for the project detail (loops + launch)."
+                    :title="p.running
+                        ? 'a claude-loop is running here. Click for the project detail (loops + launch).'
+                        : 'local — root known, no loop running. Click for the project detail (loops + launch).'"
                     @click.stop="emit('open-detail', p.value as string)"
                 ><i class="pi pi-desktop" /></span>
                 <span
@@ -407,17 +411,34 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
     background: var(--p-surface-300);
     color: var(--p-text-color);
 }
-/* #393: "local" — a claude-loop runs here. Icon-only chip, primary tint. */
+/* #393: "local" — root known but no loop running. Dim desktop chip. */
 .sidebar-badge--local {
-    background: var(--p-primary-color);
-    color: var(--p-primary-contrast-color);
+    background: var(--p-surface-400);
+    color: var(--p-surface-50);
     padding: 0.05rem 0.35rem;
     cursor: pointer;
+    opacity: 0.75;
 }
-.sidebar-badge--local:hover {
+/* #393 (3c): "running" — a claude-loop is live here. Green, gently pulsing. */
+.sidebar-badge--running {
+    background: var(--p-green-500, #22c55e);
+    color: #fff;
+    padding: 0.05rem 0.35rem;
+    cursor: pointer;
+    animation: sidebar-running-pulse 2s ease-in-out infinite;
+}
+@keyframes sidebar-running-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+.sidebar-badge--local:hover,
+.sidebar-badge--running:hover {
     filter: brightness(1.15);
+    opacity: 1;
+    animation: none;
 }
-.sidebar-badge--local .pi {
+.sidebar-badge--local .pi,
+.sidebar-badge--running .pi {
     font-size: 0.65rem;
 }
 </style>

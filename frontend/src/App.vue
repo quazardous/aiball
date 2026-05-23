@@ -582,6 +582,8 @@ const projectListItems = computed<ProjectListItem[]>(() => [
         snoozed: p.snoozed_count || 0,
         // #393: a claude-loop with a known root runs here.
         local: p.local === true,
+        // #393 (3c): a loop is currently running (rooted consumer heartbeating).
+        running: p.running === true,
     })),
 ]);
 
