@@ -85,10 +85,22 @@ Create `tests/scenario-<name>.ts` importing the helpers from `tests/lib.ts`
 - **Assert**: `status=rejected` + `meta.deleted`; excluded from counts/gates/thread
   (tombstone in `include_deleted=1` view only).
 
-### ☐ moderation rules
-- **Setup**: a rule matching `project`/`kind`/`by_agent` → `auto` or `review`.
-- **Assert**: a new message's status follows the rule (auto-approved vs pending);
-  a registered **human** author bypasses moderation.
+### ✅ moderation rules — `scenario-moderation.ts`
+- **Setup**: two project-scoped rules — `R_auto` (pos 0, match `by_agent=agent-auto`
+  → `auto`) and `R_review` (pos 10, match `kind=comment_added` → `review`). A human
+  `human-mod` (`provisionHuman`) opens the parent ticket.
+- **Assert** (engine: `src/rules.ts evaluate()`), reading `status` + `matched_rule_id`
+  off the `POST /api/messages` response:
+  - **human bypass** — human-mod's `ticket_created` is `approved` despite the default.
+  - **review** — `agent-a`'s comment matches `R_review` (kind) → `pending` (the rule
+    overrides the permissive `auto-reply` default).
+  - **auto + first-match-wins** — `agent-auto`'s comment matches BOTH rules but
+    `R_auto` (lower position) wins → `approved` with `matched_rule_id=R_auto.id`.
+  - **human bypass over a rule** — human-mod's comment WOULD match `R_review` but
+    `isHuman()` short-circuits → `approved` with `matched_rule_id=null` (the null is
+    what distinguishes a bypass from a rule-driven auto).
+- **Note**: assertions are env-default-independent (every rule is `match_project`-scoped;
+  outcomes are forced by the rules + the human bypass, not the ambient strategy).
 
 ## Out of scope here
 
