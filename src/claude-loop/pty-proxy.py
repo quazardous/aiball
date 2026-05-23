@@ -215,14 +215,40 @@ class _AfkDetector:
         self.combos = combos
         self.window_ms = window_ms
         self.first_at = None
+        # #381b (david t9kk9s : « le moteur doit oublier sur succès ET sur échec »).
+        # Cooldown post-fire + jeu d'octets du combo : après un toggle on AVALE les
+        # ESC résiduels (répétition clavier / tap surnuméraire) pendant window_ms
+        # au lieu de les laisser ré-armer le détecteur — voir feed().
+        self.cooldown_until = 0.0
+        self.last_residual = False
+        self._combo_bytes = set()
+        for c in combos:
+            self._combo_bytes |= set(c)
 
     def feed(self, data, now):
+        self.last_residual = False
         if not self.combos:
             return False
+        # #381b : OUBLIER SUR SUCCÈS. L'ambiguïté c1==c2 (esc==esc) faisait qu'un
+        # ESC traînant juste après un toggle réussi RÉ-ARMAIT le détecteur ; un
+        # esc isolé suivant complétait alors un combo FANTÔME et re-togglait (le
+        # « après le 1er esc esc une seule pression suffit » de david). Pendant
+        # window_ms après un fire, toute frappe composée UNIQUEMENT d'octets du
+        # combo est avalée (oubliée, ne ré-arme pas) ; toute autre frappe clôt le
+        # cooldown (l'humain agit pour de bon).
+        if now < self.cooldown_until:
+            self.first_at = None
+            if data and all(b in self._combo_bytes for b in data):
+                self.last_residual = True
+                return False
+            self.cooldown_until = 0.0
         c1 = self.combos[0]
         c2 = self.combos[1] if len(self.combos) > 1 else None
         if c2 is None:
-            return data == c1
+            if data == c1:
+                self.cooldown_until = now + self.window_ms / 1000.0
+                return True
+            return False
         # #381 : combo COALESCÉ en un seul read. Le PTY peut livrer les 2 combos
         # d'un coup (ex. `esc esc` tapé vite → b"\x1b\x1b" en un read) ; sans ça
         # `data` (2 octets) ne matchait NI c1 NI c2 → l'armement était
@@ -230,11 +256,13 @@ class _AfkDetector:
         # reconnaît la concaténation → succès immédiat, atomique.
         if data == c1 + c2:
             self.first_at = None
+            self.cooldown_until = now + self.window_ms / 1000.0
             return True
         if (self.first_at is not None
                 and (now - self.first_at) * 1000 <= self.window_ms
                 and data == c2):
             self.first_at = None
+            self.cooldown_until = now + self.window_ms / 1000.0
             return True
         if data == c1:
             self.first_at = now
@@ -404,6 +432,13 @@ class _Decider:
             d["word"] = "rest"
             return d
 
+        # (a') #381b : ESC RÉSIDUEL avalé pendant le cooldown post-toggle. Sans ça
+        #     il retombait en branche (c) lone-esc → clear_afk + forward, ce qui
+        #     ANNULAIT le toggle qu'on venait de poser ET interrompait claude. On
+        #     n'envoie RIEN à claude et on ne touche pas l'afk (il vient d'être posé).
+        if self.afk.last_residual:
+            return d
+
         # (b) 1re combo d'une séquence à 2 → on la BUFFERISE (au lieu de la
         #     forwarder) jusqu'à la fenêtre afk. #381 : on NE touche PAS l'afk
         #     ici — ce 1er octet est AMBIGU (peut compléter le combo → toggle, ou
@@ -459,6 +494,10 @@ class _Decider:
             d["forward"] = self.pending
             self.pending = None
             self.pending_deadline = 0.0
+            # #381b : OUBLIER SUR ÉCHEC. La 1re combo a expiré sans 2e moitié →
+            # le combo a échoué : le détecteur oublie son armement (sinon first_at
+            # restait latché). David : « le moteur doit oublier [...] sur échec ».
+            self.afk.first_at = None
         return d
 
 

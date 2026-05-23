@@ -99,6 +99,13 @@ function bytesEqual(a: ArrayLike<number>, b: number[]): boolean {
     return true;
 }
 
+/** #381b: every byte of `bytes` belongs to the combo's byte set. */
+function allComboBytes(bytes: ArrayLike<number>, set: Set<number>): boolean {
+    if (bytes.length === 0) return false;
+    for (let i = 0; i < bytes.length; i++) if (!set.has(bytes[i])) return false;
+    return true;
+}
+
 /**
  * Stateful AFK detector. Fed ONE keystroke's bytes at a time (the PTY proxy
  * delivers per-keystroke chunks), with the current time injected — so the
@@ -110,13 +117,52 @@ function bytesEqual(a: ArrayLike<number>, b: number[]): boolean {
  */
 export class AfkDetector {
     private firstAt: number | null = null;
+    // #381b: post-fire cooldown — forget on success (mirror of pty-proxy.py).
+    private cooldownUntil = 0;
+    private lastResidual = false;
+    private readonly comboBytes: Set<number>;
 
-    constructor(private readonly spec: AfkSpec) {}
+    constructor(private readonly spec: AfkSpec) {
+        this.comboBytes = new Set<number>();
+        for (const c of spec.combos) for (const b of c) this.comboBytes.add(b);
+    }
+
+    /**
+     * #381b: true iff the LAST {@link feed} swallowed a residual combo byte
+     * during the post-fire cooldown — the caller must drop it (no forward, afk
+     * unchanged), NOT treat it as a lone keystroke that would clear the afk.
+     */
+    get residual(): boolean {
+        return this.lastResidual;
+    }
 
     /** @param bytes one keystroke's bytes. @param now ms clock. */
     feed(bytes: ArrayLike<number>, now: number): boolean {
+        this.lastResidual = false;
         const [c1, c2] = this.spec.combos;
-        if (!c2) return bytesEqual(bytes, c1); // single combo
+
+        // #381b: FORGET ON SUCCESS. With c1==c2 (esc==esc) a stray ESC right after
+        // a successful toggle re-armed the detector, so a single later ESC closed a
+        // PHANTOM combo and re-toggled (david: "après le 1er esc esc une seule
+        // pression suffit"). For windowMs after a fire, any keystroke made solely of
+        // combo bytes is swallowed (forgotten, never re-arms); anything else ends
+        // the cooldown (the human is really acting).
+        if (now < this.cooldownUntil) {
+            this.firstAt = null;
+            if (allComboBytes(bytes, this.comboBytes)) {
+                this.lastResidual = true;
+                return false;
+            }
+            this.cooldownUntil = 0;
+        }
+
+        if (!c2) {
+            if (bytesEqual(bytes, c1)) {
+                this.cooldownUntil = now + this.spec.windowMs;
+                return true;
+            }
+            return false;
+        }
 
         // #381: combo COALESCED into one read — the PTY can deliver both combos
         // in a single chunk (e.g. a fast `esc esc` → [0x1b,0x1b]), where `bytes`
@@ -124,6 +170,7 @@ export class AfkDetector {
         // ("sometimes it corrupts"). Recognize the concatenation → fire at once.
         if (bytesEqual(bytes, [...c1, ...c2])) {
             this.firstAt = null;
+            this.cooldownUntil = now + this.spec.windowMs;
             return true;
         }
         // Second combo arrived in time → fire.
@@ -133,6 +180,7 @@ export class AfkDetector {
             bytesEqual(bytes, c2)
         ) {
             this.firstAt = null;
+            this.cooldownUntil = now + this.spec.windowMs;
             return true;
         }
         // Otherwise (re)evaluate as a potential first combo.
@@ -145,8 +193,10 @@ export class AfkDetector {
         return false;
     }
 
-    /** Forget any pending first-combo (e.g. on detach). */
+    /** Forget any pending first-combo + cooldown (e.g. on detach). */
     reset(): void {
         this.firstAt = null;
+        this.cooldownUntil = 0;
+        this.lastResidual = false;
     }
 }

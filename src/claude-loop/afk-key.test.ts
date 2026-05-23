@@ -78,3 +78,32 @@ test("detector: distinct 2-combo sequence (ctrl+a then d)", () => {
     assert.equal(d2.feed([0x01], 0), false);
     assert.equal(d2.feed([0x65], 100), false); // 'e' ≠ 'd'
 });
+
+test("detector: #381b forget-on-success — stray ESC after a fire never re-toggles", () => {
+    // The bug (david t9kk9s): esc esc fires, then a single ESC re-toggles. With
+    // c1==c2 a residual ESC re-armed the detector → a later lone ESC closed a
+    // phantom combo. Post-fire cooldown swallows those residuals.
+    const d = new AfkDetector(parseAfkKey("esc esc", 400));
+    assert.equal(d.feed([0x1b], 0), false); // first esc
+    assert.equal(d.feed([0x1b], 50), true); // second esc → fire (toggle)
+    // residual ESCs within the cooldown window: no fire, flagged residual.
+    assert.equal(d.feed([0x1b], 100), false);
+    assert.equal(d.residual, true);
+    assert.equal(d.feed([0x1b], 300), false);
+    assert.equal(d.residual, true);
+    // past the cooldown: a clean restart — needs TWO close ESC again to re-fire.
+    assert.equal(d.feed([0x1b], 600), false); // fresh first, not residual
+    assert.equal(d.residual, false);
+    assert.equal(d.feed([0x1b], 650), true); // second → re-fire
+});
+
+test("detector: #381b a non-combo key during cooldown ends it (human is back)", () => {
+    const d = new AfkDetector(parseAfkKey("esc esc", 400));
+    assert.equal(d.feed([0x1b], 0), false);
+    assert.equal(d.feed([0x1b], 50), true); // fire → cooldown until 450
+    assert.equal(d.feed([0x61], 100), false); // 'a' within cooldown ≠ combo byte
+    assert.equal(d.residual, false); // not swallowed — cooldown is over
+    // and the detector is usable immediately after
+    assert.equal(d.feed([0x1b], 150), false); // fresh first
+    assert.equal(d.feed([0x1b], 200), true); // second → fire
+});

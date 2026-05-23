@@ -97,6 +97,22 @@ test("#381: esc esc TOGGLE on↔off, et un esc seul ne change PAS l'afk", { skip
     assert.equal(v.filter((r) => r.markers.includes("clear_afk")).length, 1); // SEUL le 2e combo clear
 });
 
+// ---- #381b : OUBLIER sur succès — les ESC résiduels ne re-togglent pas -------
+// david (t9kk9s) : « le 1er esc esc ok puis une seule pression suffit pour re
+// toggle ; le moteur doit oublier sur succès ET sur échec ». Avec c1==c2 un ESC
+// traînant après un toggle ré-armait le détecteur → un esc isolé suivant
+// complétait un combo FANTÔME. Le cooldown post-fire avale ces résidus.
+test("#381b: après un toggle, des ESC résiduels n'inversent PAS l'afk (oublier sur succès)", { skip: SKIP }, () => {
+    // esc esc (ON) puis deux ESC traînants dans la fenêtre (combo fantôme évité).
+    const v = replay("0 esc\n50 esc\n50 esc\n200 esc\n", ESC_ESC);
+    const fired = v.filter((r) => r.afk_fired);
+    assert.equal(fired.length, 1);             // UN seul toggle (ON), pas de re-toggle
+    assert.equal(fired[0].afk_active, true);
+    assert.equal(v.at(-1)!.afk_active, true);  // reste away malgré les ESC traînants
+    // les ESC résiduels sont avalés (cooldown) → rien ne fuit vers claude.
+    assert.equal(v.filter((r) => r.forward !== "").length, 0);
+});
+
 test("esc seul puis tick au-delà de la fenêtre → flush vers claude, PAS d'AFK", { skip: SKIP }, () => {
     const v = replay("0 esc\n500 -\n", ESC_ESC);
     assert.equal(v[0].buffered_first, true);

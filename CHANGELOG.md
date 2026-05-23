@@ -30,6 +30,16 @@ still clears AFK). The detector also recognizes the combo when the terminal
 delivers both keystrokes **coalesced in one read** (`esc esc` → `\x1b\x1b`),
 which previously made arming non-deterministic with the PTY's batching.
 
+A follow-up closed the last asymmetry: with two identical halves (`esc esc`,
+`c1==c2`) a **stray ESC right after a successful toggle re-armed the detector**,
+so a single later ESC closed a *phantom* combo and flipped AFK back ("after the
+first esc esc, one press is enough"). The detector now **forgets on both
+outcomes**: a short post-fire **cooldown** (one `afk_window_ms`) swallows
+residual combo keystrokes — key-repeat or a surplus tap — instead of letting
+them re-arm, and a buffered first half that times out without its partner is
+forgotten too. A deliberate away→back still works (two close ESC separated by a
+normal human pause); only same-burst residue is ignored.
+
 ### PTY-proxy diagnostic & replay tooling (#360)
 
 The proxy's keystroke→action logic (AFK detection, first-combo buffering,

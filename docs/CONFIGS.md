@@ -55,7 +55,9 @@ that it redirects the agent to ask via a ticket comment. `afk_key` lets you
 flag yourself away *immediately* (no waiting for the timeout): the PTY proxy
 watches stdin for the combo and, on match, **toggles** an `afk` marker the gate
 honours (#381 — the combo flips away↔back, robust to the two keystrokes
-arriving coalesced in one read); resuming any **typing** also clears it. `afk_key` uses VS Code
+arriving coalesced in one read, and forgetting its state after each toggle so a
+stray repeat key within `afk_window_ms` can't re-toggle); resuming any
+**typing** also clears it. `afk_key` uses VS Code
 notation — `+` joins modifiers, a space is a 2-combo sequence (default
 `"esc esc"`); `afk_window_ms` (default 400) bounds the gap between the two
 combos. Since the proxy only sees the terminal's **byte stream**, the
