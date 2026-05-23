@@ -160,7 +160,7 @@ export function cmdRestart(name: string): void {
         die(`no loop '${name}' to restart (no state dir at ${sd}) — use 'start'`);
     }
     const plate = readPlate(sd);
-    const cwd = plate.cwd;
+    const bin = join(installRoot(), "bin", "claude-loop");
     // Reconstruct the original `start` invocation from the persisted plate.
     // (pings source isn't recoverable from the plate — plate.pings_path points
     // into the state dir we're about to rm — so the relaunch falls back to the
@@ -174,12 +174,24 @@ export function cmdRestart(name: string): void {
         "--no-attach",
         ...(plate.claude_args.length ? ["--", ...plate.claude_args] : []),
     ];
-    cmdRm(name, true); // kill claude + session + timer + state
-    const bin = join(installRoot(), "bin", "claude-loop");
-    const child = spawn(bin, startArgs, { cwd, detached: true, stdio: "ignore" });
+    // Delegate the teardown+relaunch to a DETACHED, new-session helper (setsid
+    // via detached:true). This is what lets a HARD restart survive being fired
+    // from INSIDE the very session it kills — by the SIGHUP'd timer, OR by the
+    // loop's own claude bash (an agent restarting itself). The invoker dies
+    // during `rm` (tmux kill-session), but this child — a new session, outside
+    // the tmux pane's process group — does not. The brief sleep lets the invoker
+    // return first so the kill is clean. rm + start run as fresh CLI subprocesses.
+    const script =
+        `sleep 0.4; ${shQuote(bin)} rm ${shQuote(name)} --force >/dev/null 2>&1; ` +
+        `exec ${shQuote(bin)} ${startArgs.map(shQuote).join(" ")}`;
+    const child = spawn("bash", ["-lc", script], {
+        cwd: plate.cwd,
+        detached: true,
+        stdio: "ignore",
+    });
     child.unref();
     process.stdout.write(
-        `restarting loop '${name}' (killed + relaunching in ${cwd}, pid ${child.pid}) — reconnect with 'claude-loop attach ${name}'\n`,
+        `restart scheduled for '${name}' — detached helper (pid ${child.pid}) will kill + relaunch in ${plate.cwd}. Reconnect: 'claude-loop attach ${name}'.\n`,
     );
 }
 
