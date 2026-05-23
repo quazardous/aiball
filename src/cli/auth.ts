@@ -21,6 +21,7 @@ import {
     getConsumer,
     issueToken,
     listTokens,
+    upsertConsumer,
 } from "../db.js";
 
 const URL = process.env.AIBALL_URL ?? "http://127.0.0.1:7777";
@@ -86,7 +87,7 @@ export function registerAuthCommands(program: Command): void {
 
     auth.command("issue")
         .description("Mint a long-lived agent token bound to a consumer. Used for CLI / MCP / sandbox clients.")
-        .requiredOption("--consumer <id>", "Existing consumer_id to bind the token to")
+        .requiredOption("--consumer <id>", "consumer_id to bind the token to (created on the fly if it doesn't exist)")
         .option("--label <label>", "Human-readable label (e.g. 'laptop cli', 'sandbox-1')")
         .option(
             "--kind <kind>",
@@ -94,17 +95,22 @@ export function registerAuthCommands(program: Command): void {
             "agent",
         )
         .action((opts: { consumer: string; label?: string; kind: string }) => {
-            const c = getConsumer(opts.consumer);
-            if (!c) die(`auth issue: consumer '${opts.consumer}' not found. Create it via Settings > Consumers or post a message first.`);
             if (opts.kind !== "agent" && opts.kind !== "auth") {
                 die(`auth issue: --kind must be 'agent' or 'auth' (got '${opts.kind}')`);
             }
+            // #390 (david kwca43): create the consumer on the fly when it doesn't
+            // exist yet. A remote agent has no other way to bootstrap its identity
+            // — it can't "post first" to auto-register without already having a
+            // token. Idempotent: an existing consumer is left untouched.
+            const existed = getConsumer(opts.consumer) !== null;
+            if (!existed) upsertConsumer({ consumer_id: opts.consumer, kind: "agent" });
             const t = issueToken({
                 consumer_id: opts.consumer,
                 kind: opts.kind as "agent" | "auth",
                 label: opts.label ?? null,
             });
             process.stdout.write([
+                ...(existed ? [] : [`Created consumer '${opts.consumer}' (agent).`, ``]),
                 `Token issued for ${opts.consumer}:`,
                 ``,
                 `  ${t.token}`,

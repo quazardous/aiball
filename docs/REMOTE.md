@@ -20,16 +20,16 @@ tmux run (B); A is just the shared board.
 
 ## Setup
 
-### 1. On A — make sure the consumer exists, then mint a token
+### 1. On A — mint a token for the loop's consumer
 
-The token is bound to a **consumer** (the loop's identity). That consumer must
-already exist on A — create it in the web UI (**Settings → Consumers**), or let
-it auto-register the first time it posts. Then:
+The token is bound to a **consumer** (the loop's identity). `aiball auth issue`
+**creates the consumer on the fly** if it doesn't exist yet, so this is one step:
 
 ```bash
 # on machine A
 aiball auth issue --consumer my-remote-agent
-#  → Token issued for my-remote-agent:
+#  → Created consumer 'my-remote-agent' (agent).
+#    Token issued for my-remote-agent:
 #       aiball-<48 hex>
 ```
 
@@ -98,6 +98,6 @@ not SSE-over-TCP connects cleanly; the heartbeat polling covers the gap.
   bearer middleware. The sha256 path is the capability (effectively
   unguessable). Don't expose the daemon's port to untrusted networks; keep it on
   the tailnet/LAN.
-- **Consumer bootstrap friction:** `aiball auth issue` needs the consumer to
-  pre-exist. A future `aiball consumer add` (or an auto-create flag) would smooth
-  the first-run setup.
+- **Consumer identity:** `aiball auth issue` creates the consumer if it's new, so
+  no separate setup step. The daemon authenticates an agent by the **token's**
+  consumer — the `--consumer` on B must name the same one the token is bound to.
