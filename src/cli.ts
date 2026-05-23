@@ -7,9 +7,9 @@
  * Global flag --human / -H swaps the active consumer to $AIBALL_HUMAN
  * (default "human"), so a single CLI invocation can play either side.
  */
-import { existsSync, statSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, statSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";
 import { AIBALL_VERSION } from "./version.js";
@@ -124,6 +124,33 @@ program
             daemon: daemonInfo,
         };
         out(payload, gOpts(cmd), fmtStatus);
+    });
+
+program
+    .command("download <ref>")
+    .description(
+        "Download a ticket's attached upload (#390). <ref> is the `/uploads/<sha>.<ext>` " +
+            "reference (or bare `<sha>.<ext>`) from a ticket's attachments[]. Fetches it over " +
+            "the configured transport (UDS locally, TCP+token for a remote daemon), writes it " +
+            "locally and prints the path — so a REMOTE loop can read images it can't open as file://.",
+    )
+    .option("--out <path>", "Output file path (default: $TMPDIR/aiball-<sha>.<ext>)")
+    .action(async (ref: string, opts: { out?: string }, cmd) => {
+        // Accept `/uploads/<sha>.<ext>`, a full URL, or bare `<sha>.<ext>`.
+        const filename = ref.replace(/^.*\/uploads\//, "").replace(/^\/+/, "");
+        if (!/^[0-9a-f]{64}\.[a-z0-9]+$/i.test(filename)) {
+            die(`invalid upload ref '${ref}' — expected /uploads/<sha>.<ext> or <sha>.<ext>`);
+        }
+        const client = buildClient(gOpts(cmd));
+        const { bytes, contentType } = await client.downloadUpload(filename);
+        const out_path = opts.out ?? join(tmpdir(), `aiball-${filename}`);
+        writeFileSync(out_path, bytes);
+        out(
+            { path: out_path, bytes: bytes.length, content_type: contentType },
+            gOpts(cmd),
+            (v: { path: string; bytes: number; content_type: string }) =>
+                `saved ${v.path} (${v.bytes} bytes, ${v.content_type})`,
+        );
     });
 
 program

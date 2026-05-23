@@ -276,6 +276,73 @@ export class AiballClient {
             .finally(() => clearTimeout(t));
     }
 
+    /**
+     * Download a content-addressed upload by its `<sha>.<ext>` filename
+     * (#390). GETs `/uploads/<filename>` over the SAME transport as the rest
+     * of the client — UDS (local-trust) when `socketPath` is set, else
+     * TCP+token. Returns the raw bytes + content-type so a REMOTE loop can
+     * read a ticket's attached images, which it can't open as a local
+     * `file://`. (`/uploads` is a static mount outside `/api`, so it isn't
+     * behind the bearer middleware — the sha256 path is the capability — but
+     * we still send the token over TCP; it's ignored there and harmless.)
+     * Roomy timeout: an image read can outlast the 2 s probe budget.
+     */
+    downloadUpload(
+        filename: string,
+    ): Promise<{ bytes: Buffer; contentType: string }> {
+        const path = `/uploads/${filename}`;
+        const timeoutMs = Math.max(this.timeoutMs, 15000);
+        const headers: Record<string, string> = {};
+        if (this.agentId) headers["x-aiball-consumer"] = this.agentId;
+        type Dl = { bytes: Buffer; contentType: string };
+        if (this.socketPath) {
+            return new Promise<Dl>((resolve, reject) => {
+                const req = httpRequest(
+                    { socketPath: this.socketPath!, path, method: "GET", headers, timeout: timeoutMs },
+                    (res: IncomingMessage) => {
+                        const chunks: Buffer[] = [];
+                        res.on("data", (c) => chunks.push(c as Buffer));
+                        res.on("end", () => {
+                            const status = res.statusCode ?? 0;
+                            const body = Buffer.concat(chunks);
+                            if (status < 200 || status >= 300) {
+                                reject(httpError("GET", path, status, body.toString("utf8")));
+                                return;
+                            }
+                            resolve({
+                                bytes: body,
+                                contentType: String(res.headers["content-type"] ?? "application/octet-stream"),
+                            });
+                        });
+                        res.on("error", reject);
+                    },
+                );
+                req.on("error", reject);
+                req.on("timeout", () => {
+                    req.destroy(new Error(`GET ${path} → timeout after ${timeoutMs}ms`));
+                });
+                req.end();
+            });
+        }
+        const headersTcp = { ...headers };
+        if (this.token) headersTcp["authorization"] = `Bearer ${this.token}`;
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), timeoutMs);
+        return fetch(this.url + path, { method: "GET", headers: headersTcp, signal: ctrl.signal })
+            .then(async (res) => {
+                if (!res.ok) {
+                    const txt = await res.text().catch(() => "");
+                    throw httpError("GET", path, res.status, txt);
+                }
+                const ab = await res.arrayBuffer();
+                return {
+                    bytes: Buffer.from(ab),
+                    contentType: res.headers.get("content-type") ?? "application/octet-stream",
+                };
+            })
+            .finally(() => clearTimeout(t));
+    }
+
     private spoolDrop(msg: Record<string, unknown>): SpoolResult {
         mkdirSync(this.spoolDir, { recursive: true });
         const ts = process.hrtime.bigint().toString();
