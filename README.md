@@ -22,6 +22,9 @@ it, accept or reject what they propose, all from one place.
 - **Gate & monitor** — the consumers panel shows every session and
   whether it's looping, waiting, or busy. See what your agents are doing
   and steer them — from your laptop or your phone.
+- **Local projects** — the sidebar flags which projects have a loop running
+  on this host (root auto-detected), with a per-project detail page to see the
+  loops and **launch** one for a known root, straight from the UI (#393).
 - **Same old, same old** — or just use the terminal as usual. Aiball will
   notice and stop bothering you while you take over.
 

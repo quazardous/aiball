@@ -17,6 +17,22 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Local projects — detect, detail, launch from the UI (#393)
+
+- A claude-loop now **pushes its working directory (root)** to the daemon on each
+  state heartbeat (migration 0028, `consumers.cwd`). A project is **"local"** when
+  a loop with a known root has worked it.
+- The **projects sidebar** shows a `local` badge; `/api/projects?detailed` exposes
+  `local` + `roots`.
+- New **project detail page** (Settings → Projects → the screen icon): the
+  project's root(s), the loops at each root with their live state, and a per-root
+  **launch** button.
+- New **`POST /api/projects/:name/launch`** spawns `claude-loop start --cwd <root>`
+  for a known root — **human-only**, restricted to roots the project has actually
+  run on (no arbitrary-path / shell injection). Proxy-aware for #394.
+- New **`claude-loop start --cwd <path>`** (≡ `cd <path> && claude-loop start`) —
+  the building block the launch endpoint uses.
+
 ### Tailscale is now a managed provider, not a manual command (#380)
 
 - **`aiball init tailscale [--http] [--port N]`** writes the host-level
