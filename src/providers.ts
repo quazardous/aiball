@@ -1,5 +1,5 @@
 /**
- * #354 v1: remote-access providers (tailscale, and future cloudflared/…).
+ * #354: remote-access providers (tailscale, and future cloudflared/…).
  *
  * Config is HOST-level — remote access exposes the whole machine's daemon —
  * so the `providers:` block lives in the GLOBAL config
@@ -9,21 +9,27 @@
  *
  * Autostart is wired as the systemd unit's `ExecStartPost` running
  * `aiball providers up`, so the provider comes up whenever the daemon
- * (re)starts. The actual bring-up reuses `bin/aiball-tailscale`.
+ * (re)starts.
+ *
+ * #380: the bring-up/down/status logic was inlined here (calling `tailscale`
+ * directly) — the former `bin/aiball-tailscale` helper script is gone. This
+ * module IS the unified provider manager; per-provider logic lives in the
+ * `tailscale*` helpers below. A future provider (cloudflared, ngrok…) adds
+ * its own helpers + a `providers.<name>` config sub-key.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { globalConfigPath } from "./autopoll/config.js";
 
 export interface TailscaleProvider {
     enabled: boolean;
     autostart: boolean;
-    /** `https` (default) or `http` — maps to `aiball-tailscale up [--http]`. */
+    /** `https` (default) serves on 443; `http` serves on 80 (no certs). */
     mode: "https" | "http";
-    /** Optional listen port override (→ `--port`). */
+    /** Optional listen-port override (default 443 https / 80 http). */
     port?: number;
 }
 
@@ -62,16 +68,82 @@ export function loadProviders(): ProvidersConfig {
     }
 }
 
-/** Resolve the shipped `bin/aiball-tailscale` (repo root is two up from src/). */
-function tailscaleBin(): string {
-    const here = dirname(fileURLToPath(import.meta.url)); // src/
-    return join(here, "..", "bin", "aiball-tailscale");
-}
-
 export interface ProviderResult {
     provider: string;
     ok: boolean;
     detail: string;
+}
+
+// ---- tailscale provider (#380: inlined from the old bin/aiball-tailscale) ----
+
+/**
+ * Resolve the daemon's port to proxy: `AIBALL_PORT` env → the systemd bind
+ * drop-in (`~/.config/systemd/user/aiball.service.d/bind.conf`) → 7777.
+ */
+function resolveDaemonPort(): number {
+    const env = process.env.AIBALL_PORT;
+    if (env && /^\d+$/.test(env)) return Number(env);
+    const dropin = join(homedir(), ".config", "systemd", "user", "aiball.service.d", "bind.conf");
+    if (existsSync(dropin)) {
+        try {
+            const matches = readFileSync(dropin, "utf8").match(/AIBALL_PORT=(\d+)/g);
+            if (matches && matches.length) {
+                const last = matches[matches.length - 1].split("=")[1];
+                if (last) return Number(last);
+            }
+        } catch { /* fall through to default */ }
+    }
+    return 7777;
+}
+
+/** `tailscale` present AND logged in? Returns a reason when not. */
+function tailscaleReady(): { ok: boolean; reason: string } {
+    const ver = spawnSync("tailscale", ["version"], { encoding: "utf8" });
+    if (ver.error || ver.status !== 0) {
+        return { ok: false, reason: "tailscale not found — install from https://tailscale.com/download" };
+    }
+    const st = spawnSync("tailscale", ["status"], { encoding: "utf8" });
+    if (st.status !== 0) {
+        return { ok: false, reason: "tailscale not logged in — run: sudo tailscale up" };
+    }
+    return { ok: true, reason: "" };
+}
+
+/** `tailscale serve --bg --https=<listen> 127.0.0.1:<daemon-port>` (or --http). */
+function tailscaleUp(mode: "https" | "http", portOverride?: number): ProviderResult {
+    const ready = tailscaleReady();
+    if (!ready.ok) return { provider: "tailscale", ok: false, detail: ready.reason };
+    const target = `127.0.0.1:${resolveDaemonPort()}`;
+    const listen = portOverride ?? (mode === "http" ? 80 : 443);
+    const flag = mode === "http" ? `--http=${listen}` : `--https=${listen}`;
+    const r = spawnSync("tailscale", ["serve", "--bg", flag, target], { encoding: "utf8" });
+    const out = ((r.stdout ?? "") + (r.stderr ?? "")).trim();
+    if (r.status !== 0) {
+        const hint = mode === "https"
+            ? " — HTTPS serve failed; MagicDNS + HTTPS certs may be off (set providers.tailscale.mode: http to fall back)"
+            : "";
+        return { provider: "tailscale", ok: false, detail: (out || String(r.error ?? "serve failed")) + hint };
+    }
+    return { provider: "tailscale", ok: true, detail: out || `serve --bg ${flag} ${target}` };
+}
+
+/** `tailscale serve reset`. */
+function tailscaleDown(): ProviderResult {
+    const ready = tailscaleReady();
+    if (!ready.ok) return { provider: "tailscale", ok: false, detail: ready.reason };
+    const r = spawnSync("tailscale", ["serve", "reset"], { encoding: "utf8" });
+    return {
+        provider: "tailscale",
+        ok: r.status === 0,
+        detail: ((r.stdout ?? "") + (r.stderr ?? "")).trim() || (r.error ? String(r.error) : "serve reset"),
+    };
+}
+
+/** Raw `tailscale serve status` output (null when empty / unavailable). */
+function tailscaleServeStatus(): string | null {
+    const r = spawnSync("tailscale", ["serve", "status"], { encoding: "utf8" });
+    const out = ((r.stdout ?? "") + (r.stderr ?? "")).trim();
+    return out || null;
 }
 
 /**
@@ -85,41 +157,21 @@ export function bringUpProviders(opts: { onlyAutostart?: boolean } = {}): Provid
     const results: ProviderResult[] = [];
     const ts = cfg.tailscale;
     if (ts && ts.enabled && (!opts.onlyAutostart || ts.autostart)) {
-        const args = ["up"];
-        if (ts.mode === "http") args.push("--http");
-        if (ts.port) args.push("--port", String(ts.port));
-        const r = spawnSync(tailscaleBin(), args, { encoding: "utf8" });
-        results.push({
-            provider: "tailscale",
-            ok: r.status === 0,
-            detail: ((r.stdout ?? "") + (r.stderr ?? "")).trim() || (r.error ? String(r.error) : ""),
-        });
+        results.push(tailscaleUp(ts.mode, ts.port));
     }
     return results;
 }
 
-/** Take down all configured providers (`aiball-tailscale down`). */
+/** Take down all configured providers. */
 export function bringDownProviders(): ProviderResult[] {
     const cfg = loadProviders();
     const results: ProviderResult[] = [];
-    if (cfg.tailscale) {
-        const r = spawnSync(tailscaleBin(), ["down"], { encoding: "utf8" });
-        results.push({
-            provider: "tailscale",
-            ok: r.status === 0,
-            detail: ((r.stdout ?? "") + (r.stderr ?? "")).trim() || (r.error ? String(r.error) : ""),
-        });
-    }
+    if (cfg.tailscale) results.push(tailscaleDown());
     return results;
 }
 
 /** Configured providers + live tailscale serve status (best-effort). */
 export function providersStatus(): { config: ProvidersConfig; tailscale: string | null } {
     const config = loadProviders();
-    let tailscale: string | null = null;
-    if (config.tailscale) {
-        const r = spawnSync(tailscaleBin(), ["status"], { encoding: "utf8" });
-        tailscale = ((r.stdout ?? "") + (r.stderr ?? "")).trim() || null;
-    }
-    return { config, tailscale };
+    return { config, tailscale: config.tailscale ? tailscaleServeStatus() : null };
 }

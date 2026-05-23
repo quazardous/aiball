@@ -87,7 +87,7 @@ export function fmtWhoami(v: { consumer_id: string; cwd: string; source: string;
     return lines.join("\n");
 }
 
-export function fmtStatus(v: { daemon_up: boolean; url: string; paths: { home: string; db: string; db_size: number; spool_dir: string }; spool_pending: number; spool_failed?: number }): string {
+export function fmtStatus(v: { daemon_up: boolean; url: string; paths: { home: string; db: string; db_size: number; spool_dir: string }; spool_pending: number; spool_failed?: number; providers?: { config: { tailscale?: { enabled: boolean; autostart: boolean; mode: string; port?: number } }; tailscale: string | null } }): string {
     const lines = [
         v.daemon_up ? `daemon: up at ${v.url}` : `daemon: DOWN (${v.url})`,
         `home:   ${v.paths.home}`,
@@ -98,6 +98,16 @@ export function fmtStatus(v: { daemon_up: boolean; url: string; paths: { home: s
     // shouldn't carry noise, but a backlog of rejected writes must be visible.
     if (v.spool_failed && v.spool_failed > 0) {
         lines.push(`        ⚠ ${v.spool_failed} failed (${v.paths.spool_dir}/failed) — rejected writes that never landed`);
+    }
+    // #380: remote-access providers — configured + live serve status. Only
+    // shown when a provider is configured (no `providers:` block → no line).
+    const ts = v.providers?.config.tailscale;
+    if (ts) {
+        const serve = v.providers?.tailscale ?? null;
+        const urlLine = serve?.split("\n").find((l) => l.includes("://"))?.trim();
+        const state = urlLine ? `up → ${urlLine}` : "down (not serving)";
+        const flags = [ts.mode, ts.autostart ? "autostart" : "manual"].join(", ");
+        lines.push(`proxy:  tailscale [${flags}] — ${state}`);
     }
     return lines.join("\n");
 }

@@ -51,10 +51,10 @@ hook) live in [`MCP-CLIENT.md`](./MCP-CLIENT.md); the loop internals in
 
 ## Remote (Tailscale)
 
-The loop in your pocket: `aiball-tailscale up` exposes the local daemon to
-your tailnet via `tailscale serve` — read the inbox, moderate, queue
-tickets from your phone. Storage stays local; private, end-to-end
-encrypted, no public exposure. Guide:
+The loop in your pocket: `aiball init tailscale` exposes the local daemon to
+your tailnet via `tailscale serve` (the daemon brings it up at boot) — read the
+inbox, moderate, queue tickets from your phone. Storage stays local; private,
+end-to-end encrypted, no public exposure. Guide:
 [`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
 
 A project living on another host? Run its `claude-loop` **there**, slaved to

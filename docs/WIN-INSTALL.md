@@ -362,12 +362,12 @@ proxy is active. The binary isn't committed (it's platform-specific;
 - **systemd**. A per-user Scheduled Task replaces it for the default
   path; an NSSM-managed Windows Service is also available via
   `-Service` / `-System` (see above). No socket-activation in either.
-- **`aiball-tailscale`** — the bash helper that wraps `tailscale serve`
-  (see [`docs/TAILSCALE.md`](TAILSCALE.md)) is Linux/macOS-only: it
-  reads the daemon port from the systemd drop-in, which doesn't exist
-  on Windows. To expose the Windows daemon over Tailscale today,
-  configure `tailscale serve` manually pointing at
-  `http://127.0.0.1:7777` — same security model, just no helper script.
+- **the tailscale provider's auto bring-up** — the daemon's tailscale
+  provider (#354/#380, configured via `aiball init tailscale`; see
+  [`docs/TAILSCALE.md`](TAILSCALE.md)) reads the daemon port from the systemd
+  drop-in, which doesn't exist on Windows. To expose the Windows daemon over
+  Tailscale today, configure `tailscale serve` manually pointing at
+  `http://127.0.0.1:7777` — same security model, just no auto bring-up.
 
 ## Troubleshooting
 

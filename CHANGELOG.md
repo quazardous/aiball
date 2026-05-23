@@ -17,6 +17,23 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Tailscale is now a managed provider, not a manual command (#380)
+
+- **`aiball init tailscale [--http] [--port N]`** writes the host-level
+  `providers.tailscale` block to the global config (`~/.config/aiball/config.yaml`),
+  preserving existing keys + comments. The daemon brings it up automatically at
+  boot (systemd `ExecStartPost` → `aiball providers up`); `aiball providers
+  up|down|status` manage it on demand.
+- **`aiball status` now shows a `proxy:` line** — configured provider(s) + live
+  serve status + URL (or `down`).
+- The standalone **`aiball-tailscale` command is gone**: its `tailscale serve`
+  logic is inlined into `src/providers.ts` (the unified provider manager), so
+  there's no separate script and no user-facing per-provider command. Existing
+  installs: re-run `bash install.sh && systemctl --user restart aiball` to drop
+  the old symlink and pick up the autostart hook.
+- Docs rewritten around the auto path: [`docs/TAILSCALE.md`](docs/TAILSCALE.md),
+  README, `docs/CONFIGS.md`.
+
 ### Remote aiball — a local `claude-loop` slaved to a remote daemon (#390)
 
 - New `claude-loop start` flags: **`--aiball-url`**, **`--aiball-token`**,
