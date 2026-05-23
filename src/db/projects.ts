@@ -110,6 +110,14 @@ export interface ProjectMeta {
      *  alimente la stratégie `stale` (wake si `now - landscape_last_activity > seuil`).
      *  Null si aucun ticket ouvert n'a de `last_actor_at`. Posé avec `landscape_hash`. */
     landscape_last_activity?: string | null;
+    /** #393: true when a claude-loop with a known root has worked this project
+     *  (root discoverable from a pushed consumer `cwd`) → the project is "local"
+     *  and can be (re)launched from the UI. The root persists even when the loop
+     *  is stopped, so this means "root known", not "currently running". */
+    local?: boolean;
+    /** #393: distinct loop roots known for this project (from `consumers.cwd`).
+     *  Usually one (a dir = one project). Empty/undefined when not local. */
+    roots?: string[];
 }
 
 export function listProjectsDetailed(consumer_id?: string, landscape = false): ProjectMeta[] {
@@ -540,6 +548,38 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
         for (const p of byProject.values()) {
             p.unread_for_consumer = byProjectSets.get(p.name)?.size ?? 0;
         }
+    }
+
+    // #393: derive "local" — a project is local when a claude-loop with a known
+    // root has worked it. The root comes from consumers.cwd (pushed by the loop's
+    // state heartbeat, Phase 1); we link a rooted consumer to a project via the
+    // content it authored there (comments + root tickets). The root persists even
+    // when the loop is stopped, so "local" = "root known → can (re)launch" (the
+    // live running-state is shown per-consumer on the project detail page).
+    const rootsByProject = new Map<string, Set<string>>();
+    const addRoot = (project: string, cwd: string | null | undefined) => {
+        if (!project || !cwd) return;
+        let s = rootsByProject.get(project);
+        if (!s) { s = new Set<string>(); rootsByProject.set(project, s); }
+        s.add(cwd);
+    };
+    const rootedCwd = sql`${schema.consumers.cwd} IS NOT NULL AND ${schema.consumers.cwd} != ''`;
+    for (const r of db.select({ project: schema.tickets.project, cwd: schema.consumers.cwd })
+        .from(schema.consumers)
+        .innerJoin(schema.messages, eq(schema.messages.byAgent, schema.consumers.consumerId))
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
+        .where(rootedCwd)
+        .groupBy(schema.tickets.project, schema.consumers.cwd)
+        .all()) addRoot(r.project, r.cwd);
+    for (const r of db.select({ project: schema.tickets.project, cwd: schema.consumers.cwd })
+        .from(schema.consumers)
+        .innerJoin(schema.tickets, eq(schema.tickets.byAgent, schema.consumers.consumerId))
+        .where(rootedCwd)
+        .groupBy(schema.tickets.project, schema.consumers.cwd)
+        .all()) addRoot(r.project, r.cwd);
+    for (const p of byProject.values()) {
+        const s = rootsByProject.get(p.name);
+        if (s && s.size > 0) { p.local = true; p.roots = [...s]; }
     }
 
     return [...byProject.values()].sort((a, b) =>

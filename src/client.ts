@@ -518,6 +518,10 @@ export class AiballClient {
             landscape_hash?: string;
             /** #379: max(last_actor_at) over open tickets (only when landscape=1). */
             landscape_last_activity?: string | null;
+            /** #393: a claude-loop with a known root has worked this project. */
+            local?: boolean;
+            /** #393: the loop root(s) known for this project (from consumers.cwd). */
+            roots?: string[];
             // #265: scope to our own agent id so the actionable_count is
             // "actionable for me" (the conversational gate is per-consumer).
         }>>("GET", `/api/projects?detailed=1&consumer_id=${encodeURIComponent(this.agentId)}${ls}`);
