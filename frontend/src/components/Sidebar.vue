@@ -39,7 +39,6 @@ const emit = defineEmits<{
     (e: "open-panel", panel: SettingsPanel): void;
     (e: "new-ticket"): void;
     (e: "open-current-settings"): void;
-    (e: "open-detail", value: string): void;
 }>();
 
 // #B.161: collapse the projects details by default on phones so the
@@ -128,14 +127,14 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
             >
                 <i :class="p.icon" />
                 <span class="sidebar-item-label">{{ p.label }}</span>
+<!-- #393 (3c): indicator only — no link here (david jkzk4g: the
+                     detail link lives in the Projects page, not the chooser). -->
                 <span
                     v-if="p.local && p.value"
                     :class="['sidebar-badge', p.running ? 'sidebar-badge--running' : 'sidebar-badge--local']"
-                    role="button"
                     :title="p.running
-                        ? 'a claude-loop is running here. Click for the project detail (loops + launch).'
-                        : 'local — root known, no loop running. Click for the project detail (loops + launch).'"
-                    @click.stop="emit('open-detail', p.value as string)"
+                        ? 'a claude-loop is running here'
+                        : 'local — root known, no loop running'"
                 ><i class="pi pi-desktop" /></span>
                 <span
                     v-if="p.pending > 0"
@@ -411,12 +410,12 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
     background: var(--p-surface-300);
     color: var(--p-text-color);
 }
-/* #393: "local" — root known but no loop running. Dim desktop chip. */
+/* #393: "local" — root known but no loop running. Dim desktop chip
+   (indicator only — not clickable, see jkzk4g). */
 .sidebar-badge--local {
     background: var(--p-surface-400);
     color: var(--p-surface-50);
     padding: 0.05rem 0.35rem;
-    cursor: pointer;
     opacity: 0.75;
 }
 /* #393 (3c): "running" — a claude-loop is live here. Green, gently pulsing. */
@@ -424,18 +423,11 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
     background: var(--p-green-500, #22c55e);
     color: #fff;
     padding: 0.05rem 0.35rem;
-    cursor: pointer;
     animation: sidebar-running-pulse 2s ease-in-out infinite;
 }
 @keyframes sidebar-running-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.55; }
-}
-.sidebar-badge--local:hover,
-.sidebar-badge--running:hover {
-    filter: brightness(1.15);
-    opacity: 1;
-    animation: none;
 }
 .sidebar-badge--local .pi,
 .sidebar-badge--running .pi {
