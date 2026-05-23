@@ -568,6 +568,7 @@ const projectListItems = computed<ProjectListItem[]>(() => [
         open: projects.value.reduce((acc, p) => acc + projectOpenCount(p), 0),
         resolved: projects.value.reduce((acc, p) => acc + (p.resolved_count || 0), 0),
         snoozed: projects.value.reduce((acc, p) => acc + (p.snoozed_count || 0), 0),
+        local: false,
     },
     ...projects.value.map((p) => ({
         label: p.name,
@@ -578,6 +579,8 @@ const projectListItems = computed<ProjectListItem[]>(() => [
         open: projectOpenCount(p),
         resolved: p.resolved_count || 0,
         snoozed: p.snoozed_count || 0,
+        // #393: a claude-loop with a known root runs here.
+        local: p.local === true,
     })),
 ]);
 

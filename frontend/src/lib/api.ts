@@ -384,6 +384,11 @@ export interface ProjectMeta {
     snoozed_count?: number;
     /** Approved+open tickets currently in the resolved-pending-close state. */
     resolved_count?: number;
+    /** #393: a claude-loop with a known root has worked this project → it's
+     *  "local" (root known, can be relaunched from the UI). */
+    local?: boolean;
+    /** #393: the distinct loop root(s) known for this project (consumers.cwd). */
+    roots?: string[];
 }
 
 export const api = {

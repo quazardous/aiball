@@ -10,6 +10,8 @@ export interface ProjectListItem {
     open: number;
     resolved: number;
     snoozed: number;
+    /** #393: a claude-loop with a known root runs in this project (local). */
+    local?: boolean;
 }
 
 export type SettingsPanel = "rules" | "tags" | "projects" | "consumers" | "compose";
@@ -123,6 +125,11 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
             >
                 <i :class="p.icon" />
                 <span class="sidebar-item-label">{{ p.label }}</span>
+                <span
+                    v-if="p.local"
+                    class="sidebar-badge sidebar-badge--local"
+                    title="local — a claude-loop runs here (root known, can be relaunched)"
+                ><i class="pi pi-desktop" /></span>
                 <span
                     v-if="p.pending > 0"
                     class="sidebar-badge sidebar-badge--pending"
@@ -396,5 +403,14 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
 .sidebar-badge--open {
     background: var(--p-surface-300);
     color: var(--p-text-color);
+}
+/* #393: "local" — a claude-loop runs here. Icon-only chip, primary tint. */
+.sidebar-badge--local {
+    background: var(--p-primary-color);
+    color: var(--p-primary-contrast-color);
+    padding: 0.05rem 0.35rem;
+}
+.sidebar-badge--local .pi {
+    font-size: 0.65rem;
 }
 </style>
