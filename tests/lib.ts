@@ -17,6 +17,18 @@ export function provision(consumer: string): string {
 }
 
 /**
+ * Register a HUMAN consumer (kind=human) and mint its token. Same provisioning
+ * carve-out as `provision`, but flips the consumer kind so it counts as human
+ * for the gate's recency rule (#358 — a pending decision yields to a later
+ * HUMAN comment) and for the summary_until exemption (humans skip it).
+ */
+export function provisionHuman(consumer: string): string {
+    ensureConsumer(consumer);
+    getDb().update(schema.consumers).set({ kind: "human" }).where(eq(schema.consumers.consumerId, consumer)).run();
+    return issueToken({ kind: "auth", consumer_id: consumer, label: "e2e" }).token;
+}
+
+/**
  * Push `next_message_id` far above the ticket-id space so a fresh container DB
  * doesn't hit the next_ticket_id/next_message_id collision (getMessage is
  * tickets-first → a comment id colliding with a ticket id misresolves). Only
@@ -54,6 +66,27 @@ export async function unread(token: string, consumer: string, project: string): 
     const text = await r.text();
     if (!r.ok) throw new Error(`GET /api/unread → ${r.status}: ${text}`);
     return JSON.parse(text) as Record<string, unknown>;
+}
+
+/**
+ * List tickets for a project as the token's consumer (per-consumer flags).
+ * `actionable: true` → `GET /api/tickets?actionable=1` (the candidate pool the
+ * decision/last-actor gates carve out); `open: true` → the broader open set.
+ */
+export async function tickets(
+    token: string,
+    project: string,
+    opts: { actionable?: boolean; open?: boolean } = {},
+): Promise<Array<Record<string, unknown>>> {
+    const params = new URLSearchParams({ project });
+    if (opts.actionable) params.set("actionable", "1");
+    if (opts.open) params.set("open", "1");
+    const r = await fetch(`${BASE}/api/tickets?${params.toString()}`, {
+        headers: { authorization: `Bearer ${token}` },
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`GET /api/tickets → ${r.status}: ${text}`);
+    return JSON.parse(text) as Array<Record<string, unknown>>;
 }
 
 /** Accept/reject a decision-on-comment (#B.129): POST /api/messages/:id/decide. */

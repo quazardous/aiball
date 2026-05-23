@@ -49,10 +49,15 @@ Create `tests/scenario-<name>.ts` importing the helpers from `tests/lib.ts`
 - **Setup**: `agent-a` opens a ticket; `agent-b` comments; `agent-a` comments on its own ticket.
 - **Assert**: A's `unread` contains B's comment but **NOT** A's own → no self-ping.
 
-### ☐ decision gate (#273)
-- **Setup**: an agent proposes a plan (`comment_added` + `decision_kind=plan` → pending).
-- **Assert**: the ticket leaves the author's `actionable` pool while a decision is
-  pending; **last-signal-per-ticket-wins** (a newer signal supersedes an older one).
+### ✅ decision gate (#273) — `scenario-decision-gate.ts`
+- **Setup**: human `david` (`provisionHuman`, bypasses moderation so the ticket is
+  approved) files a ticket the agent `agent-a` works; `agent-a` proposes a plan
+  (`comment_added` + `decision_kind=plan` → pending).
+- **Assert**: the ticket starts **in** `agent-a`'s actionable pool, **leaves** it while
+  the decision is pending, a later **human** comment makes it **re-enter** (recency
+  #358 — the ball comes back to the agent), and a fresh `plan:pending` re-gates it
+  (**last-signal-per-ticket-wins**). Drives `GET /api/tickets?actionable=1`.
+- **Note**: pure logic also covered in unit (`src/db/decision-gate.test.ts`, 14 cases).
 
 ### ☐ decision-on-comment (#B.129)
 - **Setup**: propose a plan/resolution (pending); reporter/human `POST /decide`.
