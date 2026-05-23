@@ -98,10 +98,16 @@ test("bytesToGrammar: ESC-led sequences are named, not mis-read as alt+[", () =>
     assert.equal(bytesToGrammar([0x7f]), "backspace");
 });
 
-test("bytesToGrammar: printable + lossless hex fallback", () => {
+test("bytesToGrammar: printable ASCII + Unicode (#cy678t) + lossless hex fallback", () => {
     assert.equal(bytesToGrammar([0x7a]), "z");
     assert.equal(bytesToGrammar([]), "(empty)");
-    assert.equal(bytesToGrammar([0xc3, 0xa9]), "<hex c3a9>"); // 'é' UTF-8 — not a combo
+    // david cy678t: pressing the AZERTY top-left key emits UTF-8 `c2 b2` = `²`.
+    // A printable non-ASCII key shows the literal char (not an afk combo, but a
+    // real key) — the raw bytes still print in the tool's hex column.
+    assert.equal(bytesToGrammar([0xc2, 0xb2]), "²");
+    assert.equal(bytesToGrammar([0xc3, 0xa9]), "é"); // 'é' UTF-8
+    // Truly unmappable bytes (invalid UTF-8) keep the lossless hex catch-all.
+    assert.equal(bytesToGrammar([0xff, 0xfe]), "<hex fffe>");
 });
 
 test("matchAfkCombo: exact atomic-combo match, no debounce state", () => {

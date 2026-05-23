@@ -180,7 +180,14 @@ export function bytesToGrammar(bytes: ArrayLike<number>): string {
         const single = decodeSingle(arr);
         if (single) return single;
     }
-    return `<hex ${h}>`;
+    // Printable non-ASCII key (e.g. AZERTY `²` = UTF-8 `c2 b2`): show the literal
+    // character — it's a real key, just not encodable as an afk combo (those are
+    // ASCII control/alt/ctrl chords). The hex stays visible in the byte column.
+    try {
+        const s = new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(arr));
+        if ([...s].length === 1 && !/\p{Cc}/u.test(s)) return s;
+    } catch { /* not valid UTF-8 — fall through to the hex catch-all */ }
+    return `<hex ${h}>`; // lossless catch-all: unmappable bytes, never dropped
 }
 
 /**
