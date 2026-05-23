@@ -70,15 +70,15 @@ Create `tests/scenario-<name>.ts` importing the helpers from `tests/lib.ts`
   `decided`, one `moved` — **one event per mutation, no double-fire** (the move must
   not also fire a stray `created` for its audit comment). The dedup regression net.
 
-### ☐ decision-on-comment (#B.129)
-- **Setup**: propose a plan/resolution (pending); reporter/human `POST /decide`.
-- **Assert**: `meta.decision` goes `pending`→`accepted`/`rejected`; accepting a
-  resolution closes/ungates as expected; re-deciding a terminal decision is rejected.
+### ✅ decision-on-comment (#B.129) — `scenario-decision.ts`
+- **Setup**: `agent-b` proposes a plan (`comment_added` + `decision_kind=plan` → a
+  pending decision); `agent-a` (reporter) accepts it via `POST /api/messages/:id/decide`.
+- **Assert**: `meta.decision` goes `pending` → `accepted` (kind stays `plan`).
 
-### ☐ move cross-project (#294)
-- **Setup**: `agent-a` opens a ticket in project X; reporter/human moves it to Y.
-- **Assert**: the head's `project` becomes Y with a fresh `display_seq`; an audit
-  comment lands; fan-out reaches the **destination** project; comments follow.
+### ✅ move cross-project (#294) — `scenario-move.ts`
+- **Setup**: `agent-a` opens a ticket in `move-src`; the reporter moves it to `move-dst`
+  via `POST /api/tickets/:id/move`.
+- **Assert**: the head's `project` flips `move-src` → `move-dst`.
 
 ### ✅ delete comment (#309) — `scenario-delete-comment.ts`
 - **Setup**: human `human-mod` opens a ticket; `agent-a` comments (gets deleted),
@@ -109,8 +109,21 @@ Create `tests/scenario-<name>.ts` importing the helpers from `tests/lib.ts`
 - **Note**: assertions are env-default-independent (every rule is `match_project`-scoped;
   outcomes are forced by the rules + the human bypass, not the ambient strategy).
 
+### ✅ tags consumers / state_human_word (#310) — `scenario-tags-consumers.ts`
+- **Setup**: a loop agent `tagscons-agent` (kind=agent) and a human `tagscons-human`.
+  Consumer state is **global** (not project-scoped) → scenario-unique consumer ids.
+- **Assert** (`PUT /api/consumers/:id/state` → `GET /api/consumers`):
+  - each presence word `stop`/`wait`/`loop` pushed (`human_word`) is reflected on the
+    consumers page (`state_human_word`); an unknown word is ignored (last value stays).
+  - **guards** — a human pushing state → `403` (badges are for loop agents); an agent
+    pushing another consumer's state → `403` (own-state only).
+
 ## Out of scope here
 
+- **intent=feature branch hint (#319)** — the hint is composed by `buildWakePhrase()`
+  in `src/claude-loop/state.ts` and pasted into the tmux session at wake; it's **never
+  serialized over HTTP**, so it can't be asserted by this daemon stack. Belongs to the
+  claude-loop / tier-2 layer (or a pure-logic unit on `buildWakePhrase`).
 - **claude-loop / tier-2** (typing→wait #315, the stop/wait/loop bar #302/#305) —
   covered separately (david).
 - **attribution (#322)** + **per-agent workflow (#323)** — await the multi-agent /
