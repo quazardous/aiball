@@ -59,6 +59,17 @@ Create `tests/scenario-<name>.ts` importing the helpers from `tests/lib.ts`
   (**last-signal-per-ticket-wins**). Drives `GET /api/tickets?actionable=1`.
 - **Note**: pure logic also covered in unit (`src/db/decision-gate.test.ts`, 14 cases).
 
+### ✅ bus lifecycle (#321) — `scenario-bus-lifecycle.ts`
+- **Setup**: the lifecycle bus (`src/event-bus.ts`) is an **in-process** EventEmitter,
+  so it can't be observed over HTTP from the shared daemon (another process). This
+  scenario instead mounts the **real app in-process** (`createApp`, the affordance
+  `src/app.ts` was extracted for) on an ephemeral port and subscribes `onLifecycle`
+  in the **same** process, then drives the business API against that local instance.
+- **Act**: create a ticket → propose+accept a plan → move the ticket cross-project.
+- **Assert**: an `onLifecycle` handler receives exactly **one** `created`, one
+  `decided`, one `moved` — **one event per mutation, no double-fire** (the move must
+  not also fire a stray `created` for its audit comment). The dedup regression net.
+
 ### ☐ decision-on-comment (#B.129)
 - **Setup**: propose a plan/resolution (pending); reporter/human `POST /decide`.
 - **Assert**: `meta.decision` goes `pending`→`accepted`/`rejected`; accepting a
