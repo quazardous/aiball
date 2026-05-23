@@ -1,11 +1,13 @@
 # aiball on Windows — install + run guide (#B.178)
 
-> **Status**: working. The PowerShell installer (`install.ps1`) provisions
-> the daemon + `aiball` CLI + `aiball-mcp` end-to-end, with a per-user
-> Scheduled Task auto-launching the daemon at logon. `claude-loop` ships
-> its `.cmd` launcher but the wrapper still needs tmux — use WSL2 if you
-> want the autonomous-loop feature. The daemon + MCP + autopoll Stop hook
-> cover ~90% of daily usage.
+> **Status**: working, natively (no WSL2). The PowerShell installer
+> (`install.ps1`) provisions the daemon + `aiball` CLI + `aiball-mcp`
+> end-to-end. On the default desktop install the daemon is owned by the
+> **tray** (auto-launched at logon by a per-user Scheduled Task) — the icon
+> is the app: it starts/supervises/stops the daemon. `claude-loop` also runs
+> natively via **psmux** (tmux-compatible) + a **ConPTY proxy** for live
+> human-typing detection — see [`CLAUDE-LOOP.md`](CLAUDE-LOOP.md) /
+> [`PTY-PROXY-WINDOWS.md`](PTY-PROXY-WINDOWS.md).
 
 ## Prerequisites
 
@@ -170,6 +172,16 @@ aiball-daemon` (or a vite dev server) without re-running the installer.
 | `-Yes` | skip interactive confirmations |
 
 ## Daemon lifecycle
+
+**Default desktop install — the tray owns the daemon.** The `aiball-daemon`
+scheduled task launches the **tray** at logon; the tray then starts, supervises
+(restarts if it dies), and — on *Quitter aiball* — stops the daemon. So the
+**tray icon = aiball is running** (no hidden background daemon). Right-click the
+icon for *Ouvrir / Redémarrer le daemon / Quitter aiball*. The Start/Stop-task
+commands below still drive the autostart, but day-to-day you use the tray.
+
+Want the daemon **without** a tray? `install.ps1 -NoTray` (task runs the daemon
+directly, no icon) or `-Service` (true background service, survives logout).
 
 Scheduled Task (default — no flag at install):
 
