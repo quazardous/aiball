@@ -344,6 +344,13 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export CL_ASK_GRACE_SEC=${shQuote(String(askGraceSec))}`,
         `export CL_AFK_SPEC=${shQuote(afkSpecJson)}`,
         `export CL_AFK_WINDOW_MS=${shQuote(String(ctx.claude_loop.afk_window_ms))}`,
+        // #381c: opt-in diag capture. Export CL_PROXY_LOG=<file> before
+        // `claude-loop start` → the PTY proxy appends one NDJSON line per
+        // keystroke read (raw bytes + timestamp). Re-run it through
+        // `pty-proxy.py --replay-log <file>` to replay the REAL byte stream
+        // (coalescing/key-repeat included) — the faithful test the idealized
+        // `--replay` tokens couldn't be. Absent = no capture (zero overhead).
+        ...(process.env.CL_PROXY_LOG ? [`export CL_PROXY_LOG=${shQuote(process.env.CL_PROXY_LOG)}`] : []),
         // #B.154: resume picker auto-dismiss mode. Read by the
         // SessionStart hook when source=resume.
         `export CL_RESUME_MODE=${shQuote(opts.resumeMode ?? "as-is")}`,

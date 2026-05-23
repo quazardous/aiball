@@ -130,17 +130,82 @@ test("2e ESC hors fenêtre → ré-arme au lieu de fire (besoin de 2 rapprochés
     assert.equal(v[1].buffered_first, true);
 });
 
-// ---- #381 : esc esc COALESCÉ en un seul read → déterministe ------------------
-// Quand le terminal livre les deux ESC d'un coup (`1b1b`), le combo `esc esc`
-// les reconnaît comme la concaténation → toggle, au lieu de l'ancien
-// non-déterminisme (traité en ESC nu selon le batching). Plus rien ne part à
-// claude. C'est la moitié « armement qui se corrompt parfois » de #381.
-test("#381: esc esc coalescé en un read → toggle l'AFK (déterministe)", { skip: SKIP }, () => {
+// ---- #381c : esc esc COALESCÉ → re-séparé en touches → déterministe ----------
+// Quand le terminal livre les deux ESC d'un coup (`1b1b`), `split_keystrokes`
+// les re-sépare en DEUX touches ESC (esc esc = deux combos d'1 octet) → le
+// toggle tombe sur la 2e, EXACTEMENT comme deux reads séparés. Plus de chemin
+// « combo concaténé » fragile ni de non-déterminisme selon le batching de l'OS.
+test("#381c: esc esc coalescé (1b1b) → re-séparé → toggle l'AFK, rien vers claude", { skip: SKIP }, () => {
     const v = replay("0 1b1b\n", ESC_ESC);
-    assert.equal(v.length, 1);
+    assert.equal(v.length, 2);                 // 1b1b → [esc][esc]
+    assert.equal(v[0].afk_fired, false);       // 1re ESC : armée
+    assert.equal(v[1].afk_fired, true);        // 2e ESC : fire
+    assert.equal(v[1].afk_active, true);
+    assert.equal(v.map((r) => r.forward).join(""), ""); // rien ne fuit vers claude
+});
+
+// ---- #381c : INVARIANCE AU REGROUPEMENT (le « truc du réel » : coalescing) ---
+// david : « le pur simulateur doit pas prendre en compte un truc du réel ». Le
+// réel, c'est qu'`os.read` regroupe les octets selon le timing. Le résultat ne
+// doit PLUS en dépendre : deux ESC en un read (`1b1b`) == deux reads (`esc`,
+// `esc`). On compare les verdicts métier des deux découpages.
+test("#381c: invariance — 1b1b coalescé == esc esc en deux reads", { skip: SKIP }, () => {
+    const proj = (v: Verdict[]) =>
+        v.map((r) => ({ fired: r.afk_fired, afk: r.afk_active, fwd: r.forward, mk: r.markers }));
+    assert.deepEqual(proj(replay("0 1b1b\n", ESC_ESC)), proj(replay("0 esc\n0 esc\n", ESC_ESC)));
+});
+
+// ---- #381c : trois ESC coalescés ne PARASITENT plus (le vrai bug #381) -------
+// Avant : `1b1b1b` en un read retombait en ESC nu → clear_afk + les 3 ESC
+// PARTAIENT à claude (interruption parasite). Après split : [esc][esc][esc] →
+// la 2e fait le toggle, la 3e est avalée par le cooldown post-fire. UN toggle
+// net, zéro octet vers claude — quel que soit le nombre d'ESC agglomérés.
+test("#381c: 1b1b1b coalescé → UN seul toggle, rien vers claude (plus de clear parasite)", { skip: SKIP }, () => {
+    const v = replay("0 1b1b1b\n", ESC_ESC);
+    const fired = v.filter((r) => r.afk_fired);
+    assert.equal(fired.length, 1);                       // un seul toggle
+    assert.equal(fired[0].afk_active, true);             // → ON
+    assert.equal(v.map((r) => r.forward).join(""), "");  // RIEN vers claude
+    assert.equal(v.filter((r) => r.markers.includes("clear_afk")).length, 0); // pas de clear parasite
+});
+
+// ---- #381c : un ESC RÉELLEMENT seul (1 octet) ne re-toggle JAMAIS -----------
+// Le cœur du rapport david : « esc esc (toggle) puis esc seul (toggle direct) ».
+// Un `\x1b` unique APRÈS un toggle ne doit pas inverser l'afk : il s'arme
+// (bufferisé), il faut une 2e ESC. S'il reste seul il finit flushé vers claude.
+// (Si david voit quand même un toggle sur « un seul esc », c'est que son clavier
+// émet `1b1b` en key-repeat → la capture --replay-log le prouvera.)
+test("#381c: après un toggle, un ESC seul (1 octet) s'arme mais n'inverse PAS l'afk", { skip: SKIP }, () => {
+    const v = replay("0 esc\n80 esc\n2000 esc\n2500 -\n", ESC_ESC);
+    const fired = v.filter((r) => r.afk_fired);
+    assert.equal(fired.length, 1);             // SEUL le esc esc initial toggle
+    assert.equal(fired[0].afk_active, true);
+    assert.equal(v.at(-1)!.afk_active, true);  // reste away : l'esc seul n'a pas inversé
+    assert.equal(v.at(-1)!.forward, "1b");     // l'esc seul finit flushé vers claude
+});
+
+// ---- alt+esc : combo ATOMIQUE multi-octets → JAMAIS re-séparé ----------------
+// `[[27,27]]` est UN combo de 2 octets : `split_keystrokes` doit le garder
+// ENTIER (le re-séparer en deux ESC le rendrait indétectable). Filet pour la
+// régression « combo-aware » du split #381c.
+test("#381c: alt+esc reste atomique — 1b1b NON re-séparé, fire en une unité", { skip: SKIP }, () => {
+    const v = replay("0 1b1b\n", ALT_ESC);
+    assert.equal(v.length, 1);                 // gardé atomique
+    assert.equal(v[0].raw, "1b1b");
     assert.equal(v[0].afk_fired, true);
     assert.equal(v[0].afk_active, true);
-    assert.equal(v[0].forward, "");           // rien ne fuit vers claude
+});
+
+// ---- #381c : les flèches (CSI) survivent au split — pas volées par `esc` -----
+// Un combo `esc` d'1 octet ne doit pas voler le préfixe `\x1b` d'une flèche
+// (`\x1b[A`). La séquence CSI est reconnue et gardée entière → forwardée telle
+// quelle, aucun fire AFK.
+test("#381c: flèche ESC[A non disloquée par le split esc esc", { skip: SKIP }, () => {
+    const v = replay("0 1b5b41\n", ESC_ESC);
+    assert.equal(v.length, 1);
+    assert.equal(v[0].raw, "1b5b41");
+    assert.equal(v[0].afk_fired, false);
+    assert.equal(v[0].forward, "1b5b41");      // passe à claude intacte
 });
 
 // ---- alt+esc : combo ATOMIQUE robuste au batching ---------------------------

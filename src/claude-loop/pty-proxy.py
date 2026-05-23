@@ -93,6 +93,79 @@ def _is_lone_esc(data: bytes) -> bool:
     return data[1] not in (0x5B, 0x4F)  # 0x5B='[' (CSI), 0x4F='O' (SS3)
 
 
+def split_keystrokes(data: bytes, combos=None):
+    """#381c : éclate un read brut en touches INDIVIDUELLES (COMBO-AWARE).
+
+    Le détecteur AFK a un contrat « UNE touche par feed » (cf. _AfkDetector) —
+    mais `os.read` COALESCE : taper `esc esc` vite, ou un ESC en key-repeat,
+    livre `\\x1b\\x1b` (voire `\\x1b\\x1b\\x1b`) en UN seul read. L'ancien code
+    feedait le chunk entier comme « une touche » → `\\x1b\\x1b` matchait le
+    combo concaténé (ok) mais `\\x1b\\x1b\\x1b` retombait en ESC nu (clear_afk +
+    forward vers claude !), et surtout le RÉSULTAT dépendait du regroupement
+    des octets = non-déterministe (« parfois l'armement se corrompt », david
+    #381). On restaure l'invariant en re-séparant le chunk AVANT le détecteur :
+    deux ESC coalescés = deux touches ESC, exactement comme deux reads séparés.
+
+    COMBO-AWARE (sinon on casserait un combo ATOMIQUE multi-octets) :
+      - `esc esc` = DEUX combos d'1 octet → `\\x1b\\x1b` se sépare en 2 touches
+        ESC → la fenêtre 2-combos du détecteur fait le toggle (déterministe) ;
+      - `alt+esc` = UN combo de 2 octets (`\\x1b\\x1b`) → on le garde ENTIER,
+        sinon le détecteur (qui attend `\\x1b\\x1b` d'un coup) ne fire jamais.
+
+    Ordre de découpe : CSI (`\\x1b[…`) / SS3 (`\\x1bO.`) reconnus en PREMIER et
+    gardés entiers (flèches, F-keys — un combo `esc` d'1 octet ne doit pas voler
+    le préfixe `\\x1b` d'une flèche) ; puis un combo CONFIGURÉ qui matche à la
+    position courante (plus long d'abord) → unité atomique ; sinon un ESC isolé ;
+    sinon un run d'octets non-ESC gardé groupé (un paste reste un seul forward).
+
+    Fast-path : aucun ESC dans le chunk, ou AFK désactivé (pas de combo) → on
+    rend [data] tel quel — zéro changement de comportement.
+    """
+    if combos is None:
+        combos = _AFK_COMBOS
+    if 0x1B not in data or not combos:
+        return [data]
+    # Plus long d'abord : un combo long prime sur un préfixe plus court.
+    combo_set = sorted({bytes(c) for c in combos if c}, key=len, reverse=True)
+    units = []
+    i, n = 0, len(data)
+    while i < n:
+        b = data[i]
+        if b == 0x1B and i + 1 < n:
+            nxt = data[i + 1]
+            if nxt == 0x5B:        # CSI : ESC [ … byte final 0x40–0x7e
+                j = i + 2
+                while j < n and not (0x40 <= data[j] <= 0x7E):
+                    j += 1
+                if j < n:
+                    j += 1         # inclut le byte final
+                units.append(data[i:j])
+                i = j
+                continue
+            if nxt == 0x4F:        # SS3 : ESC O <byte> (F1–F4, etc.)
+                j = min(i + 3, n)
+                units.append(data[i:j])
+                i = j
+                continue
+        # Un combo CONFIGURÉ matche-t-il à cette position ? → unité atomique.
+        m = next((c for c in combo_set if data[i:i + len(c)] == c), None)
+        if m is not None:
+            units.append(data[i:i + len(m)])
+            i += len(m)
+            continue
+        if b == 0x1B:              # ESC isolé (nu / alt+x non-combo)
+            units.append(data[i:i + 1])
+            i += 1
+            continue
+        # Run d'octets non-ESC → groupé en une seule unité (paste/texte).
+        j = i
+        while j < n and data[j] != 0x1B:
+            j += 1
+        units.append(data[i:j])
+        i = j
+    return units
+
+
 def touch_marker():
     p = _marker_path()
     if not p:
@@ -545,32 +618,114 @@ def _run_replay(args):
             clock += delay / 1000.0
             token = parts[1].strip() if len(parts) > 1 else "-"
             if token in ("-", "tick", "flush"):
-                dec = decider.on_flush(clock)
+                decs = [decider.on_flush(clock)]
             else:
-                dec = decider.on_stdin(_token_to_bytes(token), clock)
-            # Reconstruit l'état logique afk/grace depuis les markers émis.
-            for m in dec.get("markers", []):
-                if m == "set_afk":
-                    afk_active = True
-                elif m == "clear_afk":
-                    afk_active = False
-                elif m == "touch_user_grace":
-                    grace_until = clock + grace
-                elif m == "clear_user_grace":
-                    grace_until = 0.0
-            rec = _decision_record(dec)
-            word = dec.get("word")
-            rec["afk_active"] = afk_active
-            rec["word_resolved"] = (
-                "stop" if word == "stop"
-                else ("wait" if grace_until > clock else "loop") if word == "rest"
-                else None
-            )
-            sys.stdout.write(_json.dumps(rec) + "\n")
+                # #381c : un token octets peut représenter un read COALESCÉ
+                # (ex. `1b1b` = deux ESC livrés d'un coup). On le re-sépare en
+                # touches individuelles, comme en live (main → split_keystrokes),
+                # pour que le replay reflète FIDÈLEMENT le réel : c'est le « truc
+                # du réel » (coalescing) que le simulateur idéalisé ignorait.
+                decs = [decider.on_stdin(u, clock)
+                        for u in split_keystrokes(_token_to_bytes(token))]
+            for dec in decs:
+                # Reconstruit l'état logique afk/grace depuis les markers émis.
+                for m in dec.get("markers", []):
+                    if m == "set_afk":
+                        afk_active = True
+                    elif m == "clear_afk":
+                        afk_active = False
+                    elif m == "touch_user_grace":
+                        grace_until = clock + grace
+                    elif m == "clear_user_grace":
+                        grace_until = 0.0
+                rec = _decision_record(dec)
+                word = dec.get("word")
+                rec["afk_active"] = afk_active
+                rec["word_resolved"] = (
+                    "stop" if word == "stop"
+                    else ("wait" if grace_until > clock else "loop") if word == "rest"
+                    else None
+                )
+                sys.stdout.write(_json.dumps(rec) + "\n")
         sys.stdout.flush()
     finally:
         if path:
             src.close()
+    return 0
+
+
+def _run_replay_log(args):
+    """#381c : rejoue une CAPTURE LIVE (NDJSON CL_PROXY_LOG) à travers le cœur
+    PUR — le « replay du réel » que david réclamait. Le simulateur idéalisé
+    (`--replay`) ne voyait que des tokens propres écrits à la main ; ici on
+    re-feed les OCTETS EXACTS lus par `os.read` en live (champ `raw`), aux
+    DÉLAIS réels (champ `t`), à travers un Decider neuf. Reproduction fidèle
+    du « truc du réel » (coalescing/key-repeat) qui échappait au pur token.
+
+    Entrée : le fichier NDJSON écrit en live quand CL_PROXY_LOG est posé
+    (`claude-loop start` le propage si l'env est exporté). On ne rejoue que les
+    events `stdin` (frappe humaine) et `flush` (timeout du buffer) ; les `inject`
+    (wake) ne sont pas de la frappe humaine → ignorés. Sortie : même verdict
+    NDJSON que `--replay` (afk_active / word_resolved reconstruits)."""
+    path = None
+    for a in args:
+        if not a.startswith("-"):
+            path = a
+            break
+    if not path:
+        sys.stderr.write("pty-proxy --replay-log: need a capture file path\n")
+        return 2
+    afk = _AfkDetector(_AFK_COMBOS, _AFK_WINDOW_MS)
+    decider = _Decider(afk, _AFK_COMBOS, _ESC_TAKEOVER, _AFK_WINDOW_MS)
+    try:
+        grace = float(os.environ.get("CL_USER_GRACE_SEC") or "60")
+    except ValueError:
+        grace = 60.0
+    state = {"afk_active": False, "grace_until": 0.0}
+
+    def emit(dec, clock):
+        for m in dec.get("markers", []):
+            if m == "set_afk":
+                state["afk_active"] = True
+            elif m == "clear_afk":
+                state["afk_active"] = False
+            elif m == "touch_user_grace":
+                state["grace_until"] = clock + grace
+            elif m == "clear_user_grace":
+                state["grace_until"] = 0.0
+        rec = _decision_record(dec)
+        word = dec.get("word")
+        rec["afk_active"] = state["afk_active"]
+        rec["word_resolved"] = (
+            "stop" if word == "stop"
+            else ("wait" if state["grace_until"] > clock else "loop") if word == "rest"
+            else None
+        )
+        sys.stdout.write(_json.dumps(rec) + "\n")
+
+    with open(path) as src:
+        for line in src:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                cap = _json.loads(line)
+            except ValueError:
+                continue
+            event = cap.get("event")
+            if event not in ("stdin", "flush"):
+                continue  # inject (wake) ≠ frappe humaine
+            clock = float(cap.get("t", 0.0))
+            if event == "flush":
+                emit(decider.on_flush(clock), clock)
+            else:
+                raw = bytes.fromhex(cap.get("raw") or "")
+                # Captures live DÉJÀ découpées par unité (main feed
+                # split_keystrokes avant chaque on_stdin) ; on re-split par
+                # sécurité au cas où une capture pré-#381c serait rejouée.
+                for u in (split_keystrokes(raw) if raw else [b""]):
+                    emit(decider.on_stdin(u, clock), clock)
+    sys.stdout.flush()
     return 0
 
 
@@ -692,6 +847,10 @@ def main(argv):
     # le verdict NDJSON. Sert aux tests de la couche détection (#381 esc esc…).
     if args and args[0] == "--replay":
         return _run_replay(args[1:])
+    # #381c : rejoue une CAPTURE LIVE (NDJSON CL_PROXY_LOG) — le « replay du
+    # réel » (octets exacts d'os.read, délais réels) vs les tokens idéalisés.
+    if args and args[0] == "--replay-log":
+        return _run_replay_log(args[1:])
     cmd = args
     # `--` séparateur optionnel : `pty-proxy.py -- claude …`
     if cmd and cmd[0] == "--":
@@ -897,7 +1056,16 @@ def main(argv):
                     # #360 : toute la logique frappe→action (succès combo AFK /
                     # bufferisation 1re combo / frappe ordinaire + flush) est dans
                     # le cœur PUR `_Decider` ; main n'applique que le résultat.
-                    apply_decision(decider.on_stdin(data, datetime.datetime.now().timestamp()))
+                    # #381c : un read peut COALESCER plusieurs touches (esc esc,
+                    # key-repeat) → on le re-sépare en touches individuelles AVANT
+                    # le détecteur (contrat « 1 touche par feed »). Les unités d'un
+                    # même read partagent le même `now` (elles sont arrivées au
+                    # même instant) → la fenêtre/cooldown du détecteur les traite
+                    # comme des frappes simultanées, déterministe quel que soit le
+                    # batching de l'OS.
+                    now_stdin = datetime.datetime.now().timestamp()
+                    for unit in split_keystrokes(data):
+                        apply_decision(decider.on_stdin(unit, now_stdin))
                 else:
                     # EOF stdin : on arrête de le poller (claude tourne
                     # encore — on garde le pont sortie + injection vivant).
