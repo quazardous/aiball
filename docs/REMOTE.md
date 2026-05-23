@@ -18,6 +18,37 @@ proxy, human-typing detection and all state files stay **local on B**; only the
 This is **not** "run the loop on the remote host". The loop runs where claude +
 tmux run (B); A is just the shared board.
 
+## Two ways to wire B → A
+
+- **Direct (#390)** — each `claude-loop` on B points at A with `--aiball-url` /
+  `--aiball-token` (see [Setup](#setup) below). Per-loop config.
+- **Proxy mode (#394, recommended for a busy host)** — run a **local aiball
+  daemon on B in proxy mode**; it transparently relays to A. Then **every** local
+  client (loops, MCP, CLI, web UI) just uses localhost / the UDS as usual
+  (token-less, SSE included) — no per-client remote config. See
+  [Proxy mode](#proxy-mode) below. The two coexist; pick whichever fits.
+
+## Proxy mode
+
+On B, add a `proxy:` block to the **global** config (`~/.config/aiball/config.yaml`)
+and run the daemon normally:
+
+```yaml
+proxy:
+  url: https://<A-host>:7777
+  token: aiball-<48 hex>      # mint on A: aiball auth issue --consumer <id>
+```
+
+The B daemon becomes a **transparent relay**: it forwards `/api/*` and
+`/uploads/*` to A (injecting the bearer), pipes A's SSE (`/api/events`) back to
+local subscribers, and keeps no local DB. Local clients on B talk to the UDS /
+`127.0.0.1` token-less, exactly as if A were local. If A is unreachable the proxy
+answers 502 and the local client spools the write for replay (#389).
+
+> Today the proxy relays the data plane; **launching a loop on B from A's web UI**
+> (#393) needs a reverse control channel (A→B) and is a follow-up — local launch
+> on B works now.
+
 ## Setup
 
 ### 1. On A — mint a token for the loop's consumer
