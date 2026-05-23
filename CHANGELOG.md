@@ -17,6 +17,8 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-23
+
 ### aiball proxy-node mode — a local daemon that relays to a remote (#394)
 
 - A local daemon can run as a **transparent relay** to a remote aiball: add a
