@@ -17,12 +17,80 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Remote aiball — a local `claude-loop` slaved to a remote daemon (#390)
+
+- New `claude-loop start` flags: **`--aiball-url`**, **`--aiball-token`**,
+  `--consumer`, `--project`. They point a loop running on machine B at an aiball
+  daemon on machine A (tailnet/LAN) — B needs no aiball install. The loop, tmux
+  session and state stay local; only the data plane (tickets/comments/pings/
+  uploads) is remote. The connection is persisted in the loop's plate, so
+  `claude-loop restart` replays it; the env file is `0600` when it holds a token.
+- New **`aiball download <ref>`** — fetch a ticket's attached upload
+  (`/uploads/<sha>.<ext>`) over the authenticated transport and write it locally,
+  so a remote loop can read images it can't open as `file://`.
+- See [`docs/REMOTE.md`](docs/REMOTE.md) for the setup. (The daemon already
+  supported per-consumer bearer tokens and TCP for every endpoint — this wires
+  the loop to use them.)
+
+### Fix: deterministic write rejections no longer vanish into the spool (#389)
+
+- The CLI/MCP client treated the file spool as a catch-all fallback: **any**
+  failed `POST /api/messages` was queued for later replay. But a deterministic
+  4xx (e.g. a non-reporter trying to `close` someone else's ticket → 403) would
+  only fail again identically at replay and get dumped into `spool/failed/` —
+  so the call returned a misleading `queued: true` and the comment body was
+  **silently lost** (9 such closes lost since 2026-05-11).
+- The client now distinguishes a deterministic client error (4xx — surfaced to
+  the caller immediately, so the agent sees "post `ticket_resolved` instead")
+  from a transport/daemon failure (connection refused, timeout, 5xx — still
+  spooled for replay).
+- `aiball status` now counts and warns on `spool/failed/` (it only ever showed
+  `N pending` from the spool root, so a growing graveyard of lost writes was
+  invisible).
+
+### `claude-loop restart` + SIGHUP self-restart (#388)
+
+- New **`claude-loop restart [name]`** — a HARD restart: kills claude + the tmux
+  session + the detached timer + the state dir, then relaunches the loop fresh
+  with the **same start config** (replayed from the plate: name, interval,
+  check-cmd, claude args, cwd). Unlike `reload` (timer-only, claude survives),
+  this is a full stop+start. Detached + `--no-attach` — reconnect with
+  `claude-loop attach <name>`.
+- The detached timer now traps **SIGHUP**: it spawns a detached `restart` and
+  exits, so `kill -HUP <timer.pid>` is a self-service hard restart. (The handler
+  delegates to a detached child precisely so it survives killing its own
+  session/pid.) A remote/UI trigger can hard-restart a project's loop just by
+  sending SIGHUP to the timer pid — no out-of-session supervisor needed.
+
+### Fix: an anonymous local call no longer wakes the `human` consumer (#386)
+
+- A Unix-socket (local-trust) request **without** an `X-Aiball-Consumer` header
+  resolves to the literal `"human"` consumer for authorization — but it used to
+  also `touchLastSeen("human")`, so `human` kept "resurfacing" as recently-active
+  on the consumers page even when the human only ever uses a named identity.
+- Now `last_seen_at` is bumped **only for an explicit identity** (header present);
+  an anonymous headerless call still resolves to `"human"` but no longer refreshes
+  it. Named identities are unaffected. (`src/auth.ts`.)
+
+### MCP `upload` tool — attach images via the socket (#387)
+
+- New MCP tool **`upload({ path, name? })`**: reads a local image file
+  (png / jpeg / gif / webp) and POSTs its bytes to the daemon's
+  content-addressable store (`POST /api/uploads`) over the **same Unix socket**
+  as every other MCP call — token-less, no TCP. Returns
+  `{ url, sha256, bytes, content_type, markdown }`; the `markdown` (`![](…)`)
+  drops straight into a `ticket_new` / `ticket_reply` body and renders in the UI.
+- Backed by a new `AiballClient.uploadImage(bytes, contentType, name?)` raw-byte
+  POST helper (UDS or TCP+token). Uploads dedupe by sha. Reading images back was
+  already automatic (`ticket_get` → `attachments[]`, #283); this closes the write half.
+
 ### Drained-backlog wake reminders + set-aware dedup (#379)
 
-New opt-in `claude_loop.drained_strategy` decides what the heartbeat does when
+New `claude_loop.drained_strategy` decides what the heartbeat does when
 **only a gated backlog remains** (no pings, nothing actionable in your court, but
-open tickets awaiting *your* accept/reject/reply). Default **`silent`** (current
-behaviour, zero regression). Spectrum `silent | once | stale[:PT2H] |
+open tickets awaiting *your* accept/reject/reply). Default **`once`** (#379 david
+krwnqu — one reminder when the pool first drains, then quiet until the landscape
+moves; set `silent` to opt out). Spectrum `silent | once | stale[:PT2H] |
 backoff[:PT10M[/PT1D]] | persistent[:PT30M]` (ISO-8601 durations; bare names use
 defaults), evaluated by the pure `drained-strategy.ts` (unit-tested). The shared
 primitive is a server-side **`landscape_hash`** (sha1 of the sorted

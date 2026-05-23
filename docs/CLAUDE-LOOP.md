@@ -251,7 +251,8 @@ The hooks and the timer all read the same `env` file so they share
 The wake gate normally fires on **pings** or **actionable** tickets (work in
 your court). When those are both 0 but `open > 0` — a backlog entirely awaiting
 the **human** (pending decisions, you-replied-last, blocked) — the loop is
-"drained" and stays silent by default; the count is still visible on the sidebar.
+"drained" and reminds **once** by default (#379 david krwnqu); the count is also
+visible on the sidebar. Set `drained_strategy: silent` to opt out of the nudge.
 
 `claude_loop.drained_strategy` opts into a throttled reminder so a forgotten
 gated backlog doesn't sleep forever. Spec `kind[:PT…[/PT…]]` (ISO-8601), parsed
@@ -259,8 +260,8 @@ by the pure `drained-strategy.ts`:
 
 | strategy | when it wakes (drained = actionable 0, open > 0) |
 |----------|--------------------------------------------------|
-| `silent` *(default)* | never — current behaviour, zero regression |
-| `once`   | one wake when the pool empties, then quiet until the landscape moves |
+| `silent` | never — opt out of the nudge entirely |
+| `once` *(default)* | one wake when the pool empties, then quiet until the landscape moves |
 | `stale[:PT2H]` | auto-memo: only when the backlog is untouched for > the window (uses `last_actor_at`) |
 | `backoff[:PT10M[/PT1D]]` | first at +base, gap doubles (base, 2×, 4×…) up to cap; resets when the landscape moves |
 | `persistent[:PT30M]` | every eligible tick while `open > 0`, spaced ≥ param |

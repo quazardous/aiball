@@ -36,6 +36,7 @@
    they don't surface again at the bottom with the body. The "edit
    message" button stays in-article (it edits the body it sits next to). */
 .thread-view--top-down .thread-ticket > header.meta,
+.thread-view--top-down .thread-ticket > .thread-priority,
 .thread-view--top-down .thread-ticket > .thread-title,
 .thread-view--top-down .thread-ticket > .thread-relations,
 .thread-view--top-down .thread-ticket > .thread-relations-form { display: none; }
@@ -226,6 +227,11 @@
 }
 .snooze-popover__custom-input {
     flex: 1;
+}
+/* #382 : la priorité s'affiche au-dessus du titre (badge sur sa propre ligne). */
+.thread-priority {
+    display: inline-block;
+    margin: 0 0 0.35rem;
 }
 .thread-title {
     margin: 0;

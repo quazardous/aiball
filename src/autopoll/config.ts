@@ -125,7 +125,8 @@ export interface AiballConfig {
         /** #379: what to do at heartbeat when ONLY a gated backlog remains
          *  (pings=0, actionable=0, open>0 — all in the human's court). Spec:
          *  `silent|once|stale[:PT]|backoff[:PT[/PT]]|persistent[:PT]`. Default
-         *  `silent` (no reminder, zero regression). Drives CL_DRAINED_STRATEGY;
+         *  `once` (#379 david krwnqu — one reminder when the pool first drains,
+         *  then quiet until the landscape moves). Drives CL_DRAINED_STRATEGY;
          *  parsed by drained-strategy.ts. */
         drained_strategy: string;
     };
@@ -139,6 +140,28 @@ export interface AiballConfig {
         hint_branch: boolean;
         /** Hint to use a git worktree (off by default — too technical). */
         hint_worktree: boolean;
+    };
+    /**
+     * #385 (david wstfea): the claude-loop tmux bar colour profile. Layered on
+     * THREE levels (defaults → global `~/.config/aiball/config.yaml colors:` →
+     * per-project `.aiball.yaml colors:`), so a user sets a machine-wide theme
+     * once and a project tunes it. Each value is a raw tmux colour token
+     * (`colour16`, `red`, `#0087ff`, …) passed straight into the status format.
+     * The bar text sits on TWO backgrounds: the black "island" (`claude-…`,
+     * `island_fg`) and the state-coloured region (`name [state] · afk:key`,
+     * `bar_fg`) — so "make the font black" is `bar_fg`, not the island.
+     */
+    colors: {
+        /** `claude-…` label on the black island gradient (stays light). */
+        island_fg: string;
+        /** project name / `[state]` tag / afk key on the state-coloured region. */
+        bar_fg: string;
+        /** the dim `· afk:` control-key label. */
+        afk_label_fg: string;
+        /** per-state bar background (busy / idle / boot). */
+        busy_bg: string;
+        idle_bg: string;
+        boot_bg: string;
     };
     /** Absolute path to the loaded `.aiball.yaml`, or null when none was found. */
     configPath: string | null;
@@ -197,9 +220,11 @@ const DEFAULTS: AiballConfig = {
         // #305: no-wait by default (#343); a project flips it per-tree via
         // `.aiball.yaml claude_loop.wait: true`.
         wait: false,
-        // #379: no drained-backlog reminder by default (current behaviour).
-        // Opt in per-project via `.aiball.yaml claude_loop.drained_strategy`.
-        drained_strategy: "silent",
+        // #379 (david krwnqu): remind ONCE by default when the pool first
+        // drains (actionable=0 but open>0 — the backlog handed back to the
+        // human), then quiet until the landscape moves. Tune per-project via
+        // `.aiball.yaml claude_loop.drained_strategy` (`silent` disables it).
+        drained_strategy: "once",
     },
     // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
     // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.
@@ -207,9 +232,49 @@ const DEFAULTS: AiballConfig = {
         hint_branch: false,
         hint_worktree: false,
     },
+    // #385 (david wstfea): bar colour profile. bar_fg defaults BLACK (colour16) —
+    // david's bar runs the electric-blue busy state where white washed out
+    // (white-on-yellow boot was unreadable too). The island stays white. State
+    // backgrounds keep the established palette (#B.154). All tunable global/project.
+    colors: {
+        island_fg: "colour15",     // white — `claude-…` on the black island
+        bar_fg: "colour16",        // black — name / [state] / afk key on the coloured bar
+        afk_label_fg: "colour238", // dim dark-grey — the de-emphasised `· afk:` label
+        busy_bg: "colour33",       // electric blue (#B.154)
+        idle_bg: "colour240",      // dark grey
+        boot_bg: "colour178",      // yellow
+    },
     configPath: null,
     prompts: {},
 };
+
+/** The tunable colour-profile keys (#385). Used to validate yaml `colors:` blocks. */
+const COLOR_KEYS = [
+    "island_fg", "bar_fg", "afk_label_fg", "busy_bg", "idle_bg", "boot_bg",
+] as const;
+
+/** Keep only the known `colors:` keys whose value is a non-empty string token. */
+function pickColors(block: unknown): Partial<AiballConfig["colors"]> {
+    const out: Partial<AiballConfig["colors"]> = {};
+    if (!block || typeof block !== "object") return out;
+    const b = block as Record<string, unknown>;
+    for (const k of COLOR_KEYS) {
+        const v = b[k];
+        if (typeof v === "string" && v.trim()) out[k] = v.trim();
+    }
+    return out;
+}
+
+/** Read a `colors:` block from a YAML file (the global config). Missing/malformed → {}. */
+function readColorsBlock(path: string): Partial<AiballConfig["colors"]> {
+    if (!existsSync(path)) return {};
+    try {
+        const raw = (parseYaml(readFileSync(path, "utf8")) ?? {}) as Record<string, unknown>;
+        return pickColors(raw.colors);
+    } catch {
+        return {};
+    }
+}
 
 export function findConfigUpwards(start: string): string | null {
     let dir = resolve(start);
@@ -291,10 +356,16 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         consumer: { ...DEFAULTS.consumer },
         claude_loop: { ...DEFAULTS.claude_loop },
         workflow: { ...DEFAULTS.workflow },
+        colors: { ...DEFAULTS.colors },
         mcp_json_deprecated: mcpJsonHasIdentityEnv(projectDir),
         configPath,
         prompts: {},
     };
+
+    // #385: bar colour profile, GLOBAL layer. Sits between defaults and the
+    // per-project block below (which Object.assigns over this), so precedence is
+    // defaults → global → project. Missing global file → {} (no-op).
+    Object.assign(cfg.colors, readColorsBlock(globalConfigPath()));
 
     // No .aiball.json → autopoll disabled. The hook wiring in
     // ~/.claude/settings.json is global; per-project opt-in lives in
@@ -369,6 +440,8 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             const wf = (raw.workflow ?? {}) as Record<string, unknown>;
             if (typeof wf.hint_branch === "boolean") cfg.workflow.hint_branch = wf.hint_branch;
             if (typeof wf.hint_worktree === "boolean") cfg.workflow.hint_worktree = wf.hint_worktree;
+            // #385: per-project colour profile — wins over the global layer applied above.
+            Object.assign(cfg.colors, pickColors(raw.colors));
             // #B.232 cpaez7: per-project prompt template overrides. The
             // service handles shape validation per slot and silently
             // drops malformed entries, so we keep the wider config

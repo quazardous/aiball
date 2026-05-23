@@ -57,7 +57,7 @@ import {
     type Plate,
 } from "./state.js";
 import { cmdTail, type TailMode } from "./cmds/tail.js";
-import { cmdPrune, cmdReload, cmdRm, cmdWake } from "./cmds/manage.js";
+import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdWake } from "./cmds/manage.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -153,6 +153,18 @@ interface StartOpts {
     force?: boolean;
     /** Resume-picker auto-dismiss (#B.154): summary | as-is | abort. */
     resumeMode?: string;
+    /**
+     * #390: target a REMOTE aiball daemon over HTTP (http[s]://host:port)
+     * instead of the local Unix socket. Set → remote mode. The loop stays
+     * local; only the aiball data-plane is remote.
+     */
+    aiballUrl?: string;
+    /** #390: bearer token for the remote daemon (`aiball auth issue` on the host). */
+    aiballToken?: string;
+    /** #390: consumer id = loop identity (overrides resolved ctx.agent). */
+    consumer?: string;
+    /** #390: project name (overrides resolved ctx.project). */
+    project?: string;
     claudeArgs: string[];
 }
 
@@ -236,8 +248,30 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // process.env so the timer + hooks + claude spawn with the
     // right identity. Single source for every subcommand.
     const ctx = resolveProjectContext();
+    // #390: explicit flags override the resolved identity (the loop's
+    // consumer/project are passed at launch, independent of any local
+    // .aiball.yaml — David's "consumer_id pas propre au remote").
+    if (opts.consumer) ctx.agent = opts.consumer;
+    if (opts.project) ctx.project = opts.project;
     applyToProcessEnv(ctx);
     warnIfDeprecated(ctx);
+    // #390: remote-daemon mode. --aiball-url points the loop's aiball
+    // client at a REMOTE daemon over HTTP+token instead of the local
+    // socket. Exported into process.env BEFORE the auto-register call
+    // below so it (and the spawned claude session + its MCP server, which
+    // inherit this env) all reach machine A. The timer + hooks read the
+    // same values from the persisted env file (built further down).
+    if (opts.aiballUrl) {
+        if (!opts.aiballToken) {
+            die("--aiball-url requires --aiball-token (mint one on the daemon host with `aiball auth issue --consumer <id>`)");
+        }
+        process.env.AIBALL_URL = opts.aiballUrl;
+        process.env.AIBALL_TOKEN = opts.aiballToken;
+        // Critical: AIBALL_SOCK defaults to $AIBALL_HOME/sock; an empty
+        // value forces the TCP transport, else the client silently routes
+        // back to a local socket that isn't there on machine B.
+        process.env.AIBALL_SOCK = "";
+    }
     const cwd = ctx.cwd;
 
     // #B.216 david (979632): auto-register the project with the aiball
@@ -316,6 +350,15 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // #B.225: stamp the install-root SHA so `list` / `check` can
         // flag the daemon when source moves past what its timer loaded.
         started_at_sha: installRootSha(),
+        // #390: persist the remote connection so `restart` replays it.
+        remote: opts.aiballUrl
+            ? {
+                  url: opts.aiballUrl,
+                  token: opts.aiballToken,
+                  consumer: opts.consumer ?? ctx.agent,
+                  project: opts.project ?? ctx.project,
+              }
+            : null,
     };
     writePlate(sd, plate);
 
@@ -350,7 +393,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export CL_AFK_SPEC=${shQuote(afkSpecJson)}`,
         `export CL_AFK_WINDOW_MS=${shQuote(String(ctx.claude_loop.afk_window_ms))}`,
         // #379: drained-backlog reminder strategy, read by the timer's heartbeat
-        // (parseDrainedStrategy). Default "silent" → no reminder (current behaviour).
+        // (parseDrainedStrategy). Default "once" (david krwnqu) → one reminder
+        // when the pool first drains, then quiet until the landscape moves.
         `export CL_DRAINED_STRATEGY=${shQuote(ctx.claude_loop.drained_strategy)}`,
         // #381c: opt-in diag capture. Export CL_PROXY_LOG=<file> before
         // `claude-loop start` → the PTY proxy appends one NDJSON line per
@@ -369,6 +413,17 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // a random uuid via AiballClient.
         ...(ctx.agent ? [`export AIBALL_AGENT=${shQuote(ctx.agent)}`] : []),
         ...(ctx.project ? [`export AIBALL_PROJECT=${shQuote(ctx.project)}`] : []),
+        // #390: remote-daemon connection for the timer + hooks (they source
+        // this file). Empty AIBALL_SOCK forces TCP — see the process.env
+        // note above. Mirrors what we exported into process.env for the
+        // claude session.
+        ...(opts.aiballUrl
+            ? [
+                  `export AIBALL_URL=${shQuote(opts.aiballUrl)}`,
+                  `export AIBALL_SOCK=`,
+                  ...(opts.aiballToken ? [`export AIBALL_TOKEN=${shQuote(opts.aiballToken)}`] : []),
+              ]
+            : []),
         // #274: the PTY proxy paints the human-presence segment of the
         // tmux bar directly (instant on keystroke). It needs the session
         // target + the tmux binary to call `set-option @cl_human` /
@@ -377,7 +432,13 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export MUX_CMD=${shQuote(MUX_CMD)}`,
         "",
     ];
-    writeFileSync(envPath(sd), envLines.join("\n"));
+    // #390: 0600 when the env file carries a bearer token — it's a secret
+    // at rest. (Default perms otherwise, unchanged for local loops.)
+    writeFileSync(
+        envPath(sd),
+        envLines.join("\n"),
+        opts.aiballToken ? { mode: 0o600 } : undefined,
+    );
 
     // Inline Claude Code settings JSON: register the Stop hook (which
     // execs the TS hook via tsx) for THIS session only — no
@@ -562,23 +623,31 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // (#B.149). SessionStart hook flips to idle/busy once claude is
     // actually ready. Color + label are driven by setTmuxStatus.
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-left-length", "90"], { stdio: "ignore" });
-    // #381 (david y59fp8): the default tmux status-right (host + date) is useless
-    // for a loop pane — clear it so the control-key hint can live on the LEFT
-    // (where david looks) without the bar fighting for room.
-    spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", ""], { stdio: "ignore" });
-    // #381 (david y59fp8): static control-key hint folded into the left island
-    // (`· afk:f9`). The afk_key is the only claude-loop control key; it never
-    // changes mid-session, so we seed `@cl_keys` ONCE here (setTmuxStatus leaves
-    // it alone). `off` when the spec is empty/invalid (AFK disabled above).
-    const afkKeyDisp = ctx.claude_loop.afk_key.trim();
-    const keysHint = afkSpecJson
-        ? `#[fg=colour245] · afk:#[fg=colour15]${afkKeyDisp}`
-        : `#[fg=colour245] · afk:off`;
+    // #381 → #385 (david qyqwnw): the control-key hint moves to `status-right`,
+    // fully right-aligned ("met le hint complètement à droite"), uppercased, and
+    // now also surfaces the tmux DETACH shortcut. The default host+date
+    // status-right was useless for a loop pane, so this reclaims it. It's STATIC
+    // (afk_key + tmux prefix don't change mid-session), seeded once here;
+    // setTmuxStatus only ever rewrites status-left, so this survives every tick.
+    // Colours mirror the left island: label dim (afk_label_fg), value in bar_fg,
+    // both on the state-coloured status-bg.
+    const afkKeyDisp = ctx.claude_loop.afk_key.trim().toUpperCase();
+    // tmux DETACH = `<prefix> d` (default binding). Query the live prefix so the
+    // hint is accurate; fall back to the tmux default C-b.
+    const prefixRes = spawnSync(MUX_CMD, ["show-option", "-gv", "prefix"], { encoding: "utf8" });
+    const detachDisp = `${(prefixRes.stdout ?? "").trim() || "C-b"} d`;
+    const afkPart = afkSpecJson
+        ? `#[fg=${ctx.colors.afk_label_fg}]AFK:#[fg=${ctx.colors.bar_fg}]${afkKeyDisp}`
+        : `#[fg=${ctx.colors.afk_label_fg}]AFK:OFF`;
+    const keysHint = `${afkPart} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
+    spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", keysHint], { stdio: "ignore" });
+    spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right-length", "50"], { stdio: "ignore" });
     // #274: seed the per-owner status-left segments so the static format
     // setTmuxStatus installs never renders an unset `#{@cl_*}` (empty is
     // fine; unset would show literally on some tmux). The proxy and
-    // setTmuxStatus take ownership from here.
-    for (const [opt, val] of [["@cl_human", "#[fg=colour178]loop"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_keys", keysHint]]) {
+    // setTmuxStatus take ownership from here. (#385: @cl_keys retired — the
+    // hint is status-right now, no longer referenced by the status-left format.)
+    for (const [opt, val] of [["@cl_human", "#[fg=colour178]loop"], ["@cl_proxy", ""], ["@cl_state", ""]]) {
         spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
     }
     // #281 strategy A: tell psmux to touch the human-typing marker natively
@@ -1177,11 +1246,18 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         // stays accepted as the explicit/back-compat form.
         .option("--wait", "Wait out the boot-grace for a possible human take-over before draining pre-existing pings at boot (#302). Opt-in — the default is --no-wait.")
         .option("--no-wait", "(default since #343) Assume no human at the terminal: eager boot drain, no boot-grace deferral.")
+        // #390: remote-daemon mode — run the loop locally but slave it to an
+        // aiball daemon on another host (tailscale/LAN), no local aiball needed.
+        .option("--aiball-url <url>", "#390: target a REMOTE aiball daemon over HTTP (http[s]://host:port) instead of the local socket. The loop, tmux pane and state stay local; only the data-plane is remote.")
+        .option("--aiball-token <token>", "#390: bearer token for the remote daemon (mint with `aiball auth issue --consumer <id>` on the daemon host). Required with --aiball-url.")
+        .option("--consumer <id>", "#390: consumer id = the loop's identity (overrides .aiball.yaml). Recommended with --aiball-url.")
+        .option("--project <name>", "#390: project name (overrides .aiball.yaml).")
         .allowExcessArguments(false)
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
             attach: boolean; startupPing: boolean; userGrace?: string; force?: boolean;
             resumeMode?: string; wait: boolean;
+            aiballUrl?: string; aiballToken?: string; consumer?: string; project?: string;
         }, command: Command) => {
             // #305 (option a): only forward `wait` when --wait/--no-wait was
             // ACTUALLY passed. Otherwise leave it undefined so cmdStart falls
@@ -1198,6 +1274,10 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 force: opts.force === true,
                 resumeMode: opts.resumeMode,
                 wait: waitExplicit ? opts.wait : undefined,
+                aiballUrl: opts.aiballUrl,
+                aiballToken: opts.aiballToken,
+                consumer: opts.consumer,
+                project: opts.project,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });
@@ -1226,7 +1306,7 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "check", "trace", "prune", "init", "debug-proxy-tty", "debug-keys", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "restart", "check", "trace", "prune", "init", "debug-proxy-tty", "debug-keys", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -1263,6 +1343,9 @@ async function main(): Promise<void> {
     program.command("reload [name]")
         .description("Respawn the detached timer process without killing claude (picks up edited timer.ts / state.ts since tsx doesn't hot-reload). Name optional — defaults to the loop registered for the current cwd.")
         .action((name: string | undefined) => cmdReload(name ?? resolveCurrentLoopName()));
+    program.command("restart [name]")
+        .description("HARD restart (#388): kill claude + the loop entirely, then relaunch fresh with the same start config (from the plate). Unlike `reload` (timer-only), this stops + starts. Detached + no-attach — reconnect with `attach`. Also the SIGHUP action: `kill -HUP <timer.pid>` self-restarts. Name optional — defaults to the current-cwd loop.")
+        .action((name: string | undefined) => cmdRestart(name ?? resolveCurrentLoopName()));
     program.command("check [name]")
         .description("Diagnose what the check-cmd would do right now (no claude spawn)")
         .option("--check-cmd <cmd>", "Override the check-cmd (default: from loop plate or DEFAULT_CHECK_CMD)")

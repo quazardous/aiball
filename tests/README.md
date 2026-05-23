@@ -59,28 +59,71 @@ Create `tests/scenario-<name>.ts` importing the helpers from `tests/lib.ts`
   (**last-signal-per-ticket-wins**). Drives `GET /api/tickets?actionable=1`.
 - **Note**: pure logic also covered in unit (`src/db/decision-gate.test.ts`, 14 cases).
 
-### ☐ decision-on-comment (#B.129)
-- **Setup**: propose a plan/resolution (pending); reporter/human `POST /decide`.
-- **Assert**: `meta.decision` goes `pending`→`accepted`/`rejected`; accepting a
-  resolution closes/ungates as expected; re-deciding a terminal decision is rejected.
+### ✅ bus lifecycle (#321) — `scenario-bus-lifecycle.ts`
+- **Setup**: the lifecycle bus (`src/event-bus.ts`) is an **in-process** EventEmitter,
+  so it can't be observed over HTTP from the shared daemon (another process). This
+  scenario instead mounts the **real app in-process** (`createApp`, the affordance
+  `src/app.ts` was extracted for) on an ephemeral port and subscribes `onLifecycle`
+  in the **same** process, then drives the business API against that local instance.
+- **Act**: create a ticket → propose+accept a plan → move the ticket cross-project.
+- **Assert**: an `onLifecycle` handler receives exactly **one** `created`, one
+  `decided`, one `moved` — **one event per mutation, no double-fire** (the move must
+  not also fire a stray `created` for its audit comment). The dedup regression net.
 
-### ☐ move cross-project (#294)
-- **Setup**: `agent-a` opens a ticket in project X; reporter/human moves it to Y.
-- **Assert**: the head's `project` becomes Y with a fresh `display_seq`; an audit
-  comment lands; fan-out reaches the **destination** project; comments follow.
+### ✅ decision-on-comment (#B.129) — `scenario-decision.ts`
+- **Setup**: `agent-b` proposes a plan (`comment_added` + `decision_kind=plan` → a
+  pending decision); `agent-a` (reporter) accepts it via `POST /api/messages/:id/decide`.
+- **Assert**: `meta.decision` goes `pending` → `accepted` (kind stays `plan`).
 
-### ☐ delete comment (#309)
-- **Setup**: a comment exists; a **human** deletes it.
-- **Assert**: `status=rejected` + `meta.deleted`; excluded from counts/gates/thread
-  (tombstone in `include_deleted=1` view only).
+### ✅ move cross-project (#294) — `scenario-move.ts`
+- **Setup**: `agent-a` opens a ticket in `move-src`; the reporter moves it to `move-dst`
+  via `POST /api/tickets/:id/move`.
+- **Assert**: the head's `project` flips `move-src` → `move-dst`.
 
-### ☐ moderation rules
-- **Setup**: a rule matching `project`/`kind`/`by_agent` → `auto` or `review`.
-- **Assert**: a new message's status follows the rule (auto-approved vs pending);
-  a registered **human** author bypasses moderation.
+### ✅ delete comment (#309) — `scenario-delete-comment.ts`
+- **Setup**: human `human-mod` opens a ticket; `agent-a` comments (gets deleted),
+  `agent-b` comments (stays). Addresses comments by id → `seedCounters()`.
+- **Assert** (`POST /api/messages/:id/delete`):
+  - **guards** — an agent's delete → `403` (human-moderator only); deleting the
+    ticket head → `400` (only comments can be deleted).
+  - **soft-delete** — the response is `status=rejected` + `meta.deleted={by,at}`.
+  - **excluded** — cA gone from the normal thread (cB intact, delete is targeted),
+    `comment_count` drops 2→1, and cA's ping is wiped from the subscriber's `unread`.
+  - **tombstone** — `?include_deleted=1` re-surfaces cA with `body=null` +
+    `meta.deleted` (the UI placeholder), never the original text.
+
+### ✅ moderation rules — `scenario-moderation.ts`
+- **Setup**: two project-scoped rules — `R_auto` (pos 0, match `by_agent=agent-auto`
+  → `auto`) and `R_review` (pos 10, match `kind=comment_added` → `review`). A human
+  `human-mod` (`provisionHuman`) opens the parent ticket.
+- **Assert** (engine: `src/rules.ts evaluate()`), reading `status` + `matched_rule_id`
+  off the `POST /api/messages` response:
+  - **human bypass** — human-mod's `ticket_created` is `approved` despite the default.
+  - **review** — `agent-a`'s comment matches `R_review` (kind) → `pending` (the rule
+    overrides the permissive `auto-reply` default).
+  - **auto + first-match-wins** — `agent-auto`'s comment matches BOTH rules but
+    `R_auto` (lower position) wins → `approved` with `matched_rule_id=R_auto.id`.
+  - **human bypass over a rule** — human-mod's comment WOULD match `R_review` but
+    `isHuman()` short-circuits → `approved` with `matched_rule_id=null` (the null is
+    what distinguishes a bypass from a rule-driven auto).
+- **Note**: assertions are env-default-independent (every rule is `match_project`-scoped;
+  outcomes are forced by the rules + the human bypass, not the ambient strategy).
+
+### ✅ tags consumers / state_human_word (#310) — `scenario-tags-consumers.ts`
+- **Setup**: a loop agent `tagscons-agent` (kind=agent) and a human `tagscons-human`.
+  Consumer state is **global** (not project-scoped) → scenario-unique consumer ids.
+- **Assert** (`PUT /api/consumers/:id/state` → `GET /api/consumers`):
+  - each presence word `stop`/`wait`/`loop` pushed (`human_word`) is reflected on the
+    consumers page (`state_human_word`); an unknown word is ignored (last value stays).
+  - **guards** — a human pushing state → `403` (badges are for loop agents); an agent
+    pushing another consumer's state → `403` (own-state only).
 
 ## Out of scope here
 
+- **intent=feature branch hint (#319)** — the hint is composed by `buildWakePhrase()`
+  in `src/claude-loop/state.ts` and pasted into the tmux session at wake; it's **never
+  serialized over HTTP**, so it can't be asserted by this daemon stack. Belongs to the
+  claude-loop / tier-2 layer (or a pure-logic unit on `buildWakePhrase`).
 - **claude-loop / tier-2** (typing→wait #315, the stop/wait/loop bar #302/#305) —
   covered separately (david).
 - **attribution (#322)** + **per-agent workflow (#323)** — await the multi-agent /

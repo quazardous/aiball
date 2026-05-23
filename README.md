@@ -57,6 +57,11 @@ tickets from your phone. Storage stays local; private, end-to-end
 encrypted, no public exposure. Guide:
 [`docs/TAILSCALE.md`](./docs/TAILSCALE.md).
 
+A project living on another host? Run its `claude-loop` **there**, slaved to
+this daemon over HTTP+token — no aiball install needed on the second host
+(`claude-loop start --aiball-url … --aiball-token … --consumer … --project …`).
+Guide: [`docs/REMOTE.md`](./docs/REMOTE.md).
+
 ## Under the hood
 
 No magic. `claude-loop` runs claude inside **tmux** and installs two

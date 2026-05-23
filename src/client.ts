@@ -118,7 +118,7 @@ export class AiballClient {
             });
             if (!res.ok) {
                 const txt = await res.text().catch(() => "");
-                throw new Error(`${method} ${path} → ${res.status}: ${txt}`);
+                throw httpError(method, path, res.status, txt);
             }
             const ct = res.headers.get("content-type") ?? "";
             if (ct.includes("application/json")) return (await res.json()) as T;
@@ -150,7 +150,7 @@ export class AiballClient {
                         const text = Buffer.concat(chunks).toString("utf8");
                         const status = res.statusCode ?? 0;
                         if (status < 200 || status >= 300) {
-                            reject(new Error(`${method} ${path} → ${status}: ${text}`));
+                            reject(httpError(method, path, status, text));
                             return;
                         }
                         const ct = res.headers["content-type"] ?? "";
@@ -176,13 +176,26 @@ export class AiballClient {
         });
     }
 
-    /** Try to POST a new message; on failure, queue it in the spool. */
+    /**
+     * Try to POST a new message; on failure, queue it in the spool.
+     *
+     * The spool is a *daemon-unreachable* fallback, NOT a catch-all (#389).
+     * A deterministic client error (HTTP 4xx — bad request, forbidden close,
+     * unknown tag…) would only fail again identically at replay and get
+     * silently dumped into spool/failed/, losing the body. So we re-throw 4xx
+     * to the caller (the MCP tool surfaces it to the agent synchronously) and
+     * spool only on transport failures or 5xx (daemon down / transient).
+     */
     async postMessage(
         msg: Record<string, unknown>,
     ): Promise<unknown | SpoolResult> {
         try {
             return await this.http("POST", "/api/messages", msg);
-        } catch {
+        } catch (e) {
+            const status = (e as { status?: number }).status;
+            if (typeof status === "number" && status >= 400 && status < 500) {
+                throw e;
+            }
             return this.spoolDrop(msg);
         }
     }
@@ -190,6 +203,144 @@ export class AiballClient {
     /** Per-project subscriber + content stats (« nobody is listening » hint). */
     projectStats(project: string) {
         return this.http("GET", `/api/projects/${encodeURIComponent(project)}/stats`);
+    }
+
+    /**
+     * Upload raw image bytes to /api/uploads (#387). Content-addressable: the
+     * daemon dedupes by sha256 and returns `{ url, sha256, bytes, content_type }`.
+     * Goes over the SAME transport as every other call — UDS (token-less
+     * local-trust) when `socketPath` is set, else TCP+token. `name` is an
+     * optional original filename (stored as upload metadata). Distinct from
+     * `http()` because the body is raw bytes with an image content-type, not
+     * JSON. Roomier timeout than the 2 s probe budget (a 10 MB write can outlast it).
+     */
+    uploadImage(
+        bytes: Buffer,
+        contentType: string,
+        name?: string,
+    ): Promise<{ url: string; sha256: string; bytes: number; content_type: string }> {
+        const headers: Record<string, string> = { "content-type": contentType };
+        if (this.agentId) headers["x-aiball-consumer"] = this.agentId;
+        if (name) headers["x-aiball-upload-name"] = name;
+        const path = "/api/uploads";
+        const timeoutMs = Math.max(this.timeoutMs, 15000);
+        type UploadResult = { url: string; sha256: string; bytes: number; content_type: string };
+        if (this.socketPath) {
+            return new Promise<UploadResult>((resolve, reject) => {
+                const req = httpRequest(
+                    { socketPath: this.socketPath!, path, method: "POST", headers, timeout: timeoutMs },
+                    (res: IncomingMessage) => {
+                        const chunks: Buffer[] = [];
+                        res.on("data", (c) => chunks.push(c as Buffer));
+                        res.on("end", () => {
+                            const text = Buffer.concat(chunks).toString("utf8");
+                            const status = res.statusCode ?? 0;
+                            if (status < 200 || status >= 300) {
+                                reject(new Error(`POST ${path} → ${status}: ${text}`));
+                                return;
+                            }
+                            try {
+                                resolve(JSON.parse(text) as UploadResult);
+                            } catch (e) {
+                                reject(e);
+                            }
+                        });
+                        res.on("error", reject);
+                    },
+                );
+                req.on("error", reject);
+                req.on("timeout", () => {
+                    req.destroy(new Error(`POST ${path} → timeout after ${timeoutMs}ms`));
+                });
+                req.write(bytes);
+                req.end();
+            });
+        }
+        const headersTcp = { ...headers };
+        if (this.token) headersTcp["authorization"] = `Bearer ${this.token}`;
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), timeoutMs);
+        return fetch(this.url + path, {
+            method: "POST",
+            headers: headersTcp,
+            body: new Uint8Array(bytes),
+            signal: ctrl.signal,
+        })
+            .then(async (res) => {
+                if (!res.ok) {
+                    const txt = await res.text().catch(() => "");
+                    throw new Error(`POST ${path} → ${res.status}: ${txt}`);
+                }
+                return (await res.json()) as UploadResult;
+            })
+            .finally(() => clearTimeout(t));
+    }
+
+    /**
+     * Download a content-addressed upload by its `<sha>.<ext>` filename
+     * (#390). GETs `/uploads/<filename>` over the SAME transport as the rest
+     * of the client — UDS (local-trust) when `socketPath` is set, else
+     * TCP+token. Returns the raw bytes + content-type so a REMOTE loop can
+     * read a ticket's attached images, which it can't open as a local
+     * `file://`. (`/uploads` is a static mount outside `/api`, so it isn't
+     * behind the bearer middleware — the sha256 path is the capability — but
+     * we still send the token over TCP; it's ignored there and harmless.)
+     * Roomy timeout: an image read can outlast the 2 s probe budget.
+     */
+    downloadUpload(
+        filename: string,
+    ): Promise<{ bytes: Buffer; contentType: string }> {
+        const path = `/uploads/${filename}`;
+        const timeoutMs = Math.max(this.timeoutMs, 15000);
+        const headers: Record<string, string> = {};
+        if (this.agentId) headers["x-aiball-consumer"] = this.agentId;
+        type Dl = { bytes: Buffer; contentType: string };
+        if (this.socketPath) {
+            return new Promise<Dl>((resolve, reject) => {
+                const req = httpRequest(
+                    { socketPath: this.socketPath!, path, method: "GET", headers, timeout: timeoutMs },
+                    (res: IncomingMessage) => {
+                        const chunks: Buffer[] = [];
+                        res.on("data", (c) => chunks.push(c as Buffer));
+                        res.on("end", () => {
+                            const status = res.statusCode ?? 0;
+                            const body = Buffer.concat(chunks);
+                            if (status < 200 || status >= 300) {
+                                reject(httpError("GET", path, status, body.toString("utf8")));
+                                return;
+                            }
+                            resolve({
+                                bytes: body,
+                                contentType: String(res.headers["content-type"] ?? "application/octet-stream"),
+                            });
+                        });
+                        res.on("error", reject);
+                    },
+                );
+                req.on("error", reject);
+                req.on("timeout", () => {
+                    req.destroy(new Error(`GET ${path} → timeout after ${timeoutMs}ms`));
+                });
+                req.end();
+            });
+        }
+        const headersTcp = { ...headers };
+        if (this.token) headersTcp["authorization"] = `Bearer ${this.token}`;
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), timeoutMs);
+        return fetch(this.url + path, { method: "GET", headers: headersTcp, signal: ctrl.signal })
+            .then(async (res) => {
+                if (!res.ok) {
+                    const txt = await res.text().catch(() => "");
+                    throw httpError("GET", path, res.status, txt);
+                }
+                const ab = await res.arrayBuffer();
+                return {
+                    bytes: Buffer.from(ab),
+                    contentType: res.headers.get("content-type") ?? "application/octet-stream",
+                };
+            })
+            .finally(() => clearTimeout(t));
     }
 
     private spoolDrop(msg: Record<string, unknown>): SpoolResult {
@@ -699,6 +850,25 @@ export class AiballClient {
     health() {
         return this.http<{ ok: boolean; ts: string }>("GET", "/api/health");
     }
+}
+
+/**
+ * Build an Error carrying the HTTP `status`, so callers (notably
+ * postMessage's spool fallback, #389) can tell a deterministic client
+ * error (4xx — retrying won't help) from a transport/server failure
+ * (connection refused, timeout, 5xx — worth spooling for replay).
+ */
+function httpError(
+    method: string,
+    path: string,
+    status: number,
+    body: string,
+): Error {
+    const err = new Error(`${method} ${path} → ${status}: ${body}`) as Error & {
+        status?: number;
+    };
+    err.status = status;
+    return err;
 }
 
 function query(q: Record<string, string | number | undefined>): string {

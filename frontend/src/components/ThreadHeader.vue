@@ -31,6 +31,13 @@ const emit = defineEmits<{
 </script>
 
 <template>
+    <!-- #382 : la priorité passe AU-DESSUS du titre (david). -->
+    <Tag
+        v-if="ticket.priority && ticket.priority !== 'normal'"
+        class="thread-priority"
+        :value="ticket.priority"
+        :severity="ticket.priority === 'urgent' ? 'danger' : ticket.priority === 'high' ? 'warn' : 'info'"
+    />
     <h2 class="thread-title">{{ ticket.title }}</h2>
     <template v-if="showBanners">
         <div
@@ -74,16 +81,12 @@ const emit = defineEmits<{
         </div>
     </template>
     <!-- #362 : l'intent est remonté dans ThreadMetaHeader (cartouche du
-         haut) ; cette bande ne porte plus que priority + tags. -->
+         haut). #382 : la priorité est remontée au-dessus du titre ; cette
+         bande ne porte plus que les tags (+ les boutons edit/manage). -->
     <div
-        v-if="(ticket.priority && ticket.priority !== 'normal') || (ticket.tags && ticket.tags.length) || showEditButton"
+        v-if="(ticket.tags && ticket.tags.length) || showEditButton"
         class="thread-meta-extra"
     >
-        <Tag
-            v-if="ticket.priority && ticket.priority !== 'normal'"
-            :value="ticket.priority"
-            :severity="ticket.priority === 'urgent' ? 'danger' : ticket.priority === 'high' ? 'warn' : 'info'"
-        />
         <span
             v-for="t in ticket.tags ?? []"
             :key="t.id"

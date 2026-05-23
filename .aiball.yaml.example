@@ -168,11 +168,11 @@ autopoll:
 #
 #   # Drained-backlog reminder (#379). What the heartbeat does when ONLY a gated
 #   # backlog remains: pings=0, actionable=0 (nothing in your court), but open>0
-#   # (tickets awaiting YOUR accept/reject/reply). Default "silent" = no reminder
-#   # (current behaviour). Syntax: kind[:PT…[/PT…]] (ISO-8601 durations):
-#   #   silent              — never remind (default).
+#   # (tickets awaiting YOUR accept/reject/reply). Default "once" (#379 david
+#   # krwnqu). Syntax: kind[:PT…[/PT…]] (ISO-8601 durations):
+#   #   silent              — never remind (opt out of the nudge entirely).
 #   #   once                — one wake when the pool empties, then quiet until the
-#   #                         landscape moves (a ticket opens/closes or someone acts).
+#   #                         landscape moves (a ticket opens/closes or someone acts). (default)
 #   #   stale[:PT2H]        — auto-memo: remind only when the backlog has been
 #   #                         untouched for > the window (exploits last_actor_at).
 #   #                         Silent while you work. Default window PT2H.
@@ -183,7 +183,7 @@ autopoll:
 #   #                         at least the param (none → every heartbeat).
 #   # Reminders are about the backlog in YOUR court — they nudge you to clear it,
 #   # which hands tickets back to the agent. Recommended for solo use: "stale".
-#   drained_strategy: "silent"
+#   drained_strategy: "once"
 
 # Workflow hints (#319). claude-loop "habille" the WAKE of a `feature`-intent
 # ticket with a branch hint ("🌿 Feature: build it in …, not on main."). Lets
@@ -195,6 +195,27 @@ autopoll:
 #   # Also mention a git worktree (too technical). Default false.
 #   hint_worktree: false
 #   # (both false → no branch hint on feature wakes; opt in per project)
+
+# claude-loop tmux bar colour profile (#385). Each value is a raw tmux colour
+# token (`colour16`, `colour15`, a named colour like `red`, or a hex `#0087ff`).
+# Layered on THREE levels — defaults → global `~/.config/aiball/config.yaml`
+# `colors:` → this file's `colors:` (project wins). Set a machine-wide theme once
+# in the global file; tune per project here. Any key you omit keeps the layer
+# below.
+#
+# The bar text sits on TWO backgrounds, so it has TWO foregrounds:
+#   • the black "island" holds `claude-…`           → island_fg (keep it light)
+#   • the state-coloured region holds `name [state] · afk:key` → bar_fg
+# So "make the bar font black" = bar_fg (the default, #385 — white washed out on
+# the busy electric-blue bar; white-on-yellow boot was unreadable). The island
+# stays light so `claude-` reads on the black gradient.
+# colors:
+#   island_fg: "colour15"     # `claude-…` on the black island (default white)
+#   bar_fg: "colour16"        # name / [state] / afk key on the coloured bar (default black)
+#   afk_label_fg: "colour238" # the dim `· afk:` control-key label
+#   busy_bg: "colour33"       # bar background while claude is working (electric blue)
+#   idle_bg: "colour240"      # bar background at the prompt (dark grey)
+#   boot_bg: "colour178"      # bar background while booting (yellow)
 
 # Wake-CTA / state-prompt template overrides (#B.232 cpaez7).
 # Optional per-project section. When absent, the skill-shipped defaults

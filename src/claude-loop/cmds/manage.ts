@@ -141,6 +141,66 @@ export function cmdReload(name: string): void {
     process.stdout.write(`timer for '${name}' respawned${killed} — new pid ${child.pid}\n`);
 }
 
+/**
+ * #388: HARD restart — kill the loop entirely (claude + tmux session + timer +
+ * state) and relaunch it fresh with the SAME start config. Unlike `reload`
+ * (timer-only, claude survives), this is the "stop + start" david asked for.
+ *
+ * The config is read from the plate BEFORE the rm (rm deletes the state dir).
+ * The relaunch goes through the real `claude-loop start` (spawned detached in
+ * the loop's original cwd) so the full start path + ctx resolution is reused —
+ * `--no-attach` because a restart has no TTY to attach to (reconnect with
+ * `claude-loop attach <name>`). Doubles as the SIGHUP self-restart action: the
+ * timer traps SIGHUP and spawns THIS detached, so it survives killing its own
+ * session.
+ */
+export function cmdRestart(name: string): void {
+    const sd = stateDirFor(name);
+    if (!existsSync(platePath(sd))) {
+        die(`no loop '${name}' to restart (no state dir at ${sd}) — use 'start'`);
+    }
+    const plate = readPlate(sd);
+    const bin = join(installRoot(), "bin", "claude-loop");
+    // Reconstruct the original `start` invocation from the persisted plate.
+    // (pings source isn't recoverable from the plate — plate.pings_path points
+    // into the state dir we're about to rm — so the relaunch falls back to the
+    // default ping phrases, which is fine for a restart.)
+    const startArgs = [
+        "start",
+        "--name", name,
+        "--interval", String(plate.interval),
+        "--check-cmd", plate.check_cmd,
+        // #390: replay the remote-daemon connection so a hard restart of a
+        // remote loop stays remote (else it would fall back to a local socket).
+        ...(plate.remote?.url ? ["--aiball-url", plate.remote.url] : []),
+        ...(plate.remote?.token ? ["--aiball-token", plate.remote.token] : []),
+        ...(plate.remote?.consumer ? ["--consumer", plate.remote.consumer] : []),
+        ...(plate.remote?.project ? ["--project", plate.remote.project] : []),
+        "--force",
+        "--no-attach",
+        ...(plate.claude_args.length ? ["--", ...plate.claude_args] : []),
+    ];
+    // Delegate the teardown+relaunch to a DETACHED, new-session helper (setsid
+    // via detached:true). This is what lets a HARD restart survive being fired
+    // from INSIDE the very session it kills — by the SIGHUP'd timer, OR by the
+    // loop's own claude bash (an agent restarting itself). The invoker dies
+    // during `rm` (tmux kill-session), but this child — a new session, outside
+    // the tmux pane's process group — does not. The brief sleep lets the invoker
+    // return first so the kill is clean. rm + start run as fresh CLI subprocesses.
+    const script =
+        `sleep 0.4; ${shQuote(bin)} rm ${shQuote(name)} --force >/dev/null 2>&1; ` +
+        `exec ${shQuote(bin)} ${startArgs.map(shQuote).join(" ")}`;
+    const child = spawn("bash", ["-lc", script], {
+        cwd: plate.cwd,
+        detached: true,
+        stdio: "ignore",
+    });
+    child.unref();
+    process.stdout.write(
+        `restart scheduled for '${name}' — detached helper (pid ${child.pid}) will kill + relaunch in ${plate.cwd}. Reconnect: 'claude-loop attach ${name}'.\n`,
+    );
+}
+
 export async function cmdPrune(): Promise<void> {
     if (!existsSync(STATE_ROOT)) {
         process.stdout.write("nothing to prune\n");

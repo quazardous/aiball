@@ -101,6 +101,32 @@ export async function decide(token: string, messageId: number, status: "accepted
     return JSON.parse(text) as Record<string, unknown>;
 }
 
+/**
+ * Create a moderation rule (#B.213): POST /api/rules. Returns the inserted
+ * Rule (carries `id`, used to assert `matched_rule_id` on routed messages).
+ * Auth is bearer-only (no role gate) — any provisioned token can post one.
+ */
+export async function createRule(
+    token: string,
+    rule: {
+        decision: "auto" | "review";
+        match_project?: string;
+        match_kind?: string;
+        match_by_agent?: string;
+        position?: number;
+        note?: string;
+    },
+): Promise<Record<string, unknown>> {
+    const r = await fetch(`${BASE}/api/rules`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify(rule),
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`POST /api/rules → ${r.status}: ${text}`);
+    return JSON.parse(text) as Record<string, unknown>;
+}
+
 /** Move a ticket to another project (#294): POST /api/tickets/:id/move. */
 export async function move(token: string, ticketId: number, project: string): Promise<Record<string, unknown>> {
     const r = await fetch(`${BASE}/api/tickets/${ticketId}/move`, {

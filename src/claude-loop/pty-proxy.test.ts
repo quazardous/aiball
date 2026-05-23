@@ -197,3 +197,31 @@ test("alt+esc: ESC key-repeat (1b1b1b) → UN seul toggle (debounce)", { skip: S
     assert.equal(fired.length, 1);
     assert.equal(v.at(-1)!.afk_active, true);
 });
+
+// ---- #381 (david) : l'armement ne se "corrompt" PAS sur usage répété --------
+// Bug rapporté : « la 1re fois esc esc toggle, mais après une seule pression
+// suffit (armement cassé) ». Régression : un ESC NU, quel que soit l'état afk
+// antérieur, ne FIRE jamais le combo — il reste une interruption forwardée. Le
+// combo atomique 1b1b est la SEULE chose qui toggle.
+test("alt+esc: armement non corrompu — un ESC nu APRÈS un toggle ne re-fire pas le combo (#381)", { skip: SKIP }, () => {
+    const v = replay("0 1b1b\n2000 1b\n", ALT_ESC);
+    // le combo 1b1b toggle ON…
+    assert.equal(v[0].afk_fired, true);
+    assert.equal(v[0].afk_active, true);
+    assert.equal(v[0].forward, "");
+    // …puis un ESC nu ne re-fire PAS le combo (armement intact) : il est forwardé
+    // comme une interruption, pas avalé par un faux match du combo.
+    assert.equal(v[1].afk_fired, false);
+    assert.equal(v[1].forward, "1b");
+    assert.equal(v[1].lone_esc, true);
+});
+
+// #381 : deux ESC nus sur des reads SÉPARÉS ne se recombinent pas en 1b1b
+// (combos atomiques, aucune fenêtre cross-read) — garde contre un armement qui
+// "s'armerait" à travers deux frappes successives.
+test("alt+esc: deux ESC nus séparés ne togglent pas (pas de combo cross-read) (#381)", { skip: SKIP }, () => {
+    const v = replay("0 1b\n100 1b\n", ALT_ESC);
+    assert.equal(v.length, 2);
+    assert.ok(v.every((r) => r.afk_fired === false), "aucun ESC nu ne doit fire le combo");
+    assert.equal(v.map((r) => r.forward).join(""), "1b1b");
+});
