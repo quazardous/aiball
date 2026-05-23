@@ -47,6 +47,8 @@ export interface ProjectContext {
         afk_window_ms: number;
         /** #305 (option a): per-project boot-grace wait default (no-flag). */
         wait: boolean;
+        /** #379: drained-backlog reminder strategy (default "silent"). */
+        drained_strategy: string;
     };
 }
 

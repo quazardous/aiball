@@ -165,6 +165,25 @@ autopoll:
 #   # bytes; within this window after a toggle they're swallowed (one net toggle
 #   # per physical press). NOT a sequence window anymore. Default 400.
 #   afk_window_ms: 400
+#
+#   # Drained-backlog reminder (#379). What the heartbeat does when ONLY a gated
+#   # backlog remains: pings=0, actionable=0 (nothing in your court), but open>0
+#   # (tickets awaiting YOUR accept/reject/reply). Default "silent" = no reminder
+#   # (current behaviour). Syntax: kind[:PT…[/PT…]] (ISO-8601 durations):
+#   #   silent              — never remind (default).
+#   #   once                — one wake when the pool empties, then quiet until the
+#   #                         landscape moves (a ticket opens/closes or someone acts).
+#   #   stale[:PT2H]        — auto-memo: remind only when the backlog has been
+#   #                         untouched for > the window (exploits last_actor_at).
+#   #                         Silent while you work. Default window PT2H.
+#   #   backoff[:PT10M[/PT1D]] — polite persistent: first reminder at +base, then
+#   #                         the gap doubles (base, 2×, 4×…) up to the cap. Resets
+#   #                         when the landscape moves. Defaults base PT10M, cap PT1D.
+#   #   persistent[:PT30M]  — remind every eligible tick while open>0, spaced by
+#   #                         at least the param (none → every heartbeat).
+#   # Reminders are about the backlog in YOUR court — they nudge you to clear it,
+#   # which hands tickets back to the agent. Recommended for solo use: "stale".
+#   drained_strategy: "silent"
 
 # Workflow hints (#319). claude-loop "habille" the WAKE of a `feature`-intent
 # ticket with a branch hint ("🌿 Feature: build it in …, not on main."). Lets

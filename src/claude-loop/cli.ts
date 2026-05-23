@@ -349,6 +349,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export CL_ASK_GRACE_SEC=${shQuote(String(askGraceSec))}`,
         `export CL_AFK_SPEC=${shQuote(afkSpecJson)}`,
         `export CL_AFK_WINDOW_MS=${shQuote(String(ctx.claude_loop.afk_window_ms))}`,
+        // #379: drained-backlog reminder strategy, read by the timer's heartbeat
+        // (parseDrainedStrategy). Default "silent" → no reminder (current behaviour).
+        `export CL_DRAINED_STRATEGY=${shQuote(ctx.claude_loop.drained_strategy)}`,
         // #381c: opt-in diag capture. Export CL_PROXY_LOG=<file> before
         // `claude-loop start` → the PTY proxy appends one NDJSON line per
         // keystroke read (raw bytes + timestamp). Re-run it through

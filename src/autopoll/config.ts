@@ -122,6 +122,12 @@ export interface AiballConfig {
          *  CLI default stays no-wait (#343); an explicit flag always wins.
          *  Drives CL_WAIT. */
         wait: boolean;
+        /** #379: what to do at heartbeat when ONLY a gated backlog remains
+         *  (pings=0, actionable=0, open>0 — all in the human's court). Spec:
+         *  `silent|once|stale[:PT]|backoff[:PT[/PT]]|persistent[:PT]`. Default
+         *  `silent` (no reminder, zero regression). Drives CL_DRAINED_STRATEGY;
+         *  parsed by drained-strategy.ts. */
+        drained_strategy: string;
     };
     /**
      * #319: workflow hints surfaced by claude-loop at wake for `feature`-intent
@@ -191,6 +197,9 @@ const DEFAULTS: AiballConfig = {
         // #305: no-wait by default (#343); a project flips it per-tree via
         // `.aiball.yaml claude_loop.wait: true`.
         wait: false,
+        // #379: no drained-backlog reminder by default (current behaviour).
+        // Opt in per-project via `.aiball.yaml claude_loop.drained_strategy`.
+        drained_strategy: "silent",
     },
     // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
     // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.
@@ -350,6 +359,11 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // #305 (option a): per-project wait default (no-flag behaviour).
             if (typeof cl.wait === "boolean") {
                 cfg.claude_loop.wait = cl.wait;
+            }
+            // #379: drained-backlog reminder strategy (validated at use site
+            // by parseDrainedStrategy — an unknown spec degrades to silent).
+            if (typeof cl.drained_strategy === "string" && cl.drained_strategy.trim()) {
+                cfg.claude_loop.drained_strategy = cl.drained_strategy.trim();
             }
             // #319: workflow hint flags (layered like claude_loop above).
             const wf = (raw.workflow ?? {}) as Record<string, unknown>;

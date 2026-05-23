@@ -17,6 +17,22 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Drained-backlog wake reminders + set-aware dedup (#379)
+
+New opt-in `claude_loop.drained_strategy` decides what the heartbeat does when
+**only a gated backlog remains** (no pings, nothing actionable in your court, but
+open tickets awaiting *your* accept/reject/reply). Default **`silent`** (current
+behaviour, zero regression). Spectrum `silent | once | stale[:PT2H] |
+backoff[:PT10M[/PT1D]] | persistent[:PT30M]` (ISO-8601 durations; bare names use
+defaults), evaluated by the pure `drained-strategy.ts` (unit-tested). The shared
+primitive is a server-side **`landscape_hash`** (sha1 of the sorted
+`<id>:<last_actor_at>` of the agent's open tickets, behind `&landscape=1` — no
+extra query, no cache) that drives both the strategy **reset** and a **set-aware
+dedup** of the actionable wake leg, replacing the count watermark that missed
+swaps (a ticket leaving your court while another enters at constant count). Only
+the timer evaluates the drained branch (sole writer, no cross-process race). See
+[`docs/CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md).
+
 ### AFK key default is now `f9`; `claude-loop debug-keys`; non-ASCII keys (#381)
 
 The default `afk_key` changes from `alt+esc` to **`f9`**: `alt+esc` was confirmed

@@ -60,8 +60,10 @@ import {
     paneFooterShowsBusy,
     pingsPath,
     readBusyDefer,
-    readLastOpenWakeCount,
     recordOpenWakeCount,
+    recordOpenWakeHash,
+    readDrainedState,
+    writeDrainedState,
     recordWakeHint,
     setTmuxStatus,
     snapshotPane,
@@ -78,6 +80,7 @@ import {
     type Plate,
     type WakeHint,
 } from "./state.js";
+import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 
 const sd = process.env.CL_STATE_DIR;
 const name = process.env.CL_NAME;
@@ -469,6 +472,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         }
     }
     let gateOpenCount = 0;
+    let gateHash: string | undefined;
     if (!manualWake) {
         const gate = await checkHasWork(
             checkCmd,
@@ -476,12 +480,40 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             process.env.AIBALL_PROJECT ?? null,
             sd!,
         );
-        if (!gate.has) {
-            const watermark = readLastOpenWakeCount(sd!);
-            log(`skip wake (${reason}) — checkHasWork returned false (pings=${gate.pingsCount} open=${gate.openCount} watermark=${watermark})`);
-            return false;
-        }
         gateOpenCount = gate.openCount;
+        gateHash = gate.landscapeHash;
+        if (!gate.has) {
+            // #379 drained-reminder branch. The timer is the SOLE writer of the
+            // drained-state marker (heartbeat-owned) → no cross-process race with
+            // the hooks. Fires only when a GATED backlog remains (actionable=0,
+            // open>0) and the configured strategy says so. Default `silent` →
+            // never fires (zero regression). State is persisted on EVERY drained
+            // tick so backoff/stale/once track when the landscape appeared.
+            const strat = parseDrainedStrategy(process.env.CL_DRAINED_STRATEGY);
+            const drainable = strat.kind !== "silent"
+                && gate.openCount === 0
+                && gate.totalOpenCount > 0
+                && gate.landscapeHash !== undefined;
+            if (drainable) {
+                const dec = decideDrainedWake({
+                    strategy: strat,
+                    hash: gate.landscapeHash!,
+                    lastActivityMs: gate.lastActivityMs,
+                    now: Date.now(),
+                    prev: readDrainedState(sd!),
+                });
+                writeDrainedState(sd!, dec.next);
+                if (!dec.wake) {
+                    log(`skip wake (${reason}) — drained (${strat.kind}) not due (open=${gate.totalOpenCount})`);
+                    return false;
+                }
+                log(`drained wake (${reason}) — strategy=${strat.kind} open=${gate.totalOpenCount}`);
+                // fall through to send-keys
+            } else {
+                log(`skip wake (${reason}) — checkHasWork false (pings=${gate.pingsCount} actionable=${gate.openCount} open=${gate.totalOpenCount})`);
+                return false;
+            }
+        }
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
@@ -492,11 +524,12 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // same (ticket, comment) within `WAKE_COALESCE_WINDOW_MS` get
     // dropped at `onPing` (event-layer merge, no DB write).
     recordWakeHint(sd!, hint);
-    // #B.232 ch887f: bump the open-tickets watermark so the same N
-    // tickets don't re-fire the gate on every heartbeat. Only when
-    // we observed the count via the SDK path (manual/legacy wakes
-    // leave gateOpenCount=0 → watermark drops, which is fine).
-    if (gateOpenCount > 0) recordOpenWakeCount(sd!, gateOpenCount);
+    // #379: record the landscape hash so the same set doesn't re-fire the
+    // actionable leg (set-aware dedup, replaces the count watermark). Fall back
+    // to the count watermark when the daemon supplied no hash (old version);
+    // manual/legacy wakes leave both empty, which is fine.
+    if (gateHash !== undefined) recordOpenWakeHash(sd!, gateHash);
+    else if (gateOpenCount > 0) recordOpenWakeCount(sd!, gateOpenCount);
     setTmuxStatus(name!, "busy");
     log(`wake (${reason}) → '${phrase}'`);
     return true;

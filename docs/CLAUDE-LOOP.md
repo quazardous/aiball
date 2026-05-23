@@ -234,13 +234,49 @@ not human-present, but it's the other reason a tick may skip.)
 | `busy-defer-until`| Stop hook       | absolute time the wake-defer gate reopens |
 | `last-wake-at`    | any wake path   | wake-coalesce window (`#B.198`)           |
 | `last-wake-hint`  | any wake path   | dedup identical SSE pings (`#B.198`)      |
-| `last-open-wake-count` | wake path  | open-ticket watermark (`#B.232`)          |
+| `last-open-wake-count` | wake path  | open-ticket count watermark — fallback (`#B.232`) |
+| `last-open-wake-hash`  | wake path  | landscape signature watermark — set-aware dedup (`#379`) |
+| `drained-state`   | timer only      | drained-strategy state `{hash,armedAt,wakeAt,step}` (`#379`) |
 | `timer.pid`       | cli on start    | pid of the detached timer (used by `rm`)  |
 | `timer.log`       | timer (stdout/err) | inspect via `tail --timer`             |
 
 The hooks and the timer all read the same `env` file so they share
 `CL_NAME`, `CL_STATE_DIR`, `CL_INTERVAL`, `CL_CHECK_CMD`, `CL_PINGS`,
 `CL_NO_STARTUP_PING`.
+
+---
+
+## Drained-backlog reminders — `#379`
+
+The wake gate normally fires on **pings** or **actionable** tickets (work in
+your court). When those are both 0 but `open > 0` — a backlog entirely awaiting
+the **human** (pending decisions, you-replied-last, blocked) — the loop is
+"drained" and stays silent by default; the count is still visible on the sidebar.
+
+`claude_loop.drained_strategy` opts into a throttled reminder so a forgotten
+gated backlog doesn't sleep forever. Spec `kind[:PT…[/PT…]]` (ISO-8601), parsed
+by the pure `drained-strategy.ts`:
+
+| strategy | when it wakes (drained = actionable 0, open > 0) |
+|----------|--------------------------------------------------|
+| `silent` *(default)* | never — current behaviour, zero regression |
+| `once`   | one wake when the pool empties, then quiet until the landscape moves |
+| `stale[:PT2H]` | auto-memo: only when the backlog is untouched for > the window (uses `last_actor_at`) |
+| `backoff[:PT10M[/PT1D]]` | first at +base, gap doubles (base, 2×, 4×…) up to cap; resets when the landscape moves |
+| `persistent[:PT30M]` | every eligible tick while `open > 0`, spaced ≥ param |
+
+The shared primitive is the **`landscape_hash`** — `sha1` of the sorted
+`<id>:<last_actor_at>` of the agent's open tickets, computed server-side in
+`listProjectsDetailed` behind `&landscape=1` (no extra query, no cache). It is
+the single signal for both:
+
+- **reset** of the drained strategy (hash changed → backlog moved → re-arm), and
+- **set-aware dedup** of the *actionable* wake leg (`last-open-wake-hash`) —
+  replacing the count watermark, which missed swaps (one ticket leaves your
+  court while another enters at a constant count).
+
+Only the **timer** evaluates the drained branch (heartbeat-owned → sole writer
+of `drained-state`, no cross-process race with the hooks).
 
 ---
 

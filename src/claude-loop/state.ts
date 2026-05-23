@@ -19,6 +19,7 @@ import { parse as parseYaml } from "yaml";
 import { loadConfig } from "../autopoll/config.js";
 import { AiballClient } from "../client.js";
 import type { Intent } from "../domain.js";
+import type { DrainedState } from "./drained-strategy.js";
 import { loadPromptsFromYaml, mergePrompts, pickPrompt } from "../prompt-templates.js";
 
 export const STATE_ROOT = process.env.CLAUDE_LOOP_STATE_ROOT
@@ -232,6 +233,62 @@ export function recordOpenWakeCount(sd: string, count: number): void {
     } catch { /* gate fails-open next tick, not fatal */ }
 }
 
+/**
+ * #379: set-aware dedup watermark for the actionable wake leg. Replaces the
+ * count watermark (`last-open-wake-count`) with the `landscape_hash` — the
+ * count missed SWAPS (a ticket leaves my court while another enters → count
+ * constant → no re-wake → the new actionable ticket never surfaced). The hash
+ * changes on any set churn, so the same N idle tickets stay deduped but a
+ * genuine change re-wakes. Falls back to the count path when the daemon doesn't
+ * supply a hash (old version). Lifetime = the state dir (same as the count).
+ */
+export function lastOpenWakeHashPath(sd: string): string {
+    return join(sd, "last-open-wake-hash");
+}
+
+/** Read the last landscape hash we woke on; "" when missing (→ first wake). */
+export function readLastOpenWakeHash(sd: string): string {
+    try {
+        return readFileSync(lastOpenWakeHashPath(sd), "utf8").trim();
+    } catch {
+        return "";
+    }
+}
+
+/** Persist the landscape hash after a successful wake. Best-effort. */
+export function recordOpenWakeHash(sd: string, hash: string): void {
+    try {
+        writeFileSync(lastOpenWakeHashPath(sd), `${hash}\n`);
+    } catch { /* gate fails-open next tick, not fatal */ }
+}
+
+/**
+ * #379: persistent state of the drained-strategy (marker `drained-state`). The
+ * timer is the SOLE writer (heartbeat-owned) — hooks fire on activity, not on
+ * idle backlog, so they never touch it (no cross-process race). Persisted on
+ * EVERY drained tick so `backoff`/`stale`/`once` can track when the landscape
+ * appeared and whether they already fired. See drained-strategy.ts.
+ */
+export function drainedStatePath(sd: string): string { return join(sd, "drained-state"); }
+
+/** Read the drained-strategy state, or null (missing / unparseable → fresh). */
+export function readDrainedState(sd: string): DrainedState | null {
+    try {
+        const o = JSON.parse(readFileSync(drainedStatePath(sd), "utf8")) as DrainedState;
+        if (o && typeof o.hash === "string") return o;
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/** Persist the drained-strategy state. Best-effort. */
+export function writeDrainedState(sd: string, state: DrainedState): void {
+    try {
+        writeFileSync(drainedStatePath(sd), JSON.stringify(state) + "\n");
+    } catch { /* next tick recomputes from scratch (re-arms), not fatal */ }
+}
+
 /** Persist the hint that just triggered a wake. Pass `undefined` to
  *  no-op (we only want hinted wakes in the dedup ledger; un-hinted
  *  pop-culture wakes coalesce via `lastWakeAtPath` already). */
@@ -409,7 +466,20 @@ const LEGACY_AIBALL_CHECK_CMD = "aiball pings-count -q";
 export interface CheckHasWorkResult {
     has: boolean;
     pingsCount: number;
+    /** Actionable count (tickets in MY court). Kept named `openCount` for
+     *  back-compat (timer log + count-watermark fallback). */
     openCount: number;
+    /** #379: total OPEN tickets incl. gated / awaiting-human — drives the
+     *  timer's drained-reminder branch (distinct from the actionable count). */
+    totalOpenCount: number;
+    /** #379: combined landscape_hash over the in-scope project(s), or undefined
+     *  when the daemon didn't supply it (older version → count-watermark path). */
+    landscapeHash?: string;
+    /** #379: max(last_actor_at) over open tickets in ms, or null — for `stale`. */
+    lastActivityMs: number | null;
+}
+function emptyWork(over: Partial<CheckHasWorkResult> = {}): CheckHasWorkResult {
+    return { has: false, pingsCount: 0, openCount: 0, totalOpenCount: 0, lastActivityMs: null, ...over };
 }
 export async function checkHasWork(
     checkCmd: string | null | undefined,
@@ -418,44 +488,62 @@ export async function checkHasWork(
     sd?: string | null,
 ): Promise<CheckHasWorkResult> {
     const cmd = checkCmd ?? "";
-    if (cmd === "true") return { has: true, pingsCount: 0, openCount: 0 };
+    if (cmd === "true") return emptyWork({ has: true });
     if (cmd === "" || cmd === LEGACY_AIBALL_CHECK_CMD) {
         const c = client ?? new AiballClient();
         try {
             const [pingsR, projects] = await Promise.all([
                 c.pingsCount() as Promise<{ unread?: number }>,
-                c.listProjectsDetailed().catch(() => []) as Promise<Array<{
+                // #379: ask for the landscape so the actionable dedup is
+                // set-aware (hash) and the drained branch has its primitive.
+                c.listProjectsDetailed({ landscape: true }).catch(() => []) as Promise<Array<{
                     name: string;
                     open_count?: number;
                     actionable_count?: number;
+                    landscape_hash?: string;
+                    landscape_last_activity?: string | null;
                 }>>,
             ]);
+            const filtered = Array.isArray(projects)
+                ? projects.filter((p) => !project || p.name === project)
+                : [];
             const pingsCount = pingsR.unread ?? 0;
-            const openCount = Array.isArray(projects)
-                ? projects
-                    .filter((p) => !project || p.name === project)
-                    .reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0)
-                : 0;
-            if (pingsCount > 0) return { has: true, pingsCount, openCount };
-            // Open-tickets leg: gate by watermark when sd is available
-            // so the same N idle tickets don't wake every heartbeat.
+            const actionableCount = filtered.reduce((acc, p) => acc + (p.actionable_count ?? p.open_count ?? 0), 0);
+            const totalOpenCount = filtered.reduce((acc, p) => acc + (p.open_count ?? 0), 0);
+            const hashes = filtered.map((p) => p.landscape_hash).filter((h): h is string => typeof h === "string");
+            // Combined signature across the in-scope projects (sorted → stable).
+            const landscapeHash = hashes.length ? hashes.slice().sort().join("|") : undefined;
+            let lastActivityMs: number | null = null;
+            for (const p of filtered) {
+                if (!p.landscape_last_activity) continue;
+                const t = Date.parse(p.landscape_last_activity);
+                if (!Number.isNaN(t) && (lastActivityMs === null || t > lastActivityMs)) lastActivityMs = t;
+            }
+            const base = { pingsCount, openCount: actionableCount, totalOpenCount, landscapeHash, lastActivityMs };
+            if (pingsCount > 0) return { has: true, ...base };
+            // #379 actionable leg — set-aware hash dedup (Q2): re-wake only when
+            // the landscape moved since the last wake (catches swaps the count
+            // watermark missed). Fall back to the count watermark when the
+            // daemon supplied no hash (zero regression on old versions).
+            if (sd && landscapeHash !== undefined) {
+                const seen = readLastOpenWakeHash(sd);
+                return { has: actionableCount > 0 && landscapeHash !== seen, ...base };
+            }
             if (sd) {
                 const watermark = readLastOpenWakeCount(sd);
-                if (openCount < watermark) {
-                    // Tickets were closed — lower the watermark so a
-                    // future climb correctly re-triggers. Best-effort.
-                    recordOpenWakeCount(sd, openCount);
-                    return { has: false, pingsCount, openCount };
+                if (actionableCount < watermark) {
+                    recordOpenWakeCount(sd, actionableCount);
+                    return { has: false, ...base };
                 }
-                return { has: openCount > watermark, pingsCount, openCount };
+                return { has: actionableCount > watermark, ...base };
             }
-            return { has: openCount > 0, pingsCount, openCount };
+            return { has: actionableCount > 0, ...base };
         } catch {
-            return { has: false, pingsCount: 0, openCount: 0 };
+            return emptyWork();
         }
     }
     const r = spawnSync("bash", ["-c", cmd], { stdio: "ignore" });
-    return { has: r.status === 0, pingsCount: 0, openCount: 0 };
+    return emptyWork({ has: r.status === 0 });
 }
 
 /**
