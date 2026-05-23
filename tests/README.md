@@ -80,10 +80,17 @@ Create `tests/scenario-<name>.ts` importing the helpers from `tests/lib.ts`
 - **Assert**: the head's `project` becomes Y with a fresh `display_seq`; an audit
   comment lands; fan-out reaches the **destination** project; comments follow.
 
-### ☐ delete comment (#309)
-- **Setup**: a comment exists; a **human** deletes it.
-- **Assert**: `status=rejected` + `meta.deleted`; excluded from counts/gates/thread
-  (tombstone in `include_deleted=1` view only).
+### ✅ delete comment (#309) — `scenario-delete-comment.ts`
+- **Setup**: human `human-mod` opens a ticket; `agent-a` comments (gets deleted),
+  `agent-b` comments (stays). Addresses comments by id → `seedCounters()`.
+- **Assert** (`POST /api/messages/:id/delete`):
+  - **guards** — an agent's delete → `403` (human-moderator only); deleting the
+    ticket head → `400` (only comments can be deleted).
+  - **soft-delete** — the response is `status=rejected` + `meta.deleted={by,at}`.
+  - **excluded** — cA gone from the normal thread (cB intact, delete is targeted),
+    `comment_count` drops 2→1, and cA's ping is wiped from the subscriber's `unread`.
+  - **tombstone** — `?include_deleted=1` re-surfaces cA with `body=null` +
+    `meta.deleted` (the UI placeholder), never the original text.
 
 ### ✅ moderation rules — `scenario-moderation.ts`
 - **Setup**: two project-scoped rules — `R_auto` (pos 0, match `by_agent=agent-auto`
