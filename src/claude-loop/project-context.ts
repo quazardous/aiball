@@ -47,7 +47,7 @@ export interface ProjectContext {
         afk_window_ms: number;
         /** #305 (option a): per-project boot-grace wait default (no-flag). */
         wait: boolean;
-        /** #379: drained-backlog reminder strategy (default "silent"). */
+        /** #379: drained-backlog reminder strategy (default "once"). */
         drained_strategy: string;
     };
     /** #385: tmux bar colour profile (layered defaults → global → project). */

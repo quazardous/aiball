@@ -125,7 +125,8 @@ export interface AiballConfig {
         /** #379: what to do at heartbeat when ONLY a gated backlog remains
          *  (pings=0, actionable=0, open>0 — all in the human's court). Spec:
          *  `silent|once|stale[:PT]|backoff[:PT[/PT]]|persistent[:PT]`. Default
-         *  `silent` (no reminder, zero regression). Drives CL_DRAINED_STRATEGY;
+         *  `once` (#379 david krwnqu — one reminder when the pool first drains,
+         *  then quiet until the landscape moves). Drives CL_DRAINED_STRATEGY;
          *  parsed by drained-strategy.ts. */
         drained_strategy: string;
     };
@@ -219,9 +220,11 @@ const DEFAULTS: AiballConfig = {
         // #305: no-wait by default (#343); a project flips it per-tree via
         // `.aiball.yaml claude_loop.wait: true`.
         wait: false,
-        // #379: no drained-backlog reminder by default (current behaviour).
-        // Opt in per-project via `.aiball.yaml claude_loop.drained_strategy`.
-        drained_strategy: "silent",
+        // #379 (david krwnqu): remind ONCE by default when the pool first
+        // drains (actionable=0 but open>0 — the backlog handed back to the
+        // human), then quiet until the landscape moves. Tune per-project via
+        // `.aiball.yaml claude_loop.drained_strategy` (`silent` disables it).
+        drained_strategy: "once",
     },
     // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
     // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.

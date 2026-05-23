@@ -168,11 +168,11 @@ autopoll:
 #
 #   # Drained-backlog reminder (#379). What the heartbeat does when ONLY a gated
 #   # backlog remains: pings=0, actionable=0 (nothing in your court), but open>0
-#   # (tickets awaiting YOUR accept/reject/reply). Default "silent" = no reminder
-#   # (current behaviour). Syntax: kind[:PT…[/PT…]] (ISO-8601 durations):
-#   #   silent              — never remind (default).
+#   # (tickets awaiting YOUR accept/reject/reply). Default "once" (#379 david
+#   # krwnqu). Syntax: kind[:PT…[/PT…]] (ISO-8601 durations):
+#   #   silent              — never remind (opt out of the nudge entirely).
 #   #   once                — one wake when the pool empties, then quiet until the
-#   #                         landscape moves (a ticket opens/closes or someone acts).
+#   #                         landscape moves (a ticket opens/closes or someone acts). (default)
 #   #   stale[:PT2H]        — auto-memo: remind only when the backlog has been
 #   #                         untouched for > the window (exploits last_actor_at).
 #   #                         Silent while you work. Default window PT2H.
@@ -183,7 +183,7 @@ autopoll:
 #   #                         at least the param (none → every heartbeat).
 #   # Reminders are about the backlog in YOUR court — they nudge you to clear it,
 #   # which hands tickets back to the agent. Recommended for solo use: "stale".
-#   drained_strategy: "silent"
+#   drained_strategy: "once"
 
 # Workflow hints (#319). claude-loop "habille" the WAKE of a `feature`-intent
 # ticket with a branch hint ("🌿 Feature: build it in …, not on main."). Lets

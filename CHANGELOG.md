@@ -19,10 +19,11 @@ narrative for the product as a whole.
 
 ### Drained-backlog wake reminders + set-aware dedup (#379)
 
-New opt-in `claude_loop.drained_strategy` decides what the heartbeat does when
+New `claude_loop.drained_strategy` decides what the heartbeat does when
 **only a gated backlog remains** (no pings, nothing actionable in your court, but
-open tickets awaiting *your* accept/reject/reply). Default **`silent`** (current
-behaviour, zero regression). Spectrum `silent | once | stale[:PT2H] |
+open tickets awaiting *your* accept/reject/reply). Default **`once`** (#379 david
+krwnqu — one reminder when the pool first drains, then quiet until the landscape
+moves; set `silent` to opt out). Spectrum `silent | once | stale[:PT2H] |
 backoff[:PT10M[/PT1D]] | persistent[:PT30M]` (ISO-8601 durations; bare names use
 defaults), evaluated by the pure `drained-strategy.ts` (unit-tested). The shared
 primitive is a server-side **`landscape_hash`** (sha1 of the sorted
