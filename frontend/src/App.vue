@@ -24,6 +24,7 @@ import PaginationBar from "./components/PaginationBar.vue";
 import NewTicketPage from "./components/NewTicketPage.vue";
 import ProjectStatsPage from "./components/ProjectStatsPage.vue";
 import ProjectSettingsPage from "./components/ProjectSettingsPage.vue";
+import ProjectDetailPage from "./components/ProjectDetailPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
 import ConsumersPanel from "./components/ConsumersPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
@@ -686,6 +687,7 @@ watch(showSnoozed, (v) => {
                     v-if="panel === 'projects'"
                     @open-stats="(name: string) => openProjectPage(name, 'stats')"
                     @open-settings="(name: string) => openProjectPage(name, 'settings')"
+                @open-detail="(name: string) => openProjectPage(name, 'detail')"
                 />
                 <RulesPanel v-else-if="panel === 'rules'" />
                 <TagsPanel v-else-if="panel === 'tags'" />
@@ -716,6 +718,11 @@ watch(showSnoozed, (v) => {
                 />
                 <ProjectStatsPage
                     v-else-if="projectPage === 'stats' && project !== null"
+                    :project="project"
+                    @back="projectPage = null"
+                />
+                <ProjectDetailPage
+                    v-else-if="projectPage === 'detail' && project !== null"
                     :project="project"
                     @back="projectPage = null"
                 />

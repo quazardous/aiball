@@ -23,7 +23,7 @@ export type SettingsPanel = "rules" | "tags" | "projects" | "consumers" | "compo
  * `projectPage` so the inbox item doesn't light up while a sub-page
  * is active.
  */
-export type ProjectPage = "stats" | "settings";
+export type ProjectPage = "stats" | "settings" | "detail";
 
 const props = defineProps<{
     items: ProjectListItem[];
