@@ -18,6 +18,21 @@ test("parseAfkKey: single combos → byte sequences", () => {
     assert.deepEqual(parseAfkKey("f9", 400).combos, [[0x1b, 0x5b, 0x32, 0x30, 0x7e]]);
 });
 
+test("parseAfkKey: non-ASCII literal → UTF-8 bytes (#381 9garjb, AZERTY ²)", () => {
+    // `²` (U+00B2) is sent by the terminal as UTF-8 `c2 b2`, NOT as 0xb2 — the
+    // combo must encode the actual wire bytes or it would never match.
+    assert.deepEqual(parseAfkKey("²", 400).combos, [[0xc2, 0xb2]]);
+    assert.deepEqual(parseAfkKey("a", 400).combos, [[0x61]]); // ASCII still 1 byte
+});
+
+test("detector + round-trip: ² toggles and decodes back to ²", () => {
+    const spec = parseAfkKey("²", 400);
+    const d = new AfkDetector(spec);
+    assert.equal(d.feed([0xc2, 0xb2], 0), true);          // press ² → toggle
+    assert.equal(matchAfkCombo([0xc2, 0xb2], spec), true);
+    assert.equal(bytesToGrammar(spec.combos[0]), "²");    // grammar round-trip
+});
+
 test("parseAfkKey: space = alternatives (any toggles), windowMs carried", () => {
     const spec = parseAfkKey("ctrl+g alt+a", 250);
     assert.deepEqual(spec.combos, [[0x07], [0x1b, 0x61]]);

@@ -178,15 +178,15 @@ const DEFAULTS: AiballConfig = {
         esc_takeover: true,
         // #351 / #381: 10-min ask-grace. AFK = a single ATOMIC combo that
         // TOGGLES away/back — #381 (david s4r9n8) dropped the 2-press timing
-        // sequence. Default `alt+esc` (david d3me34) = the bytes ESC ESC
-        // (\x1b\x1b) matched as ONE atomic 2-byte combo: a single ESC no longer
-        // toggles (so it stays a clean interrupt), but note alt+esc is byte-
-        // identical to a fast double-ESC / ESC key-repeat coalesced into one read
-        // (can still toggle), and tmux escape-time may split it. A ctrl+<char>
-        // (single byte) is fully unambiguous if that bites. afk_window_ms is now
-        // only a post-fire key-repeat debounce.
+        // sequence. Default `f9` (david 9garjb) — the previous `alt+esc` was
+        // confirmed SWALLOWED BY THE OS/window manager (GNOME) before it ever
+        // reached the proxy, and was also byte-ambiguous with a coalesced
+        // double-ESC. A function key has zero OS/tmux/claude conflict and emits
+        // distinct bytes (ESC [ 2 0 ~). Verify any candidate on your setup with
+        // `claude-loop debug-keys`. afk_window_ms is only a post-fire key-repeat
+        // debounce now.
         ask_grace_seconds: 600,
-        afk_key: "alt+esc",
+        afk_key: "f9",
         afk_window_ms: 400,
         // #305: no-wait by default (#343); a project flips it per-tree via
         // `.aiball.yaml claude_loop.wait: true`.

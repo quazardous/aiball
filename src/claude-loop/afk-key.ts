@@ -58,7 +58,11 @@ const NAMED: Record<string, number[]> = {
 function keyToBytes(key: string): number[] {
     const k = key.toLowerCase();
     if (k in NAMED) return [...NAMED[k]];
-    if (key.length === 1) return [key.charCodeAt(0)];
+    // A single Unicode code point → its UTF-8 bytes (#381 9garjb). ASCII stays
+    // one byte (charCodeAt-equivalent); a non-ASCII literal like the AZERTY `²`
+    // key becomes its multi-byte UTF-8 (`c2 b2`) — matching exactly what the
+    // terminal emits, so the detector can compare apples to apples.
+    if ([...key].length === 1) return Array.from(new TextEncoder().encode(key));
     throw new Error(`afk_key: unknown key "${key}"`);
 }
 

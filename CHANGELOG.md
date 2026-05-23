@@ -17,6 +17,22 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### AFK key default is now `f9`; `claude-loop debug-keys`; non-ASCII keys (#381)
+
+The default `afk_key` changes from `alt+esc` to **`f9`**: `alt+esc` was confirmed
+**swallowed by the OS/window manager (GNOME)** before the bytes ever reached the
+PTY proxy (and it was byte-ambiguous with a coalesced double-ESC). A function key
+has no OS/tmux/claude conflict and emits distinct bytes. New **`claude-loop
+debug-keys`** (alias `--debug-keys`) reads keystrokes straight from the terminal
+(no PTY/tmux/claude) and prints each one as `<hex> → <afk grammar>` with a ✓ when
+it matches your `afk_key` — the direct way to check whether your WM/terminal eats
+a combo before picking one. The `afk_key` grammar now also accepts **non-ASCII
+literal keys** (e.g. the AZERTY `²`), encoded as their real UTF-8 bytes so they
+actually match what the terminal sends; note a literal printable key is *swallowed*
+when used as the AFK toggle (it won't reach claude). Avoid `alt+…` (WM/terminal
+shortcuts), `ctrl+s`/`ctrl+q` (flow-control freeze), the readline editing ctrls,
+and `f1`/`f10`/`f11`/`f12` (help/menu/fullscreen).
+
 ### Fix: AFK combo is a real toggle, robust to coalesced keystrokes (#381)
 
 The `afk_key` combo (default `esc esc`) was a one-way switch: pressing it again

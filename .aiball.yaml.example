@@ -147,15 +147,19 @@ autopoll:
 #   # sequence was irreparably ambiguous (key-repeat bytes == two deliberate
 #   # taps; and a bare ESC doubles as claude's interrupt key, so it's REJECTED).
 #   # VS Code notation: `+` joins modifiers; a SPACE means OR (alternatives, any
-#   # toggles), e.g. "alt+esc ctrl+g". Only what the terminal emits as distinct
-#   # bytes is supported (ctrl+<char>, alt+<char>, f-keys, named keys, literals).
-#   # Default "alt+esc" = the bytes ESC ESC (\x1b\x1b) as ONE atomic combo: a
-#   # single ESC stays a clean interrupt (won't toggle), but alt+esc is byte-
-#   # identical to a fast double-ESC / ESC key-repeat (can still toggle) and tmux
-#   # escape-time may split it. For a fully unambiguous toggle use a ctrl+<char>
-#   # (single byte, never split), e.g. "ctrl+g". The matched combo is SWALLOWED
-#   # by the proxy (claude never sees it). Requires the PTY proxy.
-#   afk_key: "alt+esc"
+#   # toggles), e.g. "f9 ctrl+g". Only what the terminal emits as distinct bytes
+#   # is supported: ctrl+<char>, alt+<char>, f-keys, named keys, and literals
+#   # (incl. non-ASCII like the AZERTY "²" key — encoded as its UTF-8 bytes).
+#   # Default "f9" (#381): the previous "alt+esc" was confirmed SWALLOWED BY THE
+#   # OS/window manager (GNOME) before reaching the proxy. A function key has no
+#   # OS/tmux/claude conflict. AVOID alt+… (WM/terminal shortcuts), ctrl+s/q
+#   # (flow-control freeze), ctrl+c/d/z/b and the readline editing ctrls, and
+#   # f1/f10/f11/f12 (help/menu/fullscreen). A literal printable key (e.g. "²")
+#   # works too but is then SWALLOWED — you can't type it to claude. Confirm any
+#   # candidate reaches aiball on YOUR setup with `claude-loop debug-keys`. The
+#   # matched combo is swallowed by the proxy (claude never sees it). Requires
+#   # the PTY proxy.
+#   afk_key: "f9"
 #
 #   # Post-fire key-repeat DEBOUNCE in ms (#381): a held chord repeats the same
 #   # bytes; within this window after a toggle they're swallowed (one net toggle
