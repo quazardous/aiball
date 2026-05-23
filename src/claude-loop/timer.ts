@@ -84,6 +84,9 @@ import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 
 const sd = process.env.CL_STATE_DIR;
 const name = process.env.CL_NAME;
+// #393: the loop's root (stable for its lifetime) — pushed with each state
+// heartbeat so the daemon can mark the project "local". Read once from the plate.
+const loopCwd = (() => { try { return sd ? readPlate(sd).cwd : undefined; } catch { return undefined; } })();
 const intervalRaw = process.env.CL_INTERVAL;
 const checkCmd = process.env.CL_CHECK_CMD ?? "true";
 const userGraceSec = Math.max(0, Number(process.env.CL_USER_GRACE_SEC ?? DEFAULT_USER_GRACE_SEC));
@@ -818,7 +821,7 @@ async function mainSse(): Promise<void> {
             // #310: also push the 3-state presence word (stop/wait/loop) so the
             // consumers page mirrors the tmux bar, not just the binary human flag.
             const humanWord = humanPresenceWord(sd, userGraceSec);
-            await client().pushState(settledStatus, human, humanWord);
+            await client().pushState(settledStatus, human, humanWord, loopCwd);
         } catch { /* daemon down or transient — next tick retries */ }
     }
     log("tmux session gone — timer exiting");

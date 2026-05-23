@@ -10,6 +10,8 @@ export interface ProjectListItem {
     open: number;
     resolved: number;
     snoozed: number;
+    /** #393: a claude-loop with a known root runs in this project (local). */
+    local?: boolean;
 }
 
 export type SettingsPanel = "rules" | "tags" | "projects" | "consumers" | "compose";
@@ -21,7 +23,7 @@ export type SettingsPanel = "rules" | "tags" | "projects" | "consumers" | "compo
  * `projectPage` so the inbox item doesn't light up while a sub-page
  * is active.
  */
-export type ProjectPage = "stats" | "settings";
+export type ProjectPage = "stats" | "settings" | "detail";
 
 const props = defineProps<{
     items: ProjectListItem[];
@@ -35,6 +37,7 @@ const emit = defineEmits<{
     (e: "open-panel", panel: SettingsPanel): void;
     (e: "new-ticket"): void;
     (e: "open-current-settings"): void;
+    (e: "open-detail", value: string): void;
 }>();
 
 // #B.161: collapse the projects details by default on phones so the
@@ -123,6 +126,13 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
             >
                 <i :class="p.icon" />
                 <span class="sidebar-item-label">{{ p.label }}</span>
+                <span
+                    v-if="p.local && p.value"
+                    class="sidebar-badge sidebar-badge--local"
+                    role="button"
+                    title="local — a claude-loop runs here. Click for the project detail (loops + launch)."
+                    @click.stop="emit('open-detail', p.value as string)"
+                ><i class="pi pi-desktop" /></span>
                 <span
                     v-if="p.pending > 0"
                     class="sidebar-badge sidebar-badge--pending"
@@ -396,5 +406,18 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
 .sidebar-badge--open {
     background: var(--p-surface-300);
     color: var(--p-text-color);
+}
+/* #393: "local" — a claude-loop runs here. Icon-only chip, primary tint. */
+.sidebar-badge--local {
+    background: var(--p-primary-color);
+    color: var(--p-primary-contrast-color);
+    padding: 0.05rem 0.35rem;
+    cursor: pointer;
+}
+.sidebar-badge--local:hover {
+    filter: brightness(1.15);
+}
+.sidebar-badge--local .pi {
+    font-size: 0.65rem;
 }
 </style>

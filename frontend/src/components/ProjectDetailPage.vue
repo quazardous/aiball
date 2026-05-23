@@ -1,0 +1,263 @@
+<script setup lang="ts">
+// #393 phase 3b: per-project detail page. Shows whether the project is "local"
+// (a claude-loop with a known root has run here), its root(s), the loops at
+// each root with their live state, and a button to launch a loop for a root.
+import { computed, onMounted, ref, watch } from "vue";
+import { api, type ProjectMeta, type Consumer } from "../lib/api";
+
+const props = defineProps<{ project: string }>();
+const emit = defineEmits<{ (e: "back"): void }>();
+
+const meta = ref<ProjectMeta | null>(null);
+const consumers = ref<Consumer[]>([]);
+const loading = ref(false);
+const error = ref<string | null>(null);
+const launching = ref<string | null>(null);
+const flash = ref<string | null>(null);
+
+async function load() {
+    loading.value = true;
+    error.value = null;
+    try {
+        const all = await api.listProjectsDetailed();
+        meta.value = all.find((p) => p.name === props.project) ?? null;
+        consumers.value = await api.listConsumers();
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        loading.value = false;
+    }
+}
+
+watch(() => props.project, () => load());
+onMounted(load);
+
+const roots = computed(() => meta.value?.roots ?? []);
+
+// Loops at each known root (consumer.cwd matches the root).
+const loopsByRoot = computed(() => {
+    const map = new Map<string, Consumer[]>();
+    for (const r of roots.value) map.set(r, []);
+    for (const c of consumers.value) {
+        if (c.cwd && map.has(c.cwd)) map.get(c.cwd)!.push(c);
+    }
+    return map;
+});
+
+// A loop is "online" when it heartbeated recently.
+const ONLINE_MS = 120_000;
+function isOnline(c: Consumer): boolean {
+    if (!c.state_updated_at) return false;
+    return Date.now() - new Date(c.state_updated_at).getTime() < ONLINE_MS;
+}
+function presence(c: Consumer): string {
+    if (!isOnline(c)) return "offline";
+    const word = c.state_human_word ?? (c.state_human ? "stop" : "loop");
+    return `${c.state ?? "?"} · ${word}`;
+}
+
+async function launch(root: string) {
+    launching.value = root;
+    flash.value = null;
+    try {
+        const r = await api.launchLoop(props.project, root);
+        flash.value = `Launched (pid ${r.pid}) at ${root}`;
+        setTimeout(load, 1500);
+    } catch (e) {
+        flash.value = `Launch failed: ${(e as Error).message}`;
+    } finally {
+        launching.value = null;
+    }
+}
+</script>
+
+<template>
+    <div class="project-detail">
+        <header class="project-detail__header">
+            <button type="button" class="project-detail__back" title="Back to inbox" @click="emit('back')">
+                <i class="pi pi-arrow-left" /> back
+            </button>
+            <h2>{{ project }} — detail</h2>
+            <span v-if="meta?.local" class="project-detail__local"><i class="pi pi-desktop" /> local</span>
+            <div class="project-detail__actions">
+                <button type="button" class="project-detail__refresh" title="Refresh" @click="load">
+                    <i class="pi pi-refresh" />
+                </button>
+            </div>
+        </header>
+
+        <div v-if="loading" class="aiball-empty">Loading…</div>
+        <div v-else-if="error" class="aiball-empty" style="color: var(--p-red-500)">{{ error }}</div>
+
+        <template v-else>
+            <p v-if="flash" class="project-detail__flash">{{ flash }}</p>
+
+            <div v-if="roots.length === 0" class="aiball-empty">
+                No local loop has run for this project. A project becomes <strong>local</strong>
+                when a claude-loop runs in its directory (the root is then discovered automatically).
+            </div>
+
+            <section v-for="root in roots" :key="root" class="project-detail__root">
+                <div class="project-detail__root-head">
+                    <code class="project-detail__path">{{ root }}</code>
+                    <button
+                        type="button"
+                        class="project-detail__launch"
+                        :disabled="launching === root"
+                        title="Launch a claude-loop for this root"
+                        @click="launch(root)"
+                    >
+                        <i class="pi pi-play" /> {{ launching === root ? "launching…" : "launch loop" }}
+                    </button>
+                </div>
+                <ul class="project-detail__loops">
+                    <li
+                        v-for="c in loopsByRoot.get(root) ?? []"
+                        :key="c.consumer_id"
+                        class="project-detail__loop"
+                        :class="{ 'is-offline': !isOnline(c) }"
+                    >
+                        <span class="project-detail__dot" :class="isOnline(c) ? 'is-on' : 'is-off'" />
+                        <span class="project-detail__loop-id">{{ c.consumer_id }}</span>
+                        <span class="project-detail__loop-state">{{ presence(c) }}</span>
+                    </li>
+                    <li v-if="(loopsByRoot.get(root) ?? []).length === 0" class="project-detail__none">
+                        no loop registered at this root yet
+                    </li>
+                </ul>
+            </section>
+        </template>
+    </div>
+</template>
+
+<style scoped>
+.project-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+.project-detail__header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+.project-detail__header h2 {
+    margin: 0;
+    font-size: 1.3rem;
+}
+.project-detail__local {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    background: var(--p-primary-color);
+    color: var(--p-primary-contrast-color);
+    border-radius: 999px;
+    padding: 0.1rem 0.5rem;
+}
+.project-detail__back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: transparent;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.4rem;
+    padding: 0.25rem 0.55rem;
+    color: var(--p-text-color);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.85rem;
+}
+.project-detail__back:hover { background: var(--p-surface-100); }
+.project-detail__actions { margin-left: auto; }
+.project-detail__refresh {
+    background: transparent;
+    border: 0;
+    color: var(--p-text-muted-color);
+    cursor: pointer;
+    padding: 0.3rem 0.5rem;
+    border-radius: 0.3rem;
+}
+.project-detail__refresh:hover { background: var(--p-surface-100); }
+.project-detail__flash {
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+    background: var(--p-surface-100);
+    border-radius: 0.4rem;
+    font-size: 0.85rem;
+}
+.project-detail__root {
+    padding: 0.8rem 1rem;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.5rem;
+    background: var(--p-content-background);
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+.project-detail__root-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+.project-detail__path {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.85rem;
+    color: var(--p-text-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.project-detail__launch {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: var(--p-primary-color);
+    color: var(--p-primary-contrast-color);
+    border: 0;
+    border-radius: 0.4rem;
+    padding: 0.3rem 0.7rem;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+.project-detail__launch:disabled { opacity: 0.6; cursor: default; }
+.project-detail__loops {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+.project-detail__loop {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+}
+.project-detail__loop.is-offline { opacity: 0.6; }
+.project-detail__dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 999px;
+    flex: none;
+}
+.project-detail__dot.is-on { background: var(--p-green-500); }
+.project-detail__dot.is-off { background: var(--p-surface-400); }
+.project-detail__loop-id {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    color: var(--p-text-color);
+}
+.project-detail__loop-state {
+    color: var(--p-text-muted-color);
+    font-size: 0.8rem;
+}
+.project-detail__none {
+    color: var(--p-text-muted-color);
+    font-style: italic;
+    font-size: 0.82rem;
+}
+</style>

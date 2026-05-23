@@ -42,6 +42,9 @@ export interface Consumer {
      *  heartbeat — mirrors the tmux bar. null = never reported / pre-#310 loop
      *  (fall back to `state_human` for the binary view). */
     state_human_word?: HumanWord | null;
+    /** #393: the loop's working directory (project root), pushed by the
+     *  state heartbeat. null for humans / non-loop / pre-#393 loops. */
+    cwd?: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -61,6 +64,7 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         state_updated_at: r.stateUpdatedAt,
         state_human: r.stateHuman == null ? null : r.stateHuman === 1,
         state_human_word: (r.stateHumanWord as HumanWord | null) ?? null,
+        cwd: r.cwd ?? null,
         created_at: r.createdAt,
         updated_at: r.updatedAt,
     };
@@ -117,6 +121,7 @@ export function setConsumerState(
     state: ConsumerState,
     human?: boolean,
     humanWord?: HumanWord,
+    cwd?: string,
 ): void {
     if (!consumer_id) return;
     const now = nowIso();
@@ -135,6 +140,8 @@ export function setConsumerState(
     if (human !== undefined) patch.stateHuman = human ? 1 : 0;
     // #310: the finer 3-state presence word, pushed alongside the boolean.
     if (humanWord !== undefined) patch.stateHumanWord = humanWord;
+    // #393: the loop's root, pushed on each heartbeat. Only set when reported.
+    if (cwd !== undefined) patch.cwd = cwd;
     if (changed) patch.stateSince = now;
     getDb().update(schema.consumers)
         .set(patch)

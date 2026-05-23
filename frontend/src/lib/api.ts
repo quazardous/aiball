@@ -366,6 +366,9 @@ export interface Consumer {
      * / pre-#310 loop (fall back to `state_human` for the binary view).
      */
     state_human_word?: "stop" | "wait" | "loop" | null;
+    /** #393: the loop's working directory (project root), pushed by the state
+     *  heartbeat. null for humans / non-loop / pre-#393 loops. */
+    cwd?: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -384,6 +387,11 @@ export interface ProjectMeta {
     snoozed_count?: number;
     /** Approved+open tickets currently in the resolved-pending-close state. */
     resolved_count?: number;
+    /** #393: a claude-loop with a known root has worked this project → it's
+     *  "local" (root known, can be relaunched from the UI). */
+    local?: boolean;
+    /** #393: the distinct loop root(s) known for this project (consumers.cwd). */
+    roots?: string[];
 }
 
 export const api = {
@@ -701,6 +709,14 @@ export const api = {
     me: () => req<Consumer>("GET", "/api/me"),
 
     listConsumers: () => req<Consumer[]>("GET", "/api/consumers"),
+    /** #393: launch a claude-loop for a known local root of this project
+     *  (human-only, server validates the root). */
+    launchLoop: (project: string, root: string) =>
+        req<{ ok: boolean; project: string; root: string; pid: number }>(
+            "POST",
+            `/api/projects/${encodeURIComponent(project)}/launch`,
+            { root },
+        ),
     upsertConsumer: (body: {
         consumer_id: string;
         kind?: ConsumerKind;

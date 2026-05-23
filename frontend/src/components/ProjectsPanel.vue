@@ -20,6 +20,7 @@ const creatingForm = ref(false);
 const emit = defineEmits<{
     (e: "open-stats", project: string): void;
     (e: "open-settings", project: string): void;
+    (e: "open-detail", project: string): void;
 }>();
 
 async function load() {
@@ -277,6 +278,15 @@ defineExpose({ load });
                                 size="small"
                                 title="Open per-project stats"
                                 @click="emit('open-stats', p.name)"
+                            />
+                            <Button
+                                icon="pi pi-desktop"
+                                severity="secondary"
+                                text
+                                rounded
+                                size="small"
+                                title="Project detail — local loops + roots (#393)"
+                                @click="emit('open-detail', p.name)"
                             />
                             <Button
                                 icon="pi pi-eraser"

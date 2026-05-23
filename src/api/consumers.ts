@@ -116,7 +116,7 @@ consumersRouter.put("/consumers/:consumer_id/state", (req: Request, res: Respons
     } else if (c.kind === "human") {
         return res.status(403).json({ error: "state push is for loop agents, not humans" });
     }
-    const body = (req.body ?? {}) as { state?: unknown; human?: unknown; human_word?: unknown };
+    const body = (req.body ?? {}) as { state?: unknown; human?: unknown; human_word?: unknown; cwd?: unknown };
     if (body.state !== "busy" && body.state !== "idle" && body.state !== "boot") {
         return badRequest(res, "state must be one of: busy, idle, boot");
     }
@@ -127,7 +127,9 @@ consumersRouter.put("/consumers/:consumer_id/state", (req: Request, res: Respons
         body.human_word === "stop" || body.human_word === "wait" || body.human_word === "loop"
             ? body.human_word
             : undefined;
-    setConsumerState(caller, body.state, human, humanWord);
+    // #393: optional loop root, pushed on each heartbeat → marks the project local.
+    const cwd = typeof body.cwd === "string" && body.cwd ? body.cwd : undefined;
+    setConsumerState(caller, body.state, human, humanWord, cwd);
     broadcast({ type: "consumer_changed", data: { consumer_id: caller, state: body.state, human, human_word: humanWord } });
-    res.json({ consumer_id: caller, state: body.state, human, human_word: humanWord });
+    res.json({ consumer_id: caller, state: body.state, human, human_word: humanWord, cwd });
 });
