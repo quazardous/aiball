@@ -16,7 +16,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { loadConfig } from "../autopoll/config.js";
+import { loadConfig, type AiballConfig } from "../autopoll/config.js";
 import { AiballClient } from "../client.js";
 import type { Intent } from "../domain.js";
 import type { DrainedState } from "./drained-strategy.js";
@@ -666,15 +666,22 @@ export function humanIsTyping(sd: string, ttlSec = HUMAN_TYPING_TTL_SEC): boolea
  */
 export type LoopStatus = "idle" | "boot" | "busy";
 
-const STATUS_COLORS: Record<LoopStatus, { bg: string; fg: string }> = {
-    // #B.154 david: "la couleur de busy c'est bleu electrique
-    // (le vert est pas clair en signal)". colour33 = vivid blue
-    // (~#0087ff), more readable as an active-state signal than the
-    // previous green and the original cyan.
-    busy: { bg: "colour33",  fg: "colour15" },  // electric blue / white (claude processing)
-    idle: { bg: "colour240", fg: "colour15" },  // dark gray / white (at prompt)
-    boot: { bg: "colour178", fg: "colour15" },  // yellow / white (transitional)
-};
+// #385 (david wstfea): the bar colour profile is config-driven (defaults →
+// global `~/.config/aiball/config.yaml` → per-project `.aiball.yaml`, resolved in
+// autopoll/config.ts). Memoised per-process — colours never change mid-session,
+// and setTmuxStatus runs in short-lived hook processes (one resolve each) + the
+// long-lived timer (resolved once). The default palette keeps the #B.154 state
+// backgrounds (busy electric-blue / idle grey / boot yellow); what changed is
+// that the bar text sits on TWO backgrounds with TWO foregrounds: `island_fg`
+// (light) on the black island, `bar_fg` (now black) on the state-coloured region
+// — david's bar runs the busy-blue state where white washed out.
+let BAR_COLORS: AiballConfig["colors"] | null = null;
+function barColors(): AiballConfig["colors"] {
+    if (!BAR_COLORS) BAR_COLORS = loadConfig().colors;
+    return BAR_COLORS;
+}
+const stateBg = (col: AiballConfig["colors"], s: LoopStatus): string =>
+    s === "busy" ? col.busy_bg : s === "boot" ? col.boot_bg : col.idle_bg;
 
 // #305: this module is imported by the timer at launch, so its load time ≈
 // loop boot for the process that owns setTmuxStatus. humanBarWord's degraded
@@ -743,7 +750,8 @@ export function setTmuxStatus(
         tag = `[${status}:${countOrInfo}]`;
     }
     const tn = tmuxName(name);
-    const c = STATUS_COLORS[status];
+    const col = barColors();
+    const bg = stateBg(col, status);
     const sd = process.env.CL_STATE_DIR;
     const proxyAlive = !!sd && proxyIsAlive(sd);
     const setOpt = (opt: string, val: string) =>
@@ -755,8 +763,8 @@ export function setTmuxStatus(
     // TS owns the rest. The bar's bg comes from `status-bg` (set per state
     // below), so the proxy's fg-only `@cl_human` renders on the current
     // state colour without the proxy ever knowing it. The fg is reset to
-    // white (`c.fg`) after the human/proxy segments so `name [state]`
-    // keeps the neutral tint.
+    // `bar_fg` (#385 colour profile, black by default) after the human/proxy
+    // segments so `name [state]` reads on the coloured bar.
     // `#{@cl_human}` carries the human-presence WORD (loop/stop, painted by
     // the proxy live or by the degraded-mode block below). It can be empty
     // for a beat — proxy forked but hasn't painted yet, CL_TMUX unset so the
@@ -785,12 +793,12 @@ export function setTmuxStatus(
         // guard renders empty for sessions started before this segment existed
         // (unset option) instead of a literal `#{@cl_keys}`. No commas in either
         // branch → no `#,` escaping needed (cf. the @cl_human fallback below).
-        `#[bg=${c.bg}] #[fg=${c.bg},bg=colour16]▓▒░#[fg=${c.fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour40#,bg=colour16]loop} #[fg=${c.bg},bg=colour16]░▒▓#[bg=${c.bg}]#{@cl_proxy}#[fg=${c.fg}] ${name} #{@cl_state}#{?@cl_keys,#{@cl_keys},} `,
+        `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour40#,bg=colour16]loop} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}] ${name} #{@cl_state}#{?@cl_keys,#{@cl_keys},} `,
     );
-    setOpt("status-bg", c.bg);
-    setOpt("status-fg", c.fg);
+    setOpt("status-bg", bg);
+    setOpt("status-fg", col.bar_fg);
     // Loop-state tag (#B.149/#B.154): `[idle 3]` / `[boot:resume?]` etc.
-    setOpt("@cl_state", `#[fg=${c.fg}]${tag}`);
+    setOpt("@cl_state", `#[fg=${col.bar_fg}]${tag}`);
     // #269 (tcn5ej): discreet ⇄ when the pane really runs under the proxy
     // (ground truth = proxy-alive marker). Absent ⇒ direct-launch fallback.
     setOpt("@cl_proxy", proxyAlive ? `#[fg=colour250] ⇄` : "");

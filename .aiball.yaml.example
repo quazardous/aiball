@@ -196,6 +196,27 @@ autopoll:
 #   hint_worktree: false
 #   # (both false → no branch hint on feature wakes; opt in per project)
 
+# claude-loop tmux bar colour profile (#385). Each value is a raw tmux colour
+# token (`colour16`, `colour15`, a named colour like `red`, or a hex `#0087ff`).
+# Layered on THREE levels — defaults → global `~/.config/aiball/config.yaml`
+# `colors:` → this file's `colors:` (project wins). Set a machine-wide theme once
+# in the global file; tune per project here. Any key you omit keeps the layer
+# below.
+#
+# The bar text sits on TWO backgrounds, so it has TWO foregrounds:
+#   • the black "island" holds `claude-…`           → island_fg (keep it light)
+#   • the state-coloured region holds `name [state] · afk:key` → bar_fg
+# So "make the bar font black" = bar_fg (the default, #385 — white washed out on
+# the busy electric-blue bar; white-on-yellow boot was unreadable). The island
+# stays light so `claude-` reads on the black gradient.
+# colors:
+#   island_fg: "colour15"     # `claude-…` on the black island (default white)
+#   bar_fg: "colour16"        # name / [state] / afk key on the coloured bar (default black)
+#   afk_label_fg: "colour238" # the dim `· afk:` control-key label
+#   busy_bg: "colour33"       # bar background while claude is working (electric blue)
+#   idle_bg: "colour240"      # bar background at the prompt (dark grey)
+#   boot_bg: "colour178"      # bar background while booting (yellow)
+
 # Wake-CTA / state-prompt template overrides (#B.232 cpaez7).
 # Optional per-project section. When absent, the skill-shipped defaults
 # in `config/defaults/claude-loop-pings.yaml` apply — you don't need anything here

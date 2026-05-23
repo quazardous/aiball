@@ -69,6 +69,17 @@ without the kitty/win32 keyboard protocol.
 `hint_branch`, `hint_worktree` (both off by default). See
 [`WORKFLOW.md`](./WORKFLOW.md).
 
+### Bar colour profile — `colors:` — *defaults → global → yaml*
+The claude-loop tmux status-bar colours (#385). Code defaults →
+`~/.config/aiball/config.yaml` `colors:` (machine-wide theme) →
+`.aiball.yaml` `colors:` (project wins). Each key is a raw tmux colour token
+(`colour16`, `red`, `#0087ff`); an omitted key keeps the layer below. The bar
+text has **two** foregrounds because it sits on two backgrounds: `island_fg`
+(light, `claude-…` on the black island) and `bar_fg` (the state-coloured region
+`name [state] · afk:key` — black by default so it reads on the busy electric-blue
+/ boot-yellow bar). Keys: `island_fg`, `bar_fg`, `afk_label_fg`, `busy_bg`,
+`idle_bg`, `boot_bg`. Full annotated block in `.aiball.yaml.example`.
+
 ### Wake-CTA / prompt templates — `prompts:` — *3 layers, slot-grain replace*
 `config/defaults/claude-loop-pings.yaml` → `~/.config/aiball/config.yaml`
 → `.aiball.yaml`. Project wins over global wins over defaults; each *slot*

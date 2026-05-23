@@ -50,6 +50,15 @@ export interface ProjectContext {
         /** #379: drained-backlog reminder strategy (default "silent"). */
         drained_strategy: string;
     };
+    /** #385: tmux bar colour profile (layered defaults → global → project). */
+    colors: {
+        island_fg: string;
+        bar_fg: string;
+        afk_label_fg: string;
+        busy_bg: string;
+        idle_bg: string;
+        boot_bg: string;
+    };
 }
 
 interface ResolveOpts {
@@ -71,6 +80,7 @@ export function resolveProjectContext(opts: ResolveOpts = {}): ProjectContext {
         mcp_json_deprecated: cfg.mcp_json_deprecated,
         config_path: cfg.configPath,
         claude_loop: { ...cfg.claude_loop },
+        colors: { ...cfg.colors },
     };
 }
 

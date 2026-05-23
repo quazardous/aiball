@@ -570,10 +570,13 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // (`· afk:f9`). The afk_key is the only claude-loop control key; it never
     // changes mid-session, so we seed `@cl_keys` ONCE here (setTmuxStatus leaves
     // it alone). `off` when the spec is empty/invalid (AFK disabled above).
+    // #385 (david wstfea): the hint colours come from the bar colour profile —
+    // `· afk:` label dim (afk_label_fg), the key in bar_fg (black by default, so
+    // it reads on the state-coloured bar like the rest of the right-of-island text).
     const afkKeyDisp = ctx.claude_loop.afk_key.trim();
     const keysHint = afkSpecJson
-        ? `#[fg=colour245] · afk:#[fg=colour15]${afkKeyDisp}`
-        : `#[fg=colour245] · afk:off`;
+        ? `#[fg=${ctx.colors.afk_label_fg}] · afk:#[fg=${ctx.colors.bar_fg}]${afkKeyDisp}`
+        : `#[fg=${ctx.colors.afk_label_fg}] · afk:off`;
     // #274: seed the per-owner status-left segments so the static format
     // setTmuxStatus installs never renders an unset `#{@cl_*}` (empty is
     // fine; unset would show literally on some tmux). The proxy and
