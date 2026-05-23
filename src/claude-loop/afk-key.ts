@@ -185,8 +185,9 @@ export function bytesToGrammar(bytes: ArrayLike<number>): string {
         if (single) return single;
     }
     // Printable non-ASCII key (e.g. AZERTY `²` = UTF-8 `c2 b2`): show the literal
-    // character — it's a real key, just not encodable as an afk combo (those are
-    // ASCII control/alt/ctrl chords). The hex stays visible in the byte column.
+    // character. Roundtrips with `keyToBytes` (#381 9garjb): `afk_key: "²"` IS a
+    // valid combo, encoded to those same UTF-8 bytes. The hex stays visible in
+    // the byte column.
     try {
         const s = new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(arr));
         if ([...s].length === 1 && !/\p{Cc}/u.test(s)) return s;
