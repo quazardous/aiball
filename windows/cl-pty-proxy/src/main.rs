@@ -70,7 +70,8 @@ use windows_sys::Win32::System::Pipes::{
     PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
 };
 
-const HUMAN_TTL: Duration = Duration::from_secs(5); // follow HUMAN_TYPING_TTL_SEC (state.ts)
+mod core;
+
 const CP_UTF8: u32 = 65001;
 
 /// Opt-in byte tracing to stderr (set CL_PROXY_DEBUG=1). Logs the first
@@ -112,90 +113,135 @@ fn inject_pipe_name() -> Option<String> {
     Some(format!(r"\\.\pipe\cl-inject-{name}"))
 }
 
-// --- typing classifier (mirrors is_typing_keystroke in pty-proxy.py) --------
-
-/// A unicode code point counts as "text" (paint `stop`) when it's a
-/// printable char — excludes the C0 controls (< 0x20: Enter, Tab,
-/// Ctrl-combos) and DEL. Navigation/function keys carry Uc=0, so they
-/// never qualify.
-fn is_text_codepoint(u: u32) -> bool {
-    u >= 0x20 && u != 0x7f
-}
-
-fn parse_uint(b: &[u8]) -> Option<u32> {
-    if b.is_empty() {
-        return None;
-    }
-    let mut v: u32 = 0;
-    for &c in b {
-        if !c.is_ascii_digit() {
-            return None;
-        }
-        v = v.checked_mul(10)?.checked_add((c - b'0') as u32)?;
-    }
-    Some(v)
-}
-
-/// True if `data` carries a human TEXT keystroke.
-///
-/// Two encodings to handle:
-/// 1. Raw VT — a leading printable byte (some terminals / non-ConPTY).
-/// 2. win32-input-mode — what psmux/ConPTY actually delivers:
-///    `ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _`. Each keystroke is a
-///    `_`-terminated CSI; the 3rd field is the unicode code point and the
-///    4th is key-down(1)/up(0). We flag a chunk when ANY contained
-///    sequence is a key-DOWN of a printable code point. ESC-led control
-///    sequences (DSR `…R`, arrows with Uc=0, …) are correctly ignored.
-///    (Mirrors is_typing_keystroke in pty-proxy.py, extended for Windows.)
-fn is_typing_keystroke(data: &[u8]) -> bool {
-    match data.first() {
-        None => return false,
-        // Raw printable byte → typing.
-        Some(&b0) if b0 != 0x1b && b0 >= 0x20 && b0 != 0x7f => return true,
-        _ => {}
-    }
-    // Scan for `_`-terminated win32-input-mode CSI sequences.
-    let mut i = 0;
-    while i + 1 < data.len() {
-        if data[i] == 0x1b && data[i + 1] == b'[' {
-            let start = i + 2;
-            let mut j = start;
-            while j < data.len() && data[j] != b'_' && data[j] != 0x1b {
-                j += 1;
-            }
-            if j < data.len() && data[j] == b'_' {
-                let fields: Vec<&[u8]> = data[start..j].split(|&c| c == b';').collect();
-                // [Vk, Sc, Uc, Kd, Cs, Rc]
-                if fields.len() >= 4 {
-                    let uc = parse_uint(fields[2]);
-                    let key_down = parse_uint(fields[3]) == Some(1);
-                    if key_down {
-                        if let Some(u) = uc {
-                            if is_text_codepoint(u) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-                i = j + 1;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    false
-}
-
 // --- markers ----------------------------------------------------------------
 
+fn ts_now() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn afk_path() -> Option<String> {
+    state_dir().map(|sd| format!("{sd}/afk"))
+}
+
+fn user_grace_path() -> Option<String> {
+    state_dir().map(|sd| format!("{sd}/user-took-over"))
+}
+
+/// `human-typing` — touched on a text keystroke; read by state.ts::humanIsTyping.
 fn touch_marker() {
     if let Some(p) = marker_path() {
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        let _ = fs::write(&p, format!("{ts}\n")); // mtime is what TS reads
+        let _ = fs::write(&p, format!("{}\n", ts_now())); // mtime is what TS reads
     }
+}
+
+/// `afk` — set on the AFK toggle-on (away), removed on toggle-off / any text /
+/// lone-ESC. Read by the PreToolUse hook to redirect AskUserQuestion (#351).
+fn set_afk() {
+    if let Some(p) = afk_path() {
+        let _ = fs::write(&p, format!("{}\n", ts_now()));
+    }
+}
+fn clear_afk() {
+    if let Some(p) = afk_path() {
+        let _ = fs::remove_file(&p);
+    }
+}
+
+/// `user-took-over` — armed on typing / lone-ESC (#315/#345); drives the bar's
+/// `wait` word + the timer's auto-ping freeze. Cleared on AFK + at boot (#357).
+fn touch_user_grace() {
+    if let Some(p) = user_grace_path() {
+        let _ = fs::write(&p, format!("{}\n", ts_now()));
+    }
+}
+fn clear_user_grace() {
+    if let Some(p) = user_grace_path() {
+        let _ = fs::remove_file(&p);
+    }
+}
+
+fn apply_marker(m: core::Marker) {
+    match m {
+        core::Marker::SetAfk => set_afk(),
+        core::Marker::ClearAfk => clear_afk(),
+        core::Marker::TouchTyping => touch_marker(),
+        core::Marker::TouchUserGrace => touch_user_grace(),
+        core::Marker::ClearUserGrace => clear_user_grace(),
+    }
+}
+
+// --- bar word (stop/wait/loop) + grace windows (#302/#305/#315/#345) ---------
+
+/// Follows HUMAN_TYPING_TTL_SEC (state.ts): how long after the last text
+/// keystroke the bar stays `stop` before reverting to the rest word.
+const HUMAN_TTL_MS: f64 = 5000.0;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BarWord {
+    Stop,
+    Wait,
+    Loop,
+}
+
+/// fg+bg aligned with setTmuxStatus / humanBarWord (state.ts), #302:
+/// stop=red, wait=yellow, loop=green, all on the bar bg (colour16).
+fn bar_word_str(w: BarWord) -> &'static str {
+    match w {
+        BarWord::Stop => "#[fg=colour196,bg=colour16]stop",
+        BarWord::Wait => "#[fg=colour178,bg=colour16]wait",
+        BarWord::Loop => "#[fg=colour40,bg=colour16]loop",
+    }
+}
+
+fn env_f64(key: &str, default: f64) -> f64 {
+    env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
+}
+
+/// #305: boot-grace seconds left (0 under `--no-wait` / CL_WAIT=0).
+fn boot_grace_remaining(boot: Instant) -> f64 {
+    if env::var("CL_WAIT").as_deref() == Ok("0") {
+        return 0.0;
+    }
+    (env_f64("CL_BOOT_GRACE_SEC", 60.0) - boot.elapsed().as_secs_f64()).max(0.0)
+}
+
+/// #302/#315: user-grace seconds left, from the `user-took-over` mtime.
+fn user_grace_remaining() -> f64 {
+    let p = match user_grace_path() {
+        Some(p) => p,
+        None => return 0.0,
+    };
+    let grace = env_f64("CL_USER_GRACE_SEC", 60.0);
+    match fs::metadata(&p).and_then(|m| m.modified()) {
+        Ok(mtime) => {
+            let age = SystemTime::now()
+                .duration_since(mtime)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(f64::MAX);
+            (grace - age).max(0.0)
+        }
+        Err(_) => 0.0,
+    }
+}
+
+/// At-rest word: `wait` during boot-grace OR user-grace, else `loop`.
+fn rest_word(boot: Instant) -> BarWord {
+    if boot_grace_remaining(boot) > 0.0 || user_grace_remaining() > 0.0 {
+        BarWord::Wait
+    } else {
+        BarWord::Loop
+    }
+}
+
+/// Shared between the stdin thread (writes) and the housekeeping thread
+/// (revert stop→rest after the typing TTL). `word` is the last painted word
+/// so both threads only repaint on a transition (no tmux churn).
+struct BarState {
+    word: BarWord,
+    last_keystroke_ms: f64,
 }
 
 /// Presence marker stamped with our PID (ground truth: the pane really
@@ -213,12 +259,11 @@ fn clear_proxy_alive() {
     }
 }
 
-// --- tmux @cl_human painting (#274 parity) ----------------------------------
+// --- tmux @cl_human painting (#274/#302 parity) -----------------------------
 
-/// Repaint the `@cl_human` segment of the tmux/psmux bar and force a
-/// refresh. No-op when CL_TMUX is unset or the mux call fails — the bar
-/// must NEVER be able to break the I/O bridge.
-fn paint_human(typing: bool) {
+/// Repaint the `@cl_human` bar segment + force a refresh. No-op when CL_TMUX
+/// is unset or the mux call fails — the bar must NEVER break the I/O bridge.
+fn paint_word(word: BarWord) {
     let target = match env::var("CL_TMUX") {
         Ok(t) if !t.is_empty() => t,
         _ => return,
@@ -230,14 +275,9 @@ fn paint_human(typing: bool) {
         None => return,
     };
     let pre: Vec<&str> = it.collect();
-    let word = if typing {
-        "#[fg=colour196]stop"
-    } else {
-        "#[fg=colour178]loop"
-    };
     let _ = StdCommand::new(prog)
         .args(&pre)
-        .args(["set-option", "-t", &target, "@cl_human", word])
+        .args(["set-option", "-t", &target, "@cl_human", bar_word_str(word)])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
@@ -247,6 +287,41 @@ fn paint_human(typing: bool) {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+/// Set the bar to `want`, painting only on a transition (both threads call
+/// this under the shared lock so they never fight over `@cl_human`).
+fn set_word(shared: &Arc<Mutex<BarState>>, want: BarWord) {
+    let paint = {
+        let mut s = shared.lock().unwrap();
+        if s.word != want {
+            s.word = want;
+            true
+        } else {
+            false
+        }
+    };
+    if paint {
+        paint_word(want);
+    }
+}
+
+/// Typing → `stop` + refresh the keystroke clock (so the TTL revert is timed
+/// from the last keypress). Always updates the clock, paints only on flip.
+fn mark_typing(shared: &Arc<Mutex<BarState>>, now_ms: f64) {
+    let paint = {
+        let mut s = shared.lock().unwrap();
+        s.last_keystroke_ms = now_ms;
+        if s.word != BarWord::Stop {
+            s.word = BarWord::Stop;
+            true
+        } else {
+            false
+        }
+    };
+    if paint {
+        paint_word(BarWord::Stop);
+    }
 }
 
 // --- raw console handle I/O (Windows) ---------------------------------------
@@ -531,16 +606,28 @@ fn real_main() -> i32 {
         }
     };
 
-    // Fork succeeded -> we really front claude. Drop the ground-truth
-    // marker and claim the `@cl_human` segment at rest before anything else.
+    // Fork succeeded -> we really front claude.
+    let boot_ts = Instant::now();
+    // #381/#351 config from the loop env (cli.ts exports these).
+    let afk_combos = core::parse_afk_spec(&env::var("CL_AFK_SPEC").unwrap_or_default());
+    let afk_window_ms = env_f64("CL_AFK_WINDOW_MS", 400.0);
+    let esc_takeover = env::var("CL_ESC_TAKEOVER").map(|v| v != "0").unwrap_or(true);
+
+    // Ground-truth presence marker; drop stale afk / user-grace inherited from
+    // a previous run in the same state dir (#351/#357), then claim the bar at
+    // its rest word.
     drop_proxy_alive();
-    paint_human(false);
+    clear_afk();
+    clear_user_grace();
+    let initial = rest_word(boot_ts);
+    paint_word(initial);
 
     let writer = Arc::new(Mutex::new(writer));
     let master: Arc<Mutex<Box<dyn MasterPty + Send>>> = Arc::new(Mutex::new(pair.master));
     let running = Arc::new(AtomicBool::new(true));
-    // Shared human-badge state: (currently shown, last keystroke time).
-    let human = Arc::new(Mutex::new((false, Instant::now())));
+    // Bar state shared between the stdin + housekeeping threads. last_keystroke
+    // far in the past so the housekeeping TTL revert is immediately eligible.
+    let shared = Arc::new(Mutex::new(BarState { word: initial, last_keystroke_ms: -1.0e12 }));
 
     let stdin_h = SendHandle(console.stdin);
     let stdout_h = SendHandle(console.stdout);
@@ -566,32 +653,42 @@ fn real_main() -> i32 {
         });
     }
 
-    // (2) human keystrokes -> claude PTY (+ marker + paint).
+    // (2) human keystrokes -> claude PTY, through the pure Decider (#381).
+    // Each read is split into individual keystrokes (win32-input-mode is
+    // self-delineating, so coalesced key-repeat / combo+text re-separate
+    // deterministically), classified (AFK toggle / typing / lone-ESC), markers
+    // applied, raw bytes forwarded (or an AFK combo swallowed), bar word driven.
     {
         let writer = writer.clone();
-        let human = human.clone();
+        let shared = shared.clone();
         let running = running.clone();
         let sin = stdin_h;
+        let boot = boot_ts;
         thread::spawn(move || {
+            let mut decider = core::Decider::new(afk_combos, esc_takeover, afk_window_ms);
             let mut buf = [0u8; 8192];
             while running.load(Ordering::Relaxed) {
                 match sin.read(&mut buf) {
                     Some(n) => {
                         let data = &buf[..n];
                         dbg_bytes("stdin", data);
-                        if is_typing_keystroke(data) {
-                            touch_marker();
-                            let mut h = human.lock().unwrap();
-                            h.1 = Instant::now();
-                            if !h.0 {
-                                h.0 = true;
-                                drop(h);
-                                paint_human(true); // loop -> stop, instant
+                        let now_ms = boot.elapsed().as_secs_f64() * 1000.0;
+                        for unit in core::split_units(data) {
+                            let v = decider.on_unit(&unit, now_ms);
+                            for m in &v.markers {
+                                apply_marker(*m);
                             }
-                        }
-                        if let Ok(mut w) = writer.lock() {
-                            let _ = w.write_all(data);
-                            let _ = w.flush();
+                            if !v.forward.is_empty() {
+                                if let Ok(mut w) = writer.lock() {
+                                    let _ = w.write_all(&v.forward);
+                                    let _ = w.flush();
+                                }
+                            }
+                            match v.word {
+                                core::Word::Stop => mark_typing(&shared, now_ms),
+                                core::Word::Rest => set_word(&shared, rest_word(boot)),
+                                core::Word::None => {}
+                            }
                         }
                     }
                     None => {
@@ -611,24 +708,22 @@ fn real_main() -> i32 {
         thread::spawn(move || run_inject_server(pipe_name, writer, running));
     }
 
-    // (4) housekeeping: clear the human badge after TTL + propagate resize.
+    // (4) housekeeping: revert stop→rest after the typing TTL (and progress
+    // wait→loop as the boot/user grace windows expire) + propagate resize.
     {
-        let human = human.clone();
+        let shared = shared.clone();
         let master = master.clone();
         let running = running.clone();
         let out = stdout_h;
+        let boot = boot_ts;
         thread::spawn(move || {
             let mut last_size = (rows, cols);
             while running.load(Ordering::Relaxed) {
-                thread::sleep(Duration::from_millis(300));
-                // Human badge TTL.
-                {
-                    let mut h = human.lock().unwrap();
-                    if h.0 && h.1.elapsed() >= HUMAN_TTL {
-                        h.0 = false;
-                        drop(h);
-                        paint_human(false);
-                    }
+                thread::sleep(Duration::from_millis(200));
+                let now_ms = boot.elapsed().as_secs_f64() * 1000.0;
+                let last_ks = shared.lock().unwrap().last_keystroke_ms;
+                if (now_ms - last_ks) >= HUMAN_TTL_MS {
+                    set_word(&shared, rest_word(boot));
                 }
                 // Resize: poll the (psmux) console size, push to claude PTY.
                 if let Some((r, c)) = out.window_size() {
@@ -652,8 +747,9 @@ fn real_main() -> i32 {
     let status = child.wait();
     running.store(false, Ordering::Relaxed);
 
-    // Cleanup: hand the bar back (loop), drop the marker, restore console.
-    paint_human(false);
+    // Cleanup: hand the bar back to its rest word, drop the presence marker,
+    // restore console. (TS reverts to its own painting once proxy-alive is gone.)
+    paint_word(rest_word(boot_ts));
     clear_proxy_alive();
     console.restore();
 
@@ -693,63 +789,4 @@ fn run_direct(prog: &str, args: &[String]) -> i32 {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // win32-input-mode keystroke: ESC [ Vk;Sc;Uc;Kd;Cs;Rc _
-    fn w32(vk: u32, sc: u32, uc: u32, kd: u32) -> Vec<u8> {
-        format!("\x1b[{vk};{sc};{uc};{kd};0;1_").into_bytes()
-    }
-
-    #[test]
-    fn raw_printable_is_typing() {
-        assert!(is_typing_keystroke(b"a"));
-        assert!(is_typing_keystroke(b"ver"));
-    }
-
-    #[test]
-    fn raw_control_is_not_typing() {
-        assert!(!is_typing_keystroke(b"\r")); // Enter
-        assert!(!is_typing_keystroke(b"\t")); // Tab
-        assert!(!is_typing_keystroke(&[0x7f])); // DEL
-        assert!(!is_typing_keystroke(b"")); // empty
-    }
-
-    #[test]
-    fn win32_text_keydown_is_typing() {
-        // 'h' (Uc=104) key down — the real shape psmux delivers.
-        assert!(is_typing_keystroke(&w32(72, 35, 104, 1)));
-        // 'e', 'l' from the captured trace.
-        assert!(is_typing_keystroke(&w32(69, 18, 101, 1)));
-        assert!(is_typing_keystroke(&w32(76, 38, 108, 1)));
-    }
-
-    #[test]
-    fn win32_keyup_alone_is_not_typing() {
-        // key-UP of 'h' on its own must not paint stop.
-        assert!(!is_typing_keystroke(&w32(72, 35, 104, 0)));
-    }
-
-    #[test]
-    fn win32_down_and_up_chunk_is_typing() {
-        // A single press often arrives as down+up in one read.
-        let mut chunk = w32(72, 35, 104, 1);
-        chunk.extend(w32(72, 35, 104, 0));
-        assert!(is_typing_keystroke(&chunk));
-    }
-
-    #[test]
-    fn win32_navigation_and_control_not_typing() {
-        // Enter (Uc=13) key down.
-        assert!(!is_typing_keystroke(&w32(13, 28, 13, 1)));
-        // Left arrow: Vk=37, Uc=0.
-        assert!(!is_typing_keystroke(&w32(37, 75, 0, 1)));
-    }
-
-    #[test]
-    fn dsr_response_not_typing() {
-        // ESC[1;1R cursor-position report (answer to ESC[6n) must be ignored.
-        assert!(!is_typing_keystroke(b"\x1b[1;1R"));
-    }
-}
+// Pure-logic unit tests live in core.rs (decode / split / AFK / decider).

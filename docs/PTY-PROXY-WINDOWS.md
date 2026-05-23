@@ -131,53 +131,44 @@ cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml
 it, claude-loop still works — it just falls back to the idle-only pane-diff
 detection (`claude-loop check` will say so).
 
-## Parity with the Unix proxy — status & TODO
+## Parity with the Unix proxy
 
 On Windows, the **proxy is the prioritized path** (project decision): it keeps
 accumulating capabilities the bare psmux-native marker (strategy A) can't
-cover — notably AFK-combo detection. So bringing the Rust proxy up to the
-Unix Python proxy's feature level is the active Windows goal.
+cover — notably AFK-combo detection. So the Rust proxy tracks the Unix Python
+proxy's feature level.
 
-The Rust proxy currently sits at the **#269 / #274 / #278** level. The Python
-proxy (`src/claude-loop/pty-proxy.py`) has since gained five iterations the
-Rust one does **not** yet have:
+The decision logic is mirrored as a **pure core** (`src/core.rs`: win32
+decode + keystroke split + `AfkDetector` + `Decider` + bar-word), the Rust
+analogue of the Python proxy's `_Decider` / `split_keystrokes` / `_AfkDetector`
+(#360/#381). It unit-tests without a PTY (`cargo test`), like the Python
+`--replay` path. `main.rs` is the I/O glue.
 
-**Covered (at parity):** PTY/ConPTY bridge, `proxy-alive` (PID-stamped),
-`human-typing` marker, wake injection (named pipe ↔ UDS), resize, exit-code
-propagation, fail-safe direct launch, and `is_typing_keystroke` — the Rust
-classifier is in fact *ahead* here (it decodes **win32-input-mode**, which
-the Unix raw-VT path doesn't need).
+**At parity:** PTY/ConPTY bridge, `proxy-alive` (PID-stamped), `human-typing`
+marker, wake injection (named pipe ↔ UDS), resize, exit-code propagation,
+fail-safe direct launch, and:
 
-**Missing (TODO — port to Rust):**
+- [x] **#302/#305 — 3-state bar word + colours.** `stop`(196) / `wait`(178) /
+      `loop`(40 green), all `bg=colour16`, painted on transition.
+- [x] **#315 — arm user-grace on typing.** A keystroke touches `user-took-over`
+      → bar does `stop → wait → loop`.
+- [x] **#345 — ESC-takeover.** A bare ESC (gated by `CL_ESC_TAKEOVER`) arms the
+      user-grace; ESC-led CSI/SS3 (arrows) don't.
+- [x] **#305 — boot-grace `wait`.** Bar reads `wait` during the boot window
+      (`CL_BOOT_GRACE_SEC`, `CL_WAIT`/`--no-wait`).
+- [x] **#351/#381 — AFK detection.** Atomic-combo TOGGLE (`CL_AFK_SPEC` /
+      `CL_AFK_WINDOW_MS` debounce) → `afk` marker on↔off, cleared on any other
+      keystroke + on boot. The combo is swallowed (never reaches claude).
 
-- [ ] **#302/#305 — 3-state bar word + colours.** Python paints
-      `stop` / `wait` / `loop` with current colours (`stop`=196, `wait`=178,
-      `loop`=**40 green**, all `bg=colour16`). Rust only knows `stop`(196) /
-      `loop`(**178 yellow, no bg**) → never shows `wait`, and `loop` is the
-      stale colour. Since the proxy *owns* `@cl_human` while alive, this is a
-      visible drift, not just a gap.
-- [ ] **#315 — arm user-grace on typing.** Python touches `user-took-over`
-      on a keystroke (loop backs off; bar does `stop → wait → loop`). Rust
-      doesn't.
-- [ ] **#345 — ESC-takeover.** A bare ESC (`_is_lone_esc`, gated by
-      `CL_ESC_TAKEOVER`) arms the user-grace. Absent in Rust.
-- [ ] **#305 — boot-grace `wait`.** Bar reads `wait` during the boot window
-      (`CL_BOOT_GRACE_SEC`, `CL_WAIT`/`--no-wait`). Absent in Rust.
-- [ ] **#351 — AFK detection.** Combo (`CL_AFK_SPEC`/`CL_AFK_WINDOW_MS`) →
-      `afk` marker, cleared on any other keystroke + on boot. **Absent in
-      Rust → `afk_key` is a no-op on Windows** (even though `cli.ts` already
-      exports the env). On Windows this MUST decode win32-input-mode per
-      keystroke (raw-byte compare never matches the win32 sequences).
-
-**Known bug to fix while porting AFK (affects the shared detector, Linux
-too):** `AfkDetector.feed` assumes *one keystroke per call*, but the proxy
-feeds the whole `read()` chunk. Two fast keystrokes coalesced into one read
-(e.g. `\x1b\x1b` for `esc esc`) match neither combo → the sequence is
-**missed** (and on the Python side degrades to a lone-ESC `wait`). Tests only
-ever feed per-keystroke, so it slipped through. Fix = split the read into
-individual keystrokes before feeding. On Windows the win32-input-mode decode
-yields discrete key-down events, so feeding per-decoded-key fixes it by
-construction; the shared/Linux fix is tracked separately.
+**The Windows-specific win on the double-frappe bug.** The shared
+`AfkDetector` assumes *one keystroke per feed*, but a raw read can coalesce
+several (fast key-repeat, or a combo glued to text). On Linux the splitter
+re-separates raw VT bytes. On Windows it's intrinsically clean: keystrokes
+arrive as **win32-input-mode** (`ESC[Vk;Sc;Uc;Kd;Cs;Rc_`), which is
+self-delineating — `split_units` parses one key per `_`-terminated CSI and
+decodes each to its VT form (`win32_to_vt`) before the detector, so coalesced
+input is split deterministically and `is_down`/modifier info is preserved
+(only key-DOWN events drive detection; combo key-UPs are swallowed too).
 
 ## Known limitation — double conhost
 
