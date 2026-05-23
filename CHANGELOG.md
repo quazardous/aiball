@@ -28,6 +28,14 @@ narrative for the product as a whole.
   project detail page shows a `running` status instead of a launch button, and
   `POST /api/projects/:name/launch` rejects with **409** if a loop is already
   heartbeating at that root (no accidental duplicate).
+- The sidebar `local`/`running` chip is now an **indicator only** (no link); the
+  link to the project detail lives in the Projects page (Settings → Projects).
+- **Exact root↔project attribution** (migration 0029, `consumers.project`): a
+  claude-loop now pushes its **project** alongside its root, so a project is
+  marked `local`/`running` from the loop's *own* project — not from every
+  project the consumer ever posted on. (Consumers that haven't re-heartbeated
+  yet fall back to the previous authored-content heuristic, self-healing on the
+  next heartbeat.)
 
 ## [0.8.0] — 2026-05-23
 

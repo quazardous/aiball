@@ -45,6 +45,9 @@ export interface Consumer {
     /** #393: the loop's working directory (project root), pushed by the
      *  state heartbeat. null for humans / non-loop / pre-#393 loops. */
     cwd?: string | null;
+    /** #393 (Option A): the loop's project, pushed alongside cwd → exact
+     *  root↔project attribution. null = authored-content fallback. */
+    project?: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -65,6 +68,7 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         state_human: r.stateHuman == null ? null : r.stateHuman === 1,
         state_human_word: (r.stateHumanWord as HumanWord | null) ?? null,
         cwd: r.cwd ?? null,
+        project: r.project ?? null,
         created_at: r.createdAt,
         updated_at: r.updatedAt,
     };
@@ -122,6 +126,7 @@ export function setConsumerState(
     human?: boolean,
     humanWord?: HumanWord,
     cwd?: string,
+    project?: string,
 ): void {
     if (!consumer_id) return;
     const now = nowIso();
@@ -142,6 +147,8 @@ export function setConsumerState(
     if (humanWord !== undefined) patch.stateHumanWord = humanWord;
     // #393: the loop's root, pushed on each heartbeat. Only set when reported.
     if (cwd !== undefined) patch.cwd = cwd;
+    // #393 (Option A): the loop's project, pushed alongside cwd → exact attribution.
+    if (project !== undefined) patch.project = project;
     if (changed) patch.stateSince = now;
     getDb().update(schema.consumers)
         .set(patch)

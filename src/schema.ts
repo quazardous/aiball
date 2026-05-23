@@ -412,6 +412,15 @@ export const consumers = sqliteTable("consumers", {
      * NULL for humans, non-loop consumers, and pre-#393 loops.
      */
     cwd: text("cwd"),
+    /**
+     * #393 (Option A): the loop's project, pushed alongside `cwd` by the
+     * state heartbeat. Lets the daemon attribute the root to EXACTLY this
+     * project (root↔project) instead of the broad authored-content heuristic
+     * that over-tags every project the consumer ever posted on. NULL for
+     * humans, non-loop consumers, and pre-Option-A loops (→ authored-content
+     * fallback in listProjectsDetailed).
+     */
+    project: text("project"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (t) => [

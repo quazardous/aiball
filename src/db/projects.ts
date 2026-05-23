@@ -573,29 +573,40 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
 
     // #393: derive "local" — a project is local when a claude-loop with a known
     // root has worked it. The root comes from consumers.cwd (pushed by the loop's
-    // state heartbeat, Phase 1); we link a rooted consumer to a project via the
-    // content it authored there (comments + root tickets). The root persists even
-    // when the loop is stopped, so "local" = "root known → can (re)launch" (the
-    // live running-state is shown per-consumer on the project detail page).
+    // state heartbeat). The root persists even when the loop is stopped, so
+    // "local" = "root known → can (re)launch".
     const rootsByProject = new Map<string, Set<string>>();
-    const addRoot = (project: string, cwd: string | null | undefined) => {
+    const addRoot = (project: string | null | undefined, cwd: string | null | undefined) => {
         if (!project || !cwd) return;
         let s = rootsByProject.get(project);
         if (!s) { s = new Set<string>(); rootsByProject.set(project, s); }
         s.add(cwd);
     };
-    const rootedCwd = sql`${schema.consumers.cwd} IS NOT NULL AND ${schema.consumers.cwd} != ''`;
+    // #393 (Option A) — PRIMARY: exact root↔project straight from the consumer's
+    // own pushed (project, cwd). No ticket join → no over-attribution (a loop is
+    // attributed to EXACTLY its project, not every project the consumer posted on).
+    for (const r of db.select({ project: schema.consumers.project, cwd: schema.consumers.cwd })
+        .from(schema.consumers)
+        .where(sql`${schema.consumers.cwd} IS NOT NULL AND ${schema.consumers.cwd} != ''
+            AND ${schema.consumers.project} IS NOT NULL AND ${schema.consumers.project} != ''`)
+        .all()) addRoot(r.project, r.cwd);
+    // #393 phase-1 FALLBACK — only for consumers that pushed a cwd but NO project
+    // (pre-Option-A loop, or not-yet-re-heartbeated): recover the root via authored
+    // content (comments + root tickets). Self-heals to the exact path above on the
+    // consumer's next heartbeat; over-attribution is confined to these legacy rows.
+    const rootedNoProject = sql`${schema.consumers.cwd} IS NOT NULL AND ${schema.consumers.cwd} != ''
+        AND (${schema.consumers.project} IS NULL OR ${schema.consumers.project} = '')`;
     for (const r of db.select({ project: schema.tickets.project, cwd: schema.consumers.cwd })
         .from(schema.consumers)
         .innerJoin(schema.messages, eq(schema.messages.byAgent, schema.consumers.consumerId))
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
-        .where(rootedCwd)
+        .where(rootedNoProject)
         .groupBy(schema.tickets.project, schema.consumers.cwd)
         .all()) addRoot(r.project, r.cwd);
     for (const r of db.select({ project: schema.tickets.project, cwd: schema.consumers.cwd })
         .from(schema.consumers)
         .innerJoin(schema.tickets, eq(schema.tickets.byAgent, schema.consumers.consumerId))
-        .where(rootedCwd)
+        .where(rootedNoProject)
         .groupBy(schema.tickets.project, schema.consumers.cwd)
         .all()) addRoot(r.project, r.cwd);
     // #393 (3c): which roots have a currently-heartbeating loop → `running`.
