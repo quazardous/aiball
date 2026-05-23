@@ -17,6 +17,20 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### `claude-loop restart` + SIGHUP self-restart (#388)
+
+- New **`claude-loop restart [name]`** — a HARD restart: kills claude + the tmux
+  session + the detached timer + the state dir, then relaunches the loop fresh
+  with the **same start config** (replayed from the plate: name, interval,
+  check-cmd, claude args, cwd). Unlike `reload` (timer-only, claude survives),
+  this is a full stop+start. Detached + `--no-attach` — reconnect with
+  `claude-loop attach <name>`.
+- The detached timer now traps **SIGHUP**: it spawns a detached `restart` and
+  exits, so `kill -HUP <timer.pid>` is a self-service hard restart. (The handler
+  delegates to a detached child precisely so it survives killing its own
+  session/pid.) A remote/UI trigger can hard-restart a project's loop just by
+  sending SIGHUP to the timer pid — no out-of-session supervisor needed.
+
 ### Fix: an anonymous local call no longer wakes the `human` consumer (#386)
 
 - A Unix-socket (local-trust) request **without** an `X-Aiball-Consumer` header

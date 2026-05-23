@@ -856,6 +856,20 @@ async function mainPoll(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+    // #388: SIGHUP = hard self-restart. The timer can't rm+start itself inline
+    // (rm kills its own tmux session AND this very pid mid-handler), so delegate
+    // to a DETACHED `claude-loop restart <name>` that survives the teardown,
+    // then exit. So `kill -HUP <timer_pid>` is the self-service hard restart.
+    process.on("SIGHUP", () => {
+        if (name) {
+            try {
+                const bin = join(installRoot(), "bin", "claude-loop");
+                const child = spawn(bin, ["restart", name], { detached: true, stdio: "ignore" });
+                child.unref();
+            } catch { /* best effort — exit regardless */ }
+        }
+        process.exit(0);
+    });
     if (isInternalCheckCmd(checkCmd)) {
         await mainSse();
     } else {
