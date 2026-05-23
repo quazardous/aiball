@@ -17,6 +17,22 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Fix: deterministic write rejections no longer vanish into the spool (#389)
+
+- The CLI/MCP client treated the file spool as a catch-all fallback: **any**
+  failed `POST /api/messages` was queued for later replay. But a deterministic
+  4xx (e.g. a non-reporter trying to `close` someone else's ticket → 403) would
+  only fail again identically at replay and get dumped into `spool/failed/` —
+  so the call returned a misleading `queued: true` and the comment body was
+  **silently lost** (9 such closes lost since 2026-05-11).
+- The client now distinguishes a deterministic client error (4xx — surfaced to
+  the caller immediately, so the agent sees "post `ticket_resolved` instead")
+  from a transport/daemon failure (connection refused, timeout, 5xx — still
+  spooled for replay).
+- `aiball status` now counts and warns on `spool/failed/` (it only ever showed
+  `N pending` from the spool root, so a growing graveyard of lost writes was
+  invisible).
+
 ### `claude-loop restart` + SIGHUP self-restart (#388)
 
 - New **`claude-loop restart [name]`** — a HARD restart: kills claude + the tmux

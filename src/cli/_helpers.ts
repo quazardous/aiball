@@ -87,13 +87,18 @@ export function fmtWhoami(v: { consumer_id: string; cwd: string; source: string;
     return lines.join("\n");
 }
 
-export function fmtStatus(v: { daemon_up: boolean; url: string; paths: { home: string; db: string; db_size: number; spool_dir: string }; spool_pending: number }): string {
+export function fmtStatus(v: { daemon_up: boolean; url: string; paths: { home: string; db: string; db_size: number; spool_dir: string }; spool_pending: number; spool_failed?: number }): string {
     const lines = [
         v.daemon_up ? `daemon: up at ${v.url}` : `daemon: DOWN (${v.url})`,
         `home:   ${v.paths.home}`,
         `db:     ${v.paths.db}${v.paths.db_size ? ` (${fmtBytes(v.paths.db_size)})` : " (missing)"}`,
         `spool:  ${v.spool_pending} pending (${v.paths.spool_dir})`,
     ];
+    // #389: only show the graveyard line when it's non-empty — a clean tree
+    // shouldn't carry noise, but a backlog of rejected writes must be visible.
+    if (v.spool_failed && v.spool_failed > 0) {
+        lines.push(`        ⚠ ${v.spool_failed} failed (${v.paths.spool_dir}/failed) — rejected writes that never landed`);
+    }
     return lines.join("\n");
 }
 

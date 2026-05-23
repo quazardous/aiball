@@ -118,7 +118,7 @@ export class AiballClient {
             });
             if (!res.ok) {
                 const txt = await res.text().catch(() => "");
-                throw new Error(`${method} ${path} → ${res.status}: ${txt}`);
+                throw httpError(method, path, res.status, txt);
             }
             const ct = res.headers.get("content-type") ?? "";
             if (ct.includes("application/json")) return (await res.json()) as T;
@@ -150,7 +150,7 @@ export class AiballClient {
                         const text = Buffer.concat(chunks).toString("utf8");
                         const status = res.statusCode ?? 0;
                         if (status < 200 || status >= 300) {
-                            reject(new Error(`${method} ${path} → ${status}: ${text}`));
+                            reject(httpError(method, path, status, text));
                             return;
                         }
                         const ct = res.headers["content-type"] ?? "";
@@ -176,13 +176,26 @@ export class AiballClient {
         });
     }
 
-    /** Try to POST a new message; on failure, queue it in the spool. */
+    /**
+     * Try to POST a new message; on failure, queue it in the spool.
+     *
+     * The spool is a *daemon-unreachable* fallback, NOT a catch-all (#389).
+     * A deterministic client error (HTTP 4xx — bad request, forbidden close,
+     * unknown tag…) would only fail again identically at replay and get
+     * silently dumped into spool/failed/, losing the body. So we re-throw 4xx
+     * to the caller (the MCP tool surfaces it to the agent synchronously) and
+     * spool only on transport failures or 5xx (daemon down / transient).
+     */
     async postMessage(
         msg: Record<string, unknown>,
     ): Promise<unknown | SpoolResult> {
         try {
             return await this.http("POST", "/api/messages", msg);
-        } catch {
+        } catch (e) {
+            const status = (e as { status?: number }).status;
+            if (typeof status === "number" && status >= 400 && status < 500) {
+                throw e;
+            }
             return this.spoolDrop(msg);
         }
     }
@@ -770,6 +783,25 @@ export class AiballClient {
     health() {
         return this.http<{ ok: boolean; ts: string }>("GET", "/api/health");
     }
+}
+
+/**
+ * Build an Error carrying the HTTP `status`, so callers (notably
+ * postMessage's spool fallback, #389) can tell a deterministic client
+ * error (4xx — retrying won't help) from a transport/server failure
+ * (connection refused, timeout, 5xx — worth spooling for replay).
+ */
+function httpError(
+    method: string,
+    path: string,
+    status: number,
+    body: string,
+): Error {
+    const err = new Error(`${method} ${path} → ${status}: ${body}`) as Error & {
+        status?: number;
+    };
+    err.status = status;
+    return err;
 }
 
 function query(q: Record<string, string | number | undefined>): string {

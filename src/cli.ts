@@ -92,6 +92,14 @@ program
         if (existsSync(spoolDir)) {
             spoolCount = readdirSync(spoolDir).filter((f) => f.endsWith(".json")).length;
         }
+        // #389: the failed/ subdir is a graveyard of rejected writes (each a
+        // message that never landed). It was invisible here — surface it so a
+        // growing backlog of lost comments is noticed instead of silent.
+        const failedDir = join(spoolDir, "failed");
+        let spoolFailed = 0;
+        if (existsSync(failedDir)) {
+            spoolFailed = readdirSync(failedDir).filter((f) => f.endsWith(".json")).length;
+        }
         const dbPath = join(home, "aiball.db");
         let dbSize = 0;
         if (existsSync(dbPath)) {
@@ -112,6 +120,7 @@ program
                 spool_dir: spoolDir,
             },
             spool_pending: spoolCount,
+            spool_failed: spoolFailed,
             daemon: daemonInfo,
         };
         out(payload, gOpts(cmd), fmtStatus);
