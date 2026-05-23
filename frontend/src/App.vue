@@ -668,6 +668,7 @@ watch(showSnoozed, (v) => {
                 @open-panel="openPanel"
                 @new-ticket="panel = 'compose'"
                 @open-current-settings="project && openProjectPage(project, 'settings')"
+                @open-detail="(name: string) => openProjectPage(name, 'detail')"
             />
 
             <main class="aiball-main">
