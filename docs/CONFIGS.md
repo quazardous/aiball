@@ -115,14 +115,16 @@ providers:
   tailscale:
     enabled: true       # default true when the block is present
     autostart: true     # bring up with the daemon (ExecStartPost). default true
-    mode: https         # https (default) | http  → aiball-tailscale up [--http]
-    # port: 8443        # optional listen port override → --port
+    mode: https         # https (default) | http
+    # port: 8443        # optional listen port override (default 443/80)
   # cloudflared: { … }  # future, same shape
 ```
 
-Manage from the CLI: `aiball providers status | up [--all] | down`. A present
-provider block defaults `enabled`/`autostart` to true (declaring it = wanting
-it). The bring-up reuses `bin/aiball-tailscale` (see [`TAILSCALE.md`](./TAILSCALE.md)).
+Set it up with `aiball init tailscale [--http] [--port N]`; manage from the CLI:
+`aiball providers status | up [--all] | down`. A present provider block defaults
+`enabled`/`autostart` to true (declaring it = wanting it). The bring-up calls
+`tailscale serve` directly (inlined in `src/providers.ts` since #380; see
+[`TAILSCALE.md`](./TAILSCALE.md)).
 
 > Activation note: the `ExecStartPost` lives in the shipped unit
 > (`systemd/aiball.service`). An existing install picks it up after a re-run

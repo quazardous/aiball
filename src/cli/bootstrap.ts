@@ -13,7 +13,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { Command } from "commander";
+import { parseDocument } from "yaml";
 import { die, userCwd, resolveInstallRoot } from "./_helpers.js";
+import { globalConfigPath } from "../autopoll/config.js";
 
 /**
  * Shared `mcp init` body so both `aiball mcp init` and the combined
@@ -110,6 +112,50 @@ export async function bootstrapInit(opts: { force?: boolean; stopHook?: boolean;
     process.stdout.write(`Run \`aiball check\` to verify everything resolves.\n`);
 }
 
+/**
+ * #380: write the `providers.tailscale` block into the GLOBAL config
+ * (`~/.config/aiball/config.yaml`). Uses the yaml Document API so existing
+ * keys AND comments are preserved — only the tailscale entry is set. Remote
+ * access is host-level, so this is global (not per-project `.aiball.yaml`).
+ */
+function initTailscale(opts: { http: boolean; port?: number; autostart: boolean }): void {
+    const path = globalConfigPath();
+    let doc;
+    try {
+        doc = parseDocument(existsSync(path) ? readFileSync(path, "utf8") : "");
+    } catch {
+        die(`init tailscale: ${path} exists but isn't valid YAML — fix or remove it first`);
+    }
+    const entry: Record<string, unknown> = {
+        enabled: true,
+        autostart: opts.autostart,
+        mode: opts.http ? "http" : "https",
+    };
+    if (opts.port !== undefined) entry.port = opts.port;
+    doc.setIn(["providers", "tailscale"], entry);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, doc.toString(), "utf8");
+
+    process.stdout.write(
+        [
+            `Wrote providers.tailscale → ${path}`,
+            ``,
+            `  providers:`,
+            `    tailscale:`,
+            `      enabled: true`,
+            `      autostart: ${opts.autostart}`,
+            `      mode: ${opts.http ? "http" : "https"}`,
+            ...(opts.port !== undefined ? [`      port: ${opts.port}`] : []),
+            ``,
+            `Apply autostart-at-boot (regenerates the systemd unit, then restart):`,
+            `  bash install.sh && systemctl --user restart aiball`,
+            `Or bring it up right now (no restart):  aiball providers up`,
+            `Check:  aiball status`,
+            ``,
+        ].join("\n"),
+    );
+}
+
 export function registerBootstrapCommands(program: Command): void {
     const mcp = program
         .command("mcp")
@@ -134,7 +180,7 @@ export function registerBootstrapCommands(program: Command): void {
      * flip autopoll on. The verbose annotated template lives at
      * `.aiball.yaml.example` for users who want to tune knobs.
      */
-    program
+    const initCmd = program
         .command("init")
         .description("Bootstrap a project: write .mcp.json + .aiball.yaml (combines `mcp init` + `autopoll init`)")
         .option("--force", "Overwrite existing entries (passes through to both subactions)")
@@ -142,6 +188,23 @@ export function registerBootstrapCommands(program: Command): void {
         .option("--global", "With --stop-hook, write to ~/.claude/settings.json instead of <PWD>/.claude/settings.json (fires in every Claude Code session)")
         .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean }) => {
             await bootstrapInit(opts);
+        });
+
+    // #380: `aiball init tailscale` — configure host-level remote access by
+    // writing the `providers.tailscale` block to the GLOBAL config. The daemon
+    // brings it up at boot (systemd ExecStartPost) or via `aiball providers up`.
+    initCmd
+        .command("tailscale")
+        .description("Configure tailscale remote access (writes providers.tailscale to ~/.config/aiball/config.yaml)")
+        .option("--http", "Serve plain HTTP on :80 instead of HTTPS on :443 (no certs)")
+        .option("--port <n>", "Listen-port override (default 443 https / 80 http)")
+        .option("--no-autostart", "Configure but don't bring it up automatically with the daemon")
+        .action((o: { http?: boolean; port?: string; autostart?: boolean }) => {
+            initTailscale({
+                http: o.http === true,
+                port: o.port !== undefined ? Number(o.port) : undefined,
+                autostart: o.autostart !== false,
+            });
         });
 
     // `aiball stop-hook install [--global]` — standalone wiring command,

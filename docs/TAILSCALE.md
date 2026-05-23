@@ -1,8 +1,12 @@
-# aiball over Tailscale — remote access (#B.182)
+# aiball over Tailscale — remote access (#B.182, #354, #380)
 
 Read the inbox / moderate / drop tickets from your phone (or any
 other device) while away from the aiball host, without exposing
 aiball to the public internet.
+
+Remote access is a **host-level provider** managed by the daemon — there's no
+manual command to run each time. You configure it once; the daemon brings it up
+at boot.
 
 ## Quickstart
 
@@ -10,36 +14,58 @@ aiball to the public internet.
 
 1. Install Tailscale + log in:
    <https://tailscale.com/download>, then `sudo tailscale up`.
-2. Expose the daemon to your tailnet:
+2. Configure the tailscale provider (writes the global `providers:` block):
    ```bash
-   aiball-tailscale up                 # HTTPS on :443 (needs MagicDNS HTTPS)
-   aiball-tailscale up --http          # plain HTTP on :80 (fallback if HTTPS fails)
+   aiball init tailscale            # HTTPS on :443 (needs MagicDNS HTTPS)
+   aiball init tailscale --http     # plain HTTP on :80 (fallback if HTTPS fails)
    ```
-   The command prints the reachable URL — note it (e.g.
-   `https://<your-host>.<tailnet>.ts.net/`).
+3. Apply it so the daemon brings it up automatically at every boot
+   (regenerates the systemd unit's autostart hook, then restarts):
+   ```bash
+   bash install.sh && systemctl --user restart aiball
+   ```
+   Or bring it up right now without a restart: `aiball providers up`.
+4. Confirm + get the URL:
+   ```bash
+   aiball status        # shows: proxy: tailscale [...] — up → https://<host>.<tailnet>.ts.net
+   ```
 
 **On every client** (phone, laptop, …) you want to reach aiball from:
 
-3. Install the Tailscale app:
+5. Install the Tailscale app:
    - Android: <https://play.google.com/store/apps/details?id=com.tailscale.ipn>
    - iOS: <https://apps.apple.com/app/tailscale/id1470499037>
    - Desktop: <https://tailscale.com/download>
-4. Sign in with the **same account** you used on the host.
-5. Enable the VPN toggle (the app asks for the permission once).
-6. Open the URL from step 2 in any browser → log in with your aiball
+6. Sign in with the **same account** you used on the host.
+7. Enable the VPN toggle (the app asks for the permission once).
+8. Open the URL from step 4 in any browser → log in with your aiball
    human credentials (created at install time via `--auth-init`).
 
 Verify from the host: `tailscale status` should now list the client.
 
-## Useful commands
+## Managing the provider
 
 ```bash
-aiball-tailscale status     # show current serve config + URL
-aiball-tailscale down       # un-expose (remove serve config)
+aiball providers status     # configured providers + live serve status + URL
+aiball providers up         # bring up every enabled provider now
+aiball providers down       # un-expose (tailscale serve reset)
+aiball status               # daemon + spool + the proxy line, all in one
 ```
 
-Auto-resolves the daemon port from `AIBALL_PORT`, the systemd
-`bind.conf` drop-in, or the 7777 default. Override with `--port`.
+Config lives in the **global** `~/.config/aiball/config.yaml` (remote access is
+host-level, not per-project — see [`CONFIGS.md`](./CONFIGS.md)):
+
+```yaml
+providers:
+  tailscale:
+    enabled: true       # default true when the block is present
+    autostart: true     # bring up with the daemon (systemd ExecStartPost)
+    mode: https         # https (default) | http
+    # port: 8443        # optional listen-port override (default 443/80)
+```
+
+The daemon auto-resolves the proxy target port from `AIBALL_PORT`, the systemd
+`bind.conf` drop-in, or the 7777 default.
 
 ## Security model
 
@@ -60,9 +86,12 @@ Auto-resolves the daemon port from `AIBALL_PORT`, the systemd
   enable MagicDNS. Or use the tailnet IP directly: `https://100.x.y.z/`.
 - **HTTPS cert warning** → MagicDNS HTTPS Certificates not enabled
   in the admin console (Settings → DNS → HTTPS Certificates).
-  Quick workaround: `aiball-tailscale down && aiball-tailscale up --http`.
+  Quick workaround: set `mode: http` (or `aiball init tailscale --http`)
+  then `aiball providers down && aiball providers up`.
 - **"connection refused"** → daemon down: `systemctl --user status aiball`.
-  Check `aiball-tailscale status` proxy target matches `127.0.0.1:<port>`.
+  Check `aiball providers status` proxy target matches `127.0.0.1:<port>`.
+- **proxy not up after a reboot** → the installed systemd unit predates the
+  autostart hook. Re-run `bash install.sh && systemctl --user restart aiball`.
 - **"401 authentication required"** → expected on first visit; log in
   with your human consumer credentials.
 

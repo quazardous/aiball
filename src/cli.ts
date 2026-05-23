@@ -22,6 +22,7 @@ import { registerAutopollCommands } from "./cli/autopoll.js";
 import { registerBootstrapCommands } from "./cli/bootstrap.js";
 import { registerConsumerCommands } from "./cli/consumer.js";
 import { registerProviderCommands } from "./cli/providers.js";
+import { providersStatus } from "./providers.js";
 import {
     URL,
     die,
@@ -109,6 +110,9 @@ program
                 /* ignore */
             }
         }
+        // #380: surface remote-access providers (configured + live serve
+        // status) so `aiball status` answers "is my tailscale proxy up?".
+        const providers = providersStatus();
         const payload = {
             daemon_up: up,
             url: URL,
@@ -121,6 +125,7 @@ program
             },
             spool_pending: spoolCount,
             spool_failed: spoolFailed,
+            providers,
             daemon: daemonInfo,
         };
         out(payload, gOpts(cmd), fmtStatus);

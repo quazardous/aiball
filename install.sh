@@ -177,8 +177,9 @@ mkdir -p "$PREFIX_BIN"
 ln -sf "$PREFIX_LIB/bin/aiball"           "$PREFIX_BIN/aiball"
 ln -sf "$PREFIX_LIB/bin/aiball-mcp"       "$PREFIX_BIN/aiball-mcp"
 ln -sf "$PREFIX_LIB/bin/claude-loop"      "$PREFIX_BIN/claude-loop"
-ln -sf "$PREFIX_LIB/bin/aiball-tailscale" "$PREFIX_BIN/aiball-tailscale"
-log "Symlinked $PREFIX_BIN/aiball, aiball-mcp, claude-loop, aiball-tailscale"
+# #380: tailscale is no longer a user command — it's an internal provider
+# managed by the daemon (`aiball providers` / autostart). No symlink.
+log "Symlinked $PREFIX_BIN/aiball, aiball-mcp, claude-loop"
 
 # --- systemd user service -------------------------------------------------
 
