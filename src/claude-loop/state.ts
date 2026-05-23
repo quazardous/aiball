@@ -80,6 +80,21 @@ export interface Plate {
      * missing.
      */
     started_at_sha?: string | null;
+    /**
+     * #390: remote-daemon connection. Present when the loop was started
+     * against a REMOTE aiball (machine A) over HTTP+token instead of the
+     * local Unix socket — `claude-loop start --aiball-url …`. Persisted so
+     * `restart` replays the same connection. The loop process + tmux pane +
+     * state files stay LOCAL (machine B); only the aiball data-plane
+     * (tickets/comments/pings/uploads) travels over HTTP. Absent/null = the
+     * default local-socket mode.
+     */
+    remote?: {
+        url: string;
+        token?: string;
+        consumer?: string;
+        project?: string;
+    } | null;
 }
 
 /**

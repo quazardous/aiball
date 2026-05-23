@@ -170,6 +170,12 @@ export function cmdRestart(name: string): void {
         "--name", name,
         "--interval", String(plate.interval),
         "--check-cmd", plate.check_cmd,
+        // #390: replay the remote-daemon connection so a hard restart of a
+        // remote loop stays remote (else it would fall back to a local socket).
+        ...(plate.remote?.url ? ["--aiball-url", plate.remote.url] : []),
+        ...(plate.remote?.token ? ["--aiball-token", plate.remote.token] : []),
+        ...(plate.remote?.consumer ? ["--consumer", plate.remote.consumer] : []),
+        ...(plate.remote?.project ? ["--project", plate.remote.project] : []),
         "--force",
         "--no-attach",
         ...(plate.claude_args.length ? ["--", ...plate.claude_args] : []),

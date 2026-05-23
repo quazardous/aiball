@@ -153,6 +153,18 @@ interface StartOpts {
     force?: boolean;
     /** Resume-picker auto-dismiss (#B.154): summary | as-is | abort. */
     resumeMode?: string;
+    /**
+     * #390: target a REMOTE aiball daemon over HTTP (http[s]://host:port)
+     * instead of the local Unix socket. Set → remote mode. The loop stays
+     * local; only the aiball data-plane is remote.
+     */
+    aiballUrl?: string;
+    /** #390: bearer token for the remote daemon (`aiball auth issue` on the host). */
+    aiballToken?: string;
+    /** #390: consumer id = loop identity (overrides resolved ctx.agent). */
+    consumer?: string;
+    /** #390: project name (overrides resolved ctx.project). */
+    project?: string;
     claudeArgs: string[];
 }
 
@@ -236,8 +248,30 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // process.env so the timer + hooks + claude spawn with the
     // right identity. Single source for every subcommand.
     const ctx = resolveProjectContext();
+    // #390: explicit flags override the resolved identity (the loop's
+    // consumer/project are passed at launch, independent of any local
+    // .aiball.yaml — David's "consumer_id pas propre au remote").
+    if (opts.consumer) ctx.agent = opts.consumer;
+    if (opts.project) ctx.project = opts.project;
     applyToProcessEnv(ctx);
     warnIfDeprecated(ctx);
+    // #390: remote-daemon mode. --aiball-url points the loop's aiball
+    // client at a REMOTE daemon over HTTP+token instead of the local
+    // socket. Exported into process.env BEFORE the auto-register call
+    // below so it (and the spawned claude session + its MCP server, which
+    // inherit this env) all reach machine A. The timer + hooks read the
+    // same values from the persisted env file (built further down).
+    if (opts.aiballUrl) {
+        if (!opts.aiballToken) {
+            die("--aiball-url requires --aiball-token (mint one on the daemon host with `aiball auth issue --consumer <id>`)");
+        }
+        process.env.AIBALL_URL = opts.aiballUrl;
+        process.env.AIBALL_TOKEN = opts.aiballToken;
+        // Critical: AIBALL_SOCK defaults to $AIBALL_HOME/sock; an empty
+        // value forces the TCP transport, else the client silently routes
+        // back to a local socket that isn't there on machine B.
+        process.env.AIBALL_SOCK = "";
+    }
     const cwd = ctx.cwd;
 
     // #B.216 david (979632): auto-register the project with the aiball
@@ -316,6 +350,15 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // #B.225: stamp the install-root SHA so `list` / `check` can
         // flag the daemon when source moves past what its timer loaded.
         started_at_sha: installRootSha(),
+        // #390: persist the remote connection so `restart` replays it.
+        remote: opts.aiballUrl
+            ? {
+                  url: opts.aiballUrl,
+                  token: opts.aiballToken,
+                  consumer: opts.consumer ?? ctx.agent,
+                  project: opts.project ?? ctx.project,
+              }
+            : null,
     };
     writePlate(sd, plate);
 
@@ -370,6 +413,17 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // a random uuid via AiballClient.
         ...(ctx.agent ? [`export AIBALL_AGENT=${shQuote(ctx.agent)}`] : []),
         ...(ctx.project ? [`export AIBALL_PROJECT=${shQuote(ctx.project)}`] : []),
+        // #390: remote-daemon connection for the timer + hooks (they source
+        // this file). Empty AIBALL_SOCK forces TCP — see the process.env
+        // note above. Mirrors what we exported into process.env for the
+        // claude session.
+        ...(opts.aiballUrl
+            ? [
+                  `export AIBALL_URL=${shQuote(opts.aiballUrl)}`,
+                  `export AIBALL_SOCK=`,
+                  ...(opts.aiballToken ? [`export AIBALL_TOKEN=${shQuote(opts.aiballToken)}`] : []),
+              ]
+            : []),
         // #274: the PTY proxy paints the human-presence segment of the
         // tmux bar directly (instant on keystroke). It needs the session
         // target + the tmux binary to call `set-option @cl_human` /
@@ -378,7 +432,13 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export MUX_CMD=${shQuote(MUX_CMD)}`,
         "",
     ];
-    writeFileSync(envPath(sd), envLines.join("\n"));
+    // #390: 0600 when the env file carries a bearer token — it's a secret
+    // at rest. (Default perms otherwise, unchanged for local loops.)
+    writeFileSync(
+        envPath(sd),
+        envLines.join("\n"),
+        opts.aiballToken ? { mode: 0o600 } : undefined,
+    );
 
     // Inline Claude Code settings JSON: register the Stop hook (which
     // execs the TS hook via tsx) for THIS session only — no
@@ -1186,11 +1246,18 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         // stays accepted as the explicit/back-compat form.
         .option("--wait", "Wait out the boot-grace for a possible human take-over before draining pre-existing pings at boot (#302). Opt-in — the default is --no-wait.")
         .option("--no-wait", "(default since #343) Assume no human at the terminal: eager boot drain, no boot-grace deferral.")
+        // #390: remote-daemon mode — run the loop locally but slave it to an
+        // aiball daemon on another host (tailscale/LAN), no local aiball needed.
+        .option("--aiball-url <url>", "#390: target a REMOTE aiball daemon over HTTP (http[s]://host:port) instead of the local socket. The loop, tmux pane and state stay local; only the data-plane is remote.")
+        .option("--aiball-token <token>", "#390: bearer token for the remote daemon (mint with `aiball auth issue --consumer <id>` on the daemon host). Required with --aiball-url.")
+        .option("--consumer <id>", "#390: consumer id = the loop's identity (overrides .aiball.yaml). Recommended with --aiball-url.")
+        .option("--project <name>", "#390: project name (overrides .aiball.yaml).")
         .allowExcessArguments(false)
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
             attach: boolean; startupPing: boolean; userGrace?: string; force?: boolean;
             resumeMode?: string; wait: boolean;
+            aiballUrl?: string; aiballToken?: string; consumer?: string; project?: string;
         }, command: Command) => {
             // #305 (option a): only forward `wait` when --wait/--no-wait was
             // ACTUALLY passed. Otherwise leave it undefined so cmdStart falls
@@ -1207,6 +1274,10 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 force: opts.force === true,
                 resumeMode: opts.resumeMode,
                 wait: waitExplicit ? opts.wait : undefined,
+                aiballUrl: opts.aiballUrl,
+                aiballToken: opts.aiballToken,
+                consumer: opts.consumer,
+                project: opts.project,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });
