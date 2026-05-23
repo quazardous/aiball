@@ -787,13 +787,12 @@ export function setTmuxStatus(
         // tmux splits `#{?cond,then,else}` on commas, so an unescaped one broke
         // the `loop` fallback entirely (the #278 bare-`claude-` guard never
         // actually fired). Escaped, the fallback renders when @cl_human is unset.
-        // #381 (david y59fp8): the static control-key hint `@cl_keys` (`· afk:f9`)
-        // tails the island, after the `[state]` tag. Seeded ONCE at loop start
-        // (cli.ts) since the afk_key never changes mid-session. The `#{?@cl_keys,…}`
-        // guard renders empty for sessions started before this segment existed
-        // (unset option) instead of a literal `#{@cl_keys}`. No commas in either
-        // branch → no `#,` escaping needed (cf. the @cl_human fallback below).
-        `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour40#,bg=colour16]loop} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}] ${name} #{@cl_state}#{?@cl_keys,#{@cl_keys},} `,
+        // #381 → #385 (david qyqwnw): the control-key hint moved OFF the left
+        // island to `status-right` (seeded in cli.ts: `AFK:<KEY> · DETACH:<prefix> d`).
+        // The status-left format below no longer carries `@cl_keys`; a leftover
+        // @cl_keys on a session started before this change is simply never
+        // referenced now (harmless — no literal renders).
+        `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour40#,bg=colour16]loop} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}] ${name} #{@cl_state} `,
     );
     setOpt("status-bg", bg);
     setOpt("status-fg", col.bar_fg);

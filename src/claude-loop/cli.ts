@@ -563,26 +563,31 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // (#B.149). SessionStart hook flips to idle/busy once claude is
     // actually ready. Color + label are driven by setTmuxStatus.
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-left-length", "90"], { stdio: "ignore" });
-    // #381 (david y59fp8): the default tmux status-right (host + date) is useless
-    // for a loop pane — clear it so the control-key hint can live on the LEFT
-    // (where david looks) without the bar fighting for room.
-    spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", ""], { stdio: "ignore" });
-    // #381 (david y59fp8): static control-key hint folded into the left island
-    // (`· afk:f9`). The afk_key is the only claude-loop control key; it never
-    // changes mid-session, so we seed `@cl_keys` ONCE here (setTmuxStatus leaves
-    // it alone). `off` when the spec is empty/invalid (AFK disabled above).
-    // #385 (david wstfea): the hint colours come from the bar colour profile —
-    // `· afk:` label dim (afk_label_fg), the key in bar_fg (black by default, so
-    // it reads on the state-coloured bar like the rest of the right-of-island text).
-    const afkKeyDisp = ctx.claude_loop.afk_key.trim();
-    const keysHint = afkSpecJson
-        ? `#[fg=${ctx.colors.afk_label_fg}] · afk:#[fg=${ctx.colors.bar_fg}]${afkKeyDisp}`
-        : `#[fg=${ctx.colors.afk_label_fg}] · afk:off`;
+    // #381 → #385 (david qyqwnw): the control-key hint moves to `status-right`,
+    // fully right-aligned ("met le hint complètement à droite"), uppercased, and
+    // now also surfaces the tmux DETACH shortcut. The default host+date
+    // status-right was useless for a loop pane, so this reclaims it. It's STATIC
+    // (afk_key + tmux prefix don't change mid-session), seeded once here;
+    // setTmuxStatus only ever rewrites status-left, so this survives every tick.
+    // Colours mirror the left island: label dim (afk_label_fg), value in bar_fg,
+    // both on the state-coloured status-bg.
+    const afkKeyDisp = ctx.claude_loop.afk_key.trim().toUpperCase();
+    // tmux DETACH = `<prefix> d` (default binding). Query the live prefix so the
+    // hint is accurate; fall back to the tmux default C-b.
+    const prefixRes = spawnSync(MUX_CMD, ["show-option", "-gv", "prefix"], { encoding: "utf8" });
+    const detachDisp = `${(prefixRes.stdout ?? "").trim() || "C-b"} d`;
+    const afkPart = afkSpecJson
+        ? `#[fg=${ctx.colors.afk_label_fg}]AFK:#[fg=${ctx.colors.bar_fg}]${afkKeyDisp}`
+        : `#[fg=${ctx.colors.afk_label_fg}]AFK:OFF`;
+    const keysHint = `${afkPart} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
+    spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", keysHint], { stdio: "ignore" });
+    spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right-length", "50"], { stdio: "ignore" });
     // #274: seed the per-owner status-left segments so the static format
     // setTmuxStatus installs never renders an unset `#{@cl_*}` (empty is
     // fine; unset would show literally on some tmux). The proxy and
-    // setTmuxStatus take ownership from here.
-    for (const [opt, val] of [["@cl_human", "#[fg=colour178]loop"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_keys", keysHint]]) {
+    // setTmuxStatus take ownership from here. (#385: @cl_keys retired — the
+    // hint is status-right now, no longer referenced by the status-left format.)
+    for (const [opt, val] of [["@cl_human", "#[fg=colour178]loop"], ["@cl_proxy", ""], ["@cl_state", ""]]) {
         spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
     }
     // #281 strategy A: tell psmux to touch the human-typing marker natively
