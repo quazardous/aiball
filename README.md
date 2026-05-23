@@ -39,7 +39,7 @@ git clone https://github.com/quazardous/aiball.git && cd aiball
 # Lost it? re-mint with: aiball auth init
 
 # 2. Wire a project (per repo): writes .mcp.json + .aiball.yaml (idempotent)
-cd <your-project> && aiball init
+cd <your-project> && claude-loop init
 
 # 3. Launch a session in the loop (anything after -- is forwarded to claude)
 claude-loop -- --resume
