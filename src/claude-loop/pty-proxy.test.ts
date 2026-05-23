@@ -66,8 +66,9 @@ function replay(seq: string, afkSpec: string, windowMs = 400): Verdict[] {
     return r.stdout.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l) as Verdict);
 }
 
-const ALT_A = "[[27,97]]";   // afk_key "alt+a"  → ESC a   (combo atomique 2 octets)
-const CTRL_G = "[[7]]";      // afk_key "ctrl+g" → 0x07    (combo atomique 1 octet)
+const ALT_A = "[[27,97]]";   // afk_key "alt+a"   → ESC a    (combo atomique 2 octets)
+const CTRL_G = "[[7]]";      // afk_key "ctrl+g"  → 0x07     (combo atomique 1 octet)
+const ALT_ESC = "[[27,27]]"; // afk_key "alt+esc" → ESC ESC  (défaut #d3me34)
 
 // ---- combo atomique : un appui = un TOGGLE ---------------------------------
 
@@ -169,4 +170,30 @@ test("alternatives (ctrl+g OU alt+a) : chacun toggle", { skip: SKIP }, () => {
     assert.equal(v[0].afk_active, true);
     assert.equal(v[1].afk_active, false);
     assert.equal(v.map((r) => r.forward).join(""), "");
+});
+
+// ---- alt+esc (défaut #d3me34) : 1b1b atomique --------------------------------
+// alt+esc = octets ESC ESC. Contrat voulu par david : un SEUL ESC (le bug
+// rapporté) ne toggle PAS et reste une interruption ; le combo 1b1b toggle ;
+// un ESC en key-repeat (1b1b…) ne fait qu'UN toggle (debounce). NB : 1b1b est
+// byte-identique à un double-ESC mashé coalescé — collision documentée.
+test("alt+esc: un seul ESC ne toggle PAS, reste forwardé (interruption)", { skip: SKIP }, () => {
+    const v = replay("0 1b\n", ALT_ESC);
+    assert.equal(v.length, 1);
+    assert.equal(v[0].afk_fired, false);
+    assert.equal(v[0].forward, "1b");
+});
+
+test("alt+esc: 1b1b atomique → toggle, rien forwardé", { skip: SKIP }, () => {
+    const v = replay("0 1b1b\n", ALT_ESC);
+    assert.equal(v.at(-1)!.afk_fired, true);
+    assert.equal(v.at(-1)!.afk_active, true);
+    assert.equal(v.map((r) => r.forward).join(""), "");
+});
+
+test("alt+esc: ESC key-repeat (1b1b1b) → UN seul toggle (debounce)", { skip: SKIP }, () => {
+    const v = replay("0 1b1b1b\n", ALT_ESC);
+    const fired = v.filter((r) => r.afk_fired);
+    assert.equal(fired.length, 1);
+    assert.equal(v.at(-1)!.afk_active, true);
 });
