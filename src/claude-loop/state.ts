@@ -739,6 +739,34 @@ export function paneFooterShowsBusy(paneText: string, footerLines = 5): boolean 
 }
 
 /**
+ * True iff the visible pane shows Claude Code's "interrupted by user"
+ * notice (#345 B) — i.e. the human pressed ESC and claude bailed out
+ * mid-turn, leaving a half-done state once the prompt returns. Used to
+ * decorate the bar as `[idle:interrupted]` (no 4th LoopStatus — just a
+ * `:special` suffix, like `idle:user` / `idle:wait`).
+ *
+ * ⚠️ #345 : la chaîne EXACTE rendue par Claude Code n'est pas encore
+ * confirmée sur capture réelle (aucune fixture dans le repo ; au moment
+ * du dev les sessions live étaient busy/idle, pas interrompues). On
+ * matche le marqueur standard « interrupted by user » (couvre aussi
+ * « Request interrupted by user »), avec un scope élargi (12 dernières
+ * lignes non vides, vs 5 pour `busy`) car la notice remonte au-dessus du
+ * prompt rendu. À confirmer/affiner via #360 (le logger proxy) ou une
+ * capture d'interruption réelle. C'est de la DÉCORATION pure : un faux
+ * négatif retombe sur `[idle]`, un faux positif sur `[idle:interrupted]`
+ * — aucun impact sur le gating des wakes (qui, lui, lit `esc to interrupt`).
+ */
+export function paneShowsInterrupted(paneText: string, footerLines = 12): boolean {
+    const footer = paneText
+        .split("\n")
+        .map((l) => l.trimEnd())
+        .filter((l) => l.length > 0)
+        .slice(-footerLines)
+        .join("\n");
+    return /interrupted by user/i.test(footer);
+}
+
+/**
  * Special INTERNAL pane states (not errors) that should suppress
  * auto-wakes regardless of the `esc to interrupt` mid-turn signal.
  *

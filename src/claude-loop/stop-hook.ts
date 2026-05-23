@@ -17,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
+import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 
 function emit(): never {
@@ -107,6 +107,10 @@ function readPane(): string {
 (async () => {
     const paneText = readPane();
     const pane = snapshotPane(paneText);
+    // #345 B: claude a-t-il été interrompu (ESC) et bailé mid-turn ? Sert
+    // UNIQUEMENT à décorer la barre `[idle:interrupted]` (précédence sur
+    // `idle:user`) — aucun impact sur le gating des wakes.
+    const interrupted = paneShowsInterrupted(paneText);
     log(`FIRE — ${classifyTurn()} | ${formatPaneSnapshot(pane)} | checkCmd=${checkCmd}`);
     try {
         // #332: a recognized API/backend error crashed this turn. Don't
@@ -148,8 +152,11 @@ function readPane(): string {
             // for wakes" — we're actually deferring wakes. Surface
             // the user-grace caveat in the bar so the human reads it
             // as "claude IS at prompt, but we won't poke during grace".
-            setTmuxStatus(name!, "idle", "user");
-            log(`  → SUPPRESS (user-grace<${userGraceSec}s) became=idle:user`);
+            // #345 B: si claude a été interrompu, le marquer prime sur
+            // `user` (plus spécifique que « grace humaine en cours »).
+            const sub = interrupted ? "interrupted" : "user";
+            setTmuxStatus(name!, "idle", sub);
+            log(`  → SUPPRESS (user-grace<${userGraceSec}s) became=idle:${sub}`);
             emit();
         }
         // #B.198 david: "si pane=busy:true on attend 5 secondes de
@@ -221,8 +228,10 @@ function readPane(): string {
         } else {
             // Nothing to do — mark idle so the timer can take over.
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-            setTmuxStatus(name!, "idle");
-            log(`  → IDLE (no work) became=idle`);
+            // #345 B: garder le marqueur interrupted visible tant que le
+            // pane le montre, même hors user-grace.
+            setTmuxStatus(name!, "idle", interrupted ? "interrupted" : undefined);
+            log(`  → IDLE (no work) became=idle${interrupted ? ":interrupted" : ""}`);
         }
     } catch (e) {
         log(`  → ERROR ${(e as Error).message ?? String(e)}`);
