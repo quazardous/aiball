@@ -94,39 +94,22 @@ def _is_lone_esc(data: bytes) -> bool:
 
 
 def split_keystrokes(data: bytes, combos=None):
-    """#381c : éclate un read brut en touches INDIVIDUELLES (COMBO-AWARE).
-
-    Le détecteur AFK a un contrat « UNE touche par feed » (cf. _AfkDetector) —
-    mais `os.read` COALESCE : taper `esc esc` vite, ou un ESC en key-repeat,
-    livre `\\x1b\\x1b` (voire `\\x1b\\x1b\\x1b`) en UN seul read. L'ancien code
-    feedait le chunk entier comme « une touche » → `\\x1b\\x1b` matchait le
-    combo concaténé (ok) mais `\\x1b\\x1b\\x1b` retombait en ESC nu (clear_afk +
-    forward vers claude !), et surtout le RÉSULTAT dépendait du regroupement
-    des octets = non-déterministe (« parfois l'armement se corrompt », david
-    #381). On restaure l'invariant en re-séparant le chunk AVANT le détecteur :
-    deux ESC coalescés = deux touches ESC, exactement comme deux reads séparés.
-
-    COMBO-AWARE (sinon on casserait un combo ATOMIQUE multi-octets) :
-      - `esc esc` = DEUX combos d'1 octet → `\\x1b\\x1b` se sépare en 2 touches
-        ESC → la fenêtre 2-combos du détecteur fait le toggle (déterministe) ;
-      - `alt+esc` = UN combo de 2 octets (`\\x1b\\x1b`) → on le garde ENTIER,
-        sinon le détecteur (qui attend `\\x1b\\x1b` d'un coup) ne fire jamais.
-
-    Ordre de découpe : CSI (`\\x1b[…`) / SS3 (`\\x1bO.`) reconnus en PREMIER et
-    gardés entiers (flèches, F-keys — un combo `esc` d'1 octet ne doit pas voler
-    le préfixe `\\x1b` d'une flèche) ; puis un combo CONFIGURÉ qui matche à la
-    position courante (plus long d'abord) → unité atomique ; sinon un ESC isolé ;
-    sinon un run d'octets non-ESC gardé groupé (un paste reste un seul forward).
-
-    Fast-path : aucun ESC dans le chunk, ou AFK désactivé (pas de combo) → on
-    rend [data] tel quel — zéro changement de comportement.
+    """#381 (david s4r9n8) : éclate un read brut en touches INDIVIDUELLES pour
+    que le détecteur de COMBO ATOMIQUE (« 1 touche par feed ») voie chaque combo
+    ISOLÉ, même si l'OS l'a coalescé avec des octets voisins (key-repeat, ou un
+    combo collé à du texte). Ordre : CSI (`\\x1b[…`) / SS3 (`\\x1bO.`) gardés
+    ENTIERS (flèches, F-keys) ; un combo CONFIGURÉ qui matche à la position
+    courante (plus long d'abord) → unité atomique ; sinon un run d'octets gardé
+    jusqu'au prochain ESC OU prochain début de combo (un paste/texte reste un
+    seul forward ; un combo collé à du texte est bien détaché ; un ESC nu seul
+    devient sa propre unité via le garde j==i). Fast-path : aucun combo → [data].
     """
     if combos is None:
         combos = _AFK_COMBOS
-    if 0x1B not in data or not combos:
-        return [data]
     # Plus long d'abord : un combo long prime sur un préfixe plus court.
     combo_set = sorted({bytes(c) for c in combos if c}, key=len, reverse=True)
+    if not combo_set:
+        return [data]
     units = []
     i, n = 0, len(data)
     while i < n:
@@ -153,14 +136,14 @@ def split_keystrokes(data: bytes, combos=None):
             units.append(data[i:i + len(m)])
             i += len(m)
             continue
-        if b == 0x1B:              # ESC isolé (nu / alt+x non-combo)
-            units.append(data[i:i + 1])
-            i += 1
-            continue
-        # Run d'octets non-ESC → groupé en une seule unité (paste/texte).
+        # Run jusqu'au prochain ESC OU prochain DÉBUT de combo (un combo collé
+        # à du texte est ainsi détaché ; un paste/texte reste un seul forward ;
+        # un ESC nu seul devient sa propre unité via le garde j==i).
         j = i
-        while j < n and data[j] != 0x1B:
+        while j < n and data[j] != 0x1B and not any(data[j:j + len(c)] == c for c in combo_set):
             j += 1
+        if j == i:
+            j = i + 1
         units.append(data[i:j])
         i = j
     return units
@@ -282,70 +265,36 @@ def clear_afk():
 
 
 class _AfkDetector:
-    """Per-keystroke exact-match detector (mirror of afk-key.ts AfkDetector).
-
-    Fed ONE keystroke's bytes at a time with an injected `now` (seconds).
-    A single combo fires on exact match; a 2-combo sequence fires when the
-    2nd combo lands within `window_ms` of the 1st. Any other keystroke breaks
-    a pending sequence."""
+    """#381 (david s4r9n8) : détecteur de COMBO ATOMIQUE par frappe (mirror de
+    afk-key.ts AfkDetector). PLUS de séquence à 2 touches avec fenêtre : une
+    frappe qui matche EXACTEMENT l'un des combos configurés TOGGLE l'afk
+    immédiatement. `window_ms` ne survit que comme DEBOUNCE post-fire : un chord
+    maintenu key-repeat les mêmes octets (sinon N toggles) → pendant window_ms
+    après un fire, toute frappe composée UNIQUEMENT d'octets du combo est avalée
+    (un seul toggle net par appui physique). Toute autre frappe clôt le debounce."""
 
     def __init__(self, combos, window_ms):
-        self.combos = combos
+        self.combos = [bytes(c) for c in combos if c]
         self.window_ms = window_ms
-        self.first_at = None
-        # #381b (david t9kk9s : « le moteur doit oublier sur succès ET sur échec »).
-        # Cooldown post-fire + jeu d'octets du combo : après un toggle on AVALE les
-        # ESC résiduels (répétition clavier / tap surnuméraire) pendant window_ms
-        # au lieu de les laisser ré-armer le détecteur — voir feed().
         self.cooldown_until = 0.0
         self.last_residual = False
         self._combo_bytes = set()
-        for c in combos:
+        for c in self.combos:
             self._combo_bytes |= set(c)
 
     def feed(self, data, now):
         self.last_residual = False
         if not self.combos:
             return False
-        # #381b : OUBLIER SUR SUCCÈS. L'ambiguïté c1==c2 (esc==esc) faisait qu'un
-        # ESC traînant juste après un toggle réussi RÉ-ARMAIT le détecteur ; un
-        # esc isolé suivant complétait alors un combo FANTÔME et re-togglait (le
-        # « après le 1er esc esc une seule pression suffit » de david). Pendant
-        # window_ms après un fire, toute frappe composée UNIQUEMENT d'octets du
-        # combo est avalée (oubliée, ne ré-arme pas) ; toute autre frappe clôt le
-        # cooldown (l'humain agit pour de bon).
+        # Debounce : avale le key-repeat des octets du combo juste déclenché.
         if now < self.cooldown_until:
-            self.first_at = None
             if data and all(b in self._combo_bytes for b in data):
                 self.last_residual = True
                 return False
-            self.cooldown_until = 0.0
-        c1 = self.combos[0]
-        c2 = self.combos[1] if len(self.combos) > 1 else None
-        if c2 is None:
-            if data == c1:
-                self.cooldown_until = now + self.window_ms / 1000.0
-                return True
-            return False
-        # #381 : combo COALESCÉ en un seul read. Le PTY peut livrer les 2 combos
-        # d'un coup (ex. `esc esc` tapé vite → b"\x1b\x1b" en un read) ; sans ça
-        # `data` (2 octets) ne matchait NI c1 NI c2 → l'armement était
-        # non-déterministe selon le batching (« parfois ça se corrompt »). On
-        # reconnaît la concaténation → succès immédiat, atomique.
-        if data == c1 + c2:
-            self.first_at = None
+            self.cooldown_until = 0.0  # toute autre frappe clôt le debounce
+        if any(data == c for c in self.combos):
             self.cooldown_until = now + self.window_ms / 1000.0
-            return True
-        if (self.first_at is not None
-                and (now - self.first_at) * 1000 <= self.window_ms
-                and data == c2):
-            self.first_at = None
-            self.cooldown_until = now + self.window_ms / 1000.0
-            return True
-        if data == c1:
-            self.first_at = now
-            return False
-        self.first_at = None
+            return True  # TOGGLE
         return False
 
 
@@ -478,8 +427,6 @@ class _Decider:
         self.afk_combos = afk_combos
         self.esc_takeover = esc_takeover
         self.window_ms = window_ms
-        self.pending = None
-        self.pending_deadline = 0.0
         self.last_keystroke = 0.0
         # #381 : état afk LOGIQUE (le proxy est seul à écrire le marqueur après
         # le clear_afk de boot → ce booléen reste en phase avec le fichier). Sert
@@ -505,8 +452,6 @@ class _Decider:
             else:                          # était présent → on PART
                 d["markers"] += ["set_afk", "clear_user_grace"]
                 self.afk_active = True
-            self.pending = None
-            self.pending_deadline = 0.0
             d["word"] = "rest"
             return d
 
@@ -517,37 +462,10 @@ class _Decider:
         if self.afk.last_residual:
             return d
 
-        # (b) 1re combo d'une séquence à 2 → on la BUFFERISE (au lieu de la
-        #     forwarder) jusqu'à la fenêtre afk. #381 : on NE touche PAS l'afk
-        #     ici — ce 1er octet est AMBIGU (peut compléter le combo → toggle, ou
-        #     rester un ESC nu → takeover). Clear prématuré = c'était LUI qui
-        #     faisait qu'une seule pression suffisait à lever l'afk. La présence,
-        #     elle, est armée tout de suite (l'humain agit) ; un succès au coup
-        #     suivant la corrigera (clear_user_grace).
-        if (len(self.afk_combos) >= 2 and self.afk.first_at is not None
-                and data == self.afk_combos[0]):
-            self.pending = data
-            self.pending_deadline = now + self.window_ms / 1000.0
-            d["buffer"] = data
-            d["buffered_first"] = True
-            typing = is_typing_keystroke(data)
-            d["typing"] = typing
-            if typing:
-                d["markers"] += ["touch_marker", "touch_user_grace"]
-                self.last_keystroke = now
-            elif self.esc_takeover and _is_lone_esc(data):
-                d["lone_esc"] = True
-                d["markers"].append("touch_user_grace")
-            d["word"] = "stop" if typing else "rest"
-            return d
-
-        # (c) Frappe ordinaire. Si une 1re combo était bufferisée, le combo a
-        #     ÉCHOUÉ (cette touche n'est pas la 2e) → flush différé AVANT cette
-        #     frappe (ordre préservé), puis traitement normal.
-        if self.pending is not None:
-            d["forward"] += self.pending
-            self.pending = None
-            self.pending_deadline = 0.0
+        # (b) Frappe ordinaire → forward IMMÉDIAT. #381 (david s4r9n8) : plus de
+        #     buffering de la « 1re combo » (la séquence à 2 touches a disparu) →
+        #     l'ESC d'interruption atteint claude SANS le délai de 400ms qu'imposait
+        #     l'ancien buffer.
         if is_typing_keystroke(data):
             d["typing"] = True
             d["markers"] += ["clear_afk", "touch_marker", "touch_user_grace"]
@@ -563,20 +481,10 @@ class _Decider:
         return d
 
     def on_flush(self, now):
-        """Tick idle : flush différé du pending si sa deadline est passée
-        (combo échoué par timeout). L'appelant ne l'invoque que lorsqu'aucun
-        stdin n'est prêt ce tour (parité avec l'ancienne boucle)."""
-        d = {"event": "flush", "now": now, "raw": b"",
-             "forward": b"", "buffer": None, "markers": [], "word": None}
-        if self.pending is not None and now >= self.pending_deadline:
-            d["forward"] = self.pending
-            self.pending = None
-            self.pending_deadline = 0.0
-            # #381b : OUBLIER SUR ÉCHEC. La 1re combo a expiré sans 2e moitié →
-            # le combo a échoué : le détecteur oublie son armement (sinon first_at
-            # restait latché). David : « le moteur doit oublier [...] sur échec ».
-            self.afk.first_at = None
-        return d
+        """#381 : plus rien n'est bufferisé (la séquence à 2 a disparu) → le flush
+        est un no-op. Conservé pour la parité replay/main."""
+        return {"event": "flush", "now": now, "raw": b"",
+                "forward": b"", "buffer": None, "markers": [], "word": None}
 
 
 def _run_replay(args):
@@ -1088,13 +996,6 @@ def main(argv):
             else:
                 rems = [r for r in (_boot_grace_remaining(), _user_grace_remaining()) if r > 0.0]
                 timeout = min(rems) if rems else None
-            # #345: si une 1re combo est bufferisée, on doit se réveiller à sa
-            # deadline pour la flusher même si plus aucune frappe n'arrive.
-            if decider.pending is not None:
-                flush_rem = decider.pending_deadline - now_ts
-                if flush_rem < 0.0:
-                    flush_rem = 0.0
-                timeout = flush_rem if timeout is None else min(timeout, flush_rem)
             try:
                 ready, _, _ = select.select(rfds, [], [], timeout)
             except (InterruptedError, OSError):
@@ -1108,16 +1009,6 @@ def main(argv):
                     _paint_word(want)
                     current_word = want
 
-            # 0.5) #345 (david #xvswug): 1re combo bufferisée dont la fenêtre afk
-            #      a expiré SANS 2e combo, et aucun stdin ce tour → combo échoué.
-            #      Flush différé vers claude (= la frappe nue, ex. ESC = interruption,
-            #      juste retardée de ≤ afk_window). Si du stdin est prêt, on laisse
-            #      le handler ci-dessous décider (succès du combo / autre touche).
-            if decider.pending is not None and stdin_fd not in ready:
-                dec = decider.on_flush(datetime.datetime.now().timestamp())
-                if dec["forward"]:
-                    apply_decision(dec)
-
             # 1) Frappe humaine (tmux → nous → claude).
             if stdin_fd in ready:
                 try:
@@ -1125,16 +1016,13 @@ def main(argv):
                 except OSError:
                     data = b""
                 if data:
-                    # #360 : toute la logique frappe→action (succès combo AFK /
-                    # bufferisation 1re combo / frappe ordinaire + flush) est dans
-                    # le cœur PUR `_Decider` ; main n'applique que le résultat.
-                    # #381c : un read peut COALESCER plusieurs touches (esc esc,
-                    # key-repeat) → on le re-sépare en touches individuelles AVANT
-                    # le détecteur (contrat « 1 touche par feed »). Les unités d'un
-                    # même read partagent le même `now` (elles sont arrivées au
-                    # même instant) → la fenêtre/cooldown du détecteur les traite
-                    # comme des frappes simultanées, déterministe quel que soit le
-                    # batching de l'OS.
+                    # #360 : toute la logique frappe→action vit dans le cœur PUR
+                    # `_Decider` ; main n'applique que le résultat. #381 : un read
+                    # peut COALESCER plusieurs touches (key-repeat, combo collé à du
+                    # texte) → split_keystrokes les re-sépare AVANT le détecteur
+                    # (contrat « 1 touche par feed »), en gardant chaque combo
+                    # atomique isolé. Les unités d'un même read partagent le même
+                    # `now` → le debounce post-fire les traite comme simultanées.
                     now_stdin = datetime.datetime.now().timestamp()
                     units = split_keystrokes(data)
                     if _DEBUG_TTY:

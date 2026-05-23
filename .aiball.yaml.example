@@ -140,20 +140,24 @@ autopoll:
 #   # Default 600 (10 min).
 #   ask_grace_seconds: 600
 #
-#   # AFK combo (#351): press it to TOGGLE yourself away/back IMMEDIATELY (the
-#   # AskUserQuestion gate redirects while away, without waiting for the timeout);
-#   # resuming typing also clears it ("I'm back"). #381: the combo flips
-#   # away↔back, is robust to the keys arriving coalesced in one read, and
-#   # forgets its state after each toggle — a stray repeat ESC within
-#   # afk_window_ms is ignored, so a single later press can't re-toggle.
-#   # VS Code notation: `+` joins
-#   # modifiers, a space = a 2-combo sequence (e.g. "esc esc", "ctrl+a").
-#   # Only what the terminal emits as distinct bytes is supported (esc,
-#   # ctrl+<char>, f-keys, literals). Requires the PTY proxy. Default "esc esc".
-#   afk_key: "esc esc"
+#   # AFK combo (#351 / #381): press it to TOGGLE yourself away/back IMMEDIATELY
+#   # (the AskUserQuestion gate redirects while away, without waiting for the
+#   # timeout); resuming typing also clears it ("I'm back"). #381 (david s4r9n8):
+#   # it's now a SINGLE ATOMIC combo (chord), no 2-press timing sequence — the
+#   # sequence was irreparably ambiguous (key-repeat bytes == two deliberate
+#   # taps; and a bare ESC doubles as claude's interrupt key, so it's REJECTED).
+#   # VS Code notation: `+` joins modifiers; a SPACE means OR (alternatives, any
+#   # toggles), e.g. "ctrl+g ctrl+]". Only what the terminal emits as distinct
+#   # bytes is supported (ctrl+<char>, alt+<char>, f-keys, named keys, literals).
+#   # Prefer ctrl+<char>: it's a SINGLE byte → robust. An alt+ combo is ESC-
+#   # prefixed and tmux escape-time can split it (ESC then key) → unreliable.
+#   # The matched combo is SWALLOWED by the proxy (claude never sees it → you
+#   # lose that key for claude). Requires the PTY proxy. Default "ctrl+g".
+#   afk_key: "ctrl+g"
 #
-#   # Max milliseconds between the two combos of an afk_key sequence
-#   # (ignored for a single combo). Default 400.
+#   # Post-fire key-repeat DEBOUNCE in ms (#381): a held chord repeats the same
+#   # bytes; within this window after a toggle they're swallowed (one net toggle
+#   # per physical press). NOT a sequence window anymore. Default 400.
 #   afk_window_ms: 400
 
 # Workflow hints (#319). claude-loop "habille" the WAKE of a `feature`-intent

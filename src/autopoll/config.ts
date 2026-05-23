@@ -176,9 +176,14 @@ const DEFAULTS: AiballConfig = {
         user_grace_seconds: 60,
         wake_in_flight_ttl_ms: 2000,
         esc_takeover: true,
-        // #351: 10-min ask-grace, AFK = double-ESC within 400ms.
+        // #351 / #381: 10-min ask-grace. AFK = a single ATOMIC combo (default
+        // ctrl+g) that TOGGLES away/back — #381 (david s4r9n8) dropped the
+        // 2-press timing sequence (irreparably ambiguous: key-repeat bytes == two
+        // taps; and ESC doubles as claude's interrupt). ctrl+<char> is a single
+        // byte → robust (an alt+ combo is ESC-prefixed and can be split by tmux
+        // escape-time). afk_window_ms is now only a post-fire key-repeat debounce.
         ask_grace_seconds: 600,
-        afk_key: "esc esc",
+        afk_key: "ctrl+g",
         afk_window_ms: 400,
         // #305: no-wait by default (#343); a project flips it per-tree via
         // `.aiball.yaml claude_loop.wait: true`.

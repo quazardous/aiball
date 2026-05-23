@@ -1,4 +1,8 @@
-// #351 — afk_key parser + AFK detector. node:test + tsx (zero deps). Run: `npm test`.
+// #351 / #381 — afk_key parser + AFK detector. node:test + tsx (zero deps).
+// #381 (david s4r9n8): afk_key is one or more ALTERNATIVE atomic combos that
+// TOGGLE (no 2-press timing sequence); a space means OR. A bare ESC is rejected
+// (it doubles as claude's interrupt). `windowMs` survives only as a post-fire
+// key-repeat debounce. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseAfkKey, AfkDetector } from "./afk-key.js";
@@ -6,104 +10,66 @@ import { parseAfkKey, AfkDetector } from "./afk-key.js";
 // ---- parseAfkKey (pure: notation → byte combos) ----------------------
 
 test("parseAfkKey: single combos → byte sequences", () => {
-    assert.deepEqual(parseAfkKey("esc", 400).combos, [[0x1b]]);
     assert.deepEqual(parseAfkKey("ctrl+a", 400).combos, [[0x01]]);
     assert.deepEqual(parseAfkKey("ctrl+]", 400).combos, [[0x1d]]);
+    assert.deepEqual(parseAfkKey("ctrl+g", 400).combos, [[0x07]]);
     assert.deepEqual(parseAfkKey("a", 400).combos, [[0x61]]);
-    assert.deepEqual(parseAfkKey("alt+x", 400).combos, [[0x1b, 0x78]]);
+    assert.deepEqual(parseAfkKey("alt+a", 400).combos, [[0x1b, 0x61]]);
     assert.deepEqual(parseAfkKey("f9", 400).combos, [[0x1b, 0x5b, 0x32, 0x30, 0x7e]]);
 });
 
-test("parseAfkKey: 2-combo sequence + window carried through", () => {
-    const spec = parseAfkKey("esc esc", 400);
-    assert.deepEqual(spec.combos, [[0x1b], [0x1b]]);
-    assert.equal(spec.windowMs, 400);
-
-    assert.deepEqual(parseAfkKey("ctrl+a d", 250).combos, [[0x01], [0x64]]);
+test("parseAfkKey: space = alternatives (any toggles), windowMs carried", () => {
+    const spec = parseAfkKey("ctrl+g alt+a", 250);
+    assert.deepEqual(spec.combos, [[0x07], [0x1b, 0x61]]);
+    assert.equal(spec.windowMs, 250);
 });
 
-test("parseAfkKey: rejects empty / >2 combos / bad ctrl / unknown key", () => {
+test("parseAfkKey: rejects empty / bare-ESC / bad ctrl / unknown key", () => {
     assert.throws(() => parseAfkKey("", 400));
     assert.throws(() => parseAfkKey("   ", 400));
-    assert.throws(() => parseAfkKey("esc esc esc", 400)); // 3 combos
+    assert.throws(() => parseAfkKey("esc", 400));      // bare ESC = interrupt key
+    assert.throws(() => parseAfkKey("ctrl+g esc", 400)); // any combo bare-ESC
     assert.throws(() => parseAfkKey("ctrl+esc", 400)); // ctrl needs single char
-    assert.throws(() => parseAfkKey("f99", 400)); // unknown named key
+    assert.throws(() => parseAfkKey("f99", 400));      // unknown named key
 });
 
 // ---- AfkDetector (stateful, clock injected) --------------------------
 
-test("detector: single combo fires on exact match, ignores others", () => {
-    const d = new AfkDetector(parseAfkKey("esc", 400));
-    assert.equal(d.feed([0x61], 0), false); // 'a'
-    assert.equal(d.feed([0x1b], 0), true); // esc
-    // a bare ESC is NOT an ESC-led sequence (arrow key) → no false positive
-    const d2 = new AfkDetector(parseAfkKey("esc", 400));
-    assert.equal(d2.feed([0x1b, 0x5b, 0x41], 0), false); // up arrow
+test("detector: a combo match TOGGLES (fires each press), ignores others", () => {
+    const d = new AfkDetector(parseAfkKey("alt+a", 400));
+    assert.equal(d.feed([0x61], 0), false);            // 'a' alone ≠ alt+a
+    assert.equal(d.feed([0x1b, 0x61], 0), true);       // alt+a → fire (ON)
+    assert.equal(d.feed([0x1b, 0x61], 1000), true);    // alt+a again → fire (OFF)
 });
 
-test("detector: 2-combo fires only when 2nd is within the window", () => {
-    const d = new AfkDetector(parseAfkKey("esc esc", 400));
-    assert.equal(d.feed([0x1b], 0), false); // first esc
-    assert.equal(d.feed([0x1b], 200), true); // second esc within 400ms → fire
+test("detector: an ESC-led arrow key is not a combo (no false positive)", () => {
+    const d = new AfkDetector(parseAfkKey("alt+a", 400));
+    assert.equal(d.feed([0x1b, 0x5b, 0x41], 0), false); // up arrow
 });
 
-test("detector: 2nd combo past the window does not fire (restarts)", () => {
-    const d = new AfkDetector(parseAfkKey("esc esc", 400));
-    assert.equal(d.feed([0x1b], 0), false);
-    assert.equal(d.feed([0x1b], 500), false); // too late → becomes a new first
-    assert.equal(d.feed([0x1b], 600), true); // now within window of the restart
-});
-
-test("detector: #381 coalesced combo in one read fires (esc esc → [1b,1b])", () => {
-    const d = new AfkDetector(parseAfkKey("esc esc", 400));
-    assert.equal(d.feed([0x1b, 0x1b], 0), true); // both ESC in one chunk → fire at once
-    // distinct 2-combo coalesced too
-    const d2 = new AfkDetector(parseAfkKey("ctrl+a d", 400));
-    assert.equal(d2.feed([0x01, 0x64], 0), true); // ctrl+a then d, one chunk → fire
-});
-
-test("detector: an intervening keystroke resets the pending sequence", () => {
-    const d = new AfkDetector(parseAfkKey("esc esc", 400));
-    assert.equal(d.feed([0x1b], 0), false);
-    assert.equal(d.feed([0x78], 100), false); // 'x' breaks it
-    assert.equal(d.feed([0x1b], 150), false); // this is a fresh first, not the 2nd
-});
-
-test("detector: distinct 2-combo sequence (ctrl+a then d)", () => {
-    const d = new AfkDetector(parseAfkKey("ctrl+a d", 400));
-    assert.equal(d.feed([0x01], 0), false); // ctrl+a
-    assert.equal(d.feed([0x64], 100), true); // 'd' → fire
-    // wrong second key resets
-    const d2 = new AfkDetector(parseAfkKey("ctrl+a d", 400));
-    assert.equal(d2.feed([0x01], 0), false);
-    assert.equal(d2.feed([0x65], 100), false); // 'e' ≠ 'd'
-});
-
-test("detector: #381b forget-on-success — stray ESC after a fire never re-toggles", () => {
-    // The bug (david t9kk9s): esc esc fires, then a single ESC re-toggles. With
-    // c1==c2 a residual ESC re-armed the detector → a later lone ESC closed a
-    // phantom combo. Post-fire cooldown swallows those residuals.
-    const d = new AfkDetector(parseAfkKey("esc esc", 400));
-    assert.equal(d.feed([0x1b], 0), false); // first esc
-    assert.equal(d.feed([0x1b], 50), true); // second esc → fire (toggle)
-    // residual ESCs within the cooldown window: no fire, flagged residual.
-    assert.equal(d.feed([0x1b], 100), false);
+test("detector: #381 key-repeat debounce — held chord toggles once", () => {
+    const d = new AfkDetector(parseAfkKey("alt+a", 400));
+    assert.equal(d.feed([0x1b, 0x61], 0), true);       // fire → cooldown until 400
+    // key-repeat within the window: swallowed (residual), no re-toggle.
+    assert.equal(d.feed([0x1b, 0x61], 100), false);
     assert.equal(d.residual, true);
-    assert.equal(d.feed([0x1b], 300), false);
+    assert.equal(d.feed([0x1b, 0x61], 300), false);
     assert.equal(d.residual, true);
-    // past the cooldown: a clean restart — needs TWO close ESC again to re-fire.
-    assert.equal(d.feed([0x1b], 600), false); // fresh first, not residual
+    // past the window: a clean press fires again.
+    assert.equal(d.feed([0x1b, 0x61], 600), true);
     assert.equal(d.residual, false);
-    assert.equal(d.feed([0x1b], 650), true); // second → re-fire
 });
 
-test("detector: #381b a non-combo key during cooldown ends it (human is back)", () => {
-    const d = new AfkDetector(parseAfkKey("esc esc", 400));
-    assert.equal(d.feed([0x1b], 0), false);
-    assert.equal(d.feed([0x1b], 50), true); // fire → cooldown until 450
-    assert.equal(d.feed([0x61], 100), false); // 'a' within cooldown ≠ combo byte
-    assert.equal(d.residual, false); // not swallowed — cooldown is over
-    // and the detector is usable immediately after
-    assert.equal(d.feed([0x1b], 150), false); // fresh first
-    assert.equal(d.feed([0x1b], 200), true); // second → fire
+test("detector: a non-combo key during cooldown ends it (human is back)", () => {
+    const d = new AfkDetector(parseAfkKey("ctrl+g", 400));
+    assert.equal(d.feed([0x07], 0), true);             // fire → cooldown until 400
+    assert.equal(d.feed([0x61], 100), false);          // 'a' ≠ combo byte → ends cooldown
+    assert.equal(d.residual, false);
+    assert.equal(d.feed([0x07], 150), true);           // usable immediately → fire
+});
+
+test("detector: alternatives — any configured combo fires", () => {
+    const d = new AfkDetector(parseAfkKey("ctrl+g alt+a", 400));
+    assert.equal(d.feed([0x07], 0), true);             // ctrl+g → fire
+    assert.equal(d.feed([0x1b, 0x61], 1000), true);    // alt+a → fire
 });
