@@ -86,15 +86,48 @@ export function registerAuthCommands(program: Command): void {
         });
 
     auth.command("issue")
-        .description("Mint a long-lived agent token bound to a consumer. Used for CLI / MCP / sandbox clients.")
-        .requiredOption("--consumer <id>", "consumer_id to bind the token to (created on the fly if it doesn't exist)")
-        .option("--label <label>", "Human-readable label (e.g. 'laptop cli', 'sandbox-1')")
+        .description("Mint a long-lived agent token bound to a consumer (or a --node service token for #394 proxy mode). Used for CLI / MCP / sandbox / proxy clients.")
+        .option("--consumer <id>", "consumer_id to bind the token to (created on the fly if it doesn't exist). Required unless --node.")
+        .option("--label <label>", "Human-readable label (e.g. 'laptop cli', 'sandbox-1', 'B proxy node')")
         .option(
             "--kind <kind>",
             "Token kind: 'agent' (default) or 'auth' (web-style, normally minted by /login)",
             "agent",
         )
-        .action((opts: { consumer: string; label?: string; kind: string }) => {
+        .option(
+            "--node",
+            "Mint a NODE token instead — a trusted-proxy SERVICE token (#394), NOT bound to a consumer. It lets a proxy node assert relayed identities via x-aiball-consumer. Put it in the node's `proxy.token`.",
+        )
+        .action((opts: { consumer?: string; label?: string; kind: string; node?: boolean }) => {
+            // #394 volet C: a node token is a service credential for the proxy
+            // node — no consumer, kind 'node'. The daemon then trusts the
+            // forwarded x-aiball-consumer (X-Forwarded-For style).
+            if (opts.node) {
+                const t = issueToken({
+                    consumer_id: null,
+                    kind: "node",
+                    label: opts.label ?? "proxy node",
+                });
+                process.stdout.write([
+                    `NODE token issued (trusted-proxy service token, no consumer):`,
+                    ``,
+                    `  ${t.token}`,
+                    ``,
+                    `Put it in the proxy node's global config (machine B):`,
+                    `  proxy:`,
+                    `    url: <this daemon's URL>`,
+                    `    token: ${t.token}`,
+                    ``,
+                    `Or: aiball proxy init --url <A-url> --token ${t.token}`,
+                    `The node may then relay any local client's identity (x-aiball-consumer).`,
+                    `Keep it on the tailnet/LAN — it can assert any consumer.`,
+                    ``,
+                ].join("\n"));
+                return;
+            }
+            if (!opts.consumer) {
+                die("auth issue: --consumer <id> is required (or pass --node for a proxy service token)");
+            }
             if (opts.kind !== "agent" && opts.kind !== "auth") {
                 die(`auth issue: --kind must be 'agent' or 'auth' (got '${opts.kind}')`);
             }

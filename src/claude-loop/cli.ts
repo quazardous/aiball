@@ -31,6 +31,7 @@ import { AiballClient } from "../client.js";
 import { AIBALL_VERSION } from "../version.js";
 import { bootstrapInit } from "../cli/bootstrap.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
+import { readLocalRemote, writeLocalRemote } from "./local-config.js";
 import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
 import {
     DEFAULT_CHECK_CMD,
@@ -257,6 +258,16 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const startCwd = opts.cwd ? resolve(opts.cwd) : undefined;
     if (startCwd && !existsSync(startCwd)) {
         die(`--cwd path does not exist: ${startCwd}`);
+    }
+    // #394 volet A: a persisted remote config (`claude-loop init`) makes a plain
+    // `claude-loop start` reconnect to the same REMOTE aiball without re-passing
+    // flags. Explicit flags still win (only fill what wasn't passed).
+    const localRemote = readLocalRemote(startCwd ?? process.cwd());
+    if (localRemote) {
+        opts.aiballUrl ??= localRemote.url;
+        opts.aiballToken ??= localRemote.token;
+        opts.consumer ??= localRemote.consumer;
+        opts.project ??= localRemote.project;
     }
     const ctx = resolveProjectContext(startCwd ? { cwd: startCwd } : {});
     // #390: explicit flags override the resolved identity (the loop's
@@ -1219,6 +1230,46 @@ function splitClaudeArgs(argv: string[]): { wrapper: string[]; passthrough: stri
     return { wrapper: argv.slice(0, idx), passthrough: argv.slice(idx + 1) };
 }
 
+/**
+ * #394 volet A: persist a REMOTE aiball connection to `<cwd>/.aiball.local.yaml`
+ * so a plain `claude-loop start` (no flags) slaves to it. Folded into
+ * `claude-loop init` (which also bootstraps the project) — runs only when
+ * `--aiball-url` is passed. The file carries a token → chmod 600, git-ignored.
+ * Per-start flags still override per-launch.
+ */
+function cmdInitRemote(opts: {
+    aiballUrl?: string; aiballToken?: string; consumer?: string; project?: string;
+}): void {
+    if (!opts.aiballUrl) return; // only persist a remote when one is given
+    if (!opts.aiballToken) {
+        die("init: --aiball-token is required with --aiball-url (mint on the remote with `aiball auth issue --consumer <id>`)");
+    }
+    let p: string;
+    try {
+        p = writeLocalRemote(process.cwd(), {
+            url: opts.aiballUrl,
+            token: opts.aiballToken,
+            consumer: opts.consumer,
+            project: opts.project,
+        });
+    } catch (e) {
+        die(`init: ${(e as Error).message}`);
+    }
+    process.stdout.write([
+        `Wrote remote config → ${p} (chmod 600 — do NOT commit, it carries a token)`,
+        ``,
+        `  remote:`,
+        `    url: ${opts.aiballUrl}`,
+        `    token: ${opts.aiballToken.slice(0, 12)}…`,
+        ...(opts.consumer ? [`    consumer: ${opts.consumer}`] : []),
+        ...(opts.project ? [`    project: ${opts.project}`] : []),
+        ``,
+        `Now \`claude-loop start\` (no flags) in this dir slaves to the remote.`,
+        `Per-start flags still override. (.aiball.local.yaml is git-ignored.)`,
+        ``,
+    ].join("\n"));
+}
+
 function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
     return new Command()
         .description("Spawn a new claude-loop (default subcommand)")
@@ -1388,12 +1439,23 @@ async function main(): Promise<void> {
         .action(() => cmdDebugKeys());
     // #304 david: alias for `aiball init` — bootstrap a project (.mcp.json +
     // .aiball.yaml) without leaving the claude-loop workflow. Shares the body.
+    // #394 volet A: with --aiball-url, ALSO persist a REMOTE aiball connection
+    // to .aiball.local.yaml so a plain `claude-loop start` slaves to it.
     program.command("init")
-        .description("Alias for `aiball init` — bootstrap this project (.mcp.json + .aiball.yaml)")
+        .description("Bootstrap this project (.mcp.json + .aiball.yaml). With --aiball-url, also persist a REMOTE aiball connection (#394) so `start` slaves to it.")
         .option("--force", "Overwrite existing entries")
         .option("--stop-hook", "Also wire Claude Code's Stop hook into .claude/settings.json")
         .option("--global", "With --stop-hook, write to ~/.claude/settings.json (every Claude Code session)")
-        .action((opts: { force?: boolean; stopHook?: boolean; global?: boolean }) => bootstrapInit(opts));
+        .option("--aiball-url <url>", "#394: persist a REMOTE aiball URL (http[s]://host:port) so `start` (no flags) slaves to it")
+        .option("--aiball-token <token>", "#394: bearer token for the remote (required with --aiball-url; mint with `aiball auth issue --consumer <id>`)")
+        .option("--consumer <id>", "#394: loop identity = consumer_id (persisted with the remote)")
+        .option("--project <name>", "#394: project name (persisted with the remote)")
+        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; aiballUrl?: string; aiballToken?: string; consumer?: string; project?: string }) => {
+            // #394: persist the remote connection first (validates --aiball-token).
+            cmdInitRemote(opts);
+            // Existing behavior: bootstrap the project (.mcp.json + .aiball.yaml).
+            await bootstrapInit(opts);
+        });
 
     // -h / --help at top level → root help, not start help.
     if (sub === "-h" || sub === "--help" || sub === "help") {

@@ -30,20 +30,51 @@ tmux run (B); A is just the shared board.
 
 ## Proxy mode
 
-On B, add a `proxy:` block to the **global** config (`~/.config/aiball/config.yaml`)
-and run the daemon normally:
-
-```yaml
-proxy:
-  url: https://<A-host>:7777
-  token: aiball-<48 hex>      # mint on A: aiball auth issue --consumer <id>
-```
-
 The B daemon becomes a **transparent relay**: it forwards `/api/*` and
 `/uploads/*` to A (injecting the bearer), pipes A's SSE (`/api/events`) back to
 local subscribers, and keeps no local DB. Local clients on B talk to the UDS /
 `127.0.0.1` token-less, exactly as if A were local. If A is unreachable the proxy
 answers 502 and the local client spools the write for replay (#389).
+
+### The node token — why the proxy needs a *special* token
+
+A proxy node relays **many** local clients (loops, MCP, CLI, web UI), each with
+its **own** consumer identity. It forwards each caller's `x-aiball-consumer`
+header and injects **one** bearer for the whole node. So A must trust that header
+— but only *because* the node is legit. That's the **X-Forwarded-For model**: a
+whitelisted reverse-proxy is allowed to assert the real client.
+
+A regular **agent** token can't do this — for agent tokens the token wins and the
+header is ignored (everything would be attributed to the node). So the node uses
+a dedicated **node token** (`kind: node`): it proves the *node* is legit and lets
+it **assert** the relayed identity via `x-aiball-consumer` (auto-creating the
+consumer on first sight). A node token is **not** human — the delegated
+consumer's own privileges apply.
+
+> Identity, two ways: the **node token** proves the *node* is legit; a regular
+> **agent token** (#390 direct mode) proves the *consumer* is legit. Pick one.
+
+### Wiring (B → A) in two commands
+
+```bash
+# on A — mint the node service token (no consumer; it's the node's credential)
+aiball auth issue --node            #  → aiball-<48 hex>
+
+# on B — point this daemon at A as a proxy node (writes the proxy: block)
+aiball proxy init --url https://<A-host>:7777 --token aiball-<48 hex>
+systemctl --user restart aiball     # boot as a relay
+```
+
+`install.sh` can do the B side in one shot:
+`bash install.sh --proxy-url https://<A-host>:7777 --proxy-token aiball-<48 hex>`.
+
+Either way it writes the **global** config (`~/.config/aiball/config.yaml`):
+
+```yaml
+proxy:
+  url: https://<A-host>:7777
+  token: aiball-<48 hex>      # a NODE token: aiball auth issue --node
+```
 
 > Today the proxy relays the data plane; **launching a loop on B from A's web UI**
 > (#393) needs a reverse control channel (A→B) and is a follow-up — local launch
@@ -91,6 +122,24 @@ What the flags do:
 | `--aiball-token` | Bearer token from step 1 (**required** with `--aiball-url`). |
 | `--consumer`     | The loop's identity — overrides any local `.aiball.yaml`. Match the token. |
 | `--project`      | Project name — overrides any local `.aiball.yaml`. Use a per-platform name (e.g. `myapp-android`) until multi-agent-per-project (#391) lands. |
+
+#### Persist it — `claude-loop init` (so plain `start` reconnects)
+
+To avoid re-passing the flags every time, persist the connection once:
+
+```bash
+# on machine B, in the project dir
+claude-loop init \
+  --aiball-url   http://<A-host>:7777 \
+  --aiball-token aiball-<48 hex> \
+  --consumer     my-remote-agent \
+  --project      my-project
+```
+
+This writes a `remote:` block to `.aiball.local.yaml` (chmod `600`, **git-ignored**
+— it carries a token) **and** bootstraps the project (`.mcp.json` + `.aiball.yaml`,
+the existing `claude-loop init` behavior). Afterwards a plain **`claude-loop start`**
+(no flags) in that dir slaves to A; per-start flags still override.
 
 Under the hood the loop exports `AIBALL_URL` / `AIBALL_TOKEN` and an **empty
 `AIBALL_SOCK`** (which forces the TCP transport — otherwise the client defaults

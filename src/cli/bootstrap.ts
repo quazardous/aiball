@@ -156,6 +156,43 @@ function initTailscale(opts: { http: boolean; port?: number; autostart: boolean 
     );
 }
 
+/**
+ * #394 volet B: write the `proxy:` block into the GLOBAL config
+ * (`~/.config/aiball/config.yaml`) so this daemon boots as a transparent
+ * relay to a REMOTE aiball. Same Document-API approach as initTailscale —
+ * existing keys + comments are preserved; only `proxy` is set. Host-level
+ * (every local client on this host relays), so it's global, not per-project.
+ */
+function initProxy(opts: { url: string; token: string }): void {
+    const path = globalConfigPath();
+    let doc;
+    try {
+        doc = parseDocument(existsSync(path) ? readFileSync(path, "utf8") : "");
+    } catch {
+        die(`proxy init: ${path} exists but isn't valid YAML — fix or remove it first`);
+    }
+    doc.setIn(["proxy", "url"], opts.url);
+    if (opts.token) doc.setIn(["proxy", "token"], opts.token);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, doc.toString(), "utf8");
+
+    process.stdout.write(
+        [
+            `Wrote proxy → ${path}`,
+            ``,
+            `  proxy:`,
+            `    url: ${opts.url}`,
+            ...(opts.token ? [`    token: ${opts.token.slice(0, 12)}…`] : [`    token: (none — set one with --token)`]),
+            ``,
+            `This daemon will relay /api/* + /uploads/* to ${opts.url}.`,
+            `Mint the token on the REMOTE with:  aiball auth issue --node`,
+            `Apply:  systemctl --user restart aiball`,
+            `Check:  aiball status`,
+            ``,
+        ].join("\n"),
+    );
+}
+
 export function registerBootstrapCommands(program: Command): void {
     const mcp = program
         .command("mcp")
@@ -205,6 +242,19 @@ export function registerBootstrapCommands(program: Command): void {
                 port: o.port !== undefined ? Number(o.port) : undefined,
                 autostart: o.autostart !== false,
             });
+        });
+
+    // #394 volet B: `aiball proxy init` — configure this daemon as a transparent
+    // relay to a REMOTE aiball by writing the `proxy:` block to the GLOBAL config.
+    // The daemon picks it up at boot (createApp → proxy mode). Host-level.
+    const proxy = program.command("proxy").description("Proxy-node mode: relay this daemon to a remote aiball (#394)");
+    proxy
+        .command("init")
+        .description("Configure proxy-node mode (writes the proxy: block to ~/.config/aiball/config.yaml)")
+        .requiredOption("--url <url>", "Remote aiball URL to relay to (e.g. https://A-host:7777)")
+        .option("--token <token>", "Node service token (mint on the remote with `aiball auth issue --node`)")
+        .action((o: { url: string; token?: string }) => {
+            initProxy({ url: o.url, token: o.token ?? "" });
         });
 
     // `aiball stop-hook install [--global]` — standalone wiring command,

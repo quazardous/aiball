@@ -17,6 +17,23 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Remote/proxy ergonomics — one-command setup + node tokens (#394)
+
+- **`claude-loop init --aiball-url … --aiball-token … [--consumer --project]`**
+  now persists a `remote:` block to `.aiball.local.yaml` (chmod 600, git-ignored)
+  **and** bootstraps the project. Afterwards a plain **`claude-loop start`** (no
+  flags) reconnects to the same remote; per-start flags still override.
+- **`aiball proxy init --url … [--token …]`** writes the `proxy:` block to the
+  global config (no hand-editing YAML). **`install.sh --proxy-url … [--proxy-token …]`**
+  does the B side at install time (skips local `auth init` — a proxy node has no
+  local DB).
+- **Node tokens** (`aiball auth issue --node`, migration 0030 widens the
+  `tokens.kind` CHECK): a trusted-proxy **service token** (no consumer) that lets
+  a proxy node **assert** the relayed `x-aiball-consumer` (X-Forwarded-For model)
+  — so each relayed write keeps its real loop identity on the remote, instead of
+  all being attributed to the node. Not human; the delegated consumer's own
+  privileges apply. Regular agent tokens still ignore the header (token wins).
+
 ### Local projects — running indicator + single-loop launch gate (#393)
 
 - The projects list now shows, at a glance, **whether a claude-loop is currently

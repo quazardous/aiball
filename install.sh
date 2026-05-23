@@ -13,6 +13,10 @@
 #                                      # write to ~/.claude/settings.json
 #                                      # instead (fires in every Claude Code
 #                                      # session everywhere). #B.99
+#   ./install.sh --proxy-url URL       # #394: run this daemon as a proxy node
+#                  [--proxy-token TOK]  # relaying to a remote aiball (writes the
+#                                      # proxy: block; mint TOK on the remote with
+#                                      # `aiball auth issue --node`)
 #   ./install.sh --uninstall           # remove everything we installed
 #
 # Reentrant: re-running with new --port / --host overwrites only the bind
@@ -32,6 +36,8 @@ STOP_HOOK=false
 GLOBAL_HOOK=false
 PORT=""
 HOST=""
+PROXY_URL=""
+PROXY_TOKEN=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -39,6 +45,11 @@ while [[ $# -gt 0 ]]; do
         --uninstall)  UNINSTALL=true; shift ;;
         --symlink)    SYMLINK=true; shift ;;
         --stop-hook)  STOP_HOOK=true; shift ;;
+        # #394: proxy-node mode — relay this daemon to a remote aiball.
+        --proxy-url)    PROXY_URL="${2:-}"; shift 2 ;;
+        --proxy-url=*)  PROXY_URL="${1#--proxy-url=}"; shift ;;
+        --proxy-token)   PROXY_TOKEN="${2:-}"; shift 2 ;;
+        --proxy-token=*) PROXY_TOKEN="${1#--proxy-token=}"; shift ;;
         # #B.128: --stop-hook now writes to <PWD>/.claude/settings.json
         # by default (project-local). Pass --global to fall back to the
         # legacy ~/.claude/settings.json behavior, which fires in EVERY
@@ -247,7 +258,22 @@ AIBALL_DATA_DIR="$HOME/.local/share/aiball"
 EFFECTIVE_HOST="${HOST:-127.0.0.1}"
 EFFECTIVE_PORT="${PORT:-7777}"
 EFFECTIVE_URL="http://$EFFECTIVE_HOST:$EFFECTIVE_PORT"
-if command -v aiball >/dev/null 2>&1; then
+if [[ -n "$PROXY_URL" ]]; then
+    # #394: proxy-node mode. This daemon is a transparent relay to a REMOTE
+    # aiball — it has NO local DB, so we skip `auth init` (auth lives on the
+    # remote). Write the proxy: block and restart so it boots as a relay.
+    if command -v aiball >/dev/null 2>&1; then
+        if aiball proxy init --url "$PROXY_URL" ${PROXY_TOKEN:+--token "$PROXY_TOKEN"}; then
+            if ! $NO_SYSTEMD && command -v systemctl >/dev/null 2>&1; then
+                systemctl --user restart "$SERVICE_NAME" 2>/dev/null || true
+            fi
+            log "proxy-node mode: this daemon relays to $PROXY_URL"
+            [[ -z "$PROXY_TOKEN" ]] && warn "no --proxy-token — mint one on the remote ('aiball auth issue --node') then 'aiball proxy init --token <tok>'"
+        else
+            warn "proxy init failed — check the URL / config"
+        fi
+    fi
+elif command -v aiball >/dev/null 2>&1; then
     # Wait briefly for the daemon to be reachable so the migration that
     # creates `tokens` / `consumers` has run before we query the DB via
     # the CLI (which talks to SQLite directly).

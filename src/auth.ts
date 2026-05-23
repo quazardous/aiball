@@ -12,6 +12,7 @@ import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
 import {
     anyHumanCredentials,
+    ensureConsumer,
     getTokenAndTouch,
     isHuman,
     touchLastSeen,
@@ -169,6 +170,27 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         res.status(403).json({
             error: "install tokens cannot access /api/* — use POST /api/auth/setup first",
         });
+        return;
+    }
+    // #394 volet C: a "node" token authenticates a trusted proxy NODE, not a
+    // consumer. Like a reverse-proxy whitelisted to set X-Forwarded-For, it may
+    // ASSERT a relayed identity via x-aiball-consumer — which we HONOR here (and
+    // auto-create), unlike a regular agent token where the token wins and the
+    // header is ignored. Without the header, default to the node's local owner
+    // ("human"), mirroring the UDS local-trust default. Node tokens are service
+    // tokens with no bound consumer.
+    if (row.kind === "node") {
+        const override = req.header("x-aiball-consumer");
+        const explicit = typeof override === "string" && override.trim() ? override.trim() : null;
+        const cid = explicit ?? "human";
+        const ar = req as AuthenticatedRequest;
+        ar.consumer_id = cid;
+        ar.token_kind = "node";
+        // Auto-register a relayed agent we haven't seen yet (the loop on B has
+        // no token of its own — the node vouches for it). Never touches humans.
+        if (explicit && !isHuman(cid)) ensureConsumer(cid);
+        touchLastSeen(cid);
+        next();
         return;
     }
     if (!row.consumer_id) {
