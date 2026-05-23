@@ -367,7 +367,14 @@ watch([statusFilter, onlyOpen, project], () => {
 localStorage.removeItem("aiball.filter.intent");
 
 watch(sortBy, (v) => localStorage.setItem("aiball.filter.sort", v));
-watch(priorityFilter, (v) => localStorage.setItem("aiball.filter.priority", v));
+watch(priorityFilter, (v) => {
+    localStorage.setItem("aiball.filter.priority", v);
+    // #383: le param `priority` est appliqué côté serveur dans loadRows() —
+    // il faut refetch pour que le dropdown narrow réellement la liste. Avant,
+    // ce watch ne faisait que persister (page=1 sur le watch L443), jamais
+    // recharger → la liste ne bougeait pas. Aligné sur showSnoozed (L603).
+    bus.emit("inbox.refresh");
+});
 
 // Debounce the search input so we don't fire a request on every keystroke
 // — 220ms gives a comfortable feel without showing stale results too long.
