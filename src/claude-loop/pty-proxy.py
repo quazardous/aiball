@@ -234,6 +234,11 @@ _NO_WAIT = os.environ.get("CL_WAIT") == "0"
 # CL_ESC_TAKEOVER="0" disables it.
 _ESC_TAKEOVER = (os.environ.get("CL_ESC_TAKEOVER") or "1") != "0"
 
+# #381 (david debug-proxy-tty) : trace live sur stderr (fd 2) — pour chaque read
+# brut, le découpage en touches + la décision AFK par touche. Gated par env, donc
+# AUCUN effet en prod (le flag n'est posé que par `claude-loop debug-proxy-tty`).
+_DEBUG_TTY = (os.environ.get("CL_PROXY_DEBUG_TTY") or "") == "1"
+
 # #351: AFK detection. CL_AFK_SPEC = JSON list of combos (each a list of byte
 # ints, produced by the TS parseAfkKey); CL_AFK_WINDOW_MS = max gap (ms)
 # between the two combos of a sequence. On the combo we write the `afk`
@@ -729,6 +734,69 @@ def _run_replay_log(args):
     return 0
 
 
+def _render_keys(data: bytes) -> str:
+    """#381 : rendu LISIBLE d'un buffer d'octets (debug-proxy-tty / faux claude).
+    `\\x1b` → `ESC`, contrôles → `^X`, imprimables tels quels, reste en hex."""
+    named = {0x1b: "ESC", 0x0d: "CR", 0x0a: "LF", 0x09: "TAB", 0x7f: "DEL",
+             0x20: "SPACE", 0x03: "^C", 0x04: "^D"}
+    out = []
+    for b in data:
+        if b in named:
+            out.append(named[b])
+        elif b < 0x20:
+            out.append("^" + chr(b + 0x40))
+        elif b < 0x7f:
+            out.append(chr(b))
+        else:
+            out.append("\\x%02x" % b)
+    return " ".join(out)
+
+
+def _run_fake_claude(_args):
+    """#381 (david) : faux « claude » derrière le proxy, pour `claude-loop
+    debug-proxy-tty`. Ne fait que LOGGER ce que le proxy lui forwarde (= ce que
+    le vrai claude recevrait), une ligne par read : nb d'octets + hex + décodage.
+    Le combo AFK étant AVALÉ par le proxy, il n'arrive jamais ici — c'est
+    justement la preuve visible qu'il a été consommé (et pas envoyé à claude).
+    Notre tty est mis en raw (pas d'écho, lecture octet par octet) pour ne pas
+    doubler l'affichage ni attendre Entrée. Quitte sur Ctrl-C / Ctrl-D / EOF."""
+    # Ctrl-C must be a DATA byte (0x03), not a signal: in raw mode the tty
+    # won't raise SIGINT, but there's a startup window before setraw where the
+    # cooked slave could. Ignore SIGINT so we always handle 0x03 in the loop.
+    try:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except (ValueError, OSError):
+        pass
+    old = None
+    try:
+        import tty
+        old = termios.tcgetattr(0)
+        tty.setraw(0)
+    except (termios.error, OSError):
+        old = None
+    os.write(1, b"\r\n  [faux claude] j'affiche ce que le proxy me transmet. Ctrl-C pour quitter.\r\n\r\n")
+    try:
+        while True:
+            try:
+                data = os.read(0, 65536)
+            except OSError:
+                break
+            if not data:
+                break
+            stop = 0x03 in data or 0x04 in data
+            os.write(1, ("  claude <- %2dB : %-26s %s\r\n" % (
+                len(data), data.hex(" "), _render_keys(data))).encode())
+            if stop:
+                break
+    finally:
+        if old is not None:
+            try:
+                termios.tcsetattr(0, termios.TCSAFLUSH, old)
+            except (termios.error, OSError):
+                pass
+    return 0
+
+
 def _user_grace_remaining():
     """#302 : secondes de user-grace restantes (marqueur `user-took-over`
     < CL_USER_GRACE_SEC), 0.0 hors-grâce. Permet au proxy de peindre `wait`
@@ -851,6 +919,10 @@ def main(argv):
     # réel » (octets exacts d'os.read, délais réels) vs les tokens idéalisés.
     if args and args[0] == "--replay-log":
         return _run_replay_log(args[1:])
+    # #381 : faux claude (logger d'octets) — lancé COMME ENFANT du proxy par
+    # `claude-loop debug-proxy-tty`. Pas de pty.fork ici : on lit notre tty.
+    if args and args[0] == "--fake-claude":
+        return _run_fake_claude(args[1:])
     cmd = args
     # `--` séparateur optionnel : `pty-proxy.py -- claude …`
     if cmd and cmd[0] == "--":
@@ -1064,8 +1136,20 @@ def main(argv):
                     # comme des frappes simultanées, déterministe quel que soit le
                     # batching de l'OS.
                     now_stdin = datetime.datetime.now().timestamp()
-                    for unit in split_keystrokes(data):
-                        apply_decision(decider.on_stdin(unit, now_stdin))
+                    units = split_keystrokes(data)
+                    if _DEBUG_TTY:
+                        os.write(2, ("\r\n[proxy] read %dB  %s  -> %d touche(s)%s\r\n" % (
+                            len(data), data.hex(" "), len(units),
+                            "  (1 read -> plusieurs touches : COALESCE)" if len(units) > 1 else "")).encode())
+                    for unit in units:
+                        dec = decider.on_stdin(unit, now_stdin)
+                        apply_decision(dec)
+                        if _DEBUG_TTY:
+                            os.write(2, ("[proxy]   %-12s fired=%s afk=%-4s fwd=%s\r\n" % (
+                                _render_keys(unit),
+                                "Y" if dec.get("afk_fired") else "-",
+                                "AWAY" if decider.afk_active else "back",
+                                (dec.get("forward") or b"").hex() or "-")).encode())
                 else:
                     # EOF stdin : on arrête de le poller (claude tourne
                     # encore — on garde le pont sortie + injection vivant).

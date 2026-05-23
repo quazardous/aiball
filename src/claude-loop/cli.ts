@@ -15,12 +15,14 @@ import { commandExists } from "../sysdeps.js";
 import {
     copyFileSync,
     existsSync,
+    mkdtempSync,
     openSync,
     readFileSync,
     readdirSync,
     rmSync,
     writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -948,6 +950,115 @@ async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boo
 }
 
 
+/**
+ * Debug subcommand (#381, david "--debug-proxy-tty"). Runs the REAL PTY proxy
+ * attached to the current terminal, but with a FAKE claude (a byte logger)
+ * behind it instead of claude. Lets you mash keys and see, LIVE:
+ *   - each physical os.read (byte count + hex),
+ *   - how `split_keystrokes` splits it into keystrokes (coalescing flagged),
+ *   - the per-keystroke AFK decision (fired? afk away/back? forwarded bytes?),
+ *   - what actually reaches "claude" (the fake logger's output).
+ * The AFK spec/window/esc_takeover come from the resolved config, identical to
+ * `start`, so the detector behaves exactly as in production. Captures a raw
+ * NDJSON to a temp file (replayable via `pty-proxy.py --replay-log`) and prints
+ * a summary on exit. Answers david's #381 question directly: does a single ESC
+ * press read as `1b` or `1b1b` (key-repeat coalescing)?
+ */
+async function cmdDebugProxyTty(): Promise<void> {
+    if (process.platform === "win32") {
+        die("debug-proxy-tty: Unix only (Python PTY proxy). Windows uses the ConPTY proxy.");
+    }
+    need("python3");
+    const root = selfRoot();
+    const pyProxy = join(root, "src/claude-loop/pty-proxy.py");
+    if (!existsSync(pyProxy)) die(`pty-proxy.py not found at ${pyProxy}`);
+    const ctx = resolveProjectContext();
+    // Same afk_key → byte-combo resolution as `start` (#351) so the detector
+    // under test is byte-for-byte the production one.
+    let afkSpecJson = "";
+    try {
+        afkSpecJson = JSON.stringify(
+            parseAfkKey(ctx.claude_loop.afk_key, ctx.claude_loop.afk_window_ms).combos,
+        );
+    } catch (e) {
+        process.stderr.write(`claude-loop: invalid afk_key "${ctx.claude_loop.afk_key}" — AFK disabled (${(e as Error).message})\n`);
+    }
+    // Isolated temp state dir + raw capture — never collides with a live loop.
+    const tmp = mkdtempSync(join(tmpdir(), "cl-debug-proxy-"));
+    const capture = join(tmp, "capture.ndjson");
+    const env = {
+        ...process.env,
+        CL_STATE_DIR: tmp,
+        CL_AFK_SPEC: afkSpecJson,
+        CL_AFK_WINDOW_MS: String(ctx.claude_loop.afk_window_ms),
+        CL_ESC_TAKEOVER: ctx.claude_loop.esc_takeover ? "1" : "0",
+        CL_USER_GRACE_SEC: String(ctx.claude_loop.user_grace_seconds),
+        CL_WAIT: "0",
+        CL_PROXY_LOG: capture,
+        CL_PROXY_DEBUG_TTY: "1",
+        // No CL_TMUX → the proxy's bar painting is a silent no-op here.
+    };
+    process.stdout.write([
+        `claude-loop debug-proxy-tty`,
+        `  afk_key : "${ctx.claude_loop.afk_key}"  (window ${ctx.claude_loop.afk_window_ms}ms, esc_takeover ${ctx.claude_loop.esc_takeover})`,
+        `  spec    : ${afkSpecJson || "(AFK disabled — empty/invalid afk_key)"}`,
+        ``,
+        `Real PTY proxy in front of a FAKE claude (byte logger). Type/mash keys and`,
+        `watch, live: each physical read, how it splits, and the AFK decision.`,
+        `Things worth trying: your AFK combo; a lone ESC; mash ESC twice; HOLD ESC`,
+        `(key-repeat). The combo is SWALLOWED (won't reach the logger) — expected.`,
+        `Quit with Ctrl-C.`,
+        ``,
+    ].join("\n"));
+    const r = spawnSync("python3", ["-B", pyProxy, "--", "python3", "-B", pyProxy, "--fake-claude"], {
+        stdio: "inherit",
+        env,
+    });
+    printDebugProxySummary(capture);
+    process.stdout.write(
+        `\nraw capture : ${capture}\n` +
+        `  replay it : python3 ${pyProxy} --replay-log ${capture}\n`,
+    );
+    process.exit(r.status ?? 0);
+}
+
+/**
+ * Post-session summary for `debug-proxy-tty`. Reads the raw NDJSON capture and
+ * counts physical reads (consecutive `stdin` events share a timestamp when they
+ * came from one os.read), how many carried >1 keystroke (coalescing — the #381
+ * ambiguity), and how many AFK toggles fired. Flags the smoking gun when a
+ * single read produced multiple keystrokes.
+ */
+function printDebugProxySummary(capture: string): void {
+    if (!existsSync(capture)) { process.stdout.write(`\n(no keystrokes captured)\n`); return; }
+    let lines: Array<{ t: number; event: string; afk_fired: boolean }>;
+    try {
+        lines = readFileSync(capture, "utf8").trim().split("\n").filter(Boolean)
+            .map((l) => JSON.parse(l));
+    } catch { return; }
+    const stdin = lines.filter((l) => l.event === "stdin");
+    if (stdin.length === 0) { process.stdout.write(`\n(no keystrokes captured)\n`); return; }
+    let reads = 0, coalesced = 0, toggles = 0, inRead = 0;
+    let prevT: number | null = null;
+    for (const l of stdin) {
+        if (l.afk_fired) toggles++;
+        if (l.t !== prevT) { if (inRead > 1) coalesced++; reads++; inRead = 1; prevT = l.t; }
+        else inRead++;
+    }
+    if (inRead > 1) coalesced++;
+    process.stdout.write(`\n=== session summary ===\n`);
+    process.stdout.write(`  physical reads : ${reads}\n`);
+    process.stdout.write(`  coalesced reads: ${coalesced}  (one read carrying >1 keystroke)\n`);
+    process.stdout.write(`  AFK toggles    : ${toggles}\n`);
+    if (coalesced > 0) {
+        process.stdout.write(
+            `  ⚠ a single physical read carried multiple keystrokes — that key-repeat/\n` +
+            `    coalescing is exactly the #381 ambiguity (a held/repeated ESC reads as\n` +
+            `    1b1b → splits into two ESC → completes the esc-esc combo → toggles).\n`,
+        );
+    }
+}
+
 // Commander wiring. `start` is the default — bare `claude-loop` (or
 // `claude-loop --name foo -- --model opus`) runs start. Anything
 // after `--` is captured as claude_args.
@@ -1034,9 +1145,11 @@ async function main(): Promise<void> {
     // `claude-loop --reload` respawns the timer of the current-cwd
     // loop without touching claude.
     else if (wrapper[0] === "--reload") wrapper[0] = "reload";
+    // #381 (david): bare top-level alias for the proxy-tty debug session.
+    else if (wrapper[0] === "--debug-proxy-tty") wrapper[0] = "debug-proxy-tty";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "check", "trace", "prune", "init", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "check", "trace", "prune", "init", "debug-proxy-tty", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -1086,6 +1199,12 @@ async function main(): Promise<void> {
         .option("--events", "Open SSE and tail every aiball event live (no gate eval)")
         .action((opts: { checkCmd?: string; interval?: string; once?: boolean; events?: boolean }) => cmdTrace(opts));
     program.command("prune").description("Interactively clean orphan state dirs").action(cmdPrune);
+    // #381 (david): "--debug-proxy-tty pour piper des choses et avoir un faux claude
+    // logger derriere". Real PTY proxy + fake-claude byte logger, attached to this
+    // terminal — see/capture EXACTLY what your keyboard emits + the AFK decision.
+    program.command("debug-proxy-tty")
+        .description("Run the real PTY proxy in front of a fake-claude byte logger to capture/diagnose what your keyboard actually emits + AFK toggling (#381)")
+        .action(() => cmdDebugProxyTty());
     // #304 david: alias for `aiball init` — bootstrap a project (.mcp.json +
     // .aiball.yaml) without leaving the claude-loop workflow. Shares the body.
     program.command("init")
