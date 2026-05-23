@@ -17,14 +17,18 @@ import {
     getProjectStatsRich,
     purgeOldClosedTickets,
     getProjectStats,
+    isHuman,
     type Strategy,
 } from "./db.js";
 import { existsSync, unlinkSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { join } from "node:path";
+import { installRoot } from "./claude-loop/state.js";
 import { broadcast } from "./ws.js";
 import { outboxPath } from "./paths.js";
 import { searchMessages } from "./search.js";
 import { bearerAuth } from "./auth.js";
-import { badRequest } from "./api/_helpers.js";
+import { badRequest, consumerOf } from "./api/_helpers.js";
 import { AIBALL_VERSION } from "./version.js";
 import { agentHelpersRouter } from "./api/agent-helpers.js";
 import { authRouter } from "./api/auth.js";
@@ -214,6 +218,37 @@ api.post("/projects/:name/purge", (req, res) => {
         broadcast({ type: "project_purged", data: { project: name, ...result, older_than_days: days } });
     }
     res.json({ project: name, older_than_days: days, ...result, ok: true });
+});
+
+// #393 phase 4: launch a claude-loop for a known LOCAL root, from the UI.
+// HUMAN-ONLY (it spawns a process) and restricted to a root this project has
+// actually run on (consumers.cwd, pushed by a prior loop — #393 phase 1/2),
+// never an arbitrary path. Spawns on THIS daemon's host; proxy-aware (#394):
+// a launch hitting the remote daemon transparently forwards to the local node
+// that owns the root, which spawns it there. Detached + --no-attach.
+api.post("/projects/:name/launch", (req, res) => {
+    const name = String(req.params.name);
+    const caller = consumerOf(req);
+    if (!caller || !isHuman(caller)) {
+        return res.status(403).json({ error: "launch is human-only — it spawns a claude-loop process" });
+    }
+    const root = String(((req.body ?? {}) as { root?: unknown }).root ?? "");
+    const meta = listProjectsDetailed().find((p) => p.name === name);
+    const knownRoots = meta?.roots ?? [];
+    if (!root || !knownRoots.includes(root)) {
+        return badRequest(res, `root must be one of this project's known local roots: ${JSON.stringify(knownRoots)}`);
+    }
+    try {
+        const bin = join(installRoot(), "bin", "claude-loop");
+        const child = spawn(bin, ["start", "--cwd", root, "--no-attach"], {
+            detached: true,
+            stdio: "ignore",
+        });
+        child.unref();
+        return res.json({ ok: true, project: name, root, pid: child.pid });
+    } catch (e) {
+        return res.status(500).json({ error: `failed to launch claude-loop: ${(e as Error).message}` });
+    }
 });
 
 api.delete("/projects/:name", (req, res) => {
