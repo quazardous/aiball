@@ -165,6 +165,9 @@ interface StartOpts {
     consumer?: string;
     /** #390: project name (overrides resolved ctx.project). */
     project?: string;
+    /** #393: launch the loop in this directory instead of the invoker's cwd
+     *  (e.g. the daemon starting a loop for a known project root from the UI). */
+    cwd?: string;
     claudeArgs: string[];
 }
 
@@ -247,7 +250,15 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // AIBALL_PROJECT from .mcp.json once, then writes them back to
     // process.env so the timer + hooks + claude spawn with the
     // right identity. Single source for every subcommand.
-    const ctx = resolveProjectContext();
+    // #393: --cwd launches the loop in an explicit directory (e.g. the daemon
+    // spawning a loop for a known project root from the UI) instead of the
+    // invoker's cwd. Threads through ctx.cwd → plate.cwd, tmux `-c`, config
+    // resolution, and the conflict checks below.
+    const startCwd = opts.cwd ? resolve(opts.cwd) : undefined;
+    if (startCwd && !existsSync(startCwd)) {
+        die(`--cwd path does not exist: ${startCwd}`);
+    }
+    const ctx = resolveProjectContext(startCwd ? { cwd: startCwd } : {});
     // #390: explicit flags override the resolved identity (the loop's
     // consumer/project are passed at launch, independent of any local
     // .aiball.yaml — David's "consumer_id pas propre au remote").
@@ -1252,12 +1263,16 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--aiball-token <token>", "#390: bearer token for the remote daemon (mint with `aiball auth issue --consumer <id>` on the daemon host). Required with --aiball-url.")
         .option("--consumer <id>", "#390: consumer id = the loop's identity (overrides .aiball.yaml). Recommended with --aiball-url.")
         .option("--project <name>", "#390: project name (overrides .aiball.yaml).")
+        // #393: launch in an explicit dir (e.g. the daemon spawning a loop for a
+        // known project root from the UI) instead of the invoker's cwd.
+        .option("--cwd <path>", "#393: launch the loop in this directory instead of the current one.")
         .allowExcessArguments(false)
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
             attach: boolean; startupPing: boolean; userGrace?: string; force?: boolean;
             resumeMode?: string; wait: boolean;
             aiballUrl?: string; aiballToken?: string; consumer?: string; project?: string;
+            cwd?: string;
         }, command: Command) => {
             // #305 (option a): only forward `wait` when --wait/--no-wait was
             // ACTUALLY passed. Otherwise leave it undefined so cmdStart falls
@@ -1278,6 +1293,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 aiballToken: opts.aiballToken,
                 consumer: opts.consumer,
                 project: opts.project,
+                cwd: opts.cwd,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });
