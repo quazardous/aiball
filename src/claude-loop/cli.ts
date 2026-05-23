@@ -289,6 +289,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const wakeInFlightTtlMs = ctx.claude_loop.wake_in_flight_ttl_ms; // yaml-only
     const escTakeover = ctx.claude_loop.esc_takeover; // #345, yaml-only
     const askGraceSec = ctx.claude_loop.ask_grace_seconds; // #351, yaml-only
+    // #305 (option a): explicit --wait/--no-wait wins; else the per-project
+    // `.aiball.yaml claude_loop.wait` default (global CLI default stays no-wait #343).
+    const wait = opts.wait !== undefined ? opts.wait : ctx.claude_loop.wait;
     // #351: parse afk_key → byte combos for the PTY proxy. A bad spec logs +
     // disables AFK (empty spec) rather than failing the whole launch.
     let afkSpecJson = "";
@@ -331,7 +334,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // Default (and explicit --no-wait) → "0": no human at the terminal,
         // eager boot drain, no boot-grace deferral. Read by the timer
         // (boot-grace gate) + the SessionStart hook (eager-inject gate).
-        `export CL_WAIT=${shQuote(opts.wait ? "1" : "0")}`,
+        `export CL_WAIT=${shQuote(wait ? "1" : "0")}`,
         // Seconds the timer stays out of the way after the human
         // submits a prompt (UserPromptSubmit hook refreshes the
         // user-took-over marker). 0 disables the grace.
@@ -1111,7 +1114,11 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             name?: string; interval?: string; checkCmd: string; pings?: string;
             attach: boolean; startupPing: boolean; userGrace?: string; force?: boolean;
             resumeMode?: string; wait: boolean;
-        }) => {
+        }, command: Command) => {
+            // #305 (option a): only forward `wait` when --wait/--no-wait was
+            // ACTUALLY passed. Otherwise leave it undefined so cmdStart falls
+            // back to the per-project `.aiball.yaml claude_loop.wait` default.
+            const waitExplicit = command.getOptionValueSource?.("wait") === "cli";
             invoke({
                 name: opts.name ?? nameArg,
                 interval: opts.interval !== undefined ? Math.max(1, Number(opts.interval)) : null,
@@ -1122,7 +1129,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 userGraceSec: opts.userGrace !== undefined ? Math.max(0, Number(opts.userGrace)) : null,
                 force: opts.force === true,
                 resumeMode: opts.resumeMode,
-                wait: opts.wait,
+                wait: waitExplicit ? opts.wait : undefined,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });

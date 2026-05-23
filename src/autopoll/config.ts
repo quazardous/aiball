@@ -117,6 +117,11 @@ export interface AiballConfig {
         /** #351: max ms between the two combos of an afk_key sequence
          *  (ignored for a single combo). CL_AFK_WINDOW_MS. */
         afk_window_ms: number;
+        /** #305 (option a): per-project default for the boot-grace wait
+         *  behaviour when NEITHER --wait nor --no-wait is passed. The global
+         *  CLI default stays no-wait (#343); an explicit flag always wins.
+         *  Drives CL_WAIT. */
+        wait: boolean;
     };
     /**
      * #319: workflow hints surfaced by claude-loop at wake for `feature`-intent
@@ -175,6 +180,9 @@ const DEFAULTS: AiballConfig = {
         ask_grace_seconds: 600,
         afk_key: "esc esc",
         afk_window_ms: 400,
+        // #305: no-wait by default (#343); a project flips it per-tree via
+        // `.aiball.yaml claude_loop.wait: true`.
+        wait: false,
     },
     // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
     // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.
@@ -330,6 +338,10 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             }
             if (typeof cl.afk_window_ms === "number" && cl.afk_window_ms > 0) {
                 cfg.claude_loop.afk_window_ms = cl.afk_window_ms;
+            }
+            // #305 (option a): per-project wait default (no-flag behaviour).
+            if (typeof cl.wait === "boolean") {
+                cfg.claude_loop.wait = cl.wait;
             }
             // #319: workflow hint flags (layered like claude_loop above).
             const wf = (raw.workflow ?? {}) as Record<string, unknown>;

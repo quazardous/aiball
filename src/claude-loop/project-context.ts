@@ -45,6 +45,8 @@ export interface ProjectContext {
         ask_grace_seconds: number;
         afk_key: string;
         afk_window_ms: number;
+        /** #305 (option a): per-project boot-grace wait default (no-flag). */
+        wait: boolean;
     };
 }
 

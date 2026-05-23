@@ -108,6 +108,13 @@ autopoll:
 #   # heartbeat / boot-grace order, #B.185).
 #   user_grace_seconds: 60
 #
+#   # #305: boot-grace WAIT default when NEITHER --wait nor --no-wait is
+#   # passed on `claude-loop start`. The global CLI default stays no-wait
+#   # (#343: eager boot drain). Set true here so THIS project's loops boot
+#   # in `wait` (yield the boot-grace for a human take-over) without typing
+#   # --wait each time. An explicit --wait/--no-wait still overrides. Default false.
+#   wait: false
+#
 #   # Wake-in-flight TTL (#B.180): how long the marker stays "fresh"
 #   # after the timer touches it pre-send-keys. The UserPromptSubmit
 #   # hook checks this to distinguish auto-wake from human input.
