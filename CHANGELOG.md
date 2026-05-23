@@ -17,6 +17,21 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Remote aiball — a local `claude-loop` slaved to a remote daemon (#390)
+
+- New `claude-loop start` flags: **`--aiball-url`**, **`--aiball-token`**,
+  `--consumer`, `--project`. They point a loop running on machine B at an aiball
+  daemon on machine A (tailnet/LAN) — B needs no aiball install. The loop, tmux
+  session and state stay local; only the data plane (tickets/comments/pings/
+  uploads) is remote. The connection is persisted in the loop's plate, so
+  `claude-loop restart` replays it; the env file is `0600` when it holds a token.
+- New **`aiball download <ref>`** — fetch a ticket's attached upload
+  (`/uploads/<sha>.<ext>`) over the authenticated transport and write it locally,
+  so a remote loop can read images it can't open as `file://`.
+- See [`docs/REMOTE.md`](docs/REMOTE.md) for the setup. (The daemon already
+  supported per-consumer bearer tokens and TCP for every endpoint — this wires
+  the loop to use them.)
+
 ### Fix: deterministic write rejections no longer vanish into the spool (#389)
 
 - The CLI/MCP client treated the file spool as a catch-all fallback: **any**
