@@ -405,6 +405,13 @@ export const consumers = sqliteTable("consumers", {
      * that only pushes the `state_human` boolean).
      */
     stateHumanWord: text("state_human_word"),
+    /**
+     * #393: the loop's working directory (project root), pushed by the
+     * state heartbeat. Lets the daemon mark a project "local" (a loop is
+     * running here, root known) and offer to launch claude-loop for it.
+     * NULL for humans, non-loop consumers, and pre-#393 loops.
+     */
+    cwd: text("cwd"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (t) => [

@@ -619,10 +619,13 @@ export class AiballClient {
         state: "busy" | "idle" | "boot",
         human?: boolean,
         humanWord?: "stop" | "wait" | "loop",
+        cwd?: string,
     ) {
-        const body: { state: string; human?: boolean; human_word?: string } = { state };
+        const body: { state: string; human?: boolean; human_word?: string; cwd?: string } = { state };
         if (human !== undefined) body.human = human;
         if (humanWord !== undefined) body.human_word = humanWord;
+        // #393: the loop's root, so the daemon can mark the project "local".
+        if (cwd !== undefined) body.cwd = cwd;
         return this.http<{ consumer_id: string; state: string; human?: boolean; human_word?: string }>(
             "PUT",
             `/api/consumers/${encodeURIComponent(this.agentId)}/state`,
