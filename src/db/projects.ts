@@ -11,6 +11,7 @@ import { getDb, nowIso } from "./connection.js";
 import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
 import { listHumans } from "./consumers.js";
 import { computeDecisionGate } from "./decision-gate.js";
+import { landscapeHash, type LandscapeEntry } from "./landscape.js";
 
 /**
  * Project names known to the system. Reads from the explicit `projects`
@@ -99,9 +100,19 @@ export interface ProjectMeta {
     /** Approved+open tickets with at least one PENDING `ticket_resolved`
      *  proposal — the reporter needs to accept-and-close (or reject) it. */
     resolved_count?: number;
+    /** #379: signature du paysage ouvert (sha1 des `<id>:<last_actor_at>` triés
+     *  des tickets ouverts non-snoozés de ce projet). Calculé seulement quand
+     *  `listProjectsDetailed` est appelé avec `landscape=true` (flag `&landscape=1`)
+     *  — seul le timer claude-loop le demande, pas les polls UI. Primitif partagé
+     *  reset + dédup set-aware de la drained-strategy. */
+    landscape_hash?: string;
+    /** #379: dernière activité (`max(last_actor_at)`) sur les tickets ouverts —
+     *  alimente la stratégie `stale` (wake si `now - landscape_last_activity > seuil`).
+     *  Null si aucun ticket ouvert n'a de `last_actor_at`. Posé avec `landscape_hash`. */
+    landscape_last_activity?: string | null;
 }
 
-export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
+export function listProjectsDetailed(consumer_id?: string, landscape = false): ProjectMeta[] {
     const db = getDb();
     // Aggregates by project across tickets + messages. Two queries merged
     // in JS — small data sizes, simpler than a SQL UNION/GROUP dance.
@@ -327,11 +338,18 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         id: schema.tickets.id,
         status: schema.tickets.status,
         postponedUntil: schema.tickets.postponedUntil,
+        // #379: `last_actor_at` (#374) ajouté au SELECT existant → zéro requête
+        // en plus ; alimente le landscape_hash (gated par le flag `landscape`).
+        lastActorAt: schema.tickets.lastActorAt,
     }).from(schema.tickets).all();
     const nowStr = nowIso();
     const openPerProject = new Map<string, number>();
     const actionablePerProject = new Map<string, number>();
     const snoozedPerProject = new Map<string, number>();
+    // #379: par projet, les entrées de paysage (tickets ouverts non-snoozés) +
+    // la dernière activité. Peuplé seulement quand `landscape` est demandé.
+    const landscapeEntriesPerProject = new Map<string, LandscapeEntry[]>();
+    const landscapeLastActivityPerProject = new Map<string, string>();
 
     // #B.123 phase B.4: gate actionable_count on active depends_on
     // relations to an OPEN blocker. Walk all ticket_relation events in
@@ -400,6 +418,14 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
             continue;
         }
         openPerProject.set(t.project, (openPerProject.get(t.project) ?? 0) + 1);
+        if (landscape) {
+            let entries = landscapeEntriesPerProject.get(t.project);
+            if (!entries) { entries = []; landscapeEntriesPerProject.set(t.project, entries); }
+            entries.push({ id: t.id, lastActorAt: t.lastActorAt ?? null });
+            if (t.lastActorAt && (landscapeLastActivityPerProject.get(t.project) ?? "") < t.lastActorAt) {
+                landscapeLastActivityPerProject.set(t.project, t.lastActorAt);
+            }
+        }
         // Actionable = open and NOT marked resolved/blocked by an agent
         // AND not gated by an active depends_on to an open blocker
         // (#B.123 phase B.4) AND not awaiting-someone-else for this
@@ -421,6 +447,11 @@ export function listProjectsDetailed(consumer_id?: string): ProjectMeta[] {
         p.open_count = openPerProject.get(p.name) ?? 0;
         p.actionable_count = actionablePerProject.get(p.name) ?? 0;
         p.snoozed_count = snoozedPerProject.get(p.name) ?? 0;
+        if (landscape) {
+            // sha1 sur les tickets ouverts non-snoozés de la vision agent (#379).
+            p.landscape_hash = landscapeHash(landscapeEntriesPerProject.get(p.name) ?? []);
+            p.landscape_last_activity = landscapeLastActivityPerProject.get(p.name) ?? null;
+        }
         // Filter the pending-resolution set to only ticket ids whose
         // parent ticket is open + approved + NOT snoozed (otherwise a
         // stale proposal on a closed/snoozed ticket would inflate the

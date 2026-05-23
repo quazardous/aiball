@@ -131,7 +131,10 @@ api.use(messagesRouter);
 api.get("/projects", (req, res) => {
     if (req.query.detailed === "1") {
         const consumer = req.query.consumer_id as string | undefined;
-        return res.json(listProjectsDetailed(consumer));
+        // #379: `&landscape=1` ajoute landscape_hash + landscape_last_activity
+        // par projet (calcul O(N) gated → seul le timer claude-loop le demande).
+        const landscape = req.query.landscape === "1";
+        return res.json(listProjectsDetailed(consumer, landscape));
     }
     res.json(listProjects());
 });

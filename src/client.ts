@@ -343,7 +343,11 @@ export class AiballClient {
      * (ticket_count, open_count, pending_count, last_activity…) instead
      * of bare names. Used by poll() to surface per-project workload.
      */
-    listProjectsDetailed() {
+    listProjectsDetailed(opts?: { landscape?: boolean }) {
+        // #379: pass `landscape=1` to also get landscape_hash + landscape_last_activity
+        // per project (the drained-strategy reset/dedup primitive). Off by default —
+        // only the claude-loop timer asks for it, sidebar polls don't pay the O(N).
+        const ls = opts?.landscape ? "&landscape=1" : "";
         return this.http<Array<{
             name: string;
             last_activity: string;
@@ -359,9 +363,13 @@ export class AiballClient {
             actionable_count?: number;
             snoozed_count?: number;
             resolved_count?: number;
+            /** #379: open-landscape signature (only set when landscape=1). */
+            landscape_hash?: string;
+            /** #379: max(last_actor_at) over open tickets (only when landscape=1). */
+            landscape_last_activity?: string | null;
             // #265: scope to our own agent id so the actionable_count is
             // "actionable for me" (the conversational gate is per-consumer).
-        }>>("GET", `/api/projects?detailed=1&consumer_id=${encodeURIComponent(this.agentId)}`);
+        }>>("GET", `/api/projects?detailed=1&consumer_id=${encodeURIComponent(this.agentId)}${ls}`);
     }
     feedPath(project: string) {
         return this.http<{ path: string }>(
