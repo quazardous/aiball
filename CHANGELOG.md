@@ -17,6 +17,22 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-23
+
+### aiball proxy-node mode — a local daemon that relays to a remote (#394)
+
+- A local daemon can run as a **transparent relay** to a remote aiball: add a
+  `proxy: { url, token }` block to the global config (`~/.config/aiball/config.yaml`)
+  and the daemon forwards `/api/*` + `/uploads/*` to the remote (injecting the
+  bearer, preserving `x-aiball-consumer`), pipes the remote's SSE back, and keeps
+  no local DB.
+- So **every** local client on that host (claude-loop, MCP, CLI, web UI) keeps
+  using localhost / the UDS token-less — no per-client remote config. Coexists
+  with the direct `claude-loop --aiball-url` path (#390).
+- Resilience: remote unreachable → 502 → the local client spools for replay (#389).
+- See [`docs/REMOTE.md`](docs/REMOTE.md) § Proxy mode. (Cross-host launch from the
+  web UI — the #393 reverse control channel — is a follow-up.)
+
 ### Local projects — detect, detail, launch from the UI (#393)
 
 - A claude-loop now **pushes its working directory (root)** to the daemon on each
