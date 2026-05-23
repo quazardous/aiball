@@ -192,6 +192,77 @@ export class AiballClient {
         return this.http("GET", `/api/projects/${encodeURIComponent(project)}/stats`);
     }
 
+    /**
+     * Upload raw image bytes to /api/uploads (#387). Content-addressable: the
+     * daemon dedupes by sha256 and returns `{ url, sha256, bytes, content_type }`.
+     * Goes over the SAME transport as every other call — UDS (token-less
+     * local-trust) when `socketPath` is set, else TCP+token. `name` is an
+     * optional original filename (stored as upload metadata). Distinct from
+     * `http()` because the body is raw bytes with an image content-type, not
+     * JSON. Roomier timeout than the 2 s probe budget (a 10 MB write can outlast it).
+     */
+    uploadImage(
+        bytes: Buffer,
+        contentType: string,
+        name?: string,
+    ): Promise<{ url: string; sha256: string; bytes: number; content_type: string }> {
+        const headers: Record<string, string> = { "content-type": contentType };
+        if (this.agentId) headers["x-aiball-consumer"] = this.agentId;
+        if (name) headers["x-aiball-upload-name"] = name;
+        const path = "/api/uploads";
+        const timeoutMs = Math.max(this.timeoutMs, 15000);
+        type UploadResult = { url: string; sha256: string; bytes: number; content_type: string };
+        if (this.socketPath) {
+            return new Promise<UploadResult>((resolve, reject) => {
+                const req = httpRequest(
+                    { socketPath: this.socketPath!, path, method: "POST", headers, timeout: timeoutMs },
+                    (res: IncomingMessage) => {
+                        const chunks: Buffer[] = [];
+                        res.on("data", (c) => chunks.push(c as Buffer));
+                        res.on("end", () => {
+                            const text = Buffer.concat(chunks).toString("utf8");
+                            const status = res.statusCode ?? 0;
+                            if (status < 200 || status >= 300) {
+                                reject(new Error(`POST ${path} → ${status}: ${text}`));
+                                return;
+                            }
+                            try {
+                                resolve(JSON.parse(text) as UploadResult);
+                            } catch (e) {
+                                reject(e);
+                            }
+                        });
+                        res.on("error", reject);
+                    },
+                );
+                req.on("error", reject);
+                req.on("timeout", () => {
+                    req.destroy(new Error(`POST ${path} → timeout after ${timeoutMs}ms`));
+                });
+                req.write(bytes);
+                req.end();
+            });
+        }
+        const headersTcp = { ...headers };
+        if (this.token) headersTcp["authorization"] = `Bearer ${this.token}`;
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), timeoutMs);
+        return fetch(this.url + path, {
+            method: "POST",
+            headers: headersTcp,
+            body: new Uint8Array(bytes),
+            signal: ctrl.signal,
+        })
+            .then(async (res) => {
+                if (!res.ok) {
+                    const txt = await res.text().catch(() => "");
+                    throw new Error(`POST ${path} → ${res.status}: ${txt}`);
+                }
+                return (await res.json()) as UploadResult;
+            })
+            .finally(() => clearTimeout(t));
+    }
+
     private spoolDrop(msg: Record<string, unknown>): SpoolResult {
         mkdirSync(this.spoolDir, { recursive: true });
         const ts = process.hrtime.bigint().toString();

@@ -17,6 +17,18 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### MCP `upload` tool — attach images via the socket (#387)
+
+- New MCP tool **`upload({ path, name? })`**: reads a local image file
+  (png / jpeg / gif / webp) and POSTs its bytes to the daemon's
+  content-addressable store (`POST /api/uploads`) over the **same Unix socket**
+  as every other MCP call — token-less, no TCP. Returns
+  `{ url, sha256, bytes, content_type, markdown }`; the `markdown` (`![](…)`)
+  drops straight into a `ticket_new` / `ticket_reply` body and renders in the UI.
+- Backed by a new `AiballClient.uploadImage(bytes, contentType, name?)` raw-byte
+  POST helper (UDS or TCP+token). Uploads dedupe by sha. Reading images back was
+  already automatic (`ticket_get` → `attachments[]`, #283); this closes the write half.
+
 ### Drained-backlog wake reminders + set-aware dedup (#379)
 
 New `claude_loop.drained_strategy` decides what the heartbeat does when

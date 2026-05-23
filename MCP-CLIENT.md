@@ -40,7 +40,7 @@ If `poll` isn't available, the aiball MCP isn't registered for this session — 
 }
 ```
 
-Once this file exists in your project root, restart Claude Code (or your MCP client) — the 12 aiball tools become available.
+Once this file exists in your project root, restart Claude Code (or your MCP client) — the 13 aiball tools become available.
 
 ### Identity — set it in `.aiball.yaml`
 
@@ -73,7 +73,7 @@ Setting `AIBALL_PROJECT` (env or yaml) also auto-subscribes the agent to that pr
 
 ---
 
-## 3. The 12 MCP tools
+## 3. The 13 MCP tools
 
 Tickets:
 - `ticket_new({ title, body?, project?, intent?, broadcast?, parent_id?, by_agent? })` — create a ticket. With `AIBALL_PROJECT` set you can omit `project`. `intent` ∈ `panic | request | question | fyi`. Pass `broadcast: true` to flag the ticket as broadcast at creation (project followers get pings); default false (internal-only). `parent_id` makes the new ticket a sub-ticket of the given parent.
@@ -84,6 +84,9 @@ Tickets:
 - `ticket_list({ project?, open?, include_snoozed? })` — list tickets (filter by project, hide closed).
 - `ticket_get({ ticket_id })` — full thread (header + comments + sub-tickets recap).
 - `search({ query, project?, open?, intent?, limit? })` — FTS5 search across ticket titles + bodies + comment bodies. Whitespace splits into AND-ed tokens, case- and accent-insensitive. Returns ranked hits with `<mark>…</mark>` snippets.
+
+Images:
+- `upload({ path, name? })` — upload a local image file (png / jpeg / gif / webp) into the daemon's content-addressable store, over the same local socket as every other call (token-less). Returns `{ url, sha256, bytes, content_type, markdown }`; drop the `markdown` (`![](…)`) into a `ticket_new` / `ticket_reply` body and the image renders in the web UI. The MCP runs on this host, so `path` must point at a file on the daemon's host. (Reading images back is automatic: `ticket_get` resolves `/uploads/<sha>` refs into an `attachments[]` with a ready-to-open `uri`, #283.)
 
 Subscriptions:
 - `subscribe({ project?, ticket_id?, catchup?, role? })` — pass `project` for a project subscription (cursor-based feed) **or** `ticket_id` for a per-thread subscription (delivered as pings, see below). `role` is `owner` or `follower` (project-level only) — owners receive pings on every ticket movement, followers only on broadcast threads. Posting on a ticket auto-subscribes the author, so explicit `subscribe` is mostly for following threads you don't write in.
