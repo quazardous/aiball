@@ -17,6 +17,16 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Fix: an anonymous local call no longer wakes the `human` consumer (#386)
+
+- A Unix-socket (local-trust) request **without** an `X-Aiball-Consumer` header
+  resolves to the literal `"human"` consumer for authorization — but it used to
+  also `touchLastSeen("human")`, so `human` kept "resurfacing" as recently-active
+  on the consumers page even when the human only ever uses a named identity.
+- Now `last_seen_at` is bumped **only for an explicit identity** (header present);
+  an anonymous headerless call still resolves to `"human"` but no longer refreshes
+  it. Named identities are unaffected. (`src/auth.ts`.)
+
 ### MCP `upload` tool — attach images via the socket (#387)
 
 - New MCP tool **`upload({ path, name? })`**: reads a local image file

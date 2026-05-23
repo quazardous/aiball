@@ -133,11 +133,18 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
     // a same-uid caller is the local owner of this aiball instance.
     if ((req.socket as unknown as { __aiballUds?: boolean }).__aiballUds === true) {
         const override = req.header("x-aiball-consumer");
-        const cid = (typeof override === "string" && override.trim()) || "human";
+        const explicit = typeof override === "string" && override.trim() ? override.trim() : null;
+        // #386: an anonymous local call (no X-Aiball-Consumer header) still
+        // RESOLVES to the local owner ("human") for authorization, but must NOT
+        // refresh that consumer's last_seen — otherwise the literal "human"
+        // consumer keeps "resurfacing" as active on the consumers page even when
+        // the human only ever uses a named identity. Only an EXPLICIT identity
+        // (header present) touches last_seen.
+        const cid = explicit ?? "human";
         const ar = req as AuthenticatedRequest;
         ar.consumer_id = cid;
         ar.token_kind = "agent";
-        touchLastSeen(cid); // #B.177
+        if (explicit) touchLastSeen(cid); // #B.177 / #386
         next();
         return;
     }
