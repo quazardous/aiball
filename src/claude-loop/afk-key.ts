@@ -110,6 +110,89 @@ function bytesEqual(a: ArrayLike<number>, b: number[]): boolean {
     return true;
 }
 
+/** Lowercase hex of a byte sequence, no separators: [0x1b,0x1b] → "1b1b". */
+function toHex(bytes: ArrayLike<number>): string {
+    let s = "";
+    for (let i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, "0");
+    return s;
+}
+
+// Reverse of NAMED (hex → name), derived so it never drifts. When several names
+// share a byte sequence (ret/enter on 0x0d, bs/backspace on 0x7f) the canonical
+// one wins.
+const NAMED_CANON = new Set([
+    "esc", "tab", "enter", "space", "backspace", "del",
+    "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+]);
+const REVERSE_NAMED: Record<string, string> = (() => {
+    const m: Record<string, string> = {};
+    for (const [name, bytes] of Object.entries(NAMED)) {
+        const h = toHex(bytes);
+        if (!(h in m) || NAMED_CANON.has(name)) m[h] = name;
+    }
+    return m;
+})();
+
+// CSI / SS3 escape sequences we can name but that aren't valid afk combos
+// (arrows / nav) — so the decoder labels them instead of mis-reading the ESC
+// prefix as `alt+[`.
+const ESC_SEQ: Record<string, string> = {
+    "1b5b41": "up", "1b5b42": "down", "1b5b43": "right", "1b5b44": "left",
+    "1b5b48": "home", "1b5b46": "end", "1b5b357e": "pgup", "1b5b367e": "pgdn",
+};
+
+/** Decode ONE simple key (1 byte, or a named single like ESC) to grammar, or null. */
+function decodeSingle(bytes: number[]): string | null {
+    const named = REVERSE_NAMED[toHex(bytes)];
+    if (named) return named;
+    if (bytes.length !== 1) return ESC_SEQ[toHex(bytes)] ?? null;
+    const b = bytes[0];
+    if (b < 0x20) {
+        // Inverse of `ctrl+<char>` = char & 0x1f → restore the 0x40 bit.
+        const c = b | 0x40;
+        const ch = String.fromCharCode(c);
+        return "ctrl+" + (c >= 0x41 && c <= 0x5a ? ch.toLowerCase() : ch);
+    }
+    if (b >= 0x21 && b <= 0x7e) return String.fromCharCode(b); // printable literal
+    return null;
+}
+
+/**
+ * #381 (david yf8wht): inverse of {@link parseCombo} — decode a keystroke's raw
+ * bytes back into the afk_key grammar (`alt+esc`, `ctrl+g`, `f9`, `a`, …). Powers
+ * the `debug-keys` tool: pressing a key shows WHAT the terminal actually
+ * delivered, so david can confirm whether GNOME/tmux swallows `alt+esc` (it'd
+ * print nothing or different bytes instead of `1b1b`). Lossless fallback:
+ * anything unnameable renders as `<hex …>`, never dropped.
+ */
+export function bytesToGrammar(bytes: ArrayLike<number>): string {
+    const arr = Array.from(bytes);
+    if (arr.length === 0) return "(empty)";
+    const h = toHex(arr);
+    if (REVERSE_NAMED[h]) return REVERSE_NAMED[h]; // esc/tab/enter/space/backspace/del/f-keys
+    if (ESC_SEQ[h]) return ESC_SEQ[h]; // arrows / nav
+    // Alt = ESC prefix on a simple key — but NOT a CSI (ESC [) / SS3 (ESC O) seq.
+    if (arr.length >= 2 && arr[0] === 0x1b && arr[1] !== 0x5b && arr[1] !== 0x4f) {
+        const inner = decodeSingle(arr.slice(1));
+        if (inner) return "alt+" + inner;
+    }
+    if (arr.length === 1) {
+        const single = decodeSingle(arr);
+        if (single) return single;
+    }
+    return `<hex ${h}>`;
+}
+
+/**
+ * Pure combo match (no debounce state): does `bytes` exactly equal one of the
+ * spec's atomic combos? Used by the `debug-keys` diagnostic to flag a keystroke
+ * that WOULD toggle AFK, without touching the stateful {@link AfkDetector}.
+ */
+export function matchAfkCombo(bytes: ArrayLike<number>, spec: AfkSpec): boolean {
+    for (const c of spec.combos) if (bytesEqual(bytes, c)) return true;
+    return false;
+}
+
 /** #381b: every byte of `bytes` belongs to the combo's byte set. */
 function allComboBytes(bytes: ArrayLike<number>, set: Set<number>): boolean {
     if (bytes.length === 0) return false;

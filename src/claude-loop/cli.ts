@@ -31,7 +31,7 @@ import { AiballClient } from "../client.js";
 import { AIBALL_VERSION } from "../version.js";
 import { bootstrapInit } from "../cli/bootstrap.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
-import { parseAfkKey } from "./afk-key.js";
+import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
 import {
     DEFAULT_CHECK_CMD,
     isInternalCheckCmd,
@@ -954,6 +954,59 @@ async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boo
 
 
 /**
+ * Debug subcommand (#381 yf8wht, david "un outil qui lit directement les touches
+ * et qui donne la syntaxe dans notre grammaire"). Reads raw keystrokes STRAIGHT
+ * from this terminal (no PTY, no tmux, no claude) and prints, per keystroke, the
+ * hex bytes + the decoded afk_key grammar (`alt+esc`, `ctrl+g`, …) + whether it
+ * matches the configured afk_key. The direct test for david's hypothesis "alt+esc
+ * est intercepté par gnome": press the combo — if NOTHING prints, the window
+ * manager / terminal swallowed it before aiball ever saw the bytes. Quit: Ctrl-C.
+ */
+function cmdDebugKeys(): void {
+    const ctx = resolveProjectContext();
+    let spec: AfkSpec | null = null;
+    try {
+        spec = parseAfkKey(ctx.claude_loop.afk_key, ctx.claude_loop.afk_window_ms);
+    } catch (e) {
+        process.stderr.write(
+            `claude-loop: invalid afk_key "${ctx.claude_loop.afk_key}" — match column disabled (${(e as Error).message})\n`,
+        );
+    }
+    const stdin = process.stdin;
+    if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
+        die("debug-keys: stdin is not a TTY — run it directly in a real terminal (the same one you use for the loop).");
+    }
+    process.stdout.write([
+        `claude-loop debug-keys`,
+        `  afk_key : "${ctx.claude_loop.afk_key}"  → combos ${spec ? JSON.stringify(spec.combos) : "(disabled)"}`,
+        ``,
+        `Reads keys DIRECTLY from this terminal (no PTY / tmux / claude). Per key:`,
+        `  <hex bytes>   →   <grammar>   [✓ matches afk_key → would TOGGLE]`,
+        `Press your AFK combo (e.g. alt+esc). If NOTHING prints, the window manager`,
+        `or terminal ate it before aiball could see the bytes — that's the #381 cause.`,
+        `Quit: Ctrl-C.`,
+        ``,
+    ].join("\n"));
+    stdin.setRawMode(true);
+    stdin.resume();
+    const restore = (): void => { try { stdin.setRawMode(false); } catch { /* already gone */ } };
+    process.on("exit", restore);
+    stdin.on("data", (buf: Buffer) => {
+        const bytes = Array.from(buf);
+        const hex = bytes.map((b) => b.toString(16).padStart(2, "0")).join(" ");
+        const grammar = bytesToGrammar(bytes);
+        // Ctrl-C (lone 0x03) quits — show it decoded first, then bail.
+        if (bytes.length === 1 && bytes[0] === 0x03) {
+            process.stdout.write(`  ${hex.padEnd(16)} →  ${grammar}   (quit)\n`);
+            restore();
+            process.exit(0);
+        }
+        const hit = spec && matchAfkCombo(bytes, spec) ? "   ✓ matches afk_key → would TOGGLE" : "";
+        process.stdout.write(`  ${hex.padEnd(16)} →  ${grammar}${hit}\n`);
+    });
+}
+
+/**
  * Debug subcommand (#381, david "--debug-proxy-tty"). Runs the REAL PTY proxy
  * attached to the current terminal, but with a FAKE claude (a byte logger)
  * behind it instead of claude. Lets you mash keys and see, LIVE:
@@ -1154,9 +1207,11 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--reload") wrapper[0] = "reload";
     // #381 (david): bare top-level alias for the proxy-tty debug session.
     else if (wrapper[0] === "--debug-proxy-tty") wrapper[0] = "debug-proxy-tty";
+    // #381 (david yf8wht): bare alias for the direct key-grammar reader.
+    else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "check", "trace", "prune", "init", "debug-proxy-tty", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "check", "trace", "prune", "init", "debug-proxy-tty", "debug-keys", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -1212,6 +1267,11 @@ async function main(): Promise<void> {
     program.command("debug-proxy-tty")
         .description("Run the real PTY proxy in front of a fake-claude byte logger to capture/diagnose what your keyboard actually emits + AFK toggling (#381)")
         .action(() => cmdDebugProxyTty());
+    // #381 (david yf8wht): direct raw-stdin key reader — no PTY/tmux/claude. Shows
+    // each keystroke's bytes + afk grammar decode, to tell if GNOME ate alt+esc.
+    program.command("debug-keys")
+        .description("Read keys directly from this terminal and print them in afk_key grammar (alt+esc, ctrl+g, …) — diagnose whether the WM/terminal swallows your combo (#381)")
+        .action(() => cmdDebugKeys());
     // #304 david: alias for `aiball init` — bootstrap a project (.mcp.json +
     // .aiball.yaml) without leaving the claude-loop workflow. Shares the body.
     program.command("init")

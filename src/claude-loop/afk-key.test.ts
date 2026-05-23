@@ -5,7 +5,7 @@
 // key-repeat debounce. Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseAfkKey, AfkDetector } from "./afk-key.js";
+import { parseAfkKey, AfkDetector, bytesToGrammar, matchAfkCombo } from "./afk-key.js";
 
 // ---- parseAfkKey (pure: notation → byte combos) ----------------------
 
@@ -72,4 +72,42 @@ test("detector: alternatives — any configured combo fires", () => {
     const d = new AfkDetector(parseAfkKey("ctrl+g alt+a", 400));
     assert.equal(d.feed([0x07], 0), true);             // ctrl+g → fire
     assert.equal(d.feed([0x1b, 0x61], 1000), true);    // alt+a → fire
+});
+
+// ---- bytesToGrammar (#381 yf8wht: bytes → grammar, inverse of parseCombo) ----
+
+test("bytesToGrammar: round-trips the combos parseAfkKey produces", () => {
+    // For each grammar token, parse → bytes → decode should land back on it.
+    // NB: bare "esc" is rejected by parseAfkKey (interrupt key) — its decode is
+    // checked separately below; only round-trip the combos parseAfkKey accepts.
+    for (const tok of ["alt+esc", "ctrl+g", "ctrl+a", "ctrl+]", "alt+a", "a", "f9", "tab", "enter"]) {
+        const [combo] = parseAfkKey(tok, 0).combos;
+        assert.equal(bytesToGrammar(combo), tok, `round-trip ${tok}`);
+    }
+});
+
+test("bytesToGrammar: alt+esc is 1b1b (the #381 default)", () => {
+    assert.equal(bytesToGrammar([0x1b, 0x1b]), "alt+esc");
+    assert.equal(bytesToGrammar([0x1b]), "esc"); // a lone ESC stays ESC (the interrupt)
+});
+
+test("bytesToGrammar: ESC-led sequences are named, not mis-read as alt+[", () => {
+    assert.equal(bytesToGrammar([0x1b, 0x5b, 0x41]), "up");   // CSI arrow, not alt+[
+    assert.equal(bytesToGrammar([0x1b, 0x5b, 0x33, 0x7e]), "del");
+    assert.equal(bytesToGrammar([0x20]), "space");
+    assert.equal(bytesToGrammar([0x7f]), "backspace");
+});
+
+test("bytesToGrammar: printable + lossless hex fallback", () => {
+    assert.equal(bytesToGrammar([0x7a]), "z");
+    assert.equal(bytesToGrammar([]), "(empty)");
+    assert.equal(bytesToGrammar([0xc3, 0xa9]), "<hex c3a9>"); // 'é' UTF-8 — not a combo
+});
+
+test("matchAfkCombo: exact atomic-combo match, no debounce state", () => {
+    const spec = parseAfkKey("alt+esc ctrl+g", 400);
+    assert.equal(matchAfkCombo([0x1b, 0x1b], spec), true);  // alt+esc
+    assert.equal(matchAfkCombo([0x07], spec), true);        // ctrl+g
+    assert.equal(matchAfkCombo([0x1b], spec), false);       // lone ESC ≠ combo
+    assert.equal(matchAfkCombo([0x1b, 0x5b, 0x41], spec), false); // up arrow
 });
