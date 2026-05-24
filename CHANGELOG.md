@@ -17,8 +17,11 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
-### Approved command launchers (#398) — backend
+### Approved command launchers (#398)
 
+- A **Launchers panel** in the UI (sidebar + mobile footer) lists the
+  operator-approved commands and runs one on click — so you can "launch Chrome"
+  straight from aiball.
 - The daemon can spawn a small set of **operator-approved commands** (e.g.
   "launch Chrome") declared in the global config `launchers:` list — never an
   arbitrary command from the API (which references a launcher only by `id`). New
@@ -37,7 +40,7 @@ narrative for the product as a whole.
       icon: pi-google          # optional PrimeIcons class for the UI button
   ```
 
-  UI launcher panel + project-level (`.aiball.yaml`) launchers are the next step.
+  Project-level (`.aiball.yaml`) launchers are the next step.
 
 ### Near-realtime claude-loop running detection (#395)
 

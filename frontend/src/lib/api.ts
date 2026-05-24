@@ -403,6 +403,16 @@ export interface ProjectMeta {
     running_human_word?: "stop" | "wait" | "loop" | string;
 }
 
+/** #398: an operator-approved command launcher (declared in config). */
+export interface Launcher {
+    id: string;
+    label: string;
+    cmd: string;
+    args?: string[];
+    cwd?: string;
+    icon?: string;
+}
+
 export const api = {
     listProjects: () => req<string[]>("GET", "/api/projects"),
     /**
@@ -741,5 +751,14 @@ export const api = {
         req<{ consumer_id: string; deleted: boolean }>(
             "DELETE",
             `/api/consumers/${encodeURIComponent(consumer_id)}`,
+        ),
+    /** #398: operator-approved command launchers (declared in the global
+     *  config `launchers:` list; the API only ever takes an id). */
+    listLaunchers: () => req<Launcher[]>("GET", "/api/launchers"),
+    /** #398: run a launcher by id (human-only; detached spawn on the host). */
+    runLauncher: (id: string) =>
+        req<{ ok: boolean; id: string; label: string; pid: number }>(
+            "POST",
+            `/api/launchers/${encodeURIComponent(id)}/run`,
         ),
 };

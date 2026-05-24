@@ -1,7 +1,7 @@
 import { onBeforeUnmount, watch, type Ref } from "vue";
 
 export type RouteState = {
-    panel: "rules" | "tags" | "projects" | "consumers" | "compose" | null;
+    panel: "rules" | "tags" | "projects" | "consumers" | "launchers" | "compose" | null;
     openTicketId: number | null;
     /** Set on `/consumers/<id>` — ConsumersPanel renders the edit view (#B.193). */
     consumerEditId: string | null;
@@ -25,6 +25,7 @@ export function buildUrl(s: RouteState): string {
             ? `/consumers/${encodeURIComponent(s.consumerEditId)}`
             : "/consumers";
     }
+    else if (s.panel === "launchers") path = "/launchers";
     else if (s.panel === "compose") path = "/new";
     else if (s.openTicketId !== null) path = `/b/${s.openTicketId}`;
 
@@ -67,6 +68,9 @@ export function parseUrl(): Partial<RouteState> {
         out.openTicketId = null;
         const raw = path.slice("/consumers/".length);
         out.consumerEditId = raw ? decodeURIComponent(raw) : null;
+    } else if (path === "/launchers") {
+        out.panel = "launchers";
+        out.openTicketId = null;
     } else if (path === "/new") {
         out.panel = "compose";
         out.openTicketId = null;

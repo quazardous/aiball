@@ -27,6 +27,7 @@ import ProjectSettingsPage from "./components/ProjectSettingsPage.vue";
 import ProjectDetailPage from "./components/ProjectDetailPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
 import ConsumersPanel from "./components/ConsumersPanel.vue";
+import LaunchersPanel from "./components/LaunchersPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
 import SetupScreen from "./components/SetupScreen.vue";
 import LoginScreen from "./components/LoginScreen.vue";
@@ -693,6 +694,7 @@ watch(showSnoozed, (v) => {
                 />
                 <RulesPanel v-else-if="panel === 'rules'" />
                 <TagsPanel v-else-if="panel === 'tags'" />
+                <LaunchersPanel v-else-if="panel === 'launchers'" />
                 <ConsumersPanel
                     v-else-if="panel === 'consumers'"
                     :edit-consumer-id="consumerEditId"
@@ -819,6 +821,9 @@ watch(showSnoozed, (v) => {
                     </button>
                     <button type="button" class="aiball-footer-settings__item" @click="openPanel('consumers')">
                         <i class="pi pi-users" /> <span>Consumers</span>
+                    </button>
+                    <button type="button" class="aiball-footer-settings__item" @click="openPanel('launchers')">
+                        <i class="pi pi-play" /> <span>Launchers</span>
                     </button>
                 </aside>
             </main>
