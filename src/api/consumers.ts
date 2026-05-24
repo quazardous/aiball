@@ -24,6 +24,14 @@ consumersRouter.get("/consumers", (_req, res) => {
     res.json(listConsumers());
 });
 
+// #397: single consumer lookup (incl. micro_prompt) — the claude-loop timer
+// fetches its own row to inject `{consumer_prompt}` into the wake prompt.
+consumersRouter.get("/consumers/:consumer_id", (req: Request, res: Response) => {
+    const c = getConsumer(String(req.params.consumer_id));
+    if (!c) return notFound(res, "consumer not found");
+    res.json(c);
+});
+
 consumersRouter.post("/consumers", (req: Request, res: Response) => {
     const { consumer_id, kind, display_name, enabled, note } = (req.body ?? {}) as {
         consumer_id?: unknown;
@@ -56,6 +64,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
         display_name?: unknown;
         enabled?: unknown;
         note?: unknown;
+        micro_prompt?: unknown;
     };
     if (body.kind !== undefined && body.kind !== "human" && body.kind !== "agent" && body.kind !== "sandbox") {
         return badRequest(res, "kind must be 'human', 'agent', or 'sandbox'");
@@ -65,6 +74,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
         display_name?: string | null;
         enabled?: boolean;
         note?: string | null;
+        micro_prompt?: string | null;
     } = {};
     if (body.kind !== undefined) patch.kind = body.kind as ConsumerKind;
     if (body.display_name !== undefined) {
@@ -77,6 +87,11 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
     }
     if (body.note !== undefined) {
         patch.note = body.note === null ? null : (typeof body.note === "string" ? body.note : null);
+    }
+    if (body.micro_prompt !== undefined) {
+        patch.micro_prompt = body.micro_prompt === null
+            ? null
+            : (typeof body.micro_prompt === "string" ? body.micro_prompt : null);
     }
     const updated: Consumer | null = updateConsumer(consumer_id, patch);
     if (!updated) return notFound(res, "consumer not found");

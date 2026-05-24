@@ -624,6 +624,15 @@ export class AiballClient {
         );
     }
 
+    /** #397: fetch a single consumer (incl. `micro_prompt`). Used by the wake
+     *  builder to inject `{consumer_prompt}` into the relance prompt. */
+    getConsumer(id: string) {
+        return this.http<{ consumer_id: string; micro_prompt?: string | null }>(
+            "GET",
+            `/api/consumers/${encodeURIComponent(id)}`,
+        );
+    }
+
     /**
      * #B.177 B1: push the current claude-loop state for this consumer
      * (own-state only — the daemon refuses cross-consumer pushes).

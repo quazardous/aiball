@@ -343,6 +343,10 @@ export interface Consumer {
     display_name: string | null;
     enabled: boolean;
     note: string | null;
+    /** #397: per-consumer micro-prompt — a short standing instruction edited
+     *  here, injected into the wake prompt via the `{consumer_prompt}`
+     *  placeholder. null = none (opt-in). */
+    micro_prompt?: string | null;
     /** #B.177: ISO8601 of last API call from this consumer. */
     last_seen_at?: string | null;
     /** #B.177 B1: current claude-loop state (null = no loop tracking). */
@@ -745,7 +749,7 @@ export const api = {
     }) => req<Consumer>("POST", "/api/consumers", body),
     updateConsumer: (
         consumer_id: string,
-        patch: Partial<{ kind: ConsumerKind; display_name: string | null; enabled: boolean; note: string | null }>,
+        patch: Partial<{ kind: ConsumerKind; display_name: string | null; enabled: boolean; note: string | null; micro_prompt: string | null }>,
     ) => req<Consumer>("PATCH", `/api/consumers/${encodeURIComponent(consumer_id)}`, patch),
     deleteConsumer: (consumer_id: string) =>
         req<{ consumer_id: string; deleted: boolean }>(

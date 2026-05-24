@@ -359,6 +359,13 @@ export const consumers = sqliteTable("consumers", {
     enabled: integer("enabled").notNull().default(1),
     note: text("note"),
     /**
+     * #397: a per-consumer "micro-prompt" — a short standing instruction the
+     * operator edits in the UI (e.g. "branche main si le ticket ne précise
+     * pas"). Surfaced to the agent on wake via the `{consumer_prompt}`
+     * placeholder in the `prompts:` wake templates. NULL = none (opt-in).
+     */
+    microPrompt: text("micro_prompt"),
+    /**
      * scrypt password hash (#B.94). Set for humans who go through the
      * web /setup or /login flow. NULL for agents (they auth via
      * agent-tokens, no password).

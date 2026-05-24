@@ -277,8 +277,11 @@ autopoll:
 #                      then oldest) — the ticket to engage first.
 #   {head_title}       title of that head ticket.
 #   {project_scope}    "`<project>`" or "your scope".
-#   {consumer_prompt}  (planned, #397) per-consumer micro-prompt — not wired
-#                      yet; will be just one more always-provided placeholder.
+#   {consumer_prompt}  (#397) this consumer's micro-prompt — a standing
+#                      instruction edited per-agent in the UI (Consumers →
+#                      edit → micro-prompt). Empty when unset (opt-in): drop
+#                      the placeholder into your wake_master where you want
+#                      the agent to see it (e.g. "{consumer_prompt:+ {consumer_prompt}}").
 #
 # ── Slots (the whole wake-CTA, two slots) ──────────────────────────────────
 #   wake_lead    → conversational lead between {culture} and the state report

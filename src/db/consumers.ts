@@ -48,6 +48,9 @@ export interface Consumer {
     /** #393 (Option A): the loop's project, pushed alongside cwd → exact
      *  root↔project attribution. null = authored-content fallback. */
     project?: string | null;
+    /** #397: per-consumer micro-prompt — a short standing instruction edited in
+     *  the UI, injected into the wake prompt via `{consumer_prompt}`. null = none. */
+    micro_prompt?: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -69,6 +72,7 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         state_human_word: (r.stateHumanWord as HumanWord | null) ?? null,
         cwd: r.cwd ?? null,
         project: r.project ?? null,
+        micro_prompt: r.microPrompt ?? null,
         created_at: r.createdAt,
         updated_at: r.updatedAt,
     };
@@ -233,6 +237,8 @@ export interface UpdateConsumerPatch {
     display_name?: string | null;
     enabled?: boolean;
     note?: string | null;
+    /** #397: per-consumer micro-prompt (injected into the wake prompt). */
+    micro_prompt?: string | null;
 }
 
 export function updateConsumer(consumer_id: string, patch: UpdateConsumerPatch): Consumer | null {
@@ -243,6 +249,7 @@ export function updateConsumer(consumer_id: string, patch: UpdateConsumerPatch):
     if (patch.display_name !== undefined) row.displayName = patch.display_name;
     if (patch.enabled !== undefined) row.enabled = patch.enabled ? 1 : 0;
     if (patch.note !== undefined) row.note = patch.note;
+    if (patch.micro_prompt !== undefined) row.microPrompt = patch.micro_prompt;
     const r = getDb().update(schema.consumers)
         .set(row)
         .where(eq(schema.consumers.consumerId, consumer_id))

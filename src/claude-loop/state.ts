@@ -980,7 +980,7 @@ export async function buildContextPhrase(
 ): Promise<string> {
     const culture = pickPingPhrase(pingsAbsPath);
     try {
-        const [pingsR, projects, headRows] = await Promise.all([
+        const [pingsR, projects, headRows, consumerR] = await Promise.all([
             client.pingsCount() as Promise<{ unread?: number }>,
             client.listProjectsDetailed() as Promise<Array<{
                 name: string;
@@ -995,8 +995,15 @@ export async function buildContextPhrase(
                 project: project ?? undefined,
                 limit: "1",
             }) as Promise<Array<{ id: number; title?: string }>>,
+            // #397: this loop's own consumer row → its micro_prompt, exposed as
+            // the `{consumer_prompt}` placeholder. Best-effort (null on failure).
+            client.getConsumer(client.agentId).catch(() => null) as Promise<{ micro_prompt?: string | null } | null>,
         ]);
         const pingCount = typeof pingsR?.unread === "number" ? pingsR.unread : 0;
+        // #397: per-consumer standing instruction. Empty when unset → the
+        // `{consumer_prompt}` placeholder renders to nothing (opt-in; the
+        // operator puts the placeholder in their wake template where they want).
+        const consumerPrompt = (consumerR?.micro_prompt ?? "").trim();
         // #374 (#kjsejy): open and actionable are DISTINCT counts. We always
         // state the TRUE open count when waking so a gated backlog (open>0,
         // actionable=0) never reads as "nothing to do"; `actionableCount`
@@ -1062,6 +1069,10 @@ export async function buildContextPhrase(
             head_id: head?.id ?? "",
             head_title: head?.title ?? "",
             project_scope: scope,
+            // #397: {consumer_prompt} = this consumer's micro-prompt (opt-in;
+            // empty → renders to nothing). David puts the placeholder in his
+            // wake_master override where he wants it.
+            consumer_prompt: consumerPrompt,
         };
         return renderSlot(
             promptMap,

@@ -28,6 +28,7 @@ const original = ref<Consumer | null>(null);
 const kind = ref<ConsumerKind>("agent");
 const displayName = ref("");
 const note = ref("");
+const microPrompt = ref("");
 const enabled = ref(true);
 
 const KIND_OPTIONS = CONSUMER_KIND_OPTIONS;
@@ -36,9 +37,10 @@ async function load() {
     loading.value = true;
     error.value = null;
     try {
-        // The /api/consumers endpoint returns the full list, so we filter
-        // client-side. There's no per-id GET today; the cost is small (a
-        // few hundred rows max in any realistic deployment).
+        // We reuse the full-list endpoint and filter client-side (cost is
+        // small — a few hundred rows max). A per-id GET exists since #397
+        // (used by the claude-loop wake builder) but the list already carries
+        // `micro_prompt`, so there's no need for a second round-trip here.
         const all = await api.listConsumers();
         const found = all.find((c) => c.consumer_id === props.consumerId);
         if (!found) {
@@ -49,6 +51,7 @@ async function load() {
         kind.value = found.kind;
         displayName.value = found.display_name ?? "";
         note.value = found.note ?? "";
+        microPrompt.value = found.micro_prompt ?? "";
         enabled.value = found.enabled;
     } catch (e) {
         error.value = (e as Error).message;
@@ -67,6 +70,7 @@ async function save() {
             kind: kind.value,
             display_name: displayName.value.trim() || null,
             note: note.value.trim() || null,
+            micro_prompt: microPrompt.value.trim() || null,
             enabled: enabled.value,
         });
         toast.add({
@@ -147,6 +151,22 @@ async function save() {
                     placeholder="(internal note — visible only on this page)"
                     style="width: 100%"
                 />
+            </div>
+
+            <div class="consumer-edit__field">
+                <label for="ce-micro-prompt">micro-prompt</label>
+                <Textarea
+                    id="ce-micro-prompt"
+                    v-model="microPrompt"
+                    rows="3"
+                    placeholder="(standing instruction injected into this agent's wake prompt via {consumer_prompt} — e.g. &quot;branch main if the ticket doesn't specify&quot;)"
+                    style="width: 100%"
+                />
+                <small class="consumer-edit__hint">
+                    Surfaced to the agent on wake via the <code>{consumer_prompt}</code>
+                    placeholder. Opt-in: add the placeholder to your <code>wake_master</code>
+                    template (<code>.aiball.yaml</code>) where you want it. Empty = nothing injected.
+                </small>
             </div>
 
             <div class="consumer-edit__field">
@@ -244,6 +264,15 @@ async function save() {
 .consumer-edit__field label {
     font-size: 0.85rem;
     color: var(--p-text-muted-color);
+}
+.consumer-edit__hint {
+    font-size: 0.78rem;
+    line-height: 1.35;
+    color: var(--p-text-muted-color);
+}
+.consumer-edit__hint code {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.74rem;
 }
 .consumer-edit__static {
     font-family: ui-monospace, SFMono-Regular, monospace;
