@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { unlinkSync, chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { globalConfigPath } from "./autopoll/config.js";
 import { createApp, frontendDistDir } from "./app.js";
@@ -68,6 +69,34 @@ function reloadConfig(): void {
         console.log(`[sighup] config reloaded (most config is read fresh per request; global=${gp}, hot_window_sec=${hotWin ?? "default"})`);
     } catch (e) {
         console.error("[sighup] config reload failed (daemon stays up):", e);
+    }
+}
+
+/**
+ * #407 — SIGUSR2 = HARD restart (david `bstvby` "il faut quand même un hard
+ * restart pour certain cas" + `azppqg` "Avec kill"). The kill-triggered sibling
+ * of `aiball restart`, for the cases SIGHUP/reload can't cover: schema
+ * migrations, env changes, code that didn't hot-reload, socket rebind.
+ *
+ * It MUST go through the service supervisor, not a self-exit: the daemon runs
+ * under `tsx watch`, and `tsx watch` only relaunches on file changes — NOT on
+ * process exit (verified) — so `process.exit()` here would leave aiball DOWN.
+ * `systemctl --user restart aiball` instead bounces the whole service tree
+ * (npm → tsx watch → fresh daemon), re-running migrations + reloading all code.
+ * Spawned detached + unref'd so it survives the SIGTERM systemd then sends us.
+ * SIGUSR1 is reserved by Node (inspector), so SIGUSR2 is the free user signal.
+ */
+function hardRestart(): void {
+    try {
+        console.log("[sigusr2] hard restart requested — delegating to the service supervisor…");
+        const child = spawn("systemctl", ["--user", "restart", "aiball"], {
+            detached: true,
+            stdio: "ignore",
+        });
+        child.on("error", (e) => console.error("[sigusr2] hard restart spawn failed (daemon stays up):", e));
+        child.unref();
+    } catch (e) {
+        console.error("[sigusr2] hard restart failed (daemon stays up):", e);
     }
 }
 
@@ -173,6 +202,8 @@ function main(): void {
     process.on("SIGTERM", shutdown);
     // #407: HUP reloads config in place (no downtime), never terminates.
     process.on("SIGHUP", reloadConfig);
+    // #407: USR2 = hard restart via the supervisor (david "Avec kill").
+    process.on("SIGUSR2", hardRestart);
 }
 
 main();
