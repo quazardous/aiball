@@ -89,6 +89,15 @@ If you need **per-consumer hard proof**, use **#390 direct mode** (each loop
 carries its own agent token, end-to-end). The two modes coexist on purpose —
 pick ergonomics (proxy) or strictness (direct) per deployment.
 
+**You can also mix the two *through* the proxy** (#394 QW-A): a caller that
+presents its **own** agent token keeps it end-to-end — the proxy injects the
+node token **only as a fallback** for token-less callers. So a loop configured
+with its own per-consumer token gets hard proof at A *and* the proxy's single
+egress point + spool resilience; the node token then only covers the genuinely
+token-less local clients (web UI, ad-hoc CLI). This shrinks the node token's
+blast radius in practice — the writes that matter (the loop's) carry their own
+proof, so a leaked node token can impersonate only the token-less stragglers.
+
 ### Wiring (B → A) in two commands
 
 ```bash

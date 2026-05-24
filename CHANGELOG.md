@@ -39,6 +39,12 @@ narrative for the product as a whole.
   node token is **impersonation-capable** and unscoped. The `auth issue --node`
   output now carries a louder security note (private network only; use #390
   direct mode for per-consumer proof).
+- **Per-consumer proof *through* the proxy** (QW-A): the proxy no longer clobbers
+  an `Authorization` header the caller already set — it injects the node token
+  only as a **fallback** for token-less callers. A loop carrying its own
+  per-consumer agent token now gets hard per-consumer proof at the remote
+  end-to-end through the proxy, with the node token left to cover only genuinely
+  token-less local clients — shrinking the node token's blast radius in practice.
 
 ### Local projects — running indicator + single-loop launch gate (#393)
 

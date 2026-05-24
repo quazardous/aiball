@@ -66,9 +66,16 @@ export function proxyMiddleware(cfg: ProxyConfig): RequestHandler {
             ...req.headers,
             host: target.host,
         };
-        // Local callers reach the proxy over UDS (token-less). Inject the
-        // remote's bearer so the upstream authenticates this node.
-        if (cfg.token) headers["authorization"] = `Bearer ${cfg.token}`;
+        // #394 QW-A: a caller that already carries its OWN bearer (a per-consumer
+        // agent token, #390-style) keeps it → the upstream authenticates THAT
+        // consumer with hard per-consumer proof, end-to-end through the proxy.
+        // The node token is only a FALLBACK for genuinely token-less local
+        // callers (web UI / CLI over the UDS) — then it vouches for the relayed
+        // x-aiball-consumer (X-Forwarded-For model). So: per-consumer proof when
+        // the caller has a token, node-vouched identity otherwise.
+        if (cfg.token && !headers["authorization"]) {
+            headers["authorization"] = `Bearer ${cfg.token}`;
+        }
         const upstream = reqFn(
             {
                 protocol: target.protocol,
