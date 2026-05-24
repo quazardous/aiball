@@ -38,8 +38,14 @@ narrative for the product as a whole.
   `full + order=desc + limit=10` returns the 10 most recent thread entries **with
   full bodies** — a bounded read on a huge thread instead of pulling the whole
   thing. The response carries a `pagination` block (offset/limit/returned/total/
-  order/has_more) when paging is active; with no params it ships the full feed
-  exactly as before. `brief` / `digest` keep their own shapes (params ignored).
+  order/has_more) when paging is active. `brief` / `digest` keep their own
+  shapes (params ignored).
+- **Safe default for the agent path**: in the MCP tool, a bare `full:true` (no
+  `limit`) now returns the **20 most recent** entries (`order:desc`) + a
+  pagination block, so a reflexive full on a huge thread can't overflow the
+  response cap. Override with `limit` (e.g. `limit:9999` for everything) / `offset`
+  / `order`. The raw HTTP API still returns the whole thread (the web UI renders
+  it all) — only the agent-facing default is bounded.
 
 ### Remote/proxy ergonomics — one-command setup + node tokens (#394)
 
