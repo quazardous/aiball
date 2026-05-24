@@ -13,16 +13,18 @@ tmux wrapper + a stdio MCP server. See [`README.md`](./README.md).
   `tsx`/`vue-tsc` only typecheck, they don't emit `dist/` (which the daemon
   serves). Hard-reload the browser after.
 - **DB migrations only run at daemon boot.** A `tsx`-watch reload does NOT
-  re-run them — applying a migration needs `systemctl --user restart aiball`.
-  Add the migration + journal entry **before** committing code that reads
-  the new column (else the live daemon crashes). See [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
-- **Config reload, no restart (#407):** `aiball reload` sends the daemon
-  `SIGHUP` → it re-reads config **in place, no downtime** (mutualised with
-  `claude-loop reload`). Most config is already read fresh per request, so this
-  is mainly for any boot-cached config; **schema migrations still need the full
-  restart above.** Plain `kill -HUP` works too — target `$AIBALL_HOME/daemon.pid`
-  (under `tsx watch` the daemon's pid changes on every reload, so use the pidfile,
-  not the systemd MainPID).
+  re-run them — applying a migration needs a **hard restart**: `aiball restart`
+  (wraps `systemctl --user restart aiball`). Add the migration + journal entry
+  **before** committing code that reads the new column (else the live daemon
+  crashes). See [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
+- **Daemon lifecycle (#407), mutualised with `claude-loop`:**
+  - `aiball reload` → `SIGHUP` → re-reads config **in place, no downtime**. Most
+    config is already read fresh per request, so this is mainly for any
+    boot-cached config + revalidation. Plain `kill -HUP` works too — target
+    `$AIBALL_HOME/daemon.pid` (under `tsx watch` the daemon's pid changes on
+    every reload, so use the pidfile, not the systemd MainPID).
+  - `aiball restart` → **hard restart** for the cases reload can't cover: schema
+    migrations, env changes, code that didn't hot-reload, socket rebind.
 - Typecheck backend with `npm run typecheck`; daemon health: `aiball check`
   or `GET /api/health`.
 

@@ -8,6 +8,7 @@
  * (default "human"), so a single CLI invocation can play either side.
  */
 import { existsSync, statSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { Command } from "commander";
@@ -364,6 +365,34 @@ program
             gOpts(cmd),
             (v: { pid: number }) =>
                 `sent SIGHUP to daemon (pid ${v.pid}) — config reloaded in place (no downtime)`,
+        );
+    });
+
+program
+    .command("restart")
+    .description(
+        "Hard-restart the daemon — re-runs DB migrations, reloads ALL code + env, " +
+            "rebinds the socket (#407, david bstvby: \"il faut quand même un hard restart " +
+            "pour certain cas\"). Use this for the cases `aiball reload` can't cover " +
+            "(schema migrations above all). Under the standard systemd-user install this " +
+            "runs `systemctl --user restart aiball`; on other deploys (Windows, dev) " +
+            "restart the daemon the way you launched it. Mutualised with `claude-loop restart`.",
+    )
+    .action((_opts, cmd) => {
+        // Canonical deploy = systemd user service (see docs/WIN-INSTALL.md for the
+        // Windows path). A clean SIGTERM would NOT auto-relaunch under
+        // Restart=on-failure, so the hard restart has to go through the supervisor.
+        const r = spawnSync("systemctl", ["--user", "restart", "aiball"], { stdio: "inherit" });
+        if (r.error || r.status !== 0) {
+            die(
+                "could not `systemctl --user restart aiball` (not a systemd-user install, or systemctl missing). " +
+                    "Restart the daemon the way you launched it. For config-only changes, `aiball reload` works with no downtime.",
+            );
+        }
+        out(
+            { restarted: true },
+            gOpts(cmd),
+            () => "daemon hard-restarted (systemctl --user restart aiball)",
         );
     });
 
