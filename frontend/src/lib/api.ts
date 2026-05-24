@@ -395,6 +395,12 @@ export interface ProjectMeta {
     /** #393 (3c): a claude-loop is **currently running** for this project (a
      *  rooted consumer heartbeated recently). Distinct from `local`. */
     running?: boolean;
+    /** #395 (q3bfvn): the running loop's activity state (busy/idle/boot). */
+    running_state?: "busy" | "idle" | "boot" | string;
+    /** #395 (q3bfvn): a live human is driving the running loop (#280). */
+    running_human?: boolean;
+    /** #395 (q3bfvn): the running loop's presence word (stop/wait/loop, #310). */
+    running_human_word?: "stop" | "wait" | "loop" | string;
 }
 
 export const api = {

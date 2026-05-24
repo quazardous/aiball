@@ -50,10 +50,23 @@ function isOnline(c: Consumer): boolean {
     if (!c.state_updated_at) return false;
     return Date.now() - new Date(c.state_updated_at).getTime() < ONLINE_MS;
 }
-function presence(c: Consumer): string {
-    if (!isOnline(c)) return "offline";
-    const word = c.state_human_word ?? (c.state_human ? "stop" : "loop");
-    return `${c.state ?? "?"} · ${word}`;
+// #395 (q3bfvn): render the busy/idle/boot + loop/human state as CSS tags
+// (like ConsumersPanel) instead of plain "busy · loop" text. Same colour
+// mapping: busy=info/blue, boot=warn/yellow, idle=grey; loop=green, stop=red,
+// wait/human=yellow.
+function activityClass(state?: string | null): string {
+    if (state === "busy") return "ld-tag--busy";
+    if (state === "boot") return "ld-tag--boot";
+    return "ld-tag--idle";
+}
+function presenceWord(human?: boolean | null, word?: string | null): string {
+    return word ?? (human ? "human" : "loop");
+}
+function presenceClass(human?: boolean | null, word?: string | null): string {
+    const w = presenceWord(human, word);
+    if (w === "stop") return "ld-tag--stop";
+    if (w === "wait" || w === "human") return "ld-tag--wait";
+    return "ld-tag--loop";
 }
 
 // #393 (3c): a root is "running" when one of its loops is online → no relaunch.
@@ -85,6 +98,11 @@ async function launch(root: string) {
             <h2>{{ project }} — detail</h2>
             <span v-if="meta?.running" class="project-detail__local is-running"><i class="pi pi-desktop" /> running</span>
             <span v-else-if="meta?.local" class="project-detail__local"><i class="pi pi-desktop" /> local</span>
+            <!-- #395 (q3bfvn): the running loop's activity + presence as CSS tags. -->
+            <template v-if="meta?.running && meta.running_state">
+                <span class="ld-tag" :class="activityClass(meta.running_state)">{{ meta.running_state }}</span>
+                <span class="ld-tag" :class="presenceClass(meta.running_human, meta.running_human_word)">{{ presenceWord(meta.running_human, meta.running_human_word) }}</span>
+            </template>
             <div class="project-detail__actions">
                 <button type="button" class="project-detail__refresh" title="Refresh" @click="load">
                     <i class="pi pi-refresh" />
@@ -129,7 +147,12 @@ async function launch(root: string) {
                     >
                         <span class="project-detail__dot" :class="isOnline(c) ? 'is-on' : 'is-off'" />
                         <span class="project-detail__loop-id">{{ c.consumer_id }}</span>
-                        <span class="project-detail__loop-state">{{ presence(c) }}</span>
+                        <!-- #395 (q3bfvn): busy/idle + loop/human as CSS tags (was plain text). -->
+                        <template v-if="isOnline(c)">
+                            <span class="ld-tag" :class="activityClass(c.state)">{{ c.state ?? "?" }}</span>
+                            <span class="ld-tag" :class="presenceClass(c.state_human, c.state_human_word)">{{ presenceWord(c.state_human, c.state_human_word) }}</span>
+                        </template>
+                        <span v-else class="ld-tag ld-tag--offline">offline</span>
                     </li>
                     <li v-if="(loopsByRoot.get(root) ?? []).length === 0" class="project-detail__none">
                         no loop registered at this root yet
@@ -170,6 +193,29 @@ async function launch(root: string) {
     background: var(--p-green-500, #22c55e);
     color: #fff;
 }
+/* #395 (q3bfvn): CSS tag for the loop's busy/idle + loop/human state, same
+   colour scheme as ConsumersPanel (busy=blue, boot/wait=yellow, idle=grey,
+   loop=green, stop=red). */
+.ld-tag {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1;
+    border-radius: 999px;
+    padding: 0.15rem 0.5rem;
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+    background: var(--p-surface-200, #e5e7eb);
+    color: var(--p-surface-700, #374151);
+}
+.ld-tag--busy { background: var(--p-blue-500, #3b82f6); color: #fff; }
+.ld-tag--boot { background: var(--p-yellow-500, #eab308); color: #1f2937; }
+.ld-tag--idle { background: var(--p-surface-300, #d1d5db); color: var(--p-surface-700, #374151); }
+.ld-tag--loop { background: var(--p-green-500, #22c55e); color: #fff; }
+.ld-tag--wait { background: var(--p-yellow-500, #eab308); color: #1f2937; }
+.ld-tag--stop { background: var(--p-red-500, #ef4444); color: #fff; }
+.ld-tag--offline { background: transparent; color: var(--p-surface-400, #9ca3af); border: 1px solid var(--p-surface-300, #d1d5db); }
 .project-detail__back {
     display: inline-flex;
     align-items: center;

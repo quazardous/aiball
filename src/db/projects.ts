@@ -123,6 +123,14 @@ export interface ProjectMeta {
      *  project — a rooted consumer heartbeated within RUNNING_WINDOW_MS.
      *  Distinct from `local` (root known, loop maybe stopped). */
     running?: boolean;
+    /** #395 (q3bfvn): the running loop's activity state (busy/idle/boot), so the
+     *  UI can show a tag like ConsumersPanel. Only set when `running`. */
+    running_state?: string;
+    /** #395 (q3bfvn): the running loop has a live human driving it (#280). */
+    running_human?: boolean;
+    /** #395 (q3bfvn): the running loop's 3-state presence word (stop/wait/loop,
+     *  #310) — drives the presence chip colour. Only set when `running`. */
+    running_human_word?: string;
 }
 
 /** #393 (3c): a loop is "running" when its consumer heartbeated this recently. */
@@ -632,16 +640,31 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
     // stopped near-realtime instead of lingering up to RUNNING_WINDOW_MS.
     const cutoff = new Date(Date.now() - RUNNING_WINDOW_MS).toISOString();
     const runningRoots = new Set<string>();
+    // #395 (q3bfvn): also capture the running loop's activity state per root, so
+    // the UI can show a busy/idle/boot tag (+ loop/human) next to `running`,
+    // like ConsumersPanel. Prefer a `busy` consumer when a root has several.
+    const runningStateByRoot = new Map<string, { state: string | null; human: boolean; word: string | null }>();
     for (const c of db.select({
         consumerId: schema.consumers.consumerId,
         cwd: schema.consumers.cwd,
         stateUpdatedAt: schema.consumers.stateUpdatedAt,
+        state: schema.consumers.state,
+        stateHuman: schema.consumers.stateHuman,
+        stateHumanWord: schema.consumers.stateHumanWord,
     })
         .from(schema.consumers)
         .where(sql`${schema.consumers.cwd} IS NOT NULL AND ${schema.consumers.cwd} != ''`)
         .all()) {
         if (c.cwd && consumerEffectiveRunning(c.consumerId, c.stateUpdatedAt, cutoff)) {
             runningRoots.add(c.cwd);
+            const prev = runningStateByRoot.get(c.cwd);
+            if (!prev || c.state === "busy") {
+                runningStateByRoot.set(c.cwd, {
+                    state: c.state,
+                    human: c.stateHuman === 1,
+                    word: c.stateHumanWord,
+                });
+            }
         }
     }
     for (const p of byProject.values()) {
@@ -650,6 +673,15 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
             p.local = true;
             p.roots = [...s];
             p.running = p.roots.some((r) => runningRoots.has(r));
+            if (p.running) {
+                const rr = p.roots.find((r) => runningStateByRoot.has(r));
+                const st = rr ? runningStateByRoot.get(rr) : undefined;
+                if (st) {
+                    p.running_state = st.state ?? undefined;
+                    p.running_human = st.human;
+                    p.running_human_word = st.word ?? undefined;
+                }
+            }
         }
     }
 

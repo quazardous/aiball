@@ -19,6 +19,12 @@ narrative for the product as a whole.
 
 ### Near-realtime claude-loop running detection (#395)
 
+- **Loop activity tags** (q3bfvn): the project detail page now shows the running
+  loop's **busy / idle / boot** activity and its **loop / human / stop / wait**
+  presence as CSS tag-badges (same colour scheme as the Consumers panel) instead
+  of plain "busy · loop" text — in the header next to `running` and per-loop in
+  the roots list. `/api/projects?detailed` exposes `running_state` /
+  `running_human` / `running_human_word` for the running loop.
 - A loop's **`running` state now flips near-realtime** instead of lagging up to
   120 s. The loop already holds a long-lived SSE connection (`/api/events`); its
   connect/disconnect is now the liveness signal — connect → `running:true`,
