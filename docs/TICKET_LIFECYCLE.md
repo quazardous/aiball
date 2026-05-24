@@ -162,23 +162,32 @@ The hot-zone keeps the wake on **the conversation the agent is actively
 working**, instead of jumping it to a stale oldest head whenever someone else
 moves another ticket.
 
-- **Definition (POV agent, david `xkehmv`):** a ticket is *hot* **for a given
-  consumer** iff **that consumer's own last activity** on it is within the
-  **hot window** — i.e. `now − max(created_at of messages they authored on the
-  ticket) < hot_window_sec`. It is **per-consumer**, computed from *their* own
-  activity, not the ticket's global `last_actor`:
-  - agent works ticket A, **david** comments on ticket B → B is **not** hot for
-    the agent (B never enters the agent's hot-zone; the agent stays on A);
-  - david comments on the agent's ticket A → A **stays** hot (the agent's own
-    activity defines it; the human's doesn't add/remove hotness).
+- **Definition (POV agent, david `xkehmv` + `#408`):** a ticket is *hot* iff an
+  **agent (non-human consumer)** has activity on it within the **hot window** —
+  i.e. `now − max(created_at of messages authored by a non-`human`-kind consumer
+  on the ticket) < hot_window_sec`. It is the **agent's focus**, an objective
+  property of the ticket — **the same flag is shown to everyone**, including human
+  viewers (who see *what the agent is on*, not their own activity). A **human**
+  acting never makes a ticket hot (`#408`):
+  - agent works ticket A, **david** comments on ticket B → B is **not** hot
+    (david is human → excluded; the agent stays on A);
+  - david comments on the agent's ticket A → A **stays** hot (the agent's
+    activity defines it; the human's comment is ignored);
+  - david replies on a ticket **no agent has touched** → **not** hot (`#408`:
+    "c'est pas moi qui dois passer un ticket en hot" — his own reply must not
+    flag it; the 🔥 follows the agent, not the viewer).
+  - **Why agent-activity, not per-requester:** the first cut (`#405`) computed it
+    over the *requesting* consumer's own activity, so when david viewed/commented
+    in the UI his activity flagged his own ticket hot — wrong (`#408`).
 - **Window:** `hot_window_sec`, read from the **global config yaml**
   (`~/.config/aiball/config.yaml` → `hot_window_sec:`), **default 600** (10 min).
   (david `xkehmv` D2: yaml only, not a settings-table row.)
 - **Scope:** hot is a **tiebreak at equal priority, within the tier** — it never
   promotes a ticket across `unread`/`actionable`/`open`, and never resurfaces a
   closed one.
-- **Signal:** `ticketSelfLastActivity(consumer, ids)` = `MAX(created_at) GROUP BY
-  ticket WHERE by_agent = consumer`.
+- **Signal (`#408`):** `ticketAgentLastActivity(ids)` = `MAX(created_at) GROUP BY
+  ticket WHERE by_agent NOT IN (consumers WHERE kind = 'human')`. (Replaces the
+  per-requester `ticketSelfLastActivity` used in the first cut.)
 
 This is **levier 1 — ordering** (when the agent *is* woken, it points at the
 right ticket). **Levier 2 — gating** (using the same hot-zone signal to *defer
