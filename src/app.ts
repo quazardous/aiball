@@ -41,6 +41,11 @@ export function createApp(): express.Express {
     // case; loops/MCP/CLI + SSE are what matter. WS proxying is a follow-up.)
     const proxy = loadProxy();
     if (proxy) {
+        // Local, never-relayed node probe: liveness of THIS daemon + whether
+        // it's a proxy. Mounted BEFORE the relay so it isn't forwarded to the
+        // remote (in proxy mode /api/health relays → reports the REMOTE, not us).
+        // The tray reads it to show a `[proxy]` badge; details live on the page.
+        app.get("/api/node", (_req, res) => res.json({ ok: true, proxy: true, upstream: proxy.url }));
         const fwd = proxyMiddleware(proxy);
         app.use("/api", fwd);
         app.use("/uploads", fwd);
@@ -54,6 +59,9 @@ export function createApp(): express.Express {
     }
 
     app.use(express.json({ limit: "1mb" }));
+    // Local node probe (public — before the bearer-auth'd router): liveness +
+    // not-a-proxy. Mirrors the proxy-mode route so the tray uses one endpoint.
+    app.get("/api/node", (_req, res) => res.json({ ok: true, proxy: false, upstream: null }));
     app.use("/api", api);
 
     // User-uploaded images (#B.76). Content-addressed → safe long max-age.
