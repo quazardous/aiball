@@ -246,6 +246,12 @@ const topTokenMax = computed(() =>
                         <div><dt>cache read</dt><dd>{{ formatTokens(stats.token_usage.cache_r) }}</dd></div>
                     </dl>
                 </div>
+                <h4
+                    v-if="stats.top_token_tickets.length > 0"
+                    class="project-stats__token-top-label"
+                >
+                    Top 3 costliest tickets
+                </h4>
                 <ol
                     v-if="stats.top_token_tickets.length > 0"
                     class="project-stats__bars project-stats__token-top"
@@ -500,6 +506,14 @@ const topTokenMax = computed(() =>
     margin: 0;
     font-variant-numeric: tabular-nums;
     color: var(--p-text-color);
+}
+.project-stats__token-top-label {
+    margin: 0.2rem 0 0.35rem;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--p-text-muted-color);
+    font-weight: 600;
 }
 .project-stats__token-top li {
     grid-template-columns: minmax(0, 1fr) 5rem 4rem;

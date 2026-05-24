@@ -1027,7 +1027,8 @@ export function getProjectStatsRich(project: string): ProjectStatsRich {
         tokRows.push({ id, title: tokTitleById.get(id) ?? "", token_usage: u });
     }
     tokRows.sort((a, b) => tokCost(b.token_usage) - tokCost(a.token_usage));
-    const topTokenTickets = tokRows.slice(0, 8);
+    // #406 david 3q954y: "le top 3 des tickets les plus couteux".
+    const topTokenTickets = tokRows.slice(0, 3);
     const tokenUsageTotal = tokenMap.size > 0 ? tokTotal : null;
 
     // ---- Throughput (auto-approved %) ----
