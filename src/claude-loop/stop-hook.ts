@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
+import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -236,5 +237,16 @@ function readPane(): string {
     } catch (e) {
         log(`  → ERROR ${(e as Error).message ?? String(e)}`);
     }
+    // #404: best-effort token-effort capture — read this turn's `usage` and push
+    // it to the active ticket (the MCP-written marker). Own try/catch, after the
+    // wake gate, so it can NEVER affect the wake. Awaited so the POST flushes
+    // before the process exits.
+    try {
+        await captureTokenUsage({
+            transcriptDir: projectTranscriptDir(process.cwd()),
+            stateDir: sd!,
+            postUsage: (ticketId, u) => new AiballClient().postTokenUsage(ticketId, u),
+        });
+    } catch { /* best-effort — never block the stop */ }
     emit();
 })();

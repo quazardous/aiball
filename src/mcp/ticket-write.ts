@@ -9,7 +9,7 @@
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { asText, client, effectiveBy } from "./_helpers.js";
+import { asText, client, effectiveBy, markActiveTicket } from "./_helpers.js";
 
 /**
  * Snooze a ticket until a future timestamp (per #B.329). Accepts either
@@ -115,6 +115,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 parent_id,
                 scope,
             })) as { id?: number };
+            markActiveTicket(res?.id); // #404: focus = the new ticket (token attribution)
             if (tags && tags.length > 0 && typeof res?.id === "number") {
                 // PUT /api/messages/:id/tags accepts tag NAMES alongside ids
                 // — it resolves via getTagByName server-side. Unknown names
@@ -284,6 +285,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 // explicit `scope` to narrow or broaden).
                 scope: scope ?? "default",
             });
+            markActiveTicket(ticketId); // #404: focus = this ticket (token attribution)
             return asText(res);
         },
     );
@@ -299,6 +301,7 @@ export function registerTicketWriteTools(server: McpServer): void {
             },
         },
         async ({ ticket_id, project, by_agent }) => {
+            markActiveTicket(ticket_id); // #404: focus = this ticket (token attribution)
             let proj = project;
             if (!proj) {
                 try {
@@ -340,6 +343,7 @@ export function registerTicketWriteTools(server: McpServer): void {
             },
         },
         async ({ ticket_id, project }) => {
+            markActiveTicket(ticket_id); // #404: focus = this ticket (token attribution)
             const res = await client.moveTicket(ticket_id, project);
             return asText(res);
         },
@@ -413,6 +417,7 @@ export function registerTicketWriteTools(server: McpServer): void {
             },
         },
         async ({ ticket_id, title, summary, body, intent, priority, postponed_until }) => {
+            markActiveTicket(ticket_id); // #404: focus = this ticket (token attribution)
             const results: Record<string, unknown> = { ticket_id };
             // Each field maps to its own HTTP endpoint. Apply in this
             // order: edit fields first (they may change the title/body

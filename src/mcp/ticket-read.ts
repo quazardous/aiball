@@ -8,7 +8,7 @@
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { asText, client } from "./_helpers.js";
+import { asText, client, markActiveTicket } from "./_helpers.js";
 
 export function registerTicketReadTools(server: McpServer): void {
     server.registerTool(
@@ -206,6 +206,7 @@ export function registerTicketReadTools(server: McpServer): void {
             },
         },
         async ({ ticket_id, full, brief, tail, digest, digest_limit, offset, limit, order }) => {
+            markActiveTicket(ticket_id); // #404: focus = this ticket (token attribution)
             // #396 (david 6zwrk9): a reflexive `full` (no limit) on a big thread
             // overflows the response cap. So bound the AGENT default — full with
             // no explicit limit → the 20 most recent entries (order=desc) + a

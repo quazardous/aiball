@@ -12,9 +12,24 @@
  *   - `asText()` — wraps a payload (+ microStatus) into the MCP
  *     `{ content: [{type:"text", text:JSON}] }` shape.
  */
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { AiballClient } from "../client.js";
 
 export const client = new AiballClient();
+
+/**
+ * #404: record the ticket the agent is currently focused on (the last
+ * ticket-scoped tool call), so the claude-loop Stop-hook can attribute the
+ * turn's token usage to it. Writes `active-ticket` in the loop state dir.
+ * Best-effort + a no-op outside a claude-loop session (no `CL_STATE_DIR`),
+ * so the generic MCP (direct / non-loop use) is unaffected.
+ */
+export function markActiveTicket(ticketId: number | null | undefined): void {
+    const sd = process.env.CL_STATE_DIR;
+    if (!sd || !ticketId || ticketId <= 0) return;
+    try { writeFileSync(join(sd, "active-ticket"), String(ticketId)); } catch { /* best-effort */ }
+}
 
 /**
  * Resolve the author identity for every MCP write. The stored `by_agent`

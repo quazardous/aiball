@@ -633,6 +633,16 @@ export class AiballClient {
         );
     }
 
+    /** #404: push a turn's token-usage delta onto a ticket (additive). Called
+     *  best-effort by the Stop-hook's token-capture; failures are swallowed. */
+    postTokenUsage(ticketId: number, u: { in: number; out: number; cacheW: number; cacheR: number }) {
+        return this.http(
+            "POST",
+            `/api/tickets/${ticketId}/token-usage`,
+            { in: u.in, out: u.out, cache_w: u.cacheW, cache_r: u.cacheR },
+        );
+    }
+
     /**
      * #B.177 B1: push the current claude-loop state for this consumer
      * (own-state only — the daemon refuses cross-consumer pushes).
