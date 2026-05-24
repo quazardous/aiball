@@ -132,6 +132,11 @@ export interface ProjectMeta {
     /** #395 (q3bfvn): the running loop's 3-state presence word (stop/wait/loop,
      *  #310) — drives the presence chip colour. Only set when `running`. */
     running_human_word?: string;
+    /** #406 (david `chhv9c`): cumulative per-project token-effort tally —
+     *  raw counts summed across the project's tickets, `null`/undefined until
+     *  any usage is captured. The Projects list shows a derived cost estimate
+     *  (cache_r weighted 0.1×, like the per-ticket badge). */
+    token_usage?: TokenTally | null;
 }
 
 /** #393 (3c): a loop is "running" when its consumer heartbeated this recently. */
@@ -267,6 +272,35 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
             });
         }
     }
+    // #406 (david chhv9c): cumulative token effort per project, for the
+    // Projects-list column. Raw sums across the project's tickets; the UI
+    // derives the cost estimate. Only attached when a project has any usage.
+    const tokenAgg = db.select({
+        project: schema.tickets.project,
+        tokens_in: sql<number>`COALESCE(SUM(${schema.ticketTokenUsage.tokensIn}), 0)`,
+        tokens_out: sql<number>`COALESCE(SUM(${schema.ticketTokenUsage.tokensOut}), 0)`,
+        cache_w: sql<number>`COALESCE(SUM(${schema.ticketTokenUsage.cacheW}), 0)`,
+        cache_r: sql<number>`COALESCE(SUM(${schema.ticketTokenUsage.cacheR}), 0)`,
+        updated_at: sql<string>`MAX(${schema.ticketTokenUsage.updatedAt})`,
+    })
+        .from(schema.ticketTokenUsage)
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.ticketTokenUsage.ticketId))
+        .groupBy(schema.tickets.project)
+        .all();
+    for (const tk of tokenAgg) {
+        const cur = byProject.get(tk.project);
+        const total = Number(tk.tokens_in) + Number(tk.tokens_out) + Number(tk.cache_w) + Number(tk.cache_r);
+        if (cur && total > 0) {
+            cur.token_usage = {
+                tokens_in: Number(tk.tokens_in),
+                tokens_out: Number(tk.tokens_out),
+                cache_w: Number(tk.cache_w),
+                cache_r: Number(tk.cache_r),
+                updated_at: tk.updated_at ?? "",
+            };
+        }
+    }
+
     // Lifecycle replay across (closed/reopened/resolved/blocked) events
     // in id order so we know which tickets are currently closed AND which
     // have been marked resolved or blocked by an agent (waiting for the

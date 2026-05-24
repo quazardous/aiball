@@ -423,6 +423,10 @@ export interface ProjectMeta {
     running_human?: boolean;
     /** #395 (q3bfvn): the running loop's presence word (stop/wait/loop, #310). */
     running_human_word?: "stop" | "wait" | "loop" | string;
+    /** #406 (david chhv9c): cumulative per-project token-effort tally (raw
+     *  counts summed across the project's tickets; null until any usage). The
+     *  Projects list shows a derived cost via `estTokenCost`. */
+    token_usage?: TokenUsage | null;
 }
 
 /** #398: an operator-approved command launcher (declared in config). */

@@ -5,6 +5,7 @@ import InputText from "primevue/inputtext";
 import { useToast } from "primevue/usetoast";
 import { api, type ProjectMeta } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
+import { estTokenCost, formatTokens } from "../lib/format";
 
 const toast = useToast();
 const rows = ref<ProjectMeta[]>([]);
@@ -204,6 +205,7 @@ defineExpose({ load });
                     <th>Last activity</th>
                     <th>Tickets</th>
                     <th>Comments</th>
+                    <th>Tokens</th>
                     <th>Pending</th>
                     <th />
                 </tr>
@@ -217,6 +219,15 @@ defineExpose({ load });
                     <td data-label="Last activity" :title="p.last_activity">{{ relativeTime(p.last_activity) }}</td>
                     <td data-label="Tickets">{{ p.ticket_count }}</td>
                     <td data-label="Comments">{{ p.comment_count }}</td>
+                    <td
+                        data-label="Tokens"
+                        :title="p.token_usage
+                            ? `in ${p.token_usage.tokens_in} · out ${p.token_usage.tokens_out} · cache-w ${p.token_usage.cache_w} · cache-r ${p.token_usage.cache_r} (est. cost-equiv, cache reads ×0.1)`
+                            : 'no token usage captured yet'"
+                    >
+                        <span v-if="p.token_usage">⚡ {{ formatTokens(estTokenCost(p.token_usage)) }}</span>
+                        <span v-else style="color: var(--p-text-muted-color)">—</span>
+                    </td>
                     <td data-label="Pending">
                         <span v-if="p.pending_count > 0" class="pending-pill">
                             {{ p.pending_count }}
@@ -353,9 +364,11 @@ defineExpose({ load });
 .projects-table td:nth-child(3),
 .projects-table td:nth-child(4),
 .projects-table td:nth-child(5),
+.projects-table td:nth-child(6),
 .projects-table th:nth-child(3),
 .projects-table th:nth-child(4),
-.projects-table th:nth-child(5) {
+.projects-table th:nth-child(5),
+.projects-table th:nth-child(6) {
     text-align: right;
     width: 6rem;
 }
@@ -440,7 +453,8 @@ defineExpose({ load });
     }
     .projects-table td[data-label="Last activity"],
     .projects-table td[data-label="Tickets"],
-    .projects-table td[data-label="Comments"] {
+    .projects-table td[data-label="Comments"],
+    .projects-table td[data-label="Tokens"] {
         color: var(--p-text-muted-color);
         font-size: 0.78rem;
     }
