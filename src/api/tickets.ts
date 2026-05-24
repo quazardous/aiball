@@ -36,6 +36,7 @@ import {
     markTicketSeen,
     markTicketUnseen,
     ticketUnreadFlags,
+    ticketSelfLastActivity,
     isHuman,
     insertTypedRelation,
     listTypedRelationsForTicket,
@@ -45,6 +46,10 @@ import {
     listTicketSubscriptionsForTicket,
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
+import { compareWorkOrder, isWithinHotWindow, type WorkOrderCtx } from "../db/work-order.js";
+import { globalConfigPath } from "../autopoll/config.js";
+import { readFileSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
 import { RELATION_KINDS, isRelationKind, isLineageRelationKind, type RelationKind } from "../relations.js";
 import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
@@ -53,6 +58,21 @@ import { moveTicketTo } from "../messages.js";
 import { paginateFeed, type FeedPagination } from "./feed-paginate.js";
 
 export const ticketsRouter = Router();
+
+/** #402 levier 1 — hot-window (seconds) read from the global config yaml
+ *  (`~/.config/aiball/config.yaml` → `hot_window_sec:`, david `xkehmv` D2).
+ *  Default 600s. Read once per ticket_list (the sort), not per row, so the
+ *  yaml parse is cheap. Falls back to the default on any read/parse error. */
+const DEFAULT_HOT_WINDOW_SEC = 600;
+function hotWindowSec(): number {
+    try {
+        const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as { hot_window_sec?: unknown };
+        const v = Number(raw?.hot_window_sec);
+        return Number.isFinite(v) && v > 0 ? v : DEFAULT_HOT_WINDOW_SEC;
+    } catch {
+        return DEFAULT_HOT_WINDOW_SEC;
+    }
+}
 
 /**
  * #352: change a ticket's owner (= its `by_agent` / reporter — no model
@@ -574,38 +594,31 @@ ticketsRouter.get("/tickets", (req, res) => {
     if (sinceIso) {
         result = result.filter((t) => t.created_at >= sinceIso);
     }
-    // #B.222 + #371 david: order the list as a WORK LANDSCAPE. Outer key =
-    // tier (greedy — each ticket appears once, in the highest tier it
-    // qualifies for):
-    //   0 unread → 1 actionable (¬unread) → 2 other open (¬unread ¬actionable)
-    //   → 3 the rest (closed / snoozed / non-approved — sinks to the bottom).
-    // Inner key within a tier = work order: priority desc (urgent→low), then
-    // id ASC (oldest first, as a tiebreak). NB: "FIFO" was the wrong term
-    // (david kyudpg) — it's the GET's work order; explicit priority still
-    // wins. The `open`/`actionable` filters above only SUBSET the rows; this
-    // orders whatever's left. Sets are nested: unread ⊂ actionable ⊂ open.
+    // #B.222 + #371 + #402 david: order the list as a WORK LANDSCAPE. Keys
+    // outer→inner (see compareWorkOrder / docs/TICKET_LIFECYCLE.md):
+    //   tier (0 unread → 1 actionable → 2 open → 3 rest)
+    //   → priority desc (urgent→low, the strongest sort within a tier)
+    //   → HOT (#402 levier 1): at equal priority, a ticket in THIS consumer's
+    //     hot-zone (their own activity within hot_window_sec) sorts first, so
+    //     the wake follows the active conversation instead of a stale oldest
+    //     head. Stays within the tier — never crosses unread/actionable.
+    //   → id ASC (oldest first, final tiebreak).
+    // The `open`/`actionable` filters above only SUBSET the rows; this orders
+    // whatever's left. Sets are nested: unread ⊂ actionable ⊂ open.
     {
-        const PRIORITY_WEIGHT: Record<string, number> = {
-            urgent: 4,
-            high: 3,
-            normal: 2,
-            low: 1,
+        const PRIORITY_WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
+        // #402: hot = the requesting consumer's own last activity per ticket,
+        // within the hot window. Computed once over the rows being ordered.
+        const selfActivity = ticketSelfLastActivity(consumerId, result.map((t) => t.id));
+        const windowMs = hotWindowSec() * 1000;
+        const nowMs = Date.now();
+        const ctx: WorkOrderCtx = {
+            tierOf: (id) =>
+                unreadMap.get(id) ? 0 : actionableIds.has(id) ? 1 : openIds.has(id) ? 2 : 3,
+            priorityWeight: (p) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2,
+            isHot: (id) => isWithinHotWindow(selfActivity.get(id), nowMs, windowMs),
         };
-        const tierOf = (id: number): number => {
-            if (unreadMap.get(id)) return 0;
-            if (actionableIds.has(id)) return 1;
-            if (openIds.has(id)) return 2;
-            return 3;
-        };
-        result.sort((a, b) => {
-            const tA = tierOf(a.id);
-            const tB = tierOf(b.id);
-            if (tA !== tB) return tA - tB;
-            const wA = PRIORITY_WEIGHT[a.priority ?? "normal"] ?? 2;
-            const wB = PRIORITY_WEIGHT[b.priority ?? "normal"] ?? 2;
-            if (wA !== wB) return wB - wA;
-            return a.id - b.id;
-        });
+        result.sort((a, b) => compareWorkOrder(a, b, ctx));
     }
     if (limit !== undefined) result = result.slice(0, limit);
     res.json(result);

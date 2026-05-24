@@ -6,7 +6,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { and, asc, eq, inArray, isNotNull, lte, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, lte, ne, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { listTypedRelationsForTicket } from "./messages.js";
@@ -370,4 +370,32 @@ export function listExpiredPostpones(nowIsoString: string = nowIso()): number[] 
         ))
         .all();
     return rows.map((r) => r.id);
+}
+
+/**
+ * #402 — the requesting consumer's OWN last activity per ticket: MAX(created_at)
+ * over the messages THEY authored, grouped by ticket. The hot-zone primitive
+ * (POV agent, david `xkehmv`): a ticket is "hot" for a consumer iff THEY acted
+ * on it recently — so someone else's activity on a different ticket never pulls
+ * the agent off-task. `messages.ticket_id` is non-null for every feed row
+ * (comments + the ticket_created root), so one grouped MAX covers all activity.
+ * Returns ISO strings; absent ticket = the consumer never acted on it.
+ */
+export function ticketSelfLastActivity(consumer_id: string, ticket_ids: number[]): Map<number, string> {
+    const out = new Map<number, string>();
+    if (ticket_ids.length === 0) return out;
+    const rows = getDb()
+        .select({
+            ticketId: schema.messages.ticketId,
+            last: sql<string>`MAX(${schema.messages.createdAt})`,
+        })
+        .from(schema.messages)
+        .where(and(
+            eq(schema.messages.byAgent, consumer_id),
+            inArray(schema.messages.ticketId, ticket_ids),
+        ))
+        .groupBy(schema.messages.ticketId)
+        .all();
+    for (const r of rows) if (r.ticketId != null && r.last) out.set(r.ticketId, r.last);
+    return out;
 }

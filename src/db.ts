@@ -151,6 +151,7 @@ export {
     setTicketOwner,
     getTicketStages,
     getTicketBookends,
+    ticketSelfLastActivity,
     type SubTicketSummary,
     type TicketStage,
     type TicketBookend,

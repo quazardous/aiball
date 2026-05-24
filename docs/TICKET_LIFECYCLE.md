@@ -137,20 +137,54 @@ decision-gate):
 
 ---
 
-## 5. The work order (#371)
+## 5. The work order (#371 + #402)
 
 `ticket_list` returns a **work landscape**: tiered, then ordered within a tier.
+The keys, outer→inner (pure comparator in `src/db/work-order.ts`):
 
 1. **Tier** (greedy — each ticket in the highest tier it qualifies for):
    `unread` → `actionable` (¬unread) → other open → the rest (closed/snoozed).
-2. **Within a tier**: priority desc (urgent→low), then **oldest-first** (id asc)
-   as a tiebreak. Explicit priority still wins.
+2. **Priority** desc (urgent→low) — the **strongest** sort within a tier
+   (david `xkehmv`: « priorité est le tri le plus fort »). Explicit priority wins.
+3. **Hot** (#402 levier 1) — at **equal priority**, a ticket in the requesting
+   consumer's **hot-zone** sorts first (see §5.1). Within-tier only.
+4. **Oldest-first** (id asc) — final tiebreak.
 
 The wake-CTA **names the head** of this order (`#{head_id}`) so the agent takes
 the top of its queue, not the newest/loudest. ("FIFO" is a misnomer — it's the
 GET's work order.) It also **always states the open count** (per the §1
 invariant) — even when `actionable` is empty — so a gated backlog is never
 silent.
+
+### 5.1 The hot-zone (#402)
+
+The hot-zone keeps the wake on **the conversation the agent is actively
+working**, instead of jumping it to a stale oldest head whenever someone else
+moves another ticket.
+
+- **Definition (POV agent, david `xkehmv`):** a ticket is *hot* **for a given
+  consumer** iff **that consumer's own last activity** on it is within the
+  **hot window** — i.e. `now − max(created_at of messages they authored on the
+  ticket) < hot_window_sec`. It is **per-consumer**, computed from *their* own
+  activity, not the ticket's global `last_actor`:
+  - agent works ticket A, **david** comments on ticket B → B is **not** hot for
+    the agent (B never enters the agent's hot-zone; the agent stays on A);
+  - david comments on the agent's ticket A → A **stays** hot (the agent's own
+    activity defines it; the human's doesn't add/remove hotness).
+- **Window:** `hot_window_sec`, read from the **global config yaml**
+  (`~/.config/aiball/config.yaml` → `hot_window_sec:`), **default 600** (10 min).
+  (david `xkehmv` D2: yaml only, not a settings-table row.)
+- **Scope:** hot is a **tiebreak at equal priority, within the tier** — it never
+  promotes a ticket across `unread`/`actionable`/`open`, and never resurfaces a
+  closed one.
+- **Signal:** `ticketSelfLastActivity(consumer, ids)` = `MAX(created_at) GROUP BY
+  ticket WHERE by_agent = consumer`.
+
+This is **levier 1 — ordering** (when the agent *is* woken, it points at the
+right ticket). **Levier 2 — gating** (using the same hot-zone signal to *defer
+the wake itself* for out-of-zone activity, so the agent isn't interrupted at all)
+is a **second pass** (david `s62yaq`), tracked separately — with urgent/`@mention`
++ human-presence escapes so the agent never becomes unreachable.
 
 ---
 
