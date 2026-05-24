@@ -211,6 +211,9 @@ export interface TicketSummary {
     /** #404: accumulated per-ticket token-effort tally (null until any usage
      *  is captured). Raw counts; derive a cost estimate via `estTokenCost`. */
     token_usage?: TokenUsage | null;
+    /** #405: in the requesting consumer's hot-zone (focus) — the ticket they're
+     *  actively working (most recent self-activity within the hot window). */
+    hot?: boolean;
 }
 
 /** #404: per-ticket token-effort tally (raw counts from the Claude transcript). */

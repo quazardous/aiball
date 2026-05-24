@@ -40,6 +40,11 @@ const emit = defineEmits<{
         :severity="ticket.priority === 'urgent' ? 'danger' : ticket.priority === 'high' ? 'warn' : 'info'"
     />
     <h2 class="thread-title">{{ ticket.title }}</h2>
+    <!-- #405: hot-zone focus flag — the ticket the agent is actively working
+         (most recent self-activity within the hot window). -->
+    <span v-if="ticket.hot" class="thread-hot-focus" title="In your hot-zone — the ticket you're actively working (recent activity within the hot window).">
+        🔥 focus
+    </span>
     <!-- #404/#406: per-ticket token-effort cost (shown once any usage is
          captured; cost-equivalent — cache reads weighted 0.1×). -->
     <span
@@ -145,5 +150,18 @@ const emit = defineEmits<{
 .thread-token-cost .pi {
     font-size: 0.72rem;
     opacity: 0.7;
+}
+/* #405: hot-zone focus badge. */
+.thread-hot-focus {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin: 0.2rem 0 0.3rem;
+    padding: 0.05rem 0.45rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 0.7rem;
+    color: var(--p-orange-600, #c2410c);
+    background: var(--p-orange-100, #ffedd5);
 }
 </style>

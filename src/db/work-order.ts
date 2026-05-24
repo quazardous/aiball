@@ -52,3 +52,23 @@ export function isWithinHotWindow(lastActivityIso: string | undefined | null, no
     if (Number.isNaN(t)) return false;
     return nowMs - t < windowMs;
 }
+
+/**
+ * #405 — the consumer's HOT-ZONE (focus), from their per-ticket self-activity.
+ * Mono-focus today: the SINGLE most-recently self-touched ticket within the hot
+ * window (david `garkc8`: "la fenêtre se ferme quand la suivante s'ouvre" → the
+ * latest activity IS the focus; moving to another ticket closes the previous).
+ * Returned as a **Set** so going multi-hotzone later (david `5qgx2w`) is just a
+ * fill-policy change here — the consumers (sort tiebreak, `hot` flag, the wake
+ * gate) already iterate the set. Empty when no self-activity is within the window.
+ */
+export function computeHotFocus(selfActivity: Map<number, string>, nowMs: number, windowMs: number): Set<number> {
+    let focusId = -1;
+    let focusTs = -Infinity;
+    for (const [id, iso] of selfActivity) {
+        const t = Date.parse(iso);
+        if (Number.isNaN(t)) continue;
+        if (nowMs - t < windowMs && t > focusTs) { focusTs = t; focusId = id; }
+    }
+    return focusId > 0 ? new Set([focusId]) : new Set<number>();
+}

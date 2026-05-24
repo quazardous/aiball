@@ -48,7 +48,7 @@ import {
     listTicketSubscriptionsForTicket,
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
-import { compareWorkOrder, isWithinHotWindow, type WorkOrderCtx } from "../db/work-order.js";
+import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { globalConfigPath } from "../autopoll/config.js";
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
@@ -557,6 +557,13 @@ ticketsRouter.get("/tickets", (req, res) => {
     const { openIds, actionableIds } = computeActionableTicketIds(consumerId);
     // #404: per-ticket token-effort tally (empty until the capture side lands).
     const tokenUsageMap = getTicketTokenUsage(created.map((m) => m.id));
+    // #405: the consumer's HOT-ZONE (focus) — the single most-recent self-touched
+    // ticket within the hot window (mono-focus, Set-modeled for multi-hotzone).
+    // One source of truth: drives both the `hot` flag below AND the work-order
+    // tiebreak. ticketSelfLastActivity reads the messages table, so it's correct
+    // independent of the #404 token capture.
+    const selfActivity = ticketSelfLastActivity(consumerId, created.map((m) => m.id));
+    const hotFocus = computeHotFocus(selfActivity, Date.now(), hotWindowSec() * 1000);
     const tickets = created.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;
@@ -585,6 +592,8 @@ ticketsRouter.get("/tickets", (req, res) => {
             tags: tagsMap.get(m.id) ?? [],
             // #404: accumulated token-effort tally (null until any usage pushed).
             token_usage: tokenUsageMap.get(m.id) ?? null,
+            // #405: in the consumer's hot-zone (focus) → the 🔥 UI flag.
+            hot: hotFocus.has(m.id),
         };
         if (summary) return base;
         return { ...base, body: m.edited_body ?? m.body };
@@ -629,16 +638,14 @@ ticketsRouter.get("/tickets", (req, res) => {
     // whatever's left. Sets are nested: unread ⊂ actionable ⊂ open.
     {
         const PRIORITY_WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
-        // #402: hot = the requesting consumer's own last activity per ticket,
-        // within the hot window. Computed once over the rows being ordered.
-        const selfActivity = ticketSelfLastActivity(consumerId, result.map((t) => t.id));
-        const windowMs = hotWindowSec() * 1000;
-        const nowMs = Date.now();
+        // #402/#405: hot = the consumer's hot-zone FOCUS (computed once above as
+        // `hotFocus`, mono-focus = the most-recent self-touched ticket). Same set
+        // drives the tiebreak and the `hot` row flag.
         const ctx: WorkOrderCtx = {
             tierOf: (id) =>
                 unreadMap.get(id) ? 0 : actionableIds.has(id) ? 1 : openIds.has(id) ? 2 : 3,
             priorityWeight: (p) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2,
-            isHot: (id) => isWithinHotWindow(selfActivity.get(id), nowMs, windowMs),
+            isHot: (id) => hotFocus.has(id),
         };
         result.sort((a, b) => compareWorkOrder(a, b, ctx));
     }

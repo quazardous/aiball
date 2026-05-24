@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compareWorkOrder, isWithinHotWindow, type WorkOrderCtx } from "./work-order.js";
+import { compareWorkOrder, isWithinHotWindow, computeHotFocus, type WorkOrderCtx } from "./work-order.js";
 
 const WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
 const pw = (p: string | null | undefined): number => WEIGHT[p ?? "normal"] ?? 2;
@@ -41,6 +41,24 @@ test("#402 hot stays within its tier — a hot open ticket never jumps actionabl
     // 1 actionable(tier1) cold, 2 open(tier2) hot → 1 first (tier beats hot).
     const c = ctx({ 1: 1, 2: 2 }, new Set([2]));
     assert.deepEqual(sorted([{ id: 1, priority: "normal" }, { id: 2, priority: "normal" }], c), [1, 2]);
+});
+
+test("#405 computeHotFocus: mono-focus = the most recent self-activity within the window", () => {
+    const now = Date.parse("2026-05-24T10:00:00Z");
+    const win = 600_000; // 10 min
+    const self = new Map<number, string>([
+        [1, "2026-05-24T09:58:00Z"], // 2 min ago
+        [2, "2026-05-24T09:50:00Z"], // 10 min ago (== window edge → out)
+        [3, "2026-05-24T09:59:30Z"], // 30 s ago → the focus
+    ]);
+    assert.deepEqual([...computeHotFocus(self, now, win)], [3]); // single most-recent
+});
+
+test("#405 computeHotFocus: empty when nothing is within the window", () => {
+    const now = Date.parse("2026-05-24T10:00:00Z");
+    const self = new Map<number, string>([[1, "2026-05-24T09:00:00Z"]]); // 1h ago
+    assert.equal(computeHotFocus(self, now, 600_000).size, 0);
+    assert.equal(computeHotFocus(new Map(), now, 600_000).size, 0);
 });
 
 test("#402 isWithinHotWindow", () => {
