@@ -101,6 +101,15 @@ if (!sd || !name || !intervalRaw) {
 const interval = Math.max(1, Number(intervalRaw));
 const tname = tmuxName(name);
 
+// #413: le timer enregistre SON PROPRE pid ici, en écrasant le pid-wrapper
+// deviné par cmdStart / cmdReload / selfReloadIfStale (= le child.pid de
+// `bash -lc "… exec tsx …"`). tsx 4.21 exécute ce script dans un process ENFANT
+// forké : ce pid-wrapper est donc le bash→tsx (qui exit → devient un zombie
+// defunct), PAS ce process — celui qui porte les handlers SIGHUP/SIGUSR2. Sans
+// ça, `kill -HUP`/`-USR2`, `claude-loop reload` et `restart` signalent le mauvais
+// pid → no-op silencieux (cf. le "kill -1 ne fait rien" de david).
+try { writeFileSync(timerPidPath(sd!), `${process.pid}\n`); } catch { /* best effort — la cible kill resterait le wrapper */ }
+
 // #302: --no-wait (CL_WAIT=0) assumes NO human at the terminal → eager boot
 // drain, no boot-grace deferral. Default (--wait): during the first
 // CL_BOOT_GRACE_SEC after launch, tryWake holds off ALL auto-wakes so the
