@@ -35,6 +35,7 @@ import { readLocalRemote, writeLocalRemote } from "./local-config.js";
 import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
 import { acquireStartLock } from "./start-lock.js";
 import {
+    canonicalCwd,
     DEFAULT_CHECK_CMD,
     isInternalCheckCmd,
     MUX_CMD,
@@ -199,12 +200,16 @@ function pruneDeadStateDirs(): void {
  */
 function findLiveLoopForCwdAgent(cwd: string, agent: string | undefined): { name: string; agent: string | null } | null {
     if (!existsSync(STATE_ROOT)) return null;
+    // #414: compare canonical paths so a symlinked alias of the same dir matches
+    // (the live plate may have been written with the other alias).
+    const wantCwd = canonicalCwd(cwd);
     for (const name of readdirSync(STATE_ROOT)) {
+        if (name.startsWith(".")) continue; // #403 lock dotfiles aren't loops
         if (!tmuxAlive(name)) continue;
         let plate: Plate | null = null;
         try { plate = readPlate(stateDirFor(name)); } catch { /* skip */ }
         if (!plate) continue;
-        if (plate.cwd !== cwd) continue;
+        if (canonicalCwd(plate.cwd) !== wantCwd) continue;
         const envFile = envPath(stateDirFor(name));
         let loopAgent: string | null = null;
         if (existsSync(envFile)) {
@@ -224,7 +229,7 @@ function findLiveLoopForCwdAgent(cwd: string, agent: string | undefined): { name
  * live session beats a stale state dir from a prior run.
  */
 function resolveCurrentLoopName(): string {
-    const cwd = process.env.CLAUDE_LOOP_CWD ?? process.cwd();
+    const cwd = canonicalCwd(process.env.CLAUDE_LOOP_CWD ?? process.cwd()); // #414 symlink-safe
     if (!existsSync(STATE_ROOT)) die(`no loops registered (state root ${STATE_ROOT} missing). Pass a name or start one first.`);
     const matches: { name: string; alive: boolean }[] = [];
     for (const name of readdirSync(STATE_ROOT)) {
@@ -232,7 +237,7 @@ function resolveCurrentLoopName(): string {
         if (!existsSync(platePath(sd))) continue;
         let plate: Plate | null = null;
         try { plate = readPlate(sd); } catch { continue; }
-        if (plate.cwd !== cwd) continue;
+        if (canonicalCwd(plate.cwd) !== cwd) continue;
         matches.push({ name, alive: tmuxAlive(name) });
     }
     if (matches.length === 0) die(`no claude-loop registered for cwd ${cwd}. Pass a name or run \`claude-loop list\`.`);
@@ -298,7 +303,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // back to a local socket that isn't there on machine B.
         process.env.AIBALL_SOCK = "";
     }
-    const cwd = ctx.cwd;
+    // #414: canonicalise once so the start-lock key, plate.cwd, tmux -c and the
+    // dup-loop conflict check share ONE symlink-collapsed identity — else a
+    // start from a symlinked alias of the same dir slips past the guard.
+    const cwd = canonicalCwd(ctx.cwd);
 
     // #B.216 david (979632): auto-register the project with the aiball
     // daemon so `claude-loop start` in any dir surfaces a fresh entry

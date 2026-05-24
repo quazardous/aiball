@@ -11,7 +11,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,6 +33,20 @@ export function stateDirFor(name: string): string {
 
 export function tmuxName(name: string): string {
     return `cl-${name}`;
+}
+
+/**
+ * #414 — canonicalise un cwd pour servir d'IDENTITÉ de loop (clé de lock +
+ * guard anti-doublon + résolution par cwd). Deux alias du même dossier (un
+ * chemin symlinké vs sa cible, ou `..`) doivent retomber sur UNE seule clé :
+ * sinon `claude-loop start` depuis un alias rate le loop live enregistré sous
+ * l'autre et spawn un doublon (cas david : `/home/david/dev` symlink vers
+ * `/home/david/Private/dev`). `realpathSync` écrase les symlinks ; fallback sur
+ * le chemin brut si la résolution échoue (path disparu) pour dégrader vers
+ * l'ancien compare-par-chaîne au lieu de throw.
+ */
+export function canonicalCwd(p: string): string {
+    try { return realpathSync(p); } catch { return p; }
 }
 
 export function ensureDir(p: string): void {
