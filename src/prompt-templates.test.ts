@@ -73,6 +73,34 @@ test("#400 recadré renderSlot: tone bucket with neither tone nor directive → 
     assert.equal(renderSlot({ s: { hint: "soft" } }, "s", { x: "1" }, "fb {x}", "imperative"), "fb 1");
 });
 
+// #400 (david 54phhg): `_`-prefixed slots are reusable {_name} partials.
+test("#400 partials: {_name} expands a string partial", () => {
+    assert.equal(renderSlot({ _drain: "drain it", s: "go — {_drain}." }, "s"), "go — drain it.");
+});
+
+test("#400 partials: a partial can be a round-robin list", () => {
+    // Single element → deterministic, proves the list path runs for a partial.
+    assert.equal(renderSlot({ _x: ["only"], s: "{_x}" }, "s"), "only");
+});
+
+test("#400 partials: a partial is tone-aware (resolved at the active tone)", () => {
+    const map = { _drain: { directive: "DRAIN", hint: "drain maybe" }, s: "{_drain}" };
+    assert.equal(renderSlot(map, "s", {}, "", "hint"), "drain maybe");
+    assert.equal(renderSlot(map, "s", {}, "", "imperative"), "DRAIN"); // fallback directive
+});
+
+test("#400 partials: usable inside a {x:+…} body, dropped when the var is empty", () => {
+    const map = { _drain: "via `unread({pings: true})`", s: "{p:+ {p} ping(s) — {_drain}.}" };
+    assert.equal(renderSlot(map, "s", { p: 2 }), " 2 ping(s) — via `unread({pings: true})`.");
+    assert.equal(renderSlot(map, "s", { p: "" }), "");
+});
+
+test("#400 partials: partials may nest, and a cycle renders \"\" (no hang)", () => {
+    assert.equal(renderSlot({ _a: "A+{_b}", _b: "B", s: "{_a}" }, "s"), "A+B");
+    // _a → _b → _a : the back-reference hits the cycle guard and renders "".
+    assert.equal(renderSlot({ _a: "a{_b}", _b: "b{_a}", s: "{_a}" }, "s"), "ab");
+});
+
 test("#400 recadré loadPromptsFromYamlBlock: accepts the tone-bucket shape", () => {
     const block = {
         wake_lead: { directive: ["fyi:"], hint: ["btw,"] },

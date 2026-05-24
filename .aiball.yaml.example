@@ -288,24 +288,40 @@ autopoll:
 #                  line + open count, each gated by its own `{x:+ … }` block.
 #                  A missing wake_master falls back to the in-code default.
 #
+# ── Partials (reusable fragments, david 54phhg) ────────────────────────────
+# Any slot whose NAME STARTS WITH `_` is a partial: reference it as {_name}
+# from any template and it expands where it sits — resolved through the same
+# path (active tone + round-robin), so a partial may itself be a string, a
+# list, or a per-tone bucket, and may reference other partials. Use it to
+# factor wording you'd otherwise repeat across tone buckets (e.g. the drain /
+# engage verbs). A cyclic reference renders "" (no hang).
+#
 # A missing slot in the override falls back to the lower layers; a slot here
 # REPLACES the default for that slot (no deep merge inside a slot, so you can
 # switch shape forms freely between layers).
 #
 # prompts:
+#   # Partials: factor the verbs once (tone-aware, round-robin), reuse via {_…}.
+#   _drain:
+#     directive: ["drain via `unread({pings: true, mark_read: true})`",
+#                 "ack via `unread({pings: true, mark_read: true})`"]
+#     imperative: ["DRAIN now via `unread({pings: true, mark_read: true})`"]
+#   _engage:
+#     directive: ["engage #{head_id} first — top of the work order — via `ticket_list({actionable: true})`"]
+#     imperative: ["ENGAGE #{head_id} first — via `ticket_list({actionable: true})`"]
+#
 #   # Tone buckets, round-robin within each.
 #   wake_lead:
 #     directive: ["fyi:", "heads up —", "quick note:"]
 #     hint:      ["btw,", "fyi,", "just so you know,"]
 #     imperative: ["**heads up**:", "**ACTION**:"]
 #
-#   # The whole wake-CTA in one template per tone (round-robin list within).
-#   # Each {x:+ … } block renders only when its var is set.
+#   # The whole wake-CTA, one template per tone. {_drain}/{_engage} pull the
+#   # partials above (at the current tone). Each {x:+ … } block renders only
+#   # when its var is set.
 #   wake_master:
-#     directive:
-#       - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}{actionable_count:+ engage #{head_id} first — top of the work order — via `ticket_list({actionable: true})`.}{open_count:+ ({open_count} open in {project_scope})}"
-#     imperative:
-#       - "{culture} {lead}{ping_count:+ {ping_count} unread ping(s) — DRAIN now via `unread({pings: true, mark_read: true})`.}{actionable_count:+ ENGAGE #{head_id} first — via `ticket_list({actionable: true})`.}{open_count:+ ({open_count} open in {project_scope})}"
+#     directive: "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — {_drain}.}{actionable_count:+ {_engage}.}{open_count:+ ({open_count} open in {project_scope})}"
+#     imperative: "{culture} {lead}{ping_count:+ {ping_count} unread ping(s) — {_drain}.}{actionable_count:+ {_engage}.}{open_count:+ ({open_count} open in {project_scope})}"
 
 # Ticket-text linkifier patterns (#B.235). Same 3-layer chain as
 # `prompts:` — shipped defaults at `config/defaults/claude-loop-pings.yaml`,

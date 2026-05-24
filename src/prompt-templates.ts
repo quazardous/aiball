@@ -29,6 +29,12 @@
  *
  * `text`/`default` may themselves contain `{...}` — placeholders resolve from
  * the inside out (the engine iterates until stable).
+ *
+ * **Partials (#400, david `54phhg`)** — any slot whose name starts with `_` is
+ * a reusable fragment: reference it as `{_name}` from any template and it
+ * expands (at the active tone, round-robin if a list) where it sits. Lets the
+ * user factor repeated wording (`_drain`, `_engage`) instead of duplicating it
+ * across tone buckets. Partials may nest; a cyclic reference renders "".
  */
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
@@ -158,7 +164,8 @@ export function render(template: string, vars: RenderVars): string {
  *      `slot[tone]` (fallback `slot[DEFAULT_TONE]`). Applied uniformly; not a
  *      per-placeholder rule (david d7zcj5).
  *   2. Round-robin — if the (narrowed) slot is a list, pick a random element.
- *   3. Render — substitute placeholders via the grammar.
+ *   3. Render — substitute placeholders via the grammar, exposing every
+ *      `_`-prefixed slot as a `{_name}` partial (david 54phhg).
  * Returns `fallback` (rendered with the same vars) when the slot is absent,
  * empty, or the bucket can't be resolved. The conditional logic lives in the
  * template; the caller just names the slot + the tone.
@@ -170,15 +177,46 @@ export function renderSlot(
     fallback = "",
     tone: string = DEFAULT_TONE,
 ): string {
+    return renderSlotWith(map, name, vars, fallback, tone, new Set());
+}
+
+/** Recursive core. `seen` tracks the partial-expansion path to break cycles. */
+function renderSlotWith(
+    map: PromptMap,
+    name: string,
+    vars: RenderVars,
+    fallback: string,
+    tone: string,
+    seen: Set<string>,
+): string {
     let slot = map[name];
     // 1. Tone layer: a bucket map (plain object, not a string/array) → slot[tone].
     if (slot && typeof slot === "object" && !Array.isArray(slot)) {
         slot = (slot as ToneSlot)[tone] ?? (slot as ToneSlot)[DEFAULT_TONE];
     }
-    // 2. + 3. Round-robin within the (narrowed) slot, then render.
+    // 2. Round-robin within the (narrowed) slot.
     let template: string;
     if (typeof slot === "string") template = slot;
     else if (Array.isArray(slot) && slot.length > 0) template = slot[Math.floor(Math.random() * slot.length)];
     else template = fallback;
-    return render(template, vars);
+    // 3. Render, exposing `_`-prefixed slots as {_name} partials.
+    return render(template, withPartials(map, vars, tone, seen));
+}
+
+/**
+ * #400 (david 54phhg): expose every `_`-prefixed slot as a lazy `{_name}`
+ * placeholder. A partial resolves through the same renderSlot path (tone +
+ * round-robin), so it may itself be a string, a list, or a per-tone bucket, and
+ * may reference other partials. A partial already on the current expansion path
+ * renders "" — a simple cycle guard so a config typo never hangs the wake.
+ */
+function withPartials(map: PromptMap, vars: RenderVars, tone: string, seen: Set<string>): RenderVars {
+    const out: RenderVars = { ...vars };
+    for (const key of Object.keys(map)) {
+        if (!key.startsWith("_")) continue;
+        out[key] = seen.has(key)
+            ? ""
+            : () => renderSlotWith(map, key, out, "", tone, new Set(seen).add(key));
+    }
+    return out;
 }
