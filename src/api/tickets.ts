@@ -1030,6 +1030,12 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         // Frontend reads this to render the "X/Y open" chip beside
         // questions without round-tripping to the server.
         meta: t.meta ?? null,
+        // #406 (david 7mybeg "dans le détail ticket on a pas l'info du cumul
+        // d'effort"): expose the per-ticket token tally on the GET header too,
+        // not just list rows — the thread badge (ThreadHeader) reads it, and the
+        // detail view fetches via ticket_get, so without this the badge had no
+        // data when a ticket was opened directly. null until any usage captured.
+        token_usage: getTicketTokenUsage([t.id]).get(t.id) ?? null,
     };
     if (summary) {
         const commentCount = threadMessages.filter(
