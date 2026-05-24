@@ -299,6 +299,9 @@ export interface InboxRow {
     scope?: "internal" | "default" | "broadcast";
     /** Per-consumer flag: ≥1 unseen ping on the thread for the requesting consumer. */
     unread?: boolean;
+    /** #405: in the requesting consumer's hot-zone (focus) — the ticket they're
+     *  actively working. Drives the 🔥 flag in the inbox list. */
+    hot?: boolean;
     /** Snooze flag (#B.329): true iff `postponed_until` is in the future.
      *  Postponed rows are hidden from the open inbox the same way closed
      *  ones are. */

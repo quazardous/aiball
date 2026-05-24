@@ -167,6 +167,12 @@ function onRowClick(r: InboxRow) {
         </template>
         <template v-if="r.by_agent" #from>{{ r.by_agent }}</template>
         <template #title>
+            <span
+                v-if="r.hot"
+                class="list-hot-focus"
+                title="In your hot-zone — the ticket you're actively working (recent activity within the hot window)."
+                style="margin-right: 0.3rem"
+            >🔥</span>
             <span class="ticket-id">{{ formatTicketRef(r.id) }}</span>
             {{ titleOf(r) }}
             <!-- #B.245: per-event scope badge. Only render for

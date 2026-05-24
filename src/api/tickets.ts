@@ -341,6 +341,13 @@ ticketsRouter.get("/inbox", (req, res) => {
 
     const tagsMap = tagsForMessages(tickets.map((m) => m.id));
     const unreadMap = ticketUnreadFlags(consumerId, tickets.map((m) => m.id));
+    // #405: hot-zone focus for the inbox rows — same source as ticket_list
+    // (computeHotFocus over the consumer's per-ticket self-activity).
+    const hotFocus = computeHotFocus(
+        ticketSelfLastActivity(consumerId, tickets.map((m) => m.id)),
+        Date.now(),
+        hotWindowSec() * 1000,
+    );
     const nowStr = new Date().toISOString();
     let rows = tickets.map((t) => {
         const agg =
@@ -403,6 +410,9 @@ ticketsRouter.get("/inbox", (req, res) => {
             // Per-consumer unread flag (≥1 unseen ping on the thread for
             // the caller, resolved from the X-Aiball-Consumer header).
             unread: unreadMap.get(t.id) ?? false,
+            // #405: in the consumer's hot-zone focus (the ticket they're
+            // actively working) → drives the 🔥 list flag.
+            hot: hotFocus.has(t.id),
             // Snooze (#B.329). `postponed=true` means the deadline hasn't
             // passed yet — UI hides the row from the open inbox the same
             // way `closed=true` does. `postponed_until` is the deadline
