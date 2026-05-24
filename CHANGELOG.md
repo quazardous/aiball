@@ -45,6 +45,10 @@ narrative for the product as a whole.
   per-consumer agent token now gets hard per-consumer proof at the remote
   end-to-end through the proxy, with the node token left to cover only genuinely
   token-less local clients — shrinking the node token's blast radius in practice.
+- **`docs/SECURITY.md`** — a plain-language map of aiball's trust boundaries
+  (local UDS / direct / proxy-node) with diagrams, spelling out where the limits
+  are: the proxy node token is the weak point (impersonation-capable, unscoped →
+  private-network-only).
 
 ### Local projects — running indicator + single-loop launch gate (#393)
 

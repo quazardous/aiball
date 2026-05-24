@@ -36,6 +36,7 @@ Root:
 - [`SANDBOX.md`](./docs/SANDBOX.md) — `aiball sandbox` (experimental autonomous agent).
 - [`TAILSCALE.md`](./docs/TAILSCALE.md) — remote access over a tailnet.
 - [`REMOTE.md`](./docs/REMOTE.md) — run a local `claude-loop` slaved to a remote aiball daemon (#390).
+- [`SECURITY.md`](./docs/SECURITY.md) — trust model & limits (local UDS / direct / proxy-node), with diagrams; the proxy node token is the weak point.
 - [`WIN-INSTALL.md`](./docs/WIN-INSTALL.md) — Windows install.
 - [`WORKFLOW.md`](./docs/WORKFLOW.md) — `feature` vs mainstream dev workflow (intent-driven; never switch the runtime checkout's branch).
 - [`MIGRATIONS.md`](./docs/MIGRATIONS.md) — drizzle/SQLite migration conventions.
