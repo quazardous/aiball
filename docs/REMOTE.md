@@ -98,6 +98,16 @@ token-less local clients (web UI, ad-hoc CLI). This shrinks the node token's
 blast radius in practice — the writes that matter (the loop's) carry their own
 proof, so a leaked node token can impersonate only the token-less stragglers.
 
+**To close the weak point entirely, use strict mode** (#394): `proxy.strict:
+true` (or `aiball proxy init --strict`) tells the proxy to **never inject the
+node token** — every relayed request must carry its own per-consumer bearer, and
+a token-less call is rejected with **401** at the proxy. The node can no longer
+assert an identity, so A authenticates every write per-consumer. Trade-off:
+each local client must be provisioned with its own token (`aiball auth issue
+--consumer <id>`), and token-less clients (web UI / ad-hoc CLI over the UDS) stop
+working through the proxy — that's why it's **opt-in**. See
+[`SECURITY.md`](./SECURITY.md) § *Closing the weak point entirely*.
+
 ### Wiring (B → A) in two commands
 
 ```bash

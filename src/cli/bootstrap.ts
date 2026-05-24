@@ -163,7 +163,7 @@ function initTailscale(opts: { http: boolean; port?: number; autostart: boolean 
  * existing keys + comments are preserved; only `proxy` is set. Host-level
  * (every local client on this host relays), so it's global, not per-project.
  */
-function initProxy(opts: { url: string; token: string }): void {
+function initProxy(opts: { url: string; token: string; strict?: boolean }): void {
     const path = globalConfigPath();
     let doc;
     try {
@@ -173,6 +173,9 @@ function initProxy(opts: { url: string; token: string }): void {
     }
     doc.setIn(["proxy", "url"], opts.url);
     if (opts.token) doc.setIn(["proxy", "token"], opts.token);
+    // #394 « tuer le point faible » : strict ⇒ pas d'injection du token node ;
+    // chaque requête doit porter son propre bearer per-consumer, sinon 401.
+    if (opts.strict) doc.setIn(["proxy", "strict"], true);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, doc.toString(), "utf8");
 
@@ -183,9 +186,18 @@ function initProxy(opts: { url: string; token: string }): void {
             `  proxy:`,
             `    url: ${opts.url}`,
             ...(opts.token ? [`    token: ${opts.token.slice(0, 12)}…`] : [`    token: (none — set one with --token)`]),
+            ...(opts.strict ? [`    strict: true`] : []),
             ``,
             `This daemon will relay /api/* + /uploads/* to ${opts.url}.`,
-            `Mint the token on the REMOTE with:  aiball auth issue --node`,
+            ...(opts.strict
+                ? [
+                    `STRICT mode: the node token is NEVER injected — every relayed request`,
+                    `must carry its own per-consumer bearer (else 401). Provision each`,
+                    `local client with a token minted on the REMOTE (aiball auth issue`,
+                    `--consumer <id>); token-less clients (web UI / CLI over the UDS) will`,
+                    `be rejected. This closes the cross-host weak point (docs/SECURITY.md).`,
+                ]
+                : [`Mint the token on the REMOTE with:  aiball auth issue --node`]),
             `Apply:  systemctl --user restart aiball`,
             `Check:  aiball status`,
             ``,
@@ -253,8 +265,9 @@ export function registerBootstrapCommands(program: Command): void {
         .description("Configure proxy-node mode (writes the proxy: block to ~/.config/aiball/config.yaml)")
         .requiredOption("--url <url>", "Remote aiball URL to relay to (e.g. https://A-host:7777)")
         .option("--token <token>", "Node service token (mint on the remote with `aiball auth issue --node`)")
-        .action((o: { url: string; token?: string }) => {
-            initProxy({ url: o.url, token: o.token ?? "" });
+        .option("--strict", "Never inject the node token: every relayed request must carry its own per-consumer bearer (else 401). Closes the cross-host weak point (#394).")
+        .action((o: { url: string; token?: string; strict?: boolean }) => {
+            initProxy({ url: o.url, token: o.token ?? "", strict: o.strict === true });
         });
 
     // `aiball stop-hook install [--global]` — standalone wiring command,

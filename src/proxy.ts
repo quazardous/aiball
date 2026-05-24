@@ -30,6 +30,16 @@ import { globalConfigPath } from "./autopoll/config.js";
 export interface ProxyConfig {
     url: string;
     token: string;
+    /**
+     * #394 « tuer le point faible » : en mode strict le proxy n'injecte JAMAIS
+     * le token node en fallback. Toute requête relayée DOIT porter son propre
+     * bearer per-consumer, sinon 401. → le node ne peut plus *affirmer* une
+     * identité (le token node n'est plus un passe-partout) ; A authentifie
+     * chaque écriture per-consumer (preuve dure de bout en bout, via QW-A).
+     * Opt-in (défaut false) : l'activer casse les clients token-less (web UI /
+     * CLI sur l'UDS), qui doivent alors être provisionnés avec leur propre token.
+     */
+    strict?: boolean;
 }
 
 /** Read the `proxy:` block from the GLOBAL config. Null when absent → the
@@ -39,14 +49,15 @@ export function loadProxy(): ProxyConfig | null {
     if (!existsSync(p)) return null;
     try {
         const raw = (parseYaml(readFileSync(p, "utf8")) ?? {}) as {
-            proxy?: { url?: unknown; token?: unknown };
+            proxy?: { url?: unknown; token?: unknown; strict?: unknown };
         };
         const px = raw.proxy;
         if (!px || typeof px !== "object") return null;
         const url = typeof px.url === "string" ? px.url.trim() : "";
         const token = typeof px.token === "string" ? px.token : "";
+        const strict = px.strict === true;
         if (!url) return null;
-        return { url, token };
+        return { url, token, strict };
     } catch {
         return null;
     }
@@ -66,14 +77,27 @@ export function proxyMiddleware(cfg: ProxyConfig): RequestHandler {
             ...req.headers,
             host: target.host,
         };
+        // #394 « tuer le point faible » : en mode strict, le node n'a plus le
+        // droit d'affirmer une identité. Une requête sans son propre bearer
+        // per-consumer est rejetée ICI (401) — on ne forwarde pas, on n'injecte
+        // pas le token node. Plus de passe-partout réseau ⇒ le point faible
+        // cross-host disparaît (cf docs/SECURITY.md).
+        if (cfg.strict && !headers["authorization"]) {
+            res.status(401).json({
+                error: "proxy strict mode: a per-consumer bearer token is required "
+                    + "(the node token is not injected as a fallback in strict mode)",
+            });
+            return;
+        }
         // #394 QW-A: a caller that already carries its OWN bearer (a per-consumer
         // agent token, #390-style) keeps it → the upstream authenticates THAT
         // consumer with hard per-consumer proof, end-to-end through the proxy.
         // The node token is only a FALLBACK for genuinely token-less local
         // callers (web UI / CLI over the UDS) — then it vouches for the relayed
         // x-aiball-consumer (X-Forwarded-For model). So: per-consumer proof when
-        // the caller has a token, node-vouched identity otherwise.
-        if (cfg.token && !headers["authorization"]) {
+        // the caller has a token, node-vouched identity otherwise. (Disabled in
+        // strict mode — the early return above already 401'd any token-less call.)
+        if (!cfg.strict && cfg.token && !headers["authorization"]) {
             headers["authorization"] = `Bearer ${cfg.token}`;
         }
         const upstream = reqFn(

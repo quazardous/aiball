@@ -59,6 +59,56 @@ test("#394 QW-A: proxy preserves a caller's own bearer, node token only as fallb
     await new Promise((r) => proxySrv.close(r));
 });
 
+// #394 « tuer le point faible » : en mode strict le proxy n'injecte JAMAIS le
+// token node. Une requête token-less est rejetée (401) AVANT tout forward ;
+// une requête qui porte son propre bearer passe tel quel (preuve per-consumer).
+test("#394 strict: token-less call is 401'd, own bearer passes, node token never injected", async () => {
+    let received: string | undefined;
+    let reached = false;
+    const upstream = http.createServer((req, res) => {
+        reached = true;
+        received = req.headers.authorization;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+    });
+    const upPort = await listen(upstream);
+
+    const app = express();
+    app.use(proxyMiddleware({ url: `http://127.0.0.1:${upPort}`, token: "node-tok", strict: true }));
+    const proxySrv = http.createServer(app);
+    const pxPort = await listen(proxySrv);
+
+    const call = (headers: Record<string, string>): Promise<number> =>
+        new Promise((resolve, reject) => {
+            const r = http.request(
+                { host: "127.0.0.1", port: pxPort, path: "/api/health", method: "GET", headers },
+                (res) => {
+                    res.resume();
+                    res.on("end", () => resolve(res.statusCode ?? 0));
+                },
+            );
+            r.on("error", reject);
+            r.end();
+        });
+
+    // (1) appelant token-less → 401 local, jamais forwardé, token node PAS injecté.
+    received = undefined;
+    reached = false;
+    const status1 = await call({});
+    assert.equal(status1, 401);
+    assert.equal(reached, false, "strict mode must not forward a token-less request");
+
+    // (2) appelant avec son propre token agent → forwardé tel quel (preuve per-consumer).
+    received = undefined;
+    reached = false;
+    const status2 = await call({ authorization: "Bearer agent-xyz" });
+    assert.equal(status2, 200);
+    assert.equal(received, "Bearer agent-xyz");
+
+    await new Promise((r) => upstream.close(r));
+    await new Promise((r) => proxySrv.close(r));
+});
+
 // #394 (8c7xut): la page proxy annonce le remote et échappe l'URL.
 test("#394: proxyLandingHtml announces the remote URL and escapes it", () => {
     const html = proxyLandingHtml("https://a-host:7777");

@@ -45,6 +45,14 @@ narrative for the product as a whole.
   per-consumer agent token now gets hard per-consumer proof at the remote
   end-to-end through the proxy, with the node token left to cover only genuinely
   token-less local clients — shrinking the node token's blast radius in practice.
+- **Strict mode — close the weak point entirely** (`proxy.strict: true`, or
+  `aiball proxy init --strict`): the proxy **never** injects the node token as a
+  fallback. Every relayed request must carry its own per-consumer bearer; a
+  token-less call is rejected with **401** at the proxy. The node can no longer
+  *assert* an identity, so the remote authenticates every write per-consumer and
+  the cross-host weak point is gone. Opt-in (default off) — turning it on means
+  provisioning each local client with its own token (`auth issue --consumer`) and
+  giving up token-less convenience (web UI / CLI over the UDS).
 - **`docs/SECURITY.md`** — a plain-language map of aiball's trust boundaries
   (local UDS / direct / proxy-node) with diagrams, spelling out where the limits
   are: the proxy node token is the weak point (impersonation-capable, unscoped →

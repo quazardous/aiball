@@ -112,6 +112,43 @@ practice.
 
 ---
 
+## Closing the weak point entirely — strict mode (#394)
+
+QW-A *shrinks* the blast radius; **strict mode removes it.** Set `strict: true`
+in the `proxy:` block (or `aiball proxy init --strict`) and the proxy **never
+injects the node token as a fallback**. Every relayed request must carry its own
+per-consumer bearer — a token-less call is **rejected with 401 at the proxy**,
+before any forward.
+
+```yaml
+proxy:
+  url: https://A-host:7777
+  strict: true          # node token is never injected; per-consumer bearer or 401
+```
+
+```
+   host B (proxy, strict)                        host A
+ [ loop w/ own token T_alice ]
+        └─Bearer T_alice──►[ proxy ]──Bearer T_alice──►[ daemon ] ─► "alice" (HARD proof)
+
+ [ web UI / ad-hoc CLI ]──token-less──►[ proxy ]──► 401 (rejected, never forwarded)
+```
+
+With strict on, **the node can no longer *assert* an identity** — there is no
+master-credential fallback left, so the cross-host weak point is gone: A
+authenticates **every** write per-consumer. The trade-off is ergonomic — each
+local client must be provisioned with its own token minted on A
+(`aiball auth issue --consumer <id>`); token-less clients (the web UI, ad-hoc
+CLI over the UDS) stop working through the proxy. That's why strict is **opt-in
+(default off)** — turning it on is a deliberate "I've provisioned per-consumer
+tokens and want zero node-asserted identity" choice.
+
+The only residue is the **same-uid-on-B** boundary (a process running as the
+same OS user as the proxy can read its config / a local token) — that's the uid
+frontier, true everywhere and out of scope for tokens.
+
+---
+
 ## Summary
 
 | mode | proof | strength | ergonomics |
@@ -120,22 +157,25 @@ practice.
 | direct #390 | per-consumer token | **strongest** (hard per-consumer) | a token per client |
 | proxy #394 | node token | **weakest** (node asserts identity) | token-less locally |
 | proxy + own token (QW-A) | per-consumer token | hard proof for the loop | one node secret + provisioned loop token |
+| **proxy strict (#394)** | per-consumer token (mandatory) | **strongest** (no node-asserted identity, 401 otherwise) | a token per local client, no token-less fallback |
 
 **Rules of thumb**
 
 - The **node token is a master credential.** Treat it like the keys to A:
   private network, hosts you control, `chmod 600`, never committed.
 - **Local trust is uid-level**, not per-process — fine on a single-user host.
-- Want **hard per-consumer proof**? Use **direct mode (#390)**, or carry the
-  loop's own token through the proxy (**QW-A**).
+- Want **hard per-consumer proof**? Use **direct mode (#390)**, carry the loop's
+  own token through the proxy (**QW-A**), or **kill the node-asserted identity
+  outright** with **strict mode** (`proxy.strict: true`).
 
 **Roadmap (further hardening)**
 
-- **Scope node tokens** to an allow-list of consumer-id prefixes / projects, so a
-  leaked node token can't impersonate outside its lane.
 - **QW-B** — `claude-loop init` auto-mints the loop's per-consumer token (via a
   human-authed remote issue endpoint), making "one consumer = one token" turnkey
-  even behind the proxy.
+  even behind the proxy → makes strict mode painless (no manual provisioning).
+- **Scope node tokens** to an allow-list of consumer-id prefixes / projects, so a
+  leaked node token can't impersonate outside its lane (relevant only in
+  non-strict mode, where a node token still exists).
 
 See also [`REMOTE.md`](./REMOTE.md) § *Trust model & threat model* for the
 proxy-mode wiring details.

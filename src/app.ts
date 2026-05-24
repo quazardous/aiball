@@ -49,7 +49,7 @@ export function createApp(): express.Express {
         app.get(/^\/(?!api|ws|uploads).*/, (_req, res) => {
             res.type("html").send(proxyLandingHtml(proxy.url));
         });
-        console.log(`aiball PROXY MODE → ${proxy.url}`);
+        console.log(`aiball PROXY MODE → ${proxy.url}${proxy.strict ? " (strict: node token never injected)" : ""}`);
         return app;
     }
 
