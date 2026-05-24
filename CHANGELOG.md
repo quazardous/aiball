@@ -49,6 +49,10 @@ narrative for the product as a whole.
   (local UDS / direct / proxy-node) with diagrams, spelling out where the limits
   are: the proxy node token is the weak point (impersonation-capable, unscoped →
   private-network-only).
+- **Proxy-mode landing page**: a daemon in proxy mode no longer serves the (
+  degraded, no-live-`/ws`) SPA — it shows a tiny self-contained page saying
+  "this daemon is a proxy" with the remote URL + a link to the real UI. `/api`
+  and `/uploads` still forward for local clients.
 
 ### Local projects — running indicator + single-loop launch gate (#393)
 

@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { api } from "./api.js";
 import { UPLOADS_DIR } from "./paths.js";
-import { loadProxy, proxyMiddleware } from "./proxy.js";
+import { loadProxy, proxyMiddleware, proxyLandingHtml } from "./proxy.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -37,7 +37,6 @@ export function createApp(): express.Express {
     // #394: proxy mode. When a `proxy:` block is configured, this daemon is a
     // transparent relay to the remote — forward /api + /uploads (raw stream, no
     // body parsing, no local routers); SSE (/api/events) pipes through for free.
-    // The local frontend is still served (it talks to /api, which proxies).
     // (The /ws live-update socket stays local — B's own web UI isn't the use
     // case; loops/MCP/CLI + SSE are what matter. WS proxying is a follow-up.)
     const proxy = loadProxy();
@@ -45,13 +44,11 @@ export function createApp(): express.Express {
         const fwd = proxyMiddleware(proxy);
         app.use("/api", fwd);
         app.use("/uploads", fwd);
-        const distP = frontendDistDir();
-        if (distP) {
-            app.use(express.static(distP));
-            app.get(/^\/(?!api|ws|uploads).*/, (_req, res) => {
-                res.sendFile(join(distP, "index.html"));
-            });
-        }
+        // #394 (8c7xut): the browser UI is degraded in proxy mode (no local /ws),
+        // so instead of the SPA serve a tiny "I'm a proxy of <url>" landing page.
+        app.get(/^\/(?!api|ws|uploads).*/, (_req, res) => {
+            res.type("html").send(proxyLandingHtml(proxy.url));
+        });
         console.log(`aiball PROXY MODE → ${proxy.url}`);
         return app;
     }

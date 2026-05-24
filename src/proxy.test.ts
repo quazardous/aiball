@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import express from "express";
-import { proxyMiddleware } from "./proxy.js";
+import { proxyMiddleware, proxyLandingHtml } from "./proxy.js";
 
 // Démarre un serveur sur un port éphémère ; renvoie le port.
 function listen(server: http.Server): Promise<number> {
@@ -57,4 +57,17 @@ test("#394 QW-A: proxy preserves a caller's own bearer, node token only as fallb
 
     await new Promise((r) => upstream.close(r));
     await new Promise((r) => proxySrv.close(r));
+});
+
+// #394 (8c7xut): la page proxy annonce le remote et échappe l'URL.
+test("#394: proxyLandingHtml announces the remote URL and escapes it", () => {
+    const html = proxyLandingHtml("https://a-host:7777");
+    assert.match(html, /proxy mode/i);
+    assert.match(html, /https:\/\/a-host:7777/);
+    assert.match(html, /Open the remote aiball/);
+
+    // URL with HTML metacharacters must be escaped (no raw injection).
+    const evil = proxyLandingHtml('https://x/"><script>alert(1)</script>');
+    assert.ok(!evil.includes("<script>"), "must escape angle brackets in the URL");
+    assert.match(evil, /&lt;script&gt;/);
 });

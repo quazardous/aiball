@@ -101,3 +101,47 @@ export function proxyMiddleware(cfg: ProxyConfig): RequestHandler {
         req.pipe(upstream);
     };
 }
+
+/** Minimal HTML escaping for the operator-controlled proxy URL. */
+function esc(s: string): string {
+    return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+/**
+ * #394 (8c7xut): in proxy mode the web UI is degraded (the live `/ws` socket
+ * stays local) and would only mirror the remote — so instead of the SPA we
+ * serve this tiny self-contained landing page: "this daemon is a proxy of
+ * <url>", with a link to the real UI. No build artifact needed.
+ */
+export function proxyLandingHtml(url: string): string {
+    const u = esc(url);
+    return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aiball — proxy mode</title>
+<style>
+  body{font-family:system-ui,-apple-system,sans-serif;background:#0f1115;color:#e6e6e6;
+       display:grid;place-items:center;min-height:100vh;margin:0}
+  .card{text-align:center;max-width:34rem;padding:2rem}
+  .tag{font-size:.75rem;letter-spacing:.12em;text-transform:uppercase;color:#7fa8b8}
+  h1{font-size:1.4rem;margin:.4rem 0 .8rem}
+  p{line-height:1.5;color:#b9c0cc}
+  code{background:#1b1f27;padding:.15rem .45rem;border-radius:.35rem;color:#e6e6e6}
+  a.btn{display:inline-block;margin-top:1.4rem;padding:.6rem 1.1rem;border-radius:.5rem;
+        background:#2563eb;color:#fff;text-decoration:none;font-weight:600}
+  a.btn:hover{background:#1d4ed8}
+</style></head>
+<body><div class="card">
+  <div class="tag">aiball · proxy mode</div>
+  <h1>This daemon is a proxy</h1>
+  <p>It transparently relays everything to a remote aiball — no data lives here.
+     Local clients (loop, MCP, CLI) keep talking to it as usual.</p>
+  <p>Relaying to <code>${u}</code></p>
+  <a class="btn" href="${u}">Open the remote aiball →</a>
+</div></body></html>
+`;
+}
