@@ -335,11 +335,11 @@ program
 program
     .command("reload")
     .description(
-        "Reload the daemon's config in place via SIGHUP — no downtime, no restart " +
-            "(#407, mutualised with `claude-loop reload`). Reads $AIBALL_HOME/daemon.pid " +
-            "and signals it. Most aiball config is already read fresh per request; this " +
-            "re-reads + validates the global config and is the hook for any boot-cached " +
-            "config. For schema migrations you still need a full restart.",
+        "Reload the daemon's config in place via SIGUSR2 — no downtime, no restart " +
+            "(#407). Reads $AIBALL_HOME/daemon.pid and signals it. Most aiball config " +
+            "is already read fresh per request; this re-reads + validates the global " +
+            "config and is the hook for any boot-cached config. For schema migrations " +
+            "(and anything code/env-level) use `aiball restart` / `kill -HUP`.",
     )
     .action((_opts, cmd) => {
         const pidPath = join(aiballHome(), "daemon.pid");
@@ -348,15 +348,15 @@ program
         }
         const pid = Number(readFileSync(pidPath, "utf8").trim());
         if (!Number.isInteger(pid) || pid <= 0) die(`invalid pid in ${pidPath}`);
-        // Liveness probe (signal 0) before HUP, so a stale pidfile gives a clear
-        // message instead of an ESRCH on the real signal.
+        // Liveness probe (signal 0) before the real signal, so a stale pidfile
+        // gives a clear message instead of an ESRCH.
         try {
             process.kill(pid, 0);
         } catch {
             die(`daemon pid ${pid} is not alive (stale ${pidPath}) — start the daemon first`);
         }
         try {
-            process.kill(pid, "SIGHUP");
+            process.kill(pid, "SIGUSR2");
         } catch (e) {
             die(`failed to signal daemon pid ${pid}: ${(e as Error).message}`);
         }
@@ -364,7 +364,7 @@ program
             { reloaded: true, pid },
             gOpts(cmd),
             (v: { pid: number }) =>
-                `sent SIGHUP to daemon (pid ${v.pid}) — config reloaded in place (no downtime)`,
+                `sent SIGUSR2 to daemon (pid ${v.pid}) — config reloaded in place (no downtime)`,
         );
     });
 
@@ -372,11 +372,11 @@ program
     .command("restart")
     .description(
         "Hard-restart the daemon — re-runs DB migrations, reloads ALL code + env, " +
-            "rebinds the socket (#407, david bstvby: \"il faut quand même un hard restart " +
-            "pour certain cas\"). Use this for the cases `aiball reload` can't cover " +
-            "(schema migrations above all). Under the standard systemd-user install this " +
-            "runs `systemctl --user restart aiball`; on other deploys (Windows, dev) " +
-            "restart the daemon the way you launched it. Mutualised with `claude-loop restart`.",
+            "rebinds the socket (#407). Use this for the cases `aiball reload` can't " +
+            "cover (schema migrations above all). Same as `kill -HUP` on the daemon — " +
+            "identical to the loop's kill-HUP (#388). Under the standard systemd-user " +
+            "install this runs `systemctl --user restart aiball`; on other deploys " +
+            "(Windows, dev) restart the daemon the way you launched it.",
     )
     .action((_opts, cmd) => {
         // Canonical deploy = systemd user service (see docs/WIN-INSTALL.md for the

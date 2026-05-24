@@ -39,25 +39,23 @@ function revealExpiredPostpones(): void {
 }
 
 /**
- * #407 — SIGHUP = reload config (david `zsxhn3`: "Ok reload", not restart).
- * The classic Unix convention: `kill -HUP <daemon>` re-reads config **in place,
- * no downtime** — the mutualised counterpart to the loop's own kill-HUP (#388,
- * which restarts its detached timer). WITHOUT this handler, the default SIGHUP
- * action is **terminate**, and with `Restart=on-failure` a clean exit would NOT
- * relaunch → aiball down for every project. So catching it is the headline fix.
+ * #407 — SIGUSR2 = reload config in place, no downtime (driven by `aiball
+ * reload`). David `8q4pu5` chose to keep `kill -HUP` = restart (consistent with
+ * the loop's kill-HUP #388 → see {@link hardRestart}), so the rarer hot-reload
+ * moved off HUP onto USR2. Users don't signal USR2 directly — they run `aiball
+ * reload`; USR2 is just its plumbing. SIGUSR1 is reserved by Node (inspector).
  *
  * aiball reads almost all config FRESH per request (`loadConfig()` re-reads
  * `.aiball.yaml`, `hotWindowSec()` re-reads the global yaml, settings/rules live
  * from the DB), so most config is already live without any reload. This handler
- * therefore (a) keeps HUP from killing the daemon, (b) re-reads + validates the
- * GLOBAL config so a broken edit surfaces now and the effective values are logged
- * as proof the reload ran, and (c) is the single extension point for any future
- * boot-cached config. It is wrapped so a reload error can NEVER take the daemon
- * down — that would defeat the purpose of HUP=reload.
+ * therefore (a) re-reads + validates the GLOBAL config so a broken edit surfaces
+ * now and the effective values are logged as proof the reload ran, and (b) is the
+ * single extension point for any future boot-cached config. It is wrapped so a
+ * reload error can NEVER take the daemon down.
  */
 function reloadConfig(): void {
     try {
-        console.log("[sighup] reloading config…");
+        console.log("[sigusr2] reloading config…");
         const gp = globalConfigPath();
         let hotWin: unknown;
         try {
@@ -66,37 +64,38 @@ function reloadConfig(): void {
         } catch {
             // Missing/empty global config is the normal case — not an error.
         }
-        console.log(`[sighup] config reloaded (most config is read fresh per request; global=${gp}, hot_window_sec=${hotWin ?? "default"})`);
+        console.log(`[sigusr2] config reloaded (most config is read fresh per request; global=${gp}, hot_window_sec=${hotWin ?? "default"})`);
     } catch (e) {
-        console.error("[sighup] config reload failed (daemon stays up):", e);
+        console.error("[sigusr2] config reload failed (daemon stays up):", e);
     }
 }
 
 /**
- * #407 — SIGUSR2 = HARD restart (david `bstvby` "il faut quand même un hard
- * restart pour certain cas" + `azppqg` "Avec kill"). The kill-triggered sibling
- * of `aiball restart`, for the cases SIGHUP/reload can't cover: schema
- * migrations, env changes, code that didn't hot-reload, socket rebind.
+ * #407 — SIGHUP = HARD restart, **identical to the loop's kill-HUP** (#388, which
+ * self-restarts its timer). David `8q4pu5` ("Pourquoi pas hup ? je comprends
+ * pas") + `Allons-y` settled on one consistent signal across loop and daemon:
+ * `kill -HUP <daemon>` = restart, for the cases the soft reload can't cover —
+ * schema migrations, env changes, code that didn't hot-reload, socket rebind.
+ * (The rarer hot config reload lives on USR2 via `aiball reload`.)
  *
  * It MUST go through the service supervisor, not a self-exit: the daemon runs
  * under `tsx watch`, and `tsx watch` only relaunches on file changes — NOT on
  * process exit (verified) — so `process.exit()` here would leave aiball DOWN.
  * `systemctl --user restart aiball` instead bounces the whole service tree
  * (npm → tsx watch → fresh daemon), re-running migrations + reloading all code.
- * Spawned detached + unref'd so it survives the SIGTERM systemd then sends us.
- * SIGUSR1 is reserved by Node (inspector), so SIGUSR2 is the free user signal.
+ * Spawned detached + unref'd so it survives the SIGTERM the supervisor sends us.
  */
 function hardRestart(): void {
     try {
-        console.log("[sigusr2] hard restart requested — delegating to the service supervisor…");
+        console.log("[sighup] hard restart requested — delegating to the service supervisor…");
         const child = spawn("systemctl", ["--user", "restart", "aiball"], {
             detached: true,
             stdio: "ignore",
         });
-        child.on("error", (e) => console.error("[sigusr2] hard restart spawn failed (daemon stays up):", e));
+        child.on("error", (e) => console.error("[sighup] hard restart spawn failed (daemon stays up):", e));
         child.unref();
     } catch (e) {
-        console.error("[sigusr2] hard restart failed (daemon stays up):", e);
+        console.error("[sighup] hard restart failed (daemon stays up):", e);
     }
 }
 
@@ -200,10 +199,10 @@ function main(): void {
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
-    // #407: HUP reloads config in place (no downtime), never terminates.
-    process.on("SIGHUP", reloadConfig);
-    // #407: USR2 = hard restart via the supervisor (david "Avec kill").
-    process.on("SIGUSR2", hardRestart);
+    // #407: HUP = hard restart, identical to the loop's kill-HUP (david 8q4pu5).
+    process.on("SIGHUP", hardRestart);
+    // #407: USR2 = soft config reload, no downtime (driven by `aiball reload`).
+    process.on("SIGUSR2", reloadConfig);
 }
 
 main();
