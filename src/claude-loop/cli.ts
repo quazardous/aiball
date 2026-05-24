@@ -845,9 +845,14 @@ function cmdList(): void {
     }
 }
 
-function cmdAttach(name: string): void {
-    if (!tmuxAlive(name)) die(`loop '${name}' not alive`);
-    spawnSync(MUX_CMD, ["attach", "-t", tmuxName(name)], { stdio: "inherit" });
+function cmdAttach(name: string | undefined): void {
+    // #415 (david) : `claude-loop attach` sans nom → résout le loop unique
+    // du cwd courant (même convention que tail/reload/restart/check).
+    // resolveCurrentLoopName privilégie déjà l'alive sur égalité et meurt
+    // avec un message de désambiguïsation si plusieurs loops partagent le cwd.
+    const resolved = name ?? resolveCurrentLoopName();
+    if (!tmuxAlive(resolved)) die(`loop '${resolved}' not alive`);
+    spawnSync(MUX_CMD, ["attach", "-t", tmuxName(resolved)], { stdio: "inherit" });
 }
 
 
@@ -1436,7 +1441,9 @@ async function main(): Promise<void> {
         .helpOption("-h, --help", "Show help");
     program.addCommand(buildStartCommand((opts) => cmdStart({ ...opts, claudeArgs: passthrough })).name("start"));
     program.command("list").description("List all known loops").action(cmdList);
-    program.command("attach <name>").description("tmux attach to a loop session").action(cmdAttach);
+    program.command("attach [name]")
+        .description("tmux attach to a loop session. Name optional — defaults to the single loop registered for the current cwd (#415).")
+        .action((name: string | undefined) => cmdAttach(name));
     program.command("tail [name]")
         .description("Follow the claude pane live (--timer / --stop-hook / --log for the wake-decision logs). Name optional — defaults to the loop registered for the current cwd. Ctrl-C to stop; pass --once for a snapshot.")
         .option("--lines <n>", "Lines to show", "40")
