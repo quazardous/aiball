@@ -20,7 +20,7 @@ import { loadConfig, type AiballConfig } from "../autopoll/config.js";
 import { AiballClient } from "../client.js";
 import type { Intent } from "../domain.js";
 import type { DrainedState } from "./drained-strategy.js";
-import { loadPromptsFromYaml, mergePrompts, pickPrompt } from "../prompt-templates.js";
+import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
 export const STATE_ROOT = process.env.CLAUDE_LOOP_STATE_ROOT
     ?? join(homedir(), ".claude-loop");
@@ -1040,95 +1040,34 @@ export async function buildContextPhrase(
         // mirror the prior hardcoded wording so a broken yaml still
         // ships a sensible prompt.
         const cfg = loadConfig();
-        const skillPrompts = loadPromptsFromYaml(pingsAbsPath);
-        const promptMap = mergePrompts(skillPrompts, cfg.prompts);
-        const tone = cfg.autopoll.tone;
+        const promptMap = mergePrompts(loadPromptsFromYaml(pingsAbsPath), cfg.prompts);
 
-        const parts: string[] = [];
-        if (pingCount > 0) {
-            // count=pingCount routes to wake_state_pings_one /
-            // wake_state_pings_other (#B.232 hd7taf 2-slug
-            // pluralization). The plain wake_state_pings slot is the
-            // no-variant fallback if the yaml only defines one form.
-            parts.push(pickPrompt(promptMap, "wake_state_pings", {
-                tone,
-                count: pingCount,
-                vars: { ping_count: pingCount },
-                fallback: `${pingCount} unread aiball ping${pingCount === 1 ? "" : "s"}`,
-            }));
-        }
-        if (openCount > 0) {
-            const scope = project ? `\`${project}\`` : "your scope";
-            // #374: always state OPEN; append "(N to handle)" when fewer are
-            // actionable so a gated backlog stays visible without over-claiming.
-            const courtNote = actionableCount < openCount
-                ? ` (${actionableCount} to handle)`
-                : "";
-            parts.push(pickPrompt(promptMap, "wake_state_open", {
-                tone,
-                count: openCount,
-                vars: {
-                    open_count: openCount,
-                    actionable_count: actionableCount,
-                    project_scope: scope,
-                },
-                fallback: `${openCount} open aiball ticket${openCount === 1 ? "" : "s"} in ${scope}${courtNote}`,
-            }));
-        }
-
-        const verbs: string[] = [];
-        if (pingCount > 0) {
-            verbs.push(pickPrompt(promptMap, "wake_directive_drain", {
-                tone,
-                vars: { ping_count: pingCount },
-                fallback: "drain via `unread({pings: true, mark_read: true})`",
-            }));
-        }
-        if (actionableCount > 0) {
-            // #371: name the FIFO head (head_id/head_title) so the directive
-            // points at ONE specific ticket — the oldest at top priority —
-            // instead of "one of N" (which let the agent grab the newest).
-            // All vars stay exposed so the YAML slot can be overridden
-            // per project — count-style or custom flavor (#371 david: les
-            // prompts sont pilotés par le yaml, overridables). #374: gated on
-            // actionableCount (only engage real work-in-court); open_count
-            // exposed too so a slot can mention the wider backlog.
-            const head = Array.isArray(headRows) ? headRows[0] : undefined;
-            verbs.push(pickPrompt(promptMap, "wake_directive_engage", {
-                tone,
-                vars: {
-                    open_count: openCount,
-                    actionable_count: actionableCount,
-                    head_id: head?.id ?? "",
-                    head_title: head?.title ?? "",
-                },
-                fallback: head
-                    ? `engage #${head.id} first — top of the work order (${actionableCount} in your court) — via \`ticket_list({actionable: true})\``
-                    : `engage one of ${actionableCount} actionable via \`ticket_list({actionable: true})\``,
-            }));
-        }
-        const directive = verbs.join(" + ");
-        const state = parts.join(" + ");
-
-        const lead = pickPrompt(promptMap, "wake_state_lead", {
-            tone,
-            fallback: "fyi:",
-        });
-
-        // #B.232 jdhdxq: top-level assembly via the `wake_master` slot.
-        // Sub-parts (culture / lead / state / directive) ship to the
-        // template as vars; `{culture}` also resolves via the `resolve`
-        // callback when the template embeds it standalone (so a custom
-        // wake_master that uses {culture} inline in addition to / instead
-        // of the leading position keeps working). Fallback assembly
-        // matches the prior hardcoded layout so a broken yaml still
-        // emits a usable wake.
-        return pickPrompt(promptMap, "wake_master", {
-            tone,
-            vars: { culture, lead, state, directive },
-            resolve: (key) => key === "culture" ? pickPingPhrase(pingsAbsPath) : undefined,
-            fallback: `${culture} ${lead} ${state}. ${directive}.`,
-        });
+        // #400: ONE template carries the whole wake via the {x:+…} grammar — no
+        // conditional assembly here. Counts pass "" when zero so the matching
+        // {count:+…} block drops out. `lead` is its own slot (random pick for
+        // variety). All vars are exposed so the yaml `wake_master` is fully
+        // overridable per project (#371/#374 wording lives in the template).
+        const head = Array.isArray(headRows) ? headRows[0] : undefined;
+        const scope = project ? `\`${project}\`` : "your scope";
+        const vars = {
+            culture,
+            lead: renderSlot(promptMap, "wake_lead", {}, "fyi:"),
+            ping_count: pingCount || "",
+            open_count: openCount || "",
+            actionable_count: actionableCount || "",
+            head_id: head?.id ?? "",
+            head_title: head?.title ?? "",
+            project_scope: scope,
+        };
+        return renderSlot(
+            promptMap,
+            "wake_master",
+            vars,
+            "{culture} {lead}"
+            + "{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}"
+            + "{actionable_count:+ engage #{head_id} first — top of the work order — via `ticket_list({actionable: true})`.}"
+            + "{open_count:+{actionable_count:+ }[{open_count} open]}",
+        );
     } catch {
         return culture;
     }

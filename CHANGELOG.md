@@ -17,7 +17,22 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
-### Approved command launchers (#398)
+### Wake-prompt system — radically simpler (#400)
+
+- The wake/relance prompt templating is now **one template + a tiny placeholder
+  grammar**, replacing the branchy per-slot assembly (david: "le système de
+  prompt devrait être simple, pas du `if` partout"). Grammar (shell-inspired):
+  `{var}` (value, empty when unset), `{var:-default}`, `{var:+text}` (text only
+  when the var is non-empty — the inline condition that removes the `if`s).
+  Tool-call braces inside a conditional (`unread({pings: true})`) are safe.
+- Calling code is just `renderSlot(map, name, vars)` — no tones, no plural
+  slugs, no conditional assembly. **Variants** (tone, language, singular/plural)
+  are now simply **separate named templates**; the caller picks the name.
+- Dropped from the engine: the 3 slot shapes / `{tone: …}` nesting / `_one`
+  `_other` plural variants / the separate `resolve` callback (callbacks are just
+  values now). The wake `prompts:` block collapses from ~7 slots to
+  `wake_lead` + `wake_master`. Pure refactor — no behavior change to *what* the
+  wake says, only how it's built; no migration.
 
 - A **Launchers panel** in the UI (sidebar + mobile footer) lists the
   operator-approved commands and runs one on click — so you can "launch Chrome"

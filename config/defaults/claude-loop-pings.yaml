@@ -58,111 +58,38 @@ wake_phrases:
     with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}."
     ticket_only:  "Heads-up on aiball ticket #{ticket}."
 
-# State-CTA slots assembled by claude-loop's `buildContextPhrase` when
-# a wake fires with no SSE artifact (timer heartbeat / stop-hook post
-# turn / session-start). Externalized per #B.232 cpaez7 so the wording
-# is dynamic and per-project tunable via `.aiball.yaml` → `prompts:`.
+# State-CTA wake assembled by claude-loop's `buildContextPhrase` when a wake
+# fires with no SSE artifact (timer heartbeat / stop-hook post turn /
+# session-start). #400: ONE template + a tiny placeholder grammar — no per-slot
+# assembly, no `if` in code (david: « le système de prompt devrait être simple »).
 #
-# Each slot accepts THREE shapes (russian-doll optional):
-#   string                  → no variation, same at every tone
-#   list[string]            → random pick, same pool for every tone
-#   { tone: list[string] }  → per-imperativity pool. Tone comes from
-#                             `.aiball.yaml` → `autopoll.tone`
-#                             (hint | directive | imperative). Missing
-#                             tone in the map → falls back to `directive`.
+# A slot is a plain template string, OR a list of strings (random pick for
+# variety). All the logic lives in the template via the grammar:
+#   {var}          → the value (empty string when unset/empty)
+#   {var:-default} → the value, or `default` when empty
+#   {var:+text}    → `text` only when var is non-empty, else "" (inline condition)
+# `text`/`default` may contain `{…}` and literal braces (tool-call syntax like
+# `unread({pings: true})` is safe). Variants (tone, language, plural…) are just
+# SEPARATE named templates — the caller picks the name; no tone/plural machinery.
 #
-# Placeholders substituted at render time:
-#   {ping_count}    integer
-#   {open_count}    integer
-#   {project_scope} "`<project>`" or "your scope"
-#
-# Pluralization (#B.232 hd7taf): pluralizable slots split into TWO
-# separate keys, NOT a `{plural}` placeholder. Suffixes:
-#
-#   {slot}_one     used when count === 1
-#   {slot}_other   used when count !== 1
-#
-# The picker consults these suffix-variants FIRST when the caller
-# passes `count`; the plain {slot} acts as a no-variant fallback.
-# Why 2 slugs vs `{ping_plural}`-style placeholder: lets each variant
-# carry its own wording, gender, article — useful for FR/EN agreement
-# ("1 ping aiball non lu" vs "3 pings aiball non lus") where the
-# placeholder hack would force template-string gymnastics.
-#
-# Why externalize (vs the prior hardcoded `[aiball: ...] — ... before
-# answering.` shape): the previous wording tripped prompt-injection
-# defenses on cold claude sessions (david 6ehkvn). With the templates
-# in yaml, ops can tune the lead/directive wording without a redeploy,
-# and the per-tone russian-doll lets projects scale directiveness.
+# Vars exposed to `wake_master` (counts are "" when zero, so {count:+…} drops):
+#   {culture}          random phrase from ping_messages above
+#   {ping_count}       unread aiball ping count
+#   {open_count}       open ticket count
+#   {actionable_count} tickets in your court (#374)
+#   {head_id} {head_title}  the work-order head (#371: priority desc, then oldest)
+#   {project_scope}    "`<project>`" or "your scope"
 prompts:
-  # Conversational lead — separator between the culture phrase and
-  # the state report. Replaces the old `[aiball: ...]` bracket header.
-  # Object form: per-tone list for random pick within a tone bucket.
-  wake_state_lead:
-    hint:
-      - "btw,"
-      - "fyi,"
-      - "just so you know,"
-    directive:
-      - "fyi:"
-      - "heads up —"
-      - "quick note:"
-    imperative:
-      - "**heads up**:"
-      - "**ACTION**:"
-      - "**you've got**:"
+  # Conversational lead — random pick for variety.
+  wake_lead:
+    - "fyi:"
+    - "heads up —"
+    - "quick note:"
 
-  # State parts — string form (no variation, identical at every tone).
-  # "aiball" baked into the phrase so the prompt explicitly names the
-  # tracker even when other trackers' MCPs are connected (david #B.230).
-  #
-  # Two-slug pluralization (#B.232 hd7taf): _one when count === 1,
-  # _other otherwise. The plain wake_state_pings / wake_state_open
-  # slots are intentionally absent here — the picker uses the suffix
-  # variants exclusively when the caller passes `count`.
-  wake_state_pings_one:   "1 unread aiball ping"
-  wake_state_pings_other: "{ping_count} unread aiball pings"
-  wake_state_open_one:    "1 open aiball ticket in {project_scope}"
-  wake_state_open_other:  "{open_count} open aiball tickets in {project_scope}"
-
-  # Directive verbs — list form, random pick across tones (proven
-  # imperative-style retained at every level, per 0aed5a2 fix against
-  # "agent listed and standby"). Variants swap the verb but keep the
-  # tool-call body identical so the agent still receives the exact
-  # argument shape.
-  wake_directive_drain:
-    - "drain via `unread({pings: true, mark_read: true})`"
-    - "ack via `unread({pings: true, mark_read: true})`"
-  # #371 (david kyudpg): ticket_list({actionable}) returns tickets in WORK
-  # ORDER (priority desc, then oldest-first as tiebreak) — NOT "FIFO" (that
-  # term is wrong; the GET's order is what matters). The wake names the head
-  # of that order (#{head_id}) so the agent takes the first to handle, not the
-  # newest/loudest. "actionable" is the "in your court" subset of open —
-  # nested sets, smallest→largest: unread ⊂ actionable ⊂ open. The state
-  # line (wake_state_open) always reports {open_count}; this directive
-  # reports {actionable_count} (the in-court subset, #374 #kjsejy). Vars:
-  # {head_id} {head_title} {open_count} {actionable_count} — override freely.
-  wake_directive_engage:
-    - "engage #{head_id} first — top of the work order ({actionable_count} in your court) — via `ticket_list({actionable: true})`"
-    - "start with #{head_id} — first in the GET's work order — via `ticket_list({actionable: true})`"
-
-  # Top-level assembly template (#B.232 jdhdxq). Composes the rendered
-  # sub-parts into the final wake-CTA. Placeholders:
-  #   {culture}    pop-culture phrase from ping_messages (auto-resolved
-  #                via the `resolve` callback — see pickPrompt). Override
-  #                ping_messages above to control the pool.
-  #   {lead}       rendered wake_state_lead (per-tone bucket).
-  #   {state}      assembled state parts ("3 unread pings + 5 open
-  #                tickets in `aiball`"), joined by the caller.
-  #   {directive}  assembled directive verbs ("drain via … + engage one
-  #                of 5 via …"), joined by the caller.
-  #
-  # When the slot is absent, the caller falls back to a hardcoded
-  # `"{culture} {lead} {state}. {directive}."` assembly so the wake
-  # never returns blank.
-  wake_master:
-    - "{culture} {lead} {state}. {directive}."
-    - "{culture} {state}. {directive}."
+  # The whole wake-CTA in one template. Each {x:+…} block renders only when x
+  # is set — so pings/engage/open appear exactly when relevant, no branching in
+  # code. #371: the engage block NAMES the work-order head (#{head_id}).
+  wake_master: "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}{actionable_count:+ engage #{head_id} first — top of the work order — via `ticket_list({actionable: true})`.}{open_count:+ ({open_count} open in {project_scope})}"
 
 # Ticket-text formatting patterns (#B.235). Linkifies refs like #B.123,
 # #C.<hashid>, @mention in ticket bodies and comments. Lives in the same
