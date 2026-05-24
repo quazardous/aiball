@@ -50,6 +50,7 @@ import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
 import { badRequest, consumerOf, notFound, withTags } from "./_helpers.js";
 import { moveTicketTo } from "../messages.js";
+import { paginateFeed, type FeedPagination } from "./feed-paginate.js";
 
 export const ticketsRouter = Router();
 
@@ -1103,6 +1104,20 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
             ? ({ ...m, body: null, edited_body: null } as typeof m)
             : m,
     );
+    // #396 (david h4gp5z): paginate + order the full thread feed. Lets a reader
+    // page through a big thread — or grab the last N entries WITH full bodies —
+    // instead of pulling the whole 80 KB at once. Only in pure full mode (brief
+    // and digest have their own shapes). Pure logic in feed-paginate.ts.
+    let pagination: FeedPagination | undefined;
+    if (!brief) {
+        const paged = paginateFeed(outComments, {
+            offset: req.query.offset,
+            limit: req.query.limit,
+            order: req.query.order,
+        });
+        outComments = paged.feed;
+        pagination = paged.pagination;
+    }
     // #B.123 phase B: surface the active typed relations alongside the
     // existing parent/sub-ticket lineage. Each relation is enriched
     // with the target ticket's lifecycle stage (open / closed /
@@ -1146,6 +1161,8 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         // only relevant in that fallback path.
         pivot_comment_id: brief ? pivotCommentId : undefined,
         tail: brief && !pivotApplied ? tail : undefined,
+        // #396: present only when the full feed was paginated/reordered.
+        pagination,
     });
 });
 

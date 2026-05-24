@@ -17,6 +17,16 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Big-thread reads — paginate `ticket_get(full)` (#396)
+
+- `ticket_get` **full mode is now paginatable**: `offset`, `limit`, and `order`
+  (`asc` = top_down/oldest-first, default; `desc` = bottom_up/newest-first). So
+  `full + order=desc + limit=10` returns the 10 most recent thread entries **with
+  full bodies** — a bounded read on a huge thread instead of pulling the whole
+  thing. The response carries a `pagination` block (offset/limit/returned/total/
+  order/has_more) when paging is active; with no params it ships the full feed
+  exactly as before. `brief` / `digest` keep their own shapes (params ignored).
+
 ### Remote/proxy ergonomics — one-command setup + node tokens (#394)
 
 - **`claude-loop init --aiball-url … --aiball-token … [--consumer --project]`**

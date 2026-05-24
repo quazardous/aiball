@@ -389,6 +389,10 @@ export class AiballClient {
             tail?: number;
             digest?: boolean;
             digest_limit?: number;
+            // #396: paginate/order the full feed (pure full mode only).
+            offset?: number;
+            limit?: number;
+            order?: "asc" | "desc";
         } = {},
     ) {
         const q: Record<string, string | undefined> = {};
@@ -398,6 +402,13 @@ export class AiballClient {
         // summary=1 when truthy for backward-compat with older daemons.
         if (opts.summary === false) q.full = "1";
         else if (opts.summary === true) q.summary = "1";
+        // #396 (david h4gp5z): pagination + order on the full thread. Only
+        // meaningful in pure full mode — brief/digest have their own shapes.
+        if (opts.summary === false && !opts.brief && !opts.digest) {
+            if (typeof opts.offset === "number" && opts.offset > 0) q.offset = String(Math.floor(opts.offset));
+            if (typeof opts.limit === "number" && opts.limit > 0) q.limit = String(Math.floor(opts.limit));
+            if (opts.order === "desc") q.order = "desc";
+        }
         // #B.130 phase 2 + #B.21X (pivot-cut): brief returns the thread
         // shaped around the latest summary_until pivot — drops the
         // already-summarized prefix, keeps full bodies after the pivot.
