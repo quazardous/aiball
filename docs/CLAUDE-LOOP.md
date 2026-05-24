@@ -244,6 +244,29 @@ The hooks and the timer all read the same `env` file so they share
 `CL_NAME`, `CL_STATE_DIR`, `CL_INTERVAL`, `CL_CHECK_CMD`, `CL_PINGS`,
 `CL_NO_STARTUP_PING`.
 
+### One live loop per (cwd, agent) — `#403`
+
+Two `claude-loop start` for the **same agent in the same directory** is
+unsupported, and made **impossible** at start time. The plain live-loop check
+(`findLiveLoopForCwdAgent`) is a check-then-spawn — two concurrent starts could
+both pass it before either registered its tmux session. So `start` first takes
+an **atomic lock**:
+
+- `~/.claude-loop/.start-lock-<sha1(cwd, agent)>` is created with `O_EXCL`
+  (atomic "create iff absent") **before** the live-loop check + spawn. Only one
+  concurrent start wins; the loser sees a live holder and refuses.
+- The lock is held for the start process's lifetime; once it exits, the tmux
+  session is the source of truth and `findLiveLoopForCwdAgent` guards the steady
+  state, so the lock only needs to cover the spawn window.
+- A **stale** lock left by a start that crashed mid-spawn self-reclaims: the
+  holder pid is recorded in the lock and a dead pid is reclaimed transparently.
+- `pruneDeadStateDirs` skips dotfiles so it never deletes a live lock.
+- `--force` bypasses the lock (and the check) — explicit override.
+
+Granularity is **(cwd, agent)**: a different agent may still run its own loop in
+the same directory. The lock logic is pure/injectable (`src/claude-loop/start-lock.ts`,
+unit-tested in `start-lock.test.ts`).
+
 ---
 
 ## Drained-backlog reminders — `#379`

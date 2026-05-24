@@ -33,6 +33,7 @@ import { bootstrapInit } from "../cli/bootstrap.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
 import { readLocalRemote, writeLocalRemote } from "./local-config.js";
 import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
+import { acquireStartLock } from "./start-lock.js";
 import {
     DEFAULT_CHECK_CMD,
     isInternalCheckCmd,
@@ -180,6 +181,9 @@ interface StartOpts {
 function pruneDeadStateDirs(): void {
     if (!existsSync(STATE_ROOT)) return;
     for (const name of readdirSync(STATE_ROOT)) {
+        // #403: skip dotfiles — `.start-lock-*` lives here; a concurrent start's
+        // prune must NOT delete a live lock (that would re-open the race).
+        if (name.startsWith(".")) continue;
         if (tmuxAlive(name)) continue;
         try { rmSync(stateDirFor(name), { recursive: true, force: true }); }
         catch { /* ignore */ }
@@ -322,6 +326,22 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // 14 dead loops accumulate from repeated rm-less restarts.
     pruneDeadStateDirs();
     if (!opts.force) {
+        // #403: take an ATOMIC start lock on (cwd, agent) BEFORE the live-loop
+        // check, to close the check-then-spawn TOCTOU race — two concurrent
+        // `claude-loop start` in the same dir+agent can no longer both win
+        // (O_EXCL: one creates the lock, the other sees a live holder). Held
+        // until this start process exits (by then the tmux session exists and
+        // findLiveLoopForCwdAgent guards the steady state). A stale lock from a
+        // crashed start self-reclaims (dead holder pid). `--force` bypasses.
+        const releaseLock = acquireStartLock(STATE_ROOT, cwd, ctx.agent);
+        if (releaseLock === null) {
+            die(
+                `another 'claude-loop start' is in progress (or a loop is live) for ${cwd}` +
+                (ctx.agent ? ` for agent '${ctx.agent}'` : "") +
+                `.\n  Retry in a moment, attach the live loop, or override with --force.`,
+            );
+        }
+        process.once("exit", releaseLock);
         const conflict = findLiveLoopForCwdAgent(cwd, ctx.agent);
         if (conflict) {
             die(
