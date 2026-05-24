@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { api } from "../lib/api";
+import { api, type TokenUsage } from "../lib/api";
 import { formatTicketRef } from "../lib/formatting";
+import { estTokenCost, formatTokens } from "../lib/format";
 
 const props = defineProps<{
     project: string;
@@ -35,6 +36,8 @@ interface ProjectStatsRich {
     top_tags: { name: string; count: number }[];
     top_intents: { intent: string; count: number }[];
     auto_approved_pct: number;
+    token_usage: TokenUsage | null;
+    top_token_tickets: { id: number; title: string; token_usage: TokenUsage }[];
 }
 
 const stats = ref<ProjectStatsRich | null>(null);
@@ -69,6 +72,12 @@ const topTagMax = computed(() =>
 const topIntentMax = computed(() =>
     stats.value && stats.value.top_intents.length > 0
         ? stats.value.top_intents[0].count
+        : 1,
+);
+// #406 — top_token_tickets is pre-sorted desc by cost, so [0] is the max scale.
+const topTokenMax = computed(() =>
+    stats.value && stats.value.top_token_tickets.length > 0
+        ? estTokenCost(stats.value.top_token_tickets[0].token_usage)
         : 1,
 );
 </script>
@@ -218,6 +227,43 @@ const topIntentMax = computed(() =>
                         </li>
                     </ol>
                 </div>
+            </section>
+
+            <!-- Token effort (#406): cost-equivalent aggregate + costliest tickets.
+                 Hidden until any usage is captured (#404). -->
+            <section v-if="stats.token_usage" class="project-stats__section">
+                <h3>Token effort</h3>
+                <div class="project-stats__token-summary">
+                    <div class="stat-card stat-card--accent">
+                        <div class="stat-card__value">⚡ {{ formatTokens(estTokenCost(stats.token_usage)) }}</div>
+                        <div class="stat-card__label">est. cost</div>
+                        <div class="stat-card__sub">cost-equiv · cache reads ×0.1</div>
+                    </div>
+                    <dl class="project-stats__token-raw">
+                        <div><dt>input</dt><dd>{{ formatTokens(stats.token_usage.tokens_in) }}</dd></div>
+                        <div><dt>output</dt><dd>{{ formatTokens(stats.token_usage.tokens_out) }}</dd></div>
+                        <div><dt>cache write</dt><dd>{{ formatTokens(stats.token_usage.cache_w) }}</dd></div>
+                        <div><dt>cache read</dt><dd>{{ formatTokens(stats.token_usage.cache_r) }}</dd></div>
+                    </dl>
+                </div>
+                <ol
+                    v-if="stats.top_token_tickets.length > 0"
+                    class="project-stats__bars project-stats__token-top"
+                >
+                    <li v-for="t in stats.top_token_tickets" :key="t.id">
+                        <a :href="`/b/${t.id}`" class="project-stats__bar-name" :title="t.title">
+                            <span class="project-stats__ref">{{ formatTicketRef(t.id) }}</span>
+                            {{ t.title }}
+                        </a>
+                        <span class="project-stats__bar-track">
+                            <span
+                                class="project-stats__bar-fill"
+                                :style="`width: ${(estTokenCost(t.token_usage) / topTokenMax * 100).toFixed(1)}%`"
+                            />
+                        </span>
+                        <span class="project-stats__bar-count">{{ formatTokens(estTokenCost(t.token_usage)) }}</span>
+                    </li>
+                </ol>
             </section>
         </template>
     </div>
@@ -420,5 +466,49 @@ const topIntentMax = computed(() =>
     font-style: italic;
     display: block !important;
     grid-template-columns: none !important;
+}
+/* #406 — token effort section */
+.project-stats__token-summary {
+    display: flex;
+    gap: 1rem;
+    align-items: stretch;
+    flex-wrap: wrap;
+    margin-bottom: 0.8rem;
+}
+.project-stats__token-summary .stat-card {
+    min-width: 9rem;
+}
+.project-stats__token-raw {
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+    gap: 0.3rem 1.4rem;
+    margin: 0;
+    align-content: center;
+}
+.project-stats__token-raw > div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+.project-stats__token-raw dt {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--p-text-muted-color);
+}
+.project-stats__token-raw dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+    color: var(--p-text-color);
+}
+.project-stats__token-top li {
+    grid-template-columns: minmax(0, 1fr) 5rem 4rem;
+}
+.project-stats__token-top .project-stats__bar-name {
+    text-decoration: none;
+    color: var(--p-text-color);
+}
+.project-stats__token-top .project-stats__bar-name:hover {
+    text-decoration: underline;
 }
 </style>

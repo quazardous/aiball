@@ -11,6 +11,7 @@ import { getDb, nowIso } from "./connection.js";
 import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
 import { listHumans } from "./consumers.js";
 import { computeDecisionGate } from "./decision-gate.js";
+import { getTicketTokenUsage, type TokenTally } from "./token-usage.js";
 import { landscapeHash, type LandscapeEntry } from "./landscape.js";
 import { presenceRunning } from "../live-presence.js";
 
@@ -810,6 +811,12 @@ export interface ProjectStatsRich {
 
     // Throughput
     auto_approved_pct: number;        // auto-decided / total decided (approved), 0..100
+
+    // Token effort (#406, suite #404). Project-wide raw sums (null until any
+    // usage is captured) + the costliest tickets. Raw counts only — the UI
+    // derives the cost-equivalent (cache_r weighted 0.1×, see #404 findings).
+    token_usage: TokenTally | null;
+    top_token_tickets: { id: number; title: string; token_usage: TokenTally }[];
 }
 
 export function getProjectStatsRich(project: string): ProjectStatsRich {
@@ -967,6 +974,28 @@ export function getProjectStatsRich(project: string): ProjectStatsRich {
         .sort((a, b) => b.count - a.count)
         .slice(0, 5);
 
+    // ---- Token effort (#406, suite #404) ----
+    // Cost-equivalent weighting mirrors the UI's estTokenCost (in + cache-writes
+    // + out full, cache reads 0.1×; #404 findings) so "top by cost" matches the
+    // per-ticket badge. We return raw counts; the UI recomputes the estimate.
+    const tokenMap = getTicketTokenUsage(ticketIds);
+    const tokCost = (u: TokenTally) =>
+        u.tokens_in + u.cache_w + u.tokens_out + Math.round(u.cache_r * 0.1);
+    const tokTitleById = new Map(tickets.map((t) => [t.id, t.editedTitle ?? t.title ?? ""]));
+    const tokTotal: TokenTally = { tokens_in: 0, tokens_out: 0, cache_w: 0, cache_r: 0, updated_at: "" };
+    const tokRows: { id: number; title: string; token_usage: TokenTally }[] = [];
+    for (const [id, u] of tokenMap) {
+        tokTotal.tokens_in += u.tokens_in;
+        tokTotal.tokens_out += u.tokens_out;
+        tokTotal.cache_w += u.cache_w;
+        tokTotal.cache_r += u.cache_r;
+        if (u.updated_at > tokTotal.updated_at) tokTotal.updated_at = u.updated_at;
+        tokRows.push({ id, title: tokTitleById.get(id) ?? "", token_usage: u });
+    }
+    tokRows.sort((a, b) => tokCost(b.token_usage) - tokCost(a.token_usage));
+    const topTokenTickets = tokRows.slice(0, 8);
+    const tokenUsageTotal = tokenMap.size > 0 ? tokTotal : null;
+
     // ---- Throughput (auto-approved %) ----
     const decided = tickets.filter((t) => t.status === "approved");
     const auto = decided.filter((t) => t.decidedBy === "auto" || t.decidedBy === "owner").length;
@@ -990,6 +1019,8 @@ export function getProjectStatsRich(project: string): ProjectStatsRich {
         top_tags: topTags,
         top_intents: topIntents,
         auto_approved_pct: autoApprovedPct,
+        token_usage: tokenUsageTotal,
+        top_token_tickets: topTokenTickets,
     };
 }
 
