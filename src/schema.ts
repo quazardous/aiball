@@ -454,6 +454,22 @@ export const tokens = sqliteTable("tokens", {
     index("idx_tokens_kind").on(t.kind),
 ]);
 
+/**
+ * #404 — per-ticket token-effort tally. The claude-loop Stop-hook reads each
+ * turn's `usage` from the Claude session transcript and pushes the delta,
+ * attributed to the active ticket (last ticket-scoped MCP call). Raw counts
+ * accumulate here; the UI/MCP derive a cost estimate (cache_r is cheap, ~0.1×).
+ * Statistical by design (turn-level granularity, multi-ticket turns → active).
+ */
+export const ticketTokenUsage = sqliteTable("ticket_token_usage", {
+    ticketId: integer("ticket_id").primaryKey().references(() => tickets.id, { onDelete: "cascade" }),
+    tokensIn: integer("tokens_in").notNull().default(0),
+    tokensOut: integer("tokens_out").notNull().default(0),
+    cacheW: integer("cache_w").notNull().default(0),
+    cacheR: integer("cache_r").notNull().default(0),
+    updatedAt: text("updated_at").notNull(),
+});
+
 // ---- inferred types ------------------------------------------------------
 
 export type Project = typeof projects.$inferSelect;
@@ -480,3 +496,5 @@ export type NewConsumerRow = typeof consumers.$inferInsert;
 
 export type Token = typeof tokens.$inferSelect;
 export type NewTokenRow = typeof tokens.$inferInsert;
+
+export type TicketTokenUsage = typeof ticketTokenUsage.$inferSelect;

@@ -225,6 +225,13 @@
       "when": 1780800000000,
       "tag": "0031_consumers_micro_prompt",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1780900000000,
+      "tag": "0032_ticket_token_usage",
+      "breakpoints": true
     }
   ]
 }
