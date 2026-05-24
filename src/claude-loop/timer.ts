@@ -33,7 +33,7 @@
  * per-menu settings flags. Interim: user runs `claude` once to clear
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
-import { existsSync, openSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, openSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
@@ -54,6 +54,7 @@ import {
     injectSockPath,
     installRoot,
     installRootSha,
+    STATE_ROOT,
     isLoopStale,
     isDuplicateWakeHint,
     lastWakeAtPath,
@@ -866,15 +867,31 @@ async function main(): Promise<void> {
     // (rm kills its own tmux session AND this very pid mid-handler), so delegate
     // to a DETACHED `claude-loop restart <name>` that survives the teardown,
     // then exit. So `kill -HUP <timer_pid>` is the self-service hard restart.
+    //
+    // #407 (fiabiliser): the old handler `spawn(...); unref(); process.exit(0)`
+    // exited IMMEDIATELY — racing the detached fork, which sometimes died with
+    // the parent → loop left un-restarted (no timer). Now: (1) exit ONLY after
+    // the child's `spawn` event (it really exists), (2) capture the restart's
+    // output to a log OUTSIDE the rm'd state dir, so failures are visible.
     process.on("SIGHUP", () => {
-        if (name) {
-            try {
-                const bin = join(installRoot(), "bin", "claude-loop");
-                const child = spawn(bin, ["restart", name], { detached: true, stdio: "ignore" });
-                child.unref();
-            } catch { /* best effort — exit regardless */ }
+        if (!name) { process.exit(0); }
+        const logPath = join(STATE_ROOT, "restart.log");
+        const log = (m: string): void => {
+            try { appendFileSync(logPath, `${new Date().toISOString()} [${name}] ${m}\n`); } catch { /* nowhere */ }
+        };
+        try {
+            const bin = join(installRoot(), "bin", "claude-loop");
+            const out = openSync(logPath, "a"); // restart child's stdout+stderr → the log
+            const child = spawn(bin, ["restart", name!], { detached: true, stdio: ["ignore", out, out] });
+            child.unref();
+            child.on("spawn", () => { log(`SIGHUP → restart child pid ${child.pid} spawned`); process.exit(0); });
+            child.on("error", (e) => { log(`SIGHUP → restart spawn FAILED: ${String(e)}`); process.exit(1); });
+            // Safety net: never hang the dying timer if neither event fires.
+            setTimeout(() => { log("SIGHUP → restart child events timed out; exiting anyway"); process.exit(0); }, 3000);
+        } catch (e) {
+            log(`SIGHUP → restart threw: ${String(e)}`);
+            process.exit(1);
         }
-        process.exit(0);
     });
     if (isInternalCheckCmd(checkCmd)) {
         await mainSse();

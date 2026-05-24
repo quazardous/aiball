@@ -187,8 +187,14 @@ export function cmdRestart(name: string): void {
     // during `rm` (tmux kill-session), but this child — a new session, outside
     // the tmux pane's process group — does not. The brief sleep lets the invoker
     // return first so the kill is clean. rm + start run as fresh CLI subprocesses.
+    // #407 (fiabiliser): send the helper's whole output to a log OUTSIDE the
+    // rm'd state dir — the old `>/dev/null` + `stdio:"ignore"` hid every failure
+    // (rm, start, lock), so a botched restart left the loop dead silently.
+    const logPath = join(STATE_ROOT, "restart.log");
     const script =
-        `sleep 0.4; ${shQuote(bin)} rm ${shQuote(name)} --force >/dev/null 2>&1; ` +
+        `exec >> ${shQuote(logPath)} 2>&1; ` +
+        `echo "$(date -Is) [${name}] restart: rm + start (cwd ${plate.cwd})"; ` +
+        `sleep 0.4; ${shQuote(bin)} rm ${shQuote(name)} --force; ` +
         `exec ${shQuote(bin)} ${startArgs.map(shQuote).join(" ")}`;
     const child = spawn("bash", ["-lc", script], {
         cwd: plate.cwd,
