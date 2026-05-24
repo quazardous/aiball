@@ -238,89 +238,74 @@ autopoll:
 # Slot-grain replace at each step (no deep merge inside a slot, so a
 # user can switch shape forms freely between layers).
 #
-# Each slot accepts THREE shapes (russian-doll optional):
+# ── Placeholder grammar (#400) ────────────────────────────────────────────
+# All the conditional logic lives IN the template (no `if` in code, david:
+# « pas du `if` partout »). A shell-inspired grammar:
 #
-#   string                  → no variation, identical at every tone.
-#                             Easiest form when you have one canonical
-#                             wording you trust.
-#   list[string]             → random pick from the pool every wake.
-#                              Use to inject variety so the prompt
-#                              feels less mechanical.
-#   { tone: list[string] }   → russian-doll, per-imperativity pool.
-#                              Tone comes from `autopoll.tone` above
-#                              (hint | directive | imperative). Missing
-#                              tone in the map → falls back to `directive`.
-#                              Each tone gets its own list (random
-#                              pick within).
+#   {var}            → the value (empty string when unset/empty)
+#   {var:-default}   → the value, or `default` when unset/empty
+#   {var:+text}      → `text` ONLY when var is non-empty, else "" (inline if)
 #
-# Placeholders substituted at render time (slot-specific):
+# `text`/`default` may themselves contain `{…}` and LITERAL braces, so a
+# tool-call like `unread({pings: true})` is safe inside a `{x:+ … }` body.
+# Counts are passed as "" when zero, so a `{count:+ … }` block disappears at
+# zero with no branching in code.
 #
-#   {ping_count}    integer (e.g. 3)
-#   {open_count}    integer (count of actionable tickets)
-#   {project_scope} "`<project>`" or "your scope"
+# ── Slot shapes (#400 recadré — tone + round-robin kept, david b296px) ─────
+#   string                   → fixed wording.
+#   list[string]             → ROUND-ROBIN: a random element is picked each
+#                              wake (variety, so the prompt feels less canned).
+#   { <tone>: string|list }  → per-TONE bucket. The active tone is
+#                              `autopoll.tone` above (hint | directive |
+#                              imperative); a missing tone falls back to
+#                              `directive`. The selected bucket is then a
+#                              string or a round-robin list. Tone is a uniform
+#                              selection layer, never a per-placeholder rule.
 #
-# Pluralization (#B.232 hd7taf): when a slot's wording depends on a
-# count, split into TWO keys instead of using a `{plural}` placeholder.
-# The picker looks at the runtime count and chooses automatically:
+# No `_one/_other` plural slugs: write a flat `(s)` in the template
+# (`ping(s)`, `ouvert(s)`). A count-driven suffix would be a per-placeholder
+# rule the code must remember — exactly what #400 removes (david d7zcj5).
 #
-#   {slot}_one     used when count === 1
-#   {slot}_other   used when count !== 1
+# ── Placeholders exposed to the wake templates (always provided) ───────────
+#   {culture}          random pop-culture phrase from `ping_messages`
+#                      (auto-resolved fresh each render).
+#   {lead}             the rendered `wake_lead` slot (for the active tone).
+#   {ping_count}       unread aiball ping count ("" when zero).
+#   {open_count}       open ticket count ("" when zero).
+#   {actionable_count} tickets in your court (#374; "" when zero).
+#   {head_id}          id of the work-order head (#371: priority desc,
+#                      then oldest) — the ticket to engage first.
+#   {head_title}       title of that head ticket.
+#   {project_scope}    "`<project>`" or "your scope".
+#   {consumer_prompt}  (planned, #397) per-consumer micro-prompt — not wired
+#                      yet; will be just one more always-provided placeholder.
 #
-# The plain `{slot}` (no suffix) acts as a no-variant fallback when
-# the yaml only defines one form. Variants support the same 3 shapes
-# (string, list, object{tone:list}). Useful for languages with
-# pluralization beyond a trailing "s": French agreement on multiple
-# words ("1 ping aiball non lu" vs "3 pings aiball non lus"), gendered
-# articles, "no tickets" zero-case (treated like _other by default).
+# ── Slots (the whole wake-CTA, two slots) ──────────────────────────────────
+#   wake_lead    → conversational lead between {culture} and the state report
+#                  (avoids the old `[aiball: …]` bracket that tripped
+#                  prompt-injection defenses on cold sessions, david 6ehkvn).
+#   wake_master  → the ENTIRE wake-CTA in one template: pings line + engage
+#                  line + open count, each gated by its own `{x:+ … }` block.
+#                  A missing wake_master falls back to the in-code default.
 #
-# Slot reference (all wake-CTA pieces — the central service composes
-# them via the `wake_master` assembly template, falling back to a
-# hardcoded `{culture} {lead} {state}. {directive}.` shape):
-#
-#   wake_master            → assembly template. Composes the rendered
-#                            sub-parts. Supports placeholders:
-#                            {culture} (random pop-culture ping —
-#                            auto-resolved from ping_messages),
-#                            {lead}, {state}, {directive}.
-#                            Use the list shape to vary the sentence
-#                            structure across wakes.
-#   wake_state_lead        → conversational lead between the culture
-#                            phrase and the state report. Replaces the
-#                            old `[aiball: ...]` bracket framing that
-#                            tripped prompt-injection defenses on cold
-#                            sessions (david 6ehkvn).
-#   wake_state_pings       → state part for unread pings.
-#   wake_state_open        → state part for open tickets.
-#   wake_directive_drain   → imperative verb for the drain action.
-#   wake_directive_engage  → imperative verb for the engage action.
-#
-# Magic placeholder (#B.232 jdhdxq): `{culture}` resolves to a random
-# pick from `ping_messages` (the pop-culture phrase pool defined in
-# `skill/claude-loop-pings.yaml`). Drop it into any slot — wake_master
-# leads with it by default, but a custom wake_state_lead like
-# `"{culture}, fyi:"` also works.
-#
-# A missing slot in the override falls back to the skill defaults; a
-# slot in the override REPLACES the default for that slot (no deep merge
-# inside a slot, so you can switch shape forms freely).
+# A missing slot in the override falls back to the lower layers; a slot here
+# REPLACES the default for that slot (no deep merge inside a slot, so you can
+# switch shape forms freely between layers).
 #
 # prompts:
-#   wake_state_lead:
-#     directive:
-#       - "fyi:"
-#       - "heads up —"
-#       - "quick note:"
-#     hint: ["btw,", "fyi,"]
+#   # Tone buckets, round-robin within each.
+#   wake_lead:
+#     directive: ["fyi:", "heads up —", "quick note:"]
+#     hint:      ["btw,", "fyi,", "just so you know,"]
 #     imperative: ["**heads up**:", "**ACTION**:"]
 #
-#   # 2-slug pluralization (#B.232 hd7taf).
-#   wake_state_pings_one:   "1 unread aiball ping"
-#   wake_state_pings_other: "{ping_count} unread aiball pings"
-#
-#   # List form (random pick, identical at every tone).
-#   wake_directive_drain:
-#     - "drain via `unread({pings: true, mark_read: true})`"
-#     - "ack via `unread({pings: true, mark_read: true})`"
+#   # The whole wake-CTA in one template per tone (round-robin list within).
+#   # Each {x:+ … } block renders only when its var is set.
+#   wake_master:
+#     directive:
+#       - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}{actionable_count:+ engage #{head_id} first — top of the work order — via `ticket_list({actionable: true})`.}{open_count:+ ({open_count} open in {project_scope})}"
+#     imperative:
+#       - "{culture} {lead}{ping_count:+ {ping_count} unread ping(s) — DRAIN now via `unread({pings: true, mark_read: true})`.}{actionable_count:+ ENGAGE #{head_id} first — via `ticket_list({actionable: true})`.}{open_count:+ ({open_count} open in {project_scope})}"
 
 # Ticket-text linkifier patterns (#B.235). Same 3-layer chain as
 # `prompts:` — shipped defaults at `config/defaults/claude-loop-pings.yaml`,

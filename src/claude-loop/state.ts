@@ -1040,6 +1040,10 @@ export async function buildContextPhrase(
         // mirror the prior hardcoded wording so a broken yaml still
         // ships a sensible prompt.
         const cfg = loadConfig();
+        // #400 recadré (david b296px): tone is back as a SELECTION layer. A slot
+        // may carry per-tone buckets `{ <tone>: … }`; renderSlot narrows to
+        // slot[tone] (fallback directive). Applied uniformly, not per-placeholder.
+        const tone = cfg.autopoll.tone;
         const promptMap = mergePrompts(loadPromptsFromYaml(pingsAbsPath), cfg.prompts);
 
         // #400: ONE template carries the whole wake via the {x:+…} grammar — no
@@ -1051,7 +1055,7 @@ export async function buildContextPhrase(
         const scope = project ? `\`${project}\`` : "your scope";
         const vars = {
             culture,
-            lead: renderSlot(promptMap, "wake_lead", {}, "fyi:"),
+            lead: renderSlot(promptMap, "wake_lead", {}, "fyi:", tone),
             ping_count: pingCount || "",
             open_count: openCount || "",
             actionable_count: actionableCount || "",
@@ -1067,6 +1071,7 @@ export async function buildContextPhrase(
             + "{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}"
             + "{actionable_count:+ engage #{head_id} first — top of the work order — via `ticket_list({actionable: true})`.}"
             + "{open_count:+{actionable_count:+ }[{open_count} open]}",
+            tone,
         );
     } catch {
         return culture;

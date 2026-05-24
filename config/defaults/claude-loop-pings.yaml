@@ -60,36 +60,59 @@ wake_phrases:
 
 # State-CTA wake assembled by claude-loop's `buildContextPhrase` when a wake
 # fires with no SSE artifact (timer heartbeat / stop-hook post turn /
-# session-start). #400: ONE template + a tiny placeholder grammar — no per-slot
-# assembly, no `if` in code (david: « le système de prompt devrait être simple »).
+# session-start). #400: the conditional logic lives in the template via a tiny
+# placeholder grammar — no per-slot `if` assembly in code (david: « le système
+# de prompt devrait être simple, pas du `if` partout »).
 #
-# A slot is a plain template string, OR a list of strings (random pick for
-# variety). All the logic lives in the template via the grammar:
+# A slot is one of (#400 recadré — tone + round-robin kept, david b296px):
+#   string                  → fixed wording.
+#   list[string]            → round-robin random pick for variety.
+#   { <tone>: string|list } → per-tone bucket (hint|directive|imperative),
+#                             selected by `autopoll.tone` (fallback directive),
+#                             then round-robin within. Tone is a uniform
+#                             SELECTION layer, NOT a per-placeholder rule.
+# All the logic lives in the template via the grammar:
 #   {var}          → the value (empty string when unset/empty)
 #   {var:-default} → the value, or `default` when empty
 #   {var:+text}    → `text` only when var is non-empty, else "" (inline condition)
 # `text`/`default` may contain `{…}` and literal braces (tool-call syntax like
-# `unread({pings: true})` is safe). Variants (tone, language, plural…) are just
-# SEPARATE named templates — the caller picks the name; no tone/plural machinery.
+# `unread({pings: true})` is safe). Plural is a flat `(s)` in the template — no
+# `_one/_other` slugs (that'd be a per-placeholder rule the code must remember).
 #
 # Vars exposed to `wake_master` (counts are "" when zero, so {count:+…} drops):
 #   {culture}          random phrase from ping_messages above
+#   {lead}             rendered wake_lead (for the chosen tone)
 #   {ping_count}       unread aiball ping count
 #   {open_count}       open ticket count
 #   {actionable_count} tickets in your court (#374)
 #   {head_id} {head_title}  the work-order head (#371: priority desc, then oldest)
 #   {project_scope}    "`<project>`" or "your scope"
 prompts:
-  # Conversational lead — random pick for variety.
+  # Conversational lead — per-tone buckets, round-robin within each.
   wake_lead:
-    - "fyi:"
-    - "heads up —"
-    - "quick note:"
+    directive:
+      - "fyi:"
+      - "heads up —"
+      - "quick note:"
+    hint:
+      - "btw,"
+      - "fyi,"
+      - "just so you know,"
+    imperative:
+      - "**heads up**:"
+      - "**ACTION**:"
 
   # The whole wake-CTA in one template. Each {x:+…} block renders only when x
   # is set — so pings/engage/open appear exactly when relevant, no branching in
-  # code. #371: the engage block NAMES the work-order head (#{head_id}).
-  wake_master: "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}{actionable_count:+ engage #{head_id} first — top of the work order — via `ticket_list({actionable: true})`.}{open_count:+ ({open_count} open in {project_scope})}"
+  # code. #371: the engage block NAMES the work-order head (#{head_id}). Per-tone
+  # buckets; directive is the shipped default tone.
+  wake_master:
+    directive:
+      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}{actionable_count:+ engage #{head_id} first — top of the work order — via `ticket_list({actionable: true})`.}{open_count:+ ({open_count} open in {project_scope})}"
+    hint:
+      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) (clear with `unread({pings: true, mark_read: true})`).}{actionable_count:+ #{head_id} is top of the work order if you want to pick it up (`ticket_list({actionable: true})`).}{open_count:+ ({open_count} open in {project_scope})}"
+    imperative:
+      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — DRAIN now via `unread({pings: true, mark_read: true})`.}{actionable_count:+ ENGAGE #{head_id} first — top of the work order — via `ticket_list({actionable: true})`.}{open_count:+ ({open_count} open in {project_scope})}"
 
 # Ticket-text formatting patterns (#B.235). Linkifies refs like #B.123,
 # #C.<hashid>, @mention in ticket bodies and comments. Lives in the same
