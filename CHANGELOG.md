@@ -33,6 +33,12 @@ narrative for the product as a whole.
   — so each relayed write keeps its real loop identity on the remote, instead of
   all being attributed to the node. Not human; the delegated consumer's own
   privileges apply. Regular agent tokens still ignore the header (token wins).
+- **Trust model documented** (`REMOTE.md` § Trust model & threat model): the
+  forwarded identity is trusted on the node token alone (node-level proof, the
+  cross-host analog of the UDS same-uid local-trust) — *not* per-consumer, so a
+  node token is **impersonation-capable** and unscoped. The `auth issue --node`
+  output now carries a louder security note (private network only; use #390
+  direct mode for per-consumer proof).
 
 ### Local projects — running indicator + single-loop launch gate (#393)
 

@@ -119,8 +119,12 @@ export function registerAuthCommands(program: Command): void {
                     `    token: ${t.token}`,
                     ``,
                     `Or: aiball proxy init --url <A-url> --token ${t.token}`,
-                    `The node may then relay any local client's identity (x-aiball-consumer).`,
-                    `Keep it on the tailnet/LAN — it can assert any consumer.`,
+                    ``,
+                    `⚠ SECURITY: this token is impersonation-capable — it can assert ANY`,
+                    `  consumer (it is NOT scoped). Treat it like a master credential:`,
+                    `  private network (tailnet/LAN) only, never expose it publicly, never`,
+                    `  commit it. For per-consumer proof instead, use direct mode (#390 — a`,
+                    `  per-consumer agent token). See docs/REMOTE.md § Trust model.`,
                     ``,
                 ].join("\n"));
                 return;

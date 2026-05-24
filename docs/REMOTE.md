@@ -54,6 +54,41 @@ consumer's own privileges apply.
 > Identity, two ways: the **node token** proves the *node* is legit; a regular
 > **agent token** (#390 direct mode) proves the *consumer* is legit. Pick one.
 
+### Trust model & threat model
+
+A fair question: A trusts the forwarded `x-aiball-consumer` **on the node token
+alone** — there's no *per-consumer* proof. Is that safe?
+
+It's the **same shape as aiball's existing local-trust**, extended one hop. Over
+the UDS, the only proof is **same-uid + `chmod 600`**: any process of your uid can
+already assert *any* `x-aiball-consumer` (it defaults to `human`). aiball has
+**never** required per-consumer proof locally — the uid *is* the boundary. The
+node token is just the **cross-host analog of "same uid"**: a coarse proof (the
+node is legit) plus an asserted identity (the header). So the forwarded identity
+*does* have a proof — the node token — it's simply node-level, not per-consumer,
+exactly like local.
+
+The trade-off vs **#390 direct** is deliberate:
+
+| | proof at A | local clients | leak blast radius |
+|---|---|---|---|
+| **proxy (node token)** | node-level | token-less (UDS) | **impersonate any consumer** |
+| **direct (agent token)** | per-consumer | each needs a remote token | one consumer |
+
+So a **node token is impersonation-capable** — more sensitive than an agent token
+(which is bound to a single consumer) because it is **not scoped** to any consumer
+or project. Treat it accordingly:
+
+- **Private network only** — tailnet (see [`TAILSCALE.md`](./TAILSCALE.md)) or
+  trusted LAN. Never expose a node-token endpoint publicly.
+- **Deploy only between hosts you control** — you are federating *your own*
+  machines, not opening a delegation endpoint to third parties.
+- Keep `proxy.token` `chmod 600` in the global config; never commit it.
+
+If you need **per-consumer hard proof**, use **#390 direct mode** (each loop
+carries its own agent token, end-to-end). The two modes coexist on purpose —
+pick ergonomics (proxy) or strictness (direct) per deployment.
+
 ### Wiring (B → A) in two commands
 
 ```bash
