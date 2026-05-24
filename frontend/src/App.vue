@@ -469,6 +469,7 @@ useRouting({
     panel,
     openTicketId,
     consumerEditId,
+    projectPage,
     project,
     statusFilter,
     onlyOpen,

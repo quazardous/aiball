@@ -5,6 +5,12 @@ export type RouteState = {
     openTicketId: number | null;
     /** Set on `/consumers/<id>` — ConsumersPanel renders the edit view (#B.193). */
     consumerEditId: string | null;
+    /** #411 — project-scoped full pages (stats/settings/detail). Requires
+     *  `project !== null`; encoded as `/stats|/settings|/detail` + `?p=`, so a
+     *  Ctrl-R on a project stats page restores it instead of dropping to inbox.
+     *  Union mirrors ProjectPage in components/Sidebar.vue (inlined to keep
+     *  this lib free of a .vue import). */
+    projectPage: "stats" | "settings" | "detail" | null;
     project: string | null;
     statusFilter: "all" | "unread" | "pending" | "approved" | "rejected";
     onlyOpen: boolean;
@@ -27,6 +33,10 @@ export function buildUrl(s: RouteState): string {
     }
     else if (s.panel === "launchers") path = "/launchers";
     else if (s.panel === "compose") path = "/new";
+    // #411 — project pages (project carried by `?p=` below, always set here).
+    else if (s.projectPage === "stats") path = "/stats";
+    else if (s.projectPage === "settings") path = "/settings";
+    else if (s.projectPage === "detail") path = "/detail";
     else if (s.openTicketId !== null) path = `/b/${s.openTicketId}`;
 
     const qs = new URLSearchParams();
@@ -49,6 +59,8 @@ export function parseUrl(): Partial<RouteState> {
     const out: Partial<RouteState> = {};
     // Default to null so navigating away from /consumers/<id> clears the edit view.
     out.consumerEditId = null;
+    // #411 — default to null so navigating away from a project page clears it.
+    out.projectPage = null;
 
     if (path === "/rules") {
         out.panel = "rules";
@@ -74,6 +86,11 @@ export function parseUrl(): Partial<RouteState> {
     } else if (path === "/new") {
         out.panel = "compose";
         out.openTicketId = null;
+    } else if (path === "/stats" || path === "/settings" || path === "/detail") {
+        // #411 — project page; the project itself comes from `?p=` below.
+        out.panel = null;
+        out.openTicketId = null;
+        out.projectPage = path.slice(1) as RouteState["projectPage"];
     } else if (path.startsWith("/b/") || path.startsWith("/t/")) {
         // /b/N is canonical; /t/N is kept as a backward-compatible alias for
         // older bookmarks and any markdown rendered before the rename.
@@ -113,6 +130,7 @@ export function useRouting(refs: {
     panel: Ref<RouteState["panel"]>;
     openTicketId: Ref<number | null>;
     consumerEditId: Ref<string | null>;
+    projectPage: Ref<RouteState["projectPage"]>;
     project: Ref<string | null>;
     statusFilter: Ref<RouteState["statusFilter"]>;
     onlyOpen: Ref<boolean>;
@@ -124,6 +142,7 @@ export function useRouting(refs: {
             panel: refs.panel.value,
             openTicketId: refs.openTicketId.value,
             consumerEditId: refs.consumerEditId.value,
+            projectPage: refs.projectPage.value,
             project: refs.project.value,
             statusFilter: refs.statusFilter.value,
             onlyOpen: refs.onlyOpen.value,
@@ -135,6 +154,7 @@ export function useRouting(refs: {
         if ("panel" in state) refs.panel.value = state.panel ?? null;
         if ("openTicketId" in state) refs.openTicketId.value = state.openTicketId ?? null;
         if ("consumerEditId" in state) refs.consumerEditId.value = state.consumerEditId ?? null;
+        if ("projectPage" in state) refs.projectPage.value = state.projectPage ?? null;
         if ("project" in state) refs.project.value = state.project ?? null;
         if ("statusFilter" in state && state.statusFilter)
             refs.statusFilter.value = state.statusFilter;
@@ -160,6 +180,7 @@ export function useRouting(refs: {
             refs.panel,
             refs.openTicketId,
             refs.consumerEditId,
+            refs.projectPage,
             refs.project,
             refs.statusFilter,
             refs.onlyOpen,
