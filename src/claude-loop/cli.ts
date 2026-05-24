@@ -768,6 +768,23 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     spawnSync(MUX_CMD, ["attach", "-t", tname], { stdio: "inherit" });
 }
 
+/**
+ * #410 (david) — lit le pid du timer détaché depuis timer.pid (null si
+ * absent/illisible) + sonde sa liveness (signal 0). Le timer.pid est le pid
+ * qu'on cible avec `kill -HUP`/`-USR2` ; l'afficher au listing permet aussi
+ * de repérer un pidfile périmé (timer mort alors que le tmux tourne → plus
+ * d'auto-wake), à l'origine des timers orphelins déjà vus.
+ */
+function readTimerPid(sd: string): number | null {
+    const p = timerPidPath(sd);
+    if (!existsSync(p)) return null;
+    const pid = Number.parseInt(readFileSync(p, "utf8").trim(), 10);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+function pidAlive(pid: number): boolean {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
 function cmdList(): void {
     if (!existsSync(STATE_ROOT)) {
         process.stdout.write("(no loops)\n");
@@ -795,8 +812,14 @@ function cmdList(): void {
         const stale = alive && isLoopStale(plate);
         const staleTag = stale ? " [stale]" : "";
         if (stale) staleCount++;
+        // #410 — pid du timer détaché (kill -HUP/-USR2 target). " (dead)" =
+        // pidfile périmé ; "—" = pas de pidfile.
+        const timerPid = readTimerPid(sd);
+        const pidCol = timerPid == null
+            ? "pid —"
+            : `pid ${timerPid}${pidAlive(timerPid) ? "" : " (dead)"}`;
         process.stdout.write(
-            `${name.padEnd(24)}  ${aliveStr.padEnd(5)}${staleTag.padEnd(8)}  ${plate.interval}s  ${idle}\n`,
+            `${name.padEnd(24)}  ${aliveStr.padEnd(5)}${staleTag.padEnd(8)}  ${pidCol.padEnd(16)}  ${plate.interval}s  ${idle}\n`,
         );
         process.stdout.write(`${"".padEnd(24)}  dir=${plate.cwd}\n`);
         if (stale && plate.started_at_sha && currentSha) {
