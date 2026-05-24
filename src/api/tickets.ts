@@ -36,7 +36,7 @@ import {
     markTicketSeen,
     markTicketUnseen,
     ticketUnreadFlags,
-    ticketSelfLastActivity,
+    ticketAgentLastActivity,
     addTicketTokenUsage,
     getTicketTokenUsage,
     isHuman,
@@ -341,10 +341,11 @@ ticketsRouter.get("/inbox", (req, res) => {
 
     const tagsMap = tagsForMessages(tickets.map((m) => m.id));
     const unreadMap = ticketUnreadFlags(consumerId, tickets.map((m) => m.id));
-    // #405: hot-zone focus for the inbox rows — same source as ticket_list
-    // (computeHotFocus over the consumer's per-ticket self-activity).
+    // #405/#408: hot-zone focus for the inbox rows. Computed over AGENT
+    // (non-human) activity — a human commenting must NOT make a ticket hot
+    // (david #408); only an agent working it does.
     const hotFocus = computeHotFocus(
-        ticketSelfLastActivity(consumerId, tickets.map((m) => m.id)),
+        ticketAgentLastActivity(tickets.map((m) => m.id)),
         Date.now(),
         hotWindowSec() * 1000,
     );
@@ -567,13 +568,16 @@ ticketsRouter.get("/tickets", (req, res) => {
     const { openIds, actionableIds } = computeActionableTicketIds(consumerId);
     // #404: per-ticket token-effort tally (empty until the capture side lands).
     const tokenUsageMap = getTicketTokenUsage(created.map((m) => m.id));
-    // #405: the consumer's HOT-ZONE (focus) — the single most-recent self-touched
+    // #405/#408: the HOT-ZONE (focus) = the single most-recent AGENT-touched
     // ticket within the hot window (mono-focus, Set-modeled for multi-hotzone).
-    // One source of truth: drives both the `hot` flag below AND the work-order
-    // tiebreak. ticketSelfLastActivity reads the messages table, so it's correct
-    // independent of the #404 token capture.
-    const selfActivity = ticketSelfLastActivity(consumerId, created.map((m) => m.id));
-    const hotFocus = computeHotFocus(selfActivity, Date.now(), hotWindowSec() * 1000);
+    // #408: computed over AGENT (non-human) activity — a human (david) commenting
+    // must NOT make a ticket hot; only an agent working it does. One source of
+    // truth: drives both the `hot` flag below AND the work-order tiebreak.
+    const hotFocus = computeHotFocus(
+        ticketAgentLastActivity(created.map((m) => m.id)),
+        Date.now(),
+        hotWindowSec() * 1000,
+    );
     const tickets = created.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;
