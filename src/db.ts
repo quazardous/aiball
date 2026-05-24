@@ -156,6 +156,12 @@ export {
     type TicketStage,
     type TicketBookend,
 } from "./db/tickets.js";
+export {
+    addTicketTokenUsage,
+    getTicketTokenUsage,
+    type TokenDelta,
+    type TokenTally,
+} from "./db/token-usage.js";
 
 export {
     type Ping,

@@ -37,6 +37,8 @@ import {
     markTicketUnseen,
     ticketUnreadFlags,
     ticketSelfLastActivity,
+    addTicketTokenUsage,
+    getTicketTokenUsage,
     isHuman,
     insertTypedRelation,
     listTypedRelationsForTicket,
@@ -91,6 +93,22 @@ ticketsRouter.post("/tickets/:id/owner", (req: Request, res: Response) => {
     setTicketOwner(id, by_agent);
     upsertTicketSubscription(by_agent, id);
     res.json({ ticket_id: id, by_agent });
+});
+
+/**
+ * #404: push a turn's token-usage delta onto a ticket (called by the claude-loop
+ * Stop-hook once the capture side lands). Additive — accumulates. Body:
+ * `{ in?, out?, cache_w?, cache_r? }`. Silently no-ops on an unknown ticket id
+ * (the FK on the table rejects it) so a stale marker never errors the hook.
+ */
+ticketsRouter.post("/tickets/:id/token-usage", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    const b = (req.body ?? {}) as { in?: unknown; out?: unknown; cache_w?: unknown; cache_r?: unknown };
+    const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+    addTicketTokenUsage(id, { in: n(b.in), out: n(b.out), cacheW: n(b.cache_w), cacheR: n(b.cache_r) });
+    res.json({ ticket_id: id, ok: true });
 });
 
 /**
@@ -537,6 +555,8 @@ ticketsRouter.get("/tickets", (req, res) => {
     const consumerId = consumerOf(req);
     const unreadMap = ticketUnreadFlags(consumerId, created.map((m) => m.id));
     const { openIds, actionableIds } = computeActionableTicketIds(consumerId);
+    // #404: per-ticket token-effort tally (empty until the capture side lands).
+    const tokenUsageMap = getTicketTokenUsage(created.map((m) => m.id));
     const tickets = created.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;
@@ -563,6 +583,8 @@ ticketsRouter.get("/tickets", (req, res) => {
             unread: unreadMap.get(m.id) ?? false,
             actionable: actionableIds.has(m.id),
             tags: tagsMap.get(m.id) ?? [],
+            // #404: accumulated token-effort tally (null until any usage pushed).
+            token_usage: tokenUsageMap.get(m.id) ?? null,
         };
         if (summary) return base;
         return { ...base, body: m.edited_body ?? m.body };
