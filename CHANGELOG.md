@@ -17,6 +17,20 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Near-realtime claude-loop running detection (#395)
+
+- A loop's **`running` state now flips near-realtime** instead of lagging up to
+  120 s. The loop already holds a long-lived SSE connection (`/api/events`); its
+  connect/disconnect is now the liveness signal — connect → `running:true`,
+  disconnect → (after a short grace that absorbs reconnect blips) `running:false`,
+  each broadcast immediately so the UI lights up at once. **Stop detection** is
+  the big win: before, a dead loop lingered "running" until its last heartbeat
+  went stale; now presence is **authoritative** over the heartbeat for any loop
+  seen this session, so it reads stopped within seconds. The 120 s heartbeat
+  window survives only as a bridge for loops never seen via SSE this session
+  (e.g. right after a daemon restart). In-memory, **zero migration**, no
+  loop-client change — built on the existing SSE transport.
+
 ### Big-thread reads — paginate `ticket_get(full)` (#396)
 
 - `ticket_get` **full mode is now paginatable**: `offset`, `limit`, and `order`

@@ -15,6 +15,7 @@ import {
     unreadPingCount,
 } from "../db.js";
 import { onPing } from "../event-bus.js";
+import { presenceConnect, presenceDisconnect } from "../live-presence.js";
 import { badRequest } from "./_helpers.js";
 
 export const pingsRouter = Router();
@@ -81,9 +82,20 @@ pingsRouter.get("/events", (req, res) => {
     const ka = setInterval(() => {
         res.write(`:keepalive ${new Date().toISOString()}\n\n`);
     }, 30_000);
+    // #395: this live SSE connection IS the loop's liveness signal. Register it
+    // → near-realtime running detection (open→running, close→running:false after
+    // grace), broadcast from live-presence. `source` (#395 jvdxez) distinguishes
+    // a UI-launched loop from a terminal one. Disconnect must run exactly once
+    // (req fires both 'close' and 'error') — guard the decrement.
+    const source = req.query.source === "ui" ? "ui" : "terminal";
+    presenceConnect(consumer, source);
+    let cleaned = false;
     const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
         clearInterval(ka);
         off();
+        presenceDisconnect(consumer);
         try { res.end(); } catch { /* already closed */ }
     };
     req.on("close", cleanup);

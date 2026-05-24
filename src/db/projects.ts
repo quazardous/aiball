@@ -12,6 +12,7 @@ import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./l
 import { listHumans } from "./consumers.js";
 import { computeDecisionGate } from "./decision-gate.js";
 import { landscapeHash, type LandscapeEntry } from "./landscape.js";
+import { presenceRunning } from "../live-presence.js";
 
 /**
  * Project names known to the system. Reads from the explicit `projects`
@@ -127,18 +128,34 @@ export interface ProjectMeta {
 /** #393 (3c): a loop is "running" when its consumer heartbeated this recently. */
 const RUNNING_WINDOW_MS = 120_000;
 
-/** #393 (3c): is a claude-loop currently heartbeating at this exact root?
- *  Used to gate launch (no duplicate) + the per-project `running` flag. */
+/**
+ * #395: a consumer's effective running state. Presence (live SSE) is
+ * AUTHORITATIVE — `true` while connected, `false` once seen-then-gone (so a
+ * just-dead loop with a still-fresh heartbeat reads stopped *immediately*,
+ * instead of lingering up to RUNNING_WINDOW_MS). The heartbeat window is only a
+ * bridge for consumers never seen via SSE this session (e.g. right after a
+ * daemon restart, before loops reconnect).
+ */
+function consumerEffectiveRunning(consumerId: string, stateUpdatedAt: string | null, cutoff: string): boolean {
+    const verdict = presenceRunning(consumerId);
+    if (verdict !== null) return verdict;
+    return stateUpdatedAt != null && stateUpdatedAt >= cutoff;
+}
+
+/** #393 (3c) + #395: is a claude-loop currently running at this exact root?
+ *  Presence-aware (see consumerEffectiveRunning). Used to gate launch (no
+ *  duplicate) + the per-project `running` flag. */
 export function isRootActive(root: string): boolean {
     if (!root) return false;
     const cutoff = new Date(Date.now() - RUNNING_WINDOW_MS).toISOString();
-    const row = getDb().select({ cwd: schema.consumers.cwd })
+    const rows = getDb().select({
+        consumerId: schema.consumers.consumerId,
+        stateUpdatedAt: schema.consumers.stateUpdatedAt,
+    })
         .from(schema.consumers)
-        .where(sql`${schema.consumers.cwd} = ${root}
-            AND ${schema.consumers.stateUpdatedAt} IS NOT NULL
-            AND ${schema.consumers.stateUpdatedAt} >= ${cutoff}`)
-        .get();
-    return !!row;
+        .where(sql`${schema.consumers.cwd} = ${root}`)
+        .all();
+    return rows.some((c) => consumerEffectiveRunning(c.consumerId, c.stateUpdatedAt, cutoff));
 }
 
 export function listProjectsDetailed(consumer_id?: string, landscape = false): ProjectMeta[] {
@@ -609,23 +626,30 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
         .where(rootedNoProject)
         .groupBy(schema.tickets.project, schema.consumers.cwd)
         .all()) addRoot(r.project, r.cwd);
-    // #393 (3c): which roots have a currently-heartbeating loop → `running`.
+    // #393 (3c) + #395: which roots have a currently-RUNNING loop. Presence
+    // (live SSE) is authoritative per consumer; the 120s heartbeat is only the
+    // bridge for consumers never seen via SSE this session → a dead loop reads
+    // stopped near-realtime instead of lingering up to RUNNING_WINDOW_MS.
     const cutoff = new Date(Date.now() - RUNNING_WINDOW_MS).toISOString();
-    const freshRoots = new Set<string>();
-    for (const c of db.select({ cwd: schema.consumers.cwd })
+    const runningRoots = new Set<string>();
+    for (const c of db.select({
+        consumerId: schema.consumers.consumerId,
+        cwd: schema.consumers.cwd,
+        stateUpdatedAt: schema.consumers.stateUpdatedAt,
+    })
         .from(schema.consumers)
-        .where(sql`${schema.consumers.cwd} IS NOT NULL AND ${schema.consumers.cwd} != ''
-            AND ${schema.consumers.stateUpdatedAt} IS NOT NULL
-            AND ${schema.consumers.stateUpdatedAt} >= ${cutoff}`)
+        .where(sql`${schema.consumers.cwd} IS NOT NULL AND ${schema.consumers.cwd} != ''`)
         .all()) {
-        if (c.cwd) freshRoots.add(c.cwd);
+        if (c.cwd && consumerEffectiveRunning(c.consumerId, c.stateUpdatedAt, cutoff)) {
+            runningRoots.add(c.cwd);
+        }
     }
     for (const p of byProject.values()) {
         const s = rootsByProject.get(p.name);
         if (s && s.size > 0) {
             p.local = true;
             p.roots = [...s];
-            p.running = p.roots.some((r) => freshRoots.has(r));
+            p.running = p.roots.some((r) => runningRoots.has(r));
         }
     }
 
