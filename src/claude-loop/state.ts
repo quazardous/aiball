@@ -214,6 +214,63 @@ export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env.CL_WAKE_CO
 export function lastWakeHintPath(sd: string): string { return join(sd, "last-wake-hint"); }
 
 /**
+ * #409 — single-chokepoint wake-injection dedup. The wake sites (timer
+ * SSE-wake, Stop-hook post-turn wake, session-start) run as SEPARATE
+ * processes and every one funnels through `injectWakePhrase`. The
+ * upstream coalesces (`lastWakeHint` at the SSE consumer, `lastWakeAt`
+ * at the Stop hook) are per-decider — they don't see a sibling site
+ * about to fire, so two sites could each inject the SAME rendered CTA
+ * within a beat (david: « le wakeup a été envoyé 3 fois »). This marker
+ * is the cross-process catch-all: the last phrase actually injected +
+ * when. Format: ISO-timestamp + "\n" + phrase (the phrase may itself
+ * contain newlines — everything after the first "\n" is the phrase).
+ */
+export function lastInjectedWakePath(sd: string): string { return join(sd, "last-injected-wake"); }
+
+/**
+ * #409 — pure dedup decision for the injection chokepoint. Given the
+ * previous marker content (or null), the phrase about to be injected,
+ * the current time, and the coalesce window: SKIP if the SAME phrase was
+ * injected less than `windowMs` ago (a sibling site already fired it);
+ * otherwise inject and return the marker string to persist. Keyed on
+ * phrase-identity (not just "any wake") so distinct legitimate wakes are
+ * never dropped. `windowMs <= 0` disables the dedup (always inject).
+ */
+export function dedupeWakeInjection(
+    prevMarker: string | null,
+    phrase: string,
+    nowMs: number,
+    windowMs: number,
+): { skip: boolean; write: string | null } {
+    if (windowMs > 0 && prevMarker) {
+        const nl = prevMarker.indexOf("\n");
+        if (nl > 0) {
+            const prevPhrase = prevMarker.slice(nl + 1);
+            const age = nowMs - Date.parse(prevMarker.slice(0, nl));
+            if (prevPhrase === phrase && age >= 0 && age < windowMs) {
+                return { skip: true, write: null };
+            }
+        }
+    }
+    return { skip: false, write: new Date(nowMs).toISOString() + "\n" + phrase };
+}
+
+/**
+ * #409 — fs side of the injection dedup: read the marker, decide via
+ * `dedupeWakeInjection`, persist when injecting. Returns true to SKIP.
+ * Fails open (inject) on any fs error — a missed dedup is harmless, a
+ * dropped wake is not.
+ */
+function skipDuplicateWakeInjection(sd: string, phrase: string): boolean {
+    let prev: string | null = null;
+    try { prev = readFileSync(lastInjectedWakePath(sd), "utf8"); } catch { /* no marker yet */ }
+    const { skip, write } = dedupeWakeInjection(prev, phrase, Date.now(), WAKE_COALESCE_WINDOW_MS);
+    if (skip) return true;
+    try { if (write !== null) writeFileSync(lastInjectedWakePath(sd), write); } catch { /* ignore — fail open */ }
+    return false;
+}
+
+/**
  * Session-volatile watermark for the open-tickets wake gate (#B.232
  * david ch887f: "il faut un mécanisme pour les ack et qu'ils ne
  * reviennent plus pour cette session si c'est du bruit, mémoire
@@ -1118,6 +1175,11 @@ export async function injectWakePhrase(paneTarget: string, phrase: string): Prom
     // Fall back to the tmux paste/send-keys path for loops not under the
     // proxy or if the write fails.
     const sd = process.env.CL_STATE_DIR;
+    // #409: cross-process dedup at the single injection chokepoint — skip an
+    // identical CTA already injected within the coalesce window by a sibling
+    // wake site (timer / Stop-hook / session-start), which the per-decider
+    // upstream coalesces can't catch. Marker written here, before the inject.
+    if (sd && skipDuplicateWakeInjection(sd, phrase)) return;
     if (sd) {
         if (process.platform === "win32") {
             // #281 strategy B: Windows uses a named pipe. It can't be
