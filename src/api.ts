@@ -27,6 +27,7 @@ import { join } from "node:path";
 import { installRoot } from "./claude-loop/state.js";
 import { broadcast } from "./ws.js";
 import { outboxPath } from "./paths.js";
+import { loadLaunchers, getLauncher } from "./launchers.js";
 import { searchMessages } from "./search.js";
 import { bearerAuth } from "./auth.js";
 import { badRequest, consumerOf } from "./api/_helpers.js";
@@ -253,6 +254,39 @@ api.post("/projects/:name/launch", (req, res) => {
         return res.json({ ok: true, project: name, root, pid: child.pid });
     } catch (e) {
         return res.status(500).json({ error: `failed to launch claude-loop: ${(e as Error).message}` });
+    }
+});
+
+// #398: operator-approved command launchers. GET lists the declared launchers
+// (config-only — see launchers.ts); POST runs one by id (HUMAN-ONLY, detached
+// spawn). The API never accepts a command, only a launcher id → the daemon can
+// only ever spawn what the operator declared in config.
+api.get("/launchers", (_req, res) => {
+    res.json(loadLaunchers());
+});
+
+api.post("/launchers/:id/run", (req, res) => {
+    const caller = consumerOf(req);
+    if (!caller || !isHuman(caller)) {
+        return res.status(403).json({ error: "launchers are human-only — they spawn a process on the daemon host" });
+    }
+    const launcher = getLauncher(String(req.params.id));
+    if (!launcher) {
+        return res.status(404).json({ error: `no launcher with id '${req.params.id}' (declared in config?)` });
+    }
+    try {
+        // Detached + stdio ignored → survives the daemon; inherits the user's
+        // graphical-session env (WAYLAND_DISPLAY/DISPLAY/XDG_RUNTIME_DIR), so GUI
+        // apps launch (#398 verified). cmd/args come from config, never the API.
+        const child = spawn(launcher.cmd, launcher.args ?? [], {
+            detached: true,
+            stdio: "ignore",
+            ...(launcher.cwd ? { cwd: launcher.cwd } : {}),
+        });
+        child.unref();
+        return res.json({ ok: true, id: launcher.id, label: launcher.label, pid: child.pid });
+    } catch (e) {
+        return res.status(500).json({ error: `failed to launch '${launcher.id}': ${(e as Error).message}` });
     }
 });
 

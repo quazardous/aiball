@@ -17,6 +17,28 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Approved command launchers (#398) — backend
+
+- The daemon can spawn a small set of **operator-approved commands** (e.g.
+  "launch Chrome") declared in the global config `launchers:` list — never an
+  arbitrary command from the API (which references a launcher only by `id`). New
+  endpoints: `GET /api/launchers` (list the declared launchers) and
+  `POST /api/launchers/:id/run` (**human-only**, detached spawn). The spawn
+  inherits the user's graphical-session env (`WAYLAND_DISPLAY`/`DISPLAY`/
+  `XDG_RUNTIME_DIR` — verified present in the systemd --user daemon), so GUI apps
+  launch. Config shape:
+
+  ```yaml
+  launchers:
+    - id: chrome
+      label: Chrome
+      cmd: google-chrome-stable
+      args: ["--new-window"]
+      icon: pi-google          # optional PrimeIcons class for the UI button
+  ```
+
+  UI launcher panel + project-level (`.aiball.yaml`) launchers are the next step.
+
 ### Near-realtime claude-loop running detection (#395)
 
 - **Loop activity tags** (q3bfvn): the project detail page now shows the running
