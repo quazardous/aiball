@@ -208,6 +208,18 @@ export interface TicketSummary {
      *  surfaced when the GET asked for `full=1`. */
     relations?: TicketRelation[];
     tags: Tag[];
+    /** #404: accumulated per-ticket token-effort tally (null until any usage
+     *  is captured). Raw counts; derive a cost estimate via `estTokenCost`. */
+    token_usage?: TokenUsage | null;
+}
+
+/** #404: per-ticket token-effort tally (raw counts from the Claude transcript). */
+export interface TokenUsage {
+    tokens_in: number;
+    tokens_out: number;
+    cache_w: number;
+    cache_r: number;
+    updated_at: string;
 }
 
 export interface TicketRelation {

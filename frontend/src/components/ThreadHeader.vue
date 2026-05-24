@@ -15,6 +15,7 @@
 import Button from "primevue/button";
 import Tag from "primevue/tag";
 import type { TicketSummary } from "../lib/api";
+import { estTokenCost, formatTokens } from "../lib/format";
 
 defineProps<{
     ticket: TicketSummary;
@@ -39,6 +40,17 @@ const emit = defineEmits<{
         :severity="ticket.priority === 'urgent' ? 'danger' : ticket.priority === 'high' ? 'warn' : 'info'"
     />
     <h2 class="thread-title">{{ ticket.title }}</h2>
+    <!-- #404/#406: per-ticket token-effort cost (shown once any usage is
+         captured; cost-equivalent — cache reads weighted 0.1×). -->
+    <span
+        v-if="estTokenCost(ticket.token_usage) > 0"
+        class="thread-token-cost"
+        :title="ticket.token_usage
+            ? `tokens — in ${ticket.token_usage.tokens_in} · out ${ticket.token_usage.tokens_out} · cache write ${ticket.token_usage.cache_w} · cache read ${ticket.token_usage.cache_r}`
+            : ''"
+    >
+        <i class="pi pi-bolt" /> {{ formatTokens(estTokenCost(ticket.token_usage)) }} tok
+    </span>
     <template v-if="showBanners">
         <div
             v-if="ticket.resolved && !ticket.closed"
@@ -118,3 +130,20 @@ const emit = defineEmits<{
         </template>
     </div>
 </template>
+
+<style scoped>
+/* #406: per-ticket token-effort cost badge. */
+.thread-token-cost {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin: 0.2rem 0 0.4rem;
+    font-size: 0.78rem;
+    color: var(--p-text-muted-color);
+    font-variant-numeric: tabular-nums;
+}
+.thread-token-cost .pi {
+    font-size: 0.72rem;
+    opacity: 0.7;
+}
+</style>
