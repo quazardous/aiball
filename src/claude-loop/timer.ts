@@ -893,6 +893,32 @@ async function main(): Promise<void> {
             process.exit(1);
         }
     });
+    // #407: SIGUSR2 = soft reload — the signal mirror of `claude-loop reload`
+    // (respawn the detached timer to repick timer.ts/state.ts; claude untouched).
+    // Unified with the daemon so a signal means the SAME thing on both CLIs:
+    // `kill -HUP` = hard restart, `kill -USR2` = soft reload. Like SIGHUP, the
+    // timer can't reload ITSELF inline (cmdReload kills this very pid), so it
+    // delegates to a DETACHED `claude-loop reload <name>` that survives, exiting
+    // only once the child really spawned (same fiabilisation as the SIGHUP path).
+    process.on("SIGUSR2", () => {
+        if (!name) { process.exit(0); }
+        const logPath = join(STATE_ROOT, "restart.log");
+        const log = (m: string): void => {
+            try { appendFileSync(logPath, `${new Date().toISOString()} [${name}] ${m}\n`); } catch { /* nowhere */ }
+        };
+        try {
+            const bin = join(installRoot(), "bin", "claude-loop");
+            const out = openSync(logPath, "a");
+            const child = spawn(bin, ["reload", name!], { detached: true, stdio: ["ignore", out, out] });
+            child.unref();
+            child.on("spawn", () => { log(`SIGUSR2 → reload child pid ${child.pid} spawned`); process.exit(0); });
+            child.on("error", (e) => { log(`SIGUSR2 → reload spawn FAILED: ${String(e)}`); process.exit(1); });
+            setTimeout(() => { log("SIGUSR2 → reload child events timed out; exiting anyway"); process.exit(0); }, 3000);
+        } catch (e) {
+            log(`SIGUSR2 → reload threw: ${String(e)}`);
+            process.exit(1);
+        }
+    });
     if (isInternalCheckCmd(checkCmd)) {
         await mainSse();
     } else {
