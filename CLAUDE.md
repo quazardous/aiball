@@ -16,6 +16,13 @@ tmux wrapper + a stdio MCP server. See [`README.md`](./README.md).
   re-run them — applying a migration needs `systemctl --user restart aiball`.
   Add the migration + journal entry **before** committing code that reads
   the new column (else the live daemon crashes). See [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
+- **Config reload, no restart (#407):** `aiball reload` sends the daemon
+  `SIGHUP` → it re-reads config **in place, no downtime** (mutualised with
+  `claude-loop reload`). Most config is already read fresh per request, so this
+  is mainly for any boot-cached config; **schema migrations still need the full
+  restart above.** Plain `kill -HUP` works too — target `$AIBALL_HOME/daemon.pid`
+  (under `tsx watch` the daemon's pid changes on every reload, so use the pidfile,
+  not the systemd MainPID).
 - Typecheck backend with `npm run typecheck`; daemon health: `aiball check`
   or `GET /api/health`.
 
