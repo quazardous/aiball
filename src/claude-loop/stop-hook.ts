@@ -113,6 +113,25 @@ function readPane(): string {
     // `idle:user`) — aucun impact sur le gating des wakes.
     const interrupted = paneShowsInterrupted(paneText);
     log(`FIRE — ${classifyTurn()} | ${formatPaneSnapshot(pane)} | checkCmd=${checkCmd}`);
+    // #404/#406 (david wezr82 "ça bouge plus"): capture this turn's token usage
+    // FIRST — before any wake-decision branch below that emit()-exits the
+    // process (error-backoff, pane-special, user-grace, BUSY-DEFER, coalesce).
+    // The Stop hook fires post-turn while the pane usually still shows busy, so
+    // the previous placement (after the gate) armed busy-defer and exited before
+    // ever capturing → only the rare non-busy turn was counted. Capture is
+    // independent of the wake logic; awaited so the POST flushes; never throws.
+    try {
+        const cap = await captureTokenUsage({
+            transcriptDir: projectTranscriptDir(process.cwd()),
+            stateDir: sd!,
+            postUsage: (ticketId, u) => new AiballClient().postTokenUsage(ticketId, u),
+        });
+        const detail = cap.status === "pushed"
+            ? ` #${cap.ticketId} (+in${cap.turn.in}/out${cap.turn.out}/cw${cap.turn.cacheW}/cr${cap.turn.cacheR})`
+            : "ticketId" in cap ? ` #${cap.ticketId}`
+            : "id" in cap ? ` ${cap.id}` : "";
+        log(`  token-capture: ${cap.status}${detail}`);
+    } catch (e) { log(`  token-capture: ERROR ${(e as Error).message ?? String(e)}`); }
     try {
         // #332: a recognized API/backend error crashed this turn. Don't
         // re-ping (it hammers the API and pops claude out of the flow).
@@ -237,16 +256,9 @@ function readPane(): string {
     } catch (e) {
         log(`  → ERROR ${(e as Error).message ?? String(e)}`);
     }
-    // #404: best-effort token-effort capture — read this turn's `usage` and push
-    // it to the active ticket (the MCP-written marker). Own try/catch, after the
-    // wake gate, so it can NEVER affect the wake. Awaited so the POST flushes
-    // before the process exits.
-    try {
-        await captureTokenUsage({
-            transcriptDir: projectTranscriptDir(process.cwd()),
-            stateDir: sd!,
-            postUsage: (ticketId, u) => new AiballClient().postTokenUsage(ticketId, u),
-        });
-    } catch { /* best-effort — never block the stop */ }
+    // #404/#406: token capture now runs at the TOP of the hook (it used to sit
+    // here, but the busy-defer / grace / coalesce branches emit()-exit before
+    // reaching it — david wezr82 "ça bouge plus"). This fall-through only needs
+    // to emit for the WAKE / IDLE-no-work paths.
     emit();
 })();
