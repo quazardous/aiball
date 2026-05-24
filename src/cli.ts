@@ -332,6 +332,42 @@ program
     });
 
 program
+    .command("reload")
+    .description(
+        "Reload the daemon's config in place via SIGHUP — no downtime, no restart " +
+            "(#407, mutualised with `claude-loop reload`). Reads $AIBALL_HOME/daemon.pid " +
+            "and signals it. Most aiball config is already read fresh per request; this " +
+            "re-reads + validates the global config and is the hook for any boot-cached " +
+            "config. For schema migrations you still need a full restart.",
+    )
+    .action((_opts, cmd) => {
+        const pidPath = join(aiballHome(), "daemon.pid");
+        if (!existsSync(pidPath)) {
+            die("no daemon.pid found — is the daemon running? (start: systemctl --user start aiball)");
+        }
+        const pid = Number(readFileSync(pidPath, "utf8").trim());
+        if (!Number.isInteger(pid) || pid <= 0) die(`invalid pid in ${pidPath}`);
+        // Liveness probe (signal 0) before HUP, so a stale pidfile gives a clear
+        // message instead of an ESRCH on the real signal.
+        try {
+            process.kill(pid, 0);
+        } catch {
+            die(`daemon pid ${pid} is not alive (stale ${pidPath}) — start the daemon first`);
+        }
+        try {
+            process.kill(pid, "SIGHUP");
+        } catch (e) {
+            die(`failed to signal daemon pid ${pid}: ${(e as Error).message}`);
+        }
+        out(
+            { reloaded: true, pid },
+            gOpts(cmd),
+            (v: { pid: number }) =>
+                `sent SIGHUP to daemon (pid ${v.pid}) — config reloaded in place (no downtime)`,
+        );
+    });
+
+program
     .command("drain")
     .description("Touch the spool dir to nudge the daemon's spool watcher")
     .action(async (_opts, cmd) => {

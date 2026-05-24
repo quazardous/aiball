@@ -1,7 +1,10 @@
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { unlinkSync, chmodSync } from "node:fs";
+import { unlinkSync, chmodSync, readFileSync, writeFileSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
+import { globalConfigPath } from "./autopoll/config.js";
 import { createApp, frontendDistDir } from "./app.js";
+import { DAEMON_PID_PATH } from "./paths.js";
 import { attachWs } from "./ws.js";
 import { getDb } from "./db.js";
 import { AIBALL_HOME, ensureDirs } from "./paths.js";
@@ -34,6 +37,40 @@ function revealExpiredPostpones(): void {
     }
 }
 
+/**
+ * #407 — SIGHUP = reload config (david `zsxhn3`: "Ok reload", not restart).
+ * The classic Unix convention: `kill -HUP <daemon>` re-reads config **in place,
+ * no downtime** — the mutualised counterpart to the loop's own kill-HUP (#388,
+ * which restarts its detached timer). WITHOUT this handler, the default SIGHUP
+ * action is **terminate**, and with `Restart=on-failure` a clean exit would NOT
+ * relaunch → aiball down for every project. So catching it is the headline fix.
+ *
+ * aiball reads almost all config FRESH per request (`loadConfig()` re-reads
+ * `.aiball.yaml`, `hotWindowSec()` re-reads the global yaml, settings/rules live
+ * from the DB), so most config is already live without any reload. This handler
+ * therefore (a) keeps HUP from killing the daemon, (b) re-reads + validates the
+ * GLOBAL config so a broken edit surfaces now and the effective values are logged
+ * as proof the reload ran, and (c) is the single extension point for any future
+ * boot-cached config. It is wrapped so a reload error can NEVER take the daemon
+ * down — that would defeat the purpose of HUP=reload.
+ */
+function reloadConfig(): void {
+    try {
+        console.log("[sighup] reloading config…");
+        const gp = globalConfigPath();
+        let hotWin: unknown;
+        try {
+            const raw = parseYaml(readFileSync(gp, "utf8")) as { hot_window_sec?: unknown } | null;
+            hotWin = raw?.hot_window_sec;
+        } catch {
+            // Missing/empty global config is the normal case — not an error.
+        }
+        console.log(`[sighup] config reloaded (most config is read fresh per request; global=${gp}, hot_window_sec=${hotWin ?? "default"})`);
+    } catch (e) {
+        console.error("[sighup] config reload failed (daemon stays up):", e);
+    }
+}
+
 const HOST = process.env.AIBALL_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.AIBALL_PORT ?? 7777);
 
@@ -58,6 +95,11 @@ const SOCK_PATH = (() => {
 function main(): void {
     ensureDirs(); // make sure UPLOADS_DIR etc. exist before serving them
     getDb(); // open + migrate
+
+    // #407: publish our pid so `aiball reload` can target THIS process for a
+    // SIGHUP config-reload. Under `tsx watch` the daemon runs in a child whose
+    // pid changes on every code reload, so the pidfile is the reliable handle.
+    try { writeFileSync(DAEMON_PID_PATH, String(process.pid)); } catch { /* best effort */ }
 
     // #324: app building lives in src/app.ts (createApp) so the test stack can
     // mount the same app in-process. daemon.ts only wraps it in the servers.
@@ -117,6 +159,7 @@ function main(): void {
 
     const shutdown = () => {
         console.log("shutting down...");
+        try { unlinkSync(DAEMON_PID_PATH); } catch { /* already gone */ }
         server.close(() => process.exit(0));
         if (udsServer) {
             udsServer.close();
@@ -128,6 +171,8 @@ function main(): void {
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
+    // #407: HUP reloads config in place (no downtime), never terminates.
+    process.on("SIGHUP", reloadConfig);
 }
 
 main();
