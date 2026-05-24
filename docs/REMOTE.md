@@ -108,6 +108,25 @@ each local client must be provisioned with its own token (`aiball auth issue
 working through the proxy — that's why it's **opt-in**. See
 [`SECURITY.md`](./SECURITY.md) § *Closing the weak point entirely*.
 
+**To keep strict ergonomic, use the node-managed token store** (#394): instead
+of putting an A-token on each client, B holds a `{local token → A-token}` map and
+**swaps** an incoming local bearer for the mapped A-token at egress. Clients hold
+only a *local* token; the A-token's custody (and rotation/revocation) stays on
+the node, while A still gets hard per-consumer proof.
+
+```bash
+# on A — mint the per-consumer A-token
+aiball auth issue --consumer alice               # → aiball-<…>
+# on B — map a local token to it (the local token is generated + printed)
+aiball proxy token add --consumer alice --remote aiball-<…>
+aiball proxy token list                          # local→remote, tokens masked
+aiball proxy token revoke alice                  # by consumer or local token
+systemctl --user restart aiball                  # the store is read at boot
+```
+
+The store lives at `~/.config/aiball/proxy-tokens.yaml` (chmod 600). A bearer not
+in the store passes through untouched (a client carrying its own A-token, QW-A).
+
 ### Wiring (B → A) in two commands
 
 ```bash

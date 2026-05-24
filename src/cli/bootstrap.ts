@@ -9,13 +9,15 @@
  *
  * Exposed entry point: `registerBootstrapCommands(program)`.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { Command } from "commander";
-import { parseDocument } from "yaml";
+import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
 import { die, userCwd, resolveInstallRoot } from "./_helpers.js";
 import { globalConfigPath } from "../autopoll/config.js";
+import { proxyTokensPath, type ProxyTokenEntry } from "../proxy.js";
 
 /**
  * Shared `mcp init` body so both `aiball mcp init` and the combined
@@ -205,6 +207,86 @@ function initProxy(opts: { url: string; token: string; strict?: boolean }): void
     );
 }
 
+/** #394 node-managed token store helpers (proxy node side, DB-less). */
+function maskToken(t: string): string {
+    return t.length > 14 ? `${t.slice(0, 12)}…` : t;
+}
+
+function readProxyTokens(): ProxyTokenEntry[] {
+    const p = proxyTokensPath();
+    if (!existsSync(p)) return [];
+    try {
+        const raw = (parseYaml(readFileSync(p, "utf8")) ?? {}) as { tokens?: ProxyTokenEntry[] };
+        return Array.isArray(raw.tokens) ? raw.tokens : [];
+    } catch {
+        die(`proxy token: ${p} exists but isn't valid YAML — fix or remove it first`);
+    }
+}
+
+function writeProxyTokens(tokens: ProxyTokenEntry[]): void {
+    const p = proxyTokensPath();
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, stringifyYaml({ tokens }), "utf8");
+    chmodSync(p, 0o600);
+}
+
+/**
+ * `aiball proxy token add` — map a LOCAL token (handed to a local client) to an
+ * upstream per-consumer A-token. The proxy swaps it at egress so A gets hard
+ * per-consumer proof and the A-token never lives on the client.
+ */
+function addProxyToken(opts: { consumer: string; remote: string; local?: string }): void {
+    const tokens = readProxyTokens();
+    const local = opts.local?.trim() || `aiball-local-${randomBytes(24).toString("hex")}`;
+    if (tokens.some((t) => t.local === local)) die(`proxy token add: that local token is already in the store`);
+    tokens.push({ local, remote: opts.remote, consumer: opts.consumer });
+    writeProxyTokens(tokens);
+    process.stdout.write(
+        [
+            `Added mapping → ${proxyTokensPath()}`,
+            ``,
+            `  consumer: ${opts.consumer}`,
+            `  local:    ${local}`,
+            `  remote:   ${maskToken(opts.remote)}  (per-consumer A-token; stays on this node)`,
+            ``,
+            `Give the LOCAL token to the client (export AIBALL_TOKEN=${local}, or`,
+            `claude-loop init --aiball-token ${local}). The proxy swaps it for the`,
+            `A-token at egress → A authenticates as '${opts.consumer}' (hard proof).`,
+            `Apply:  systemctl --user restart aiball`,
+            ``,
+        ].join("\n"),
+    );
+}
+
+function listProxyTokensCmd(): void {
+    const tokens = readProxyTokens();
+    if (tokens.length === 0) {
+        process.stdout.write("(no proxy token mappings)\n");
+        return;
+    }
+    for (const t of tokens) {
+        process.stdout.write(
+            `${(t.consumer || "(no consumer)").padEnd(20)}  local=${maskToken(t.local)}  →  remote=${maskToken(t.remote)}\n`,
+        );
+    }
+}
+
+function revokeProxyToken(needle: string): void {
+    const tokens = readProxyTokens();
+    const matches = tokens.filter(
+        (t) => t.local === needle || t.local.startsWith(needle) || t.consumer === needle,
+    );
+    if (matches.length === 0) die(`proxy token revoke: nothing matching '${needle}'`);
+    if (matches.length > 1) {
+        die(
+            `proxy token revoke: '${needle}' matches ${matches.length} entries — be more specific:\n` +
+                matches.map((t) => `  ${t.consumer}  ${maskToken(t.local)}`).join("\n"),
+        );
+    }
+    writeProxyTokens(tokens.filter((t) => t !== matches[0]));
+    process.stdout.write(`revoked local token for '${matches[0].consumer}' (${maskToken(matches[0].local)})\n`);
+}
+
 export function registerBootstrapCommands(program: Command): void {
     const mcp = program
         .command("mcp")
@@ -269,6 +351,30 @@ export function registerBootstrapCommands(program: Command): void {
         .action((o: { url: string; token?: string; strict?: boolean }) => {
             initProxy({ url: o.url, token: o.token ?? "", strict: o.strict === true });
         });
+
+    // #394 node-managed token store: map LOCAL tokens → upstream per-consumer
+    // A-tokens. The proxy swaps them at egress (hard per-consumer proof at A,
+    // A-token custody on the node). DB-less — pure file store on machine B.
+    const proxyToken = proxy
+        .command("token")
+        .description("Node-managed token store: map local tokens → upstream per-consumer A-tokens (#394)");
+    proxyToken
+        .command("add")
+        .description("Add a local→remote mapping (generates the local token unless --local is given)")
+        .requiredOption("--consumer <id>", "Consumer the A-token proves (bookkeeping + provisioning hint)")
+        .requiredOption("--remote <token>", "Per-consumer A-token minted on the remote (`aiball auth issue --consumer <id>`)")
+        .option("--local <token>", "Use this local token instead of generating one")
+        .action((o: { consumer: string; remote: string; local?: string }) => {
+            addProxyToken({ consumer: o.consumer, remote: o.remote, local: o.local });
+        });
+    proxyToken
+        .command("list")
+        .description("List the local→remote token mappings (tokens masked)")
+        .action(() => listProxyTokensCmd());
+    proxyToken
+        .command("revoke <local-or-consumer>")
+        .description("Remove a mapping by local token (full or unique prefix) or by consumer")
+        .action((needle: string) => revokeProxyToken(needle));
 
     // `aiball stop-hook install [--global]` — standalone wiring command,
     // shared between `aiball init --stop-hook` and install.ps1 -StopHook.

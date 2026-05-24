@@ -21,6 +21,7 @@
  * transport → spool, 4xx → surfaced).
  */
 import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { parse as parseYaml } from "yaml";
@@ -64,11 +65,62 @@ export function loadProxy(): ProxyConfig | null {
 }
 
 /**
+ * #394 node-managed token store. One entry = a LOCAL token (handed to a local
+ * client) mapped to an upstream per-consumer A-token (custody on the node). The
+ * `consumer` is bookkeeping only (list/audit) — the A-token already proves the
+ * consumer at A.
+ */
+export interface ProxyTokenEntry {
+    local: string;
+    remote: string;
+    consumer: string;
+}
+
+/** In-memory view of the store, keyed by the LOCAL token for O(1) swap. */
+export type ProxyTokenStore = Map<string, { remote: string; consumer: string }>;
+
+/** Path of the node-managed token store (next to the global config). */
+export function proxyTokensPath(): string {
+    return join(dirname(globalConfigPath()), "proxy-tokens.yaml");
+}
+
+/**
+ * #394 node-managed token store: read the `{local→{remote,consumer}}` mappings
+ * the proxy uses to SWAP an incoming local bearer for the upstream per-consumer
+ * A-token. Empty map when the file is absent/invalid → no swap, base behaviour
+ * (never crash the proxy on a malformed store).
+ */
+export function loadProxyTokens(): ProxyTokenStore {
+    const p = proxyTokensPath();
+    const store: ProxyTokenStore = new Map();
+    if (!existsSync(p)) return store;
+    try {
+        const raw = (parseYaml(readFileSync(p, "utf8")) ?? {}) as {
+            tokens?: Array<{ local?: unknown; remote?: unknown; consumer?: unknown }>;
+        };
+        for (const e of raw.tokens ?? []) {
+            const local = typeof e.local === "string" ? e.local.trim() : "";
+            const remote = typeof e.remote === "string" ? e.remote.trim() : "";
+            const consumer = typeof e.consumer === "string" ? e.consumer.trim() : "";
+            if (local && remote) store.set(local, { remote, consumer });
+        }
+    } catch {
+        /* malformed store → behave as if empty */
+    }
+    return store;
+}
+
+/**
  * A transparent streaming reverse-proxy middleware to the remote daemon.
  * Forwards method + path (`req.originalUrl`) + headers + body; injects the
  * bearer token; pipes the response back (works for JSON and SSE alike).
+ *
+ * `tokens` is the node-managed store (#394) — defaults to `loadProxyTokens()`,
+ * injectable for tests. A request whose bearer matches a local token is
+ * rewritten to carry the mapped upstream A-token before forwarding.
  */
-export function proxyMiddleware(cfg: ProxyConfig): RequestHandler {
+export function proxyMiddleware(cfg: ProxyConfig, tokens?: ProxyTokenStore): RequestHandler {
+    const store = tokens ?? loadProxyTokens();
     const target = new URL(cfg.url);
     const reqFn = target.protocol === "https:" ? httpsRequest : httpRequest;
     const port = target.port || (target.protocol === "https:" ? "443" : "80");
@@ -77,6 +129,17 @@ export function proxyMiddleware(cfg: ProxyConfig): RequestHandler {
             ...req.headers,
             host: target.host,
         };
+        // #394 node-managed store : si le bearer entrant est un token LOCAL
+        // connu, on le SWAP contre le token A per-consumer mappé → A reçoit la
+        // preuve dure per-consumer (le token A est la preuve), et ce token A ne
+        // vit jamais côté client (custody sur le node). Un bearer inconnu (le
+        // client porte déjà son propre token A, cf QW-A) passe tel quel.
+        const incoming = headers["authorization"];
+        if (store.size > 0 && typeof incoming === "string") {
+            const m = /^Bearer\s+(.+)$/i.exec(incoming);
+            const mapped = m ? store.get(m[1].trim()) : undefined;
+            if (mapped) headers["authorization"] = `Bearer ${mapped.remote}`;
+        }
         // #394 « tuer le point faible » : en mode strict, le node n'a plus le
         // droit d'affirmer une identité. Une requête sans son propre bearer
         // per-consumer est rejetée ICI (401) — on ne forwarde pas, on n'injecte

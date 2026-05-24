@@ -147,6 +147,38 @@ The only residue is the **same-uid-on-B** boundary (a process running as the
 same OS user as the proxy can read its config / a local token) — that's the uid
 frontier, true everywhere and out of scope for tokens.
 
+### Node-managed token store — strict without losing convenience (#394)
+
+Strict mode makes every client carry a per-consumer A-token, which means the
+A-token lives on each client. The **node-managed token store** keeps that
+custody on the node instead: B holds a small map `{local token → A-token}`, hands
+each client a **local** token, and **swaps** it for the mapped A-token at egress.
+
+```
+   host B (proxy, strict + store)                 host A
+ [ loop ]──Bearer T_local_alice──►[ proxy ]──swap──Bearer T_A_alice──►[ daemon ]
+                                  store: T_local_alice → T_A_alice          └─► "alice"
+```
+
+So the client only ever holds a **local** token; the real A-token never leaves
+the node. Benefits: **central custody + rotation/revocation on B** (rotate the
+A-token in one place, clients keep their stable local token), while A still gets
+**hard per-consumer proof** (the swapped A-token *is* the proof). A bearer that
+isn't in the store passes through untouched (a client carrying its own A-token,
+QW-A). Wiring:
+
+```bash
+# on A — mint the per-consumer A-token
+aiball auth issue --consumer alice           # → aiball-<…>
+
+# on B — map a local token to it (generates the local token)
+aiball proxy token add --consumer alice --remote aiball-<…>
+# → hand the printed LOCAL token to alice's client; restart B
+```
+
+The same-uid-on-B residue still applies (the store is `chmod 600`, but a process
+as the same OS user can read it) — the uid frontier, as always.
+
 ---
 
 ## Summary
@@ -158,6 +190,7 @@ frontier, true everywhere and out of scope for tokens.
 | proxy #394 | node token | **weakest** (node asserts identity) | token-less locally |
 | proxy + own token (QW-A) | per-consumer token | hard proof for the loop | one node secret + provisioned loop token |
 | **proxy strict (#394)** | per-consumer token (mandatory) | **strongest** (no node-asserted identity, 401 otherwise) | a token per local client, no token-less fallback |
+| **proxy strict + node store (#394)** | per-consumer token (node swaps local→A) | **strongest** (hard per-consumer at A) | clients hold a local token, A-token custody + rotation on the node |
 
 **Rules of thumb**
 

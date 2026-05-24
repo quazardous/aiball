@@ -53,6 +53,14 @@ narrative for the product as a whole.
   the cross-host weak point is gone. Opt-in (default off) — turning it on means
   provisioning each local client with its own token (`auth issue --consumer`) and
   giving up token-less convenience (web UI / CLI over the UDS).
+- **Node-managed token store** (`aiball proxy token add/list/revoke`): the proxy
+  node can hold a `{local token → upstream A-token}` map and **swap** an incoming
+  local bearer for the mapped per-consumer A-token at egress. Clients hold only a
+  *local* token; the real A-token's custody + rotation/revocation stay on the
+  node, while the remote still gets hard per-consumer proof. Pairs with strict
+  mode to close the weak point *without* losing local convenience. Store at
+  `~/.config/aiball/proxy-tokens.yaml` (chmod 600); a bearer not in the store
+  passes through untouched (QW-A). Zero migration (file store, DB-less on B).
 - **`docs/SECURITY.md`** — a plain-language map of aiball's trust boundaries
   (local UDS / direct / proxy-node) with diagrams, spelling out where the limits
   are: the proxy node token is the weak point (impersonation-capable, unscoped →
