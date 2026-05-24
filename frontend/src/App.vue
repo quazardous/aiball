@@ -230,7 +230,13 @@ watch(inListView, (now, prev) => {
 watch(project, (v) => {
     if (v) localStorage.setItem("aiball.project", v);
     else localStorage.removeItem("aiball.project");
-    openTicketId.value = null;
+    // #411: NE PAS wiper openTicketId ici. Ce watcher fire AUSSI pendant la
+    // restauration d'URL au boot (useRouting → apply(parseUrl()) pose project
+    // depuis `?p=`), ce qui effaçait le ticket fraîchement restauré → un Ctrl-R
+    // sur un deep-link cross-projet (ou en multi-onglet) retombait sur l'inbox.
+    // Le wipe sur changement de projet *piloté par l'utilisateur* est déjà fait
+    // par selectProject / openProjectPage / openPanel ; on ne garde ici que la
+    // persistance localStorage, qui doit suivre toutes les sources (URL incluse).
 });
 
 watch(dark, (v) => {
@@ -353,7 +359,10 @@ useBus("message.decided", (m) => { notifyArrival(m); });
 useBus("project.deleted", ({ project: deleted }) => {
     // If the user is currently scoped to the just-deleted project, fall
     // back to "all projects" so the lists don't sit empty silently.
-    if (project.value === deleted) project.value = null;
+    // #411: le wipe d'openTicketId n'est plus porté par watch(project) — on le
+    // refait explicitement ici pour garder le comportement (fermer le thread
+    // ouvert quand son projet disparaît).
+    if (project.value === deleted) { project.value = null; openTicketId.value = null; }
 });
 // `thread.refresh` is handled inside ThreadView itself (it knows its own
 // ticket id and reloads when the bus event matches), so we don't need to
