@@ -170,7 +170,7 @@ function onRowClick(r: InboxRow) {
             <span
                 v-if="r.hot"
                 class="list-hot-focus"
-                title="In your hot-zone — the ticket you're actively working (recent activity within the hot window)."
+                title="Hot-zone — an agent is actively working this ticket (recent agent activity within the hot window)."
                 style="margin-right: 0.3rem"
             >🔥</span>
             <span class="ticket-id">{{ formatTicketRef(r.id) }}</span>

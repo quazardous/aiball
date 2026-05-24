@@ -40,9 +40,10 @@ const emit = defineEmits<{
         :severity="ticket.priority === 'urgent' ? 'danger' : ticket.priority === 'high' ? 'warn' : 'info'"
     />
     <h2 class="thread-title">{{ ticket.title }}</h2>
-    <!-- #405: hot-zone focus flag — the ticket the agent is actively working
-         (most recent self-activity within the hot window). -->
-    <span v-if="ticket.hot" class="thread-hot-focus" title="In your hot-zone — the ticket you're actively working (recent activity within the hot window).">
+    <!-- #405/#408: hot-zone focus flag — the ticket an AGENT is actively working
+         (most recent agent activity within the hot window). #408: a human
+         commenting does NOT make a ticket hot; only an agent's work does. -->
+    <span v-if="ticket.hot" class="thread-hot-focus" title="Hot-zone — an agent is actively working this ticket (recent agent activity within the hot window).">
         🔥 focus
     </span>
     <!-- #404/#406: per-ticket token-effort cost (shown once any usage is
