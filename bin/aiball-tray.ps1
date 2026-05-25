@@ -22,12 +22,6 @@
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-# DestroyIcon: free the GDI handle from Bitmap.GetHicon() when we swap the
-# composed (proxy) icon, so a long-running tray doesn't leak handles.
-Add-Type -Namespace AiballNative -Name U32 -MemberDefinition @'
-[System.Runtime.InteropServices.DllImport("user32.dll")]
-public static extern bool DestroyIcon(System.IntPtr hIcon);
-'@
 
 # Singleton: a second instance exits silently (mutex), so double-clicking a
 # shortcut while the logon-launched tray is up doesn't stack icons.
@@ -84,42 +78,28 @@ function Get-NodeInfo {
 }
 function Test-DaemonUp { return (Get-NodeInfo).up }
 
-# Compose the tray icon: base aiball icon, plus a small arrow overlay when this
-# daemon is a PROXY -- arrow colour = remote health (green up, red down). Pure
-# runtime composition (no extra .ico files). Recomposed only on state change;
-# the prior GDI handle is freed via DestroyIcon.
-$script:composedHicon = [System.IntPtr]::Zero
+# Tray icon variants. The proxy overlay icons are PRE-GENERATED multi-resolution
+# .ico files (assets/aiball-proxy-{up,down}.ico, built by
+# assets/gen-proxy-icons.ps1) -- an upward "uplink" arrow over the base icon,
+# green when the remote is healthy, red when it's down. They are FILES (loaded
+# once, like the base) so the notification area picks a NATIVE frame for its
+# size. Runtime composition was dropped: it produced a single 32x32 frame the
+# tray downscaled into "snow". Set-TrayIcon just swaps among the three.
+function Get-IconFile($path, $fallback) {
+    if (Test-Path $path) {
+        try { return (New-Object System.Drawing.Icon $path) } catch { }
+    }
+    return $fallback
+}
+
 function Set-TrayIcon([bool]$proxy, [bool]$remoteUp) {
     if (-not $proxy) {
         $ni.Icon = $script:baseIcon
-        if ($script:composedHicon -ne [System.IntPtr]::Zero) {
-            [void][AiballNative.U32]::DestroyIcon($script:composedHicon)
-            $script:composedHicon = [System.IntPtr]::Zero
-        }
-        return
+    } elseif ($remoteUp) {
+        $ni.Icon = $script:proxyUpIcon
+    } else {
+        $ni.Icon = $script:proxyDownIcon
     }
-    $color = if ($remoteUp) { [System.Drawing.Color]::LimeGreen } else { [System.Drawing.Color]::Red }
-    $bmp = New-Object System.Drawing.Bitmap 32, 32
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $g.DrawIcon($script:baseIcon, (New-Object System.Drawing.Rectangle 0, 0, 32, 32))
-    # Dark disc for contrast in the bottom-right corner.
-    $g.FillEllipse((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(230, 25, 25, 25))), 15, 15, 16, 16)
-    # Right-pointing arrow (proxy = relay onward), coloured by remote health.
-    $pts = @(
-        (New-Object System.Drawing.Point 19, 19),
-        (New-Object System.Drawing.Point 28, 23),
-        (New-Object System.Drawing.Point 19, 27)
-    )
-    $g.FillPolygon((New-Object System.Drawing.SolidBrush $color), $pts)
-    $g.Dispose()
-    $h = $bmp.GetHicon()
-    $ni.Icon = [System.Drawing.Icon]::FromHandle($h)
-    $bmp.Dispose()
-    if ($script:composedHicon -ne [System.IntPtr]::Zero) {
-        [void][AiballNative.U32]::DestroyIcon($script:composedHicon)
-    }
-    $script:composedHicon = $h
 }
 
 function Start-Daemon {
@@ -164,6 +144,15 @@ function Get-OpenUrl {
     return $url
 }
 
+# Open a URL in the OS DEFAULT browser -- Windows manages the browser choice
+# (Settings > Apps > Default apps). Going through explorer.exe does the
+# ShellExecute in the running shell's context, so the link lands in the active
+# default-browser instance + profile when it is already running (rather than a
+# fresh instance launched straight from this Task-Scheduler process).
+function Open-Url($u) {
+    Start-Process -FilePath 'explorer.exe' -ArgumentList $u
+}
+
 # --- tray icon + menu -------------------------------------------------------
 $ni = New-Object System.Windows.Forms.NotifyIcon
 $icoPath = Join-Path $PSScriptRoot '..\assets\aiball.ico'
@@ -172,13 +161,16 @@ $script:baseIcon = if (Test-Path $icoPath) {
 } else {
     [System.Drawing.SystemIcons]::Information
 }
+# Pre-generated proxy overlay icons (fall back to the base if missing).
+$script:proxyUpIcon   = Get-IconFile (Join-Path $PSScriptRoot '..\assets\aiball-proxy-up.ico')   $script:baseIcon
+$script:proxyDownIcon = Get-IconFile (Join-Path $PSScriptRoot '..\assets\aiball-proxy-down.ico') $script:baseIcon
 $ni.Icon = $script:baseIcon
 $ni.Text = "aiball - starting..."
 $ni.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $open = $menu.Items.Add("Open in browser")
-$open.Add_Click({ Start-Process (Get-OpenUrl) })
+$open.Add_Click({ Open-Url (Get-OpenUrl) })
 $restart = $menu.Items.Add("Restart daemon")
 $restart.Add_Click({ Stop-Daemon; Start-Sleep -Milliseconds 400; Start-Daemon })
 $menu.Items.Add("-") | Out-Null
@@ -197,10 +189,10 @@ $ni.ContextMenuStrip = $menu
 $ni.Add_MouseClick({
     param($sender, $e)
     if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-        Start-Process (Get-OpenUrl)
+        Open-Url (Get-OpenUrl)
     }
 })
-$ni.Add_MouseDoubleClick({ Start-Process (Get-OpenUrl) })
+$ni.Add_MouseDoubleClick({ Open-Url (Get-OpenUrl) })
 
 # --- supervise: keep the daemon alive, reflect state in the tooltip --------
 # Tooltip is the at-a-glance signal (NotifyIcon.Text is capped at 63 chars).
