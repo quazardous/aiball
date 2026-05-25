@@ -1,11 +1,9 @@
 <script setup lang="ts">
 // #424 — Nodes panel: lists proxy-node tokens (kind=node) with their label,
-// last activity, last peer IP, and the consumers each relays. Read + revoke
-// (moderator-only API). The token value is never exposed — a node is keyed by a
-// non-secret `node_id`.
+// last activity and last peer IP — each row links to the node detail page.
+// Read-only list; revoke + relayed consumers live on the detail page (#452).
+// The token value is never exposed — a node is keyed by a non-secret `node_id`.
 import { ref, onMounted } from "vue";
-import Button from "primevue/button";
-import { useConfirm } from "primevue/useconfirm";
 import { api, type NodeView } from "../lib/api";
 import NodeDetailPage from "./NodeDetailPage.vue";
 import DataList from "./ui/DataList.vue";
@@ -21,7 +19,6 @@ const emit = defineEmits<{
     (e: "close-edit"): void;
 }>();
 
-const confirm = useConfirm();
 const nodes = ref<NodeView[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -35,35 +32,6 @@ async function load(): Promise<void> {
         error.value = e instanceof Error ? e.message : String(e);
     } finally {
         loading.value = false;
-    }
-}
-
-// #433: confirm before revoking (destructive — cuts the node + every consumer
-// it relays). Uses the app's in-app PrimeVue confirm dialog (global
-// <ConfirmDialog/> in App.vue), not the native window.confirm, for a consistent
-// look and an impact-aware message.
-function revoke(n: NodeView): void {
-    const label = n.label || n.node_id;
-    const relayed = n.relayed_count
-        ? ` ${n.relayed_count} relayed consumer${n.relayed_count > 1 ? "s" : ""} will lose access until the node is re-enrolled.`
-        : "";
-    confirm.require({
-        header: "Revoke node",
-        message: `Revoke node "${label}"? The proxy will no longer relay to this daemon.${relayed}`,
-        icon: "pi pi-exclamation-triangle",
-        acceptLabel: "Revoke",
-        rejectLabel: "Cancel",
-        acceptClass: "p-button-danger",
-        accept: () => { void doRevoke(n); },
-    });
-}
-
-async function doRevoke(n: NodeView): Promise<void> {
-    try {
-        await api.revokeNode(n.node_id);
-        await load();
-    } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
     }
 }
 
@@ -101,7 +69,6 @@ onMounted(load);
                 <th>Node</th>
                 <th>Last IP</th>
                 <th>Last activity</th>
-                <th></th>
             </template>
             <template #body>
                 <tr v-for="n in nodes" :key="n.node_id">
@@ -116,9 +83,6 @@ onMounted(load);
                     </td>
                     <td>{{ n.last_seen_ip ?? "—" }}</td>
                     <td :title="`created ${fmt(n.created_at)}`">{{ fmt(n.last_used_at) }}</td>
-                    <td>
-                        <Button label="Revoke" severity="danger" text size="small" @click="revoke(n)" />
-                    </td>
                 </tr>
             </template>
         </DataList>
