@@ -30,6 +30,19 @@ narrative for the product as a whole.
   the claims auto-released by the one-focus rule. Agent `engage`/`assign` go
   through the same path, so an agent picking up work lights up its row live.
 
+### Per-agent work filters (#447)
+
+- New **Settings > Work filters**: narrow which tickets an **agent** picks up, by
+  tag — e.g. *the windows agent only works tickets tagged `win`*. A filter is
+  `consumer + (optional project) + mode (work-only / never-work) + tags
+  (any-of)`, with an enable/mute toggle. It restricts that agent's
+  **engage / actionable** pool only — never your own view of the board.
+- Filters live in the **daemon DB**, not in per-machine config: an agent's loop
+  on *any* machine that talks to this daemon picks them up, so the same agent run
+  from a second machine obeys the same filter with nothing to sync. Applied
+  server-side in the actionable/claimable gate; fail-open (a read error never
+  hides an agent's work). New `/api/work-filters` CRUD.
+
 ### Token tally reads as effort, not re-read context (#446)
 
 - The per-ticket/per-project token figure is now the **effort** = new tokens
