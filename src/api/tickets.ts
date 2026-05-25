@@ -156,6 +156,18 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
         setTicketAssignment(id, target, caller);
     }
     upsertTicketSubscription(target, id);
+    // #448 david: the claim landed in the DB but the UI didn't reflect it live —
+    // this path never broadcast, so an open inbox/thread kept showing the
+    // pre-claim state until a manual reload. Emit message_edited on each
+    // touched ticket (the new claim/assign + any claims the one-focus rule
+    // auto-released) so the WS relay fires inbox.refresh + thread.refresh and
+    // the holder icon (lists + header) appears/clears in real time. Mirrors the
+    // moveTicket broadcast. releasedClaims never includes `id` (built excluding
+    // the new claim), so no dup.
+    for (const rid of [id, ...releasedClaims]) {
+        const updated = getMessage(rid);
+        if (updated) broadcast({ type: "message_edited", data: updated });
+    }
     res.json({
         ticket_id: id,
         assignee: isClaim ? null : target,
@@ -186,6 +198,9 @@ ticketsRouter.post("/tickets/:id/release", (req: Request, res: Response) => {
     }
     if (holdsClaim) releaseTicketClaim(id);
     if (canReleaseAssignment && t.assignee) releaseTicketAssignment(id);
+    // #448: broadcast so the holder icon clears live (same fix as assign).
+    const updated = getMessage(id);
+    if (updated) broadcast({ type: "message_edited", data: updated });
     res.json({ ticket_id: id, released: true });
 });
 
