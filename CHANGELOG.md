@@ -17,6 +17,17 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Work-order tiebreak follows your claim (#430)
+
+- The ticket work-order (`ticket_list`, the `ticket_engage` head, the wake-CTA
+  head) now sorts a ticket you hold a **live claim** on first — within its tier
+  and priority, **above** the hot-zone. The claim is the explicit focus signal
+  and survives a quiet stretch (thinking / reading context), where the hot-zone
+  (recent activity) decays after its window and loses your place. The 🔥 flag
+  stays activity-based ("active now"). Self-claim only — an assignment is a
+  responsibility, not a focus signal. Pure comparator extended + unit-tested; no
+  migration. (First slice of the focus/claim umbrella, #436.)
+
 ### `ask` presence word — surface the AskUserQuestion window (#426)
 
 - The tmux bar (and the consumers page) gain a 4th human-presence word **`ask`**

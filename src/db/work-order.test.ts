@@ -43,6 +43,30 @@ test("#402 hot stays within its tier — a hot open ticket never jumps actionabl
     assert.deepEqual(sorted([{ id: 1, priority: "normal" }, { id: 2, priority: "normal" }], c), [1, 2]);
 });
 
+test("#430 own claim beats hot at EQUAL priority within a tier", () => {
+    // same tier, same priority: 1 hot, 2 own-claim → 2 first (claim > hot).
+    const c: WorkOrderCtx = { tierOf: () => 1, priorityWeight: pw, isHot: (id) => id === 1, isOwnClaim: (id) => id === 2 };
+    assert.deepEqual(sorted([{ id: 1, priority: "normal" }, { id: 2, priority: "normal" }], c), [2, 1]);
+});
+
+test("#430 priority still beats own claim within a tier", () => {
+    // 1 normal+own-claim, 2 urgent → urgent first (priority is the strongest sort).
+    const c: WorkOrderCtx = { tierOf: () => 1, priorityWeight: pw, isHot: () => false, isOwnClaim: (id) => id === 1 };
+    assert.deepEqual(sorted([{ id: 1, priority: "normal" }, { id: 2, priority: "urgent" }], c), [2, 1]);
+});
+
+test("#430 own claim stays within its tier (never jumps unread/actionable)", () => {
+    // 1 actionable(tier1) cold, 2 open(tier2) own-claim → 1 first (tier beats claim).
+    const c: WorkOrderCtx = { tierOf: (id) => (id === 1 ? 1 : 2), priorityWeight: pw, isHot: () => false, isOwnClaim: (id) => id === 2 };
+    assert.deepEqual(sorted([{ id: 1, priority: "normal" }, { id: 2, priority: "normal" }], c), [1, 2]);
+});
+
+test("#430 isOwnClaim omitted → no claim distinction (back-compat)", () => {
+    // legacy ctx (no isOwnClaim) → falls through to hot then oldest.
+    const c = ctx({ 1: 1, 2: 1 }, new Set([2]));
+    assert.deepEqual(sorted([{ id: 1, priority: "normal" }, { id: 2, priority: "normal" }], c), [2, 1]);
+});
+
 test("#405 computeHotFocus: mono-focus = the most recent self-activity within the window", () => {
     const now = Date.parse("2026-05-24T10:00:00Z");
     const win = 600_000; // 10 min

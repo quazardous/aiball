@@ -51,8 +51,9 @@ import {
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
 import { listSubscriptions } from "../db/subscriptions.js";
+import { isAssignmentLive } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
-import { globalConfigPath } from "../autopoll/config.js";
+import { globalConfigPath, assignWindowSec } from "../autopoll/config.js";
 import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { RELATION_KINDS, isRelationKind, isLineageRelationKind, type RelationKind } from "../relations.js";
@@ -637,6 +638,18 @@ ticketsRouter.get("/tickets", (req, res) => {
     );
     const isClaimable = (id: number, proj: string): boolean =>
         actionableIds.has(id) && ownedProjects.has(proj);
+    // #430: tickets the consumer holds a LIVE claim on (assignee = me, is_claim,
+    // within the assign window) — the explicit FOCUS, used as a work-order
+    // tiebreak ABOVE hot. Self-claim only: an assignment is a responsibility, not
+    // a focus signal (#435 distinction).
+    const claimNowMs = Date.now();
+    const assignWindowMs = assignWindowSec() * 1000;
+    const ownClaimIds = new Set<number>();
+    for (const m of created) {
+        if (m.assignee === consumerId && m.is_claim && isAssignmentLive(m.assigned_at, claimNowMs, assignWindowMs)) {
+            ownClaimIds.add(m.id);
+        }
+    }
     // #404: per-ticket token-effort tally (empty until the capture side lands).
     const tokenUsageMap = getTicketTokenUsage(created.map((m) => m.id));
     // #405/#408: the HOT-ZONE (focus) = the single most-recent AGENT-touched
@@ -743,6 +756,7 @@ ticketsRouter.get("/tickets", (req, res) => {
                 unreadMap.get(id) ? 0 : actionableIds.has(id) ? 1 : openIds.has(id) ? 2 : 3,
             priorityWeight: (p) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2,
             isHot: (id) => hotFocus.has(id),
+            isOwnClaim: (id) => ownClaimIds.has(id), // #430: own live claim sorts above hot
         };
         result.sort((a, b) => compareWorkOrder(a, b, ctx));
     }

@@ -7,11 +7,16 @@
  *      (¬unread) → 2 other open → 3 the rest (closed/snoozed).
  *   2. **priority** desc (urgent→low) — the strongest sort WITHIN a tier
  *      (david `xkehmv`: « priorité est le tri le plus fort »).
- *   3. **hot** (#402 levier 1) — at EQUAL priority, a ticket in the requesting
- *      consumer's *hot-zone* (their own recent activity, see TICKET_LIFECYCLE.md)
- *      sorts first, so the wake follows the active conversation instead of a
- *      stale oldest head. Stays WITHIN the tier — never crosses unread/actionable.
- *   4. **oldest** (id asc) — final tiebreak.
+ *   3. **own claim** (#430) — at EQUAL priority, a ticket the consumer holds a
+ *      LIVE claim on (their explicit focus) sorts first, ABOVE hot. The claim is
+ *      a stronger "what I'm on" signal than hot's recent-activity proxy: it's
+ *      intentional and survives a quiet stretch (thinking / reading context),
+ *      whereas hot decays after the hot window. Stays WITHIN the tier.
+ *   4. **hot** (#402 levier 1) — at EQUAL priority + no own-claim distinction, a
+ *      ticket in the consumer's *hot-zone* (their own recent activity, see
+ *      TICKET_LIFECYCLE.md) sorts first, so the wake follows the active
+ *      conversation instead of a stale oldest head. Stays WITHIN the tier.
+ *   5. **oldest** (id asc) — final tiebreak.
  */
 
 export type Tier = number;
@@ -28,9 +33,12 @@ export interface WorkOrderCtx {
     priorityWeight: (priority: string | null | undefined) => number;
     /** #402: is the ticket in the requesting consumer's hot-zone right now? */
     isHot: (id: number) => boolean;
+    /** #430: does the consumer hold a LIVE claim on this ticket? (explicit focus,
+     *  sorts above hot). Optional — omitted ⇒ no claim distinction (back-compat). */
+    isOwnClaim?: (id: number) => boolean;
 }
 
-/** Pure comparator: tier → priority desc → hot → oldest. */
+/** Pure comparator: tier → priority desc → own-claim → hot → oldest. */
 export function compareWorkOrder(a: WorkOrderRow, b: WorkOrderRow, ctx: WorkOrderCtx): number {
     const tA = ctx.tierOf(a.id);
     const tB = ctx.tierOf(b.id);
@@ -38,6 +46,10 @@ export function compareWorkOrder(a: WorkOrderRow, b: WorkOrderRow, ctx: WorkOrde
     const wA = ctx.priorityWeight(a.priority);
     const wB = ctx.priorityWeight(b.priority);
     if (wA !== wB) return wB - wA; // priority desc — strongest sort within a tier
+    // #430: own live claim = explicit focus, sorts before hot (implicit/decaying).
+    const cA = ctx.isOwnClaim?.(a.id) ? 1 : 0;
+    const cB = ctx.isOwnClaim?.(b.id) ? 1 : 0;
+    if (cA !== cB) return cB - cA;
     const hA = ctx.isHot(a.id) ? 1 : 0;
     const hB = ctx.isHot(b.id) ? 1 : 0;
     if (hA !== hB) return hB - hA; // #402: hot first, only at equal priority
