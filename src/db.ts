@@ -135,6 +135,15 @@ export {
 } from "./db/work-filters.js";
 
 export {
+    getConfig,
+    getResolvedConfig,
+    setConfigOverride,
+    deleteConfigOverride,
+    resolveConfigValue,
+    type ResolvedConfig,
+} from "./db/config-overrides.js";
+
+export {
     type ProjectStats,
     upsertSubscription,
     deleteSubscription,
