@@ -32,6 +32,7 @@ import LaunchersPanel from "./components/LaunchersPanel.vue";
 import GeneralSettingsPanel from "./components/GeneralSettingsPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
 import WorkFiltersPanel from "./components/WorkFiltersPanel.vue";
+import AutomationPanel from "./components/AutomationPanel.vue";
 import SetupScreen from "./components/SetupScreen.vue";
 import LoginScreen from "./components/LoginScreen.vue";
 import { setUnauthorizedHandler } from "./lib/api";
@@ -688,7 +689,7 @@ watch(showSnoozed, (v) => {
                      band, easy to miss). One unified back-link covers
                      all four; per-panel headers stay untouched. -->
                 <a
-                    v-if="panel === 'general' || panel === 'projects' || panel === 'rules' || panel === 'work-filters' || panel === 'tags' || panel === 'consumers' || panel === 'nodes'"
+                    v-if="panel === 'general' || panel === 'automation' || panel === 'projects' || panel === 'rules' || panel === 'work-filters' || panel === 'tags' || panel === 'consumers' || panel === 'nodes'"
                     href="/"
                     class="settings-back-link"
                     @click.prevent="panel = null"
@@ -711,6 +712,7 @@ watch(showSnoozed, (v) => {
                     @open-settings="(name: string) => openProjectPage(name, 'settings')"
                 @open-detail="(name: string) => openProjectPage(name, 'detail')"
                 />
+                <AutomationPanel v-else-if="panel === 'automation'" />
                 <RulesPanel v-else-if="panel === 'rules'" />
                 <WorkFiltersPanel v-else-if="panel === 'work-filters'" />
                 <TagsPanel v-else-if="panel === 'tags'" />

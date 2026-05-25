@@ -16,7 +16,7 @@ export interface ProjectListItem {
     running?: boolean;
 }
 
-export type SettingsPanel = "general" | "rules" | "work-filters" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "compose";
+export type SettingsPanel = "general" | "automation" | "rules" | "work-filters" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "compose";
 
 /**
  * Per-project sub-pages (#B.127): "settings" hosts the moderation
@@ -185,23 +185,16 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
                 <i class="pi pi-folder" />
                 <span>Projects</span>
             </button>
+            <!-- #457: moderation rules + work filters merged under one
+                 "Automation" entry (they're both ordered conditional config). -->
             <button
                 type="button"
                 class="sidebar-item"
-                :class="{ active: panel === 'rules' }"
-                @click="emit('open-panel', 'rules')"
+                :class="{ active: panel === 'automation' || panel === 'rules' || panel === 'work-filters' }"
+                @click="emit('open-panel', 'automation')"
             >
-                <i class="pi pi-cog" />
-                <span>Rules</span>
-            </button>
-            <button
-                type="button"
-                class="sidebar-item"
-                :class="{ active: panel === 'work-filters' }"
-                @click="emit('open-panel', 'work-filters')"
-            >
-                <i class="pi pi-filter" />
-                <span>Work filters</span>
+                <i class="pi pi-bolt" />
+                <span>Automation</span>
             </button>
             <button
                 type="button"
