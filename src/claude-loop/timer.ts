@@ -33,7 +33,7 @@
  * per-menu settings flags. Interim: user runs `claude` once to clear
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
-import { appendFileSync, existsSync, openSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, openSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
@@ -101,6 +101,23 @@ if (!sd || !name || !intervalRaw) {
 }
 const interval = Math.max(1, Number(intervalRaw));
 const tname = tmuxName(name);
+
+/**
+ * #442: remote HARD-KILL. A `control:kill` event arrived on the SSE this loop
+ * already holds → tear the loop down from inside: kill the tmux session (claude
+ * + pane die), remove the state dir, then exit THIS (detached) timer process.
+ * We deliberately do NOT reuse `cmdRm`: it `process.kill()`s the recorded timer
+ * pid, which is the tsx WRAPPER (a defunct zombie, #413) and not this real
+ * process — only an explicit `process.exit` reliably stops the live timer. The
+ * SSE teardown on exit makes the daemon broadcast `running:false` (live-presence)
+ * so the UI clears the badge without polling.
+ */
+function selfDestruct(reason: string): void {
+    log(`CONTROL kill received (${reason}) — self-destructing loop '${name}', exiting`);
+    try { spawnSync(MUX_CMD, ["kill-session", "-t", tname], { stdio: "ignore" }); } catch { /* tmux already gone */ }
+    try { if (sd) rmSync(sd, { recursive: true, force: true }); } catch { /* best effort */ }
+    process.exit(0);
+}
 
 // #413: le timer enregistre SON PROPRE pid ici, en écrasant le pid-wrapper
 // deviné par cmdStart / cmdReload / selfReloadIfStale (= le child.pid de
@@ -584,6 +601,12 @@ async function mainSse(): Promise<void> {
         unsubscribe?.();
         unsubscribe = client().subscribeEvents({
             onHello: (h) => { log(`SSE hello: unread=${h.unread}`); },
+            // #442: remote hard-kill. A `control:kill` arrives on the SSE this
+            // loop already holds → self-destruct from inside.
+            onControl: (c) => {
+                if (c.action === "kill") selfDestruct("sse:control:kill");
+                else log(`SSE control ignored (unknown action): ${JSON.stringify(c)}`);
+            },
             onPing: (p) => {
                 // #B.214: panic intent → interrupt-this-turn path,
                 // bypasses every gate. Routed FIRST so the dup-hint

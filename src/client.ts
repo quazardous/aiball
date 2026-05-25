@@ -715,6 +715,8 @@ export class AiballClient {
     subscribeEvents(handlers: {
         onPing: (payload: { ticket_id?: number; comment_id?: number; comment_hashid?: string; intent?: "panic" | "request" | "question" | "fyi" }) => void;
         onHello?: (payload: { consumer_id: string; unread: number }) => void;
+        // #442: out-of-band control events (e.g. remote hard-kill) on the same stream.
+        onControl?: (payload: { action: string }) => void;
         onError?: (err: Error) => void;
     }): () => void {
         const path = `/api/events?consumer_id=${encodeURIComponent(this.agentId)}`;
@@ -768,6 +770,8 @@ export class AiballClient {
                         handlers.onPing(payload as { ticket_id?: number; comment_id?: number; comment_hashid?: string; intent?: "panic" | "request" | "question" | "fyi" });
                     } else if (evName === "hello" && handlers.onHello) {
                         handlers.onHello(payload as { consumer_id: string; unread: number });
+                    } else if (evName === "control" && handlers.onControl) {
+                        handlers.onControl(payload as { action: string });
                     }
                 }
             });
