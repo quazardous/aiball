@@ -26,6 +26,12 @@ narrative for the product as a whole.
   before your first comment, closing the pickup→first-comment window left by the
   auto-claim. The wake CTA now points agents at `ticket_engage()`. Builds on the
   assignment/claim from #418; no migration.
+- **Fix (#432):** a bare `ticket_engage()` ignored the `AIBALL_PROJECT` default
+  and ran cross-project, so the head could be a *follower-broadcast from another
+  project* (an aiball agent claimed a stale qdadm migration notice). Now applies
+  the default softly (explicit arg wins, set default scopes, genuinely-unset
+  stays cross-project) — matching the documented "Defaults to `$AIBALL_PROJECT`
+  if set".
 
 ### Ticket → agent assignment + claim (#418)
 
