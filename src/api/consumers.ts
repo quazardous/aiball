@@ -18,7 +18,10 @@ import {
 } from "../db.js";
 import { listNodes, revokeNode } from "../db/nodes.js";
 import { broadcast } from "../ws.js";
-import { badRequest, consumerOf, notFound } from "./_helpers.js";
+import { emitControl } from "../event-bus.js";
+import { isPresent } from "../live-presence.js";
+import { canStopLoop } from "../loop-control.js";
+import { badRequest, consumerOf, notFound, tokenKindOf } from "./_helpers.js";
 
 export const consumersRouter = Router();
 
@@ -32,6 +35,21 @@ consumersRouter.get("/consumers/:consumer_id", (req: Request, res: Response) => 
     const c = getConsumer(String(req.params.consumer_id));
     if (!c) return notFound(res, "consumer not found");
     res.json(c);
+});
+
+// #442: remotely HARD-KILL the claude-loop running as <consumer_id>. Pushes a
+// `control:kill` event onto the loop's live SSE (the loop already holds one) →
+// the loop's timer self-rm's (kill tmux + state + exit). Works over the tailnet
+// since it rides the daemon. Gated to a local/direct human moderator; proxy
+// nodes are DENIED (anti-DoS — see loop-control.ts). `delivered` says whether a
+// live loop was connected to receive it right now (false ⇒ nothing was running).
+consumersRouter.post("/consumers/:consumer_id/loop-stop", (req: Request, res: Response) => {
+    const target = String(req.params.consumer_id);
+    const verdict = canStopLoop(tokenKindOf(req), isHuman(consumerOf(req)));
+    if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
+    const delivered = isPresent(target);
+    emitControl(target, { action: "kill" });
+    res.json({ consumer_id: target, action: "kill", delivered });
 });
 
 consumersRouter.post("/consumers", (req: Request, res: Response) => {

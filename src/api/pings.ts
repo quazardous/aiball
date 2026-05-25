@@ -14,7 +14,7 @@ import {
     markPingsRead,
     unreadPingCount,
 } from "../db.js";
-import { onPing } from "../event-bus.js";
+import { onPing, onControl } from "../event-bus.js";
 import { presenceConnect, presenceDisconnect } from "../live-presence.js";
 import { badRequest } from "./_helpers.js";
 
@@ -79,6 +79,11 @@ pingsRouter.get("/events", (req, res) => {
     const off = onPing(consumer, (payload) => {
         res.write(`event: ping\ndata: ${JSON.stringify(payload)}\n\n`);
     });
+    // #442: out-of-band control events (e.g. remote hard-kill) ride the same
+    // live SSE the loop already holds. The loop's timer acts on them.
+    const offControl = onControl(consumer, (payload) => {
+        res.write(`event: control\ndata: ${JSON.stringify(payload)}\n\n`);
+    });
     const ka = setInterval(() => {
         res.write(`:keepalive ${new Date().toISOString()}\n\n`);
     }, 30_000);
@@ -95,6 +100,7 @@ pingsRouter.get("/events", (req, res) => {
         cleaned = true;
         clearInterval(ka);
         off();
+        offControl();
         presenceDisconnect(consumer);
         try { res.end(); } catch { /* already closed */ }
     };

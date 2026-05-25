@@ -47,3 +47,9 @@ export function consumerOf(req: Request): string {
     if (typeof headerVal === "string" && headerVal.trim()) return headerVal.trim();
     return process.env.AIBALL_HUMAN ?? "human";
 }
+
+/** #442: the request's auth tier (`agent` = UDS/direct bearer, `node` = proxy
+ *  node token), set by bearerAuth. Undefined on routes reached without auth. */
+export function tokenKindOf(req: Request): string | undefined {
+    return (req as AuthenticatedRequest).token_kind;
+}

@@ -52,6 +52,29 @@ export function onPing(
 }
 
 /**
+ * #442 — out-of-band CONTROL events pushed to a consumer's live SSE stream
+ * (the loop already holds one open). Distinct from `ping` (work-arrival): this
+ * is the daemon telling a specific loop to act on itself. Today: `kill` (hard
+ * stop — the loop self-rm's). Same per-recipient routing as pings.
+ */
+export interface ControlEvent {
+    action: "kill";
+}
+
+export function emitControl(recipient: string, payload: ControlEvent): void {
+    bus.emit(`control:${recipient}`, payload);
+}
+
+export function onControl(
+    recipient: string,
+    handler: (payload: ControlEvent) => void,
+): () => void {
+    const key = `control:${recipient}`;
+    bus.on(key, handler);
+    return () => bus.off(key, handler);
+}
+
+/**
  * #321: backend lifecycle bus. Every ticket lifecycle mutation (a message
  * landing, a decision, a move…) emits a typed `LifecycleEvent` here AFTER the
  * DB write; subscribers (WS broadcast, ping fan-out, and — #322 — the rules /
