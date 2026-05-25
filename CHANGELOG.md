@@ -17,6 +17,13 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Pending tickets stay out of the backlog (#450)
+
+- A not-yet-approved ticket still pings participants (so it can be discussed)
+  but no longer shows in the open backlog list — it appears only under the
+  explicit **Pending** (moderation) view. Tickets that are approved but carry
+  pending comments are unaffected. (Counters already excluded pending.)
+
 ### Claims are visible in the lists, and update live (#429, #448)
 
 - The inbox **list rows** now show who currently holds a ticket — a discreet
