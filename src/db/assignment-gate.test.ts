@@ -2,7 +2,7 @@
 // Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isAssignmentLive, isAssignedAway, isHeldByOther, claimsToAutoRelease } from "./assignment-gate.js";
+import { isAssignmentLive, isAssignedAway, isHeldByOther, claimsToAutoRelease, pickFocusClaim } from "./assignment-gate.js";
 
 const C = "claude-aiball-dev"; // the consumer asking "what's in my court?"
 const OTHER = "skybot";
@@ -106,4 +106,39 @@ test("claimsToAutoRelease: mixed set → only bare live non-keep claims drop", (
     ];
     const acted = new Map([[11, claimedMs(10_000)]]);   // worked 11 after claim
     assert.deepEqual(claimsToAutoRelease(claims, acted, /*keep*/ 13, NOW, WINDOW), [10]);
+});
+
+// #439 token attribution — pickFocusClaim (most-recent live claim).
+test("pickFocusClaim: no claims → null (caller falls back to the marker)", () => {
+    assert.equal(pickFocusClaim([], NOW, WINDOW), null);
+});
+
+test("pickFocusClaim: one live claim → its id", () => {
+    assert.equal(pickFocusClaim([{ id: 10, claimedAt: iso(60_000) }], NOW, WINDOW), 10);
+});
+
+test("pickFocusClaim: only an expired claim → null", () => {
+    assert.equal(pickFocusClaim([{ id: 10, claimedAt: iso(WINDOW + 1000) }], NOW, WINDOW), null);
+});
+
+test("pickFocusClaim: multiple live claims → the most-recently-claimed wins", () => {
+    const claims = [
+        { id: 10, claimedAt: iso(300_000) }, // 5min ago
+        { id: 11, claimedAt: iso(30_000) },  // 30s ago → most recent
+        { id: 12, claimedAt: iso(120_000) }, // 2min ago
+    ];
+    assert.equal(pickFocusClaim(claims, NOW, WINDOW), 11);
+});
+
+test("pickFocusClaim: most-recent is expired → falls to the newest LIVE one", () => {
+    const claims = [
+        { id: 10, claimedAt: iso(WINDOW + 1000) }, // expired (would be "newest" by recency but dead)
+        { id: 11, claimedAt: iso(120_000) },       // live, newest live
+        { id: 12, claimedAt: iso(300_000) },       // live, older
+    ];
+    assert.equal(pickFocusClaim(claims, NOW, WINDOW), 11);
+});
+
+test("pickFocusClaim: null timestamp ignored", () => {
+    assert.equal(pickFocusClaim([{ id: 10, claimedAt: null }], NOW, WINDOW), null);
 });

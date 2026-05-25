@@ -17,6 +17,21 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Focus/claim follow-ups: one-focus on engage + claim-anchored token attribution (#439)
+
+- **One focus at a time.** Self-claiming a ticket (`ticket_engage` or a self
+  `ticket_assign`) now auto-releases your OTHER **live** claims you never
+  commented on since grabbing them — bare pickups, zero work lost. Claims you've
+  actually worked (a comment after you claimed) survive, and the ticket you're
+  engaging is never dropped (re-engage stays idempotent). Stops an agent from
+  stacking claims that each drop a ticket from every other agent's pool. The
+  assign response now lists `released_claims` (relayed by engage).
+- **Token attribution anchors on the held claim.** A turn's token-usage is now
+  attributed server-side to your most-recently-claimed **live** claim (the
+  durable focus), falling back to the volatile `active-ticket` marker only when
+  you hold no live claim. An incidental ticket-scoped write mid-turn no longer
+  mis-attributes the turn's tokens. No migration (reuses `claimant`/`claimed_at`).
+
 ### Global moderation strategy moves to Settings → General (#438)
 
 - The daemon-wide moderation-strategy picker left the header dropdown for a new

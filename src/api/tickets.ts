@@ -55,7 +55,7 @@ import {
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
 import { listSubscriptions } from "../db/subscriptions.js";
-import { isAssignmentLive, claimsToAutoRelease } from "../db/assignment-gate.js";
+import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { globalConfigPath, assignWindowSec } from "../autopoll/config.js";
 import { readFileSync } from "node:fs";
@@ -194,15 +194,31 @@ ticketsRouter.post("/tickets/:id/release", (req: Request, res: Response) => {
  * Stop-hook once the capture side lands). Additive — accumulates. Body:
  * `{ in?, out?, cache_w?, cache_r? }`. Silently no-ops on an unknown ticket id
  * (the FK on the table rejects it) so a stale marker never errors the hook.
+ *
+ * #439: the `:id` from the loop-side capture is the volatile `active-ticket`
+ * MARKER — but that flips on any incidental ticket-scoped write within the turn.
+ * So we RE-ANCHOR server-side onto the caller's most-recently-claimed LIVE claim
+ * (the durable focus), and fall back to the passed marker only when the caller
+ * holds no live claim. Policy lives here, where the claim does; the loop side
+ * stays dumb (keeps posting the marker).
  */
 ticketsRouter.post("/tickets/:id/token-usage", (req: Request, res: Response) => {
-    const id = Number(req.params.id);
+    const markerId = Number(req.params.id);
+    const caller = consumerOf(req);
+    // #439: anchor on the held claim; the marker is the fallback.
+    const focus = pickFocusClaim(
+        ticketsClaimedBy(caller).map((c) => ({ id: c.id, claimedAt: c.claimed_at })),
+        Date.now(),
+        assignWindowSec() * 1000,
+    );
+    const id = focus ?? markerId;
     const t = getMessage(id);
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
     const b = (req.body ?? {}) as { in?: unknown; out?: unknown; cache_w?: unknown; cache_r?: unknown };
     const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
     addTicketTokenUsage(id, { in: n(b.in), out: n(b.out), cacheW: n(b.cache_w), cacheR: n(b.cache_r) });
-    res.json({ ticket_id: id, ok: true });
+    // #439: surface both so a stale-marker vs claim-anchor mismatch is debuggable.
+    res.json({ ticket_id: id, marker_id: markerId, ok: true });
 });
 
 /**

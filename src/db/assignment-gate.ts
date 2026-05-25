@@ -98,3 +98,29 @@ export function claimsToAutoRelease(
     }
     return out;
 }
+
+/**
+ * #439 token attribution — given the consumer's current claims, pick the ticket a
+ * turn's tokens should be attributed to: the MOST-RECENTLY-CLAIMED LIVE claim
+ * (max `claimedAt` within the window). This is the DURABLE focus anchor — robust
+ * to an incidental ticket-scoped write elsewhere in the turn flipping the
+ * volatile `active-ticket` marker (the pre-#439 anchor). Returns null when the
+ * consumer holds no live claim, so the caller falls back to the marker. With
+ * #439 one-focus, bare prior claims are already released; among any surviving
+ * WORKED claims the most-recently-claimed is taken as the current focus. Pure.
+ * `windowMs` in MILLISECONDS.
+ */
+export function pickFocusClaim(
+    claims: { id: number; claimedAt: string | null | undefined }[],
+    nowMs: number,
+    windowMs: number,
+): number | null {
+    let best: { id: number; ms: number } | null = null;
+    for (const c of claims) {
+        if (!isAssignmentLive(c.claimedAt, nowMs, windowMs)) continue;
+        const ms = Date.parse(c.claimedAt as string);
+        if (Number.isNaN(ms)) continue;
+        if (!best || ms > best.ms) best = { id: c.id, ms };
+    }
+    return best ? best.id : null;
+}

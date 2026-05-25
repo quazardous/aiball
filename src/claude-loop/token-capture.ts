@@ -10,6 +10,8 @@
  *      double-count);
  *   3. reads the `active-ticket` marker (written by the aiball MCP server on
  *      each ticket-scoped tool call) and pushes the turn's usage to that ticket.
+ *      (#439: the daemon then RE-ANCHORS that push onto the caller's held live
+ *      claim if any — the marker is just the fallback. Loop side stays dumb.)
  *
  * Pure FS + an injected `postUsage`, so the discovery / latest-turn / dedup
  * logic unit-tests without a daemon (same shape as start-lock.ts).
