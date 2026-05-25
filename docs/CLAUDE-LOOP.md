@@ -150,7 +150,7 @@ who's at the keyboard**. Injecting "What's up, Doc?" into the middle of
 a prompt you're typing is worse than useless. Three signals keep the
 loop deferential, coarsest to finest.
 
-### 1. User-grace (submit-time) — `#B.145`
+### 1. User-grace (submit-time)
 
 The `UserPromptSubmit` hook fires on every prompt submitted in the pane
 — yours *and* the loop's own auto-wake. When the prompt came from a
@@ -160,14 +160,14 @@ auto-wake while that marker is fresher than `CL_USER_GRACE_SEC`
 (default **60s**). Every prompt you submit re-arms the window, so an
 active session stays wake-free until you've been quiet for a minute.
 
-The catch (`#B.180`): the loop's *own* wake also triggers
+The catch: the loop's *own* wake also triggers
 `UserPromptSubmit`, which would stamp `user-took-over` and freeze the
 next wake for a full grace window — self-inflicted. Fix: every wake path
 touches a `wake-in-flight` marker right before injecting; the hook sees
 it (TTL `CL_WAKE_IN_FLIGHT_TTL_MS`, default 2s), recognizes the prompt as
 the loop's own, and skips the `user-took-over` stamp.
 
-### 2. Live keystroke detection (`human-typing`) — `#264` / `#269`
+### 2. Live keystroke detection (`human-typing`)
 
 User-grace only updates at *submit* time. To know a human is typing
 **right now** — before they hit Enter, even mid-turn — the loop keeps a
@@ -199,7 +199,7 @@ Both signals collapse into one human-presence word on the status bar
 When the proxy is alive it paints this segment live (instant on the
 first keystroke); otherwise the timer paints it from the markers.
 
-### AskUserQuestion in a headless loop — `#264`
+### AskUserQuestion in a headless loop
 
 The same `userIsTakingOver()` signal gates Claude's `AskUserQuestion`
 tool via a `PreToolUse` hook. In an autonomous loop with **no human**,
@@ -227,16 +227,16 @@ not human-present, but it's the other reason a tick may skip.)
 | `idle-since`      | Stop / SessionStart sleep branch | claude is at prompt since X |
 | `wake-requested`  | `claude-loop wake` | one-shot trigger for the next tick    |
 | `user-took-over`  | UserPromptSubmit hook | last HUMAN submit (user-grace gate)    |
-| `wake-in-flight`  | timer / Stop before send-keys | "this wake is ours" (≤2s, `#B.180`) |
+| `wake-in-flight`  | timer / Stop before send-keys | "this wake is ours" (≤2s) |
 | `human-typing`    | PTY proxy / timer poll | a human is typing now (TTL 5s)        |
 | `inject.sock`     | PTY proxy       | UDS the proxy listens on for wake injection |
 | `proxy-alive`     | PTY proxy       | proxy is really fronting claude (PID-stamped) |
 | `busy-defer-until`| Stop hook       | absolute time the wake-defer gate reopens |
-| `last-wake-at`    | any wake path   | wake-coalesce window (`#B.198`)           |
-| `last-wake-hint`  | any wake path   | dedup identical SSE pings (`#B.198`)      |
-| `last-open-wake-count` | wake path  | open-ticket count watermark — fallback (`#B.232`) |
-| `last-open-wake-hash`  | wake path  | landscape signature watermark — set-aware dedup (`#379`) |
-| `drained-state`   | timer only      | drained-strategy state `{hash,armedAt,wakeAt,step}` (`#379`) |
+| `last-wake-at`    | any wake path   | wake-coalesce window                      |
+| `last-wake-hint`  | any wake path   | dedup identical SSE pings                 |
+| `last-open-wake-count` | wake path  | open-ticket count watermark — fallback    |
+| `last-open-wake-hash`  | wake path  | landscape signature watermark — set-aware dedup |
+| `drained-state`   | timer only      | drained-strategy state `{hash,armedAt,wakeAt,step}` |
 | `timer.pid`       | cli on start    | pid of the detached timer (used by `rm`)  |
 | `timer.log`       | timer (stdout/err) | inspect via `tail --timer`             |
 
@@ -244,7 +244,7 @@ The hooks and the timer all read the same `env` file so they share
 `CL_NAME`, `CL_STATE_DIR`, `CL_INTERVAL`, `CL_CHECK_CMD`, `CL_PINGS`,
 `CL_NO_STARTUP_PING`.
 
-### One live loop per (cwd, agent) — `#403`
+### One live loop per (cwd, agent)
 
 Two `claude-loop start` for the **same agent in the same directory** is
 unsupported, and made **impossible** at start time. The plain live-loop check
@@ -269,12 +269,12 @@ unit-tested in `start-lock.test.ts`).
 
 ---
 
-## Drained-backlog reminders — `#379`
+## Drained-backlog reminders
 
 The wake gate normally fires on **pings** or **actionable** tickets (work in
 your court). When those are both 0 but `open > 0` — a backlog entirely awaiting
 the **human** (pending decisions, you-replied-last, blocked) — the loop is
-"drained" and reminds **once** by default (#379 david krwnqu); the count is also
+"drained" and reminds **once** by default (david krwnqu); the count is also
 visible on the sidebar. Set `drained_strategy: silent` to opt out of the nudge.
 
 `claude_loop.drained_strategy` opts into a throttled reminder so a forgotten
@@ -341,7 +341,7 @@ src/claude-loop/
   error-backoff.ts                      # exponential retry on pane crash (rate-limit/api-error)
   pty-proxy.py                          # Unix PTY proxy: live keystroke detection (see PTY-PROXY.md)
 config/defaults/claude-loop-pings.yaml  # default wake phrases + prompt templates
-windows/cl-pty-proxy/                    # Windows ConPTY proxy (Rust, named pipe — #281)
+windows/cl-pty-proxy/                    # Windows ConPTY proxy (Rust, named pipe)
 docs/CLAUDE-LOOP.md                     # this file
 ```
 

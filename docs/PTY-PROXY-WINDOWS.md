@@ -4,7 +4,7 @@
 > tell **a human typing** apart from **claude's output** and from **the
 > loop's own wake injection**, live, even while claude is busy streaming —
 > but built on **ConPTY** + a **named pipe** instead of POSIX `pty` +
-> `AF_UNIX`. (#281)
+> `AF_UNIX`.
 
 ---
 
@@ -85,17 +85,17 @@ unit tests (`cargo test`) built from real captured sequences.
 > needed the parser. Likewise, injected raw text (`ver\r`) written to
 > claude's ConPTY input is decoded into keystrokes by conhost.
 
-## Markers & status (parity with #269 / #274 / #278)
+## Markers & status
 
 - `human-typing` — timestamp file touched on every real text keystroke;
   read by `state.ts::humanIsTyping` (5 s TTL), drives the bicolor bar word.
 - `@cl_human` — the proxy repaints this psmux user-option instantly
   (`loop` yellow ↔ `stop` red) and clears it after the TTL, exactly like
-  the Unix proxy's #274 path. `MUX_CMD` + `CL_TMUX` come from the loop env.
+  the Unix proxy's path. `MUX_CMD` + `CL_TMUX` come from the loop env.
 - `proxy-alive` — PID-stamped presence marker dropped after a successful
   fork, removed at graceful exit. `state.ts::proxyIsAlive` probes the PID's
   liveness, so a proxy killed with `TerminateProcess` (no cleanup) leaves a
-  stale marker that is correctly read as dead — same contract as #278.
+  stale marker that is correctly read as dead — same contract as the Unix proxy.
 
 ## Fail-safe
 
@@ -140,23 +140,23 @@ proxy's feature level.
 
 The decision logic is mirrored as a **pure core** (`src/core.rs`: win32
 decode + keystroke split + `AfkDetector` + `Decider` + bar-word), the Rust
-analogue of the Python proxy's `_Decider` / `split_keystrokes` / `_AfkDetector`
-(#360/#381). It unit-tests without a PTY (`cargo test`), like the Python
+analogue of the Python proxy's `_Decider` / `split_keystrokes` / `_AfkDetector`.
+It unit-tests without a PTY (`cargo test`), like the Python
 `--replay` path. `main.rs` is the I/O glue.
 
 **At parity:** PTY/ConPTY bridge, `proxy-alive` (PID-stamped), `human-typing`
 marker, wake injection (named pipe ↔ UDS), resize, exit-code propagation,
 fail-safe direct launch, and:
 
-- [x] **#302/#305 — 3-state bar word + colours.** `stop`(196) / `wait`(178) /
+- [x] **3-state bar word + colours.** `stop`(196) / `wait`(178) /
       `loop`(40 green), all `bg=colour16`, painted on transition.
-- [x] **#315 — arm user-grace on typing.** A keystroke touches `user-took-over`
+- [x] **Arm user-grace on typing.** A keystroke touches `user-took-over`
       → bar does `stop → wait → loop`.
-- [x] **#345 — ESC-takeover.** A bare ESC (gated by `CL_ESC_TAKEOVER`) arms the
+- [x] **ESC-takeover.** A bare ESC (gated by `CL_ESC_TAKEOVER`) arms the
       user-grace; ESC-led CSI/SS3 (arrows) don't.
-- [x] **#305 — boot-grace `wait`.** Bar reads `wait` during the boot window
+- [x] **Boot-grace `wait`.** Bar reads `wait` during the boot window
       (`CL_BOOT_GRACE_SEC`, `CL_WAIT`/`--no-wait`).
-- [x] **#351/#381 — AFK detection.** Atomic-combo TOGGLE (`CL_AFK_SPEC` /
+- [x] **AFK detection.** Atomic-combo TOGGLE (`CL_AFK_SPEC` /
       `CL_AFK_WINDOW_MS` debounce) → `afk` marker on↔off, cleared on any other
       keystroke + on boot. The combo is swallowed (never reaches claude).
 

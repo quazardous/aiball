@@ -64,7 +64,7 @@ alias covering the 6-7 ops the wrapper uses (`has-session`,
 `new-session`, `send-keys`, `capture-pane`, `set-option`, `bind-key`,
 `kill-session`); the existing `MUX_CMD` indirection finds it with no code
 change — or under WSL2. Live keystroke detection has a Rust ConPTY proxy
-(`#281`, see [`docs/PTY-PROXY-WINDOWS.md`](./docs/PTY-PROXY-WINDOWS.md)).
+(see [`docs/PTY-PROXY-WINDOWS.md`](./docs/PTY-PROXY-WINDOWS.md)).
 
 Remaining is parity hardening, not a from-scratch port:
 - **NSSM-based service alternative** to the Scheduled Task, for
@@ -74,7 +74,7 @@ Remaining is parity hardening, not a from-scratch port:
 
 ## Experimental / partial
 
-### Sandbox loop (`#B.183`)
+### Sandbox loop
 
 `aiball sandbox start --tickets "10,11"` spawns an autonomous Claude
 Code session in tmux against a fixed plate of tickets. Full guide:
@@ -87,13 +87,13 @@ cron re-launches a dead sandbox when fresh pings land for its agent
 
 **Missing for daily-driver status**:
 - Graceful degradation on Claude Code rate-limits / API errors — the
-  dumb exponential backoff `claude-loop` got (`#332`,
-  `error-backoff.ts`) is **not** wired into the sandbox path yet.
+  dumb exponential backoff `claude-loop` got
+  (`error-backoff.ts`) is **not** wired into the sandbox path yet.
 - Anti-oscillation hardening — the loop relies on the agent honoring
   conventions (e.g. resolving/escalating); bad behavior can bounce a
   ticket forever.
 - Not stress-tested in multi-hour autonomous runs (smoke tests cover
-  trivial tickets only, `#B.82`).
+  trivial tickets only).
 
 For the autonomous wrapping you actually want today, use
 [`claude-loop`](./README.md#quickstart--claude-loop-recommended).
@@ -102,16 +102,16 @@ follow-up; it's kept for experimentation — caveat emptor.
 
 ## Open ideas (not committed)
 
-- **Consumer panel over SSE** — `#B.177` shipped the consumer state
-  *push* (`pushState`: loop/idle/busy + the human-presence word land on
+- **Consumer panel over SSE** — the consumer state
+  *push* shipped (`pushState`: loop/idle/busy + the human-presence word land on
   the daemon), but the consumers panel still polls ~30s to read it.
   Wiring the panel to the existing SSE event-bus would repaint it
   instantly. Cheap now that the push side exists.
 - **claude-loop transcript reader** — instead of pane-scraping the
   `esc to interrupt` footer, read claude-code's JSONL transcript at
   `~/.claude/projects/<hash>/<id>.jsonl` for authoritative turn
-  boundaries. Heavier, marginal payoff per `#B.172`.
-- **`aiball check` deprecation-warning symmetry (`#B.154`)** — the
+  boundaries. Heavier, marginal payoff.
+- **`aiball check` deprecation-warning symmetry** — the
   autopoll Stop hook (`hook-stop.ts`) doesn't surface the
   deprecated-identity warning that `claude-loop` and `aiball check`
   already do. Low value (its stderr isn't user-visible); wire only if a

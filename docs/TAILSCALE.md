@@ -1,4 +1,4 @@
-# aiball over Tailscale — remote access (#B.182, #354, #380)
+# aiball over Tailscale — remote access
 
 Read the inbox / moderate / drop tickets from your phone (or any
 other device) while away from the aiball host, without exposing
@@ -95,5 +95,5 @@ The daemon auto-resolves the proxy target port from `AIBALL_PORT`, the systemd
 - **"401 authentication required"** → expected on first visit; log in
   with your human consumer credentials.
 
-The web UI is responsive (#B.161) — usable from a phone without
+The web UI is responsive — usable from a phone without
 zoom. Long ticket bodies are still more comfortable on a laptop.

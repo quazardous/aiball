@@ -48,13 +48,13 @@ Keys: `interval_seconds`, `boot_grace_seconds`, `user_grace_seconds`,
 `wake_in_flight_ttl_ms`, `esc_takeover`, `ask_grace_seconds`, `afk_key`,
 `afk_window_ms`. See [`CLAUDE-LOOP.md`](./CLAUDE-LOOP.md).
 
-**AskUserQuestion gate + AFK (#351).** In a loop, `AskUserQuestion` is allowed
+**AskUserQuestion gate + AFK.** In a loop, `AskUserQuestion` is allowed
 only if a human acted within `ask_grace_seconds` (default 600 = 10 min, longer
 than the wake user-grace — a stalled question is cheap vs a lost one); past
 that it redirects the agent to ask via a ticket comment. `afk_key` lets you
 flag yourself away *immediately* (no waiting for the timeout): the PTY proxy
 watches stdin for the combo and, on match, **toggles** an `afk` marker the gate
-honours (#381 — the combo flips away↔back, robust to the two keystrokes
+honours (the combo flips away↔back, robust to the two keystrokes
 arriving coalesced in one read, and forgetting its state after each toggle so a
 stray repeat key within `afk_window_ms` can't re-toggle); resuming any
 **typing** also clears it. `afk_key` uses VS Code
@@ -70,7 +70,7 @@ without the kitty/win32 keyboard protocol.
 [`WORKFLOW.md`](./WORKFLOW.md).
 
 ### Bar colour profile — `colors:` — *defaults → global → yaml*
-The claude-loop tmux status-bar colours (#385). Code defaults →
+The claude-loop tmux status-bar colours. Code defaults →
 `~/.config/aiball/config.yaml` `colors:` (machine-wide theme) →
 `.aiball.yaml` `colors:` (project wins). Each key is a raw tmux colour token
 (`colour16`, `red`, `#0087ff`); an omitted key keeps the layer below. The bar
@@ -101,7 +101,7 @@ prompts/formatting, every layer **adds**. Config tags render read-only
 project via a `tags: { global: [...], projects: { name: [...] } }` map;
 a bare list in `.aiball.yaml` means "tags for this project".
 
-### Remote-access providers — `providers:` — *global only (host-level, #354)*
+### Remote-access providers — `providers:` — *global only (host-level)*
 Remote access exposes the whole machine's daemon, so this block lives in the
 **global** config only (`~/.config/aiball/config.yaml`), not per-project.
 v1 implements **tailscale** and **autostart only** (bring up at daemon
@@ -123,7 +123,7 @@ providers:
 Set it up with `aiball init tailscale [--http] [--port N]`; manage from the CLI:
 `aiball providers status | up [--all] | down`. A present provider block defaults
 `enabled`/`autostart` to true (declaring it = wanting it). The bring-up calls
-`tailscale serve` directly (inlined in `src/providers.ts` since #380; see
+`tailscale serve` directly (inlined in `src/providers.ts`; see
 [`TAILSCALE.md`](./TAILSCALE.md)).
 
 > Activation note: the `ExecStartPost` lives in the shipped unit

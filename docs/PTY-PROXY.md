@@ -116,7 +116,7 @@ MIT.)
   want the first native dep in the project.
 - **Unix-only is fine here.** Python's `pty` is Unix-only, but Windows
   support is handled separately (psmux), so this proxy deliberately does
-  **not** need to be cross-platform or share its tech (#269).
+  **not** need to be cross-platform or share its tech.
 - **Fail-safe.** If PTY allocation/setup fails, the proxy `exec`s claude
   directly — the live terminal is never bricked.
 
@@ -140,9 +140,9 @@ MIT.)
 > PID-stamped `proxy-alive` marker) is the ground truth for who paints
 > the bar's human segment.
 
-## Diagnostic & replay (#360)
+## Diagnostic & replay
 
-The proxy's keystroke→action logic — AFK-combo detection, the #345
+The proxy's keystroke→action logic — AFK-combo detection, the
 first-combo buffering, presence (`stop`/`wait`/`loop`), ESC-takeover —
 lives in a **pure decider** (`_Decider`) decoupled from all I/O: it
 takes a keystroke (or idle tick) + a clock and **returns the actions**
