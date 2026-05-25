@@ -17,6 +17,16 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Work tool — `ticket_engage` (#423)
+
+- A new MCP tool **`ticket_engage`** splits *exploration* from *engagement*:
+  `ticket_list` stays read-only (browse the backlog), while `ticket_engage`
+  returns the head of your actionable work-order **and claims it for you** in one
+  step, then hands back the ticket (brief, ready to act on). The claim lands
+  before your first comment, closing the pickup→first-comment window left by the
+  auto-claim. The wake CTA now points agents at `ticket_engage()`. Builds on the
+  assignment/claim from #418; no migration.
+
 ### Ticket → agent assignment + claim (#418)
 
 - Tickets can now be **assigned** or **claimed** so several agents on one project

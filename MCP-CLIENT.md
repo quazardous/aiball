@@ -73,7 +73,7 @@ Setting `AIBALL_PROJECT` (env or yaml) also auto-subscribes the agent to that pr
 
 ---
 
-## 3. The 13 MCP tools
+## 3. The 14 MCP tools
 
 Tickets:
 - `ticket_new({ title, body?, project?, intent?, broadcast?, parent_id?, by_agent? })` — create a ticket. With `AIBALL_PROJECT` set you can omit `project`. `intent` ∈ `panic | request | question | fyi`. Pass `broadcast: true` to flag the ticket as broadcast at creation (project followers get pings); default false (internal-only). `parent_id` makes the new ticket a sub-ticket of the given parent.
@@ -83,7 +83,8 @@ Tickets:
 - `ticket_close({ ticket_id, project?, by_agent? })` — close a thread.
 - `ticket_assign({ ticket_id, assignee? })` — claim or assign a ticket (multi-agent anti-collision). Omit `assignee` (or pass your own id) to **claim** it for yourself — a live claim drops it out of every other agent's actionable pool while you work it. Pass another consumer's id to **push** the assignment onto them (moderator/human only). The hold lapses after the configured assign window (default 4h) and auto-releases on close.
 - `ticket_release({ ticket_id })` — release an assignment / claim back to the shared pool (assignee or moderator; no-op if unassigned).
-- `ticket_list({ project?, open?, include_snoozed? })` — list tickets (filter by project, hide closed).
+- `ticket_engage({ project? })` — the **work** tool (vs `ticket_list` = exploration): returns the head of YOUR actionable work-order **and claims it for you** in one step, then hands back the ticket (brief) ready to act on. Use it when you actually pick up work — the claim lands before your first comment so other agents don't double-work it. Returns `{ engaged: null }` when your queue is empty.
+- `ticket_list({ project?, open?, actionable?, include_snoozed? })` — list tickets (filter by project, hide closed). Read-only **exploration** of the backlog — it never claims; use `ticket_engage` to pick up the head.
 - `ticket_get({ ticket_id })` — full thread (header + comments + sub-tickets recap).
 - `search({ query, project?, open?, intent?, limit? })` — FTS5 search across ticket titles + bodies + comment bodies. Whitespace splits into AND-ed tokens, case- and accent-insensitive. Returns ranked hits with `<mark>…</mark>` snippets.
 
