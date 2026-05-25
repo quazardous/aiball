@@ -17,20 +17,24 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
-### Stop a claude-loop remotely (#442)
+### Stop a claude-loop, locally or remotely (#442)
 
-- A running claude-loop can now be **hard-killed remotely** — no shell on its host
-  needed. The Consumers page shows a **stop button** on every live autonomous
-  loop; it calls `POST /api/consumers/:id/loop-stop`, which pushes a `control:kill`
-  event down the live SSE the loop already holds. The loop's timer self-destructs
-  (kills its tmux session + Claude, removes its state, exits); the running badge
-  clears on its own via the presence broadcast. Works over the tailnet since it
-  rides the daemon.
+- New **`claude-loop stop [name]`** + a **`SIGTERM`** handler on the timer — a clean
+  shutdown that kills Claude/tmux and exits but **keeps the state dir** (the loop
+  shows as dead, still `restart`/`prune`-able; `rm` remains the halt + delete).
+  This completes the signal convention: `HUP` = restart, `USR2` = reload,
+  **`TERM` = stop**.
+- The same loop can be **stopped remotely** — no shell on its host. The Consumers
+  page shows a **stop button** on every live loop; it calls
+  `POST /api/consumers/:id/loop-stop`, which pushes a `control` event down the
+  live SSE the loop already holds, and the timer funnels it into the *same*
+  clean-shutdown path. The running badge clears on its own via the presence
+  broadcast. Works over the tailnet since it rides the daemon.
 - **Privileged + guarded**: loop-stop is moderator-only and explicitly **denied to
   proxy-node tokens** (a node may relay any identity, so the tier check is
   independent of the human check — a compromised node can't DoS your loops).
-- First cut is **hard-kill**; a graceful "pause autonomy, keep Claude alive" is a
-  planned follow-up. (Already-running loops pick up the self-destruct after a
+- First cut is **hard stop**; a graceful "pause autonomy, keep Claude alive" is a
+  planned follow-up. (Already-running loops pick up the new handler after a
   `claude-loop reload`/restart, since the detached timer doesn't hot-reload.)
 
 ### Syntax highlighting in rendered markdown (#440)

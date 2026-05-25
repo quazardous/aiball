@@ -135,9 +135,18 @@ claude-loop tail <name> --lines 30     # last N lines of the claude pane
 claude-loop tail <name> --timer        # detached timer's stdout log
 claude-loop attach <name>              # tmux attach
 claude-loop wake <name>                # force the next tick (bypass check-cmd)
-claude-loop rm <name> [--force]        # kill tmux + timer + state dir
+claude-loop reload [name]              # respawn the timer in place (keeps claude)
+claude-loop restart [name]            # hard restart: kill + relaunch from the plate
+claude-loop stop [name]               # clean stop: kill claude/tmux + exit, KEEP state
+claude-loop rm <name> [--force]        # stop + DELETE the state dir
 claude-loop prune                      # interactive cleanup of orphans
 ```
+
+**Signals** (sent to the timer pid, `$state/timer.pid`) mirror the lifecycle
+verbs so a loop is controllable without the CLI: `HUP` = restart, `USR2` =
+reload, `TERM` = stop. A running loop can also be **stopped remotely** from the
+aiball web UI (the Consumers page shows a stop button on each live loop) — handy
+when you have no shell on the loop's host.
 
 ---
 

@@ -60,7 +60,7 @@ import {
     type Plate,
 } from "./state.js";
 import { cmdTail, type TailMode } from "./cmds/tail.js";
-import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdWake } from "./cmds/manage.js";
+import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake } from "./cmds/manage.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -1499,6 +1499,9 @@ async function main(): Promise<void> {
     program.command("restart [name]")
         .description("HARD restart (#388): kill claude + the loop entirely, then relaunch fresh with the same start config (from the plate). Unlike `reload` (timer-only), this stops + starts. Detached + no-attach — reconnect with `attach`. Also the SIGHUP action: `kill -HUP <timer.pid>` self-restarts. Name optional — defaults to the current-cwd loop.")
         .action((name: string | undefined) => cmdRestart(name ?? resolveCurrentLoopName()));
+    program.command("stop [name]")
+        .description("Clean-STOP a loop: kill claude/tmux + exit the timer, but KEEP the state dir (loop shows dead, stays restart/prune-able — `rm` is the halt+delete). Also the SIGTERM action: `kill -TERM <timer.pid>` (#442 — convention HUP=restart, USR2=reload, TERM=stop). Remotely via the daemon: the Consumers-page stop button. Name optional — defaults to the current-cwd loop.")
+        .action((name: string | undefined) => cmdStop(name ?? resolveCurrentLoopName()));
     program.command("check [name]")
         .description("Diagnose what the check-cmd would do right now (no claude spawn)")
         .option("--check-cmd <cmd>", "Override the check-cmd (default: from loop plate or DEFAULT_CHECK_CMD)")

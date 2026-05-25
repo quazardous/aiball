@@ -64,6 +64,29 @@ export function cmdRm(name: string, force: boolean): void {
     }
 }
 
+/**
+ * #442: clean STOP — SIGTERM the timer (its handler kills tmux + exits; the
+ * state dir is KEPT). The signal mirror of the timer's TERM handler, completing
+ * the convention alongside reload (USR2) / restart (HUP). Unlike `rm` (halt +
+ * delete), `stop` leaves the loop listed as dead so it stays restart/prune-able.
+ */
+export function cmdStop(name: string): void {
+    const sd = stateDirFor(name);
+    if (!existsSync(timerPidPath(sd))) die(`no loop '${name}' at ${sd}`);
+    let pid: number | null = null;
+    try {
+        const raw = Number(readFileSync(timerPidPath(sd), "utf8").trim());
+        if (Number.isFinite(raw) && raw > 0) pid = raw;
+    } catch { /* unreadable */ }
+    if (pid === null) die(`no timer pid recorded for '${name}'`);
+    try {
+        process.kill(pid, "SIGTERM");
+    } catch {
+        die(`timer for '${name}' not running (stale pid ${pid}) — use 'rm' to clean up`);
+    }
+    process.stdout.write(`stop sent to loop '${name}' (clean shutdown; state kept — 'rm' to delete)\n`);
+}
+
 export function cmdWake(name: string): void {
     if (!tmuxAlive(name)) die(`loop '${name}' not alive`);
     const sd = stateDirFor(name);

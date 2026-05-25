@@ -33,7 +33,7 @@
  * per-menu settings flags. Interim: user runs `claude` once to clear
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
-import { appendFileSync, existsSync, openSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, openSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
@@ -103,19 +103,24 @@ const interval = Math.max(1, Number(intervalRaw));
 const tname = tmuxName(name);
 
 /**
- * #442: remote HARD-KILL. A `control:kill` event arrived on the SSE this loop
- * already holds → tear the loop down from inside: kill the tmux session (claude
- * + pane die), remove the state dir, then exit THIS (detached) timer process.
- * We deliberately do NOT reuse `cmdRm`: it `process.kill()`s the recorded timer
- * pid, which is the tsx WRAPPER (a defunct zombie, #413) and not this real
- * process — only an explicit `process.exit` reliably stops the live timer. The
- * SSE teardown on exit makes the daemon broadcast `running:false` (live-presence)
- * so the UI clears the badge without polling.
+ * #442: CLEAN SHUTDOWN — the canonical "stop this loop" path. Triggered by
+ * `SIGTERM` (the signal mirror of `claude-loop stop`, completing the convention
+ * HUP=restart / USR2=reload / TERM=stop) AND by a remote `control:kill` over the
+ * SSE the loop already holds — both converge here. Kills the tmux session
+ * (claude + pane die), then exits THIS (detached) timer process.
+ *
+ * We deliberately do NOT reuse `cmdRm`: it `process.kill()`s the RECORDED timer
+ * pid, and only an explicit in-process exit reliably stops the live timer (cf.
+ * #413). The exit closes the SSE → the daemon broadcasts `running:false`
+ * (live-presence) so the UI clears the badge without polling.
+ *
+ * (B) A *stop* HALTS but LEAVES the state dir — the loop shows as dead in
+ * `claude-loop list` and stays `restart`/`prune`-able. `claude-loop rm` is the
+ * halt + delete.
  */
-function selfDestruct(reason: string): void {
-    log(`CONTROL kill received (${reason}) — self-destructing loop '${name}', exiting`);
+function cleanShutdown(reason: string): void {
+    log(`clean shutdown (${reason}) — stopping loop '${name}' (state kept; rm to delete)`);
     try { spawnSync(MUX_CMD, ["kill-session", "-t", tname], { stdio: "ignore" }); } catch { /* tmux already gone */ }
-    try { if (sd) rmSync(sd, { recursive: true, force: true }); } catch { /* best effort */ }
     process.exit(0);
 }
 
@@ -604,7 +609,7 @@ async function mainSse(): Promise<void> {
             // #442: remote hard-kill. A `control:kill` arrives on the SSE this
             // loop already holds → self-destruct from inside.
             onControl: (c) => {
-                if (c.action === "kill") selfDestruct("sse:control:kill");
+                if (c.action === "kill") cleanShutdown("sse:control:kill");
                 else log(`SSE control ignored (unknown action): ${JSON.stringify(c)}`);
             },
             onPing: (p) => {
@@ -963,6 +968,12 @@ async function main(): Promise<void> {
             process.exit(1);
         }
     });
+    // #442: SIGTERM = clean STOP. Completes the signal convention HUP=restart /
+    // USR2=reload / TERM=stop. Unlike HUP/USR2 (which delegate to a detached
+    // re-spawn), stop just halts in place — kill tmux + exit, state dir kept.
+    // The signal mirror of `claude-loop stop`; the remote SSE control:kill also
+    // funnels into the same `cleanShutdown`.
+    process.on("SIGTERM", () => cleanShutdown("SIGTERM"));
     if (isInternalCheckCmd(checkCmd)) {
         await mainSse();
     } else {
