@@ -20,6 +20,7 @@ import { AiballClient } from "../client.js";
 import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
+import { createLogger } from "../log.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -38,10 +39,16 @@ if (!sd || !name) emit();
 // silence that made misfires invisible. tail -f via
 // `claude-loop tail <name> --stop-hook` (planned subcommand) or
 // `tail -f ~/.claude-loop/<name>/stop-hook.log`.
+// #412: route stop-hook.log through the level logger (no tag → `<ts> LEVEL msg`).
+// Existing calls map to `info` (default output preserved, now with the LEVEL
+// token); the hook inherits CL_LOG_LEVEL from the sourced env file.
+const logger = createLogger({
+    write: (line) => {
+        try { appendFileSync(join(sd!, "stop-hook.log"), line); } catch { /* nowhere to log */ }
+    },
+});
 function log(msg: string): void {
-    try {
-        appendFileSync(join(sd!, "stop-hook.log"), `${new Date().toISOString()} ${msg}\n`);
-    } catch { /* nowhere to log */ }
+    logger.info(msg);
 }
 
 /**

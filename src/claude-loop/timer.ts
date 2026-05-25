@@ -37,6 +37,7 @@ import { appendFileSync, existsSync, openSync, unlinkSync, writeFileSync } from 
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
+import { createLogger } from "../log.js";
 import {
     isInternalCheckCmd,
     DEFAULT_USER_GRACE_SEC,
@@ -120,11 +121,14 @@ const NO_WAIT = process.env.CL_WAIT === "0";
 const BOOT_GRACE_MS = Math.max(0, Number(process.env.CL_BOOT_GRACE_SEC ?? 60)) * 1000;
 const BOOT_TIME = Date.now();
 
+// #412: timer log routed through the level logger (tag `claude-loop:<name>`,
+// stdout → redirected to timer.log by the launcher). Existing calls map to
+// `info` so default output is unchanged (now carrying the LEVEL token); use
+// `logger.debug(…)` for new diagnostic lines (dropped at the default `info`).
+// #B.198: ts stays at the head so `--log` can reorder as `<ts> [tag] body`.
+const logger = createLogger({ tag: `claude-loop:${name}` });
 function log(msg: string): void {
-    // #B.198 david: timer lines were missing timestamps — added at
-    // the head to match stop-hook.log and to let `--log` reorder as
-    // `<ts> [tag] body`.
-    process.stdout.write(`${new Date().toISOString()} [claude-loop:${name}] ${msg}\n`);
+    logger.info(msg);
 }
 
 function tmuxAlive(): boolean {
@@ -885,9 +889,13 @@ async function main(): Promise<void> {
     process.on("SIGHUP", () => {
         if (!name) { process.exit(0); }
         const logPath = join(STATE_ROOT, "restart.log");
-        const log = (m: string): void => {
-            try { appendFileSync(logPath, `${new Date().toISOString()} [${name}] ${m}\n`); } catch { /* nowhere */ }
-        };
+        // #412: route restart.log through the level logger (tag=name →
+        // `<ts> [name] LEVEL msg`); these are info-level lifecycle lines.
+        const restartLog = createLogger({
+            tag: name,
+            write: (line) => { try { appendFileSync(logPath, line); } catch { /* nowhere */ } },
+        });
+        const log = (m: string): void => restartLog.info(m);
         try {
             const bin = join(installRoot(), "bin", "claude-loop");
             const out = openSync(logPath, "a"); // restart child's stdout+stderr → the log
@@ -912,9 +920,13 @@ async function main(): Promise<void> {
     process.on("SIGUSR2", () => {
         if (!name) { process.exit(0); }
         const logPath = join(STATE_ROOT, "restart.log");
-        const log = (m: string): void => {
-            try { appendFileSync(logPath, `${new Date().toISOString()} [${name}] ${m}\n`); } catch { /* nowhere */ }
-        };
+        // #412: route restart.log through the level logger (tag=name →
+        // `<ts> [name] LEVEL msg`); these are info-level lifecycle lines.
+        const restartLog = createLogger({
+            tag: name,
+            write: (line) => { try { appendFileSync(logPath, line); } catch { /* nowhere */ } },
+        });
+        const log = (m: string): void => restartLog.info(m);
         try {
             const bin = join(installRoot(), "bin", "claude-loop");
             const out = openSync(logPath, "a");

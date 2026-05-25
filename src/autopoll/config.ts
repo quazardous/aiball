@@ -148,6 +148,10 @@ export interface AiballConfig {
          *  then quiet until the landscape moves). Drives CL_DRAINED_STRATEGY;
          *  parsed by drained-strategy.ts. */
         drained_strategy: string;
+        /** #412: minimum log level (PSR-3 / RFC5424: debug…emergency). Messages
+         *  below it are dropped. Drives CL_LOG_LEVEL (timer + hooks). Default
+         *  `info`; an unknown name degrades to the default at the logger. */
+        log_level: string;
     };
     /**
      * #319: workflow hints surfaced by claude-loop at wake for `feature`-intent
@@ -244,6 +248,8 @@ const DEFAULTS: AiballConfig = {
         // human), then quiet until the landscape moves. Tune per-project via
         // `.aiball.yaml claude_loop.drained_strategy` (`silent` disables it).
         drained_strategy: "once",
+        // #412: PSR-style level threshold; messages below it are dropped. info default.
+        log_level: "info",
     },
     // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
     // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.
@@ -454,6 +460,11 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // by parseDrainedStrategy — an unknown spec degrades to silent).
             if (typeof cl.drained_strategy === "string" && cl.drained_strategy.trim()) {
                 cfg.claude_loop.drained_strategy = cl.drained_strategy.trim();
+            }
+            // #412: log level threshold (validated at the logger — an unknown
+            // name degrades to the default `info`).
+            if (typeof cl.log_level === "string" && cl.log_level.trim()) {
+                cfg.claude_loop.log_level = cl.log_level.trim().toLowerCase();
             }
             // #319: workflow hint flags (layered like claude_loop above).
             const wf = (raw.workflow ?? {}) as Record<string, unknown>;
