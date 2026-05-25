@@ -132,6 +132,9 @@ narrative for the product as a whole.
   relay time (`tokens.last_seen_ip`). The token value is never exposed: a node is
   addressed by a non-secret id. `GET /api/nodes` + `DELETE /api/nodes/:id`,
   moderator-only. Builds on the remote-detection signals from #422.
+- **Revoke confirmation (#433):** revoke now goes through the app's styled
+  confirm dialog (not a bare native prompt) with an impact-aware message — it
+  names how many relayed consumers lose access until the node is re-enrolled.
 
 ### Detect remote agents (#422)
 

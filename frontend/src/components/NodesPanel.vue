@@ -6,8 +6,10 @@
 import { ref, onMounted } from "vue";
 import Button from "primevue/button";
 import Tag from "primevue/tag";
+import { useConfirm } from "primevue/useconfirm";
 import { api, type NodeView } from "../lib/api";
 
+const confirm = useConfirm();
 const nodes = ref<NodeView[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -24,11 +26,27 @@ async function load(): Promise<void> {
     }
 }
 
-async function revoke(n: NodeView): Promise<void> {
+// #433: confirm before revoking (destructive — cuts the node + every consumer
+// it relays). Uses the app's in-app PrimeVue confirm dialog (global
+// <ConfirmDialog/> in App.vue), not the native window.confirm, for a consistent
+// look and an impact-aware message.
+function revoke(n: NodeView): void {
     const label = n.label || n.node_id;
-    if (!window.confirm(`Revoke node "${label}"? The proxy will no longer be able to relay to this daemon.`)) {
-        return;
-    }
+    const relayed = n.relayed_count
+        ? ` ${n.relayed_count} relayed consumer${n.relayed_count > 1 ? "s" : ""} will lose access until the node is re-enrolled.`
+        : "";
+    confirm.require({
+        header: "Revoke node",
+        message: `Revoke node "${label}"? The proxy will no longer relay to this daemon.${relayed}`,
+        icon: "pi pi-exclamation-triangle",
+        acceptLabel: "Revoke",
+        rejectLabel: "Cancel",
+        acceptClass: "p-button-danger",
+        accept: () => { void doRevoke(n); },
+    });
+}
+
+async function doRevoke(n: NodeView): Promise<void> {
     try {
         await api.revokeNode(n.node_id);
         await load();
