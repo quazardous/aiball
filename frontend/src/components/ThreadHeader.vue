@@ -57,7 +57,8 @@ const emit = defineEmits<{
         class="thread-assignee"
         :title="`${ticket.is_claim ? 'Claimed by' : 'Assigned to'} ${ticket.assignee}${ticket.assigned_at ? ' · ' + new Date(ticket.assigned_at).toLocaleString() : ''}`"
     >
-        <i class="pi pi-user" /> {{ ticket.assignee }}
+        <i :class="['pi', ticket.is_claim ? 'pi-bookmark-fill' : 'pi-user-plus']" />
+        {{ ticket.is_claim ? 'claimed by' : 'assigned to' }} {{ ticket.assignee }}
     </span>
     <!-- #404/#406: per-ticket token-effort cost (shown once any usage is
          captured; cost-equivalent — cache reads weighted 0.1×). -->
