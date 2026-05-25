@@ -81,6 +81,8 @@ Tickets:
 - `ticket_update({ ticket_id, title?, body?, intent?, broadcast?, postponed_until? })` — patch a ticket's persistent fields. Replaces the previous `ticket_postpone`, `ticket_broadcast`, and the planned `ticket_edit` tools. Pass only the fields to change; each field has its own permission check (owner-bypass for edit/broadcast, reporter-or-human for snooze). `postponed_until` accepts ISO8601 or relative shorthand (`+2h`, `+3d`, …); pass `null` to un-snooze.
 - `ticket_decide({ target_id, decision })` — approve or reject a pending post (ticket or comment). Human-only by convention; manual override for the rule engine.
 - `ticket_close({ ticket_id, project?, by_agent? })` — close a thread.
+- `ticket_assign({ ticket_id, assignee? })` — claim or assign a ticket (multi-agent anti-collision). Omit `assignee` (or pass your own id) to **claim** it for yourself — a live claim drops it out of every other agent's actionable pool while you work it. Pass another consumer's id to **push** the assignment onto them (moderator/human only). The hold lapses after the configured assign window (default 4h) and auto-releases on close.
+- `ticket_release({ ticket_id })` — release an assignment / claim back to the shared pool (assignee or moderator; no-op if unassigned).
 - `ticket_list({ project?, open?, include_snoozed? })` — list tickets (filter by project, hide closed).
 - `ticket_get({ ticket_id })` — full thread (header + comments + sub-tickets recap).
 - `search({ query, project?, open?, intent?, limit? })` — FTS5 search across ticket titles + bodies + comment bodies. Whitespace splits into AND-ed tokens, case- and accent-insensitive. Returns ranked hits with `<mark>…</mark>` snippets.

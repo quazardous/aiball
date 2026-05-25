@@ -2,8 +2,8 @@
  * Ticket-write MCP tools (carved out of src/mcp.ts in #B.213 phase
  * 4.A on 2026-05-19). Behavior-preserving move.
  *
- * Tools: ticket_new, ticket_reply, ticket_close, ticket_update,
- * ticket_decide.
+ * Tools: ticket_new, ticket_reply, ticket_close, ticket_move,
+ * ticket_assign, ticket_release, ticket_update, ticket_decide.
  *
  * Exposed entry point: `registerTicketWriteTools(server)`.
  */
@@ -345,6 +345,45 @@ export function registerTicketWriteTools(server: McpServer): void {
         async ({ ticket_id, project }) => {
             markActiveTicket(ticket_id); // #404: focus = this ticket (token attribution)
             const res = await client.moveTicket(ticket_id, project);
+            return asText(res);
+        },
+    );
+
+    // #418: ticket → agent assignment for the multi-agent anti-collision gate.
+    server.registerTool(
+        "ticket_assign",
+        {
+            description:
+                "Assign or claim a ticket so multiple agents on one project don't double-work it. Omit `assignee` (or pass your own consumer id) to CLAIM it for yourself: a live claim drops the ticket out of every OTHER agent's actionable pool while you work it. Pass another consumer's id to PUSH the assignment onto them — moderator/human only (an agent can only claim for itself; pushing to a third party is rejected). The hold is time-boxed: it lapses after the configured assign window (default 4h) so an abandoned claim returns to the shared pool, and it auto-releases when the ticket closes. Hand it back early with ticket_release.",
+            inputSchema: {
+                ticket_id: z.number().int().describe("Ticket id (the integer in #<id>)."),
+                assignee: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "Consumer id to assign to. Omit (or pass your own id) to claim it for yourself; assigning a different consumer is moderator-only.",
+                    ),
+            },
+        },
+        async ({ ticket_id, assignee }) => {
+            markActiveTicket(ticket_id); // #404: focus = this ticket (token attribution)
+            const res = await client.assignTicket(ticket_id, assignee);
+            return asText(res);
+        },
+    );
+
+    server.registerTool(
+        "ticket_release",
+        {
+            description:
+                "Release a ticket's assignment or claim — hand it back to the shared pool so any agent can pick it up again. The current assignee or a human moderator can release; no-op if the ticket is unassigned.",
+            inputSchema: {
+                ticket_id: z.number().int().describe("Ticket id (the integer in #<id>)."),
+            },
+        },
+        async ({ ticket_id }) => {
+            markActiveTicket(ticket_id); // #404: focus = this ticket (token attribution)
+            const res = await client.releaseTicket(ticket_id);
             return asText(res);
         },
     );
