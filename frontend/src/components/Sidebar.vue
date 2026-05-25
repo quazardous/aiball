@@ -16,7 +16,7 @@ export interface ProjectListItem {
     running?: boolean;
 }
 
-export type SettingsPanel = "general" | "rules" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "compose";
+export type SettingsPanel = "general" | "rules" | "work-filters" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "compose";
 
 /**
  * Per-project sub-pages (#B.127): "settings" hosts the moderation
@@ -193,6 +193,15 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
             >
                 <i class="pi pi-cog" />
                 <span>Rules</span>
+            </button>
+            <button
+                type="button"
+                class="sidebar-item"
+                :class="{ active: panel === 'work-filters' }"
+                @click="emit('open-panel', 'work-filters')"
+            >
+                <i class="pi pi-filter" />
+                <span>Work filters</span>
             </button>
             <button
                 type="button"

@@ -125,6 +125,16 @@ export {
 } from "./db/rules.js";
 
 export {
+    insertWorkFilter,
+    listWorkFilters,
+    deleteWorkFilter,
+    setWorkFilterEnabled,
+    type WorkFilter,
+    type WorkFilterMode,
+    type NewWorkFilter,
+} from "./db/work-filters.js";
+
+export {
     type ProjectStats,
     upsertSubscription,
     deleteSubscription,

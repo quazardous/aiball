@@ -43,6 +43,7 @@ import { rulesRouter } from "./api/rules.js";
 import { subscriptionsRouter } from "./api/subscriptions.js";
 import { tagsRouter } from "./api/tags.js";
 import { ticketsRouter } from "./api/tickets.js";
+import { workFiltersRouter } from "./api/work-filters.js";
 import { ticketSubscriptionsRouter } from "./api/ticket-subscriptions.js";
 import { uploadsRouter } from "./api/uploads.js";
 
@@ -364,6 +365,7 @@ api.use(configRouter);
 // Moderation rule CRUD → ./api/rules.ts; /feed-path → ./api/agent-helpers.ts
 // (#B.213 phase 1.C).
 api.use(rulesRouter);
+api.use(workFiltersRouter);
 api.use(agentHelpersRouter);
 
 // -------- subscriptions + read-tracking ------------------------------------

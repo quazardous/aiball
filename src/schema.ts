@@ -241,6 +241,28 @@ export const rules = sqliteTable("rules", {
     index("idx_rules_position").on(t.position),
 ]);
 
+// #447: per-agent work filters — narrow which tickets a consumer (agent) picks
+// up, by tag. Stored here in the daemon DB (not per-machine config) so every
+// loop hitting this daemon shares the same filter. Applied in the actionable/
+// claimable gate. Mirrors the `rules` table's shape (position + enabled mute).
+export const workFilters = sqliteTable("work_filters", {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** The agent (consumer_id) this filter constrains. */
+    consumerId: text("consumer_id").notNull(),
+    /** Optional project scope. NULL = applies across all the consumer's projects. */
+    project: text("project"),
+    /** 'only' = work ONLY matching tickets; 'except' = never work matching ones. */
+    mode: text("mode").notNull().default("only"),
+    /** JSON array of tag names (any-of): a ticket matches if it carries ≥1. */
+    matchTags: text("match_tags").notNull().default("[]"),
+    enabled: integer("enabled").notNull().default(1),
+    position: integer("position").notNull().default(0),
+    note: text("note"),
+    createdAt: text("created_at").notNull(),
+}, (t) => [
+    index("idx_work_filters_consumer").on(t.consumerId),
+]);
+
 export const tags = sqliteTable("tags", {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull().unique(),
@@ -525,6 +547,9 @@ export type NewMessageRow = typeof messages.$inferInsert;
 
 export type Rule = typeof rules.$inferSelect;
 export type NewRuleRow = typeof rules.$inferInsert;
+
+export type WorkFilterRow = typeof workFilters.$inferSelect;
+export type NewWorkFilterRow = typeof workFilters.$inferInsert;
 
 export type Tag = typeof tags.$inferSelect;
 export type NewTagRow = typeof tags.$inferInsert;

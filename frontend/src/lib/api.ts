@@ -107,6 +107,20 @@ export interface Rule {
     created_at: string;
 }
 
+/** #447: a per-agent work filter — narrows which tickets a consumer picks up,
+ *  by tag. Applied server-side in the actionable/claimable gate. */
+export interface WorkFilter {
+    id: number;
+    consumer_id: string;
+    project: string | null;
+    mode: "only" | "except";
+    match_tags: string[];
+    enabled: 0 | 1;
+    position: number;
+    note: string | null;
+    created_at: string;
+}
+
 /**
  * The current consumer (the human moderator behind the UI). Stored in
  * localStorage and propagated to the backend on EVERY request via the
@@ -747,6 +761,23 @@ export const api = {
     delRule: (id: number) => req<void>("DELETE", `/api/rules/${id}`),
     toggleRule: (id: number, enabled: boolean) =>
         req<Rule>("PATCH", `/api/rules/${id}`, { enabled }),
+
+    // #447: per-agent work filters.
+    listWorkFilters: (consumerId?: string) =>
+        req<WorkFilter[]>(
+            "GET",
+            `/api/work-filters${consumerId ? `?consumer_id=${encodeURIComponent(consumerId)}` : ""}`,
+        ),
+    addWorkFilter: (body: {
+        consumer_id: string;
+        project?: string | null;
+        mode?: "only" | "except";
+        match_tags: string[];
+        note?: string | null;
+    }) => req<WorkFilter>("POST", "/api/work-filters", body),
+    delWorkFilter: (id: number) => req<void>("DELETE", `/api/work-filters/${id}`),
+    toggleWorkFilter: (id: number, enabled: boolean) =>
+        req<WorkFilter>("PATCH", `/api/work-filters/${id}`, { enabled }),
 
     listTags: () => req<Tag[]>("GET", "/api/tags"),
     // Merged config+DB catalog for the Tags admin panel (#223). Pass a

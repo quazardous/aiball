@@ -31,6 +31,7 @@ import NodesPanel from "./components/NodesPanel.vue";
 import LaunchersPanel from "./components/LaunchersPanel.vue";
 import GeneralSettingsPanel from "./components/GeneralSettingsPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
+import WorkFiltersPanel from "./components/WorkFiltersPanel.vue";
 import SetupScreen from "./components/SetupScreen.vue";
 import LoginScreen from "./components/LoginScreen.vue";
 import { setUnauthorizedHandler } from "./lib/api";
@@ -684,7 +685,7 @@ watch(showSnoozed, (v) => {
                      band, easy to miss). One unified back-link covers
                      all four; per-panel headers stay untouched. -->
                 <a
-                    v-if="panel === 'general' || panel === 'projects' || panel === 'rules' || panel === 'tags' || panel === 'consumers' || panel === 'nodes'"
+                    v-if="panel === 'general' || panel === 'projects' || panel === 'rules' || panel === 'work-filters' || panel === 'tags' || panel === 'consumers' || panel === 'nodes'"
                     href="/"
                     class="settings-back-link"
                     @click.prevent="panel = null"
@@ -708,6 +709,7 @@ watch(showSnoozed, (v) => {
                 @open-detail="(name: string) => openProjectPage(name, 'detail')"
                 />
                 <RulesPanel v-else-if="panel === 'rules'" />
+                <WorkFiltersPanel v-else-if="panel === 'work-filters'" />
                 <TagsPanel v-else-if="panel === 'tags'" />
                 <LaunchersPanel v-else-if="panel === 'launchers'" />
                 <ConsumersPanel
@@ -834,6 +836,9 @@ watch(showSnoozed, (v) => {
                     </button>
                     <button type="button" class="aiball-footer-settings__item" @click="openPanel('rules')">
                         <i class="pi pi-cog" /> <span>Rules</span>
+                    </button>
+                    <button type="button" class="aiball-footer-settings__item" @click="openPanel('work-filters')">
+                        <i class="pi pi-filter" /> <span>Work filters</span>
                     </button>
                     <button type="button" class="aiball-footer-settings__item" @click="openPanel('tags')">
                         <i class="pi pi-tag" /> <span>Tags</span>

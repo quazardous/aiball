@@ -16,6 +16,8 @@ import { computeDecisionGate } from "./decision-gate.js";
 import { getTicketTokenUsage, type TokenTally } from "./token-usage.js";
 import { landscapeHash, type LandscapeEntry } from "./landscape.js";
 import { presenceRunning } from "../live-presence.js";
+import { tagsForMessages } from "./tags.js";
+import { getEnabledWorkFiltersForConsumer, ticketPassesWorkFilters } from "./work-filters.js";
 
 /**
  * Project names known to the system. Reads from the explicit `projects`
@@ -1255,6 +1257,7 @@ export function computeActionableTicketIds(consumerId?: string): ActionableTicke
     // Open set: approved + not lifecycle-closed + not snoozed.
     const tickets = db.select({
         id: schema.tickets.id,
+        project: schema.tickets.project,
         status: schema.tickets.status,
         postponedUntil: schema.tickets.postponedUntil,
         assignee: schema.tickets.assignee,
@@ -1338,6 +1341,29 @@ export function computeActionableTicketIds(consumerId?: string): ActionableTicke
         if (assignedAwaySet.has(id)) continue;
         if (awaitingOtherSet && awaitingOtherSet.has(id)) continue;
         actionableIds.add(id);
+    }
+
+    // #447: per-agent work filters — narrow the actionable pool by tag (e.g. the
+    // aiball-windows agent only works `win`-tagged tickets). Server-side so it
+    // applies to engage/actionable regardless of which machine the loop runs on
+    // (rules live in the daemon DB, shared by every loop hitting it). Only runs
+    // for a named consumer that actually HAS enabled filters → zero cost on the
+    // common path; openIds (the human's view) is never narrowed. Read is
+    // fail-open (no filters on error → don't hide work).
+    if (consumerId) {
+        const workFilters = getEnabledWorkFiltersForConsumer(consumerId);
+        if (workFilters.length > 0) {
+            const ids = [...actionableIds];
+            const tagsById = tagsForMessages(ids);
+            const projectById = new Map(tickets.map((t) => [t.id, t.project]));
+            for (const id of ids) {
+                const proj = projectById.get(id) ?? "";
+                const tagNames = (tagsById.get(id) ?? []).map((tg) => tg.name);
+                if (!ticketPassesWorkFilters(proj, tagNames, workFilters)) {
+                    actionableIds.delete(id);
+                }
+            }
+        }
     }
 
     return { openIds, actionableIds };
