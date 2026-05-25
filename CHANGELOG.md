@@ -49,6 +49,16 @@ narrative for the product as a whole.
   `CL_LOG_LEVEL` (default `info`). Roll-your-own, no dependency. Migrating the
   daemon's scattered `console.*` onto the same logger is a follow-up slice.
 
+### Nodes panel (#424)
+
+- A **Nodes** panel (settings sidebar + mobile footer) lists each proxy node —
+  every `node` token — with its label, last activity, last peer IP, and the
+  consumers it relays (grouped by IP), plus **revoke** (deletes the node token →
+  the proxy can no longer relay). The node's address is stamped on its token at
+  relay time (`tokens.last_seen_ip`). The token value is never exposed: a node is
+  addressed by a non-secret id. `GET /api/nodes` + `DELETE /api/nodes/:id`,
+  moderator-only. Builds on the remote-detection signals from #422.
+
 ### Detect remote agents (#422)
 
 - The daemon now records the **transport** each consumer was last seen on

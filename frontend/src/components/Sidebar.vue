@@ -16,7 +16,7 @@ export interface ProjectListItem {
     running?: boolean;
 }
 
-export type SettingsPanel = "rules" | "tags" | "projects" | "consumers" | "launchers" | "compose";
+export type SettingsPanel = "rules" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "compose";
 
 /**
  * Per-project sub-pages (#B.127): "settings" hosts the moderation
@@ -202,6 +202,15 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
             >
                 <i class="pi pi-users" />
                 <span>Consumers</span>
+            </button>
+            <button
+                type="button"
+                class="sidebar-item"
+                :class="{ active: panel === 'nodes' }"
+                @click="emit('open-panel', 'nodes')"
+            >
+                <i class="pi pi-sitemap" />
+                <span>Nodes</span>
             </button>
             <button
                 type="button"
