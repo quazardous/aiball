@@ -272,9 +272,9 @@ export function setTicketAssignment(
  * (`now − claimedAt < assign_window_sec`) and one-focus. Drives the work-order
  * tiebreak (#430) + token attribution (#434). Independent of any assignment.
  */
-export function setTicketClaim(ticket_id: number, claimant: string): void {
+export function setTicketClaim(ticket_id: number, claimant: string, at: string = nowIso()): void {
     getDb().update(schema.tickets)
-        .set({ claimant, claimedAt: nowIso() })
+        .set({ claimant, claimedAt: at })
         .where(eq(schema.tickets.id, ticket_id))
         .run();
 }

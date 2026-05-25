@@ -483,7 +483,11 @@ export function submitMessage(input: NewMessage): Message {
             if (t && t.kind === "ticket_created"
                 && !isHeldByOther(t.assignee, t.claimant, t.claimed_at, author, Date.now(), assignWindowSec() * 1000)) {
                 // #436: auto-claim sets the CLAIM (focus), not an assignment.
-                setTicketClaim(msg.ticket_id, author);
+                // #439: stamp claimed_at with the COMMENT's created_at (not a fresh
+                // now()) so a worked claim's claimed_at == the author's latest
+                // comment timestamp exactly — one-focus's `lastMs >= claimedMs`
+                // then keeps it (a fresh now() lands a few ms LATER → falsely "bare").
+                setTicketClaim(msg.ticket_id, author, msg.created_at);
             }
         }
     }
