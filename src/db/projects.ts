@@ -787,7 +787,9 @@ export function purgeOldClosedTickets(
 /**
  * Hard-delete a project: every ticket (cascades to _messages, ticket_tags,
  * ticket_subscriptions via FK), every project subscription, every ping
- * targeting any of those ids (no FK on pings; cleanup is explicit).
+ * targeting any of those ids (no FK on pings; cleanup is explicit), AND the
+ * registry row itself — sans ça le projet réapparaît dans `listProjects`
+ * (qui merge le registre + les projects distincts des tickets).
  */
 export function deleteProject(name: string): { deleted_messages: number } {
     const db = getDb();
@@ -811,6 +813,8 @@ export function deleteProject(name: string): { deleted_messages: number } {
         }
         tx.delete(schema.tickets).where(eq(schema.tickets.project, name)).run();
         tx.delete(schema.subscriptions).where(eq(schema.subscriptions.project, name)).run();
+        // La ligne registre : sinon le projet (0 ticket) reste listé.
+        tx.delete(schema.projects).where(eq(schema.projects.name, name)).run();
         return { deleted_messages: ticketIds.length + messageIds.length };
     });
 }
