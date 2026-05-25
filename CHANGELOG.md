@@ -17,6 +17,15 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Syntax highlighting in rendered markdown (#440)
+
+- Fenced code blocks with a language tag (```` ```json ````, `ts`, `bash`, …) are
+  now **syntax-highlighted** in rendered bodies (tickets, comments). Powered by
+  highlight.js (core + a curated language set — json, js/ts, bash/shell, python,
+  yaml, xml/html, css, sql, diff, ini, markdown), wired into the `marked` code
+  renderer. An unknown or absent language falls back to plain, escaped text. The
+  token theme is hand-written and follows the light / dark toggle.
+
 ### Focus/claim follow-ups: one-focus on engage + claim-anchored token attribution (#439)
 
 - **One focus at a time.** Self-claiming a ticket (`ticket_engage` or a self

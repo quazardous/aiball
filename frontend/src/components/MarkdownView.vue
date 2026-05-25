@@ -44,6 +44,7 @@ const html = computed(() => {
             "h1", "h2", "h3", "h4", "h5", "h6",
             "p", "br", "hr",
             "strong", "em", "del", "code", "pre",
+            "span", // #440: highlight.js token spans inside code blocks
             "blockquote",
             "ul", "ol", "li",
             "a", "img",
@@ -273,6 +274,43 @@ watch(html, () => { void wireQuestionClicks(); }, { flush: "post", immediate: tr
     background: transparent;
     padding: 0;
 }
+/* #440: highlight.js token theme, scoped to rendered bodies. Hand-written
+   (github-ish) so it follows aiball's `.aiball-dark` class toggle without
+   shipping two theme files. Light defaults + dark overrides below. */
+.md-body .hljs-comment, .md-body .hljs-quote { color: #6a737d; font-style: italic; }
+.md-body .hljs-keyword, .md-body .hljs-selector-tag, .md-body .hljs-meta-keyword { color: #d73a49; }
+.md-body .hljs-string, .md-body .hljs-meta .hljs-string, .md-body .hljs-regexp { color: #032f62; }
+.md-body .hljs-number, .md-body .hljs-literal, .md-body .hljs-built_in,
+.md-body .hljs-attr, .md-body .hljs-symbol, .md-body .hljs-bullet { color: #005cc5; }
+.md-body .hljs-title, .md-body .hljs-section, .md-body .hljs-name,
+.md-body .hljs-selector-id, .md-body .hljs-selector-class { color: #6f42c1; }
+.md-body .hljs-type, .md-body .hljs-class .hljs-title { color: #d73a49; }
+.md-body .hljs-attribute, .md-body .hljs-variable, .md-body .hljs-template-variable { color: #e36209; }
+.md-body .hljs-tag { color: #22863a; }
+.md-body .hljs-meta { color: #6a737d; }
+.md-body .hljs-addition { color: #22863a; background: #f0fff4; }
+.md-body .hljs-deletion { color: #b31d28; background: #ffeef0; }
+.md-body .hljs-emphasis { font-style: italic; }
+.md-body .hljs-strong { font-weight: 600; }
+.aiball-dark .md-body .hljs-comment, .aiball-dark .md-body .hljs-quote { color: #8b949e; }
+.aiball-dark .md-body .hljs-keyword, .aiball-dark .md-body .hljs-selector-tag,
+.aiball-dark .md-body .hljs-meta-keyword { color: #ff7b72; }
+.aiball-dark .md-body .hljs-string, .aiball-dark .md-body .hljs-meta .hljs-string,
+.aiball-dark .md-body .hljs-regexp { color: #a5d6ff; }
+.aiball-dark .md-body .hljs-number, .aiball-dark .md-body .hljs-literal,
+.aiball-dark .md-body .hljs-built_in, .aiball-dark .md-body .hljs-symbol,
+.aiball-dark .md-body .hljs-bullet { color: #79c0ff; }
+.aiball-dark .md-body .hljs-attr { color: #79c0ff; }
+.aiball-dark .md-body .hljs-title, .aiball-dark .md-body .hljs-section,
+.aiball-dark .md-body .hljs-name, .aiball-dark .md-body .hljs-selector-id,
+.aiball-dark .md-body .hljs-selector-class { color: #d2a8ff; }
+.aiball-dark .md-body .hljs-type, .aiball-dark .md-body .hljs-class .hljs-title { color: #ff7b72; }
+.aiball-dark .md-body .hljs-attribute, .aiball-dark .md-body .hljs-variable,
+.aiball-dark .md-body .hljs-template-variable { color: #ffa657; }
+.aiball-dark .md-body .hljs-tag { color: #7ee787; }
+.aiball-dark .md-body .hljs-meta { color: #8b949e; }
+.aiball-dark .md-body .hljs-addition { color: #aff5b4; background: #033a16; }
+.aiball-dark .md-body .hljs-deletion { color: #ffdcd7; background: #67060c; }
 .md-body blockquote {
     border-left: 3px solid var(--p-content-border-color);
     padding-left: 0.8em;

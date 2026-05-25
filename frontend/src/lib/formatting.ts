@@ -19,6 +19,7 @@
  */
 import { Marked, type Tokens } from "marked";
 import { ref } from "vue";
+import { highlightCode, resolveLang } from "./highlight";
 
 export interface FormattingPattern {
     id: string;
@@ -90,6 +91,19 @@ export function buildMarked(pats: FormattingPattern[]): Marked {
             };
         });
     if (exts.length) inst.use({ extensions: exts });
+    // #440: highlight fenced code blocks. Override the `code` renderer so a
+    // ```lang fence runs through highlight.js (curated langs) — the `hljs`
+    // class + `language-<lang>` survive DOMPurify (span + class are allowed in
+    // MarkdownView), and the theme there colors the `hljs-*` token spans.
+    inst.use({
+        renderer: {
+            code(token: Tokens.Code): string {
+                const lang = resolveLang(token.lang);
+                const langClass = lang ? ` language-${lang}` : "";
+                return `<pre><code class="hljs${langClass}">${highlightCode(token.text, token.lang)}</code></pre>`;
+            },
+        },
+    });
     return inst;
 }
 
