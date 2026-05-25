@@ -32,6 +32,10 @@ narrative for the product as a whole.
   moderator-only) and `ticket_release`; HTTP `POST /tickets/:id/assign` +
   `/release`; `assignee` / `assigned_at` / `is_claim` surfaced on ticket reads.
   The thread header shows a "claimed by / assigned to X" chip.
+- **Auto-claim**: an agent posting a comment on a ticket nobody else actively
+  holds claims it for that agent automatically — the anti-collision becomes a
+  side effect of working, no explicit claim discipline to keep. Never steals a
+  live claim; the window + auto-release keep it self-maintaining.
 
 ### Wake-prompt system — radically simpler (#400)
 

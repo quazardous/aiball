@@ -12,6 +12,7 @@ import {
     listPendingLifecycleForTicket,
     deletePingsForMessage,
     releaseTicketAssignment,
+    setTicketAssignee,
     ensureConsumer,
     isHuman,
     INTENTS,
@@ -21,6 +22,8 @@ import {
     type Intent,
 } from "./db.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
+import { isAssignedAway } from "./db/assignment-gate.js";
+import { assignWindowSec } from "./autopoll/config.js";
 import { evaluate } from "./rules.js";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
@@ -462,6 +465,24 @@ export function submitMessage(input: NewMessage): Message {
                 // assignment / claim so a later reopen starts back in the shared
                 // pool (and the data stays clean). No-op when unassigned.
                 releaseTicketAssignment(msg.ticket_id);
+            }
+        }
+    }
+    // #418: auto-claim (discipline A) — an agent posting an APPROVED comment on a
+    // ticket that nobody else actively holds claims (or refreshes) it for that
+    // agent. Makes the multi-agent anti-collision structural, not behavioural:
+    // the claim is a side effect of working, no `ticket_claim` discipline to
+    // keep. Humans don't claim (they don't "work" a ticket in the agent sense —
+    // same exclusion as the hot-zone). Skipped when another agent's claim is
+    // still live (we never steal); the window expiry + auto-release on close keep
+    // it self-maintaining.
+    if (msg.kind === "comment_added" && msg.status === "approved" && msg.ticket_id != null) {
+        const author = msg.by_agent;
+        if (author && author !== "auto" && !isHuman(author)) {
+            const t = getMessage(msg.ticket_id);
+            if (t && t.kind === "ticket_created"
+                && !isAssignedAway(t.assignee, t.assigned_at, author, Date.now(), assignWindowSec() * 1000)) {
+                setTicketAssignee(msg.ticket_id, author, author, true);
             }
         }
     }
