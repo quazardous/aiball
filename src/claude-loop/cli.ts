@@ -470,6 +470,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // (parseDrainedStrategy). Default "once" (david krwnqu) → one reminder
         // when the pool first drains, then quiet until the landscape moves.
         `export CL_DRAINED_STRATEGY=${shQuote(ctx.claude_loop.drained_strategy)}`,
+        // #412: PSR-style log-level threshold for the timer + hooks (src/log.ts).
+        // Below it → dropped. From `.aiball.yaml claude_loop.log_level` (default info).
+        `export CL_LOG_LEVEL=${shQuote(ctx.claude_loop.log_level)}`,
         // #381c: opt-in diag capture. Export CL_PROXY_LOG=<file> before
         // `claude-loop start` → the PTY proxy appends one NDJSON line per
         // keystroke read (raw bytes + timestamp). Re-run it through

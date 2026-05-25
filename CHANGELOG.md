@@ -17,6 +17,18 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Level logger for claude-loop (#412)
+
+- A small PSR-3 / RFC 5424 level logger (`src/log.ts`):
+  `log.debug/info/notice/warning/error/critical/alert/emergency` (+ `log.log`),
+  filtered by a configured **threshold** — below it, messages are dropped before
+  formatting. The claude-loop **timer**, **Stop hook** and **restart handlers**
+  now route through it; the `timer.log` / `stop-hook.log` / `restart.log` formats
+  are preserved (now carrying the `LEVEL` token), so `claude-loop tail` / `--log`
+  keep working. Threshold from `.aiball.yaml claude_loop.log_level` →
+  `CL_LOG_LEVEL` (default `info`). Roll-your-own, no dependency. Migrating the
+  daemon's scattered `console.*` onto the same logger is a follow-up slice.
+
 ### Wake-prompt system — radically simpler (#400)
 
 - The wake/relance prompt templating is now **one template + a tiny placeholder

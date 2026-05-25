@@ -49,6 +49,8 @@ export interface ProjectContext {
         wait: boolean;
         /** #379: drained-backlog reminder strategy (default "once"). */
         drained_strategy: string;
+        /** #412: PSR-style log-level threshold (default "info"). Drives CL_LOG_LEVEL. */
+        log_level: string;
     };
     /** #385: tmux bar colour profile (layered defaults → global → project). */
     colors: {

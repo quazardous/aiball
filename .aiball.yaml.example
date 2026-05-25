@@ -184,6 +184,14 @@ autopoll:
 #   # Reminders are about the backlog in YOUR court — they nudge you to clear it,
 #   # which hands tickets back to the agent. Recommended for solo use: "stale".
 #   drained_strategy: "once"
+#
+#   # Minimum log level for the claude-loop timer + hooks (PSR-3 / RFC 5424).
+#   # Messages below the threshold are dropped (cheap). Levels, low→high:
+#   #   debug, info, notice, warning, error, critical, alert, emergency
+#   # Default "info". Set "debug" to see the noisy diagnostic lines, or
+#   # "warning" to quiet routine activity. Format stays `<ts> [tag] LEVEL msg`
+#   # so `claude-loop tail` / `--log` keep working.
+#   log_level: "info"
 
 # Workflow hints. claude-loop "habille" the WAKE of a `feature`-intent
 # ticket with a branch hint ("🌿 Feature: build it in …, not on main."). Lets
