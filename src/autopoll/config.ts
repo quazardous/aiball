@@ -40,6 +40,25 @@ export function globalConfigPath(): string {
     return join(base, "aiball", "config.yaml");
 }
 
+/**
+ * #418 — assignment window (seconds): how long a ticket assignment / claim
+ * stays "live" before it lapses and the ticket returns to the shared pool.
+ * Read from the global config yaml (`assign_window_sec:`), default 14400 (4h).
+ * Expiry is DERIVED (now − assigned_at < window) — no stored "assigned_until",
+ * same pattern as `hot_window_sec`, so changing the knob applies uniformly to
+ * live assignments. Falls back to the default on any read/parse error.
+ */
+export const DEFAULT_ASSIGN_WINDOW_SEC = 14400;
+export function assignWindowSec(): number {
+    try {
+        const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as { assign_window_sec?: unknown };
+        const v = Number(raw?.assign_window_sec);
+        return Number.isFinite(v) && v > 0 ? v : DEFAULT_ASSIGN_WINDOW_SEC;
+    } catch {
+        return DEFAULT_ASSIGN_WINDOW_SEC;
+    }
+}
+
 export type AutopollTone = "hint" | "directive" | "imperative";
 const VALID_TONES: AutopollTone[] = ["hint", "directive", "imperative"];
 

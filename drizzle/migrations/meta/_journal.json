@@ -232,6 +232,13 @@
       "when": 1780900000000,
       "tag": "0032_ticket_token_usage",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1781000000000,
+      "tag": "0033_ticket_assignment",
+      "breakpoints": true
     }
   ]
 }
