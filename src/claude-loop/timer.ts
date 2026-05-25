@@ -33,7 +33,7 @@
  * per-menu settings flags. Interim: user runs `claude` once to clear
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
-import { appendFileSync, existsSync, openSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, openSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
@@ -119,8 +119,23 @@ const tname = tmuxName(name);
  * halt + delete.
  */
 function cleanShutdown(reason: string): void {
-    log(`clean shutdown (${reason}) — stopping loop '${name}' (state kept; rm to delete)`);
+    log(`clean shutdown (${reason}) — stopping loop '${name}' (transient state swept; rm to delete)`);
     try { spawnSync(MUX_CMD, ["kill-session", "-t", tname], { stdio: "ignore" }); } catch { /* tmux already gone */ }
+    // #442 ménage — sweep the transient RUNTIME markers (stale `timer.pid`,
+    // `idle-since`, `wake-*`, `user-took-over`, `human-typing`, `busy-defer-until`,
+    // `inject.sock`, …) so the dead loop reads cleanly in `claude-loop list` and a
+    // later signal can't chase a recycled pid. KEEP the durable start config +
+    // history (plate/env/pings/timer.log) so `restart` replays. (B): the state dir
+    // itself stays — `rm` is the halt + delete.
+    if (sd) {
+        const KEEP = new Set(["plate.json", "env", "pings.yaml", "timer.log"]);
+        try {
+            for (const f of readdirSync(sd)) {
+                if (KEEP.has(f)) continue;
+                try { unlinkSync(join(sd, f)); } catch { /* a subdir or a race — skip */ }
+            }
+        } catch { /* state dir already gone */ }
+    }
     process.exit(0);
 }
 
