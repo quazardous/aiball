@@ -151,6 +151,7 @@ export {
     setTicketOwner,
     setTicketAssignment,
     setTicketClaim,
+    ticketsClaimedBy,
     releaseTicketAssignment,
     releaseTicketClaim,
     releaseTicketHold,

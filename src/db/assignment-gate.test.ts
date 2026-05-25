@@ -2,7 +2,7 @@
 // Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isAssignmentLive, isAssignedAway, isHeldByOther } from "./assignment-gate.js";
+import { isAssignmentLive, isAssignedAway, isHeldByOther, claimsToAutoRelease } from "./assignment-gate.js";
 
 const C = "claude-aiball-dev"; // the consumer asking "what's in my court?"
 const OTHER = "skybot";
@@ -61,4 +61,49 @@ test("isHeldByOther: unheld → not away", () => {
 });
 test("isHeldByOther: assignment to me + live claim by other → away (the claim wins)", () => {
     assert.equal(isHeldByOther(C, OTHER, iso(0), C, NOW, WINDOW), true);
+});
+
+// #439 one-focus — claimsToAutoRelease.
+const claimedMs = (msAgo: number) => NOW - msAgo;
+
+test("claimsToAutoRelease: a bare live pickup (never commented) → released", () => {
+    const claims = [{ id: 10, claimedAt: iso(60_000) }]; // claimed 1min ago
+    assert.deepEqual(
+        claimsToAutoRelease(claims, new Map(), /*keep*/ 99, NOW, WINDOW),
+        [10],
+    );
+});
+
+test("claimsToAutoRelease: worked since claim (self comment after claimed_at) → kept", () => {
+    const claims = [{ id: 10, claimedAt: iso(60_000) }];
+    const acted = new Map([[10, claimedMs(30_000)]]); // commented 30s ago, AFTER claim
+    assert.deepEqual(claimsToAutoRelease(claims, acted, 99, NOW, WINDOW), []);
+});
+
+test("claimsToAutoRelease: the ticket being engaged (keepId) is never released", () => {
+    const claims = [{ id: 10, claimedAt: iso(60_000) }];
+    assert.deepEqual(claimsToAutoRelease(claims, new Map(), /*keep*/ 10, NOW, WINDOW), []);
+});
+
+test("claimsToAutoRelease: an expired claim → not released (already out of pools)", () => {
+    const claims = [{ id: 10, claimedAt: iso(WINDOW + 1000) }];
+    assert.deepEqual(claimsToAutoRelease(claims, new Map(), 99, NOW, WINDOW), []);
+});
+
+test("claimsToAutoRelease: comment BEFORE claim (re-claimed, untouched since) → released", () => {
+    const claims = [{ id: 10, claimedAt: iso(60_000) }]; // claimed 1min ago
+    const acted = new Map([[10, claimedMs(120_000)]]); // last comment 2min ago, BEFORE claim
+    assert.deepEqual(claimsToAutoRelease(claims, acted, 99, NOW, WINDOW), [10]);
+});
+
+test("claimsToAutoRelease: mixed set → only bare live non-keep claims drop", () => {
+    const claims = [
+        { id: 10, claimedAt: iso(60_000) },             // bare live → drop
+        { id: 11, claimedAt: iso(60_000) },             // worked → keep
+        { id: 12, claimedAt: iso(WINDOW + 1000) },      // expired → keep
+        { id: 13, claimedAt: iso(60_000) },             // keepId → keep
+        { id: 14, claimedAt: null },                    // no timestamp → not live → keep
+    ];
+    const acted = new Map([[11, claimedMs(10_000)]]);   // worked 11 after claim
+    assert.deepEqual(claimsToAutoRelease(claims, acted, /*keep*/ 13, NOW, WINDOW), [10]);
 });

@@ -279,6 +279,25 @@ export function setTicketClaim(ticket_id: number, claimant: string): void {
         .run();
 }
 
+/**
+ * #439 one-focus: every ticket this consumer currently holds a CLAIM on
+ * ({id, claimed_at}). Closed/resolved tickets already have their hold cleared
+ * (`releaseTicketHold` fires on close), so this surfaces only open claims —
+ * liveness + comment checks are left to the pure `claimsToAutoRelease`.
+ */
+export function ticketsClaimedBy(consumer_id: string): { id: number; claimed_at: string }[] {
+    return getDb()
+        .select({ id: schema.tickets.id, claimedAt: schema.tickets.claimedAt })
+        .from(schema.tickets)
+        .where(and(
+            eq(schema.tickets.claimant, consumer_id),
+            isNotNull(schema.tickets.claimedAt),
+        ))
+        .all()
+        .filter((r): r is { id: number; claimedAt: string } => r.claimedAt != null)
+        .map((r) => ({ id: r.id, claimed_at: r.claimedAt }));
+}
+
 /** #436: release a ticket's ASSIGNMENT (responsibility) — back to the shared pool. */
 export function releaseTicketAssignment(ticket_id: number): void {
     getDb().update(schema.tickets)

@@ -62,3 +62,39 @@ export function isHeldByOther(
     if (assignee && assignee !== consumerId) return true;
     return false;
 }
+
+/**
+ * #439 one-focus — when a consumer self-claims (engage / self ticket_assign)
+ * ticket `keepId`, decide which of their OTHER live claims to AUTO-RELEASE so an
+ * agent holds ONE focus at a time instead of accumulating locks (each live claim
+ * drops a ticket from every other agent's pool + boosts it in the holder's own
+ * work-order). A claim is released only when it is a *bare pickup* — a DIFFERENT
+ * ticket, still LIVE, that the consumer has NOT commented on since they grabbed
+ * it (so zero work is lost). Claims they've actually worked (a self comment AFTER
+ * `claimedAt`) are kept. Pure: caller supplies the claims, the consumer's own
+ * last-activity per ticket, and the clock/window.
+ *
+ * `claims`: every ticket the consumer currently holds a claim on ({id, claimedAt}).
+ * `selfLastActivityMs`: ticketId → epoch-ms of the consumer's most-recent message
+ *   on that ticket (absent = never commented). `windowMs` in MILLISECONDS.
+ * Returns the ids to release (subset of `claims`, never including `keepId`).
+ */
+export function claimsToAutoRelease(
+    claims: { id: number; claimedAt: string | null | undefined }[],
+    selfLastActivityMs: Map<number, number>,
+    keepId: number,
+    nowMs: number,
+    windowMs: number,
+): number[] {
+    const out: number[] = [];
+    for (const c of claims) {
+        if (c.id === keepId) continue; // never drop the ticket being engaged
+        if (!isAssignmentLive(c.claimedAt, nowMs, windowMs)) continue; // expired → already out of pools
+        const claimedMs = c.claimedAt ? Date.parse(c.claimedAt) : NaN;
+        const lastMs = selfLastActivityMs.get(c.id);
+        const workedSinceClaim =
+            lastMs !== undefined && !Number.isNaN(claimedMs) && lastMs > claimedMs;
+        if (!workedSinceClaim) out.push(c.id); // bare pickup → release
+    }
+    return out;
+}

@@ -46,6 +46,8 @@ import {
     setTicketOwner,
     setTicketAssignment,
     setTicketClaim,
+    ticketsClaimedBy,
+    ticketSelfLastActivity,
     releaseTicketAssignment,
     releaseTicketClaim,
     upsertTicketSubscription,
@@ -53,7 +55,7 @@ import {
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
 import { listSubscriptions } from "../db/subscriptions.js";
-import { isAssignmentLive } from "../db/assignment-gate.js";
+import { isAssignmentLive, claimsToAutoRelease } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { globalConfigPath, assignWindowSec } from "../autopoll/config.js";
 import { readFileSync } from "node:fs";
@@ -126,7 +128,29 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
     }
     // #436: self → CLAIM (focus, transient); other → ASSIGNMENT (responsibility,
     // persistent). Two distinct fields now — a ticket can be both.
+    let releasedClaims: number[] = [];
     if (isClaim) {
+        // #439 one-focus: picking this up auto-releases my OTHER live claims I
+        // never commented on since grabbing them (bare pickups, zero work lost),
+        // so an agent holds one focus at a time instead of stacking locks. Claims
+        // I've actually worked (a self comment after claimed_at) survive. Runs
+        // BEFORE the new claim so re-engaging the head I already hold is a no-op.
+        const myClaims = ticketsClaimedBy(caller);
+        if (myClaims.length > 0) {
+            const selfActMs = new Map<number, number>();
+            for (const [tid, iso] of ticketSelfLastActivity(caller, myClaims.map((c) => c.id))) {
+                const ms = Date.parse(iso);
+                if (!Number.isNaN(ms)) selfActMs.set(tid, ms);
+            }
+            releasedClaims = claimsToAutoRelease(
+                myClaims.map((c) => ({ id: c.id, claimedAt: c.claimed_at })),
+                selfActMs,
+                id,
+                Date.now(),
+                assignWindowSec() * 1000,
+            );
+            for (const rid of releasedClaims) releaseTicketClaim(rid);
+        }
         setTicketClaim(id, caller);
     } else {
         setTicketAssignment(id, target, caller);
@@ -138,6 +162,8 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
         claimant: isClaim ? caller : null,
         assigned_by: caller,
         is_claim: isClaim,
+        // #439: which other live claims this self-claim auto-released (one-focus).
+        released_claims: releasedClaims,
     });
 });
 
