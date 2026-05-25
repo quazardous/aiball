@@ -239,6 +239,13 @@
       "when": 1781100000000,
       "tag": "0034_consumers_last_seen_via",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1781200000000,
+      "tag": "0035_tokens_last_seen_ip",
+      "breakpoints": true
     }
   ]
 }

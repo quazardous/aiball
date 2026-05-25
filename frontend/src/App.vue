@@ -27,6 +27,7 @@ import ProjectSettingsPage from "./components/ProjectSettingsPage.vue";
 import ProjectDetailPage from "./components/ProjectDetailPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
 import ConsumersPanel from "./components/ConsumersPanel.vue";
+import NodesPanel from "./components/NodesPanel.vue";
 import LaunchersPanel from "./components/LaunchersPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
 import SetupScreen from "./components/SetupScreen.vue";
@@ -689,7 +690,7 @@ watch(showSnoozed, (v) => {
                      band, easy to miss). One unified back-link covers
                      all four; per-panel headers stay untouched. -->
                 <a
-                    v-if="panel === 'projects' || panel === 'rules' || panel === 'tags' || panel === 'consumers'"
+                    v-if="panel === 'projects' || panel === 'rules' || panel === 'tags' || panel === 'consumers' || panel === 'nodes'"
                     href="/"
                     class="settings-back-link"
                     @click.prevent="panel = null"
@@ -711,6 +712,7 @@ watch(showSnoozed, (v) => {
                     @open-edit="(id: string) => { consumerEditId = id; }"
                     @close-edit="consumerEditId = null"
                 />
+                <NodesPanel v-else-if="panel === 'nodes'" />
 
                 <NewTicketPage
                     v-else-if="panel === 'compose'"
@@ -831,6 +833,9 @@ watch(showSnoozed, (v) => {
                     </button>
                     <button type="button" class="aiball-footer-settings__item" @click="openPanel('consumers')">
                         <i class="pi pi-users" /> <span>Consumers</span>
+                    </button>
+                    <button type="button" class="aiball-footer-settings__item" @click="openPanel('nodes')">
+                        <i class="pi pi-sitemap" /> <span>Nodes</span>
                     </button>
                     <button type="button" class="aiball-footer-settings__item" @click="openPanel('launchers')">
                         <i class="pi pi-play" /> <span>Launchers</span>

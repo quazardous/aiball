@@ -208,6 +208,7 @@ export {
     getToken,
     getTokenAndTouch,
     deleteToken,
+    setTokenLastSeenIp,
     listTokens,
     purgeExpiredTokens,
     anyHumanCredentials,

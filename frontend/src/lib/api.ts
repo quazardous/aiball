@@ -793,4 +793,20 @@ export const api = {
             "POST",
             `/api/launchers/${encodeURIComponent(id)}/run`,
         ),
+    /** #424: proxy-node tokens + the consumers each relays (moderator-only). */
+    listNodes: () => req<NodeView[]>("GET", "/api/nodes"),
+    /** #424: revoke a node by its non-secret handle (deletes the node token). */
+    revokeNode: (node_id: string) =>
+        req<{ node_id: string; revoked: boolean }>("DELETE", `/api/nodes/${encodeURIComponent(node_id)}`),
 };
+
+/** #424: a proxy node for the Nodes panel — never carries the token value. */
+export interface NodeView {
+    node_id: string;
+    label: string | null;
+    created_at: string;
+    last_used_at: string | null;
+    last_seen_ip: string | null;
+    relayed: { consumer_id: string; last_seen_at: string | null }[];
+    relayed_count: number;
+}

@@ -12,9 +12,11 @@ import {
     setConsumerState,
     updateConsumer,
     upsertConsumer,
+    isHuman,
     type Consumer,
     type ConsumerKind,
 } from "../db.js";
+import { listNodes, revokeNode } from "../db/nodes.js";
 import { broadcast } from "../ws.js";
 import { badRequest, consumerOf, notFound } from "./_helpers.js";
 
@@ -149,4 +151,29 @@ consumersRouter.put("/consumers/:consumer_id/state", (req: Request, res: Respons
     setConsumerState(caller, body.state, human, humanWord, cwd, project);
     broadcast({ type: "consumer_changed", data: { consumer_id: caller, state: body.state, human, human_word: humanWord } });
     res.json({ consumer_id: caller, state: body.state, human, human_word: humanWord, cwd, project });
+});
+
+/**
+ * #424: the Nodes panel feed — proxy-node tokens (kind='node') with label,
+ * last activity, last peer IP, and the consumers each relays. Never exposes the
+ * token value (a node is addressed by a non-secret `node_id`). Moderator-only,
+ * like the other token-adjacent surfaces.
+ */
+consumersRouter.get("/nodes", (req: Request, res: Response) => {
+    if (!isHuman(consumerOf(req))) {
+        return res.status(403).json({ error: "nodes list is moderator-only" });
+    }
+    res.json(listNodes());
+});
+
+/** #424: revoke a node by its non-secret handle (deletes the underlying node
+ *  token → the proxy can no longer relay). Moderator-only. */
+consumersRouter.delete("/nodes/:node_id", (req: Request, res: Response) => {
+    if (!isHuman(consumerOf(req))) {
+        return res.status(403).json({ error: "node revoke is moderator-only" });
+    }
+    const node_id = String(req.params.node_id);
+    if (!revokeNode(node_id)) return notFound(res, "node not found");
+    broadcast({ type: "consumer_changed", data: { node_id, revoked: true } });
+    res.json({ node_id, revoked: true });
 });

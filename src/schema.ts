@@ -458,6 +458,11 @@ export const tokens = sqliteTable("tokens", {
     createdAt: text("created_at").notNull(),
     lastUsedAt: text("last_used_at"),
     expiresAt: text("expires_at"),
+    /** #424: peer IP stamped when a `node` token relays — the proxy node's
+     *  address. Lets the Nodes panel show it + group the consumers it relays
+     *  (consumers.last_seen_via='node' with matching last_seen_ip). NULL for
+     *  non-node tokens and nodes never used since the column landed. */
+    lastSeenIp: text("last_seen_ip"),
 }, (t) => [
     index("idx_tokens_consumer").on(t.consumerId),
     index("idx_tokens_kind").on(t.kind),

@@ -123,6 +123,16 @@ export function deleteToken(token: string): boolean {
     return r.changes > 0;
 }
 
+/** #424: stamp a (node) token's peer IP — its proxy node's address — on use.
+ *  Called from the auth node-branch where the request IP is known. */
+export function setTokenLastSeenIp(token: string, ip: string | null): void {
+    if (!token) return;
+    getDb().update(schema.tokens)
+        .set({ lastSeenIp: ip ?? null })
+        .where(eq(schema.tokens.token, token))
+        .run();
+}
+
 export function listTokens(opts: { kind?: TokenKind; consumer_id?: string } = {}): Token[] {
     let q = getDb().select().from(schema.tokens).$dynamic();
     const conds = [];

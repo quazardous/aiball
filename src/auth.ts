@@ -14,6 +14,7 @@ import {
     anyHumanCredentials,
     ensureConsumer,
     getTokenAndTouch,
+    setTokenLastSeenIp,
     isHuman,
     touchLastSeen,
     type Token,
@@ -189,7 +190,9 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         // Auto-register a relayed agent we haven't seen yet (the loop on B has
         // no token of its own — the node vouches for it). Never touches humans.
         if (explicit && !isHuman(cid)) ensureConsumer(cid);
-        touchLastSeen(cid, "node", clientIp(req)); // #422: proxy-relayed → remote
+        const nodeIp = clientIp(req);
+        touchLastSeen(cid, "node", nodeIp); // #422: proxy-relayed → remote
+        setTokenLastSeenIp(token, nodeIp); // #424: stamp the node's address for the Nodes panel
         next();
         return;
     }
