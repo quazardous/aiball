@@ -108,11 +108,11 @@ prompts:
   # buckets; directive is the shipped default tone.
   wake_master:
     directive:
-      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}{actionable_count:+ engage #{head_id} first — top of the work order — via `ticket_list({actionable: true})`.}{open_count:+ ({open_count} open in {project_scope})}"
+      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}{actionable_count:+ engage #{head_id} first — top of the work order — via `ticket_engage()`.}{open_count:+ ({open_count} open in {project_scope})}"
     hint:
-      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) (clear with `unread({pings: true, mark_read: true})`).}{actionable_count:+ #{head_id} is top of the work order if you want to pick it up (`ticket_list({actionable: true})`).}{open_count:+ ({open_count} open in {project_scope})}"
+      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) (clear with `unread({pings: true, mark_read: true})`).}{actionable_count:+ #{head_id} is top of the work order if you want to pick it up (`ticket_engage()`).}{open_count:+ ({open_count} open in {project_scope})}"
     imperative:
-      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — DRAIN now via `unread({pings: true, mark_read: true})`.}{actionable_count:+ ENGAGE #{head_id} first — top of the work order — via `ticket_list({actionable: true})`.}{open_count:+ ({open_count} open in {project_scope})}"
+      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — DRAIN now via `unread({pings: true, mark_read: true})`.}{actionable_count:+ ENGAGE #{head_id} first — top of the work order — via `ticket_engage()`.}{open_count:+ ({open_count} open in {project_scope})}"
 
 # Ticket-text formatting patterns (#B.235). Linkifies refs like #B.123,
 # #C.<hashid>, @mention in ticket bodies and comments. Lives in the same

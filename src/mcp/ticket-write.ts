@@ -388,6 +388,47 @@ export function registerTicketWriteTools(server: McpServer): void {
         },
     );
 
+    // #423: the WORK tool, distinct from ticket_list (the EXPLORATION tool).
+    // david: « ticket_list = outil d'exploration ; scinder l'outil de travail ».
+    // engage = fetch the head of YOUR actionable work-order AND claim it in one
+    // step, so the claim lands BEFORE the first comment (closes the
+    // pickup→first-comment window of #418's auto-claim A). Reuses the exact
+    // ticket_list({actionable}) path → same head as the wake-CTA names; the
+    // claim reuses #418 self-assign. Read-only browse stays on ticket_list.
+    server.registerTool(
+        "ticket_engage",
+        {
+            description:
+                "Engage your NEXT task: returns the head of YOUR actionable work-order (same gate + order as `ticket_list({actionable: true})` — priority desc, then hot, then oldest) AND claims it for you in one step. A live claim drops the ticket out of every OTHER agent's actionable pool while you work it (anti-collision, #418), and the claim lands BEFORE your first comment so your intent shows immediately. Use THIS — not `ticket_list` — when you're actually picking up work: `ticket_list` is the EXPLORATION/backlog tool (read-only, never claims); `ticket_engage` is the WORK tool that commits you to the head and hands the ticket back (brief) ready to act on. Returns `{ engaged: null }` when your queue is empty (nothing claimed). Idempotent: re-engaging the head you already hold just refreshes the claim window.",
+            inputSchema: {
+                project: z
+                    .string()
+                    .optional()
+                    .describe("Restrict the work-order to one project. Defaults to $AIBALL_PROJECT if set."),
+            },
+        },
+        async ({ project }) => {
+            // Head of MY actionable work-order — same endpoint/params as
+            // ticket_list({actionable:true}), so the head is identical to the
+            // one the wake-CTA names. limit:1 → just the top row. The daemon
+            // returns a bare array (the {_status,result} envelope is added
+            // MCP-side by asText, not by the client).
+            const rows = (await client.listTickets({
+                project,
+                actionable: "1",
+                limit: "1",
+            })) as Array<{ id: number }>;
+            const head = Array.isArray(rows) ? rows[0] : undefined;
+            if (!head) {
+                return asText({ engaged: null, reason: "no actionable ticket — your queue is empty" });
+            }
+            markActiveTicket(head.id); // #404: focus = this ticket (token attribution)
+            const claim = await client.assignTicket(head.id); // no assignee → self-claim (#418)
+            const ticket = await client.getTicket(head.id, { brief: true });
+            return asText({ engaged: head.id, claim, ticket });
+        },
+    );
+
     /**
      * Patch a ticket's persistent fields (per #B.76). Replaces the dedicated
      * `ticket_postpone`, `ticket_broadcast`, and the planned `ticket_edit`
