@@ -17,6 +17,18 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### aiball hooks are loop-only by default (#431)
+
+- Plain `claude` (outside claude-loop) now runs with **no aiball hooks**. The
+  claude-loop hooks were already injected per-session (`claude --settings`), so
+  the only global hook that fired on a direct session was the *interactive
+  autopoll Stop hook* — which is opt-in (`install.sh --stop-hook`) and now
+  **removable on its own** via **`install.sh --remove-stop-hook`** (surgical:
+  drops only the aiball Stop hook, keeps every other hook, backs up; cleans both
+  global `~/.claude` and project `./.claude`). Windows never wired it, and the
+  per-session `--settings` injection is cross-platform — so loop sessions stay
+  fully hooked while direct sessions are untouched everywhere.
+
 ### Work-order tiebreak follows your claim (#430)
 
 - The ticket work-order (`ticket_list`, the `ticket_engage` head, the wake-CTA

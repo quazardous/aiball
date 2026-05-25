@@ -17,6 +17,13 @@
 #                  [--proxy-token TOK]  # relaying to a remote aiball (writes the
 #                                      # proxy: block; mint TOK on the remote with
 #                                      # `aiball auth issue --node`)
+#   ./install.sh --remove-stop-hook    # remove ONLY the interactive autopoll
+#                                      # Stop hook (global ~/.claude + project
+#                                      # ./.claude), leaving the rest installed.
+#                                      # aiball's claude-loop hooks are injected
+#                                      # per-session (claude --settings) and are
+#                                      # unaffected — so plain `claude` runs with
+#                                      # NO aiball hooks. #431
 #   ./install.sh --uninstall           # remove everything we installed
 #
 # Reentrant: re-running with new --port / --host overwrites only the bind
@@ -31,6 +38,7 @@ SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 NO_SYSTEMD=false
 UNINSTALL=false
+REMOVE_STOP_HOOK=false
 SYMLINK=false
 STOP_HOOK=false
 GLOBAL_HOOK=false
@@ -43,6 +51,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-systemd) NO_SYSTEMD=true; shift ;;
         --uninstall)  UNINSTALL=true; shift ;;
+        --remove-stop-hook) REMOVE_STOP_HOOK=true; shift ;;
         --symlink)    SYMLINK=true; shift ;;
         --stop-hook)  STOP_HOOK=true; shift ;;
         # #394: proxy-node mode — relay this daemon to a remote aiball.
@@ -80,6 +89,38 @@ DROPIN_DIR="$SYSTEMD_DIR/$SERVICE_NAME.d"
 DEV_DROPIN="$DROPIN_DIR/dev.conf"
 BIND_DROPIN="$DROPIN_DIR/bind.conf"
 
+# #431 (piste 2): surgically remove the aiball autopoll Stop hook from a
+# settings.json (global ~/.claude + project-local ./.claude), preserving every
+# other hook (e.g. an unrelated PreToolUse). Backs up once to <file>.aiball-bak.
+# Used by --uninstall AND the standalone --remove-stop-hook (which leaves the
+# rest of the install intact). jq required; missing files skip silently.
+remove_stop_hook() {
+    if ! command -v jq >/dev/null 2>&1; then
+        warn "jq not found — cannot remove the Stop hook automatically."
+        warn "    edit ~/.claude/settings.json (and/or ./.claude/settings.json) and drop the"
+        warn "    .hooks.Stop entry whose command ends in aiball-autopoll-stop.sh"
+        return 0
+    fi
+    local s removed=false
+    for s in "$HOME/.claude/settings.json" "$PWD/.claude/settings.json"; do
+        [[ -f "$s" ]] || continue
+        if jq -e '.hooks.Stop[]?.hooks[]? | select(.command|tostring|test("aiball-autopoll-stop\\.sh$"))' "$s" >/dev/null 2>&1; then
+            cp -n "$s" "$s.aiball-bak" || true
+            jq '
+                if .hooks.Stop then
+                    .hooks.Stop |= map(
+                        .hooks |= map(select(.command|tostring|test("aiball-autopoll-stop\\.sh$")|not))
+                    ) |
+                    .hooks.Stop |= map(select(.hooks|length > 0))
+                else . end
+            ' "$s" > "$s.tmp" && mv "$s.tmp" "$s"
+            log "Removed aiball Stop hook from $s (backup: $s.aiball-bak)"
+            removed=true
+        fi
+    done
+    $removed || log "No aiball Stop hook found in ~/.claude or ./.claude settings — nothing to remove."
+}
+
 uninstall() {
     log "Uninstalling aiball..."
     if command -v systemctl >/dev/null 2>&1; then
@@ -96,33 +137,17 @@ uninstall() {
     else
         rm -rf "$PREFIX_LIB"
     fi
-    # Remove the Stop autopoll hook from any settings.json we may have
-    # written into — global ~/.claude/settings.json (legacy default) AND
-    # project-local <PWD>/.claude/settings.json (#B.128). Best-effort,
-    # jq required; missing files are silently skipped.
-    if command -v jq >/dev/null 2>&1; then
-        local s
-        for s in "$HOME/.claude/settings.json" "$PWD/.claude/settings.json"; do
-            [[ -f "$s" ]] || continue
-            if jq -e '.hooks.Stop[]?.hooks[]? | select(.command|tostring|test("aiball-autopoll-stop\\.sh$"))' "$s" >/dev/null 2>&1; then
-                cp -n "$s" "$s.aiball-bak" || true
-                jq '
-                    if .hooks.Stop then
-                        .hooks.Stop |= map(
-                            .hooks |= map(select(.command|tostring|test("aiball-autopoll-stop\\.sh$")|not))
-                        ) |
-                        .hooks.Stop |= map(select(.hooks|length > 0))
-                    else . end
-                ' "$s" > "$s.tmp" && mv "$s.tmp" "$s"
-                log "Removed Stop hook from $s"
-            fi
-        done
-    fi
+    # Remove the Stop autopoll hook from any settings.json we wrote into.
+    remove_stop_hook
     warn "Data preserved at \$AIBALL_HOME (~/.local/share/aiball). Remove manually if you want a clean slate."
     log "Done."
 }
 
 if $UNINSTALL; then uninstall; exit 0; fi
+# #431 (piste 2): standalone removal of the interactive autopoll Stop hook —
+# leaves the rest of the install in place. Plain `claude` then runs with no
+# aiball hooks (the claude-loop hooks are per-session via `claude --settings`).
+if $REMOVE_STOP_HOOK; then remove_stop_hook; exit 0; fi
 
 # --- prerequisites ---------------------------------------------------------
 
@@ -359,10 +384,15 @@ Next steps:
                                'export AIBALL_TOKEN=<token>'
   4. Register the MCP server:  see MCP-CLIENT.md or README.md
   5. (optional) Interactive Stop autopoll hook:
-                               re-run with --stop-hook in the repo's root to wire
-                               <PWD>/.claude/settings.json (project-local).
-                               Add --global to wire ~/.claude/settings.json
-                               instead (fires in every Claude Code session).
+                               claude-loop sessions already get aiball's hooks
+                               automatically (injected per-session via
+                               'claude --settings'), so plain 'claude' runs with
+                               NO aiball hooks by default. This --stop-hook is
+                               ONLY for making PLAIN interactive 'claude' sessions
+                               aiball-aware. Re-run with --stop-hook in the repo's
+                               root to wire <PWD>/.claude/settings.json
+                               (project-local); --global wires ~/.claude (every
+                               session). Remove it later with --remove-stop-hook.
                                Per-project: drop a {} into .aiball.json to enable;
                                tune via autopoll.tone / throttle_seconds (see docs)
 EOF
