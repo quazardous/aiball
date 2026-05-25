@@ -17,6 +17,35 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Claims are visible in the lists, and update live (#429, #448)
+
+- The inbox **list rows** now show who currently holds a ticket — a discreet
+  role-specific glyph (bookmark = an agent's self-**claim**, person-plus = a
+  human-pushed **assignment**) with the holder's name in the tooltip. Until now
+  this only showed in the thread header; the lists were mute.
+- **Claims now refresh the UI in real time.** Claiming, assigning, or releasing a
+  ticket previously updated the database silently — an open inbox or thread kept
+  showing the pre-claim state until a manual reload. These actions now broadcast,
+  so the holder icon appears/clears on the spot (lists + thread header), including
+  the claims auto-released by the one-focus rule. Agent `engage`/`assign` go
+  through the same path, so an agent picking up work lights up its row live.
+
+### `claude-loop status` (#444)
+
+- New **`claude-loop status [name]`** — a read-only, project-level snapshot: the
+  resolved project + default agent (and where each came from), the loaded
+  `.aiball.yaml`, the **connection type** the client would use right now (local
+  Unix socket vs remote HTTP, token or not, loopback flagged as local) with its
+  endpoint, a live daemon-reachability probe (+ the daemon's version), and the
+  loop registered for the current cwd. Answers "who am I and how do I reach the
+  daemon", complementing `check` ("what would the timer do").
+
+### Harmonised launch/stop buttons on the project page (#443)
+
+- On the per-project detail page, the **launch** and **stop** controls now share a
+  look — both are icon-only buttons (green play / red stop) with tooltips, instead
+  of a filled text button next to an icon one.
+
 ## [0.9.0] — 2026-05-25
 
 ### Stop a claude-loop, locally or remotely (#442)
