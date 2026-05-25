@@ -181,3 +181,37 @@ body,
     display: block;
 }
 
+/* =====================================================================
+   #453 — styles admin partagés (patterns qdadm, scalés)
+   Backbone des composants components/ui/* : DataList, PanelHeader, …
+   Une seule définition du "look" table — les panels ne redéclarent que
+   leurs deltas (responsive, colonnes spécifiques), plus le boilerplate.
+   ===================================================================== */
+
+/* Look de table partagé — adossé à <DataList>. */
+.aiball-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+}
+.aiball-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+.aiball-table th,
+.aiball-table td {
+    text-align: left;
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid var(--p-content-border-color);
+    vertical-align: top;
+}
+.aiball-table th {
+    font-weight: 600;
+    opacity: 0.7;
+}
+
+/* Variante d'erreur de l'empty-state partagé (.aiball-empty est global). */
+.aiball-empty--error {
+    color: var(--p-red-500);
+}
+

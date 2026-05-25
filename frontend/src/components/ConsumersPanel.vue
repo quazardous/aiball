@@ -7,6 +7,7 @@ import { useConfirm } from "primevue/useconfirm";
 import { api, type Consumer } from "../lib/api";
 import { useBus } from "../lib/bus";
 import ConsumerEditPage from "./ConsumerEditPage.vue";
+import DataList from "./ui/DataList.vue";
 
 // Set on /consumers/<id> → render the dedicated edit view. Parent
 // (App.vue) owns the ref so browser back/forward works (#B.193).
@@ -340,35 +341,36 @@ const sortedRows = computed<Consumer[]>(() => {
             </span>
         </section>
 
-        <div v-if="loading && !rows.length" class="aiball-empty">Loading…</div>
-        <div v-else-if="!rows.length" class="aiball-empty">
-            <i class="pi pi-users" style="font-size: 1.6rem" />
-            <div>No consumers yet — anyone who posts will be added here automatically.</div>
-        </div>
-
-        <div v-else class="consumers-table-wrap">
-        <table class="consumers-table">
-            <thead>
-                <tr>
-                    <th class="sortable" @click="toggleSort('consumer_id')">
-                        Consumer id <i :class="sortIcon('consumer_id')" />
-                    </th>
-                    <th class="sortable col-kind" @click="toggleSort('kind')">
-                        Kind <i :class="sortIcon('kind')" />
-                    </th>
-                    <th class="sortable col-display" @click="toggleSort('display_name')">
-                        Display name <i :class="sortIcon('display_name')" />
-                    </th>
-                    <th class="sortable" @click="toggleSort('activity')">
-                        Activity <i :class="sortIcon('activity')" />
-                    </th>
-                    <th class="sortable col-enabled" @click="toggleSort('enabled')">
-                        Active <i :class="sortIcon('enabled')" />
-                    </th>
-                    <th />
-                </tr>
-            </thead>
-            <tbody>
+        <DataList
+            table-class="consumers-table"
+            :loading="loading && !rows.length"
+            :is-empty="!rows.length"
+        >
+            <template #empty>
+                <div class="aiball-empty">
+                    <i class="pi pi-users" style="font-size: 1.6rem" />
+                    <div>No consumers yet — anyone who posts will be added here automatically.</div>
+                </div>
+            </template>
+            <template #head>
+                <th class="sortable" @click="toggleSort('consumer_id')">
+                    Consumer id <i :class="sortIcon('consumer_id')" />
+                </th>
+                <th class="sortable col-kind" @click="toggleSort('kind')">
+                    Kind <i :class="sortIcon('kind')" />
+                </th>
+                <th class="sortable col-display" @click="toggleSort('display_name')">
+                    Display name <i :class="sortIcon('display_name')" />
+                </th>
+                <th class="sortable" @click="toggleSort('activity')">
+                    Activity <i :class="sortIcon('activity')" />
+                </th>
+                <th class="sortable col-enabled" @click="toggleSort('enabled')">
+                    Active <i :class="sortIcon('enabled')" />
+                </th>
+                <th />
+            </template>
+            <template #body>
                 <tr v-for="r in sortedRows" :key="r.consumer_id" :class="{ 'is-blocked': !r.enabled }">
                     <td class="consumers-cid">
                         <div class="consumers-cid__inner">
@@ -472,9 +474,8 @@ const sortedRows = computed<Consumer[]>(() => {
                         </div>
                     </td>
                 </tr>
-            </tbody>
-        </table>
-        </div>
+            </template>
+        </DataList>
     </div>
 </template>
 
@@ -504,20 +505,15 @@ const sortedRows = computed<Consumer[]>(() => {
     font-size: 0.82rem;
     color: var(--p-text-muted-color);
 }
-.consumers-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.92rem;
-}
-.consumers-table th,
-.consumers-table td {
-    text-align: left;
-    padding: 0.5rem 0.6rem;
-    border-bottom: 1px solid var(--p-content-border-color);
+/* Look de base (width/border-collapse/padding/border/th) → `.aiball-table`
+   (style.css). Deltas conservés via compound `.aiball-table.consumers-table`
+   (gagne sur la base quel que soit l'ordre de chargement) :
+   - cellules centrées verticalement (Select/Button d'intrinsèques variables) ;
+   - hauteur de ligne épinglée pour que les composants PrimeVue de hauteurs
+     légèrement différentes ne fassent pas vibrer la grille entre lignes. */
+.aiball-table.consumers-table th,
+.aiball-table.consumers-table td {
     vertical-align: middle;
-    /* Pin row height so PrimeVue components with mildly different
-       intrinsic heights (Select vs Button text vs Button rounded)
-       can't drift between rows. */
     height: 3rem;
 }
 .consumers-cid {
@@ -598,13 +594,10 @@ const sortedRows = computed<Consumer[]>(() => {
 .consumers-table .activity-cell__state {
     margin-top: 2px;
 }
-/* #B.193 mobile compaction — keep table inside viewport, scroll as a
-   last resort if a long consumer_id still overflows. */
-.consumers-table-wrap {
-    width: 100%;
-    overflow-x: auto;
-}
-/* Phone-sized: drop the redundant columns. `kind` is already shown as
+/* #B.193 mobile compaction — keep table inside viewport, scroll as a last
+   resort if a long consumer_id still overflows. Wrap (.aiball-table-wrap,
+   overflow-x:auto) is provided by <DataList>.
+   Phone-sized: drop the redundant columns. `kind` is already shown as
    an inline tag next to the consumer id (moderator/sandbox); `display
    name` is secondary and lives on the edit page; `enabled` is implicit
    from `tr.is-blocked` row dimming. Tighter paddings + drop the

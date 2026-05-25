@@ -6,6 +6,7 @@ import { useToast } from "primevue/usetoast";
 import { api, type ProjectMeta } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
 import { estTokenEffort, formatTokens, tokenBreakdownTitle } from "../lib/format";
+import DataList from "./ui/DataList.vue";
 
 const toast = useToast();
 const rows = ref<ProjectMeta[]>([]);
@@ -192,25 +193,27 @@ defineExpose({ load });
             </form>
         </header>
 
-        <div v-if="loading && !rows.length" class="aiball-empty">Loading…</div>
-        <div v-else-if="!rows.length" class="aiball-empty">
-            <i class="pi pi-folder" style="font-size: 1.6rem" />
-            <div>No projects yet — use "Create project" above or file a ticket.</div>
-        </div>
-
-        <table v-else class="projects-table">
-            <thead>
-                <tr>
-                    <th>Project</th>
-                    <th>Last activity</th>
-                    <th>Tickets</th>
-                    <th>Comments</th>
-                    <th>Tokens</th>
-                    <th>Pending</th>
-                    <th />
-                </tr>
-            </thead>
-            <tbody>
+        <DataList
+            table-class="projects-table"
+            :loading="loading && !rows.length"
+            :is-empty="!rows.length"
+        >
+            <template #empty>
+                <div class="aiball-empty">
+                    <i class="pi pi-folder" style="font-size: 1.6rem" />
+                    <div>No projects yet — use "Create project" above or file a ticket.</div>
+                </div>
+            </template>
+            <template #head>
+                <th>Project</th>
+                <th>Last activity</th>
+                <th>Tickets</th>
+                <th>Comments</th>
+                <th>Tokens</th>
+                <th>Pending</th>
+                <th />
+            </template>
+            <template #body>
                 <tr v-for="p in rows" :key="p.name">
                     <td data-label="Project">
                         <i class="pi pi-folder" style="margin-right: 0.4rem" />
@@ -320,8 +323,8 @@ defineExpose({ load });
                         </template>
                     </td>
                 </tr>
-            </tbody>
-        </table>
+            </template>
+        </DataList>
     </div>
 </template>
 
@@ -343,22 +346,8 @@ defineExpose({ load });
     gap: 0.5rem;
     margin-top: 0.5rem;
 }
-.projects-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.92rem;
-}
-.projects-table th,
-.projects-table td {
-    text-align: left;
-    padding: 0.5rem 0.6rem;
-    border-bottom: 1px solid var(--p-content-border-color);
-}
-.projects-table th {
-    color: var(--p-text-muted-color);
-    font-weight: 500;
-    font-size: 0.82rem;
-}
+/* Look de base (width/border/padding/th) → `.aiball-table` (style.css).
+   Ici on ne garde que les deltas : colonnes numériques, action-cell, responsive. */
 .projects-table td:nth-child(3),
 .projects-table td:nth-child(4),
 .projects-table td:nth-child(5),

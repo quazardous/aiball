@@ -6,6 +6,7 @@ import Select from "primevue/select";
 import { api, type CatalogTag } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
 import TagBadge from "./TagBadge.vue";
+import DataList from "./ui/DataList.vue";
 
 const tags = ref<CatalogTag[]>([]);
 const loading = ref(false);
@@ -181,21 +182,19 @@ onMounted(() => {
                 </div>
             </div>
 
-            <div v-if="!tags.length" class="aiball-empty">No tags defined yet.</div>
-
-            <div v-else class="tags-table-wrap">
-                <table class="tags-table">
-                    <thead>
-                        <tr>
-                            <th>preview</th>
-                            <th>name</th>
-                            <th>color</th>
-                            <th>note</th>
-                            <th>order</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
+            <DataList table-class="tags-table" :is-empty="!tags.length">
+                <template #empty>
+                    <div class="aiball-empty">No tags defined yet.</div>
+                </template>
+                <template #head>
+                    <th>Preview</th>
+                    <th>Name</th>
+                    <th>Color</th>
+                    <th>Note</th>
+                    <th>Order</th>
+                    <th></th>
+                </template>
+                <template #body>
                         <tr v-for="t in tags" :key="t.id ?? `config:${t.name}`">
                             <td data-label="preview">
                                 <span class="tags-preview-cell">
@@ -275,9 +274,8 @@ onMounted(() => {
                                 />
                             </td>
                         </tr>
-                    </tbody>
-                </table>
-            </div>
+                </template>
+            </DataList>
         </section>
 
         <section class="rules-section">
@@ -328,26 +326,13 @@ onMounted(() => {
 .tags-page header h2 {
     margin: 0 0 0.4rem;
 }
-.tags-table {
-    width: 100%;
-    border-collapse: collapse;
-}
-.tags-table th, .tags-table td {
-    padding: 0.4rem 0.5rem;
-    text-align: left;
-    border-bottom: 1px solid var(--p-content-border-color);
-    font-size: 0.9rem;
+/* Look de base (width/border/padding/th) → `.aiball-table` (style.css).
+   Delta : cellules à inputs centrées verticalement (la base est valign top).
+   Compound `.aiball-table.tags-table` pour gagner sur la base de façon
+   déterministe quel que soit l'ordre de chargement du CSS. */
+.aiball-table.tags-table th,
+.aiball-table.tags-table td {
     vertical-align: middle;
-}
-.tags-table th {
-    color: var(--p-text-muted-color);
-    font-weight: 500;
-    font-size: 0.78rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-.tags-table-wrap {
-    width: 100%;
 }
 .tags-project-picker {
     display: inline-flex;

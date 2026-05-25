@@ -13,6 +13,7 @@ import Button from "primevue/button";
 import { useConfirm } from "primevue/useconfirm";
 import { useToast } from "primevue/usetoast";
 import { api, type NodeView } from "../lib/api";
+import DataList from "./ui/DataList.vue";
 
 const props = defineProps<{ nodeId: string }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -140,23 +141,21 @@ async function doRevoke(n: NodeView): Promise<void> {
                     Consumers attributed to this node by its peer IP — the clients it relays
                     to this daemon. Revoking the node cuts them until it is re-enrolled.
                 </p>
-                <div v-if="!node.relayed_count" class="node-detail__none">
-                    No consumers attributed to this node.
-                </div>
-                <table v-else class="node-detail__table">
-                    <thead>
-                        <tr>
-                            <th>Consumer</th>
-                            <th>Last seen</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+                <DataList :is-empty="!node.relayed_count">
+                    <template #empty>
+                        <div class="node-detail__none">No consumers attributed to this node.</div>
+                    </template>
+                    <template #head>
+                        <th>Consumer</th>
+                        <th>Last seen</th>
+                    </template>
+                    <template #body>
                         <tr v-for="c in node.relayed" :key="c.consumer_id">
                             <td><code>{{ c.consumer_id }}</code></td>
                             <td>{{ fmt(c.last_seen_at) }}</td>
                         </tr>
-                    </tbody>
-                </table>
+                    </template>
+                </DataList>
             </section>
 
             <div class="node-detail__actions">
@@ -266,21 +265,6 @@ async function doRevoke(n: NodeView): Promise<void> {
 .node-detail__none {
     font-size: 0.85rem;
     color: var(--p-text-muted-color);
-}
-.node-detail__table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
-}
-.node-detail__table th,
-.node-detail__table td {
-    text-align: left;
-    padding: 0.4rem 0.6rem;
-    border-bottom: 1px solid var(--p-surface-200, #e5e7eb);
-}
-.node-detail__table th {
-    font-weight: 600;
-    opacity: 0.7;
 }
 .node-detail__actions {
     display: flex;

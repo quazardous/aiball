@@ -8,6 +8,7 @@ import Button from "primevue/button";
 import { useConfirm } from "primevue/useconfirm";
 import { api, type NodeView } from "../lib/api";
 import NodeDetailPage from "./NodeDetailPage.vue";
+import DataList from "./ui/DataList.vue";
 
 // Set on /nodes/<id> → render the dedicated detail view. Parent (App.vue) owns
 // the ref so browser back/forward works (#452, mirrors ConsumersPanel #B.193).
@@ -89,56 +90,43 @@ onMounted(load);
             </p>
         </header>
 
-        <div v-if="loading && !nodes.length" class="aiball-empty">Loading…</div>
-        <div v-else-if="error" class="aiball-empty">{{ error }}</div>
-        <div v-else-if="!nodes.length" class="aiball-empty">
-            <i class="pi pi-sitemap" style="font-size: 1.6rem" />
-            <p>No proxy nodes. Mint one on this host with <code>aiball auth issue --node</code>.</p>
-        </div>
-        <div v-else class="nodes-table-wrap">
-            <table class="nodes-table">
-                <thead>
-                    <tr>
-                        <th>Node</th>
-                        <th>Last IP</th>
-                        <th>Last activity</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr v-for="n in nodes" :key="n.node_id">
-                        <td>
-                            <a
-                                :href="`/nodes/${encodeURIComponent(n.node_id)}`"
-                                class="nodes-label-link"
-                                :title="`View node details${n.relayed_count ? ` — ${n.relayed_count} relayed consumer${n.relayed_count > 1 ? 's' : ''}` : ''}`"
-                                @click.prevent="emit('open-edit', n.node_id)"
-                            >{{ n.label || "(unlabelled)" }}</a>
-                            <code class="nodes-id">{{ n.node_id }}</code>
-                        </td>
-                        <td>{{ n.last_seen_ip ?? "—" }}</td>
-                        <td :title="`created ${fmt(n.created_at)}`">{{ fmt(n.last_used_at) }}</td>
-                        <td>
-                            <Button label="Revoke" severity="danger" text size="small" @click="revoke(n)" />
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+        <DataList :loading="loading && !nodes.length" :error="error" :is-empty="!nodes.length">
+            <template #empty>
+                <div class="aiball-empty">
+                    <i class="pi pi-sitemap" style="font-size: 1.6rem" />
+                    <p>No proxy nodes. Mint one on this host with <code>aiball auth issue --node</code>.</p>
+                </div>
+            </template>
+            <template #head>
+                <th>Node</th>
+                <th>Last IP</th>
+                <th>Last activity</th>
+                <th></th>
+            </template>
+            <template #body>
+                <tr v-for="n in nodes" :key="n.node_id">
+                    <td>
+                        <a
+                            :href="`/nodes/${encodeURIComponent(n.node_id)}`"
+                            class="nodes-label-link"
+                            :title="`View node details${n.relayed_count ? ` — ${n.relayed_count} relayed consumer${n.relayed_count > 1 ? 's' : ''}` : ''}`"
+                            @click.prevent="emit('open-edit', n.node_id)"
+                        >{{ n.label || "(unlabelled)" }}</a>
+                        <code class="nodes-id">{{ n.node_id }}</code>
+                    </td>
+                    <td>{{ n.last_seen_ip ?? "—" }}</td>
+                    <td :title="`created ${fmt(n.created_at)}`">{{ fmt(n.last_used_at) }}</td>
+                    <td>
+                        <Button label="Revoke" severity="danger" text size="small" @click="revoke(n)" />
+                    </td>
+                </tr>
+            </template>
+        </DataList>
     </div>
 </template>
 
 <style scoped>
 .nodes-panel { padding: 1rem; }
-.nodes-table-wrap { overflow-x: auto; }
-.nodes-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-.nodes-table th, .nodes-table td {
-    text-align: left;
-    padding: 0.4rem 0.6rem;
-    border-bottom: 1px solid var(--p-surface-200, #e5e7eb);
-    vertical-align: top;
-}
-.nodes-table th { font-weight: 600; opacity: 0.7; }
 .nodes-label-link {
     font-weight: 600;
     color: var(--p-primary-color);
