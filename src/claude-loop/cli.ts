@@ -128,20 +128,29 @@ function selfRoot(): string {
     return resolve(here, "..", "..");
 }
 
-function defaultName(agent?: string): string {
-    // #420: when the agent is known, derive a stable, readable name from it so
-    // two loops in the same dir under different agents auto-get distinct names
-    // (no --name needed — david "spécifier un agent différent suffit"). Sanitise
-    // to a tmux/dir-safe slug; on collision (e.g. the same agent already running
-    // elsewhere) fall back to a random suffix rather than failing.
-    if (agent) {
-        const slug = agent.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-        if (slug) {
-            const base = `cl-${slug}`;
-            return existsSync(stateDirFor(base)) ? `${base}-${randomBytes(2).toString("hex")}` : base;
-        }
+function defaultName(project?: string, agent?: string): string {
+    // #420: derive a stable, readable loop name. A loop is per-(dir, agent), so
+    // the natural disambiguator ACROSS dirs is the PROJECT (dir); the AGENT only
+    // matters when several agents share ONE dir. So prefer `cl-<project>`; if it's
+    // taken (a 2nd agent in the same dir, or the same project basename elsewhere)
+    // try `cl-<project>-<agent>`; random suffix only as a last resort. Keeps the
+    // common cases readable — same agent in two dirs → cl-<projA>/cl-<projB> (not
+    // an opaque suffix, david 9w9n54); two agents in one dir → cl-<proj> + cl-<proj>-<agent>.
+    const slug = (s: string): string => s.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+    const p = project ? slug(project) : "";
+    const a = agent ? slug(agent) : "";
+    const candidates: string[] = [];
+    if (p) {
+        candidates.push(`cl-${p}`);
+        if (a) candidates.push(`cl-${p}-${a}`);
+    } else if (a) {
+        candidates.push(`cl-${a}`);
     }
-    return `cl-${randomBytes(3).toString("hex")}`;
+    for (const c of candidates) {
+        if (!existsSync(stateDirFor(c))) return c;
+    }
+    const base = candidates[0] ?? "cl";
+    return `${base}-${randomBytes(2).toString("hex")}`;
 }
 
 interface StartOpts {
@@ -294,7 +303,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // #420: resolve the loop name AFTER the agent is known, so an omitted --name
     // defaults to a per-agent slug → two loops in the same dir under different
     // agents auto-get distinct names. Explicit --name still wins.
-    const name = opts.name ?? defaultName(ctx.agent);
+    const name = opts.name ?? defaultName(ctx.project, ctx.agent);
     const sd = stateDirFor(name);
     if (existsSync(sd)) {
         die(`loop '${name}' already exists at ${sd}. Use 'rm ${name}' first or pick another --name.`);
