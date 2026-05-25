@@ -25,6 +25,20 @@ narrative for the product as a whole.
   onto this page, next to the node's id, last peer IP and created/last-activity
   times. Revoke lives there too.
 
+### Send a raw prompt to a claude-loop (#451)
+
+- A **consumer's page** (Settings → Consumers → a consumer) gains a **"send a
+  raw prompt"** box: type a prompt and it's injected **verbatim** into that
+  loop's Claude session — no moderation, no wake-phrase indirection — for a
+  direct operator instruction.
+- **Spooled then delivered**: the prompt is queued in a volatile in-memory spool
+  (no DB/file), then if the loop is live it's drained onto its SSE now
+  (`control:prompt` → the loop injects it like a wake, PTY proxy / tmux); if the
+  loop is offline it waits in the spool and is drained when the loop's SSE
+  reconnects. Volatile by design — a daemon restart clears it (fine for now).
+- **Privileged**: same gate as remote stop (#442) — moderator-only, proxy-node
+  tokens denied (an arbitrary prompt can hijack an agent).
+
 ### Pending tickets stay out of the backlog (#450)
 
 - A not-yet-approved ticket still pings participants (so it can be discussed)

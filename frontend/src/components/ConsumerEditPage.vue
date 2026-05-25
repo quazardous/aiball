@@ -30,6 +30,9 @@ const displayName = ref("");
 const note = ref("");
 const microPrompt = ref("");
 const enabled = ref(true);
+// #451: raw-prompt injection (this dedicated page is where the operator types it).
+const promptText = ref("");
+const promptBusy = ref(false);
 
 const KIND_OPTIONS = CONSUMER_KIND_OPTIONS;
 
@@ -88,6 +91,35 @@ async function save() {
         });
     } finally {
         saving.value = false;
+    }
+}
+
+// #451: send a raw, unfiltered prompt to this loop. Spooled then delivered:
+// live → injected now; offline → delivered when the loop's SSE reconnects.
+async function sendPrompt() {
+    const text = promptText.value.trim();
+    if (!text) return;
+    promptBusy.value = true;
+    try {
+        const r = await api.sendLoopPrompt(props.consumerId, text);
+        toast.add({
+            severity: r.delivered ? "success" : "info",
+            summary: r.delivered ? `Prompt sent to ${props.consumerId}` : `Prompt spooled for ${props.consumerId}`,
+            detail: r.delivered
+                ? "Injected into the live Claude session."
+                : "Loop offline — it'll be delivered when the loop reconnects.",
+            life: 5000,
+        });
+        promptText.value = "";
+    } catch (e) {
+        toast.add({
+            severity: "error",
+            summary: "Prompt failed",
+            detail: (e as Error).message,
+            life: 6000,
+        });
+    } finally {
+        promptBusy.value = false;
     }
 }
 </script>
@@ -178,6 +210,40 @@ async function save() {
                     />
                     enabled (when off, the daemon rejects new posts from this consumer)
                 </label>
+            </div>
+
+            <!-- #451: raw-prompt injection (moderator-only, server-enforced). -->
+            <div class="consumer-edit__field">
+                <label for="ce-prompt">send a raw prompt</label>
+                <Textarea
+                    id="ce-prompt"
+                    v-model="promptText"
+                    rows="4"
+                    :placeholder="original.present
+                        ? 'Type a prompt — injected verbatim into the live Claude session…'
+                        : 'Loop offline — the prompt will be spooled and delivered when it reconnects.'"
+                    style="width: 100%"
+                    :disabled="promptBusy"
+                    @keydown.ctrl.enter="sendPrompt"
+                />
+                <small class="consumer-edit__hint">
+                    Sent <strong>verbatim</strong> — no moderation, no wake-phrase.
+                    {{ original.present
+                        ? "Loop is live → delivered now."
+                        : "Loop is offline → spooled until it reconnects." }}
+                    Ctrl+Enter to send.
+                </small>
+                <div class="consumer-edit__actions">
+                    <Button
+                        label="Send prompt"
+                        icon="pi pi-send"
+                        size="small"
+                        severity="secondary"
+                        :loading="promptBusy"
+                        :disabled="!promptText.trim()"
+                        @click="sendPrompt"
+                    />
+                </div>
             </div>
 
             <div class="consumer-edit__meta">

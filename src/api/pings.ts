@@ -15,6 +15,7 @@ import {
     unreadPingCount,
 } from "../db.js";
 import { onPing, onControl } from "../event-bus.js";
+import { drainPrompts } from "../loop-prompts.js";
 import { presenceConnect, presenceDisconnect } from "../live-presence.js";
 import { badRequest } from "./_helpers.js";
 
@@ -84,6 +85,11 @@ pingsRouter.get("/events", (req, res) => {
     const offControl = onControl(consumer, (payload) => {
         res.write(`event: control\ndata: ${JSON.stringify(payload)}\n\n`);
     });
+    // #451: flush any prompts spooled while this loop was offline — its control
+    // SSE is live now, so write them straight onto the stream (drained == sent).
+    for (const text of drainPrompts(consumer)) {
+        res.write(`event: control\ndata: ${JSON.stringify({ action: "prompt", text })}\n\n`);
+    }
     const ka = setInterval(() => {
         res.write(`:keepalive ${new Date().toISOString()}\n\n`);
     }, 30_000);

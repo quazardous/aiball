@@ -20,7 +20,8 @@ import { listNodes, revokeNode } from "../db/nodes.js";
 import { broadcast } from "../ws.js";
 import { emitControl } from "../event-bus.js";
 import { isPresent, presenceRunning } from "../live-presence.js";
-import { canStopLoop } from "../loop-control.js";
+import { canControlLoop } from "../loop-control.js";
+import { spoolPrompt, drainPrompts } from "../loop-prompts.js";
 import { badRequest, consumerOf, notFound, tokenKindOf } from "./_helpers.js";
 
 export const consumersRouter = Router();
@@ -52,11 +53,35 @@ consumersRouter.get("/consumers/:consumer_id", (req: Request, res: Response) => 
 // live loop was connected to receive it right now (false ⇒ nothing was running).
 consumersRouter.post("/consumers/:consumer_id/loop-stop", (req: Request, res: Response) => {
     const target = String(req.params.consumer_id);
-    const verdict = canStopLoop(tokenKindOf(req), isHuman(consumerOf(req)));
+    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
     if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
     const delivered = isPresent(target);
     emitControl(target, { action: "kill" });
     res.json({ consumer_id: target, action: "kill", delivered });
+});
+
+// #451: send a RAW, unfiltered prompt into the loop's Claude session. The prompt
+// is SPOOLED first (VOLATILE, in the daemon's memory — no DB/file, cleared on a
+// daemon restart, per david) THEN delivered: if the loop is live, drain the
+// spool onto its SSE now (a `control:prompt` event → the loop injects the text
+// like a wake, PTY proxy / tmux); if it's offline the prompt waits in memory and
+// is drained when the loop's SSE reconnects (see /api/events). Same privilege
+// gate as loop-stop (moderator only; proxy nodes DENIED — an arbitrary prompt
+// can hijack the agent). `delivered` = a live loop received it now; `spooled`
+// is always true.
+consumersRouter.post("/consumers/:consumer_id/prompt", (req: Request, res: Response) => {
+    const target = String(req.params.consumer_id);
+    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
+    if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
+    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    if (!text) return badRequest(res, "text required");
+    spoolPrompt(target, text);
+    const present = isPresent(target);
+    if (present) {
+        // Live → flush the whole queue (this prompt + anything spooled earlier).
+        for (const t of drainPrompts(target)) emitControl(target, { action: "prompt", text: t });
+    }
+    res.json({ consumer_id: target, action: "prompt", spooled: true, delivered: present });
 });
 
 consumersRouter.post("/consumers", (req: Request, res: Response) => {

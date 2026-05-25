@@ -625,6 +625,14 @@ async function mainSse(): Promise<void> {
             // loop already holds → self-destruct from inside.
             onControl: (c) => {
                 if (c.action === "kill") cleanShutdown("sse:control:kill");
+                // #451: operator-supplied RAW prompt → inject it into the Claude
+                // session exactly like a wake (sendKeys sets the wake-in-flight +
+                // coalesce markers so the timer doesn't auto-wake on top of it).
+                else if (c.action === "prompt") {
+                    const preview = c.text.length > 80 ? c.text.slice(0, 80) + "…" : c.text;
+                    log(`SSE control: prompt injection (${c.text.length} chars): ${preview}`);
+                    void sendKeys(c.text);
+                }
                 else log(`SSE control ignored (unknown action): ${JSON.stringify(c)}`);
             },
             onPing: (p) => {
