@@ -60,6 +60,11 @@ narrative for the product as a whole.
   global `~/.claude` and project `./.claude`). Windows never wired it, and the
   per-session `--settings` injection is cross-platform — so loop sessions stay
   fully hooked while direct sessions are untouched everywhere.
+- Docs (`CLAUDE-LOOP.md`) now spell out the unattended permission model: the loop
+  runs `claude --permission-mode auto` (classifier-checked, no prompts) and its
+  per-session `--settings` carries hooks only — aiball never sets/reads any global
+  permission-bypass key, so a stray `skipAutoPermissionPrompt` in `~/.claude` is
+  not aiball's and is not needed.
 
 ### Work-order tiebreak follows your claim (#430)
 

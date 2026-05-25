@@ -28,6 +28,26 @@ pop-culture phrase. Non-zero → mark idle, wait.
 
 ---
 
+## Permissions (unattended runs)
+
+A loop has no human on hand to answer Claude Code's permission prompts,
+so it launches the inner session with `--permission-mode auto`: every
+tool call is classifier-checked and runs **without a prompt**. A mode
+that *prompts* (`default` / `acceptEdits` / `plan`) would stall the loop
+at the first tool call. Override the whole launch command (binary +
+flags before `--settings`) via `CL_CLAUDE_CMD` — e.g. to pick another
+mode such as `bypassPermissions`.
+
+The per-session `--settings` block carries **only hooks**; it never
+writes permission keys. So unattended autonomy comes **entirely** from
+`--permission-mode` — aiball does not set, require, or read any global
+permission-bypass setting. (If a `skipAutoPermissionPrompt`-style key is
+sitting in your `~/.claude/settings.json`, it is not aiball's and is not
+needed; a plain `claude` you start yourself just uses your normal
+config.)
+
+---
+
 ## Core cycle
 
 ```
