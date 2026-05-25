@@ -46,6 +46,13 @@ narrative for the product as a whole.
   look — both are icon-only buttons (green play / red stop) with tooltips, instead
   of a filled text button next to an icon one.
 
+### Notifications control moved into Settings > General (#445)
+
+- The **“enable alerts”** button (and the mute toggle) left the header for the
+  global **Settings > General** page, alongside the moderation strategy — same
+  per-device behaviour, just a calmer header. Mirrors the earlier strategy-picker
+  move.
+
 ## [0.9.0] — 2026-05-25
 
 ### Stop a claude-loop, locally or remotely (#442)
