@@ -128,7 +128,19 @@ function selfRoot(): string {
     return resolve(here, "..", "..");
 }
 
-function defaultName(): string {
+function defaultName(agent?: string): string {
+    // #420: when the agent is known, derive a stable, readable name from it so
+    // two loops in the same dir under different agents auto-get distinct names
+    // (no --name needed — david "spécifier un agent différent suffit"). Sanitise
+    // to a tmux/dir-safe slug; on collision (e.g. the same agent already running
+    // elsewhere) fall back to a random suffix rather than failing.
+    if (agent) {
+        const slug = agent.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+        if (slug) {
+            const base = `cl-${slug}`;
+            return existsSync(stateDirFor(base)) ? `${base}-${randomBytes(2).toString("hex")}` : base;
+        }
+    }
     return `cl-${randomBytes(3).toString("hex")}`;
 }
 
@@ -249,11 +261,6 @@ function resolveCurrentLoopName(): string {
 }
 
 async function cmdStart(opts: StartOpts): Promise<void> {
-    const name = opts.name ?? defaultName();
-    const sd = stateDirFor(name);
-    if (existsSync(sd)) {
-        die(`loop '${name}' already exists at ${sd}. Use 'rm ${name}' first or pick another --name.`);
-    }
     need(MUX_CMD);
 
     // #B.154: ProjectContext resolves cwd + AIBALL_AGENT +
@@ -284,6 +291,14 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // .aiball.yaml — David's "consumer_id pas propre au remote").
     if (opts.consumer) ctx.agent = opts.consumer;
     if (opts.project) ctx.project = opts.project;
+    // #420: resolve the loop name AFTER the agent is known, so an omitted --name
+    // defaults to a per-agent slug → two loops in the same dir under different
+    // agents auto-get distinct names. Explicit --name still wins.
+    const name = opts.name ?? defaultName(ctx.agent);
+    const sd = stateDirFor(name);
+    if (existsSync(sd)) {
+        die(`loop '${name}' already exists at ${sd}. Use 'rm ${name}' first or pick another --name.`);
+    }
     applyToProcessEnv(ctx);
     warnIfDeprecated(ctx);
     // #390: remote-daemon mode. --aiball-url points the loop's aiball
@@ -1369,6 +1384,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--aiball-url <url>", "#390: target a REMOTE aiball daemon over HTTP (http[s]://host:port) instead of the local socket. The loop, tmux pane and state stay local; only the data-plane is remote.")
         .option("--aiball-token <token>", "#390: bearer token for the remote daemon (mint with `aiball auth issue --consumer <id>` on the daemon host). Required with --aiball-url.")
         .option("--consumer <id>", "#390: consumer id = the loop's identity (overrides .aiball.yaml). Recommended with --aiball-url.")
+        .option("--agent <id>", "#420: alias for --consumer (the loop's agent identity). Set a distinct one to run several loops in the same dir.")
         .option("--project <name>", "#390: project name (overrides .aiball.yaml).")
         // #393: launch in an explicit dir (e.g. the daemon spawning a loop for a
         // known project root from the UI) instead of the invoker's cwd.
@@ -1378,7 +1394,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             name?: string; interval?: string; checkCmd: string; pings?: string;
             attach: boolean; startupPing: boolean; userGrace?: string; force?: boolean;
             resumeMode?: string; wait: boolean;
-            aiballUrl?: string; aiballToken?: string; consumer?: string; project?: string;
+            aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             cwd?: string;
         }, command: Command) => {
             // #305 (option a): only forward `wait` when --wait/--no-wait was
@@ -1398,7 +1414,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 wait: waitExplicit ? opts.wait : undefined,
                 aiballUrl: opts.aiballUrl,
                 aiballToken: opts.aiballToken,
-                consumer: opts.consumer,
+                consumer: opts.consumer ?? opts.agent, // #420: --agent is an alias for --consumer
                 project: opts.project,
                 cwd: opts.cwd,
                 claudeArgs: [], // filled in by the dispatcher below
