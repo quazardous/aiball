@@ -51,6 +51,10 @@ narrative for the product as a whole.
   (they were summed per turn, re-counting the same context and inflating the
   number). The cost-equivalent (effort + cache-reads ×0.1) and the re-read
   context size are still shown, in the tooltip / stats sub-label.
+- Token effort is now **drained per MCP tool call** that attaches to a project,
+  not only at the end-of-turn hook — so a turn that works several tickets splits
+  its effort across them (attributed to each call's ticket) instead of lumping
+  to the last one. Each turn is still counted once (shared dedup, race-safe).
 
 ### `claude-loop status` (#444)
 
