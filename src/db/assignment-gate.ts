@@ -38,3 +38,27 @@ export function isAssignedAway(
     if (!assignee || assignee === consumerId) return false;
     return isAssignmentLive(assignedAt, nowMs, windowMs);
 }
+
+/**
+ * #436: is this ticket HELD by someone OTHER than consumer C — so it leaves C's
+ * actionable pool (anti-collision)? Two distinct holds now (split from the #418
+ * single field):
+ *   - a LIVE CLAIM by another agent (focus lock, TRANSIENT — within the claim
+ *     window `now − claimedAt < windowMs`); OR
+ *   - an ASSIGNMENT to another consumer (responsibility, PERSISTENT — no expiry).
+ * Either drops the ticket from C's pool. Held-by-C / unheld / an expired claim
+ * with no assignment → not away (falls through to the last_actor gate).
+ * Supersedes `isAssignedAway` (kept for back-compat). `windowMs` in MS.
+ */
+export function isHeldByOther(
+    assignee: string | null | undefined,
+    claimant: string | null | undefined,
+    claimedAt: string | null | undefined,
+    consumerId: string,
+    nowMs: number,
+    windowMs: number,
+): boolean {
+    if (claimant && claimant !== consumerId && isAssignmentLive(claimedAt, nowMs, windowMs)) return true;
+    if (assignee && assignee !== consumerId) return true;
+    return false;
+}

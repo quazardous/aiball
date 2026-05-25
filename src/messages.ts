@@ -11,8 +11,8 @@ import {
     applyMessageDecision,
     listPendingLifecycleForTicket,
     deletePingsForMessage,
-    releaseTicketAssignment,
-    setTicketAssignee,
+    releaseTicketHold,
+    setTicketClaim,
     ensureConsumer,
     isHuman,
     INTENTS,
@@ -22,7 +22,7 @@ import {
     type Intent,
 } from "./db.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
-import { isAssignedAway } from "./db/assignment-gate.js";
+import { isHeldByOther } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
 import { evaluate } from "./rules.js";
 import { deliverToOutbox } from "./outbox.js";
@@ -461,10 +461,10 @@ export function submitMessage(input: NewMessage): Message {
                         broadcast({ type: "message_decided", data: rejected });
                     }
                 }
-                // #418: a closed ticket is out of every pool — release any live
-                // assignment / claim so a later reopen starts back in the shared
-                // pool (and the data stays clean). No-op when unassigned.
-                releaseTicketAssignment(msg.ticket_id);
+                // #418/#436: a closed ticket is out of every pool — release BOTH
+                // its assignment AND its claim so a later reopen starts back in the
+                // shared pool (and the data stays clean). No-op when unheld.
+                releaseTicketHold(msg.ticket_id);
             }
         }
     }
@@ -481,8 +481,9 @@ export function submitMessage(input: NewMessage): Message {
         if (author && author !== "auto" && !isHuman(author)) {
             const t = getMessage(msg.ticket_id);
             if (t && t.kind === "ticket_created"
-                && !isAssignedAway(t.assignee, t.assigned_at, author, Date.now(), assignWindowSec() * 1000)) {
-                setTicketAssignee(msg.ticket_id, author, author, true);
+                && !isHeldByOther(t.assignee, t.claimant, t.claimed_at, author, Date.now(), assignWindowSec() * 1000)) {
+                // #436: auto-claim sets the CLAIM (focus), not an assignment.
+                setTicketClaim(msg.ticket_id, author);
             }
         }
     }

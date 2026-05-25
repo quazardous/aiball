@@ -492,7 +492,7 @@ export class AiballClient {
      * ticket closes — multi-agent anti-collision.
      */
     assignTicket(ticket_id: number, assignee?: string) {
-        return this.http<{ ticket_id: number; assignee: string; assigned_by: string; is_claim: boolean }>(
+        return this.http<{ ticket_id: number; assignee: string | null; claimant: string | null; assigned_by: string; is_claim: boolean }>(
             "POST",
             `/api/tickets/${ticket_id}/assign`,
             assignee ? { assignee } : {},

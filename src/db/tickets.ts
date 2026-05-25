@@ -251,37 +251,57 @@ export function setTicketOwner(ticket_id: number, by_agent: string): void {
 }
 
 /**
- * #418: assign / claim a ticket. `assignee` = the target consumer; `assignedBy`
- * = who set it (the human moderator for a push, the agent itself for a claim);
- * `isClaim` true for a self-claim. Stamps `assignedAt` so the live window is
- * derivable (now − assignedAt < assign_window_sec). The API layer gates push
- * (human-only) vs claim (self) and subscribes the assignee.
+ * #436: ASSIGNMENT — a human moderator pushes a RESPONSIBILITY onto a consumer.
+ * Persistent (no auto-expiry); cleared on reassign/close. `assignedBy` audits
+ * who set it. Distinct from a claim (see setTicketClaim).
  */
-export function setTicketAssignee(
+export function setTicketAssignment(
     ticket_id: number,
     assignee: string,
     assigned_by: string,
-    is_claim: boolean,
 ): void {
     getDb().update(schema.tickets)
-        .set({
-            assignee,
-            assignedBy: assigned_by,
-            assignedAt: nowIso(),
-            isClaim: is_claim ? 1 : 0,
-        })
+        .set({ assignee, assignedBy: assigned_by, assignedAt: nowIso() })
         .where(eq(schema.tickets.id, ticket_id))
         .run();
 }
 
 /**
- * #418: release a ticket's assignment / claim — back to the shared pool. Called
- * by the /release endpoint (assignee or moderator) and auto-fired on close so a
- * later reopen starts fresh.
+ * #436: CLAIM — an agent self-declares FOCUS ("I'm on this now"), via
+ * ticket_engage or a self ticket_assign. Transient: the live window is derived
+ * (`now − claimedAt < assign_window_sec`) and one-focus. Drives the work-order
+ * tiebreak (#430) + token attribution (#434). Independent of any assignment.
  */
+export function setTicketClaim(ticket_id: number, claimant: string): void {
+    getDb().update(schema.tickets)
+        .set({ claimant, claimedAt: nowIso() })
+        .where(eq(schema.tickets.id, ticket_id))
+        .run();
+}
+
+/** #436: release a ticket's ASSIGNMENT (responsibility) — back to the shared pool. */
 export function releaseTicketAssignment(ticket_id: number): void {
     getDb().update(schema.tickets)
-        .set({ assignee: null, assignedBy: null, assignedAt: null, isClaim: 0 })
+        .set({ assignee: null, assignedBy: null, assignedAt: null })
+        .where(eq(schema.tickets.id, ticket_id))
+        .run();
+}
+
+/** #436: release a ticket's CLAIM (focus) — drop the lock, keep any assignment. */
+export function releaseTicketClaim(ticket_id: number): void {
+    getDb().update(schema.tickets)
+        .set({ claimant: null, claimedAt: null })
+        .where(eq(schema.tickets.id, ticket_id))
+        .run();
+}
+
+/**
+ * #436: clear BOTH holds (assignment + claim). Fired on close/resolve so a later
+ * reopen starts fresh. Also zeroes the vestigial `is_claim`.
+ */
+export function releaseTicketHold(ticket_id: number): void {
+    getDb().update(schema.tickets)
+        .set({ assignee: null, assignedBy: null, assignedAt: null, claimant: null, claimedAt: null, isClaim: 0 })
         .where(eq(schema.tickets.id, ticket_id))
         .run();
 }

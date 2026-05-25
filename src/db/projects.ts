@@ -9,7 +9,7 @@ import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
-import { isAssignedAway } from "./assignment-gate.js";
+import { isHeldByOther } from "./assignment-gate.js";
 import { assignWindowSec } from "../autopoll/config.js";
 import { listHumans } from "./consumers.js";
 import { computeDecisionGate } from "./decision-gate.js";
@@ -1259,6 +1259,8 @@ export function computeActionableTicketIds(consumerId?: string): ActionableTicke
         postponedUntil: schema.tickets.postponedUntil,
         assignee: schema.tickets.assignee,
         assignedAt: schema.tickets.assignedAt,
+        claimant: schema.tickets.claimant,
+        claimedAt: schema.tickets.claimedAt,
     }).from(schema.tickets).all();
     const openIds = new Set<number>();
     for (const t of tickets) {
@@ -1268,17 +1270,19 @@ export function computeActionableTicketIds(consumerId?: string): ActionableTicke
         openIds.add(t.id);
     }
 
-    // #418: assignment exclusion — a ticket LIVE-assigned to someone OTHER than
-    // the requesting consumer leaves THEIR actionable pool (anti-collision). It
-    // stays `open` (still a real ticket); only `actionable` narrows. Unassigned
-    // or expired → falls through to the last_actor gate (the shared pool). Only
-    // computed when a consumer is in scope (anonymous callers see the pool).
+    // #418/#436: anti-collision exclusion — a ticket HELD by someone OTHER than
+    // the requesting consumer leaves THEIR actionable pool. Held = a LIVE claim
+    // by another agent (transient focus lock) OR an assignment to another
+    // consumer (persistent responsibility). It stays `open` (still a real
+    // ticket); only `actionable` narrows. Unheld / held-by-me / an expired claim
+    // with no assignment → falls through to the last_actor gate (the shared pool).
+    // Only computed when a consumer is in scope (anonymous callers see the pool).
     const assignedAwaySet = new Set<number>();
     if (consumerId) {
         const nowMs = Date.now();
         const assignWindowMs = assignWindowSec() * 1000;
         for (const t of tickets) {
-            if (isAssignedAway(t.assignee, t.assignedAt, consumerId, nowMs, assignWindowMs)) {
+            if (isHeldByOther(t.assignee, t.claimant, t.claimedAt, consumerId, nowMs, assignWindowMs)) {
                 assignedAwaySet.add(t.id);
             }
         }

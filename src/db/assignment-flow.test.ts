@@ -18,7 +18,7 @@ process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-418-"));
 const { getDb, nowIso } = await import("./connection.js");
 const schema = await import("../schema.js");
 const { computeActionableTicketIds } = await import("./projects.js");
-const { setTicketAssignee, releaseTicketAssignment } = await import("./tickets.js");
+const { setTicketClaim, setTicketAssignment, releaseTicketClaim } = await import("./tickets.js");
 
 const A = "agent-a";
 const B = "agent-b";
@@ -51,36 +51,36 @@ test("baseline: an unassigned ticket sits in BOTH agents' pool", () => {
 });
 
 test("claim: a self-claim drops the ticket out of the OTHER agent's pool", () => {
-    setTicketAssignee(1, A, A, true); // A claims T1
+    setTicketClaim(1, A); // A claims T1 (focus)
     assert.ok(actionable(A).has(1), "T1 stays actionable for the claimer A");
     assert.ok(!actionable(B).has(1), "T1 leaves B's pool (anti-collision)");
     assert.ok(open(B).has(1), "T1 is still OPEN for B — a real ticket, just not in B's court");
 });
 
 test("push: a moderator push to B → B sees it, A does not", () => {
-    setTicketAssignee(2, B, "human", false); // human pushes T2 onto B
+    setTicketAssignment(2, B, "human"); // human pushes T2 onto B (responsibility)
     assert.ok(actionable(B).has(2), "T2 actionable for the assignee B");
     assert.ok(!actionable(A).has(2), "T2 leaves A's pool");
 });
 
 test("expiry: a stale claim lapses → ticket returns to the shared pool", () => {
-    setTicketAssignee(3, A, A, true); // A claims T3…
-    // …but stamp it 5h ago (> the default 4h window) → expired.
+    setTicketClaim(3, A); // A claims T3…
+    // …but stamp the CLAIM 5h ago (> the default 4h window) → expired.
     const old = new Date(Date.now() - 5 * 3600 * 1000).toISOString();
-    db.update(schema.tickets).set({ assignedAt: old }).where(eq(schema.tickets.id, 3)).run();
+    db.update(schema.tickets).set({ claimedAt: old }).where(eq(schema.tickets.id, 3)).run();
     assert.ok(actionable(A).has(3), "expired claim: T3 back for A");
     assert.ok(actionable(B).has(3), "expired claim: T3 back in B's pool");
 });
 
 test("release: handing it back returns the ticket to the pool", () => {
-    releaseTicketAssignment(1); // T1 was claimed by A earlier
+    releaseTicketClaim(1); // T1 was claimed by A earlier
     assert.ok(actionable(B).has(1), "released T1 back in B's pool");
     assert.ok(actionable(A).has(1), "released T1 still fine for A");
 });
 
 test("no double-pick: two live claims never collide on the same ticket", () => {
     // A holds T1 again, B holds T2: each sees its own, never the other's.
-    setTicketAssignee(1, A, A, true);
+    setTicketClaim(1, A);
     // T2 still pushed to B from the earlier test. Re-assert the partition.
     assert.ok(actionable(A).has(1) && !actionable(B).has(1), "T1 is A's alone");
     assert.ok(actionable(B).has(2) && !actionable(A).has(2), "T2 is B's alone");

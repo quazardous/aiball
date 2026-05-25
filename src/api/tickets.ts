@@ -44,8 +44,10 @@ import {
     listTypedRelationsForTicket,
     lineageWouldCycle,
     setTicketOwner,
-    setTicketAssignee,
+    setTicketAssignment,
+    setTicketClaim,
     releaseTicketAssignment,
+    releaseTicketClaim,
     upsertTicketSubscription,
     listTicketSubscriptionsForTicket,
 } from "../db.js";
@@ -115,16 +117,28 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
     const t = getMessage(id);
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
     const rawAssignee = typeof req.body?.assignee === "string" ? req.body.assignee.trim() : "";
-    const assignee = rawAssignee || caller; // no assignee → self-claim
-    const isClaim = assignee === caller;
+    const target = rawAssignee || caller; // no assignee → self-claim
+    const isClaim = target === caller;
     if (!isClaim && !isHuman(caller)) {
         return res.status(403).json({
             error: "assigning another consumer is moderator-only (an agent can only claim for itself)",
         });
     }
-    setTicketAssignee(id, assignee, caller, isClaim);
-    upsertTicketSubscription(assignee, id);
-    res.json({ ticket_id: id, assignee, assigned_by: caller, is_claim: isClaim });
+    // #436: self → CLAIM (focus, transient); other → ASSIGNMENT (responsibility,
+    // persistent). Two distinct fields now — a ticket can be both.
+    if (isClaim) {
+        setTicketClaim(id, caller);
+    } else {
+        setTicketAssignment(id, target, caller);
+    }
+    upsertTicketSubscription(target, id);
+    res.json({
+        ticket_id: id,
+        assignee: isClaim ? null : target,
+        claimant: isClaim ? caller : null,
+        assigned_by: caller,
+        is_claim: isClaim,
+    });
 });
 
 /**
@@ -136,10 +150,16 @@ ticketsRouter.post("/tickets/:id/release", (req: Request, res: Response) => {
     const caller = consumerOf(req);
     const t = getMessage(id);
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
-    if (t.assignee && t.assignee !== caller && !isHuman(caller)) {
-        return res.status(403).json({ error: "only the assignee or a moderator can release this assignment" });
+    // #436: release whatever the caller holds. An agent releases its own CLAIM;
+    // the assignee or a moderator releases the ASSIGNMENT. A caller who holds
+    // neither (and isn't a moderator) can't release someone else's hold.
+    const holdsClaim = t.claimant === caller;
+    const canReleaseAssignment = (t.assignee === caller) || isHuman(caller);
+    if (!holdsClaim && !canReleaseAssignment) {
+        return res.status(403).json({ error: "only the claimant, the assignee, or a moderator can release this ticket" });
     }
-    releaseTicketAssignment(id);
+    if (holdsClaim) releaseTicketClaim(id);
+    if (canReleaseAssignment && t.assignee) releaseTicketAssignment(id);
     res.json({ ticket_id: id, released: true });
 });
 
@@ -638,16 +658,21 @@ ticketsRouter.get("/tickets", (req, res) => {
     );
     const isClaimable = (id: number, proj: string): boolean =>
         actionableIds.has(id) && ownedProjects.has(proj);
-    // #430: tickets the consumer holds a LIVE claim on (assignee = me, is_claim,
-    // within the assign window) — the explicit FOCUS, used as a work-order
-    // tiebreak ABOVE hot. Self-claim only: an assignment is a responsibility, not
-    // a focus signal (#435 distinction).
+    // #430/#436: tickets the consumer holds a LIVE CLAIM on (claimant = me,
+    // within the claim window) — the explicit FOCUS, used as a work-order tiebreak
+    // ABOVE hot. #436: reads the dedicated `claimant`/`claimed_at` (was the fused
+    // assignee+is_claim). #436 (4): assigned-to-me (a human handed it to me) is a
+    // SEPARATE, weaker boost — sorts below own-claim, above hot.
     const claimNowMs = Date.now();
     const assignWindowMs = assignWindowSec() * 1000;
     const ownClaimIds = new Set<number>();
+    const assignedToMeIds = new Set<number>();
     for (const m of created) {
-        if (m.assignee === consumerId && m.is_claim && isAssignmentLive(m.assigned_at, claimNowMs, assignWindowMs)) {
+        if (m.claimant === consumerId && isAssignmentLive(m.claimed_at, claimNowMs, assignWindowMs)) {
             ownClaimIds.add(m.id);
+        }
+        if (m.assignee === consumerId) {
+            assignedToMeIds.add(m.id);
         }
     }
     // #404: per-ticket token-effort tally (empty until the capture side lands).
@@ -694,11 +719,15 @@ ticketsRouter.get("/tickets", (req, res) => {
             token_usage: tokenUsageMap.get(m.id) ?? null,
             // #405: in the consumer's hot-zone (focus) → the 🔥 UI flag.
             hot: hotFocus.has(m.id),
-            // #418: assignment — who holds it + when (live window derived).
+            // #418/#436: assignment (responsibility, persistent) + claim (focus,
+            // transient) are now distinct fields. `is_claim` kept for back-compat
+            // (true when claimed), derived from `claimant`.
             assignee: m.assignee ?? null,
             assigned_by: m.assigned_by ?? null,
             assigned_at: m.assigned_at ?? null,
-            is_claim: m.is_claim ?? false,
+            claimant: m.claimant ?? null,
+            claimed_at: m.claimed_at ?? null,
+            is_claim: m.claimant != null,
         };
         if (summary) return base;
         return { ...base, body: m.edited_body ?? m.body };
@@ -757,6 +786,7 @@ ticketsRouter.get("/tickets", (req, res) => {
             priorityWeight: (p) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2,
             isHot: (id) => hotFocus.has(id),
             isOwnClaim: (id) => ownClaimIds.has(id), // #430: own live claim sorts above hot
+            isAssignedToMe: (id) => assignedToMeIds.has(id), // #436(4): handed to me → below claim, above hot
         };
         result.sort((a, b) => compareWorkOrder(a, b, ctx));
     }
@@ -1120,12 +1150,15 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         postponed_until: t.postponed_until ?? null,
         intent: t.intent,
         priority: t.priority ?? "normal",
-        // #418: assignment — surfaced on the thread header so the UI can render
-        // the "assigned to X" chip and an agent sees who holds it.
+        // #418/#436: assignment (responsibility) + claim (focus) — distinct
+        // fields, surfaced on the thread header so the UI renders "assigned to X"
+        // and/or "claimed by Y". `is_claim` kept for back-compat (claimed?).
         assignee: t.assignee ?? null,
         assigned_by: t.assigned_by ?? null,
         assigned_at: t.assigned_at ?? null,
-        is_claim: t.is_claim ?? false,
+        claimant: t.claimant ?? null,
+        claimed_at: t.claimed_at ?? null,
+        is_claim: t.claimant != null,
         parent_ticket_id: t.parent_ticket_id ?? null,
         sub_tickets: listSubTickets(t.id),
         tags: listMessageTags(t.id),

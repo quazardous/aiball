@@ -2,7 +2,7 @@
 // Run: `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isAssignmentLive, isAssignedAway } from "./assignment-gate.js";
+import { isAssignmentLive, isAssignedAway, isHeldByOther } from "./assignment-gate.js";
 
 const C = "claude-aiball-dev"; // the consumer asking "what's in my court?"
 const OTHER = "skybot";
@@ -39,4 +39,26 @@ test("isAssignedAway: expired claim by other → back in the pool (not away)", (
 
 test("isAssignedAway: assignee set but no timestamp → not live → not away", () => {
     assert.equal(isAssignedAway(OTHER, null, C, NOW, WINDOW), false);
+});
+
+// #436: isHeldByOther — claim (transient) OR assignment (persistent) by another.
+test("isHeldByOther: a LIVE claim by another → away", () => {
+    assert.equal(isHeldByOther(null, OTHER, iso(0), C, NOW, WINDOW), true);
+    assert.equal(isHeldByOther(null, OTHER, iso(WINDOW - 1000), C, NOW, WINDOW), true);
+});
+test("isHeldByOther: an EXPIRED claim by another (no assignment) → not away", () => {
+    assert.equal(isHeldByOther(null, OTHER, iso(WINDOW + 1000), C, NOW, WINDOW), false);
+});
+test("isHeldByOther: an assignment to another is PERSISTENT (no expiry) → away", () => {
+    assert.equal(isHeldByOther(OTHER, null, null, C, NOW, WINDOW), true);
+});
+test("isHeldByOther: held by ME (claim or assignment) → not away", () => {
+    assert.equal(isHeldByOther(C, null, null, C, NOW, WINDOW), false);
+    assert.equal(isHeldByOther(null, C, iso(0), C, NOW, WINDOW), false);
+});
+test("isHeldByOther: unheld → not away", () => {
+    assert.equal(isHeldByOther(null, null, null, C, NOW, WINDOW), false);
+});
+test("isHeldByOther: assignment to me + live claim by other → away (the claim wins)", () => {
+    assert.equal(isHeldByOther(C, OTHER, iso(0), C, NOW, WINDOW), true);
 });

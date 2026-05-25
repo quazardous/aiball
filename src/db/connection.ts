@@ -168,6 +168,11 @@ export interface Message {
     assigned_by?: string | null;
     assigned_at?: string | null;
     is_claim?: boolean;
+    /** #436: CLAIM (focus) — distinct from assignment. `claimant` = the agent
+     *  currently focused; `claimed_at` stamps it (live window derived). NULL when
+     *  unclaimed. See src/db/assignment-gate.ts (isHeldByOther). */
+    claimant?: string | null;
+    claimed_at?: string | null;
 }
 
 export type SubscriptionRole = "owner" | "follower";
@@ -492,6 +497,8 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         assigned_by: t.assignedBy ?? null,
         assigned_at: t.assignedAt ?? null,
         is_claim: !!t.isClaim,
+        claimant: t.claimant ?? null,
+        claimed_at: t.claimedAt ?? null,
     };
 }
 

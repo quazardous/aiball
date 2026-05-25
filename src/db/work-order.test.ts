@@ -67,6 +67,15 @@ test("#430 isOwnClaim omitted → no claim distinction (back-compat)", () => {
     assert.deepEqual(sorted([{ id: 1, priority: "normal" }, { id: 2, priority: "normal" }], c), [2, 1]);
 });
 
+test("#436(4) assigned-to-me beats hot, below own-claim", () => {
+    // same tier+priority. 1 hot, 2 assigned-to-me → 2 first (assignment > hot).
+    const c1: WorkOrderCtx = { tierOf: () => 1, priorityWeight: pw, isHot: (id) => id === 1, isAssignedToMe: (id) => id === 2 };
+    assert.deepEqual(sorted([{ id: 1, priority: "normal" }, { id: 2, priority: "normal" }], c1), [2, 1]);
+    // 1 own-claim, 2 assigned-to-me → 1 first (own-claim outranks assignment).
+    const c2: WorkOrderCtx = { tierOf: () => 1, priorityWeight: pw, isHot: () => false, isOwnClaim: (id) => id === 1, isAssignedToMe: (id) => id === 2 };
+    assert.deepEqual(sorted([{ id: 1, priority: "normal" }, { id: 2, priority: "normal" }], c2), [1, 2]);
+});
+
 test("#405 computeHotFocus: mono-focus = the most recent self-activity within the window", () => {
     const now = Date.parse("2026-05-24T10:00:00Z");
     const win = 600_000; // 10 min

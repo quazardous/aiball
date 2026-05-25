@@ -214,12 +214,15 @@ export interface TicketSummary {
     /** #405: in the requesting consumer's hot-zone (focus) — the ticket they're
      *  actively working (most recent self-activity within the hot window). */
     hot?: boolean;
-    /** #418: ticket → agent assignment. `assignee` = who holds it (a human push
-     *  or an agent self-claim); `is_claim` marks the self-claim; `assigned_at`
-     *  stamps it (the live window is derived). Null when unassigned. */
+    /** #418/#436: two distinct holds. ASSIGNMENT (`assignee`/`assigned_by`/
+     *  `assigned_at`) = a responsibility a human pushed (persistent). CLAIM
+     *  (`claimant`/`claimed_at`) = an agent's current focus (transient). A ticket
+     *  can carry both. `is_claim` kept for back-compat (true when claimed). */
     assignee?: string | null;
     assigned_by?: string | null;
     assigned_at?: string | null;
+    claimant?: string | null;
+    claimed_at?: string | null;
     is_claim?: boolean;
 }
 

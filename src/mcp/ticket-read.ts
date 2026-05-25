@@ -8,7 +8,7 @@
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { asText, client, markActiveTicket } from "./_helpers.js";
+import { asText, client } from "./_helpers.js";
 
 export function registerTicketReadTools(server: McpServer): void {
     server.registerTool(
@@ -212,7 +212,10 @@ export function registerTicketReadTools(server: McpServer): void {
             },
         },
         async ({ ticket_id, full, brief, tail, digest, digest_limit, offset, limit, order }) => {
-            markActiveTicket(ticket_id); // #404: focus = this ticket (token attribution)
+            // #434: ticket_get (a READ) no longer moves the token-attribution
+            // focus — an incidental `ticket_get(#A)` for context mid-turn used to
+            // steal the whole turn's tokens from the ticket you're working. Only
+            // WRITES (reply/engage/resolve) set the focus now.
             // #396 (david 6zwrk9): a reflexive `full` (no limit) on a big thread
             // overflows the response cap. So bound the AGENT default — full with
             // no explicit limit → the 20 most recent entries (order=desc) + a

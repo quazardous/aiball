@@ -52,13 +52,21 @@ const emit = defineEmits<{
          render as an oversized full-width bar — dropping the background fixes the
          "trop grand" while keeping the claimer visible.) Read-only here; agents
          claim/release via MCP, a human moderator pushes via the manage panel. -->
+    <!-- #436: claim (focus) and assignment (responsibility) are distinct now —
+         a ticket can show both. Discreet muted text, not badges (david #429). -->
+    <span
+        v-if="ticket.claimant"
+        class="thread-assignee"
+        :title="`Claimed by ${ticket.claimant}${ticket.claimed_at ? ' · ' + new Date(ticket.claimed_at).toLocaleString() : ''}`"
+    >
+        <i class="pi pi-bookmark-fill" /> claimed by {{ ticket.claimant }}
+    </span>
     <span
         v-if="ticket.assignee"
         class="thread-assignee"
-        :title="`${ticket.is_claim ? 'Claimed by' : 'Assigned to'} ${ticket.assignee}${ticket.assigned_at ? ' · ' + new Date(ticket.assigned_at).toLocaleString() : ''}`"
+        :title="`Assigned to ${ticket.assignee}${ticket.assigned_at ? ' · ' + new Date(ticket.assigned_at).toLocaleString() : ''}`"
     >
-        <i :class="['pi', ticket.is_claim ? 'pi-bookmark-fill' : 'pi-user-plus']" />
-        {{ ticket.is_claim ? 'claimed by' : 'assigned to' }} {{ ticket.assignee }}
+        <i class="pi pi-user-plus" /> assigned to {{ ticket.assignee }}
     </span>
     <!-- #404/#406: per-ticket token-effort cost (shown once any usage is
          captured; cost-equivalent — cache reads weighted 0.1×). -->

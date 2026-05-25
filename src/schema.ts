@@ -134,21 +134,31 @@ export const tickets = sqliteTable("tickets", {
     lastActor: text("last_actor"),
     lastActorAt: text("last_actor_at"),
     /**
-     * #418: ticket → agent assignment. `assignee` = the consumer the ticket is
-     * attributed to. One model, two ways in: a human moderator *pushes* an
-     * assignment (`assignee` = someone, `isClaim` = 0), or an agent *claims* it
-     * for itself (`assignee` = self, `isClaim` = 1). `assignedBy` audits who set
-     * it. The live window is DERIVED (`now − assignedAt < assign_window_sec`) —
-     * no stored "assigned_until", same pattern as hot, so a config change to the
-     * window applies uniformly. A live assignment to someone ELSE drops the
-     * ticket from a consumer's actionable pool (anti-collision); see
-     * src/db/assignment-gate.ts. Auto-cleared on close/resolve. NULL `assignee`
-     * = unassigned (the shared pool, last_actor gate as usual).
+     * #418/#436: two ORTHOGONAL axes (split in #436 — they were fused in #418).
+     *
+     * ASSIGNMENT — `assignee` / `assignedBy` / `assignedAt`: a RESPONSIBILITY a
+     * human moderator *pushes* onto a consumer ("this is yours to do"). Persistent
+     * — it does NOT auto-expire; cleared on reassign/close. Boosts the assignee's
+     * claimable work-order (#436 decision 4).
+     *
+     * CLAIM — `claimant` / `claimedAt`: the FOCUS an agent *self-declares* ("I'm on
+     * this now"), via ticket_engage / a self ticket_assign. TRANSIENT: the live
+     * window is DERIVED (`now − claimedAt < assign_window_sec`, same pattern as
+     * hot) and one-focus (engage releases the prior uncommented claim). Drives the
+     * work-order tiebreak (#430) + token attribution (#434).
+     *
+     * A ticket can be BOTH assigned to A and claimed by A at once. A live claim OR
+     * a live assignment to someone ELSE drops the ticket from a consumer's
+     * actionable pool (anti-collision); see src/db/assignment-gate.ts. `isClaim`
+     * is vestigial post-#436 (kept to avoid a table rebuild; new code uses
+     * `claimant`).
      */
     assignee: text("assignee"),
     assignedBy: text("assigned_by"),
     assignedAt: text("assigned_at"),
     isClaim: integer("is_claim").notNull().default(0),
+    claimant: text("claimant"),
+    claimedAt: text("claimed_at"),
 }, (t) => [
     uniqueIndex("idx_tickets_project_display").on(t.project, t.displaySeq),
     index("idx_tickets_project").on(t.project),
@@ -157,6 +167,7 @@ export const tickets = sqliteTable("tickets", {
     index("idx_tickets_parent").on(t.parentTicketId),
     index("idx_tickets_priority").on(t.priority),
     index("idx_tickets_assignee").on(t.assignee),
+    index("idx_tickets_claimant").on(t.claimant),
 ]);
 
 export const messages = sqliteTable("_messages", {

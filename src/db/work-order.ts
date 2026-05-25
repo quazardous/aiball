@@ -36,9 +36,13 @@ export interface WorkOrderCtx {
     /** #430: does the consumer hold a LIVE claim on this ticket? (explicit focus,
      *  sorts above hot). Optional — omitted ⇒ no claim distinction (back-compat). */
     isOwnClaim?: (id: number) => boolean;
+    /** #436 (decision 4): is this ticket ASSIGNED to the consumer (a human handed
+     *  it to them)? Sorts below own-claim (current focus) but above hot — what
+     *  you've been handed outranks a stale-activity guess. Optional (back-compat). */
+    isAssignedToMe?: (id: number) => boolean;
 }
 
-/** Pure comparator: tier → priority desc → own-claim → hot → oldest. */
+/** Pure comparator: tier → priority desc → own-claim → assigned-to-me → hot → oldest. */
 export function compareWorkOrder(a: WorkOrderRow, b: WorkOrderRow, ctx: WorkOrderCtx): number {
     const tA = ctx.tierOf(a.id);
     const tB = ctx.tierOf(b.id);
@@ -50,6 +54,10 @@ export function compareWorkOrder(a: WorkOrderRow, b: WorkOrderRow, ctx: WorkOrde
     const cA = ctx.isOwnClaim?.(a.id) ? 1 : 0;
     const cB = ctx.isOwnClaim?.(b.id) ? 1 : 0;
     if (cA !== cB) return cB - cA;
+    // #436 (4): assigned-to-me (handed to you) sorts below own-claim, above hot.
+    const gA = ctx.isAssignedToMe?.(a.id) ? 1 : 0;
+    const gB = ctx.isAssignedToMe?.(b.id) ? 1 : 0;
+    if (gA !== gB) return gB - gA;
     const hA = ctx.isHot(a.id) ? 1 : 0;
     const hB = ctx.isHot(b.id) ? 1 : 0;
     if (hA !== hB) return hB - hA; // #402: hot first, only at equal priority
