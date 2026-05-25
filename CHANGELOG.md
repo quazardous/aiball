@@ -17,6 +17,22 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Ticket → agent assignment + claim (#418)
+
+- Tickets can now be **assigned** or **claimed** so several agents on one project
+  don't double-work the same ticket. One model, two ways in: a human moderator
+  **pushes** an assignment onto a consumer, or an agent **claims** a ticket for
+  itself (`is_claim`). A *live* assignment removes the ticket from every **other**
+  consumer's `actionable` pool — anti-collision — while staying open for them.
+- The hold is **time-boxed**: it lapses after `assign_window_sec` (global config,
+  default 4h) so an abandoned claim returns to the shared pool; expiry is derived
+  from `assigned_at` (no stored deadline, same pattern as the hot window). Closing
+  a ticket auto-releases its assignment.
+- New MCP tools `ticket_assign` (omit `assignee` to self-claim; another id is
+  moderator-only) and `ticket_release`; HTTP `POST /tickets/:id/assign` +
+  `/release`; `assignee` / `assigned_at` / `is_claim` surfaced on ticket reads.
+  The thread header shows a "claimed by / assigned to X" chip.
+
 ### Wake-prompt system — radically simpler (#400)
 
 - The wake/relance prompt templating is now **one template + a tiny placeholder
