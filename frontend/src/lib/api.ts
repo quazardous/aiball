@@ -329,6 +329,15 @@ export interface InboxRow {
     /** #427: accumulated per-ticket token-effort tally (null until any usage
      *  is captured). Raw counts; derive a cost estimate via `estTokenCost`. */
     token_usage?: TokenUsage | null;
+    /** #429: who currently holds this ticket — surfaced so the list can render
+     *  a compact claim/assign icon + tooltip naming the holder (parity with the
+     *  thread header). Two distinct holds (#418/#436): CLAIM (`claimant`/
+     *  `claimed_at`, an agent's transient focus) and ASSIGNMENT (`assignee`/
+     *  `assigned_at`, a human-pushed responsibility). A row can carry both. */
+    claimant?: string | null;
+    claimed_at?: string | null;
+    assignee?: string | null;
+    assigned_at?: string | null;
 }
 
 export interface ThreadView {

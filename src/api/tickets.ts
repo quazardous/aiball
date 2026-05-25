@@ -549,6 +549,15 @@ ticketsRouter.get("/inbox", (req, res) => {
             // #427: accumulated token-effort tally (null until any usage is
             // captured) so the inbox row can surface the cost-equiv chip.
             token_usage: tokenUsageMap.get(t.id) ?? null,
+            // #429: who currently holds this ticket, so the list can render a
+            // compact claim/assign icon + tooltip naming the holder (parity
+            // with the thread header). Two distinct holds (#436) — a row can
+            // carry both: CLAIM (focus, agent self-declared) and ASSIGNMENT
+            // (responsibility, a human push).
+            claimant: t.claimant ?? null,
+            claimed_at: t.claimed_at ?? null,
+            assignee: t.assignee ?? null,
+            assigned_at: t.assigned_at ?? null,
         };
     });
 

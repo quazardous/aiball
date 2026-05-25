@@ -229,6 +229,26 @@ function onRowClick(r: InboxRow) {
             />
         </template>
         <template #meta>
+            <!-- #429: who currently holds this ticket — compact icon + tooltip
+                 naming the holder (the tooltip carries the assignee/claimant,
+                 per david). Claim (focus) and assignment (responsibility) are
+                 distinct (#436); a row can show both. Role-specific glyph,
+                 same as the thread header (bookmark-fill = self-claim,
+                 user-plus = pushed assignment). -->
+            <span
+                v-if="r.claimant"
+                class="list-row__hold"
+                :title="`Claimed by ${r.claimant}${r.claimed_at ? ' · ' + new Date(r.claimed_at).toLocaleString() : ''}`"
+            >
+                <i class="pi pi-bookmark-fill" />
+            </span>
+            <span
+                v-if="r.assignee"
+                class="list-row__hold"
+                :title="`Assigned to ${r.assignee}${r.assigned_at ? ' · ' + new Date(r.assigned_at).toLocaleString() : ''}`"
+            >
+                <i class="pi pi-user-plus" />
+            </span>
             <!-- #427: per-ticket token-effort cost (cost-equiv; cache reads
                  weighted 0.1×). Shown only once any usage is captured, same
                  bolt glyph as the thread header. -->
@@ -277,6 +297,18 @@ function onRowClick(r: InboxRow) {
    and doesn't blend into the muted comment count next to it. */
 .list-row__token {
     color: var(--p-amber-500);
+}
+/* #429: claim/assign hold marker — discreet muted icon (the holder's name
+   lives in the tooltip, not inline, to keep the list row compact). Matches
+   the thread header's "afficher qui a claim mais pas dans un badge" intent. */
+.list-row__hold {
+    display: inline-flex;
+    align-items: center;
+    color: var(--p-text-muted-color);
+}
+.list-row__hold .pi {
+    font-size: 0.78rem;
+    opacity: 0.75;
 }
 .ticket-id {
     color: var(--p-text-muted-color);
