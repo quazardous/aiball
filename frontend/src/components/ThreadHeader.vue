@@ -46,6 +46,16 @@ const emit = defineEmits<{
     <span v-if="ticket.hot" class="thread-hot-focus" title="Hot-zone — an agent is actively working this ticket (recent agent activity within the hot window).">
         🔥 focus
     </span>
+    <!-- #418: assignment / claim — who currently holds this ticket (live window).
+         Read-only here; agents claim/release via MCP (ticket_assign /
+         ticket_release), a human moderator pushes via the manage panel. -->
+    <span
+        v-if="ticket.assignee"
+        class="thread-assignee"
+        :title="`${ticket.is_claim ? 'Claimed by' : 'Assigned to'} ${ticket.assignee}${ticket.assigned_at ? ' · ' + new Date(ticket.assigned_at).toLocaleString() : ''}`"
+    >
+        <i class="pi pi-user" /> {{ ticket.is_claim ? 'claimed by' : 'assigned to' }} {{ ticket.assignee }}
+    </span>
     <!-- #404/#406: per-ticket token-effort cost (shown once any usage is
          captured; cost-equivalent — cache reads weighted 0.1×). -->
     <span
@@ -164,5 +174,21 @@ const emit = defineEmits<{
     border-radius: 0.7rem;
     color: var(--p-orange-600, #c2410c);
     background: var(--p-orange-100, #ffedd5);
+}
+/* #418: assignment / claim chip. */
+.thread-assignee {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin: 0.2rem 0 0.3rem;
+    padding: 0.05rem 0.45rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 0.7rem;
+    color: var(--p-indigo-600, #4f46e5);
+    background: var(--p-indigo-100, #e0e7ff);
+}
+.thread-assignee .pi {
+    font-size: 0.72rem;
 }
 </style>

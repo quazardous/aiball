@@ -214,6 +214,13 @@ export interface TicketSummary {
     /** #405: in the requesting consumer's hot-zone (focus) — the ticket they're
      *  actively working (most recent self-activity within the hot window). */
     hot?: boolean;
+    /** #418: ticket → agent assignment. `assignee` = who holds it (a human push
+     *  or an agent self-claim); `is_claim` marks the self-claim; `assigned_at`
+     *  stamps it (the live window is derived). Null when unassigned. */
+    assignee?: string | null;
+    assigned_by?: string | null;
+    assigned_at?: string | null;
+    is_claim?: boolean;
 }
 
 /** #404: per-ticket token-effort tally (raw counts from the Claude transcript). */
