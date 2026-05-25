@@ -914,7 +914,7 @@ export class AiballClient {
     }
 
     health() {
-        return this.http<{ ok: boolean; ts: string }>("GET", "/api/health");
+        return this.http<{ ok: boolean; ts: string; version?: string }>("GET", "/api/health");
     }
 }
 

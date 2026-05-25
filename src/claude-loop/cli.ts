@@ -7,8 +7,8 @@
  * (if anything) to do based on its own context / MCP tools.
  *
  * Subcommands (start is default): `start | list | attach | tail | rm
- * | wake | reload | check | trace | prune`. Anything after `--` is
- * passed verbatim to the spawned `claude`.
+ * | wake | reload | check | status | trace | prune`. Anything after `--`
+ * is passed verbatim to the spawned `claude`.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { commandExists } from "../sysdeps.js";
@@ -249,9 +249,16 @@ function findLiveLoopForCwdAgent(cwd: string, agent: string | undefined): { name
  * ties — `claude-loop tail` is "show me what's happening now", so a
  * live session beats a stale state dir from a prior run.
  */
-function resolveCurrentLoopName(): string {
-    const cwd = canonicalCwd(process.env.CLAUDE_LOOP_CWD ?? process.cwd()); // #414 symlink-safe
-    if (!existsSync(STATE_ROOT)) die(`no loops registered (state root ${STATE_ROOT} missing). Pass a name or start one first.`);
+/**
+ * Best-effort: the registered loops whose plate cwd matches the current
+ * cwd (symlink-safe, #414), each with its tmux liveness. Never dies —
+ * returns [] when the state root is missing or nothing matches. Shared
+ * by `resolveCurrentLoopName` (which layers the die-on-ambiguity policy)
+ * and read-only callers like `status` that just want the picture.
+ */
+function loopsForCwd(): { name: string; alive: boolean }[] {
+    if (!existsSync(STATE_ROOT)) return [];
+    const cwd = canonicalCwd(process.env.CLAUDE_LOOP_CWD ?? process.cwd());
     const matches: { name: string; alive: boolean }[] = [];
     for (const name of readdirSync(STATE_ROOT)) {
         const sd = stateDirFor(name);
@@ -261,6 +268,13 @@ function resolveCurrentLoopName(): string {
         if (canonicalCwd(plate.cwd) !== cwd) continue;
         matches.push({ name, alive: tmuxAlive(name) });
     }
+    return matches;
+}
+
+function resolveCurrentLoopName(): string {
+    const cwd = canonicalCwd(process.env.CLAUDE_LOOP_CWD ?? process.cwd()); // #414 symlink-safe
+    if (!existsSync(STATE_ROOT)) die(`no loops registered (state root ${STATE_ROOT} missing). Pass a name or start one first.`);
+    const matches = loopsForCwd();
     if (matches.length === 0) die(`no claude-loop registered for cwd ${cwd}. Pass a name or run \`claude-loop list\`.`);
     if (matches.length === 1) return matches[0].name;
     const alive = matches.filter((m) => m.alive);
@@ -1060,6 +1074,77 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
 }
 
 /**
+ * `claude-loop status [name]` (#444). Project-level snapshot: the resolved
+ * identity (project + default agent, with where each came from), the loaded
+ * `.aiball.yaml`, and — david's main ask — the **connection type** the aiball
+ * client would use right now (local Unix socket vs remote HTTP, token or not),
+ * plus a live daemon-reachability probe. Read-only; never touches loop state.
+ *
+ * Distinct from `check` (which answers "what would the timer do — pings/subs/
+ * verdict"): `status` answers "who am I and how do I reach the daemon",
+ * cheaply. The transport is resolved purely from env by AiballClient
+ * (AIBALL_SOCK > AIBALL_URL/AIBALL_TOKEN), so we build one the same way the
+ * loop/MCP would and report what it WOULD pick — the honest "type de connexion".
+ */
+async function cmdStatus(name: string | undefined): Promise<void> {
+    const ctx = resolveProjectContext();
+    applyToProcessEnv(ctx);
+    warnIfDeprecated(ctx);
+
+    process.stdout.write(`claude-loop status\n`);
+    process.stdout.write(`  project        : ${ctx.project} (from ${ctx.project_source})\n`);
+    process.stdout.write(`  default agent  : ${ctx.agent} (from ${ctx.agent_source})\n`);
+    process.stdout.write(`  .aiball.yaml   : ${ctx.config_path ?? "(none — built-in defaults)"}\n`);
+
+    const client = new AiballClient({ agentId: ctx.agent, defaultProject: ctx.project });
+    let connection: string;
+    let endpoint: string;
+    if (client.socketPath) {
+        connection = "local — Unix socket (local-trust, no token)";
+        endpoint = client.socketPath;
+    } else if (client.token) {
+        connection = "remote — HTTP + bearer token";
+        endpoint = client.url;
+    } else {
+        // No token over TCP: fine for a loopback daemon (local trust at the
+        // OS level), but a non-loopback host with no token won't authenticate.
+        let loopback = false;
+        try { loopback = ["127.0.0.1", "localhost", "::1"].includes(new URL(client.url).hostname); }
+        catch { /* malformed url — leave loopback=false */ }
+        connection = loopback
+            ? "local — HTTP loopback (no token)"
+            : "remote — HTTP, NO token (won't authenticate unless the daemon is open)";
+        endpoint = client.url;
+    }
+    process.stdout.write(`  connection     : ${connection}\n`);
+    process.stdout.write(`  endpoint       : ${endpoint}\n`);
+
+    // Live reachability probe (client default timeout = 2s). Surfaces the
+    // daemon's version so a stale/ahead daemon vs this CLI is visible.
+    let daemon: string;
+    try {
+        const h = await client.health();
+        daemon = `✓ reachable${h.version ? ` (aiball ${h.version})` : ""}`;
+    } catch (e) {
+        daemon = `✗ unreachable (${(e as Error).message ?? String(e)})`;
+    }
+    process.stdout.write(`  daemon         : ${daemon}\n`);
+    process.stdout.write(`  client version : aiball ${AIBALL_VERSION}\n`);
+
+    // Best-effort: a registered loop for this cwd (read-only, never dies).
+    const loops = name
+        ? loopsForCwd().filter((l) => l.name === name)
+        : loopsForCwd();
+    if (loops.length === 0) {
+        process.stdout.write(`  loop @ cwd     : ${name ? `'${name}' not registered here` : "none registered for this cwd"}\n`);
+    } else {
+        process.stdout.write(`  loop @ cwd     : ${
+            loops.map((l) => `${l.name} (${l.alive ? "alive" : "dead — state kept"})`).join(", ")
+        }\n`);
+    }
+}
+
+/**
  * Dummy/observe subcommand (#B.149). Runs the timer's gate logic in
  * the foreground without spawning claude or a tmux session — david:
  * "un mode dummy qui permet de savoir ce qui devrait se passer
@@ -1457,7 +1542,7 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "restart", "stop", "check", "trace", "prune", "init", "debug-proxy-tty", "debug-keys", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "debug-proxy-tty", "debug-keys", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -1507,6 +1592,9 @@ async function main(): Promise<void> {
         .option("--check-cmd <cmd>", "Override the check-cmd (default: from loop plate or DEFAULT_CHECK_CMD)")
         .option("--config", "Also inspect the loop's state dir + .aiball.yaml in its cwd (autopoll wiring)")
         .action((name: string | undefined, opts: { checkCmd?: string; config?: boolean }) => cmdCheck(name, opts));
+    program.command("status [name]")
+        .description("Show this project's connection status: resolved project + default agent (and their sources), the loaded .aiball.yaml, the connection type the aiball client would use (local Unix socket vs remote HTTP, token or not), and a live daemon reachability probe. Name optional — annotates the loop registered for the current cwd.")
+        .action((name: string | undefined) => cmdStatus(name));
     program.command("trace")
         .description("Foreground gate evaluator — print WAKE/sleep every tick (no claude, no tmux)")
         .option("--check-cmd <cmd>", "Override the check-cmd (default: DEFAULT_CHECK_CMD)")
