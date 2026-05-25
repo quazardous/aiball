@@ -24,7 +24,7 @@ aiball has **two types** of remote. They do the same job (a loop on B against a
 daemon on A) but differ mainly by the **token** — and that single choice decides
 per-client config, the proof A gets, and the blast radius if a token leaks:
 
-| | **Type 1 — Direct** (#390) | **Type 2 — Proxy** (#394) |
+| | **Type 1 — Direct** | **Type 2 — Proxy** |
 |---|---|---|
 | what | each loop on B talks **straight** to A | a **local aiball daemon on B** relays *all* local clients to A |
 | token | **agent** token | **node** token |
@@ -44,7 +44,7 @@ token *through* the proxy) or **harden** the proxy so it never speaks for anyone
 (`proxy.strict`). Each type — with its setup commands and trade-offs — is its own
 section below.
 
-## Type 1 — Direct (#390)
+## Type 1 — Direct
 
 Each `claude-loop` on B points at A **directly**, carrying its **own agent
 token** end-to-end. Per-loop config; A authenticates every write per-consumer
@@ -90,7 +90,7 @@ What the flags do:
 | `--aiball-url`   | Target the remote daemon over HTTP (**required** for remote mode). |
 | `--aiball-token` | Bearer token from step 1 (**required** with `--aiball-url`). |
 | `--consumer`     | The loop's identity — overrides any local `.aiball.yaml`. Match the token. |
-| `--project`      | Project name — overrides any local `.aiball.yaml`. Use a per-platform name (e.g. `myapp-android`) until multi-agent-per-project (#391) lands. |
+| `--project`      | Project name — overrides any local `.aiball.yaml`. Use a per-platform name (e.g. `myapp-android`) until multi-agent-per-project lands. |
 
 #### Persist it — `claude-loop init` (so plain `start` reconnects)
 
@@ -118,7 +118,7 @@ persisted `env` file (the timer + hooks). The env file is written `0600` when it
 carries a token. The connection is stored in the loop's plate, so
 `claude-loop restart` replays it — a remote loop stays remote.
 
-## Type 2 — Proxy (#394)
+## Type 2 — Proxy
 
 Run a **local aiball daemon on B in proxy mode**; it relays every local client to
 A under **one node token**, so loops, MCP, CLI and the web UI on B all stay
@@ -129,7 +129,7 @@ The B daemon becomes a **transparent relay**: it forwards `/api/*` and
 `/uploads/*` to A (injecting the bearer), pipes A's SSE (`/api/events`) back to
 local subscribers, and keeps no local DB. Local clients on B talk to the UDS /
 `127.0.0.1` token-less, exactly as if A were local. If A is unreachable the proxy
-answers 502 and the local client spools the write for replay (#389).
+answers 502 and the local client spools the write for replay.
 
 ### The node token — why the proxy needs a *special* token
 
@@ -147,7 +147,7 @@ consumer on first sight). A node token is **not** human — the delegated
 consumer's own privileges apply.
 
 > Identity, two ways: the **node token** proves the *node* is legit; a regular
-> **agent token** (#390 direct mode) proves the *consumer* is legit. Pick one.
+> **agent token** (direct mode) proves the *consumer* is legit. Pick one.
 
 ### Trust model & threat model
 
@@ -163,7 +163,7 @@ node is legit) plus an asserted identity (the header). So the forwarded identity
 *does* have a proof — the node token — it's simply node-level, not per-consumer,
 exactly like local.
 
-The trade-off vs **#390 direct** is deliberate:
+The trade-off vs **direct mode** is deliberate:
 
 | | proof at A | local clients | leak blast radius |
 |---|---|---|---|
@@ -184,7 +184,7 @@ If you need **per-consumer hard proof**, use **Type 1 — Direct** (each loop
 carries its own agent token, end-to-end). The two types coexist on purpose —
 pick ergonomics (proxy) or strictness (direct) per deployment.
 
-**You can also mix the two *through* the proxy** (#394 QW-A): a caller that
+**You can also mix the two *through* the proxy**: a caller that
 presents its **own** agent token keeps it end-to-end — the proxy injects the
 node token **only as a fallback** for token-less callers. So a loop configured
 with its own per-consumer token gets hard proof at A *and* the proxy's single
@@ -193,7 +193,7 @@ token-less local clients (web UI, ad-hoc CLI). This shrinks the node token's
 blast radius in practice — the writes that matter (the loop's) carry their own
 proof, so a leaked node token can impersonate only the token-less stragglers.
 
-**To close the weak point entirely, use strict mode** (#394): `proxy.strict:
+**To close the weak point entirely, use strict mode**: `proxy.strict:
 true` (or `aiball proxy init --strict`) tells the proxy to **never inject the
 node token** — every relayed request must carry its own per-consumer bearer, and
 a token-less call is rejected with **401** at the proxy. The node can no longer
@@ -203,7 +203,7 @@ each local client must be provisioned with its own token (`aiball auth issue
 working through the proxy — that's why it's **opt-in**. See
 [`SECURITY.md`](./SECURITY.md) § *Closing the weak point entirely*.
 
-**To keep strict ergonomic, use the node-managed token store** (#394): instead
+**To keep strict ergonomic, use the node-managed token store**: instead
 of putting an A-token on each client, B holds a `{local token → A-token}` map and
 **swaps** an incoming local bearer for the mapped A-token at egress. Clients hold
 only a *local* token; the A-token's custody (and rotation/revocation) stays on
@@ -245,7 +245,7 @@ proxy:
 ```
 
 > Today the proxy relays the data plane; **launching a loop on B from A's web UI**
-> (#393) needs a reverse control channel (A→B) and is a follow-up — local launch
+> needs a reverse control channel (A→B) and is a follow-up — local launch
 > on B works now.
 
 ## Reading attached images

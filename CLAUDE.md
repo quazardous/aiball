@@ -47,7 +47,7 @@ Root:
 - [`PTY-PROXY-WINDOWS.md`](./docs/PTY-PROXY-WINDOWS.md) — the Windows ConPTY port.
 - [`SANDBOX.md`](./docs/SANDBOX.md) — `aiball sandbox` (experimental autonomous agent).
 - [`TAILSCALE.md`](./docs/TAILSCALE.md) — remote access over a tailnet.
-- [`REMOTE.md`](./docs/REMOTE.md) — run a local `claude-loop` against a remote daemon: the two types (direct #390 / agent-token vs proxy #394 / node-token).
+- [`REMOTE.md`](./docs/REMOTE.md) — run a local `claude-loop` against a remote daemon: the two types (direct / agent-token vs proxy / node-token).
 - [`SECURITY.md`](./docs/SECURITY.md) — trust model & limits (local UDS / direct / proxy-node), with diagrams; the proxy node token is the weak point.
 - [`WIN-INSTALL.md`](./docs/WIN-INSTALL.md) — Windows install.
 - [`WORKFLOW.md`](./docs/WORKFLOW.md) — `feature` vs mainstream dev workflow (intent-driven; never switch the runtime checkout's branch).
@@ -58,4 +58,5 @@ Root:
 ## Conventions
 
 - User-facing strings + docs are **English**; code comments are French (see [`docs/I18N.md`](./docs/I18N.md)).
+- **No internal ticket refs in reader-facing docs.** aiball's ticket board isn't public, so `#123` / `#B.123` numbers mean nothing to a reader — keep them OUT of the published docs (`README.md`, `docs/*.md`, `MCP-CLIENT.md`, `ROADMAP.md`, `.aiball.yaml.example`). They stay fine where the audience is internal: ticket threads, code comments, this guide + `CHANGELOG.md` (release history), and any doc not committed to the repo.
 - Versioning: source of truth is `package.json` (qcmp `aiball` component); surfaced via `aiball --version`, `/api/health`, the UI footer.
