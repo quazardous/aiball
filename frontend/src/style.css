@@ -243,3 +243,57 @@ body,
     font-size: 0.9rem;
 }
 
+/* Chrome de formulaire/section admin partagé (pattern qdadm, scalé). Jadis
+   `.rules-section` / `.rule-builder` / `.builder-cond` / `.builder-row` /
+   `.rules-error` — définies non-scopées dans RulesPanel (et dupliquées dans
+   TagsPanel) puis empruntées par Rules/Tags/WorkFilters via la fuite globale.
+   Désormais ici, une seule fois. `.aiball-field` est adossé à <FormField>. */
+.aiball-section {
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.5rem;
+    padding: 1rem 1.2rem;
+    background: var(--p-content-background);
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+.aiball-section__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.aiball-section h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+/* Rangée de construction de formulaire : champs qui s'enroulent, alignés bas. */
+.aiball-form-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: end;
+}
+/* Un champ = label au-dessus de l'input (adossé à <FormField>). */
+.aiball-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 9rem;
+}
+.aiball-field .field-label {
+    margin-bottom: 0;
+    font-size: 0.75rem;
+}
+.aiball-form-row {
+    display: flex;
+    align-items: end;
+    gap: 0.6rem;
+    margin-top: 0.4rem;
+}
+.aiball-form-error {
+    color: var(--p-red-500);
+    background: color-mix(in srgb, var(--p-red-500) 10%, transparent);
+    padding: 0.6rem 0.8rem;
+    border-radius: 0.4rem;
+}
+

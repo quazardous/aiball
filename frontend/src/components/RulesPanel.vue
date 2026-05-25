@@ -117,8 +117,8 @@ onMounted(load);
             </p>
         </PanelHeader>
 
-        <section class="rules-section">
-            <div class="rules-section-head">
+        <section class="aiball-section">
+            <div class="aiball-section__head">
                 <h3>Active rules ({{ sortedRules.length }})</h3>
             </div>
 
@@ -185,19 +185,19 @@ onMounted(load);
             </ol>
         </section>
 
-        <section class="rules-section">
+        <section class="aiball-section">
             <h3>Add a rule</h3>
             <p class="aiball-explainer aiball-explainer--muted">
                 Build a sentence: <em>if</em> these conditions match, <em>then</em> apply this verdict.
             </p>
-            <div class="rule-builder">
+            <div class="aiball-form-grid">
                 <span class="kw">if</span>
-                <div class="builder-cond">
+                <div class="aiball-field">
                     <label class="field-label">project</label>
                     <InputText v-model="matchProject" placeholder="(any)" class="w-full" />
                 </div>
                 <span class="kw kw-and">and</span>
-                <div class="builder-cond">
+                <div class="aiball-field">
                     <label class="field-label">kind</label>
                     <Select
                         v-model="matchKind"
@@ -208,12 +208,12 @@ onMounted(load);
                     />
                 </div>
                 <span class="kw kw-and">and</span>
-                <div class="builder-cond">
+                <div class="aiball-field">
                     <label class="field-label">by_agent</label>
                     <InputText v-model="matchBy" placeholder="(any)" class="w-full" />
                 </div>
                 <span class="kw">→</span>
-                <div class="builder-cond">
+                <div class="aiball-field">
                     <label class="field-label">verdict</label>
                     <Select
                         v-model="decision"
@@ -224,8 +224,8 @@ onMounted(load);
                     />
                 </div>
             </div>
-            <div class="builder-row">
-                <div class="builder-cond" style="flex: 1">
+            <div class="aiball-form-row">
+                <div class="aiball-field" style="flex: 1">
                     <label class="field-label">note (optional, shown in the rule list)</label>
                     <InputText
                         v-model="note"
@@ -242,7 +242,7 @@ onMounted(load);
             </div>
         </section>
 
-        <div v-if="error" class="rules-error">
+        <div v-if="error" class="aiball-form-error">
             <i class="pi pi-exclamation-triangle" /> {{ error }}
         </div>
     </div>
@@ -254,27 +254,11 @@ onMounted(load);
     flex-direction: column;
     gap: 1.4rem;
 }
-/* En-tête + explainer → globaux (`.aiball-panel-head*`, `.aiball-explainer*`
-   dans style.css), via <PanelHeader>. Étaient ici en non-scopé et fuyaient
-   vers 6 panels. */
-.rules-section {
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
-    padding: 1rem 1.2rem;
-    background: var(--p-content-background);
-    display: flex;
-    flex-direction: column;
-    gap: 0.8rem;
-}
-.rules-section-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-.rules-section h3 {
-    margin: 0;
-    font-size: 1rem;
-}
+/* Chrome partagé → globaux dans style.css, via <PanelHeader>/<FormField> :
+   en-tête + explainer (`.aiball-panel-head*`, `.aiball-explainer*`) et
+   section/form (`.aiball-section*`, `.aiball-form-grid`, `.aiball-field`,
+   `.aiball-form-row`, `.aiball-form-error`). Étaient ici en non-scopé et
+   fuyaient vers 6 panels. Ne restent que les styles propres à RulesPanel. */
 .rule-list {
     list-style: none;
     padding: 0;
@@ -382,33 +366,4 @@ onMounted(load);
     gap: 0.4rem;
 }
 
-.rule-builder {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    align-items: end;
-}
-.builder-cond {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-    min-width: 9rem;
-}
-.builder-cond .field-label {
-    margin-bottom: 0;
-    font-size: 0.75rem;
-}
-.builder-row {
-    display: flex;
-    align-items: end;
-    gap: 0.6rem;
-    margin-top: 0.4rem;
-}
-
-.rules-error {
-    color: var(--p-red-500);
-    background: color-mix(in srgb, var(--p-red-500) 10%, transparent);
-    padding: 0.6rem 0.8rem;
-    border-radius: 0.4rem;
-}
 </style>

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // #447: per-agent work filters — narrow which tickets an agent picks up, by
 // tag. Server-side gate; this panel just CRUDs the rules (stored in the daemon
-// DB, so a loop on any machine sees them). Reuses the global .rules-* styles
-// from RulesPanel for a consistent look.
+// DB, so a loop on any machine sees them). Reuses the shared .aiball-* admin
+// styles (style.css: PanelHeader, sections, form chrome) for a consistent look.
 import { computed, onMounted, ref } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
@@ -10,6 +10,7 @@ import Select from "primevue/select";
 import ToggleSwitch from "primevue/toggleswitch";
 import { api, type WorkFilter } from "../lib/api";
 import PanelHeader from "./ui/PanelHeader.vue";
+import FormField from "./ui/FormField.vue";
 
 const filters = ref<WorkFilter[]>([]);
 const error = ref<string | null>(null);
@@ -107,8 +108,8 @@ onMounted(load);
             </p>
         </PanelHeader>
 
-        <section class="rules-section">
-            <div class="rules-section-head">
+        <section class="aiball-section">
+            <div class="aiball-section__head">
                 <h3>Active filters ({{ sorted.length }})</h3>
             </div>
 
@@ -173,23 +174,20 @@ onMounted(load);
             </ol>
         </section>
 
-        <section class="rules-section">
+        <section class="aiball-section">
             <h3>Add a filter</h3>
             <p class="aiball-explainer aiball-explainer--muted">
                 <em>this agent</em> [in <em>this project</em>] <em>only / never</em> works tickets
                 carrying <em>these tags</em>.
             </p>
-            <div class="rule-builder">
-                <div class="builder-cond">
-                    <label class="field-label">agent (consumer id)</label>
+            <div class="aiball-form-grid">
+                <FormField label="agent (consumer id)">
                     <InputText v-model="consumer" placeholder="e.g. aiball-win-claude" class="w-full" />
-                </div>
-                <div class="builder-cond">
-                    <label class="field-label">project (optional)</label>
+                </FormField>
+                <FormField label="project (optional)">
                     <InputText v-model="project" placeholder="(all projects)" class="w-full" />
-                </div>
-                <div class="builder-cond">
-                    <label class="field-label">mode</label>
+                </FormField>
+                <FormField label="mode">
                     <Select
                         v-model="mode"
                         :options="modeOptions"
@@ -197,17 +195,15 @@ onMounted(load);
                         option-value="value"
                         class="w-full"
                     />
-                </div>
-                <div class="builder-cond" style="flex: 1; min-width: 12rem">
-                    <label class="field-label">tags (comma-separated, any-of)</label>
+                </FormField>
+                <FormField label="tags (comma-separated, any-of)" style="flex: 1; min-width: 12rem">
                     <InputText v-model="tagsInput" placeholder="win, urgent" class="w-full" />
-                </div>
+                </FormField>
             </div>
-            <div class="builder-row">
-                <div class="builder-cond" style="flex: 1">
-                    <label class="field-label">note (optional, shown in the list)</label>
+            <div class="aiball-form-row">
+                <FormField label="note (optional, shown in the list)" style="flex: 1">
                     <InputText v-model="note" placeholder="why this filter exists" class="w-full" />
-                </div>
+                </FormField>
                 <Button
                     label="add filter"
                     icon="pi pi-plus"
@@ -217,7 +213,7 @@ onMounted(load);
             </div>
         </section>
 
-        <div v-if="error" class="rules-error">
+        <div v-if="error" class="aiball-form-error">
             <i class="pi pi-exclamation-triangle" /> {{ error }}
         </div>
     </div>

@@ -167,8 +167,8 @@ onMounted(() => {
             </p>
         </PanelHeader>
 
-        <section class="rules-section">
-            <div class="rules-section-head">
+        <section class="aiball-section">
+            <div class="aiball-section__head">
                 <h3>Catalog ({{ tags.length }})</h3>
                 <div class="tags-project-picker">
                     <label class="field-label">project</label>
@@ -278,19 +278,19 @@ onMounted(() => {
             </DataList>
         </section>
 
-        <section class="rules-section">
+        <section class="aiball-section">
             <h3>Add a tag</h3>
             <p class="aiball-explainer" style="margin-top: 0">
                 New tags are added to the global DB catalog (visible in every project).
                 Project-scoped or non-deletable tags live in the config files — see
                 <code>.aiball.yaml.example</code>.
             </p>
-            <div class="rule-builder">
-                <div class="builder-cond">
+            <div class="aiball-form-grid">
+                <div class="aiball-field">
                     <label class="field-label">name</label>
                     <InputText v-model="newName" placeholder="e.g. blocked" class="w-full" />
                 </div>
-                <div class="builder-cond">
+                <div class="aiball-field">
                     <label class="field-label">color</label>
                     <input
                         type="color"
@@ -298,7 +298,7 @@ onMounted(() => {
                         style="width: 3rem; height: 2.4rem; cursor: pointer; border: 0; padding: 0; background: transparent"
                     />
                 </div>
-                <div class="builder-cond" style="flex: 1">
+                <div class="aiball-field" style="flex: 1">
                     <label class="field-label">note (shown on hover)</label>
                     <InputText v-model="newNote" placeholder="(optional)" class="w-full" />
                 </div>
@@ -311,7 +311,7 @@ onMounted(() => {
             </div>
         </section>
 
-        <div v-if="error" class="rules-error">
+        <div v-if="error" class="aiball-form-error">
             <i class="pi pi-exclamation-triangle" /> {{ error }}
         </div>
     </div>
@@ -454,7 +454,7 @@ onMounted(() => {
     }
     /* Add-a-tag block: full-width inputs so the form doesn't
        overflow when the parent gets cramped. */
-    .tags-page .rule-builder .builder-cond {
+    .tags-page .aiball-form-grid .aiball-field {
         flex: 1 1 100%;
         min-width: 0;
     }
