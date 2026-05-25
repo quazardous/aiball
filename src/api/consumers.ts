@@ -20,7 +20,7 @@ import { listNodes, revokeNode } from "../db/nodes.js";
 import { broadcast } from "../ws.js";
 import { emitControl } from "../event-bus.js";
 import { isPresent, presenceRunning } from "../live-presence.js";
-import { canStopLoop } from "../loop-control.js";
+import { canControlLoop } from "../loop-control.js";
 import { badRequest, consumerOf, notFound, tokenKindOf } from "./_helpers.js";
 
 export const consumersRouter = Router();
@@ -52,11 +52,29 @@ consumersRouter.get("/consumers/:consumer_id", (req: Request, res: Response) => 
 // live loop was connected to receive it right now (false ⇒ nothing was running).
 consumersRouter.post("/consumers/:consumer_id/loop-stop", (req: Request, res: Response) => {
     const target = String(req.params.consumer_id);
-    const verdict = canStopLoop(tokenKindOf(req), isHuman(consumerOf(req)));
+    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
     if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
     const delivered = isPresent(target);
     emitControl(target, { action: "kill" });
     res.json({ consumer_id: target, action: "kill", delivered });
+});
+
+// #451: send a RAW, unfiltered prompt straight into the loop's Claude session.
+// Pushes a `control:prompt` event onto the loop's live SSE → the loop injects
+// the text as if it were a wake (PTY proxy socket / tmux), bypassing the
+// ticket/wake-phrase indirection. Same privilege gate as loop-stop (moderator
+// only; proxy nodes DENIED — see loop-control.ts) since an arbitrary prompt can
+// hijack the agent. `delivered` is false when no live loop is connected (the
+// prompt is NOT queued — the operator retries when the loop is up).
+consumersRouter.post("/consumers/:consumer_id/prompt", (req: Request, res: Response) => {
+    const target = String(req.params.consumer_id);
+    const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
+    if (!verdict.ok) return res.status(403).json({ error: verdict.reason });
+    const text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    if (!text) return badRequest(res, "text required");
+    const delivered = isPresent(target);
+    emitControl(target, { action: "prompt", text });
+    res.json({ consumer_id: target, action: "prompt", delivered });
 });
 
 consumersRouter.post("/consumers", (req: Request, res: Response) => {

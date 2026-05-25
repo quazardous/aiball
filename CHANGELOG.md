@@ -17,6 +17,17 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Send a raw prompt to a claude-loop (#451)
+
+- New **"send prompt"** action on each live loop (Consumers page): type a prompt
+  and it's injected **verbatim** into that loop's Claude session — no moderation,
+  no wake-phrase indirection — for a direct operator instruction. Rides the same
+  daemon→loop SSE control channel as remote stop (#442): `POST
+  /api/consumers/:id/prompt` → a `control:prompt` event → the loop injects the
+  text like a wake (PTY proxy socket / tmux). Same privilege gate as stop
+  (moderator-only; proxy-node tokens denied — an arbitrary prompt can hijack an
+  agent). `delivered:false` when no live loop is connected (not queued).
+
 ### Pending tickets stay out of the backlog (#450)
 
 - A not-yet-approved ticket still pings participants (so it can be discussed)

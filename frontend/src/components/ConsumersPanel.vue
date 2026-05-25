@@ -2,6 +2,8 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import Button from "primevue/button";
 import Tag from "primevue/tag";
+import Dialog from "primevue/dialog";
+import Textarea from "primevue/textarea";
 import { useToast } from "primevue/usetoast";
 import { useConfirm } from "primevue/useconfirm";
 import { api, type Consumer } from "../lib/api";
@@ -37,6 +39,11 @@ const toast = useToast();
 const confirmDialog = useConfirm();
 const rows = ref<Consumer[]>([]);
 const loading = ref(false);
+// #451: raw-prompt injection dialog state.
+const promptVisible = ref(false);
+const promptTarget = ref("");
+const promptText = ref("");
+const promptBusy = ref(false);
 
 // Hide consumers idle > 1 week by default; toggle reveals the long
 // tail for debugging (#B.193).
@@ -115,6 +122,38 @@ async function doStopLoop(consumer_id: string) {
             detail: (e as Error).message,
             life: 6000,
         });
+    }
+}
+
+// #451: open the raw-prompt dialog for a loop.
+function openPrompt(consumer_id: string) {
+    promptTarget.value = consumer_id;
+    promptText.value = "";
+    promptVisible.value = true;
+}
+// Send the typed prompt verbatim into the loop's Claude session.
+async function sendPrompt() {
+    const text = promptText.value.trim();
+    if (!text) return;
+    promptBusy.value = true;
+    try {
+        const r = await api.sendLoopPrompt(promptTarget.value, text);
+        toast.add({
+            severity: r.delivered ? "success" : "warn",
+            summary: r.delivered ? `Prompt sent to ${promptTarget.value}` : `No live loop for ${promptTarget.value}`,
+            detail: r.delivered ? "Injected into the Claude session." : "Nothing was connected to receive it.",
+            life: 5000,
+        });
+        promptVisible.value = false;
+    } catch (e) {
+        toast.add({
+            severity: "error",
+            summary: `Prompt failed for ${promptTarget.value}`,
+            detail: (e as Error).message,
+            life: 6000,
+        });
+    } finally {
+        promptBusy.value = false;
     }
 }
 
@@ -440,6 +479,18 @@ const sortedRows = computed<Consumer[]>(() => {
                     </td>
                     <td class="action-cell">
                         <div class="action-cell__inner">
+                            <!-- #451: send a raw, unfiltered prompt into the loop's
+                                 Claude session (live loops only). -->
+                            <Button
+                                v-if="isLiveLoop(r)"
+                                icon="pi pi-send"
+                                severity="secondary"
+                                text
+                                rounded
+                                size="small"
+                                :title="`Send a raw prompt to the claude-loop running as ${r.consumer_id}`"
+                                @click="openPrompt(r.consumer_id)"
+                            />
                             <!-- #442/#443: remote hard-kill on ANY live loop
                                  (wait/busy/boot/human too — not just autonomous). -->
                             <Button
@@ -475,6 +526,32 @@ const sortedRows = computed<Consumer[]>(() => {
             </tbody>
         </table>
         </div>
+
+        <!-- #451: raw-prompt injection dialog. -->
+        <Dialog
+            v-model:visible="promptVisible"
+            modal
+            header="Send a raw prompt"
+            :style="{ width: '32rem', maxWidth: '95vw' }"
+        >
+            <p style="margin: 0 0 0.6rem; font-size: 0.85rem; color: var(--p-text-muted-color); line-height: 1.45">
+                Sent <strong>verbatim</strong> into <strong>{{ promptTarget }}</strong>'s Claude session —
+                no moderation, no wake-phrase. A direct instruction straight to the loop.
+            </p>
+            <Textarea
+                v-model="promptText"
+                rows="5"
+                auto-resize
+                placeholder="Type the prompt to inject…"
+                :disabled="promptBusy"
+                style="width: 100%"
+                @keydown.ctrl.enter="sendPrompt"
+            />
+            <template #footer>
+                <Button label="Cancel" text severity="secondary" :disabled="promptBusy" @click="promptVisible = false" />
+                <Button label="Send" icon="pi pi-send" :loading="promptBusy" :disabled="!promptText.trim()" @click="sendPrompt" />
+            </template>
+        </Dialog>
     </div>
 </template>
 

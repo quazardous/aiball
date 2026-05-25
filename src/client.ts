@@ -16,6 +16,7 @@ import { homedir } from "node:os";
 import { loadConfig } from "./autopoll/config.js";
 import { createHash } from "node:crypto";
 import { request as httpRequest, type IncomingMessage } from "node:http";
+import type { ControlEvent } from "./event-bus.js"; // #451: typed control payload
 
 export interface ClientOptions {
     url?: string;
@@ -715,8 +716,9 @@ export class AiballClient {
     subscribeEvents(handlers: {
         onPing: (payload: { ticket_id?: number; comment_id?: number; comment_hashid?: string; intent?: "panic" | "request" | "question" | "fyi" }) => void;
         onHello?: (payload: { consumer_id: string; unread: number }) => void;
-        // #442: out-of-band control events (e.g. remote hard-kill) on the same stream.
-        onControl?: (payload: { action: string }) => void;
+        // #442/#451: out-of-band control events (remote kill / raw-prompt
+        // injection) on the same stream.
+        onControl?: (payload: ControlEvent) => void;
         onError?: (err: Error) => void;
     }): () => void {
         const path = `/api/events?consumer_id=${encodeURIComponent(this.agentId)}`;
@@ -771,7 +773,7 @@ export class AiballClient {
                     } else if (evName === "hello" && handlers.onHello) {
                         handlers.onHello(payload as { consumer_id: string; unread: number });
                     } else if (evName === "control" && handlers.onControl) {
-                        handlers.onControl(payload as { action: string });
+                        handlers.onControl(payload as ControlEvent);
                     }
                 }
             });

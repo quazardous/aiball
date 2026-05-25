@@ -52,14 +52,19 @@ export function onPing(
 }
 
 /**
- * #442 — out-of-band CONTROL events pushed to a consumer's live SSE stream
+ * #442/#451 — out-of-band CONTROL events pushed to a consumer's live SSE stream
  * (the loop already holds one open). Distinct from `ping` (work-arrival): this
- * is the daemon telling a specific loop to act on itself. Today: `kill` (hard
- * stop — the loop self-rm's). Same per-recipient routing as pings.
+ * is the daemon telling a specific loop to act on itself. Same per-recipient
+ * routing as pings. Actions:
+ *   - `kill`   (#442) — hard stop (the loop self-rm's).
+ *   - `prompt` (#451) — inject a raw, unfiltered prompt `text` straight into the
+ *                       loop's Claude session (a "wake" with operator-supplied
+ *                       text instead of a ping phrase). Privileged — see
+ *                       loop-control.ts (moderator-only, no proxy nodes).
  */
-export interface ControlEvent {
-    action: "kill";
-}
+export type ControlEvent =
+    | { action: "kill" }
+    | { action: "prompt"; text: string };
 
 export function emitControl(recipient: string, payload: ControlEvent): void {
     bus.emit(`control:${recipient}`, payload);
