@@ -17,6 +17,8 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-05-25
+
 ### Stop a claude-loop, locally or remotely (#442)
 
 - New **`claude-loop stop [name]`** + a **`SIGTERM`** handler on the timer — a clean
