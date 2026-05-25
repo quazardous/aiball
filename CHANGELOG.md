@@ -46,7 +46,9 @@ narrative for the product as a whole.
   "running", on those views too (the project detail page previously never refreshed
   on its own). The stop button now appears on **any** live loop (busy / waiting /
   human-driven), not only an idle autonomous one — so a loop stuck right after a
-  relaunch is still killable.
+  relaunch is still killable. The **per-project detail page** also carries the stop
+  button now (next to each live loop), so a loop is killable from the project view,
+  not only the Consumers list.
 
 ### Syntax highlighting in rendered markdown (#440)
 

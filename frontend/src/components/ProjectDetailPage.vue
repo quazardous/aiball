@@ -3,6 +3,9 @@
 // (a claude-loop with a known root has run here), its root(s), the loops at
 // each root with their live state, and a button to launch a loop for a root.
 import { computed, onMounted, ref, watch } from "vue";
+import Button from "primevue/button";
+import { useToast } from "primevue/usetoast";
+import { useConfirm } from "primevue/useconfirm";
 import { api, type ProjectMeta, type Consumer } from "../lib/api";
 import { useBus } from "../lib/bus";
 
@@ -15,6 +18,9 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const launching = ref<string | null>(null);
 const flash = ref<string | null>(null);
+
+const toast = useToast();
+const confirmDialog = useConfirm();
 
 async function load() {
     loading.value = true;
@@ -103,6 +109,42 @@ async function launch(root: string) {
         launching.value = null;
     }
 }
+
+// #443 (2gx5ev): david wants the remote hard-kill (#442) reachable from the
+// per-project page too, not only the Consumers list. Same flow mirrored: a
+// PrimeVue ConfirmDialog gates the call so a stray click never kills a loop.
+function stopLoop(consumer_id: string) {
+    confirmDialog.require({
+        header: "Stop loop",
+        message: `Stop the claude-loop running as "${consumer_id}"? This kills its tmux session + Claude (the conversation is lost). Its state is kept — use Delete to remove it entirely.`,
+        icon: "pi pi-stop-circle",
+        acceptLabel: "Stop",
+        rejectLabel: "Cancel",
+        acceptClass: "p-button-danger",
+        accept: () => { void doStopLoop(consumer_id); },
+    });
+}
+// The running badge + loop chip clear on their own via the presence WS broadcast
+// (`projects.refresh` → load()); reload shortly after as a backstop.
+async function doStopLoop(consumer_id: string) {
+    try {
+        const r = await api.stopLoop(consumer_id);
+        toast.add({
+            severity: r.delivered ? "success" : "warn",
+            summary: r.delivered ? `Stop sent to ${consumer_id}` : `No live loop for ${consumer_id}`,
+            detail: r.delivered ? "The loop will self-terminate." : "Nothing was connected to receive it.",
+            life: 5000,
+        });
+        setTimeout(() => void load(), 1500);
+    } catch (e) {
+        toast.add({
+            severity: "error",
+            summary: `Stop failed for ${consumer_id}`,
+            detail: (e as Error).message,
+            life: 6000,
+        });
+    }
+}
 </script>
 
 <template>
@@ -169,6 +211,18 @@ async function launch(root: string) {
                             <span class="ld-tag" :class="presenceClass(c.state_human, c.state_human_word)">{{ presenceWord(c.state_human, c.state_human_word) }}</span>
                         </template>
                         <span v-else class="ld-tag ld-tag--offline">offline</span>
+                        <!-- #443 (2gx5ev): remote hard-kill on any live loop, mirrors ConsumersPanel. -->
+                        <Button
+                            v-if="isOnline(c)"
+                            class="project-detail__stop"
+                            icon="pi pi-stop-circle"
+                            severity="danger"
+                            text
+                            rounded
+                            size="small"
+                            :title="`Stop (hard-kill) the claude-loop running as ${c.consumer_id}`"
+                            @click="stopLoop(c.consumer_id)"
+                        />
                     </li>
                     <li v-if="(loopsByRoot.get(root) ?? []).length === 0" class="project-detail__none">
                         no loop registered at this root yet
@@ -334,6 +388,8 @@ async function launch(root: string) {
     font-size: 0.85rem;
 }
 .project-detail__loop.is-offline { opacity: 0.6; }
+/* #443: hard-kill button pushed to the right edge of the loop row. */
+.project-detail__stop { margin-left: auto; }
 .project-detail__dot {
     width: 0.55rem;
     height: 0.55rem;
