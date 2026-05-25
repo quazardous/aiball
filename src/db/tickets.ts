@@ -251,6 +251,42 @@ export function setTicketOwner(ticket_id: number, by_agent: string): void {
 }
 
 /**
+ * #418: assign / claim a ticket. `assignee` = the target consumer; `assignedBy`
+ * = who set it (the human moderator for a push, the agent itself for a claim);
+ * `isClaim` true for a self-claim. Stamps `assignedAt` so the live window is
+ * derivable (now − assignedAt < assign_window_sec). The API layer gates push
+ * (human-only) vs claim (self) and subscribes the assignee.
+ */
+export function setTicketAssignee(
+    ticket_id: number,
+    assignee: string,
+    assigned_by: string,
+    is_claim: boolean,
+): void {
+    getDb().update(schema.tickets)
+        .set({
+            assignee,
+            assignedBy: assigned_by,
+            assignedAt: nowIso(),
+            isClaim: is_claim ? 1 : 0,
+        })
+        .where(eq(schema.tickets.id, ticket_id))
+        .run();
+}
+
+/**
+ * #418: release a ticket's assignment / claim — back to the shared pool. Called
+ * by the /release endpoint (assignee or moderator) and auto-fired on close so a
+ * later reopen starts fresh.
+ */
+export function releaseTicketAssignment(ticket_id: number): void {
+    getDb().update(schema.tickets)
+        .set({ assignee: null, assignedBy: null, assignedAt: null, isClaim: 0 })
+        .where(eq(schema.tickets.id, ticket_id))
+        .run();
+}
+
+/**
  * Count direct children per parent ticket, in one shot. Rejected children
  * are excluded (symmetric with listSubTickets). Used by the ticket list
  * endpoint to surface lineage without paying a per-row N+1.

@@ -11,6 +11,7 @@ import {
     applyMessageDecision,
     listPendingLifecycleForTicket,
     deletePingsForMessage,
+    releaseTicketAssignment,
     ensureConsumer,
     isHuman,
     INTENTS,
@@ -457,6 +458,10 @@ export function submitMessage(input: NewMessage): Message {
                         broadcast({ type: "message_decided", data: rejected });
                     }
                 }
+                // #418: a closed ticket is out of every pool — release any live
+                // assignment / claim so a later reopen starts back in the shared
+                // pool (and the data stays clean). No-op when unassigned.
+                releaseTicketAssignment(msg.ticket_id);
             }
         }
     }
