@@ -1,4 +1,4 @@
-# Remote aiball — a local `claude-loop` slaved to a remote daemon (#390)
+# Remote aiball — run a local `claude-loop` against a remote daemon
 
 Run a `claude-loop` **on machine B** while the aiball daemon lives **on machine
 A** (reachable over a tailnet or LAN). Machine B needs **no aiball install of its
@@ -18,23 +18,118 @@ proxy, human-typing detection and all state files stay **local on B**; only the
 This is **not** "run the loop on the remote host". The loop runs where claude +
 tmux run (B); A is just the shared board.
 
-## Two ways to wire B → A
+## The two types of remote
 
-- **Direct (#390)** — each `claude-loop` on B points at A with `--aiball-url` /
-  `--aiball-token` (see [Setup](#setup) below). Per-loop config.
-- **Proxy mode (#394, recommended for a busy host)** — run a **local aiball
-  daemon on B in proxy mode**; it transparently relays to A. Then **every** local
-  client (loops, MCP, CLI, web UI) just uses localhost / the UDS as usual
-  (token-less, SSE included) — no per-client remote config. See
-  [Proxy mode](#proxy-mode) below. The two coexist; pick whichever fits.
+aiball has **two types** of remote. They do the same job (a loop on B against a
+daemon on A) but differ mainly by the **token** — and that single choice decides
+per-client config, the proof A gets, and the blast radius if a token leaks:
 
-## Proxy mode
+| | **Type 1 — Direct** | **Type 2 — Proxy** |
+|---|---|---|
+| what | each loop on B talks **straight** to A | a **local aiball daemon on B** relays *all* local clients to A |
+| token | **agent** token | **node** token |
+| minted on A by | `aiball auth issue --consumer <id>` | `aiball auth issue --node` |
+| bound to | one consumer | nothing (`consumer_id` NULL, `kind: node`) |
+| proof at A | **per-consumer** (hard) | per-**node** + *asserted* identity (`x-aiball-consumer`) |
+| client config | each loop carries its own token | local clients are **token-less** (UDS) |
+| best for | one / a few loops, strict identity | a busy host, many clients, ergonomics |
+| leak blast radius | one consumer | **impersonate any consumer** (sensitive) |
+
+Rule of thumb: **Direct** for a single loop or when you want hard per-consumer
+proof; **Proxy** for a host running several clients (loops, MCP, CLI, web UI)
+that should all "just work" against A without per-client tokens.
+
+The two coexist, and you can even **mix** them (a loop carrying its own agent
+token *through* the proxy) or **harden** the proxy so it never speaks for anyone
+(`proxy.strict`). Each type — with its setup commands and trade-offs — is its own
+section below.
+
+## Type 1 — Direct
+
+Each `claude-loop` on B points at A **directly**, carrying its **own agent
+token** end-to-end. Per-loop config; A authenticates every write per-consumer
+(hard proof). Use this for one or a few loops, or when identity strictness
+matters more than ergonomics.
+
+### 1. On A — mint a token for the loop's consumer
+
+The token is bound to a **consumer** (the loop's identity). `aiball auth issue`
+**creates the consumer on the fly** if it doesn't exist yet, so this is one step:
+
+```bash
+# on machine A
+aiball auth issue --consumer my-remote-agent
+#  → Created consumer 'my-remote-agent' (agent).
+#    Token issued for my-remote-agent:
+#       aiball-<48 hex>
+```
+
+> The daemon authenticates an agent by **the token's** consumer — the
+> `--consumer` flag on B must name the **same** consumer the token is bound to
+> (a mismatch is ignored for agent tokens; the token wins).
+
+Make sure the daemon is reachable from B. Over Tailscale, see
+[`TAILSCALE.md`](./TAILSCALE.md) (`tailscale serve`); over a LAN, bind/forward
+the daemon's port (default `7777`).
+
+### 2. On B — start the loop pointed at A
+
+```bash
+# on machine B, in the project dir
+claude-loop start \
+  --aiball-url   http://<A-host>:7777 \
+  --aiball-token aiball-<48 hex> \
+  --consumer     my-remote-agent \
+  --project      my-project
+```
+
+What the flags do:
+
+| Flag | Effect |
+|------|--------|
+| `--aiball-url`   | Target the remote daemon over HTTP (**required** for remote mode). |
+| `--aiball-token` | Bearer token from step 1 (**required** with `--aiball-url`). |
+| `--consumer`     | The loop's identity — overrides any local `.aiball.yaml`. Match the token. |
+| `--project`      | Project name — overrides any local `.aiball.yaml`. Use a per-platform name (e.g. `myapp-android`) until multi-agent-per-project lands. |
+
+#### Persist it — `claude-loop init` (so plain `start` reconnects)
+
+To avoid re-passing the flags every time, persist the connection once:
+
+```bash
+# on machine B, in the project dir
+claude-loop init \
+  --aiball-url   http://<A-host>:7777 \
+  --aiball-token aiball-<48 hex> \
+  --consumer     my-remote-agent \
+  --project      my-project
+```
+
+This writes a `remote:` block to `.aiball.local.yaml` (chmod `600`, **git-ignored**
+— it carries a token) **and** bootstraps the project (`.mcp.json` + `.aiball.yaml`,
+the existing `claude-loop init` behavior). Afterwards a plain **`claude-loop start`**
+(no flags) in that dir slaves to A; per-start flags still override.
+
+Under the hood the loop exports `AIBALL_URL` / `AIBALL_TOKEN` and an **empty
+`AIBALL_SOCK`** (which forces the TCP transport — otherwise the client defaults
+to a local socket that doesn't exist on B). These go into both `process.env`
+(the claude session **and its MCP server** inherit them) and the loop's
+persisted `env` file (the timer + hooks). The env file is written `0600` when it
+carries a token. The connection is stored in the loop's plate, so
+`claude-loop restart` replays it — a remote loop stays remote.
+
+## Type 2 — Proxy
+
+Run a **local aiball daemon on B in proxy mode**; it relays every local client to
+A under **one node token**, so loops, MCP, CLI and the web UI on B all stay
+token-less (localhost / UDS, SSE included) — no per-client remote config.
+Recommended for a busy host.
 
 The B daemon becomes a **transparent relay**: it forwards `/api/*` and
 `/uploads/*` to A (injecting the bearer), pipes A's SSE (`/api/events`) back to
 local subscribers, and keeps no local DB. Local clients on B talk to the UDS /
 `127.0.0.1` token-less, exactly as if A were local. If A is unreachable the proxy
-answers 502 and the local client spools the write for replay (#389).
+answers 502 and the local client spools the write for replay.
 
 ### The node token — why the proxy needs a *special* token
 
@@ -52,7 +147,7 @@ consumer on first sight). A node token is **not** human — the delegated
 consumer's own privileges apply.
 
 > Identity, two ways: the **node token** proves the *node* is legit; a regular
-> **agent token** (#390 direct mode) proves the *consumer* is legit. Pick one.
+> **agent token** (direct mode) proves the *consumer* is legit. Pick one.
 
 ### Trust model & threat model
 
@@ -68,7 +163,7 @@ node is legit) plus an asserted identity (the header). So the forwarded identity
 *does* have a proof — the node token — it's simply node-level, not per-consumer,
 exactly like local.
 
-The trade-off vs **#390 direct** is deliberate:
+The trade-off vs **direct mode** is deliberate:
 
 | | proof at A | local clients | leak blast radius |
 |---|---|---|---|
@@ -85,11 +180,11 @@ or project. Treat it accordingly:
   machines, not opening a delegation endpoint to third parties.
 - Keep `proxy.token` `chmod 600` in the global config; never commit it.
 
-If you need **per-consumer hard proof**, use **#390 direct mode** (each loop
-carries its own agent token, end-to-end). The two modes coexist on purpose —
+If you need **per-consumer hard proof**, use **Type 1 — Direct** (each loop
+carries its own agent token, end-to-end). The two types coexist on purpose —
 pick ergonomics (proxy) or strictness (direct) per deployment.
 
-**You can also mix the two *through* the proxy** (#394 QW-A): a caller that
+**You can also mix the two *through* the proxy**: a caller that
 presents its **own** agent token keeps it end-to-end — the proxy injects the
 node token **only as a fallback** for token-less callers. So a loop configured
 with its own per-consumer token gets hard proof at A *and* the proxy's single
@@ -98,7 +193,7 @@ token-less local clients (web UI, ad-hoc CLI). This shrinks the node token's
 blast radius in practice — the writes that matter (the loop's) carry their own
 proof, so a leaked node token can impersonate only the token-less stragglers.
 
-**To close the weak point entirely, use strict mode** (#394): `proxy.strict:
+**To close the weak point entirely, use strict mode**: `proxy.strict:
 true` (or `aiball proxy init --strict`) tells the proxy to **never inject the
 node token** — every relayed request must carry its own per-consumer bearer, and
 a token-less call is rejected with **401** at the proxy. The node can no longer
@@ -108,7 +203,7 @@ each local client must be provisioned with its own token (`aiball auth issue
 working through the proxy — that's why it's **opt-in**. See
 [`SECURITY.md`](./SECURITY.md) § *Closing the weak point entirely*.
 
-**To keep strict ergonomic, use the node-managed token store** (#394): instead
+**To keep strict ergonomic, use the node-managed token store**: instead
 of putting an A-token on each client, B holds a `{local token → A-token}` map and
 **swaps** an incoming local bearer for the mapped A-token at egress. Clients hold
 only a *local* token; the A-token's custody (and rotation/revocation) stays on
@@ -150,77 +245,8 @@ proxy:
 ```
 
 > Today the proxy relays the data plane; **launching a loop on B from A's web UI**
-> (#393) needs a reverse control channel (A→B) and is a follow-up — local launch
+> needs a reverse control channel (A→B) and is a follow-up — local launch
 > on B works now.
-
-## Setup
-
-### 1. On A — mint a token for the loop's consumer
-
-The token is bound to a **consumer** (the loop's identity). `aiball auth issue`
-**creates the consumer on the fly** if it doesn't exist yet, so this is one step:
-
-```bash
-# on machine A
-aiball auth issue --consumer my-remote-agent
-#  → Created consumer 'my-remote-agent' (agent).
-#    Token issued for my-remote-agent:
-#       aiball-<48 hex>
-```
-
-> The daemon authenticates an agent by **the token's** consumer — the
-> `--consumer` flag on B must name the **same** consumer the token is bound to
-> (a mismatch is ignored for agent tokens; the token wins).
-
-Make sure the daemon is reachable from B. Over Tailscale, see
-[`TAILSCALE.md`](./TAILSCALE.md) (`tailscale serve`); over a LAN, bind/forward
-the daemon's port (default `7777`).
-
-### 2. On B — start the loop pointed at A
-
-```bash
-# on machine B, in the project dir
-claude-loop start \
-  --aiball-url   http://<A-host>:7777 \
-  --aiball-token aiball-<48 hex> \
-  --consumer     my-remote-agent \
-  --project      my-project
-```
-
-What the flags do:
-
-| Flag | Effect |
-|------|--------|
-| `--aiball-url`   | Target the remote daemon over HTTP (**required** for remote mode). |
-| `--aiball-token` | Bearer token from step 1 (**required** with `--aiball-url`). |
-| `--consumer`     | The loop's identity — overrides any local `.aiball.yaml`. Match the token. |
-| `--project`      | Project name — overrides any local `.aiball.yaml`. Use a per-platform name (e.g. `myapp-android`) until multi-agent-per-project (#391) lands. |
-
-#### Persist it — `claude-loop init` (so plain `start` reconnects)
-
-To avoid re-passing the flags every time, persist the connection once:
-
-```bash
-# on machine B, in the project dir
-claude-loop init \
-  --aiball-url   http://<A-host>:7777 \
-  --aiball-token aiball-<48 hex> \
-  --consumer     my-remote-agent \
-  --project      my-project
-```
-
-This writes a `remote:` block to `.aiball.local.yaml` (chmod `600`, **git-ignored**
-— it carries a token) **and** bootstraps the project (`.mcp.json` + `.aiball.yaml`,
-the existing `claude-loop init` behavior). Afterwards a plain **`claude-loop start`**
-(no flags) in that dir slaves to A; per-start flags still override.
-
-Under the hood the loop exports `AIBALL_URL` / `AIBALL_TOKEN` and an **empty
-`AIBALL_SOCK`** (which forces the TCP transport — otherwise the client defaults
-to a local socket that doesn't exist on B). These go into both `process.env`
-(the claude session **and its MCP server** inherit them) and the loop's
-persisted `env` file (the timer + hooks). The env file is written `0600` when it
-carries a token. The connection is stored in the loop's plate, so
-`claude-loop restart` replays it — a remote loop stays remote.
 
 ## Reading attached images
 

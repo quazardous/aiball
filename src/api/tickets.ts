@@ -44,6 +44,8 @@ import {
     listTypedRelationsForTicket,
     lineageWouldCycle,
     setTicketOwner,
+    setTicketAssignee,
+    releaseTicketAssignment,
     upsertTicketSubscription,
     listTicketSubscriptionsForTicket,
 } from "../db.js";
@@ -93,6 +95,50 @@ ticketsRouter.post("/tickets/:id/owner", (req: Request, res: Response) => {
     setTicketOwner(id, by_agent);
     upsertTicketSubscription(by_agent, id);
     res.json({ ticket_id: id, by_agent });
+});
+
+/**
+ * #418: assign / claim a ticket.
+ *  - PUSH (`assignee` = someone other than the caller): human/moderator only,
+ *    like owner-change. is_claim=0, assigned_by=the human.
+ *  - CLAIM (no `assignee`, or `assignee` = caller): any consumer self-assigns.
+ *    is_claim=1, assigned_by=caller.
+ * Subscribes the assignee to the thread. A live assignment narrows the ticket
+ * out of OTHER consumers' actionable pool until it expires (assign_window_sec),
+ * is released, or the ticket closes. The assignee's own gating is unchanged.
+ */
+ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const caller = consumerOf(req);
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    const rawAssignee = typeof req.body?.assignee === "string" ? req.body.assignee.trim() : "";
+    const assignee = rawAssignee || caller; // no assignee → self-claim
+    const isClaim = assignee === caller;
+    if (!isClaim && !isHuman(caller)) {
+        return res.status(403).json({
+            error: "assigning another consumer is moderator-only (an agent can only claim for itself)",
+        });
+    }
+    setTicketAssignee(id, assignee, caller, isClaim);
+    upsertTicketSubscription(assignee, id);
+    res.json({ ticket_id: id, assignee, assigned_by: caller, is_claim: isClaim });
+});
+
+/**
+ * #418: release a ticket's assignment / claim — back to the shared pool. The
+ * current assignee or a human moderator can release.
+ */
+ticketsRouter.post("/tickets/:id/release", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const caller = consumerOf(req);
+    const t = getMessage(id);
+    if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
+    if (t.assignee && t.assignee !== caller && !isHuman(caller)) {
+        return res.status(403).json({ error: "only the assignee or a moderator can release this assignment" });
+    }
+    releaseTicketAssignment(id);
+    res.json({ ticket_id: id, released: true });
 });
 
 /**
@@ -608,6 +654,11 @@ ticketsRouter.get("/tickets", (req, res) => {
             token_usage: tokenUsageMap.get(m.id) ?? null,
             // #405: in the consumer's hot-zone (focus) → the 🔥 UI flag.
             hot: hotFocus.has(m.id),
+            // #418: assignment — who holds it + when (live window derived).
+            assignee: m.assignee ?? null,
+            assigned_by: m.assigned_by ?? null,
+            assigned_at: m.assigned_at ?? null,
+            is_claim: m.is_claim ?? false,
         };
         if (summary) return base;
         return { ...base, body: m.edited_body ?? m.body };
@@ -1023,6 +1074,12 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         postponed_until: t.postponed_until ?? null,
         intent: t.intent,
         priority: t.priority ?? "normal",
+        // #418: assignment — surfaced on the thread header so the UI can render
+        // the "assigned to X" chip and an agent sees who holds it.
+        assignee: t.assignee ?? null,
+        assigned_by: t.assigned_by ?? null,
+        assigned_at: t.assigned_at ?? null,
+        is_claim: t.is_claim ?? false,
         parent_ticket_id: t.parent_ticket_id ?? null,
         sub_tickets: listSubTickets(t.id),
         tags: listMessageTags(t.id),

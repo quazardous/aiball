@@ -32,7 +32,7 @@ per-consumer guarantee.
 
 ---
 
-## Boundary 2 — Direct remote (#390) — strongest
+## Boundary 2 — Direct remote — strongest
 
 ```
    host B                          host A
@@ -52,7 +52,7 @@ strictness.
 
 ---
 
-## Boundary 3 — Proxy node (#394) — ergonomic, and **the weak point** ⚠
+## Boundary 3 — Proxy node — ergonomic, and **the weak point** ⚠
 
 A proxy node is a local daemon on B that **relays** to A. Local clients on B keep
 talking token-less over the UDS; the node injects **one** credential for the
@@ -90,7 +90,7 @@ consumer). So:
 
 ---
 
-## Mitigation — carry your own token *through* the proxy (#394 QW-A)
+## Mitigation — carry your own token *through* the proxy (QW-A)
 
 You don't have to choose globally. The proxy injects the node token **only as a
 fallback**: a caller that already presents its **own** agent token keeps it
@@ -112,7 +112,7 @@ practice.
 
 ---
 
-## Closing the weak point entirely — strict mode (#394)
+## Closing the weak point entirely — strict mode
 
 QW-A *shrinks* the blast radius; **strict mode removes it.** Set `strict: true`
 in the `proxy:` block (or `aiball proxy init --strict`) and the proxy **never
@@ -147,7 +147,7 @@ The only residue is the **same-uid-on-B** boundary (a process running as the
 same OS user as the proxy can read its config / a local token) — that's the uid
 frontier, true everywhere and out of scope for tokens.
 
-### Node-managed token store — strict without losing convenience (#394)
+### Node-managed token store — strict without losing convenience
 
 Strict mode makes every client carry a per-consumer A-token, which means the
 A-token lives on each client. The **node-managed token store** keeps that
@@ -186,18 +186,18 @@ as the same OS user can read it) — the uid frontier, as always.
 | mode | proof | strength | ergonomics |
 |---|---|---|---|
 | local UDS | OS uid | uid-level (any same-uid process) | token-less |
-| direct #390 | per-consumer token | **strongest** (hard per-consumer) | a token per client |
-| proxy #394 | node token | **weakest** (node asserts identity) | token-less locally |
+| direct | per-consumer token | **strongest** (hard per-consumer) | a token per client |
+| proxy | node token | **weakest** (node asserts identity) | token-less locally |
 | proxy + own token (QW-A) | per-consumer token | hard proof for the loop | one node secret + provisioned loop token |
-| **proxy strict (#394)** | per-consumer token (mandatory) | **strongest** (no node-asserted identity, 401 otherwise) | a token per local client, no token-less fallback |
-| **proxy strict + node store (#394)** | per-consumer token (node swaps local→A) | **strongest** (hard per-consumer at A) | clients hold a local token, A-token custody + rotation on the node |
+| **proxy strict** | per-consumer token (mandatory) | **strongest** (no node-asserted identity, 401 otherwise) | a token per local client, no token-less fallback |
+| **proxy strict + node store** | per-consumer token (node swaps local→A) | **strongest** (hard per-consumer at A) | clients hold a local token, A-token custody + rotation on the node |
 
 **Rules of thumb**
 
 - The **node token is a master credential.** Treat it like the keys to A:
   private network, hosts you control, `chmod 600`, never committed.
 - **Local trust is uid-level**, not per-process — fine on a single-user host.
-- Want **hard per-consumer proof**? Use **direct mode (#390)**, carry the loop's
+- Want **hard per-consumer proof**? Use **direct mode**, carry the loop's
   own token through the proxy (**QW-A**), or **kill the node-asserted identity
   outright** with **strict mode** (`proxy.strict: true`).
 

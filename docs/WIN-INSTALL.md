@@ -1,4 +1,4 @@
-# aiball on Windows — install + run guide (#B.178)
+# aiball on Windows — install + run guide
 
 > **Status**: working, natively (no WSL2). The PowerShell installer
 > (`install.ps1`) provisions the daemon + `aiball` CLI + `aiball-mcp`
@@ -352,7 +352,7 @@ until psmux + bash are reachable).
 By default, claude-loop on Windows detects "a human is typing in the pane"
 by diffing `capture-pane` — which only works while claude is idle. For
 **live** detection (busy included) plus cleaner wake injection, build the
-Rust ConPTY proxy (`windows/cl-pty-proxy`, #281 — see
+Rust ConPTY proxy (`windows/cl-pty-proxy` — see
 [`docs/PTY-PROXY-WINDOWS.md`](PTY-PROXY-WINDOWS.md)):
 
 ```powershell
@@ -375,7 +375,7 @@ proxy is active. The binary isn't committed (it's platform-specific;
   path; an NSSM-managed Windows Service is also available via
   `-Service` / `-System` (see above). No socket-activation in either.
 - **the tailscale provider's auto bring-up** — the daemon's tailscale
-  provider (#354/#380, configured via `aiball init tailscale`; see
+  provider (configured via `aiball init tailscale`; see
   [`docs/TAILSCALE.md`](TAILSCALE.md)) reads the daemon port from the systemd
   drop-in, which doesn't exist on Windows. To expose the Windows daemon over
   Tailscale today, configure `tailscale serve` manually pointing at
@@ -426,7 +426,7 @@ proxy is active. The binary isn't committed (it's platform-specific;
   want service-manager semantics (auto-restart on crash).
 - **Windows Terminal profile** auto-add for one-click `aiball check`
   shell.
-- **claude-loop port via psmux** (#B.178). David's pick for the
+- **claude-loop port via psmux**. David's pick for the
   Windows multiplexer: <https://github.com/psmux/psmux>. The
   `claude-loop` adapter would need PowerShell equivalents for the
   6 tmux operations the wrapper uses (`new-session -d`, `send-keys`,

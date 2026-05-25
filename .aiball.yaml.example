@@ -1,4 +1,4 @@
-# aiball per-project config (#B.99)
+# aiball per-project config
 #
 # Drop this file at your project root as `.aiball.yaml` to enable the
 # autopoll hook (Stop event → "you have N aiball pings to drain").
@@ -27,7 +27,7 @@ autopoll:
   volatile: false
 
   # Reminder cadence (ignored when volatile: true). 0 means "every
-  # Stop"; with persistent mode that's spammy. Bumped #B.192 to 120s
+  # Stop"; with persistent mode that's spammy. Bumped to 120s
   # so fast back-and-forth conversations (each turn ≪ 30s) don't
   # re-fire the standing reminder every turn — new pings and new
   # open tickets still bypass the throttle and notify instantly.
@@ -61,7 +61,7 @@ autopoll:
   backlog: true
 
 # Identity — consumer_id and project for this project. The CANONICAL
-# source (#B.154 — david: ".aiball.yaml est la source canonique").
+# source (david: ".aiball.yaml est la source canonique").
 # Resolution chain across every aiball tool (autopoll, claude-loop,
 # `aiball` CLI, MCP server):
 #
@@ -88,14 +88,14 @@ autopoll:
 #   agent: skybot-claude
 #   project: skybot
 
-# claude-loop timeouts (#B.180). All optional — the defaults below
+# claude-loop timeouts. All optional — the defaults below
 # are what ship today. CLI flags (`--interval`, `--user-grace`) still
 # win over yaml when explicitly passed.
 #
 # claude_loop:
 #   # Heartbeat tick in seconds. Lower = bar more reactive + faster
 #   # polling-fallback, higher = less daemon load. Default 30
-#   # (recalibrated #B.185 — old 60s was sluggish enough that the
+#   # (recalibrated — old 60s was sluggish enough that the
 #   # bar lagged visibly behind real state changes).
 #   interval_seconds: 30
 #
@@ -105,24 +105,24 @@ autopoll:
 #
 #   # User-grace window after a human prompt — tryWake refuses to
 #   # send-keys during this period. Default 60 (aligned on the
-#   # heartbeat / boot-grace order, #B.185).
+#   # heartbeat / boot-grace order).
 #   user_grace_seconds: 60
 #
-#   # #305: boot-grace WAIT default when NEITHER --wait nor --no-wait is
+#   # Boot-grace WAIT default when NEITHER --wait nor --no-wait is
 #   # passed on `claude-loop start`. The global CLI default stays no-wait
-#   # (#343: eager boot drain). Set true here so THIS project's loops boot
+#   # (eager boot drain). Set true here so THIS project's loops boot
 #   # in `wait` (yield the boot-grace for a human take-over) without typing
 #   # --wait each time. An explicit --wait/--no-wait still overrides. Default false.
 #   wait: false
 #
-#   # Wake-in-flight TTL (#B.180): how long the marker stays "fresh"
+#   # Wake-in-flight TTL: how long the marker stays "fresh"
 #   # after the timer touches it pre-send-keys. The UserPromptSubmit
 #   # hook checks this to distinguish auto-wake from human input.
 #   # Default 2000 (2s) — only reduce if your shell is faster than
 #   # 2s round-trip on send-keys → hook fire.
 #   wake_in_flight_ttl_ms: 2000
 #
-#   # ESC takeover (#345). When ON, pressing ESC in the loop pane (the
+#   # ESC takeover. When ON, pressing ESC in the loop pane (the
 #   # gesture you use to interrupt claude / take over) arms the
 #   # user-grace window — the loop stops auto-pinging for
 #   # `user_grace_seconds` so it doesn't barge back in over you, and the
@@ -133,16 +133,16 @@ autopoll:
 #   # with no effect on the loop.
 #   esc_takeover: true
 #
-#   # AskUserQuestion gate (#351). In a loop, the multi-choice dialog is
+#   # AskUserQuestion gate. In a loop, the multi-choice dialog is
 #   # allowed only if a human acted within ask_grace_seconds; past that it
 #   # redirects the agent to ask via a ticket comment. Longer than
 #   # user_grace_seconds — a stalled question is cheap vs a lost one.
 #   # Default 600 (10 min).
 #   ask_grace_seconds: 600
 #
-#   # AFK combo (#351 / #381): press it to TOGGLE yourself away/back IMMEDIATELY
+#   # AFK combo: press it to TOGGLE yourself away/back IMMEDIATELY
 #   # (the AskUserQuestion gate redirects while away, without waiting for the
-#   # timeout); resuming typing also clears it ("I'm back"). #381 (david s4r9n8):
+#   # timeout); resuming typing also clears it ("I'm back"). David s4r9n8:
 #   # it's now a SINGLE ATOMIC combo (chord), no 2-press timing sequence — the
 #   # sequence was irreparably ambiguous (key-repeat bytes == two deliberate
 #   # taps; and a bare ESC doubles as claude's interrupt key, so it's REJECTED).
@@ -150,7 +150,7 @@ autopoll:
 #   # toggles), e.g. "f9 ctrl+g". Only what the terminal emits as distinct bytes
 #   # is supported: ctrl+<char>, alt+<char>, f-keys, named keys, and literals
 #   # (incl. non-ASCII like the AZERTY "²" key — encoded as its UTF-8 bytes).
-#   # Default "f9" (#381): the previous "alt+esc" was confirmed SWALLOWED BY THE
+#   # Default "f9": the previous "alt+esc" was confirmed SWALLOWED BY THE
 #   # OS/window manager (GNOME) before reaching the proxy. A function key has no
 #   # OS/tmux/claude conflict. AVOID alt+… (WM/terminal shortcuts), ctrl+s/q
 #   # (flow-control freeze), ctrl+c/d/z/b and the readline editing ctrls, and
@@ -161,14 +161,14 @@ autopoll:
 #   # the PTY proxy.
 #   afk_key: "f9"
 #
-#   # Post-fire key-repeat DEBOUNCE in ms (#381): a held chord repeats the same
+#   # Post-fire key-repeat DEBOUNCE in ms: a held chord repeats the same
 #   # bytes; within this window after a toggle they're swallowed (one net toggle
 #   # per physical press). NOT a sequence window anymore. Default 400.
 #   afk_window_ms: 400
 #
-#   # Drained-backlog reminder (#379). What the heartbeat does when ONLY a gated
+#   # Drained-backlog reminder. What the heartbeat does when ONLY a gated
 #   # backlog remains: pings=0, actionable=0 (nothing in your court), but open>0
-#   # (tickets awaiting YOUR accept/reject/reply). Default "once" (#379 david
+#   # (tickets awaiting YOUR accept/reject/reply). Default "once" (david
 #   # krwnqu). Syntax: kind[:PT…[/PT…]] (ISO-8601 durations):
 #   #   silent              — never remind (opt out of the nudge entirely).
 #   #   once                — one wake when the pool empties, then quiet until the
@@ -185,7 +185,7 @@ autopoll:
 #   # which hands tickets back to the agent. Recommended for solo use: "stale".
 #   drained_strategy: "once"
 
-# Workflow hints (#319). claude-loop "habille" the WAKE of a `feature`-intent
+# Workflow hints. claude-loop "habille" the WAKE of a `feature`-intent
 # ticket with a branch hint ("🌿 Feature: build it in …, not on main."). Lets
 # you tune the wording per project without forcing a workflow; layered like
 # claude_loop (defaults → this file). request/other intents get no hint.
@@ -196,7 +196,7 @@ autopoll:
 #   hint_worktree: false
 #   # (both false → no branch hint on feature wakes; opt in per project)
 
-# claude-loop tmux bar colour profile (#385). Each value is a raw tmux colour
+# claude-loop tmux bar colour profile. Each value is a raw tmux colour
 # token (`colour16`, `colour15`, a named colour like `red`, or a hex `#0087ff`).
 # Layered on THREE levels — defaults → global `~/.config/aiball/config.yaml`
 # `colors:` → this file's `colors:` (project wins). Set a machine-wide theme once
@@ -206,7 +206,7 @@ autopoll:
 # The bar text sits on TWO backgrounds, so it has TWO foregrounds:
 #   • the black "island" holds `claude-…`           → island_fg (keep it light)
 #   • the state-coloured region holds `name [state] · afk:key` → bar_fg
-# So "make the bar font black" = bar_fg (the default, #385 — white washed out on
+# So "make the bar font black" = bar_fg (the default — white washed out on
 # the busy electric-blue bar; white-on-yellow boot was unreadable). The island
 # stays light so `claude-` reads on the black gradient.
 # colors:
@@ -217,14 +217,14 @@ autopoll:
 #   idle_bg: "colour240"      # bar background at the prompt (dark grey)
 #   boot_bg: "colour178"      # bar background while booting (yellow)
 
-# Wake-CTA / state-prompt template overrides (#B.232 cpaez7).
+# Wake-CTA / state-prompt template overrides.
 # Optional per-project section. When absent, the skill-shipped defaults
 # in `config/defaults/claude-loop-pings.yaml` apply — you don't need anything here
 # for the wake-CTA to work. Use this block to localize wording (FR/EN),
 # experiment with directiveness levels, or tune the prompt for a project
 # with multiple agents talking to claude.
 #
-# Resolution chain (#B.232 7bxrr2): three layers, project wins.
+# Resolution chain: three layers, project wins.
 #
 #   1. Shipped defaults — at `config/defaults/claude-loop-pings.yaml`.
 #                        Read at every wake by the central service.
@@ -238,7 +238,7 @@ autopoll:
 # Slot-grain replace at each step (no deep merge inside a slot, so a
 # user can switch shape forms freely between layers).
 #
-# ── Placeholder grammar (#400) ────────────────────────────────────────────
+# ── Placeholder grammar ────────────────────────────────────────────────────
 # All the conditional logic lives IN the template (no `if` in code, david:
 # « pas du `if` partout »). A shell-inspired grammar:
 #
@@ -251,7 +251,7 @@ autopoll:
 # Counts are passed as "" when zero, so a `{count:+ … }` block disappears at
 # zero with no branching in code.
 #
-# ── Slot shapes (#400 recadré — tone + round-robin kept, david b296px) ─────
+# ── Slot shapes (tone + round-robin kept, david b296px) ────────────────────
 #   string                   → fixed wording.
 #   list[string]             → ROUND-ROBIN: a random element is picked each
 #                              wake (variety, so the prompt feels less canned).
@@ -264,7 +264,7 @@ autopoll:
 #
 # No `_one/_other` plural slugs: write a flat `(s)` in the template
 # (`ping(s)`, `ouvert(s)`). A count-driven suffix would be a per-placeholder
-# rule the code must remember — exactly what #400 removes (david d7zcj5).
+# rule the code must remember — exactly what this grammar removes (david d7zcj5).
 #
 # ── Placeholders exposed to the wake templates (always provided) ───────────
 #   {culture}          random pop-culture phrase from `ping_messages`
@@ -272,12 +272,12 @@ autopoll:
 #   {lead}             the rendered `wake_lead` slot (for the active tone).
 #   {ping_count}       unread aiball ping count ("" when zero).
 #   {open_count}       open ticket count ("" when zero).
-#   {actionable_count} tickets in your court (#374; "" when zero).
-#   {head_id}          id of the work-order head (#371: priority desc,
+#   {actionable_count} tickets in your court ("" when zero).
+#   {head_id}          id of the work-order head (priority desc,
 #                      then oldest) — the ticket to engage first.
 #   {head_title}       title of that head ticket.
 #   {project_scope}    "`<project>`" or "your scope".
-#   {consumer_prompt}  (#397) this consumer's micro-prompt — a standing
+#   {consumer_prompt}  this consumer's micro-prompt — a standing
 #                      instruction edited per-agent in the UI (Consumers →
 #                      edit → micro-prompt). Empty when unset (opt-in): drop
 #                      the placeholder into your wake_master where you want
@@ -326,7 +326,7 @@ autopoll:
 #     directive: "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — {_drain}.}{actionable_count:+ {_engage}.}{open_count:+ ({open_count} open in {project_scope})}"
 #     imperative: "{culture} {lead}{ping_count:+ {ping_count} unread ping(s) — {_drain}.}{actionable_count:+ {_engage}.}{open_count:+ ({open_count} open in {project_scope})}"
 
-# Ticket-text linkifier patterns (#B.235). Same 3-layer chain as
+# Ticket-text linkifier patterns. Same 3-layer chain as
 # `prompts:` — shipped defaults at `config/defaults/claude-loop-pings.yaml`,
 # global at `~/.config/aiball/config.yaml`, per-project here. Merge is by
 # `id`: shipped defaults are non-removable (they always run as fallback);
@@ -364,7 +364,7 @@ autopoll:
 #       href: "https://jira.example.com/browse/{1}"
 #       class: "external-ref"
 
-# Config-defined tags (#223). Tags declared here show up in the Tags
+# Config-defined tags. Tags declared here show up in the Tags
 # admin panel as READ-ONLY entries (a lock badge, no delete) next to the
 # DB tags you create from the UI. Use them to ship a curated component
 # catalog (`claude-code`, `mcp`, `daemon`, `hook`, …) that can't be

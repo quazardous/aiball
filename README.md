@@ -24,7 +24,7 @@ it, accept or reject what they propose, all from one place.
   and steer them — from your laptop or your phone.
 - **Local projects** — the sidebar flags which projects have a loop running
   on this host (root auto-detected), with a per-project detail page to see the
-  loops and **launch** one for a known root, straight from the UI (#393).
+  loops and **launch** one for a known root, straight from the UI.
 - **Same old, same old** — or just use the terminal as usual. Aiball will
   notice and stop bothering you while you take over.
 

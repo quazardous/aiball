@@ -1,6 +1,6 @@
 # Ticket lifecycle & the `actionable` model
 
-> **Status: IMPLEMENTED (#374).** The `last_actor` model below is live: the
+> **Status: IMPLEMENTED.** The `last_actor` model below is live: the
 > denormalized column + backfill (migration 0027), `bumpLastActor` at every
 > action chokepoint, the §4.1 gate (`last_actor` + sole-participant) in
 > `computeActionableTicketIds`, and the §1 open-count invariant in the wake.
@@ -28,9 +28,9 @@ unread  ⊂  actionable  ⊂  open
 - **unread** — actionable **and** ≥1 unseen ping for you. "Loud right now."
 
 `ticket_list({open})` / `({actionable})` just subset to a lens; the
-[work order](#5-the-work-order-371) orders whatever's left.
+[work order](#5-the-work-order) orders whatever's left.
 
-> **Invariant — always surface the `open` count (#374).** `actionable` can be
+> **Invariant — always surface the `open` count.** `actionable` can be
 > small or empty (everything gated), but that must **never** read as "nothing to
 > do." Any status surface — the wake-CTA, the sidebar badges, an agent's
 > self-report — always states **how many tickets are open**, alongside the
@@ -62,7 +62,7 @@ Only `approved` tickets are ever open/actionable.
 
 ---
 
-## 3. Decisions on comments (#B.129 / #B.243)
+## 3. Decisions on comments
 
 A `comment_added` can carry a decision sidecar in its meta:
 
@@ -97,9 +97,9 @@ actionable-for-C (whose-court) =
 
 - **last_actor ≠ C** → C's turn (e.g. david commented / accepted / reopened).
 - **last_actor = C but C is the sole participant** → it's C's own backlog
-  (a task C logged for itself, no counterpart) → stays actionable. *(This is the
-  #370/#374 case: `last_actor` alone is **not** enough — without this clause an
-  agent's own un-answered task tickets vanish from its queue.)*
+  (a task C logged for itself, no counterpart) → stays actionable. *(`last_actor`
+  alone is **not** enough — without this clause an agent's own un-answered task
+  tickets vanish from its queue.)*
 - **last_actor = C and a counterpart exists** → C acted last toward someone else
   → gated (awaiting them). *(e.g. agent posted a plan/reply, awaiting david.)*
 
@@ -116,28 +116,28 @@ agent comment's actor is its **author**, not "auto".
 
 ### 4.3 Why `last_actor` unifies today's scattered gates
 
-One signal collapses several special cases (#265 lastAuthor + #273/#358
-decision-gate):
+One signal collapses several special cases (the lastAuthor + decision-gate
+cases):
 
 - agent posts a pending plan/resolution → agent is last_actor, counterpart
   exists → **gated** (= old "pending proposal awaiting human").
 - david comments after a pending proposal → david is last_actor → **un-gated**
-  (= the #358 recency rule, for free).
+  (= the recency rule, for free).
 - david accepts a plan → david is last_actor → **re-actionable** (= the
   go-signal, for free).
-- david reopens → david is last_actor → **re-actionable** (= **#305 fixed**).
+- david reopens → david is last_actor → **re-actionable** (= **reopen fixed**).
 - david accepts a resolution → ticket closes → leaves the open set.
 
 ### 4.4 Gates that stay separate from `last_actor`
 
 - **blocked** (`ticket_blocked`) — suppressed until unblocked.
-- **relation gate** (#B.123) — an open `depends_on` / `blocks` blocker
+- **relation gate** — an open `depends_on` / `blocks` blocker
   suppresses the dependent.
 - **snoozed / closed / non-approved** — not open in the first place.
 
 ---
 
-## 5. The work order (#371 + #402)
+## 5. The work order
 
 `ticket_list` returns a **work landscape**: tiered, then ordered within a tier.
 The keys, outer→inner (pure comparator in `src/db/work-order.ts`):
@@ -146,7 +146,7 @@ The keys, outer→inner (pure comparator in `src/db/work-order.ts`):
    `unread` → `actionable` (¬unread) → other open → the rest (closed/snoozed).
 2. **Priority** desc (urgent→low) — the **strongest** sort within a tier
    (david `xkehmv`: « priorité est le tri le plus fort »). Explicit priority wins.
-3. **Hot** (#402 levier 1) — at **equal priority**, a ticket in the requesting
+3. **Hot** (levier 1) — at **equal priority**, a ticket in the requesting
    consumer's **hot-zone** sorts first (see §5.1). Within-tier only.
 4. **Oldest-first** (id asc) — final tiebreak.
 
@@ -156,36 +156,36 @@ GET's work order.) It also **always states the open count** (per the §1
 invariant) — even when `actionable` is empty — so a gated backlog is never
 silent.
 
-### 5.1 The hot-zone (#402)
+### 5.1 The hot-zone
 
 The hot-zone keeps the wake on **the conversation the agent is actively
 working**, instead of jumping it to a stale oldest head whenever someone else
 moves another ticket.
 
-- **Definition (POV agent, david `xkehmv` + `#408`):** a ticket is *hot* iff an
+- **Definition (POV agent, david `xkehmv`):** a ticket is *hot* iff an
   **agent (non-human consumer)** has activity on it within the **hot window** —
   i.e. `now − max(created_at of messages authored by a non-`human`-kind consumer
   on the ticket) < hot_window_sec`. It is the **agent's focus**, an objective
   property of the ticket — **the same flag is shown to everyone**, including human
   viewers (who see *what the agent is on*, not their own activity). A **human**
-  acting never makes a ticket hot (`#408`):
+  acting never makes a ticket hot:
   - agent works ticket A, **david** comments on ticket B → B is **not** hot
     (david is human → excluded; the agent stays on A);
   - david comments on the agent's ticket A → A **stays** hot (the agent's
     activity defines it; the human's comment is ignored);
-  - david replies on a ticket **no agent has touched** → **not** hot (`#408`:
-    "c'est pas moi qui dois passer un ticket en hot" — his own reply must not
+  - david replies on a ticket **no agent has touched** → **not** hot
+    ("c'est pas moi qui dois passer un ticket en hot" — his own reply must not
     flag it; the 🔥 follows the agent, not the viewer).
-  - **Why agent-activity, not per-requester:** the first cut (`#405`) computed it
+  - **Why agent-activity, not per-requester:** the first cut computed it
     over the *requesting* consumer's own activity, so when david viewed/commented
-    in the UI his activity flagged his own ticket hot — wrong (`#408`).
+    in the UI his activity flagged his own ticket hot — wrong.
 - **Window:** `hot_window_sec`, read from the **global config yaml**
   (`~/.config/aiball/config.yaml` → `hot_window_sec:`), **default 600** (10 min).
   (david `xkehmv` D2: yaml only, not a settings-table row.)
 - **Scope:** hot is a **tiebreak at equal priority, within the tier** — it never
   promotes a ticket across `unread`/`actionable`/`open`, and never resurfaces a
   closed one.
-- **Signal (`#408`):** `ticketAgentLastActivity(ids)` = `MAX(created_at) GROUP BY
+- **Signal:** `ticketAgentLastActivity(ids)` = `MAX(created_at) GROUP BY
   ticket WHERE by_agent NOT IN (consumers WHERE kind = 'human')`. (Replaces the
   per-requester `ticketSelfLastActivity` used in the first cut.)
 
@@ -203,9 +203,9 @@ is a **second pass** (david `s62yaq`), tracked separately — with urgent/`@ment
 |---|---|---|
 | david files a bug, no reply | david created | ✅ last_actor=david ≠ agent |
 | agent replied, awaiting david | agent comment | ❌ agent last, david is counterpart |
-| david **reopens** ("encore vu ce bug") | david reopen | ✅ last_actor=david (**#305**) |
+| david **reopens** ("encore vu ce bug") | david reopen | ✅ last_actor=david |
 | david **accepts** the agent's plan | david decide | ✅ last_actor=david (go-signal) |
-| agent logged an e2e task for itself, untouched | agent created | ✅ sole participant = agent's backlog (**#370**) |
+| agent logged an e2e task for itself, untouched | agent created | ✅ sole participant = agent's backlog |
 | david accepts a resolution | david decide → close | ➖ closed, leaves open set |
 
 ---
@@ -216,7 +216,7 @@ Today the whose-court gate is `lastNonLifecycleAuthorByTicket()`
 (`src/db/projects.ts:872`), which counts **only `comment_added`** events (+ the
 original author). Consequences:
 
-- **#305** — a `ticket_reopened` is a lifecycle event → ignored → the agent's
+- **Reopen** — a `ticket_reopened` is a lifecycle event → ignored → the agent's
   old comment stays "last author" → reopened bug **invisible** to the agent.
 - **decide** (accept/reject) **mutates the comment meta in place, emits no
   event** (`applyMessageDecision`, `src/db/messages.ts:1087`) → david accepting
@@ -225,11 +225,11 @@ original author). Consequences:
   (`frontend/src/lib/resolutionFlow.ts:245`); resolution-accept (→`ticket_closed`,
   l.249) and reopen (→`ticket_reopened`, l.315) route their body onto lifecycle
   events → no flip.
-- **#370 / self-authored backlog** — the agent's own un-answered task tickets
+- **Self-authored backlog** — the agent's own un-answered task tickets
   read `last_author = agent` → gated out (the §4.1 sole-participant clause is the
   fix; note `last_actor` alone does **not** cover this).
 
-**Landed** (#374, the `last_actor` column variant — `decide` keeps mutating
+**Landed** (the `last_actor` column variant — `decide` keeps mutating
 meta in place rather than emitting a `decided` event):
 
 1. ✅ Stored **`last_actor` / `last_actor_at`** on the ticket — migration 0027,
@@ -239,15 +239,14 @@ meta in place rather than emitting a `decided` event):
 3. ✅ The §4.1 rule (whose-court **+** sole-participant) — `lastActorExclusions`
    (`a12ec65`).
 4. ✅ `computeActionableTicketIds` switched onto it; `lastNonLifecycleAuthorByTicket`
-   retired; decision-gate (#273/#358) folded in, relation/blocked kept (`a12ec65`).
+   retired; decision-gate folded in, relation/blocked kept (`a12ec65`).
 5. ✅ Migration + one-time backfill (replays `decided_by`) (`460ca45`).
 6. ✅ The §1 open-count invariant in the wake (`buildContextPhrase`) — open and
    actionable stated distinctly (`3e709a3`).
 
-Validated live: the actionable pool went 1 → 12 (#305 reopened bug + the
+Validated live: the actionable pool went 1 → 12 (reopened bug + the
 self-authored e2e backlog surfaced; dialogue tickets stay gated). Pure unit
-tests cover the decision-gate (#358) and the last-actor exclusion rule.
+tests cover the decision-gate and the last-actor exclusion rule.
 
-**Related:** #265 (per-consumer actionable), #273 (latest-decision gate), #358
-(decision-pending gate + recency), #305 (reopened bug invisible), #370/#374
-(self-authored backlog), #371 (work order).
+**Related:** per-consumer actionable, latest-decision gate, decision-pending
+gate + recency, reopened bug invisible, self-authored backlog, work order.

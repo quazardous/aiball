@@ -485,6 +485,28 @@ export class AiballClient {
         return this.http("POST", `/api/tickets/${ticket_id}/move`, { project });
     }
     /**
+     * #418: assign / claim a ticket. Pass `assignee` to PUSH it onto another
+     * consumer (human/moderator only); omit it (or pass your own id) to CLAIM it
+     * for yourself. A live assignment narrows the ticket out of OTHER consumers'
+     * actionable pool until it expires (assign_window_sec), is released, or the
+     * ticket closes — multi-agent anti-collision.
+     */
+    assignTicket(ticket_id: number, assignee?: string) {
+        return this.http<{ ticket_id: number; assignee: string; assigned_by: string; is_claim: boolean }>(
+            "POST",
+            `/api/tickets/${ticket_id}/assign`,
+            assignee ? { assignee } : {},
+        );
+    }
+    /** #418: release a ticket's assignment / claim — back to the shared pool. */
+    releaseTicket(ticket_id: number) {
+        return this.http<{ ticket_id: number; released: boolean }>(
+            "POST",
+            `/api/tickets/${ticket_id}/release`,
+            {},
+        );
+    }
+    /**
      * Create or change a typed relation (#275) from `ticket_id` → `target`.
      * Append-only: posting the same active kind is a server-side no-op;
      * `kind="ignored"` removes the edge (tombstone). Mirrors

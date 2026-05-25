@@ -157,6 +157,17 @@ export interface Message {
      * colocate without schema changes.
      */
     meta?: string | null;
+    /**
+     * #418: ticket → agent assignment. `assignee` = the consumer the ticket is
+     * attributed to (a human push, or an agent self-claim); `is_claim` marks the
+     * self-claim; `assigned_at` stamps it (the live window is derived,
+     * now − assigned_at < assign_window_sec). NULL/undefined for non-ticket rows
+     * and unassigned tickets. See src/db/assignment-gate.ts.
+     */
+    assignee?: string | null;
+    assigned_by?: string | null;
+    assigned_at?: string | null;
+    is_claim?: boolean;
 }
 
 export type SubscriptionRole = "owner" | "follower";
@@ -477,6 +488,10 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         parent_ticket_id: t.parentTicketId ?? null,
         source_ticket_id: null,
         meta: t.meta ?? null,
+        assignee: t.assignee ?? null,
+        assigned_by: t.assignedBy ?? null,
+        assigned_at: t.assignedAt ?? null,
+        is_claim: !!t.isClaim,
     };
 }
 

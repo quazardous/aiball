@@ -1,4 +1,4 @@
-# Workflow — `feature` vs mainstream (#319)
+# Workflow — `feature` vs mainstream
 
 aiball's dev checkout **is** the live runtime: `~/.local/lib/aiball` symlinks to
 it, `bin/*` run the source via `tsx` (no build), and the daemon is `tsx watch`.
@@ -51,7 +51,4 @@ opts in. `request`/other intents never get a workflow hint.
 
 Direct `git push origin main` and `gh pr merge` are gated by the permission
 classifier. Persist via a **feature-branch PR** (then merge). A Bash permission
-rule for `git push origin <branch>` + `gh pr merge` would make a standing "go"
-(see #319 option A).
-
-See **#319** for the friction analysis behind this model.
+rule for `git push origin <branch>` + `gh pr merge` would make a standing "go".

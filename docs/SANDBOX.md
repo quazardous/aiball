@@ -1,6 +1,6 @@
 # Sandbox loop
 
-> **Status: experimental / partial (#B.183).** See [`ROADMAP.md`](../ROADMAP.md#sandbox-loop-b183)
+> **Status: experimental / partial.** See [`ROADMAP.md`](../ROADMAP.md#sandbox-loop)
 > for what's missing. For daily-driver autonomous wrapping use
 > [`claude-loop`](../README.md#quickstart--claude-loop-recommended).
 > This page stays for the experimentation surface; caveat emptor.
@@ -33,7 +33,7 @@ What this does:
    - `plate.json` — the tickets the agent is expected to work on
    - `env` — sourceable shell file (`AIBALL_AGENT`, `AIBALL_PROJECT`, `SB_*` flags, and the forwarded `AIBALL_SOCK` / `AIBALL_TOKEN` so the hooks reach the daemon)
    - `hooks/session-start.sh` + `hooks/stop.sh` — thin bash wrappers that exec the TS hook entrypoints in `src/sandbox/`
-2. Pre-registers the agent consumer (`claude-release-2.6`) with `kind=sandbox` so the Consumers panel can distinguish loop agents from interactive ones (#B.103).
+2. Pre-registers the agent consumer (`claude-release-2.6`) with `kind=sandbox` so the Consumers panel can distinguish loop agents from interactive ones.
 3. Builds an inline Claude Code settings JSON that wires the hooks and pre-approves the aiball MCP tools (so the auto-mode classifier doesn't block `ticket_close` / `ticket_reply`).
 4. Spawns `tmux new-session -d -s sb-release-2.6 -c <dir> bash -lc 'source env; exec claude --settings <inline-json> --permission-mode auto'`.
 5. Schedules an initial "Start processing your ticket plate." nudge so claude actually starts (SessionStart context alone doesn't trigger a turn).
@@ -68,7 +68,7 @@ ticket_reply({
 })
 ```
 
-The `then: "resolved"` chain marks the ticket as agent-resolved (#B.119). The autopoll backlog count and the Stop hook stop treating it as actionable — it's in the human's court now. The reporter (you) sees the resolution proposal in the UI, reads the blocker, and either:
+The `then: "resolved"` chain marks the ticket as agent-resolved. The autopoll backlog count and the Stop hook stop treating it as actionable — it's in the human's court now. The reporter (you) sees the resolution proposal in the UI, reads the blocker, and either:
 - accepts (closes the ticket — agent was right, work isn't possible)
 - rejects + replies with the missing info (reopens for the agent to retry)
 
@@ -132,7 +132,7 @@ cat ~/.aiball-sandbox/<name>/env | grep -E 'AIBALL_(SOCK|TOKEN|URL)'
 
 **Claude hesitates ("Should I check the pings?")**
 
-That's the failure mode #B.99 documents. The convention says: drain pings yourself, react, don't ask. If the sandbox keeps doing this, the brief in the SessionStart hook should be more aggressive. Check `skill/hooks/sandbox-session-start.sh` for the wording.
+That's a documented failure mode. The convention says: drain pings yourself, react, don't ask. If the sandbox keeps doing this, the brief in the SessionStart hook should be more aggressive. Check `skill/hooks/sandbox-session-start.sh` for the wording.
 
 **Anti-oscillation**
 
@@ -154,7 +154,7 @@ Common exits: `/exit` typed accidentally, plate halted, all tickets closed, clas
 
 ## Known limits (assumed in v1)
 
-- **Not stress-tested in multi-hour autonomous sessions.** The smoke tests (#B.82) cover trivial tickets only. The watcher → respawn flow works in synthetic conditions but hasn't been run for a 4h+ task with escalations and reopens. See #B.110 (roadmap: solidify aiball) — this is one of the listed dettes.
+- **Not stress-tested in multi-hour autonomous sessions.** The smoke tests cover trivial tickets only. The watcher → respawn flow works in synthetic conditions but hasn't been run for a 4h+ task with escalations and reopens. See the roadmap (solidify aiball) — this is one of the listed dettes.
 - **No parallelism limit.** `aiball sandbox start` will happily spawn 50 sandboxes against the same project; each eats a Claude session and worktree disk. There's no hard cap or soft warn yet.
 - **Docs assume Linux + bash.** macOS should work (tmux, jq, claude-code are portable) but isn't routinely tested. Windows via WSL only.
 - **No retry budget.** If a tool call fails (network, classifier, etc.) the agent has to handle it in-prompt. Aiball doesn't track tool failures or impose a max-retries per ticket.

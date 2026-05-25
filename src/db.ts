@@ -149,6 +149,8 @@ export {
     listSubTickets,
     subTicketCounts,
     setTicketOwner,
+    setTicketAssignee,
+    releaseTicketAssignment,
     getTicketStages,
     getTicketBookends,
     ticketSelfLastActivity,
