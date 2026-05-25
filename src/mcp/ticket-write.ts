@@ -399,7 +399,7 @@ export function registerTicketWriteTools(server: McpServer): void {
         "ticket_engage",
         {
             description:
-                "Engage your NEXT task: returns the head of YOUR actionable work-order (same gate + order as `ticket_list({actionable: true})` — priority desc, then hot, then oldest) AND claims it for you in one step. A live claim drops the ticket out of every OTHER agent's actionable pool while you work it (anti-collision, #418), and the claim lands BEFORE your first comment so your intent shows immediately. Use THIS — not `ticket_list` — when you're actually picking up work: `ticket_list` is the EXPLORATION/backlog tool (read-only, never claims); `ticket_engage` is the WORK tool that commits you to the head and hands the ticket back (brief) ready to act on. Returns `{ engaged: null }` when your queue is empty (nothing claimed). Idempotent: re-engaging the head you already hold just refreshes the claim window.",
+                "Engage your NEXT task: returns the head of YOUR CLAIMABLE work-order (same gate + order as `ticket_list({claimable: true})` — priority desc, then hot, then oldest) AND claims it for you in one step. Claimable = actionable AND in a project you OWN, so engage never claims a follower-broadcast from a project you only follow (that work belongs to that project's owners, #432). A live claim drops the ticket out of every OTHER agent's actionable pool while you work it (anti-collision, #418), and the claim lands BEFORE your first comment so your intent shows immediately. Use THIS — not `ticket_list` — when you're actually picking up work: `ticket_list` is the EXPLORATION/backlog tool (read-only, never claims); `ticket_engage` is the WORK tool that commits you to the head and hands the ticket back (brief) ready to act on. Returns `{ engaged: null }` when your queue is empty (nothing claimed). Idempotent: re-engaging the head you already hold just refreshes the claim window.",
             inputSchema: {
                 project: z
                     .string()
@@ -423,9 +423,15 @@ export function registerTicketWriteTools(server: McpServer): void {
             // default stays cross-project (matches "Defaults to $AIBALL_PROJECT
             // if set").
             const proj = project ?? client.defaultProject ?? undefined;
+            // #432: engage the head of the CLAIMABLE set (actionable ∩ projects
+            // I own), not just actionable. So even cross-project (project unset)
+            // engage never claims a follower-broadcast from a project I only
+            // follow — that work belongs to that project's owners. The #432
+            // project-default above stays (orthogonal: it scopes the common
+            // single-project case); claimable is the conceptual backstop.
             const rows = (await client.listTickets({
                 project: proj,
-                actionable: "1",
+                claimable: "1",
                 limit: "1",
             })) as Array<{ id: number }>;
             const head = Array.isArray(rows) ? rows[0] : undefined;

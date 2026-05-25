@@ -1058,11 +1058,16 @@ export async function buildContextPhrase(
                 open_count?: number;
                 actionable_count?: number;
             }>>,
-            // #371: head of the FIFO queue (oldest at top priority, after the
-            // id-asc sort) so the wake NAMES the ticket to engage instead of a
-            // bare count — kills the agent's recency bias toward the newest.
+            // #371: head of the work-order so the wake NAMES the ticket to
+            // engage instead of a bare count — kills the recency bias toward
+            // the newest.
+            // #432: name the CLAIMABLE head (actionable ∩ owned-project), since
+            // the directive points at `ticket_engage` which only claims that
+            // set. `claimable: "1"` (the API gate matches `=== "1"`, so this
+            // actually filters, not just leans on the tiering). The counts below
+            // stay actionable/open-inclusive — only the named head narrows.
             client.listTickets({
-                actionable: "true",
+                claimable: "1",
                 project: project ?? undefined,
                 limit: "1",
             }) as Promise<Array<{ id: number; title?: string }>>,

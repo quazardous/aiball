@@ -15,7 +15,7 @@ export function registerTicketReadTools(server: McpServer): void {
         "ticket_list",
         {
             description:
-                "List tickets, optionally filtered by project, tags, author, status, title substring, or `since` (created_at >= ISO8601). Snoozed tickets excluded by default when `open: true` — pass `include_snoozed: true` to surface them. **`actionable: true`** (#B.232 #234) is stricter than `open`: also excludes tickets with a pending resolution proposal, blocked tickets, and tickets gated by an open dependency — i.e. the candidate pool the wake-CTA points at. Tag filter is AND-semantic. **Default: header-only rows** (id, title, summary, status, parent, sub_count, tags, plus per-consumer `unread` + `actionable` booleans) — no bodies. Pass `full: true` to include `body` per row. Use ticket_get for one full thread.\n\n**Order (#371)**: results come back as a WORK LANDSCAPE — tiered, then work-ordered within each tier. Tiers (greedy: each ticket appears once, in the highest tier it qualifies for): `unread` → `actionable` (¬unread) → other open → the rest (closed/snoozed, at the bottom). Within a tier: priority desc (urgent → low), then oldest-first as a tiebreak. Every row carries `unread` (≥1 unseen ping for you) and `actionable` (in your court) so you can slice the single list yourself — the sets are **nested: unread ⊂ actionable ⊂ open**. `open: true` / `actionable: true` just SUBSET the rows to that set; the tiering still applies. Take the first row to work the top of your queue (explicit priority still wins within a tier; \"FIFO\" was a misnomer — it's the GET's work order).",
+                "List tickets, optionally filtered by project, tags, author, status, title substring, or `since` (created_at >= ISO8601). Snoozed tickets excluded by default when `open: true` — pass `include_snoozed: true` to surface them. **`actionable: true`** (#B.232 #234) is stricter than `open`: also excludes tickets with a pending resolution proposal, blocked tickets, and tickets gated by an open dependency — i.e. the candidate pool the wake-CTA points at. Tag filter is AND-semantic. **Default: header-only rows** (id, title, summary, status, parent, sub_count, tags, plus per-consumer `unread` + `actionable` + `claimable` booleans) — no bodies. Pass `full: true` to include `body` per row. Use ticket_get for one full thread.\n\n**Order (#371)**: results come back as a WORK LANDSCAPE — tiered, then work-ordered within each tier. Tiers (greedy: each ticket appears once, in the highest tier it qualifies for): `unread` → `actionable` (¬unread) → other open → the rest (closed/snoozed, at the bottom). Within a tier: priority desc (urgent → low), then oldest-first as a tiebreak. Every row carries `unread` (≥1 unseen ping for you) and `actionable` (in your court) so you can slice the single list yourself — the sets are **nested: unread ⊂ actionable ⊂ open**. `open: true` / `actionable: true` just SUBSET the rows to that set; the tiering still applies. Take the first row to work the top of your queue (explicit priority still wins within a tier; \"FIFO\" was a misnomer — it's the GET's work order).",
             inputSchema: {
                 project: z.string().optional(),
                 open: z
@@ -26,6 +26,10 @@ export function registerTicketReadTools(server: McpServer): void {
                     .boolean()
                     .optional()
                     .describe("If true, only tickets where the agent actually has work to do: not closed, not snoozed, NOT in awaiting-validation state (no pending resolution/plan proposal), not blocked, not gated by an open dependency. Strictly tighter than `open: true`. Matches the actionable_count surfaced on the sidebar."),
+                claimable: z
+                    .boolean()
+                    .optional()
+                    .describe("If true, only tickets you can CLAIM: `actionable` AND in a project you OWN (role=owner). Narrower than `actionable` — a follower-broadcast from a project you only follow is actionable/visible but NOT claimable (the work belongs to that project's owners). This is the exact set `ticket_engage` claims from. Every row also carries a per-consumer `claimable` boolean so you can slice the list yourself."),
                 include_snoozed: z
                     .boolean()
                     .optional()
@@ -79,6 +83,7 @@ export function registerTicketReadTools(server: McpServer): void {
             project,
             open,
             actionable,
+            claimable,
             include_snoozed,
             tags,
             full,
@@ -92,6 +97,7 @@ export function registerTicketReadTools(server: McpServer): void {
                 project,
                 open: open ? "1" : undefined,
                 actionable: actionable ? "1" : undefined,
+                claimable: claimable ? "1" : undefined,
                 include_postponed: include_snoozed ? "1" : undefined,
                 tags: tags && tags.length > 0 ? tags.join(",") : undefined,
                 // Default (no flag) → summary mode on the API side. `full: true`

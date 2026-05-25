@@ -41,6 +41,16 @@ narrative for the product as a whole.
   the default softly (explicit arg wins, set default scopes, genuinely-unset
   stays cross-project) — matching the documented "Defaults to `$AIBALL_PROJECT`
   if set".
+- **Claimable vs actionable (#432):** a new, narrower lens. `actionable` stays
+  inclusive — a broadcast from a project you only *follow* is still actionable /
+  visible. `claimable` = `actionable` **AND** in a project you **own** (role
+  `owner`): claiming commits you to the work, which belongs to that project's
+  owners. `ticket_engage` now claims the head of the **claimable** set (so even
+  cross-project it never grabs a followed project's broadcast), the wake CTA
+  names the claimable head, and `ticket_list` gained a `claimable` filter + a
+  per-row `claimable` boolean (alongside `unread`/`actionable`). Counts, the
+  gate, and the sidebar are untouched. No migration (the `owner`/`follower`
+  role already exists on subscriptions).
 
 ### Ticket → agent assignment + claim (#418)
 

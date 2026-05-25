@@ -50,6 +50,7 @@ import {
     listTicketSubscriptionsForTicket,
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
+import { listSubscriptions } from "../db/subscriptions.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { globalConfigPath } from "../autopoll/config.js";
 import { readFileSync } from "node:fs";
@@ -525,6 +526,13 @@ ticketsRouter.get("/tickets", (req, res) => {
     // broader "everything not lifecycle-closed" view (david still needs
     // to see resolution proposals to act on them).
     const onlyActionable = req.query.actionable === "1";
+    // #432 david: `claimable` is a DIFFERENT, narrower lens than `actionable`.
+    // actionable stays inclusive (a follower-broadcast from another project is
+    // still actionable/visible); claimable = actionable ∩ {projects where THIS
+    // consumer is an `owner`}. Claiming commits you to the work, which belongs
+    // to that project's owners — so a project you only `follow` is actionable
+    // but not claimable. `ticket_engage` + the wake-CTA head use this set.
+    const onlyClaimable = req.query.claimable === "1";
     // Default: when `open=1`, snoozed tickets are hidden (same rule as
     // the inbox). Pass `include_postponed=1` to surface them anyway.
     const includePostponed = req.query.include_postponed === "1";
@@ -619,6 +627,16 @@ ticketsRouter.get("/tickets", (req, res) => {
     const consumerId = consumerOf(req);
     const unreadMap = ticketUnreadFlags(consumerId, created.map((m) => m.id));
     const { openIds, actionableIds } = computeActionableTicketIds(consumerId);
+    // #432: projects this consumer owns (role=owner). A claimable ticket must
+    // live in one of these — claiming a follower-only project's broadcast would
+    // commit us to another project's work.
+    const ownedProjects = new Set(
+        listSubscriptions(consumerId)
+            .filter((s) => s.role === "owner")
+            .map((s) => s.project),
+    );
+    const isClaimable = (id: number, proj: string): boolean =>
+        actionableIds.has(id) && ownedProjects.has(proj);
     // #404: per-ticket token-effort tally (empty until the capture side lands).
     const tokenUsageMap = getTicketTokenUsage(created.map((m) => m.id));
     // #405/#408: the HOT-ZONE (focus) = the single most-recent AGENT-touched
@@ -656,6 +674,8 @@ ticketsRouter.get("/tickets", (req, res) => {
             // ⊂ open). Let the caller slice the one list itself.
             unread: unreadMap.get(m.id) ?? false,
             actionable: actionableIds.has(m.id),
+            // #432: actionable AND in a project I own → safe for me to claim.
+            claimable: isClaimable(m.id, m.project),
             tags: tagsMap.get(m.id) ?? [],
             // #404: accumulated token-effort tally (null until any usage pushed).
             token_usage: tokenUsageMap.get(m.id) ?? null,
@@ -680,6 +700,11 @@ ticketsRouter.get("/tickets", (req, res) => {
         // `actionableIds` set computed once above). A ticket where they
         // authored the latest content (awaiting someone else) drops out.
         result = result.filter((t) => actionableIds.has(t.id));
+    }
+    if (onlyClaimable) {
+        // #432: actionable ∩ owned-project. The narrower set ticket_engage
+        // claims from, so a cross-project follower-broadcast is never claimed.
+        result = result.filter((t) => isClaimable(t.id, t.project));
     }
     if (tagsFilter && tagsFilter.length > 0) {
         const requiredSet = new Set(tagsFilter.map((s) => s.toLowerCase()));
