@@ -56,9 +56,8 @@ narrative for the product as a whole.
 - New MCP tools `ticket_assign` (omit `assignee` to self-claim; another id is
   moderator-only) and `ticket_release`; HTTP `POST /tickets/:id/assign` +
   `/release`; `assignee` / `assigned_at` / `is_claim` surfaced on ticket reads.
-  (The early thread-header "claimed by X" chip was dropped in #429 — it rendered
-  oversized and added clutter on every self-claimed ticket; the claim mechanism
-  and the payload fields are unchanged, only the visual badge is gone.)
+  (The thread header shows who holds the ticket as discreet muted text — #429
+  replaced the early oversized pill badge with a plain `person · name` line.)
 - **Auto-claim**: an agent posting a comment on a ticket nobody else actively
   holds claims it for that agent automatically — the anti-collision becomes a
   side effect of working, no explicit claim discipline to keep. Never steals a

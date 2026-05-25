@@ -46,12 +46,19 @@ const emit = defineEmits<{
     <span v-if="ticket.hot" class="thread-hot-focus" title="Hot-zone — an agent is actively working this ticket (recent agent activity within the hot window).">
         🔥 focus
     </span>
-    <!-- #429: the #418 assignment/claim BADGE was dropped here — it rendered as
-         an oversized full-width pill (blockified inline-flex as a flex item) and
-         added clutter on every self-claimed ticket. The claim MECHANISM is
-         untouched (anti-collision lives in the server-side actionable gate);
-         only the visual chip is gone. `assigned_at`/`is_claim` still ship in the
-         payload for any future, more discreet surface. -->
+    <!-- #418/#429: who currently holds this ticket. david (#429): "afficher qui
+         a claim mais pas dans un badge" — so this is DISCREET muted inline text,
+         NOT a pill. (The pill's background made its blockified-inline-flex stretch
+         render as an oversized full-width bar — dropping the background fixes the
+         "trop grand" while keeping the claimer visible.) Read-only here; agents
+         claim/release via MCP, a human moderator pushes via the manage panel. -->
+    <span
+        v-if="ticket.assignee"
+        class="thread-assignee"
+        :title="`${ticket.is_claim ? 'Claimed by' : 'Assigned to'} ${ticket.assignee}${ticket.assigned_at ? ' · ' + new Date(ticket.assigned_at).toLocaleString() : ''}`"
+    >
+        <i class="pi pi-user" /> {{ ticket.assignee }}
+    </span>
     <!-- #404/#406: per-ticket token-effort cost (shown once any usage is
          captured; cost-equivalent — cache reads weighted 0.1×). -->
     <span
@@ -155,6 +162,23 @@ const emit = defineEmits<{
     font-variant-numeric: tabular-nums;
 }
 .thread-token-cost .pi {
+    font-size: 0.72rem;
+    opacity: 0.7;
+}
+/* #418/#429: claim/assignee — DISCREET muted inline text, deliberately NOT a
+   badge (david: "afficher qui a claim mais pas dans un badge"). No background,
+   so no visible full-width stretch; align-self keeps it shrink-to-content even
+   when it's a flex item of the header column. */
+.thread-assignee {
+    display: inline-flex;
+    align-self: flex-start;
+    align-items: center;
+    gap: 0.3rem;
+    margin: 0.2rem 0 0.3rem;
+    font-size: 0.78rem;
+    color: var(--p-text-muted-color);
+}
+.thread-assignee .pi {
     font-size: 0.72rem;
     opacity: 0.7;
 }
