@@ -139,6 +139,30 @@ export async function move(token: string, ticketId: number, project: string): Pr
     return JSON.parse(text) as Record<string, unknown>;
 }
 
+/** #418: assign/claim a ticket. Omit `assignee` to self-claim. POST /api/tickets/:id/assign. */
+export async function assign(token: string, ticketId: number, assignee?: string): Promise<Record<string, unknown>> {
+    const r = await fetch(`${BASE}/api/tickets/${ticketId}/assign`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify(assignee ? { assignee } : {}),
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`POST /api/tickets/${ticketId}/assign → ${r.status}: ${text}`);
+    return JSON.parse(text) as Record<string, unknown>;
+}
+
+/** #418: release a ticket's assignment / claim. POST /api/tickets/:id/release. */
+export async function release(token: string, ticketId: number): Promise<Record<string, unknown>> {
+    const r = await fetch(`${BASE}/api/tickets/${ticketId}/release`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: "{}",
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error(`POST /api/tickets/${ticketId}/release → ${r.status}: ${text}`);
+    return JSON.parse(text) as Record<string, unknown>;
+}
+
 /** Parse a message's `meta` (JSON string or object) to read `.decision`. */
 export function metaDecision(m: Record<string, unknown>): { kind?: string; status?: string } | null {
     const raw = m.meta;

@@ -9,6 +9,8 @@ import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
+import { isAssignedAway } from "./assignment-gate.js";
+import { assignWindowSec } from "../autopoll/config.js";
 import { listHumans } from "./consumers.js";
 import { computeDecisionGate } from "./decision-gate.js";
 import { getTicketTokenUsage, type TokenTally } from "./token-usage.js";
@@ -1251,6 +1253,8 @@ export function computeActionableTicketIds(consumerId?: string): ActionableTicke
         id: schema.tickets.id,
         status: schema.tickets.status,
         postponedUntil: schema.tickets.postponedUntil,
+        assignee: schema.tickets.assignee,
+        assignedAt: schema.tickets.assignedAt,
     }).from(schema.tickets).all();
     const openIds = new Set<number>();
     for (const t of tickets) {
@@ -1258,6 +1262,22 @@ export function computeActionableTicketIds(consumerId?: string): ActionableTicke
         if (closedByTicket.get(t.id) === true) continue;
         if (t.postponedUntil && t.postponedUntil > nowStr) continue;
         openIds.add(t.id);
+    }
+
+    // #418: assignment exclusion — a ticket LIVE-assigned to someone OTHER than
+    // the requesting consumer leaves THEIR actionable pool (anti-collision). It
+    // stays `open` (still a real ticket); only `actionable` narrows. Unassigned
+    // or expired → falls through to the last_actor gate (the shared pool). Only
+    // computed when a consumer is in scope (anonymous callers see the pool).
+    const assignedAwaySet = new Set<number>();
+    if (consumerId) {
+        const nowMs = Date.now();
+        const assignWindowMs = assignWindowSec() * 1000;
+        for (const t of tickets) {
+            if (isAssignedAway(t.assignee, t.assignedAt, consumerId, nowMs, assignWindowMs)) {
+                assignedAwaySet.add(t.id);
+            }
+        }
     }
 
     // Relation gating: depends_on / blocks chains to an open blocker
@@ -1307,6 +1327,7 @@ export function computeActionableTicketIds(consumerId?: string): ActionableTicke
         if (gatedByDecisionByTicket.get(id) === true) continue;
         if (blockedByTicket.get(id) === true) continue;
         if (gatedByBlocker.has(id)) continue;
+        if (assignedAwaySet.has(id)) continue;
         if (awaitingOtherSet && awaitingOtherSet.has(id)) continue;
         actionableIds.add(id);
     }
