@@ -8,6 +8,7 @@
 // passed in + emitted back like HeaderBar did.
 import type { Strategy } from "../lib/api";
 import ManagedConfig from "./ManagedConfig.vue";
+import PanelHeader from "./ui/PanelHeader.vue";
 
 defineProps<{
     strategy: Strategy;
@@ -27,7 +28,7 @@ const emit = defineEmits<{
 
 <template>
     <div class="general-settings">
-        <h2 class="general-settings__title">General</h2>
+        <PanelHeader title="General" />
 
         <section class="general-settings__section">
             <h3 class="general-settings__heading">Moderation strategy</h3>
@@ -109,10 +110,7 @@ const emit = defineEmits<{
     padding: 0.5rem 0.2rem;
     max-width: 42rem;
 }
-.general-settings__title {
-    margin: 0 0 1rem;
-    font-size: 1.2rem;
-}
+/* En-tête → <PanelHeader> (style.css). */
 .general-settings__section {
     border: 1px solid var(--p-content-border-color);
     border-radius: 0.6rem;

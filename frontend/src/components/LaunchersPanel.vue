@@ -5,6 +5,7 @@
 import { onMounted, ref } from "vue";
 import Button from "primevue/button";
 import { api, type Launcher } from "../lib/api";
+import PanelHeader from "./ui/PanelHeader.vue";
 
 const launchers = ref<Launcher[]>([]);
 const loading = ref(false);
@@ -42,16 +43,17 @@ onMounted(load);
 
 <template>
     <div class="launchers-panel">
-        <header class="launchers-panel__head">
-            <h2>Launchers</h2>
-            <button type="button" class="launchers-panel__refresh" title="Refresh" @click="load">
-                <i class="pi pi-refresh" />
-            </button>
-        </header>
-        <p class="launchers-panel__hint">
-            Operator-approved commands, declared in the global config
-            <code>launchers:</code> block. Human-only.
-        </p>
+        <PanelHeader title="Launchers">
+            <template #actions>
+                <button type="button" class="launchers-panel__refresh" title="Refresh" @click="load">
+                    <i class="pi pi-refresh" />
+                </button>
+            </template>
+            <p class="aiball-explainer aiball-explainer--muted">
+                Operator-approved commands, declared in the global config
+                <code>launchers:</code> block. Human-only.
+            </p>
+        </PanelHeader>
         <p v-if="flash" class="launchers-panel__flash">{{ flash }}</p>
 
         <div v-if="loading" class="aiball-empty">Loading…</div>
@@ -79,10 +81,8 @@ onMounted(load);
 
 <style scoped>
 .launchers-panel { display: flex; flex-direction: column; gap: 0.8rem; }
-.launchers-panel__head { display: flex; align-items: center; gap: 0.6rem; }
-.launchers-panel__head h2 { margin: 0; font-size: 1.3rem; }
+/* En-tête → <PanelHeader> (style.css). */
 .launchers-panel__refresh { background: none; border: none; cursor: pointer; color: var(--p-text-color); }
-.launchers-panel__hint { margin: 0; font-size: 0.85rem; color: var(--p-text-muted-color, #6b7280); }
 .launchers-panel__flash { margin: 0; font-size: 0.85rem; color: var(--p-green-600, #16a34a); }
 .launchers-panel__list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
 .launchers-panel__item { display: flex; align-items: center; gap: 0.6rem; }
