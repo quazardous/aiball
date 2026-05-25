@@ -185,16 +185,23 @@ async function doStopLoop(consumer_id: string) {
                     <span v-if="rootIsRunning(root)" class="project-detail__running">
                         <i class="pi pi-circle-fill" /> running
                     </span>
-                    <button
+                    <!-- #443 (5dvkqg): harmonised with the per-loop Stop — both are
+                         now icon-only PrimeVue Buttons (play/success = start,
+                         stop-circle/danger = stop) instead of a classic text button
+                         next to an icon one. `loading` swaps the play glyph for a
+                         spinner + disables while the launch is in flight. -->
+                    <Button
                         v-else
-                        type="button"
                         class="project-detail__launch"
-                        :disabled="launching === root"
-                        title="Launch a claude-loop for this root"
+                        icon="pi pi-play"
+                        severity="success"
+                        text
+                        rounded
+                        size="small"
+                        :loading="launching === root"
+                        :title="launching === root ? 'launching…' : 'Launch a claude-loop for this root'"
                         @click="launch(root)"
-                    >
-                        <i class="pi pi-play" /> {{ launching === root ? "launching…" : "launch loop" }}
-                    </button>
+                    />
                 </div>
                 <ul class="project-detail__loops">
                     <li
@@ -338,22 +345,11 @@ async function doStopLoop(consumer_id: string) {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+/* #443 (5dvkqg): now an icon-only PrimeVue Button (see template) — the
+   styling is the Button's; we only keep the right-edge push. */
 .project-detail__launch {
     margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    background: var(--p-primary-color);
-    color: var(--p-primary-contrast-color);
-    border: 0;
-    border-radius: 0.4rem;
-    padding: 0.3rem 0.7rem;
-    cursor: pointer;
-    font: inherit;
-    font-size: 0.82rem;
-    white-space: nowrap;
 }
-.project-detail__launch:disabled { opacity: 0.6; cursor: default; }
 /* #393 (3c): a loop is live at this root → show status instead of a launch. */
 .project-detail__running {
     margin-left: auto;
