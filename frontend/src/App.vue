@@ -29,6 +29,7 @@ import ProjectsPanel from "./components/ProjectsPanel.vue";
 import ConsumersPanel from "./components/ConsumersPanel.vue";
 import NodesPanel from "./components/NodesPanel.vue";
 import LaunchersPanel from "./components/LaunchersPanel.vue";
+import GeneralSettingsPanel from "./components/GeneralSettingsPanel.vue";
 import RulesPanel from "./components/RulesPanel.vue";
 import SetupScreen from "./components/SetupScreen.vue";
 import LoginScreen from "./components/LoginScreen.vue";
@@ -656,15 +657,12 @@ watch(showSnoozed, (v) => {
             :global-snoozed-count="globalSnoozedCount"
             :global-open-count="globalOpenCount"
             :show-snoozed="showSnoozed"
-            :strategy="strategy"
-            :strategy-options="strategyOptions"
             :notif-allowed="notifAllowed"
             :notif-muted="notifMuted"
             :dark="dark"
             :loading="loading"
             :auto-refresh="autoRefresh"
             @update:show-snoozed="showSnoozed = $event"
-            @update:strategy="changeStrategy"
             @update:dark="dark = $event"
             @update:auto-refresh="autoRefresh = $event"
             @enable-notif="ensureNotifPermission"
@@ -690,15 +688,21 @@ watch(showSnoozed, (v) => {
                      band, easy to miss). One unified back-link covers
                      all four; per-panel headers stay untouched. -->
                 <a
-                    v-if="panel === 'projects' || panel === 'rules' || panel === 'tags' || panel === 'consumers' || panel === 'nodes'"
+                    v-if="panel === 'general' || panel === 'projects' || panel === 'rules' || panel === 'tags' || panel === 'consumers' || panel === 'nodes'"
                     href="/"
                     class="settings-back-link"
                     @click.prevent="panel = null"
                 >
                     <i class="pi pi-arrow-left" /> Back to inbox
                 </a>
+                <GeneralSettingsPanel
+                    v-if="panel === 'general'"
+                    :strategy="strategy"
+                    :strategy-options="strategyOptions"
+                    @update:strategy="changeStrategy"
+                />
                 <ProjectsPanel
-                    v-if="panel === 'projects'"
+                    v-else-if="panel === 'projects'"
                     @open-stats="(name: string) => openProjectPage(name, 'stats')"
                     @open-settings="(name: string) => openProjectPage(name, 'settings')"
                 @open-detail="(name: string) => openProjectPage(name, 'detail')"
@@ -822,6 +826,9 @@ watch(showSnoozed, (v) => {
                      Hidden on desktop — the sidebar exposes these. -->
                 <aside class="aiball-footer-settings">
                     <div class="aiball-footer-settings__label">Settings</div>
+                    <button type="button" class="aiball-footer-settings__item" @click="openPanel('general')">
+                        <i class="pi pi-sliders-h" /> <span>General</span>
+                    </button>
                     <button type="button" class="aiball-footer-settings__item" @click="openPanel('projects')">
                         <i class="pi pi-folder" /> <span>Projects</span>
                     </button>

@@ -16,7 +16,7 @@ export interface ProjectListItem {
     running?: boolean;
 }
 
-export type SettingsPanel = "rules" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "compose";
+export type SettingsPanel = "general" | "rules" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "compose";
 
 /**
  * Per-project sub-pages (#B.127): "settings" hosts the moderation
@@ -167,6 +167,15 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
             <div class="sidebar-section-label">
                 Settings
             </div>
+            <button
+                type="button"
+                class="sidebar-item"
+                :class="{ active: panel === 'general' }"
+                @click="emit('open-panel', 'general')"
+            >
+                <i class="pi pi-sliders-h" />
+                <span>General</span>
+            </button>
             <button
                 type="button"
                 class="sidebar-item"

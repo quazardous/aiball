@@ -17,6 +17,17 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Global moderation strategy moves to Settings → General (#438)
+
+- The daemon-wide moderation-strategy picker left the header dropdown for a new
+  dedicated **Settings → General** page (a `general` settings panel, routed at
+  `/general`). The header is now purely status + actions; the global default
+  (the fallback every project on *"Use global"* inherits) lives in one obvious
+  settings home, with room to grow (upload caps, etc.).
+- The per-project settings hint now points to *Settings → General* instead of
+  the header for changing the global. UI-only — backend, API, and the
+  per-project override are unchanged.
+
 ### Claim ≠ assignment — two distinct holds (#436)
 
 - **Assignment** and **claim** are now separate concepts (fused in #418's single

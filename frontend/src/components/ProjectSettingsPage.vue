@@ -30,7 +30,7 @@ const strategyOptions = computed(() => [
     {
         label: `Use global (currently: ${strategyGlobal.value})`,
         value: GLOBAL_SENTINEL as StrategyChoice,
-        hint: "Project follows the daemon-wide strategy. Change the global from the header.",
+        hint: "Project follows the daemon-wide strategy. Change the global in Settings → General.",
     },
     ...STRATEGY_OPTIONS.map((o) => ({
         label: o.label,
