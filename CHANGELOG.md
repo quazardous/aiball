@@ -30,6 +30,15 @@ narrative for the product as a whole.
   the claims auto-released by the one-focus rule. Agent `engage`/`assign` go
   through the same path, so an agent picking up work lights up its row live.
 
+### Token tally reads as effort, not re-read context (#446)
+
+- The per-ticket/per-project token figure is now the **effort** = new tokens
+  (input + cache-write + output). Cache *reads* — the same conversation context
+  re-read from cache on every turn — are no longer folded into the headline
+  (they were summed per turn, re-counting the same context and inflating the
+  number). The cost-equivalent (effort + cache-reads ×0.1) and the re-read
+  context size are still shown, in the tooltip / stats sub-label.
+
 ### `claude-loop status` (#444)
 
 - New **`claude-loop status [name]`** — a read-only, project-level snapshot: the
