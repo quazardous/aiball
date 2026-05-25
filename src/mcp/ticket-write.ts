@@ -413,8 +413,18 @@ export function registerTicketWriteTools(server: McpServer): void {
             // one the wake-CTA names. limit:1 → just the top row. The daemon
             // returns a bare array (the {_status,result} envelope is added
             // MCP-side by asText, not by the client).
+            //
+            // #432: apply the AIBALL_PROJECT default softly (like line ~311 /
+            // the wake-CTA). Without it, a bare engage() passed project=undefined
+            // straight through → the daemon ran cross-project → returned the
+            // globally-oldest actionable, which can be a FOLLOWER-broadcast from
+            // a DIFFERENT project (e.g. a qdadm migration notice claimed by an
+            // aiball agent). An explicit project still wins; a genuinely unset
+            // default stays cross-project (matches "Defaults to $AIBALL_PROJECT
+            // if set").
+            const proj = project ?? client.defaultProject ?? undefined;
             const rows = (await client.listTickets({
-                project,
+                project: proj,
                 actionable: "1",
                 limit: "1",
             })) as Array<{ id: number }>;
