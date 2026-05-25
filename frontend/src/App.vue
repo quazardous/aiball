@@ -720,6 +720,7 @@ watch(showSnoozed, (v) => {
                     :edit-consumer-id="consumerEditId"
                     @open-edit="(id: string) => { consumerEditId = id; }"
                     @close-edit="consumerEditId = null"
+                    @open-node="(id: string) => { openPanel('nodes'); nodeEditId = id; }"
                 />
                 <NodesPanel
                     v-else-if="panel === 'nodes'"

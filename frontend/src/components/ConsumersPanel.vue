@@ -4,7 +4,7 @@ import Button from "primevue/button";
 import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
 import { useConfirm } from "primevue/useconfirm";
-import { api, type Consumer } from "../lib/api";
+import { api, type Consumer, type NodeView } from "../lib/api";
 import { useBus } from "../lib/bus";
 import ConsumerEditPage from "./ConsumerEditPage.vue";
 import DataList from "./ui/DataList.vue";
@@ -18,6 +18,8 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: "open-edit", consumerId: string): void;
     (e: "close-edit"): void;
+    // #455: jump to the detail page of the proxy node that relays this consumer.
+    (e: "open-node", nodeId: string): void;
 }>();
 
 // #B.177 / #280: how long without a state heartbeat before we render a
@@ -39,6 +41,27 @@ const toast = useToast();
 const confirmDialog = useConfirm();
 const rows = ref<Consumer[]>([]);
 const loading = ref(false);
+
+// #455: proxy-node enrichment. A node-relayed consumer (last_seen_via='node')
+// is matched to its node by peer IP (same rule as the node detail's relayed
+// list), so its "via node" badge can show the node's label and link to the
+// node's detail page. Best-effort: if the nodes call fails we just fall back
+// to the plain "via node" tag.
+const nodesByIp = ref<Map<string, { node_id: string; label: string | null }>>(new Map());
+async function loadNodes(): Promise<void> {
+    try {
+        const nodes: NodeView[] = await api.listNodes();
+        const m = new Map<string, { node_id: string; label: string | null }>();
+        for (const n of nodes) if (n.last_seen_ip) m.set(n.last_seen_ip, { node_id: n.node_id, label: n.label });
+        nodesByIp.value = m;
+    } catch {
+        // best-effort enrichment — leave the map as-is
+    }
+}
+function nodeFor(r: Consumer): { node_id: string; label: string | null } | null {
+    if (r.last_seen_via !== "node" || !r.last_seen_ip) return null;
+    return nodesByIp.value.get(r.last_seen_ip) ?? null;
+}
 
 // Hide consumers idle > 1 week by default; toggle reveals the long
 // tail for debugging (#B.193).
@@ -122,6 +145,7 @@ async function doStopLoop(consumer_id: string) {
 
 onMounted(() => {
     load();
+    void loadNodes();
     // Live-poll the consumers list so the activity column reflects
     // heartbeats from claude-loop timers without manual refresh.
     nowTimer = setInterval(() => {
@@ -389,8 +413,25 @@ const sortedRows = computed<Consumer[]>(() => {
                             />
                             <!-- #422: remote consumer (node-relayed or TCP from a
                                  non-loopback peer). Title shows the transport + ip. -->
+                            <!-- #455: node-relayed → clickable badge showing the
+                                 relaying node's label, links to its detail page.
+                                 Anchor wraps the Tag because @click on a PrimeVue
+                                 Tag doesn't forward the native click. -->
+                            <a
+                                v-if="nodeFor(r)"
+                                href="#"
+                                class="consumers-node-link"
+                                :title="`Relayed by node ${nodeFor(r)?.label || nodeFor(r)?.node_id}${r.last_seen_ip ? ' · ' + r.last_seen_ip : ''} — open node`"
+                                @click.prevent="() => { const n = nodeFor(r); if (n) emit('open-node', n.node_id); }"
+                            >
+                                <Tag
+                                    :value="`via ${nodeFor(r)?.label || 'node'}`"
+                                    severity="info"
+                                    class="consumers-cid__tag"
+                                />
+                            </a>
                             <Tag
-                                v-if="r.remote"
+                                v-else-if="r.remote"
                                 :value="r.last_seen_via === 'node' ? 'via node' : 'remote'"
                                 severity="info"
                                 class="consumers-cid__tag"
@@ -535,6 +576,16 @@ const sortedRows = computed<Consumer[]>(() => {
 .consumers-cid__tag {
     font-size: 0.7rem;
     flex-shrink: 0;
+}
+/* #455: node-relayed badge that links to its node's detail page. */
+.consumers-node-link {
+    display: inline-flex;
+    text-decoration: none;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.consumers-node-link:hover {
+    filter: brightness(0.95);
 }
 .consumers-table tr.is-blocked {
     opacity: 0.55;
