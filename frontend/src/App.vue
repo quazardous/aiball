@@ -337,20 +337,6 @@ function refresh() {
     }
 }
 
-// #456: ack ALL of the human's unseen pings in one shot (the unread badge is
-// clickable). Clears the cross-project / pending-ticket backlog that the inbox
-// mark-read can't reach. Then refresh so the badge + inbox bold follow.
-async function markAllNotificationsRead() {
-    try {
-        const r = await api.markAllRead(localStorage.getItem("aiball.human_id") ?? "human");
-        bus.emit("projects.refresh");
-        bus.emit("inbox.refresh");
-        toast.add({ severity: "success", summary: `Marked ${r.updated} notification${r.updated === 1 ? "" : "s"} read`, life: 3000 });
-    } catch (e) {
-        toast.add({ severity: "error", summary: "Mark all read failed", detail: (e as Error).message, life: 6000 });
-    }
-}
-
 // #B.213 phase A.2: arrival toasts + OS notifications wired now that
 // `project` is in scope (needed for the in-scope filter).
 const {
@@ -683,7 +669,6 @@ watch(showSnoozed, (v) => {
             @update:dark="dark = $event"
             @update:auto-refresh="autoRefresh = $event"
             @refresh="refresh"
-            @mark-all-read="markAllNotificationsRead"
         />
 
         <div class="aiball-layout">

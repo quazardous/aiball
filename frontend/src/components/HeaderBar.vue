@@ -25,9 +25,6 @@ const emit = defineEmits<{
     (e: "update:dark", v: boolean): void;
     (e: "update:autoRefresh", v: boolean): void;
     (e: "refresh"): void;
-    // #456: click the unread badge → mark all notifications read (clears the
-    // cross-project / pending backlog the inbox mark-read can't reach).
-    (e: "mark-all-read"): void;
 }>();
 </script>
 
@@ -60,15 +57,13 @@ const emit = defineEmits<{
         >
             <i class="pi pi-check-circle" /> {{ globalResolvedCount }}
         </span>
-        <button
+        <span
             v-if="globalUnreadCount > 0"
-            type="button"
             class="header-badge header-badge--unread"
-            :title="`${HEADER_BADGE_TOOLTIPS.unread(globalUnreadCount)} — click to mark all read`"
-            @click="emit('mark-all-read')"
+            :title="HEADER_BADGE_TOOLTIPS.unread(globalUnreadCount)"
         >
             <i class="pi pi-envelope" /> {{ globalUnreadCount }}
-        </button>
+        </span>
         <button
             type="button"
             class="header-badge header-badge--snoozed"
@@ -203,10 +198,6 @@ const emit = defineEmits<{
 .header-badge--unread {
     background: var(--p-blue-500);
     color: white;
-    /* #456: clickable → mark all read. */
-    border: 0;
-    cursor: pointer;
-    font: inherit;
 }
 .header-badge--resolved {
     background: var(--p-green-500);

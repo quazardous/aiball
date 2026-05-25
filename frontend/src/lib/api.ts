@@ -626,15 +626,6 @@ export const api = {
             `/api/tickets/${id}/mark-unread`,
             {},
         ),
-    // #456: ack ALL of a consumer's unseen pings in one shot — clears the
-    // cross-project / pending-ticket backlog that the inbox mark-read can't
-    // reach (it only covers tickets visible in the current inbox).
-    markAllRead: (consumer_id: string) =>
-        req<{ consumer_id: string; all?: boolean; updated: number }>(
-            "POST",
-            `/api/pings/mark-read`,
-            { consumer_id, all: true },
-        ),
     // The UI always needs the full thread (body + comments) — the
     // summary default that landed in 0.5.x (#B.87) targets agents, not
     // the moderator browser. Force full=1.
