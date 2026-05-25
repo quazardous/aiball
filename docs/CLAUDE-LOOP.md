@@ -131,6 +131,7 @@ Lifecycle:
 
 ```bash
 claude-loop list                       # alive/dead + state summary
+claude-loop status [name]              # connection type, default agent, daemon reachability
 claude-loop tail <name> --lines 30     # last N lines of the claude pane
 claude-loop tail <name> --timer        # detached timer's stdout log
 claude-loop attach <name>              # tmux attach
