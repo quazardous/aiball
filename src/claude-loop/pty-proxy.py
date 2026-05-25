@@ -204,9 +204,13 @@ HUMAN_TTL_SEC = 5  # doit suivre HUMAN_TYPING_TTL_SEC côté TS
 
 # Mots fg-only (le bg = status-bg). Doivent rester alignés avec
 # setTmuxStatus / humanBarWord (state.ts) — #302 : stop=rouge, wait=jaune,
-# loop=vert.
+# loop=vert ; #426 : ask=orange.
 _HUMAN_STOP = "#[fg=colour196,bg=colour16]stop"
 _HUMAN_WAIT = "#[fg=colour178,bg=colour16]wait"
+# #426 : 4e mot `ask` (orange) entre `wait` et `loop` — fenêtre ASK-grace
+# (post user-grace) où les auto-wakes sont autonomes MAIS AskUserQuestion est
+# encore autorisé (pas encore redirigé vers un ticket).
+_HUMAN_ASK = "#[fg=colour208,bg=colour16]ask"
 _HUMAN_LOOP = "#[fg=colour40,bg=colour16]loop"
 # #302/#345: --no-wait (CL_WAIT=0) skips only the boot-grace; a present human
 # (live typing → `stop`, armed user-grace → `wait`) is still reflected, aligned
@@ -724,6 +728,27 @@ def _user_grace_remaining():
     return rem if rem > 0.0 else 0.0
 
 
+def _ask_grace_remaining():
+    """#426 : secondes d'ASK-grace restantes (marqueur `user-took-over` <
+    CL_ASK_GRACE_SEC, défaut 600). Fenêtre PLUS LONGUE que la user-grace : entre
+    la fin de la user-grace (~60s) et la fin de l'ASK-grace (~600s), les
+    auto-wakes sont autonomes mais AskUserQuestion est encore autorisé → la barre
+    doit lire `ask`, pas `loop`. Symétrique de _user_grace_remaining."""
+    sd = os.environ.get("CL_STATE_DIR") or ""
+    if not sd:
+        return 0.0
+    try:
+        grace = float(os.environ.get("CL_ASK_GRACE_SEC") or "600")
+    except ValueError:
+        grace = 600.0
+    try:
+        mtime = os.stat(os.path.join(sd, "user-took-over")).st_mtime
+    except OSError:
+        return 0.0
+    rem = grace - (datetime.datetime.now().timestamp() - mtime)
+    return rem if rem > 0.0 else 0.0
+
+
 def _boot_grace_remaining():
     """#305 : secondes de boot-grace restantes (CL_BOOT_GRACE_SEC depuis le
     démarrage du proxy), 0.0 hors-fenêtre ou sous --no-wait. Symétrique de
@@ -742,9 +767,15 @@ def _boot_grace_remaining():
 def _rest_word():
     """Mot au repos (pas de frappe) : `wait` pendant la boot-grace (#305, nulle
     sous --no-wait) OU la fenêtre user-grace (#345 : armée même sous --no-wait,
-    ex. après un ESC), sinon `loop`."""
+    ex. après un ESC) ; #426 : `ask` (orange) pendant l'ASK-grace résiduelle
+    (post user-grace, hors AFK) — AskUserQuestion encore autorisé bien que les
+    auto-wakes soient autonomes ; sinon `loop`."""
     if _boot_grace_remaining() > 0.0 or _user_grace_remaining() > 0.0:
         return _HUMAN_WAIT
+    # #426 : AFK → la gate AskUserQuestion redirige immédiatement, donc pas de
+    # `ask` (on est de fait en autonome → loop). Sinon, reste-t-il de l'ASK-grace ?
+    if not (_afk_path() and os.path.exists(_afk_path())) and _ask_grace_remaining() > 0.0:
+        return _HUMAN_ASK
     return _HUMAN_LOOP
 
 

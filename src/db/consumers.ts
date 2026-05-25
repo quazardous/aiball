@@ -15,8 +15,9 @@ export type ConsumerKind = "human" | "agent" | "sandbox";
 
 export type ConsumerState = "boot" | "idle" | "busy";
 
-/** #310: 3-state human-presence word, mirrors the tmux bar's presence chip. */
-export type HumanWord = "stop" | "wait" | "loop";
+/** #310/#426: human-presence word, mirrors the tmux bar's presence chip
+ *  (#426 added `ask` — ASK-grace window, see docs/CLAUDE-LOOP.md). */
+export type HumanWord = "stop" | "wait" | "ask" | "loop";
 
 export interface Consumer {
     consumer_id: string;

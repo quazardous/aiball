@@ -148,7 +148,9 @@ function presenceLabel(r: Consumer): string {
 function presenceSeverity(r: Consumer): "danger" | "warn" | "success" {
     const w = presenceLabel(r);
     if (w === "stop") return "danger";                 // red — human typing
-    if (w === "wait" || w === "human") return "warn";  // yellow — frozen / human present
+    // #426: `ask` (ASK-grace) grouped with the grace states here — the web badge
+    // is coarser than the tmux bar, which paints `ask` a distinct orange.
+    if (w === "wait" || w === "human" || w === "ask") return "warn"; // yellow — frozen / present / ask-grace
     return "success";                                  // green — autonomous loop
 }
 function activitySeverity(r: Consumer): "info" | "warn" | "secondary" {

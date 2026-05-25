@@ -139,9 +139,10 @@ consumersRouter.put("/consumers/:consumer_id/state", (req: Request, res: Respons
     }
     // #280: optional live human-presence flag pushed alongside the state.
     const human = typeof body.human === "boolean" ? body.human : undefined;
-    // #310: optional 3-state presence word (stop/wait/loop), mirrors the bar.
+    // #310/#426: optional presence word (stop/wait/ask/loop), mirrors the bar.
     const humanWord =
-        body.human_word === "stop" || body.human_word === "wait" || body.human_word === "loop"
+        body.human_word === "stop" || body.human_word === "wait"
+        || body.human_word === "ask" || body.human_word === "loop"
             ? body.human_word
             : undefined;
     // #393: optional loop root, pushed on each heartbeat → marks the project local.

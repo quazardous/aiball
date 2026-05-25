@@ -17,6 +17,18 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### `ask` presence word — surface the AskUserQuestion window (#426)
+
+- The tmux bar (and the consumers page) gain a 4th human-presence word **`ask`**
+  (orange), between `wait` and `loop`. It marks the window where auto-wakes are
+  already autonomous (past the ~60s user-grace) but an `AskUserQuestion` dialog
+  is **still allowed** (within the ~600s ask-grace, and not AFK). Previously
+  invisible — the bar just read `loop` while a multi-choice dialog could still
+  pop, which read as "the hook didn't filter". Wired on both the TS painter
+  (`humanPresenceWord`/`humanBarWord`) and the PTY proxy (`_rest_word`), reading
+  `CL_ASK_GRACE_SEC`. `docs/CLAUDE-LOOP.md` now documents the two distinct grace
+  windows (user-grace vs ask-grace) + the `ask` word. No migration.
+
 ### Custom wake gates (#428)
 
 - A new `claude_loop.gates` knob (`.aiball.yaml`) attaches **gates** to the loop

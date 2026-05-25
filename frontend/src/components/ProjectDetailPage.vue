@@ -65,7 +65,8 @@ function presenceWord(human?: boolean | null, word?: string | null): string {
 function presenceClass(human?: boolean | null, word?: string | null): string {
     const w = presenceWord(human, word);
     if (w === "stop") return "ld-tag--stop";
-    if (w === "wait" || w === "human") return "ld-tag--wait";
+    // #426: `ask` (ASK-grace) shares the grace-state tint on this coarser web view.
+    if (w === "wait" || w === "human" || w === "ask") return "ld-tag--wait";
     return "ld-tag--loop";
 }
 

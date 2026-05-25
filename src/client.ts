@@ -674,7 +674,7 @@ export class AiballClient {
     pushState(
         state: "busy" | "idle" | "boot",
         human?: boolean,
-        humanWord?: "stop" | "wait" | "loop",
+        humanWord?: "stop" | "wait" | "ask" | "loop",
         cwd?: string,
         project?: string,
     ) {

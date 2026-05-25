@@ -397,7 +397,7 @@ export interface Consumer {
      * heartbeat — mirrors the tmux bar's presence chip. null = never reported
      * / pre-#310 loop (fall back to `state_human` for the binary view).
      */
-    state_human_word?: "stop" | "wait" | "loop" | null;
+    state_human_word?: "stop" | "wait" | "ask" | "loop" | null;
     /** #393: the loop's working directory (project root), pushed by the state
      *  heartbeat. null for humans / non-loop / pre-#393 loops. */
     cwd?: string | null;

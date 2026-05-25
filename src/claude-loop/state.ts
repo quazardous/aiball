@@ -788,15 +788,17 @@ const PROC_START_MS = Date.now();
  * two in sync.
  */
 /**
- * #310: the bare 3-state presence WORD (`stop` / `wait` / `loop`), decoupled
+ * #310/#426: the bare presence WORD (`stop` / `wait` / `ask` / `loop`), decoupled
  * from the tmux colour formatting so the SAME logic feeds both the bar
  * (humanBarWord below) and the heartbeat push to the consumers page
  * (timer.ts → pushState). Keep in sync with pty-proxy.py's _rest_word.
  *   - `stop` — a human is typing NOW (human-typing < 5s)
  *   - `wait` — auto-pings FROZEN: boot-grace window (#305) OR user-grace
- *   - `loop` — autonomous (managed mode), incl. --no-wait
+ *   - `ask`  — #426: past user-grace but within ASK-grace (not AFK) → auto-wakes
+ *              are autonomous yet an AskUserQuestion dialog is still allowed
+ *   - `loop` — autonomous (managed mode), incl. --no-wait; a question redirects
  */
-export function humanPresenceWord(sd: string | undefined, graceSec: number): "stop" | "wait" | "loop" {
+export function humanPresenceWord(sd: string | undefined, graceSec: number): "stop" | "wait" | "ask" | "loop" {
     // #345 D: a present human is reflected even under --no-wait (CL_WAIT=0).
     // NO_WAIT only suppresses the boot-grace `wait` (no human assumed AT
     // LAUNCH); live typing → `stop` and an armed user-grace → `wait` still show.
@@ -807,6 +809,15 @@ export function humanPresenceWord(sd: string | undefined, graceSec: number): "st
     const bootGraceMs = Math.max(0, Number(process.env.CL_BOOT_GRACE_SEC ?? 60)) * 1000;
     if (!noWait && Date.now() - PROC_START_MS < bootGraceMs) return "wait";
     if (sd && userIsTakingOver(sd, graceSec)) return "wait";
+    // #426: past user-grace but still within the (longer) ASK-grace, and not
+    // AFK → the AskUserQuestion dialog is STILL allowed (it won't redirect to a
+    // ticket) even though auto-wakes are now autonomous. Surface that otherwise
+    // invisible window as `ask` so the bar stops reading a flat `loop` while a
+    // multi-choice dialog can still pop. Mirrors the PreToolUse gate.
+    if (sd && !afkActive(sd)) {
+        const askGraceSec = Math.max(0, Number(process.env.CL_ASK_GRACE_SEC ?? DEFAULT_ASK_GRACE_SEC));
+        if (askGraceSec > graceSec && userIsTakingOver(sd, askGraceSec)) return "ask";
+    }
     return "loop";
 }
 
@@ -815,7 +826,10 @@ export function humanBarWord(sd: string | undefined, graceSec: number): string {
     // any bar state colour (busy blue / idle gray / boot yellow). fg encodes the
     // word: stop=red / wait=yellow / loop=green. Logic lives in humanPresenceWord.
     const word = humanPresenceWord(sd, graceSec);
-    const fg = word === "stop" ? "colour196" : word === "wait" ? "colour178" : "colour40";
+    const fg = word === "stop" ? "colour196"
+        : word === "wait" ? "colour178"
+        : word === "ask" ? "colour208" // #426: orange — ASK-grace window
+        : "colour40";
     return `#[fg=${fg},bg=colour16]${word}`;
 }
 

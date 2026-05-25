@@ -185,7 +185,7 @@ feeders, best-to-worst:
   separate your keystrokes from the loop's own injection as cleanly —
   exactly the blind spot the proxy was built to close.
 
-### 3. The tmux bar word — `stop` / `wait` / `loop`
+### 3. The tmux bar word — `stop` / `wait` / `ask` / `loop`
 
 Both signals collapse into one human-presence word on the status bar
 (`humanPresenceWord`):
@@ -194,6 +194,7 @@ Both signals collapse into one human-presence word on the status bar
 |--------|--------|--------------------------------------------------------------|
 | `stop` | red    | a human is typing **now** (`human-typing` < 5s)              |
 | `wait` | yellow | auto-pings **frozen** — boot-grace at launch *or* user-grace |
+| `ask`  | orange | past user-grace but within **ask-grace** — auto-wakes are autonomous yet an `AskUserQuestion` dialog is still allowed (see below) |
 | `loop` | green  | autonomous, gate open (managed mode / `--no-wait`)           |
 
 When the proxy is alive it paints this segment live (instant on the
@@ -201,12 +202,22 @@ first keystroke); otherwise the timer paints it from the markers.
 
 ### AskUserQuestion in a headless loop
 
-The same `userIsTakingOver()` signal gates Claude's `AskUserQuestion`
-tool via a `PreToolUse` hook. In an autonomous loop with **no human**,
-a multi-choice dialog would stall forever (nobody to click), so the hook
-**denies** it and redirects Claude to ask on the aiball ticket thread
-instead. With a human present (inside the grace window) the dialog is
-**allowed** — best of both worlds, not an amputation.
+`AskUserQuestion` is gated by a `PreToolUse` hook — but on a **separate,
+longer window** than the auto-wake user-grace. Two distinct grace windows
+share the one `user-took-over` marker:
+
+- **user-grace** (`CL_USER_GRACE_SEC`, default **60s**) — how long auto-wakes
+  stay frozen after a human prompt. Drives the `wait` bar word.
+- **ask-grace** (`CL_ASK_GRACE_SEC`, default **600s / 10min**) — how long an
+  `AskUserQuestion` dialog is still **allowed** (the bet: a present-but-quiet
+  human can still click). A stalled question is cheap vs a lost one.
+
+So between ~60s and ~600s after your last keystroke the auto-wakes are
+autonomous yet a multi-choice dialog can still pop — that's the `ask` (orange)
+bar word, surfacing the otherwise-invisible window. Past ask-grace (or once you
+flag yourself AFK with the afk key), the hook **denies** the dialog and
+redirects Claude to ask on the aiball ticket thread instead. With a human
+present the dialog is **allowed** — best of both worlds, not an amputation.
 
 (Orthogonal third gate: the Stop hook / timer also read `esc to
 interrupt` in the pane footer and arm a `busy-defer-until` window so a
