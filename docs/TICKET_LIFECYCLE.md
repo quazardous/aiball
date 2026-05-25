@@ -133,7 +133,43 @@ cases):
 - **blocked** (`ticket_blocked`) — suppressed until unblocked.
 - **relation gate** — an open `depends_on` / `blocks` blocker
   suppresses the dependent.
+- **hold gate** (`isHeldByOther`) — a hold by *someone other than C* drops the
+  ticket from C's pool (anti-collision). See §4.5.
 - **snoozed / closed / non-approved** — not open in the first place.
+
+### 4.5 Assignment vs claim — the two holds (#436 / #439)
+
+Two distinct holds, both anti-collision, split from one fused field:
+
+- **Assignment** (`assignee` / `assigned_by` / `assigned_at`) — a *responsibility*
+  a human/moderator **pushes** onto a consumer. **Persistent** (no expiry). An
+  agent can only self-claim; pushing onto a third party is moderator-only.
+- **Claim** (`claimant` / `claimed_at`) — a *focus* an agent **self-declares**
+  ("I'm on this now"), via `ticket_engage` or a self `ticket_assign`.
+  **Transient**: the live window is derived (`now − claimed_at < assign_window_sec`).
+
+A ticket can be **both** at once. The **hold gate** (`isHeldByOther`,
+`src/db/assignment-gate.ts`) drops a ticket from C's actionable pool when it is
+held by **someone other than C** — a *live* claim by another agent **OR** an
+*assignment* to another consumer. Held-by-C, unheld, or an *expired* claim with
+no assignment → not gated (falls through to `last_actor`). Both holds clear on
+close/resolve (`releaseTicketHold`).
+
+- **One focus at a time (#439).** A self-claim auto-releases C's *other* **live**
+  claims C never commented on since claiming them (a *bare pickup* — zero work
+  lost). Claims C actually worked (a self comment after `claimed_at`) survive, and
+  the ticket being engaged is never dropped (re-engage stays idempotent). Stops an
+  agent stacking locks that each drop a ticket from every other agent's pool.
+  (`claimsToAutoRelease`, pure + tested; wired in `POST /tickets/:id/assign`,
+  surfaced as `released_claims`, relayed by `ticket_engage`.)
+- **Token attribution (#439).** A turn's token-usage is attributed to C's
+  **most-recently-claimed live** claim (the durable focus), falling back to the
+  volatile `active-ticket` marker only when C holds no live claim — so an
+  incidental ticket-scoped write mid-turn no longer mis-attributes the turn.
+  (`pickFocusClaim`, server-side re-anchor in `POST /tickets/:id/token-usage`.)
+- **Work-order tiebreak.** C's own live **claim** sorts **above the hot-zone**
+  (explicit focus outlasts the decaying hot window); an **assignment-to-C** is a
+  separate, weaker boost below own-claim. See §5.
 
 ---
 
@@ -146,9 +182,14 @@ The keys, outer→inner (pure comparator in `src/db/work-order.ts`):
    `unread` → `actionable` (¬unread) → other open → the rest (closed/snoozed).
 2. **Priority** desc (urgent→low) — the **strongest** sort within a tier
    (david `xkehmv`: « priorité est le tri le plus fort »). Explicit priority wins.
-3. **Hot** (levier 1) — at **equal priority**, a ticket in the requesting
-   consumer's **hot-zone** sorts first (see §5.1). Within-tier only.
-4. **Oldest-first** (id asc) — final tiebreak.
+3. **Own live claim** (#430) — at **equal priority**, a ticket the consumer holds
+   a live claim on (its explicit focus, see §4.5) sorts first, **above** hot — the
+   claim is the durable "what I'm on" signal where hot decays. Within-tier only.
+4. **Assigned-to-you** (#436) — a ticket a human handed the consumer; a weaker
+   boost, below own-claim, above hot. Within-tier only.
+5. **Hot** (levier 1) — at equal priority + no claim/assignment distinction, a
+   ticket in the requesting consumer's **hot-zone** sorts first (see §5.1).
+6. **Oldest-first** (id asc) — final tiebreak.
 
 The wake-CTA **names the head** of this order (`#{head_id}`) so the agent takes
 the top of its queue, not the newest/loudest. ("FIFO" is a misnomer — it's the
