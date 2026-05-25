@@ -19,14 +19,17 @@ narrative for the product as a whole.
 
 ### Send a raw prompt to a claude-loop (#451)
 
-- New **"send prompt"** action on each live loop (Consumers page): type a prompt
-  and it's injected **verbatim** into that loop's Claude session — no moderation,
-  no wake-phrase indirection — for a direct operator instruction. Rides the same
-  daemon→loop SSE control channel as remote stop (#442): `POST
-  /api/consumers/:id/prompt` → a `control:prompt` event → the loop injects the
-  text like a wake (PTY proxy socket / tmux). Same privilege gate as stop
-  (moderator-only; proxy-node tokens denied — an arbitrary prompt can hijack an
-  agent). `delivered:false` when no live loop is connected (not queued).
+- A **consumer's page** (Settings → Consumers → a consumer) gains a **"send a
+  raw prompt"** box: type a prompt and it's injected **verbatim** into that
+  loop's Claude session — no moderation, no wake-phrase indirection — for a
+  direct operator instruction.
+- **Spooled then delivered**: the prompt is persisted to a file spool, then if
+  the loop is live it's drained onto its SSE now (`control:prompt` → the loop
+  injects it like a wake, PTY proxy / tmux); if the loop is offline it stays
+  spooled and is drained when the loop's SSE reconnects. So a prompt is never
+  lost to a daemon restart or an offline loop.
+- **Privileged**: same gate as remote stop (#442) — moderator-only, proxy-node
+  tokens denied (an arbitrary prompt can hijack an agent).
 
 ### Pending tickets stay out of the backlog (#450)
 

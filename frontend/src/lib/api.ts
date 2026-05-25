@@ -854,9 +854,10 @@ export const api = {
             `/api/consumers/${encodeURIComponent(consumer_id)}/loop-stop`,
         ),
     /** #451: send a raw, unfiltered prompt straight into this loop's Claude
-     *  session. `delivered` = a live loop received it (not queued otherwise). */
+     *  session. Always `spooled`; `delivered` = a live loop received it now
+     *  (else it's drained from the spool when the loop reconnects). */
     sendLoopPrompt: (consumer_id: string, text: string) =>
-        req<{ consumer_id: string; action: string; delivered: boolean }>(
+        req<{ consumer_id: string; action: string; spooled: boolean; delivered: boolean }>(
             "POST",
             `/api/consumers/${encodeURIComponent(consumer_id)}/prompt`,
             { text },
