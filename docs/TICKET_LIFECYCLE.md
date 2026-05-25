@@ -156,12 +156,15 @@ no assignment → not gated (falls through to `last_actor`). Both holds clear on
 close/resolve (`releaseTicketHold`).
 
 - **One focus at a time (#439).** A self-claim auto-releases C's *other* **live**
-  claims C never commented on since claiming them (a *bare pickup* — zero work
-  lost). Claims C actually worked (a self comment after `claimed_at`) survive, and
-  the ticket being engaged is never dropped (re-engage stays idempotent). Stops an
-  agent stacking locks that each drop a ticket from every other agent's pool.
-  (`claimsToAutoRelease`, pure + tested; wired in `POST /tickets/:id/assign`,
-  surfaced as `released_claims`, relayed by `ticket_engage`.)
+  claims that are *bare pickups* — engage/assign claims C never commented on (zero
+  work lost). Claims C actually worked survive: posting an approved comment
+  **auto-claims** the ticket (#418), so a worked ticket's `claimed_at` *equals* C's
+  latest comment (`lastMs >= claimedMs`), whereas a bare engage-claim's
+  `claimed_at` is strictly after any earlier comment → released. The ticket being
+  engaged is never dropped (re-engage stays idempotent). Stops an agent stacking
+  locks that each drop a ticket from every other agent's pool. (`claimsToAutoRelease`,
+  pure + tested; wired in `POST /tickets/:id/assign`, surfaced as `released_claims`,
+  relayed by `ticket_engage`.)
 - **Token attribution (#439).** A turn's token-usage is attributed to C's
   **most-recently-claimed live** claim (the durable focus), falling back to the
   volatile `active-ticket` marker only when C holds no live claim — so an

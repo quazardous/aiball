@@ -80,6 +80,14 @@ test("claimsToAutoRelease: worked since claim (self comment after claimed_at) â†
     assert.deepEqual(claimsToAutoRelease(claims, acted, 99, NOW, WINDOW), []);
 });
 
+test("claimsToAutoRelease: auto-claim (comment == claimed_at) â†’ kept (worked, not bare)", () => {
+    // #418 auto-claim: an approved comment sets claimed_at = the comment time, so
+    // a worked ticket has lastMs === claimedMs. Must be KEPT (the `>=` boundary).
+    const claims = [{ id: 10, claimedAt: iso(60_000) }];
+    const acted = new Map([[10, claimedMs(60_000)]]); // comment time == claim time
+    assert.deepEqual(claimsToAutoRelease(claims, acted, 99, NOW, WINDOW), []);
+});
+
 test("claimsToAutoRelease: the ticket being engaged (keepId) is never released", () => {
     const claims = [{ id: 10, claimedAt: iso(60_000) }];
     assert.deepEqual(claimsToAutoRelease(claims, new Map(), /*keep*/ 10, NOW, WINDOW), []);

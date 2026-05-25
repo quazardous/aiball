@@ -78,6 +78,14 @@ export function isHeldByOther(
  * `selfLastActivityMs`: ticketId → epoch-ms of the consumer's most-recent message
  *   on that ticket (absent = never commented). `windowMs` in MILLISECONDS.
  * Returns the ids to release (subset of `claims`, never including `keepId`).
+ *
+ * The `>=` (not `>`) is deliberate: posting an approved comment AUTO-CLAIMS the
+ * ticket (#418 discipline A, `messages.ts`), so a *worked* ticket's `claimed_at`
+ * equals the consumer's latest comment timestamp — `lastMs == claimedMs`. A
+ * *bare* pickup (engage/assign with no comment) has `claimed_at` = the engage
+ * time, strictly AFTER any pre-existing comment (or none at all) → `lastMs <
+ * claimedMs` (or undefined) → released. So `>=` keeps comment-claims (worked) and
+ * drops engage-claims-without-comment (bare).
  */
 export function claimsToAutoRelease(
     claims: { id: number; claimedAt: string | null | undefined }[],
@@ -93,7 +101,7 @@ export function claimsToAutoRelease(
         const claimedMs = c.claimedAt ? Date.parse(c.claimedAt) : NaN;
         const lastMs = selfLastActivityMs.get(c.id);
         const workedSinceClaim =
-            lastMs !== undefined && !Number.isNaN(claimedMs) && lastMs > claimedMs;
+            lastMs !== undefined && !Number.isNaN(claimedMs) && lastMs >= claimedMs;
         if (!workedSinceClaim) out.push(c.id); // bare pickup → release
     }
     return out;
