@@ -23,11 +23,11 @@ narrative for the product as a whole.
   raw prompt"** box: type a prompt and it's injected **verbatim** into that
   loop's Claude session — no moderation, no wake-phrase indirection — for a
   direct operator instruction.
-- **Spooled then delivered**: the prompt is persisted to a file spool, then if
-  the loop is live it's drained onto its SSE now (`control:prompt` → the loop
-  injects it like a wake, PTY proxy / tmux); if the loop is offline it stays
-  spooled and is drained when the loop's SSE reconnects. So a prompt is never
-  lost to a daemon restart or an offline loop.
+- **Spooled then delivered**: the prompt is queued in a volatile in-memory spool
+  (no DB/file), then if the loop is live it's drained onto its SSE now
+  (`control:prompt` → the loop injects it like a wake, PTY proxy / tmux); if the
+  loop is offline it waits in the spool and is drained when the loop's SSE
+  reconnects. Volatile by design — a daemon restart clears it (fine for now).
 - **Privileged**: same gate as remote stop (#442) — moderator-only, proxy-node
   tokens denied (an arbitrary prompt can hijack an agent).
 

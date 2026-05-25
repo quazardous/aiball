@@ -61,13 +61,14 @@ consumersRouter.post("/consumers/:consumer_id/loop-stop", (req: Request, res: Re
 });
 
 // #451: send a RAW, unfiltered prompt into the loop's Claude session. The prompt
-// is SPOOLED first (persisted, file-based — survives a daemon restart) THEN
-// delivered: if the loop is live, drain the spool onto its SSE now (a
-// `control:prompt` event → the loop injects the text like a wake, PTY proxy /
-// tmux); if it's offline the prompt stays spooled and is drained when the loop's
-// SSE reconnects (see /api/events). Same privilege gate as loop-stop (moderator
-// only; proxy nodes DENIED — an arbitrary prompt can hijack the agent).
-// `delivered` = a live loop received it now; `spooled` is always true.
+// is SPOOLED first (VOLATILE, in the daemon's memory — no DB/file, cleared on a
+// daemon restart, per david) THEN delivered: if the loop is live, drain the
+// spool onto its SSE now (a `control:prompt` event → the loop injects the text
+// like a wake, PTY proxy / tmux); if it's offline the prompt waits in memory and
+// is drained when the loop's SSE reconnects (see /api/events). Same privilege
+// gate as loop-stop (moderator only; proxy nodes DENIED — an arbitrary prompt
+// can hijack the agent). `delivered` = a live loop received it now; `spooled`
+// is always true.
 consumersRouter.post("/consumers/:consumer_id/prompt", (req: Request, res: Response) => {
     const target = String(req.params.consumer_id);
     const verdict = canControlLoop(tokenKindOf(req), isHuman(consumerOf(req)));
