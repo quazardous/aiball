@@ -314,6 +314,15 @@ const sortedRows = computed<Consumer[]>(() => {
                                 severity="warn"
                                 class="consumers-cid__tag"
                             />
+                            <!-- #422: remote consumer (node-relayed or TCP from a
+                                 non-loopback peer). Title shows the transport + ip. -->
+                            <Tag
+                                v-if="r.remote"
+                                :value="r.last_seen_via === 'node' ? 'via node' : 'remote'"
+                                severity="info"
+                                class="consumers-cid__tag"
+                                :title="`last seen via ${r.last_seen_via ?? '?'}${r.last_seen_ip ? ' · ' + r.last_seen_ip : ''}`"
+                            />
                         </div>
                     </td>
                     <td class="col-kind">{{ r.kind }}</td>

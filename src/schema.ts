@@ -445,6 +445,15 @@ export const consumers = sqliteTable("consumers", {
      * fallback in listProjectsDetailed).
      */
     project: text("project"),
+    /**
+     * #422: transport this consumer was last seen on — `uds` (local same-uid
+     * Unix socket) / `tcp` (direct bearer over TCP) / `node` (relayed by a
+     * trusted proxy node). Stamped at auth on every request. Lets the daemon
+     * tell a REMOTE agent from a local one. `lastSeenIp` = the peer address for
+     * tcp/node (NULL for uds). Both are last-seen / per-connection, not sticky.
+     */
+    lastSeenVia: text("last_seen_via"),
+    lastSeenIp: text("last_seen_ip"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (t) => [
