@@ -25,11 +25,12 @@ narrative for the product as a whole.
   This completes the signal convention: `HUP` = restart, `USR2` = reload,
   **`TERM` = stop**.
 - The same loop can be **stopped remotely** — no shell on its host. The Consumers
-  page shows a **stop button** on every live loop; it calls
-  `POST /api/consumers/:id/loop-stop`, which pushes a `control` event down the
-  live SSE the loop already holds, and the timer funnels it into the *same*
-  clean-shutdown path. The running badge clears on its own via the presence
-  broadcast. Works over the tailnet since it rides the daemon.
+  page shows a **stop button** on every live loop (behind a **confirm dialog** so a
+  stray click never kills a loop); it calls `POST /api/consumers/:id/loop-stop`,
+  which pushes a `control` event down the live SSE the loop already holds, and the
+  timer funnels it into the *same* clean-shutdown path. The running badge clears on
+  its own via the presence broadcast. Works over the tailnet since it rides the
+  daemon.
 - **Privileged + guarded**: loop-stop is moderator-only and explicitly **denied to
   proxy-node tokens** (a node may relay any identity, so the tier check is
   independent of the human check — a compromised node can't DoS your loops).

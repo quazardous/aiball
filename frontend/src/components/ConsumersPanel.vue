@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import Button from "primevue/button";
 import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
+import { useConfirm } from "primevue/useconfirm";
 import { api, type Consumer } from "../lib/api";
 import ConsumerEditPage from "./ConsumerEditPage.vue";
 
@@ -30,6 +31,9 @@ const now = ref(Date.now());
 let nowTimer: ReturnType<typeof setInterval> | null = null;
 
 const toast = useToast();
+// Named `confirmDialog` (not `confirm`) so it doesn't shadow the native
+// `confirm()` still used by remove() below.
+const confirmDialog = useConfirm();
 const rows = ref<Consumer[]>([]);
 const loading = ref(false);
 
@@ -69,12 +73,24 @@ async function remove(consumer_id: string) {
     }
 }
 
-// #442: remotely hard-kill the claude-loop running as this consumer. Confirmed
-// (destructive — kills tmux + claude). `delivered:false` ⇒ nothing live received
+// #442: remotely stop the claude-loop running as this consumer. A proper modal
+// confirm (PrimeVue ConfirmDialog, like the comment-delete flow) gates it so a
+// stray click never kills a loop (david 52hq37). The work runs only on accept.
+function stopLoop(consumer_id: string) {
+    confirmDialog.require({
+        header: "Stop loop",
+        message: `Stop the claude-loop running as "${consumer_id}"? This kills its tmux session + Claude (the conversation is lost). Its state is kept — use Delete to remove it entirely.`,
+        icon: "pi pi-stop-circle",
+        acceptLabel: "Stop",
+        rejectLabel: "Cancel",
+        acceptClass: "p-button-danger",
+        accept: () => { void doStopLoop(consumer_id); },
+    });
+}
+// Actual call, after the user confirms. `delivered:false` ⇒ nothing live received
 // it. The running badge clears on its own via the presence WS broadcast; reload
 // shortly after as a backstop.
-async function stopLoop(consumer_id: string) {
-    if (!confirm(`Stop (hard-kill) the claude-loop running as "${consumer_id}"?\nThis kills its tmux session + Claude — the conversation is lost.`)) return;
+async function doStopLoop(consumer_id: string) {
     try {
         const r = await api.stopLoop(consumer_id);
         toast.add({
