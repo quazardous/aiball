@@ -1,16 +1,27 @@
 <script setup lang="ts">
 // #438: global (daemon-wide) settings page, under the Settings menu. Today it
 // hosts the moderation-strategy GLOBAL default (moved out of the header — david:
-// "créer une vraie page settings globale"). Room to grow (upload caps, etc.).
-// Stays a thin presentational panel: strategy is owned by App.vue (kept in sync
-// with the WS `strategy_changed`), passed in + emitted back like HeaderBar did.
+// "créer une vraie page settings globale") and, since #445, the notifications
+// control (also moved out of the header). Room to grow (upload caps, etc.).
+// Stays a thin presentational panel: state is owned by App.vue (strategy kept in
+// sync with the WS `strategy_changed`; notif state from useNotifications),
+// passed in + emitted back like HeaderBar did.
 import type { Strategy } from "../lib/api";
 
 defineProps<{
     strategy: Strategy;
     strategyOptions: { label: string; value: Strategy; hint: string; icon: string }[];
+    // #445: per-device browser-notification state, owned by App.vue's
+    // useNotifications. notifAllowed = OS permission granted; notifMuted = user
+    // silenced them in-app even though permission is granted.
+    notifAllowed: boolean;
+    notifMuted: boolean;
 }>();
-const emit = defineEmits<{ (e: "update:strategy", v: Strategy): void }>();
+const emit = defineEmits<{
+    (e: "update:strategy", v: Strategy): void;
+    (e: "enable-notif"): void;
+    (e: "toggle-mute"): void;
+}>();
 </script>
 
 <template>
@@ -39,6 +50,42 @@ const emit = defineEmits<{ (e: "update:strategy", v: Strategy): void }>();
                         <span class="general-settings__option-desc">{{ o.hint }}</span>
                     </span>
                     <i v-if="o.value === strategy" class="pi pi-check general-settings__option-check" />
+                </button>
+            </div>
+        </section>
+
+        <!-- #445: notifications control, moved here from the header (david). -->
+        <section class="general-settings__section">
+            <h3 class="general-settings__heading">Notifications</h3>
+            <p class="general-settings__hint">
+                Browser/OS alerts when something needs your attention (new pending
+                tickets, replies). Granted and silenced <em>per device</em> — each
+                browser keeps its own permission.
+            </p>
+            <div class="general-settings__options">
+                <button
+                    v-if="!notifAllowed && !notifMuted"
+                    type="button"
+                    class="general-settings__option"
+                    @click="emit('enable-notif')"
+                >
+                    <i class="pi pi-bell general-settings__option-icon" />
+                    <span class="general-settings__option-text">
+                        <span class="general-settings__option-label">Enable browser notifications</span>
+                        <span class="general-settings__option-desc">Ask this browser for permission to show OS alerts.</span>
+                    </span>
+                </button>
+                <button
+                    v-else
+                    type="button"
+                    class="general-settings__option general-settings__option--current"
+                    @click="emit('toggle-mute')"
+                >
+                    <i :class="['pi', notifMuted ? 'pi-bell-slash' : 'pi-bell', 'general-settings__option-icon']" />
+                    <span class="general-settings__option-text">
+                        <span class="general-settings__option-label">{{ notifMuted ? "Notifications muted" : "Notifications on" }}</span>
+                        <span class="general-settings__option-desc">{{ notifMuted ? "Click to unmute on this device." : "Click to mute on this device." }}</span>
+                    </span>
                 </button>
             </div>
         </section>

@@ -657,16 +657,12 @@ watch(showSnoozed, (v) => {
             :global-snoozed-count="globalSnoozedCount"
             :global-open-count="globalOpenCount"
             :show-snoozed="showSnoozed"
-            :notif-allowed="notifAllowed"
-            :notif-muted="notifMuted"
             :dark="dark"
             :loading="loading"
             :auto-refresh="autoRefresh"
             @update:show-snoozed="showSnoozed = $event"
             @update:dark="dark = $event"
             @update:auto-refresh="autoRefresh = $event"
-            @enable-notif="ensureNotifPermission"
-            @toggle-mute="toggleMute"
             @refresh="refresh"
         />
 
@@ -699,7 +695,11 @@ watch(showSnoozed, (v) => {
                     v-if="panel === 'general'"
                     :strategy="strategy"
                     :strategy-options="strategyOptions"
+                    :notif-allowed="notifAllowed"
+                    :notif-muted="notifMuted"
                     @update:strategy="changeStrategy"
+                    @enable-notif="ensureNotifPermission"
+                    @toggle-mute="toggleMute"
                 />
                 <ProjectsPanel
                     v-else-if="panel === 'projects'"

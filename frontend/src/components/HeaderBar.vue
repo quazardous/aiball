@@ -6,6 +6,8 @@ import { HEADER_BADGE_TOOLTIPS } from "../lib/labels";
 // #438: the moderation-strategy picker moved out of the header into the
 // dedicated Settings > General page (GeneralSettingsPanel) — david wanted
 // "une vraie page settings globale" rather than a head dropdown.
+// #445: the notifications control ("enable alerts" + mute toggle) likewise
+// moved out of the header into Settings > General, same rationale.
 defineProps<{
     connected: boolean;
     globalPendingCount: number;
@@ -14,8 +16,6 @@ defineProps<{
     globalSnoozedCount: number;
     globalOpenCount: number;
     showSnoozed: boolean;
-    notifAllowed: boolean;
-    notifMuted: boolean;
     dark: boolean;
     loading: boolean;
     autoRefresh: boolean;
@@ -24,8 +24,6 @@ const emit = defineEmits<{
     (e: "update:showSnoozed", v: boolean): void;
     (e: "update:dark", v: boolean): void;
     (e: "update:autoRefresh", v: boolean): void;
-    (e: "enable-notif"): void;
-    (e: "toggle-mute"): void;
     (e: "refresh"): void;
 }>();
 </script>
@@ -76,25 +74,6 @@ const emit = defineEmits<{
             <i class="pi pi-history" /> {{ globalSnoozedCount }}
         </button>
         <span class="spacer" />
-        <Button
-            v-if="!notifAllowed && !notifMuted"
-            icon="pi pi-bell"
-            label="enable alerts"
-            title="Enable browser notifications"
-            size="small"
-            severity="secondary"
-            text
-            @click="emit('enable-notif')"
-        />
-        <Button
-            v-else
-            :icon="notifMuted ? 'pi pi-bell-slash' : 'pi pi-bell'"
-            :title="notifMuted ? 'OS notifications muted' : 'OS notifications on'"
-            severity="secondary"
-            text
-            rounded
-            @click="emit('toggle-mute')"
-        />
         <IdentityPicker />
         <Button
             :icon="dark ? 'pi pi-sun' : 'pi pi-moon'"
@@ -158,9 +137,9 @@ const emit = defineEmits<{
     .aiball-header .p-button.p-button-rounded {
         margin: 0;
     }
-    /* #B.161: "enable alerts" button has a label that eats horizontal
-       space — on mobile, drop the label so the icon stays the only
-       affordance (tooltip via the existing title attr remains). */
+    /* #B.161 / #445: labelled header buttons (now the IdentityPicker's
+       consumer name) eat horizontal space — on mobile, drop the label so
+       the icon stays the only affordance (tooltip via title attr remains). */
     .aiball-header .p-button-label {
         display: none;
     }
