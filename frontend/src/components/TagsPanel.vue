@@ -7,6 +7,7 @@ import { api, type CatalogTag } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
 import TagBadge from "./TagBadge.vue";
 import DataList from "./ui/DataList.vue";
+import PanelHeader from "./ui/PanelHeader.vue";
 
 const tags = ref<CatalogTag[]>([]);
 const loading = ref(false);
@@ -153,9 +154,8 @@ onMounted(() => {
 
 <template>
     <div class="tags-page">
-        <header>
-            <h2>Tags</h2>
-            <p class="rules-explainer">
+        <PanelHeader title="Tags">
+            <p class="aiball-explainer">
                 Tags are a <strong>closed list</strong>: you (the human moderator) define what
                 tags exist. Agents can only apply existing tags — they can't invent new ones.
                 Use them to group tickets (bug / feature / urgent / done) and as a hook for
@@ -165,7 +165,7 @@ onMounted(() => {
                 can't be deleted, but you can still recolor and reorder them here — an
                 overridden color shows a <span class="tags-override-dot">●</span> marker.
             </p>
-        </header>
+        </PanelHeader>
 
         <section class="rules-section">
             <div class="rules-section-head">
@@ -280,7 +280,7 @@ onMounted(() => {
 
         <section class="rules-section">
             <h3>Add a tag</h3>
-            <p class="rules-explainer" style="margin-top: 0">
+            <p class="aiball-explainer" style="margin-top: 0">
                 New tags are added to the global DB catalog (visible in every project).
                 Project-scoped or non-deletable tags live in the config files — see
                 <code>.aiball.yaml.example</code>.
@@ -322,9 +322,6 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     gap: 1.4rem;
-}
-.tags-page header h2 {
-    margin: 0 0 0.4rem;
 }
 /* Look de base (width/border/padding/th) → `.aiball-table` (style.css).
    Delta : cellules à inputs centrées verticalement (la base est valign top).

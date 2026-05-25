@@ -8,6 +8,7 @@ import { api, type Consumer } from "../lib/api";
 import { useBus } from "../lib/bus";
 import ConsumerEditPage from "./ConsumerEditPage.vue";
 import DataList from "./ui/DataList.vue";
+import PanelHeader from "./ui/PanelHeader.vue";
 
 // Set on /consumers/<id> → render the dedicated edit view. Parent
 // (App.vue) owns the ref so browser back/forward works (#B.193).
@@ -318,14 +319,13 @@ const sortedRows = computed<Consumer[]>(() => {
         @close="emit('close-edit')"
     />
     <div v-else class="consumers-panel">
-        <header class="rules-explainer-block">
-            <h2 style="margin: 0">Consumers</h2>
-            <p class="rules-explainer rules-explainer--muted">
+        <PanelHeader title="Consumers">
+            <p class="aiball-explainer aiball-explainer--muted">
                 One row per <code>consumer_id</code> the daemon has seen.
                 <em>Human</em> = moderator (bypasses moderation, closes / snoozes any ticket);
                 <em>agent</em> = anyone else. Click the pencil to edit, the envelope to block.
             </p>
-        </header>
+        </PanelHeader>
 
         <section class="consumers-toolbar">
             <label class="consumers-toolbar__toggle">

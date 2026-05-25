@@ -215,3 +215,31 @@ body,
     color: var(--p-red-500);
 }
 
+/* En-tête de panel admin partagé (pattern qdadm PageHeader, scalé) — adossé à
+   <PanelHeader>. Remplace `.rules-header` / `.rules-explainer-block` dupliqués
+   et stoppe la fuite globale des `.rules-explainer*` (jadis définies non-scopées
+   dans RulesPanel mais utilisées par 6 panels). */
+.aiball-panel-head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+.aiball-panel-head__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+}
+.aiball-panel-head__title {
+    margin: 0;
+}
+.aiball-explainer {
+    margin: 0.3rem 0;
+    color: var(--p-text-color);
+    line-height: 1.45;
+}
+.aiball-explainer--muted {
+    color: var(--p-text-muted-color);
+    font-size: 0.9rem;
+}
+

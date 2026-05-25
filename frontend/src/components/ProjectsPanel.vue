@@ -7,6 +7,7 @@ import { api, type ProjectMeta } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
 import { estTokenEffort, formatTokens, tokenBreakdownTitle } from "../lib/format";
 import DataList from "./ui/DataList.vue";
+import PanelHeader from "./ui/PanelHeader.vue";
 
 const toast = useToast();
 const rows = ref<ProjectMeta[]>([]);
@@ -148,9 +149,8 @@ defineExpose({ load });
 
 <template>
     <div class="projects-panel">
-        <header class="rules-explainer-block">
-            <div class="projects-header-row">
-                <h2 style="margin: 0">Projects</h2>
+        <PanelHeader title="Projects">
+            <template #actions>
                 <Button
                     v-if="!creatingForm"
                     label="Create project"
@@ -158,8 +158,8 @@ defineExpose({ load });
                     size="small"
                     @click="creatingForm = true"
                 />
-            </div>
-            <p class="rules-explainer rules-explainer--muted">
+            </template>
+            <p class="aiball-explainer aiball-explainer--muted">
                 One row per project that has at least one message OR an explicit
                 registry entry. Sorted by latest activity. Deleting a project
                 hard-removes every message, comment, close event, and project
@@ -191,7 +191,7 @@ defineExpose({ load });
                     @click="creatingForm = false; newName = ''"
                 />
             </form>
-        </header>
+        </PanelHeader>
 
         <DataList
             table-class="projects-table"
@@ -334,12 +334,6 @@ defineExpose({ load });
     flex-direction: column;
     gap: 0.8rem;
 }
-.projects-header-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.6rem;
-}
 .create-project-form {
     display: flex;
     align-items: center;
@@ -389,7 +383,7 @@ defineExpose({ load });
     .projects-panel {
         gap: 0.6rem;
     }
-    .rules-explainer {
+    .aiball-explainer {
         font-size: 0.82rem;
     }
     .create-project-form {

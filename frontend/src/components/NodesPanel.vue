@@ -9,6 +9,7 @@ import { useConfirm } from "primevue/useconfirm";
 import { api, type NodeView } from "../lib/api";
 import NodeDetailPage from "./NodeDetailPage.vue";
 import DataList from "./ui/DataList.vue";
+import PanelHeader from "./ui/PanelHeader.vue";
 
 // Set on /nodes/<id> → render the dedicated detail view. Parent (App.vue) owns
 // the ref so browser back/forward works (#452, mirrors ConsumersPanel #B.193).
@@ -82,13 +83,12 @@ onMounted(load);
         @close="emit('close-edit')"
     />
     <div v-else class="nodes-panel">
-        <header class="rules-explainer-block">
-            <h2>Proxy nodes</h2>
-            <p class="rules-explainer rules-explainer--muted">
+        <PanelHeader title="Proxy nodes">
+            <p class="aiball-explainer aiball-explainer--muted">
                 Each row is a <strong>node token</strong> (<code>aiball auth issue --node</code>) that relays
                 remote clients to this daemon. The token value is never shown — a node is addressed by its id.
             </p>
-        </header>
+        </PanelHeader>
 
         <DataList :loading="loading && !nodes.length" :error="error" :is-empty="!nodes.length">
             <template #empty>

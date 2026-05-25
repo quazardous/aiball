@@ -9,6 +9,7 @@ import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import ToggleSwitch from "primevue/toggleswitch";
 import { api, type WorkFilter } from "../lib/api";
+import PanelHeader from "./ui/PanelHeader.vue";
 
 const filters = ref<WorkFilter[]>([]);
 const error = ref<string | null>(null);
@@ -92,20 +93,19 @@ onMounted(load);
 
 <template>
     <div class="rules-page">
-        <header class="rules-header">
-            <h2>Work filters</h2>
-            <p class="rules-explainer">
+        <PanelHeader title="Work filters">
+            <p class="aiball-explainer">
                 Narrow which tickets an <strong>agent</strong> picks up, by tag. e.g.
                 <em>the windows agent only works tickets tagged <code>win</code></em>.
                 These restrict an agent's <strong>engage / actionable</strong> pool — they never
                 hide tickets from your own view.
             </p>
-            <p class="rules-explainer rules-explainer--muted">
+            <p class="aiball-explainer aiball-explainer--muted">
                 Filters live in the daemon, so an agent's loop on <em>any</em> machine that talks to
                 this daemon picks them up — no per-machine config to sync. Tags match
                 <strong>any-of</strong>: a ticket matches when it carries at least one listed tag.
             </p>
-        </header>
+        </PanelHeader>
 
         <section class="rules-section">
             <div class="rules-section-head">
@@ -175,7 +175,7 @@ onMounted(load);
 
         <section class="rules-section">
             <h3>Add a filter</h3>
-            <p class="rules-explainer rules-explainer--muted">
+            <p class="aiball-explainer aiball-explainer--muted">
                 <em>this agent</em> [in <em>this project</em>] <em>only / never</em> works tickets
                 carrying <em>these tags</em>.
             </p>

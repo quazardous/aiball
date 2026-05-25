@@ -6,6 +6,7 @@ import Select from "primevue/select";
 import ToggleSwitch from "primevue/toggleswitch";
 import { api, type Rule } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
+import PanelHeader from "./ui/PanelHeader.vue";
 
 const rules = ref<Rule[]>([]);
 const error = ref<string | null>(null);
@@ -103,19 +104,18 @@ onMounted(load);
 
 <template>
     <div class="rules-page">
-        <header class="rules-header">
-            <h2>Moderation rules</h2>
-            <p class="rules-explainer">
+        <PanelHeader title="Moderation rules">
+            <p class="aiball-explainer">
                 Rules decide what happens to a posted message <em>before</em> it reaches subscribers.
                 <strong>First match wins</strong>: the rules below are evaluated top to bottom and
                 the first one that matches sets the outcome. If no rule matches, the message is
                 <strong>sent to human review</strong> in the Pending tab.
             </p>
-            <p class="rules-explainer rules-explainer--muted">
+            <p class="aiball-explainer aiball-explainer--muted">
                 Each condition is optional. A blank condition means <em>any value</em>. A rule with
                 no conditions matches every message — useful as a catch-all at the bottom.
             </p>
-        </header>
+        </PanelHeader>
 
         <section class="rules-section">
             <div class="rules-section-head">
@@ -187,7 +187,7 @@ onMounted(load);
 
         <section class="rules-section">
             <h3>Add a rule</h3>
-            <p class="rules-explainer rules-explainer--muted">
+            <p class="aiball-explainer aiball-explainer--muted">
                 Build a sentence: <em>if</em> these conditions match, <em>then</em> apply this verdict.
             </p>
             <div class="rule-builder">
@@ -254,18 +254,9 @@ onMounted(load);
     flex-direction: column;
     gap: 1.4rem;
 }
-.rules-header h2 {
-    margin: 0 0 0.4rem;
-}
-.rules-explainer {
-    margin: 0.3rem 0;
-    color: var(--p-text-color);
-    line-height: 1.45;
-}
-.rules-explainer--muted {
-    color: var(--p-text-muted-color);
-    font-size: 0.9rem;
-}
+/* En-tête + explainer → globaux (`.aiball-panel-head*`, `.aiball-explainer*`
+   dans style.css), via <PanelHeader>. Étaient ici en non-scopé et fuyaient
+   vers 6 panels. */
 .rules-section {
     border: 1px solid var(--p-content-border-color);
     border-radius: 0.5rem;
