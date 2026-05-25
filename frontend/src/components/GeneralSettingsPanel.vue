@@ -7,6 +7,7 @@
 // sync with the WS `strategy_changed`; notif state from useNotifications),
 // passed in + emitted back like HeaderBar did.
 import type { Strategy } from "../lib/api";
+import ManagedConfig from "./ManagedConfig.vue";
 
 defineProps<{
     strategy: Strategy;
@@ -88,6 +89,17 @@ const emit = defineEmits<{
                     </span>
                 </button>
             </div>
+        </section>
+
+        <!-- #449: schema-driven config keys (global layer). Same component
+             renders the per-project layer on the Project Settings page. -->
+        <section class="general-settings__section">
+            <h3 class="general-settings__heading">Managed config</h3>
+            <p class="general-settings__hint">
+                Daemon-wide defaults declared in the config schema. A project can
+                override the project-scoped ones in its own settings.
+            </p>
+            <ManagedConfig />
         </section>
     </div>
 </template>

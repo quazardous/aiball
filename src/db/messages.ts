@@ -33,6 +33,7 @@ import {
     type QuestionAnswer,
 } from "../questions.js";
 import { applyDecision, promoteToDecision, reclassifyDecision, type DecisionStatus } from "../decisions.js";
+import { getConfig } from "./config-overrides.js"; // #449: config-driven default priority
 
 /**
  * #374: record `actor` as the ticket's last actor at time `at`. Called from
@@ -73,6 +74,11 @@ export function insertMessage(m: NewMessage): Message {
             // For ticket_created, NewMessage.parent_id (when set) is the
             // parent TICKET id (sub-ticket lineage, per #B.61 follow-up).
             // For non-ticket kinds, parent_id is the parent message id.
+            // #449: default priority is now config-driven — tickets.default_priority
+            // (global default + per-project override via the config manager),
+            // falling back to 'normal'. First real consumer of the config schema.
+            const defaultPriority =
+                (getConfig("tickets.default_priority", m.project) as Priority | undefined) ?? "normal";
             const inserted = tx.insert(schema.tickets).values({
                 id,
                 project: m.project,
@@ -82,7 +88,7 @@ export function insertMessage(m: NewMessage): Message {
                 summary: m.summary ?? null,
                 byAgent: m.by_agent ?? null,
                 intent: m.intent ?? null,
-                priority: m.priority ?? "normal",
+                priority: m.priority ?? defaultPriority,
                 createdAt,
                 parentTicketId: m.parent_id ?? null,
                 // #374: the creator is the first "last actor" on the ticket.

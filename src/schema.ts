@@ -263,6 +263,25 @@ export const workFilters = sqliteTable("work_filters", {
     index("idx_work_filters_consumer").on(t.consumerId),
 ]);
 
+// #449: generic config OVERRIDES — the storage half of the unified config
+// manager. The schema (keys/scope/type/default/protected) lives in code
+// (src/config/schema.ts); this table only holds a key's override at a layer.
+// `project=''` is the GLOBAL layer; a non-empty project is that project's layer.
+// Layered read: project override → global override → schema default.
+export const configOverrides = sqliteTable("config_overrides", {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** '' = global layer; otherwise the project name (project layer). */
+    project: text("project").notNull().default(""),
+    /** A schema key, e.g. 'tickets.default_priority'. */
+    key: text("key").notNull(),
+    /** JSON-encoded value (number / boolean / string / enum share one column). */
+    value: text("value").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    updatedBy: text("updated_by"),
+}, (t) => [
+    uniqueIndex("idx_config_overrides_uniq").on(t.project, t.key),
+]);
+
 export const tags = sqliteTable("tags", {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull().unique(),
@@ -550,6 +569,9 @@ export type NewRuleRow = typeof rules.$inferInsert;
 
 export type WorkFilterRow = typeof workFilters.$inferSelect;
 export type NewWorkFilterRow = typeof workFilters.$inferInsert;
+
+export type ConfigOverrideRow = typeof configOverrides.$inferSelect;
+export type NewConfigOverrideRow = typeof configOverrides.$inferInsert;
 
 export type Tag = typeof tags.$inferSelect;
 export type NewTagRow = typeof tags.$inferInsert;

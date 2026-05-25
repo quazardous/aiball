@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import Select from "primevue/select";
 import { api, type Strategy } from "../lib/api";
 import { STRATEGY_OPTIONS } from "../lib/labels";
+import ManagedConfig from "./ManagedConfig.vue";
 
 const props = defineProps<{
     project: string;
@@ -129,6 +130,18 @@ onMounted(load);
                         (global is <em>{{ strategyGlobal }}</em>)
                     </template>
                 </div>
+            </section>
+
+            <!-- #449: project-scoped config keys (same component as Settings >
+                 General, in project mode → "Use global (currently X)" semantics). -->
+            <section class="project-settings__section">
+                <h3>Project config</h3>
+                <p class="project-settings__hint">
+                    Override the project-scoped config keys for
+                    <strong>{{ project }}</strong>. Leave a key on "Use global" to
+                    follow the daemon-wide value.
+                </p>
+                <ManagedConfig :project="project" />
             </section>
         </template>
     </div>
