@@ -121,6 +121,27 @@ export interface WorkFilter {
     created_at: string;
 }
 
+/** #449: one schema key resolved for the config-manager UI — meta + each layer
+ *  (global/project override) + the effective value. Mirrors the backend's
+ *  ResolvedConfig. `value`/layers are string|number|boolean per the key's type. */
+export type ConfigPrimitive = string | number | boolean;
+export interface ManagedConfigRow {
+    key: string;
+    scope: "global" | "global+project" | "project";
+    type: "string" | "number" | "boolean" | "enum";
+    options: string[] | null;
+    protected: boolean;
+    label: string;
+    description: string;
+    default: ConfigPrimitive;
+    /** global-layer override, or null when unset. */
+    global: ConfigPrimitive | null;
+    /** project-layer override (when a project is in scope), or null. */
+    project: ConfigPrimitive | null;
+    /** effective value after layering. */
+    value: ConfigPrimitive;
+}
+
 /**
  * The current consumer (the human moderator behind the UI). Stored in
  * localStorage and propagated to the backend on EVERY request via the
@@ -778,6 +799,25 @@ export const api = {
     delWorkFilter: (id: number) => req<void>("DELETE", `/api/work-filters/${id}`),
     toggleWorkFilter: (id: number, enabled: boolean) =>
         req<WorkFilter>("PATCH", `/api/work-filters/${id}`, { enabled }),
+
+    // #449: unified config manager. Pass a project for the per-project view
+    // (overrides + effective); omit it for the global view.
+    listManagedConfig: (project?: string | null) =>
+        req<{ project: string | null; config: ManagedConfigRow[] }>(
+            "GET",
+            `/api/managed-config${project ? `?project=${encodeURIComponent(project)}` : ""}`,
+        ),
+    setManagedConfig: (key: string, value: ConfigPrimitive, project?: string | null) =>
+        req<{ key: string; project: string | null; value: ConfigPrimitive }>(
+            "PUT",
+            `/api/managed-config/${encodeURIComponent(key)}`,
+            project ? { value, project } : { value },
+        ),
+    clearManagedConfig: (key: string, project?: string | null) =>
+        req<void>(
+            "DELETE",
+            `/api/managed-config/${encodeURIComponent(key)}${project ? `?project=${encodeURIComponent(project)}` : ""}`,
+        ),
 
     listTags: () => req<Tag[]>("GET", "/api/tags"),
     // Merged config+DB catalog for the Tags admin panel (#223). Pass a

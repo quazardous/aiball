@@ -17,7 +17,7 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
-### Unified config manager — foundation (#449)
+### Unified config manager (#449)
 
 - New schema-driven config framework: a key's metadata (scope, type, default,
   protected) is declared in code (`src/config/schema.ts`), overrides live in a
@@ -25,11 +25,15 @@ narrative for the product as a whole.
   override → global override → schema default**. One mechanism instead of a
   bespoke panel + endpoint + precedence per setting. REST: `/api/managed-config`
   (read resolved values; set/clear overrides; protected keys are moderator-only).
+- **Generic settings UI**: one `ManagedConfig` component renders the schema in
+  both **Settings → General** (global layer) and **Project Settings** (project
+  layer, with the familiar "Use global (currently: X)" semantics). Add a key to
+  the schema and it appears in both — no per-key panel. Protected keys show a
+  lock (writes are moderator-only).
 - First consumer wired end-to-end: **`tickets.default_priority`** — a new
   ticket with no explicit priority now takes the per-project (or global) default
   instead of a hardcoded `normal`. Existing settings (strategy, upload cap, tags)
   keep their own storage for now and migrate onto this incrementally.
-- Back-end foundation only; the generic global+project settings UI lands next.
 
 ### Claims are visible in the lists, and update live (#429, #448)
 
