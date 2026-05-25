@@ -5,9 +5,19 @@
 // non-secret `node_id`.
 import { ref, onMounted } from "vue";
 import Button from "primevue/button";
-import Tag from "primevue/tag";
 import { useConfirm } from "primevue/useconfirm";
 import { api, type NodeView } from "../lib/api";
+import NodeDetailPage from "./NodeDetailPage.vue";
+
+// Set on /nodes/<id> → render the dedicated detail view. Parent (App.vue) owns
+// the ref so browser back/forward works (#452, mirrors ConsumersPanel #B.193).
+const props = defineProps<{
+    editNodeId?: string | null;
+}>();
+const emit = defineEmits<{
+    (e: "open-edit", nodeId: string): void;
+    (e: "close-edit"): void;
+}>();
 
 const confirm = useConfirm();
 const nodes = ref<NodeView[]>([]);
@@ -65,7 +75,12 @@ onMounted(load);
 </script>
 
 <template>
-    <div class="nodes-panel">
+    <NodeDetailPage
+        v-if="props.editNodeId"
+        :node-id="props.editNodeId"
+        @close="emit('close-edit')"
+    />
+    <div v-else class="nodes-panel">
         <header class="rules-explainer-block">
             <h2>Proxy nodes</h2>
             <p class="rules-explainer rules-explainer--muted">
@@ -87,30 +102,22 @@ onMounted(load);
                         <th>Node</th>
                         <th>Last IP</th>
                         <th>Last activity</th>
-                        <th>Relayed consumers</th>
                         <th></th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr v-for="n in nodes" :key="n.node_id">
                         <td>
-                            <span class="nodes-label">{{ n.label || "(unlabelled)" }}</span>
+                            <a
+                                :href="`/nodes/${encodeURIComponent(n.node_id)}`"
+                                class="nodes-label-link"
+                                :title="`View node details${n.relayed_count ? ` — ${n.relayed_count} relayed consumer${n.relayed_count > 1 ? 's' : ''}` : ''}`"
+                                @click.prevent="emit('open-edit', n.node_id)"
+                            >{{ n.label || "(unlabelled)" }}</a>
                             <code class="nodes-id">{{ n.node_id }}</code>
                         </td>
                         <td>{{ n.last_seen_ip ?? "—" }}</td>
                         <td :title="`created ${fmt(n.created_at)}`">{{ fmt(n.last_used_at) }}</td>
-                        <td>
-                            <span v-if="!n.relayed_count" class="nodes-muted">none</span>
-                            <span v-else>
-                                <Tag
-                                    v-for="c in n.relayed"
-                                    :key="c.consumer_id"
-                                    :value="c.consumer_id"
-                                    severity="info"
-                                    class="nodes-consumer-tag"
-                                />
-                            </span>
-                        </td>
                         <td>
                             <Button label="Revoke" severity="danger" text size="small" @click="revoke(n)" />
                         </td>
@@ -132,8 +139,12 @@ onMounted(load);
     vertical-align: top;
 }
 .nodes-table th { font-weight: 600; opacity: 0.7; }
-.nodes-label { font-weight: 600; }
+.nodes-label-link {
+    font-weight: 600;
+    color: var(--p-primary-color);
+    text-decoration: none;
+    cursor: pointer;
+}
+.nodes-label-link:hover { text-decoration: underline; }
 .nodes-id { display: block; font-size: 0.7rem; opacity: 0.5; }
-.nodes-muted { opacity: 0.5; }
-.nodes-consumer-tag { margin: 0 0.2rem 0.2rem 0; }
 </style>

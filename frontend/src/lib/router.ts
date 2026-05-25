@@ -5,6 +5,8 @@ export type RouteState = {
     openTicketId: number | null;
     /** Set on `/consumers/<id>` — ConsumersPanel renders the edit view (#B.193). */
     consumerEditId: string | null;
+    /** Set on `/nodes/<id>` — NodesPanel renders the detail view (#452). */
+    nodeEditId: string | null;
     /** #411 — project-scoped full pages (stats/settings/detail). Requires
      *  `project !== null`; encoded as `/stats|/settings|/detail` + `?p=`, so a
      *  Ctrl-R on a project stats page restores it instead of dropping to inbox.
@@ -33,7 +35,11 @@ export function buildUrl(s: RouteState): string {
             ? `/consumers/${encodeURIComponent(s.consumerEditId)}`
             : "/consumers";
     }
-    else if (s.panel === "nodes") path = "/nodes";
+    else if (s.panel === "nodes") {
+        path = s.nodeEditId
+            ? `/nodes/${encodeURIComponent(s.nodeEditId)}`
+            : "/nodes";
+    }
     else if (s.panel === "launchers") path = "/launchers";
     else if (s.panel === "compose") path = "/new";
     // #411 — project pages (project carried by `?p=` below, always set here).
@@ -62,6 +68,8 @@ export function parseUrl(): Partial<RouteState> {
     const out: Partial<RouteState> = {};
     // Default to null so navigating away from /consumers/<id> clears the edit view.
     out.consumerEditId = null;
+    // Default to null so navigating away from /nodes/<id> clears the detail view.
+    out.nodeEditId = null;
     // #411 — default to null so navigating away from a project page clears it.
     out.projectPage = null;
 
@@ -92,6 +100,12 @@ export function parseUrl(): Partial<RouteState> {
     } else if (path === "/nodes") {
         out.panel = "nodes";
         out.openTicketId = null;
+        out.nodeEditId = null;
+    } else if (path.startsWith("/nodes/")) {
+        out.panel = "nodes";
+        out.openTicketId = null;
+        const raw = path.slice("/nodes/".length);
+        out.nodeEditId = raw ? decodeURIComponent(raw) : null;
     } else if (path === "/launchers") {
         out.panel = "launchers";
         out.openTicketId = null;
@@ -142,6 +156,7 @@ export function useRouting(refs: {
     panel: Ref<RouteState["panel"]>;
     openTicketId: Ref<number | null>;
     consumerEditId: Ref<string | null>;
+    nodeEditId: Ref<string | null>;
     projectPage: Ref<RouteState["projectPage"]>;
     project: Ref<string | null>;
     statusFilter: Ref<RouteState["statusFilter"]>;
@@ -154,6 +169,7 @@ export function useRouting(refs: {
             panel: refs.panel.value,
             openTicketId: refs.openTicketId.value,
             consumerEditId: refs.consumerEditId.value,
+            nodeEditId: refs.nodeEditId.value,
             projectPage: refs.projectPage.value,
             project: refs.project.value,
             statusFilter: refs.statusFilter.value,
@@ -166,6 +182,7 @@ export function useRouting(refs: {
         if ("panel" in state) refs.panel.value = state.panel ?? null;
         if ("openTicketId" in state) refs.openTicketId.value = state.openTicketId ?? null;
         if ("consumerEditId" in state) refs.consumerEditId.value = state.consumerEditId ?? null;
+        if ("nodeEditId" in state) refs.nodeEditId.value = state.nodeEditId ?? null;
         if ("projectPage" in state) refs.projectPage.value = state.projectPage ?? null;
         if ("project" in state) refs.project.value = state.project ?? null;
         if ("statusFilter" in state && state.statusFilter)
@@ -192,6 +209,7 @@ export function useRouting(refs: {
             refs.panel,
             refs.openTicketId,
             refs.consumerEditId,
+            refs.nodeEditId,
             refs.projectPage,
             refs.project,
             refs.statusFilter,

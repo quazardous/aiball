@@ -154,6 +154,8 @@ const dark = ref(localStorage.getItem("aiball.dark") === "1");
 const openTicketId = ref<number | null>(null);
 // Routed as /consumers/<id> via lib/router.ts (#B.193).
 const consumerEditId = ref<string | null>(null);
+// Routed as /nodes/<id> via lib/router.ts (#452).
+const nodeEditId = ref<string | null>(null);
 
 /**
  * Per-project sub-page (per #B.60). Default null = inbox view. When
@@ -472,6 +474,7 @@ useRouting({
     panel,
     openTicketId,
     consumerEditId,
+    nodeEditId,
     projectPage,
     project,
     statusFilter,
@@ -718,7 +721,12 @@ watch(showSnoozed, (v) => {
                     @open-edit="(id: string) => { consumerEditId = id; }"
                     @close-edit="consumerEditId = null"
                 />
-                <NodesPanel v-else-if="panel === 'nodes'" />
+                <NodesPanel
+                    v-else-if="panel === 'nodes'"
+                    :edit-node-id="nodeEditId"
+                    @open-edit="(id: string) => { nodeEditId = id; }"
+                    @close-edit="nodeEditId = null"
+                />
 
                 <NewTicketPage
                     v-else-if="panel === 'compose'"

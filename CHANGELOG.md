@@ -17,6 +17,14 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Proxy node detail page (#452)
+
+- Each **proxy node** (Settings → Proxy nodes) now has its own **detail page** —
+  click a node's name to open it. The **relayed consumers** (the clients a node
+  forwards to this daemon) moved off the node-list row, which was getting wide,
+  onto this page, next to the node's id, last peer IP and created/last-activity
+  times. Revoke lives there too.
+
 ### Pending tickets stay out of the backlog (#450)
 
 - A not-yet-approved ticket still pings participants (so it can be discussed)
