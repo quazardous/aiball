@@ -830,7 +830,11 @@ export function humanBarWord(sd: string | undefined, graceSec: number): string {
         : word === "wait" ? "colour178"
         : word === "ask" ? "colour208" // #426: orange — ASK-grace window
         : "colour40";
-    return `#[fg=${fg},bg=colour16]${word}`;
+    // #426 (david g23pqn): pad to the longest word (4) so the bar width is
+    // constant — `ask` (3) would otherwise shift the rest of the bar by a cell
+    // when the presence word changes. The bare word (humanPresenceWord) stays
+    // unpadded for the consumers page; only the tmux segment is fixed-width.
+    return `#[fg=${fg},bg=colour16]${word.padEnd(4)}`;
 }
 
 export function setTmuxStatus(

@@ -209,8 +209,10 @@ _HUMAN_STOP = "#[fg=colour196,bg=colour16]stop"
 _HUMAN_WAIT = "#[fg=colour178,bg=colour16]wait"
 # #426 : 4e mot `ask` (orange) entre `wait` et `loop` — fenêtre ASK-grace
 # (post user-grace) où les auto-wakes sont autonomes MAIS AskUserQuestion est
-# encore autorisé (pas encore redirigé vers un ticket).
-_HUMAN_ASK = "#[fg=colour208,bg=colour16]ask"
+# encore autorisé (pas encore redirigé vers un ticket). #426 (david g23pqn) :
+# padder à 4 (longueur max stop/wait/loop) — `ask` (3) décalerait la barre d'une
+# cellule au changement de mot. Les 3 autres font déjà 4.
+_HUMAN_ASK = "#[fg=colour208,bg=colour16]ask "
 _HUMAN_LOOP = "#[fg=colour40,bg=colour16]loop"
 # #302/#345: --no-wait (CL_WAIT=0) skips only the boot-grace; a present human
 # (live typing → `stop`, armed user-grace → `wait`) is still reflected, aligned
