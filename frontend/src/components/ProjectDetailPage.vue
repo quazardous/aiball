@@ -4,6 +4,7 @@
 // each root with their live state, and a button to launch a loop for a root.
 import { computed, onMounted, ref, watch } from "vue";
 import { api, type ProjectMeta, type Consumer } from "../lib/api";
+import { useBus } from "../lib/bus";
 
 const props = defineProps<{ project: string }>();
 const emit = defineEmits<{ (e: "back"): void }>();
@@ -32,6 +33,14 @@ async function load() {
 watch(() => props.project, () => load());
 onMounted(load);
 
+// #443: the daemon broadcasts `consumer_changed` whenever a loop's presence
+// flips (live SSE open/close, #395) or it heartbeats — the WS relay turns that
+// into `projects.refresh` on the bus. Without this subscription the page was a
+// FROZEN snapshot: a killed loop kept reading "running" until a manual refresh
+// (david's "reste à running assez longtemps"). Refetch so the running badge +
+// per-root state + loop chips clear live (~6s after kill, via presence).
+useBus("projects.refresh", () => { void load(); });
+
 const roots = computed(() => meta.value?.roots ?? []);
 
 // Loops at each known root (consumer.cwd matches the root).
@@ -44,9 +53,15 @@ const loopsByRoot = computed(() => {
     return map;
 });
 
-// A loop is "online" when it heartbeated recently.
+// A loop is "online" — #443: presence-AUTHORITATIVE, mirroring the server's
+// `consumerEffectiveRunning`. Live SSE presence (#395) wins (true/false) so a
+// killed loop reads offline within the grace (~6s); the 120s heartbeat window
+// is only the bridge for a consumer never seen via SSE this session (present
+// null — e.g. right after a daemon restart, before loops reconnect).
 const ONLINE_MS = 120_000;
 function isOnline(c: Consumer): boolean {
+    if (c.present === true) return true;
+    if (c.present === false) return false;
     if (!c.state_updated_at) return false;
     return Date.now() - new Date(c.state_updated_at).getTime() < ONLINE_MS;
 }

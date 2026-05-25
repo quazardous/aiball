@@ -19,14 +19,21 @@ import {
 import { listNodes, revokeNode } from "../db/nodes.js";
 import { broadcast } from "../ws.js";
 import { emitControl } from "../event-bus.js";
-import { isPresent } from "../live-presence.js";
+import { isPresent, presenceRunning } from "../live-presence.js";
 import { canStopLoop } from "../loop-control.js";
 import { badRequest, consumerOf, notFound, tokenKindOf } from "./_helpers.js";
 
 export const consumersRouter = Router();
 
 consumersRouter.get("/consumers", (_req, res) => {
-    res.json(listConsumers());
+    // #443: surface the live-presence verdict (#395) per consumer so the UI can
+    // render online/offline AUTHORITATIVELY — a killed loop reads offline within
+    // the SSE grace (~6s) instead of lingering the full 120s heartbeat window
+    // (the bug david saw: "running" traîne après kill). Tri-state, mirroring
+    // `consumerEffectiveRunning` server-side: true = live (or in grace), false =
+    // seen-then-gone this session (authoritative STOP), null = never seen via SSE
+    // this session → client falls back to the `state_updated_at` freshness bridge.
+    res.json(listConsumers().map((c) => ({ ...c, present: presenceRunning(c.consumer_id) })));
 });
 
 // #397: single consumer lookup (incl. micro_prompt) — the claude-loop timer

@@ -37,6 +37,14 @@ narrative for the product as a whole.
 - First cut is **hard stop**; a graceful "pause autonomy, keep Claude alive" is a
   planned follow-up. (Already-running loops pick up the new handler after a
   `claude-loop reload`/restart, since the detached timer doesn't hot-reload.)
+- **Live-status fixes (#443)**: the Consumers panel and the per-project detail view
+  now read a loop's running state from live **presence** (the SSE the loop holds) —
+  not just the 120 s heartbeat window — and refetch on the presence broadcast. So a
+  stopped loop drops to *offline* within a couple of seconds instead of lingering as
+  "running", on those views too (the project detail page previously never refreshed
+  on its own). The stop button now appears on **any** live loop (busy / waiting /
+  human-driven), not only an idle autonomous one — so a loop stuck right after a
+  relaunch is still killable.
 
 ### Syntax highlighting in rendered markdown (#440)
 

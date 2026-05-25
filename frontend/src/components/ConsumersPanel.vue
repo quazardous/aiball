@@ -5,6 +5,7 @@ import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
 import { useConfirm } from "primevue/useconfirm";
 import { api, type Consumer } from "../lib/api";
+import { useBus } from "../lib/bus";
 import ConsumerEditPage from "./ConsumerEditPage.vue";
 
 // Set on /consumers/<id> → render the dedicated edit view. Parent
@@ -57,6 +58,13 @@ async function load() {
         loading.value = false;
     }
 }
+
+// #443: refetch live when a loop's presence flips. The daemon broadcasts
+// `consumer_changed` on SSE open/close (#395) + every heartbeat; the WS relay
+// turns it into `projects.refresh` on the bus. This makes a killed loop drop its
+// `loop` badge + Stop button within the grace (~6s) instead of waiting for the
+// 30s poll below (which stays as a backstop).
+useBus("projects.refresh", () => { void load(); });
 
 async function remove(consumer_id: string) {
     if (!confirm(`Delete consumer "${consumer_id}"? Past posts are preserved; the row will be re-created the next time this id posts.`)) return;
@@ -141,9 +149,29 @@ function relativeTime(iso: string | null | undefined): string {
 }
 
 function isHeartbeatFresh(r: Consumer): boolean {
+    // #443: presence-AUTHORITATIVE (mirrors the server's
+    // `consumerEffectiveRunning`). A live SSE (#395) reads fresh, a killed loop
+    // reads stale within the grace (~6s) instead of lingering the full 120s
+    // heartbeat window. The window survives only as the bridge for a consumer
+    // never seen via SSE this session (present null — e.g. just after a restart).
+    if (r.present === true) return true;
+    if (r.present === false) return false;
     if (!r.state_updated_at) return false;
     const t = Date.parse(r.state_updated_at);
     return Number.isFinite(t) && now.value - t <= OFFLINE_THRESHOLD_MS;
+}
+
+/**
+ * #443: a live claude-loop agent → show the remote hard-kill (Stop) button.
+ * Gated on PRESENCE (is it live?), NOT on `loopMode === 'loop'`: david could not
+ * kill a freshly-relaunched loop stuck in wait/busy/boot/human (q2tqqe) because
+ * the old gate required an autonomous-`loop` presence word. The hard-kill (#442)
+ * exists precisely for a stuck/driven loop and is already behind a confirm modal,
+ * so ANY live loop is stoppable. Excludes humans (state=null) and dead/offline
+ * loops (presence false ⇒ heartbeat stale).
+ */
+function isLiveLoop(r: Consumer): boolean {
+    return !!r.state && isHeartbeatFresh(r);
 }
 
 function isMcpActive(r: Consumer): boolean {
@@ -412,9 +440,10 @@ const sortedRows = computed<Consumer[]>(() => {
                     </td>
                     <td class="action-cell">
                         <div class="action-cell__inner">
-                            <!-- #442: remote hard-kill, only on a live autonomous loop -->
+                            <!-- #442/#443: remote hard-kill on ANY live loop
+                                 (wait/busy/boot/human too — not just autonomous). -->
                             <Button
-                                v-if="loopMode(r) === 'loop'"
+                                v-if="isLiveLoop(r)"
                                 icon="pi pi-stop-circle"
                                 severity="danger"
                                 text

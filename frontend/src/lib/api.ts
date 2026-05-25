@@ -390,6 +390,15 @@ export interface Consumer {
      */
     state_updated_at?: string | null;
     /**
+     * #443: live-presence verdict from the daemon's in-memory SSE registry
+     * (#395). `true` = a live (or within-grace) SSE connection → running NOW;
+     * `false` = seen-then-gone this session → authoritatively stopped (overrides
+     * a still-fresh heartbeat — a killed loop reads offline ~immediately);
+     * `null`/undefined = never seen via SSE this session (e.g. right after a
+     * daemon restart) → fall back to the `state_updated_at` heartbeat window.
+     */
+    present?: boolean | null;
+    /**
      * #280: live human-presence at the last heartbeat — true when a human
      * is driving the loop (typing / within user-grace). null = never
      * reported. Drives the `human` vs `loop` badge.
