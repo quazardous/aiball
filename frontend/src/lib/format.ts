@@ -6,14 +6,39 @@
 import { type InboxRow, type TokenUsage } from "./api";
 
 /**
- * #404 — single "cost-equivalent" token figure for a ticket's effort. Cache
- * reads are ~10× cheaper than fresh tokens, so they're weighted 0.1× (see the
- * #404 findings); input + cache-writes + output count full. Returns 0 for a
- * null/absent tally.
+ * #446 — token EFFORT: the genuinely NEW tokens a ticket consumed (input +
+ * cache-writes + output). Excludes `cache_r` on purpose: cache reads are the
+ * SAME conversation context re-read from cache on every turn (~the whole
+ * prompt, e.g. ~240k each turn), so summing them across turns re-counts the
+ * same context N times and inflates the tally — david's "cumule le cumul".
+ * This is the headline figure shown in the UI. Returns 0 for a null tally.
+ */
+export function estTokenEffort(u: TokenUsage | null | undefined): number {
+    if (!u) return 0;
+    return (u.tokens_in ?? 0) + (u.cache_w ?? 0) + (u.tokens_out ?? 0);
+}
+
+/**
+ * #404 — "cost-equivalent" token figure: effort PLUS the re-read context billed
+ * at ~0.1× (cache reads are ~10× cheaper than fresh tokens). Kept for the
+ * tooltips/cost view (#446 Hybrid): the cache-read component is real spend, but
+ * it's shown SEPARATELY from the effort headline so the displayed number isn't
+ * dominated by the same context re-read each turn. Returns 0 for a null tally.
  */
 export function estTokenCost(u: TokenUsage | null | undefined): number {
     if (!u) return 0;
     return (u.tokens_in ?? 0) + (u.cache_w ?? 0) + (u.tokens_out ?? 0) + Math.round((u.cache_r ?? 0) * 0.1);
+}
+
+/**
+ * #446 — shared tooltip for the token chip: the effort headline broken down,
+ * then the re-read context shown apart with its ~0.1× cost-equivalent. Keeps
+ * the four display sites (inbox row, thread header, projects, stats) consistent.
+ */
+export function tokenBreakdownTitle(u: TokenUsage | null | undefined): string {
+    if (!u) return "";
+    return `effort ${formatTokens(estTokenEffort(u))} tok — new tokens: in ${u.tokens_in} · out ${u.tokens_out} · cache-write ${u.cache_w}`
+        + ` · context re-read (cache): ${formatTokens(u.cache_r)} — same context re-read each turn, billed ~0.1× → cost-equiv ~${formatTokens(estTokenCost(u))} tok`;
 }
 
 /** Compact token count: 1234 → "1.2k", 1_500_000 → "1.5M". */

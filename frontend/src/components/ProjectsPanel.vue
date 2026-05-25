@@ -5,7 +5,7 @@ import InputText from "primevue/inputtext";
 import { useToast } from "primevue/usetoast";
 import { api, type ProjectMeta } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
-import { estTokenCost, formatTokens } from "../lib/format";
+import { estTokenEffort, formatTokens, tokenBreakdownTitle } from "../lib/format";
 
 const toast = useToast();
 const rows = ref<ProjectMeta[]>([]);
@@ -221,11 +221,9 @@ defineExpose({ load });
                     <td data-label="Comments">{{ p.comment_count }}</td>
                     <td
                         data-label="Tokens"
-                        :title="p.token_usage
-                            ? `in ${p.token_usage.tokens_in} · out ${p.token_usage.tokens_out} · cache-w ${p.token_usage.cache_w} · cache-r ${p.token_usage.cache_r} (est. cost-equiv, cache reads ×0.1)`
-                            : 'no token usage captured yet'"
+                        :title="p.token_usage ? tokenBreakdownTitle(p.token_usage) : 'no token usage captured yet'"
                     >
-                        <span v-if="p.token_usage">⚡ {{ formatTokens(estTokenCost(p.token_usage)) }}</span>
+                        <span v-if="p.token_usage">⚡ {{ formatTokens(estTokenEffort(p.token_usage)) }}</span>
                         <span v-else style="color: var(--p-text-muted-color)">—</span>
                     </td>
                     <td data-label="Pending">

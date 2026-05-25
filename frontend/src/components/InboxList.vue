@@ -3,7 +3,7 @@ import Tag from "primevue/tag";
 import Button from "primevue/button";
 import Checkbox from "primevue/checkbox";
 import { type InboxRow, type SearchHit } from "../lib/api";
-import { estTokenCost, formatTokens, relativeTime, snippetOf, titleOf } from "../lib/format";
+import { estTokenEffort, formatTokens, relativeTime, snippetOf, titleOf, tokenBreakdownTitle } from "../lib/format";
 import { attentionOf, lifecycleStage } from "../lib/ticket-state";
 import { formatTicketRef } from "../lib/formatting";
 import {
@@ -253,13 +253,11 @@ function onRowClick(r: InboxRow) {
                  weighted 0.1×). Shown only once any usage is captured, same
                  bolt glyph as the thread header. -->
             <span
-                v-if="estTokenCost(r.token_usage) > 0"
+                v-if="estTokenEffort(r.token_usage) > 0"
                 class="list-row__token"
-                :title="r.token_usage
-                    ? `tokens — in ${r.token_usage.tokens_in} · out ${r.token_usage.tokens_out} · cache write ${r.token_usage.cache_w} · cache read ${r.token_usage.cache_r} (cost-equiv, cache reads ×0.1)`
-                    : ''"
+                :title="tokenBreakdownTitle(r.token_usage)"
             >
-                <i class="pi pi-bolt" /> {{ formatTokens(estTokenCost(r.token_usage)) }}
+                <i class="pi pi-bolt" /> {{ formatTokens(estTokenEffort(r.token_usage)) }}
             </span>
             <span v-if="r.pending_comment_count > 0" :title="`${r.pending_comment_count} pending comment${r.pending_comment_count > 1 ? 's' : ''}`">
                 <i class="pi pi-clock" /> {{ r.pending_comment_count }}

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { api, type TokenUsage } from "../lib/api";
 import { formatTicketRef } from "../lib/formatting";
-import { estTokenCost, formatTokens } from "../lib/format";
+import { estTokenCost, estTokenEffort, formatTokens } from "../lib/format";
 
 const props = defineProps<{
     project: string;
@@ -74,10 +74,13 @@ const topIntentMax = computed(() =>
         ? stats.value.top_intents[0].count
         : 1,
 );
-// #406 — top_token_tickets is pre-sorted desc by cost, so [0] is the max scale.
+// #406/#446 — scale the bars off the EFFORT headline (in+out+cache-write),
+// consistent with the rest of the UI. The server pre-sorts by cost, which may
+// not match effort order, so take the max effort over the list (not [0]) to
+// keep every bar ≤ 100%.
 const topTokenMax = computed(() =>
     stats.value && stats.value.top_token_tickets.length > 0
-        ? estTokenCost(stats.value.top_token_tickets[0].token_usage)
+        ? Math.max(...stats.value.top_token_tickets.map((t) => estTokenEffort(t.token_usage)), 1)
         : 1,
 );
 </script>
@@ -235,9 +238,9 @@ const topTokenMax = computed(() =>
                 <h3>Token effort</h3>
                 <div class="project-stats__token-summary">
                     <div class="stat-card stat-card--accent">
-                        <div class="stat-card__value">⚡ {{ formatTokens(estTokenCost(stats.token_usage)) }}</div>
-                        <div class="stat-card__label">est. cost</div>
-                        <div class="stat-card__sub">cost-equiv · cache reads ×0.1</div>
+                        <div class="stat-card__value">⚡ {{ formatTokens(estTokenEffort(stats.token_usage)) }}</div>
+                        <div class="stat-card__label">effort (new tokens)</div>
+                        <div class="stat-card__sub">cost-equiv ~{{ formatTokens(estTokenCost(stats.token_usage)) }} · re-read context ×0.1</div>
                     </div>
                     <dl class="project-stats__token-raw">
                         <div><dt>input</dt><dd>{{ formatTokens(stats.token_usage.tokens_in) }}</dd></div>
@@ -250,7 +253,7 @@ const topTokenMax = computed(() =>
                     v-if="stats.top_token_tickets.length > 0"
                     class="project-stats__token-top-label"
                 >
-                    Top 3 costliest tickets
+                    Top 3 token-heavy tickets
                 </h4>
                 <ol
                     v-if="stats.top_token_tickets.length > 0"
@@ -264,10 +267,10 @@ const topTokenMax = computed(() =>
                         <span class="project-stats__bar-track">
                             <span
                                 class="project-stats__bar-fill"
-                                :style="`width: ${(estTokenCost(t.token_usage) / topTokenMax * 100).toFixed(1)}%`"
+                                :style="`width: ${(estTokenEffort(t.token_usage) / topTokenMax * 100).toFixed(1)}%`"
                             />
                         </span>
-                        <span class="project-stats__bar-count">{{ formatTokens(estTokenCost(t.token_usage)) }}</span>
+                        <span class="project-stats__bar-count">{{ formatTokens(estTokenEffort(t.token_usage)) }}</span>
                     </li>
                 </ol>
             </section>

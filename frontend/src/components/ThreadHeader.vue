@@ -15,7 +15,7 @@
 import Button from "primevue/button";
 import Tag from "primevue/tag";
 import type { TicketSummary } from "../lib/api";
-import { estTokenCost, formatTokens } from "../lib/format";
+import { estTokenEffort, formatTokens, tokenBreakdownTitle } from "../lib/format";
 
 defineProps<{
     ticket: TicketSummary;
@@ -71,13 +71,11 @@ const emit = defineEmits<{
     <!-- #404/#406: per-ticket token-effort cost (shown once any usage is
          captured; cost-equivalent — cache reads weighted 0.1×). -->
     <span
-        v-if="estTokenCost(ticket.token_usage) > 0"
+        v-if="estTokenEffort(ticket.token_usage) > 0"
         class="thread-token-cost"
-        :title="ticket.token_usage
-            ? `tokens — in ${ticket.token_usage.tokens_in} · out ${ticket.token_usage.tokens_out} · cache write ${ticket.token_usage.cache_w} · cache read ${ticket.token_usage.cache_r}`
-            : ''"
+        :title="tokenBreakdownTitle(ticket.token_usage)"
     >
-        <i class="pi pi-bolt" /> {{ formatTokens(estTokenCost(ticket.token_usage)) }} tok
+        <i class="pi pi-bolt" /> {{ formatTokens(estTokenEffort(ticket.token_usage)) }} tok
     </span>
     <template v-if="showBanners">
         <div
