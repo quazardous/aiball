@@ -253,6 +253,13 @@
       "when": 1781200000000,
       "tag": "0035_tokens_last_seen_ip",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1781200100000,
+      "tag": "0036_split_claim_from_assignment",
+      "breakpoints": true
     }
   ]
 }
