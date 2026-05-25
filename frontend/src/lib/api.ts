@@ -797,6 +797,13 @@ export const api = {
             "DELETE",
             `/api/consumers/${encodeURIComponent(consumer_id)}`,
         ),
+    /** #442: remotely hard-kill the claude-loop running as this consumer.
+     *  `delivered` = a live loop was connected to receive the control event. */
+    stopLoop: (consumer_id: string) =>
+        req<{ consumer_id: string; action: string; delivered: boolean }>(
+            "POST",
+            `/api/consumers/${encodeURIComponent(consumer_id)}/loop-stop`,
+        ),
     /** #398: operator-approved command launchers (declared in the global
      *  config `launchers:` list; the API only ever takes an id). */
     listLaunchers: () => req<Launcher[]>("GET", "/api/launchers"),

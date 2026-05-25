@@ -69,6 +69,31 @@ async function remove(consumer_id: string) {
     }
 }
 
+// #442: remotely hard-kill the claude-loop running as this consumer. Confirmed
+// (destructive — kills tmux + claude). `delivered:false` ⇒ nothing live received
+// it. The running badge clears on its own via the presence WS broadcast; reload
+// shortly after as a backstop.
+async function stopLoop(consumer_id: string) {
+    if (!confirm(`Stop (hard-kill) the claude-loop running as "${consumer_id}"?\nThis kills its tmux session + Claude — the conversation is lost.`)) return;
+    try {
+        const r = await api.stopLoop(consumer_id);
+        toast.add({
+            severity: r.delivered ? "success" : "warn",
+            summary: r.delivered ? `Stop sent to ${consumer_id}` : `No live loop for ${consumer_id}`,
+            detail: r.delivered ? "The loop will self-terminate." : "Nothing was connected to receive it.",
+            life: 5000,
+        });
+        setTimeout(() => void load(), 1500);
+    } catch (e) {
+        toast.add({
+            severity: "error",
+            summary: `Stop failed for ${consumer_id}`,
+            detail: (e as Error).message,
+            life: 6000,
+        });
+    }
+}
+
 onMounted(() => {
     load();
     // Live-poll the consumers list so the activity column reflects
@@ -371,6 +396,17 @@ const sortedRows = computed<Consumer[]>(() => {
                     </td>
                     <td class="action-cell">
                         <div class="action-cell__inner">
+                            <!-- #442: remote hard-kill, only on a live autonomous loop -->
+                            <Button
+                                v-if="loopMode(r) === 'loop'"
+                                icon="pi pi-stop-circle"
+                                severity="danger"
+                                text
+                                rounded
+                                size="small"
+                                :title="`Stop (hard-kill) the claude-loop running as ${r.consumer_id}`"
+                                @click="stopLoop(r.consumer_id)"
+                            />
                             <Button
                                 icon="pi pi-pencil"
                                 text
