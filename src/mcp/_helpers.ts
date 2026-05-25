@@ -15,6 +15,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
+import { captureTokenUsage, projectTranscriptDir } from "../claude-loop/token-capture.js";
 
 export const client = new AiballClient();
 
@@ -24,10 +25,27 @@ export const client = new AiballClient();
  * turn's token usage to it. Writes `active-ticket` in the loop state dir.
  * Best-effort + a no-op outside a claude-loop session (no `CL_STATE_DIR`),
  * so the generic MCP (direct / non-loop use) is unaffected.
+ *
+ * #446 (david 9qtewx): also DRAIN this turn's effort to THIS ticket right here,
+ * "au plus tôt" — at the tool call, not only at the Stop-hook (end of turn). A
+ * turn that touches several tickets thus splits per call instead of lumping to
+ * the last-focused one. Fire-and-forget + best-effort: the dedup is claimed
+ * synchronously inside captureTokenUsage, so it's race-safe under parallel tool
+ * calls and counted ONCE across this drain and the Stop-hook's tail drain (both
+ * share `token-push-last-id`). A read/POST error never disturbs the tool call.
  */
 export function markActiveTicket(ticketId: number | null | undefined): void {
     const sd = process.env.CL_STATE_DIR;
     if (!sd || !ticketId || ticketId <= 0) return;
+    try {
+        const cwd = process.env.CLAUDE_LOOP_CWD ?? process.cwd();
+        void captureTokenUsage({
+            transcriptDir: projectTranscriptDir(cwd),
+            stateDir: sd,
+            targetTicketId: ticketId,
+            postUsage: (id, u) => client.postTokenUsage(id, u),
+        }).catch(() => { /* best-effort */ });
+    } catch { /* best-effort */ }
     try { writeFileSync(join(sd, "active-ticket"), String(ticketId)); } catch { /* best-effort */ }
 }
 

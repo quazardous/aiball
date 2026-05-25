@@ -98,6 +98,16 @@ export async function captureTokenUsage(opts: {
     transcriptDir: string;
     stateDir: string;
     postUsage: (ticketId: number, u: TurnUsage) => Promise<unknown> | void;
+    /**
+     * #446 (david 9qtewx): when set, attribute this turn to THIS ticket instead
+     * of reading the `active-ticket` marker — so the MCP server can drain the
+     * effort "au plus tôt" on each project-attachable tool call (to the call's
+     * own ticket), not only at the Stop-hook. The Stop-hook keeps calling
+     * WITHOUT this (→ reads the marker = the last-focused ticket, drains the
+     * turn's tail). Both share the `token-push-last-id` dedup below, so a turn
+     * is counted ONCE whichever drains it first.
+     */
+    targetTicketId?: number;
 }): Promise<CaptureResult> {
     const file = latestSessionFile(opts.transcriptDir);
     if (!file) return { status: "no-file" };
@@ -109,19 +119,28 @@ export async function captureTokenUsage(opts: {
     try { lastId = readFileSync(lastIdPath, "utf8").trim(); } catch { /* none yet */ }
     if (turn.id === lastId) return { status: "deduped", id: turn.id }; // already pushed
 
-    const markerPath = activeTicketMarkerPath(opts.stateDir);
     let ticketId = NaN;
-    try { ticketId = Number(readFileSync(markerPath, "utf8").trim()); } catch { /* no focus */ }
+    if (opts.targetTicketId != null && opts.targetTicketId > 0) {
+        ticketId = opts.targetTicketId; // #446: explicit per-call target
+    } else {
+        const markerPath = activeTicketMarkerPath(opts.stateDir);
+        try { ticketId = Number(readFileSync(markerPath, "utf8").trim()); } catch { /* no focus */ }
+    }
     const hasMarker = Number.isFinite(ticketId) && ticketId > 0;
+
+    // CLAIM the dedup synchronously BEFORE the (async) push: two concurrent
+    // drains of the same turn — e.g. parallel tool calls, or an MCP-call drain
+    // racing the Stop-hook — see the id already recorded and short-circuit, so
+    // a turn is never double-counted. Recorded even with no marker / on a failed
+    // push so we don't re-scan it (statistical by design).
+    try { writeFileSync(lastIdPath, turn.id); } catch { /* best-effort */ }
+
     let pushed = false;
     if (hasMarker) {
         // Awaited so the hook doesn't exit before the request flushes; wrapped
         // so a failed push never throws into the wake path (best-effort).
         try { await opts.postUsage(ticketId, turn); pushed = true; } catch { /* best-effort */ }
     }
-    // Record the id even when there was no marker / the push failed, so we don't
-    // re-scan or double-count this turn (statistical by design).
-    try { writeFileSync(lastIdPath, turn.id); } catch { /* best-effort */ }
 
     if (!hasMarker) return { status: "no-marker", id: turn.id };
     return pushed
