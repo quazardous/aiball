@@ -145,7 +145,7 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         const ar = req as AuthenticatedRequest;
         ar.consumer_id = cid;
         ar.token_kind = "agent";
-        if (explicit) touchLastSeen(cid); // #B.177 / #386
+        if (explicit) touchLastSeen(cid, "uds"); // #B.177 / #386 / #422 (local same-uid)
         next();
         return;
     }
@@ -189,7 +189,7 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         // Auto-register a relayed agent we haven't seen yet (the loop on B has
         // no token of its own — the node vouches for it). Never touches humans.
         if (explicit && !isHuman(cid)) ensureConsumer(cid);
-        touchLastSeen(cid);
+        touchLastSeen(cid, "node", clientIp(req)); // #422: proxy-relayed → remote
         next();
         return;
     }
@@ -209,8 +209,14 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         }
         // Non-humans: silently ignore the override.
     }
-    touchLastSeen(ar.consumer_id); // #B.177
+    touchLastSeen(ar.consumer_id, "tcp", clientIp(req)); // #B.177 / #422 (direct bearer over TCP)
     next();
+}
+
+/** #422: the TCP peer address (B's IP for a proxy node; the client's for direct).
+ *  `socket.remoteAddress` is the raw peer — no trust-proxy config needed. */
+function clientIp(req: Request): string | null {
+    return req.socket?.remoteAddress ?? null;
 }
 
 /**

@@ -9,6 +9,7 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
+import { isRemoteConsumer, type SeenVia } from "./remote-detect.js";
 
 export type ConsumerKind = "human" | "agent" | "sandbox";
 
@@ -51,6 +52,13 @@ export interface Consumer {
     /** #397: per-consumer micro-prompt — a short standing instruction edited in
      *  the UI, injected into the wake prompt via `{consumer_prompt}`. null = none. */
     micro_prompt?: string | null;
+    /** #422: transport last seen on — `uds` / `tcp` / `node`. null = never
+     *  tracked (pre-#422). `last_seen_ip` = peer address for tcp/node. */
+    last_seen_via?: string | null;
+    last_seen_ip?: string | null;
+    /** #422: derived — is this consumer remote (node-relayed, or TCP from a
+     *  non-loopback peer)? Convenience for the UI; computed from via + ip. */
+    remote?: boolean;
     created_at: string;
     updated_at: string;
 }
@@ -73,6 +81,9 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         cwd: r.cwd ?? null,
         project: r.project ?? null,
         micro_prompt: r.microPrompt ?? null,
+        last_seen_via: r.lastSeenVia ?? null,
+        last_seen_ip: r.lastSeenIp ?? null,
+        remote: isRemoteConsumer(r.lastSeenVia, r.lastSeenIp),
         created_at: r.createdAt,
         updated_at: r.updatedAt,
     };
@@ -109,11 +120,18 @@ export function touchLastLogin(consumer_id: string): void {
  * Cheap: single column update, no read first. Silent no-op when
  * the consumer row doesn't exist (ensureConsumer covers creation).
  */
-export function touchLastSeen(consumer_id: string): void {
+export function touchLastSeen(consumer_id: string, via?: SeenVia, ip?: string | null): void {
     if (!consumer_id) return;
     const now = nowIso();
+    // #422: stamp the transport when the caller knows it (the auth middleware
+    // does, on every request). `ip` is set for tcp/node, cleared (null) for uds.
+    const patch: Partial<schema.NewConsumerRow> = { lastSeenAt: now };
+    if (via) {
+        patch.lastSeenVia = via;
+        patch.lastSeenIp = ip ?? null;
+    }
     getDb().update(schema.consumers)
-        .set({ lastSeenAt: now })
+        .set(patch)
         .where(eq(schema.consumers.consumerId, consumer_id))
         .run();
 }

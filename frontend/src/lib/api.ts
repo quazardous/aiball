@@ -391,6 +391,12 @@ export interface Consumer {
     /** #393: the loop's working directory (project root), pushed by the state
      *  heartbeat. null for humans / non-loop / pre-#393 loops. */
     cwd?: string | null;
+    /** #422: transport last seen on — `uds` / `tcp` / `node`. null = untracked. */
+    last_seen_via?: "uds" | "tcp" | "node" | string | null;
+    last_seen_ip?: string | null;
+    /** #422: derived — remote consumer (node-relayed, or TCP from a non-loopback
+     *  peer). Drives a "remote" badge in the consumers panel. */
+    remote?: boolean;
     created_at: string;
     updated_at: string;
 }

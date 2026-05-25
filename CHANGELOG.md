@@ -17,6 +17,17 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Detect remote agents (#422)
+
+- The daemon now records the **transport** each consumer was last seen on
+  (`last_seen_via` ∈ `uds` / `tcp` / `node`, plus the peer `last_seen_ip`),
+  stamped at auth on every request. A consumer is surfaced as **remote** when it
+  reached the daemon from elsewhere — relayed by a proxy node, or directly over
+  TCP from a non-loopback address — vs a local same-uid client over the Unix
+  socket. `/api/consumers` exposes the fields + a derived `remote` flag, and the
+  Consumers panel shows a "remote" / "via node" badge. Last-seen / per-connection,
+  not a sticky property.
+
 ### Wake-prompt system — radically simpler (#400)
 
 - The wake/relance prompt templating is now **one template + a tiny placeholder
