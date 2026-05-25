@@ -152,6 +152,10 @@ export interface AiballConfig {
          *  below it are dropped. Drives CL_LOG_LEVEL (timer + hooks). Default
          *  `info`; an unknown name degrades to the default at the logger. */
         log_level: string;
+        /** #428: custom wake gates — raw config list, parsed at use via
+         *  `parseGates` (each entry needs a built-in `type` or a custom `cmd`).
+         *  When a gate triggers, its message is surfaced in the wake CTA. */
+        gates: Array<Record<string, unknown>>;
     };
     /**
      * #319: workflow hints surfaced by claude-loop at wake for `feature`-intent
@@ -250,6 +254,8 @@ const DEFAULTS: AiballConfig = {
         drained_strategy: "once",
         // #412: PSR-style level threshold; messages below it are dropped. info default.
         log_level: "info",
+        // #428: no custom gates by default (opt-in per project).
+        gates: [],
     },
     // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
     // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.
@@ -465,6 +471,10 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // name degrades to the default `info`).
             if (typeof cl.log_level === "string" && cl.log_level.trim()) {
                 cfg.claude_loop.log_level = cl.log_level.trim().toLowerCase();
+            }
+            // #428: custom wake gates — stored raw, validated at use via parseGates.
+            if (Array.isArray(cl.gates)) {
+                cfg.claude_loop.gates = cl.gates as Array<Record<string, unknown>>;
             }
             // #319: workflow hint flags (layered like claude_loop above).
             const wf = (raw.workflow ?? {}) as Record<string, unknown>;

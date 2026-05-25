@@ -215,6 +215,25 @@ not human-present, but it's the other reason a tick may skip.)
 
 ---
 
+## Wake gates
+
+Beyond the "is there work?" check, you can attach **gates** — checks run each
+heartbeat whose message is **prepended to the wake** when they trigger, so the
+agent sees e.g. "you have an un-merged PR" before picking up new work.
+Configured under `claude_loop.gates` in `.aiball.yaml`; two forms in one list:
+
+- **built-in** (`type: unmerged_pr`) — a pre-wired detector, no shell to write.
+- **custom** (`name`, `cmd`, `message`) — your own check: exit 0 = triggered,
+  and the command's stdout (if any) overrides the static `message`.
+
+`blocks: true` makes the wake **lead** with the gate and drop the "engage"
+directive ("resolve this before taking new work"); the default is a warn (the
+message is just surfaced alongside the normal CTA). Built-in wording is
+overridable per project via the `prompts:` block (slot `gate_<type>`, e.g.
+`gate_unmerged_pr`), tone-aware, with detector placeholders like `{count}`.
+
+---
+
 ## State layout
 
 `~/.claude-loop/<NAME>/` (override via `CLAUDE_LOOP_STATE_ROOT`):

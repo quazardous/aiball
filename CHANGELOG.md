@@ -17,6 +17,21 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Custom wake gates (#428)
+
+- A new `claude_loop.gates` knob (`.aiball.yaml`) attaches **gates** to the loop
+  wake: checks run each heartbeat whose message is **prepended to the wake CTA**
+  when they trigger — e.g. *"you have an un-merged PR, resolve it before new
+  work"*. Two forms in one list: **built-in** pre-wired detectors (`type:
+  unmerged_pr` — zero shell) and **custom** shell checks (`name`/`cmd`/`message`;
+  exit 0 = triggered, the cmd's stdout overrides the message). `blocks: true`
+  makes the wake lead with the gate and suppresses the "engage" directive
+  (default is warn). Built-in wording is rendered through the prompt-template
+  system (slot `gate_<type>`, per-project overridable, tone-aware, with
+  detector placeholders like `{count}`). Generalises the single, message-less
+  `check_cmd`; pure parser unit-tested; no migration. (A web-UI gate-status
+  surface is a planned follow-up.)
+
 ### Token cost on inbox rows (#427)
 
 - The inbox list now surfaces each ticket's **token-effort cost** — the same

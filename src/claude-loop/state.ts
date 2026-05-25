@@ -20,6 +20,7 @@ import { loadConfig, type AiballConfig } from "../autopoll/config.js";
 import { AiballClient } from "../client.js";
 import type { Intent } from "../domain.js";
 import type { DrainedState } from "./drained-strategy.js";
+import { parseGates, runGates } from "./gates.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
 export const STATE_ROOT = process.env.CLAUDE_LOOP_STATE_ROOT
@@ -1136,12 +1137,24 @@ export async function buildContextPhrase(
         // overridable per project (#371/#374 wording lives in the template).
         const head = Array.isArray(headRows) ? headRows[0] : undefined;
         const scope = project ? `\`${project}\`` : "your scope";
+        // #428: run the configured custom gates (built-in `type` or custom
+        // `cmd`). Triggered gates surface their message in the wake; a `blocks`
+        // gate also SUPPRESSES the engage directive (actionable_count → "") so
+        // the CTA reads "resolve this before taking new work". Fail-open: any
+        // gate error → no gate (never breaks the wake).
+        let gateResults: ReturnType<typeof runGates> = [];
+        try {
+            const specs = parseGates((cfg.claude_loop as { gates?: unknown }).gates);
+            if (specs.length) gateResults = runGates(specs, process.cwd());
+        } catch { /* gates never block the wake */ }
+        const blocking = gateResults.some((g) => g.blocks);
         const vars = {
             culture,
             lead: renderSlot(promptMap, "wake_lead", {}, "fyi:", tone),
             ping_count: pingCount || "",
             open_count: openCount || "",
-            actionable_count: actionableCount || "",
+            // #428: a blocking gate hides the engage directive ("don't take new work").
+            actionable_count: blocking ? "" : (actionableCount || ""),
             head_id: head?.id ?? "",
             head_title: head?.title ?? "",
             project_scope: scope,
@@ -1150,16 +1163,25 @@ export async function buildContextPhrase(
             // wake_master override where he wants it.
             consumer_prompt: consumerPrompt,
         };
-        return renderSlot(
+        const cta = renderSlot(
             promptMap,
             "wake_master",
             vars,
             "{culture} {lead}"
             + "{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}"
-            + "{actionable_count:+ engage #{head_id} first — top of the work order — via `ticket_list({actionable: true})`.}"
+            + "{actionable_count:+ engage #{head_id} first — top of the work order — via `ticket_engage()`.}"
             + "{open_count:+{actionable_count:+ }[{open_count} open]}",
             tone,
         );
+        // #428: prepend the triggered-gate banner. Built-in messages render via
+        // their prompt slot (per-project overridable + tone-aware + {vars});
+        // custom gates use their literal message / cmd stdout. Template-agnostic
+        // (works even when a custom wake_master has no {gates} placeholder).
+        if (gateResults.length === 0) return cta;
+        const banner = gateResults
+            .map((g) => (g.slot ? renderSlot(promptMap, g.slot, g.vars, g.message, tone) : g.message))
+            .join("  ");
+        return `${blocking ? "🛑 " : ""}${banner}  ${cta}`;
     } catch {
         return culture;
     }

@@ -114,6 +114,15 @@ prompts:
     imperative:
       - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — DRAIN now via `unread({pings: true, mark_read: true})`.}{actionable_count:+ ENGAGE #{head_id} first — top of the work order — via `ticket_engage()`.}{open_count:+ ({open_count} open in {project_scope})}"
 
+  # #428: built-in gate messages. Rendered (tone-aware) when the gate triggers;
+  # the detector fills placeholders like {count}. The triggered message is
+  # prepended to the wake CTA. Override the wording per-project here without
+  # touching the gate logic. (Custom `cmd` gates use their own `message`/stdout.)
+  gate_unmerged_pr:
+    directive: "⚠ {count} open PR(s) not merged — resolve before taking new work."
+    hint: "btw, {count} open PR(s) still un-merged."
+    imperative: "**STOP**: {count} open PR(s) not merged — resolve before new work."
+
 # Ticket-text formatting patterns (#B.235). Linkifies refs like #B.123,
 # #C.<hashid>, @mention in ticket bodies and comments. Lives in the same
 # 3-layer override chain as `prompts:` (shipped defaults → ~/.config →

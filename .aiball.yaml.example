@@ -192,6 +192,26 @@ autopoll:
 #   # "warning" to quiet routine activity. Format stays `<ts> [tag] LEVEL msg`
 #   # so `claude-loop tail` / `--log` keep working.
 #   log_level: "info"
+#
+#   # Custom wake gates. Each gate runs at heartbeat; when it triggers, its
+#   # message is prepended to the wake CTA (so the agent sees it before taking
+#   # new work). Two forms in the same list:
+#   #   - built-in `type:` — a pre-wired detector, zero shell to write.
+#   #                        Available: unmerged_pr (open PR(s) not merged).
+#   #   - custom `cmd:`     — your own check; exit 0 = triggered, and the cmd's
+#   #                         stdout (if any) overrides the static `message`.
+#   # `blocks: true` makes the wake LEAD with the gate and suppresses the
+#   # "engage #N" directive ("resolve this before taking new work"). Default is
+#   # warn (the message is just surfaced). Built-in wording is overridable in
+#   # the prompts: block (slot `gate_<type>`, e.g. gate_unmerged_pr), tone-aware,
+#   # with detector placeholders like {count}.
+#   gates:
+#     - type: unmerged_pr           # built-in, warn
+#     # - type: unmerged_pr         # …or hard-stop:
+#     #   blocks: true
+#     # - name: preflight           # custom check
+#     #   cmd: "make preflight"
+#     #   message: "⚠ preflight failing — fix before new work"
 
 # Workflow hints. claude-loop "habille" the WAKE of a `feature`-intent
 # ticket with a branch hint ("🌿 Feature: build it in …, not on main."). Lets
