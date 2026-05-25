@@ -580,6 +580,14 @@ ticketsRouter.get("/inbox", (req, res) => {
         rows = rows.filter((r) => r.status === "pending" || r.pending_comment_count > 0);
     } else if (status === "approved" || status === "rejected") {
         rows = rows.filter((r) => r.status === status);
+    } else {
+        // #450 (david): a not-yet-approved ticket is discussion/moderation, not
+        // backlog. It still pings participants, but it must NOT show in the open
+        // list — it surfaces only under the explicit `status=pending`
+        // (moderation) view above. So the default / "all" inbox excludes
+        // pending TICKETS (approved tickets with pending COMMENTS are unaffected
+        // — they're real backlog with a moderation flag).
+        rows = rows.filter((r) => r.status !== "pending");
     }
     if (onlyOpen) {
         rows = rows.filter((r) => !r.closed);
