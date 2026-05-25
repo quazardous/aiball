@@ -387,6 +387,10 @@ ticketsRouter.get("/inbox", (req, res) => {
 
     const tagsMap = tagsForMessages(tickets.map((m) => m.id));
     const unreadMap = ticketUnreadFlags(consumerId, tickets.map((m) => m.id));
+    // #427: per-ticket token-effort tally for the inbox row (one batched
+    // query for the whole page). Absent for tickets with no captured usage
+    // yet — the row renders the bolt chip only when estTokenCost > 0.
+    const tokenUsageMap = getTicketTokenUsage(tickets.map((m) => m.id));
     // #405/#408: hot-zone focus for the inbox rows. Computed over AGENT
     // (non-human) activity — a human commenting must NOT make a ticket hot
     // (david #408); only an agent working it does.
@@ -478,6 +482,9 @@ ticketsRouter.get("/inbox", (req, res) => {
             // freshly created tickets the consumer just authored.
             last_speaker: agg.lastSpeaker ?? t.by_agent,
             tags: tagsMap.get(t.id) ?? [],
+            // #427: accumulated token-effort tally (null until any usage is
+            // captured) so the inbox row can surface the cost-equiv chip.
+            token_usage: tokenUsageMap.get(t.id) ?? null,
         };
     });
 

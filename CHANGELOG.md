@@ -17,6 +17,15 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Token cost on inbox rows (#427)
+
+- The inbox list now surfaces each ticket's **token-effort cost** — the same
+  cost-equivalent figure as the thread header (input + cache-writes + output
+  counted full, cache reads weighted 0.1×), rendered as a discreet amber ⚡
+  chip beside the comment count. Shown only once usage has been captured for a
+  ticket. The list endpoint now returns the per-ticket `token_usage` tally
+  (one batched query per page). No migration.
+
 ### Work tool — `ticket_engage` (#423)
 
 - A new MCP tool **`ticket_engage`** splits *exploration* from *engagement*:

@@ -323,6 +323,9 @@ export interface InboxRow {
      *  so the user remembers who spoke last without opening the thread. */
     last_speaker?: string | null;
     tags: Tag[];
+    /** #427: accumulated per-ticket token-effort tally (null until any usage
+     *  is captured). Raw counts; derive a cost estimate via `estTokenCost`. */
+    token_usage?: TokenUsage | null;
 }
 
 export interface ThreadView {

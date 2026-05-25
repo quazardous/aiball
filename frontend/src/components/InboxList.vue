@@ -3,7 +3,7 @@ import Tag from "primevue/tag";
 import Button from "primevue/button";
 import Checkbox from "primevue/checkbox";
 import { type InboxRow, type SearchHit } from "../lib/api";
-import { relativeTime, snippetOf, titleOf } from "../lib/format";
+import { estTokenCost, formatTokens, relativeTime, snippetOf, titleOf } from "../lib/format";
 import { attentionOf, lifecycleStage } from "../lib/ticket-state";
 import { formatTicketRef } from "../lib/formatting";
 import {
@@ -229,6 +229,18 @@ function onRowClick(r: InboxRow) {
             />
         </template>
         <template #meta>
+            <!-- #427: per-ticket token-effort cost (cost-equiv; cache reads
+                 weighted 0.1×). Shown only once any usage is captured, same
+                 bolt glyph as the thread header. -->
+            <span
+                v-if="estTokenCost(r.token_usage) > 0"
+                class="list-row__token"
+                :title="r.token_usage
+                    ? `tokens — in ${r.token_usage.tokens_in} · out ${r.token_usage.tokens_out} · cache write ${r.token_usage.cache_w} · cache read ${r.token_usage.cache_r} (cost-equiv, cache reads ×0.1)`
+                    : ''"
+            >
+                <i class="pi pi-bolt" /> {{ formatTokens(estTokenCost(r.token_usage)) }}
+            </span>
             <span v-if="r.pending_comment_count > 0" :title="`${r.pending_comment_count} pending comment${r.pending_comment_count > 1 ? 's' : ''}`">
                 <i class="pi pi-clock" /> {{ r.pending_comment_count }}
             </span>
@@ -260,6 +272,11 @@ function onRowClick(r: InboxRow) {
    to speak. Discreet — same icon and number, just an accent color. */
 .list-row__last-mine {
     color: var(--p-green-500);
+}
+/* #427: token-effort cost chip — amber bolt so it reads as "cost/energy"
+   and doesn't blend into the muted comment count next to it. */
+.list-row__token {
+    color: var(--p-amber-500);
 }
 .ticket-id {
     color: var(--p-text-muted-color);
