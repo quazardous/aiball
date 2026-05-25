@@ -14,6 +14,7 @@ import { useConfirm } from "primevue/useconfirm";
 import { useToast } from "primevue/usetoast";
 import { api, type NodeView } from "../lib/api";
 import DataList from "./ui/DataList.vue";
+import FieldRow from "./ui/FieldRow.vue";
 
 const props = defineProps<{ nodeId: string }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -112,20 +113,9 @@ async function doRevoke(n: NodeView): Promise<void> {
             {{ error }}
         </div>
         <div v-else-if="node" class="node-detail__body">
-            <div class="node-detail__field">
-                <label>label</label>
-                <div class="node-detail__value">{{ node.label || "(unlabelled)" }}</div>
-            </div>
-
-            <div class="node-detail__field">
-                <label>node id</label>
-                <div class="node-detail__static">{{ node.node_id }}</div>
-            </div>
-
-            <div class="node-detail__field">
-                <label>last peer IP</label>
-                <div class="node-detail__value">{{ node.last_seen_ip ?? "—" }}</div>
-            </div>
+            <FieldRow label="label">{{ node.label || "(unlabelled)" }}</FieldRow>
+            <FieldRow label="node id"><span class="aiball-mono">{{ node.node_id }}</span></FieldRow>
+            <FieldRow label="last peer IP">{{ node.last_seen_ip ?? "—" }}</FieldRow>
 
             <div class="node-detail__meta">
                 <div><strong>created</strong> {{ fmt(node.created_at) }}</div>
@@ -222,25 +212,8 @@ async function doRevoke(n: NodeView): Promise<void> {
     border-radius: 0.5rem;
     background: var(--p-content-background);
 }
-.node-detail__field {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-}
-.node-detail__field label {
-    font-size: 0.85rem;
-    color: var(--p-text-muted-color);
-}
-.node-detail__value {
-    font-size: 0.9rem;
-}
-.node-detail__static {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.9rem;
-    padding: 0.4rem 0.5rem;
-    background: var(--p-surface-100);
-    border-radius: 0.3rem;
-}
+/* Champs read-only → <FieldRow> / `.aiball-field-row*` + `.aiball-mono`
+   (style.css). */
 .node-detail__meta {
     display: flex;
     gap: 1.5rem;

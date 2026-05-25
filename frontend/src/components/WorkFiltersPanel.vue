@@ -93,7 +93,7 @@ onMounted(load);
 </script>
 
 <template>
-    <div class="rules-page">
+    <div class="aiball-panel">
         <PanelHeader title="Work filters">
             <p class="aiball-explainer">
                 Narrow which tickets an <strong>agent</strong> picks up, by tag. e.g.

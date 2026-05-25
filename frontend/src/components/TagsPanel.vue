@@ -153,7 +153,7 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="tags-page">
+    <div class="aiball-panel tags-page">
         <PanelHeader title="Tags">
             <p class="aiball-explainer">
                 Tags are a <strong>closed list</strong>: you (the human moderator) define what
@@ -318,11 +318,8 @@ onMounted(() => {
 </template>
 
 <style>
-.tags-page {
-    display: flex;
-    flex-direction: column;
-    gap: 1.4rem;
-}
+/* Layout racine → `.aiball-panel` (style.css) ; `.tags-page` reste comme hook
+   du @media responsive ci-dessous. */
 /* Look de base (width/border/padding/th) → `.aiball-table` (style.css).
    Delta : cellules à inputs centrées verticalement (la base est valign top).
    Compound `.aiball-table.tags-table` pour gagner sur la base de façon

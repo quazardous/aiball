@@ -15,6 +15,7 @@ import Textarea from "primevue/textarea";
 import { useToast } from "primevue/usetoast";
 import { api, CONSUMER_KIND_OPTIONS, type Consumer, type ConsumerKind } from "../lib/api";
 import { relativeTime } from "../lib/format";
+import FieldRow from "./ui/FieldRow.vue";
 
 const props = defineProps<{ consumerId: string }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -147,10 +148,9 @@ async function sendPrompt() {
             {{ error }}
         </div>
         <div v-else-if="original" class="consumer-edit__body">
-            <div class="consumer-edit__field">
-                <label>consumer_id</label>
-                <div class="consumer-edit__static">{{ original.consumer_id }}</div>
-            </div>
+            <FieldRow label="consumer_id">
+                <span class="aiball-mono">{{ original.consumer_id }}</span>
+            </FieldRow>
 
             <div class="consumer-edit__field">
                 <label for="ce-kind">kind</label>
@@ -340,13 +340,7 @@ async function sendPrompt() {
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-size: 0.74rem;
 }
-.consumer-edit__static {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.9rem;
-    padding: 0.4rem 0.5rem;
-    background: var(--p-surface-100);
-    border-radius: 0.3rem;
-}
+/* consumer_id read-only → <FieldRow> + `.aiball-mono` (style.css). */
 .consumer-edit__meta {
     display: flex;
     gap: 1.5rem;

@@ -103,7 +103,7 @@ onMounted(load);
 </script>
 
 <template>
-    <div class="rules-page">
+    <div class="aiball-panel">
         <PanelHeader title="Moderation rules">
             <p class="aiball-explainer">
                 Rules decide what happens to a posted message <em>before</em> it reaches subscribers.
@@ -249,11 +249,6 @@ onMounted(load);
 </template>
 
 <style>
-.rules-page {
-    display: flex;
-    flex-direction: column;
-    gap: 1.4rem;
-}
 /* Chrome partagé → globaux dans style.css, via <PanelHeader>/<FormField> :
    en-tête + explainer (`.aiball-panel-head*`, `.aiball-explainer*`) et
    section/form (`.aiball-section*`, `.aiball-form-grid`, `.aiball-field`,
