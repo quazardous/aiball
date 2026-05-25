@@ -17,6 +17,27 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Claim ≠ assignment — two distinct holds (#436)
+
+- **Assignment** and **claim** are now separate concepts (fused in #418's single
+  `assignee`+`is_claim`). **Assignment** (`assignee`/`assigned_by`/`assigned_at`)
+  is a *responsibility* a human moderator pushes onto a consumer — **persistent**,
+  no auto-expiry. **Claim** (`claimant`/`claimed_at`) is an agent's *focus* ("I'm
+  on this now"), self-declared via `ticket_engage` / a self `ticket_assign` —
+  **transient** (the `assign_window_sec` live window). A ticket can be **both**
+  assigned to A and claimed by A at once.
+- Anti-collision (`actionable` gate) now drops a ticket from your pool when it's
+  **held by someone else** — a *live claim* by another agent OR an *assignment*
+  to another consumer. `ticket_engage` creates a **claim**; the work-order sorts
+  your live claim first, then a ticket *assigned to you*, then hot, then oldest.
+  Auto-claim (commenting) sets a claim; closing releases both holds. The thread
+  header shows claim and assignment distinctly.
+- `ticket_get` no longer moves the token-attribution focus — only writes do, so an
+  incidental read for context mid-turn doesn't steal the turn's tokens (#434).
+- Migration `0036` adds `claimant`/`claimed_at` and back-fills existing
+  self-claims into them. Follow-up (tracked): engage one-focus (auto-release the
+  prior uncommitted claim) + fully claim-anchored token attribution.
+
 ### aiball hooks are loop-only by default (#431)
 
 - Plain `claude` (outside claude-loop) now runs with **no aiball hooks**. The
