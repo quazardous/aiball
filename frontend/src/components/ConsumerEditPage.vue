@@ -16,6 +16,7 @@ import { useToast } from "primevue/usetoast";
 import { api, CONSUMER_KIND_OPTIONS, type Consumer, type ConsumerKind } from "../lib/api";
 import { relativeTime } from "../lib/format";
 import FieldRow from "./ui/FieldRow.vue";
+import DetailHeader from "./ui/DetailHeader.vue";
 
 const props = defineProps<{ consumerId: string }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -127,20 +128,12 @@ async function sendPrompt() {
 
 <template>
     <div class="consumer-edit">
-        <nav class="consumer-edit__crumbs">
-            <a
-                href="/consumers"
-                class="consumer-edit__crumb-link"
-                @click.prevent="emit('close')"
-            >
-                <i class="pi pi-arrow-left" /> Consumers
-            </a>
-            <span class="consumer-edit__crumb-sep">/</span>
-            <span class="consumer-edit__crumb-current">{{ props.consumerId }}</span>
-        </nav>
-        <header class="consumer-edit__head">
-            <h2 class="consumer-edit__title">Edit consumer</h2>
-        </header>
+        <DetailHeader
+            :crumbs="[{ label: 'Consumers' }]"
+            :current="props.consumerId"
+            title="Edit consumer"
+            @crumb="emit('close')"
+        />
 
         <div v-if="loading" class="aiball-empty">Loading…</div>
         <div v-else-if="error" class="aiball-empty consumer-edit__error">
@@ -278,38 +271,8 @@ async function sendPrompt() {
     gap: 1rem;
     max-width: 36rem;
 }
-.consumer-edit__head {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-}
-.consumer-edit__crumbs {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.9rem;
-}
-.consumer-edit__crumb-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    color: var(--p-primary-color);
-    text-decoration: none;
-}
-.consumer-edit__crumb-link:hover {
-    text-decoration: underline;
-}
-.consumer-edit__crumb-sep {
-    color: var(--p-text-muted-color);
-}
-.consumer-edit__crumb-current {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.85rem;
-    color: var(--p-text-muted-color);
-}
-.consumer-edit__title {
-    margin: 0;
-}
+/* En-tête (breadcrumb + titre) → <DetailHeader> / `.aiball-detail-head*`
+   + `.aiball-breadcrumb*` (style.css). */
 .consumer-edit__error {
     color: var(--p-red-500);
 }

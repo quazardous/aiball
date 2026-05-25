@@ -328,3 +328,54 @@ body,
     border-radius: 0.3rem;
 }
 
+/* En-tête de page détail/edit unifié (#454) : breadcrumb + titre + actions.
+   Adossé à <DetailHeader>. Remplace les `.X__crumbs` / `.X__header` / `.X__back`
+   bespoke des pages détail (Node/Consumer/Project*). */
+.aiball-detail-head {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+.aiball-breadcrumb {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+}
+.aiball-breadcrumb__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--p-primary-color);
+    text-decoration: none;
+    cursor: pointer;
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+}
+.aiball-breadcrumb__link:hover {
+    text-decoration: underline;
+}
+.aiball-breadcrumb__sep {
+    color: var(--p-text-muted-color);
+}
+.aiball-breadcrumb__current {
+    color: var(--p-text-muted-color);
+}
+.aiball-detail-head__bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+}
+.aiball-detail-head__title {
+    margin: 0;
+}
+.aiball-detail-head__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+

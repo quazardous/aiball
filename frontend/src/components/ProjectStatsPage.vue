@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { api, type TokenUsage } from "../lib/api";
 import { formatTicketRef } from "../lib/formatting";
 import { estTokenCost, estTokenEffort, formatTokens } from "../lib/format";
+import DetailHeader from "./ui/DetailHeader.vue";
 
 const props = defineProps<{
     project: string;
@@ -92,17 +93,13 @@ const topTokenMax = computed(() =>
             {{ error }}
         </div>
         <template v-else-if="stats">
-            <header class="project-stats__header">
-                <button
-                    type="button"
-                    class="project-stats__back"
-                    title="Back to inbox"
-                    @click="emit('back')"
-                >
-                    <i class="pi pi-arrow-left" /> back
-                </button>
-                <h2>{{ project }} — stats</h2>
-                <div class="project-stats__header-actions">
+            <DetailHeader
+                :crumbs="[{ label: 'Inbox' }]"
+                :current="project"
+                title="Stats"
+                @crumb="emit('back')"
+            >
+                <template #actions>
                     <button
                         type="button"
                         class="project-stats__refresh"
@@ -111,8 +108,8 @@ const topTokenMax = computed(() =>
                     >
                         <i class="pi pi-refresh" />
                     </button>
-                </div>
-            </header>
+                </template>
+            </DetailHeader>
 
             <!-- Pulse: 4 big numbers at a glance -->
             <section class="project-stats__pulse">
@@ -284,37 +281,7 @@ const topTokenMax = computed(() =>
     flex-direction: column;
     gap: 1rem;
 }
-.project-stats__header {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-}
-.project-stats__header h2 {
-    margin: 0;
-    font-size: 1.3rem;
-}
-.project-stats__back {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    background: transparent;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.4rem;
-    padding: 0.25rem 0.55rem;
-    color: var(--p-text-color);
-    cursor: pointer;
-    font: inherit;
-    font-size: 0.85rem;
-}
-.project-stats__back:hover {
-    background: var(--p-surface-100);
-}
-.project-stats__header-actions {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
+/* En-tête (breadcrumb + titre) → <DetailHeader> (style.css). */
 .project-stats__refresh {
     background: transparent;
     border: 0;

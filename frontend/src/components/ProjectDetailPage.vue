@@ -8,6 +8,7 @@ import { useToast } from "primevue/usetoast";
 import { useConfirm } from "primevue/useconfirm";
 import { api, type ProjectMeta, type Consumer } from "../lib/api";
 import { useBus } from "../lib/bus";
+import DetailHeader from "./ui/DetailHeader.vue";
 
 const props = defineProps<{ project: string }>();
 const emit = defineEmits<{ (e: "back"): void }>();
@@ -149,24 +150,25 @@ async function doStopLoop(consumer_id: string) {
 
 <template>
     <div class="project-detail">
-        <header class="project-detail__header">
-            <button type="button" class="project-detail__back" title="Back to inbox" @click="emit('back')">
-                <i class="pi pi-arrow-left" /> back
-            </button>
-            <h2>{{ project }} — detail</h2>
-            <span v-if="meta?.running" class="project-detail__local is-running"><i class="pi pi-desktop" /> running</span>
-            <span v-else-if="meta?.local" class="project-detail__local"><i class="pi pi-desktop" /> local</span>
-            <!-- #395 (q3bfvn): the running loop's activity + presence as CSS tags. -->
-            <template v-if="meta?.running && meta.running_state">
-                <span class="ld-tag" :class="activityClass(meta.running_state)">{{ meta.running_state }}</span>
-                <span class="ld-tag" :class="presenceClass(meta.running_human, meta.running_human_word)">{{ presenceWord(meta.running_human, meta.running_human_word) }}</span>
-            </template>
-            <div class="project-detail__actions">
+        <DetailHeader
+            :crumbs="[{ label: 'Inbox' }]"
+            :current="project"
+            title="Detail"
+            @crumb="emit('back')"
+        >
+            <template #actions>
+                <span v-if="meta?.running" class="project-detail__local is-running"><i class="pi pi-desktop" /> running</span>
+                <span v-else-if="meta?.local" class="project-detail__local"><i class="pi pi-desktop" /> local</span>
+                <!-- #395 (q3bfvn): the running loop's activity + presence as CSS tags. -->
+                <template v-if="meta?.running && meta.running_state">
+                    <span class="ld-tag" :class="activityClass(meta.running_state)">{{ meta.running_state }}</span>
+                    <span class="ld-tag" :class="presenceClass(meta.running_human, meta.running_human_word)">{{ presenceWord(meta.running_human, meta.running_human_word) }}</span>
+                </template>
                 <button type="button" class="project-detail__refresh" title="Refresh" @click="load">
                     <i class="pi pi-refresh" />
                 </button>
-            </div>
-        </header>
+            </template>
+        </DetailHeader>
 
         <div v-if="loading" class="aiball-empty">Loading…</div>
         <div v-else-if="error" class="aiball-empty" style="color: var(--p-red-500)">{{ error }}</div>
@@ -246,15 +248,7 @@ async function doStopLoop(consumer_id: string) {
     flex-direction: column;
     gap: 1rem;
 }
-.project-detail__header {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-}
-.project-detail__header h2 {
-    margin: 0;
-    font-size: 1.3rem;
-}
+/* En-tête (breadcrumb + titre) → <DetailHeader> (style.css). */
 .project-detail__local {
     display: inline-flex;
     align-items: center;
@@ -293,21 +287,6 @@ async function doStopLoop(consumer_id: string) {
 .ld-tag--wait { background: var(--p-yellow-500, #eab308); color: #1f2937; }
 .ld-tag--stop { background: var(--p-red-500, #ef4444); color: #fff; }
 .ld-tag--offline { background: transparent; color: var(--p-surface-400, #9ca3af); border: 1px solid var(--p-surface-300, #d1d5db); }
-.project-detail__back {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    background: transparent;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.4rem;
-    padding: 0.25rem 0.55rem;
-    color: var(--p-text-color);
-    cursor: pointer;
-    font: inherit;
-    font-size: 0.85rem;
-}
-.project-detail__back:hover { background: var(--p-surface-100); }
-.project-detail__actions { margin-left: auto; }
 .project-detail__refresh {
     background: transparent;
     border: 0;

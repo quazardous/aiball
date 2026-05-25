@@ -15,6 +15,7 @@ import { useToast } from "primevue/usetoast";
 import { api, type NodeView } from "../lib/api";
 import DataList from "./ui/DataList.vue";
 import FieldRow from "./ui/FieldRow.vue";
+import DetailHeader from "./ui/DetailHeader.vue";
 
 const props = defineProps<{ nodeId: string }>();
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -92,20 +93,12 @@ async function doRevoke(n: NodeView): Promise<void> {
 
 <template>
     <div class="node-detail">
-        <nav class="node-detail__crumbs">
-            <a
-                href="/nodes"
-                class="node-detail__crumb-link"
-                @click.prevent="emit('close')"
-            >
-                <i class="pi pi-arrow-left" /> Proxy nodes
-            </a>
-            <span class="node-detail__crumb-sep">/</span>
-            <span class="node-detail__crumb-current">{{ props.nodeId }}</span>
-        </nav>
-        <header class="node-detail__head">
-            <h2 class="node-detail__title">Node details</h2>
-        </header>
+        <DetailHeader
+            :crumbs="[{ label: 'Proxy nodes' }]"
+            :current="props.nodeId"
+            title="Node details"
+            @crumb="emit('close')"
+        />
 
         <div v-if="loading" class="aiball-empty">Loading…</div>
         <div v-else-if="error" class="aiball-empty node-detail__error">
@@ -168,38 +161,8 @@ async function doRevoke(n: NodeView): Promise<void> {
     gap: 1rem;
     max-width: 40rem;
 }
-.node-detail__head {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-}
-.node-detail__crumbs {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.9rem;
-}
-.node-detail__crumb-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    color: var(--p-primary-color);
-    text-decoration: none;
-}
-.node-detail__crumb-link:hover {
-    text-decoration: underline;
-}
-.node-detail__crumb-sep {
-    color: var(--p-text-muted-color);
-}
-.node-detail__crumb-current {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.85rem;
-    color: var(--p-text-muted-color);
-}
-.node-detail__title {
-    margin: 0;
-}
+/* En-tête (breadcrumb + titre) → <DetailHeader> / `.aiball-detail-head*`
+   + `.aiball-breadcrumb*` (style.css). */
 .node-detail__error {
     color: var(--p-red-500);
 }

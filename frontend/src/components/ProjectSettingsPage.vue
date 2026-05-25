@@ -4,6 +4,7 @@ import Select from "primevue/select";
 import { api, type Strategy } from "../lib/api";
 import { STRATEGY_OPTIONS } from "../lib/labels";
 import ManagedConfig from "./ManagedConfig.vue";
+import DetailHeader from "./ui/DetailHeader.vue";
 
 const props = defineProps<{
     project: string;
@@ -73,20 +74,12 @@ onMounted(load);
 
 <template>
     <div class="project-settings">
-        <header class="project-settings__header">
-            <!-- #B.161 mobile: back button to return to the inbox.
-                 Always rendered; styling makes it tight so it doesn't
-                 dominate on desktop either. -->
-            <button
-                type="button"
-                class="project-settings__back"
-                title="Back to inbox"
-                @click="emit('back')"
-            >
-                <i class="pi pi-arrow-left" /> back
-            </button>
-            <h2>{{ project }} — settings</h2>
-        </header>
+        <DetailHeader
+            :crumbs="[{ label: 'Inbox' }]"
+            :current="project"
+            title="Settings"
+            @crumb="emit('back')"
+        />
 
         <div v-if="loading" class="aiball-empty">Loading settings…</div>
         <div v-else-if="error" class="aiball-empty" style="color: var(--p-red-500)">
@@ -153,31 +146,7 @@ onMounted(load);
     flex-direction: column;
     gap: 1rem;
 }
-.project-settings__header {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-}
-.project-settings__header h2 {
-    margin: 0;
-    font-size: 1.3rem;
-}
-.project-settings__back {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    background: transparent;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.4rem;
-    padding: 0.25rem 0.55rem;
-    color: var(--p-text-color);
-    cursor: pointer;
-    font: inherit;
-    font-size: 0.85rem;
-}
-.project-settings__back:hover {
-    background: var(--p-surface-100);
-}
+/* En-tête (breadcrumb + titre) → <DetailHeader> (style.css). */
 .project-settings__section {
     padding: 1rem 1.2rem;
     border: 1px solid var(--p-content-border-color);
@@ -222,13 +191,6 @@ onMounted(load);
 @media (max-width: 720px) {
     .project-settings {
         gap: 0.6rem;
-    }
-    .project-settings__header h2 {
-        font-size: 1.05rem;
-    }
-    .project-settings__back {
-        padding: 0.2rem 0.4rem;
-        font-size: 0.78rem;
     }
     .project-settings__section {
         padding: 0.7rem 0.8rem;
