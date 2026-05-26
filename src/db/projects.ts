@@ -749,6 +749,59 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
  * pings are wiped explicitly (no FK). Child sub-tickets with parent_ticket_id
  * pointing at a purged row become top-level (ON DELETE SET NULL).
  */
+/**
+ * #476 david : "ajout d'un zone information global — avec la taille des
+ * data / image etc les infos etc". Daemon-wide totals surfaced in
+ * Settings > General > Info zone. Read-only aggregator, single SQL
+ * round-trip per metric. The fs-side (db file size + uploads dir
+ * total) is sampled in the api layer where the paths live.
+ */
+export function getGlobalCounts(): {
+    projects: number;
+    tickets_total: number;
+    tickets_open: number;
+    tickets_closed: number;
+    messages: number;
+} {
+    const db = getDb();
+    const projN = db.select({ n: sql<number>`COUNT(*)` })
+        .from(schema.projects).get();
+    const tkN = db.select({ n: sql<number>`COUNT(*)` })
+        .from(schema.tickets)
+        .where(eq(schema.tickets.status, "approved")).get();
+    const msgN = db.select({ n: sql<number>`COUNT(*)` })
+        .from(schema.messages).get();
+    // closed_count = latest lifecycle event per ticket is ticket_closed.
+    // Walk events once (asc by id) + bucket per-ticket; same shape as the
+    // logic in getProjectStatsRich, just global.
+    const events = db.select({
+        ticket_id: schema.messages.ticketId,
+        kind: schema.messages.kind,
+        id: schema.messages.id,
+    })
+        .from(schema.messages)
+        .where(and(
+            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
+            eq(schema.messages.status, "approved"),
+        ))
+        .orderBy(asc(schema.messages.id))
+        .all();
+    const closedById = new Map<number, boolean>();
+    for (const ev of events) {
+        closedById.set(ev.ticket_id, ev.kind === "ticket_closed");
+    }
+    let closed = 0;
+    for (const v of closedById.values()) if (v) closed++;
+    const total = Number(tkN?.n ?? 0);
+    return {
+        projects: Number(projN?.n ?? 0),
+        tickets_total: total,
+        tickets_open: total - closed,
+        tickets_closed: closed,
+        messages: Number(msgN?.n ?? 0),
+    };
+}
+
 export function purgeOldClosedTickets(
     project: string,
     olderThanDays: number,

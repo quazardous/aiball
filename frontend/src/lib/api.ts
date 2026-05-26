@@ -626,6 +626,25 @@ export const api = {
             `/api/tickets/purge`,
             { older_than_days },
         ),
+    // #476 david : "ajout d'un zone information global — avec la taille des
+    // data / image etc les infos etc". Daemon-wide info zone (version, db
+    // size, uploads size, totals) rendered in Settings > General.
+    getInfo: () =>
+        req<{
+            version: string;
+            uptime_sec: number;
+            home: string;
+            db: { path: string; bytes: number };
+            uploads: { path: string; bytes: number; files: number };
+            counts: {
+                projects: number;
+                tickets_total: number;
+                tickets_open: number;
+                tickets_closed: number;
+                messages: number;
+            };
+            ts: string;
+        }>("GET", "/api/info"),
     projectStatsRich: (name: string) =>
         req<unknown>(
             "GET",

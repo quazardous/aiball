@@ -17,16 +17,17 @@ import {
     deleteProject,
     getProjectStatsRich,
     purgeOldClosedTickets,
+    getGlobalCounts,
     getProjectStats,
     isHuman,
     type Strategy,
 } from "./db.js";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync, statSync, readdirSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { installRoot } from "./claude-loop/state.js";
 import { broadcast } from "./ws.js";
-import { outboxPath } from "./paths.js";
+import { outboxPath, AIBALL_HOME, DB_PATH, UPLOADS_DIR } from "./paths.js";
 import { loadLaunchers, getLauncher } from "./launchers.js";
 import { searchMessages } from "./search.js";
 import { bearerAuth } from "./auth.js";
@@ -234,6 +235,47 @@ api.post("/projects/:name/purge", (req, res) => {
  * place + emits the existing `project_purged` event per touched project
  * so other open tabs refresh counters incrementally as it sweeps.
  */
+/**
+ * #476 david : "ajout d'un zone information global — avec la taille des
+ * data / image etc les infos etc". Daemon-wide info surfaced in Settings
+ * > General > Info zone : aiball version, uptime, DB file size,
+ * uploads directory size + file count, and global counts (projects /
+ * tickets / messages). Read-only, single round-trip, called once on
+ * panel mount.
+ */
+function dirSize(path: string): { bytes: number; files: number } {
+    let bytes = 0;
+    let files = 0;
+    try {
+        for (const ent of readdirSync(path, { withFileTypes: true })) {
+            const child = join(path, ent.name);
+            if (ent.isDirectory()) {
+                const sub = dirSize(child);
+                bytes += sub.bytes;
+                files += sub.files;
+            } else if (ent.isFile()) {
+                try { bytes += statSync(child).size; files += 1; } catch { /* race : file vanished */ }
+            }
+        }
+    } catch { /* dir absent — return zeros */ }
+    return { bytes, files };
+}
+api.get("/info", (_req, res) => {
+    const counts = getGlobalCounts();
+    let dbBytes = 0;
+    try { dbBytes = statSync(DB_PATH).size; } catch { /* db absent — keep 0 */ }
+    const uploads = dirSize(UPLOADS_DIR);
+    res.json({
+        version: AIBALL_VERSION,
+        uptime_sec: Math.floor(process.uptime()),
+        home: AIBALL_HOME,
+        db: { path: DB_PATH, bytes: dbBytes },
+        uploads: { path: UPLOADS_DIR, bytes: uploads.bytes, files: uploads.files },
+        counts,
+        ts: new Date().toISOString(),
+    });
+});
+
 api.post("/tickets/purge", (req, res) => {
     const raw = (req.body ?? {}) as { older_than_days?: unknown };
     const days = typeof raw.older_than_days === "number" && raw.older_than_days > 0

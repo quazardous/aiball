@@ -6,7 +6,7 @@
 // Stays a thin presentational panel: state is owned by App.vue (strategy kept in
 // sync with the WS `strategy_changed`; notif state from useNotifications),
 // passed in + emitted back like HeaderBar did.
-import { ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import Button from "primevue/button";
 import { useConfirm } from "primevue/useconfirm";
 import { api, type Strategy } from "../lib/api";
@@ -14,6 +14,8 @@ import { bus } from "../lib/bus";
 import { useNotify } from "../lib/notify";
 import ManagedConfig from "./ManagedConfig.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
+
+type InfoPayload = Awaited<ReturnType<typeof api.getInfo>>;
 
 type LayoutMode = "spread" | "narrow";
 
@@ -45,6 +47,40 @@ const confirmDialog = useConfirm();
 const notify = useNotify();
 const purgingAll = ref(false);
 
+// #476 david : info zone. Fetched once at mount + on demand via refresh.
+// Pure read endpoint, light enough to refetch after a purge sweep to
+// show the updated counts.
+const info = ref<InfoPayload | null>(null);
+const infoLoading = ref(false);
+const infoError = ref<string | null>(null);
+async function loadInfo() {
+    infoLoading.value = true;
+    infoError.value = null;
+    try { info.value = await api.getInfo(); }
+    catch (e) { infoError.value = (e as Error).message; }
+    finally { infoLoading.value = false; }
+}
+onMounted(loadInfo);
+
+function fmtBytes(n: number): string {
+    if (n < 1024) return `${n} B`;
+    const units = ["KiB", "MiB", "GiB", "TiB"];
+    let v = n / 1024;
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`;
+}
+function fmtUptime(sec: number): string {
+    if (sec < 60) return `${sec}s`;
+    const m = Math.floor(sec / 60);
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h${m % 60 ? ` ${m % 60}m` : ""}`;
+    const d = Math.floor(h / 24);
+    return `${d}d${h % 24 ? ` ${h % 24}h` : ""}`;
+}
+const totalDataBytes = computed(() => (info.value ? info.value.db.bytes + info.value.uploads.bytes : 0));
+
 function confirmPurgeAll() {
     confirmDialog.require({
         header: "Purge old closed tickets — ALL projects",
@@ -75,6 +111,10 @@ async function doPurgeAll() {
         }
         bus.emit("projects.refresh");
         bus.emit("inbox.refresh");
+        // #476 : refetch info so the size/counts in the Info zone reflect
+        // the purge — feels weird otherwise (the user just purged 50
+        // tickets, the counters in the same panel still show the old value).
+        void loadInfo();
     } catch (e) {
         notify.error("Purge failed", { detail: (e as Error).message });
     } finally {
@@ -199,6 +239,63 @@ async function doPurgeAll() {
             <ManagedConfig />
         </section>
 
+        <!-- #476 david : "ajout d'un zone information global — avec la
+             taille des data / image etc les infos etc". Daemon-wide
+             stats read-only. Fetched on mount + on demand via the
+             refresh icon ; also re-fetched after a global purge so the
+             counters reflect what was just freed. -->
+        <section class="general-settings__section general-settings__info">
+            <div class="general-settings__info-head">
+                <h3 class="general-settings__heading">Info</h3>
+                <button
+                    type="button"
+                    class="general-settings__info-refresh"
+                    title="Refresh"
+                    :disabled="infoLoading"
+                    @click="loadInfo"
+                >
+                    <i :class="infoLoading ? 'pi pi-spin pi-spinner' : 'pi pi-refresh'" />
+                </button>
+            </div>
+            <p class="general-settings__hint">
+                Daemon-wide footprint and totals. Read-only.
+            </p>
+            <div v-if="infoError" class="aiball-empty" style="color: var(--p-red-500)">
+                {{ infoError }}
+            </div>
+            <dl v-else-if="info" class="general-settings__info-grid">
+                <dt>aiball version</dt>
+                <dd><code>{{ info.version }}</code></dd>
+                <dt>Uptime</dt>
+                <dd>{{ fmtUptime(info.uptime_sec) }}</dd>
+                <dt>Home</dt>
+                <dd><code class="general-settings__path">{{ info.home }}</code></dd>
+                <dt>Database</dt>
+                <dd>
+                    <strong>{{ fmtBytes(info.db.bytes) }}</strong>
+                    <small class="general-settings__path">{{ info.db.path }}</small>
+                </dd>
+                <dt>Uploads</dt>
+                <dd>
+                    <strong>{{ fmtBytes(info.uploads.bytes) }}</strong>
+                    <small>({{ info.uploads.files }} file{{ info.uploads.files === 1 ? "" : "s" }})</small>
+                    <small class="general-settings__path">{{ info.uploads.path }}</small>
+                </dd>
+                <dt>Total on disk</dt>
+                <dd><strong>{{ fmtBytes(totalDataBytes) }}</strong></dd>
+                <dt>Projects</dt>
+                <dd>{{ info.counts.projects }}</dd>
+                <dt>Tickets</dt>
+                <dd>
+                    <strong>{{ info.counts.tickets_total }}</strong>
+                    <small>({{ info.counts.tickets_open }} open · {{ info.counts.tickets_closed }} closed)</small>
+                </dd>
+                <dt>Messages</dt>
+                <dd>{{ info.counts.messages }}</dd>
+            </dl>
+            <div v-else class="aiball-empty">Loading info…</div>
+        </section>
+
         <!-- #475 david : "danger zone globale pour purger les tickets fermés
              depuis + 1 an". Same look as the per-project Danger zone, but
              sweeps EVERY project at once. Single button — Delete-project
@@ -293,6 +390,54 @@ async function doPurgeAll() {
     margin-left: auto;
     color: var(--p-primary-color);
 }
+/* #476 : Info zone — read-only stats. <dl> grid, monospace paths. */
+.general-settings__info-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.general-settings__info-head .general-settings__heading {
+    flex: 1;
+}
+.general-settings__info-refresh {
+    background: transparent;
+    border: 0;
+    color: var(--p-text-muted-color);
+    cursor: pointer;
+    padding: 0.3rem 0.5rem;
+    border-radius: 0.3rem;
+}
+.general-settings__info-refresh:hover { background: var(--p-surface-100); }
+.general-settings__info-refresh:disabled { cursor: default; opacity: 0.6; }
+.general-settings__info-grid {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: 1rem;
+    row-gap: 0.4rem;
+    margin: 0;
+    font-size: 0.88rem;
+}
+.general-settings__info-grid dt {
+    color: var(--p-text-muted-color);
+    font-weight: 500;
+}
+.general-settings__info-grid dd {
+    margin: 0;
+    color: var(--p-text-color);
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.general-settings__info-grid dd small {
+    color: var(--p-text-muted-color);
+    font-size: 0.78rem;
+}
+.general-settings__path {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.78rem;
+    overflow-wrap: anywhere;
+}
+
 /* #475 : Danger zone — même rendu que ProjectOverviewPage's
    .project-overview__danger (cadre rouge tinté). */
 .general-settings__danger {

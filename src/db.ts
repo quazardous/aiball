@@ -115,6 +115,7 @@ export {
     listProjectsDetailed,
     isRootActive,
     purgeOldClosedTickets,
+    getGlobalCounts,
 } from "./db/projects.js";
 
 export {
