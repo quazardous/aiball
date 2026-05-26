@@ -41,6 +41,7 @@ import { pingsRouter } from "./api/pings.js";
 import { readTrackingRouter } from "./api/read-tracking.js";
 import { rulesRouter } from "./api/rules.js";
 import { automationRouter } from "./api/automation.js";
+import { agentsRouter } from "./api/agents.js";
 import { subscriptionsRouter } from "./api/subscriptions.js";
 import { tagsRouter } from "./api/tags.js";
 import { ticketsRouter } from "./api/tickets.js";
@@ -372,6 +373,9 @@ api.use(workFiltersRouter);
 // so the legacy `/rules` + `/work-filters` keep serving their existing UI
 // sections until slice 3 migrates them onto this engine).
 api.use(automationRouter);
+// #464 — live tmux/psmux pane mirror (SSE). Read-only ; one stream per
+// open browser tab. Auth + bearer already gated upstream.
+api.use(agentsRouter);
 api.use(managedConfigRouter);
 api.use(agentHelpersRouter);
 

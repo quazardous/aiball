@@ -30,6 +30,14 @@ import { activityClass, presenceClass, presenceWord } from "../lib/consumer-stat
 import { relativeTime } from "../lib/format";
 import FieldRow from "./ui/FieldRow.vue";
 import AdminDetailLayout from "./ui/AdminDetailLayout.vue";
+import TerminalView from "./TerminalView.vue";
+
+// #464 — third tab "Terminal" (live tmux/psmux pane mirror) wired in
+// below. We model the active tab as a ref so the TerminalView only
+// mounts when its tab is selected — keeps the SSE connection lazy so
+// just OPENING the consumer detail page doesn't spawn capture-pane
+// every 1s for every consumer the operator opens.
+const activeTab = ref<"overview" | "edit" | "terminal">("overview");
 
 const props = defineProps<{ consumerId: string }>();
 const emit = defineEmits<{
@@ -206,10 +214,14 @@ async function sendPrompt() {
              chaque tab garde son markup actuel ; la migration vers les
              layouts dédiés se fera là-bas. -->
         <template v-else-if="original">
-            <Tabs value="overview">
+            <Tabs v-model:value="activeTab">
                 <TabList>
                     <Tab value="overview">Overview</Tab>
                     <Tab value="edit">Edit</Tab>
+                    <!-- #464 — Terminal tab shown only for agent consumers. Other
+                         consumer kinds (human, …) don't have a claude-loop
+                         session to mirror. -->
+                    <Tab v-if="original.kind === 'agent'" value="terminal">Terminal</Tab>
                 </TabList>
                 <TabPanels>
                     <TabPanel value="overview">
@@ -383,6 +395,19 @@ async function sendPrompt() {
                                     @click="save"
                                 />
                             </div>
+                        </div>
+                    </TabPanel>
+
+                    <!-- #464 — Terminal tab : live tmux/psmux pane mirror.
+                         Lazy : the TerminalView only mounts when this tab is
+                         active, so opening the consumer detail page doesn't
+                         open an SSE per consumer the operator browses. -->
+                    <TabPanel v-if="original.kind === 'agent'" value="terminal">
+                        <div class="consumer-edit__tab">
+                            <TerminalView
+                                v-if="activeTab === 'terminal'"
+                                :agent-name="original.consumer_id"
+                            />
                         </div>
                     </TabPanel>
                 </TabPanels>

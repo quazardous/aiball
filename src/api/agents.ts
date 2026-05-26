@@ -1,0 +1,179 @@
+/**
+ * #464 — agent live-pane mirror.
+ *
+ * `GET /api/agents/:name/pane/stream` opens a Server-Sent-Events stream
+ * that pushes a tmux/psmux `capture-pane` snapshot of the agent's loop
+ * session every ~1s. Read-only (slice 1) — no keystroke forwarding, no
+ * scroll back, just the current visible pane content as plain text.
+ *
+ * Why SSE : single-direction (server → client), survives long-lived
+ * connections natively, and aiball's daemon already runs Express +
+ * `Connection: keep-alive`. No new transport to plumb (WS stays for
+ * bidirectional events).
+ *
+ * Cross-platform — david `7cef3d` : "faut que ça marche avec psmux aussi".
+ * We shell out to `${MUX_CMD}` (claude-loop's tmux/psmux indirection from
+ * `src/claude-loop/state.ts:29`), so on a psmux host the `tmux` alias on
+ * PATH transparently routes here. ANSI escapes (the `-e` capture flag) are
+ * NOT requested : keeps the payload homogeneous across tmux and psmux
+ * (which doesn't necessarily support `-e`), and lets the UI render the
+ * pane as plain `<pre>` text — no xterm.js dep (~200KB saved).
+ *
+ * Auth : the existing `bearerAuth` middleware gates the whole `/api/*`
+ * tree before we land here. Browser callers come through with the
+ * session cookie, agent callers with a bearer — both work without any
+ * additional path.
+ */
+import { Router, type Request, type Response } from "express";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { MUX_CMD, tmuxName } from "../claude-loop/state.js";
+import { getConsumer } from "../db.js";
+
+export const agentsRouter = Router();
+
+/**
+ * #464 — resolve a consumer to its live claude-loop name.
+ *
+ * The loop dir lives at `~/.claude-loop/<loop_name>/` (overridable via
+ * `CLAUDE_LOOP_STATE_ROOT`) ; each carries a `plate.json` with the loop's
+ * cwd. The consumer record stores its own `cwd` (pushed via the state
+ * heartbeat, db/consumers.ts), so we match the two : a consumer's loop
+ * is the dir whose plate.cwd == consumer.cwd.
+ *
+ * Why path-keyed instead of name-keyed : claude-loop names are
+ * arbitrary (often `cl-<project>-<agent>`) and don't necessarily match
+ * the consumer_id. The cwd, on the other hand, is one canonical key
+ * already established by claude-loop's own lock + the consumer
+ * heartbeat. Same identity dimension on both sides.
+ *
+ * Returns null when no live loop matches.
+ */
+function resolveLoopName(cwd: string): string | null {
+    const stateRoot = process.env.CLAUDE_LOOP_STATE_ROOT
+        ?? join(homedir(), ".claude-loop");
+    if (!existsSync(stateRoot)) return null;
+    let entries: string[];
+    try { entries = readdirSync(stateRoot); } catch { return null; }
+    for (const dir of entries) {
+        const platePath = join(stateRoot, dir, "plate.json");
+        if (!existsSync(platePath)) continue;
+        try {
+            const plate = JSON.parse(readFileSync(platePath, "utf8")) as { cwd?: string };
+            if (plate.cwd === cwd) return dir;
+        } catch {
+            /* ignore malformed plate */
+        }
+    }
+    return null;
+}
+
+const POLL_INTERVAL_MS = 1000;
+/** Maximum length of an agent name we'll plumb into a shell command. Defensive
+ *  bound — claude-loop names are short, this rejects pathological inputs
+ *  early without bothering tmux. */
+const MAX_NAME_LEN = 64;
+/** Soft cap on a single capture payload — pane content is at most a few KB
+ *  in practice but if something explodes we don't want to spam the SSE
+ *  channel with megabyte frames. */
+const MAX_PAYLOAD_BYTES = 64_000;
+
+agentsRouter.get("/agents/:name/pane/stream", (req: Request, res: Response) => {
+    const rawName = req.params.name;
+    const consumerId = typeof rawName === "string" ? rawName : "";
+    if (!consumerId || consumerId.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(consumerId)) {
+        return res.status(400).json({ error: "bad consumer id" });
+    }
+    // Resolve consumer → cwd → loop name. The URL carries the consumer id
+    // (what the UI knows about) ; the tmux session name is a runtime
+    // construct claude-loop assigns at start. We bridge the two via cwd.
+    const consumer = getConsumer(consumerId);
+    if (!consumer) {
+        return res.status(404).json({ error: `consumer not found : ${consumerId}` });
+    }
+    if (!consumer.cwd) {
+        return res.status(404).json({
+            error: `consumer has no cwd — needs an active claude-loop heartbeat first`,
+        });
+    }
+    const loopName = resolveLoopName(consumer.cwd);
+    if (!loopName) {
+        return res.status(404).json({
+            error: `no claude-loop dir matches cwd ${consumer.cwd}`,
+        });
+    }
+    const target = `${tmuxName(loopName)}.0`;
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no"); // disable buffering on nginx-style proxies
+    res.flushHeaders?.();
+
+    // Suggested reconnect delay if the connection drops — browsers honour this.
+    res.write("retry: 1500\n\n");
+
+    let stopped = false;
+    function close() {
+        if (stopped) return;
+        stopped = true;
+        clearInterval(iv);
+        try { res.end(); } catch { /* already closed */ }
+    }
+
+    function tick() {
+        if (stopped) return;
+        // Async spawn so a slow capture doesn't block the event loop. capture-pane
+        // is normally instant ; we still cap the lifetime + payload size.
+        const child = spawn(MUX_CMD, ["capture-pane", "-p", "-t", target], { stdio: ["ignore", "pipe", "pipe"] });
+        const chunks: Buffer[] = [];
+        let total = 0;
+        let truncated = false;
+        child.stdout.on("data", (b: Buffer) => {
+            if (truncated) return;
+            total += b.length;
+            if (total > MAX_PAYLOAD_BYTES) {
+                truncated = true;
+                chunks.push(b.slice(0, Math.max(0, MAX_PAYLOAD_BYTES - (total - b.length))));
+                try { child.kill("SIGTERM"); } catch { /* noop */ }
+            } else {
+                chunks.push(b);
+            }
+        });
+        child.on("error", (e) => {
+            if (stopped) return;
+            send({ error: `spawn failed : ${e.message}` }, "error");
+        });
+        child.on("close", (code) => {
+            if (stopped) return;
+            if (code !== 0 && !truncated) {
+                send({ error: `capture-pane exited ${code}`, target }, "error");
+                return;
+            }
+            const text = Buffer.concat(chunks).toString("utf8");
+            send({ text, target, truncated, captured_at: new Date().toISOString() });
+        });
+    }
+
+    function send(payload: unknown, event?: string) {
+        if (stopped) return;
+        const lines: string[] = [];
+        if (event) lines.push(`event: ${event}`);
+        lines.push(`data: ${JSON.stringify(payload)}`);
+        try {
+            res.write(lines.join("\n") + "\n\n");
+        } catch {
+            close();
+        }
+    }
+
+    // First frame immediately, then every POLL_INTERVAL_MS.
+    tick();
+    const iv = setInterval(tick, POLL_INTERVAL_MS);
+
+    req.on("close", close);
+    req.on("error", close);
+    res.on("error", close);
+});
