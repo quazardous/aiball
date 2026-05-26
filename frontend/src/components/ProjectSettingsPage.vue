@@ -151,7 +151,16 @@ onMounted(load);
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
-    max-width: 38rem;
+    /* #474 david `eppmcx` : "la zone Project config est moin large que
+       Danger-Zone". Une `max-width: 38rem` historique gardait les
+       sections étroites sur desktop, alors que la Danger zone (rendue
+       par ProjectOverviewPage en frère du composant) prend toute la
+       largeur du conteneur. Sur la page Settings du Project Overview
+       les 3 cards (Moderation strategy / Project config / Danger zone)
+       doivent prendre la même largeur — on supprime la contrainte ici
+       (le AdminDashboardLayout cap déjà le conteneur). La media query
+       720px en dessous ajustait déjà à `max-width: none` sur mobile :
+       elle devient redondante mais reste inoffensive. */
 }
 .project-settings__section h3 {
     margin: 0;
