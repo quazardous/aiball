@@ -172,19 +172,28 @@ function openProjectPage(p: string, page: ProjectPage) {
     openTicketId.value = null;
 }
 
-// #462 — gate the `.aiball-main--wide` modifier. Default narrow (980px) is
-// preserved ONLY for the compose form (a narrow column of inputs reads as a
-// focused entry surface, NOT a dashboard). Everything else — inbox list,
-// admin panels, dashboard pages, AND the ticket thread (#462 david `b33tdr`
-// "manque la page détail ticket", reversed my initial guess that long-form
-// reads better narrow) — gets the wide cap so the content uses the available
-// screen real estate instead of leaving large empty gutters on a 1280+
-// viewport.
+// #462 — user-toggleable layout density, persisted in localStorage. `spread`
+// (default) uses min(95vw, 1600px) so the inbox / admin panels / thread view
+// use the available screen real estate; `narrow` reverts to the historical
+// 980px cap for users who prefer the tighter column. Surfaced in Settings →
+// General (david `yag539`: "ajoute une option ... entre spread et comme
+// avant").
+// The compose form is ALWAYS narrow regardless of the user preference (a
+// wide column of inputs doesn't read as a dashboard); if david wants compose
+// to also follow the preference, just drop the early-return below.
 // Form-style detail pages (Consumer/Node) already self-cap to 40rem via
 // `.aiball-detail-page`, so widening the parent is a no-op for them.
+type LayoutMode = "spread" | "narrow";
+const layoutMode = ref<LayoutMode>(
+    localStorage.getItem("aiball.layoutMode") === "narrow" ? "narrow" : "spread",
+);
+function setLayoutMode(m: LayoutMode): void {
+    layoutMode.value = m;
+    localStorage.setItem("aiball.layoutMode", m);
+}
 const aiballMainWide = computed((): boolean => {
-    if (panel.value === "compose") return false; // compose form → narrow
-    return true;
+    if (panel.value === "compose") return false; // compose form → always narrow
+    return layoutMode.value === "spread";
 });
 
 // Bulk-selection state + dispatch moved to lib/ticket-actions.ts as
@@ -721,9 +730,11 @@ watch(showSnoozed, (v) => {
                     :strategy-options="strategyOptions"
                     :notif-allowed="notifAllowed"
                     :notif-muted="notifMuted"
+                    :layout-mode="layoutMode"
                     @update:strategy="changeStrategy"
                     @enable-notif="ensureNotifPermission"
                     @toggle-mute="toggleMute"
+                    @update:layout-mode="setLayoutMode"
                 />
                 <ProjectsPanel
                     v-else-if="panel === 'projects'"

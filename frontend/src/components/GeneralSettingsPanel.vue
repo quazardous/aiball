@@ -10,6 +10,8 @@ import type { Strategy } from "../lib/api";
 import ManagedConfig from "./ManagedConfig.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
 
+type LayoutMode = "spread" | "narrow";
+
 defineProps<{
     strategy: Strategy;
     strategyOptions: { label: string; value: Strategy; hint: string; icon: string }[];
@@ -18,11 +20,15 @@ defineProps<{
     // silenced them in-app even though permission is granted.
     notifAllowed: boolean;
     notifMuted: boolean;
+    // #462: per-device layout density. `spread` = wide cap (default), `narrow`
+    // = historical 980px cap. Owned by App.vue, persisted in localStorage.
+    layoutMode: LayoutMode;
 }>();
 const emit = defineEmits<{
     (e: "update:strategy", v: Strategy): void;
     (e: "enable-notif"): void;
     (e: "toggle-mute"): void;
+    (e: "update:layout-mode", v: LayoutMode): void;
 }>();
 </script>
 
@@ -88,6 +94,45 @@ const emit = defineEmits<{
                         <span class="general-settings__option-label">{{ notifMuted ? "Notifications muted" : "Notifications on" }}</span>
                         <span class="general-settings__option-desc">{{ notifMuted ? "Click to unmute on this device." : "Click to mute on this device." }}</span>
                     </span>
+                </button>
+            </div>
+        </section>
+
+        <!-- #462: layout density preference, per-device. Spread (default) uses
+             the available screen width; Narrow reverts to the historical 980px
+             column for users who prefer the tighter reading experience. -->
+        <section class="general-settings__section">
+            <h3 class="general-settings__heading">Layout density</h3>
+            <p class="general-settings__hint">
+                How wide content uses the screen. Saved per device — each browser
+                keeps its own preference. The compose form stays narrow either way.
+            </p>
+            <div class="general-settings__options">
+                <button
+                    type="button"
+                    class="general-settings__option"
+                    :class="{ 'general-settings__option--current': layoutMode === 'spread' }"
+                    @click="emit('update:layout-mode', 'spread')"
+                >
+                    <i class="pi pi-arrows-h general-settings__option-icon" />
+                    <span class="general-settings__option-text">
+                        <span class="general-settings__option-label">Spread</span>
+                        <span class="general-settings__option-desc">Use the full width (up to 1600px). Best for wide screens.</span>
+                    </span>
+                    <i v-if="layoutMode === 'spread'" class="pi pi-check general-settings__option-check" />
+                </button>
+                <button
+                    type="button"
+                    class="general-settings__option"
+                    :class="{ 'general-settings__option--current': layoutMode === 'narrow' }"
+                    @click="emit('update:layout-mode', 'narrow')"
+                >
+                    <i class="pi pi-align-center general-settings__option-icon" />
+                    <span class="general-settings__option-text">
+                        <span class="general-settings__option-label">Narrow</span>
+                        <span class="general-settings__option-desc">Historical 980px centred column. Tighter reading.</span>
+                    </span>
+                    <i v-if="layoutMode === 'narrow'" class="pi pi-check general-settings__option-check" />
                 </button>
             </div>
         </section>
