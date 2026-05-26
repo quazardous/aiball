@@ -24,11 +24,24 @@ import { useConfirm } from "primevue/useconfirm";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+// #472 david `5uwgev` : on réutilise les helpers de tag déjà partagés avec
+// ConsumerEditPage / ProjectDetailPage pour rendre l'état claude-loop dans
+// la barre du terminal — même rendu, pas de nouvelle barre.
+import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
 
 const props = defineProps<{
     /** Consumer/agent id — the daemon constructs `cl-<name>` to target the
      *  claude-loop tmux session. */
     agentName: string;
+    /** #472 david `5uwgev`/`fw9cpd` : claude-loop activity (boot/idle/busy)
+     *  + human-presence word (stop/wait/ask/loop) + presence flag. Affichés
+     *  comme ld-tags dans la barre du terminal pour que l'opérateur voie
+     *  ce qui se passe sans switcher de tab. Optionnels — les tags ne se
+     *  rendent que si fournis (ProjectDetailPage les pousse, n'importe
+     *  quel autre futur conteneur peut juste passer null). */
+    loopState?: string | null;
+    humanPresent?: boolean | null;
+    humanWord?: string | null;
 }>();
 
 const containerRef = ref<HTMLDivElement | null>(null);
@@ -45,8 +58,28 @@ const isFullscreen = ref<boolean>(false);
 // → make the unlock deliberate, not a stray click. Subsequent toggles
 // within the same tab session bypass the confirm (it's a safety net for
 // the first time, not a per-click prompt).
-const isReadWrite = ref<boolean>(false);
-const hasConfirmedRw = ref<boolean>(false);
+//
+// #472 david `fw9cpd` "parfois le terminal se refresh et on perd l'état
+// d'édition" : ConsumerEditPage utilise `v-if="activeTab === 'terminal'"`
+// pour lazy-mount le TerminalView → switcher d'onglet le démonte. Sans
+// persistance, on revenait toujours en read-only + le confirm redemandait.
+// On persiste les 2 refs dans sessionStorage scopé par agentName : la
+// durée de vie est l'onglet du navigateur (pas localStorage qui survit
+// aux fermetures de tab — la safety net du confirm reste alors valable
+// la première fois qu'on ouvre l'agent dans un nouvel onglet).
+const RW_KEY = `aiball.terminal.rw.${props.agentName}`;
+const RW_CONFIRMED_KEY = `aiball.terminal.rwConfirmed.${props.agentName}`;
+function readSession(key: string): boolean {
+    try { return sessionStorage.getItem(key) === "1"; } catch { return false; }
+}
+function writeSession(key: string, v: boolean): void {
+    try {
+        if (v) sessionStorage.setItem(key, "1");
+        else sessionStorage.removeItem(key);
+    } catch { /* sessionStorage unavailable (private mode) — degrade gracefully */ }
+}
+const isReadWrite = ref<boolean>(readSession(RW_KEY));
+const hasConfirmedRw = ref<boolean>(readSession(RW_CONFIRMED_KEY));
 const sendError = ref<string | null>(null);
 
 const confirmDialog = useConfirm();
@@ -72,13 +105,18 @@ function mountTerm() {
     if (term || !containerRef.value) return;
     // Match the dark surface of the pre-xterm `.terminal-view__pane` so the
     // visual continuity across the rest of aiball admin pages stays intact.
+    // #472 `fw9cpd` : si isReadWrite a été restauré true depuis sessionStorage
+    // (switch d'onglet précédent), on instancie le Terminal déjà en mode RW —
+    // sinon le watch ne fire pas (valeur inchangée) et le terminal reste en
+    // disableStdin=true malgré le toggle visuel "on".
+    const startRw = isReadWrite.value;
     term = new Terminal({
         convertEol: true,
         fontFamily: "ui-monospace, SFMono-Regular, 'Courier New', monospace",
         fontSize: 13,
         lineHeight: 1.2,
-        cursorBlink: false,
-        disableStdin: true, // read-only ; slice 2 would flip this for keystrokes
+        cursorBlink: startRw,
+        disableStdin: !startRw,
         scrollback: 0,      // capture-pane is a snapshot, scrollback isn't meaningful
         theme: {
             background: "#0f172a",     // ~ var(--p-surface-900)
@@ -184,6 +222,8 @@ function toggleReadWrite() {
 // silent + nothing reaches the agent. The cursor visibility tracks RW too
 // (no blinking caret in read-only mode → clear visual signal).
 watch(isReadWrite, (rw) => {
+    // #472 david `fw9cpd` : persist across tab switches (sessionStorage scoped).
+    writeSession(RW_KEY, rw);
     if (!term) return;
     term.options.disableStdin = !rw;
     term.options.cursorBlink = rw;
@@ -193,6 +233,7 @@ watch(isReadWrite, (rw) => {
         try { term.focus(); } catch { /* noop */ }
     }
 });
+watch(hasConfirmedRw, (v) => writeSession(RW_CONFIRMED_KEY, v));
 
 function applyFrame(text: string) {
     if (!term) return;
@@ -311,6 +352,18 @@ onBeforeUnmount(() => {
                 <i class="pi pi-desktop" />
                 <code>cl-{{ agentName }}</code>
             </span>
+            <!-- #472 david `5uwgev` : claude-loop activity + presence word
+                 affichés ici (mêmes ld-tags qu'ailleurs) — pas de nouvelle
+                 barre. Render-conditional : sans loopState fourni par le
+                 parent on n'affiche rien. -->
+            <template v-if="loopState">
+                <span class="ld-tag" :class="activityClass(loopState)">{{ loopState }}</span>
+                <span
+                    v-if="humanWord || humanPresent != null"
+                    class="ld-tag"
+                    :class="presenceClass(humanPresent ?? null, humanWord ?? null)"
+                >{{ presenceWord(humanPresent ?? null, humanWord ?? null) }}</span>
+            </template>
             <span
                 class="terminal-view__status"
                 :class="{ 'terminal-view__status--error': !!lastError, 'terminal-view__status--live': connected && !lastError }"

@@ -458,6 +458,9 @@ async function sendPrompt() {
                             <TerminalView
                                 v-if="activeTab === 'terminal'"
                                 :agent-name="original.consumer_id"
+                                :loop-state="original.state"
+                                :human-present="original.state_human"
+                                :human-word="original.state_human_word"
                             />
                         </div>
                     </TabPanel>
