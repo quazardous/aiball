@@ -628,6 +628,17 @@ ticketsRouter.get("/tickets", (req, res) => {
     // to that project's owners — so a project you only `follow` is actionable
     // but not claimable. `ticket_engage` + the wake-CTA head use this set.
     const onlyClaimable = req.query.claimable === "1";
+    // #461 — predict the POST-DRAIN work-order head. With `assume_drained=1`,
+    // the work-order sort treats every currently-unread ticket as if its ping
+    // had already been ack'd: the `unread` tier is suppressed, all rows
+    // collapse into the `actionable` tier and re-sort by priority/age. The
+    // wake builder uses this when it instructs the agent to "drain pings,
+    // THEN engage" so the named #X matches what `ticket_engage` will actually
+    // claim after the drain (without this flag, the wake names the pre-drain
+    // unread-tier head and the agent's drain demotes it before engage runs,
+    // surfacing a different ticket — the friction david pointed at). Affects
+    // ORDER only; the per-row `unread` boolean still reflects real state.
+    const assumeDrained = req.query.assume_drained === "1";
     // Default: when `open=1`, snoozed tickets are hidden (same rule as
     // the inbox). Pass `include_postponed=1` to surface them anyway.
     const includePostponed = req.query.include_postponed === "1";
@@ -856,7 +867,11 @@ ticketsRouter.get("/tickets", (req, res) => {
         // drives the tiebreak and the `hot` row flag.
         const ctx: WorkOrderCtx = {
             tierOf: (id) =>
-                unreadMap.get(id) ? 0 : actionableIds.has(id) ? 1 : openIds.has(id) ? 2 : 3,
+                // #461 — `assume_drained` flag skips the unread-tier check so
+                // unread tickets fall into actionable-tier alongside the rest
+                // and the head matches what `ticket_engage` returns AFTER the
+                // agent drains its pings.
+                (!assumeDrained && unreadMap.get(id)) ? 0 : actionableIds.has(id) ? 1 : openIds.has(id) ? 2 : 3,
             priorityWeight: (p) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2,
             isHot: (id) => hotFocus.has(id),
             isOwnClaim: (id) => ownClaimIds.has(id), // #430: own live claim sorts above hot

@@ -1085,10 +1085,20 @@ export async function buildContextPhrase(
             // set. `claimable: "1"` (the API gate matches `=== "1"`, so this
             // actually filters, not just leans on the tiering). The counts below
             // stay actionable/open-inclusive — only the named head narrows.
+            // #461: `assume_drained: "1"` predicts the POST-DRAIN head, so the
+            // named #X matches what `ticket_engage` returns AFTER the agent
+            // drains its pings (the wake CTA always instructs drain BEFORE
+            // engage). Without this, the wake's named head is the pre-drain
+            // unread-tier top, but the agent's drain demotes it and engage
+            // returns a different ticket — the misalignment david flagged.
+            // Server-side flag (not client-side sim) so the prediction has
+            // access to all ranking signals (priority + own-claim + hot +
+            // assignment) and stays accurate as the rules evolve.
             client.listTickets({
                 claimable: "1",
                 project: project ?? undefined,
                 limit: "1",
+                assume_drained: "1",
             }) as Promise<Array<{ id: number; title?: string }>>,
             // #397: this loop's own consumer row → its micro_prompt, exposed as
             // the `{consumer_prompt}` placeholder. Best-effort (null on failure).
