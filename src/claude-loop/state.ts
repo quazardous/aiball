@@ -777,25 +777,35 @@ export type LoopStatus = "idle" | "boot" | "busy";
  *   3. `process.cwd()` — dernier recours (loops d'avant cette version,
  *      tests purs qui ne setent ni l'un ni l'autre).
  */
-let PROJECT_CWD_CACHED: string | null = null;
-function projectCwd(): string {
-    if (PROJECT_CWD_CACHED) return PROJECT_CWD_CACHED;
+export type ProjectCwdInfo = {
+    cwd: string;
+    source: "env" | "plate" | "cwd";
+    state_dir?: string;
+    plate_path?: string;
+};
+
+// Pure (no cache): same 3-level resolution as projectCwd(), but returns
+// the breakdown so reporters (`claude-loop check`, `claude-loop status`)
+// can surface WHICH source won.
+export function projectCwdInfo(): ProjectCwdInfo {
     const envOverride = process.env.AIBALL_PROJECT_CWD;
-    if (envOverride) {
-        PROJECT_CWD_CACHED = envOverride;
-        return PROJECT_CWD_CACHED;
-    }
+    if (envOverride) return { cwd: envOverride, source: "env" };
     const sd = process.env.CL_STATE_DIR;
     if (sd) {
         try {
             const plate = readPlate(sd);
             if (plate.cwd) {
-                PROJECT_CWD_CACHED = plate.cwd;
-                return PROJECT_CWD_CACHED;
+                return { cwd: plate.cwd, source: "plate", state_dir: sd, plate_path: platePath(sd) };
             }
         } catch { /* missing/corrupt plate — fall through */ }
     }
-    PROJECT_CWD_CACHED = process.cwd();
+    return { cwd: process.cwd(), source: "cwd" };
+}
+
+let PROJECT_CWD_CACHED: string | null = null;
+function projectCwd(): string {
+    if (PROJECT_CWD_CACHED) return PROJECT_CWD_CACHED;
+    PROJECT_CWD_CACHED = projectCwdInfo().cwd;
     return PROJECT_CWD_CACHED;
 }
 

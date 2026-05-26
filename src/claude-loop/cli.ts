@@ -49,6 +49,7 @@ import {
     pickPingPhrase,
     pingsPath,
     platePath,
+    projectCwdInfo,
     readPlate,
     setTmuxStatus,
     stateDirFor,
@@ -906,6 +907,24 @@ function cmdAttach(name: string | undefined): void {
 
 
 
+// Format the "project cwd" reporter line for `check` / `status`. When a
+// named loop's plate is in hand, prefer its cwd (it's the canonical
+// source for that loop, and what the timer will actually use). Otherwise
+// resolve from the live env (AIBALL_PROJECT_CWD → CL_STATE_DIR's plate
+// → process.cwd()).
+function formatProjectCwd(name: string | undefined, plate: Plate | null): string {
+    if (plate?.cwd) {
+        const tag = plate.name ?? name ?? "?";
+        return `${plate.cwd} (from plate.json — loop '${tag}')`;
+    }
+    const info = projectCwdInfo();
+    switch (info.source) {
+        case "env":   return `${info.cwd} (from env AIBALL_PROJECT_CWD)`;
+        case "plate": return `${info.cwd} (from plate.json — CL_STATE_DIR=${info.state_dir})`;
+        case "cwd":   return `${info.cwd} (from process.cwd())`;
+    }
+}
+
 /**
  * Diagnostic subcommand (#B.149). Answers "what would the timer do
  * right now?" without spawning claude. Useful when a fresh ticket
@@ -945,6 +964,7 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
     if (ctx.config_path) {
         process.stdout.write(`  .aiball.yaml   : ${ctx.config_path}\n`);
     }
+    process.stdout.write(`  project cwd    : ${formatProjectCwd(name, plate)}\n`);
     // #269/#281 (david ftprf7): surface the PTY-proxy dependency. The proxy
     // gives live human-typing detection (busy included) + control-channel
     // wake injection. When inactive, `start` falls back to launching claude
@@ -1099,10 +1119,19 @@ async function cmdStatus(name: string | undefined): Promise<void> {
     applyToProcessEnv(ctx);
     warnIfDeprecated(ctx);
 
+    let statusPlate: Plate | null = null;
+    if (name) {
+        const sd = stateDirFor(name);
+        if (existsSync(platePath(sd))) {
+            try { statusPlate = readPlate(sd); } catch { /* ignore */ }
+        }
+    }
+
     process.stdout.write(`claude-loop status\n`);
     process.stdout.write(`  project        : ${ctx.project} (from ${ctx.project_source})\n`);
     process.stdout.write(`  default agent  : ${ctx.agent} (from ${ctx.agent_source})\n`);
     process.stdout.write(`  .aiball.yaml   : ${ctx.config_path ?? "(none — built-in defaults)"}\n`);
+    process.stdout.write(`  project cwd    : ${formatProjectCwd(name, statusPlate)}\n`);
 
     const client = new AiballClient({ agentId: ctx.agent, defaultProject: ctx.project });
     let connection: string;
