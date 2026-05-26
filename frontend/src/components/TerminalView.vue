@@ -32,6 +32,7 @@ const truncated = ref<boolean>(false);
 const isFullscreen = ref<boolean>(false);
 
 let es: EventSource | null = null;
+let connectTimeoutId: number | null = null;
 
 interface PaneFrame {
     text: string;
@@ -47,10 +48,30 @@ interface PaneError {
 function openStream() {
     closeStream();
     lastError.value = null;
-    const url = `/api/agents/${encodeURIComponent(props.agentName)}/pane/stream`;
+    // #464 — EventSource can't set custom headers (no `Authorization`),
+    // so we pass the bearer via `?token=` query string. The backend's
+    // `readBearerToken` accepts it as a last-resort fallback (auth.ts).
+    // Cookies / same-origin alone aren't enough today : aiball's daemon
+    // auth model is bearer-only, no session cookie.
+    const token = localStorage.getItem("aiball.token");
+    const tokenQs = token ? `?token=${encodeURIComponent(token)}` : "";
+    const url = `/api/agents/${encodeURIComponent(props.agentName)}/pane/stream${tokenQs}`;
     es = new EventSource(url);
+    // If we never see an `open` within 5s, surface a clearer message so the
+    // user isn't stuck staring at "connecting…" forever (e.g. auth fail,
+    // backend not running, cwd mismatch). EventSource itself only fires a
+    // generic `error` event without a status code in that case.
+    connectTimeoutId = window.setTimeout(() => {
+        if (!connected.value && !lastError.value) {
+            lastError.value = "no response from server (check auth / loop)";
+        }
+    }, 5000);
     es.onopen = () => {
         connected.value = true;
+        if (connectTimeoutId !== null) {
+            clearTimeout(connectTimeoutId);
+            connectTimeoutId = null;
+        }
     };
     es.onerror = () => {
         connected.value = false;
@@ -85,6 +106,10 @@ function closeStream() {
     if (es) {
         try { es.close(); } catch { /* noop */ }
         es = null;
+    }
+    if (connectTimeoutId !== null) {
+        clearTimeout(connectTimeoutId);
+        connectTimeoutId = null;
     }
     connected.value = false;
 }

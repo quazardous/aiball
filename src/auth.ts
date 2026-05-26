@@ -120,6 +120,15 @@ function readBearerToken(req: Request): string | null {
     }
     const fallback = req.header("x-aiball-token");
     if (typeof fallback === "string" && fallback) return fallback.trim();
+    // #464 — EventSource (SSE in the browser) can't set custom headers,
+    // so we accept the bearer via `?token=` query as a last resort. This
+    // is only used by the SSE endpoints under /api/agents/*/pane/stream
+    // in practice ; other browser fetches send the Authorization header
+    // and never hit this path. Tokens-in-URL has known downsides (logs,
+    // Referer, history) — that's why this is the LAST fallback, only
+    // honored when no header was provided.
+    const fromQuery = req.query?.token;
+    if (typeof fromQuery === "string" && fromQuery) return fromQuery.trim();
     return null;
 }
 
