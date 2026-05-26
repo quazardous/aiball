@@ -68,7 +68,7 @@ interface ResolveOpts {
 }
 
 export function resolveProjectContext(opts: ResolveOpts = {}): ProjectContext {
-    const cwd = opts.cwd ?? process.env.CLAUDE_LOOP_CWD ?? process.cwd();
+    const cwd = opts.cwd ?? process.env.AIBALL_CWD ?? process.cwd();
     const cfg = loadConfig(cwd);
     // loadConfig now applies the `<project>-claude` default itself,
     // so both fields are guaranteed non-null here. The `!`s document

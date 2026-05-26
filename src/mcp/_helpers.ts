@@ -38,7 +38,7 @@ export function markActiveTicket(ticketId: number | null | undefined): void {
     const sd = process.env.CL_STATE_DIR;
     if (!sd || !ticketId || ticketId <= 0) return;
     try {
-        const cwd = process.env.CLAUDE_LOOP_CWD ?? process.cwd();
+        const cwd = process.env.AIBALL_CWD ?? process.cwd();
         void captureTokenUsage({
             transcriptDir: projectTranscriptDir(cwd),
             stateDir: sd,

@@ -12,14 +12,12 @@ done
 BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 ROOT="$(cd "$BIN_DIR/.." && pwd)"
 
-# Preserve the invoker's cwd so the CLI sees the right starting point
-# (matters for tmux session cwd + state dir resolution). Also export
-# AIBALL_CWD so shared CLI helpers (`userCwd()` in src/cli/_helpers.ts,
-# used by `claude-loop init` → bootstrapInit) resolve to the invoker's
-# dir, not $ROOT (we cd into it just below).
-CLAUDE_LOOP_CWD="$PWD"
+# Preserve the invoker's cwd so the CLI (loop state dir resolution,
+# tmux session cwd, bootstrapInit, MCP server) sees the right starting
+# point — we cd into $ROOT just below. Same var as bin/aiball (single
+# name across the whole aiball product surface).
 AIBALL_CWD="$PWD"
-export CLAUDE_LOOP_CWD AIBALL_CWD
+export AIBALL_CWD
 cd "$ROOT"
 
 # Same UDS/auth resolution as bin/aiball (#B.149 follow-up). claude-loop

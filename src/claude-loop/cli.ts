@@ -258,7 +258,7 @@ function findLiveLoopForCwdAgent(cwd: string, agent: string | undefined): { name
  */
 function loopsForCwd(): { name: string; alive: boolean }[] {
     if (!existsSync(STATE_ROOT)) return [];
-    const cwd = canonicalCwd(process.env.CLAUDE_LOOP_CWD ?? process.cwd());
+    const cwd = canonicalCwd(process.env.AIBALL_CWD ?? process.cwd());
     const matches: { name: string; alive: boolean }[] = [];
     for (const name of readdirSync(STATE_ROOT)) {
         const sd = stateDirFor(name);
@@ -272,7 +272,7 @@ function loopsForCwd(): { name: string; alive: boolean }[] {
 }
 
 function resolveCurrentLoopName(): string {
-    const cwd = canonicalCwd(process.env.CLAUDE_LOOP_CWD ?? process.cwd()); // #414 symlink-safe
+    const cwd = canonicalCwd(process.env.AIBALL_CWD ?? process.cwd()); // #414 symlink-safe
     if (!existsSync(STATE_ROOT)) die(`no loops registered (state root ${STATE_ROOT} missing). Pass a name or start one first.`);
     const matches = loopsForCwd();
     if (matches.length === 0) die(`no claude-loop registered for cwd ${cwd}. Pass a name or run \`claude-loop list\`.`);
