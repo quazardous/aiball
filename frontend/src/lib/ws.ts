@@ -9,6 +9,7 @@ export type WsEvent =
     | { type: "message_noted"; data: Message }
     | { type: "message_tagged"; data: Message }
     | { type: "rule_changed"; data: unknown }
+    | { type: "automation_rule_changed"; data: unknown }
     | { type: "tag_changed"; data: unknown }
     | { type: "strategy_changed"; data: { strategy: Strategy } }
     | { type: "project_deleted"; data: { project: string; deleted_messages: number } };

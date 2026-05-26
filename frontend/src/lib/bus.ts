@@ -35,6 +35,10 @@ export interface BusEvents {
     "thread.refresh": { ticketId: number };
     /** The moderation rules list should be refreshed (RulesPanel). */
     "rules.refresh": void;
+    /** #457 slice 4 — the unified automation rules list should be refreshed
+     *  (AutomationRulesSection). Fires both on local mutations and on a WS
+     *  `automation_rule_changed` event from the daemon. */
+    "automation.refresh": void;
     /** The tag catalog should be refreshed (TagsPanel, any TagPicker). */
     "tags.refresh": void;
     /** Any new message landed in the system (approved or pending). */

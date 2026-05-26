@@ -107,6 +107,38 @@ export interface Rule {
     created_at: string;
 }
 
+/** #457 — unified automation rule (slice 4). Server returns a `triggers`
+ *  JSON-decoded list and a typed `action` discriminated union. */
+export type AutomationTrigger =
+    | "message_posted"
+    | "actionable_eval"
+    | "ticket_created"
+    | "ticket_tagged";
+export type AutomationAction =
+    | { kind: "assign"; consumer_id: string }
+    | { kind: "decision"; decision: "auto" | "review" }
+    | { kind: "pickup"; mode: "only" | "except" }
+    | { kind: "add_tag"; tag: string }
+    | { kind: "set_priority"; priority: "urgent" | "high" | "normal" | "low" }
+    | { kind: "notify"; consumer_id: string };
+export interface AutomationRule {
+    id: number;
+    triggers: AutomationTrigger[];
+    scope_consumer: string | null;
+    match_project: string | null;
+    match_kind: string | null;
+    match_by_agent: string | null;
+    match_tags: string[];
+    match_tag_added: string | null;
+    match_intent: string | null;
+    match_priority: string | null;
+    action: AutomationAction;
+    enabled: 0 | 1;
+    position: number;
+    note: string | null;
+    created_at: string;
+}
+
 /** #447: a per-agent work filter — narrows which tickets a consumer picks up,
  *  by tag. Applied server-side in the actionable/claimable gate. */
 export interface WorkFilter {
@@ -799,6 +831,34 @@ export const api = {
     delWorkFilter: (id: number) => req<void>("DELETE", `/api/work-filters/${id}`),
     toggleWorkFilter: (id: number, enabled: boolean) =>
         req<WorkFilter>("PATCH", `/api/work-filters/${id}`, { enabled }),
+
+    // #457 slice 4: unified automation rules CRUD.
+    listAutomationRules: (filters?: { trigger?: AutomationTrigger; enabledOnly?: boolean }) => {
+        const q: string[] = [];
+        if (filters?.trigger) q.push(`trigger=${encodeURIComponent(filters.trigger)}`);
+        if (filters?.enabledOnly) q.push("enabled_only=1");
+        return req<AutomationRule[]>(
+            "GET",
+            `/api/automation/rules${q.length ? `?${q.join("&")}` : ""}`,
+        );
+    },
+    addAutomationRule: (body: {
+        triggers: AutomationTrigger[] | AutomationTrigger;
+        scope_consumer?: string | null;
+        match_project?: string | null;
+        match_kind?: string | null;
+        match_by_agent?: string | null;
+        match_tags?: string[];
+        match_tag_added?: string | null;
+        match_intent?: string | null;
+        match_priority?: string | null;
+        action: AutomationAction;
+        position?: number;
+        note?: string | null;
+    }) => req<AutomationRule>("POST", "/api/automation/rules", body),
+    delAutomationRule: (id: number) => req<void>("DELETE", `/api/automation/rules/${id}`),
+    toggleAutomationRule: (id: number, enabled: boolean) =>
+        req<AutomationRule>("PATCH", `/api/automation/rules/${id}`, { enabled }),
 
     // #449: unified config manager. Pass a project for the per-project view
     // (overrides + effective); omit it for the global view.

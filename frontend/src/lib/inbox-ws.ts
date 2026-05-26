@@ -36,6 +36,10 @@ export function useInboxWs(opts: {
             bus.emit("rules.refresh");
             return;
         }
+        if (ev.type === "automation_rule_changed") {
+            bus.emit("automation.refresh");
+            return;
+        }
         if (ev.type === "tag_changed") {
             // Tag catalog touched (rename, color, delete) — refresh the
             // tags panel and any open TagPicker. Don't touch inbox/projects

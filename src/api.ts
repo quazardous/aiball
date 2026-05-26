@@ -40,6 +40,7 @@ import { messagesRouter } from "./api/messages.js";
 import { pingsRouter } from "./api/pings.js";
 import { readTrackingRouter } from "./api/read-tracking.js";
 import { rulesRouter } from "./api/rules.js";
+import { automationRouter } from "./api/automation.js";
 import { subscriptionsRouter } from "./api/subscriptions.js";
 import { tagsRouter } from "./api/tags.js";
 import { ticketsRouter } from "./api/tickets.js";
@@ -367,6 +368,10 @@ api.use(configRouter);
 // (#B.213 phase 1.C).
 api.use(rulesRouter);
 api.use(workFiltersRouter);
+// #457 — unified automation engine CRUD (separate URL prefix `/automation/*`
+// so the legacy `/rules` + `/work-filters` keep serving their existing UI
+// sections until slice 3 migrates them onto this engine).
+api.use(automationRouter);
 api.use(managedConfigRouter);
 api.use(agentHelpersRouter);
 
