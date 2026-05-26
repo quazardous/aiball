@@ -4,11 +4,13 @@
  * `#extra-actions` slot inside MessageComposer). Six conditional
  * branches share one snooze button at the top:
  *
+ *   status === pending    → reject + approve Buttons (moderation, gate
+ *                            FIRST: nothing meaningful can happen on a
+ *                            not-yet-approved ticket — #486)
  *   activeDecision        → reject + accept SplitButtons (#B.129/B.139)
  *   pendingResolution     → legacy reject + accept (pre-#B.129 rows)
  *   status === rejected   → undo reject Button
  *   ticket.closed         → reopen Button
- *   status === pending    → reject + approve Buttons (moderation)
  *   default (open)        → mark resolved SplitButton + (undo) + close
  *
  * State (composer body, busy flags, decisions, menus) stays in the
@@ -70,7 +72,28 @@ const emit = defineEmits<{
         title="Set aside — type your context first if you want, then pick a duration. The ticket disappears from the open inbox until then."
         @click="(ev) => emit('open-snooze', ev)"
     />
-    <template v-if="activeDecision">
+    <template v-if="ticket.status === 'pending'">
+        <Button
+            icon="pi pi-times"
+            label="reject"
+            severity="danger"
+            size="small"
+            outlined
+            :loading="decideBusy"
+            title="Reject this pending ticket. The author is notified; comments stay readable."
+            @click="emit('decide', 'reject')"
+        />
+        <Button
+            icon="pi pi-check"
+            label="approve"
+            severity="success"
+            size="small"
+            :loading="decideBusy"
+            title="Approve this pending ticket so it joins the open inbox."
+            @click="emit('decide', 'approve')"
+        />
+    </template>
+    <template v-else-if="activeDecision">
         <SplitButton
             :label="`reject ${activeDecision.decision.kind}`"
             icon="pi pi-times"
@@ -140,27 +163,6 @@ const emit = defineEmits<{
             size="small"
             :loading="resolutionBusy"
             @click="emit('comment-reopen')"
-        />
-    </template>
-    <template v-else-if="ticket.status === 'pending'">
-        <Button
-            icon="pi pi-times"
-            label="reject"
-            severity="danger"
-            size="small"
-            outlined
-            :loading="decideBusy"
-            title="Reject this pending ticket. The author is notified; comments stay readable."
-            @click="emit('decide', 'reject')"
-        />
-        <Button
-            icon="pi pi-check"
-            label="approve"
-            severity="success"
-            size="small"
-            :loading="decideBusy"
-            title="Approve this pending ticket so it joins the open inbox."
-            @click="emit('decide', 'approve')"
         />
     </template>
     <template v-else>
