@@ -108,7 +108,7 @@ async function main(): Promise<void> {
         blocked_ticket_id: actionable.id,
     });
 
-    const reasonParts = [`Continue with #B.${actionable.id} — ${actionable.title}.`];
+    const reasonParts = [`Continue with #${actionable.id} — ${actionable.title}.`];
     if (actionable.body) reasonParts.push("", actionable.body);
     emit({
         decision: "block",

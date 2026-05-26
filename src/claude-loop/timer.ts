@@ -308,7 +308,7 @@ async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
     }
     const MAX_BODY = 4000;
     const trunc = body.length > MAX_BODY ? body.slice(0, MAX_BODY) + "…[truncated]" : body;
-    const msg = `PANIC: ${author} interrupted you on ticket #B.${hint.ticket_id} "${title}"\n\n${trunc}\n\nPoll #B.${hint.ticket_id} for the full thread.`;
+    const msg = `PANIC: ${author} interrupted you on ticket #${hint.ticket_id} "${title}"\n\n${trunc}\n\nPoll #${hint.ticket_id} for the full thread.`;
     spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Escape", "Escape"], { stdio: "ignore" });
     await sleep(500);
     const bufName = `panic_${Date.now()}`;
@@ -322,7 +322,7 @@ async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
     await sleep(200);
     spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
     setTmuxStatus(name!, "busy");
-    log(`panic (${reason}) → interrupted + injected body (${msg.length} chars) for ticket #B.${hint.ticket_id} by ${author}`);
+    log(`panic (${reason}) → interrupted + injected body (${msg.length} chars) for ticket #${hint.ticket_id} by ${author}`);
     return true;
 }
 

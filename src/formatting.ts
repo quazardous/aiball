@@ -39,19 +39,17 @@ export interface FormattingPattern {
 }
 
 /**
- * The in-code defaults that mirror what `MarkdownView.vue` did before
- * #B.235. Kept here as the SOURCE OF TRUTH for the fallback set — when
- * yaml is missing or every entry is rejected, these still run.
- *
- * Match strings use the same separator class (`[._/-]`) as the prior
- * inline regexes so user authoring conventions (#B.123, #B/123, #B-123,
- * #B_123, #B123) keep linkifying.
+ * The in-code defaults — kept as the SOURCE OF TRUTH for the fallback set
+ * when the shipped yaml is missing or every entry is rejected. Tracks the
+ * shipped defaults verbatim: B-optional match (catches both `#NN` and the
+ * legacy `#B.NN`) + bare `#{1}` canonical (#489). The old separator
+ * conventions (#B/123, #B-123, #B_123, #B123) still linkify via `[._/-]?`.
  */
 export const DEFAULT_FORMATTING_PATTERNS: readonly FormattingPattern[] = [
     {
         id: "ticket",
-        match: "#[Bb][._/-]?(\\d+)\\b",
-        canonical: "#B.{1}",
+        match: "#[Bb]?[._/-]?(\\d+)\\b",
+        canonical: "#{1}",
         href: "/b/{1}",
         class: "ticket-ref",
     },

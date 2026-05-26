@@ -55,9 +55,9 @@ async function main(): Promise<void> {
             const title = resp.ticket.edited_title ?? resp.ticket.title ?? "";
             const body = resp.ticket.edited_body ?? resp.ticket.body ?? "";
             if (!title && !body) continue;
-            briefs.push(`## #B.${t.id} — ${title}\n\n${body}`);
+            briefs.push(`## #${t.id} — ${title}\n\n${body}`);
         } catch {
-            briefs.push(`## #B.${t.id} — (unreachable: could not fetch from aiball)`);
+            briefs.push(`## #${t.id} — (unreachable: could not fetch from aiball)`);
         }
     }
     if (briefs.length === 0) emit({});

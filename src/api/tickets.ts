@@ -1020,7 +1020,7 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
     }
     const targetTicket = getMessage(target);
     if (!targetTicket || targetTicket.kind !== "ticket_created") {
-        return res.status(404).json({ error: `target ticket #B.${target} not found` });
+        return res.status(404).json({ error: `target ticket #${target} not found` });
     }
     const caller = consumerOf(req);
     // Permission (#275): mirror the edit/snooze gate (isHuman bypass +
@@ -1035,7 +1035,7 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
         targetTicket.by_agent !== caller
     ) {
         return res.status(403).json({
-            error: `only a registered human moderator or the reporter of #B.${id} (${t.by_agent}) / #B.${target} (${targetTicket.by_agent}) can relate them`,
+            error: `only a registered human moderator or the reporter of #${id} (${t.by_agent}) / #${target} (${targetTicket.by_agent}) can relate them`,
         });
     }
     // Anti-cycle (#275): lineage (child_of/parent_of) must stay a DAG.
@@ -1043,12 +1043,12 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
     // child_of, so swap (child, parent) for the check.
     if (kindStr === "child_of" && lineageWouldCycle(id, target)) {
         return res.status(409).json({
-            error: `#B.${id} child_of #B.${target} would create a lineage cycle`,
+            error: `#${id} child_of #${target} would create a lineage cycle`,
         });
     }
     if (kindStr === "parent_of" && lineageWouldCycle(target, id)) {
         return res.status(409).json({
-            error: `#B.${id} parent_of #B.${target} would create a lineage cycle`,
+            error: `#${id} parent_of #${target} would create a lineage cycle`,
         });
     }
     // Idempotency (#275): at most one active edge per (source, target).

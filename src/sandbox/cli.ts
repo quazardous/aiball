@@ -303,7 +303,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         }
         if (!project) {
             die(
-                `could not resolve project from #B.${ticketIds[0]} (set AIBALL_PROJECT).`,
+                `could not resolve project from #${ticketIds[0]} (set AIBALL_PROJECT).`,
             );
         }
     }
@@ -416,7 +416,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
             `  mode:    ${plate.mode}`,
             `  dir:     ${dir}`,
             `  state:   ${sd}`,
-            `  tickets: ${ticketIds.map((id) => `#B.${id}`).join(", ")}`,
+            `  tickets: ${ticketIds.map((id) => `#${id}`).join(", ")}`,
             `  attach:  ${MUX_CMD} attach -t ${tmuxName}   (or: aiball sandbox attach ${name})`,
             "",
         ].join("\n"),

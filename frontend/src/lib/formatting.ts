@@ -29,11 +29,11 @@ export interface FormattingPattern {
     class?: string;
 }
 
-// Mirrors src/formatting.ts DEFAULT_FORMATTING_PATTERNS (the pre-#B.235
-// hardcoded MarkdownView behavior): letter REQUIRED for numeric ticket
-// refs, dotted canonical. The yaml chain overrides these by id.
+// Mirrors src/formatting.ts DEFAULT_FORMATTING_PATTERNS — B-optional
+// match catches both `#NN` and the legacy `#B.NN`, with the bare `#{1}`
+// canonical (#489). The yaml chain overrides these by id.
 const DEFAULTS: FormattingPattern[] = [
-    { id: "ticket", match: "#[Bb][._/-]?(\\d+)\\b", canonical: "#B.{1}", href: "/b/{1}", class: "ticket-ref" },
+    { id: "ticket", match: "#[Bb]?[._/-]?(\\d+)\\b", canonical: "#{1}", href: "/b/{1}", class: "ticket-ref" },
     { id: "comment", match: "#[Cc][._/-]?([a-hjkmnp-z2-9]{4,8})\\b", canonical: "#C.{1}", href: "/b/{1}", class: "comment-ref" },
     { id: "mention", match: "(?<![\\w@>\"'/])@([a-zA-Z0-9_-]{2,64})\\b", canonical: "@{1}", class: "mention" },
 ];
@@ -159,12 +159,13 @@ export const markedInstance = ref<Marked>(buildMarked(DEFAULTS));
  * those through here instead.
  *
  * Reads the reactive `patterns` ref, so callers used inside a template
- * expression re-render when the config loads. Falls back to the dotted
- * `#B.${id}` legacy form if the `ticket` pattern is somehow absent.
+ * expression re-render when the config loads. Falls back to the bare
+ * `#${id}` form if the `ticket` pattern is somehow absent (the current
+ * shipped default canonical, was `#B.${id}` pre-#489).
  */
 export function formatTicketRef(id: number | string): string {
     const p = patterns.value.find((x) => x.id === "ticket");
-    if (!p) return `#B.${id}`;
+    if (!p) return `#${id}`;
     // {1} = the numeric id (the ticket pattern's capture group); {0} = a
     // plausible whole match for canonicals that reference it.
     return subst(p.canonical, [`#${id}`, String(id)]);

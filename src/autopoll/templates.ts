@@ -50,7 +50,7 @@ export function formatReason(tone: AutopollTone, payload: AutopollPayload): stri
     const ticketList = payload.recent_tickets
         .map((t) => {
             const title = (t.title ?? "(no title)").slice(0, 80);
-            return `  - #B.${t.id} (${t.project}) ${title}`;
+            return `  - #${t.id} (${t.project}) ${title}`;
         })
         .join("\n");
     const backlog = backlogLine(tone, payload);
