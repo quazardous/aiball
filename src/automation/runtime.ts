@@ -30,10 +30,8 @@
  * subscriber cost.
  */
 import { onLifecycle, type LifecycleEvent } from "../event-bus.js";
-import {
-    getEnabledRulesForTrigger,
-    type AutomationAction,
-} from "../db/automation.js";
+import type { AutomationAction } from "../db/automation.js";
+import { resolvedEnabledRulesForTrigger } from "./resolved-rules.js";
 import { firstMatchingRule, type AutomationEvent } from "./engine.js";
 import { setTicketAssignment } from "../db/tickets.js";
 import { upsertTicketSubscription } from "../db/subscriptions.js";
@@ -119,8 +117,11 @@ function handleLifecycle(event: LifecycleEvent): void {
 
 function fireAutomation(event: AutomationEvent, ticket: Message): void {
     try {
-        // CRUD already orders by (position asc, id asc) — engine doesn't re-sort.
-        const rules = getEnabledRulesForTrigger(event.trigger);
+        // CRUD already orders DB rules by (position asc, id asc) — engine
+        // doesn't re-sort. YAML rules (slice 3) are appended after the DB
+        // rules in declaration order, so an operator-set DB rule wins over
+        // any matching YAML default.
+        const rules = resolvedEnabledRulesForTrigger(event.trigger);
         const match = firstMatchingRule(rules, event);
         if (!match) return;
         executeAction(match.action, ticket);

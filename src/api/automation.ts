@@ -17,8 +17,10 @@ import {
     listAutomationRules,
     setAutomationRuleEnabled,
     type AutomationAction,
+    type AutomationRule,
     type Trigger,
 } from "../db/automation.js";
+import { loadYamlAutomationRules } from "../automation/yaml.js";
 import { broadcast } from "../ws.js";
 import { badRequest, notFound } from "./_helpers.js";
 
@@ -89,13 +91,23 @@ automationRouter.get("/automation/rules", (req, res) => {
             ? req.query.scope_consumer
             : undefined;
     const enabledOnly = req.query.enabled_only === "1" || req.query.enabled_only === "true";
-    res.json(
-        listAutomationRules({
-            ...(trigger ? { trigger } : {}),
-            ...(scopeConsumer ? { scopeConsumer } : {}),
-            ...(enabledOnly ? { enabledOnly } : {}),
-        }),
-    );
+
+    // DB rules first (UI-controlled, can override), YAML rules second
+    // (slice 3 — versioned defaults). UI badges YAML rows by `id < 0`.
+    const db = listAutomationRules({
+        ...(trigger ? { trigger } : {}),
+        ...(scopeConsumer ? { scopeConsumer } : {}),
+        ...(enabledOnly ? { enabledOnly } : {}),
+    });
+    const yaml = loadYamlAutomationRules().filter((r: AutomationRule) => {
+        if (enabledOnly && !r.enabled) return false;
+        if (trigger && !r.triggers.includes(trigger)) return false;
+        if (scopeConsumer !== undefined && r.scope_consumer !== null && r.scope_consumer !== scopeConsumer) {
+            return false;
+        }
+        return true;
+    });
+    res.json([...db, ...yaml]);
 });
 
 automationRouter.post("/automation/rules", (req: Request, res: Response) => {
@@ -163,17 +175,27 @@ automationRouter.post("/automation/rules", (req: Request, res: Response) => {
 
 automationRouter.delete("/automation/rules/:id", (req, res) => {
     const id = Number(req.params.id);
+    // #457 slice 3 : YAML rules carry synthetic negative ids — they live in
+    // the file, not the DB. Refuse instead of silently no-op'ing on a
+    // missing row, so the UI gets an unambiguous error.
+    if (id < 0) {
+        return badRequest(res, "YAML automation rules are read-only — edit the .aiball.yaml file");
+    }
     deleteAutomationRule(id);
     broadcast({ type: "automation_rule_changed", data: { id, deleted: true } });
     res.status(204).end();
 });
 
 automationRouter.patch("/automation/rules/:id", (req, res) => {
+    const id = Number(req.params.id);
+    if (id < 0) {
+        return badRequest(res, "YAML automation rules are read-only — edit the .aiball.yaml file");
+    }
     const { enabled } = req.body ?? {};
     if (typeof enabled !== "boolean") {
         return badRequest(res, "only `enabled: boolean` supported for now");
     }
-    const r = setAutomationRuleEnabled(Number(req.params.id), enabled);
+    const r = setAutomationRuleEnabled(id, enabled);
     if (!r) return notFound(res);
     broadcast({ type: "automation_rule_changed", data: r });
     res.json(r);

@@ -103,9 +103,16 @@ const setPriorityOptions = [
     { label: "low", value: "low" as const },
 ];
 
-const sortedRules = computed(() =>
-    [...rules.value].sort((a, b) => a.position - b.position || a.id - b.id),
-);
+const sortedRules = computed(() => {
+    // Server returns DB rules (id > 0, ordered by position asc / id asc) first,
+    // YAML rules (id < 0, declaration order) second. Preserve that ordering —
+    // mirror the engine's iteration order so the displayed rank matches the
+    // first-match-wins evaluation.
+    const dbRules = rules.value.filter((r) => r.id > 0);
+    const yamlRules = rules.value.filter((r) => r.id < 0);
+    dbRules.sort((a, b) => a.position - b.position || a.id - b.id);
+    return [...dbRules, ...yamlRules];
+});
 
 const showsKind = computed(() => triggers.value.includes("message_posted"));
 const showsTagAdded = computed(() => triggers.value.includes("ticket_tagged"));
@@ -259,11 +266,14 @@ onMounted(load);
                     v-for="(r, i) in sortedRules"
                     :key="r.id"
                     class="rule-item"
-                    :class="{ disabled: !r.enabled }"
+                    :class="{ disabled: !r.enabled, 'rule-item--yaml': r.id < 0 }"
                 >
                     <div class="rule-rank">{{ i + 1 }}</div>
                     <div class="rule-body">
                         <div class="rule-sentence">
+                            <span v-if="r.id < 0" class="source-badge" title="defined in .aiball.yaml — read-only">
+                                <i class="pi pi-file" /> yaml
+                            </span>
                             <span class="kw">on</span>
                             <span
                                 v-for="t in r.triggers"
@@ -296,18 +306,26 @@ onMounted(load);
                         <div class="rule-id">rule #{{ r.id }}</div>
                     </div>
                     <div class="rule-controls">
-                        <ToggleSwitch
-                            :model-value="!!r.enabled"
-                            @update:model-value="(v) => toggle(r, !!v)"
-                        />
-                        <Button
-                            icon="pi pi-trash"
-                            severity="danger"
-                            text
-                            rounded
-                            size="small"
-                            @click="del(r)"
-                        />
+                        <template v-if="r.id < 0">
+                            <!-- YAML rule : read-only, edit the file. -->
+                            <span class="aiball-explainer aiball-explainer--muted yaml-readonly">
+                                read-only
+                            </span>
+                        </template>
+                        <template v-else>
+                            <ToggleSwitch
+                                :model-value="!!r.enabled"
+                                @update:model-value="(v) => toggle(r, !!v)"
+                            />
+                            <Button
+                                icon="pi pi-trash"
+                                severity="danger"
+                                text
+                                rounded
+                                size="small"
+                                @click="del(r)"
+                            />
+                        </template>
                     </div>
                 </li>
             </ol>
@@ -525,6 +543,26 @@ onMounted(load);
 .rule-item.disabled {
     opacity: 0.5;
     background: var(--p-surface-50);
+}
+.rule-item--yaml {
+    border-left: 3px solid var(--p-blue-500);
+    background: color-mix(in srgb, var(--p-blue-500) 4%, transparent);
+}
+.source-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    background: color-mix(in srgb, var(--p-blue-500) 15%, transparent);
+    color: var(--p-blue-600);
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    font-family: ui-monospace, monospace;
+}
+.yaml-readonly {
+    font-size: 0.75rem;
+    font-style: italic;
+    align-self: center;
 }
 .rule-rank {
     width: 1.8rem;

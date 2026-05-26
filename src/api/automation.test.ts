@@ -96,16 +96,18 @@ test("POST /automation/rules : accepts a single trigger string (not just arrays)
 test("GET /automation/rules : lists every rule, ordered by (position, id)", async () => {
     const r = await req("GET", "/api/automation/rules");
     assert.equal(r.status, 200);
-    const rows = r.body as Array<{ id: number; position: number }>;
-    // Tests 1 + 5 each successfully insert one rule (tests 2/3/4 fail validation).
-    assert.ok(rows.length >= 2, `at least the rules we created above are there (saw ${rows.length})`);
-    // Default position=0 across our seeds → tiebreak on id asc.
-    for (let i = 1; i < rows.length; i++) {
-        const prev = rows[i - 1]!;
-        const cur = rows[i]!;
+    const all = r.body as Array<{ id: number; position: number }>;
+    // Slice 3 : YAML rules (id < 0) may be appended AFTER the DB rows. Their
+    // declaration order is meaningful, not their id, so the position-asc /
+    // id-asc invariant only applies to the DB slice.
+    const dbRows = all.filter((row) => row.id > 0);
+    assert.ok(dbRows.length >= 2, `at least the DB rules we created above are there (saw ${dbRows.length})`);
+    for (let i = 1; i < dbRows.length; i++) {
+        const prev = dbRows[i - 1]!;
+        const cur = dbRows[i]!;
         assert.ok(
             prev.position < cur.position || (prev.position === cur.position && prev.id < cur.id),
-            "ordered by (position asc, id asc)",
+            "DB rules ordered by (position asc, id asc)",
         );
     }
 });
