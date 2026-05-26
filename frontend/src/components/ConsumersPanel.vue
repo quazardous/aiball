@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import Button from "primevue/button";
 import Tag from "primevue/tag";
 import { useToast } from "primevue/usetoast";
-import { useConfirm } from "primevue/useconfirm";
 import { api, type Consumer, type NodeView } from "../lib/api";
 import { useBus } from "../lib/bus";
 import ConsumerEditPage from "./ConsumerEditPage.vue";
@@ -39,9 +37,9 @@ const now = ref(Date.now());
 let nowTimer: ReturnType<typeof setInterval> | null = null;
 
 const toast = useToast();
-// Named `confirmDialog` (not `confirm`) so it doesn't shadow the native
-// `confirm()` still used by remove() below.
-const confirmDialog = useConfirm();
+// #468 — `remove()` + `stopLoop()` ont migré sur la page détail consumer
+// (ConsumerEditPage.vue déjà équipée). Le confirmDialog + ses imports ont
+// donc disparu d'ici en même temps que les boutons.
 const rows = ref<Consumer[]>([]);
 const loading = ref(false);
 
@@ -93,58 +91,6 @@ async function load() {
 // `loop` badge + Stop button within the grace (~6s) instead of waiting for the
 // 30s poll below (which stays as a backstop).
 useBus("projects.refresh", () => { void load(); });
-
-async function remove(consumer_id: string) {
-    if (!confirm(`Delete consumer "${consumer_id}"? Past posts are preserved; the row will be re-created the next time this id posts.`)) return;
-    try {
-        await api.deleteConsumer(consumer_id);
-        rows.value = rows.value.filter((r) => r.consumer_id !== consumer_id);
-    } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: `Delete failed for ${consumer_id}`,
-            detail: (e as Error).message,
-            life: 6000,
-        });
-    }
-}
-
-// #442: remotely stop the claude-loop running as this consumer. A proper modal
-// confirm (PrimeVue ConfirmDialog, like the comment-delete flow) gates it so a
-// stray click never kills a loop (david 52hq37). The work runs only on accept.
-function stopLoop(consumer_id: string) {
-    confirmDialog.require({
-        header: "Stop loop",
-        message: `Stop the claude-loop running as "${consumer_id}"? This kills its tmux session + Claude (the conversation is lost). Its state is kept — use Delete to remove it entirely.`,
-        icon: "pi pi-stop-circle",
-        acceptLabel: "Stop",
-        rejectLabel: "Cancel",
-        acceptClass: "p-button-danger",
-        accept: () => { void doStopLoop(consumer_id); },
-    });
-}
-// Actual call, after the user confirms. `delivered:false` ⇒ nothing live received
-// it. The running badge clears on its own via the presence WS broadcast; reload
-// shortly after as a backstop.
-async function doStopLoop(consumer_id: string) {
-    try {
-        const r = await api.stopLoop(consumer_id);
-        toast.add({
-            severity: r.delivered ? "success" : "warn",
-            summary: r.delivered ? `Stop sent to ${consumer_id}` : `No live loop for ${consumer_id}`,
-            detail: r.delivered ? "The loop will self-terminate." : "Nothing was connected to receive it.",
-            life: 5000,
-        });
-        setTimeout(() => void load(), 1500);
-    } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: `Stop failed for ${consumer_id}`,
-            detail: (e as Error).message,
-            life: 6000,
-        });
-    }
-}
 
 onMounted(() => {
     load();
@@ -402,7 +348,14 @@ const sortedRows = computed<Consumer[]>(() => {
                 <th />
             </template>
             <template #body>
-                <tr v-for="r in sortedRows" :key="r.consumer_id" :class="{ 'is-blocked': !r.enabled }">
+                <tr
+                    v-for="r in sortedRows"
+                    :key="r.consumer_id"
+                    class="consumers-row"
+                    :class="{ 'is-blocked': !r.enabled }"
+                    :title="`Open ${r.consumer_id} detail`"
+                    @click="emit('open-edit', r.consumer_id)"
+                >
                     <td class="consumers-cid">
                         <div class="consumers-cid__inner">
                             <span class="consumers-cid__text">{{ r.consumer_id }}</span>
@@ -442,7 +395,7 @@ const sortedRows = computed<Consumer[]>(() => {
                             :href="`/nodes/${encodeURIComponent(nodeFor(r)!.node_id)}`"
                             class="consumers-node-link"
                             :title="`Relayed by node ${nodeFor(r)?.label || nodeFor(r)?.node_id}${r.last_seen_ip ? ' · ' + r.last_seen_ip : ''} — open node`"
-                            @click.prevent="() => { const n = nodeFor(r); if (n) emit('open-node', n.node_id); }"
+                            @click.stop.prevent="() => { const n = nodeFor(r); if (n) emit('open-node', n.node_id); }"
                         >{{ nodeFor(r)?.label || nodeFor(r)?.node_id }}</a>
                     </td>
                     <td class="activity-cell">
@@ -485,38 +438,18 @@ const sortedRows = computed<Consumer[]>(() => {
                             :severity="r.enabled ? 'success' : 'danger'"
                         />
                     </td>
-                    <td class="action-cell">
-                        <div class="action-cell__inner">
-                            <!-- #442/#443: remote hard-kill on ANY live loop
-                                 (wait/busy/boot/human too — not just autonomous). -->
-                            <Button
-                                v-if="isLiveLoop(r)"
-                                icon="pi pi-stop-circle"
-                                severity="danger"
-                                text
-                                rounded
-                                size="small"
-                                :title="`Stop (hard-kill) the claude-loop running as ${r.consumer_id}`"
-                                @click="stopLoop(r.consumer_id)"
-                            />
-                            <Button
-                                icon="pi pi-pencil"
-                                text
-                                rounded
-                                size="small"
-                                :title="`Edit ${r.consumer_id} on a dedicated page`"
-                                @click="emit('open-edit', r.consumer_id)"
-                            />
-                            <Button
-                                icon="pi pi-trash"
-                                severity="danger"
-                                text
-                                rounded
-                                size="small"
-                                :title="`Delete consumer ${r.consumer_id} (history preserved)`"
-                                @click="remove(r.consumer_id)"
-                            />
-                        </div>
+                    <!-- #468 david : action icons (pencil + trash + stop) retirés
+                         des rows. La row entière est cliquable (handler sur <tr>
+                         ci-dessus) ; Edit / Delete / Stop vivent maintenant sur
+                         la page détail consumer. On garde un INDICATEUR pur
+                         (point rouge) pour signaler "loop live" — read-only,
+                         pas un bouton. -->
+                    <td class="indicator-cell">
+                        <span
+                            v-if="isLiveLoop(r)"
+                            class="indicator-cell__dot"
+                            :title="`Live claude-loop running as ${r.consumer_id} — open detail to Stop`"
+                        />
                     </td>
                 </tr>
             </template>
@@ -601,33 +534,33 @@ const sortedRows = computed<Consumer[]>(() => {
 .consumers-table tr.is-blocked {
     opacity: 0.55;
 }
-/* Use a .consumers-table-scoped selector — there's a sibling
-   .action-cell rule in ProjectsPanel.vue (non-scoped styles bleed
-   across components) that forces display: flex on td which breaks
-   the table layout here (#B.150). Also reset min-width because that
-   sibling rule pinned 14rem (224px), which on phone ate the cid cell
-   down to 1 character (#B.193 "login complètement masqué"). */
-.consumers-table .action-cell {
+/* #468 david : la row entière est cliquable → consumer detail. Le
+   curseur + un hover discret signalent l'affordance sans la rendre
+   visuellement bruyante. */
+.consumers-table tr.consumers-row {
+    cursor: pointer;
+}
+.consumers-table tr.consumers-row:hover {
+    background: var(--p-surface-50);
+}
+/* #468 david : la cellule d'action (pencil + trash + stop) devient un
+   indicator-cell read-only avec un point rouge si un loop est live.
+   Largeur minimale pour stabiliser l'alignement de la table. */
+.consumers-table .indicator-cell {
     display: table-cell;
     text-align: right;
-    /* #B.177 david: "chevauchement de l'icone delete avec la barre
-       scroll" — when the table overflows horizontally, the scroll
-       bar sat on top of the action button. Bump the width + add
-       right padding so the icon is inset away from any scrollbar
-       gutter. */
-    width: 4rem;
+    width: 2rem;
     min-width: 0;
     padding-right: 0.75rem;
+    vertical-align: middle;
 }
-.consumers-table .action-cell__inner {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    /* Match the intrinsic height of the PrimeVue Select/Input in the
-       other cells (~39px) so this cell's total height equals theirs
-       and the row's border-bottom aligns across all columns. */
-    min-height: 2.4375rem;
-    line-height: 1;
+.consumers-table .indicator-cell__dot {
+    display: inline-block;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: var(--p-red-500);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-red-500) 25%, transparent);
 }
 /* #B.177 david: clickable sort headers */
 .consumers-table th.sortable {
@@ -694,7 +627,7 @@ const sortedRows = computed<Consumer[]>(() => {
         height: auto;
     }
     /* Force display:block on cells so the flex tr can size them — desktop
-       rules set display:table-cell on .activity-cell / .action-cell, which
+       rules set display:table-cell on .activity-cell / .indicator-cell, which
        kept the cid cell from actually growing under flex: 1 1 0 (#B.193:
        "login complètement masqué par le label modérateur"). Specificity
        must match the desktop rules (0,2,0) so the @media override wins. */
@@ -710,7 +643,7 @@ const sortedRows = computed<Consumer[]>(() => {
         min-width: 0;
         white-space: nowrap;
     }
-    .consumers-table .action-cell {
+    .consumers-table .indicator-cell {
         display: block;
         flex: 0 0 auto;
         width: auto;
