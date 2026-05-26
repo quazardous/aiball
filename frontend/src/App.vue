@@ -172,6 +172,21 @@ function openProjectPage(p: string, page: ProjectPage) {
     openTicketId.value = null;
 }
 
+// #462 — gate the `.aiball-main--wide` modifier. Default narrow (980px) is
+// preserved for two views that read better narrow : the ticket thread
+// (long-form text — column too wide kills readability) and the compose page
+// (focused input). Everything else (inbox list, admin panels list/detail,
+// dashboard pages) gets the wide cap so the table-style content uses the
+// available screen real estate instead of leaving large empty gutters on a
+// 1280+ viewport. Form-style detail pages (Consumer/Node) already self-cap
+// to 40rem via `.aiball-detail-page`, so widening the parent is a no-op for
+// them.
+const aiballMainWide = computed((): boolean => {
+    if (openTicketId.value !== null) return false; // thread view → narrow
+    if (panel.value === "compose") return false;   // compose form → narrow
+    return true;
+});
+
 // Bulk-selection state + dispatch moved to lib/ticket-actions.ts as
 // `useBulkActions(...)` (#B.213 phase A.1). Selected ids, busy flag,
 // toggle/clear/selectAll, bulkAction handler, applicability counts +
@@ -683,7 +698,7 @@ watch(showSnoozed, (v) => {
                 @open-current-settings="project && openProjectPage(project, 'settings')"
             />
 
-            <main class="aiball-main">
+            <main class="aiball-main" :class="{ 'aiball-main--wide': aiballMainWide }">
                 <!-- #B.194: settings panels lacked a visible way back to
                      the inbox on mobile (the sidebar lives in the footer
                      band, easy to miss). One unified back-link covers
@@ -941,6 +956,23 @@ watch(showSnoozed, (v) => {
        sidebar (sibling) stays static while the thread scrolls. */
     height: 100%;
     overflow-y: auto;
+}
+
+/* #462 — wide modifier for table-style + admin content (inbox list, admin
+   panels, dashboard pages, list/show detail pages). The thread view + the
+   compose form keep the narrow default (long-form reading + focused input
+   benefit from a narrower column). Form-style pages (consumer/node detail)
+   already self-cap to .aiball-detail-page (40rem) so widening the parent is
+   a no-op for them — the wider container only matters where the page DOESN'T
+   self-constrain, i.e. tables + multi-column dashboards.
+
+   `min(95vw, 1600px)` : on a typical 1280-1920 viewport we get 95% of the
+   width (a small breathing margin keeps content off the absolute edge); on
+   4K / ultra-wide we cap at 1600px so a paragraph never becomes unreadable
+   wide. Vue applies this class via the `aiballMainWide` computed in App.vue
+   (everything except thread view + compose). */
+.aiball-main--wide {
+    max-width: min(95vw, 1600px);
 }
 
 .compose-bar {
