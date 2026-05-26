@@ -272,8 +272,11 @@ export const workFilters = sqliteTable("work_filters", {
 // `src/automation/engine.ts` for the pure matcher.
 export const automationRules = sqliteTable("automation_rules", {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    /** Lifecycle event that fires this rule. See `Trigger` in db/automation.ts. */
-    trigger: text("trigger").notNull(),
+    /** JSON array of lifecycle events this rule fires for (david `8r7crj` :
+     *  a rule can union multiple triggers — e.g. `["ticket_created",
+     *  "ticket_tagged"]` for "assign win-tag tickets at creation OR when
+     *  the tag is added later", instead of duplicating into 2 rules). */
+    triggers: text("triggers").notNull().default("[]"),
     /** NULL = global rule. Otherwise the consumer_id this rule applies to
      *  (work-filter case — narrows the pickup gate for that agent only). */
     scopeConsumer: text("scope_consumer"),
@@ -302,7 +305,6 @@ export const automationRules = sqliteTable("automation_rules", {
     note: text("note"),
     createdAt: text("created_at").notNull(),
 }, (t) => [
-    index("idx_automation_rules_trigger").on(t.trigger),
     index("idx_automation_rules_scope_consumer").on(t.scopeConsumer),
 ]);
 

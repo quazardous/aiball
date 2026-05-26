@@ -78,14 +78,18 @@ function matchesTagsAnyOf(ruleTags: string[], ticketTags: string[]): boolean {
 /**
  * Does this rule fire for this event ? Pure — no side effects, no DB.
  * Callers iterate the candidate rules (already filtered by `enabled=1`
- * and `trigger=<event.trigger>` server-side) and call this per row.
+ * server-side) and call this per row.
+ *
+ * The rule's `triggers` list is a UNION (david `8r7crj`) : the rule fires
+ * for ANY trigger in the list. Empty list = no triggers = never fires
+ * (fail-closed against a malformed row).
  *
  * Each branch is fail-closed on its own attributes — a rule that sets a
  * condition the event can't satisfy (e.g. `match_tag_added` on a
  * `message_posted` event) never matches.
  */
 export function ruleMatchesEvent(rule: AutomationRule, event: AutomationEvent): boolean {
-    if (rule.trigger !== event.trigger) return false;
+    if (!rule.triggers.includes(event.trigger)) return false;
     if (!matchesCommon(rule, event.project)) return false;
 
     switch (event.trigger) {
@@ -121,12 +125,34 @@ export function ruleMatchesEvent(rule: AutomationRule, event: AutomationEvent): 
 }
 
 /**
- * Pick the rules that fire for an event. Preserves caller-provided order
- * (rules come back from `listAutomationRules` ordered by position+id, so
- * first-match-wins semantics can be applied by callers that want it via
- * `[].find()`, while all-apply callers use `[].filter()`).
+ * **First-match-wins** semantics (david `x4pejb` : the default — "par défaut
+ * une règle est first win donc l'ordre est important"). Returns the first
+ * rule whose conditions match the event, or `null` when none do.
+ *
+ * `rules` are expected to come from `listAutomationRules` already ordered
+ * by (position asc, id asc) — the engine doesn't re-sort.
+ *
+ * Use this for moderation (decision auto/review : the first matching rule
+ * is the verdict), ticket_created/tagged action runs (the first matching
+ * rule's action runs, the rest are skipped), and any new trigger where
+ * "one action per event" is the natural shape.
  */
-export function matchingRules(
+export function firstMatchingRule(
+    rules: AutomationRule[],
+    event: AutomationEvent,
+): AutomationRule | null {
+    return rules.find((r) => ruleMatchesEvent(r, event)) ?? null;
+}
+
+/**
+ * **All-apply** semantics : returns every rule whose conditions match the
+ * event, preserving caller-provided order.
+ *
+ * Use this for the work-filter (actionable_eval) gate where `except` rules
+ * and `only` rules all contribute to the final verdict — narrowing here
+ * to "first" would lose the AND/OR semantic the gate needs.
+ */
+export function allMatchingRules(
     rules: AutomationRule[],
     event: AutomationEvent,
 ): AutomationRule[] {

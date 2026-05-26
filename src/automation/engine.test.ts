@@ -1,13 +1,18 @@
 // #457 — pure tests for the automation engine matcher (no DB, node:test).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { matchingRules, ruleMatchesEvent, type AutomationEvent } from "./engine.js";
+import {
+    allMatchingRules,
+    firstMatchingRule,
+    ruleMatchesEvent,
+    type AutomationEvent,
+} from "./engine.js";
 import type { AutomationRule, Trigger } from "../db/automation.js";
 
 function rule(p: Partial<AutomationRule>): AutomationRule {
     return {
         id: p.id ?? 1,
-        trigger: p.trigger ?? ("ticket_created" as Trigger),
+        triggers: p.triggers ?? (["ticket_created"] as Trigger[]),
         scope_consumer: p.scope_consumer ?? null,
         match_project: p.match_project ?? null,
         match_kind: p.match_kind ?? null,
@@ -29,7 +34,7 @@ function rule(p: Partial<AutomationRule>): AutomationRule {
 // ---------------------------------------------------------------------------
 
 test("rule with mismatched trigger never fires", () => {
-    const r = rule({ trigger: "message_posted" });
+    const r = rule({ triggers: ["message_posted"] });
     const e: AutomationEvent = {
         trigger: "ticket_created", project: "aiball",
         by_agent: null, intent: null, priority: null, ticket_tags: [],
@@ -37,8 +42,43 @@ test("rule with mismatched trigger never fires", () => {
     assert.equal(ruleMatchesEvent(r, e), false);
 });
 
+test("rule with EMPTY triggers list never fires (fail-closed)", () => {
+    const r = rule({ triggers: [] });
+    const e: AutomationEvent = {
+        trigger: "ticket_created", project: "aiball",
+        by_agent: null, intent: null, priority: null, ticket_tags: [],
+    };
+    assert.equal(ruleMatchesEvent(r, e), false);
+});
+
+test("triggers UNION (david `8r7crj`) : rule fires for ANY listed trigger", () => {
+    // david's scenario : same rule for "ticket created with tag win" AND
+    // "tag win added later" — one rule, two triggers, no duplication.
+    const r = rule({
+        triggers: ["ticket_created", "ticket_tagged"],
+        match_tags: ["win"],
+        action: { kind: "assign", consumer_id: "aiball-windows" },
+    });
+    const createdEvent: AutomationEvent = {
+        trigger: "ticket_created", project: "aiball",
+        by_agent: "david", intent: "request", priority: "normal",
+        ticket_tags: ["win"],
+    };
+    const taggedEvent: AutomationEvent = {
+        trigger: "ticket_tagged", project: "aiball",
+        tag_added: "win", ticket_tags: ["win"], intent: null, priority: null,
+    };
+    const otherTriggerEvent: AutomationEvent = {
+        trigger: "message_posted", project: "aiball",
+        kind: "comment_added", by_agent: "alice",
+    };
+    assert.equal(ruleMatchesEvent(r, createdEvent), true);
+    assert.equal(ruleMatchesEvent(r, taggedEvent), true);
+    assert.equal(ruleMatchesEvent(r, otherTriggerEvent), false);
+});
+
 test("match_project NULL → matches any project", () => {
-    const r = rule({ trigger: "ticket_created" });
+    const r = rule({ triggers: ["ticket_created"] });
     const e: AutomationEvent = {
         trigger: "ticket_created", project: "aiball",
         by_agent: null, intent: null, priority: null, ticket_tags: [],
@@ -47,7 +87,7 @@ test("match_project NULL → matches any project", () => {
 });
 
 test("match_project set → only matches the named project", () => {
-    const r = rule({ trigger: "ticket_created", match_project: "aiball" });
+    const r = rule({ triggers: ["ticket_created"], match_project: "aiball" });
     const aiball: AutomationEvent = {
         trigger: "ticket_created", project: "aiball",
         by_agent: null, intent: null, priority: null, ticket_tags: [],
@@ -62,7 +102,7 @@ test("match_project set → only matches the named project", () => {
 // ---------------------------------------------------------------------------
 
 test("message_posted : match_kind narrows by message kind", () => {
-    const r = rule({ trigger: "message_posted", match_kind: "comment_added" });
+    const r = rule({ triggers: ["message_posted"], match_kind: "comment_added" });
     const e = (kind: string): AutomationEvent => ({
         trigger: "message_posted", project: "aiball", kind, by_agent: "alice",
     });
@@ -71,7 +111,7 @@ test("message_posted : match_kind narrows by message kind", () => {
 });
 
 test("message_posted : match_by_agent narrows by author", () => {
-    const r = rule({ trigger: "message_posted", match_by_agent: "alice" });
+    const r = rule({ triggers: ["message_posted"], match_by_agent: "alice" });
     const e = (by_agent: string | null): AutomationEvent => ({
         trigger: "message_posted", project: "aiball", kind: "comment_added", by_agent,
     });
@@ -85,7 +125,7 @@ test("message_posted : match_by_agent narrows by author", () => {
 // ---------------------------------------------------------------------------
 
 test("actionable_eval : match_tags any-of", () => {
-    const r = rule({ trigger: "actionable_eval", match_tags: ["win", "urgent"] });
+    const r = rule({ triggers: ["actionable_eval"], match_tags: ["win", "urgent"] });
     const e = (ticket_tags: string[]): AutomationEvent => ({
         trigger: "actionable_eval", consumer_id: "agent", project: "aiball", ticket_tags,
     });
@@ -96,7 +136,7 @@ test("actionable_eval : match_tags any-of", () => {
 });
 
 test("actionable_eval : empty match_tags matches everything", () => {
-    const r = rule({ trigger: "actionable_eval", match_tags: [] });
+    const r = rule({ triggers: ["actionable_eval"], match_tags: [] });
     const e: AutomationEvent = {
         trigger: "actionable_eval", consumer_id: "agent", project: "aiball", ticket_tags: [],
     };
@@ -104,7 +144,7 @@ test("actionable_eval : empty match_tags matches everything", () => {
 });
 
 test("actionable_eval : scope_consumer mismatch fails closed", () => {
-    const r = rule({ trigger: "actionable_eval", scope_consumer: "alice" });
+    const r = rule({ triggers: ["actionable_eval"], scope_consumer: "alice" });
     const e: AutomationEvent = {
         trigger: "actionable_eval", consumer_id: "bob", project: "aiball", ticket_tags: [],
     };
@@ -117,7 +157,7 @@ test("actionable_eval : scope_consumer mismatch fails closed", () => {
 
 test("ticket_created : has_tags any-of matches david's scenario", () => {
     const r = rule({
-        trigger: "ticket_created",
+        triggers: ["ticket_created"],
         match_tags: ["win"],
         action: { kind: "assign", consumer_id: "aiball-windows" },
     });
@@ -134,7 +174,7 @@ test("ticket_created : has_tags any-of matches david's scenario", () => {
 
 test("ticket_created : combines intent + priority + tags AND-wise", () => {
     const r = rule({
-        trigger: "ticket_created",
+        triggers: ["ticket_created"],
         match_intent: "panic",
         match_priority: "urgent",
         match_tags: ["security"],
@@ -155,7 +195,7 @@ test("ticket_created : combines intent + priority + tags AND-wise", () => {
 
 test("ticket_tagged : match_tag_added narrows to the specific tag just added", () => {
     const r = rule({
-        trigger: "ticket_tagged",
+        triggers: ["ticket_tagged"],
         match_tag_added: "win",
         action: { kind: "assign", consumer_id: "aiball-windows" },
     });
@@ -168,7 +208,7 @@ test("ticket_tagged : match_tag_added narrows to the specific tag just added", (
 });
 
 test("ticket_tagged : NULL match_tag_added = any tag addition", () => {
-    const r = rule({ trigger: "ticket_tagged", match_tag_added: null });
+    const r = rule({ triggers: ["ticket_tagged"], match_tag_added: null });
     const e: AutomationEvent = {
         trigger: "ticket_tagged", project: "aiball",
         tag_added: "anything", ticket_tags: ["anything"], intent: null, priority: null,
@@ -177,32 +217,59 @@ test("ticket_tagged : NULL match_tag_added = any tag addition", () => {
 });
 
 // ---------------------------------------------------------------------------
-// matchingRules — preserves order, filters disabled (caller's responsibility
-// to pre-filter enabled=1, but matchingRules itself just iterates).
+// firstMatchingRule (first-match-wins default, david `x4pejb`) +
+// allMatchingRules (all-apply, for work-filter etc.). Caller pre-orders by
+// (position, id) ; the engine doesn't re-sort.
 // ---------------------------------------------------------------------------
 
-test("matchingRules returns rules in caller-provided order", () => {
+test("firstMatchingRule returns the first match in caller order", () => {
     const e: AutomationEvent = {
         trigger: "ticket_created", project: "aiball",
         by_agent: null, intent: null, priority: null, ticket_tags: ["win"],
     };
     const rules = [
-        rule({ id: 10, position: 0, trigger: "ticket_created", match_tags: ["win"] }),
-        rule({ id: 20, position: 5, trigger: "ticket_created", match_tags: ["urgent"] }),
-        rule({ id: 30, position: 10, trigger: "ticket_created", match_tags: ["win"] }),
+        rule({ id: 10, position: 0, triggers: ["ticket_created"], match_tags: ["urgent"] }),
+        rule({ id: 20, position: 5, triggers: ["ticket_created"], match_tags: ["win"] }),
+        rule({ id: 30, position: 10, triggers: ["ticket_created"], match_tags: ["win"] }),
     ];
-    const got = matchingRules(rules, e);
-    assert.deepEqual(got.map((r) => r.id), [10, 30]);
+    const got = firstMatchingRule(rules, e);
+    assert.equal(got?.id, 20);
 });
 
-test("matchingRules with no matches → empty array", () => {
+test("firstMatchingRule with no matches → null", () => {
     const e: AutomationEvent = {
         trigger: "ticket_created", project: "aiball",
         by_agent: null, intent: null, priority: null, ticket_tags: [],
     };
     const rules = [
-        rule({ trigger: "ticket_created", match_tags: ["win"] }),
-        rule({ trigger: "ticket_tagged" }),
+        rule({ triggers: ["ticket_created"], match_tags: ["win"] }),
+        rule({ triggers: ["ticket_tagged"] }),
     ];
-    assert.deepEqual(matchingRules(rules, e), []);
+    assert.equal(firstMatchingRule(rules, e), null);
+});
+
+test("allMatchingRules returns rules in caller-provided order", () => {
+    const e: AutomationEvent = {
+        trigger: "ticket_created", project: "aiball",
+        by_agent: null, intent: null, priority: null, ticket_tags: ["win"],
+    };
+    const rules = [
+        rule({ id: 10, position: 0, triggers: ["ticket_created"], match_tags: ["win"] }),
+        rule({ id: 20, position: 5, triggers: ["ticket_created"], match_tags: ["urgent"] }),
+        rule({ id: 30, position: 10, triggers: ["ticket_created"], match_tags: ["win"] }),
+    ];
+    const got = allMatchingRules(rules, e);
+    assert.deepEqual(got.map((r) => r.id), [10, 30]);
+});
+
+test("allMatchingRules with no matches → empty array", () => {
+    const e: AutomationEvent = {
+        trigger: "ticket_created", project: "aiball",
+        by_agent: null, intent: null, priority: null, ticket_tags: [],
+    };
+    const rules = [
+        rule({ triggers: ["ticket_created"], match_tags: ["win"] }),
+        rule({ triggers: ["ticket_tagged"] }),
+    ];
+    assert.deepEqual(allMatchingRules(rules, e), []);
 });

@@ -25,7 +25,7 @@
  * (`getEnabledRulesForTrigger`) degrades to `[]` on read error so a fresh
  * tsx-hot-reload that hasn't applied migration 0039 doesn't break callers.
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, like } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 
@@ -59,7 +59,8 @@ export type ActionKind = AutomationAction["kind"];
 
 export interface AutomationRule {
     id: number;
-    trigger: Trigger;
+    /** A rule fires for any trigger in this list (david `8r7crj` : union). */
+    triggers: Trigger[];
     scope_consumer: string | null;
     match_project: string | null;
     match_kind: string | null;
@@ -76,7 +77,8 @@ export interface AutomationRule {
 }
 
 export interface NewAutomationRule {
-    trigger: Trigger;
+    /** Accepts a single trigger (sugar) or a list (union). */
+    triggers: Trigger | Trigger[];
     scope_consumer?: string | null;
     match_project?: string | null;
     match_kind?: string | null;
@@ -98,6 +100,22 @@ function parseTags(json: string): string[] {
     try {
         const v = JSON.parse(json);
         return Array.isArray(v) ? v.filter((t): t is string => typeof t === "string") : [];
+    } catch {
+        return [];
+    }
+}
+
+const VALID_TRIGGERS: Trigger[] = [
+    "message_posted", "actionable_eval", "ticket_created", "ticket_tagged",
+];
+
+function parseTriggers(json: string): Trigger[] {
+    try {
+        const v = JSON.parse(json);
+        if (!Array.isArray(v)) return [];
+        return v.filter((t): t is Trigger =>
+            typeof t === "string" && (VALID_TRIGGERS as string[]).includes(t),
+        );
     } catch {
         return [];
     }
@@ -145,7 +163,7 @@ function encodeAction(a: AutomationAction): { kind: string; data: string } {
 function rowToRule(r: schema.AutomationRuleRow): AutomationRule {
     return {
         id: r.id,
-        trigger: r.trigger as Trigger,
+        triggers: parseTriggers(r.triggers),
         scope_consumer: r.scopeConsumer,
         match_project: r.matchProject,
         match_kind: r.matchKind,
@@ -168,8 +186,9 @@ function rowToRule(r: schema.AutomationRuleRow): AutomationRule {
 
 export function insertAutomationRule(r: NewAutomationRule): AutomationRule {
     const enc = encodeAction(r.action);
+    const triggersList: Trigger[] = Array.isArray(r.triggers) ? r.triggers : [r.triggers];
     const inserted = getDb().insert(schema.automationRules).values({
-        trigger: r.trigger,
+        triggers: JSON.stringify(triggersList),
         scopeConsumer: r.scope_consumer ?? null,
         matchProject: r.match_project ?? null,
         matchKind: r.match_kind ?? null,
@@ -189,6 +208,7 @@ export function insertAutomationRule(r: NewAutomationRule): AutomationRule {
 }
 
 export interface ListOpts {
+    /** Filter to rules whose `triggers` JSON array contains this trigger. */
     trigger?: Trigger;
     scopeConsumer?: string;
     enabledOnly?: boolean;
@@ -197,15 +217,26 @@ export interface ListOpts {
 export function listAutomationRules(opts: ListOpts = {}): AutomationRule[] {
     let q = getDb().select().from(schema.automationRules).$dynamic();
     const conds = [];
-    if (opts.trigger) conds.push(eq(schema.automationRules.trigger, opts.trigger));
+    if (opts.trigger) {
+        // SQLite can't index inside JSON without a generated column. The
+        // table will stay small so a LIKE on the JSON text is fine — we still
+        // filter the result in JS below to drop any false-positive (e.g. a
+        // tag with the same name accidentally matching). The pattern includes
+        // the surrounding quotes so `"ticket"` doesn't match `"ticket_created"`.
+        conds.push(like(schema.automationRules.triggers, `%"${opts.trigger}"%`));
+    }
     if (opts.scopeConsumer !== undefined) {
         conds.push(eq(schema.automationRules.scopeConsumer, opts.scopeConsumer));
     }
     if (opts.enabledOnly) conds.push(eq(schema.automationRules.enabled, 1));
     if (conds.length) q = q.where(conds.length === 1 ? conds[0] : and(...conds));
-    return q.orderBy(asc(schema.automationRules.position), asc(schema.automationRules.id))
+    const rows = q.orderBy(asc(schema.automationRules.position), asc(schema.automationRules.id))
         .all()
         .map(rowToRule);
+    // JS-side post-filter to drop LIKE false-positives — the trigger list IS
+    // the authoritative source after JSON parse.
+    if (opts.trigger) return rows.filter((r) => r.triggers.includes(opts.trigger!));
+    return rows;
 }
 
 export function deleteAutomationRule(id: number): void {
