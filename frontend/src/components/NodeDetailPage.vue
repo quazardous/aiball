@@ -7,6 +7,11 @@
  * and the consumers it relays — the relayed list moved off the node list
  * row and onto this page. Revoke lives here too (the node's home),
  * behind the same impact-aware confirm as before.
+ *
+ * #458 — wraps <AdminDetailLayout> (3-niveaux : App.vue → AdminDetailLayout →
+ * cette page). La page ne pose plus son breadcrumb, sa largeur, ni sa carte
+ * de corps — c'est le layout qui le fait, identique à toutes les pages
+ * détail form-style.
  */
 import { ref, watch } from "vue";
 import Button from "primevue/button";
@@ -15,24 +20,13 @@ import { useToast } from "primevue/usetoast";
 import { api, type NodeView } from "../lib/api";
 import DataList from "./ui/DataList.vue";
 import FieldRow from "./ui/FieldRow.vue";
-import DetailHeader from "./ui/DetailHeader.vue";
+import AdminDetailLayout from "./ui/AdminDetailLayout.vue";
 
 const props = defineProps<{ nodeId: string }>();
 const emit = defineEmits<{
     (e: "close"): void;
-    /** #458 — first breadcrumb crumb ("Inbox") returns to the inbox instead
-     *  of just the parent list. The doubled App.vue back-link is suppressed
-     *  on detail pages; this event takes over its job. */
     (e: "close-to-inbox"): void;
 }>();
-
-// #458 — dispatch the breadcrumb click by index: 0 = Inbox (skip the list),
-// 1 = the parent list (Proxy nodes). The href on each crumb keeps the link
-// real (Ctrl-click works), the handler does the client-side state reset.
-function onCrumb(index: number): void {
-    if (index === 0) emit("close-to-inbox");
-    else emit("close");
-}
 
 const confirm = useConfirm();
 const toast = useToast();
@@ -106,20 +100,19 @@ async function doRevoke(n: NodeView): Promise<void> {
 </script>
 
 <template>
-    <div class="node-detail aiball-detail-page">
-        <DetailHeader
-            :crumbs="[{ label: 'Inbox', href: '/' }, { label: 'Proxy nodes', href: '/nodes' }]"
-            :current="props.nodeId"
-            title="Node details"
-            @crumb="onCrumb"
-        />
-
+    <AdminDetailLayout
+        :crumbs="[{ label: 'Inbox', href: '/' }, { label: 'Proxy nodes', href: '/nodes' }]"
+        :current="props.nodeId"
+        title="Node details"
+        @close-to-inbox="emit('close-to-inbox')"
+        @close-to-list="emit('close')"
+    >
         <div v-if="loading" class="aiball-empty">Loading…</div>
         <div v-else-if="error" class="aiball-empty node-detail__error">
             <i class="pi pi-exclamation-triangle" />
             {{ error }}
         </div>
-        <div v-else-if="node" class="node-detail__body">
+        <template v-else-if="node">
             <FieldRow label="label">{{ node.label || "(unlabelled)" }}</FieldRow>
             <FieldRow label="node id"><span class="aiball-mono">{{ node.node_id }}</span></FieldRow>
             <FieldRow label="last peer IP">{{ node.last_seen_ip ?? "—" }}</FieldRow>
@@ -164,25 +157,15 @@ async function doRevoke(n: NodeView): Promise<void> {
                     @click="revoke"
                 />
             </div>
-        </div>
-    </div>
+        </template>
+    </AdminDetailLayout>
 </template>
 
 <style>
-/* Layout (largeur + gouttière verticale) → `.aiball-detail-page` (style.css). */
-/* En-tête (breadcrumb + titre) → <DetailHeader> / `.aiball-detail-head*`
-   + `.aiball-breadcrumb*` (style.css). */
+/* Layout (largeur + carte) → `<AdminDetailLayout>` (#458). */
+/* En-tête (breadcrumb + titre) → bricks internes du layout. */
 .node-detail__error {
     color: var(--p-red-500);
-}
-.node-detail__body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.9rem;
-    padding: 1rem;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
-    background: var(--p-content-background);
 }
 /* Champs read-only → <FieldRow> / `.aiball-field-row*` + `.aiball-mono`
    (style.css). */

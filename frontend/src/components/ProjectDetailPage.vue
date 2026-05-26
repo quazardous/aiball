@@ -8,7 +8,7 @@ import { useToast } from "primevue/usetoast";
 import { useConfirm } from "primevue/useconfirm";
 import { api, type ProjectMeta, type Consumer } from "../lib/api";
 import { useBus } from "../lib/bus";
-import DetailHeader from "./ui/DetailHeader.vue";
+import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 
 const props = defineProps<{ project: string }>();
 const emit = defineEmits<{ (e: "back"): void }>();
@@ -149,13 +149,13 @@ async function doStopLoop(consumer_id: string) {
 </script>
 
 <template>
-    <div class="project-detail">
-        <DetailHeader
-            :crumbs="[{ label: 'Inbox' }]"
-            :current="project"
-            title="Detail"
-            @crumb="emit('back')"
-        >
+    <AdminDashboardLayout
+        class="project-detail"
+        :crumbs="[{ label: 'Inbox', href: '/' }]"
+        :current="project"
+        title="Detail"
+        @close-to-inbox="emit('back')"
+    >
             <template #actions>
                 <span v-if="meta?.running" class="project-detail__local is-running"><i class="pi pi-desktop" /> running</span>
                 <span v-else-if="meta?.local" class="project-detail__local"><i class="pi pi-desktop" /> local</span>
@@ -168,7 +168,6 @@ async function doStopLoop(consumer_id: string) {
                     <i class="pi pi-refresh" />
                 </button>
             </template>
-        </DetailHeader>
 
         <div v-if="loading" class="aiball-empty">Loading…</div>
         <div v-else-if="error" class="aiball-empty" style="color: var(--p-red-500)">{{ error }}</div>
@@ -239,16 +238,11 @@ async function doStopLoop(consumer_id: string) {
                 </ul>
             </section>
         </template>
-    </div>
+    </AdminDashboardLayout>
 </template>
 
 <style scoped>
-.project-detail {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-}
-/* En-tête (breadcrumb + titre) → <DetailHeader> (style.css). */
+/* Layout (largeur + gouttière + breadcrumb) → `<AdminDashboardLayout>` (#458). */
 .project-detail__local {
     display: inline-flex;
     align-items: center;

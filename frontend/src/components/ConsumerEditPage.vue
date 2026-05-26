@@ -16,22 +16,13 @@ import { useToast } from "primevue/usetoast";
 import { api, CONSUMER_KIND_OPTIONS, type Consumer, type ConsumerKind } from "../lib/api";
 import { relativeTime } from "../lib/format";
 import FieldRow from "./ui/FieldRow.vue";
-import DetailHeader from "./ui/DetailHeader.vue";
+import AdminDetailLayout from "./ui/AdminDetailLayout.vue";
 
 const props = defineProps<{ consumerId: string }>();
 const emit = defineEmits<{
     (e: "close"): void;
-    /** #458 — first breadcrumb crumb ("Inbox") returns to the inbox instead
-     *  of just the parent list. The doubled App.vue back-link is suppressed
-     *  on detail pages; this event takes over its job. */
     (e: "close-to-inbox"): void;
 }>();
-
-// #458 — dispatch the breadcrumb click by index (0 = Inbox, 1 = Consumers).
-function onCrumb(index: number): void {
-    if (index === 0) emit("close-to-inbox");
-    else emit("close");
-}
 
 const toast = useToast();
 const loading = ref(false);
@@ -139,20 +130,19 @@ async function sendPrompt() {
 </script>
 
 <template>
-    <div class="consumer-edit aiball-detail-page">
-        <DetailHeader
-            :crumbs="[{ label: 'Inbox', href: '/' }, { label: 'Consumers', href: '/consumers' }]"
-            :current="props.consumerId"
-            title="Edit consumer"
-            @crumb="onCrumb"
-        />
-
+    <AdminDetailLayout
+        :crumbs="[{ label: 'Inbox', href: '/' }, { label: 'Consumers', href: '/consumers' }]"
+        :current="props.consumerId"
+        title="Edit consumer"
+        @close-to-inbox="emit('close-to-inbox')"
+        @close-to-list="emit('close')"
+    >
         <div v-if="loading" class="aiball-empty">Loading…</div>
         <div v-else-if="error" class="aiball-empty consumer-edit__error">
             <i class="pi pi-exclamation-triangle" />
             {{ error }}
         </div>
-        <div v-else-if="original" class="consumer-edit__body">
+        <template v-else-if="original">
             <FieldRow label="consumer_id">
                 <span class="aiball-mono">{{ original.consumer_id }}</span>
             </FieldRow>
@@ -272,25 +262,15 @@ async function sendPrompt() {
                     @click="save"
                 />
             </div>
-        </div>
-    </div>
+        </template>
+    </AdminDetailLayout>
 </template>
 
 <style>
-/* Layout (largeur + gouttière verticale) → `.aiball-detail-page` (style.css). */
-/* En-tête (breadcrumb + titre) → <DetailHeader> / `.aiball-detail-head*`
-   + `.aiball-breadcrumb*` (style.css). */
+/* Layout (largeur + carte) → `<AdminDetailLayout>` (#458). */
+/* En-tête (breadcrumb + titre) → bricks internes du layout. */
 .consumer-edit__error {
     color: var(--p-red-500);
-}
-.consumer-edit__body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.9rem;
-    padding: 1rem;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
-    background: var(--p-content-background);
 }
 .consumer-edit__field {
     display: flex;

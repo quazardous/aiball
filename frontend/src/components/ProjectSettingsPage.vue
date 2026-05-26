@@ -4,7 +4,7 @@ import Select from "primevue/select";
 import { api, type Strategy } from "../lib/api";
 import { STRATEGY_OPTIONS } from "../lib/labels";
 import ManagedConfig from "./ManagedConfig.vue";
-import DetailHeader from "./ui/DetailHeader.vue";
+import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 
 const props = defineProps<{
     project: string;
@@ -73,14 +73,12 @@ onMounted(load);
 </script>
 
 <template>
-    <div class="project-settings">
-        <DetailHeader
-            :crumbs="[{ label: 'Inbox' }]"
-            :current="project"
-            title="Settings"
-            @crumb="emit('back')"
-        />
-
+    <AdminDashboardLayout
+        :crumbs="[{ label: 'Inbox', href: '/' }]"
+        :current="project"
+        title="Settings"
+        @close-to-inbox="emit('back')"
+    >
         <div v-if="loading" class="aiball-empty">Loading settings…</div>
         <div v-else-if="error" class="aiball-empty" style="color: var(--p-red-500)">
             {{ error }}
@@ -137,16 +135,11 @@ onMounted(load);
                 <ManagedConfig :project="project" />
             </section>
         </template>
-    </div>
+    </AdminDashboardLayout>
 </template>
 
 <style>
-.project-settings {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-}
-/* En-tête (breadcrumb + titre) → <DetailHeader> (style.css). */
+/* Layout (largeur + gouttière + breadcrumb) → `<AdminDashboardLayout>` (#458). */
 .project-settings__section {
     padding: 1rem 1.2rem;
     border: 1px solid var(--p-content-border-color);
@@ -189,9 +182,6 @@ onMounted(load);
    strategy Select so it follows the section instead of the desktop
    min-width. */
 @media (max-width: 720px) {
-    .project-settings {
-        gap: 0.6rem;
-    }
     .project-settings__section {
         padding: 0.7rem 0.8rem;
         max-width: none;

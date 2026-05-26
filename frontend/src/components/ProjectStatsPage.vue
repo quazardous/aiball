@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { api, type TokenUsage } from "../lib/api";
 import { formatTicketRef } from "../lib/formatting";
 import { estTokenCost, estTokenEffort, formatTokens } from "../lib/format";
-import DetailHeader from "./ui/DetailHeader.vue";
+import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 
 const props = defineProps<{
     project: string;
@@ -87,30 +87,29 @@ const topTokenMax = computed(() =>
 </script>
 
 <template>
-    <div class="project-stats">
+    <AdminDashboardLayout
+        class="project-stats"
+        :crumbs="[{ label: 'Inbox', href: '/' }]"
+        :current="project"
+        title="Stats"
+        @close-to-inbox="emit('back')"
+    >
+        <template #actions>
+            <button
+                type="button"
+                class="project-stats__refresh"
+                title="Refresh stats"
+                @click="load"
+            >
+                <i class="pi pi-refresh" />
+            </button>
+        </template>
+
         <div v-if="loading" class="aiball-empty">Loading stats…</div>
         <div v-else-if="error" class="aiball-empty" style="color: var(--p-red-500)">
             {{ error }}
         </div>
         <template v-else-if="stats">
-            <DetailHeader
-                :crumbs="[{ label: 'Inbox' }]"
-                :current="project"
-                title="Stats"
-                @crumb="emit('back')"
-            >
-                <template #actions>
-                    <button
-                        type="button"
-                        class="project-stats__refresh"
-                        title="Refresh stats"
-                        @click="load"
-                    >
-                        <i class="pi pi-refresh" />
-                    </button>
-                </template>
-            </DetailHeader>
-
             <!-- Pulse: 4 big numbers at a glance -->
             <section class="project-stats__pulse">
                 <div class="stat-card">
@@ -272,16 +271,11 @@ const topTokenMax = computed(() =>
                 </ol>
             </section>
         </template>
-    </div>
+    </AdminDashboardLayout>
 </template>
 
 <style>
-.project-stats {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-}
-/* En-tête (breadcrumb + titre) → <DetailHeader> (style.css). */
+/* Layout (largeur + gouttière + breadcrumb) → `<AdminDashboardLayout>` (#458). */
 .project-stats__refresh {
     background: transparent;
     border: 0;
