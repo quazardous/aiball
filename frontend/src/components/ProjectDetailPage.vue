@@ -4,7 +4,6 @@
 // each root with their live state, and a button to launch a loop for a root.
 import { computed, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
-import { useConfirm } from "primevue/useconfirm";
 import { api, type ProjectMeta, type Consumer } from "../lib/api";
 import { useBus } from "../lib/bus";
 import { useNotify } from "../lib/notify";
@@ -25,7 +24,6 @@ const error = ref<string | null>(null);
 const launching = ref<string | null>(null);
 
 const notify = useNotify();
-const confirmDialog = useConfirm();
 
 async function load() {
     loading.value = true;
@@ -99,37 +97,10 @@ async function launch(root: string) {
     }
 }
 
-// #443 (2gx5ev): david wants the remote hard-kill (#442) reachable from the
-// per-project page too, not only the Consumers list. Same flow mirrored: a
-// PrimeVue ConfirmDialog gates the call so a stray click never kills a loop.
-function stopLoop(consumer_id: string) {
-    confirmDialog.require({
-        header: "Stop loop",
-        message: `Stop the claude-loop running as "${consumer_id}"? This kills its tmux session + Claude (the conversation is lost). Its state is kept — use Delete to remove it entirely.`,
-        icon: "pi pi-stop-circle",
-        acceptLabel: "Stop",
-        rejectLabel: "Cancel",
-        acceptClass: "p-button-danger",
-        accept: () => { void doStopLoop(consumer_id); },
-    });
-}
-// The running badge + loop chip clear on their own via the presence WS broadcast
-// (`projects.refresh` → load()); reload shortly after as a backstop.
-async function doStopLoop(consumer_id: string) {
-    try {
-        const r = await api.stopLoop(consumer_id);
-        // #459 — migrated to `notify` so launch + stop go through the same
-        // semantic helpers (cohérent avec le reste de la page).
-        if (r.delivered) {
-            notify.success(`Stop sent to ${consumer_id}`, { detail: "The loop will self-terminate." });
-        } else {
-            notify.warn(`No live loop for ${consumer_id}`, { detail: "Nothing was connected to receive it." });
-        }
-        setTimeout(() => void load(), 1500);
-    } catch (e) {
-        notify.error(`Stop failed for ${consumer_id}`, { detail: (e as Error).message });
-    }
-}
+// #468 follow-up `ctmqzp` — Stop button retiré de cette liste (la row
+// entière clique vers le détail consumer, où Stop + Delete vivent dans
+// le band d'actions du tab Overview #469). `doStopLoop` + le confirm
+// dialog associé ont disparu en même temps que le bouton inline.
 </script>
 
 <template>
@@ -187,6 +158,12 @@ async function doStopLoop(consumer_id: string) {
                         @click="launch(root)"
                     />
                 </div>
+                <!-- #468 david `ctmqzp` : "réutilise ce style dans la liste
+                     des consumers par projet". La row entière clique vers le
+                     détail consumer. Le bouton Stop inline est retiré — il vit
+                     sur la page détail consumer (band Stop+Delete du tab
+                     Overview, #469). L'indicateur ON/OFF (`.project-detail__dot`)
+                     reste read-only à gauche. -->
                 <ul class="project-detail__loops">
                     <li
                         v-for="c in loopsByRoot.get(root) ?? []"
@@ -194,31 +171,20 @@ async function doStopLoop(consumer_id: string) {
                         class="project-detail__loop"
                         :class="{ 'is-offline': !isOnline(c) }"
                     >
-                        <span class="project-detail__dot" :class="isOnline(c) ? 'is-on' : 'is-off'" />
-                        <!-- #460 — chip cliquable vers la page consumer détail (centralise start/stop + info). -->
                         <a
                             :href="`/consumers/${encodeURIComponent(c.consumer_id)}`"
-                            class="project-detail__loop-id"
+                            class="project-detail__loop-link"
                             :title="`Open consumer details for ${c.consumer_id}`"
-                        >{{ c.consumer_id }}</a>
-                        <!-- #395 (q3bfvn): busy/idle + loop/human as CSS tags (was plain text). -->
-                        <template v-if="isOnline(c)">
-                            <span class="ld-tag" :class="activityClass(c.state)">{{ c.state ?? "?" }}</span>
-                            <span class="ld-tag" :class="presenceClass(c.state_human, c.state_human_word)">{{ presenceWord(c.state_human, c.state_human_word) }}</span>
-                        </template>
-                        <span v-else class="ld-tag ld-tag--offline">offline</span>
-                        <!-- #443 (2gx5ev): remote hard-kill on any live loop, mirrors ConsumersPanel. -->
-                        <Button
-                            v-if="isOnline(c)"
-                            class="project-detail__stop"
-                            icon="pi pi-stop-circle"
-                            severity="danger"
-                            text
-                            rounded
-                            size="small"
-                            :title="`Stop (hard-kill) the claude-loop running as ${c.consumer_id}`"
-                            @click="stopLoop(c.consumer_id)"
-                        />
+                        >
+                            <span class="project-detail__dot" :class="isOnline(c) ? 'is-on' : 'is-off'" />
+                            <span class="project-detail__loop-id">{{ c.consumer_id }}</span>
+                            <!-- #395 (q3bfvn): busy/idle + loop/human as CSS tags (was plain text). -->
+                            <template v-if="isOnline(c)">
+                                <span class="ld-tag" :class="activityClass(c.state)">{{ c.state ?? "?" }}</span>
+                                <span class="ld-tag" :class="presenceClass(c.state_human, c.state_human_word)">{{ presenceWord(c.state_human, c.state_human_word) }}</span>
+                            </template>
+                            <span v-else class="ld-tag ld-tag--offline">offline</span>
+                        </a>
                     </li>
                     <li v-if="(loopsByRoot.get(root) ?? []).length === 0" class="project-detail__none">
                         no loop registered at this root yet
@@ -312,14 +278,25 @@ async function doStopLoop(consumer_id: string) {
     gap: 0.3rem;
 }
 .project-detail__loop {
+    font-size: 0.85rem;
+    border-radius: 0.3rem;
+}
+.project-detail__loop.is-offline { opacity: 0.6; }
+/* #468 follow-up `ctmqzp` — row entière cliquable (anchor occupy la
+   ligne). Hover surface tint + cursor pointer. L'indicateur ON/OFF
+   reste dans le flux, read-only. */
+.project-detail__loop-link {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    font-size: 0.85rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.3rem;
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+    transition: background 0.1s;
 }
-.project-detail__loop.is-offline { opacity: 0.6; }
-/* #443: hard-kill button pushed to the right edge of the loop row. */
-.project-detail__stop { margin-left: auto; }
+.project-detail__loop-link:hover { background: var(--p-surface-100); }
 .project-detail__dot {
     width: 0.55rem;
     height: 0.55rem;
@@ -331,9 +308,7 @@ async function doStopLoop(consumer_id: string) {
 .project-detail__loop-id {
     font-family: ui-monospace, SFMono-Regular, monospace;
     color: var(--p-text-color);
-    text-decoration: none;
 }
-.project-detail__loop-id:hover { text-decoration: underline; color: var(--p-primary-color); }
 .project-detail__loop-state {
     color: var(--p-text-muted-color);
     font-size: 0.8rem;
