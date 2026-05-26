@@ -301,9 +301,16 @@ function closeStream() {
 
 async function toggleFullscreen() {
     isFullscreen.value = !isFullscreen.value;
-    // Wait a frame for the CSS resize to land, then re-fit the terminal so
-    // its cells fill the new viewport (otherwise the bottom rows clip).
+    // #472 david `6d56gs` "quand on sort du mode plein ecran la hauteur
+    // est incorrect" : un seul `nextTick` ne suffisait pas — Vue avait
+    // mis à jour le DOM mais le navigateur n'avait pas encore recalculé
+    // le layout flex parent. fit() mesurait alors l'ancienne hauteur
+    // (fullscreen) et appliquait des rows qui ne tenaient pas dans la
+    // nouvelle. On enchaîne nextTick + requestAnimationFrame (Vue puis
+    // une vraie frame de paint) avant de fit pour que les dimensions
+    // soient stables. Symétrique : ça aide aussi à l'entrée fullscreen.
     await nextTick();
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
     fitAddon?.fit();
 }
 

@@ -83,7 +83,18 @@ const promptBusy = ref(false);
 const KIND_OPTIONS = CONSUMER_KIND_OPTIONS;
 
 async function load() {
-    loading.value = true;
+    // #472 david `6d56gs` "de temps en temps tout le terminal se refresh
+    // repaint" + "quand ça se repeind ça sort tout seul du mode plein
+    // ecran". Root cause : ce composant a un `<template v-else-if="original">`
+    // chaîné après `<div v-if="loading">`. Le bus `projects.refresh`
+    // (consumer_changed broadcast ~60s) appelle load() qui flippait
+    // `loading=true` un instant → l'arbre principal est démonté →
+    // TerminalView re-monte → isFullscreen / SSE / xterm tous re-créés.
+    // On ne flip `loading=true` QUE quand on n'a pas encore de donnée
+    // (premier appel) ; les refreshs ultérieurs gardent l'UI rendue
+    // pendant la requête (en cas d'erreur sur un refresh, le contenu
+    // existant reste affiché — la div d'erreur ne flashe plus).
+    if (!original.value) loading.value = true;
     error.value = null;
     try {
         // We reuse the full-list endpoint and filter client-side (cost is
