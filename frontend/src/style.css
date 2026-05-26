@@ -391,3 +391,29 @@ body,
     max-width: 40rem;
 }
 
+/* #395/q3bfvn → #460 — CSS tag pour l'état busy/idle d'une loop + sa présence
+   loop/human/wait/stop, partagé entre ProjectDetailPage et ConsumerEditPage
+   (déplacé du <style scoped> de ProjectDetailPage vers le global pour
+   permettre la réutilisation). Couleurs : busy=blue, boot/wait=yellow,
+   idle=grey, loop=green, stop=red. */
+.ld-tag {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 1;
+    border-radius: 999px;
+    padding: 0.15rem 0.5rem;
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+    background: var(--p-surface-200, #e5e7eb);
+    color: var(--p-surface-700, #374151);
+}
+.ld-tag--busy { background: var(--p-blue-500, #3b82f6); color: #fff; }
+.ld-tag--boot { background: var(--p-yellow-500, #eab308); color: #1f2937; }
+.ld-tag--idle { background: var(--p-surface-300, #d1d5db); color: var(--p-surface-700, #374151); }
+.ld-tag--loop { background: var(--p-green-500, #22c55e); color: #fff; }
+.ld-tag--wait { background: var(--p-yellow-500, #eab308); color: #1f2937; }
+.ld-tag--stop { background: var(--p-red-500, #ef4444); color: #fff; }
+.ld-tag--offline { background: transparent; color: var(--p-surface-400, #9ca3af); border: 1px solid var(--p-surface-300, #d1d5db); }
+

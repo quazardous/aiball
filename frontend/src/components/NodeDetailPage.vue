@@ -141,7 +141,14 @@ async function doRevoke(n: NodeView): Promise<void> {
                     </template>
                     <template #body>
                         <tr v-for="c in node.relayed" :key="c.consumer_id">
-                            <td><code>{{ c.consumer_id }}</code></td>
+                            <td>
+                                <!-- #460 — chip cliquable vers la page consumer détail. -->
+                                <a
+                                    :href="`/consumers/${encodeURIComponent(c.consumer_id)}`"
+                                    class="aiball-mono node-detail__relayed-link"
+                                    :title="`Open consumer details for ${c.consumer_id}`"
+                                >{{ c.consumer_id }}</a>
+                            </td>
                             <td>{{ fmt(c.last_seen_at) }}</td>
                         </tr>
                     </template>
@@ -194,6 +201,9 @@ async function doRevoke(n: NodeView): Promise<void> {
     font-size: 0.85rem;
     color: var(--p-text-muted-color);
 }
+/* #460 — link styling for the relayed consumer chip (still mono, hover = primary). */
+.node-detail__relayed-link { color: var(--p-text-color); text-decoration: none; }
+.node-detail__relayed-link:hover { text-decoration: underline; color: var(--p-primary-color); }
 .node-detail__actions {
     display: flex;
     justify-content: flex-end;

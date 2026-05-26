@@ -6,14 +6,22 @@
  * Same fields as the inline row editor (kind, display_name, enabled,
  * note) but with more room — and a single save action so all changes
  * land atomically.
+ *
+ * #460 — also the centralised home for the loop's live status + the
+ * Stop button. Other places (ConsumersPanel row, ProjectDetailPage
+ * loop chip) link here so the operator has ONE canonical detail view
+ * per consumer.
  */
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import Textarea from "primevue/textarea";
-import { useToast } from "primevue/usetoast";
+import { useConfirm } from "primevue/useconfirm";
 import { api, CONSUMER_KIND_OPTIONS, type Consumer, type ConsumerKind } from "../lib/api";
+import { useBus } from "../lib/bus";
+import { useNotify } from "../lib/notify";
+import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
 import { relativeTime } from "../lib/format";
 import FieldRow from "./ui/FieldRow.vue";
 import AdminDetailLayout from "./ui/AdminDetailLayout.vue";
@@ -24,11 +32,30 @@ const emit = defineEmits<{
     (e: "close-to-inbox"): void;
 }>();
 
-const toast = useToast();
+const notify = useNotify();
+const confirmDialog = useConfirm();
 const loading = ref(false);
 const saving = ref(false);
+const stopBusy = ref(false);
 const error = ref<string | null>(null);
 const original = ref<Consumer | null>(null);
+
+// #460 — same online/offline criterion as ProjectDetailPage + ConsumersPanel :
+// presence-AUTHORITATIVE, with the 120s heartbeat as a bridge for never-seen-
+// via-SSE cases (just after a daemon restart). Surface it as a computed so the
+// "Loop status" section + the Stop button visibility stay derived.
+const ONLINE_MS = 120_000;
+const isOnline = computed((): boolean => {
+    const c = original.value;
+    if (!c) return false;
+    if (c.present === true) return true;
+    if (c.present === false) return false;
+    if (!c.state_updated_at) return false;
+    return Date.now() - new Date(c.state_updated_at).getTime() < ONLINE_MS;
+});
+// Stop is only meaningful when a loop is actually live AND has a `state` (a
+// human consumer has no loop to kill).
+const canStop = computed((): boolean => !!original.value?.state && isOnline.value);
 
 const kind = ref<ConsumerKind>("agent");
 const displayName = ref("");
@@ -70,6 +97,12 @@ async function load() {
 
 watch(() => props.consumerId, load, { immediate: true });
 
+// #460 — live updates : the daemon broadcasts `consumer_changed` (presence
+// flip / heartbeat) → WS relay → `projects.refresh` bus. Without this, the
+// page reads a FROZEN snapshot until manual refresh (cf. ProjectDetailPage
+// #443). Re-fetch so the status badges + Stop button reflect reality.
+useBus("projects.refresh", () => { void load(); });
+
 async function save() {
     if (!original.value) return;
     saving.value = true;
@@ -81,21 +114,47 @@ async function save() {
             micro_prompt: microPrompt.value.trim() || null,
             enabled: enabled.value,
         });
-        toast.add({
-            severity: "success",
-            summary: `Saved ${props.consumerId}`,
-            life: 3000,
-        });
+        notify.success(`Saved ${props.consumerId}`);
         emit("close");
     } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: "Save failed",
-            detail: (e as Error).message,
-            life: 6000,
-        });
+        notify.error("Save failed", { detail: (e as Error).message });
     } finally {
         saving.value = false;
+    }
+}
+
+// #460 — centralised remote hard-kill (mirrors ConsumersPanel + ProjectDetailPage).
+// Confirm modal gates it so a stray click never kills a loop. Once #460
+// "centralise on the consumer detail" lands fully, the inline shortcuts in the
+// list pages can be removed if david wants — left in for now as fast paths.
+function stopLoop(): void {
+    if (!original.value) return;
+    const consumer_id = original.value.consumer_id;
+    confirmDialog.require({
+        header: "Stop loop",
+        message: `Stop the claude-loop running as "${consumer_id}"? This kills its tmux session + Claude (the conversation is lost). Its state is kept — use Delete to remove it entirely.`,
+        icon: "pi pi-stop-circle",
+        acceptLabel: "Stop",
+        rejectLabel: "Cancel",
+        acceptClass: "p-button-danger",
+        accept: () => { void doStopLoop(consumer_id); },
+    });
+}
+async function doStopLoop(consumer_id: string): Promise<void> {
+    stopBusy.value = true;
+    try {
+        const r = await api.stopLoop(consumer_id);
+        if (r.delivered) {
+            notify.success(`Stop sent to ${consumer_id}`, { detail: "The loop will self-terminate." });
+        } else {
+            notify.warn(`No live loop for ${consumer_id}`, { detail: "Nothing was connected to receive it." });
+        }
+        // Backstop the WS broadcast in case it lags : refresh after a beat.
+        setTimeout(() => void load(), 1500);
+    } catch (e) {
+        notify.error(`Stop failed for ${consumer_id}`, { detail: (e as Error).message });
+    } finally {
+        stopBusy.value = false;
     }
 }
 
@@ -107,22 +166,14 @@ async function sendPrompt() {
     promptBusy.value = true;
     try {
         const r = await api.sendLoopPrompt(props.consumerId, text);
-        toast.add({
-            severity: r.delivered ? "success" : "info",
-            summary: r.delivered ? `Prompt sent to ${props.consumerId}` : `Prompt spooled for ${props.consumerId}`,
-            detail: r.delivered
-                ? "Injected into the live Claude session."
-                : "Loop offline — it'll be delivered when the loop reconnects.",
-            life: 5000,
-        });
+        if (r.delivered) {
+            notify.success(`Prompt sent to ${props.consumerId}`, { detail: "Injected into the live Claude session." });
+        } else {
+            notify.info(`Prompt spooled for ${props.consumerId}`, { detail: "Loop offline — it'll be delivered when the loop reconnects." });
+        }
         promptText.value = "";
     } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: "Prompt failed",
-            detail: (e as Error).message,
-            life: 6000,
-        });
+        notify.error("Prompt failed", { detail: (e as Error).message });
     } finally {
         promptBusy.value = false;
     }
@@ -145,6 +196,42 @@ async function sendPrompt() {
         <template v-else-if="original">
             <FieldRow label="consumer_id">
                 <span class="aiball-mono">{{ original.consumer_id }}</span>
+            </FieldRow>
+
+            <!-- #460 — centralised loop status + Stop button. Mirrors the chip
+                 colours used in ProjectDetailPage / ConsumersPanel (busy/idle/
+                 boot + loop/human/wait/stop) — same .ld-tag* helpers, now in
+                 global style.css. -->
+            <FieldRow label="loop status">
+                <div class="consumer-edit__status">
+                    <template v-if="original.state">
+                        <template v-if="isOnline">
+                            <span class="ld-tag" :class="activityClass(original.state)">{{ original.state }}</span>
+                            <span
+                                class="ld-tag"
+                                :class="presenceClass(original.state_human, original.state_human_word)"
+                            >{{ presenceWord(original.state_human, original.state_human_word) }}</span>
+                        </template>
+                        <span v-else class="ld-tag ld-tag--offline">offline</span>
+                        <span v-if="original.cwd" class="consumer-edit__cwd" :title="original.cwd">
+                            @ <code>{{ original.cwd }}</code>
+                        </span>
+                        <Button
+                            v-if="canStop"
+                            label="Stop"
+                            icon="pi pi-stop-circle"
+                            severity="danger"
+                            text
+                            size="small"
+                            :loading="stopBusy"
+                            :title="`Stop (hard-kill) the claude-loop running as ${original.consumer_id}`"
+                            @click="stopLoop"
+                        />
+                    </template>
+                    <span v-else class="consumer-edit__status-none">
+                        no loop tracking — this consumer has never reported a state
+                    </span>
+                </div>
             </FieldRow>
 
             <div class="consumer-edit__field">
@@ -302,5 +389,25 @@ async function sendPrompt() {
     justify-content: flex-end;
     gap: 0.5rem;
     margin-top: 0.4rem;
+}
+/* #460 — loop status row : tags + cwd + Stop button on one line. */
+.consumer-edit__status {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.consumer-edit__cwd {
+    font-size: 0.78rem;
+    color: var(--p-text-muted-color);
+}
+.consumer-edit__cwd code {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.74rem;
+}
+.consumer-edit__status-none {
+    font-size: 0.82rem;
+    color: var(--p-text-muted-color);
+    font-style: italic;
 }
 </style>

@@ -8,6 +8,7 @@ import { useConfirm } from "primevue/useconfirm";
 import { api, type ProjectMeta, type Consumer } from "../lib/api";
 import { useBus } from "../lib/bus";
 import { useNotify } from "../lib/notify";
+import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 
 const props = defineProps<{ project: string }>();
@@ -71,25 +72,8 @@ function isOnline(c: Consumer): boolean {
     if (!c.state_updated_at) return false;
     return Date.now() - new Date(c.state_updated_at).getTime() < ONLINE_MS;
 }
-// #395 (q3bfvn): render the busy/idle/boot + loop/human state as CSS tags
-// (like ConsumersPanel) instead of plain "busy · loop" text. Same colour
-// mapping: busy=info/blue, boot=warn/yellow, idle=grey; loop=green, stop=red,
-// wait/human=yellow.
-function activityClass(state?: string | null): string {
-    if (state === "busy") return "ld-tag--busy";
-    if (state === "boot") return "ld-tag--boot";
-    return "ld-tag--idle";
-}
-function presenceWord(human?: boolean | null, word?: string | null): string {
-    return word ?? (human ? "human" : "loop");
-}
-function presenceClass(human?: boolean | null, word?: string | null): string {
-    const w = presenceWord(human, word);
-    if (w === "stop") return "ld-tag--stop";
-    // #426: `ask` (ASK-grace) shares the grace-state tint on this coarser web view.
-    if (w === "wait" || w === "human" || w === "ask") return "ld-tag--wait";
-    return "ld-tag--loop";
-}
+// #460 — activityClass / presenceClass / presenceWord déplacés vers
+// lib/consumer-status.ts (partagés avec ConsumerEditPage).
 
 // #393 (3c): a root is "running" when one of its loops is online → no relaunch.
 function rootIsRunning(root: string): boolean {
@@ -206,7 +190,12 @@ async function doStopLoop(consumer_id: string) {
                         :class="{ 'is-offline': !isOnline(c) }"
                     >
                         <span class="project-detail__dot" :class="isOnline(c) ? 'is-on' : 'is-off'" />
-                        <span class="project-detail__loop-id">{{ c.consumer_id }}</span>
+                        <!-- #460 — chip cliquable vers la page consumer détail (centralise start/stop + info). -->
+                        <a
+                            :href="`/consumers/${encodeURIComponent(c.consumer_id)}`"
+                            class="project-detail__loop-id"
+                            :title="`Open consumer details for ${c.consumer_id}`"
+                        >{{ c.consumer_id }}</a>
                         <!-- #395 (q3bfvn): busy/idle + loop/human as CSS tags (was plain text). -->
                         <template v-if="isOnline(c)">
                             <span class="ld-tag" :class="activityClass(c.state)">{{ c.state ?? "?" }}</span>
@@ -252,29 +241,8 @@ async function doStopLoop(consumer_id: string) {
     background: var(--p-green-500, #22c55e);
     color: #fff;
 }
-/* #395 (q3bfvn): CSS tag for the loop's busy/idle + loop/human state, same
-   colour scheme as ConsumersPanel (busy=blue, boot/wait=yellow, idle=grey,
-   loop=green, stop=red). */
-.ld-tag {
-    display: inline-flex;
-    align-items: center;
-    font-size: 0.7rem;
-    font-weight: 600;
-    line-height: 1;
-    border-radius: 999px;
-    padding: 0.15rem 0.5rem;
-    text-transform: lowercase;
-    letter-spacing: 0.02em;
-    background: var(--p-surface-200, #e5e7eb);
-    color: var(--p-surface-700, #374151);
-}
-.ld-tag--busy { background: var(--p-blue-500, #3b82f6); color: #fff; }
-.ld-tag--boot { background: var(--p-yellow-500, #eab308); color: #1f2937; }
-.ld-tag--idle { background: var(--p-surface-300, #d1d5db); color: var(--p-surface-700, #374151); }
-.ld-tag--loop { background: var(--p-green-500, #22c55e); color: #fff; }
-.ld-tag--wait { background: var(--p-yellow-500, #eab308); color: #1f2937; }
-.ld-tag--stop { background: var(--p-red-500, #ef4444); color: #fff; }
-.ld-tag--offline { background: transparent; color: var(--p-surface-400, #9ca3af); border: 1px solid var(--p-surface-300, #d1d5db); }
+/* #460 — `.ld-tag*` styles déplacés vers style.css (global) pour partage
+   avec ConsumerEditPage. */
 .project-detail__refresh {
     background: transparent;
     border: 0;
@@ -358,7 +326,9 @@ async function doStopLoop(consumer_id: string) {
 .project-detail__loop-id {
     font-family: ui-monospace, SFMono-Regular, monospace;
     color: var(--p-text-color);
+    text-decoration: none;
 }
+.project-detail__loop-id:hover { text-decoration: underline; color: var(--p-primary-color); }
 .project-detail__loop-state {
     color: var(--p-text-muted-color);
     font-size: 0.8rem;
