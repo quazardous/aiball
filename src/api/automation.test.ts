@@ -155,6 +155,88 @@ test("DELETE /automation/rules/:id : removes the row + 204s", async () => {
     assert.ok(!rows.some((row) => row.id === id), "deleted row no longer surfaces in list");
 });
 
+// ---------------------------------------------------------------------------
+// Slice 5.2 — `expression` validator on POST.
+// ---------------------------------------------------------------------------
+
+test("POST /automation/rules : accepts a valid expression tree (OR of AND + leaf)", async () => {
+    const tree = {
+        kind: "or",
+        children: [
+            {
+                kind: "and",
+                children: [
+                    { kind: "leaf", field: "project", op: "eq", value: "aiball" },
+                    { kind: "leaf", field: "tags", op: "includes", value: "win" },
+                ],
+            },
+            { kind: "leaf", field: "intent", op: "eq", value: "urgent" },
+        ],
+    };
+    const r = await req("POST", "/api/automation/rules", {
+        triggers: ["ticket_created"],
+        expression: tree,
+        action: { kind: "assign", consumer_id: "alice" },
+    });
+    assert.equal(r.status, 201);
+    // The server echoes the canonical tree (decoded then re-emitted).
+    assert.deepEqual((r.body as { expression: unknown }).expression, tree);
+});
+
+test("POST /automation/rules : rejects a tree with unknown kind", async () => {
+    const r = await req("POST", "/api/automation/rules", {
+        triggers: ["ticket_created"],
+        expression: { kind: "xor", children: [] }, // xor isn't a thing
+        action: { kind: "decision", decision: "auto" },
+    });
+    assert.equal(r.status, 400);
+    assert.match(String((r.body as { error: string }).error), /malformed condition tree/);
+});
+
+test("POST /automation/rules : rejects a leaf with unknown op", async () => {
+    const r = await req("POST", "/api/automation/rules", {
+        triggers: ["ticket_created"],
+        expression: { kind: "leaf", field: "project", op: "matches", value: "aiball" },
+        action: { kind: "decision", decision: "auto" },
+    });
+    assert.equal(r.status, 400);
+});
+
+test("POST /automation/rules : rejects a leaf with unknown field", async () => {
+    const r = await req("POST", "/api/automation/rules", {
+        triggers: ["ticket_created"],
+        expression: { kind: "leaf", field: "secret_field", op: "eq", value: "x" },
+        action: { kind: "decision", decision: "auto" },
+    });
+    assert.equal(r.status, 400);
+});
+
+test("POST /automation/rules : rejects an `and` whose children isn't an array", async () => {
+    const r = await req("POST", "/api/automation/rules", {
+        triggers: ["ticket_created"],
+        expression: { kind: "and", children: "not an array" },
+        action: { kind: "decision", decision: "auto" },
+    });
+    assert.equal(r.status, 400);
+});
+
+test("POST /automation/rules : expression overrides flat match_*", async () => {
+    // When both are present, expression wins (it's the canonical surface).
+    // Flat fields get stored but the engine reads through expression.
+    const r = await req("POST", "/api/automation/rules", {
+        triggers: ["ticket_created"],
+        match_project: "should-be-ignored",
+        match_tags: ["should-be-ignored"],
+        expression: { kind: "leaf", field: "intent", op: "eq", value: "urgent" },
+        action: { kind: "decision", decision: "review" },
+    });
+    assert.equal(r.status, 201);
+    const body = r.body as { expression: { kind: string; field?: string; value?: unknown } };
+    assert.equal(body.expression.kind, "leaf");
+    assert.equal(body.expression.field, "intent");
+    assert.equal(body.expression.value, "urgent");
+});
+
 after(() => {
     try { server.close(); } catch { /* noop */ }
     try { rmSync(process.env.AIBALL_HOME!, { recursive: true, force: true }); } catch { /* noop */ }

@@ -16,8 +16,10 @@ import {
     insertAutomationRule,
     listAutomationRules,
     setAutomationRuleEnabled,
+    validateConditionTree,
     type AutomationAction,
     type AutomationRule,
+    type ConditionTree,
     type Trigger,
 } from "../db/automation.js";
 import { loadYamlAutomationRules } from "../automation/yaml.js";
@@ -122,6 +124,7 @@ automationRouter.post("/automation/rules", (req: Request, res: Response) => {
         match_intent,
         match_priority,
         action,
+        expression,
         position,
         note,
     } = req.body ?? {};
@@ -143,6 +146,22 @@ automationRouter.post("/automation/rules", (req: Request, res: Response) => {
     }
     const act = parseAction(action);
     if ("error" in act) return badRequest(res, act.error);
+
+    // #457 slice 5.2 : optional `expression` condition tree (overrides the
+    // synthesized AND-of-leaves from the flat `match_*` fields when set).
+    // Strict shape-check rejects malformed trees up front, so an invalid
+    // payload can't land in the DB and crash the engine downstream.
+    let parsedExpression: ConditionTree | undefined;
+    if (expression !== undefined && expression !== null) {
+        const v = validateConditionTree(expression);
+        if (!v) {
+            return badRequest(
+                res,
+                "expression : malformed condition tree (expected kind ∈ and|or|not|leaf, recursive, leaves carry field+op+value)",
+            );
+        }
+        parsedExpression = v;
+    }
 
     const r = insertAutomationRule({
         triggers: list as Trigger[],
@@ -166,6 +185,7 @@ automationRouter.post("/automation/rules", (req: Request, res: Response) => {
         match_priority:
             typeof match_priority === "string" && match_priority !== "" ? match_priority : null,
         action: act,
+        ...(parsedExpression ? { expression: parsedExpression } : {}),
         position: typeof position === "number" ? position : 0,
         note: typeof note === "string" ? note : null,
     });
