@@ -11,7 +11,11 @@ import { useNotify } from "../lib/notify";
 import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 
-const props = defineProps<{ project: string }>();
+const props = defineProps<{
+    project: string;
+    /** #471 — when nested inside ProjectOverviewPage's tabs, suppress own breadcrumb. */
+    embedded?: boolean;
+}>();
 const emit = defineEmits<{ (e: "back"): void }>();
 
 const meta = ref<ProjectMeta | null>(null);
@@ -134,6 +138,7 @@ async function doStopLoop(consumer_id: string) {
         :crumbs="[{ label: 'Inbox', href: '/' }]"
         :current="project"
         title="Detail"
+        :embedded="embedded"
         @close-to-inbox="emit('back')"
     >
             <template #actions>

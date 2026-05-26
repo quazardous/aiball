@@ -8,6 +8,8 @@ import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 
 const props = defineProps<{
     project: string;
+    /** #471 — embed mode (no own breadcrumb). */
+    embedded?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -77,6 +79,7 @@ onMounted(load);
         :crumbs="[{ label: 'Inbox', href: '/' }]"
         :current="project"
         title="Settings"
+        :embedded="embedded"
         @close-to-inbox="emit('back')"
     >
         <div v-if="loading" class="aiball-empty">Loading settings…</div>

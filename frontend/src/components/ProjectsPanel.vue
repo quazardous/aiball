@@ -12,18 +12,17 @@ import PanelHeader from "./ui/PanelHeader.vue";
 const toast = useToast();
 const rows = ref<ProjectMeta[]>([]);
 const loading = ref(false);
-const confirming = ref<string | null>(null);
-const deleting = ref<string | null>(null);
-const confirmingPurge = ref<string | null>(null);
-const purging = ref<string | null>(null);
 const creating = ref(false);
 const newName = ref("");
 const creatingForm = ref(false);
 
+// #471 david : la liste ne pilote plus directement les actions (Delete /
+// Purge / Settings / Stats / Detail). Tout passe par une page overview
+// unifiée — un seul emit, une seule cible. La row entière devient
+// cliquable, les indicateurs (loop running) restent visibles mais
+// non-cliquables individuellement.
 const emit = defineEmits<{
-    (e: "open-stats", project: string): void;
-    (e: "open-settings", project: string): void;
-    (e: "open-detail", project: string): void;
+    (e: "open-overview", project: string): void;
 }>();
 
 async function load() {
@@ -39,68 +38,6 @@ async function load() {
         });
     } finally {
         loading.value = false;
-    }
-}
-
-async function confirmPurge(name: string) {
-    purging.value = name;
-    try {
-        const r = await api.purgeOldClosed(name, 365);
-        if (r.purged_tickets === 0) {
-            toast.add({
-                severity: "info",
-                summary: `"${r.project}" — nothing to purge`,
-                detail: `No tickets closed more than ${r.older_than_days} days ago.`,
-                life: 6000,
-            });
-        } else {
-            toast.add({
-                severity: "success",
-                summary: `Purged ${r.purged_tickets} ticket(s) from "${r.project}"`,
-                detail: `${r.purged_messages} message(s) removed (closed > ${r.older_than_days}d).`,
-                life: 8000,
-            });
-        }
-        confirmingPurge.value = null;
-        bus.emit("projects.refresh");
-        bus.emit("inbox.refresh");
-    } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: "Purge failed",
-            detail: (e as Error).message,
-            life: 8000,
-        });
-    } finally {
-        purging.value = null;
-    }
-}
-
-async function confirmDelete(name: string) {
-    deleting.value = name;
-    try {
-        const r = await api.deleteProject(name);
-        toast.add({
-            severity: "success",
-            summary: `Deleted project "${r.project}"`,
-            detail: `${r.deleted_messages} message(s) removed`,
-            life: 8000,
-        });
-        confirming.value = null;
-        // WS will also fire project_deleted shortly; emitting locally
-        // keeps the panel responsive without waiting for the round-trip.
-        bus.emit("project.deleted", { project: r.project });
-        bus.emit("projects.refresh");
-        bus.emit("inbox.refresh");
-    } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: "Delete failed",
-            detail: (e as Error).message,
-            life: 8000,
-        });
-    } finally {
-        deleting.value = null;
     }
 }
 
@@ -214,7 +151,13 @@ defineExpose({ load });
                 <th />
             </template>
             <template #body>
-                <tr v-for="p in rows" :key="p.name">
+                <tr
+                    v-for="p in rows"
+                    :key="p.name"
+                    class="projects-row"
+                    :title="`Open ${p.name} overview`"
+                    @click="emit('open-overview', p.name)"
+                >
                     <td data-label="Project">
                         <i class="pi pi-folder" style="margin-right: 0.4rem" />
                         <strong>{{ p.name }}</strong>
@@ -235,92 +178,17 @@ defineExpose({ load });
                         </span>
                         <span v-else style="color: var(--p-text-muted-color)">—</span>
                     </td>
-                    <td data-label="" class="action-cell">
-                        <template v-if="confirming === p.name">
-                            <span class="confirm-text">Really delete?</span>
-                            <Button
-                                label="confirm"
-                                icon="pi pi-trash"
-                                severity="danger"
-                                size="small"
-                                :loading="deleting === p.name"
-                                @click="confirmDelete(p.name)"
-                            />
-                            <Button
-                                label="cancel"
-                                size="small"
-                                severity="secondary"
-                                text
-                                @click="confirming = null"
-                            />
-                        </template>
-                        <template v-else-if="confirmingPurge === p.name">
-                            <span class="confirm-text">Purge tickets closed &gt; 1 year?</span>
-                            <Button
-                                label="confirm"
-                                icon="pi pi-eraser"
-                                severity="warn"
-                                size="small"
-                                :loading="purging === p.name"
-                                @click="confirmPurge(p.name)"
-                            />
-                            <Button
-                                label="cancel"
-                                size="small"
-                                severity="secondary"
-                                text
-                                @click="confirmingPurge = null"
-                            />
-                        </template>
-                        <template v-else>
-                            <Button
-                                icon="pi pi-cog"
-                                severity="secondary"
-                                text
-                                rounded
-                                size="small"
-                                title="Project settings — moderation strategy (#B.127)"
-                                @click="emit('open-settings', p.name)"
-                            />
-                            <Button
-                                icon="pi pi-chart-bar"
-                                severity="secondary"
-                                text
-                                rounded
-                                size="small"
-                                title="Open per-project stats"
-                                @click="emit('open-stats', p.name)"
-                            />
-                            <Button
-                                icon="pi pi-desktop"
-                                :severity="p.running ? 'success' : 'secondary'"
-                                text
-                                rounded
-                                size="small"
-                                :title="p.running
-                                    ? 'A claude-loop is running here — open project detail (#393)'
-                                    : 'Project detail — local loops + roots (#393)'"
-                                @click="emit('open-detail', p.name)"
-                            />
-                            <Button
-                                icon="pi pi-eraser"
-                                severity="warn"
-                                text
-                                rounded
-                                size="small"
-                                title="Purge tickets closed more than 1 year ago"
-                                @click="confirmingPurge = p.name"
-                            />
-                            <Button
-                                icon="pi pi-trash"
-                                severity="danger"
-                                text
-                                rounded
-                                size="small"
-                                title="Delete this project"
-                                @click="confirming = p.name"
-                            />
-                        </template>
+                    <!-- #471 david : la cellule action (5 icônes) devient un
+                         indicator-cell — point vert si un claude-loop tourne
+                         pour ce projet, sinon rien. Read-only. Toute la row
+                         clique vers l'overview ; Delete + Purge + Settings +
+                         Stats vivent dans les tabs de l'overview. -->
+                    <td data-label="" class="indicator-cell">
+                        <span
+                            v-if="p.running"
+                            class="indicator-cell__dot"
+                            :title="`A claude-loop is running for ${p.name} — open overview for details`"
+                        />
                     </td>
                 </tr>
             </template>
@@ -353,16 +221,32 @@ defineExpose({ load });
     text-align: right;
     width: 6rem;
 }
-.projects-table .action-cell {
-    display: flex;
-    gap: 0.4rem;
-    align-items: center;
-    justify-content: flex-end;
-    min-width: 14rem;
+/* #471 david : la row entière clique → overview. cursor + hover affordance.
+   Pas de visite des cellules (toute la row est un trigger). */
+.projects-table tr.projects-row {
+    cursor: pointer;
+    transition: background 0.1s;
 }
-.confirm-text {
-    color: var(--p-red-500);
-    font-size: 0.85rem;
+.projects-table tr.projects-row:hover {
+    background: var(--p-surface-50);
+}
+/* #471 david : la cellule actions (5 icônes) devient un indicator-cell. Point
+   vert quand un loop tourne pour ce projet, sinon vide. Read-only. */
+.projects-table .indicator-cell {
+    display: table-cell;
+    text-align: right;
+    width: 2rem;
+    min-width: 0;
+    padding-right: 0.75rem;
+    vertical-align: middle;
+}
+.projects-table .indicator-cell__dot {
+    display: inline-block;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: var(--p-green-500);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-green-500) 25%, transparent);
 }
 .pending-pill {
     background: var(--p-yellow-500);
@@ -444,12 +328,12 @@ defineExpose({ load });
     .projects-table td[data-label="Pending"] {
         font-size: 0.78rem;
     }
-    /* Line 2 — actions forced onto their own row. */
-    .projects-table td.action-cell {
-        flex: 1 0 100%;
-        justify-content: flex-end;
-        margin-top: 0.1rem;
+    /* Indicator dot dans la ligne carte mobile — point vert si running. */
+    .projects-table td.indicator-cell {
+        flex: 0 0 auto;
+        margin-left: auto;
         min-width: 0;
+        padding-right: 0;
     }
 }
 </style>

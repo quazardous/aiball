@@ -27,6 +27,12 @@ defineProps<{
     crumbs: Crumb[];
     current: string;
     title?: string;
+    /** #471 — when this layout is nested inside a Tabs panel (e.g. the
+     *  ProjectOverviewPage tabs each embed an existing project page), the
+     *  inner page shouldn't render its own DetailHeader breadcrumb — the
+     *  parent already owns it. `embedded: true` suppresses the header and
+     *  the layout collapses to just its slot content. */
+    embedded?: boolean;
 }>();
 const emit = defineEmits<{
     (e: "close-to-inbox"): void;
@@ -40,8 +46,9 @@ function onCrumb(index: number): void {
 </script>
 
 <template>
-    <div class="aiball-dashboard-page">
+    <div class="aiball-dashboard-page" :class="{ 'aiball-dashboard-page--embedded': embedded }">
         <DetailHeader
+            v-if="!embedded"
             :crumbs="crumbs"
             :current="current"
             :title="title"

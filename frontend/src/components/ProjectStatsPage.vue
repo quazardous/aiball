@@ -7,6 +7,8 @@ import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 
 const props = defineProps<{
     project: string;
+    /** #471 — embed mode (no own breadcrumb). */
+    embedded?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -92,6 +94,7 @@ const topTokenMax = computed(() =>
         :crumbs="[{ label: 'Inbox', href: '/' }]"
         :current="project"
         title="Stats"
+        :embedded="embedded"
         @close-to-inbox="emit('back')"
     >
         <template #actions>

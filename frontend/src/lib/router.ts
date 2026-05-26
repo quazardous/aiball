@@ -11,12 +11,13 @@ export type RouteState = {
      *  AutomationPanel renders AutomationRuleDetailPage instead of the
      *  list section. */
     automationRuleEditId: string | null;
-    /** #411 — project-scoped full pages (stats/settings/detail). Requires
-     *  `project !== null`; encoded as `/stats|/settings|/detail` + `?p=`, so a
-     *  Ctrl-R on a project stats page restores it instead of dropping to inbox.
+    /** #411 — project-scoped full pages (stats/settings/detail/overview). Requires
+     *  `project !== null`; encoded as `/stats|/settings|/detail|/overview` + `?p=`,
+     *  so a Ctrl-R on a project page restores it instead of dropping to inbox.
      *  Union mirrors ProjectPage in components/Sidebar.vue (inlined to keep
-     *  this lib free of a .vue import). */
-    projectPage: "stats" | "settings" | "detail" | null;
+     *  this lib free of a .vue import). #471 added `overview` — the canonical
+     *  entry from the projects list, hosting Detail/Stats/Settings in tabs. */
+    projectPage: "stats" | "settings" | "detail" | "overview" | null;
     project: string | null;
     statusFilter: "all" | "unread" | "pending" | "approved" | "rejected";
     onlyOpen: boolean;
@@ -55,6 +56,7 @@ export function buildUrl(s: RouteState): string {
     else if (s.projectPage === "stats") path = "/stats";
     else if (s.projectPage === "settings") path = "/settings";
     else if (s.projectPage === "detail") path = "/detail";
+    else if (s.projectPage === "overview") path = "/overview";
     else if (s.openTicketId !== null) path = `/b/${s.openTicketId}`;
 
     const qs = new URLSearchParams();
@@ -132,8 +134,14 @@ export function parseUrl(): Partial<RouteState> {
     } else if (path === "/new") {
         out.panel = "compose";
         out.openTicketId = null;
-    } else if (path === "/stats" || path === "/settings" || path === "/detail") {
+    } else if (
+        path === "/stats" ||
+        path === "/settings" ||
+        path === "/detail" ||
+        path === "/overview"
+    ) {
         // #411 — project page; the project itself comes from `?p=` below.
+        // #471 — `/overview` is the new unified entry (Tabs).
         out.panel = null;
         out.openTicketId = null;
         out.projectPage = path.slice(1) as RouteState["projectPage"];

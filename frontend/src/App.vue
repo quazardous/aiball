@@ -25,6 +25,7 @@ import NewTicketPage from "./components/NewTicketPage.vue";
 import ProjectStatsPage from "./components/ProjectStatsPage.vue";
 import ProjectSettingsPage from "./components/ProjectSettingsPage.vue";
 import ProjectDetailPage from "./components/ProjectDetailPage.vue";
+import ProjectOverviewPage from "./components/ProjectOverviewPage.vue";
 import ProjectsPanel from "./components/ProjectsPanel.vue";
 import ConsumersPanel from "./components/ConsumersPanel.vue";
 import NodesPanel from "./components/NodesPanel.vue";
@@ -740,9 +741,7 @@ watch(showSnoozed, (v) => {
                 />
                 <ProjectsPanel
                     v-else-if="panel === 'projects'"
-                    @open-stats="(name: string) => openProjectPage(name, 'stats')"
-                    @open-settings="(name: string) => openProjectPage(name, 'settings')"
-                @open-detail="(name: string) => openProjectPage(name, 'detail')"
+                    @open-overview="(name: string) => openProjectPage(name, 'overview')"
                 />
                 <AutomationPanel
                     v-else-if="panel === 'automation'"
@@ -783,6 +782,13 @@ watch(showSnoozed, (v) => {
                     @back="openTicketId = null"
                 />
 
+                <!-- #471 — unified overview = Detail+Stats+Settings tabs + Danger zone. -->
+                <ProjectOverviewPage
+                    v-else-if="projectPage === 'overview' && project !== null"
+                    :project="project"
+                    @close="projectPage = null"
+                />
+                <!-- Legacy deep-link routes — kept for back-compat (#411). -->
                 <ProjectSettingsPage
                     v-else-if="projectPage === 'settings' && project !== null"
                     :project="project"
