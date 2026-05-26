@@ -100,9 +100,15 @@ function updateChild(index: number, child: ConditionTree) {
 
 function removeChild(index: number) {
     if (props.node.kind === "not") {
-        // Can't remove the sole NOT child — collapse to an empty AND instead
-        // so the editor stays sane.
-        emit("update", { kind: "and", children: [] });
+        // #477 david : "si je choisit NOT, il vient avec une condition
+        // projet. si je supprime la condition projet, le Not se
+        // transforme en AND/OR". On collapse-ait en `{kind:"and",
+        // children:[]}` ce qui MORPHAIT le NOT en AND vide → bug.
+        // Maintenant on garde le NOT vivant en remettant un leaf blank
+        // (même default que la root-picker quand on choisit NOT) ;
+        // l'utilisateur peut éditer ce leaf ou supprimer le NOT entier
+        // via le × propre au container NOT.
+        emit("update", { kind: "not", child: blankLeaf() });
         return;
     }
     const next = props.node.children.filter((_, i) => i !== index);
