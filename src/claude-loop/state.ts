@@ -762,12 +762,48 @@ export type LoopStatus = "idle" | "boot" | "busy";
 // that the bar text sits on TWO backgrounds with TWO foregrounds: `island_fg`
 // (light) on the black island, `bar_fg` (now black) on the state-coloured region
 // — david's bar runs the busy-blue state where white washed out.
+/**
+ * #481 : résolution du cwd projet pour `loadConfig()` côté loop. Source
+ * de vérité = `plate.json:cwd` (écrit au `claude-loop start`, autorité
+ * canonique lue partout ailleurs). Mémoïsé : on lit le plate UNE fois
+ * — il ne change pas pendant la vie du process.
+ *
+ * Niveaux de priorité (descendant) :
+ *   1. `process.env.AIBALL_PROJECT_CWD` — override haute priorité (debug
+ *      / tests qui setent l'env sans plate). David `cue7nr` : "purement
+ *      optionnel tweak".
+ *   2. `plate.json:cwd` via `process.env.CL_STATE_DIR` — la source en
+ *      régime normal.
+ *   3. `process.cwd()` — dernier recours (loops d'avant cette version,
+ *      tests purs qui ne setent ni l'un ni l'autre).
+ */
+let PROJECT_CWD_CACHED: string | null = null;
+function projectCwd(): string {
+    if (PROJECT_CWD_CACHED) return PROJECT_CWD_CACHED;
+    const envOverride = process.env.AIBALL_PROJECT_CWD;
+    if (envOverride) {
+        PROJECT_CWD_CACHED = envOverride;
+        return PROJECT_CWD_CACHED;
+    }
+    const sd = process.env.CL_STATE_DIR;
+    if (sd) {
+        try {
+            const plate = readPlate(sd);
+            if (plate.cwd) {
+                PROJECT_CWD_CACHED = plate.cwd;
+                return PROJECT_CWD_CACHED;
+            }
+        } catch { /* missing/corrupt plate — fall through */ }
+    }
+    PROJECT_CWD_CACHED = process.cwd();
+    return PROJECT_CWD_CACHED;
+}
+
 let BAR_COLORS: AiballConfig["colors"] | null = null;
 function barColors(): AiballConfig["colors"] {
-    // #480 : `AIBALL_PROJECT_CWD` exporté par claude-loop start (sinon
-    // process.cwd() qui peut être un autre repo si on a spawn depuis un
-    // dev checkout). Idem pour le `workflow.hint_branch` ci-dessous.
-    if (!BAR_COLORS) BAR_COLORS = loadConfig(process.env.AIBALL_PROJECT_CWD || process.cwd()).colors;
+    // #480 / #481 : cwd projet via plate.json (source unique) avec
+    // override env `AIBALL_PROJECT_CWD` et fallback `process.cwd()`.
+    if (!BAR_COLORS) BAR_COLORS = loadConfig(projectCwd()).colors;
     return BAR_COLORS;
 }
 const stateBg = (col: AiballConfig["colors"], s: LoopStatus): string =>
@@ -1155,13 +1191,13 @@ export async function buildContextPhrase(
         // mirror the prior hardcoded wording so a broken yaml still
         // ships a sensible prompt.
         //
-        // #480 david : on lit la config à partir du CWD PROJET (posé par
-        // claude-loop start dans `AIBALL_PROJECT_CWD`), pas du
-        // `process.cwd()` du timer. Sans ça, un loop spawn depuis un autre
-        // checkout (typiquement aiball/) tombait sur le `.aiball.yaml` de
-        // ce checkout et héritait de ses prompts (les wakes m2m sortaient
-        // en français parce que aiball/.aiball.yaml a un override FR).
-        const cfg = loadConfig(process.env.AIBALL_PROJECT_CWD || process.cwd());
+        // #480 / #481 : on lit la config à partir du CWD PROJET via
+        // `projectCwd()` (plate.json:cwd, source de vérité unique du loop).
+        // Sans ça, un loop spawn depuis un autre checkout (typiquement
+        // aiball/) tombait sur le `.aiball.yaml` de ce checkout et
+        // héritait de ses prompts (wakes m2m en français parce que
+        // aiball/.aiball.yaml a un override FR).
+        const cfg = loadConfig(projectCwd());
         // #400 recadré (david b296px): tone is back as a SELECTION layer. A slot
         // may carry per-tone buckets `{ <tone>: … }`; renderSlot narrows to
         // slot[tone] (fallback directive). Applied uniformly, not per-placeholder.
@@ -1471,9 +1507,8 @@ export function buildWakePhrase(hint: WakeHint | undefined, pingsAbsPath: string
     // (worktree off by default); the "not on main" nudge enforces the
     // no-runtime-switch rule. request/other intents get nothing extra.
     if (intent === "feature") {
-        // #480 : cwd projet via AIBALL_PROJECT_CWD ; sinon le timer pioche
-        // workflow.hint_branch dans le mauvais `.aiball.yaml`.
-        const wf = loadConfig(process.env.AIBALL_PROJECT_CWD || process.cwd()).workflow;
+        // #480 / #481 : cwd projet via projectCwd() (plate.json source unique).
+        const wf = loadConfig(projectCwd()).workflow;
         const where = wf.hint_worktree
             ? "a dedicated worktree + PR"
             : wf.hint_branch
