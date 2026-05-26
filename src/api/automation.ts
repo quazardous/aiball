@@ -15,11 +15,12 @@ import {
     deleteAutomationRule,
     insertAutomationRule,
     listAutomationRules,
-    setAutomationRuleEnabled,
+    updateAutomationRule,
     validateConditionTree,
     type AutomationAction,
     type AutomationRule,
     type ConditionTree,
+    type NewAutomationRule,
     type Trigger,
 } from "../db/automation.js";
 import { loadYamlAutomationRules } from "../automation/yaml.js";
@@ -238,16 +239,120 @@ automationRouter.delete("/automation/rules/:id", (req, res) => {
     res.status(204).end();
 });
 
-automationRouter.patch("/automation/rules/:id", (req, res) => {
+automationRouter.patch("/automation/rules/:id", (req: Request, res: Response) => {
     const id = Number(req.params.id);
     if (id < 0) {
         return badRequest(res, "YAML automation rules are read-only — edit the .aiball.yaml file");
     }
-    const { enabled } = req.body ?? {};
-    if (typeof enabled !== "boolean") {
-        return badRequest(res, "only `enabled: boolean` supported for now");
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    // Slice-5.3b — PATCH now accepts the full mutable surface (enabled +
+    // triggers + expression + actions + flat match_* + note + position).
+    // Every field is optional ; the updater applies only what's present.
+    // Validation mirrors POST so the same garbage gets rejected the same way.
+    const patch: Partial<NewAutomationRule> & { enabled?: boolean } = {};
+
+    if (body.enabled !== undefined) {
+        if (typeof body.enabled !== "boolean") {
+            return badRequest(res, "enabled must be a boolean");
+        }
+        patch.enabled = body.enabled;
     }
-    const r = setAutomationRuleEnabled(id, enabled);
+
+    if (body.triggers !== undefined) {
+        const raw = body.triggers;
+        const list = Array.isArray(raw) ? raw : raw != null ? [raw] : [];
+        if (list.length === 0) {
+            return badRequest(res, "triggers must list at least one event");
+        }
+        for (const t of list) {
+            if (typeof t !== "string" || !(VALID_TRIGGERS as readonly string[]).includes(t)) {
+                return badRequest(res, `unknown trigger '${t}'`);
+            }
+        }
+        patch.triggers = list as Trigger[];
+    }
+
+    if (body.expression !== undefined && body.expression !== null) {
+        const v = validateConditionTree(body.expression);
+        if (!v) {
+            return badRequest(res, "expression : malformed condition tree");
+        }
+        patch.expression = v;
+    }
+
+    if (body.actions !== undefined && body.actions !== null) {
+        if (!Array.isArray(body.actions)) {
+            return badRequest(res, "actions must be an array");
+        }
+        if (body.actions.length === 0) {
+            return badRequest(res, "actions must contain at least one entry");
+        }
+        const out: AutomationAction[] = [];
+        for (let i = 0; i < body.actions.length; i++) {
+            const v = parseAction(body.actions[i]);
+            if ("error" in v) {
+                return badRequest(res, `actions[${i}] : ${v.error}`);
+            }
+            out.push(v);
+        }
+        patch.actions = out;
+    } else if (body.action !== undefined && body.action !== null) {
+        const act = parseAction(body.action);
+        if ("error" in act) return badRequest(res, act.error);
+        patch.action = act;
+    }
+
+    // Flat match_* fields — string|null passthrough. Trim strings, treat
+    // empty as null. Tags is an array of strings (any-of semantics).
+    const strOrNull = (k: string): string | null | undefined => {
+        if (!(k in body)) return undefined;
+        const v = body[k];
+        if (v === null) return null;
+        if (typeof v === "string") return v.trim() === "" ? null : v.trim();
+        return undefined; // bad type — caller should send string or null
+    };
+    const mp = strOrNull("match_project");
+    if (mp !== undefined) patch.match_project = mp;
+    const mk = strOrNull("match_kind");
+    if (mk !== undefined) patch.match_kind = mk;
+    const mba = strOrNull("match_by_agent");
+    if (mba !== undefined) patch.match_by_agent = mba;
+    const mta = strOrNull("match_tag_added");
+    if (mta !== undefined) patch.match_tag_added = mta;
+    const mi = strOrNull("match_intent");
+    if (mi !== undefined) patch.match_intent = mi;
+    const mpr = strOrNull("match_priority");
+    if (mpr !== undefined) patch.match_priority = mpr;
+    const sc = strOrNull("scope_consumer");
+    if (sc !== undefined) patch.scope_consumer = sc;
+
+    if (body.match_tags !== undefined) {
+        if (!Array.isArray(body.match_tags) || body.match_tags.some((t) => typeof t !== "string")) {
+            return badRequest(res, "match_tags must be an array of tag names");
+        }
+        patch.match_tags = (body.match_tags as string[]).map((t) => t.trim()).filter(Boolean);
+    }
+
+    if (body.note !== undefined) {
+        if (body.note !== null && typeof body.note !== "string") {
+            return badRequest(res, "note must be a string or null");
+        }
+        patch.note = (body.note as string | null) ?? null;
+    }
+    if (body.position !== undefined) {
+        if (typeof body.position !== "number" || !Number.isFinite(body.position)) {
+            return badRequest(res, "position must be a number");
+        }
+        patch.position = body.position;
+    }
+
+    let r: AutomationRule | null;
+    try {
+        r = updateAutomationRule(id, patch);
+    } catch (e) {
+        return badRequest(res, (e as Error).message);
+    }
     if (!r) return notFound(res);
     broadcast({ type: "automation_rule_changed", data: r });
     res.json(r);

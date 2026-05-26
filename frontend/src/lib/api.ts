@@ -881,6 +881,9 @@ export const api = {
         match_tag_added?: string | null;
         match_intent?: string | null;
         match_priority?: string | null;
+        /** Slice 5.2 — canonical condition tree (overrides the synth from
+         *  flat match_* fields when set). */
+        expression?: ConditionTree;
         /** Slice 5.4 : canonical action stack. Server wins over `action`
          *  when both are present. */
         actions?: AutomationAction[];
@@ -893,6 +896,28 @@ export const api = {
     delAutomationRule: (id: number) => req<void>("DELETE", `/api/automation/rules/${id}`),
     toggleAutomationRule: (id: number, enabled: boolean) =>
         req<AutomationRule>("PATCH", `/api/automation/rules/${id}`, { enabled }),
+    /** Slice 5.3b — full partial-update : any subset of triggers / expression /
+     *  actions / match_* / note / position / enabled. Backend validates per-field. */
+    patchAutomationRule: (
+        id: number,
+        body: {
+            triggers?: AutomationTrigger[] | AutomationTrigger;
+            scope_consumer?: string | null;
+            match_project?: string | null;
+            match_kind?: string | null;
+            match_by_agent?: string | null;
+            match_tags?: string[];
+            match_tag_added?: string | null;
+            match_intent?: string | null;
+            match_priority?: string | null;
+            expression?: ConditionTree;
+            actions?: AutomationAction[];
+            action?: AutomationAction;
+            enabled?: boolean;
+            position?: number;
+            note?: string | null;
+        },
+    ) => req<AutomationRule>("PATCH", `/api/automation/rules/${id}`, body),
 
     // #449: unified config manager. Pass a project for the per-project view
     // (overrides + effective); omit it for the global view.

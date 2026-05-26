@@ -496,6 +496,67 @@ export function setAutomationRuleEnabled(id: number, enabled: boolean): Automati
 }
 
 /**
+ * #457 slice 5.3b — partial-update a rule. Every field optional ; pass only
+ * what changes. Mirrors the insertAutomationRule field handling :
+ *   - `triggers` : array or single, normalized
+ *   - `expression` : tree wins ; absent leaves the column untouched
+ *   - `actions` : array wins ; legacy `action` wraps to `[action]` ; both
+ *     update the legacy `action_kind` + `action_data` pair from the first
+ *     entry for back-compat reads.
+ *   - flat `match_*` : updated individually when present
+ *   - `enabled`, `position`, `note` : direct passthrough
+ * Returns the refreshed rule (post-update) or null if the id doesn't exist.
+ */
+export function updateAutomationRule(
+    id: number,
+    patch: Partial<NewAutomationRule> & { enabled?: boolean },
+): AutomationRule | null {
+    const db = getDb();
+    const upd: Partial<schema.NewAutomationRuleRow> = {};
+    if (patch.triggers !== undefined) {
+        const list = Array.isArray(patch.triggers) ? patch.triggers : [patch.triggers];
+        upd.triggers = JSON.stringify(list);
+    }
+    if (patch.scope_consumer !== undefined) upd.scopeConsumer = patch.scope_consumer ?? null;
+    if (patch.match_project !== undefined) upd.matchProject = patch.match_project ?? null;
+    if (patch.match_kind !== undefined) upd.matchKind = patch.match_kind ?? null;
+    if (patch.match_by_agent !== undefined) upd.matchByAgent = patch.match_by_agent ?? null;
+    if (patch.match_tags !== undefined) upd.matchTags = JSON.stringify(patch.match_tags ?? []);
+    if (patch.match_tag_added !== undefined) upd.matchTagAdded = patch.match_tag_added ?? null;
+    if (patch.match_intent !== undefined) upd.matchIntent = patch.match_intent ?? null;
+    if (patch.match_priority !== undefined) upd.matchPriority = patch.match_priority ?? null;
+    if (patch.expression !== undefined) upd.expression = JSON.stringify(patch.expression);
+    // Actions : `actions` (canonical) wins over legacy `action`. Whichever is
+    // provided, we always rewrite both the new column AND the legacy pair so
+    // a downgrade to pre-5.4 code can still read the rule.
+    const newActions: AutomationAction[] | undefined = patch.actions
+        ?? (patch.action ? [patch.action] : undefined);
+    if (newActions !== undefined) {
+        if (newActions.length === 0) {
+            throw new Error("updateAutomationRule : actions cannot be empty");
+        }
+        const enc = encodeAction(newActions[0]!);
+        upd.actions = encodeActions(newActions);
+        upd.actionKind = enc.kind;
+        upd.actionData = enc.data;
+    }
+    if (patch.enabled !== undefined) upd.enabled = patch.enabled ? 1 : 0;
+    if (patch.position !== undefined) upd.position = patch.position;
+    if (patch.note !== undefined) upd.note = patch.note ?? null;
+    if (Object.keys(upd).length === 0) {
+        // Nothing to write — just read back the row.
+        const r = db.select().from(schema.automationRules)
+            .where(eq(schema.automationRules.id, id)).get();
+        return r ? rowToRule(r) : null;
+    }
+    db.update(schema.automationRules).set(upd)
+        .where(eq(schema.automationRules.id, id)).run();
+    const r = db.select().from(schema.automationRules)
+        .where(eq(schema.automationRules.id, id)).get();
+    return r ? rowToRule(r) : null;
+}
+
+/**
  * Fail-open read for the engine : the enabled rules for a given trigger,
  * optionally narrowed to a consumer scope. Mirrors
  * `getEnabledWorkFiltersForConsumer` — a read error (migration 0039 not yet
