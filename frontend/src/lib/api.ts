@@ -151,6 +151,9 @@ export interface AutomationRule {
     match_tag_added: string | null;
     match_intent: string | null;
     match_priority: string | null;
+    /** Slice 5.4 — back-compat read of the FIRST action in `actions`. Old
+     *  callers that only knew about a single action keep working ; new UI
+     *  code (slice 5.3b) reads `actions` for the full stack. */
     action: AutomationAction;
     enabled: 0 | 1;
     position: number;
@@ -159,6 +162,10 @@ export interface AutomationRule {
     /** Slice 5.1 — canonical condition tree (server synthesizes one for
      *  legacy rows pre-slice-5 so this is always populated). */
     expression: ConditionTree;
+    /** Slice 5.4 — stack of actions executed sequentially on a rule match
+     *  (david `aa48pd`). Server-side guarantees ≥1 entry (legacy single
+     *  `action` wraps to `[action]`). New UI binds against this. */
+    actions: AutomationAction[];
 }
 
 /** #447: a per-agent work filter — narrows which tickets a consumer picks up,
@@ -874,7 +881,12 @@ export const api = {
         match_tag_added?: string | null;
         match_intent?: string | null;
         match_priority?: string | null;
-        action: AutomationAction;
+        /** Slice 5.4 : canonical action stack. Server wins over `action`
+         *  when both are present. */
+        actions?: AutomationAction[];
+        /** Legacy single action — server wraps as `[action]`. Either this
+         *  or `actions` is required ; the latter is preferred for new code. */
+        action?: AutomationAction;
         position?: number;
         note?: string | null;
     }) => req<AutomationRule>("POST", "/api/automation/rules", body),

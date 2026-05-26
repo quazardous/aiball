@@ -169,8 +169,16 @@ const current = computed(() => {
             </section>
 
             <section class="aiball-section">
-                <h3>Action</h3>
-                <p class="rule-detail__action">{{ formatActionCompact(rule.action) }}</p>
+                <h3>Action{{ rule.actions.length > 1 ? "s" : "" }}</h3>
+                <ol class="rule-detail__action-stack">
+                    <li v-for="(a, i) in rule.actions" :key="i" class="rule-detail__action">
+                        {{ formatActionCompact(a) }}
+                    </li>
+                </ol>
+                <p v-if="rule.actions.length > 1" class="aiball-explainer aiball-explainer--muted">
+                    Actions execute in order on every match (slice 5.4, fail-isolated — one
+                    action's error doesn't abort the rest).
+                </p>
             </section>
 
             <section class="aiball-section">
@@ -237,6 +245,14 @@ const current = computed(() => {
     white-space: pre-wrap;
     word-break: break-word;
 }
+.rule-detail__action-stack {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
 .rule-detail__action {
     font-family: ui-monospace, monospace;
     font-size: 0.95rem;
@@ -245,6 +261,7 @@ const current = computed(() => {
     padding: 0.4rem 0.6rem;
     border-radius: 0.3rem;
     display: inline-block;
+    width: fit-content;
 }
 .rule-detail__trigger-row {
     display: flex;

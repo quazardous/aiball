@@ -1,0 +1,22 @@
+-- #457 slice 5.4 — stack actions on a rule.
+--
+-- David `aa48pd` : "même principe pour l'action qui est fait / on doit pouvoir
+-- stack plusieurs actions : set kind, set foo etc". One automation rule must
+-- be able to fire SEVERAL actions in sequence (assign + set_priority +
+-- add_tag, for example), not just one.
+--
+-- Add `actions TEXT NOT NULL DEFAULT '[]'` carrying a JSON array of
+-- `{kind, ...data}` objects (one per action). The legacy `action_kind` +
+-- `action_data` columns stay populated for one bake cycle (a follow-up
+-- slice can backfill `actions` from them then drop the legacy pair) —
+-- same additive pattern slice 5.1 used for `expression`.
+--
+-- Read-side : `rowToRule` (db/automation.ts) prefers the new `actions`
+-- column when non-empty, else synthesizes a single-element array from
+-- the legacy `action_kind`/`action_data` pair so pre-5.4 rows keep
+-- working unchanged.
+--
+-- Write-side : `insertAutomationRule` writes BOTH the new column (canonical)
+-- AND the legacy pair (from the first action) so a daemon running pre-5.4
+-- code can still read the rule's primary action.
+ALTER TABLE automation_rules ADD COLUMN actions TEXT NOT NULL DEFAULT '[]';

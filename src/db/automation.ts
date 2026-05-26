@@ -192,6 +192,10 @@ export interface AutomationRule {
     match_tag_added: string | null;
     match_intent: string | null;
     match_priority: string | null;
+    /** Slice 5.4 — back-compat read of the FIRST action in `actions[]`.
+     *  Pre-5.4 consumers (e.g. the engine, the frontend) that only know
+     *  about a single action keep working ; new callers should read
+     *  `actions` for the full stack. Kept until a future slice retires it. */
     action: AutomationAction;
     enabled: number;
     position: number;
@@ -203,6 +207,11 @@ export interface AutomationRule {
      *  columns so the engine never has to branch on which generation
      *  wrote the rule. */
     expression: ConditionTree;
+    /** #457 slice 5.4 — stack of actions executed sequentially when the
+     *  rule fires (david `aa48pd`). ALWAYS populated : an empty `actions`
+     *  column on a legacy row synthesizes `[action]` from `action_kind` +
+     *  `action_data`. New rules write the full array here. */
+    actions: AutomationAction[];
 }
 
 export interface NewAutomationRule {
@@ -221,7 +230,13 @@ export interface NewAutomationRule {
     match_tag_added?: string | null;
     match_intent?: string | null;
     match_priority?: string | null;
-    action: AutomationAction;
+    /** Slice 5.4 — the new "right" way is to pass an actions[] stack.
+     *  When set, the legacy `action` field is ignored (we still write the
+     *  first action to `action_kind`+`action_data` for back-compat). */
+    actions?: AutomationAction[];
+    /** Legacy single-action input — wrapped as `[action]` at insert time
+     *  when `actions` isn't provided. */
+    action?: AutomationAction;
     position?: number;
     note?: string | null;
 }
@@ -294,6 +309,37 @@ function encodeAction(a: AutomationAction): { kind: string; data: string } {
     return { kind, data: JSON.stringify(rest) };
 }
 
+/** #457 slice 5.4 — decode the `actions` column (JSON array). Returns null
+ *  on parse failure / unknown kinds so `rowToRule` can fall back to the
+ *  legacy synth path. An empty array '[]' decodes successfully to []
+ *  (means : caller wrote a rule with zero actions — degenerate but valid). */
+function decodeActions(json: string): AutomationAction[] | null {
+    if (!json) return null;
+    let raw: unknown;
+    try { raw = JSON.parse(json); } catch { return null; }
+    if (!Array.isArray(raw)) return null;
+    const out: AutomationAction[] = [];
+    for (const a of raw) {
+        if (!a || typeof a !== "object") return null;
+        const o = a as Record<string, unknown>;
+        if (typeof o.kind !== "string") return null;
+        // Reuse decodeAction by re-emitting the data shape (drop `kind` so
+        // its inner JSON.parse sees the original payload).
+        const { kind, ...rest } = o;
+        const inner = decodeAction(kind, JSON.stringify(rest));
+        out.push(inner);
+    }
+    return out;
+}
+
+/** #457 slice 5.4 — encode an action stack as the `actions` column JSON.
+ *  Mirrors `encodeAction` but keeps the discriminator + payload inline
+ *  per entry (since the column doesn't have a separate discriminator
+ *  field like the legacy `action_kind` pair). */
+function encodeActions(actions: AutomationAction[]): string {
+    return JSON.stringify(actions);
+}
+
 function rowToRule(r: schema.AutomationRuleRow): AutomationRule {
     const matchTags = parseTags(r.matchTags);
     // #457 slice 5.1 : the engine always reads through `expression`. If the
@@ -313,6 +359,19 @@ function rowToRule(r: schema.AutomationRuleRow): AutomationRule {
             match_tags: matchTags,
             scope_consumer: r.scopeConsumer,
         });
+    // #457 slice 5.4 : action stack. Prefer the canonical `actions` column ;
+    // fall back to synthesizing a single-element array from the legacy
+    // `action_kind` + `action_data` pair when the column is empty (legacy row
+    // pre-slice-5.4 — its DEFAULT '[]' decodes to []). Caveat : a brand-new
+    // rule with INTENTIONALLY zero actions also decodes to [] and would
+    // collapse to the legacy synth. The insert path always writes ≥1 entry
+    // to `actions`, so this collision never happens for rules written by
+    // the API or YAML loader.
+    const decodedActions = decodeActions(r.actions);
+    const legacyAction = decodeAction(r.actionKind, r.actionData);
+    const actions: AutomationAction[] = (decodedActions && decodedActions.length > 0)
+        ? decodedActions
+        : [legacyAction];
     return {
         id: r.id,
         triggers: parseTriggers(r.triggers),
@@ -324,12 +383,13 @@ function rowToRule(r: schema.AutomationRuleRow): AutomationRule {
         match_tag_added: r.matchTagAdded,
         match_intent: r.matchIntent,
         match_priority: r.matchPriority,
-        action: decodeAction(r.actionKind, r.actionData),
+        action: actions[0]!, // back-compat : `action` = first of `actions`.
         enabled: r.enabled,
         position: r.position,
         note: r.note,
         created_at: r.createdAt,
         expression,
+        actions,
     };
 }
 
@@ -338,8 +398,20 @@ function rowToRule(r: schema.AutomationRuleRow): AutomationRule {
 // ---------------------------------------------------------------------------
 
 export function insertAutomationRule(r: NewAutomationRule): AutomationRule {
-    const enc = encodeAction(r.action);
     const triggersList: Trigger[] = Array.isArray(r.triggers) ? r.triggers : [r.triggers];
+    // #457 slice 5.4 : actions stack canonical via `actions`. If only the
+    // legacy `action` was provided, wrap it. Insert path REQUIRES ≥ 1
+    // action (a rule with no action is a no-op : we reject by throwing,
+    // catching nonsense at write time). The legacy `action_kind` +
+    // `action_data` columns mirror the FIRST action for one bake cycle —
+    // a future slice can drop them once no caller reads them anymore.
+    const actionsList: AutomationAction[] = r.actions && r.actions.length > 0
+        ? r.actions
+        : (r.action ? [r.action] : []);
+    if (actionsList.length === 0) {
+        throw new Error("insertAutomationRule : at least one action is required (actions[] or action)");
+    }
+    const firstEnc = encodeAction(actionsList[0]!);
     // #457 slice 5.1 : if the caller passes an explicit `expression`, that
     // wins ; else we synthesize one from the legacy `match_*` fields so the
     // column is never NULL going forward. Legacy rows already in the DB
@@ -366,13 +438,14 @@ export function insertAutomationRule(r: NewAutomationRule): AutomationRule {
         matchTagAdded: r.match_tag_added ?? null,
         matchIntent: r.match_intent ?? null,
         matchPriority: r.match_priority ?? null,
-        actionKind: enc.kind,
-        actionData: enc.data,
+        actionKind: firstEnc.kind,
+        actionData: firstEnc.data,
         enabled: 1,
         position: r.position ?? 0,
         note: r.note ?? null,
         createdAt: nowIso(),
         expression: JSON.stringify(expressionForCol),
+        actions: encodeActions(actionsList),
     }).returning().get();
     return rowToRule(inserted);
 }

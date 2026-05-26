@@ -92,9 +92,23 @@ function parseEntry(raw: unknown, syntheticId: number, source: string): Automati
         return null;
     }
 
-    // Action : look at `do:` and infer the kind from the property present.
-    const action = decodeAction(o.do, source);
-    if (!action) return null;
+    // Action(s) : `do:` can be a single action map (legacy syntax) OR an
+    // array of action maps (slice 5.4 stack — david `aa48pd`). The first
+    // surviving action populates the back-compat `action` field ; the
+    // full sequence lands in `actions`.
+    const rawDo = o.do;
+    const actionList: AutomationAction[] = [];
+    if (Array.isArray(rawDo)) {
+        for (const entry of rawDo) {
+            const a = decodeAction(entry, source);
+            if (a) actionList.push(a);
+        }
+    } else {
+        const a = decodeAction(rawDo, source);
+        if (a) actionList.push(a);
+    }
+    if (actionList.length === 0) return null;
+    const action = actionList[0]!;
 
     // Conditions : everything under `when:` (with sensible default empty).
     const when = (o.when && typeof o.when === "object" ? o.when : {}) as Record<string, unknown>;
@@ -142,6 +156,8 @@ function parseEntry(raw: unknown, syntheticId: number, source: string): Automati
         match_intent: matchIntent,
         match_priority: matchPriority,
         action,
+        // Slice 5.4 — full stack from `do:` (legacy single map or array).
+        actions: actionList,
         enabled,
         expression,
         position: 0, // YAML order is the position — caller iterates in load order.

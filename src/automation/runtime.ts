@@ -35,7 +35,7 @@ import { resolvedEnabledRulesForTrigger } from "./resolved-rules.js";
 import { firstMatchingRule, type AutomationEvent } from "./engine.js";
 import { setTicketAssignment } from "../db/tickets.js";
 import { upsertTicketSubscription } from "../db/subscriptions.js";
-import { getMessage } from "../db/messages.js";
+import { editMessage, getMessage } from "../db/messages.js";
 import { broadcast } from "../ws.js";
 import type { Message } from "../db.js";
 
@@ -124,9 +124,35 @@ function fireAutomation(event: AutomationEvent, ticket: Message): void {
         const rules = resolvedEnabledRulesForTrigger(event.trigger);
         const match = firstMatchingRule(rules, event);
         if (!match) return;
-        executeAction(match.action, ticket);
+        // #457 slice 5.4 — run the FULL stack of actions on a match, not
+        // just the first one. david `aa48pd` : "on doit pouvoir stack
+        // plusieurs actions". Fail-isolated (david `2r3w6a` ack : we
+        // postpone fail-fast for later) — one action error doesn't abort
+        // the rest. Always at least one entry in `match.actions` (the
+        // insert path rejects empty ; legacy rows synth from `action`).
+        executeActions(match.actions, ticket);
     } catch (e) {
         console.error("[automation] fire error for trigger", event.trigger, ":", e);
+    }
+}
+
+function executeActions(actions: AutomationAction[], ticket: Message): void {
+    for (const action of actions) {
+        try {
+            executeAction(action, ticket);
+        } catch (e) {
+            // Fail-isolated : the next action still runs. The error is
+            // logged with the action kind so the operator can spot which
+            // one in the stack went wrong.
+            console.error(
+                "[automation] action",
+                action.kind,
+                "failed on ticket",
+                ticket.id,
+                ":",
+                e,
+            );
+        }
     }
 }
 
@@ -145,14 +171,26 @@ function executeAction(action: AutomationAction, ticket: Message): void {
             if (updated) broadcast({ type: "message_edited", data: updated });
             return;
         }
+        case "set_priority": {
+            // #457 slice 5.4 — bump/lower a ticket's priority on rule fire.
+            // Uses the same editMessage path the UI / API call when the
+            // operator edits a ticket directly (priority CHECK + tickets-only
+            // gating already enforced in db/messages.ts). Broadcast so open
+            // inboxes refresh the urgency chip live.
+            editMessage(ticket.id, { priority: action.priority });
+            const updated = getMessage(ticket.id);
+            if (updated) broadcast({ type: "message_edited", data: updated });
+            return;
+        }
         case "decision":
         case "pickup":
         case "add_tag":
-        case "set_priority":
         case "notify":
-            // Out of scope for slice 2. `decision` and `pickup` keep firing
-            // through the legacy rules.ts / work-filters.ts engines until
-            // slice 3 migrates them. The other three have no caller yet.
+            // `decision` and `pickup` still fire through the legacy rules.ts /
+            // work-filters.ts engines (ticket #465 migrates them onto this
+            // engine). `add_tag` + `notify` aren't wired yet — they'll land
+            // in a follow-up slice (deferred since neither was on david's
+            // immediate path).
             return;
     }
 }

@@ -39,6 +39,7 @@ function rule(p: Partial<AutomationRule>): AutomationRule {
             match_tags,
             scope_consumer,
         });
+    const action = p.action ?? { kind: "decision", decision: "review" };
     return {
         id: p.id ?? 1,
         triggers: p.triggers ?? (["ticket_created"] as Trigger[]),
@@ -50,12 +51,15 @@ function rule(p: Partial<AutomationRule>): AutomationRule {
         match_tag_added,
         match_intent,
         match_priority,
-        action: p.action ?? { kind: "decision", decision: "review" },
+        action,
         enabled: p.enabled ?? 1,
         position: p.position ?? 0,
         note: p.note ?? null,
         created_at: p.created_at ?? "2026-05-26T00:00:00.000Z",
         expression,
+        // Slice 5.4 — back-compat-helper rule() : single-action by default,
+        // tests that need a stack pass `actions` explicitly via `p.actions`.
+        actions: p.actions ?? [action],
     };
 }
 

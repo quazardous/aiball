@@ -220,6 +220,71 @@ test("POST /automation/rules : rejects an `and` whose children isn't an array", 
     assert.equal(r.status, 400);
 });
 
+// ---------------------------------------------------------------------------
+// Slice 5.5 — `actions` stack on POST.
+// ---------------------------------------------------------------------------
+
+test("POST /automation/rules : accepts an actions[] stack of 2", async () => {
+    const r = await req("POST", "/api/automation/rules", {
+        triggers: ["ticket_tagged"],
+        match_tag_added: "win",
+        actions: [
+            { kind: "assign", consumer_id: "aiball-windows" },
+            { kind: "set_priority", priority: "high" },
+        ],
+    });
+    assert.equal(r.status, 201);
+    const body = r.body as { actions: unknown[]; action: { kind: string } };
+    assert.equal(body.actions.length, 2);
+    // `action` (back-compat single) mirrors the first entry.
+    assert.equal(body.action.kind, "assign");
+});
+
+test("POST /automation/rules : rejects empty actions array", async () => {
+    const r = await req("POST", "/api/automation/rules", {
+        triggers: ["ticket_created"],
+        actions: [],
+    });
+    assert.equal(r.status, 400);
+    assert.match(String((r.body as { error: string }).error), /at least one/);
+});
+
+test("POST /automation/rules : rejects actions item with bad kind", async () => {
+    const r = await req("POST", "/api/automation/rules", {
+        triggers: ["ticket_created"],
+        actions: [
+            { kind: "assign", consumer_id: "agent-a" },
+            { kind: "destroy_the_planet" }, // not a thing
+        ],
+    });
+    assert.equal(r.status, 400);
+    assert.match(String((r.body as { error: string }).error), /actions\[1\]/);
+});
+
+test("POST /automation/rules : actions wins when both action + actions provided", async () => {
+    const r = await req("POST", "/api/automation/rules", {
+        triggers: ["ticket_created"],
+        action: { kind: "decision", decision: "auto" }, // would-be legacy
+        actions: [{ kind: "assign", consumer_id: "agent-a" }],
+    });
+    assert.equal(r.status, 201);
+    const body = r.body as { actions: { kind: string }[]; action: { kind: string } };
+    assert.equal(body.actions.length, 1);
+    assert.equal(body.actions[0]!.kind, "assign", "actions wins");
+    assert.equal(body.action.kind, "assign");
+});
+
+test("POST /automation/rules : legacy single action still works (no actions field)", async () => {
+    const r = await req("POST", "/api/automation/rules", {
+        triggers: ["ticket_created"],
+        action: { kind: "decision", decision: "review" },
+    });
+    assert.equal(r.status, 201);
+    const body = r.body as { actions: { kind: string }[]; action: { kind: string } };
+    assert.deepEqual(body.actions, [{ kind: "decision", decision: "review" }]);
+    assert.equal(body.action.kind, "decision");
+});
+
 test("POST /automation/rules : expression overrides flat match_*", async () => {
     // When both are present, expression wins (it's the canonical surface).
     // Flat fields get stored but the engine reads through expression.

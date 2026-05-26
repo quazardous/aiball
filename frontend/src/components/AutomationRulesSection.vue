@@ -117,7 +117,7 @@ onMounted(load);
                         <div class="rule-meta">
                             <span class="rule-meta__triggers">on {{ r.triggers.join(", ") || "(no triggers)" }}</span>
                             <span class="rule-meta__sep">→</span>
-                            <span class="rule-meta__action">{{ formatActionCompact(r.action) }}</span>
+                            <span class="rule-meta__action">{{ r.actions.map(formatActionCompact).join(" + ") }}</span>
                         </div>
                     </button>
                     <div class="rule-controls">

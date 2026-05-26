@@ -311,6 +311,12 @@ export const automationRules = sqliteTable("automation_rules", {
      *  directly. The `match_*` columns stay around for one bake cycle, then
      *  a follow-up slice can backfill + drop them. */
     expression: text("expression"),
+    /** #457 slice 5.4 — stack of actions, JSON array of `{kind, ...data}`.
+     *  Defaults to '[]' for legacy rows (the rowToRule decoder then falls
+     *  back to synthesizing a single-element array from `action_kind` +
+     *  `action_data`). New rules write the canonical array here ; the legacy
+     *  pair is mirrored from the first action for one bake cycle. */
+    actions: text("actions").notNull().default("[]"),
 }, (t) => [
     index("idx_automation_rules_scope_consumer").on(t.scopeConsumer),
 ]);

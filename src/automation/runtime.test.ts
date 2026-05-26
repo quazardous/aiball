@@ -146,7 +146,58 @@ test("scenario 4 : ticket_created with no tags doesn't crash, just no-op", () =>
     assert.equal(getMessage(t.id)?.assignee, null);
 });
 
-test("scenario 5 : a disabled rule never fires, even on a perfect match", () => {
+test("scenario 5 (slice 5.4) : multi-action stack — assign + set_priority both run", () => {
+    // david `aa48pd` : "on doit pouvoir stack plusieurs actions". A rule
+    // with `actions: [assign, set_priority]` must apply BOTH side-effects
+    // on a single match. This pins the executeActions iteration.
+    const triageAgent = "aiball-triage";
+    upsertConsumer({ consumer_id: triageAgent, kind: "agent" });
+    const triageTag = insertTag({ name: "triage" });
+    insertAutomationRule({
+        triggers: ["ticket_tagged"],
+        match_project: PROJECT,
+        match_tag_added: "triage",
+        actions: [
+            { kind: "assign", consumer_id: triageAgent },
+            { kind: "set_priority", priority: "urgent" },
+        ],
+    });
+
+    const t = submitMessage({
+        project: PROJECT,
+        kind: "ticket_created",
+        title: "scenario 5",
+        body: "to be triaged",
+        by_agent: REPORTER,
+    });
+    assert.equal(getMessage(t.id)?.priority, "normal", "default priority before tag");
+
+    addMessageTag(t.id, triageTag.id, REPORTER);
+    emitLifecycle({
+        op: "tagged",
+        message: getMessage(t.id)!,
+        added_tag: "triage",
+        all_tags: ["triage"],
+    });
+
+    const after = getMessage(t.id);
+    assert.equal(after?.assignee, triageAgent, "first action ran : assign");
+    assert.equal(after?.priority, "urgent", "second action ran : set_priority");
+});
+
+test("scenario 6 (slice 5.4) : legacy single-`action` payload still wraps to actions[1]", () => {
+    // Rules written with the legacy `action: …` field (pre-5.4 callers)
+    // must keep working — rowToRule synthesizes `actions: [action]`.
+    const r = insertAutomationRule({
+        triggers: ["ticket_created"],
+        action: { kind: "decision", decision: "auto" }, // legacy single
+    });
+    assert.deepEqual(r.actions, [{ kind: "decision", decision: "auto" }]);
+    assert.equal(r.actions.length, 1);
+    assert.deepEqual(r.action, r.actions[0]); // back-compat field mirrors the first
+});
+
+test("scenario 7 : a disabled rule never fires, even on a perfect match", () => {
     // Use a fresh tag so we know our existing rule isn't accidentally firing
     // on the win-tag path from earlier tests.
     const beta = insertTag({ name: "beta" });

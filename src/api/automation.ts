@@ -124,6 +124,7 @@ automationRouter.post("/automation/rules", (req: Request, res: Response) => {
         match_intent,
         match_priority,
         action,
+        actions,
         expression,
         position,
         note,
@@ -144,8 +145,37 @@ automationRouter.post("/automation/rules", (req: Request, res: Response) => {
             return badRequest(res, "match_tags must be an array of tag names");
         }
     }
-    const act = parseAction(action);
-    if ("error" in act) return badRequest(res, act.error);
+
+    // #457 slice 5.5 : `actions: AutomationAction[]` is the canonical stack
+    // (david `aa48pd`). When provided, validate each entry through the same
+    // `parseAction` we use for the legacy single `action`. Empty array is
+    // a 400 — a rule with zero actions is a no-op nobody asked for.
+    let parsedActions: AutomationAction[] | undefined;
+    if (actions !== undefined && actions !== null) {
+        if (!Array.isArray(actions)) {
+            return badRequest(res, "actions must be an array");
+        }
+        if (actions.length === 0) {
+            return badRequest(res, "actions must contain at least one entry");
+        }
+        const out: AutomationAction[] = [];
+        for (let i = 0; i < actions.length; i++) {
+            const v = parseAction(actions[i]);
+            if ("error" in v) {
+                return badRequest(res, `actions[${i}] : ${v.error}`);
+            }
+            out.push(v);
+        }
+        parsedActions = out;
+    }
+    // Back-compat : if no `actions` field, the legacy `action` is required.
+    // When BOTH are present, `actions` wins (canonical surface).
+    let firstAction: AutomationAction | undefined;
+    if (!parsedActions) {
+        const act = parseAction(action);
+        if ("error" in act) return badRequest(res, act.error);
+        firstAction = act;
+    }
 
     // #457 slice 5.2 : optional `expression` condition tree (overrides the
     // synthesized AND-of-leaves from the flat `match_*` fields when set).
@@ -184,7 +214,9 @@ automationRouter.post("/automation/rules", (req: Request, res: Response) => {
         match_intent: typeof match_intent === "string" && match_intent !== "" ? match_intent : null,
         match_priority:
             typeof match_priority === "string" && match_priority !== "" ? match_priority : null,
-        action: act,
+        // Slice 5.5 — pass `actions` when set, else fall back to single `action`.
+        // insertAutomationRule reconciles either input into the canonical array.
+        ...(parsedActions ? { actions: parsedActions } : { action: firstAction! }),
         ...(parsedExpression ? { expression: parsedExpression } : {}),
         position: typeof position === "number" ? position : 0,
         note: typeof note === "string" ? note : null,
