@@ -17,6 +17,10 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: "open-edit", nodeId: string): void;
     (e: "close-edit"): void;
+    /** #458 — forwarded from NodeDetailPage: the breadcrumb's "Inbox" crumb
+     *  resets BOTH the panel and the node-edit slot in one shot, instead of
+     *  the user double-back-clicking. */
+    (e: "close-to-inbox"): void;
 }>();
 
 const nodes = ref<NodeView[]>([]);
@@ -49,6 +53,7 @@ onMounted(load);
         v-if="props.editNodeId"
         :node-id="props.editNodeId"
         @close="emit('close-edit')"
+        @close-to-inbox="emit('close-to-inbox')"
     />
     <div v-else class="nodes-panel">
         <PanelHeader title="Proxy nodes">

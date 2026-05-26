@@ -20,6 +20,9 @@ const emit = defineEmits<{
     (e: "close-edit"): void;
     // #455: jump to the detail page of the proxy node that relays this consumer.
     (e: "open-node", nodeId: string): void;
+    /** #458 — forwarded from ConsumerEditPage's "Inbox" breadcrumb. Resets
+     *  panel + consumer-edit slot in one shot instead of double-back. */
+    (e: "close-to-inbox"): void;
 }>();
 
 // #B.177 / #280: how long without a state heartbeat before we render a
@@ -341,6 +344,7 @@ const sortedRows = computed<Consumer[]>(() => {
         v-if="props.editConsumerId"
         :consumer-id="props.editConsumerId"
         @close="emit('close-edit')"
+        @close-to-inbox="emit('close-to-inbox')"
     />
     <div v-else class="consumers-panel">
         <PanelHeader title="Consumers">

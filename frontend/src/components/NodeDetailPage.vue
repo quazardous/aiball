@@ -18,7 +18,21 @@ import FieldRow from "./ui/FieldRow.vue";
 import DetailHeader from "./ui/DetailHeader.vue";
 
 const props = defineProps<{ nodeId: string }>();
-const emit = defineEmits<{ (e: "close"): void }>();
+const emit = defineEmits<{
+    (e: "close"): void;
+    /** #458 — first breadcrumb crumb ("Inbox") returns to the inbox instead
+     *  of just the parent list. The doubled App.vue back-link is suppressed
+     *  on detail pages; this event takes over its job. */
+    (e: "close-to-inbox"): void;
+}>();
+
+// #458 — dispatch the breadcrumb click by index: 0 = Inbox (skip the list),
+// 1 = the parent list (Proxy nodes). The href on each crumb keeps the link
+// real (Ctrl-click works), the handler does the client-side state reset.
+function onCrumb(index: number): void {
+    if (index === 0) emit("close-to-inbox");
+    else emit("close");
+}
 
 const confirm = useConfirm();
 const toast = useToast();
@@ -92,12 +106,12 @@ async function doRevoke(n: NodeView): Promise<void> {
 </script>
 
 <template>
-    <div class="node-detail">
+    <div class="node-detail aiball-detail-page">
         <DetailHeader
-            :crumbs="[{ label: 'Proxy nodes' }]"
+            :crumbs="[{ label: 'Inbox', href: '/' }, { label: 'Proxy nodes', href: '/nodes' }]"
             :current="props.nodeId"
             title="Node details"
-            @crumb="emit('close')"
+            @crumb="onCrumb"
         />
 
         <div v-if="loading" class="aiball-empty">Loading…</div>
@@ -155,12 +169,7 @@ async function doRevoke(n: NodeView): Promise<void> {
 </template>
 
 <style>
-.node-detail {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    max-width: 40rem;
-}
+/* Layout (largeur + gouttière verticale) → `.aiball-detail-page` (style.css). */
 /* En-tête (breadcrumb + titre) → <DetailHeader> / `.aiball-detail-head*`
    + `.aiball-breadcrumb*` (style.css). */
 .node-detail__error {

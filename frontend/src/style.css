@@ -379,3 +379,15 @@ body,
     gap: 0.5rem;
 }
 
+/* Conteneur de page détail/edit unifié (#458) : largeur standard + gouttière
+   verticale entre l'en-tête (DetailHeader) et le corps. À appliquer sur la
+   racine d'une page « form-style » (ConsumerEditPage, NodeDetailPage, …) à la
+   place d'un `max-width` bespoke. Les pages tableau de bord multi-sections
+   (ProjectStats / ProjectDetail) restent pleine largeur. */
+.aiball-detail-page {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    max-width: 40rem;
+}
+

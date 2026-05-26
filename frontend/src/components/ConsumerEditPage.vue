@@ -19,7 +19,19 @@ import FieldRow from "./ui/FieldRow.vue";
 import DetailHeader from "./ui/DetailHeader.vue";
 
 const props = defineProps<{ consumerId: string }>();
-const emit = defineEmits<{ (e: "close"): void }>();
+const emit = defineEmits<{
+    (e: "close"): void;
+    /** #458 — first breadcrumb crumb ("Inbox") returns to the inbox instead
+     *  of just the parent list. The doubled App.vue back-link is suppressed
+     *  on detail pages; this event takes over its job. */
+    (e: "close-to-inbox"): void;
+}>();
+
+// #458 — dispatch the breadcrumb click by index (0 = Inbox, 1 = Consumers).
+function onCrumb(index: number): void {
+    if (index === 0) emit("close-to-inbox");
+    else emit("close");
+}
 
 const toast = useToast();
 const loading = ref(false);
@@ -127,12 +139,12 @@ async function sendPrompt() {
 </script>
 
 <template>
-    <div class="consumer-edit">
+    <div class="consumer-edit aiball-detail-page">
         <DetailHeader
-            :crumbs="[{ label: 'Consumers' }]"
+            :crumbs="[{ label: 'Inbox', href: '/' }, { label: 'Consumers', href: '/consumers' }]"
             :current="props.consumerId"
             title="Edit consumer"
-            @crumb="emit('close')"
+            @crumb="onCrumb"
         />
 
         <div v-if="loading" class="aiball-empty">Loading…</div>
@@ -265,12 +277,7 @@ async function sendPrompt() {
 </template>
 
 <style>
-.consumer-edit {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    max-width: 36rem;
-}
+/* Layout (largeur + gouttière verticale) → `.aiball-detail-page` (style.css). */
 /* En-tête (breadcrumb + titre) → <DetailHeader> / `.aiball-detail-head*`
    + `.aiball-breadcrumb*` (style.css). */
 .consumer-edit__error {

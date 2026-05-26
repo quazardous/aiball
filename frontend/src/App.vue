@@ -687,9 +687,13 @@ watch(showSnoozed, (v) => {
                 <!-- #B.194: settings panels lacked a visible way back to
                      the inbox on mobile (the sidebar lives in the footer
                      band, easy to miss). One unified back-link covers
-                     all four; per-panel headers stay untouched. -->
+                     all four; per-panel headers stay untouched.
+                     #458: suppressed on child detail views (consumer-edit /
+                     node-detail) — the page's own DetailHeader breadcrumb
+                     prepends an "Inbox" crumb that covers the same job, so
+                     showing both stacks two back-links. -->
                 <a
-                    v-if="panel === 'general' || panel === 'automation' || panel === 'projects' || panel === 'rules' || panel === 'work-filters' || panel === 'tags' || panel === 'consumers' || panel === 'nodes'"
+                    v-if="(panel === 'general' || panel === 'automation' || panel === 'projects' || panel === 'rules' || panel === 'work-filters' || panel === 'tags' || (panel === 'consumers' && !consumerEditId) || (panel === 'nodes' && !nodeEditId))"
                     href="/"
                     class="settings-back-link"
                     @click.prevent="panel = null"
@@ -723,12 +727,14 @@ watch(showSnoozed, (v) => {
                     @open-edit="(id: string) => { consumerEditId = id; }"
                     @close-edit="consumerEditId = null"
                     @open-node="(id: string) => { openPanel('nodes'); nodeEditId = id; }"
+                    @close-to-inbox="() => { consumerEditId = null; panel = null; }"
                 />
                 <NodesPanel
                     v-else-if="panel === 'nodes'"
                     :edit-node-id="nodeEditId"
                     @open-edit="(id: string) => { nodeEditId = id; }"
                     @close-edit="nodeEditId = null"
+                    @close-to-inbox="() => { nodeEditId = null; panel = null; }"
                 />
 
                 <NewTicketPage

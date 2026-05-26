@@ -21,6 +21,11 @@
  */
 interface Crumb {
     label: string;
+    /** Optional href for real browser-navigation. When set, the crumb renders
+     *  as an `<a>` (still emits `crumb` on click for client-side state reset),
+     *  so Ctrl-click / "open in new tab" works, and the link survives if the
+     *  page is reached on a partial frontend reload. #458 */
+    href?: string;
 }
 defineProps<{
     crumbs: Crumb[];
@@ -34,7 +39,15 @@ const emit = defineEmits<{ (e: "crumb", index: number): void }>();
     <div class="aiball-detail-head">
         <nav class="aiball-breadcrumb">
             <template v-for="(c, i) in crumbs" :key="i">
-                <button type="button" class="aiball-breadcrumb__link" @click="emit('crumb', i)">
+                <a
+                    v-if="c.href"
+                    :href="c.href"
+                    class="aiball-breadcrumb__link"
+                    @click.prevent="emit('crumb', i)"
+                >
+                    <i v-if="i === 0" class="pi pi-arrow-left" /> {{ c.label }}
+                </a>
+                <button v-else type="button" class="aiball-breadcrumb__link" @click="emit('crumb', i)">
                     <i v-if="i === 0" class="pi pi-arrow-left" /> {{ c.label }}
                 </button>
                 <span class="aiball-breadcrumb__sep">/</span>
