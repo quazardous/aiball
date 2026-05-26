@@ -5,13 +5,15 @@
 import { onMounted, ref } from "vue";
 import Button from "primevue/button";
 import { api, type Launcher } from "../lib/api";
+import { useNotify } from "../lib/notify";
 import PanelHeader from "./ui/PanelHeader.vue";
 
 const launchers = ref<Launcher[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
-const flash = ref<string | null>(null);
 const running = ref<string | null>(null);
+
+const notify = useNotify();
 
 async function load() {
     loading.value = true;
@@ -27,12 +29,14 @@ async function load() {
 
 async function run(l: Launcher) {
     running.value = l.id;
-    flash.value = null;
     try {
         const r = await api.runLauncher(l.id);
-        flash.value = `Launched ${r.label} (pid ${r.pid})`;
+        // #459 — était un `flash` ref local + <p> bespoke, identique à
+        // ProjectDetailPage.launch (même anti-pattern). Migré vers le toast
+        // général via useNotify.
+        notify.success(`Launched ${r.label}`, { detail: `pid ${r.pid}` });
     } catch (e) {
-        flash.value = `Failed: ${(e as Error).message}`;
+        notify.error(`Launcher "${l.label}" failed`, { detail: (e as Error).message });
     } finally {
         running.value = null;
     }
@@ -54,7 +58,6 @@ onMounted(load);
                 <code>launchers:</code> block. Human-only.
             </p>
         </PanelHeader>
-        <p v-if="flash" class="launchers-panel__flash">{{ flash }}</p>
 
         <div v-if="loading" class="aiball-empty">Loading…</div>
         <div v-else-if="error" class="aiball-empty" style="color: var(--p-red-500)">{{ error }}</div>
@@ -83,7 +86,7 @@ onMounted(load);
 .launchers-panel { display: flex; flex-direction: column; gap: 0.8rem; }
 /* En-tête → <PanelHeader> (style.css). */
 .launchers-panel__refresh { background: none; border: none; cursor: pointer; color: var(--p-text-color); }
-.launchers-panel__flash { margin: 0; font-size: 0.85rem; color: var(--p-green-600, #16a34a); }
+/* #459 : flash retiré, les feedbacks vont via `useNotify()` (lib/notify.ts). */
 .launchers-panel__list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
 .launchers-panel__item { display: flex; align-items: center; gap: 0.6rem; }
 .launchers-panel__cmd { font-size: 0.75rem; color: var(--p-text-muted-color, #6b7280); }

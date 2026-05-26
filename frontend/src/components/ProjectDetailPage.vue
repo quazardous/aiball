@@ -4,10 +4,10 @@
 // each root with their live state, and a button to launch a loop for a root.
 import { computed, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
-import { useToast } from "primevue/usetoast";
 import { useConfirm } from "primevue/useconfirm";
 import { api, type ProjectMeta, type Consumer } from "../lib/api";
 import { useBus } from "../lib/bus";
+import { useNotify } from "../lib/notify";
 import AdminDashboardLayout from "./ui/AdminDashboardLayout.vue";
 
 const props = defineProps<{ project: string }>();
@@ -18,9 +18,8 @@ const consumers = ref<Consumer[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const launching = ref<string | null>(null);
-const flash = ref<string | null>(null);
 
-const toast = useToast();
+const notify = useNotify();
 const confirmDialog = useConfirm();
 
 async function load() {
@@ -99,13 +98,14 @@ function rootIsRunning(root: string): boolean {
 
 async function launch(root: string) {
     launching.value = root;
-    flash.value = null;
     try {
         const r = await api.launchLoop(props.project, root);
-        flash.value = `Launched (pid ${r.pid}) at ${root}`;
+        // #459 — was a local `flash` ref + bespoke <p> ; now goes through the
+        // shared toast abstraction like every other action on this page.
+        notify.success(`Launched loop (pid ${r.pid})`, { detail: root });
         setTimeout(load, 1500);
     } catch (e) {
-        flash.value = `Launch failed: ${(e as Error).message}`;
+        notify.error(`Launch failed at ${root}`, { detail: (e as Error).message });
     } finally {
         launching.value = null;
     }
@@ -130,20 +130,16 @@ function stopLoop(consumer_id: string) {
 async function doStopLoop(consumer_id: string) {
     try {
         const r = await api.stopLoop(consumer_id);
-        toast.add({
-            severity: r.delivered ? "success" : "warn",
-            summary: r.delivered ? `Stop sent to ${consumer_id}` : `No live loop for ${consumer_id}`,
-            detail: r.delivered ? "The loop will self-terminate." : "Nothing was connected to receive it.",
-            life: 5000,
-        });
+        // #459 — migrated to `notify` so launch + stop go through the same
+        // semantic helpers (cohérent avec le reste de la page).
+        if (r.delivered) {
+            notify.success(`Stop sent to ${consumer_id}`, { detail: "The loop will self-terminate." });
+        } else {
+            notify.warn(`No live loop for ${consumer_id}`, { detail: "Nothing was connected to receive it." });
+        }
         setTimeout(() => void load(), 1500);
     } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: `Stop failed for ${consumer_id}`,
-            detail: (e as Error).message,
-            life: 6000,
-        });
+        notify.error(`Stop failed for ${consumer_id}`, { detail: (e as Error).message });
     }
 }
 </script>
@@ -173,8 +169,6 @@ async function doStopLoop(consumer_id: string) {
         <div v-else-if="error" class="aiball-empty" style="color: var(--p-red-500)">{{ error }}</div>
 
         <template v-else>
-            <p v-if="flash" class="project-detail__flash">{{ flash }}</p>
-
             <div v-if="roots.length === 0" class="aiball-empty">
                 No local loop has run for this project. A project becomes <strong>local</strong>
                 when a claude-loop runs in its directory (the root is then discovered automatically).
@@ -290,13 +284,7 @@ async function doStopLoop(consumer_id: string) {
     border-radius: 0.3rem;
 }
 .project-detail__refresh:hover { background: var(--p-surface-100); }
-.project-detail__flash {
-    margin: 0;
-    padding: 0.5rem 0.75rem;
-    background: var(--p-surface-100);
-    border-radius: 0.4rem;
-    font-size: 0.85rem;
-}
+/* #459 : flash retiré, les feedbacks vont via `useNotify()` (lib/notify.ts). */
 .project-detail__root {
     padding: 0.8rem 1rem;
     border: 1px solid var(--p-content-border-color);
