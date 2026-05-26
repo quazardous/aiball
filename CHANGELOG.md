@@ -17,6 +17,22 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### docs/INSTALL.md — Linux/macOS install reference (#487)
+
+- New reader-facing doc that mirrors `docs/WIN-INSTALL.md` for the Linux /
+  macOS install path. Until now, the only narrative source for the install
+  modes was the header comment of `install.sh` — reachable only by reading
+  the script.
+- Covers the **three modes** (portable / hard / `--symlink` dev), all install
+  flags (`--port`, `--host`, `--no-systemd`, `--stop-hook`, `--proxy-url`,
+  `--auth-init`, `--uninstall`, `--remove-stop-hook`), the daemon lifecycle
+  (start / stop / `aiball restart` hard / `aiball reload` soft), the post-install
+  filesystem layout, the env vars (`AIBALL_HOME` / `AIBALL_SOCK` / `AIBALL_CWD`
+  / `AIBALL_PROJECT` / `AIBALL_TOKEN` / `AIBALL_URL` / `AIBALL_HOST` /
+  `AIBALL_PORT`), sanity-checks, and a troubleshooting section.
+- Linked from `README.md` (under the quickstart) and from the `CLAUDE.md`
+  docs index.
+
 ### Proxy node detail page (#452)
 
 - Each **proxy node** (Settings → Proxy nodes) now has its own **detail page** —

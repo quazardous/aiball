@@ -48,9 +48,10 @@ claude-loop -- --resume
 tmux opens with claude inside; the status bar tracks real state
 (`boot` → `idle` → `busy`, plus a `stop` / `wait` / `loop` human-presence
 word). Detach with `Ctrl-B D`, re-attach with `claude-loop attach <name>`.
-Run `aiball check` to verify wiring. Other setups (bare MCP, autopoll Stop
-hook) live in [`MCP-CLIENT.md`](./MCP-CLIENT.md); the loop internals in
-[`docs/CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md).
+Run `aiball check` to verify wiring. Full install guide (modes, flags,
+env vars, troubleshooting) in [`docs/INSTALL.md`](./docs/INSTALL.md); other
+setups (bare MCP, autopoll Stop hook) live in [`MCP-CLIENT.md`](./MCP-CLIENT.md);
+the loop internals in [`docs/CLAUDE-LOOP.md`](./docs/CLAUDE-LOOP.md).
 
 ## Remote (Tailscale)
 
