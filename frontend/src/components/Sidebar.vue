@@ -376,7 +376,14 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--p-text-muted-color);
-    padding: 0.3rem 0.5rem 0.2rem;
+    /* #473 david : aligne le padding-x avec `.sidebar-item` (0.6rem) pour
+       que le texte de la section-label démarre exactement au-dessus du
+       texte des items (mêmes 0.6rem du bord gauche). Avant : 0.5rem côté
+       label, 0.6rem côté items → décalage de 1.6px qui se voyait quand
+       on switchait entre "All projects" actif (label tronqué = "All
+       proje…") et un projet actif (label court = "aiball") où l'œil
+       compare directement. */
+    padding: 0.3rem 0.6rem 0.2rem;
 }
 .sidebar-item {
     display: flex;
