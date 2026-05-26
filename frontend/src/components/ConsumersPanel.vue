@@ -390,6 +390,9 @@ const sortedRows = computed<Consumer[]>(() => {
                 <th class="sortable col-display" @click="toggleSort('display_name')">
                     Display name <i :class="sortIcon('display_name')" />
                 </th>
+                <!-- #455 (david `q76ywq`) — colonne Node dédiée plutôt qu'un
+                     badge "via node" inline dans la cellule consumer id. -->
+                <th class="col-node">Node</th>
                 <th class="sortable" @click="toggleSort('activity')">
                     Activity <i :class="sortIcon('activity')" />
                 </th>
@@ -415,27 +418,13 @@ const sortedRows = computed<Consumer[]>(() => {
                                 severity="warn"
                                 class="consumers-cid__tag"
                             />
-                            <!-- #422: remote consumer (node-relayed or TCP from a
-                                 non-loopback peer). Title shows the transport + ip. -->
-                            <!-- #455: node-relayed → clickable badge showing the
-                                 relaying node's label, links to its detail page.
-                                 Anchor wraps the Tag because @click on a PrimeVue
-                                 Tag doesn't forward the native click. -->
-                            <a
-                                v-if="nodeFor(r)"
-                                href="#"
-                                class="consumers-node-link"
-                                :title="`Relayed by node ${nodeFor(r)?.label || nodeFor(r)?.node_id}${r.last_seen_ip ? ' · ' + r.last_seen_ip : ''} — open node`"
-                                @click.prevent="() => { const n = nodeFor(r); if (n) emit('open-node', n.node_id); }"
-                            >
-                                <Tag
-                                    :value="`via ${nodeFor(r)?.label || 'node'}`"
-                                    severity="info"
-                                    class="consumers-cid__tag"
-                                />
-                            </a>
+                            <!-- #455 (david `q76ywq`) — la mention "node" est
+                                 passée dans sa propre colonne ci-dessous. Le
+                                 Tag "remote" inline reste pour les non-node
+                                 (TCP depuis un peer non-loopback, signal
+                                 distinct). -->
                             <Tag
-                                v-else-if="r.remote"
+                                v-if="r.remote && !nodeFor(r)"
                                 :value="r.last_seen_via === 'node' ? 'via node' : 'remote'"
                                 severity="info"
                                 class="consumers-cid__tag"
@@ -445,6 +434,17 @@ const sortedRows = computed<Consumer[]>(() => {
                     </td>
                     <td class="col-kind">{{ r.kind }}</td>
                     <td class="col-display">{{ r.display_name ?? "" }}</td>
+                    <!-- #455 (david `q76ywq`) — colonne Node dédiée : label
+                         cliquable vers /nodes/<id> quand relayé, vide sinon. -->
+                    <td class="col-node">
+                        <a
+                            v-if="nodeFor(r)"
+                            :href="`/nodes/${encodeURIComponent(nodeFor(r)!.node_id)}`"
+                            class="consumers-node-link"
+                            :title="`Relayed by node ${nodeFor(r)?.label || nodeFor(r)?.node_id}${r.last_seen_ip ? ' · ' + r.last_seen_ip : ''} — open node`"
+                            @click.prevent="() => { const n = nodeFor(r); if (n) emit('open-node', n.node_id); }"
+                        >{{ nodeFor(r)?.label || nodeFor(r)?.node_id }}</a>
+                    </td>
                     <td class="activity-cell">
                         <div
                             class="activity-cell__seen"
@@ -581,15 +581,22 @@ const sortedRows = computed<Consumer[]>(() => {
     font-size: 0.7rem;
     flex-shrink: 0;
 }
-/* #455: node-relayed badge that links to its node's detail page. */
+/* #455 (david `q76ywq`) — colonne Node : label cliquable, style cohérent
+   avec les autres liens cliquables (consumer chip dans ProjectDetailPage). */
+.consumers-table .col-node {
+    white-space: nowrap;
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .consumers-node-link {
-    display: inline-flex;
+    color: var(--p-text-color);
     text-decoration: none;
     cursor: pointer;
-    flex-shrink: 0;
 }
 .consumers-node-link:hover {
-    filter: brightness(0.95);
+    text-decoration: underline;
+    color: var(--p-primary-color);
 }
 .consumers-table tr.is-blocked {
     opacity: 0.55;
@@ -660,6 +667,7 @@ const sortedRows = computed<Consumer[]>(() => {
 @media (max-width: 640px) {
     .consumers-table .col-kind,
     .consumers-table .col-display,
+    .consumers-table .col-node,
     .consumers-table .col-enabled {
         display: none;
     }
