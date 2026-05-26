@@ -121,6 +121,25 @@ export type AutomationAction =
     | { kind: "add_tag"; tag: string }
     | { kind: "set_priority"; priority: "urgent" | "high" | "normal" | "low" }
     | { kind: "notify"; consumer_id: string };
+/** #457 slice 5.1 — compositional condition tree (mirror of the backend's
+ *  src/db/automation.ts::ConditionTree). Recursive shape : a node is either
+ *  a leaf (field+op+value), or a combinator AND/OR with N children, or NOT
+ *  with one child. */
+export type ConditionField =
+    | "project"
+    | "kind"
+    | "by_agent"
+    | "intent"
+    | "priority"
+    | "tag_added"
+    | "tags"
+    | "scope_consumer";
+export type ConditionOp = "eq" | "neq" | "in" | "includes";
+export type ConditionTree =
+    | { kind: "and"; children: ConditionTree[] }
+    | { kind: "or"; children: ConditionTree[] }
+    | { kind: "not"; child: ConditionTree }
+    | { kind: "leaf"; field: ConditionField; op: ConditionOp; value: unknown };
 export interface AutomationRule {
     id: number;
     triggers: AutomationTrigger[];
@@ -137,6 +156,9 @@ export interface AutomationRule {
     position: number;
     note: string | null;
     created_at: string;
+    /** Slice 5.1 — canonical condition tree (server synthesizes one for
+     *  legacy rows pre-slice-5 so this is always populated). */
+    expression: ConditionTree;
 }
 
 /** #447: a per-agent work filter — narrows which tickets a consumer picks up,

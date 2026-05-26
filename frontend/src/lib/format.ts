@@ -3,7 +3,7 @@
  *
  * Extracted from InboxList.vue (#B.332 Phase D, per `#C.mf5h72`).
  */
-import { type InboxRow, type TokenUsage } from "./api";
+import { type AutomationAction, type ConditionTree, type InboxRow, type TokenUsage } from "./api";
 
 /**
  * #446 — token EFFORT: the genuinely NEW tokens a ticket consumed (input +
@@ -46,6 +46,72 @@ export function formatTokens(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
     if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
     return String(n);
+}
+
+/**
+ * #457 slice 5.3a — render an automation rule's condition tree as a compact
+ * one-liner for the rules-list view. Uses math-y combinators (∧/∨/¬) and
+ * field-relation shorthand (`⊇` for `includes`, `∈` for `in`) so a 5-leaf
+ * tree fits on one row instead of stacking chip badges.
+ *
+ * Examples :
+ *   { kind: "and", children: [] }                                 → "(any)"
+ *   { kind: "leaf", field: "project", op: "eq", value: "aiball" }→ "project=aiball"
+ *   { kind: "or", children: [
+ *       { kind: "and", children: [<project=aiball>, <tags⊇win>] },
+ *       <intent=urgent>,
+ *   ] }                                                          → "(project=aiball ∧ tags⊇win) ∨ intent=urgent"
+ */
+export function formatExpressionCompact(tree: ConditionTree): string {
+    return renderNode(tree, 0);
+}
+
+function renderNode(node: ConditionTree, depth: number): string {
+    switch (node.kind) {
+        case "and": {
+            if (node.children.length === 0) return "(any)";
+            if (node.children.length === 1) return renderNode(node.children[0]!, depth);
+            const inner = node.children.map((c) => renderNode(c, depth + 1)).join(" ∧ ");
+            return depth > 0 ? `(${inner})` : inner;
+        }
+        case "or": {
+            if (node.children.length === 0) return "(none)";
+            if (node.children.length === 1) return renderNode(node.children[0]!, depth);
+            const inner = node.children.map((c) => renderNode(c, depth + 1)).join(" ∨ ");
+            return depth > 0 ? `(${inner})` : inner;
+        }
+        case "not":
+            return `¬${renderNode(node.child, depth + 1)}`;
+        case "leaf": {
+            const v = formatLeafValue(node.value);
+            switch (node.op) {
+                case "eq":       return `${node.field}=${v}`;
+                case "neq":      return `${node.field}≠${v}`;
+                case "in":       return `${node.field}∈${v}`;
+                case "includes": return `${node.field}⊇${v}`;
+            }
+        }
+    }
+}
+
+function formatLeafValue(v: unknown): string {
+    if (Array.isArray(v)) return `[${v.map((x) => formatLeafValue(x)).join(",")}]`;
+    if (v === null) return "null";
+    if (typeof v === "string") return v;
+    return JSON.stringify(v);
+}
+
+/** #457 slice 5.3a — render an action as a compact verb : "assign→agent",
+ *  "auto-approve", "include in pickup", etc. Used in the rules-list label. */
+export function formatActionCompact(a: AutomationAction): string {
+    switch (a.kind) {
+        case "assign":       return `assign→${a.consumer_id}`;
+        case "decision":     return a.decision === "auto" ? "auto-approve" : "send to review";
+        case "pickup":       return a.mode === "only" ? "include in pickup" : "exclude from pickup";
+        case "add_tag":      return `add tag «${a.tag}»`;
+        case "set_priority": return `priority=${a.priority}`;
+        case "notify":       return `notify→${a.consumer_id}`;
+    }
 }
 
 /**

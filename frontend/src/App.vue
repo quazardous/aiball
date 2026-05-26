@@ -155,6 +155,7 @@ const dark = ref(localStorage.getItem("aiball.dark") === "1");
 const openTicketId = ref<number | null>(null);
 // Routed as /consumers/<id> via lib/router.ts (#B.193).
 const consumerEditId = ref<string | null>(null);
+const automationRuleEditId = ref<string | null>(null);
 // Routed as /nodes/<id> via lib/router.ts (#452).
 const nodeEditId = ref<string | null>(null);
 
@@ -500,6 +501,7 @@ useRouting({
     openTicketId,
     consumerEditId,
     nodeEditId,
+    automationRuleEditId,
     projectPage,
     project,
     statusFilter,
@@ -717,7 +719,7 @@ watch(showSnoozed, (v) => {
                      prepends an "Inbox" crumb that covers the same job, so
                      showing both stacks two back-links. -->
                 <a
-                    v-if="(panel === 'general' || panel === 'automation' || panel === 'projects' || panel === 'rules' || panel === 'work-filters' || panel === 'tags' || (panel === 'consumers' && !consumerEditId) || (panel === 'nodes' && !nodeEditId))"
+                    v-if="(panel === 'general' || (panel === 'automation' && !automationRuleEditId) || panel === 'projects' || panel === 'rules' || panel === 'work-filters' || panel === 'tags' || (panel === 'consumers' && !consumerEditId) || (panel === 'nodes' && !nodeEditId))"
                     href="/"
                     class="settings-back-link"
                     @click.prevent="panel = null"
@@ -742,7 +744,12 @@ watch(showSnoozed, (v) => {
                     @open-settings="(name: string) => openProjectPage(name, 'settings')"
                 @open-detail="(name: string) => openProjectPage(name, 'detail')"
                 />
-                <AutomationPanel v-else-if="panel === 'automation'" />
+                <AutomationPanel
+                    v-else-if="panel === 'automation'"
+                    :edit-rule-id="automationRuleEditId"
+                    @open-edit="(id: string) => { automationRuleEditId = id; }"
+                    @close-edit="automationRuleEditId = null"
+                />
                 <RulesPanel v-else-if="panel === 'rules'" />
                 <WorkFiltersPanel v-else-if="panel === 'work-filters'" />
                 <TagsPanel v-else-if="panel === 'tags'" />

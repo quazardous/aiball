@@ -7,6 +7,10 @@ export type RouteState = {
     consumerEditId: string | null;
     /** Set on `/nodes/<id>` — NodesPanel renders the detail view (#452). */
     nodeEditId: string | null;
+    /** #457 slice 5.3a — set on `/automation/rules/<id>` (or `"new"`) ;
+     *  AutomationPanel renders AutomationRuleDetailPage instead of the
+     *  list section. */
+    automationRuleEditId: string | null;
     /** #411 — project-scoped full pages (stats/settings/detail). Requires
      *  `project !== null`; encoded as `/stats|/settings|/detail` + `?p=`, so a
      *  Ctrl-R on a project stats page restores it instead of dropping to inbox.
@@ -26,7 +30,11 @@ const DEFAULTS = {
 export function buildUrl(s: RouteState): string {
     let path = "/";
     if (s.panel === "general") path = "/general";
-    else if (s.panel === "automation") path = "/automation";
+    else if (s.panel === "automation") {
+        path = s.automationRuleEditId
+            ? `/automation/rules/${encodeURIComponent(s.automationRuleEditId)}`
+            : "/automation";
+    }
     else if (s.panel === "rules") path = "/rules";
     else if (s.panel === "work-filters") path = "/work-filters";
     else if (s.panel === "tags") path = "/tags";
@@ -71,6 +79,8 @@ export function parseUrl(): Partial<RouteState> {
     out.consumerEditId = null;
     // Default to null so navigating away from /nodes/<id> clears the detail view.
     out.nodeEditId = null;
+    // #457 slice 5.3a — same as above for the automation rule detail view.
+    out.automationRuleEditId = null;
     // #411 — default to null so navigating away from a project page clears it.
     out.projectPage = null;
 
@@ -80,6 +90,12 @@ export function parseUrl(): Partial<RouteState> {
     } else if (path === "/automation") {
         out.panel = "automation";
         out.openTicketId = null;
+        out.automationRuleEditId = null;
+    } else if (path.startsWith("/automation/rules/")) {
+        out.panel = "automation";
+        out.openTicketId = null;
+        const raw = path.slice("/automation/rules/".length);
+        out.automationRuleEditId = raw ? decodeURIComponent(raw) : null;
     } else if (path === "/rules") {
         out.panel = "rules";
         out.openTicketId = null;
@@ -161,6 +177,7 @@ export function useRouting(refs: {
     openTicketId: Ref<number | null>;
     consumerEditId: Ref<string | null>;
     nodeEditId: Ref<string | null>;
+    automationRuleEditId: Ref<string | null>;
     projectPage: Ref<RouteState["projectPage"]>;
     project: Ref<string | null>;
     statusFilter: Ref<RouteState["statusFilter"]>;
@@ -174,6 +191,7 @@ export function useRouting(refs: {
             openTicketId: refs.openTicketId.value,
             consumerEditId: refs.consumerEditId.value,
             nodeEditId: refs.nodeEditId.value,
+            automationRuleEditId: refs.automationRuleEditId.value,
             projectPage: refs.projectPage.value,
             project: refs.project.value,
             statusFilter: refs.statusFilter.value,
@@ -187,6 +205,7 @@ export function useRouting(refs: {
         if ("openTicketId" in state) refs.openTicketId.value = state.openTicketId ?? null;
         if ("consumerEditId" in state) refs.consumerEditId.value = state.consumerEditId ?? null;
         if ("nodeEditId" in state) refs.nodeEditId.value = state.nodeEditId ?? null;
+        if ("automationRuleEditId" in state) refs.automationRuleEditId.value = state.automationRuleEditId ?? null;
         if ("projectPage" in state) refs.projectPage.value = state.projectPage ?? null;
         if ("project" in state) refs.project.value = state.project ?? null;
         if ("statusFilter" in state && state.statusFilter)
@@ -214,6 +233,7 @@ export function useRouting(refs: {
             refs.openTicketId,
             refs.consumerEditId,
             refs.nodeEditId,
+            refs.automationRuleEditId,
             refs.projectPage,
             refs.project,
             refs.statusFilter,
