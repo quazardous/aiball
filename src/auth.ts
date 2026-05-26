@@ -15,6 +15,7 @@ import {
     ensureConsumer,
     getTokenAndTouch,
     setTokenLastSeenIp,
+    updateTokenLabel,
     isHuman,
     touchLastSeen,
     type Token,
@@ -193,6 +194,16 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         const nodeIp = clientIp(req);
         touchLastSeen(cid, "node", nodeIp); // #422: proxy-relayed → remote
         setTokenLastSeenIp(token, nodeIp); // #424: stamp the node's address for the Nodes panel
+        // #463 — proxy node advertises its current label on every request.
+        // Sync the token's label when it changed (renaming the node in its
+        // own config is reflected in the Nodes panel without re-minting).
+        // Skip when header absent (older proxy, direct curl, …) or empty.
+        // Trim + cap length defensively — the label hits the UI directly.
+        const advertised = req.header("x-aiball-node-label");
+        if (typeof advertised === "string") {
+            const labelRaw = advertised.trim().slice(0, 200);
+            if (labelRaw && labelRaw !== row.label) updateTokenLabel(token, labelRaw);
+        }
         next();
         return;
     }

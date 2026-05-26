@@ -14,6 +14,7 @@
  * duplicated as tiny inlined helpers — same rationale as
  * src/api/_helpers.ts pattern (3-5 lines each).
  */
+import { hostname } from "node:os";
 import type { Command } from "commander";
 import {
     anyHumanCredentials,
@@ -103,10 +104,17 @@ export function registerAuthCommands(program: Command): void {
             // node — no consumer, kind 'node'. The daemon then trusts the
             // forwarded x-aiball-consumer (X-Forwarded-For style).
             if (opts.node) {
+                // #463 — default label to the host's machine name so a fresh
+                // node is immediately recognizable in the Nodes panel without
+                // the operator passing --label. The label is also
+                // node-overridable at runtime via `node.label` in the proxy
+                // node's own config (see src/proxy.ts) — the node side owns
+                // the label and pushes any change on each request via the
+                // `x-aiball-node-label` header.
                 const t = issueToken({
                     consumer_id: null,
                     kind: "node",
-                    label: opts.label ?? "proxy node",
+                    label: opts.label ?? hostname(),
                 });
                 process.stdout.write([
                     `NODE token issued (trusted-proxy service token, no consumer):`,

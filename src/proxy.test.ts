@@ -163,6 +163,74 @@ test("#394 node store: a local bearer is swapped for the mapped upstream A-token
     await new Promise((r) => proxySrv.close(r));
 });
 
+// #463 — the proxy advertises its node label on every forwarded request via
+// `x-aiball-node-label` so the upstream daemon can sync `tokens.label` and
+// pick up a rename on the next request without re-minting.
+test("#463: proxy injects x-aiball-node-label when configured", async () => {
+    let receivedLabel: string | undefined;
+    const upstream = http.createServer((req, res) => {
+        const h = req.headers["x-aiball-node-label"];
+        receivedLabel = typeof h === "string" ? h : undefined;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+    });
+    const upPort = await listen(upstream);
+
+    const app = express();
+    app.use(proxyMiddleware({
+        url: `http://127.0.0.1:${upPort}`,
+        token: "node-tok",
+        nodeLabel: "my-laptop",
+    }));
+    const proxySrv = http.createServer(app);
+    const pxPort = await listen(proxySrv);
+
+    await new Promise<void>((resolve, reject) => {
+        const r = http.request(
+            { host: "127.0.0.1", port: pxPort, path: "/api/health", method: "GET" },
+            (res) => { res.resume(); res.on("end", () => resolve()); },
+        );
+        r.on("error", reject);
+        r.end();
+    });
+    assert.equal(receivedLabel, "my-laptop");
+
+    await new Promise((r) => upstream.close(r));
+    await new Promise((r) => proxySrv.close(r));
+});
+
+// #463 — when no nodeLabel is configured the header is NOT injected (defensive
+// : loadProxy() always defaults to hostname(), so in practice this only
+// happens when proxyMiddleware is invoked directly with a partial config).
+test("#463: proxy does NOT inject x-aiball-node-label when unset", async () => {
+    let receivedLabel: string | undefined;
+    const upstream = http.createServer((req, res) => {
+        const h = req.headers["x-aiball-node-label"];
+        receivedLabel = typeof h === "string" ? h : undefined;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+    });
+    const upPort = await listen(upstream);
+
+    const app = express();
+    app.use(proxyMiddleware({ url: `http://127.0.0.1:${upPort}`, token: "node-tok" }));
+    const proxySrv = http.createServer(app);
+    const pxPort = await listen(proxySrv);
+
+    await new Promise<void>((resolve, reject) => {
+        const r = http.request(
+            { host: "127.0.0.1", port: pxPort, path: "/api/health", method: "GET" },
+            (res) => { res.resume(); res.on("end", () => resolve()); },
+        );
+        r.on("error", reject);
+        r.end();
+    });
+    assert.equal(receivedLabel, undefined);
+
+    await new Promise((r) => upstream.close(r));
+    await new Promise((r) => proxySrv.close(r));
+});
+
 // #394 (8c7xut): la page proxy annonce le remote et échappe l'URL.
 test("#394: proxyLandingHtml announces the remote URL and escapes it", () => {
     const html = proxyLandingHtml("https://a-host:7777");

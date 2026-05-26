@@ -133,6 +133,23 @@ export function setTokenLastSeenIp(token: string, ip: string | null): void {
         .run();
 }
 
+/**
+ * #463 — update a token's label. Called from the auth node-branch when the
+ * proxy node advertises a label via `x-aiball-node-label` and it differs
+ * from the stored value. The node side of the trust boundary owns the label
+ * (default = `os.hostname()`, overridable in its own config), so a config
+ * change on the node is picked up on the next request without re-minting.
+ * Returns true when a row was actually updated.
+ */
+export function updateTokenLabel(token: string, label: string | null): boolean {
+    if (!token) return false;
+    const r = getDb().update(schema.tokens)
+        .set({ label: label ?? null })
+        .where(eq(schema.tokens.token, token))
+        .run();
+    return r.changes > 0;
+}
+
 export function listTokens(opts: { kind?: TokenKind; consumer_id?: string } = {}): Token[] {
     let q = getDb().select().from(schema.tokens).$dynamic();
     const conds = [];

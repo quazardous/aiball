@@ -234,6 +234,7 @@ export {
     getTokenAndTouch,
     deleteToken,
     setTokenLastSeenIp,
+    updateTokenLabel,
     listTokens,
     purgeExpiredTokens,
     anyHumanCredentials,

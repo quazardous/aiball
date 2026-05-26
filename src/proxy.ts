@@ -21,6 +21,7 @@
  * transport → spool, 4xx → surfaced).
  */
 import { existsSync, readFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -41,6 +42,20 @@ export interface ProxyConfig {
      * CLI sur l'UDS), qui doivent alors être provisionnés avec leur propre token.
      */
     strict?: boolean;
+    /**
+     * #463 — label declared by this proxy node, advertised to the upstream on
+     * every forwarded request via `x-aiball-node-label`. The upstream daemon
+     * updates its `tokens.label` on change, so renaming the node in the
+     * config here is reflected in the Nodes panel without re-minting the
+     * token. Default = `os.hostname()`, overridable via the YAML config :
+     *
+     *   proxy:
+     *     url: …
+     *     token: …
+     *     node:
+     *       label: "my-laptop"     # overrides hostname()
+     */
+    nodeLabel?: string;
 }
 
 /** Read the `proxy:` block from the GLOBAL config. Null when absent → the
@@ -50,7 +65,12 @@ export function loadProxy(): ProxyConfig | null {
     if (!existsSync(p)) return null;
     try {
         const raw = (parseYaml(readFileSync(p, "utf8")) ?? {}) as {
-            proxy?: { url?: unknown; token?: unknown; strict?: unknown };
+            proxy?: {
+                url?: unknown;
+                token?: unknown;
+                strict?: unknown;
+                node?: { label?: unknown };
+            };
         };
         const px = raw.proxy;
         if (!px || typeof px !== "object") return null;
@@ -58,7 +78,13 @@ export function loadProxy(): ProxyConfig | null {
         const token = typeof px.token === "string" ? px.token : "";
         const strict = px.strict === true;
         if (!url) return null;
-        return { url, token, strict };
+        // #463 — read the node label override, fall back to the host's machine
+        // name. The override empty-string OR missing → hostname (the default
+        // makes a fresh proxy node immediately recognizable in the Nodes panel
+        // without any extra config).
+        const labelRaw = typeof px.node?.label === "string" ? px.node.label.trim() : "";
+        const nodeLabel = labelRaw || hostname();
+        return { url, token, strict, nodeLabel };
     } catch {
         return null;
     }
@@ -129,6 +155,12 @@ export function proxyMiddleware(cfg: ProxyConfig, tokens?: ProxyTokenStore): Req
             ...req.headers,
             host: target.host,
         };
+        // #463 — advertise this node's label on every forwarded request so the
+        // upstream daemon's `tokens.label` tracks the node's current config (a
+        // rename here is picked up at next request, no re-mint needed). Skip
+        // when not set (shouldn't happen — loadProxy() defaults to hostname()
+        // — but defensive).
+        if (cfg.nodeLabel) headers["x-aiball-node-label"] = cfg.nodeLabel;
         // #394 node-managed store : si le bearer entrant est un token LOCAL
         // connu, on le SWAP contre le token A per-consumer mappé → A reçoit la
         // preuve dure per-consumer (le token A est la preuve), et ce token A ne
