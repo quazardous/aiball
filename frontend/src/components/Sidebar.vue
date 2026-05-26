@@ -278,6 +278,18 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
     display: flex;
     align-items: center;
     gap: 0.4rem;
+    /* #473 david `kqrgzj` : "si on choisit all l'écart est plus petit
+       — peut etre lié au cog qui apparait". Le bouton cog
+       (.sidebar-project-settings, 1.6rem×1.6rem) n'apparaît QUE quand
+       un projet précis est sélectionné. Sans cog la row de la summary
+       fait ~1.6rem (border-box, padding inclus dans min-height ci-
+       dessous) ; avec cog elle fait ~2.1rem (1.6 cog content + 0.5
+       padding) → écart vertical vers le 1er item plus grand "avec
+       projet" que "All projects". On épingle la min-height au format
+       AVEC cog (2.1rem = 1.6 cog + 0.5 du padding `0.3rem 0.6rem
+       0.2rem` du sélecteur générique `.sidebar-section-label`) → la
+       summary garde la même hauteur dans les 2 modes. */
+    min-height: 2.1rem;
 }
 .sidebar-projects__label {
     flex: 1;
