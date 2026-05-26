@@ -293,13 +293,14 @@ function save() {
 
                 <TabPanel value="code">
                     <section class="aiball-section">
-                        <h3>JSON équivalent</h3>
+                        <h3>Equivalent JSON</h3>
                         <p class="aiball-explainer aiball-explainer--muted">
-                            Représentation canonique du draft courant — utilisable tel quel pour
-                            créer/mettre à jour une règle via <code>curl</code> ou un bloc
-                            <code>automation:</code> dans <code>.aiball.yaml</code>. Read-only
-                            pour l'instant — pour éditer, retourne dans <strong>Builder</strong>
-                            (un slice ultérieur ajoutera "Apply JSON" qui parse + valide ici).
+                            Canonical representation of the current draft — usable as-is to
+                            create or update a rule via <code>curl</code> or an
+                            <code>automation:</code> block in <code>.aiball.yaml</code>.
+                            Read-only for now — to edit, switch back to <strong>Builder</strong>
+                            (a future slice can add an "Apply JSON" button that parses and
+                            validates this textarea back into the form).
                         </p>
                         <pre class="rule-editor__code">{{ codeSnapshot }}</pre>
                     </section>

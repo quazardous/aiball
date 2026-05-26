@@ -26,7 +26,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { MUX_CMD, tmuxName } from "../claude-loop/state.js";
@@ -252,6 +252,23 @@ agentsRouter.post("/agents/:name/pane/keys", (req: Request, res: Response) => {
         });
     }
     const target = `${tmuxName(loopName)}.0`;
+
+    // david `xwmrhv` — claude-loop integration. `tmux send-keys` bypasses
+    // the PTY proxy (it's a tmux IPC, not stdin through the proxy), so the
+    // `human-typing` marker that the PTY proxy normally touches on each
+    // human keystroke is never set on this code path. claude-loop's wake
+    // timer keys off this marker (+ `user-took-over` for the longer grace
+    // window) to know "a human is at the keyboard, don't inject wake
+    // phrases". Without these touches the timer can race the browser-typed
+    // input. We mirror the proxy's behaviour : write a fresh ISO timestamp
+    // to both markers on every POST. Best-effort — a write failure just
+    // means the badge stays cold, never blocks the send.
+    const stateRoot = process.env.CLAUDE_LOOP_STATE_ROOT
+        ?? join(homedir(), ".claude-loop");
+    const sd = join(stateRoot, loopName);
+    const nowIso = new Date().toISOString() + "\n";
+    try { writeFileSync(join(sd, "human-typing"), nowIso); } catch { /* best-effort */ }
+    try { writeFileSync(join(sd, "user-took-over"), nowIso); } catch { /* best-effort */ }
 
     // `-l` keeps every byte literal — no Enter/BSpace/etc. name parsing on
     // the tmux side, so xterm's raw escape sequences round-trip cleanly.
