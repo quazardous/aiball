@@ -580,15 +580,13 @@ ticketsRouter.get("/inbox", (req, res) => {
         rows = rows.filter((r) => r.status === "pending" || r.pending_comment_count > 0);
     } else if (status === "approved" || status === "rejected") {
         rows = rows.filter((r) => r.status === status);
-    } else {
-        // #450 (david): a not-yet-approved ticket is discussion/moderation, not
-        // backlog. It still pings participants, but it must NOT show in the open
-        // list — it surfaces only under the explicit `status=pending`
-        // (moderation) view above. So the default / "all" inbox excludes
-        // pending TICKETS (approved tickets with pending COMMENTS are unaffected
-        // — they're real backlog with a moderation flag).
-        rows = rows.filter((r) => r.status !== "pending");
     }
+    // #479 david : "dans la liste de tickets avec all on voit pas les pending".
+    // Renverse la décision #450 (qui excluait les tickets pending du default
+    // pour qu'ils ne pollutent pas le backlog). Avec "all" l'utilisateur
+    // s'attend à voir EVERY ticket — pending inclus. "pending" reste le
+    // sous-ensemble focalisé (pending tickets + approved tickets with
+    // pending comments). "approved" / "rejected" inchangés.
     if (onlyOpen) {
         rows = rows.filter((r) => !r.closed);
     }
