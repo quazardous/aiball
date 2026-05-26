@@ -16,6 +16,11 @@ import { computed, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import MultiSelect from "primevue/multiselect";
+import Tab from "primevue/tab";
+import TabList from "primevue/tablist";
+import TabPanel from "primevue/tabpanel";
+import TabPanels from "primevue/tabpanels";
+import Tabs from "primevue/tabs";
 import type {
     AutomationAction,
     AutomationRule,
@@ -57,6 +62,20 @@ const note = ref<string>("");
 const validationError = ref<string | null>(null);
 
 const isNew = computed(() => !props.rule);
+
+// #457 david `5muwmt` : "l'éditeur devrait avoir 2 tabulation : builder
+// graphique + code équivalent". Tab 1 = the block-based form ; Tab 2 =
+// the equivalent JSON view of the current draft. Slice 5.3c-MVP : Code
+// tab is READ-ONLY (you can copy/paste it into curl or a YAML file, but
+// edits go through the Builder for now — a slice 5.3d can add a "Apply"
+// button that parses the JSON back into the draft).
+const activeView = ref<"builder" | "code">("builder");
+const codeSnapshot = computed<string>(() => JSON.stringify({
+    triggers: triggers.value,
+    expression: expression.value,
+    actions: actions.value,
+    ...(note.value.trim() !== "" ? { note: note.value } : {}),
+}, null, 2));
 
 function loadFromProp() {
     if (props.rule) {
@@ -120,79 +139,110 @@ function save() {
 
 <template>
     <div class="rule-editor">
-        <section class="aiball-section rule-editor__triggers">
-            <h3>Triggers</h3>
-            <p class="aiball-explainer aiball-explainer--muted">
-                Pick one or more lifecycle events. The rule fires for ANY of the
-                selected triggers (union — david `8r7crj`).
-            </p>
-            <MultiSelect
-                v-model="triggers"
-                :options="triggerOptions"
-                option-label="label"
-                option-value="value"
-                placeholder="select triggers"
-                class="rule-editor__triggers-input"
-                :disabled="busy"
-            />
-        </section>
+        <!-- #457 david `5muwmt` : 2 tabulations builder + code. Form actions
+             (cancel / save) restent en dehors des tabs : ils s'appliquent au
+             draft courant, quelle que soit la vue. -->
+        <Tabs v-model:value="activeView">
+            <TabList>
+                <Tab value="builder">
+                    <i class="pi pi-th-large" /> Builder
+                </Tab>
+                <Tab value="code">
+                    <i class="pi pi-code" /> Code
+                </Tab>
+            </TabList>
+            <TabPanels>
+                <TabPanel value="builder">
+                    <section class="aiball-section rule-editor__triggers">
+                        <h3>Triggers</h3>
+                        <p class="aiball-explainer aiball-explainer--muted">
+                            Pick one or more lifecycle events. The rule fires for ANY of the
+                            selected triggers (union — david `8r7crj`).
+                        </p>
+                        <MultiSelect
+                            v-model="triggers"
+                            :options="triggerOptions"
+                            option-label="label"
+                            option-value="value"
+                            placeholder="select triggers"
+                            class="rule-editor__triggers-input"
+                            :disabled="busy"
+                        />
+                    </section>
 
-        <section class="aiball-section">
-            <h3>Conditions</h3>
-            <p class="aiball-explainer aiball-explainer--muted">
-                Compose with <strong>AND / OR / NOT</strong> groups. The root is an
-                ALL-of (AND) group ; an empty root means the rule matches
-                everything.
-            </p>
-            <ContainerBlock
-                v-if="expression.kind !== 'leaf'"
-                :node="expression"
-                :removable="false"
-                @update="(n) => expression = n"
-                @remove="expression = { kind: 'and', children: [] }"
-            />
-        </section>
+                    <section class="aiball-section">
+                        <h3>Conditions</h3>
+                        <p class="aiball-explainer aiball-explainer--muted">
+                            Compose with <strong>AND / OR / NOT</strong> groups. The root is an
+                            ALL-of (AND) group ; an empty root means the rule matches
+                            everything.
+                        </p>
+                        <ContainerBlock
+                            v-if="expression.kind !== 'leaf'"
+                            :node="expression"
+                            :removable="false"
+                            @update="(n) => expression = n"
+                            @remove="expression = { kind: 'and', children: [] }"
+                        />
+                    </section>
 
-        <section class="aiball-section">
-            <h3>Actions</h3>
-            <p class="aiball-explainer aiball-explainer--muted">
-                Run in order on every match. Errors in one don't abort the rest
-                (david `2r3w6a` : fail-isolated).
-            </p>
-            <div class="rule-editor__actions-stack">
-                <ActionBlock
-                    v-for="(a, i) in actions"
-                    :key="i"
-                    :action="a"
-                    @update="(act) => updateAction(i, act)"
-                    @remove="removeAction(i)"
-                />
-            </div>
-            <div class="rule-editor__action-add">
-                <Button
-                    icon="pi pi-plus"
-                    label="add action"
-                    text
-                    size="small"
-                    :disabled="busy"
-                    @click="addAction"
-                />
-            </div>
-        </section>
+                    <section class="aiball-section">
+                        <h3>Actions</h3>
+                        <p class="aiball-explainer aiball-explainer--muted">
+                            Run in order on every match. Errors in one don't abort the rest
+                            (david `2r3w6a` : fail-isolated).
+                        </p>
+                        <div class="rule-editor__actions-stack">
+                            <ActionBlock
+                                v-for="(a, i) in actions"
+                                :key="i"
+                                :action="a"
+                                @update="(act) => updateAction(i, act)"
+                                @remove="removeAction(i)"
+                            />
+                        </div>
+                        <div class="rule-editor__action-add">
+                            <Button
+                                icon="pi pi-plus"
+                                label="add action"
+                                text
+                                size="small"
+                                :disabled="busy"
+                                @click="addAction"
+                            />
+                        </div>
+                    </section>
 
-        <section class="aiball-section">
-            <h3>Note (optional)</h3>
-            <p class="aiball-explainer aiball-explainer--muted">
-                Custom label shown in the rules list. Leave empty to let the list
-                auto-generate one from the compact expression.
-            </p>
-            <InputText
-                v-model="note"
-                placeholder="(auto-generated from the expression)"
-                class="w-full"
-                :disabled="busy"
-            />
-        </section>
+                    <section class="aiball-section">
+                        <h3>Note (optional)</h3>
+                        <p class="aiball-explainer aiball-explainer--muted">
+                            Custom label shown in the rules list. Leave empty to let the list
+                            auto-generate one from the compact expression.
+                        </p>
+                        <InputText
+                            v-model="note"
+                            placeholder="(auto-generated from the expression)"
+                            class="w-full"
+                            :disabled="busy"
+                        />
+                    </section>
+                </TabPanel>
+
+                <TabPanel value="code">
+                    <section class="aiball-section">
+                        <h3>JSON équivalent</h3>
+                        <p class="aiball-explainer aiball-explainer--muted">
+                            Représentation canonique du draft courant — utilisable tel quel pour
+                            créer/mettre à jour une règle via <code>curl</code> ou un bloc
+                            <code>automation:</code> dans <code>.aiball.yaml</code>. Read-only
+                            pour l'instant — pour éditer, retourne dans <strong>Builder</strong>
+                            (un slice ultérieur ajoutera "Apply JSON" qui parse + valide ici).
+                        </p>
+                        <pre class="rule-editor__code">{{ codeSnapshot }}</pre>
+                    </section>
+                </TabPanel>
+            </TabPanels>
+        </Tabs>
 
         <div v-if="validationError" class="aiball-form-error">
             <i class="pi pi-exclamation-triangle" /> {{ validationError }}
@@ -239,5 +289,16 @@ function save() {
     gap: 0.5rem;
     padding-top: 0.5rem;
     border-top: 1px solid var(--p-content-border-color);
+}
+.rule-editor__code {
+    background: var(--p-surface-100);
+    padding: 0.8rem 1rem;
+    border-radius: 0.4rem;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    white-space: pre;
+    margin: 0;
 }
 </style>
