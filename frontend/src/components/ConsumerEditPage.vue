@@ -50,6 +50,7 @@ const confirmDialog = useConfirm();
 const loading = ref(false);
 const saving = ref(false);
 const stopBusy = ref(false);
+const deleteBusy = ref(false);
 const error = ref<string | null>(null);
 const original = ref<Consumer | null>(null);
 
@@ -171,6 +172,36 @@ async function doStopLoop(consumer_id: string): Promise<void> {
     }
 }
 
+// #469 — Delete consumer, mirrored from the ConsumersPanel pre-#468 inline
+// action (now retired from the list). Confirm + delete via the same API
+// the list used. On success we close the detail page so the operator
+// doesn't stare at a stale form.
+function deleteConsumer(): void {
+    if (!original.value) return;
+    const consumer_id = original.value.consumer_id;
+    confirmDialog.require({
+        header: "Delete consumer",
+        message: `Delete consumer "${consumer_id}"? Past posts are preserved ; the row will be re-created the next time this id posts.`,
+        icon: "pi pi-trash",
+        acceptLabel: "Delete",
+        rejectLabel: "Cancel",
+        acceptClass: "p-button-danger",
+        accept: () => { void doDelete(consumer_id); },
+    });
+}
+async function doDelete(consumer_id: string): Promise<void> {
+    deleteBusy.value = true;
+    try {
+        await api.deleteConsumer(consumer_id);
+        notify.success(`Consumer ${consumer_id} deleted`);
+        emit("close");
+    } catch (e) {
+        notify.error(`Delete failed for ${consumer_id}`, { detail: (e as Error).message });
+    } finally {
+        deleteBusy.value = false;
+    }
+}
+
 // #451: send a raw, unfiltered prompt to this loop. Spooled then delivered:
 // live → injected now; offline → delivered when the loop's SSE reconnects.
 async function sendPrompt() {
@@ -230,8 +261,11 @@ async function sendPrompt() {
                                 <span class="aiball-mono">{{ original.consumer_id }}</span>
                             </FieldRow>
 
-                            <!-- Loop status + Stop, mêmes chips que
-                                 ProjectDetailPage / ConsumersPanel (#460). -->
+                            <!-- Loop status : chips read-only (mêmes que
+                                 ProjectDetailPage / ConsumersPanel #460).
+                                 #469 david : le bouton Stop micro-inline a
+                                 migré dans le band d'actions en bas de
+                                 l'overview (vrai bouton form-style). -->
                             <FieldRow label="loop status">
                                 <div class="consumer-edit__status">
                                     <template v-if="original.state">
@@ -246,17 +280,6 @@ async function sendPrompt() {
                                         <span v-if="original.cwd" class="consumer-edit__cwd" :title="original.cwd">
                                             @ <code>{{ original.cwd }}</code>
                                         </span>
-                                        <Button
-                                            v-if="canStop"
-                                            label="Stop"
-                                            icon="pi pi-stop-circle"
-                                            severity="danger"
-                                            text
-                                            size="small"
-                                            :loading="stopBusy"
-                                            :title="`Stop (hard-kill) the claude-loop running as ${original.consumer_id}`"
-                                            @click="stopLoop"
-                                        />
                                     </template>
                                     <span v-else class="consumer-edit__status-none">
                                         no loop tracking — this consumer has never reported a state
@@ -279,6 +302,34 @@ async function sendPrompt() {
                             <div class="consumer-edit__meta">
                                 <div><strong>created</strong> {{ original.created_at ? relativeTime(original.created_at) : "—" }}</div>
                                 <div><strong>last seen</strong> {{ original.last_seen_at ? relativeTime(original.last_seen_at) : "never" }}</div>
+                            </div>
+
+                            <!-- #469 david `b910e4` : les micro-boutons d'action
+                                 inline (Stop, Delete) migrent en BAS de l'overview
+                                 sous forme de vrais boutons "form style" — labels
+                                 lisibles, taille standard, severity colorée. Stop
+                                 reste gated par `canStop` (online + has state) ;
+                                 Delete est toujours dispo. -->
+                            <div class="consumer-edit__actions">
+                                <Button
+                                    v-if="canStop"
+                                    label="Stop loop"
+                                    icon="pi pi-stop-circle"
+                                    severity="danger"
+                                    outlined
+                                    :loading="stopBusy"
+                                    :title="`Stop (hard-kill) the claude-loop running as ${original.consumer_id}`"
+                                    @click="stopLoop"
+                                />
+                                <Button
+                                    label="Delete consumer"
+                                    icon="pi pi-trash"
+                                    severity="danger"
+                                    outlined
+                                    :loading="deleteBusy"
+                                    :title="`Delete consumer ${original.consumer_id} (history preserved)`"
+                                    @click="deleteConsumer"
+                                />
                             </div>
                         </div>
                     </TabPanel>
