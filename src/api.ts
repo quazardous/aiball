@@ -226,6 +226,35 @@ api.post("/projects/:name/purge", (req, res) => {
     res.json({ project: name, older_than_days: days, ...result, ok: true });
 });
 
+/**
+ * #475 david : "danger zone globale pour purger les tickets fermés depuis
+ * + 1 an". Same purge semantics as `/projects/:name/purge` but applied
+ * to EVERY known project. Implementation walks `listProjects()` + calls
+ * the per-project purge in sequence — keeps the cascade logic in one
+ * place + emits the existing `project_purged` event per touched project
+ * so other open tabs refresh counters incrementally as it sweeps.
+ */
+api.post("/tickets/purge", (req, res) => {
+    const raw = (req.body ?? {}) as { older_than_days?: unknown };
+    const days = typeof raw.older_than_days === "number" && raw.older_than_days > 0
+        ? Math.floor(raw.older_than_days)
+        : 365;
+    const projects = listProjects();
+    const per_project: Array<{ project: string; purged_tickets: number; purged_messages: number }> = [];
+    let purged_tickets = 0;
+    let purged_messages = 0;
+    for (const p of projects) {
+        const r = purgeOldClosedTickets(p, days);
+        if (r.purged_tickets > 0) {
+            broadcast({ type: "project_purged", data: { project: p, ...r, older_than_days: days } });
+        }
+        per_project.push({ project: p, ...r });
+        purged_tickets += r.purged_tickets;
+        purged_messages += r.purged_messages;
+    }
+    res.json({ older_than_days: days, purged_tickets, purged_messages, per_project, ok: true });
+});
+
 // #393 phase 4: launch a claude-loop for a known LOCAL root, from the UI.
 // HUMAN-ONLY (it spawns a process) and restricted to a root this project has
 // actually run on (consumers.cwd, pushed by a prior loop — #393 phase 1/2),

@@ -612,6 +612,20 @@ export const api = {
             `/api/projects/${encodeURIComponent(name)}/purge`,
             { older_than_days },
         ),
+    // #475 david : global "Purge tickets closed > 1 year" depuis la Danger
+    // zone de Settings > General. Boucle server-side sur listProjects().
+    purgeAllOldClosed: (older_than_days = 365) =>
+        req<{
+            older_than_days: number;
+            purged_tickets: number;
+            purged_messages: number;
+            per_project: { project: string; purged_tickets: number; purged_messages: number }[];
+            ok: boolean;
+        }>(
+            "POST",
+            `/api/tickets/purge`,
+            { older_than_days },
+        ),
     projectStatsRich: (name: string) =>
         req<unknown>(
             "GET",

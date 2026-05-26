@@ -6,7 +6,12 @@
 // Stays a thin presentational panel: state is owned by App.vue (strategy kept in
 // sync with the WS `strategy_changed`; notif state from useNotifications),
 // passed in + emitted back like HeaderBar did.
-import type { Strategy } from "../lib/api";
+import { ref } from "vue";
+import Button from "primevue/button";
+import { useConfirm } from "primevue/useconfirm";
+import { api, type Strategy } from "../lib/api";
+import { bus } from "../lib/bus";
+import { useNotify } from "../lib/notify";
 import ManagedConfig from "./ManagedConfig.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
 
@@ -30,6 +35,52 @@ const emit = defineEmits<{
     (e: "toggle-mute"): void;
     (e: "update:layout-mode", v: LayoutMode): void;
 }>();
+
+// #475 david : global "Purge tickets closed > 1 year". Même sémantique
+// que la Danger zone per-projet de ProjectOverviewPage, mais sweep TOUS
+// les projets côté daemon (endpoint POST /api/tickets/purge). State
+// local — la panel reste presentational pour tout le reste, ici on a
+// juste un busy flag + un confirm + un toast.
+const confirmDialog = useConfirm();
+const notify = useNotify();
+const purgingAll = ref(false);
+
+function confirmPurgeAll() {
+    confirmDialog.require({
+        header: "Purge old closed tickets — ALL projects",
+        message:
+            "Purge tickets closed more than 1 year ago across EVERY project? "
+            + "Open tickets, comments on still-open tickets, and recently-closed "
+            + "tickets are left intact. This walks every project in turn.",
+        icon: "pi pi-eraser",
+        acceptLabel: "Purge all projects",
+        rejectLabel: "Cancel",
+        acceptClass: "p-button-warn",
+        accept: () => { void doPurgeAll(); },
+    });
+}
+async function doPurgeAll() {
+    purgingAll.value = true;
+    try {
+        const r = await api.purgeAllOldClosed(365);
+        if (r.purged_tickets === 0) {
+            notify.info("Nothing to purge", {
+                detail: `No tickets closed more than ${r.older_than_days} days ago across any project.`,
+            });
+        } else {
+            const touched = r.per_project.filter((p) => p.purged_tickets > 0);
+            notify.success(`Purged ${r.purged_tickets} ticket(s) across ${touched.length} project(s)`, {
+                detail: `${r.purged_messages} message(s) removed (closed > ${r.older_than_days}d).`,
+            });
+        }
+        bus.emit("projects.refresh");
+        bus.emit("inbox.refresh");
+    } catch (e) {
+        notify.error("Purge failed", { detail: (e as Error).message });
+    } finally {
+        purgingAll.value = false;
+    }
+}
 </script>
 
 <template>
@@ -147,6 +198,29 @@ const emit = defineEmits<{
             </p>
             <ManagedConfig />
         </section>
+
+        <!-- #475 david : "danger zone globale pour purger les tickets fermés
+             depuis + 1 an". Same look as the per-project Danger zone, but
+             sweeps EVERY project at once. Single button — Delete-project
+             is intentionally NOT here (a global "delete every project"
+             would be too destructive; per-project keeps that affordance). -->
+        <section class="general-settings__section general-settings__danger">
+            <h3 class="general-settings__heading">Danger zone</h3>
+            <p class="general-settings__hint">
+                Maintenance actions that span every project at once. Gated by
+                a confirmation dialog — no stray clicks.
+            </p>
+            <div class="general-settings__danger-actions">
+                <Button
+                    icon="pi pi-eraser"
+                    label="Purge tickets closed > 1 year (all projects)"
+                    severity="warn"
+                    outlined
+                    :loading="purgingAll"
+                    @click="confirmPurgeAll"
+                />
+            </div>
+        </section>
     </div>
 </template>
 
@@ -218,5 +292,20 @@ const emit = defineEmits<{
 .general-settings__option-check {
     margin-left: auto;
     color: var(--p-primary-color);
+}
+/* #475 : Danger zone — même rendu que ProjectOverviewPage's
+   .project-overview__danger (cadre rouge tinté). */
+.general-settings__danger {
+    border-color: color-mix(in srgb, var(--p-red-500) 25%, var(--p-content-border-color));
+    background: color-mix(in srgb, var(--p-red-500) 3%, transparent);
+}
+.general-settings__danger .general-settings__heading {
+    color: var(--p-red-600);
+}
+.general-settings__danger-actions {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-top: 0.3rem;
 }
 </style>
