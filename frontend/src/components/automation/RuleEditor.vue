@@ -15,6 +15,7 @@
 import { computed, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
+import Menu from "primevue/menu";
 import MultiSelect from "primevue/multiselect";
 import Tab from "primevue/tab";
 import TabList from "primevue/tablist";
@@ -27,7 +28,7 @@ import type {
     AutomationTrigger,
     ConditionTree,
 } from "../../lib/api";
-import ContainerBlock from "./ContainerBlock.vue";
+import ConditionNode from "./ConditionNode.vue";
 import ActionBlock from "./ActionBlock.vue";
 
 const props = defineProps<{
@@ -54,7 +55,13 @@ const triggerOptions: { label: string; value: AutomationTrigger }[] = [
 ];
 
 const triggers = ref<AutomationTrigger[]>([]);
-const expression = ref<ConditionTree>({ kind: "and", children: [] });
+// #457 david `5g7ngx` : "la condition de base devrait etre vide (si on
+// veut commencer par not ou quoi)". A new rule starts with NO root → the
+// builder shows a "Pick your first block" menu so the user can choose
+// AND / OR / NOT / single leaf as the starting shape. Existing rules
+// load their actual expression. On save, null collapses to the empty
+// `{ kind: "and", children: [] }` (matches everything) for wire shape.
+const expression = ref<ConditionTree | null>(null);
 const actions = ref<AutomationAction[]>([
     { kind: "assign", consumer_id: "" },
 ]);
@@ -72,10 +79,46 @@ const isNew = computed(() => !props.rule);
 const activeView = ref<"builder" | "code">("builder");
 const codeSnapshot = computed<string>(() => JSON.stringify({
     triggers: triggers.value,
-    expression: expression.value,
+    // Show the canonical wire-shape : null collapses to empty AND.
+    expression: expression.value ?? { kind: "and", children: [] },
     actions: actions.value,
     ...(note.value.trim() !== "" ? { note: note.value } : {}),
 }, null, 2));
+
+// Menu for the "first block" picker shown when expression is null. The
+// same shape as ContainerBlock's add menu, but at the root level. Each
+// command sets expression.value to the chosen starting shape.
+const rootMenu = ref();
+const rootMenuItems = [
+    {
+        label: "Condition (single leaf)",
+        icon: "pi pi-bolt",
+        command: () => { expression.value = { kind: "leaf", field: "project", op: "eq", value: "" }; },
+    },
+    {
+        label: "ALL of (AND group)",
+        icon: "pi pi-th-large",
+        command: () => { expression.value = { kind: "and", children: [] }; },
+    },
+    {
+        label: "ANY of (OR group)",
+        icon: "pi pi-th-large",
+        command: () => { expression.value = { kind: "or", children: [] }; },
+    },
+    {
+        label: "NOT (negation)",
+        icon: "pi pi-ban",
+        command: () => {
+            expression.value = {
+                kind: "not",
+                child: { kind: "leaf", field: "project", op: "eq", value: "" },
+            };
+        },
+    },
+];
+function openRootMenu(e: Event) {
+    rootMenu.value?.toggle(e);
+}
 
 function loadFromProp() {
     if (props.rule) {
@@ -88,7 +131,9 @@ function loadFromProp() {
         note.value = props.rule.note ?? "";
     } else {
         triggers.value = ["ticket_created", "ticket_tagged"];
-        expression.value = { kind: "and", children: [] };
+        // david `5g7ngx` : start with an empty root so the user picks the
+        // first block themselves (Condition / AND / OR / NOT).
+        expression.value = null;
         actions.value = [{ kind: "assign", consumer_id: "" }];
         note.value = "";
     }
@@ -130,7 +175,11 @@ function save() {
     validationError.value = null;
     emit("save", {
         triggers: triggers.value,
-        expression: expression.value,
+        // david `5g7ngx` : a null root means "the user didn't pick a starting
+        // block" → save as the vacuous-true AND. The backend treats both
+        // identically, so we don't surprise anyone with a "null was not
+        // accepted" round-trip.
+        expression: expression.value ?? { kind: "and", children: [] },
         actions: actions.value,
         note: note.value.trim() === "" ? null : note.value,
     });
@@ -173,16 +222,30 @@ function save() {
                     <section class="aiball-section">
                         <h3>Conditions</h3>
                         <p class="aiball-explainer aiball-explainer--muted">
-                            Compose with <strong>AND / OR / NOT</strong> groups. The root is an
-                            ALL-of (AND) group ; an empty root means the rule matches
-                            everything.
+                            Compose with <strong>AND / OR / NOT</strong> groups, or use a
+                            single condition. An empty root means the rule matches everything.
                         </p>
-                        <ContainerBlock
-                            v-if="expression.kind !== 'leaf'"
+                        <!-- david `5g7ngx` : root commence vide, l'utilisateur
+                             pick le premier block lui-même. Permet de démarrer
+                             par NOT ou par un leaf seul, pas juste AND. -->
+                        <div v-if="expression === null" class="rule-editor__empty-root">
+                            <Button
+                                icon="pi pi-plus"
+                                label="Pick first condition…"
+                                outlined
+                                size="small"
+                                @click="openRootMenu"
+                            />
+                            <Menu ref="rootMenu" :model="rootMenuItems" :popup="true" />
+                            <span class="rule-editor__empty-hint">
+                                (or save as-is — empty matches everything)
+                            </span>
+                        </div>
+                        <ConditionNode
+                            v-else
                             :node="expression"
-                            :removable="false"
                             @update="(n) => expression = n"
-                            @remove="expression = { kind: 'and', children: [] }"
+                            @remove="expression = null"
                         />
                     </section>
 
@@ -300,5 +363,19 @@ function save() {
     line-height: 1.45;
     white-space: pre;
     margin: 0;
+}
+.rule-editor__empty-root {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.6rem 0.8rem;
+    border: 1px dashed var(--p-content-border-color);
+    border-radius: 0.4rem;
+    background: color-mix(in srgb, var(--p-content-border-color) 8%, transparent);
+}
+.rule-editor__empty-hint {
+    color: var(--p-text-muted-color);
+    font-size: 0.82rem;
+    font-style: italic;
 }
 </style>
