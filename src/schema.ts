@@ -304,6 +304,13 @@ export const automationRules = sqliteTable("automation_rules", {
     position: integer("position").notNull().default(0),
     note: text("note"),
     createdAt: text("created_at").notNull(),
+    /** #457 slice 5.1 — compositional condition tree (JSON). Nullable :
+     *  rules pre-slice-5 keep their flat `match_*` columns, and on read the
+     *  decoder synthesizes an equivalent `AND`-of-leaves tree from those
+     *  columns when this is NULL. New rules (UI/API/YAML) write a tree here
+     *  directly. The `match_*` columns stay around for one bake cycle, then
+     *  a follow-up slice can backfill + drop them. */
+    expression: text("expression"),
 }, (t) => [
     index("idx_automation_rules_scope_consumer").on(t.scopeConsumer),
 ]);

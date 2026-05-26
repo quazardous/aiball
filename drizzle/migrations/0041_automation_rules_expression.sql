@@ -1,0 +1,23 @@
+-- #457 slice 5.1 — compositional condition tree for automation rules.
+--
+-- David `dxrn2u` : "faut que les regle soit plus flexible / il faut une
+-- sorte de language drag n drop comme les language de programmation visuel
+-- par blocs / il faut des bloc qui sont de bout de condition des OR des AND
+-- etc". The current flat `match_*` columns are implicitly AND'd — there's
+-- no way to express `(project=aiball AND has_tag=win) OR (intent=urgent)`.
+--
+-- Add `expression TEXT` (nullable, JSON) carrying a recursive tree :
+--   ConditionTree =
+--     | { kind: "and"; children: ConditionTree[] }
+--     | { kind: "or";  children: ConditionTree[] }
+--     | { kind: "not"; child: ConditionTree }
+--     | { kind: "leaf"; field: ConditionField; op: ConditionOp; value: unknown }
+--
+-- The pre-existing `match_*` columns stay populated for back-compat — on
+-- read, a NULL `expression` synthesizes an AND-tree of equality leaves
+-- from the legacy columns (db/automation.ts::rowToRule). New rules
+-- written from the API/UI go straight through `expression` ; legacy rules
+-- continue to evaluate identically without any data migration. A future
+-- slice 5.2 can backfill `expression` from the legacy columns and drop
+-- the latter — out of scope here.
+ALTER TABLE automation_rules ADD COLUMN expression TEXT;

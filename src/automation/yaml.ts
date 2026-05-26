@@ -57,6 +57,7 @@ import type {
     AutomationRule,
     Trigger,
 } from "../db/automation.js";
+import { synthesizeLegacyExpression } from "../db/automation.js";
 
 const VALID_TRIGGERS: Trigger[] = [
     "message_posted",
@@ -108,19 +109,41 @@ function parseEntry(raw: unknown, syntheticId: number, source: string): Automati
     const enabled = o.enabled === false ? 0 : 1;
     const note = typeof o.note === "string" ? o.note : typeof o.name === "string" ? o.name : null;
 
+    // #457 slice 5.1 : YAML rules carry the same `expression` tree as DB
+    // rules. For this slice we synthesize from the legacy-shaped `when:`
+    // block ; slice 5.2 will add a richer YAML grammar for explicit AND/OR
+    // composition (`any:` / `all:` blocks).
+    const matchProject = typeof when.project === "string" ? when.project : null;
+    const matchKind = typeof when.kind === "string" ? when.kind : null;
+    const matchByAgent = typeof when.by_agent === "string" ? when.by_agent : null;
+    const matchTagAdded = typeof when.tag_added === "string" ? when.tag_added : null;
+    const matchIntent = typeof when.intent === "string" ? when.intent : null;
+    const scopeConsumer = typeof when.scope_consumer === "string" ? when.scope_consumer : null;
+    const expression = synthesizeLegacyExpression({
+        match_project: matchProject,
+        match_kind: matchKind,
+        match_by_agent: matchByAgent,
+        match_intent: matchIntent,
+        match_priority: matchPriority,
+        match_tag_added: matchTagAdded,
+        match_tags,
+        scope_consumer: scopeConsumer,
+    });
+
     return {
         id: syntheticId,
         triggers: triggerList,
-        scope_consumer: typeof when.scope_consumer === "string" ? when.scope_consumer : null,
-        match_project: typeof when.project === "string" ? when.project : null,
-        match_kind: typeof when.kind === "string" ? when.kind : null,
-        match_by_agent: typeof when.by_agent === "string" ? when.by_agent : null,
+        scope_consumer: scopeConsumer,
+        match_project: matchProject,
+        match_kind: matchKind,
+        match_by_agent: matchByAgent,
         match_tags,
-        match_tag_added: typeof when.tag_added === "string" ? when.tag_added : null,
-        match_intent: typeof when.intent === "string" ? when.intent : null,
+        match_tag_added: matchTagAdded,
+        match_intent: matchIntent,
         match_priority: matchPriority,
         action,
         enabled,
+        expression,
         position: 0, // YAML order is the position — caller iterates in load order.
         note,
         created_at: "yaml", // sentinel — YAML rules have no DB row.

@@ -3,29 +3,59 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
     allMatchingRules,
+    evaluateExpression,
     firstMatchingRule,
     ruleMatchesEvent,
     type AutomationEvent,
 } from "./engine.js";
-import type { AutomationRule, Trigger } from "../db/automation.js";
+import {
+    synthesizeLegacyExpression,
+    type AutomationRule,
+    type ConditionTree,
+    type Trigger,
+} from "../db/automation.js";
 
 function rule(p: Partial<AutomationRule>): AutomationRule {
+    const scope_consumer = p.scope_consumer ?? null;
+    const match_project = p.match_project ?? null;
+    const match_kind = p.match_kind ?? null;
+    const match_by_agent = p.match_by_agent ?? null;
+    const match_tags = p.match_tags ?? [];
+    const match_tag_added = p.match_tag_added ?? null;
+    const match_intent = p.match_intent ?? null;
+    const match_priority = p.match_priority ?? null;
+    // Tests built before slice 5.1 set the legacy flat fields. Synthesize an
+    // equivalent AND-tree (mirrors rowToRule's back-compat synthesis) when
+    // the caller didn't pass an explicit `expression`.
+    const expression: ConditionTree =
+        p.expression ??
+        synthesizeLegacyExpression({
+            match_project,
+            match_kind,
+            match_by_agent,
+            match_intent,
+            match_priority,
+            match_tag_added,
+            match_tags,
+            scope_consumer,
+        });
     return {
         id: p.id ?? 1,
         triggers: p.triggers ?? (["ticket_created"] as Trigger[]),
-        scope_consumer: p.scope_consumer ?? null,
-        match_project: p.match_project ?? null,
-        match_kind: p.match_kind ?? null,
-        match_by_agent: p.match_by_agent ?? null,
-        match_tags: p.match_tags ?? [],
-        match_tag_added: p.match_tag_added ?? null,
-        match_intent: p.match_intent ?? null,
-        match_priority: p.match_priority ?? null,
+        scope_consumer,
+        match_project,
+        match_kind,
+        match_by_agent,
+        match_tags,
+        match_tag_added,
+        match_intent,
+        match_priority,
         action: p.action ?? { kind: "decision", decision: "review" },
         enabled: p.enabled ?? 1,
         position: p.position ?? 0,
         note: p.note ?? null,
         created_at: p.created_at ?? "2026-05-26T00:00:00.000Z",
+        expression,
     };
 }
 
@@ -272,4 +302,173 @@ test("allMatchingRules with no matches → empty array", () => {
         rule({ triggers: ["ticket_tagged"] }),
     ];
     assert.deepEqual(allMatchingRules(rules, e), []);
+});
+
+// ---------------------------------------------------------------------------
+// Slice 5.1 — compositional condition tree (david `dxrn2u`).
+// `evaluateExpression` walks the tree ; the legacy flat-fields path
+// synthesizes an equivalent AND-tree at read time. These tests pin the
+// recursive semantics + every leaf op.
+// ---------------------------------------------------------------------------
+
+const ticketCreatedEv = (overrides: Partial<AutomationEvent> = {}): AutomationEvent => ({
+    trigger: "ticket_created",
+    project: "aiball",
+    by_agent: null,
+    intent: null,
+    priority: null,
+    ticket_tags: [],
+    ...overrides,
+} as AutomationEvent);
+
+test("evaluateExpression : empty AND matches everything (vacuous true)", () => {
+    assert.equal(evaluateExpression({ kind: "and", children: [] }, ticketCreatedEv()), true);
+});
+
+test("evaluateExpression : empty OR matches nothing (vacuous false)", () => {
+    assert.equal(evaluateExpression({ kind: "or", children: [] }, ticketCreatedEv()), false);
+});
+
+test("evaluateExpression : NOT flips its child", () => {
+    const ev = ticketCreatedEv({ project: "aiball" });
+    const isAiball: ConditionTree = { kind: "leaf", field: "project", op: "eq", value: "aiball" };
+    assert.equal(evaluateExpression({ kind: "not", child: isAiball }, ev), false);
+    const isOther: ConditionTree = { kind: "leaf", field: "project", op: "eq", value: "other" };
+    assert.equal(evaluateExpression({ kind: "not", child: isOther }, ev), true);
+});
+
+test("evaluateExpression : leaf eq / neq on event fields", () => {
+    const ev = ticketCreatedEv({ project: "aiball", intent: "urgent" });
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "project", op: "eq", value: "aiball" }, ev), true);
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "project", op: "neq", value: "aiball" }, ev), false);
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "intent", op: "eq", value: "urgent" }, ev), true);
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "intent", op: "eq", value: "fyi" }, ev), false);
+});
+
+test("evaluateExpression : leaf `in` matches when event value ∈ list", () => {
+    const ev = ticketCreatedEv({ intent: "question" });
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "intent", op: "in", value: ["request", "question"] }, ev), true);
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "intent", op: "in", value: ["fyi", "panic"] }, ev), false);
+});
+
+test("evaluateExpression : leaf `includes` matches when value ∈ event array", () => {
+    const ev = ticketCreatedEv({ ticket_tags: ["win", "urgent"] });
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "tags", op: "includes", value: "win" }, ev), true);
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "tags", op: "includes", value: "linux" }, ev), false);
+});
+
+test("evaluateExpression : leaf on a field the event doesn't carry → fail-closed", () => {
+    // `tag_added` only exists on a `ticket_tagged` event ; querying it from
+    // a `ticket_created` payload should fail closed.
+    const ev = ticketCreatedEv();
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "tag_added", op: "eq", value: "win" }, ev), false);
+});
+
+test("evaluateExpression : david's compositional scenario (project=aiball AND tags includes win) OR (intent=urgent)", () => {
+    // The whole point of slice 5.1 : the previous flat schema couldn't
+    // express this without duplicating rules. Now it's one tree.
+    const tree: ConditionTree = {
+        kind: "or",
+        children: [
+            {
+                kind: "and",
+                children: [
+                    { kind: "leaf", field: "project", op: "eq", value: "aiball" },
+                    { kind: "leaf", field: "tags", op: "includes", value: "win" },
+                ],
+            },
+            { kind: "leaf", field: "intent", op: "eq", value: "urgent" },
+        ],
+    };
+    // Case 1 : aiball + win tag → first branch hits.
+    assert.equal(evaluateExpression(tree,
+        ticketCreatedEv({ project: "aiball", ticket_tags: ["win"] })), true);
+    // Case 2 : intent=urgent (other project) → second branch hits.
+    assert.equal(evaluateExpression(tree,
+        ticketCreatedEv({ project: "other", intent: "urgent" })), true);
+    // Case 3 : aiball but no win tag, not urgent → no branch matches.
+    assert.equal(evaluateExpression(tree,
+        ticketCreatedEv({ project: "aiball", ticket_tags: ["linux"], intent: "request" })),
+        false);
+    // Case 4 : urgent but on a TICKET_TAGGED event (no `intent` in payload? actually
+    // ticket_tagged DOES carry intent, so this should match) :
+    const ttEvUrgent: AutomationEvent = {
+        trigger: "ticket_tagged", project: "other", tag_added: "x",
+        ticket_tags: ["x"], intent: "urgent", priority: null,
+    };
+    assert.equal(evaluateExpression(tree, ttEvUrgent), true);
+});
+
+test("evaluateExpression : deep nesting (3 levels) still resolves correctly", () => {
+    const tree: ConditionTree = {
+        kind: "and",
+        children: [
+            { kind: "leaf", field: "project", op: "eq", value: "aiball" },
+            {
+                kind: "or",
+                children: [
+                    { kind: "leaf", field: "intent", op: "eq", value: "urgent" },
+                    {
+                        kind: "and",
+                        children: [
+                            { kind: "leaf", field: "tags", op: "includes", value: "win" },
+                            { kind: "not", child: { kind: "leaf", field: "intent", op: "eq", value: "fyi" } },
+                        ],
+                    },
+                ],
+            },
+        ],
+    };
+    // win-tagged ticket, intent=request (NOT fyi), in aiball → AND → OR's
+    // second child → inner AND with both → true.
+    assert.equal(evaluateExpression(tree,
+        ticketCreatedEv({ project: "aiball", ticket_tags: ["win"], intent: "request" })),
+        true);
+    // win-tagged but intent=fyi → inner NOT flips, inner AND fails ; OR's
+    // first child also fails (not urgent) → false.
+    assert.equal(evaluateExpression(tree,
+        ticketCreatedEv({ project: "aiball", ticket_tags: ["win"], intent: "fyi" })),
+        false);
+});
+
+test("ruleMatchesEvent : legacy flat-fields rule still matches identically via synthesized tree", () => {
+    // The whole back-compat invariant : a rule with NULL `expression` on
+    // disk (= the `rule()` helper synthesizes one from the flat fields)
+    // evaluates exactly like before slice 5.1.
+    const r = rule({
+        triggers: ["ticket_created"],
+        match_project: "aiball",
+        match_tags: ["win"],
+    });
+    const yes = ticketCreatedEv({ project: "aiball", ticket_tags: ["win"] });
+    const no = ticketCreatedEv({ project: "aiball", ticket_tags: ["linux"] });
+    assert.equal(ruleMatchesEvent(r, yes), true);
+    assert.equal(ruleMatchesEvent(r, no), false);
+});
+
+test("ruleMatchesEvent : explicit expression overrides flat fields", () => {
+    // A new-style rule with an explicit OR tree — the flat fields are
+    // null'd out (no AND filter on top of the OR).
+    const r = rule({
+        triggers: ["ticket_created"],
+        expression: {
+            kind: "or",
+            children: [
+                { kind: "leaf", field: "tags", op: "includes", value: "win" },
+                { kind: "leaf", field: "intent", op: "eq", value: "urgent" },
+            ],
+        },
+    });
+    assert.equal(ruleMatchesEvent(r, ticketCreatedEv({ ticket_tags: ["win"] })), true);
+    assert.equal(ruleMatchesEvent(r, ticketCreatedEv({ intent: "urgent" })), true);
+    assert.equal(ruleMatchesEvent(r, ticketCreatedEv({ ticket_tags: ["linux"] })), false);
 });

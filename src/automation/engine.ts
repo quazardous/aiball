@@ -12,7 +12,7 @@
  * `match_*` columns against the event payload — every `NULL` condition
  * means "any value", every set one must match.
  */
-import type { AutomationRule } from "../db/automation.js";
+import type { AutomationRule, ConditionTree } from "../db/automation.js";
 
 // ---------------------------------------------------------------------------
 // Event shapes — one variant per trigger. Add a variant when you add a
@@ -60,19 +60,106 @@ export type AutomationEvent =
     | TicketTaggedEvent;
 
 // ---------------------------------------------------------------------------
-// Matcher.
+// Matcher — slice 5.1 redesign.
+//
+// Trigger membership + scope_consumer routing stay at the RULE level
+// (they're not "match content", they're "is this rule even a candidate
+// for this event"). Everything else funnels through the recursive
+// `evaluateExpression(tree, event)` — the source of truth for what a
+// rule's conditions resolve to.
+//
+// Legacy rules (pre-slice-5, `expression` column NULL on disk) are
+// indistinguishable here : `rowToRule` synthesizes an AND-of-leaves tree
+// from the `match_*` columns at read time, so the engine always reads a
+// populated `rule.expression`.
 // ---------------------------------------------------------------------------
 
-/** Every NULL/empty condition is "any" ; every set one must match. Pure. */
-function matchesCommon(rule: AutomationRule, project: string): boolean {
-    if (rule.match_project && rule.match_project !== project) return false;
-    return true;
+/** Extract the value of `field` from this event, or `undefined` if the
+ *  event doesn't carry that field (e.g. `tag_added` on a message_posted
+ *  event). The discriminant on `event.trigger` keeps TS happy. */
+function readEventField(event: AutomationEvent, field: string): unknown {
+    switch (event.trigger) {
+        case "message_posted":
+            if (field === "project") return event.project;
+            if (field === "kind") return event.kind;
+            if (field === "by_agent") return event.by_agent;
+            return undefined;
+        case "actionable_eval":
+            if (field === "project") return event.project;
+            if (field === "scope_consumer") return event.consumer_id;
+            if (field === "tags") return event.ticket_tags;
+            return undefined;
+        case "ticket_created":
+            if (field === "project") return event.project;
+            if (field === "by_agent") return event.by_agent;
+            if (field === "intent") return event.intent;
+            if (field === "priority") return event.priority;
+            if (field === "tags") return event.ticket_tags;
+            return undefined;
+        case "ticket_tagged":
+            if (field === "project") return event.project;
+            if (field === "tag_added") return event.tag_added;
+            if (field === "tags") return event.ticket_tags;
+            if (field === "intent") return event.intent;
+            if (field === "priority") return event.priority;
+            return undefined;
+    }
 }
 
-function matchesTagsAnyOf(ruleTags: string[], ticketTags: string[]): boolean {
-    if (ruleTags.length === 0) return true; // no tag condition → match
-    const set = new Set(ticketTags);
-    return ruleTags.some((t) => set.has(t));
+/**
+ * Recursive evaluator over the condition tree. Pure — no DB, no I/O.
+ *
+ * Semantics :
+ *   - `and { children }` : every child must match. Empty children = true
+ *     (vacuous AND), so a rule "with no conditions" matches everything.
+ *   - `or  { children }` : at least one child must match. Empty children
+ *     = false (vacuous OR — no way to satisfy).
+ *   - `not { child }`    : the negation of the child.
+ *   - `leaf { field, op, value }` : compare the leaf's `value` against the
+ *     event's `field`. If the event doesn't carry that field (e.g. `tag_added`
+ *     on a `message_posted` event), the leaf is FAIL-CLOSED → false. This
+ *     mirrors the legacy "irrelevant condition = miss" semantics.
+ *
+ * Operator semantics :
+ *   - `eq` / `neq` : strict equality on the event field. `null` compares
+ *     equal to `null` (so a rule that targets "rules with no by_agent" still
+ *     works). Coercion-free.
+ *   - `in`         : leaf value is a string[] ; matches if event field ∈ value.
+ *                    Useful for "intent in [request, question]" without a
+ *                    nested OR.
+ *   - `includes`   : event field is a string[] (tags) ; matches if value ∈ field.
+ *                    "the ticket carries this tag".
+ */
+export function evaluateExpression(tree: ConditionTree, event: AutomationEvent): boolean {
+    switch (tree.kind) {
+        case "and":
+            for (const c of tree.children) {
+                if (!evaluateExpression(c, event)) return false;
+            }
+            return true;
+        case "or":
+            for (const c of tree.children) {
+                if (evaluateExpression(c, event)) return true;
+            }
+            return false;
+        case "not":
+            return !evaluateExpression(tree.child, event);
+        case "leaf": {
+            const present = readEventField(event, tree.field);
+            // Field not provided by this trigger → fail-closed.
+            if (present === undefined) return false;
+            switch (tree.op) {
+                case "eq":
+                    return present === tree.value;
+                case "neq":
+                    return present !== tree.value;
+                case "in":
+                    return Array.isArray(tree.value) && (tree.value as unknown[]).includes(present);
+                case "includes":
+                    return Array.isArray(present) && (present as unknown[]).includes(tree.value);
+            }
+        }
+    }
 }
 
 /**
@@ -80,48 +167,26 @@ function matchesTagsAnyOf(ruleTags: string[], ticketTags: string[]): boolean {
  * Callers iterate the candidate rules (already filtered by `enabled=1`
  * server-side) and call this per row.
  *
- * The rule's `triggers` list is a UNION (david `8r7crj`) : the rule fires
- * for ANY trigger in the list. Empty list = no triggers = never fires
- * (fail-closed against a malformed row).
- *
- * Each branch is fail-closed on its own attributes — a rule that sets a
- * condition the event can't satisfy (e.g. `match_tag_added` on a
- * `message_posted` event) never matches.
+ * Two-stage filter :
+ *   1. RULE-LEVEL routing : trigger membership (union, david `8r7crj`) +
+ *      `scope_consumer` narrowing for `actionable_eval`. Empty triggers list
+ *      fails closed against a malformed row.
+ *   2. CONTENT match : delegated to `evaluateExpression(rule.expression, event)`.
+ *      Slice 5.1 — the expression tree is the canonical source of truth ;
+ *      legacy rows synthesize one at read time (db/automation.ts::rowToRule).
  */
 export function ruleMatchesEvent(rule: AutomationRule, event: AutomationEvent): boolean {
     if (!rule.triggers.includes(event.trigger)) return false;
-    if (!matchesCommon(rule, event.project)) return false;
-
-    switch (event.trigger) {
-        case "message_posted":
-            if (rule.match_kind && rule.match_kind !== event.kind) return false;
-            if (rule.match_by_agent && rule.match_by_agent !== event.by_agent) return false;
-            // tags / intent / priority / tag_added : irrelevant for posts.
-            return true;
-
-        case "actionable_eval":
-            // The scope_consumer narrows the candidate set server-side ; if it
-            // somehow leaks here for another consumer, fail-closed.
-            if (rule.scope_consumer && rule.scope_consumer !== event.consumer_id) return false;
-            if (!matchesTagsAnyOf(rule.match_tags, event.ticket_tags)) return false;
-            return true;
-
-        case "ticket_created":
-            if (rule.match_by_agent && rule.match_by_agent !== event.by_agent) return false;
-            if (rule.match_intent && rule.match_intent !== event.intent) return false;
-            if (rule.match_priority && rule.match_priority !== event.priority) return false;
-            if (!matchesTagsAnyOf(rule.match_tags, event.ticket_tags)) return false;
-            return true;
-
-        case "ticket_tagged":
-            // `match_tag_added` is the trigger-specific lever — fire only when
-            // a SPECIFIC tag was just added. NULL = any tag-add event.
-            if (rule.match_tag_added && rule.match_tag_added !== event.tag_added) return false;
-            if (rule.match_intent && rule.match_intent !== event.intent) return false;
-            if (rule.match_priority && rule.match_priority !== event.priority) return false;
-            if (!matchesTagsAnyOf(rule.match_tags, event.ticket_tags)) return false;
-            return true;
+    // scope_consumer is a rule-level routing concern (not a content match),
+    // so it stays here outside the tree. Mirrors the legacy actionable_eval
+    // narrowing (when scope_consumer is set, the rule fires only for THAT
+    // consumer's evaluations).
+    if (event.trigger === "actionable_eval"
+        && rule.scope_consumer
+        && rule.scope_consumer !== event.consumer_id) {
+        return false;
     }
+    return evaluateExpression(rule.expression, event);
 }
 
 /**
