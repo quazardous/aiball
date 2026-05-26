@@ -884,11 +884,13 @@ watch(showSnoozed, (v) => {
                     <button type="button" class="aiball-footer-settings__item" @click="openPanel('projects')">
                         <i class="pi pi-folder" /> <span>Projects</span>
                     </button>
-                    <button type="button" class="aiball-footer-settings__item" @click="openPanel('rules')">
-                        <i class="pi pi-cog" /> <span>Rules</span>
-                    </button>
-                    <button type="button" class="aiball-footer-settings__item" @click="openPanel('work-filters')">
-                        <i class="pi pi-filter" /> <span>Work filters</span>
+                    <!-- #457 david `92wub9` : le menu mobile était en
+                         retard sur le desktop (entrées `Rules` + `Work
+                         filters` séparées au lieu de l'unifiée
+                         `Automation`). Remplacé par la seule entrée
+                         `Automation` (⚡), mirror du Sidebar.vue. -->
+                    <button type="button" class="aiball-footer-settings__item" @click="openPanel('automation')">
+                        <i class="pi pi-bolt" /> <span>Automation</span>
                     </button>
                     <button type="button" class="aiball-footer-settings__item" @click="openPanel('tags')">
                         <i class="pi pi-tag" /> <span>Tags</span>
