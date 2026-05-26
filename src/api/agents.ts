@@ -182,3 +182,99 @@ agentsRouter.get("/agents/:name/pane/stream", (req: Request, res: Response) => {
     req.on("error", close);
     res.on("error", close);
 });
+
+// ---------------------------------------------------------------------------
+// #472 — read-write : forward browser keystrokes to the agent's tmux pane.
+//
+// Slice 1 read-only (#464) showed the pane ; this completes the loop by
+// letting the operator type back. xterm.js's `onData(callback)` emits the
+// raw bytes the user produced (printable chars, escape sequences for
+// arrows / control keys, etc.). The frontend POSTs each batch here and we
+// call `${MUX_CMD} send-keys -l -t cl-<loop>.0 -- <keys>` — `-l` (literal)
+// pipes every byte through unchanged, so a `\x03` from the browser becomes
+// a real Ctrl-C in the pane, an arrow-key escape sequence stays untouched,
+// etc.
+//
+// Defensive : same agent-name regex + length cap as the SSE, plus a body
+// length cap (4 KB) — typical keystroke batches are < 100 bytes, anything
+// huge is either a paste (which the UI batches differently) or abuse.
+//
+// Auth : nothing extra. The bearer-auth chain upstream already gates
+// every `/api/*` request ; if you can drive the loop from the CLI you can
+// drive it from the browser (which is a fair model for moderators). A
+// future `?moderator-only` narrowing can layer on top without changing
+// the wire shape.
+//
+// Echo : visible via the existing SSE on the next ~1s capture tick. There's
+// a ~1s round-trip lag between key-press and seeing it on screen — slice 1
+// trades latency for protocol simplicity. A pipe-pane / fifo stream
+// upgrade is a follow-up.
+// ---------------------------------------------------------------------------
+
+/** Max payload length per send-keys call. Typical xterm `onData` chunks are
+ *  < 100 bytes (a single keypress or a small input); we cap at 4 KB to
+ *  bound the shell command size + reject pathological pastes. The frontend
+ *  can batch its own data into multiple POSTs if it ever needs more. */
+const MAX_KEYS_BYTES = 4_096;
+
+agentsRouter.post("/agents/:name/pane/keys", (req: Request, res: Response) => {
+    const rawName = req.params.name;
+    const consumerId = typeof rawName === "string" ? rawName : "";
+    if (!consumerId || consumerId.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(consumerId)) {
+        return res.status(400).json({ error: "bad consumer id" });
+    }
+    const keys = (req.body as { keys?: unknown } | undefined)?.keys;
+    if (typeof keys !== "string") {
+        return res.status(400).json({ error: "keys must be a string" });
+    }
+    if (keys.length === 0) {
+        // Nothing to send — accept silently. xterm sometimes emits empty
+        // events at the boundaries of buffered input ; rejecting them would
+        // be noisy and the no-op is what the user expects anyway.
+        return res.status(204).end();
+    }
+    if (Buffer.byteLength(keys, "utf8") > MAX_KEYS_BYTES) {
+        return res.status(413).json({ error: `keys payload exceeds ${MAX_KEYS_BYTES} bytes` });
+    }
+    const consumer = getConsumer(consumerId);
+    if (!consumer) {
+        return res.status(404).json({ error: `consumer not found : ${consumerId}` });
+    }
+    if (!consumer.cwd) {
+        return res.status(404).json({
+            error: `consumer has no cwd — needs an active claude-loop heartbeat first`,
+        });
+    }
+    const loopName = resolveLoopName(consumer.cwd);
+    if (!loopName) {
+        return res.status(404).json({
+            error: `no claude-loop dir matches cwd ${consumer.cwd}`,
+        });
+    }
+    const target = `${tmuxName(loopName)}.0`;
+
+    // `-l` keeps every byte literal — no Enter/BSpace/etc. name parsing on
+    // the tmux side, so xterm's raw escape sequences round-trip cleanly.
+    // `--` separates flags from the keystroke string so a leading `-` in
+    // the user's input doesn't get parsed as an option.
+    const child = spawn(MUX_CMD, ["send-keys", "-l", "-t", target, "--", keys], {
+        stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (b: Buffer) => { stderr += b.toString("utf8"); });
+    child.on("error", (e) => {
+        if (res.headersSent) return;
+        res.status(500).json({ error: `spawn failed : ${e.message}` });
+    });
+    child.on("close", (code) => {
+        if (res.headersSent) return;
+        if (code === 0) {
+            res.status(204).end();
+        } else {
+            res.status(502).json({
+                error: `send-keys exited ${code}`,
+                detail: stderr.trim() || null,
+            });
+        }
+    });
+});

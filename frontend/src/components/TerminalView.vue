@@ -18,7 +18,7 @@
  * fullscreen toggle. The terminal only exists while this component
  * is mounted — `term.dispose()` on unmount frees its WebGL / canvas.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
@@ -36,11 +36,17 @@ const connected = ref<boolean>(false);
 const lastCapturedAt = ref<string | null>(null);
 const truncated = ref<boolean>(false);
 const isFullscreen = ref<boolean>(false);
+// #472 — read-write mode toggle. Default OFF (read-only) so the user can't
+// accidentally type into a live claude session just by focusing the
+// browser tab. Flip via the keyboard icon in the bar.
+const isReadWrite = ref<boolean>(false);
+const sendError = ref<string | null>(null);
 
 let es: EventSource | null = null;
 let term: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let connectTimeoutId: number | null = null;
+let dataDisposer: { dispose(): void } | null = null;
 
 interface PaneFrame {
     text: string;
@@ -91,15 +97,70 @@ function mountTerm() {
     term.loadAddon(fitAddon);
     term.open(containerRef.value);
     fitAddon.fit();
+
+    // #472 — register a single onData handler. xterm fires this on every
+    // user keystroke (printable chars, control sequences, paste, etc.) when
+    // `disableStdin` is false. The handler gates on `isReadWrite` so flipping
+    // the toggle is purely a re-bind of the disableStdin flag — the handler
+    // doesn't have to be added/removed. POSTs the raw bytes to the daemon's
+    // `send-keys` endpoint, which pipes them through `tmux send-keys -l`.
+    dataDisposer = term.onData((data) => {
+        if (!isReadWrite.value) return;
+        void postKeys(data);
+    });
 }
 
 function disposeTerm() {
+    if (dataDisposer) {
+        try { dataDisposer.dispose(); } catch { /* noop */ }
+        dataDisposer = null;
+    }
     if (term) {
         try { term.dispose(); } catch { /* noop */ }
         term = null;
     }
     fitAddon = null;
 }
+
+async function postKeys(data: string) {
+    try {
+        const token = localStorage.getItem("aiball.token");
+        const headers: Record<string, string> = { "content-type": "application/json" };
+        if (token) headers.authorization = `Bearer ${token}`;
+        const res = await fetch(
+            `/api/agents/${encodeURIComponent(props.agentName)}/pane/keys`,
+            { method: "POST", headers, body: JSON.stringify({ keys: data }) },
+        );
+        if (!res.ok) {
+            const text = await res.text();
+            sendError.value = `send-keys ${res.status} : ${text}`;
+        } else {
+            sendError.value = null;
+        }
+    } catch (e) {
+        sendError.value = (e as Error).message;
+    }
+}
+
+function toggleReadWrite() {
+    isReadWrite.value = !isReadWrite.value;
+}
+
+// xterm's `disableStdin` swallow input at the terminal layer, so the toggle
+// directly drives the live behavior : RW on → terminal accepts keys + onData
+// fires + we POST ; RW off → terminal eats every keypress + onData stays
+// silent + nothing reaches the agent. The cursor visibility tracks RW too
+// (no blinking caret in read-only mode → clear visual signal).
+watch(isReadWrite, (rw) => {
+    if (!term) return;
+    term.options.disableStdin = !rw;
+    term.options.cursorBlink = rw;
+    if (rw) {
+        // Focus the terminal so a fresh toggle "just works" without an
+        // extra click.
+        try { term.focus(); } catch { /* noop */ }
+    }
+});
 
 function applyFrame(text: string) {
     if (!term) return;
@@ -227,6 +288,25 @@ onBeforeUnmount(() => {
             <span v-if="truncated" class="terminal-view__warn">
                 <i class="pi pi-exclamation-triangle" /> truncated
             </span>
+            <span v-if="sendError" class="terminal-view__warn" :title="sendError">
+                <i class="pi pi-exclamation-triangle" /> send-keys failed
+            </span>
+            <!-- #472 — read-write toggle. Default = read-only (lock icon).
+                 Click → flip xterm.options.disableStdin live, keystrokes
+                 start round-tripping through the SSE/POST pair. The visual
+                 cursor blink also flips on. -->
+            <Button
+                :icon="isReadWrite ? 'pi pi-pencil' : 'pi pi-lock'"
+                :severity="isReadWrite ? 'success' : 'secondary'"
+                size="small"
+                text
+                rounded
+                :aria-label="isReadWrite ? 'Switch to read-only' : 'Switch to read-write (type into the pane)'"
+                :title="isReadWrite
+                    ? 'Read-write mode active — your keys reach the agent tmux pane'
+                    : 'Read-only mode — click to enable typing'"
+                @click="toggleReadWrite"
+            />
             <Button
                 :icon="isFullscreen ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"
                 size="small"
