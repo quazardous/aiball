@@ -20,6 +20,7 @@ import {
     type Tag,
 } from "../db.js";
 import { broadcast } from "../ws.js";
+import { emitLifecycle } from "../event-bus.js";
 import { configTagNames, resolveConfigTags } from "../config-tags.js";
 import { badRequest, conflict, notFound } from "./_helpers.js";
 
@@ -216,9 +217,20 @@ tagsRouter.put("/messages/:id/tags", (req: Request, res: Response) => {
         if (!tag) return badRequest(res, `unknown tag: ${r}`);
         ids.push(tag.id);
     }
+    // #457 slice 2 : diff added-tags so the automation engine sees one
+    // `ticket_tagged` event per NEW tag (PUT is a bulk replace, but the
+    // engine's lever `match_tag_added` operates per-add).
+    const before = new Set(listMessageTags(id).map((t) => t.name));
     setMessageTags(id, ids, typeof set_by === "string" ? set_by : null);
     const tags = listMessageTags(id);
     broadcast({ type: "message_tagged", data: { message_id: id, tags } });
+    if (m.kind === "ticket_created") {
+        const allNames = tags.map((t) => t.name);
+        for (const t of tags) {
+            if (before.has(t.name)) continue;
+            emitLifecycle({ op: "tagged", message: m, added_tag: t.name, all_tags: allNames });
+        }
+    }
     res.json(tags);
 });
 
@@ -229,9 +241,20 @@ tagsRouter.post("/messages/:id/tags", (req: Request, res: Response) => {
     const { tag, set_by } = req.body ?? {};
     const t = resolveTagRef(tag);
     if (!t) return badRequest(res, `unknown tag: ${tag}`);
+    // #457 slice 2 : detect if the tag was actually NEW (POST is idempotent on
+    // a same-tag re-add — only emit the trigger when something actually moved).
+    const wasPresent = listMessageTags(id).some((x) => x.id === t.id);
     addMessageTag(id, t.id, typeof set_by === "string" ? set_by : null);
     const tags = listMessageTags(id);
     broadcast({ type: "message_tagged", data: { message_id: id, tags } });
+    if (m.kind === "ticket_created" && !wasPresent) {
+        emitLifecycle({
+            op: "tagged",
+            message: m,
+            added_tag: t.name,
+            all_tags: tags.map((x) => x.name),
+        });
+    }
     res.status(201).json(tags);
 });
 

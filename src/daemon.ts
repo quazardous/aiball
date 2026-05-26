@@ -13,6 +13,7 @@ import { drainSpool, watchSpool } from "./spool.js";
 import { listExpiredPostpones, setTicketPostpone, getMessage, backfillParentTicketRelations } from "./db.js";
 import { broadcast as wsBroadcast } from "./ws.js";
 import { checkSandboxPings } from "./sandbox/watcher.js";
+import { registerAutomationRuntime } from "./automation/runtime.js";
 
 /**
  * Snooze reveal cron (per #B.329). Every 60s, find tickets whose
@@ -123,6 +124,11 @@ const SOCK_PATH = (() => {
 function main(): void {
     ensureDirs(); // make sure UPLOADS_DIR etc. exist before serving them
     getDb(); // open + migrate
+
+    // #457 slice 2 : attach the automation engine to the lifecycle bus once
+    // the DB is up. Idempotent — under `tsx watch` daemon code reloads but
+    // the process restarts, so a single registration per process is fine.
+    registerAutomationRuntime();
 
     // #407: publish our pid so `aiball reload` can target THIS process for a
     // SIGHUP config-reload. Under `tsx watch` the daemon runs in a child whose

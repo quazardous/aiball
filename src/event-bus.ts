@@ -90,7 +90,7 @@ export function onControl(
  * fanOutPings / broadcast calls (zero behaviour change). Phase 2 moves those
  * side-effects into `onLifecycle` handlers.
  */
-export type LifecycleOp = "created" | "decided" | "edited" | "moved";
+export type LifecycleOp = "created" | "decided" | "edited" | "moved" | "tagged";
 
 export interface LifecycleEvent {
     /** the mutation that produced it (drives the WS broadcast type in phase 2). */
@@ -99,6 +99,13 @@ export interface LifecycleEvent {
      *  (ticket_created / comment_added / ticket_closed / decision …); `project`
      *  and `ticket_id` carry the routing context the rules engine needs. */
     message: Message;
+    /** #457 slice 2 — when `op === "tagged"` : the tag name JUST added to
+     *  `message` (which is the ticket row, kind=ticket_created). Drives the
+     *  automation engine's `match_tag_added` lever. Absent for other ops. */
+    added_tag?: string;
+    /** #457 slice 2 — when `op === "tagged"` : every tag currently on the
+     *  ticket AFTER the change. Drives `match_tags` any-of. */
+    all_tags?: string[];
 }
 
 export function emitLifecycle(event: LifecycleEvent): void {

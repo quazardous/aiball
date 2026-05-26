@@ -281,6 +281,13 @@
       "when": 1781500000000,
       "tag": "0039_automation_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1781600000000,
+      "tag": "0040_automation_rules_triggers_union",
+      "breakpoints": true
     }
   ]
 }
