@@ -173,17 +173,17 @@ function openProjectPage(p: string, page: ProjectPage) {
 }
 
 // #462 — gate the `.aiball-main--wide` modifier. Default narrow (980px) is
-// preserved for two views that read better narrow : the ticket thread
-// (long-form text — column too wide kills readability) and the compose page
-// (focused input). Everything else (inbox list, admin panels list/detail,
-// dashboard pages) gets the wide cap so the table-style content uses the
-// available screen real estate instead of leaving large empty gutters on a
-// 1280+ viewport. Form-style detail pages (Consumer/Node) already self-cap
-// to 40rem via `.aiball-detail-page`, so widening the parent is a no-op for
-// them.
+// preserved ONLY for the compose form (a narrow column of inputs reads as a
+// focused entry surface, NOT a dashboard). Everything else — inbox list,
+// admin panels, dashboard pages, AND the ticket thread (#462 david `b33tdr`
+// "manque la page détail ticket", reversed my initial guess that long-form
+// reads better narrow) — gets the wide cap so the content uses the available
+// screen real estate instead of leaving large empty gutters on a 1280+
+// viewport.
+// Form-style detail pages (Consumer/Node) already self-cap to 40rem via
+// `.aiball-detail-page`, so widening the parent is a no-op for them.
 const aiballMainWide = computed((): boolean => {
-    if (openTicketId.value !== null) return false; // thread view → narrow
-    if (panel.value === "compose") return false;   // compose form → narrow
+    if (panel.value === "compose") return false; // compose form → narrow
     return true;
 });
 
@@ -959,18 +959,17 @@ watch(showSnoozed, (v) => {
 }
 
 /* #462 — wide modifier for table-style + admin content (inbox list, admin
-   panels, dashboard pages, list/show detail pages). The thread view + the
-   compose form keep the narrow default (long-form reading + focused input
-   benefit from a narrower column). Form-style pages (consumer/node detail)
-   already self-cap to .aiball-detail-page (40rem) so widening the parent is
-   a no-op for them — the wider container only matters where the page DOESN'T
-   self-constrain, i.e. tables + multi-column dashboards.
+   panels, dashboard pages, list/show detail pages, AND the ticket thread —
+   david `b33tdr` reversed my initial exclusion of the thread). Only the
+   compose form keeps the narrow default (focused entry surface). Form-style
+   pages (consumer/node detail) already self-cap to .aiball-detail-page
+   (40rem) so widening the parent is a no-op for them — the wider container
+   only matters where the page DOESN'T self-constrain.
 
    `min(95vw, 1600px)` : on a typical 1280-1920 viewport we get 95% of the
    width (a small breathing margin keeps content off the absolute edge); on
    4K / ultra-wide we cap at 1600px so a paragraph never becomes unreadable
-   wide. Vue applies this class via the `aiballMainWide` computed in App.vue
-   (everything except thread view + compose). */
+   wide. Vue applies this class via the `aiballMainWide` computed in App.vue. */
 .aiball-main--wide {
     max-width: min(95vw, 1600px);
 }
