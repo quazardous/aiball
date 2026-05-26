@@ -379,16 +379,20 @@ body,
     gap: 0.5rem;
 }
 
-/* Conteneur de page détail/edit unifié (#458) : largeur standard + gouttière
-   verticale entre l'en-tête (DetailHeader) et le corps. À appliquer sur la
-   racine d'une page « form-style » (ConsumerEditPage, NodeDetailPage, …) à la
-   place d'un `max-width` bespoke. Les pages tableau de bord multi-sections
-   (ProjectStats / ProjectDetail) restent pleine largeur. */
+/* Conteneur de page détail/edit unifié (#458) : juste une gouttière verticale
+   entre l'en-tête (DetailHeader) et le corps. À appliquer sur la racine d'une
+   page « form-style » (ConsumerEditPage, NodeDetailPage, …) à la place du
+   `display:flex/gap` bespoke.
+
+   #462 (`3ffy4d` david) : le cap `max-width: 40rem` historique a été RETIRÉ.
+   Il faisait diverger la largeur des pages détail-edit de celle des pages
+   liste / détail-ticket (qui suivent `.aiball-main--wide`). La page détail
+   prend désormais simplement la largeur du parent (= .aiball-main / .aiball-main--wide
+   selon la densité choisie en Settings), comme les pages dashboard. */
 .aiball-detail-page {
     display: flex;
     flex-direction: column;
     gap: 1rem;
-    max-width: 40rem;
 }
 
 /* #395/q3bfvn → #460 — CSS tag pour l'état busy/idle d'une loop + sa présence
