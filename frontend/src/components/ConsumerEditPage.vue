@@ -16,6 +16,11 @@ import { computed, ref, watch } from "vue";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Select from "primevue/select";
+import Tab from "primevue/tab";
+import TabList from "primevue/tablist";
+import TabPanel from "primevue/tabpanel";
+import TabPanels from "primevue/tabpanels";
+import Tabs from "primevue/tabs";
 import Textarea from "primevue/textarea";
 import { useConfirm } from "primevue/useconfirm";
 import { api, CONSUMER_KIND_OPTIONS, type Consumer, type ConsumerKind } from "../lib/api";
@@ -193,162 +198,195 @@ async function sendPrompt() {
             <i class="pi pi-exclamation-triangle" />
             {{ error }}
         </div>
+        <!-- #460 — page consumer split en 2 tabs (david `c7tzpk` accepté
+             `w37ybc`) : Overview (show) montre l'identité + loop status +
+             meta ; Edit (form) regroupe les champs éditables + raw prompt
+             + Cancel/Save. Default = Overview (lecture d'abord). En attendant
+             les briques AdminShowLayout/AdminFormLayout du #458 commit 2a,
+             chaque tab garde son markup actuel ; la migration vers les
+             layouts dédiés se fera là-bas. -->
         <template v-else-if="original">
-            <FieldRow label="consumer_id">
-                <span class="aiball-mono">{{ original.consumer_id }}</span>
-            </FieldRow>
+            <Tabs value="overview">
+                <TabList>
+                    <Tab value="overview">Overview</Tab>
+                    <Tab value="edit">Edit</Tab>
+                </TabList>
+                <TabPanels>
+                    <TabPanel value="overview">
+                        <div class="consumer-edit__tab">
+                            <FieldRow label="consumer_id">
+                                <span class="aiball-mono">{{ original.consumer_id }}</span>
+                            </FieldRow>
 
-            <!-- #460 — centralised loop status + Stop button. Mirrors the chip
-                 colours used in ProjectDetailPage / ConsumersPanel (busy/idle/
-                 boot + loop/human/wait/stop) — same .ld-tag* helpers, now in
-                 global style.css. -->
-            <FieldRow label="loop status">
-                <div class="consumer-edit__status">
-                    <template v-if="original.state">
-                        <template v-if="isOnline">
-                            <span class="ld-tag" :class="activityClass(original.state)">{{ original.state }}</span>
-                            <span
-                                class="ld-tag"
-                                :class="presenceClass(original.state_human, original.state_human_word)"
-                            >{{ presenceWord(original.state_human, original.state_human_word) }}</span>
-                        </template>
-                        <span v-else class="ld-tag ld-tag--offline">offline</span>
-                        <span v-if="original.cwd" class="consumer-edit__cwd" :title="original.cwd">
-                            @ <code>{{ original.cwd }}</code>
-                        </span>
-                        <Button
-                            v-if="canStop"
-                            label="Stop"
-                            icon="pi pi-stop-circle"
-                            severity="danger"
-                            text
-                            size="small"
-                            :loading="stopBusy"
-                            :title="`Stop (hard-kill) the claude-loop running as ${original.consumer_id}`"
-                            @click="stopLoop"
-                        />
-                    </template>
-                    <span v-else class="consumer-edit__status-none">
-                        no loop tracking — this consumer has never reported a state
-                    </span>
-                </div>
-            </FieldRow>
+                            <!-- Loop status + Stop, mêmes chips que
+                                 ProjectDetailPage / ConsumersPanel (#460). -->
+                            <FieldRow label="loop status">
+                                <div class="consumer-edit__status">
+                                    <template v-if="original.state">
+                                        <template v-if="isOnline">
+                                            <span class="ld-tag" :class="activityClass(original.state)">{{ original.state }}</span>
+                                            <span
+                                                class="ld-tag"
+                                                :class="presenceClass(original.state_human, original.state_human_word)"
+                                            >{{ presenceWord(original.state_human, original.state_human_word) }}</span>
+                                        </template>
+                                        <span v-else class="ld-tag ld-tag--offline">offline</span>
+                                        <span v-if="original.cwd" class="consumer-edit__cwd" :title="original.cwd">
+                                            @ <code>{{ original.cwd }}</code>
+                                        </span>
+                                        <Button
+                                            v-if="canStop"
+                                            label="Stop"
+                                            icon="pi pi-stop-circle"
+                                            severity="danger"
+                                            text
+                                            size="small"
+                                            :loading="stopBusy"
+                                            :title="`Stop (hard-kill) the claude-loop running as ${original.consumer_id}`"
+                                            @click="stopLoop"
+                                        />
+                                    </template>
+                                    <span v-else class="consumer-edit__status-none">
+                                        no loop tracking — this consumer has never reported a state
+                                    </span>
+                                </div>
+                            </FieldRow>
 
-            <div class="consumer-edit__field">
-                <label for="ce-kind">kind</label>
-                <Select
-                    inputId="ce-kind"
-                    v-model="kind"
-                    :options="KIND_OPTIONS"
-                    optionLabel="label"
-                    optionValue="value"
-                    style="width: 100%"
-                />
-            </div>
+                            <FieldRow label="kind">
+                                <span>{{ original.kind }}</span>
+                            </FieldRow>
+                            <FieldRow v-if="original.display_name" label="display name">
+                                <span>{{ original.display_name }}</span>
+                            </FieldRow>
+                            <FieldRow label="enabled">
+                                <span :class="original.enabled ? '' : 'consumer-edit__status-none'">
+                                    {{ original.enabled ? "enabled" : "blocked" }}
+                                </span>
+                            </FieldRow>
 
-            <div class="consumer-edit__field">
-                <label for="ce-name">display name</label>
-                <InputText
-                    id="ce-name"
-                    v-model="displayName"
-                    placeholder="(falls back to consumer_id)"
-                    style="width: 100%"
-                />
-            </div>
+                            <div class="consumer-edit__meta">
+                                <div><strong>created</strong> {{ original.created_at ? relativeTime(original.created_at) : "—" }}</div>
+                                <div><strong>last seen</strong> {{ original.last_seen_at ? relativeTime(original.last_seen_at) : "never" }}</div>
+                            </div>
+                        </div>
+                    </TabPanel>
 
-            <div class="consumer-edit__field">
-                <label for="ce-note">note</label>
-                <Textarea
-                    id="ce-note"
-                    v-model="note"
-                    rows="3"
-                    placeholder="(internal note — visible only on this page)"
-                    style="width: 100%"
-                />
-            </div>
+                    <TabPanel value="edit">
+                        <div class="consumer-edit__tab">
+                            <div class="consumer-edit__field">
+                                <label for="ce-kind">kind</label>
+                                <Select
+                                    inputId="ce-kind"
+                                    v-model="kind"
+                                    :options="KIND_OPTIONS"
+                                    optionLabel="label"
+                                    optionValue="value"
+                                    style="width: 100%"
+                                />
+                            </div>
 
-            <div class="consumer-edit__field">
-                <label for="ce-micro-prompt">micro-prompt</label>
-                <Textarea
-                    id="ce-micro-prompt"
-                    v-model="microPrompt"
-                    rows="3"
-                    placeholder="(standing instruction injected into this agent's wake prompt via {consumer_prompt} — e.g. &quot;branch main if the ticket doesn't specify&quot;)"
-                    style="width: 100%"
-                />
-                <small class="consumer-edit__hint">
-                    Surfaced to the agent on wake via the <code>{consumer_prompt}</code>
-                    placeholder. Opt-in: add the placeholder to your <code>wake_master</code>
-                    template (<code>.aiball.yaml</code>) where you want it. Empty = nothing injected.
-                </small>
-            </div>
+                            <div class="consumer-edit__field">
+                                <label for="ce-name">display name</label>
+                                <InputText
+                                    id="ce-name"
+                                    v-model="displayName"
+                                    placeholder="(falls back to consumer_id)"
+                                    style="width: 100%"
+                                />
+                            </div>
 
-            <div class="consumer-edit__field">
-                <label>
-                    <input
-                        type="checkbox"
-                        :checked="enabled"
-                        @change="enabled = ($event.target as HTMLInputElement).checked"
-                    />
-                    enabled (when off, the daemon rejects new posts from this consumer)
-                </label>
-            </div>
+                            <div class="consumer-edit__field">
+                                <label for="ce-note">note</label>
+                                <Textarea
+                                    id="ce-note"
+                                    v-model="note"
+                                    rows="3"
+                                    placeholder="(internal note — visible only on this page)"
+                                    style="width: 100%"
+                                />
+                            </div>
 
-            <!-- #451: raw-prompt injection (moderator-only, server-enforced). -->
-            <div class="consumer-edit__field">
-                <label for="ce-prompt">send a raw prompt</label>
-                <Textarea
-                    id="ce-prompt"
-                    v-model="promptText"
-                    rows="4"
-                    :placeholder="original.present
-                        ? 'Type a prompt — injected verbatim into the live Claude session…'
-                        : 'Loop offline — the prompt will be spooled and delivered when it reconnects.'"
-                    style="width: 100%"
-                    :disabled="promptBusy"
-                    @keydown.ctrl.enter="sendPrompt"
-                />
-                <small class="consumer-edit__hint">
-                    Sent <strong>verbatim</strong> — no moderation, no wake-phrase.
-                    {{ original.present
-                        ? "Loop is live → delivered now."
-                        : "Loop is offline → spooled until it reconnects." }}
-                    Ctrl+Enter to send.
-                </small>
-                <div class="consumer-edit__actions">
-                    <Button
-                        label="Send prompt"
-                        icon="pi pi-send"
-                        size="small"
-                        severity="secondary"
-                        :loading="promptBusy"
-                        :disabled="!promptText.trim()"
-                        @click="sendPrompt"
-                    />
-                </div>
-            </div>
+                            <div class="consumer-edit__field">
+                                <label for="ce-micro-prompt">micro-prompt</label>
+                                <Textarea
+                                    id="ce-micro-prompt"
+                                    v-model="microPrompt"
+                                    rows="3"
+                                    placeholder="(standing instruction injected into this agent's wake prompt via {consumer_prompt} — e.g. &quot;branch main if the ticket doesn't specify&quot;)"
+                                    style="width: 100%"
+                                />
+                                <small class="consumer-edit__hint">
+                                    Surfaced to the agent on wake via the <code>{consumer_prompt}</code>
+                                    placeholder. Opt-in: add the placeholder to your <code>wake_master</code>
+                                    template (<code>.aiball.yaml</code>) where you want it. Empty = nothing injected.
+                                </small>
+                            </div>
 
-            <div class="consumer-edit__meta">
-                <div><strong>created</strong> {{ original.created_at ? relativeTime(original.created_at) : "—" }}</div>
-                <div><strong>last seen</strong> {{ original.last_seen_at ? relativeTime(original.last_seen_at) : "never" }}</div>
-            </div>
+                            <div class="consumer-edit__field">
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        :checked="enabled"
+                                        @change="enabled = ($event.target as HTMLInputElement).checked"
+                                    />
+                                    enabled (when off, the daemon rejects new posts from this consumer)
+                                </label>
+                            </div>
 
-            <div class="consumer-edit__actions">
-                <Button
-                    label="Cancel"
-                    text
-                    size="small"
-                    :disabled="saving"
-                    @click="emit('close')"
-                />
-                <Button
-                    label="Save"
-                    icon="pi pi-save"
-                    size="small"
-                    :loading="saving"
-                    @click="save"
-                />
-            </div>
+                            <!-- #451: raw-prompt injection (moderator-only, server-enforced). -->
+                            <div class="consumer-edit__field">
+                                <label for="ce-prompt">send a raw prompt</label>
+                                <Textarea
+                                    id="ce-prompt"
+                                    v-model="promptText"
+                                    rows="4"
+                                    :placeholder="original.present
+                                        ? 'Type a prompt — injected verbatim into the live Claude session…'
+                                        : 'Loop offline — the prompt will be spooled and delivered when it reconnects.'"
+                                    style="width: 100%"
+                                    :disabled="promptBusy"
+                                    @keydown.ctrl.enter="sendPrompt"
+                                />
+                                <small class="consumer-edit__hint">
+                                    Sent <strong>verbatim</strong> — no moderation, no wake-phrase.
+                                    {{ original.present
+                                        ? "Loop is live → delivered now."
+                                        : "Loop is offline → spooled until it reconnects." }}
+                                    Ctrl+Enter to send.
+                                </small>
+                                <div class="consumer-edit__actions">
+                                    <Button
+                                        label="Send prompt"
+                                        icon="pi pi-send"
+                                        size="small"
+                                        severity="secondary"
+                                        :loading="promptBusy"
+                                        :disabled="!promptText.trim()"
+                                        @click="sendPrompt"
+                                    />
+                                </div>
+                            </div>
+
+                            <div class="consumer-edit__actions">
+                                <Button
+                                    label="Cancel"
+                                    text
+                                    size="small"
+                                    :disabled="saving"
+                                    @click="emit('close')"
+                                />
+                                <Button
+                                    label="Save"
+                                    icon="pi pi-save"
+                                    size="small"
+                                    :loading="saving"
+                                    @click="save"
+                                />
+                            </div>
+                        </div>
+                    </TabPanel>
+                </TabPanels>
+            </Tabs>
         </template>
     </AdminDetailLayout>
 </template>
@@ -356,6 +394,14 @@ async function sendPrompt() {
 <style>
 /* Layout (largeur + carte) → `<AdminDetailLayout>` (#458). */
 /* En-tête (breadcrumb + titre) → bricks internes du layout. */
+/* #460 — chaque tab applique sa gouttière verticale, miroir du body card
+   pré-tabs (avant le split Overview/Edit). */
+.consumer-edit__tab {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    padding-top: 0.6rem;
+}
 .consumer-edit__error {
     color: var(--p-red-500);
 }
