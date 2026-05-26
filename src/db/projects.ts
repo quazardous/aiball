@@ -1026,12 +1026,17 @@ export function getProjectStatsRich(project: string): ProjectStatsRich {
         .slice(0, 5);
 
     // ---- Token effort (#406, suite #404) ----
-    // Cost-equivalent weighting mirrors the UI's estTokenCost (in + cache-writes
-    // + out full, cache reads 0.1×; #404 findings) so "top by cost" matches the
-    // per-ticket badge. We return raw counts; the UI recomputes the estimate.
+    // The headline UI metric is `estTokenEffort` (in + cache_w + out, NO
+    // cache_r) — david `#446` switched the UI off the cost-equivalent
+    // weighting because re-reading the same context each turn cumulated
+    // cache_r and inflated the displayed total ("cumule le cumul"). The
+    // SORT key here must match what the UI shows ; otherwise the bars
+    // are rendered in the order of cost-equivalent (cache_r-heavy) but
+    // labelled with effort, and a high-effort/low-cache-read ticket
+    // surfaces at the bottom of the supposed "Top 3" — david `#466`.
+    // Same formula as frontend/src/lib/format.ts::estTokenEffort.
     const tokenMap = getTicketTokenUsage(ticketIds);
-    const tokCost = (u: TokenTally) =>
-        u.tokens_in + u.cache_w + u.tokens_out + Math.round(u.cache_r * 0.1);
+    const tokEffort = (u: TokenTally) => u.tokens_in + u.cache_w + u.tokens_out;
     const tokTitleById = new Map(tickets.map((t) => [t.id, t.editedTitle ?? t.title ?? ""]));
     const tokTotal: TokenTally = { tokens_in: 0, tokens_out: 0, cache_w: 0, cache_r: 0, updated_at: "" };
     const tokRows: { id: number; title: string; token_usage: TokenTally }[] = [];
@@ -1043,8 +1048,8 @@ export function getProjectStatsRich(project: string): ProjectStatsRich {
         if (u.updated_at > tokTotal.updated_at) tokTotal.updated_at = u.updated_at;
         tokRows.push({ id, title: tokTitleById.get(id) ?? "", token_usage: u });
     }
-    tokRows.sort((a, b) => tokCost(b.token_usage) - tokCost(a.token_usage));
-    // #406 david 3q954y: "le top 3 des tickets les plus couteux".
+    tokRows.sort((a, b) => tokEffort(b.token_usage) - tokEffort(a.token_usage));
+    // #406 david `3q954y` : "le top 3 des tickets les plus couteux".
     const topTokenTickets = tokRows.slice(0, 3);
     const tokenUsageTotal = tokenMap.size > 0 ? tokTotal : null;
 
