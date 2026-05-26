@@ -263,6 +263,49 @@ export const workFilters = sqliteTable("work_filters", {
     index("idx_work_filters_consumer").on(t.consumerId),
 ]);
 
+// #457 — unified automation engine (event-driven rule engine). Single table
+// for ALL automation rules : the legacy `rules` (moderation) + `work_filters`
+// (pickup gate) migrate into this in slice 3, AND new triggers
+// (ticket_created, ticket_tagged) + new actions (assign_to) plug in without
+// any further schema change (action_kind + JSON action_data carry the
+// discriminator). See `src/db/automation.ts` for the typed Rule shape and
+// `src/automation/engine.ts` for the pure matcher.
+export const automationRules = sqliteTable("automation_rules", {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    /** Lifecycle event that fires this rule. See `Trigger` in db/automation.ts. */
+    trigger: text("trigger").notNull(),
+    /** NULL = global rule. Otherwise the consumer_id this rule applies to
+     *  (work-filter case — narrows the pickup gate for that agent only). */
+    scopeConsumer: text("scope_consumer"),
+    /** Condition vocabulary — all optional (NULL = "any"). Each maps to a
+     *  ticket/event attribute the engine checks at fire time. */
+    matchProject: text("match_project"),
+    matchKind: text("match_kind"),
+    matchByAgent: text("match_by_agent"),
+    /** JSON array of tag names, any-of match (a ticket "matches" when it
+     *  carries ≥1 listed tag). Same semantics as the legacy work_filters
+     *  `match_tags`. */
+    matchTags: text("match_tags").notNull().default("[]"),
+    /** ticket_tagged trigger only — fires only when THIS specific tag was
+     *  the one just added (not just present). NULL = any tag addition. */
+    matchTagAdded: text("match_tag_added"),
+    matchIntent: text("match_intent"),
+    matchPriority: text("match_priority"),
+    /** Discriminator : decision / pickup / assign / add_tag / set_priority /
+     *  notify. New actions = new value, no schema change. */
+    actionKind: text("action_kind").notNull(),
+    /** JSON payload, typed by action_kind. e.g. for `assign` :
+     *  `{"consumer_id":"aiball-windows"}`. Decoded by the engine. */
+    actionData: text("action_data").notNull().default("{}"),
+    enabled: integer("enabled").notNull().default(1),
+    position: integer("position").notNull().default(0),
+    note: text("note"),
+    createdAt: text("created_at").notNull(),
+}, (t) => [
+    index("idx_automation_rules_trigger").on(t.trigger),
+    index("idx_automation_rules_scope_consumer").on(t.scopeConsumer),
+]);
+
 // #449: generic config OVERRIDES — the storage half of the unified config
 // manager. The schema (keys/scope/type/default/protected) lives in code
 // (src/config/schema.ts); this table only holds a key's override at a layer.
@@ -569,6 +612,9 @@ export type NewRuleRow = typeof rules.$inferInsert;
 
 export type WorkFilterRow = typeof workFilters.$inferSelect;
 export type NewWorkFilterRow = typeof workFilters.$inferInsert;
+
+export type AutomationRuleRow = typeof automationRules.$inferSelect;
+export type NewAutomationRuleRow = typeof automationRules.$inferInsert;
 
 export type ConfigOverrideRow = typeof configOverrides.$inferSelect;
 export type NewConfigOverrideRow = typeof configOverrides.$inferInsert;
