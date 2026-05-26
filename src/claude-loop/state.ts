@@ -764,7 +764,10 @@ export type LoopStatus = "idle" | "boot" | "busy";
 // — david's bar runs the busy-blue state where white washed out.
 let BAR_COLORS: AiballConfig["colors"] | null = null;
 function barColors(): AiballConfig["colors"] {
-    if (!BAR_COLORS) BAR_COLORS = loadConfig().colors;
+    // #480 : `AIBALL_PROJECT_CWD` exporté par claude-loop start (sinon
+    // process.cwd() qui peut être un autre repo si on a spawn depuis un
+    // dev checkout). Idem pour le `workflow.hint_branch` ci-dessous.
+    if (!BAR_COLORS) BAR_COLORS = loadConfig(process.env.AIBALL_PROJECT_CWD || process.cwd()).colors;
     return BAR_COLORS;
 }
 const stateBg = (col: AiballConfig["colors"], s: LoopStatus): string =>
@@ -1151,7 +1154,14 @@ export async function buildContextPhrase(
         // the russian-doll lookup for object-shape slots. Fallbacks
         // mirror the prior hardcoded wording so a broken yaml still
         // ships a sensible prompt.
-        const cfg = loadConfig();
+        //
+        // #480 david : on lit la config à partir du CWD PROJET (posé par
+        // claude-loop start dans `AIBALL_PROJECT_CWD`), pas du
+        // `process.cwd()` du timer. Sans ça, un loop spawn depuis un autre
+        // checkout (typiquement aiball/) tombait sur le `.aiball.yaml` de
+        // ce checkout et héritait de ses prompts (les wakes m2m sortaient
+        // en français parce que aiball/.aiball.yaml a un override FR).
+        const cfg = loadConfig(process.env.AIBALL_PROJECT_CWD || process.cwd());
         // #400 recadré (david b296px): tone is back as a SELECTION layer. A slot
         // may carry per-tone buckets `{ <tone>: … }`; renderSlot narrows to
         // slot[tone] (fallback directive). Applied uniformly, not per-placeholder.
@@ -1461,7 +1471,9 @@ export function buildWakePhrase(hint: WakeHint | undefined, pingsAbsPath: string
     // (worktree off by default); the "not on main" nudge enforces the
     // no-runtime-switch rule. request/other intents get nothing extra.
     if (intent === "feature") {
-        const wf = loadConfig().workflow;
+        // #480 : cwd projet via AIBALL_PROJECT_CWD ; sinon le timer pioche
+        // workflow.hint_branch dans le mauvais `.aiball.yaml`.
+        const wf = loadConfig(process.env.AIBALL_PROJECT_CWD || process.cwd()).workflow;
         const where = wf.hint_worktree
             ? "a dedicated worktree + PR"
             : wf.hint_branch

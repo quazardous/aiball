@@ -504,6 +504,14 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // a random uuid via AiballClient.
         ...(ctx.agent ? [`export AIBALL_AGENT=${shQuote(ctx.agent)}`] : []),
         ...(ctx.project ? [`export AIBALL_PROJECT=${shQuote(ctx.project)}`] : []),
+        // #480 david : le timer + les hooks sont spawn sans `cwd:` explicite
+        // côté Node, donc ils héritent du cwd du shell de lancement
+        // (typiquement le dev checkout aiball/). `loadConfig()` no-arg
+        // tombait alors sur aiball/.aiball.yaml et les prompts FR d'aiball
+        // fuyaient dans le wake de tous les autres loops. On expose le vrai
+        // cwd projet (résolu via `canonicalCwd(ctx.cwd)` au start) ; chaque
+        // appel à `loadConfig` côté loop le passe explicitement.
+        `export AIBALL_PROJECT_CWD=${shQuote(cwd)}`,
         // #390: remote-daemon connection for the timer + hooks (they source
         // this file). Empty AIBALL_SOCK forces TCP — see the process.env
         // note above. Mirrors what we exported into process.env for the
