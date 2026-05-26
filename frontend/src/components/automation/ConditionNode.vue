@@ -36,9 +36,17 @@ const emit = defineEmits<{
         @update="(n) => emit('update', n)"
         @remove="emit('remove')"
     />
+    <!-- david `3cncqt` : les × n'apparaissaient pas sur les containers
+         nestés parce que ConditionNode ne passait pas `removable` →
+         ContainerBlock défaultait à `false` partout sauf à la root où
+         RuleEditor le passait explicitement. Ici on l'active : par
+         construction tout container atteint via ConditionNode est un
+         ENFANT (la root est rendue directement par RuleEditor sans
+         passer par ConditionNode). -->
     <ContainerBlock
         v-else
         :node="node"
+        :removable="true"
         @update="(n) => emit('update', n)"
         @remove="emit('remove')"
     />
