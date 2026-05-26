@@ -20,6 +20,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
+import { useConfirm } from "primevue/useconfirm";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -38,9 +39,17 @@ const truncated = ref<boolean>(false);
 const isFullscreen = ref<boolean>(false);
 // #472 — read-write mode toggle. Default OFF (read-only) so the user can't
 // accidentally type into a live claude session just by focusing the
-// browser tab. Flip via the keyboard icon in the bar.
+// browser tab. The toggle is a labeled button ("Enable typing" / "Disable
+// typing") rather than a bare icon, and the FIRST activation per mount is
+// gated by a ConfirmDialog — david `98veqc` : "se débloque avec un toggle"
+// → make the unlock deliberate, not a stray click. Subsequent toggles
+// within the same tab session bypass the confirm (it's a safety net for
+// the first time, not a per-click prompt).
 const isReadWrite = ref<boolean>(false);
+const hasConfirmedRw = ref<boolean>(false);
 const sendError = ref<string | null>(null);
+
+const confirmDialog = useConfirm();
 
 let es: EventSource | null = null;
 let term: Terminal | null = null;
@@ -143,7 +152,30 @@ async function postKeys(data: string) {
 }
 
 function toggleReadWrite() {
-    isReadWrite.value = !isReadWrite.value;
+    if (isReadWrite.value) {
+        // Disabling : no confirm — going BACK to safe (read-only) is fine.
+        isReadWrite.value = false;
+        return;
+    }
+    // Enabling. Confirm once per mount, then unlocked freely for the rest
+    // of the tab session. If the operator re-opens the tab (component
+    // re-mount), the confirm is asked again.
+    if (hasConfirmedRw.value) {
+        isReadWrite.value = true;
+        return;
+    }
+    confirmDialog.require({
+        header: "Enable typing into the terminal",
+        message: `You're about to enable typing into ${props.agentName}'s live claude-loop tmux session. Every keystroke you type — including Ctrl-C, Enter, paste — will be sent to the running session. Continue ?`,
+        icon: "pi pi-pencil",
+        acceptLabel: "Enable typing",
+        rejectLabel: "Cancel",
+        acceptClass: "p-button-warning",
+        accept: () => {
+            hasConfirmedRw.value = true;
+            isReadWrite.value = true;
+        },
+    });
 }
 
 // xterm's `disableStdin` swallow input at the terminal layer, so the toggle
@@ -291,20 +323,21 @@ onBeforeUnmount(() => {
             <span v-if="sendError" class="terminal-view__warn" :title="sendError">
                 <i class="pi pi-exclamation-triangle" /> send-keys failed
             </span>
-            <!-- #472 — read-write toggle. Default = read-only (lock icon).
-                 Click → flip xterm.options.disableStdin live, keystrokes
-                 start round-tripping through the SSE/POST pair. The visual
-                 cursor blink also flips on. -->
+            <!-- #472 — read-write toggle. David `98veqc` "se débloque avec
+                 un toggle" → labeled button (not bare icon) + ConfirmDialog
+                 on the first activation per mount. Subsequent flips bypass
+                 the confirm (it's a safety net for the deliberate unlock,
+                 not a per-click prompt). -->
             <Button
                 :icon="isReadWrite ? 'pi pi-pencil' : 'pi pi-lock'"
+                :label="isReadWrite ? 'Disable typing' : 'Enable typing'"
                 :severity="isReadWrite ? 'success' : 'secondary'"
                 size="small"
-                text
-                rounded
-                :aria-label="isReadWrite ? 'Switch to read-only' : 'Switch to read-write (type into the pane)'"
+                :outlined="!isReadWrite"
+                :aria-label="isReadWrite ? 'Disable typing into the pane (back to read-only)' : 'Enable typing into the pane (read-write)'"
                 :title="isReadWrite
-                    ? 'Read-write mode active — your keys reach the agent tmux pane'
-                    : 'Read-only mode — click to enable typing'"
+                    ? 'Read-write mode active — your keys reach the agent tmux pane. Click to lock back.'
+                    : 'Read-only mode — click to unlock typing (confirm prompt)'"
                 @click="toggleReadWrite"
             />
             <Button
