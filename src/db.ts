@@ -100,6 +100,7 @@ export {
     reclassifyMessageDecision,
     removeMessageDecision,
     setMessageSummary,
+    setMessageVote,
     listPendingResolutionDecisionsForTicket,
 } from "./db/messages.js";
 

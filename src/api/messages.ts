@@ -34,6 +34,7 @@ import {
     reclassifyMessageDecision,
     removeMessageDecision,
     setMessageSummary,
+    setMessageVote,
     updateMessageStatus,
     type Intent,
     type MessageKind,
@@ -46,7 +47,7 @@ import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
 import { broadcast } from "../ws.js";
 import { emitLifecycle } from "../event-bus.js";
-import { badRequest, consumerOf, notFound, withTags, withTagsOne } from "./_helpers.js";
+import { badRequest, consumerOf, notFound, withTags, withTagsOne, withVotesOne } from "./_helpers.js";
 
 export const messagesRouter = Router();
 
@@ -331,6 +332,39 @@ messagesRouter.post("/messages/:id/summarize", (req: Request, res: Response) => 
         const updated = setMessageSummary(id, body.summary);
         if (!updated) return notFound(res);
         const decorated = withTagsOne(updated);
+        broadcast({ type: "message_edited", data: decorated });
+        res.json(decorated);
+    } catch (e) {
+        return res.status(409).json({ error: (e as Error).message });
+    }
+});
+
+/**
+ * #518 (david `uzwfc3` MVP option A) — vote +1/-1 sur un commentaire,
+ * per-author. Body `{value: 1 | -1 | 0}` ; 0 retract le vote courant.
+ * Returns the message décoré avec `votes_summary` pour le voter, +
+ * broadcast pour que les autres clients live recomputent leur summary
+ * (chaque viewer a sa `mine` propre, donc côté UI on re-décore localement).
+ *
+ *   POST /api/messages/:id/vote
+ *   body: { value: 1 | -1 | 0 }
+ *
+ * 409 si la cible n'est pas un commentaire (votes comment-only).
+ */
+messagesRouter.post("/messages/:id/vote", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
+    const body = (req.body ?? {}) as { value?: unknown };
+    if (body.value !== 1 && body.value !== -1 && body.value !== 0) {
+        return badRequest(res, "value must be 1, -1, or 0");
+    }
+    const voter = consumerOf(req);
+    try {
+        const updated = setMessageVote(id, voter, body.value);
+        if (!updated) return notFound(res);
+        const decorated = withVotesOne(withTagsOne(updated), voter);
+        // Broadcast pour live update — chaque viewer recompute son `mine` côté
+        // client à partir de meta.votes (qui IS dans le payload broadcasté).
         broadcast({ type: "message_edited", data: decorated });
         res.json(decorated);
     } catch (e) {

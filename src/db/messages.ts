@@ -976,6 +976,50 @@ export function setMessageSummary(
 }
 
 /**
+ * #518 (david `uzwfc3` MVP option A) — set/clear a vote (binary +1/-1)
+ * on a comment, per-author (1 vote/consumer). Value 0 retracts the
+ * voter's existing vote (delete entry from meta.votes). Throws on a
+ * non-comment target (votes are comment-only — tickets carry their
+ * own lifecycle via resolved/blocked/close, no need for thumbs).
+ * Returns the updated message or null if id doesn't exist.
+ */
+export function setMessageVote(
+    messageId: number,
+    consumerId: string,
+    value: 1 | -1 | 0,
+): Message | null {
+    const db = getDb();
+    return db.transaction((tx) => {
+        const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!m) return null;
+        if (m.kind !== "comment_added") {
+            throw new Error("votes are only meaningful on comments");
+        }
+        const meta = parseMeta(m.meta ?? null);
+        const votes = { ...(meta.votes ?? {}) };
+        if (value === 0) {
+            delete votes[consumerId];
+        } else {
+            votes[consumerId] = value;
+        }
+        if (Object.keys(votes).length === 0) {
+            delete meta.votes;
+        } else {
+            meta.votes = votes;
+        }
+        tx.update(schema.messages)
+            .set({ meta: serializeMeta(meta) })
+            .where(eq(schema.messages.id, messageId))
+            .run();
+        const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        if (!fresh) return null;
+        const parent = tx.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
+        return messageRowToMessage(fresh, parent?.project ?? "");
+    });
+}
+
+/**
  * Reclassify a comment's decision kind without changing its status
  * (#B.129 follow-up). Throws when the decision is missing or already
  * terminal. HTTP layer maps to 409 on conflict.

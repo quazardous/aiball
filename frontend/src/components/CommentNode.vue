@@ -53,6 +53,57 @@ function broadcastRefresh() {
 }
 
 const decideBusy = ref(false);
+const voteBusy = ref(false);
+
+// #518 (david `uzwfc3` option A) — vote state pour ce comment. Lit
+// `votes_summary` injecté par le backend (par viewer-aware request) ;
+// fallback à un calcul local quand le payload n'a pas le champ (cas
+// d'un WS broadcast cross-user où le `mine` du sender n'est pas le tien).
+const myConsumerId = computed<string>(() => localStorage.getItem("aiball.human_id") ?? "");
+const votesSummary = computed(() => {
+    if (props.msg.votes_summary) return props.msg.votes_summary;
+    // Fallback : recompute depuis meta.votes (présent dans le payload même
+    // sur les broadcasts WS). Meta est typé loose côté front, on parse.
+    type LooseMeta = { votes?: Record<string, 1 | -1> };
+    const raw = (props.msg as unknown as { meta?: LooseMeta | string | null }).meta;
+    let parsed: LooseMeta = {};
+    if (typeof raw === "string" && raw) {
+        try { parsed = JSON.parse(raw); } catch { /* keep empty */ }
+    } else if (raw && typeof raw === "object") {
+        parsed = raw;
+    }
+    const votes = parsed.votes ?? {};
+    let up = 0;
+    let down = 0;
+    let mine: 1 | -1 | null = null;
+    for (const [voter, v] of Object.entries(votes)) {
+        if (v === 1) up += 1;
+        else if (v === -1) down += 1;
+        if (voter === myConsumerId.value) mine = v;
+    }
+    return { up, down, mine };
+});
+
+async function vote(direction: 1 | -1) {
+    if (voteBusy.value) return;
+    voteBusy.value = true;
+    try {
+        // Toggle : si on a déjà voté pareil, on retract (value=0). Sinon on
+        // pose le vote (flip d'une opposite ou nouveau vote).
+        const value: 1 | -1 | 0 = votesSummary.value.mine === direction ? 0 : direction;
+        await api.voteOnMessage(props.msg.id, value);
+        broadcastRefresh();
+    } catch (e) {
+        toast.add({
+            severity: "error",
+            summary: "Vote failed",
+            detail: e instanceof Error ? e.message : String(e),
+            life: 4000,
+        });
+    } finally {
+        voteBusy.value = false;
+    }
+}
 async function decide(action: "approve" | "reject") {
     decideBusy.value = true;
     try {
@@ -502,6 +553,34 @@ async function doDelete() {
                 :loading="classifyBusy"
                 @click="classifyActions[0].command()"
             />
+            <!-- #518 (david `uzwfc3` option A) — votes binaires +1/-1.
+                 Compteur muté + bouton actif si voté. Re-cliquer dans la
+                 même direction retract (toggle). Pas de fan-out (no
+                 trigger v1, david). -->
+            <span class="comment-votes" :class="{ 'comment-votes--busy': voteBusy }">
+                <button
+                    type="button"
+                    class="comment-vote-btn"
+                    :class="{ 'comment-vote-btn--mine': votesSummary.mine === 1 }"
+                    :disabled="voteBusy"
+                    :title="votesSummary.mine === 1 ? 'Retract your up-vote' : 'Up-vote this comment'"
+                    @click="vote(1)"
+                >
+                    <i class="pi pi-thumbs-up" />
+                    <span v-if="votesSummary.up > 0" class="comment-vote-count">{{ votesSummary.up }}</span>
+                </button>
+                <button
+                    type="button"
+                    class="comment-vote-btn"
+                    :class="{ 'comment-vote-btn--mine': votesSummary.mine === -1 }"
+                    :disabled="voteBusy"
+                    :title="votesSummary.mine === -1 ? 'Retract your down-vote' : 'Down-vote this comment'"
+                    @click="vote(-1)"
+                >
+                    <i class="pi pi-thumbs-down" />
+                    <span v-if="votesSummary.down > 0" class="comment-vote-count">{{ votesSummary.down }}</span>
+                </button>
+            </span>
         </div>
     </div>
 </template>
@@ -515,5 +594,41 @@ async function doDelete() {
     padding: 0.25rem 0.1rem;
     color: var(--p-text-muted-color, #888);
     font-size: 0.85rem;
+}
+/* #518 — vote buttons inline footer. Discret par défaut, accent quand
+   l'utilisateur a voté. */
+.comment-votes {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    margin-left: auto;
+}
+.comment-votes--busy { opacity: 0.6; }
+.comment-vote-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.45rem;
+    border: 1px solid transparent;
+    border-radius: 0.3rem;
+    background: transparent;
+    color: var(--p-text-muted-color);
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: background 120ms, color 120ms, border-color 120ms;
+}
+.comment-vote-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
+    color: var(--p-text-color);
+}
+.comment-vote-btn--mine {
+    border-color: var(--p-primary-color);
+    color: var(--p-primary-color);
+    background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
+}
+.comment-vote-btn:disabled { cursor: progress; }
+.comment-vote-count {
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
 }
 </style>

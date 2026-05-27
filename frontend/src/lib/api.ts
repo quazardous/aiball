@@ -83,6 +83,11 @@ export interface Message {
      *  + followers. Drives the per-card scope picto. */
     scope?: "internal" | "default" | "broadcast";
     tags: Tag[];
+    /** #518 — agrégé pour les comments uniquement. `mine` est calculé
+     *  côté serveur pour le viewer du request. Optionnel : un payload
+     *  antérieur (broadcast cross-user) peut ne pas l'avoir, et on
+     *  recompute alors localement à partir de `meta.votes`. */
+    votes_summary?: { up: number; down: number; mine: 1 | -1 | null };
 }
 
 export type TicketStage =
@@ -770,6 +775,11 @@ export const api = {
      *  with new `assignee` + `assigned_by` + `assigned_at`. */
     assignTicket: (id: number, assignee: string) =>
         req<Message>("POST", `/api/tickets/${id}/assign`, { assignee }),
+    /** #518 — vote +1 / -1 / 0 (retract) sur un commentaire, per-author.
+     *  Le serveur stocke par consumer_id dans meta.votes. Renvoie le message
+     *  décoré avec `votes_summary` recalculé pour le caller. */
+    voteOnMessage: (id: number, value: 1 | -1 | 0) =>
+        req<Message>("POST", `/api/messages/${id}/vote`, { value }),
     // ---- ticket subscription / mute + owner (#352) -----------------------
     /** Current consumer's relationship to a ticket: "followed" | "muted" | null. */
     ticketSubState: (ticketId: number) =>

@@ -64,7 +64,7 @@ import { parse as parseYaml } from "yaml";
 import { RELATION_KINDS, isRelationKind, isLineageRelationKind, type RelationKind } from "../relations.js";
 import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
-import { badRequest, consumerOf, notFound, withTags } from "./_helpers.js";
+import { badRequest, consumerOf, notFound, withTags, withVotes } from "./_helpers.js";
 import type { AuthenticatedRequest } from "../auth.js";
 import { moveTicketTo } from "../messages.js";
 import { paginateFeed, type FeedPagination } from "./feed-paginate.js";
@@ -1358,7 +1358,9 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
     const tailRaw = req.query.tail;
     const tailParsed = typeof tailRaw === "string" ? Number.parseInt(tailRaw, 10) : NaN;
     const tail = Number.isFinite(tailParsed) && tailParsed > 0 ? tailParsed : 1;
-    let outComments = enrichRelationStages(withTags(threadMessages));
+    // #518 — décorer avec votes_summary (up/down + viewer's mine). Le viewer
+    // est consumerOf(req) : chaque user voit son `mine` calculé pour lui.
+    let outComments = enrichRelationStages(withVotes(withTags(threadMessages), consumerOf(req)));
     let pivotCommentId: number | null = null;
     let pivotApplied = false;
     if (brief) {

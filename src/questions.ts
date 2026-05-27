@@ -71,6 +71,13 @@ export interface MessageMeta {
      *  a moderation reject so the UI thread can render a tombstone for it
      *  (re-surfaced only with `?include_deleted=1`). */
     deleted?: { by: string; at: string };
+    /** #518 (david `uzwfc3` MVP option A) — votes binaires +1/-1 sur les
+     *  commentaires. Per-author (1 vote/consumer), retract-able en repostant
+     *  la même value (toggle off) ou flip-able en postant l'autre. Stocké
+     *  ici dans meta plutôt qu'en table dédiée pour éviter une migration
+     *  v1 ; si plus tard on veut stats agrégées, on extrait vers
+     *  `comment_votes`. La key est le consumer_id votant. */
+    votes?: Record<string, 1 | -1>;
 }
 
 // `- [ ]` or `- [x]` line, optionally preceded by indent, optionally
