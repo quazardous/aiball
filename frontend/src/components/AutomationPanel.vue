@@ -1,23 +1,22 @@
 <script setup lang="ts">
 /**
- * #457 — "Automation" : regroupe sous une seule page tous les moteurs
- * d'automation du workflow.
+ * #457 — "Automation" : seule page d'automation du workflow.
  *
- * Slice 5.3a — quand `editRuleId` est set (URL = `/automation/rules/<id>`
- * ou `/new`), on affiche la rule detail page À LA PLACE de la liste +
- * sections legacy. La nav `Automation → <id>` se fait via DetailHeader
- * (composant générique aiball détail) qui émet `close` pour revenir à
- * la liste.
+ * Slice 5.3a — quand `editRuleId` est set (URL = `/automation/rules/<id>` ou
+ * `/new`), on affiche la rule detail page À LA PLACE de la liste. La nav
+ * `Automation → <id>` se fait via DetailHeader (composant générique aiball
+ * détail) qui émet `close` pour revenir à la liste.
  *
- * Sections legacy `<RulesPanel>` + `<WorkFiltersPanel>` restent en bas
- * du panel d'accueil tant que slice 6 (migration legacy → unified) ne
- * les retire pas (cf. ticket #465).
+ * #506 — les anciens panels `<RulesPanel>` (moderation legacy) + `<WorkFiltersPanel>`
+ * (work filters legacy) ont été retirés une fois que #483 a re-wiré les deux
+ * call-sites sur `automation_rules` via le moteur unifié : leurs UIs éditaient
+ * des rows qui ne sont plus consultées par le moteur — affichage trompeur.
+ * Le backend (CLI `aiball rules ls`, API `/api/rules`, `/api/work-filters`)
+ * reste en place pour l'instant ; suppression DB + code legacy = #465 reopen.
  */
 import PanelHeader from "./ui/PanelHeader.vue";
 import AutomationRulesSection from "./AutomationRulesSection.vue";
 import AutomationRuleDetailPage from "./AutomationRuleDetailPage.vue";
-import RulesPanel from "./RulesPanel.vue";
-import WorkFiltersPanel from "./WorkFiltersPanel.vue";
 
 defineProps<{ editRuleId: string | null }>();
 const emit = defineEmits<{
@@ -36,16 +35,11 @@ const emit = defineEmits<{
         <template v-else>
             <PanelHeader title="Automation">
                 <p class="aiball-explainer aiball-explainer--muted">
-                    Three automation surfaces. <strong>Automation rules</strong> is the
-                    unified event-driven engine (assign on tag, etc.).
-                    <strong>Moderation rules</strong> + <strong>work filters</strong> are
-                    legacy ordered-config lists that will migrate into the unified engine
-                    in a follow-up slice.
+                    Event-driven rules (assign on tag, moderation decisions, work-filter
+                    pickups). All routed through the unified engine.
                 </p>
             </PanelHeader>
             <AutomationRulesSection @open-edit="(id: string) => emit('open-edit', id)" />
-            <RulesPanel />
-            <WorkFiltersPanel />
         </template>
     </div>
 </template>

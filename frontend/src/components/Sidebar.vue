@@ -16,7 +16,9 @@ export interface ProjectListItem {
     running?: boolean;
 }
 
-export type SettingsPanel = "general" | "automation" | "rules" | "work-filters" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "compose";
+// #506 — `rules` + `work-filters` retirés (panels legacy supprimés, leur UI
+// éditait des rows non consultées par le moteur depuis #483).
+export type SettingsPanel = "general" | "automation" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "compose";
 
 /**
  * Per-project sub-pages (#B.127): "settings" hosts the moderation
@@ -185,12 +187,13 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
                 <i class="pi pi-folder" />
                 <span>Projects</span>
             </button>
-            <!-- #457: moderation rules + work filters merged under one
-                 "Automation" entry (they're both ordered conditional config). -->
+            <!-- #457 puis #506 : les anciens panels moderation/work-filters
+                 ont été retirés (le moteur unifié sert les 2 verdicts depuis
+                 #483), l'entrée pointe directement vers la page Automation. -->
             <button
                 type="button"
                 class="sidebar-item"
-                :class="{ active: panel === 'automation' || panel === 'rules' || panel === 'work-filters' }"
+                :class="{ active: panel === 'automation' }"
                 @click="emit('open-panel', 'automation')"
             >
                 <i class="pi pi-bolt" />
