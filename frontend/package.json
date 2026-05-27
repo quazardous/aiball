@@ -20,7 +20,8 @@
     "marked": "^18.0.3",
     "primeicons": "^7.0.0",
     "primevue": "^4.2.0",
-    "vue": "^3.5.0"
+    "vue": "^3.5.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.1.4",

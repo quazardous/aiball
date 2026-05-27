@@ -55,15 +55,20 @@ import { findConfigUpwards, globalConfigPath } from "../autopoll/config.js";
 import type {
     AutomationAction,
     AutomationRule,
+    ConditionTree,
     Trigger,
 } from "../db/automation.js";
-import { synthesizeLegacyExpression } from "../db/automation.js";
+import { synthesizeLegacyExpression, validateConditionTree } from "../db/automation.js";
 
 const VALID_TRIGGERS: Trigger[] = [
     "message_posted",
     "actionable_eval",
     "ticket_created",
     "ticket_tagged",
+    // #509 — keep aligned with `db/automation.ts::VALID_TRIGGERS`.
+    "ticket_priority_changed",
+    "ticket_project_changed",
+    "ticket_status_changed",
 ];
 
 const VALID_PRIORITIES = ["urgent", "high", "normal", "low"] as const;
@@ -96,15 +101,19 @@ function parseEntry(raw: unknown, syntheticId: number, source: string): Automati
     // array of action maps (slice 5.4 stack — david `aa48pd`). The first
     // surviving action populates the back-compat `action` field ; the
     // full sequence lands in `actions`.
-    const rawDo = o.do;
+    // #519 — accepte aussi `actions: [...]` (shape canonique wire — chaque
+    // entry est `{kind: "assign"|"decision"|..., ...}`) en plus du sugar
+    // `do:`. Le code tab du RuleEditor dump cette shape pour matcher 1:1
+    // l'AutomationAction discriminated union.
+    const rawActions = o.actions ?? o.do;
     const actionList: AutomationAction[] = [];
-    if (Array.isArray(rawDo)) {
-        for (const entry of rawDo) {
+    if (Array.isArray(rawActions)) {
+        for (const entry of rawActions) {
             const a = decodeAction(entry, source);
             if (a) actionList.push(a);
         }
     } else {
-        const a = decodeAction(rawDo, source);
+        const a = decodeAction(rawActions, source);
         if (a) actionList.push(a);
     }
     if (actionList.length === 0) return null;
@@ -133,7 +142,16 @@ function parseEntry(raw: unknown, syntheticId: number, source: string): Automati
     const matchTagAdded = typeof when.tag_added === "string" ? when.tag_added : null;
     const matchIntent = typeof when.intent === "string" ? when.intent : null;
     const scopeConsumer = typeof when.scope_consumer === "string" ? when.scope_consumer : null;
-    const expression = synthesizeLegacyExpression({
+    // #519 — accepte aussi `expression:` (full ConditionTree au top-level)
+    // pour les rules avec OR / NOT / nesting que le legacy `when:` ne peut
+    // pas exprimer. Quand présent et valide, wins ; sinon synth from when.
+    const explicitExpr: ConditionTree | null = o.expression !== undefined
+        ? validateConditionTree(o.expression)
+        : null;
+    if (o.expression !== undefined && !explicitExpr) {
+        console.warn(`[automation/yaml] ${source} : invalid 'expression' tree — falling back to 'when:' synth`);
+    }
+    const expression = explicitExpr ?? synthesizeLegacyExpression({
         match_project: matchProject,
         match_kind: matchKind,
         match_by_agent: matchByAgent,
@@ -172,6 +190,46 @@ function decodeAction(raw: unknown, source: string): AutomationAction | null {
         return null;
     }
     const d = raw as Record<string, unknown>;
+    // #519 — accepte la shape CANONIQUE wire `{kind: "assign"|"decision"|...,
+    // payload}` en plus du sucre legacy (`assign_to: "..."`, etc.). C'est ce
+    // que le RuleEditor code tab dump en YAML pour matcher 1:1 le typage TS.
+    if (typeof d.kind === "string") {
+        switch (d.kind) {
+            case "assign":
+                if (typeof d.consumer_id === "string" && d.consumer_id.trim()) {
+                    return { kind: "assign", consumer_id: d.consumer_id.trim() };
+                }
+                break;
+            case "decision":
+                if (d.decision === "auto" || d.decision === "review") {
+                    return { kind: "decision", decision: d.decision };
+                }
+                break;
+            case "pickup":
+                if (d.mode === "only" || d.mode === "except") {
+                    return { kind: "pickup", mode: d.mode };
+                }
+                break;
+            case "add_tag":
+                if (typeof d.tag === "string" && d.tag.trim()) {
+                    return { kind: "add_tag", tag: d.tag.trim() };
+                }
+                break;
+            case "set_priority":
+                if (typeof d.priority === "string"
+                    && (VALID_PRIORITIES as readonly string[]).includes(d.priority)) {
+                    return { kind: "set_priority", priority: d.priority as typeof VALID_PRIORITIES[number] };
+                }
+                break;
+            case "notify":
+                if (typeof d.consumer_id === "string" && d.consumer_id.trim()) {
+                    return { kind: "notify", consumer_id: d.consumer_id.trim() };
+                }
+                break;
+        }
+        console.warn(`[automation/yaml] ${source} : skipping rule — canonical action '${d.kind}' has invalid payload`);
+        return null;
+    }
     if (typeof d.assign_to === "string" && d.assign_to.trim()) {
         return { kind: "assign", consumer_id: d.assign_to.trim() };
     }

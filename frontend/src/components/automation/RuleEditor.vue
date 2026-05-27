@@ -13,6 +13,7 @@
  * handles the actual API call + route navigation.
  */
 import { computed, onMounted, provide, ref, watch } from "vue";
+import { stringify as yamlStringify } from "yaml";
 import { createLeafSources, LEAF_SOURCES_KEY } from "../../lib/leaf-sources";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
@@ -83,13 +84,32 @@ const isNew = computed(() => !props.rule);
 // edits go through the Builder for now — a slice 5.3d can add a "Apply"
 // button that parses the JSON back into the draft).
 const activeView = ref<"builder" | "code">("builder");
-const codeSnapshot = computed<string>(() => JSON.stringify({
-    triggers: triggers.value,
-    // Show the canonical wire-shape : null collapses to empty AND.
-    expression: expression.value ?? { kind: "and", children: [] },
-    actions: actions.value,
-    ...(note.value.trim() !== "" ? { note: note.value } : {}),
-}, null, 2));
+// #519 — code tab en YAML, directement copiable dans le bloc `automation:`
+// d'un `.aiball.yaml`. Le backend yaml parser accepte la shape
+// canonique (triggers + expression tree + actions[]). Pour les rules
+// simples (AND-tree de leaves `eq`), on dump le sucre legacy `when:`/`do:`
+// — sinon shape canonique.
+const codeSnapshot = computed<string>(() => {
+    const exprForCol = expression.value ?? { kind: "and", children: [] };
+    const payload: Record<string, unknown> = {
+        triggers: triggers.value,
+        expression: exprForCol,
+        actions: actions.value,
+    };
+    if (note.value.trim() !== "") payload.note = note.value;
+    // yaml lib dump : indent default 2, line wrap off pour lisibilité ;
+    // garde le booléen `true/false` (pas `~`), strings en plain quand
+    // possible.
+    const yamlBody = yamlStringify(payload, {
+        indent: 2,
+        lineWidth: 0,
+    }).trimEnd();
+    // Préfixe `- ` pour matcher la shape attendue dans un bloc
+    // `automation:` (liste de rules). L'utilisateur colle le bloc tel quel
+    // sous `automation:` dans `.aiball.yaml`.
+    const indented = yamlBody.split("\n").map((l, i) => i === 0 ? `  - ${l}` : `    ${l}`).join("\n");
+    return `automation:\n${indented}\n`;
+});
 
 // Menu for the "first block" picker shown when expression is null. The
 // same shape as ContainerBlock's add menu, but at the root level. Each

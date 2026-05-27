@@ -153,3 +153,72 @@ test("parseAutomationBlock : rejects out-of-vocabulary priority", () => {
     );
     assert.equal(rules[0]!.match_priority, null, "bad priority dropped, rule still loads");
 });
+
+// #519 — YAML accepte la shape canonique wire (`expression:` tree au lieu de
+// `when:` flat + `actions:` array de `{kind, ...}` au lieu de `do:` sugar).
+// C'est ce que dump le RuleEditor code tab pour matcher 1:1 le typage TS.
+test("parseAutomationBlock #519 : top-level `expression:` tree (OR composition)", () => {
+    const { rules } = parseAutomationBlock(
+        [
+            {
+                triggers: ["ticket_created"],
+                expression: {
+                    kind: "or",
+                    children: [
+                        { kind: "leaf", field: "tags", op: "includes", value: "win" },
+                        { kind: "leaf", field: "intent", op: "eq", value: "urgent" },
+                    ],
+                },
+                actions: [{ kind: "assign", consumer_id: "lead" }],
+            },
+        ],
+        -1,
+        SRC,
+    );
+    assert.equal(rules.length, 1);
+    const r = rules[0]!;
+    assert.equal(r.expression.kind, "or");
+    assert.equal((r.expression as { kind: "or"; children: unknown[] }).children.length, 2);
+    assert.equal(r.action.kind, "assign");
+    if (r.action.kind === "assign") assert.equal(r.action.consumer_id, "lead");
+});
+
+test("parseAutomationBlock #519 : canonical `actions: [{kind, ...}]` array shape", () => {
+    const { rules } = parseAutomationBlock(
+        [
+            {
+                triggers: ["ticket_created"],
+                when: { project: "aiball" },
+                actions: [
+                    { kind: "set_priority", priority: "urgent" },
+                    { kind: "notify", consumer_id: "lead" },
+                ],
+            },
+        ],
+        -1,
+        SRC,
+    );
+    const r = rules[0]!;
+    assert.equal(r.actions.length, 2);
+    assert.equal(r.actions[0]!.kind, "set_priority");
+    assert.equal(r.actions[1]!.kind, "notify");
+});
+
+test("parseAutomationBlock #519 : invalid `expression:` tree falls back to when synth", () => {
+    const { rules } = parseAutomationBlock(
+        [
+            {
+                triggers: ["ticket_created"],
+                expression: { kind: "bogus" }, // not a valid tree
+                when: { project: "aiball" },
+                actions: [{ kind: "assign", consumer_id: "x" }],
+            },
+        ],
+        -1,
+        SRC,
+    );
+    // synth from when → AND of one leaf [project=aiball]
+    const r = rules[0]!;
+    assert.equal(r.expression.kind, "and");
+    assert.equal((r.expression as { kind: "and"; children: unknown[] }).children.length, 1);
+});
