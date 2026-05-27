@@ -195,6 +195,7 @@ export function attachProxyWs(server: Server): void {
             // pas de duplication de la lecture/parse côté connection.
             (info.req as IncomingMessage & { __aiballNodeAuth?: { token: string; row: typeof row; ip: string | null } })
                 .__aiballNodeAuth = { token, row, ip };
+            console.log(`[proxy WS] verifyClient ACCEPTED for peer=${ip} (kind=${row.kind}) — calling cb(true)`);
             cb(true);
         },
     });
