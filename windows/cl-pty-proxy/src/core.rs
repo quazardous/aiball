@@ -170,12 +170,68 @@ fn parse_field(b: &[u8]) -> u32 {
 ///   whole, vt = the bytes (already VT), treated as down.
 /// - `ESC O .` (SS3) → kept whole.
 /// - any other run → raw bytes (paste / non-ESC), vt = the bytes, down.
+///
+/// "Eager" mode : si la dernière séquence n'est pas terminée (CSI sans final
+/// byte, SS3 sans 3e byte, ESC isolé), elle est EMISE AU CHOIX comme un Unit
+/// non-décodé. Utilisable en one-shot mais perd l'info si on lit un buffer
+/// après l'autre — le split-CSI cross-buffer drop l'ESC, et `[20~` ressort
+/// en raw (#500). Pour le streaming, voir `split_units_streaming`.
 pub fn split_units(data: &[u8]) -> Vec<Unit> {
+    let (units, consumed) = split_units_with_consumed(data);
+    // Eager mode : si tail incomplet, le fallback de l'ancien comportement
+    // émettait quand même un Unit pour ce tail. On reproduit ça en émettant
+    // les bytes restants comme un raw unit unique.
+    if consumed < data.len() {
+        let mut out = units;
+        let seq = data[consumed..].to_vec();
+        out.push(Unit { vt: seq.clone(), raw: seq, is_down: true });
+        out
+    } else {
+        units
+    }
+}
+
+/// #500 — version streaming de `split_units` : porte un buffer `pending` que
+/// le caller maintient entre 2 reads de stdin. Tail incomplet (CSI sans final
+/// byte, SS3 partiel, ESC isolé) est gardé dans `pending` au lieu d'être
+/// émis comme raw — la concat avec le read suivant peut le compléter en CSI
+/// valide. Résout le split-CSI cross-ReadFile qui perdait l'ESC initial.
+pub fn split_units_streaming(data: &[u8], pending: &mut Vec<u8>) -> Vec<Unit> {
+    // Combine pending tail + new data en un buffer contigu.
+    let mut combined = std::mem::take(pending);
+    combined.extend_from_slice(data);
+    let (units, consumed) = split_units_with_consumed(&combined);
+    // Garde la queue non-consommée pour le prochain read. Cap raisonnable
+    // (~64 bytes) : un CSI valide tient en < 32 bytes ; si on accumule
+    // plus c'est du garbage, on flush pour pas ballooner.
+    if consumed < combined.len() {
+        let tail = &combined[consumed..];
+        if tail.len() > 64 {
+            // Garbage / buffer corrompu — flush en raw, reset pending.
+            let mut out = units;
+            out.push(Unit { vt: tail.to_vec(), raw: tail.to_vec(), is_down: true });
+            return out;
+        }
+        *pending = tail.to_vec();
+    }
+    units
+}
+
+/// Coeur du parseur — split en units jusqu'à la première séquence INCOMPLETE
+/// (tail). Retourne (units, bytes_consumed). `bytes_consumed < data.len()`
+/// signale qu'il reste un préfixe incomplet en `data[consumed..]` (à mettre
+/// dans pending par le caller streaming, ou flushé en raw par le caller eager).
+fn split_units_with_consumed(data: &[u8]) -> (Vec<Unit>, usize) {
     let n = data.len();
     let mut units = Vec::new();
     let mut i = 0;
     while i < n {
-        if data[i] == 0x1b && i + 1 < n && data[i + 1] == 0x5b {
+        if data[i] == 0x1b && i + 1 >= n {
+            // Lone ESC à la fin — incomplet (peut être suivi par `[` ou `O`
+            // dans le prochain buffer). Return early ; caller met dans pending.
+            return (units, i);
+        }
+        if data[i] == 0x1b && data[i + 1] == 0x5b {
             // CSI: scan to the final byte (first byte in 0x40..=0x7e).
             let start = i + 2;
             let mut j = start;
@@ -204,32 +260,36 @@ pub fn split_units(data: &[u8]) -> Vec<Unit> {
                 i = j + 1;
                 continue;
             }
-            // Unterminated CSI at end of buffer — emit the rest as one unit.
-            let seq = data[i..].to_vec();
-            units.push(Unit { vt: seq.clone(), raw: seq, is_down: true });
-            break;
+            // Unterminated CSI à la fin — incomplet. Return early.
+            return (units, i);
         }
-        if data[i] == 0x1b && i + 1 < n && data[i + 1] == 0x4f {
+        if data[i] == 0x1b && data[i + 1] == 0x4f {
             // SS3: ESC O <byte>
-            let end = (i + 3).min(n);
+            if i + 2 >= n {
+                // SS3 incomplet (manque le 3e byte) — return early.
+                return (units, i);
+            }
+            let end = i + 3;
             let seq = data[i..end].to_vec();
             units.push(Unit { vt: seq.clone(), raw: seq, is_down: true });
             i = end;
             continue;
         }
-        // Raw run until the next ESC (paste / plain bytes — rare in win32 mode).
+        // Raw run jusqu'au prochain ESC (paste / plain bytes — rare en
+        // win32 mode). Si on hit ESC isolé après une raw run, on le laisse
+        // traîner pour la prochaine iteration de la boucle (qui le détectera
+        // comme lone ESC at end et retournera early).
         let mut j = i;
         while j < n && data[j] != 0x1b {
             j += 1;
         }
-        if j == i {
-            j = i + 1; // lone ESC at end
-        }
         let seq = data[i..j].to_vec();
-        units.push(Unit { vt: seq.clone(), raw: seq, is_down: true });
+        if !seq.is_empty() {
+            units.push(Unit { vt: seq.clone(), raw: seq, is_down: true });
+        }
         i = j;
     }
-    units
+    (units, n)
 }
 
 // --- AFK spec + detector (mirror afk-key.ts / _AfkDetector) -----------------
@@ -491,6 +551,69 @@ mod tests {
         let d = split_units(b"\x1b[1;1R");
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].vt, b"\x1b[1;1R");
+    }
+
+    // #500 — streaming variant : cross-buffer CSI doit être réassemblé.
+    #[test]
+    fn streaming_recovers_split_csi_f9() {
+        // Repro czhevy : F9 VT = ESC [ 20 ~, splittée en 2 ReadFile.
+        // Buffer A : juste ESC. Buffer B : `[20~`.
+        // Avant fix : A → unit lone ESC ; B → unit raw `[20~`.
+        // Après fix : A → 0 unit, pending = [ESC] ; B → 1 unit complet ESC[20~.
+        let mut pending = Vec::new();
+        let u1 = split_units_streaming(b"\x1b", &mut pending);
+        assert_eq!(u1.len(), 0, "lone ESC at end should buffer, not emit");
+        assert_eq!(pending, b"\x1b", "ESC kept in pending for next read");
+
+        let u2 = split_units_streaming(b"[20~", &mut pending);
+        assert_eq!(u2.len(), 1, "concat ESC + [20~ → one CSI unit");
+        assert_eq!(u2[0].vt, b"\x1b[20~", "F9 VT preserved end-to-end");
+        assert!(pending.is_empty(), "fully consumed");
+    }
+
+    #[test]
+    fn streaming_split_csi_mid_sequence() {
+        // ESC[ envoyé en buffer A, paramètres + final en buffer B.
+        let mut pending = Vec::new();
+        let u1 = split_units_streaming(b"\x1b[", &mut pending);
+        assert_eq!(u1.len(), 0);
+        assert_eq!(pending, b"\x1b[");
+        let u2 = split_units_streaming(b"20~", &mut pending);
+        assert_eq!(u2.len(), 1);
+        assert_eq!(u2[0].vt, b"\x1b[20~");
+    }
+
+    #[test]
+    fn streaming_ss3_split() {
+        // ESC O envoyé en A, byte final en B (ex. ESC O P = F1 VT).
+        let mut pending = Vec::new();
+        let u1 = split_units_streaming(b"\x1bO", &mut pending);
+        assert_eq!(u1.len(), 0);
+        let u2 = split_units_streaming(b"P", &mut pending);
+        assert_eq!(u2.len(), 1);
+        assert_eq!(u2[0].vt, b"\x1bOP");
+    }
+
+    #[test]
+    fn streaming_complete_csi_no_pending() {
+        // Buffer auto-suffisant — pending reste vide.
+        let mut pending = Vec::new();
+        let u = split_units_streaming(&k_f9(), &mut pending);
+        assert_eq!(u.len(), 1);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn streaming_garbage_tail_flushes() {
+        // Tail > 64 bytes = garbage / buffer corrompu, flush en raw au lieu
+        // de pinner indéfiniment.
+        let mut pending = Vec::new();
+        let mut huge = b"\x1b[".to_vec();
+        huge.extend(std::iter::repeat(b'0').take(100));
+        let u = split_units_streaming(&huge, &mut pending);
+        // 1 unit raw avec le tail (flush défensif)
+        assert_eq!(u.len(), 1);
+        assert!(pending.is_empty(), "garbage flushed, pending reset");
     }
 
     // --- classifiers ---

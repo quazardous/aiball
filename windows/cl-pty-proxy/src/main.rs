@@ -667,13 +667,19 @@ fn real_main() -> i32 {
         thread::spawn(move || {
             let mut decider = core::Decider::new(afk_combos, esc_takeover, afk_window_ms);
             let mut buf = [0u8; 8192];
+            // #500 — buffer pour les CSI / SS3 / ESC isolés qui arrivent
+            // splittés entre 2 ReadFile. Sans ça, le tail incomplet du read N
+            // était émis en raw, puis le head du read N+1 était parsé
+            // sans son ESC → F9 (`ESC [ 20 ~`) ressortait en `[20~` clair
+            // dans l'input claude (czhevy).
+            let mut pending: Vec<u8> = Vec::new();
             while running.load(Ordering::Relaxed) {
                 match sin.read(&mut buf) {
                     Some(n) => {
                         let data = &buf[..n];
                         dbg_bytes("stdin", data);
                         let now_ms = boot.elapsed().as_secs_f64() * 1000.0;
-                        for unit in core::split_units(data) {
+                        for unit in core::split_units_streaming(data, &mut pending) {
                             let v = decider.on_unit(&unit, now_ms);
                             for m in &v.markers {
                                 apply_marker(*m);
