@@ -69,14 +69,12 @@ const opOptionsStandard: { label: string; value: ConditionOp }[] = [
     { label: "≠",  value: "neq" },
     { label: "∈ (in)",  value: "in" },
 ];
-const opOptionsTags: { label: string; value: ConditionOp }[] = [
-    { label: "⊇ (carries)", value: "includes" },
-    { label: "∈ (in list)", value: "in" },
-];
-const opOptions = computed<{ label: string; value: ConditionOp }[]>(() => {
-    if (props.node.field === "tags") return opOptionsTags;
-    return opOptionsStandard;
-});
+// #504 david `b8x54s` : pour `tags` on cache le op picker — `carries` (1 tag)
+// et `in list` (N tags) sont équivalents quand on en pose un seul. Le moteur
+// (`engine.ts` case "in") couvre maintenant la sémantique "any-of" sur un
+// field array, donc on force `op=in` et le chip row multi fait le reste.
+const opOptions = computed<{ label: string; value: ConditionOp }[]>(() => opOptionsStandard);
+const hideOpPicker = computed(() => props.node.field === "tags");
 
 const kindOptions = [
     { label: "ticket_created", value: "ticket_created" },
@@ -185,10 +183,12 @@ function emitPatch(patch: Partial<ConditionTree & { kind: "leaf" }>) {
 }
 
 function setField(field: ConditionField) {
+    // #504 `b8x54s` : pour `tags`, défaut op = `in` (any-of), value = array.
+    // Le chip row multi-toggle gère la suite ; le op picker est caché.
     const next: ConditionTree = {
         kind: "leaf",
         field,
-        op: field === "tags" ? "includes" : "eq",
+        op: field === "tags" ? "in" : "eq",
         value: field === "tags" ? [] : "",
     };
     emit("update", next);
@@ -255,9 +255,11 @@ function setNegate(v: boolean) {
             />
         </div>
 
-        <!-- Corps : op-picker + value widget -->
-        <div class="leaf-block__body">
+        <!-- Corps : op-picker + value widget. Le picker est caché pour `tags`
+             (only `in` makes sense, cf #504 `b8x54s`). -->
+        <div class="leaf-block__body" :class="{ 'leaf-block__body--no-op': hideOpPicker }">
             <Select
+                v-if="!hideOpPicker"
                 :model-value="node.op"
                 :options="opOptions"
                 option-label="label"
@@ -399,6 +401,10 @@ function setNegate(v: boolean) {
     gap: 0.4rem;
     align-items: center;
     padding-left: 0.2rem;
+}
+/* #504 `b8x54s` : pas de op picker pour `tags` → la 1ère colonne disparaît. */
+.leaf-block__body--no-op {
+    grid-template-columns: 1fr;
 }
 .leaf-block__op {
     min-width: 5.5rem;

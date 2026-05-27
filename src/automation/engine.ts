@@ -154,6 +154,15 @@ export function evaluateExpression(tree: ConditionTree, event: AutomationEvent):
                 case "neq":
                     return present !== tree.value;
                 case "in":
+                    // #504 david `b8x54s` : pour un field qui porte un array
+                    // (typiquement `tags` = ticket_tags), `in` = "ANY OF these
+                    // values is on the ticket" → permet à l'UI tags de virer
+                    // l'op picker (carries/in équivalents quand on a un seul
+                    // tag, et naturellement OR-multi-tag pour plusieurs).
+                    if (Array.isArray(present)) {
+                        return Array.isArray(tree.value)
+                            && (tree.value as unknown[]).some((v) => (present as unknown[]).includes(v));
+                    }
                     return Array.isArray(tree.value) && (tree.value as unknown[]).includes(present);
                 case "includes":
                     return Array.isArray(present) && (present as unknown[]).includes(tree.value);

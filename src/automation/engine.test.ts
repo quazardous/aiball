@@ -341,6 +341,27 @@ test("evaluateExpression : NOT flips its child", () => {
     assert.equal(evaluateExpression({ kind: "not", child: isOther }, ev), true);
 });
 
+// #504 david `b8x54s` : `in` op sur un field array (typiquement `tags`) =
+// "ANY OF" sémantique (au moins un tag sélectionné est sur le ticket). Permet
+// à l'UI de virer le op picker `carries`/`in` redondant pour ce field.
+test("evaluateExpression : `in` op sur field array = any-of (tags)", () => {
+    const ev = ticketCreatedEv({ ticket_tags: ["bug", "win"] });
+    // 1 tag commun → match
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "tags", op: "in", value: ["bug", "done"] }, ev), true);
+    // pas de tag commun → fail
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "tags", op: "in", value: ["done", "wontfix"] }, ev), false);
+    // un seul tag sélectionné → équivalent à `includes`
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "tags", op: "in", value: ["bug"] }, ev), true);
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "tags", op: "in", value: ["wontfix"] }, ev), false);
+    // empty value → no match (rien à matcher)
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "tags", op: "in", value: [] }, ev), false);
+});
+
 test("evaluateExpression : leaf eq / neq on event fields", () => {
     const ev = ticketCreatedEv({ project: "aiball", intent: "urgent" });
     assert.equal(evaluateExpression(
