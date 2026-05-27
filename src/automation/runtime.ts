@@ -184,13 +184,18 @@ function executeAction(action: AutomationAction, ticket: Message): void {
         }
         case "decision":
         case "pickup":
+            // `decision` (moderation, pre-write verdict) et `pickup`
+            // (work-filter, read-time gate) ne tombent JAMAIS dans le
+            // dispatch lifecycle async — ils sont évalués synchronement
+            // via `rules.ts::evaluate()` et
+            // `automation/work-filter-gate.ts::ticketPassesAutomationWorkFilter()`
+            // qui interrogent le moteur unifié directement (#483).
+            return;
         case "add_tag":
         case "notify":
-            // `decision` and `pickup` still fire through the legacy rules.ts /
-            // work-filters.ts engines (ticket #465 migrates them onto this
-            // engine). `add_tag` + `notify` aren't wired yet — they'll land
-            // in a follow-up slice (deferred since neither was on david's
-            // immediate path).
+            // Deferred — aucun caller lifecycle n'émet ces actions
+            // aujourd'hui (les kinds existent dans le schéma mais
+            // attendent un slice futur pour être branchés).
             return;
     }
 }

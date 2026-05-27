@@ -17,7 +17,7 @@ import { getTicketTokenUsage, type TokenTally } from "./token-usage.js";
 import { landscapeHash, type LandscapeEntry } from "./landscape.js";
 import { presenceRunning } from "../live-presence.js";
 import { tagsForMessages } from "./tags.js";
-import { getEnabledWorkFiltersForConsumer, ticketPassesWorkFilters } from "./work-filters.js";
+import { ticketPassesAutomationWorkFilter } from "../automation/work-filter-gate.js";
 
 /**
  * Project names known to the system. Reads from the explicit `projects`
@@ -1418,17 +1418,14 @@ export function computeActionableTicketIds(consumerId?: string): ActionableTicke
     // common path; openIds (the human's view) is never narrowed. Read is
     // fail-open (no filters on error → don't hide work).
     if (consumerId) {
-        const workFilters = getEnabledWorkFiltersForConsumer(consumerId);
-        if (workFilters.length > 0) {
-            const ids = [...actionableIds];
-            const tagsById = tagsForMessages(ids);
-            const projectById = new Map(tickets.map((t) => [t.id, t.project]));
-            for (const id of ids) {
-                const proj = projectById.get(id) ?? "";
-                const tagNames = (tagsById.get(id) ?? []).map((tg) => tg.name);
-                if (!ticketPassesWorkFilters(proj, tagNames, workFilters)) {
-                    actionableIds.delete(id);
-                }
+        const ids = [...actionableIds];
+        const tagsById = tagsForMessages(ids);
+        const projectById = new Map(tickets.map((t) => [t.id, t.project]));
+        for (const id of ids) {
+            const proj = projectById.get(id) ?? "";
+            const tagNames = (tagsById.get(id) ?? []).map((tg) => tg.name);
+            if (!ticketPassesAutomationWorkFilter(consumerId, proj, tagNames)) {
+                actionableIds.delete(id);
             }
         }
     }
