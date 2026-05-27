@@ -219,8 +219,15 @@ function openAddMenu(event: Event) {
                     @update="(child) => updateChild(i, child)"
                     @remove="removeChild(i)"
                 />
+                <!-- #525 david — un container vide est licit. Sémantique :
+                     AND vide = vacuous true (matches everything) ; OR vide =
+                     vacuous false (matches nothing). On le dit explicitement
+                     pour qu'on sache que ne rien poser est un choix valide,
+                     pas une étape incomplète. -->
                 <div v-if="node.children.length === 0" class="container-block__empty">
-                    <em>(empty — add a condition to make this group match anything)</em>
+                    <em v-if="node.kind === 'and'">(empty AND — matches everything by default)</em>
+                    <em v-else-if="node.kind === 'or'">(empty OR — matches nothing — add a branch or switch to AND)</em>
+                    <em v-else>(empty — add a condition)</em>
                 </div>
             </template>
         </div>
