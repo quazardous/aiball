@@ -30,7 +30,7 @@ await new Promise<void>((r) => server.once("listening", () => r()));
 const port = (server.address() as AddressInfo).port;
 const BASE = `http://127.0.0.1:${port}`;
 
-test("GET /pane/stream : node-relayed mais node hors-ligne → event 'unavailable'", async () => {
+test("GET /pane/stream : node-relayed mais node hors-ligne → event 'unavailable' + diagnostic", async () => {
     const r = await fetch(
         `${BASE}/api/agents/graphite-loop/pane/stream`,
         { headers: { authorization: `Bearer ${TOKEN}` } },
@@ -39,10 +39,12 @@ test("GET /pane/stream : node-relayed mais node hors-ligne → event 'unavailabl
     assert.match(r.headers.get("content-type") ?? "", /text\/event-stream/);
     const text = await r.text();
     assert.match(text, /event: unavailable/);
-    assert.match(text, /not currently connected/);
+    // #505 diagnostic enrichi : message qui indique POURQUOI on n'a pas trouvé.
+    assert.match(text, /No proxy node|No node row matches|is registered but/);
+    assert.match(text, /"connected_node_ids":\[\]/);
 });
 
-test("POST /pane/keys : node-relayed mais node hors-ligne → 503 + message", async () => {
+test("POST /pane/keys : node-relayed mais node hors-ligne → 503 + diagnostic", async () => {
     const r = await fetch(
         `${BASE}/api/agents/graphite-loop/pane/keys`,
         {
@@ -52,8 +54,9 @@ test("POST /pane/keys : node-relayed mais node hors-ligne → 503 + message", as
         },
     );
     assert.equal(r.status, 503);
-    const body = await r.json() as { error: string };
-    assert.match(body.error, /not currently connected/);
+    const body = await r.json() as { error: string; connected_node_ids: string[] };
+    assert.match(body.error, /No proxy node|No node row|is registered/);
+    assert.deepEqual(body.connected_node_ids, []);
 });
 
 after(() => {

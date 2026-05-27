@@ -122,7 +122,8 @@ test("POST /pane/keys node-relayé : 503 si node non connecté", async () => {
     });
     assert.equal(r.status, 503);
     const body = await r.json() as { error: string };
-    assert.match(body.error, /not currently connected/);
+    // #505 diagnostic enrichi
+    assert.match(body.error, /No proxy node|No node row|is registered/);
 });
 
 test("GET /pane/stream node-relayé : SSE relaie les pane.frame venant du node", async () => {
@@ -164,7 +165,7 @@ test("GET /pane/stream node-relayé : event 'unavailable' si node non connecté"
     assert.equal(r.status, 200);
     const text = await r.text();
     assert.match(text, /event: unavailable/);
-    assert.match(text, /not currently connected/);
+    assert.match(text, /No proxy node|No node row|is registered/);
 });
 
 after(() => {

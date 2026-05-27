@@ -33,10 +33,12 @@ import { MUX_CMD, tmuxName } from "../claude-loop/state.js";
 import { getConsumer } from "../db.js";
 import {
     getNodeSocketForConsumerIp,
+    listConnectedNodeIds,
     newRequestId,
     registerResponseHandler,
     unregisterResponseHandler,
 } from "../proxy-ws.js";
+import { listNodes } from "../db/nodes.js";
 
 export const agentsRouter = Router();
 
@@ -111,11 +113,25 @@ agentsRouter.get("/agents/:name/pane/stream", (req: Request, res: Response) => {
         res.setHeader("X-Accel-Buffering", "no");
         res.flushHeaders?.();
         if (!ws) {
+            // #505 — diagnostic enrichi : on dit POURQUOI on n'a pas trouvé.
+            const connectedIds = listConnectedNodeIds();
+            const allNodes = listNodes();
+            const matchingNode = allNodes.find((n) => n.last_seen_ip === consumer.last_seen_ip);
+            let hint: string;
+            if (connectedIds.length === 0) {
+                hint = "No proxy node currently has a live WS to this daemon. Restart the daemon on the node hosting this agent (the WS client opens at boot).";
+            } else if (!matchingNode) {
+                hint = `No node row matches consumer.last_seen_ip=${consumer.last_seen_ip ?? "null"}. Connected nodes (${connectedIds.length}): ${connectedIds.join(", ")}. Likely the consumer hasn't been re-touched since the node's IP changed — wait for next agent request through the proxy.`;
+            } else {
+                hint = `Node ${matchingNode.node_id} (${matchingNode.label}) is registered but its WS is not open right now. Connected node IDs: ${connectedIds.join(", ") || "(none)"}. Restart the proxy daemon on that node.`;
+            }
             res.write(`event: unavailable\ndata: ${JSON.stringify({
-                error: "Node hosting this agent is not currently connected to upstream — restart the proxy daemon on the node.",
+                error: hint,
                 consumer_id: consumerId,
                 last_seen_via: "node",
                 last_seen_ip: consumer.last_seen_ip ?? null,
+                connected_node_ids: connectedIds,
+                matching_node_id: matchingNode?.node_id ?? null,
             })}\n\n`);
             res.end();
             return;
@@ -312,9 +328,20 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
     if (consumer.last_seen_via === "node") {
         const ws = getNodeSocketForConsumerIp(consumer.last_seen_ip ?? null);
         if (!ws) {
+            // #505 — même diagnostic enrichi que /pane/stream.
+            const connectedIds = listConnectedNodeIds();
+            const allNodes = listNodes();
+            const matchingNode = allNodes.find((n) => n.last_seen_ip === consumer.last_seen_ip);
             return res.status(503).json({
-                error: "Node hosting this agent is not currently connected to upstream — restart the proxy daemon on the node.",
+                error: connectedIds.length === 0
+                    ? "No proxy node currently has a live WS to this daemon."
+                    : !matchingNode
+                        ? `No node row matches consumer.last_seen_ip=${consumer.last_seen_ip ?? "null"}.`
+                        : `Node ${matchingNode.node_id} (${matchingNode.label}) is registered but its WS is not open right now.`,
                 consumer_id: consumerId,
+                last_seen_ip: consumer.last_seen_ip ?? null,
+                connected_node_ids: connectedIds,
+                matching_node_id: matchingNode?.node_id ?? null,
             });
         }
         if (!consumer.cwd) {
