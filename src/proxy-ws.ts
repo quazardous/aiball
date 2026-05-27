@@ -197,6 +197,7 @@ export function attachProxyWs(server: Server): void {
         bumpLastUsed(token);
         console.log(`[proxy WS] node connected: id=${nid} label=${row.label ?? "(unset)"} peer=${ip}`);
         wss.handleUpgrade(req, socket, head, (ws) => {
+            console.log(`[proxy WS] handleUpgrade callback fired for id=${nid} (handshake completed)`);
             // #505 — debug map state at upgrade entry. nodes.size tells us if the
             // OLD entry survived (= we should supersede) or vanished silently.
             const mapSizeBefore = nodes.size;
