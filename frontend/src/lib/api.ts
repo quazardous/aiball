@@ -764,6 +764,12 @@ export const api = {
      *  human only. Returns the moved ticket header (with its new project). */
     moveTicket: (id: number, project: string) =>
         req<Message>("POST", `/api/tickets/${id}/move`, { project }),
+    /** #514 — push (or self-claim if assignee = caller) the responsibility for
+     *  a ticket. `assignee` empty/omitted = self-claim, else pushes to that
+     *  consumer (human/moderator only for cross-assign). Returns the ticket head
+     *  with new `assignee` + `assigned_by` + `assigned_at`. */
+    assignTicket: (id: number, assignee: string) =>
+        req<Message>("POST", `/api/tickets/${id}/assign`, { assignee }),
     // ---- ticket subscription / mute + owner (#352) -----------------------
     /** Current consumer's relationship to a ticket: "followed" | "muted" | null. */
     ticketSubState: (ticketId: number) =>

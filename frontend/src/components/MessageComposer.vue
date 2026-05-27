@@ -83,6 +83,14 @@ const intent = ref<Intent>("request");
 const priority = ref<Priority>("normal");
 // #292: tags chosen for a NEW ticket (deferred — applied after create).
 const ticketTagIds = ref<number[]>([]);
+// #514 (david `nd967z`) : assignee picker au create. Empty = pas d'assign
+// (le ticket part non-assigné, comportement antérieur). Sinon, après le
+// POST /messages, on chain un POST /tickets/<id>/assign pour ne pas
+// dupliquer la logique côté backend. Tickets only (pas pour les
+// comments — l'assignee est ticket-level). Catalog des consumers chargé
+// au mount (réutilise le path que `mentionCatalog` fait déjà).
+const assignee = ref<string>("");
+const consumerCatalog = ref<string[]>([]);
 const preview = ref(false);
 const sending = ref(false);
 const error = ref<string | null>(null);
@@ -270,6 +278,17 @@ async function submit() {
                 ...(scope.value !== "default" ? { scope: scope.value } : {}),
             });
             createdId = typeof r?.id === "number" ? r.id : null;
+            // #514 (nd967z) : push assign in a 2e step une fois le ticket
+            // créé. Best-effort comme les tags : si l'assign rate, le ticket
+            // est déjà posted, on warne et continue (le user peut retry
+            // depuis le Manage panel).
+            if (createdId !== null && assignee.value.trim()) {
+                try {
+                    await api.assignTicket(createdId, assignee.value.trim());
+                } catch (e) {
+                    console.warn("[composer] failed to assign new ticket:", e);
+                }
+            }
             // #292: apply the tags chosen in the composer to the freshly
             // created ticket (deferred — it had no id until now). Best-effort:
             // the ticket is already posted, so a tag failure only warns.
@@ -371,6 +390,12 @@ onMounted(() => {
     api.mentionSuggestions()
         .then((r) => { mentionCatalog.value = r; })
         .catch(() => { /* offline OK — autocomplete just stays inert */ });
+    // #514 — assignee picker (tickets only) : on charge le catalog des
+    // consumers une fois au mount. Ignoré si offline ou si on est en
+    // mode comment (le picker ne s'affiche pas alors).
+    api.listConsumers()
+        .then((r) => { consumerCatalog.value = r.map((c) => c.consumer_id); })
+        .catch(() => { /* assignee picker just stays empty */ });
 });
 onBeforeUnmount(() => {
     detachPaste?.();
@@ -641,6 +666,24 @@ async function onAttachPicked(ev: Event) {
         <div v-if="isTicket && !preview" class="composer-tags-row">
             <span class="composer-tags-label">tags</span>
             <TagPicker v-model:selectedIds="ticketTagIds" />
+        </div>
+        <!-- #514 david `nd967z` : assignee picker au create. Empty = no
+             assign (default — comportement antérieur). Tickets only. Le
+             POST /tickets/<id>/assign est chained après le POST /messages
+             success (cf. submit()). -->
+        <div v-if="isTicket && !preview" class="composer-tags-row">
+            <span class="composer-tags-label">assignee</span>
+            <Select
+                v-model="assignee"
+                :options="consumerCatalog"
+                placeholder="(none — leave unassigned)"
+                size="small"
+                show-clear
+                filter
+                :disabled="sending"
+                style="min-width: 14rem"
+                title="Assignee — the consumer responsible for this ticket. Leave empty for unassigned."
+            />
         </div>
         <div v-if="!preview" class="composer-textarea-wrap">
             <Textarea
