@@ -131,6 +131,9 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
     // #436: self → CLAIM (focus, transient); other → ASSIGNMENT (responsibility,
     // persistent). Two distinct fields now — a ticket can be both.
     let releasedClaims: number[] = [];
+    // #523 — surfaced when this assign auto-releases a prior claim by a
+    // DIFFERENT consumer (cf. setTicketAssignment).
+    let assignReleasedClaim: { ticket_id: number; claimant: string } | null = null;
     if (isClaim) {
         // #439 one-focus: picking this up auto-releases my OTHER live claims I
         // never commented on since grabbing them (bare pickups, zero work lost),
@@ -155,7 +158,19 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
         }
         setTicketClaim(id, caller);
     } else {
-        setTicketAssignment(id, target, caller);
+        // #523 david `dzakgw` : setTicketAssignment auto-release le claim si
+        // claimant existant ≠ nouveau assignee (rule "assignment reset le
+        // claim"). Le retour signal qui s'est fait éjecter pour audit + pour
+        // que l'UI X refresh (broadcast plus bas).
+        const ar = setTicketAssignment(id, target, caller);
+        if (ar.released_claim) {
+            // Pas de ping dédié (david : "ça va se faire s'il est abonné,
+            // hors scope"). Le broadcast `message_edited` ci-dessous suffit
+            // pour que l'UI de l'ex-claimant voie son icon claim disparaître
+            // au prochain SSE tick — X perd aussi le own-claim boost dans
+            // son work-order, signal naturel.
+            assignReleasedClaim = ar.released_claim;
+        }
     }
     upsertTicketSubscription(target, id);
     // #448 david: the claim landed in the DB but the UI didn't reflect it live —
@@ -178,6 +193,9 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
         is_claim: isClaim,
         // #439: which other live claims this self-claim auto-released (one-focus).
         released_claims: releasedClaims,
+        // #523 : claim libéré par CET assignment (ex-claimant ≠ nouveau assignee).
+        // null si pas de claim avant, ou self-assign (assignee == claimant).
+        assign_released_claim: assignReleasedClaim,
     });
 });
 

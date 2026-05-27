@@ -259,11 +259,39 @@ export function setTicketAssignment(
     ticket_id: number,
     assignee: string,
     assigned_by: string,
-): void {
-    getDb().update(schema.tickets)
-        .set({ assignee, assignedBy: assigned_by, assignedAt: nowIso() })
-        .where(eq(schema.tickets.id, ticket_id))
-        .run();
+): { released_claim: { ticket_id: number; claimant: string } | null } {
+    // #523 david `reztjq` : assignment doit reset le claim courant si claimant
+    // existant ET claimant !== nouveau assignee. Self-assign (assignee ==
+    // claimant) protégé : le focus reste, promu en responsabilité.
+    // Couvre les 2 call-sites (route API + automation runtime) en poussant la
+    // logique au niveau DB plutôt qu'API.
+    const db = getDb();
+    return db.transaction((tx) => {
+        const cur = tx.select({ claimant: schema.tickets.claimant })
+            .from(schema.tickets)
+            .where(eq(schema.tickets.id, ticket_id))
+            .get();
+        const prevClaimant = cur?.claimant ?? null;
+        const releaseClaim = !!prevClaimant && prevClaimant !== assignee;
+        const updateSet: Partial<schema.NewTicket> = {
+            assignee,
+            assignedBy: assigned_by,
+            assignedAt: nowIso(),
+        };
+        if (releaseClaim) {
+            updateSet.claimant = null;
+            updateSet.claimedAt = null;
+        }
+        tx.update(schema.tickets)
+            .set(updateSet)
+            .where(eq(schema.tickets.id, ticket_id))
+            .run();
+        return {
+            released_claim: releaseClaim
+                ? { ticket_id, claimant: prevClaimant! }
+                : null,
+        };
+    });
 }
 
 /**
