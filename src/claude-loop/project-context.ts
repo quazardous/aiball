@@ -31,6 +31,9 @@ export interface ProjectContext {
     agent_source: AgentSource;
     /** Where the project value came from. */
     project_source: AgentSource;
+    /** #508 phase A2 — when true, this project's agent is no-claim
+     *  (assignment-only). Mirrored from `consumer.no_claim` in `.aiball.yaml`. */
+    no_claim: boolean;
     /** True when `.mcp.json` carries the deprecated identity env block. */
     mcp_json_deprecated: boolean;
     /** Absolute path to the loaded `.aiball.yaml`, if any. */
@@ -79,6 +82,7 @@ export function resolveProjectContext(opts: ResolveOpts = {}): ProjectContext {
         project: cfg.consumer.project!,
         agent_source: cfg.consumer.agent_source ?? "default",
         project_source: cfg.consumer.project_source ?? "default",
+        no_claim: cfg.consumer.no_claim,
         mcp_json_deprecated: cfg.mcp_json_deprecated,
         config_path: cfg.configPath,
         claude_loop: { ...cfg.claude_loop },
@@ -94,6 +98,11 @@ export function resolveProjectContext(opts: ResolveOpts = {}): ProjectContext {
 export function applyToProcessEnv(ctx: ProjectContext): void {
     process.env.AIBALL_AGENT = ctx.agent;
     process.env.AIBALL_PROJECT = ctx.project;
+    // #508 phase A2 — propagate the no-claim flag via env so every child
+    // process (timer, hooks, claude itself) sees it. The AiballClient picks
+    // it up and injects `x-aiball-no-claim: 1` on every API call.
+    if (ctx.no_claim) process.env.AIBALL_NO_CLAIM = "1";
+    else delete process.env.AIBALL_NO_CLAIM;
 }
 
 /**

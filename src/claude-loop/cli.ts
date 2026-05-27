@@ -505,6 +505,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // a random uuid via AiballClient.
         ...(ctx.agent ? [`export AIBALL_AGENT=${shQuote(ctx.agent)}`] : []),
         ...(ctx.project ? [`export AIBALL_PROJECT=${shQuote(ctx.project)}`] : []),
+        // #508 phase A2 — propagate the project-yaml no_claim flag so the
+        // claude process + every API call from it carries the no-claim hint.
+        ...(ctx.no_claim ? [`export AIBALL_NO_CLAIM=1`] : []),
         // #480 david : le timer + les hooks sont spawn sans `cwd:` explicite
         // côté Node, donc ils héritent du cwd du shell de lancement
         // (typiquement le dev checkout aiball/). `loadConfig()` no-arg

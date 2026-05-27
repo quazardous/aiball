@@ -161,6 +161,7 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         ar.consumer_id = cid;
         ar.token_kind = "agent";
         if (explicit) touchLastSeen(cid, "uds"); // #B.177 / #386 / #422 (local same-uid)
+        readNoClaimHint(req, ar);
         next();
         return;
     }
@@ -201,15 +202,6 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         const ar = req as AuthenticatedRequest;
         ar.consumer_id = cid;
         ar.token_kind = "node";
-        // #508 phase A2 — le node peut déclarer que CE consumer relayé est
-        // no-claim via le header `x-aiball-no-claim: 1`. On stash sur l'ar
-        // pour que le lens claimable (api/tickets.ts) puisse l'appliquer
-        // EN PLUS du flag DB `consumers.can_claim` (OU logique : un OU l'autre
-        // suffit pour gater le claim).
-        const noClaimHint = req.header("x-aiball-no-claim");
-        if (typeof noClaimHint === "string" && (noClaimHint === "1" || noClaimHint.toLowerCase() === "true")) {
-            ar.no_claim_hint = true;
-        }
         // Auto-register a relayed agent we haven't seen yet (the loop on B has
         // no token of its own — the node vouches for it). Never touches humans.
         if (explicit && !isHuman(cid)) ensureConsumer(cid);
@@ -226,6 +218,7 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
             const labelRaw = advertised.trim().slice(0, 200);
             if (labelRaw && labelRaw !== row.label) updateTokenLabel(token, labelRaw);
         }
+        readNoClaimHint(req, ar);
         next();
         return;
     }
@@ -246,7 +239,28 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         // Non-humans: silently ignore the override.
     }
     touchLastSeen(ar.consumer_id, "tcp", clientIp(req)); // #B.177 / #422 (direct bearer over TCP)
+    readNoClaimHint(req, ar);
     next();
+}
+
+/**
+ * #508 phase A2 — read the `x-aiball-no-claim: 1` header REGARDLESS of token
+ * kind (node-relayed OR direct agent token). claude-loop exports
+ * `AIBALL_NO_CLAIM=1` from the project `.aiball.yaml consumer.no_claim` and
+ * the client lib injects the header on every request. Trust the agent's own
+ * declaration (no privilege escalation — it gates the agent OUT of the
+ * claim pool, never IN). Stashed on `AuthenticatedRequest.no_claim_hint`
+ * for the claimable lens in `api/tickets.ts`.
+ *
+ * Called at the END of the auth chain — after `consumer_id`/`token_kind` are
+ * known. Re-applied also on the UDS local-trust path (humans driving a loop
+ * over UDS with AIBALL_NO_CLAIM set in their env).
+ */
+function readNoClaimHint(req: Request, ar: AuthenticatedRequest): void {
+    const v = req.header("x-aiball-no-claim");
+    if (typeof v === "string" && (v === "1" || v.toLowerCase() === "true")) {
+        ar.no_claim_hint = true;
+    }
 }
 
 /** #422: the TCP peer address (B's IP for a proxy node; the client's for direct).

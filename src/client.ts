@@ -95,6 +95,12 @@ export class AiballClient {
         if (!this.socketPath && this.token) {
             headers["authorization"] = `Bearer ${this.token}`;
         }
+        // #508 phase A2 — claude-loop exports AIBALL_NO_CLAIM=1 when the
+        // project's `.aiball.yaml` sets `consumer.no_claim: true`. Forward as
+        // a header so the upstream's claimable lens picks it up.
+        if (process.env.AIBALL_NO_CLAIM === "1") {
+            headers["x-aiball-no-claim"] = "1";
+        }
         const payload = body ? JSON.stringify(body) : undefined;
         if (this.socketPath) {
             return this.httpUds<T>(method, path, headers, payload);
@@ -223,6 +229,11 @@ export class AiballClient {
         const headers: Record<string, string> = { "content-type": contentType };
         if (this.agentId) headers["x-aiball-consumer"] = this.agentId;
         if (name) headers["x-aiball-upload-name"] = name;
+        // #508 phase A2 — propagate the no-claim hint on uploads too (cosmetic
+        // but consistent — auth middleware reads the same header in any path).
+        if (process.env.AIBALL_NO_CLAIM === "1") {
+            headers["x-aiball-no-claim"] = "1";
+        }
         const path = "/api/uploads";
         const timeoutMs = Math.max(this.timeoutMs, 15000);
         type UploadResult = { url: string; sha256: string; bytes: number; content_type: string };

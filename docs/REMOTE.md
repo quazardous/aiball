@@ -73,23 +73,10 @@ proxy:
   # optional, declared by THIS node :
   node:
     label: "my-laptop"        # default = os.hostname()
-  no_claim_consumers:         # consumers that should NEVER auto-claim
-    - aiball-windows          # — `ticket_engage` only returns tickets
-                              #   explicitly assigned to them. Can still
-                              #   receive a push, comment, resolve.
 ```
 
 That's it — every local client on B (loops, MCP, CLI, web UI) now reaches A
 token-less over the UDS / `127.0.0.1`, as if A were local.
-
-The `no_claim_consumers` list (per-node config) is OR'd with the upstream
-`consumers.can_claim=false` flag (set via the admin UI on A): a consumer
-becomes assignment-only if *either* gate triggers. Useful when the same
-consumer should be no-claim only when running through THIS node, or when you
-want the policy to live with the agent's machine rather than the admin UI.
-Implemented via a `x-aiball-no-claim: 1` header the proxy injects on
-forwarded requests for matching consumers — the upstream's claimable lens
-short-circuits the global pool to "assigned to me" only.
 
 > Today the proxy relays the data plane; **launching a loop on B from A's web UI**
 > needs a reverse control channel (A→B) and is a follow-up — local launch

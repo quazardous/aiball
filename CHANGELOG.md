@@ -24,18 +24,30 @@ claimable pool and only surfaces tickets explicitly assigned to that consumer
 via `ticket_assign`. Receiving a push, commenting, resolving and closing still
 work — only the auto-claim is gated.
 
-- **Admin UI** (`ConsumerEditPage`): new "can claim" checkbox. Off = the
-  consumer is assignment-only.
-- **Per-node YAML override**: a proxy node's `~/.config/aiball/config.yaml`
-  can list `proxy.no_claim_consumers: [consumer_id, …]`. The proxy injects
-  `x-aiball-no-claim: 1` on forwarded requests for those consumers; the
-  upstream's claimable lens treats them as no-claim regardless of the DB flag.
-  Lets the policy live with the agent's machine (e.g. configure a Windows-only
-  agent as no-claim from its host).
-- Either gate suffices (OR): DB flag OR proxy hint → assignment-only.
-- Migration `0043_consumers_can_claim.sql` adds the column (default 1 =
-  claim allowed, existing rows preserved).
-- Doc updated in `docs/REMOTE.md` § proxy config.
+Two configuration paths, OR'd together:
+
+- **Admin UI on the upstream daemon** (`ConsumerEditPage`): new "can claim"
+  checkbox. Off = the consumer is assignment-only globally.
+- **Project-scope `.aiball.yaml` on the agent's machine** — same level as
+  `consumer.agent`:
+
+  ```yaml
+  consumer:
+    agent: aiball-windows
+    no_claim: true
+  ```
+
+  claude-loop reads it at boot and exports `AIBALL_NO_CLAIM=1` to the claude
+  process + every child hook. The `AiballClient` injects
+  `x-aiball-no-claim: 1` on each API call; the upstream's `bearerAuth`
+  recognises it for any token kind (UDS, node, agent) and applies the no-claim
+  semantic for that request. Lets the policy live with the agent's project,
+  not the central admin UI — particularly useful for an agent whose project
+  lives on a Windows machine talking through a proxy node.
+
+Either gate suffices (OR): DB flag OR yaml/header hint → assignment-only.
+Migration `0043_consumers_can_claim.sql` adds the column (default 1 = claim
+allowed, existing rows preserved).
 
 ### docs/INSTALL.md — Linux/macOS install reference (#487)
 

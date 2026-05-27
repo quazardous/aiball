@@ -87,6 +87,13 @@ autopoll:
 # consumer:
 #   agent: skybot-claude
 #   project: skybot
+#   # Optional. When true, this project's agent is "assignment-only":
+#   # ticket_engage skips the global claimable pool and only returns
+#   # tickets explicitly assigned via ticket_assign. The agent can still
+#   # receive a push, comment, resolve, close — only the auto-claim is
+#   # gated. OR'd with the upstream `consumers.can_claim=false` admin flag.
+#   # Default false (claim normally).
+#   no_claim: false
 
 # claude-loop timeouts. All optional — the defaults below
 # are what ship today. CLI flags (`--interval`, `--user-grace`) still
