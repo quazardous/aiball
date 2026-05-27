@@ -27,6 +27,7 @@ import {
     mutedConsumersForTicket,
     type Message,
 } from "./db.js";
+import { effectiveNotifyProjectBroadcasts, getConsumer } from "./db/consumers.js";
 
 /**
  * Extract `@<name>` mentions from a body. Code fences / inline-code spans
@@ -104,8 +105,19 @@ export function fanOutPings(msg: Message): void {
     // decision now (post-#B.245), no longer derived from the ticket-wide
     // flag. The previous ticket-level `broadcast` boolean was unified
     // into this same tristate; each event decides its own follower reach.
+    //
+    // #516 (david `r59bkm` plan E) — un consumer no_claim n'a pas à recevoir
+    // les broadcasts projet par défaut. `effectiveNotifyProjectBroadcasts`
+    // résout la tri-state `notify_project_broadcasts` :
+    //   - explicit (true/false) wins
+    //   - null (auto) → suit can_claim
+    // Donc un no_claim sans override sort du recipient set, un claim-able
+    // garde le comportement antérieur, override explicit fonctionne dans
+    // les deux sens.
     if (msg.scope === "broadcast") {
         for (const sub of listProjectSubscribers(msg.project, { roles: ["follower"] })) {
+            const c = getConsumer(sub);
+            if (c && !effectiveNotifyProjectBroadcasts(c)) continue;
             recipients.add(sub);
         }
     }

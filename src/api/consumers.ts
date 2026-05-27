@@ -119,6 +119,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
         note?: unknown;
         micro_prompt?: unknown;
         can_claim?: unknown;
+        notify_project_broadcasts?: unknown;
     };
     if (body.kind !== undefined && body.kind !== "human" && body.kind !== "agent" && body.kind !== "sandbox") {
         return badRequest(res, "kind must be 'human', 'agent', or 'sandbox'");
@@ -130,6 +131,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
         note?: string | null;
         micro_prompt?: string | null;
         can_claim?: boolean;
+        notify_project_broadcasts?: boolean | null;
     } = {};
     if (body.kind !== undefined) patch.kind = body.kind as ConsumerKind;
     if (body.display_name !== undefined) {
@@ -150,6 +152,13 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
     }
     if (body.can_claim !== undefined && typeof body.can_claim === "boolean") {
         patch.can_claim = body.can_claim;
+    }
+    // #516 — tri-state (null | true | false). API accepte les 3 valeurs ;
+    // tout autre type est silently ignored (no-op).
+    if (body.notify_project_broadcasts === null
+        || body.notify_project_broadcasts === true
+        || body.notify_project_broadcasts === false) {
+        patch.notify_project_broadcasts = body.notify_project_broadcasts;
     }
     const updated: Consumer | null = updateConsumer(consumer_id, patch);
     if (!updated) return notFound(res, "consumer not found");

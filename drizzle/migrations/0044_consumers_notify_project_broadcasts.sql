@@ -1,0 +1,11 @@
+-- #516 david `r59bkm` plan E — opt-in per-consumer flag pour recevoir les
+-- broadcasts projet (scope='broadcast' du fan-out). NULL (défaut, tri-state)
+-- = "auto" : suit can_claim → un consumer qui peut claim reçoit les broadcasts
+-- (comportement actuel préservé), un consumer no_claim ne les reçoit PAS
+-- (le fix david demandait : "agent no claim par defaut n'a pas à recevoir de
+-- notification general projet"). 1 = opt-in explicite (no_claim mais quand
+-- même les broadcasts). 0 = opt-out explicite (claim mais pas de broadcasts).
+--
+-- Édité dans ConsumerEditPage. fanOutPings filtre les broadcast followers
+-- via cette colonne avant l'ajout au recipient set.
+ALTER TABLE consumers ADD COLUMN notify_project_broadcasts INTEGER;

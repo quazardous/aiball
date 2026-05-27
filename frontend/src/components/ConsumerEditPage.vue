@@ -80,6 +80,11 @@ const enabled = ref(true);
 // Quand false → consumer "spécialiste" qui ne prend QUE les tickets explicitement
 // assignés (via ticket_assign), pas le pool global.
 const canClaim = ref(true);
+// #516 (david `r59bkm` plan E) — tri-state opt-in pour les broadcasts projet.
+// "auto" (null) = suit can_claim ; "on" = opt-in explicite ; "off" = opt-out
+// explicite. Stocké en string pour le Select ; converti en boolean | null
+// au save.
+const notifyBroadcasts = ref<"auto" | "on" | "off">("auto");
 // #451: raw-prompt injection (this dedicated page is where the operator types it).
 const promptText = ref("");
 const promptBusy = ref(false);
@@ -118,6 +123,11 @@ async function load() {
         microPrompt.value = found.micro_prompt ?? "";
         enabled.value = found.enabled;
         canClaim.value = found.can_claim !== false; // default true if undefined (pre-#508 row)
+        notifyBroadcasts.value = found.notify_project_broadcasts === true
+            ? "on"
+            : found.notify_project_broadcasts === false
+                ? "off"
+                : "auto";
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -144,6 +154,11 @@ async function save() {
             micro_prompt: microPrompt.value.trim() || null,
             enabled: enabled.value,
             can_claim: canClaim.value,
+            notify_project_broadcasts: notifyBroadcasts.value === "on"
+                ? true
+                : notifyBroadcasts.value === "off"
+                    ? false
+                    : null,
         });
         notify.success(`Saved ${props.consumerId}`);
         emit("close");
@@ -424,6 +439,29 @@ async function sendPrompt() {
                                     />
                                     can claim (when off, this consumer is <strong>assignment-only</strong>: <code>ticket_engage</code> skips the global pool and returns only tickets explicitly assigned via <code>ticket_assign</code>)
                                 </label>
+                            </div>
+
+                            <!-- #516 (david `r59bkm` plan E) — tri-state opt-in pour les
+                                 broadcasts projet (scope=broadcast follower fan-out).
+                                 Auto = suit can_claim (claim-able → reçoit, no_claim → ne reçoit pas) ;
+                                 on = opt-in explicite ; off = opt-out explicite. -->
+                            <div class="consumer-edit__field">
+                                <label for="ce-notify-broadcasts">project broadcasts</label>
+                                <select
+                                    id="ce-notify-broadcasts"
+                                    v-model="notifyBroadcasts"
+                                    class="consumer-edit__select"
+                                >
+                                    <option value="auto">auto (follows can-claim)</option>
+                                    <option value="on">on (always receive broadcasts)</option>
+                                    <option value="off">off (never receive broadcasts)</option>
+                                </select>
+                                <small class="consumer-edit__hint">
+                                    Receive <code>scope: broadcast</code> events (e.g. project-wide
+                                    fan-out). <strong>Auto</strong> = same as <code>can claim</code> ;
+                                    a no-claim consumer is silenced by default. Override to <strong>on</strong>
+                                    if you want a no-claim agent to still see broadcasts.
+                                </small>
                             </div>
 
                             <!-- #451: raw-prompt injection (moderator-only, server-enforced). -->

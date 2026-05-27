@@ -496,6 +496,9 @@ export interface Consumer {
      *  consumer "spécialiste" (false) qui ne prend QUE les tickets explicitement
      *  assignés via ticket_assign. */
     can_claim?: boolean;
+    /** #516 — tri-state opt-in pour broadcasts projet. null = auto (suit
+     *  can_claim) ; true = opt-in explicite ; false = opt-out explicite. */
+    notify_project_broadcasts?: boolean | null;
     /** #B.177: ISO8601 of last API call from this consumer. */
     last_seen_at?: string | null;
     /** #B.177 B1: current claude-loop state (null = no loop tracking). */
@@ -1059,7 +1062,7 @@ export const api = {
     }) => req<Consumer>("POST", "/api/consumers", body),
     updateConsumer: (
         consumer_id: string,
-        patch: Partial<{ kind: ConsumerKind; display_name: string | null; enabled: boolean; note: string | null; micro_prompt: string | null; can_claim: boolean }>,
+        patch: Partial<{ kind: ConsumerKind; display_name: string | null; enabled: boolean; note: string | null; micro_prompt: string | null; can_claim: boolean; notify_project_broadcasts: boolean | null }>,
     ) => req<Consumer>("PATCH", `/api/consumers/${encodeURIComponent(consumer_id)}`, patch),
     deleteConsumer: (consumer_id: string) =>
         req<{ consumer_id: string; deleted: boolean }>(

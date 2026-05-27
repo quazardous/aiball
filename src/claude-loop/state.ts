@@ -1232,13 +1232,24 @@ export async function buildContextPhrase(
             if (specs.length) gateResults = runGates(specs, process.cwd());
         } catch { /* gates never block the wake */ }
         const blocking = gateResults.some((g) => g.blocks);
+        // #516 (david `r59bkm` plan A) — pour un consumer no_claim ou tout
+        // contexte où il n'y a pas de head claimable post-drain, l'engage
+        // directive doit DISPARAÎTRE (sinon le wake dit "engage # first" avec
+        // un id vide — le bug que david/aiball-win ont vu). Le var
+        // `actionable_count` reste la jauge informationnelle (combien dans
+        // ton camp au sens large), mais le template ne fait fire l'engage
+        // que sur HEAD_ID non-vide via `head_id:+ {…}` ; voir wake_master
+        // ci-dessous. Empty head → fallback texte qui rappelle juste
+        // les unread pings.
+        const hasClaimableHead = !!(head?.id);
         const vars = {
             culture,
             lead: renderSlot(promptMap, "wake_lead", {}, "fyi:", tone),
             ping_count: pingCount || "",
             open_count: openCount || "",
             // #428: a blocking gate hides the engage directive ("don't take new work").
-            actionable_count: blocking ? "" : (actionableCount || ""),
+            // #516 : aussi caché quand pas de head claimable post-drain.
+            actionable_count: (blocking || !hasClaimableHead) ? "" : (actionableCount || ""),
             head_id: head?.id ?? "",
             head_title: head?.title ?? "",
             project_scope: scope,

@@ -574,6 +574,14 @@ export const consumers = sqliteTable("consumers", {
      * project-level dans `.aiball.yaml`.
      */
     canClaim: integer("can_claim").notNull().default(1),
+    /**
+     * #516 david `r59bkm` plan E — tri-state opt-in pour recevoir les
+     * broadcasts projet (fanOutPings scope='broadcast' follower fan-out).
+     * NULL = auto (suit canClaim : claim-able reçoit les broadcasts comme
+     * avant ; no_claim ne les reçoit pas). 1 = opt-in explicite. 0 =
+     * opt-out explicite. Édité dans ConsumerEditPage. Migration 0044.
+     */
+    notifyProjectBroadcasts: integer("notify_project_broadcasts"),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (t) => [

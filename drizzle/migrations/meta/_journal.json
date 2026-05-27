@@ -309,6 +309,13 @@
       "when": 1781900000000,
       "tag": "0043_consumers_can_claim",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1782000000000,
+      "tag": "0044_consumers_notify_project_broadcasts",
+      "breakpoints": true
     }
   ]
 }

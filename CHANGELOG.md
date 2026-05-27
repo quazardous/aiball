@@ -17,6 +17,34 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### no_claim consumer UX cleanup — silent autopoll, no broadcast spam, gated CTA (#516)
+
+Three-part follow-up to the per-consumer no_claim flag from earlier this
+cycle. Before: a no_claim consumer (assignment-only specialist) still
+received the same wake CTA as a regular agent — "engage # first" with an
+empty id (because there's no claimable head to name), plus the heartbeat
+fired every cycle on the bare presence of project-actionable tickets, and
+they got pinged on every broadcast project event.
+
+- **Wake CTA gated on a real claimable head.** The `engage` directive in
+  the wake banner now drops when `head_id` is empty (no claimable ticket
+  to point at), so a no_claim consumer no longer sees the "engage # first"
+  prompt with a blank id.
+- **Heartbeat silent for no_claim with no pings.** The timer's heartbeat
+  wake path checks `AIBALL_NO_CLAIM=1` + `pingsCount === 0` and skips —
+  a no_claim consumer with no direct pings stays idle instead of waking
+  on every project landscape change.
+- **Broadcast follower fan-out filtered.** New per-consumer
+  `notify_project_broadcasts` tri-state column (`auto` / explicit on /
+  explicit off) gates the `scope: broadcast` follower fan-out in
+  `fanOutPings`. `auto` (default, NULL) follows `can_claim`: a claim-able
+  consumer keeps receiving broadcasts as before, a no_claim consumer is
+  silenced. Operators can override per consumer in the ConsumerEditPage
+  (new "project broadcasts" select).
+
+Migration `0044_consumers_notify_project_broadcasts.sql` adds the column
+nullable (no backfill needed — NULL = auto).
+
 ### Proxy node WS reverse health on detail page (#510)
 
 The proxy-node detail page (`/nodes/<id>`) now shows a dedicated **ws reverse**
