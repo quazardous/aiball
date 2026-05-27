@@ -93,6 +93,28 @@ agentsRouter.get("/agents/:name/pane/stream", (req: Request, res: Response) => {
     if (!consumer) {
         return res.status(404).json({ error: `consumer not found : ${consumerId}` });
     }
+    // #503 — node-relayed agent : the pane lives on a remote host, this daemon
+    // can't `tmux capture-pane` it. Surface as an `event: unavailable` SSE frame
+    // (open + 1 event + close) so the TerminalView shows the actual reason
+    // instead of falling back to the generic "no response from server" timeout
+    // (an HTTP 501 before SSE upgrade would be invisible to EventSource).
+    // Check BEFORE the cwd-missing 404 — the "no cwd" hint is misleading for a
+    // node-relayed agent (cwd may be missing OR set to the remote host's path,
+    // either way it can't be reached locally).
+    if (consumer.last_seen_via === "node") {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.flushHeaders?.();
+        const payload = {
+            error: "Web terminal not available for node-relayed agents — the pane lives on a different host.",
+            consumer_id: consumerId,
+            last_seen_via: "node",
+            last_seen_ip: consumer.last_seen_ip ?? null,
+        };
+        res.write(`event: unavailable\ndata: ${JSON.stringify(payload)}\n\n`);
+        res.end();
+        return;
+    }
     if (!consumer.cwd) {
         return res.status(404).json({
             error: `consumer has no cwd — needs an active claude-loop heartbeat first`,
@@ -239,6 +261,16 @@ agentsRouter.post("/agents/:name/pane/keys", (req: Request, res: Response) => {
     const consumer = getConsumer(consumerId);
     if (!consumer) {
         return res.status(404).json({ error: `consumer not found : ${consumerId}` });
+    }
+    // #503 — symmetric guard with pane/stream : a node-relayed agent's pane
+    // can't be reached locally, so don't pretend to send keys to it. Check
+    // BEFORE the cwd-missing 404 (same reasoning as the SSE side).
+    if (consumer.last_seen_via === "node") {
+        return res.status(501).json({
+            error: "Web terminal write not available for node-relayed agents — the pane lives on a different host.",
+            consumer_id: consumerId,
+            last_seen_via: "node",
+        });
     }
     if (!consumer.cwd) {
         return res.status(404).json({

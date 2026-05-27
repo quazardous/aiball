@@ -285,6 +285,19 @@ function openStream() {
             /* ignore malformed error frame */
         }
     });
+    // #503 — backend ouvre la SSE, envoie 1 event `unavailable` puis close
+    // pour signaler qu'on ne peut pas servir ce pane localement (node-relayé,
+    // pane sur un autre host). On affiche le message + on ferme proprement
+    // pour ne pas reconnecter en boucle.
+    es.addEventListener("unavailable", (e: MessageEvent) => {
+        try {
+            const data = JSON.parse(e.data) as { error?: string };
+            lastError.value = data.error ?? "pane unavailable on this daemon";
+        } catch {
+            lastError.value = "pane unavailable on this daemon";
+        }
+        closeStream();
+    });
 }
 
 function closeStream() {
