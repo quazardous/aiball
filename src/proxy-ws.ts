@@ -143,10 +143,6 @@ function readBearer(req: IncomingMessage): string | null {
     return null;
 }
 
-function peerIp(req: IncomingMessage): string | null {
-    return req.socket?.remoteAddress ?? null;
-}
-
 /** Bumpe `tokens.last_used_at` pour ce token. Inline pour éviter un round-trip
  *  par `getTokenAndTouch` (qui re-lit la row + check l'expiration à chaque
  *  frame — overkill pour le keepalive). */
@@ -162,102 +158,108 @@ function bumpLastUsed(token: string): void {
 }
 
 export function attachProxyWs(server: Server): void {
-    // `noServer: true` + handleUpgrade manuel : ça nous laisse refuser
-    // proprement l'upgrade quand l'auth échoue (sinon `ws` accepte tout et on
-    // doit close après — l'auth en pre-upgrade est plus propre).
-    const wss = new WebSocketServer({ noServer: true });
+    // #505 — refactor : on utilisait `noServer: true` + `server.on("upgrade")`
+    // manuel. Symptôme : `wss.handleUpgrade` callback ne fire JAMAIS, donc
+    // pas de handshake → graphite cycle au timeout. Probable conflit avec
+    // l'autre `WebSocketServer({server, path:"/ws"})` (`attachWs` de ws.ts)
+    // pour la même `server.on("upgrade")`. Le pattern standard `{server, path,
+    // verifyClient}` fait que ws lib gère le multi-path proprement.
+    //
+    // verifyClient gate l'upgrade pre-handshake → on peut refuser sur token,
+    // comme avant. Identité du node calculée DANS verifyClient et passée à
+    // l'on("connection") via `req` (info.req qu'on récupère sur connection).
+    const wss = new WebSocketServer({
+        server,
+        path: PROXY_WS_PATH,
+        verifyClient: (info, cb) => {
+            const ip = info.req.socket?.remoteAddress ?? null;
+            console.log(`[proxy WS] verifyClient: path=${info.req.url} peer=${ip}`);
+            const token = readBearer(info.req);
+            if (!token) {
+                console.warn(`[proxy WS] upgrade refused: no bearer (peer=${ip})`);
+                cb(false, 401, "Unauthorized");
+                return;
+            }
+            const row = getToken(token);
+            if (!row) {
+                console.warn(`[proxy WS] upgrade refused: token not found (peer=${ip})`);
+                cb(false, 401, "Unauthorized");
+                return;
+            }
+            if (row.kind !== "node") {
+                console.warn(`[proxy WS] upgrade refused: token kind=${row.kind} (need 'node') peer=${ip}`);
+                cb(false, 403, "Forbidden");
+                return;
+            }
+            // Stash identity sur la req pour reprise dans on("connection") —
+            // pas de duplication de la lecture/parse côté connection.
+            (info.req as IncomingMessage & { __aiballNodeAuth?: { token: string; row: typeof row; ip: string | null } })
+                .__aiballNodeAuth = { token, row, ip };
+            cb(true);
+        },
+    });
 
-    server.on("upgrade", (req, socket, head) => {
-        const url = new URL(req.url ?? "/", "http://localhost");
-        if (url.pathname !== PROXY_WS_PATH) return; // pas pour nous, laisse ws.ts gérer
-        console.log(`[proxy WS] upgrade attempt: path=${url.pathname} peer=${req.socket?.remoteAddress}`);
-        const ip = peerIp(req);
-        const token = readBearer(req);
-        if (!token) {
-            console.warn(`[proxy WS] upgrade refused: no bearer (peer=${ip})`);
-            socket.write("HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer\r\n\r\n");
-            socket.destroy();
+    wss.on("connection", (ws, req) => {
+        const auth = (req as IncomingMessage & { __aiballNodeAuth?: { token: string; row: ReturnType<typeof getToken>; ip: string | null } })
+            .__aiballNodeAuth;
+        if (!auth || !auth.row) {
+            // verifyClient devrait toujours stasher, mais belt-and-suspenders.
+            try { ws.close(1011, "auth context missing"); } catch { /* */ }
             return;
         }
-        const row = getToken(token);
-        if (!row) {
-            console.warn(`[proxy WS] upgrade refused: token not found (peer=${ip})`);
-            socket.write("HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer\r\n\r\n");
-            socket.destroy();
-            return;
-        }
-        if (row.kind !== "node") {
-            console.warn(`[proxy WS] upgrade refused: token kind=${row.kind} (need 'node') peer=${ip}`);
-            socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-            socket.destroy();
-            return;
-        }
+        const { token, row, ip } = auth;
         const nid = computeNodeId(token);
         setTokenLastSeenIp(token, ip);
         bumpLastUsed(token);
-        console.log(`[proxy WS] node connected: id=${nid} label=${row.label ?? "(unset)"} peer=${ip}`);
-        wss.handleUpgrade(req, socket, head, (ws) => {
-            console.log(`[proxy WS] handleUpgrade callback fired for id=${nid} (handshake completed)`);
-            // #505 — debug map state at upgrade entry. nodes.size tells us if the
-            // OLD entry survived (= we should supersede) or vanished silently.
-            const mapSizeBefore = nodes.size;
-            // Si un autre WS du même node était déjà ouvert (reconnect rapide),
-            // on close le précédent — un node = une connexion active.
-            const prev = nodes.get(nid);
-            if (prev) {
-                const prevAgeMs = Date.now() - prev.last_frame_ms;
-                console.log(`[proxy WS] supersede: closing prev conn for id=${nid} (prev was ${(prevAgeMs / 1000).toFixed(1)}s since last frame, readyState=${prev.socket.readyState}, map_size=${mapSizeBefore})`);
-                try { prev.socket.close(1000, "superseded"); } catch { /* noop */ }
-            } else {
-                console.log(`[proxy WS] no prev conn in map for id=${nid} (map_size=${mapSizeBefore}) — previous WS vanished without firing close/sweep`);
-            }
-            const conn: ProxyNodeConn = {
-                node_id: nid,
-                token,
-                socket: ws,
-                last_frame_ms: Date.now(),
-            };
-            nodes.set(nid, conn);
+        const mapSizeBefore = nodes.size;
+        const prev = nodes.get(nid);
+        if (prev) {
+            const prevAgeMs = Date.now() - prev.last_frame_ms;
+            console.log(`[proxy WS] supersede: closing prev conn for id=${nid} (prev was ${(prevAgeMs / 1000).toFixed(1)}s since last frame, readyState=${prev.socket.readyState}, map_size=${mapSizeBefore})`);
+            try { prev.socket.close(1000, "superseded"); } catch { /* noop */ }
+        }
+        const conn: ProxyNodeConn = {
+            node_id: nid,
+            token,
+            socket: ws,
+            last_frame_ms: Date.now(),
+        };
+        nodes.set(nid, conn);
+        console.log(`[proxy WS] node connected: id=${nid} label=${row.label ?? "(unset)"} peer=${ip} map_size_after=${nodes.size}`);
+        try {
             ws.send(JSON.stringify({ kind: "hello", node_id: nid, server_ts: Date.now() }));
-            // Bump last_used_at + last_frame_ms sur chaque message, ET dispatch
-            // via le request_id vers le handler enregistré (phase 2 :
-            // `pane.frame`/`pane.ack`/`pane.error` qui répondent à une requête
-            // ouverte côté API). Les frames sans request_id (`hello`) sont
-            // juste consommées pour la liveness + log de version (#505 `mwm67f`).
-            ws.on("message", (data) => {
-                conn.last_frame_ms = Date.now();
-                bumpLastUsed(token);
-                let frame: PaneFrame;
-                try { frame = JSON.parse(data.toString()) as PaneFrame; } catch { return; }
-                if (frame.kind === "hello") {
-                    const nodeVer = typeof frame.version === "string" ? frame.version : "(unknown)";
-                    const nodeCommit = typeof frame.commit === "string" ? frame.commit : "(unknown)";
-                    const match = nodeVer === AIBALL_VERSION && nodeCommit === AIBALL_COMMIT;
-                    const tag = match ? "match" : "MISMATCH";
-                    console.log(`[proxy WS] hello from id=${nid}: node v=${nodeVer} commit=${nodeCommit} | upstream v=${AIBALL_VERSION} commit=${AIBALL_COMMIT} → ${tag}`);
-                }
-                if (typeof frame.request_id === "string") {
-                    const handler = responseHandlers.get(frame.request_id);
-                    if (handler) handler(frame);
-                }
-            });
-            ws.on("pong", () => {
-                conn.last_frame_ms = Date.now();
-                bumpLastUsed(token);
-                if (process.env.AIBALL_WS_TRACE) {
-                    console.log(`[proxy WS] pong from id=${nid}`);
-                }
-            });
-            ws.on("close", (code, reason) => {
-                const lifetimeSec = ((Date.now() - conn.last_frame_ms) / 1000).toFixed(1);
-                console.log(`[proxy WS] node disconnected: id=${nid} label=${row.label ?? "(unset)"} code=${code} reason=${reason?.toString() || "(none)"} silent_for=${lifetimeSec}s`);
-                // N'enlève la map QUE si on est encore le conn courant (sinon
-                // un supersede a déjà installé le nouveau).
-                if (nodes.get(nid) === conn) nodes.delete(nid);
-            });
-            ws.on("error", () => {
-                try { ws.terminate(); } catch { /* noop */ }
-            });
+        } catch { /* noop — close prendra le relais */ }
+        ws.on("message", (data) => {
+            conn.last_frame_ms = Date.now();
+            bumpLastUsed(token);
+            let frame: PaneFrame;
+            try { frame = JSON.parse(data.toString()) as PaneFrame; } catch { return; }
+            if (frame.kind === "hello") {
+                const nodeVer = typeof frame.version === "string" ? frame.version : "(unknown)";
+                const nodeCommit = typeof frame.commit === "string" ? frame.commit : "(unknown)";
+                const match = nodeVer === AIBALL_VERSION && nodeCommit === AIBALL_COMMIT;
+                const tag = match ? "match" : "MISMATCH";
+                console.log(`[proxy WS] hello from id=${nid}: node v=${nodeVer} commit=${nodeCommit} | upstream v=${AIBALL_VERSION} commit=${AIBALL_COMMIT} → ${tag}`);
+            }
+            if (typeof frame.request_id === "string") {
+                const handler = responseHandlers.get(frame.request_id);
+                if (handler) handler(frame);
+            }
+        });
+        ws.on("pong", () => {
+            conn.last_frame_ms = Date.now();
+            bumpLastUsed(token);
+            if (process.env.AIBALL_WS_TRACE) {
+                console.log(`[proxy WS] pong from id=${nid}`);
+            }
+        });
+        ws.on("close", (code, reason) => {
+            const lifetimeSec = ((Date.now() - conn.last_frame_ms) / 1000).toFixed(1);
+            console.log(`[proxy WS] node disconnected: id=${nid} label=${row.label ?? "(unset)"} code=${code} reason=${reason?.toString() || "(none)"} silent_for=${lifetimeSec}s`);
+            if (nodes.get(nid) === conn) nodes.delete(nid);
+        });
+        ws.on("error", () => {
+            try { ws.terminate(); } catch { /* noop */ }
         });
     });
 
