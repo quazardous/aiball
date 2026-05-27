@@ -20,9 +20,12 @@ if exist "C:\Program Files\Git\bin\bash.exe" set "PATH=C:\Program Files\Git\bin;
 set "BIN_DIR=%~dp0"
 for %%I in ("%BIN_DIR%..") do set "ROOT=%%~fI"
 
-REM Preserve invoker's cwd — cli.ts reads CLAUDE_LOOP_CWD to figure
-REM out the project context (matters for tmux cwd + state dir).
-set "CLAUDE_LOOP_CWD=%CD%"
+REM Preserve invoker's cwd — cli.ts (and aiball.cmd) reads AIBALL_CWD
+REM so subcommands that walk up from the user's project (project cwd
+REM resolution, tmux cwd, state-dir naming) see the right starting
+REM point. Same name as bin/claude-loop (bash) and bin/aiball.cmd —
+REM single canonical var across the whole aiball product surface.
+set "AIBALL_CWD=%CD%"
 cd /d "%ROOT%"
 
 if not defined AIBALL_HOME set "AIBALL_HOME=%USERPROFILE%\.local\share\aiball"
