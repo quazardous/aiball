@@ -17,6 +17,31 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Automation triggers : state-change events (#509)
+
+Three new triggers fire when an **existing ticket's structural attributes
+mutate** :
+
+- `ticket_priority_changed` — when a ticket's `priority` is edited
+  (`POST /api/messages/:id/edit` or any `set_priority` automation action).
+  Carries the new + old values.
+- `ticket_project_changed` — when a ticket is moved across projects
+  (`POST /api/tickets/:id/move`). Carries the new project + source.
+- `ticket_status_changed` — when a moderator approves or rejects a pending
+  ticket (`POST /api/messages/:id/approve|reject`). Carries the new status
+  (`approved` / `rejected`) + the previous (`pending`).
+
+Paired with a new `status` condition leaf — `pending` / `approved` /
+`rejected` — selectable in the rule editor's field picker. Only meaningful
+under the `ticket_status_changed` trigger ; on other triggers the field is
+absent so the leaf fails closed.
+
+Rules can compose old → new transitions via stacked leaves (e.g. trigger
+`ticket_priority_changed` + `priority in [urgent, high]` → assign team
+lead). The automation runtime itself can cascade : the `set_priority`
+action emits `priority_changed` lifecycle, so a downstream rule on
+`ticket_priority_changed` runs.
+
 ### Consumer no-claim flag — assignment-only specialists (#508)
 
 A consumer can now be marked **no-claim**: `ticket_engage` skips the global

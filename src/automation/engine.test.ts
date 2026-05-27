@@ -498,3 +498,130 @@ test("ruleMatchesEvent : explicit expression overrides flat fields", () => {
     assert.equal(ruleMatchesEvent(r, ticketCreatedEv({ intent: "urgent" })), true);
     assert.equal(ruleMatchesEvent(r, ticketCreatedEv({ ticket_tags: ["linux"] })), false);
 });
+
+// ---------------------------------------------------------------------------
+// #509 — state-change triggers : ticket_priority_changed / _project_changed /
+// _status_changed. Chaque event porte la NOUVELLE valeur sur `priority` /
+// `project` / `status` + l'ancienne sur `old_*` (consommée par le runtime,
+// pas par les leaves aujourd'hui — un rule matche le post-état).
+// ---------------------------------------------------------------------------
+
+test("#509 ticket_priority_changed : rule matche la NOUVELLE priority", () => {
+    const r = rule({
+        triggers: ["ticket_priority_changed"],
+        expression: { kind: "leaf", field: "priority", op: "eq", value: "urgent" },
+        action: { kind: "assign", consumer_id: "lead" },
+    });
+    const bumped: AutomationEvent = {
+        trigger: "ticket_priority_changed",
+        project: "aiball",
+        by_agent: "david",
+        intent: "request",
+        priority: "urgent",
+        old_priority: "normal",
+        ticket_tags: [],
+    };
+    const calmed: AutomationEvent = {
+        trigger: "ticket_priority_changed",
+        project: "aiball",
+        by_agent: "david",
+        intent: "request",
+        priority: "low",
+        old_priority: "urgent",
+        ticket_tags: [],
+    };
+    assert.equal(ruleMatchesEvent(r, bumped), true);
+    assert.equal(ruleMatchesEvent(r, calmed), false);
+});
+
+test("#509 ticket_project_changed : rule matche le NOUVEAU project", () => {
+    const r = rule({
+        triggers: ["ticket_project_changed"],
+        expression: { kind: "leaf", field: "project", op: "eq", value: "aiball" },
+    });
+    const intoAiball: AutomationEvent = {
+        trigger: "ticket_project_changed",
+        project: "aiball",
+        by_agent: null,
+        intent: null,
+        priority: null,
+        old_project: "skybot",
+        ticket_tags: [],
+    };
+    const outOfAiball: AutomationEvent = {
+        trigger: "ticket_project_changed",
+        project: "skybot",
+        by_agent: null,
+        intent: null,
+        priority: null,
+        old_project: "aiball",
+        ticket_tags: [],
+    };
+    assert.equal(ruleMatchesEvent(r, intoAiball), true);
+    assert.equal(ruleMatchesEvent(r, outOfAiball), false);
+});
+
+test("#509 ticket_status_changed : leaf field `status` matche pending→approved", () => {
+    const r = rule({
+        triggers: ["ticket_status_changed"],
+        expression: { kind: "leaf", field: "status", op: "eq", value: "approved" },
+        action: { kind: "notify", consumer_id: "lead" },
+    });
+    const approved: AutomationEvent = {
+        trigger: "ticket_status_changed",
+        project: "aiball",
+        by_agent: "david",
+        intent: "request",
+        priority: "normal",
+        status: "approved",
+        old_status: "pending",
+        ticket_tags: [],
+    };
+    const rejected: AutomationEvent = {
+        trigger: "ticket_status_changed",
+        project: "aiball",
+        by_agent: "david",
+        intent: "request",
+        priority: "normal",
+        status: "rejected",
+        old_status: "pending",
+        ticket_tags: [],
+    };
+    assert.equal(ruleMatchesEvent(r, approved), true);
+    assert.equal(ruleMatchesEvent(r, rejected), false);
+});
+
+test("#509 leaf `status` sur un event sans status (ticket_created) → fail-closed", () => {
+    // Le field `status` n'existe QUE sur ticket_status_changed ; un autre
+    // trigger qui le query doit fail closed (cohérent avec tag_added sur
+    // message_posted).
+    const ev: AutomationEvent = ticketCreatedEv();
+    assert.equal(evaluateExpression(
+        { kind: "leaf", field: "status", op: "eq", value: "approved" }, ev), false);
+});
+
+test("#509 ticket_priority_changed : combinable avec `in` sur priority", () => {
+    // david pourrait vouloir : "fire si priority bumped → urgent OR high".
+    const r = rule({
+        triggers: ["ticket_priority_changed"],
+        expression: { kind: "leaf", field: "priority", op: "in", value: ["urgent", "high"] },
+    });
+    const toUrgent: AutomationEvent = {
+        trigger: "ticket_priority_changed", project: "aiball",
+        by_agent: null, intent: null, priority: "urgent", old_priority: "normal",
+        ticket_tags: [],
+    };
+    const toHigh: AutomationEvent = {
+        trigger: "ticket_priority_changed", project: "aiball",
+        by_agent: null, intent: null, priority: "high", old_priority: "low",
+        ticket_tags: [],
+    };
+    const toLow: AutomationEvent = {
+        trigger: "ticket_priority_changed", project: "aiball",
+        by_agent: null, intent: null, priority: "low", old_priority: "normal",
+        ticket_tags: [],
+    };
+    assert.equal(ruleMatchesEvent(r, toUrgent), true);
+    assert.equal(ruleMatchesEvent(r, toHigh), true);
+    assert.equal(ruleMatchesEvent(r, toLow), false);
+});

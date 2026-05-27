@@ -51,6 +51,11 @@ const emit = defineEmits<{
 const triggerOptions: { label: string; value: AutomationTrigger }[] = [
     { label: "ticket created", value: "ticket_created" },
     { label: "ticket tagged", value: "ticket_tagged" },
+    // #509 — state-change triggers : fire chaque fois qu'un ticket existant
+    // voit son attribut structurel muter (priorité, project, status).
+    { label: "ticket priority changed", value: "ticket_priority_changed" },
+    { label: "ticket project changed", value: "ticket_project_changed" },
+    { label: "ticket status changed", value: "ticket_status_changed" },
     { label: "message posted", value: "message_posted" },
     { label: "actionable eval", value: "actionable_eval" },
 ];

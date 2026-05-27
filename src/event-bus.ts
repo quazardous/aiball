@@ -90,7 +90,18 @@ export function onControl(
  * fanOutPings / broadcast calls (zero behaviour change). Phase 2 moves those
  * side-effects into `onLifecycle` handlers.
  */
-export type LifecycleOp = "created" | "decided" | "edited" | "moved" | "tagged";
+export type LifecycleOp =
+    | "created"
+    | "decided"
+    | "edited"
+    | "moved"
+    | "tagged"
+    // #509 — state-change ops séparés du générique `edited` pour que les
+    // subscribers (notamment l'automation runtime) dispatchent sans avoir à
+    // diff l'avant/après eux-mêmes. Chaque op porte sa valeur old sur le
+    // LifecycleEvent (champs `old_priority` / `old_project` / `old_status`).
+    | "priority_changed"
+    | "status_changed";
 
 export interface LifecycleEvent {
     /** the mutation that produced it (drives the WS broadcast type in phase 2). */
@@ -106,6 +117,16 @@ export interface LifecycleEvent {
     /** #457 slice 2 — when `op === "tagged"` : every tag currently on the
      *  ticket AFTER the change. Drives `match_tags` any-of. */
     all_tags?: string[];
+    /** #509 — when `op === "priority_changed"` : the priority value BEFORE
+     *  the mutation. The new value lives on `message.priority`. */
+    old_priority?: string;
+    /** #509 — when `op === "moved"` : the project source BEFORE the move.
+     *  The new project is on `message.project`. */
+    old_project?: string;
+    /** #509 — when `op === "status_changed"` : the moderation status BEFORE
+     *  the transition. Typically `"pending"` since the modérateur decide()
+     *  path gates on existing.status === "pending". */
+    old_status?: string;
 }
 
 export function emitLifecycle(event: LifecycleEvent): void {

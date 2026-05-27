@@ -53,11 +53,60 @@ export interface TicketTaggedEvent {
     priority: string | null;
 }
 
+/**
+ * #509 — state-change triggers. Chaque event capture old + new value pour
+ * permettre à une rule de matcher la transition (ex. priority `normal →
+ * urgent`). `priority` / `project` / `status` sur le leaf lisent la NOUVELLE
+ * valeur ; un leaf `op:"neq"` contre l'ancienne (via `tags`/etc. n'est pas
+ * possible aujourd'hui) reste un add ultérieur si david le demande.
+ */
+export interface TicketPriorityChangedEvent {
+    trigger: "ticket_priority_changed";
+    project: string;
+    by_agent: string | null;
+    intent: string | null;
+    /** Valeur APRÈS la mutation — celle que les rules matchent par défaut. */
+    priority: string;
+    /** Valeur AVANT la mutation, exposée pour les rules qui veulent gater
+     *  la transition (`old_priority`). Toujours présente sur cet event. */
+    old_priority: string;
+    ticket_tags: string[];
+}
+
+export interface TicketProjectChangedEvent {
+    trigger: "ticket_project_changed";
+    project: string;
+    by_agent: string | null;
+    intent: string | null;
+    priority: string | null;
+    /** Project source AVANT le `move` (= ce que la rule peut matcher pour
+     *  intercepter "tout ticket qui sort de tel projet"). */
+    old_project: string;
+    ticket_tags: string[];
+}
+
+export interface TicketStatusChangedEvent {
+    trigger: "ticket_status_changed";
+    project: string;
+    by_agent: string | null;
+    intent: string | null;
+    priority: string | null;
+    /** Status APRÈS — typiquement `approved` ou `rejected` (la transition
+     *  depuis `pending` est la seule possible côté décision modérateur). */
+    status: string;
+    /** Status AVANT — `pending` dans la branche moderation accept/reject. */
+    old_status: string;
+    ticket_tags: string[];
+}
+
 export type AutomationEvent =
     | MessagePostedEvent
     | ActionableEvalEvent
     | TicketCreatedEvent
-    | TicketTaggedEvent;
+    | TicketTaggedEvent
+    | TicketPriorityChangedEvent
+    | TicketProjectChangedEvent
+    | TicketStatusChangedEvent;
 
 // ---------------------------------------------------------------------------
 // Matcher — slice 5.1 redesign.
@@ -102,6 +151,32 @@ function readEventField(event: AutomationEvent, field: string): unknown {
             if (field === "tags") return event.ticket_tags;
             if (field === "intent") return event.intent;
             if (field === "priority") return event.priority;
+            return undefined;
+        case "ticket_priority_changed":
+            if (field === "project") return event.project;
+            if (field === "by_agent") return event.by_agent;
+            if (field === "intent") return event.intent;
+            if (field === "priority") return event.priority;
+            if (field === "tags") return event.ticket_tags;
+            return undefined;
+        case "ticket_project_changed":
+            // `project` ici = NOUVEAU project (post-move) — cohérent avec la
+            // sémantique "le ticket est maintenant dans X". L'ancien est
+            // disponible via une extension future si david demande un leaf
+            // `old_project` (pas dans le scope #509 slice 1+2).
+            if (field === "project") return event.project;
+            if (field === "by_agent") return event.by_agent;
+            if (field === "intent") return event.intent;
+            if (field === "priority") return event.priority;
+            if (field === "tags") return event.ticket_tags;
+            return undefined;
+        case "ticket_status_changed":
+            if (field === "project") return event.project;
+            if (field === "by_agent") return event.by_agent;
+            if (field === "intent") return event.intent;
+            if (field === "priority") return event.priority;
+            if (field === "status") return event.status;
+            if (field === "tags") return event.ticket_tags;
             return undefined;
     }
 }

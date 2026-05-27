@@ -119,6 +119,17 @@ function decide(
     // #321 phase 2 (additive): a moderator approved/rejected a pending message
     // → emit so the rules engine (#322) can react to the now-live message.
     emitLifecycle({ op: "decided", message: decorated });
+    // #509 — émet aussi un status_changed dédié pour que l'automation
+    // ticket_status_changed (runtime) fire sans avoir à reconnaître `decided`
+    // comme un transition. old_status = "pending" (la branche est gatée par
+    // existing.status === "pending" plus haut).
+    if (decorated.kind === "ticket_created") {
+        emitLifecycle({
+            op: "status_changed",
+            message: decorated,
+            old_status: "pending",
+        });
+    }
     res.json(decorated);
 }
 
@@ -153,6 +164,20 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
     if (!updated) return notFound(res);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });
+    // #509 — priority_changed lifecycle quand la priorité d'un ticket bouge
+    // réellement (normalise NULL→"normal" sur les 2 côtés pour éviter un faux
+    // positif). Runtime ticket_priority_changed dispatch en dépend.
+    if (
+        priority !== undefined
+        && existing.kind === "ticket_created"
+        && (existing.priority ?? "normal") !== (decorated.priority ?? "normal")
+    ) {
+        emitLifecycle({
+            op: "priority_changed",
+            message: decorated,
+            old_priority: existing.priority ?? "normal",
+        });
+    }
     res.json(decorated);
 });
 

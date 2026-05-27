@@ -451,14 +451,14 @@ export function moveTicket(
     ticketId: number,
     targetProject: string,
     byAgent: string | null,
-): { ticket: Message; event: Message | null } | null {
+): { ticket: Message; event: Message | null; from: string } | null {
     const db = getDb();
     return db.transaction((tx) => {
         const t = tx.select().from(schema.tickets).where(eq(schema.tickets.id, ticketId)).get();
         if (!t) return null;
         const from = t.project;
         if (from === targetProject) {
-            return { ticket: ticketRowToMessage(t), event: null };
+            return { ticket: ticketRowToMessage(t), event: null, from };
         }
         // Fresh display_seq in the destination project (MAX+1), so the
         // moved ticket doesn't collide with an existing (project, seq).
@@ -494,6 +494,7 @@ export function moveTicket(
         return {
             ticket: ticketRowToMessage(moved),
             event: messageRowToMessage(ev, targetProject),
+            from,
         };
     });
 }

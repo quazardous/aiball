@@ -29,7 +29,7 @@
  * explicitly so test suites that don't exercise automation don't pay the
  * subscriber cost.
  */
-import { onLifecycle, type LifecycleEvent } from "../event-bus.js";
+import { emitLifecycle, onLifecycle, type LifecycleEvent } from "../event-bus.js";
 import type { AutomationAction } from "../db/automation.js";
 import { resolvedEnabledRulesForTrigger } from "./resolved-rules.js";
 import { firstMatchingRule, type AutomationEvent } from "./engine.js";
@@ -58,14 +58,20 @@ export function registerAutomationRuntime(): () => void {
 
 function handleLifecycle(event: LifecycleEvent): void {
     try {
-        // Only fire automation on APPROVED rows : a pending submission must
-        // not drive side-effects (could be rejected next), and a rejected one
-        // never fires (the moderation path emits op="decided" with
-        // status="rejected", which we filter out here).
-        if (event.message.status !== "approved") return;
         if (event.message.kind !== "ticket_created") return;
-
         const m = event.message;
+
+        // #509 — status_changed peut transporter un ticket dont status n'est
+        // PAS encore approved (typiquement rejected). Le dispatch est gated
+        // par op + précondition (existing.status==="pending" déjà imposée
+        // côté décideur), pas par status==="approved". Le filtre approved
+        // s'applique uniquement aux triggers content-only (ticket_created,
+        // ticket_tagged, priority/project) où on ne veut pas réagir sur un
+        // ticket pending ou rejeté.
+        const approvedOnly =
+            event.op !== "status_changed" ? event.message.status === "approved" : true;
+        if (!approvedOnly) return;
+
         if (event.op === "created" || event.op === "decided") {
             // Both ends of the moderation flow land here :
             //   - op="created" + status="approved" → auto-approved path
@@ -105,6 +111,57 @@ function handleLifecycle(event: LifecycleEvent): void {
                     ticket_tags: event.all_tags ?? [],
                     intent: m.intent ?? null,
                     priority: m.priority ?? null,
+                },
+                m,
+            );
+        } else if (event.op === "priority_changed") {
+            // #509 — `old_priority` est toujours présent sur cet op (l'émetteur
+            // l'injecte). Fail-closed sinon : pas de fire si la valeur old est
+            // absente (event malformé).
+            if (event.old_priority === undefined) return;
+            fireAutomation(
+                {
+                    trigger: "ticket_priority_changed",
+                    project: m.project,
+                    by_agent: m.by_agent,
+                    intent: m.intent ?? null,
+                    priority: m.priority ?? "normal",
+                    old_priority: event.old_priority,
+                    ticket_tags: [],
+                },
+                m,
+            );
+        } else if (event.op === "moved") {
+            // #509 — `old_project` injecté par moveTicketTo. Skip si absent
+            // (back-compat avec un éventuel ancien call-site qui n'aurait pas
+            // été mis à jour).
+            if (event.old_project === undefined) return;
+            fireAutomation(
+                {
+                    trigger: "ticket_project_changed",
+                    project: m.project,
+                    by_agent: m.by_agent,
+                    intent: m.intent ?? null,
+                    priority: m.priority ?? null,
+                    old_project: event.old_project,
+                    ticket_tags: [],
+                },
+                m,
+            );
+        } else if (event.op === "status_changed") {
+            // #509 — `old_status` injecté côté decide(). Le NEW status est lu
+            // sur le ticket lui-même (status="approved" ou "rejected").
+            if (event.old_status === undefined) return;
+            fireAutomation(
+                {
+                    trigger: "ticket_status_changed",
+                    project: m.project,
+                    by_agent: m.by_agent,
+                    intent: m.intent ?? null,
+                    priority: m.priority ?? null,
+                    status: m.status,
+                    old_status: event.old_status,
+                    ticket_tags: [],
                 },
                 m,
             );
@@ -177,9 +234,24 @@ function executeAction(action: AutomationAction, ticket: Message): void {
             // operator edits a ticket directly (priority CHECK + tickets-only
             // gating already enforced in db/messages.ts). Broadcast so open
             // inboxes refresh the urgency chip live.
+            const oldPriority = ticket.priority ?? "normal";
             editMessage(ticket.id, { priority: action.priority });
             const updated = getMessage(ticket.id);
-            if (updated) broadcast({ type: "message_edited", data: updated });
+            if (updated) {
+                broadcast({ type: "message_edited", data: updated });
+                // #509 — fire ticket_priority_changed quand l'automation
+                // elle-même bouge la priorité, pour permettre les chaînes
+                // (rule A bump → rule B sur ticket_priority_changed assign).
+                // Cascade volontaire — l'utilisateur veut sa composition.
+                const newPriority = updated.priority ?? "normal";
+                if (newPriority !== oldPriority) {
+                    emitLifecycle({
+                        op: "priority_changed",
+                        message: updated,
+                        old_priority: oldPriority,
+                    });
+                }
+            }
             return;
         }
         case "decision":

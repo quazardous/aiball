@@ -524,6 +524,8 @@ export function moveTicketTo(
     broadcast({ type: "message_edited", data: res.ticket });
     // #321 phase 1: the ticket changed project — emit so the rules engine can
     // re-evaluate attribution on the new project (#322).
-    emitLifecycle({ op: "moved", message: res.ticket });
+    // #509 — `old_project` plumb pour que ticket_project_changed automation
+    // (runtime.ts) ait l'avant + l'après. `res.from` est le project SOURCE.
+    emitLifecycle({ op: "moved", message: res.ticket, old_project: res.from });
     return res.ticket;
 }

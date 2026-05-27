@@ -113,7 +113,10 @@ export type AutomationTrigger =
     | "message_posted"
     | "actionable_eval"
     | "ticket_created"
-    | "ticket_tagged";
+    | "ticket_tagged"
+    | "ticket_priority_changed"
+    | "ticket_project_changed"
+    | "ticket_status_changed";
 export type AutomationAction =
     | { kind: "assign"; consumer_id: string }
     | { kind: "decision"; decision: "auto" | "review" }
@@ -133,7 +136,8 @@ export type ConditionField =
     | "priority"
     | "tag_added"
     | "tags"
-    | "scope_consumer";
+    | "scope_consumer"
+    | "status";
 export type ConditionOp = "eq" | "neq" | "in" | "includes";
 export type ConditionTree =
     | { kind: "and"; children: ConditionTree[] }

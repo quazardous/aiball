@@ -37,7 +37,14 @@ export type Trigger =
     | "message_posted"
     | "actionable_eval"
     | "ticket_created"
-    | "ticket_tagged";
+    | "ticket_tagged"
+    // #509 — state-change triggers. Émis par les call-sites qui mutent les
+    // attributs structurels d'un ticket déjà créé. Chaque event porte old/new
+    // value sur l'engine pour qu'une rule puisse matcher la transition
+    // (ex. priority `normal → urgent`).
+    | "ticket_priority_changed"
+    | "ticket_project_changed"
+    | "ticket_status_changed";
 
 // ---------------------------------------------------------------------------
 // Action discriminated union (extensible — add a new case + a new schema).
@@ -67,7 +74,11 @@ export type ConditionField =
     | "priority"
     | "tag_added"
     | "tags"
-    | "scope_consumer";
+    | "scope_consumer"
+    // #509 — moderation status (pending/approved/rejected). Porté par
+    // ticket_status_changed (post-decision) ; sur les autres triggers le field
+    // est undefined → leaf fail-closed (cohérent avec readEventField).
+    | "status";
 
 /** Leaf comparison operators :
  *  - `eq` / `neq` : strict (in)equality, value is a string/null.
@@ -84,7 +95,7 @@ export type ConditionTree =
 
 const VALID_FIELDS: ConditionField[] = [
     "project", "kind", "by_agent", "intent", "priority",
-    "tag_added", "tags", "scope_consumer",
+    "tag_added", "tags", "scope_consumer", "status",
 ];
 const VALID_OPS: ConditionOp[] = ["eq", "neq", "in", "includes"];
 
@@ -256,6 +267,7 @@ function parseTags(json: string): string[] {
 
 const VALID_TRIGGERS: Trigger[] = [
     "message_posted", "actionable_eval", "ticket_created", "ticket_tagged",
+    "ticket_priority_changed", "ticket_project_changed", "ticket_status_changed",
 ];
 
 function parseTriggers(json: string): Trigger[] {

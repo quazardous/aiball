@@ -58,6 +58,10 @@ const fieldOptions: { label: string; value: ConditionField; icon: string }[] = [
     { label: "tags (any-of)",  value: "tags",           icon: "pi pi-tags" },
     { label: "tag_added",      value: "tag_added",      icon: "pi pi-plus-circle" },
     { label: "scope_consumer", value: "scope_consumer", icon: "pi pi-id-card" },
+    // #509 — status n'a de sens que pour le trigger ticket_status_changed
+    // (sur les autres le field est undefined → leaf fail-closed). Listé ici
+    // dans le picker pour que l'utilisateur puisse l'ajouter explicitement.
+    { label: "status",         value: "status",         icon: "pi pi-circle" },
 ];
 const fieldIcon = computed<string>(() =>
     fieldOptions.find((f) => f.value === props.node.field)?.icon ?? "pi pi-bolt",
@@ -85,6 +89,12 @@ const priorityOptions = [
     { label: "normal", value: "normal" },
     { label: "low",    value: "low" },
 ];
+// #509 — moderation status pour ticket_status_changed.
+const statusOptions = [
+    { label: "pending",  value: "pending" },
+    { label: "approved", value: "approved" },
+    { label: "rejected", value: "rejected" },
+];
 
 // --- helpers value <-> widget ---------------------------------------------
 
@@ -93,7 +103,8 @@ const priorityOptions = [
 const isEnum = computed<boolean>(() =>
     props.node.field === "kind"
     || props.node.field === "intent"
-    || props.node.field === "priority",
+    || props.node.field === "priority"
+    || props.node.field === "status",
 );
 const isTagField = computed(() =>
     props.node.field === "tags" || props.node.field === "tag_added",
@@ -108,6 +119,7 @@ function enumOptionsFor(field: ConditionField): { label: string; value: string }
     if (field === "kind") return kindOptions;
     if (field === "intent") return intentOptions;
     if (field === "priority") return priorityOptions;
+    if (field === "status") return statusOptions;
     return [];
 }
 
@@ -285,6 +297,7 @@ function setNegate(v: boolean) {
 .leaf-block--tags           { --leaf-accent: var(--p-teal-500); }
 .leaf-block--tag_added      { --leaf-accent: var(--p-emerald-500); }
 .leaf-block--scope_consumer { --leaf-accent: var(--p-rose-500); }
+.leaf-block--status         { --leaf-accent: var(--p-yellow-500); }
 
 .leaf-block--negated {
     border-style: dashed;
