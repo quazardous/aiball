@@ -261,6 +261,10 @@ function onClick(ev: MouseEvent) {
     white-space: nowrap;
     display: block;
     font-size: 0.92rem;
+    /* #530 — explicit line-height: with `normal`, Segoe UI on Windows
+       Chrome resolves to ~1.31, which clips descenders (g/p/y) under
+       `overflow: hidden`. 1.5 = standard typography buffer. */
+    line-height: 1.5;
 }
 .list-row__line--chips {
     flex-wrap: wrap;
