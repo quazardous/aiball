@@ -30,6 +30,7 @@ import type { RequestHandler } from "express";
 import { WebSocket } from "ws";
 import { globalConfigPath } from "./autopoll/config.js";
 import { resolveLoopName, paneTarget, captureOnce, sendKeys } from "./pane.js";
+import { AIBALL_VERSION, AIBALL_COMMIT } from "./version.js";
 
 export interface ProxyConfig {
     url: string;
@@ -286,15 +287,18 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
         }
         ws.on("open", () => {
             attempt = 0; // succès → reset le backoff
-            console.log(`[proxy WS] connected to ${wsUrl}`);
-            // Hello + label : on advertise le label au handshake comme on le
-            // faisait sur le header `x-aiball-node-label` de chaque request
-            // HTTP forwardée. Le serveur fera la même sync de `tokens.label`.
+            console.log(`[proxy WS] connected to ${wsUrl} (sending hello v=${AIBALL_VERSION} commit=${AIBALL_COMMIT})`);
+            // Hello + label + version/commit : le label re-sync `tokens.label`
+            // (comme le vieux header `x-aiball-node-label`). version/commit
+            // (#505 david `mwm67f`) loggués côté serveur pour spotter un node
+            // qui tourne du code outdated vs l'upstream.
             try {
                 ws?.send(JSON.stringify({
                     kind: "hello",
                     label: cfg.nodeLabel ?? null,
                     client_ts: Date.now(),
+                    version: AIBALL_VERSION,
+                    commit: AIBALL_COMMIT,
                 }));
             } catch { /* noop — le close handler reprendra */ }
         });

@@ -33,6 +33,7 @@ import { nowIso } from "./db/connection.js";
 import { getDb } from "./db/connection.js";
 import * as schema from "./schema.js";
 import { eq } from "drizzle-orm";
+import { AIBALL_VERSION, AIBALL_COMMIT } from "./version.js";
 
 /** Path WS dédié au canal node↔upstream (distinct du `/ws` browser). */
 export const PROXY_WS_PATH = "/ws/proxy-node";
@@ -220,12 +221,19 @@ export function attachProxyWs(server: Server): void {
             // via le request_id vers le handler enregistré (phase 2 :
             // `pane.frame`/`pane.ack`/`pane.error` qui répondent à une requête
             // ouverte côté API). Les frames sans request_id (`hello`) sont
-            // juste consommées pour la liveness.
+            // juste consommées pour la liveness + log de version (#505 `mwm67f`).
             ws.on("message", (data) => {
                 conn.last_frame_ms = Date.now();
                 bumpLastUsed(token);
                 let frame: PaneFrame;
                 try { frame = JSON.parse(data.toString()) as PaneFrame; } catch { return; }
+                if (frame.kind === "hello") {
+                    const nodeVer = typeof frame.version === "string" ? frame.version : "(unknown)";
+                    const nodeCommit = typeof frame.commit === "string" ? frame.commit : "(unknown)";
+                    const match = nodeVer === AIBALL_VERSION && nodeCommit === AIBALL_COMMIT;
+                    const tag = match ? "match" : "MISMATCH";
+                    console.log(`[proxy WS] hello from id=${nid}: node v=${nodeVer} commit=${nodeCommit} | upstream v=${AIBALL_VERSION} commit=${AIBALL_COMMIT} → ${tag}`);
+                }
                 if (typeof frame.request_id === "string") {
                     const handler = responseHandlers.get(frame.request_id);
                     if (handler) handler(frame);
