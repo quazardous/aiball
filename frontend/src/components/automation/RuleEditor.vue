@@ -109,9 +109,13 @@ const rootMenuItems = [
         label: "NOT (negation)",
         icon: "pi pi-ban",
         command: () => {
+            // david (#498) : NOT vient avec un AND vide, pas un leaf —
+            // l'utilisateur peut alors choisir la forme du contenu
+            // (toggle AND/OR via le Select interne, +add pour
+            // poser un leaf ou nester un groupe).
             expression.value = {
                 kind: "not",
-                child: { kind: "leaf", field: "project", op: "eq", value: "" },
+                child: { kind: "and", children: [] },
             };
         },
     },

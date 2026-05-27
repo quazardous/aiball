@@ -57,7 +57,10 @@ const addMenuItems = [
     {
         label: "Group : NOT",
         icon: "pi pi-ban",
-        command: () => addChild({ kind: "not", child: blankLeaf() }),
+        // david (#498) : NOT pré-rempli avec un AND vide, pas un leaf —
+        // l'utilisateur compose ensuite via le +add interne du AND
+        // (et bascule en OR via son Select s'il préfère).
+        command: () => addChild({ kind: "not", child: { kind: "and", children: [] } }),
     },
 ];
 
@@ -100,15 +103,12 @@ function updateChild(index: number, child: ConditionTree) {
 
 function removeChild(index: number) {
     if (props.node.kind === "not") {
-        // #477 david : "si je choisit NOT, il vient avec une condition
-        // projet. si je supprime la condition projet, le Not se
-        // transforme en AND/OR". On collapse-ait en `{kind:"and",
-        // children:[]}` ce qui MORPHAIT le NOT en AND vide → bug.
-        // Maintenant on garde le NOT vivant en remettant un leaf blank
-        // (même default que la root-picker quand on choisit NOT) ;
-        // l'utilisateur peut éditer ce leaf ou supprimer le NOT entier
-        // via le × propre au container NOT.
-        emit("update", { kind: "not", child: blankLeaf() });
+        // #477 + #498 : NOT garde toujours un child non-vide (le schéma
+        // l'exige) MAIS on refill avec un AND vide plutôt qu'un leaf —
+        // cohérent avec la création initiale d'un NOT (#498). Le NOT
+        // ne morphe pas en AND/OR : il reste un NOT autour d'un AND
+        // vide, que l'utilisateur peut basculer en OR ou remplir.
+        emit("update", { kind: "not", child: { kind: "and", children: [] } });
         return;
     }
     const next = props.node.children.filter((_, i) => i !== index);
