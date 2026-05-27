@@ -200,7 +200,14 @@ export function attachProxyWs(server: Server): void {
         },
     });
 
+    wss.on("headers", (_headers, _req) => {
+        console.log(`[proxy WS] wss.on('headers') fired — handshake about to complete`);
+    });
+    wss.on("error", (e) => {
+        console.warn(`[proxy WS] wss.on('error'): ${e.message}`);
+    });
     wss.on("connection", (ws, req) => {
+        console.log(`[proxy WS] wss.on('connection') fired — handshake done, ws ready`);
         const auth = (req as IncomingMessage & { __aiballNodeAuth?: { token: string; row: ReturnType<typeof getToken>; ip: string | null } })
             .__aiballNodeAuth;
         if (!auth || !auth.row) {
