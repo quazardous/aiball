@@ -20,9 +20,18 @@ import { readdirSync, statSync, readFileSync, existsSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-/** Claude Code encodes the project dir by replacing '/' and '.' with '-'. */
+/**
+ * Claude Code encodes the project dir by replacing path-punctuation chars
+ * with '-' :
+ *   - `/` et `.` sur POSIX (cas historique pré-Windows).
+ *   - `\` et `:` aussi sur Windows (#517 david `vb9umt`) — sinon
+ *     `C:\Users\david\dev\aiball` reste tel quel et ne matche pas la dir
+ *     Claude Code (`C-Users-david-dev-aiball`), `latestSessionFile` →
+ *     null, et le token-push n'est jamais déclenché pour les agents
+ *     graphite/Windows. Résolution : regex inclut les 4 séparateurs.
+ */
 export function projectTranscriptDir(cwd: string): string {
-    return join(homedir(), ".claude", "projects", cwd.replace(/[/.]/g, "-"));
+    return join(homedir(), ".claude", "projects", cwd.replace(/[/.\\:]/g, "-"));
 }
 
 /** Newest `.jsonl` in `dir` (the active session is the most recently written). */
