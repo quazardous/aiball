@@ -119,7 +119,7 @@ const rootMenuItems = [
     {
         label: "Condition (single leaf)",
         icon: "pi pi-bolt",
-        command: () => { expression.value = { kind: "leaf", field: "project", op: "eq", value: "" }; },
+        command: () => { expression.value = { kind: "leaf", field: "project", op: "in", value: [] }; },
     },
     {
         label: "ALL of (AND group)",

@@ -100,11 +100,14 @@ function openNotAddMenu(event: Event) {
 }
 
 function blankLeaf(): ConditionTree {
-    // Default leaf : project = "" (empty string ; the user will type or
-    // switch field). A `tags` leaf would default to [] — but project is the
-    // most-used so it's a sensible starting field.
+    // Default leaf : project + op `in` + value [] (#522 david `bhc88v` :
+    // tous les fields ont migré sur op:in array-style ; `op:eq value:""`
+    // était stale post-#522). Empty array = leaf qui matche rien (vacuous
+    // false jusqu'à ce que l'utilisateur ajoute des chips) — sémantique
+    // claire vs un literal empty string. project = field le plus utile
+    // comme starting point, l'utilisateur switch facilement via le picker.
     const field: ConditionField = "project";
-    return { kind: "leaf", field, op: "eq", value: "" };
+    return { kind: "leaf", field, op: "in", value: [] };
 }
 
 const isNot = computed(() => props.node.kind === "not");
