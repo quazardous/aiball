@@ -158,60 +158,46 @@ function bumpLastUsed(token: string): void {
 }
 
 export function attachProxyWs(server: Server): void {
-    // #505 — refactor : on utilisait `noServer: true` + `server.on("upgrade")`
-    // manuel. Symptôme : `wss.handleUpgrade` callback ne fire JAMAIS, donc
-    // pas de handshake → graphite cycle au timeout. Probable conflit avec
-    // l'autre `WebSocketServer({server, path:"/ws"})` (`attachWs` de ws.ts)
-    // pour la même `server.on("upgrade")`. Le pattern standard `{server, path,
-    // verifyClient}` fait que ws lib gère le multi-path proprement.
-    //
-    // verifyClient gate l'upgrade pre-handshake → on peut refuser sur token,
-    // comme avant. Identité du node calculée DANS verifyClient et passée à
-    // l'on("connection") via `req` (info.req qu'on récupère sur connection).
-    const wss = new WebSocketServer({
-        server,
-        path: PROXY_WS_PATH,
-        verifyClient: (info, cb) => {
-            const ip = info.req.socket?.remoteAddress ?? null;
-            console.log(`[proxy WS] verifyClient: path=${info.req.url} peer=${ip}`);
-            const token = readBearer(info.req);
-            if (!token) {
-                console.warn(`[proxy WS] upgrade refused: no bearer (peer=${ip})`);
-                cb(false, 401, "Unauthorized");
-                return;
-            }
-            const row = getToken(token);
-            if (!row) {
-                console.warn(`[proxy WS] upgrade refused: token not found (peer=${ip})`);
-                cb(false, 401, "Unauthorized");
-                return;
-            }
-            if (row.kind !== "node") {
-                console.warn(`[proxy WS] upgrade refused: token kind=${row.kind} (need 'node') peer=${ip}`);
-                cb(false, 403, "Forbidden");
-                return;
-            }
-            // Stash identity sur la req pour reprise dans on("connection") —
-            // pas de duplication de la lecture/parse côté connection.
-            (info.req as IncomingMessage & { __aiballNodeAuth?: { token: string; row: typeof row; ip: string | null } })
-                .__aiballNodeAuth = { token, row, ip };
-            console.log(`[proxy WS] verifyClient ACCEPTED for peer=${ip} (kind=${row.kind}) — calling cb(true)`);
-            cb(true);
-        },
+    // #505 — noServer + manual upgrade dispatch. Le pattern `{server, path}`
+    // ne marche PAS quand 2+ WebSocketServer path-scoped partagent le même
+    // server : la lib appelle `handleUpgrade` UNCONDITIONNELLEMENT, qui
+    // abort-handshake-400 sur path mismatch → destroy le socket avant que
+    // les autres WSS puissent l'attraper. Le noServer évite ce piège.
+    const wss = new WebSocketServer({ noServer: true });
+
+    server.on("upgrade", (req, socket, head) => {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        if (url.pathname !== PROXY_WS_PATH) return; // pas pour nous
+        console.log(`[proxy WS] upgrade attempt: path=${url.pathname} peer=${req.socket?.remoteAddress}`);
+        const ip = req.socket?.remoteAddress ?? null;
+        const token = readBearer(req);
+        if (!token) {
+            console.warn(`[proxy WS] upgrade refused: no bearer (peer=${ip})`);
+            socket.write("HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer\r\n\r\n");
+            socket.destroy();
+            return;
+        }
+        const row = getToken(token);
+        if (!row) {
+            console.warn(`[proxy WS] upgrade refused: token not found (peer=${ip})`);
+            socket.write("HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer\r\n\r\n");
+            socket.destroy();
+            return;
+        }
+        if (row.kind !== "node") {
+            console.warn(`[proxy WS] upgrade refused: token kind=${row.kind} (need 'node') peer=${ip}`);
+            socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+            socket.destroy();
+            return;
+        }
+        // Auth OK — handshake.
+        wss.handleUpgrade(req, socket, head, (ws) => {
+            wss.emit("connection", ws, req, { token, row, ip });
+        });
     });
 
-    wss.on("headers", (_headers, _req) => {
-        console.log(`[proxy WS] wss.on('headers') fired — handshake about to complete`);
-    });
-    wss.on("error", (e) => {
-        console.warn(`[proxy WS] wss.on('error'): ${e.message}`);
-    });
-    wss.on("connection", (ws, req) => {
-        console.log(`[proxy WS] wss.on('connection') fired — handshake done, ws ready`);
-        const auth = (req as IncomingMessage & { __aiballNodeAuth?: { token: string; row: ReturnType<typeof getToken>; ip: string | null } })
-            .__aiballNodeAuth;
-        if (!auth || !auth.row) {
-            // verifyClient devrait toujours stasher, mais belt-and-suspenders.
+    wss.on("connection", (ws, _req, auth?: { token: string; row: NonNullable<ReturnType<typeof getToken>>; ip: string | null }) => {
+        if (!auth) {
             try { ws.close(1011, "auth context missing"); } catch { /* */ }
             return;
         }

@@ -18,7 +18,20 @@ export type WsEvent =
     | { type: "consumer_changed"; data: unknown };
 
 export function attachWs(server: Server, path = "/ws"): void {
-    wss = new WebSocketServer({ server, path });
+    // #505 — `{server, path}` callait `wss.handleUpgrade` UNCONDITIONNELLEMENT
+    // côté ws lib, qui `abortHandshake(socket, 400)` quand le path ne matchait
+    // pas → le socket est destroy pour TOUS les autres path-scoped WSS sur le
+    // même server (e.g. proxy-ws.ts pour /ws/proxy-node). On passe en
+    // `noServer` + manual upgrade dispatch qui ne touche pas le socket si le
+    // path ne matche pas.
+    wss = new WebSocketServer({ noServer: true });
+    server.on("upgrade", (req, socket, head) => {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        if (url.pathname !== path) return;
+        wss!.handleUpgrade(req, socket, head, (ws) => {
+            wss!.emit("connection", ws, req);
+        });
+    });
     wss.on("connection", (socket) => {
         socket.send(JSON.stringify({ type: "hello", data: { ts: Date.now() } }));
         // Liveness flag flipped false each keepalive sweep, reset by pong (#B.191).
