@@ -71,6 +71,21 @@ function livenessTitle(lastUsedAt: string | null): string {
     if (ageSec < 3600) return `last activity ${Math.round(ageSec / 60)}min ago`;
     return `last activity ${Math.round(ageSec / 3600)}h ago`;
 }
+
+// #513 (suite j48y3b) : format compact pour la liste — `v0.9.0 · abc12345`.
+// Mêmes règles que NodeDetailPage : commit tronqué 8 chars, fallback gracieux
+// si l'un des 2 manque, null si rien d'utile (la row n'apparaît pas).
+type WsState = NonNullable<NodeView["ws_state"]>;
+function proxyVersionShort(s: WsState): string | null {
+    const v = s.node_version;
+    const c = s.node_commit;
+    const ver = v && v !== "(unknown)" ? v : null;
+    const commit = c && c !== "(unknown)" ? c.slice(0, 8) : null;
+    if (ver && commit) return `${ver} · ${commit}`;
+    if (ver) return ver;
+    if (commit) return commit;
+    return null;
+}
 </script>
 
 <template>
@@ -118,6 +133,14 @@ function livenessTitle(lastUsedAt: string | null): string {
                             @click.prevent="emit('open-edit', n.node_id)"
                         >{{ n.label || "(unlabelled)" }}</a>
                         <code class="nodes-id">{{ n.node_id }}</code>
+                        <!-- #513 (suite j48y3b) : version aussi dans la liste,
+                             pas que dans le detail page. Format compact à
+                             côté du node_id : "v0.9.0 · abc12345". -->
+                        <code
+                            v-if="n.ws_state?.connected && proxyVersionShort(n.ws_state)"
+                            class="nodes-version"
+                            :title="`proxy version (${n.ws_state.node_version ?? '?'} commit ${n.ws_state.node_commit ?? '?'})`"
+                        >{{ proxyVersionShort(n.ws_state) }}</code>
                     </td>
                     <td>{{ n.last_seen_ip ?? "—" }}</td>
                     <td :title="`created ${fmt(n.created_at)}`">{{ fmt(n.last_used_at) }}</td>
@@ -137,4 +160,13 @@ function livenessTitle(lastUsedAt: string | null): string {
 }
 .nodes-label-link:hover { text-decoration: underline; }
 .nodes-id { display: block; font-size: 0.7rem; opacity: 0.5; }
+/* #513 — version proxy juste sous le node_id, plus discret encore (italic
+   pour visuellement distinguer de l'id stable). */
+.nodes-version {
+    display: block;
+    font-size: 0.7rem;
+    opacity: 0.6;
+    font-style: italic;
+    color: var(--p-text-muted-color);
+}
 </style>
