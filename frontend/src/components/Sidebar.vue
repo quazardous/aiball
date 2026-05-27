@@ -119,43 +119,51 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
                     <i class="pi pi-plus" />
                 </button>
             </summary>
+            <!-- #528 david : compteurs masquent le nom + l'icon moniteur +
+                 l'icon dossier servent à pas grand chose. On vire les 2 icons
+                 du project picker (sidebar-projects branch UNIQUEMENT — les
+                 boutons settings gardent leurs icons), on style le label
+                 selon p.running / p.local pour différencier (vert si une
+                 loop tourne, muted-italic si local sans loop, normal sinon),
+                 et on rétrécit les badges count. -->
             <button
                 v-for="p in items"
                 :key="p.value ?? '__all__'"
                 type="button"
-                class="sidebar-item"
+                class="sidebar-item sidebar-item--project"
                 :class="{ active: panel === null && projectPage === null && project === p.value }"
                 @click="emit('select', p.value)"
             >
-                <i :class="p.icon" />
-                <span class="sidebar-item-label">{{ p.label }}</span>
-<!-- #393 (3c): indicator only — no link here (david jkzk4g: the
-                     detail link lives in the Projects page, not the chooser). -->
                 <span
-                    v-if="p.local && p.value"
-                    :class="['sidebar-badge', p.running ? 'sidebar-badge--running' : 'sidebar-badge--local']"
+                    class="sidebar-item-label sidebar-item-label--project"
+                    :class="{
+                        'sidebar-item-label--running': p.running && p.value,
+                        'sidebar-item-label--local': p.local && !p.running && p.value,
+                    }"
                     :title="p.running
-                        ? 'a claude-loop is running here'
-                        : 'local — root known, no loop running'"
-                ><i class="pi pi-desktop" /></span>
+                        ? `${p.label} — a claude-loop is running here`
+                        : (p.local && p.value
+                            ? `${p.label} — local (root known, no loop running)`
+                            : p.label)"
+                >{{ p.label }}</span>
                 <span
                     v-if="p.pending > 0"
-                    class="sidebar-badge sidebar-badge--pending"
+                    class="sidebar-badge sidebar-badge--pending sidebar-badge--mini"
                     :title="`${p.pending} pending moderation`"
                 >{{ p.pending }}</span>
                 <span
                     v-if="p.resolved > 0"
-                    class="sidebar-badge sidebar-badge--resolved"
+                    class="sidebar-badge sidebar-badge--resolved sidebar-badge--mini"
                     :title="`${p.resolved} resolution proposal${p.resolved > 1 ? 's' : ''} waiting for your accept/reject`"
                 >{{ p.resolved }}</span>
                 <span
                     v-if="p.unread > 0"
-                    class="sidebar-badge sidebar-badge--unread"
+                    class="sidebar-badge sidebar-badge--unread sidebar-badge--mini"
                     :title="`${p.unread} unread tickets for you`"
                 >{{ p.unread }}</span>
                 <span
                     v-if="p.open > 0"
-                    class="sidebar-badge sidebar-badge--open"
+                    class="sidebar-badge sidebar-badge--open sidebar-badge--mini"
                     :title="`${p.open} open tickets`"
                 >{{ p.open }}</span>
             </button>
@@ -430,12 +438,35 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+/* #528 — project row : pas d'icon ⇒ on récupère l'espace, le label peut
+   utiliser tout le gap. Petit gap entre label + badges count. */
+.sidebar-item--project { gap: 0.3rem; }
+.sidebar-item-label--project { flex: 1; min-width: 0; }
+/* #528 — différenciation par style du nom (remplace l'icon moniteur) :
+   - running : couleur primaire + bold subtle pour signaler activité.
+   - local sans running : italic muted (root connu mais loop éteinte).
+   - sinon : normal.
+   Sur la row .active (sélectionnée) on respecte le contrast color du
+   bouton — l'override couleur ne s'applique qu'aux rows non-active. */
+.sidebar-item-label--running { color: var(--p-green-500); font-weight: 600; }
+.sidebar-item-label--local { font-style: italic; opacity: 0.85; }
+.sidebar-item.active .sidebar-item-label--running,
+.sidebar-item.active .sidebar-item-label--local { color: inherit; }
 .sidebar-badge {
     font-size: 0.72rem;
     font-weight: 600;
     border-radius: 999px;
     padding: 0.05rem 0.4rem;
     line-height: 1.2;
+}
+/* #528 — badges compteurs project : plus petits + plus serrés pour ne
+   plus masquer le nom (compteurs étaient à 0.72rem + 0.4rem padding =
+   ~28px wide pour un chiffre seul × 4 chips = ~110px volés au label). */
+.sidebar-badge--mini {
+    font-size: 0.65rem;
+    padding: 0.02rem 0.3rem;
+    min-width: 1.1rem;
+    text-align: center;
 }
 .sidebar-badge--pending {
     background: var(--p-yellow-500);
@@ -461,27 +492,8 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
     background: var(--p-surface-300);
     color: var(--p-text-color);
 }
-/* #393: "local" — root known but no loop running. Dim desktop chip
-   (indicator only — not clickable, see jkzk4g). */
-.sidebar-badge--local {
-    background: var(--p-surface-400);
-    color: var(--p-surface-50);
-    padding: 0.05rem 0.35rem;
-    opacity: 0.75;
-}
-/* #393 (3c): "running" — a claude-loop is live here. Green, gently pulsing. */
-.sidebar-badge--running {
-    background: var(--p-green-500, #22c55e);
-    color: #fff;
-    padding: 0.05rem 0.35rem;
-    animation: sidebar-running-pulse 2s ease-in-out infinite;
-}
-@keyframes sidebar-running-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.55; }
-}
-.sidebar-badge--local .pi,
-.sidebar-badge--running .pi {
-    font-size: 0.65rem;
-}
+/* #528 — les anciennes classes `.sidebar-badge--local` / `--running` (avec
+   le `pi-desktop` icon + pulse anim) ont été remplacées par le style sur
+   `.sidebar-item-label--running` / `--local` ci-dessus (couleur + italic
+   directement sur le nom). Plus de duplication d'info iconique. */
 </style>
