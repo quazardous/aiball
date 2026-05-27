@@ -249,9 +249,11 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
         const u = new URL("/ws/proxy-node", cfg.url);
         u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
         wsUrl = u.toString();
-    } catch {
+    } catch (e) {
+        console.warn(`[proxy WS] cannot derive WS URL from cfg.url=${cfg.url}: ${(e as Error).message}`);
         return { close: () => {}, isOpen: () => false };
     }
+    console.log(`[proxy WS] starting client → ${wsUrl} (label=${cfg.nodeLabel ?? "(unset)"})`);
 
     let stopped = false;
     let ws: WebSocket | null = null;

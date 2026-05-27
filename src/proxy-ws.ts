@@ -159,22 +159,31 @@ export function attachProxyWs(server: Server): void {
     server.on("upgrade", (req, socket, head) => {
         const url = new URL(req.url ?? "/", "http://localhost");
         if (url.pathname !== PROXY_WS_PATH) return; // pas pour nous, laisse ws.ts gérer
+        const ip = peerIp(req);
         const token = readBearer(req);
         if (!token) {
+            console.warn(`[proxy WS] upgrade refused: no bearer (peer=${ip})`);
             socket.write("HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer\r\n\r\n");
             socket.destroy();
             return;
         }
         const row = getToken(token);
-        if (!row || row.kind !== "node") {
+        if (!row) {
+            console.warn(`[proxy WS] upgrade refused: token not found (peer=${ip})`);
+            socket.write("HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer\r\n\r\n");
+            socket.destroy();
+            return;
+        }
+        if (row.kind !== "node") {
+            console.warn(`[proxy WS] upgrade refused: token kind=${row.kind} (need 'node') peer=${ip}`);
             socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
             socket.destroy();
             return;
         }
         const nid = computeNodeId(token);
-        const ip = peerIp(req);
         setTokenLastSeenIp(token, ip);
         bumpLastUsed(token);
+        console.log(`[proxy WS] node connected: id=${nid} label=${row.label ?? "(unset)"} peer=${ip}`);
         wss.handleUpgrade(req, socket, head, (ws) => {
             // Si un autre WS du même node était déjà ouvert (reconnect rapide),
             // on close le précédent — un node = une connexion active.
