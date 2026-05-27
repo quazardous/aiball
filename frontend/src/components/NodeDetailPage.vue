@@ -110,6 +110,20 @@ function wsPillTitle(s: WsState): string {
     return "connected (no frame timestamp)";
 }
 
+// #513 — formate la version proxy : "v0.9.0 · abc1234" (commit short).
+// Tolère version manquante (juste le commit) ou commit manquant (juste la
+// version), pour ne jamais afficher "null" / chaîne vide.
+function formatProxyVersion(s: WsState): string {
+    const v = s.node_version;
+    const c = s.node_commit;
+    const ver = v && v !== "(unknown)" ? v : null;
+    const commit = c && c !== "(unknown)" ? c.slice(0, 8) : null;
+    if (ver && commit) return `${ver} · ${commit}`;
+    if (ver) return ver;
+    if (commit) return commit;
+    return "(unknown)";
+}
+
 // #433: confirm before revoking (destructive — cuts the node + every consumer
 // it relays). On success we leave the detail page (the node no longer exists).
 function revoke(): void {
@@ -177,6 +191,12 @@ async function doRevoke(n: NodeView): Promise<void> {
                     :label="wsPillLabel(node.ws_state)"
                     :title="wsPillTitle(node.ws_state)"
                 />
+            </FieldRow>
+            <!-- #513 — version + commit reportés par le proxy au hello WS.
+                 Seulement visible quand le node est connecté (avant ça les
+                 champs sont null). -->
+            <FieldRow v-if="node.ws_state?.connected && (node.ws_state.node_version || node.ws_state.node_commit)" label="proxy version">
+                <span class="aiball-mono">{{ formatProxyVersion(node.ws_state) }}</span>
             </FieldRow>
             <FieldRow label="label">{{ node.label || "(unlabelled)" }}</FieldRow>
             <FieldRow label="node id"><span class="aiball-mono">{{ node.node_id }}</span></FieldRow>

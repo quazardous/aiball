@@ -1094,5 +1094,9 @@ export interface NodeView {
         connected: boolean;
         last_frame_at: string | null;
         silent_for_sec: number | null;
+        /** #513 — version + commit reportés par le proxy dans son frame hello.
+         *  NULL avant connexion ou pre-build qui n'envoie pas ces champs. */
+        node_version?: string | null;
+        node_commit?: string | null;
     };
 }

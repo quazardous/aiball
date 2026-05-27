@@ -44,6 +44,11 @@ interface ProxyNodeConn {
     socket: WebSocket;
     /** ms timestamp de la dernière frame reçue — sert au keepalive. */
     last_frame_ms: number;
+    /** #513 — version + commit reportés par le proxy dans son frame `hello`.
+     *  Permet de surfacer la version courante côté admin UI. NULL avant la
+     *  première hello frame (rare : le proxy envoie hello juste après l'open). */
+    node_version: string | null;
+    node_commit: string | null;
 }
 
 const nodes = new Map<string, ProxyNodeConn>();
@@ -145,17 +150,27 @@ export interface ProxyNodeWsState {
     connected: boolean;
     last_frame_at: string | null;
     silent_for_sec: number | null;
+    /** #513 — version + commit reportés par le proxy dans `hello`. NULL
+     *  quand non-connected ou avant le 1er hello ; comparable à
+     *  `AIBALL_VERSION` côté upstream pour signaler un drift. */
+    node_version: string | null;
+    node_commit: string | null;
 }
 
 export function getProxyNodeWsState(nid: string): ProxyNodeWsState {
     const c = nodes.get(nid);
     if (!c || c.socket.readyState !== WebSocket.OPEN) {
-        return { connected: false, last_frame_at: null, silent_for_sec: null };
+        return {
+            connected: false, last_frame_at: null, silent_for_sec: null,
+            node_version: null, node_commit: null,
+        };
     }
     return {
         connected: true,
         last_frame_at: new Date(c.last_frame_ms).toISOString(),
         silent_for_sec: Math.round((Date.now() - c.last_frame_ms) / 1000),
+        node_version: c.node_version,
+        node_commit: c.node_commit,
     };
 }
 
@@ -248,6 +263,8 @@ export function attachProxyWs(server: Server): void {
             token,
             socket: ws,
             last_frame_ms: Date.now(),
+            node_version: null,
+            node_commit: null,
         };
         nodes.set(nid, conn);
         console.log(`[proxy WS] node connected: id=${nid} label=${row.label ?? "(unset)"} peer=${ip} map_size_after=${nodes.size}`);
@@ -265,6 +282,11 @@ export function attachProxyWs(server: Server): void {
                 const match = nodeVer === AIBALL_VERSION && nodeCommit === AIBALL_COMMIT;
                 const tag = match ? "match" : "MISMATCH";
                 console.log(`[proxy WS] hello from id=${nid}: node v=${nodeVer} commit=${nodeCommit} | upstream v=${AIBALL_VERSION} commit=${AIBALL_COMMIT} → ${tag}`);
+                // #513 — persiste la version sur la conn pour l'exposer côté UI
+                // (NodeDetailPage). On stocke même "(unknown)" pour refléter
+                // l'état exact (un proxy pre-version-frame se signale ainsi).
+                conn.node_version = nodeVer;
+                conn.node_commit = nodeCommit;
             }
             if (typeof frame.request_id === "string") {
                 const handler = responseHandlers.get(frame.request_id);
