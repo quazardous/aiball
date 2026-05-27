@@ -199,6 +199,8 @@ export function attachProxyWs(server: Server): void {
             // on close le précédent — un node = une connexion active.
             const prev = nodes.get(nid);
             if (prev) {
+                const prevAgeMs = Date.now() - prev.last_frame_ms;
+                console.log(`[proxy WS] supersede: closing prev conn for id=${nid} (prev was ${(prevAgeMs / 1000).toFixed(1)}s since last frame, readyState=${prev.socket.readyState})`);
                 try { prev.socket.close(1000, "superseded"); } catch { /* noop */ }
             }
             const conn: ProxyNodeConn = {
