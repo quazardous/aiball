@@ -245,6 +245,8 @@ export function attachProxyWs(server: Server): void {
                 continue;
             }
             if (now - conn.last_frame_ms > STALE_MS) {
+                const silentSec = ((now - conn.last_frame_ms) / 1000).toFixed(1);
+                console.log(`[proxy WS] terminating stale node: id=${nid} silent_for=${silentSec}s (no frame in ${STALE_MS / 1000}s window)`);
                 try { conn.socket.terminate(); } catch { /* noop */ }
                 nodes.delete(nid);
                 continue;
