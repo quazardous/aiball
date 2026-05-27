@@ -622,6 +622,35 @@ async function onAttachPicked(ev: Event) {
                     </span>
                 </template>
             </Select>
+            <!-- #514 (david `4dfqj4`) : assignee picker à côté du scope,
+                 icone-only (pas de label "assignee"). Tickets only.
+                 Compact : la #value slot affiche juste l'icone bonhomme
+                 (+ le consumer_id sélectionné) ; sinon placeholder vide. -->
+            <Select
+                v-if="isTicket"
+                v-model="assignee"
+                :options="consumerCatalog"
+                size="small"
+                show-clear
+                filter
+                :disabled="sending"
+                aria-label="Assignee"
+                class="composer-assignee"
+                title="Assignee — the consumer responsible for this ticket. Empty = unassigned."
+            >
+                <template #value="slotProps">
+                    <span class="composer-scope-option">
+                        <i class="pi pi-user" />
+                        <span v-if="slotProps.value">{{ slotProps.value }}</span>
+                    </span>
+                </template>
+                <template #option="slotProps">
+                    <span class="composer-scope-option">
+                        <i class="pi pi-user" style="width: 1rem; text-align: center" />
+                        <span>{{ slotProps.option }}</span>
+                    </span>
+                </template>
+            </Select>
             <span class="spacer" />
             <ToggleButton
                 v-model="preview"
@@ -667,24 +696,9 @@ async function onAttachPicked(ev: Event) {
             <span class="composer-tags-label">tags</span>
             <TagPicker v-model:selectedIds="ticketTagIds" />
         </div>
-        <!-- #514 david `nd967z` : assignee picker au create. Empty = no
-             assign (default — comportement antérieur). Tickets only. Le
-             POST /tickets/<id>/assign est chained après le POST /messages
-             success (cf. submit()). -->
-        <div v-if="isTicket && !preview" class="composer-tags-row">
-            <span class="composer-tags-label">assignee</span>
-            <Select
-                v-model="assignee"
-                :options="consumerCatalog"
-                placeholder="(none — leave unassigned)"
-                size="small"
-                show-clear
-                filter
-                :disabled="sending"
-                style="min-width: 14rem"
-                title="Assignee — the consumer responsible for this ticket. Leave empty for unassigned."
-            />
-        </div>
+        <!-- #514 (david `4dfqj4`) : assignee picker déplacé dans le
+             composer-meta à côté du scope (icone bonhomme uniquement,
+             pas de label). Cf. plus haut. La row dédiée a été retirée. -->
         <div v-if="!preview" class="composer-textarea-wrap">
             <Textarea
                 ref="bodyTextareaRef"
@@ -938,6 +952,10 @@ async function onAttachPicked(ev: Event) {
     align-items: center;
 }
 .composer-scope {
+    min-width: 9rem;
+}
+/* #514 — assignee picker à côté du scope, mêmes dimensions. */
+.composer-assignee {
     min-width: 9rem;
 }
 .composer-scope-option {
