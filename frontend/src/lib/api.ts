@@ -139,7 +139,7 @@ export type ConditionTree =
     | { kind: "and"; children: ConditionTree[] }
     | { kind: "or"; children: ConditionTree[] }
     | { kind: "not"; child: ConditionTree }
-    | { kind: "leaf"; field: ConditionField; op: ConditionOp; value: unknown };
+    | { kind: "leaf"; field: ConditionField; op: ConditionOp; value: unknown; negate?: boolean };
 export interface AutomationRule {
     id: number;
     triggers: AutomationTrigger[];

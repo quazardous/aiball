@@ -12,7 +12,8 @@
  * Save / cancel emit upward — the parent (AutomationRuleDetailPage)
  * handles the actual API call + route navigation.
  */
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, provide, ref, watch } from "vue";
+import { createLeafSources, LEAF_SOURCES_KEY } from "../../lib/leaf-sources";
 import Button from "primevue/button";
 import InputText from "primevue/inputtext";
 import Menu from "primevue/menu";
@@ -145,6 +146,13 @@ function loadFromProp() {
 }
 
 watch(() => props.rule?.id, () => loadFromProp(), { immediate: true });
+
+// #504 — sources d'autocomplete (projects/agents/tags/consumers), fetchées une
+// fois au mount et partagées à toute la sous-arbre via provide(). Les leaves
+// font `inject(LEAF_SOURCES_KEY)` au lieu de re-fetch chacun.
+const leafSources = createLeafSources();
+provide(LEAF_SOURCES_KEY, leafSources);
+onMounted(() => { void leafSources.refresh(); });
 
 function addAction() {
     actions.value = [...actions.value, { kind: "assign", consumer_id: "" }];

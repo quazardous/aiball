@@ -148,16 +148,26 @@ export function evaluateExpression(tree: ConditionTree, event: AutomationEvent):
             const present = readEventField(event, tree.field);
             // Field not provided by this trigger → fail-closed.
             if (present === undefined) return false;
+            let match: boolean;
             switch (tree.op) {
                 case "eq":
-                    return present === tree.value;
+                    match = present === tree.value;
+                    break;
                 case "neq":
-                    return present !== tree.value;
+                    match = present !== tree.value;
+                    break;
                 case "in":
-                    return Array.isArray(tree.value) && (tree.value as unknown[]).includes(present);
+                    match = Array.isArray(tree.value) && (tree.value as unknown[]).includes(present);
+                    break;
                 case "includes":
-                    return Array.isArray(present) && (present as unknown[]).includes(tree.value);
+                    match = Array.isArray(present) && (present as unknown[]).includes(tree.value);
+                    break;
             }
+            // #504 — per-leaf negate flag (UI sugar to avoid wrapping in a NOT
+            // container). The fail-closed branch above (present===undefined)
+            // stays uninverted on purpose: a field absent from the trigger
+            // means the leaf can't meaningfully evaluate, negated or not.
+            return tree.negate === true ? !match : match;
         }
     }
 }
