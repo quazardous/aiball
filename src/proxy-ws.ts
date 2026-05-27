@@ -217,6 +217,9 @@ export function attachProxyWs(server: Server): void {
             ws.on("pong", () => {
                 conn.last_frame_ms = Date.now();
                 bumpLastUsed(token);
+                if (process.env.AIBALL_WS_TRACE) {
+                    console.log(`[proxy WS] pong from id=${nid}`);
+                }
             });
             ws.on("close", (code, reason) => {
                 const lifetimeSec = ((Date.now() - conn.last_frame_ms) / 1000).toFixed(1);
@@ -231,12 +234,13 @@ export function attachProxyWs(server: Server): void {
         });
     });
 
-    // Keepalive : ping toutes les 10s, terminate les conns non-pong à 30s.
-    // Initialement 25s/60s mais david `3pq2kj` montre que graphite reconnecte
-    // toutes les 12-30s — probablement un reverse-proxy (tailscale serve ?)
-    // qui coupe les WS idle plus court que 30s. 10s/30s laisse de la marge.
-    const PING_INTERVAL_MS = 10_000;
-    const STALE_MS = 30_000;
+    // Keepalive : ping toutes les 25s, terminate les conns non-pong à 60s.
+    // Middleboxes (NAT, load balancers) coupent les TCP idle ~30-60s, ce ping
+    // garde la conn warm. (Une tentative de descendre à 10s/30s pour défaire
+    // un timeout d'intermédiaire #505 n'a rien changé — le cycle 70s persiste
+    // au même pattern, donc le bug n'est pas du côté de notre keepalive.)
+    const PING_INTERVAL_MS = 25_000;
+    const STALE_MS = 60_000;
     const interval = setInterval(() => {
         const now = Date.now();
         for (const [nid, conn] of nodes) {
@@ -251,7 +255,12 @@ export function attachProxyWs(server: Server): void {
                 nodes.delete(nid);
                 continue;
             }
-            try { conn.socket.ping(); } catch { /* noop */ }
+            try {
+                conn.socket.ping();
+                if (process.env.AIBALL_WS_TRACE) {
+                    console.log(`[proxy WS] ping → id=${nid} silent_for=${((now - conn.last_frame_ms) / 1000).toFixed(1)}s`);
+                }
+            } catch { /* noop */ }
         }
     }, PING_INTERVAL_MS);
     interval.unref(); // ne pas garder le process en vie tout seul (tests)
