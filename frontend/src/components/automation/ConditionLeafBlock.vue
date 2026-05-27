@@ -27,7 +27,6 @@ import Button from "primevue/button";
 import ToggleSwitch from "primevue/toggleswitch";
 import type {
     ConditionField,
-    ConditionOp,
     ConditionTree,
     Tag,
 } from "../../lib/api";
@@ -64,17 +63,10 @@ const fieldIcon = computed<string>(() =>
     fieldOptions.find((f) => f.value === props.node.field)?.icon ?? "pi pi-bolt",
 );
 
-const opOptionsStandard: { label: string; value: ConditionOp }[] = [
-    { label: "=",  value: "eq" },
-    { label: "≠",  value: "neq" },
-    { label: "∈ (in)",  value: "in" },
-];
-// #504 david `b8x54s` : pour `tags` on cache le op picker — `carries` (1 tag)
-// et `in list` (N tags) sont équivalents quand on en pose un seul. Le moteur
-// (`engine.ts` case "in") couvre maintenant la sémantique "any-of" sur un
-// field array, donc on force `op=in` et le chip row multi fait le reste.
-const opOptions = computed<{ label: string; value: ConditionOp }[]>(() => opOptionsStandard);
-const hideOpPicker = computed(() => props.node.field === "tags");
+// #504 david `6twrgq` + `bhc88v` : op picker entièrement supprimé pour TOUS les
+// fields. La sémantique se résume à : `op=in`, `value=[…]` (any-of) + NOT
+// toggle pour la négation. Plus de eq/neq/includes côté UI ; le moteur
+// continue à les supporter en lecture (back-compat des vieilles règles).
 
 const kindOptions = [
     { label: "ticket_created", value: "ticket_created" },
@@ -96,15 +88,13 @@ const priorityOptions = [
 
 // --- helpers value <-> widget ---------------------------------------------
 
-const isMulti = computed<boolean>(() => props.node.op === "in");
+// #504 david `6twrgq` + `bhc88v` : tous les fields sont en mode multi
+// (op=in), donc plus de `isMulti` — c'est toujours vrai.
 const isEnum = computed<boolean>(() =>
     props.node.field === "kind"
     || props.node.field === "intent"
     || props.node.field === "priority",
 );
-// #504 `ftj93r` : tags + tag_added utilisent un chip row de TagBadge, comme la
-// création de ticket — population bornée + colorée. Pas d'AutoComplete pour
-// ces deux-là (l'AutoComplete reste pour les listes textuelles ouvertes).
 const isTagField = computed(() =>
     props.node.field === "tags" || props.node.field === "tag_added",
 );
@@ -144,12 +134,10 @@ function onAcComplete(e: { query: string }) {
     else acFiltered.value = all.filter((s) => s.toLowerCase().includes(q)).slice(0, 50);
 }
 
-const valueSingle = computed<string>(() => {
-    const v = props.node.value;
-    if (v == null) return "";
-    if (Array.isArray(v)) return v.join(",");
-    return String(v);
-});
+// Value est toujours un array (#504 `6twrgq`+`bhc88v` op=in everywhere).
+// Une vieille règle qui aurait stocké value en string est tolérée à la lecture
+// (on la lift en `[value]` pour le rendu) — la prochaine sauvegarde la
+// canonise en array.
 const valueArray = computed<string[]>(() => {
     const v = props.node.value;
     if (Array.isArray(v)) return v.map((x) => String(x));
@@ -157,23 +145,16 @@ const valueArray = computed<string[]>(() => {
     return [String(v)];
 });
 
-// --- chip helpers (enum click-chips, david `7yvf5f` "tags à cliquer") ----
+// --- chip helpers — toggle multi (single mode supprimé #504 `6twrgq`) ----
 
 function isChipSelected(opt: string): boolean {
-    if (isMulti.value) return valueArray.value.includes(opt);
-    return valueSingle.value === opt;
+    return valueArray.value.includes(opt);
 }
 function toggleChip(opt: string) {
-    if (isMulti.value) {
-        const cur = new Set(valueArray.value);
-        if (cur.has(opt)) cur.delete(opt);
-        else cur.add(opt);
-        emitPatch({ value: [...cur] });
-    } else {
-        // Single-select : clic = sélectionne (re-cliquer ne désélectionne pas
-        // pour éviter "value vide" silencieux ; passer par × pour supprimer).
-        emitPatch({ value: opt });
-    }
+    const cur = new Set(valueArray.value);
+    if (cur.has(opt)) cur.delete(opt);
+    else cur.add(opt);
+    emitPatch({ value: [...cur] });
 }
 
 // --- emit helpers ----------------------------------------------------------
@@ -183,34 +164,11 @@ function emitPatch(patch: Partial<ConditionTree & { kind: "leaf" }>) {
 }
 
 function setField(field: ConditionField) {
-    // #504 `b8x54s` : pour `tags`, défaut op = `in` (any-of), value = array.
-    // Le chip row multi-toggle gère la suite ; le op picker est caché.
-    const next: ConditionTree = {
-        kind: "leaf",
-        field,
-        op: field === "tags" ? "in" : "eq",
-        value: field === "tags" ? [] : "",
-    };
-    emit("update", next);
+    // #504 `6twrgq`+`bhc88v` : tous les fields → op=in, value=array vide.
+    // L'utilisateur compose ensuite via chip-toggle ou AutoComplete multi.
+    emit("update", { kind: "leaf", field, op: "in", value: [] });
 }
 
-function setOp(op: ConditionOp) {
-    const goingMulti = op === "in";
-    if (goingMulti && !Array.isArray(props.node.value)) {
-        const seed = String(props.node.value ?? "").trim();
-        emit("update", { ...props.node, op, value: seed ? [seed] : [] });
-        return;
-    }
-    if (!goingMulti && Array.isArray(props.node.value)) {
-        emit("update", { ...props.node, op, value: props.node.value[0] ?? "" });
-        return;
-    }
-    emit("update", { ...props.node, op });
-}
-
-function setValueSingle(v: string | undefined) {
-    emitPatch({ value: v ?? "" });
-}
 function setValueMulti(v: string[] | undefined) {
     emitPatch({ value: v ?? [] });
 }
@@ -255,20 +213,10 @@ function setNegate(v: boolean) {
             />
         </div>
 
-        <!-- Corps : op-picker + value widget. Le picker est caché pour `tags`
-             (only `in` makes sense, cf #504 `b8x54s`). -->
-        <div class="leaf-block__body" :class="{ 'leaf-block__body--no-op': hideOpPicker }">
-            <Select
-                v-if="!hideOpPicker"
-                :model-value="node.op"
-                :options="opOptions"
-                option-label="label"
-                option-value="value"
-                class="leaf-block__op"
-                @update:model-value="setOp"
-            />
-
-            <!-- enum : chip row textuel (toggle multi / exclusif single) -->
+        <!-- Corps : juste le value widget (#504 `6twrgq`+`bhc88v` op picker
+             entièrement supprimé — toujours `in`, négation via NOT). -->
+        <div class="leaf-block__body leaf-block__body--no-op">
+            <!-- enum : chip row textuel, toggle multi -->
             <div v-if="isEnum" class="leaf-block__chips">
                 <button
                     v-for="opt in enumOptionsFor(node.field)"
@@ -299,37 +247,19 @@ function setNegate(v: boolean) {
                     no tags in the catalog — define some in Settings → Tags first.
                 </span>
             </div>
-            <!-- autocomplete mono (free-text + suggestions) -->
+            <!-- autocomplete : toujours en mode `multiple` (chips PrimeVue) —
+                 un seul tag/projet/agent sélectionné équivaut à l'ancien
+                 op=eq, plusieurs = any-of. #504 `6twrgq`+`bhc88v`. -->
             <AutoComplete
-                v-else-if="isAutocomplete && !isMulti"
-                :model-value="valueSingle"
-                :suggestions="acFiltered"
-                :placeholder="`pick a ${node.field}`"
-                dropdown
-                class="leaf-block__value"
-                @complete="onAcComplete"
-                @update:model-value="setValueSingle"
-            />
-            <!-- autocomplete multi (chips PrimeVue) -->
-            <AutoComplete
-                v-else-if="isAutocomplete && isMulti"
+                v-else-if="isAutocomplete"
                 :model-value="valueArray"
                 :suggestions="acFiltered"
-                :placeholder="`pick ${node.field}s`"
+                :placeholder="`pick ${node.field}(s)`"
                 multiple
                 dropdown
                 class="leaf-block__value"
                 @complete="onAcComplete"
                 @update:model-value="setValueMulti"
-            />
-            <!-- fallback : free-text. Garde un input texte pour les fields
-                 sans population connue (rien en pratique aujourd'hui). -->
-            <InputText
-                v-else
-                :model-value="valueSingle"
-                placeholder="(value)"
-                class="leaf-block__value"
-                @update:model-value="setValueSingle"
             />
         </div>
     </div>
