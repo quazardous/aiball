@@ -170,6 +170,7 @@ export function attachProxyWs(server: Server): void {
     server.on("upgrade", (req, socket, head) => {
         const url = new URL(req.url ?? "/", "http://localhost");
         if (url.pathname !== PROXY_WS_PATH) return; // pas pour nous, laisse ws.ts gérer
+        console.log(`[proxy WS] upgrade attempt: path=${url.pathname} peer=${req.socket?.remoteAddress}`);
         const ip = peerIp(req);
         const token = readBearer(req);
         if (!token) {
