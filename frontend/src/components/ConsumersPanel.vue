@@ -554,13 +554,16 @@ const sortedRows = computed<Consumer[]>(() => {
     padding-right: 0.75rem;
     vertical-align: middle;
 }
+/* #507 david : la pastille signale "live" (consumer présent), pas "stop" —
+   couleur verte plus parlante (rouge faisait croire à une erreur). L'action
+   "Stop" reste accessible via le row click → page détail. */
 .consumers-table .indicator-cell__dot {
     display: inline-block;
     width: 0.55rem;
     height: 0.55rem;
     border-radius: 50%;
-    background: var(--p-red-500);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-red-500) 25%, transparent);
+    background: var(--p-green-500);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--p-green-500) 25%, transparent);
 }
 /* #B.177 david: clickable sort headers */
 .consumers-table th.sortable {
