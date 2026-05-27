@@ -228,9 +228,13 @@
 .snooze-popover__custom-input {
     flex: 1;
 }
-/* #382 : la priorité s'affiche au-dessus du titre (badge sur sa propre ligne). */
+/* #382 : la priorité s'affiche au-dessus du titre (badge sur sa propre ligne).
+   #512 : `.thread-ticket` est flex-column → align-items:stretch par défaut, le
+   Tag s'étirait sur toute la largeur (bar rouge "urgent" plein écran). On
+   clamp explicitement à son content width via align-self. */
 .thread-priority {
     display: inline-block;
+    align-self: flex-start;
     margin: 0 0 0.35rem;
 }
 .thread-title {
