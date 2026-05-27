@@ -351,7 +351,18 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
                 send({ kind: "pane.error", request_id: requestId, error: r.error });
                 return;
             }
-            send({ kind: "pane.frame", request_id: requestId, text: r.text, target: r.target, truncated: r.truncated, captured_at: r.captured_at });
+            const frame: Record<string, unknown> = {
+                kind: "pane.frame",
+                request_id: requestId,
+                text: r.text,
+                target: r.target,
+                truncated: r.truncated,
+                captured_at: r.captured_at,
+            };
+            // #505 `4r9q34` : forward debug (stderr / fallback hint) au papy
+            // SSE pour visualiser pourquoi text est vide quand on l'est.
+            if (r.debug) frame.debug = r.debug;
+            send(frame);
         };
         void tick();
         const iv = setInterval(() => { void tick(); }, 1000);

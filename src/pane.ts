@@ -55,17 +55,43 @@ export interface CaptureResult {
     target: string;
     truncated: boolean;
     captured_at: string;
+    /** #505 debug : exit code + stderr du `capture-pane` (utile pour repérer
+     *  les sessions invalides ou les flags non supportés par psmux/Windows
+     *  qui sortent 0 mais avec stdout vide). */
+    debug?: { exit_code: number | null; stderr: string };
 }
 
 /**
  * #464 — spawn `${MUX_CMD} capture-pane -ep -t <target>` une fois. Renvoie le
  * texte capturé (avec ANSI préservé, `-e`) ou une erreur. Borne la taille à
  * `MAX_PAYLOAD_BYTES`. Async non-bloquant.
+ *
+ * #505 fallback (`4r9q34`) : si la 1ʳᵉ tentative avec `-e` retourne text="" +
+ * exit=0 + pas de stderr, on retry sans `-e`. Symptôme observé côté graphite
+ * (psmux/Windows) : psmux peut accepter `-e` silencieusement mais sortir
+ * stdout vide. Sans `-e` on perd les couleurs ANSI mais on récupère le texte.
  */
-export function captureOnce(target: string): Promise<CaptureResult | { error: string; target: string }> {
+export async function captureOnce(target: string): Promise<CaptureResult | { error: string; target: string }> {
+    const first = await captureOnceImpl(target, true);
+    if ("error" in first) return first;
+    if (first.text === "" && !first.debug) {
+        // text vide + pas de stderr → essaye sans -e.
+        const second = await captureOnceImpl(target, false);
+        if ("error" in second) return first; // return first quand-même (au moins le timestamp est cohérent)
+        if (second.text !== "") {
+            second.debug = { exit_code: 0, stderr: `[fallback] -e returned empty; -p alone got ${second.text.length} bytes` };
+            return second;
+        }
+    }
+    return first;
+}
+
+function captureOnceImpl(target: string, withAnsi: boolean): Promise<CaptureResult | { error: string; target: string }> {
     return new Promise((resolve) => {
-        const child = spawn(MUX_CMD, ["capture-pane", "-ep", "-t", target], { stdio: ["ignore", "pipe", "pipe"] });
+        const args = withAnsi ? ["capture-pane", "-ep", "-t", target] : ["capture-pane", "-p", "-t", target];
+        const child = spawn(MUX_CMD, args, { stdio: ["ignore", "pipe", "pipe"] });
         const chunks: Buffer[] = [];
+        const errChunks: Buffer[] = [];
         let total = 0;
         let truncated = false;
         child.stdout.on("data", (b: Buffer) => {
@@ -79,16 +105,24 @@ export function captureOnce(target: string): Promise<CaptureResult | { error: st
                 chunks.push(b);
             }
         });
+        child.stderr?.on("data", (b: Buffer) => { errChunks.push(b); });
         child.on("error", (e) => {
             resolve({ error: `spawn failed : ${e.message}`, target });
         });
         child.on("close", (code) => {
+            const stderr = Buffer.concat(errChunks).toString("utf8").trim();
             if (code !== 0 && !truncated) {
-                resolve({ error: `capture-pane exited ${code}`, target });
+                resolve({ error: `capture-pane exited ${code}${stderr ? ` (stderr: ${stderr})` : ""}`, target });
                 return;
             }
             const text = Buffer.concat(chunks).toString("utf8");
-            resolve({ text, target, truncated, captured_at: new Date().toISOString() });
+            const result: CaptureResult = { text, target, truncated, captured_at: new Date().toISOString() };
+            // Quand text est vide ET stderr non vide → ajoute le debug, sinon
+            // on garde le payload minimal pour ne pas le polluer.
+            if (text === "" && stderr) {
+                result.debug = { exit_code: code, stderr: stderr.slice(0, 500) };
+            }
+            resolve(result);
         });
     });
 }
