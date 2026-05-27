@@ -86,6 +86,30 @@ function livenessTitle(lastUsedAt: string | null): string {
     return `last activity ${Math.round(ageSec / 3600)}h ago`;
 }
 
+// #510 — pastille dédiée au canal WS reverse. Connecté + silence < 30s = up
+// (ping interval = 25s côté daemon, on attend une frame tous les 25s) ; OPEN
+// mais silence > 30s = stale (warning) ; disconnected = down.
+type WsState = NonNullable<NodeView["ws_state"]>;
+function wsPillStatus(s: WsState): "up" | "stale" | "down" {
+    if (!s.connected) return "down";
+    if (s.silent_for_sec !== null && s.silent_for_sec > 30) return "stale";
+    return "up";
+}
+function wsPillLabel(s: WsState): string {
+    if (!s.connected) return "disconnected";
+    if (s.silent_for_sec !== null && s.silent_for_sec > 30) return "silent";
+    return "connected";
+}
+function wsPillTitle(s: WsState): string {
+    if (!s.connected) return "no active /ws/proxy-node connection";
+    if (s.last_frame_at) {
+        const sec = s.silent_for_sec ?? 0;
+        if (sec < 60) return `last frame ${sec}s ago (ping interval 25s)`;
+        return `last frame ${Math.round(sec / 60)}min ago — silent (anomaly)`;
+    }
+    return "connected (no frame timestamp)";
+}
+
 // #433: confirm before revoking (destructive — cuts the node + every consumer
 // it relays). On success we leave the detail page (the node no longer exists).
 function revoke(): void {
@@ -141,6 +165,17 @@ async function doRevoke(n: NodeView): Promise<void> {
                     :status="liveness(node.last_used_at)"
                     :label="nodeLivenessLabel(liveness(node.last_used_at))"
                     :title="livenessTitle(node.last_used_at)"
+                />
+            </FieldRow>
+            <!-- #510 — état du canal WS reverse (/ws/proxy-node) :
+                 connected = WS OPEN ; disconnected = pas dans la map / CLOSED.
+                 Affiche aussi la dernière frame reçue (silence trop long =
+                 anomalie même si OPEN). -->
+            <FieldRow v-if="node.ws_state" label="ws reverse">
+                <StatusPill
+                    :status="wsPillStatus(node.ws_state)"
+                    :label="wsPillLabel(node.ws_state)"
+                    :title="wsPillTitle(node.ws_state)"
                 />
             </FieldRow>
             <FieldRow label="label">{{ node.label || "(unlabelled)" }}</FieldRow>

@@ -1087,4 +1087,12 @@ export interface NodeView {
     last_seen_ip: string | null;
     relayed: { consumer_id: string; last_seen_at: string | null }[];
     relayed_count: number;
+    /** #510 — état du WS reverse (canal /ws/proxy-node) si le daemon
+     *  upstream l'a décoré. Absent quand le serveur tourne sur un build pre-#510
+     *  (back-compat). */
+    ws_state?: {
+        connected: boolean;
+        last_frame_at: string | null;
+        silent_for_sec: number | null;
+    };
 }

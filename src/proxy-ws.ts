@@ -128,6 +128,37 @@ export function listConnectedNodeIds(): string[] {
     });
 }
 
+/**
+ * #510 — état détaillé du WS reverse pour un node donné, à surfacer dans le
+ * NodeDetailPage (UI admin).
+ *
+ *  - `connected:false` quand le node n'est PAS dans la map (jamais connecté
+ *    cette boot session du daemon, ou close()'d), ou est dans la map mais avec
+ *    un socket non-OPEN (CLOSING/CLOSED). Distinct de `tokens.last_used_at`
+ *    qui retourne la dernière activité HTTP+WS confondue.
+ *  - `last_frame_at` est l'ISO de la dernière frame reçue (msg / hello / pong)
+ *    sur le WS courant ; null si pas connecté.
+ *  - `silent_for_sec` est l'âge de cette dernière frame en secondes — permet
+ *    à l'UI de pister un node connecté mais qui ne ping plus (anomalie).
+ */
+export interface ProxyNodeWsState {
+    connected: boolean;
+    last_frame_at: string | null;
+    silent_for_sec: number | null;
+}
+
+export function getProxyNodeWsState(nid: string): ProxyNodeWsState {
+    const c = nodes.get(nid);
+    if (!c || c.socket.readyState !== WebSocket.OPEN) {
+        return { connected: false, last_frame_at: null, silent_for_sec: null };
+    }
+    return {
+        connected: true,
+        last_frame_at: new Date(c.last_frame_ms).toISOString(),
+        silent_for_sec: Math.round((Date.now() - c.last_frame_ms) / 1000),
+    };
+}
+
 function readBearer(req: IncomingMessage): string | null {
     const auth = req.headers["authorization"];
     if (typeof auth === "string") {

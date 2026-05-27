@@ -17,6 +17,15 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Proxy node WS reverse health on detail page (#510)
+
+The proxy-node detail page (`/nodes/<id>`) now shows a dedicated **ws reverse**
+status pill next to the existing activity pill — green `connected` /
+yellow `silent` (OPEN but no frame in 30s+) / grey `disconnected`. Backed by
+the live `/ws/proxy-node` map, distinct from `last_used_at` (which mixes
+HTTP and WS activity). `GET /api/nodes` gains an optional `ws_state` block
+(`{connected, last_frame_at, silent_for_sec}`) ; older clients ignore it.
+
 ### Automation triggers : state-change events (#509)
 
 Three new triggers fire when an **existing ticket's structural attributes

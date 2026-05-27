@@ -17,6 +17,7 @@ import {
     type ConsumerKind,
 } from "../db.js";
 import { listNodes, revokeNode } from "../db/nodes.js";
+import { getProxyNodeWsState } from "../proxy-ws.js";
 import { broadcast } from "../ws.js";
 import { emitControl } from "../event-bus.js";
 import { isPresent, presenceRunning } from "../live-presence.js";
@@ -219,7 +220,14 @@ consumersRouter.get("/nodes", (req: Request, res: Response) => {
     if (!isHuman(consumerOf(req))) {
         return res.status(403).json({ error: "nodes list is moderator-only" });
     }
-    res.json(listNodes());
+    // #510 — décorer chaque node avec son état WS reverse courant. Lecture
+    // mémoire (proxy-ws map) — pas de coût DB. Le NodeView reste compatible
+    // back-compat ; les anciens clients ignorent le champ ws_state.
+    const decorated = listNodes().map((n) => ({
+        ...n,
+        ws_state: getProxyNodeWsState(n.node_id),
+    }));
+    res.json(decorated);
 });
 
 /** #424: revoke a node by its non-secret handle (deletes the underlying node
