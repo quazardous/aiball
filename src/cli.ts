@@ -24,6 +24,7 @@ import { registerBootstrapCommands } from "./cli/bootstrap.js";
 import { registerConsumerCommands } from "./cli/consumer.js";
 import { registerProviderCommands } from "./cli/providers.js";
 import { providersStatus } from "./providers.js";
+import { loadProxy } from "./proxy.js";
 import {
     URL,
     die,
@@ -114,6 +115,23 @@ program
         // #380: surface remote-access providers (configured + live serve
         // status) so `aiball status` answers "is my tailscale proxy up?".
         const providers = providersStatus();
+        // #394: is THIS daemon a proxy NODE (relaying to a remote aiball)? The
+        // local `proxy:` config gives the upstream + strict flag and works even
+        // when the daemon is down; the never-relayed `/api/node` probe is the
+        // runtime truth, so it wins over a config that was edited but not yet
+        // applied (proxy mode is read once at boot — needs a hard restart).
+        const proxyCfg = loadProxy();
+        let proxyNode: { upstream: string; strict: boolean } | null = proxyCfg
+            ? { upstream: proxyCfg.url, strict: proxyCfg.strict ?? false }
+            : null;
+        try {
+            const n = await client.node();
+            proxyNode = n.proxy && n.upstream
+                ? { upstream: n.upstream, strict: proxyCfg?.strict ?? false }
+                : null;
+        } catch {
+            /* daemon down / pre-#394 daemon → keep the config-derived value */
+        }
         const payload = {
             daemon_up: up,
             url: URL,
@@ -127,6 +145,7 @@ program
             spool_pending: spoolCount,
             spool_failed: spoolFailed,
             providers,
+            proxy_node: proxyNode,
             daemon: daemonInfo,
         };
         out(payload, gOpts(cmd), fmtStatus);

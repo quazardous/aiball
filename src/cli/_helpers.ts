@@ -87,13 +87,21 @@ export function fmtWhoami(v: { consumer_id: string; cwd: string; source: string;
     return lines.join("\n");
 }
 
-export function fmtStatus(v: { daemon_up: boolean; url: string; paths: { home: string; db: string; db_size: number; spool_dir: string }; spool_pending: number; spool_failed?: number; providers?: { config: { tailscale?: { enabled: boolean; autostart: boolean; mode: string; port?: number } }; tailscale: string | null } }): string {
+export function fmtStatus(v: { daemon_up: boolean; url: string; paths: { home: string; db: string; db_size: number; spool_dir: string }; spool_pending: number; spool_failed?: number; proxy_node?: { upstream: string; strict: boolean } | null; providers?: { config: { tailscale?: { enabled: boolean; autostart: boolean; mode: string; port?: number } }; tailscale: string | null } }): string {
     const lines = [
         v.daemon_up ? `daemon: up at ${v.url}` : `daemon: DOWN (${v.url})`,
         `home:   ${v.paths.home}`,
         `db:     ${v.paths.db}${v.paths.db_size ? ` (${fmtBytes(v.paths.db_size)})` : " (missing)"}`,
         `spool:  ${v.spool_pending} pending (${v.paths.spool_dir})`,
     ];
+    // #394: a proxy NODE relays to a remote aiball — no data lives here, so the
+    // db line above is moot. Surface it right after `daemon:` so it's not missed
+    // (distinct from the `proxy: tailscale` remote-ACCESS line below). On a proxy
+    // node, `daemon: up` means the relay is up AND the remote is reachable.
+    if (v.proxy_node) {
+        const strict = v.proxy_node.strict ? "; strict" : "";
+        lines.splice(1, 0, `mode:   PROXY NODE → ${v.proxy_node.upstream} (relaying; no local DB${strict})`);
+    }
     // #389: only show the graveyard line when it's non-empty — a clean tree
     // shouldn't carry noise, but a backlog of rejected writes must be visible.
     if (v.spool_failed && v.spool_failed > 0) {

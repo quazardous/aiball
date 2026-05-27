@@ -918,6 +918,16 @@ export class AiballClient {
     health() {
         return this.http<{ ok: boolean; ts: string; version?: string }>("GET", "/api/health");
     }
+
+    /**
+     * #394 local node probe — never relayed (mounted before the proxy relay in
+     * app.ts). Tells whether THIS daemon is a proxy node and, if so, the
+     * upstream it relays to. `/api/health` can't answer this: in proxy mode it
+     * relays and reports the REMOTE.
+     */
+    node() {
+        return this.http<{ ok: boolean; proxy: boolean; upstream: string | null }>("GET", "/api/node");
+    }
 }
 
 /**
