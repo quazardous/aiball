@@ -437,4 +437,23 @@ function setNegate(v: boolean) {
     color: var(--p-text-color);
     font-weight: 600;
 }
+
+/* #504 `3bd3jm` : pour les tags on supprime la 2e border du wrapper (le
+   TagBadge a déjà sa forme/couleur), on pilote la sélection par opacité +
+   ring de focus — pattern TagPicker à la création de ticket. */
+.leaf-chip--tag {
+    background: transparent;
+    border: 1px solid transparent;
+    padding: 0.1rem;
+    opacity: 0.45;
+}
+.leaf-chip--tag:hover {
+    border-color: transparent;
+    opacity: 0.8;
+}
+.leaf-chip--tag.leaf-chip--selected {
+    background: transparent;
+    border-color: var(--p-primary-color);
+    opacity: 1;
+}
 </style>
