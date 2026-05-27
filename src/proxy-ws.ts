@@ -195,13 +195,18 @@ export function attachProxyWs(server: Server): void {
         bumpLastUsed(token);
         console.log(`[proxy WS] node connected: id=${nid} label=${row.label ?? "(unset)"} peer=${ip}`);
         wss.handleUpgrade(req, socket, head, (ws) => {
+            // #505 — debug map state at upgrade entry. nodes.size tells us if the
+            // OLD entry survived (= we should supersede) or vanished silently.
+            const mapSizeBefore = nodes.size;
             // Si un autre WS du même node était déjà ouvert (reconnect rapide),
             // on close le précédent — un node = une connexion active.
             const prev = nodes.get(nid);
             if (prev) {
                 const prevAgeMs = Date.now() - prev.last_frame_ms;
-                console.log(`[proxy WS] supersede: closing prev conn for id=${nid} (prev was ${(prevAgeMs / 1000).toFixed(1)}s since last frame, readyState=${prev.socket.readyState})`);
+                console.log(`[proxy WS] supersede: closing prev conn for id=${nid} (prev was ${(prevAgeMs / 1000).toFixed(1)}s since last frame, readyState=${prev.socket.readyState}, map_size=${mapSizeBefore})`);
                 try { prev.socket.close(1000, "superseded"); } catch { /* noop */ }
+            } else {
+                console.log(`[proxy WS] no prev conn in map for id=${nid} (map_size=${mapSizeBefore}) — previous WS vanished without firing close/sweep`);
             }
             const conn: ProxyNodeConn = {
                 node_id: nid,
