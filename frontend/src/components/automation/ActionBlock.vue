@@ -8,10 +8,11 @@
  * switch from `assign` → `set_priority` doesn't carry the consumer_id
  * forward.
  */
-import { computed } from "vue";
-import InputText from "primevue/inputtext";
+import { computed, inject, ref } from "vue";
+import AutoComplete from "primevue/autocomplete";
 import Select from "primevue/select";
 import Button from "primevue/button";
+import { LEAF_SOURCES_KEY, type LeafSources } from "../../lib/leaf-sources";
 import type { AutomationAction } from "../../lib/api";
 
 const props = defineProps<{
@@ -21,6 +22,27 @@ const emit = defineEmits<{
     (e: "update", action: AutomationAction): void;
     (e: "remove"): void;
 }>();
+
+// #522 (suite shqdjp) — pareil que ConditionLeafBlock : on inject les
+// sources `provide`ées par RuleEditor (`consumers`, `tags`) pour alimenter
+// l'AutoComplete des champs assign/notify (consumer_id) + add_tag (tag).
+const sources = inject<LeafSources | null>(LEAF_SOURCES_KEY, null);
+const consumerSuggestions = ref<string[]>([]);
+const tagSuggestions = ref<string[]>([]);
+function onConsumerComplete(e: { query: string }) {
+    const q = (e.query ?? "").trim().toLowerCase();
+    const all = sources?.consumers.value ?? [];
+    consumerSuggestions.value = q
+        ? all.filter((s) => s.toLowerCase().includes(q)).slice(0, 50)
+        : all.slice(0, 50);
+}
+function onTagComplete(e: { query: string }) {
+    const q = (e.query ?? "").trim().toLowerCase();
+    const all = sources?.tags.value ?? [];
+    tagSuggestions.value = q
+        ? all.filter((s) => s.toLowerCase().includes(q)).slice(0, 50)
+        : all.slice(0, 50);
+}
 
 const kindOptions: { label: string; value: AutomationAction["kind"] }[] = [
     { label: "assign to consumer", value: "assign" },
@@ -111,10 +133,16 @@ function setPriority(v: "urgent" | "high" | "normal" | "low") {
 
         <template v-if="action.kind === 'assign' || action.kind === 'notify'">
             <span class="action-block__arrow">→</span>
-            <InputText
+            <!-- #522 shqdjp : AutoComplete avec consumers source (single
+                 select — une action = un consumer_id) au lieu du plain
+                 InputText. dropdown pour browse la liste sans typer. -->
+            <AutoComplete
                 :model-value="consumerId"
+                :suggestions="consumerSuggestions"
                 placeholder="consumer_id"
+                dropdown
                 class="action-block__value"
+                @complete="onConsumerComplete"
                 @update:model-value="setConsumer"
             />
         </template>
@@ -140,10 +168,15 @@ function setPriority(v: "urgent" | "high" | "normal" | "low") {
         </template>
         <template v-else-if="action.kind === 'add_tag'">
             <span class="action-block__arrow">«</span>
-            <InputText
+            <!-- #522 shqdjp : pareil — AutoComplete avec tags catalog source.
+                 Single select (une action add_tag = un tag). -->
+            <AutoComplete
                 :model-value="tagValue"
+                :suggestions="tagSuggestions"
                 placeholder="tag name"
+                dropdown
                 class="action-block__value"
+                @complete="onTagComplete"
                 @update:model-value="setTag"
             />
         </template>
