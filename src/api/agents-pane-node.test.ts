@@ -1,6 +1,10 @@
-// #503 — quand un consumer est node-relayé (last_seen_via='node'), le pane
-// vit sur un autre host : le daemon local ne peut pas faire `tmux capture-pane`.
-// On dégrade proprement : SSE → 1 event `unavailable` + close ; POST keys → 501.
+// #505 phase 2 — quand un consumer est node-relayé MAIS qu'aucun node n'est
+// connecté en WS (le proxy daemon est down ou pas encore upgradé), on dégrade :
+//  - SSE → 200 + 1 frame `event: unavailable` + close.
+//  - POST keys → 503 + message clair.
+//
+// Le cas où le node EST connecté (la WS route bien) est couvert par
+// `proxy-ws-pane.test.ts` (avec un fake-node).
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -16,7 +20,7 @@ const { ensureConsumer, touchLastSeen } = await import("../db.js");
 
 ensureConsumer("graphite-loop");
 // Marquer le consumer comme node-relayé (ce que fait l'auth middleware sur la
-// branche node-token).
+// branche node-token). Aucun fake-node connecté → pas de WS → dégradation.
 touchLastSeen("graphite-loop", "node", "10.0.0.42");
 ensureConsumer("operator");
 const TOKEN = issueToken({ kind: "agent", consumer_id: "operator", label: "ops" }).token;
@@ -26,7 +30,7 @@ await new Promise<void>((r) => server.once("listening", () => r()));
 const port = (server.address() as AddressInfo).port;
 const BASE = `http://127.0.0.1:${port}`;
 
-test("GET /pane/stream : node-relayed consumer → SSE 'unavailable' event puis close", async () => {
+test("GET /pane/stream : node-relayed mais node hors-ligne → event 'unavailable'", async () => {
     const r = await fetch(
         `${BASE}/api/agents/graphite-loop/pane/stream`,
         { headers: { authorization: `Bearer ${TOKEN}` } },
@@ -35,11 +39,10 @@ test("GET /pane/stream : node-relayed consumer → SSE 'unavailable' event puis 
     assert.match(r.headers.get("content-type") ?? "", /text\/event-stream/);
     const text = await r.text();
     assert.match(text, /event: unavailable/);
-    assert.match(text, /node-relayed agents/);
-    assert.match(text, /"last_seen_via":"node"/);
+    assert.match(text, /not currently connected/);
 });
 
-test("POST /pane/keys : node-relayed consumer → 501 + message clair", async () => {
+test("POST /pane/keys : node-relayed mais node hors-ligne → 503 + message", async () => {
     const r = await fetch(
         `${BASE}/api/agents/graphite-loop/pane/keys`,
         {
@@ -48,10 +51,9 @@ test("POST /pane/keys : node-relayed consumer → 501 + message clair", async ()
             body: JSON.stringify({ keys: "ls\n" }),
         },
     );
-    assert.equal(r.status, 501);
-    const body = await r.json() as { error: string; last_seen_via: string };
-    assert.match(body.error, /not available for node-relayed agents/);
-    assert.equal(body.last_seen_via, "node");
+    assert.equal(r.status, 503);
+    const body = await r.json() as { error: string };
+    assert.match(body.error, /not currently connected/);
 });
 
 after(() => {

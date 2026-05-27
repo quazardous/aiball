@@ -29,6 +29,7 @@ import { parse as parseYaml } from "yaml";
 import type { RequestHandler } from "express";
 import { WebSocket } from "ws";
 import { globalConfigPath } from "./autopoll/config.js";
+import { resolveLoopName, paneTarget, captureOnce, sendKeys } from "./pane.js";
 
 export interface ProxyConfig {
     url: string;
@@ -293,11 +294,88 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
                 }));
             } catch { /* noop — le close handler reprendra */ }
         });
-        ws.on("close", () => { scheduleReconnect(); });
+        ws.on("message", (data) => { handleServerFrame(data.toString()); });
+        ws.on("close", () => {
+            // Cleanup les streams en cours — l'autre côté a coupé, plus de
+            // destinataire pour les frames qu'on aurait pu envoyer.
+            for (const iv of activeStreams.values()) clearInterval(iv);
+            activeStreams.clear();
+            scheduleReconnect();
+        });
         ws.on("error", () => { /* silencieux : le close suit + reconnect */ });
         ws.on("ping", () => {
             // Le `ws` lib auto-pong, mais en explicit ça reset le timer interne.
         });
+    }
+
+    // --- handlers d'ordres reçus du serveur upstream ---
+    // Phase 2 : le serveur envoie `pane.stream.open` / `pane.stream.close` /
+    // `pane.keys`. On exécute localement (tmux capture-pane / send-keys) et on
+    // répond par `pane.frame` / `pane.ack` / `pane.error` taggé du même
+    // request_id. Cleanup au close du socket.
+    const activeStreams = new Map<string, NodeJS.Timeout>();
+
+    function send(frame: Record<string, unknown>): void {
+        try { ws?.send(JSON.stringify(frame)); } catch { /* socket dead, close reprendra */ }
+    }
+
+    function startStream(requestId: string, cwd: string): void {
+        const loopName = resolveLoopName(cwd);
+        if (!loopName) {
+            send({ kind: "pane.error", request_id: requestId, error: `no claude-loop dir matches cwd ${cwd}` });
+            return;
+        }
+        const target = paneTarget(loopName);
+        const tick = async () => {
+            const r = await captureOnce(target);
+            if ("error" in r) {
+                send({ kind: "pane.error", request_id: requestId, error: r.error });
+                return;
+            }
+            send({ kind: "pane.frame", request_id: requestId, text: r.text, target: r.target, truncated: r.truncated, captured_at: r.captured_at });
+        };
+        void tick();
+        const iv = setInterval(() => { void tick(); }, 1000);
+        iv.unref();
+        activeStreams.set(requestId, iv);
+    }
+
+    function stopStream(requestId: string): void {
+        const iv = activeStreams.get(requestId);
+        if (iv) { clearInterval(iv); activeStreams.delete(requestId); }
+    }
+
+    async function doKeys(requestId: string, cwd: string, keys: string): Promise<void> {
+        const loopName = resolveLoopName(cwd);
+        if (!loopName) {
+            send({ kind: "pane.ack", request_id: requestId, ok: false, error: `no claude-loop dir matches cwd ${cwd}` });
+            return;
+        }
+        const r = await sendKeys(paneTarget(loopName), keys);
+        send({ kind: "pane.ack", request_id: requestId, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
+    }
+
+    function handleServerFrame(raw: string): void {
+        let frame: { kind?: string; request_id?: string; cwd?: string; keys?: string };
+        try { frame = JSON.parse(raw); } catch { return; }
+        if (typeof frame.request_id !== "string") return;
+        const rid = frame.request_id;
+        switch (frame.kind) {
+            case "pane.stream.open":
+                if (typeof frame.cwd === "string") startStream(rid, frame.cwd);
+                break;
+            case "pane.stream.close":
+                stopStream(rid);
+                break;
+            case "pane.keys":
+                if (typeof frame.cwd === "string" && typeof frame.keys === "string") {
+                    void doKeys(rid, frame.cwd, frame.keys);
+                }
+                break;
+            default:
+                /* hello-back ou frame inconnue : on ignore */
+                break;
+        }
     }
 
     function scheduleReconnect(): void {

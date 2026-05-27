@@ -25,8 +25,9 @@
  */
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage, Server } from "node:http";
+import { randomBytes } from "node:crypto";
 import { getToken } from "./db/tokens.js";
-import { nodeId as computeNodeId } from "./db/nodes.js";
+import { nodeId as computeNodeId, listNodes } from "./db/nodes.js";
 import { setTokenLastSeenIp } from "./db/tokens.js";
 import { nowIso } from "./db/connection.js";
 import { getDb } from "./db/connection.js";
@@ -51,6 +52,61 @@ const nodes = new Map<string, ProxyNodeConn>();
 export function getProxyNodeSocket(nodeId: string): WebSocket | null {
     const c = nodes.get(nodeId);
     return c && c.socket.readyState === WebSocket.OPEN ? c.socket : null;
+}
+
+/**
+ * #505 phase 2 — résout le node qui héberge un consumer donné, via le matching
+ * IP (consumer.last_seen_ip == tokens.last_seen_ip pour kind=node), même
+ * heuristique que `src/db/nodes.ts::relayedFor`. Renvoie le WS si le node est
+ * actuellement connecté, sinon null. Le caller (agents.ts) doit fallback sur
+ * `event:unavailable` dans ce cas (le node n'écoute pas, on ne peut pas livrer
+ * la requête).
+ */
+export function getNodeSocketForConsumerIp(consumerIp: string | null): WebSocket | null {
+    if (!consumerIp) return null;
+    const node = listNodes().find((n) => n.last_seen_ip === consumerIp);
+    if (!node) return null;
+    return getProxyNodeSocket(node.node_id);
+}
+
+// --- envelope d'ordres : tracking par request_id -----------------------------
+
+/** Type minimal d'une frame "envelope" : `{kind, request_id, ...}`. */
+export interface PaneFrame { kind: string; request_id?: string; [k: string]: unknown }
+
+type ResponseHandler = (frame: PaneFrame) => void;
+/** Par request_id → handler. Le handler est appelé pour CHAQUE frame avec ce
+ *  request_id (un stream émet plusieurs `pane.frame`). C'est le caller qui
+ *  unregister via `unregisterResponseHandler` quand son écoute s'arrête. */
+const responseHandlers = new Map<string, ResponseHandler>();
+
+/** Génère un request_id court mais unique enough pour borner les collisions. */
+export function newRequestId(): string {
+    return randomBytes(8).toString("hex");
+}
+
+export function registerResponseHandler(requestId: string, handler: ResponseHandler): void {
+    responseHandlers.set(requestId, handler);
+}
+
+export function unregisterResponseHandler(requestId: string): void {
+    responseHandlers.delete(requestId);
+}
+
+/**
+ * Envoie une frame d'ordre à un node connecté. Renvoie true si le socket est
+ * OPEN + le write a pu être posté ; false si le node n'est pas joignable
+ * (caller dégrade — pane endpoint fait un `event:unavailable`).
+ */
+export function sendToNode(nodeId: string, frame: PaneFrame): boolean {
+    const ws = getProxyNodeSocket(nodeId);
+    if (!ws) return false;
+    try {
+        ws.send(JSON.stringify(frame));
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 /** Snapshot des nodes connectés (pour /api/nodes ou debug). */
@@ -134,11 +190,20 @@ export function attachProxyWs(server: Server): void {
             };
             nodes.set(nid, conn);
             ws.send(JSON.stringify({ kind: "hello", node_id: nid, server_ts: Date.now() }));
-            // Bump last_used_at + last_frame_ms sur chaque message (phase 2
-            // viendra parser le `kind` pour router vers les handlers d'ordre).
-            ws.on("message", () => {
+            // Bump last_used_at + last_frame_ms sur chaque message, ET dispatch
+            // via le request_id vers le handler enregistré (phase 2 :
+            // `pane.frame`/`pane.ack`/`pane.error` qui répondent à une requête
+            // ouverte côté API). Les frames sans request_id (`hello`) sont
+            // juste consommées pour la liveness.
+            ws.on("message", (data) => {
                 conn.last_frame_ms = Date.now();
                 bumpLastUsed(token);
+                let frame: PaneFrame;
+                try { frame = JSON.parse(data.toString()) as PaneFrame; } catch { return; }
+                if (typeof frame.request_id === "string") {
+                    const handler = responseHandlers.get(frame.request_id);
+                    if (handler) handler(frame);
+                }
             });
             ws.on("pong", () => {
                 conn.last_frame_ms = Date.now();

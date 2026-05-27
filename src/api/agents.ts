@@ -31,6 +31,12 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { MUX_CMD, tmuxName } from "../claude-loop/state.js";
 import { getConsumer } from "../db.js";
+import {
+    getNodeSocketForConsumerIp,
+    newRequestId,
+    registerResponseHandler,
+    unregisterResponseHandler,
+} from "../proxy-ws.js";
 
 export const agentsRouter = Router();
 
@@ -93,26 +99,64 @@ agentsRouter.get("/agents/:name/pane/stream", (req: Request, res: Response) => {
     if (!consumer) {
         return res.status(404).json({ error: `consumer not found : ${consumerId}` });
     }
-    // #503 — node-relayed agent : the pane lives on a remote host, this daemon
-    // can't `tmux capture-pane` it. Surface as an `event: unavailable` SSE frame
-    // (open + 1 event + close) so the TerminalView shows the actual reason
-    // instead of falling back to the generic "no response from server" timeout
-    // (an HTTP 501 before SSE upgrade would be invisible to EventSource).
-    // Check BEFORE the cwd-missing 404 — the "no cwd" hint is misleading for a
-    // node-relayed agent (cwd may be missing OR set to the remote host's path,
-    // either way it can't be reached locally).
+    // #505 phase 2 — node-relayed agent : on route via la WS reverse au node
+    // qui héberge le pane, au lieu de dégrader en `event:unavailable` (#503).
+    // Fallback sur le message d'indispo si le node n'est PAS actuellement
+    // connecté en WS (down ou pas encore restart sur la nouvelle build).
     if (consumer.last_seen_via === "node") {
+        const ws = getNodeSocketForConsumerIp(consumer.last_seen_ip ?? null);
         res.setHeader("Content-Type", "text/event-stream");
         res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
         res.flushHeaders?.();
-        const payload = {
-            error: "Web terminal not available for node-relayed agents — the pane lives on a different host.",
-            consumer_id: consumerId,
-            last_seen_via: "node",
-            last_seen_ip: consumer.last_seen_ip ?? null,
+        if (!ws) {
+            res.write(`event: unavailable\ndata: ${JSON.stringify({
+                error: "Node hosting this agent is not currently connected to upstream — restart the proxy daemon on the node.",
+                consumer_id: consumerId,
+                last_seen_via: "node",
+                last_seen_ip: consumer.last_seen_ip ?? null,
+            })}\n\n`);
+            res.end();
+            return;
+        }
+        if (!consumer.cwd) {
+            res.write(`event: unavailable\ndata: ${JSON.stringify({
+                error: "consumer has no cwd — needs an active claude-loop heartbeat first",
+                consumer_id: consumerId,
+            })}\n\n`);
+            res.end();
+            return;
+        }
+        // Stream relayé : on ouvre côté node, on forward chaque `pane.frame`
+        // comme SSE `data:`. Sur close du browser → on signale `pane.stream.close`
+        // au node + unregister le handler.
+        const requestId = newRequestId();
+        res.write("retry: 1500\n\n");
+        let stopped = false;
+        registerResponseHandler(requestId, (frame) => {
+            if (stopped) return;
+            if (frame.kind === "pane.frame") {
+                try { res.write(`data: ${JSON.stringify(frame)}\n\n`); } catch { stopped = true; }
+            } else if (frame.kind === "pane.error") {
+                try { res.write(`event: error\ndata: ${JSON.stringify({ error: frame.error })}\n\n`); } catch { /* */ }
+            }
+        });
+        const closeStream = (): void => {
+            if (stopped) return;
+            stopped = true;
+            unregisterResponseHandler(requestId);
+            try { ws.send(JSON.stringify({ kind: "pane.stream.close", request_id: requestId })); } catch { /* */ }
+            try { res.end(); } catch { /* */ }
         };
-        res.write(`event: unavailable\ndata: ${JSON.stringify(payload)}\n\n`);
-        res.end();
+        req.on("close", closeStream);
+        req.on("error", closeStream);
+        res.on("error", closeStream);
+        try {
+            ws.send(JSON.stringify({ kind: "pane.stream.open", request_id: requestId, consumer_id: consumerId, cwd: consumer.cwd }));
+        } catch {
+            closeStream();
+        }
         return;
     }
     if (!consumer.cwd) {
@@ -239,7 +283,7 @@ agentsRouter.get("/agents/:name/pane/stream", (req: Request, res: Response) => {
  *  can batch its own data into multiple POSTs if it ever needs more. */
 const MAX_KEYS_BYTES = 4_096;
 
-agentsRouter.post("/agents/:name/pane/keys", (req: Request, res: Response) => {
+agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response) => {
     const rawName = req.params.name;
     const consumerId = typeof rawName === "string" ? rawName : "";
     if (!consumerId || consumerId.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(consumerId)) {
@@ -262,15 +306,46 @@ agentsRouter.post("/agents/:name/pane/keys", (req: Request, res: Response) => {
     if (!consumer) {
         return res.status(404).json({ error: `consumer not found : ${consumerId}` });
     }
-    // #503 — symmetric guard with pane/stream : a node-relayed agent's pane
-    // can't be reached locally, so don't pretend to send keys to it. Check
-    // BEFORE the cwd-missing 404 (same reasoning as the SSE side).
+    // #505 phase 2 — node-relayed agent : route via WS reverse au lieu du 501.
+    // Fallback 503 si le node n'est pas connecté en WS (peut être restart en
+    // cours / pas encore upgraded sur la nouvelle build).
     if (consumer.last_seen_via === "node") {
-        return res.status(501).json({
-            error: "Web terminal write not available for node-relayed agents — the pane lives on a different host.",
-            consumer_id: consumerId,
-            last_seen_via: "node",
+        const ws = getNodeSocketForConsumerIp(consumer.last_seen_ip ?? null);
+        if (!ws) {
+            return res.status(503).json({
+                error: "Node hosting this agent is not currently connected to upstream — restart the proxy daemon on the node.",
+                consumer_id: consumerId,
+            });
+        }
+        if (!consumer.cwd) {
+            return res.status(404).json({
+                error: `consumer has no cwd — needs an active claude-loop heartbeat first`,
+            });
+        }
+        const requestId = newRequestId();
+        // POST keys = one-shot : on attend UN ack (ok/error) avec un timeout
+        // raisonnable (3s) — send-keys est instant en local côté node.
+        const ackPromise = new Promise<{ ok: boolean; error?: string }>((resolve) => {
+            const timer = setTimeout(() => {
+                unregisterResponseHandler(requestId);
+                resolve({ ok: false, error: "timeout waiting for node ack" });
+            }, 3000);
+            registerResponseHandler(requestId, (frame) => {
+                if (frame.kind !== "pane.ack") return;
+                clearTimeout(timer);
+                unregisterResponseHandler(requestId);
+                resolve({ ok: !!frame.ok, error: typeof frame.error === "string" ? frame.error : undefined });
+            });
         });
+        try {
+            ws.send(JSON.stringify({ kind: "pane.keys", request_id: requestId, consumer_id: consumerId, cwd: consumer.cwd, keys }));
+        } catch (e) {
+            unregisterResponseHandler(requestId);
+            return res.status(502).json({ error: `failed to send to node: ${(e as Error).message}` });
+        }
+        const ack = await ackPromise;
+        if (ack.ok) return res.status(204).end();
+        return res.status(502).json({ error: ack.error ?? "node refused" });
     }
     if (!consumer.cwd) {
         return res.status(404).json({
