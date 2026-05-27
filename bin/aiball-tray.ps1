@@ -153,6 +153,63 @@ function Open-Url($u) {
     Start-Process -FilePath 'explorer.exe' -ArgumentList $u
 }
 
+# --- autostart (Settings > Apps > Startup) ---------------------------------
+# A HKCU Run-key entry is the standard Windows autostart visible (and
+# disableable) in Settings > Apps > Startup. install.ps1 defaults to a
+# scheduled task at logon, which does NOT show in that panel -- so the menu
+# toggle exposes the panel-visible mechanism. To make the "off" toggle truly
+# off, disabling also turns the scheduled task off; otherwise it would still
+# fire at logon and the toggle would be a lie.
+$AutostartRunKey  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$AutostartValName = 'aiball-tray'
+$AutostartTask    = 'aiball-daemon'   # mirrors install.ps1 $TaskName
+
+function Get-AutostartCommand {
+    # Prefer the .vbs tray wrapper (wscript SW_HIDE = no console flash).
+    # install.ps1 writes it to %LOCALAPPDATA%\aiball (per-user) or
+    # %PROGRAMDATA%\aiball\logs (-System install).
+    $candidates = @(
+        (Join-Path $env:LOCALAPPDATA 'aiball\tray-launcher.vbs'),
+        (Join-Path $env:PROGRAMDATA  'aiball\logs\tray-launcher.vbs')
+    )
+    foreach ($v in $candidates) {
+        if (Test-Path $v) { return "wscript.exe `"$v`"" }
+    }
+    # Fallback: launch aiball-tray.cmd directly (brief console flash).
+    return "`"$(Join-Path $PSScriptRoot 'aiball-tray.cmd')`""
+}
+
+function Test-AutostartRun {
+    try {
+        $v = Get-ItemProperty -Path $AutostartRunKey -Name $AutostartValName -ErrorAction Stop
+        return [bool]$v.$AutostartValName
+    } catch { return $false }
+}
+
+function Test-AutostartTaskEnabled {
+    try {
+        $t = Get-ScheduledTask -TaskName $AutostartTask -ErrorAction Stop
+        return ($t.State -ne 'Disabled')
+    } catch { return $false }
+}
+
+function Test-AutostartEnabled {
+    return (Test-AutostartRun) -or (Test-AutostartTaskEnabled)
+}
+
+function Enable-Autostart {
+    if (-not (Test-Path $AutostartRunKey)) {
+        New-Item -Path $AutostartRunKey -Force | Out-Null
+    }
+    Set-ItemProperty -Path $AutostartRunKey -Name $AutostartValName -Value (Get-AutostartCommand) -Type String
+}
+
+function Disable-Autostart {
+    try { Remove-ItemProperty -Path $AutostartRunKey -Name $AutostartValName -ErrorAction SilentlyContinue } catch { }
+    # Also kill the install scheduled task so the OFF toggle really means off.
+    try { Disable-ScheduledTask -TaskName $AutostartTask -ErrorAction SilentlyContinue | Out-Null } catch { }
+}
+
 # --- tray icon + menu -------------------------------------------------------
 $ni = New-Object System.Windows.Forms.NotifyIcon
 $icoPath = Join-Path $PSScriptRoot '..\assets\aiball.ico'
@@ -173,6 +230,15 @@ $open = $menu.Items.Add("Open in browser")
 $open.Add_Click({ Open-Url (Get-OpenUrl) })
 $restart = $menu.Items.Add("Restart daemon")
 $restart.Add_Click({ Stop-Daemon; Start-Sleep -Milliseconds 400; Start-Daemon })
+$autostart = New-Object System.Windows.Forms.ToolStripMenuItem
+$autostart.Text = "Start with Windows"
+$autostart.Add_Click({
+    if (Test-AutostartEnabled) { Disable-Autostart } else { Enable-Autostart }
+})
+$menu.Items.Add($autostart) | Out-Null
+# Refresh checkmark on each open so external changes (Settings > Apps >
+# Startup, Task Scheduler) are reflected the next time the menu pops up.
+$menu.Add_Opening({ $autostart.Checked = (Test-AutostartEnabled) })
 $menu.Items.Add("-") | Out-Null
 $quit = $menu.Items.Add("Quit aiball")
 # Quitting closes the WHOLE app: stop the daemon, then tear down the tray.
