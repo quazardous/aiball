@@ -52,6 +52,7 @@ import {
     releaseTicketClaim,
     upsertTicketSubscription,
     listTicketSubscriptionsForTicket,
+    getConsumer,
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
 import { listSubscriptions } from "../db/subscriptions.js";
@@ -739,8 +740,20 @@ ticketsRouter.get("/tickets", (req, res) => {
             .filter((s) => s.role === "owner")
             .map((s) => s.project),
     );
-    const isClaimable = (id: number, proj: string): boolean =>
-        actionableIds.has(id) && ownedProjects.has(proj);
+    // #508 — un consumer "spécialiste" (can_claim=false) ne peut RIEN claim
+    // via le pool global, peu importe ses owned projects. Pour lui le set
+    // claimable = uniquement les tickets explicitement assignés (assignee=lui).
+    // Engage / wake-CTA prennent la tête de ce set → le no-claim ne consomme
+    // que ce qu'on lui pousse.
+    const consumerRow = getConsumer(consumerId);
+    const consumerCanClaim = !consumerRow || consumerRow.can_claim !== false;
+    const isClaimable = (id: number, proj: string, assignee: string | null): boolean => {
+        if (!consumerCanClaim) {
+            // Assignment-only : claimable = (assigné à moi ET actionable).
+            return assignee === consumerId && actionableIds.has(id);
+        }
+        return actionableIds.has(id) && ownedProjects.has(proj);
+    };
     // #430/#436: tickets the consumer holds a LIVE CLAIM on (claimant = me,
     // within the claim window) — the explicit FOCUS, used as a work-order tiebreak
     // ABOVE hot. #436: reads the dedicated `claimant`/`claimed_at` (was the fused
@@ -796,7 +809,7 @@ ticketsRouter.get("/tickets", (req, res) => {
             unread: unreadMap.get(m.id) ?? false,
             actionable: actionableIds.has(m.id),
             // #432: actionable AND in a project I own → safe for me to claim.
-            claimable: isClaimable(m.id, m.project),
+            claimable: isClaimable(m.id, m.project, m.assignee ?? null),
             tags: tagsMap.get(m.id) ?? [],
             // #404: accumulated token-effort tally (null until any usage pushed).
             token_usage: tokenUsageMap.get(m.id) ?? null,
@@ -829,7 +842,7 @@ ticketsRouter.get("/tickets", (req, res) => {
     if (onlyClaimable) {
         // #432: actionable ∩ owned-project. The narrower set ticket_engage
         // claims from, so a cross-project follower-broadcast is never claimed.
-        result = result.filter((t) => isClaimable(t.id, t.project));
+        result = result.filter((t) => isClaimable(t.id, t.project, t.assignee ?? null));
     }
     if (tagsFilter && tagsFilter.length > 0) {
         const requiredSet = new Set(tagsFilter.map((s) => s.toLowerCase()));

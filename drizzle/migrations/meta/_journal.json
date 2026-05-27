@@ -302,6 +302,13 @@
       "when": 1781800000000,
       "tag": "0042_automation_rules_actions",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1781900000000,
+      "tag": "0043_consumers_can_claim",
+      "breakpoints": true
     }
   ]
 }

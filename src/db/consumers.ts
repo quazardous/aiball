@@ -60,6 +60,11 @@ export interface Consumer {
     /** #422: derived — is this consumer remote (node-relayed, or TCP from a
      *  non-loopback peer)? Convenience for the UI; computed from via + ip. */
     remote?: boolean;
+    /** #508 — true (défaut) = peut claim normalement via `ticket_engage` /
+     *  pool claimable. false = consumer "spécialiste" : engage skip le pool
+     *  global et ne retourne QUE les tickets explicitement assignés. Peut
+     *  toujours recevoir push d'assignement, commenter, resolved, etc. */
+    can_claim: boolean;
     created_at: string;
     updated_at: string;
 }
@@ -85,6 +90,7 @@ function rowToConsumer(r: schema.Consumer): Consumer {
         last_seen_via: r.lastSeenVia ?? null,
         last_seen_ip: r.lastSeenIp ?? null,
         remote: isRemoteConsumer(r.lastSeenVia, r.lastSeenIp),
+        can_claim: r.canClaim !== 0,
         created_at: r.createdAt,
         updated_at: r.updatedAt,
     };
@@ -258,6 +264,9 @@ export interface UpdateConsumerPatch {
     note?: string | null;
     /** #397: per-consumer micro-prompt (injected into the wake prompt). */
     micro_prompt?: string | null;
+    /** #508 — global flag : false = consumer "spécialiste" (assignment-only,
+     *  ne claim PAS via engage). Édité dans ConsumerEditPage. */
+    can_claim?: boolean;
 }
 
 export function updateConsumer(consumer_id: string, patch: UpdateConsumerPatch): Consumer | null {
@@ -269,6 +278,7 @@ export function updateConsumer(consumer_id: string, patch: UpdateConsumerPatch):
     if (patch.enabled !== undefined) row.enabled = patch.enabled ? 1 : 0;
     if (patch.note !== undefined) row.note = patch.note;
     if (patch.micro_prompt !== undefined) row.microPrompt = patch.micro_prompt;
+    if (patch.can_claim !== undefined) row.canClaim = patch.can_claim ? 1 : 0;
     const r = getDb().update(schema.consumers)
         .set(row)
         .where(eq(schema.consumers.consumerId, consumer_id))

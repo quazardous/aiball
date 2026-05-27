@@ -117,6 +117,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
         enabled?: unknown;
         note?: unknown;
         micro_prompt?: unknown;
+        can_claim?: unknown;
     };
     if (body.kind !== undefined && body.kind !== "human" && body.kind !== "agent" && body.kind !== "sandbox") {
         return badRequest(res, "kind must be 'human', 'agent', or 'sandbox'");
@@ -127,6 +128,7 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
         enabled?: boolean;
         note?: string | null;
         micro_prompt?: string | null;
+        can_claim?: boolean;
     } = {};
     if (body.kind !== undefined) patch.kind = body.kind as ConsumerKind;
     if (body.display_name !== undefined) {
@@ -144,6 +146,9 @@ consumersRouter.patch("/consumers/:consumer_id", (req: Request, res: Response) =
         patch.micro_prompt = body.micro_prompt === null
             ? null
             : (typeof body.micro_prompt === "string" ? body.micro_prompt : null);
+    }
+    if (body.can_claim !== undefined && typeof body.can_claim === "boolean") {
+        patch.can_claim = body.can_claim;
     }
     const updated: Consumer | null = updateConsumer(consumer_id, patch);
     if (!updated) return notFound(res, "consumer not found");

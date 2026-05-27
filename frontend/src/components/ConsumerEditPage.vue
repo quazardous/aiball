@@ -76,6 +76,10 @@ const displayName = ref("");
 const note = ref("");
 const microPrompt = ref("");
 const enabled = ref(true);
+// #508 — global flag : peut claim via engage / pool claimable (défaut true).
+// Quand false → consumer "spécialiste" qui ne prend QUE les tickets explicitement
+// assignés (via ticket_assign), pas le pool global.
+const canClaim = ref(true);
 // #451: raw-prompt injection (this dedicated page is where the operator types it).
 const promptText = ref("");
 const promptBusy = ref(false);
@@ -113,6 +117,7 @@ async function load() {
         note.value = found.note ?? "";
         microPrompt.value = found.micro_prompt ?? "";
         enabled.value = found.enabled;
+        canClaim.value = found.can_claim !== false; // default true if undefined (pre-#508 row)
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -138,6 +143,7 @@ async function save() {
             note: note.value.trim() || null,
             micro_prompt: microPrompt.value.trim() || null,
             enabled: enabled.value,
+            can_claim: canClaim.value,
         });
         notify.success(`Saved ${props.consumerId}`);
         emit("close");
@@ -404,6 +410,19 @@ async function sendPrompt() {
                                         @change="enabled = ($event.target as HTMLInputElement).checked"
                                     />
                                     enabled (when off, the daemon rejects new posts from this consumer)
+                                </label>
+                            </div>
+
+                            <!-- #508 — global no-claim flag : consumer "spécialiste" qui ne
+                                 prend que les tickets explicitement assignés. -->
+                            <div class="consumer-edit__field">
+                                <label>
+                                    <input
+                                        type="checkbox"
+                                        :checked="canClaim"
+                                        @change="canClaim = ($event.target as HTMLInputElement).checked"
+                                    />
+                                    can claim (when off, this consumer is <strong>assignment-only</strong>: <code>ticket_engage</code> skips the global pool and returns only tickets explicitly assigned via <code>ticket_assign</code>)
                                 </label>
                             </div>
 

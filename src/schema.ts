@@ -564,6 +564,16 @@ export const consumers = sqliteTable("consumers", {
      */
     lastSeenVia: text("last_seen_via"),
     lastSeenIp: text("last_seen_ip"),
+    /**
+     * #508 david `xc967a` — global per-consumer flag : 1 (défaut) = peut
+     * claim normalement via `ticket_engage` / le pool claimable. 0 = consumer
+     * spécialiste (assignment-only) : engage skip le pool global et ne
+     * retourne QUE les tickets explicitement assignés à ce consumer. Peut
+     * toujours recevoir un push d'assignement, commenter, resolved/close,
+     * etc. Édité dans `ConsumerEditPage`. Phase A2 ajoutera un override
+     * project-level dans `.aiball.yaml`.
+     */
+    canClaim: integer("can_claim").notNull().default(1),
     createdAt: text("created_at").notNull(),
     updatedAt: text("updated_at").notNull(),
 }, (t) => [
