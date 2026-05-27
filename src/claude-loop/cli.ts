@@ -1133,6 +1133,11 @@ async function cmdStatus(name: string | undefined): Promise<void> {
     process.stdout.write(`claude-loop status\n`);
     process.stdout.write(`  project        : ${ctx.project} (from ${ctx.project_source})\n`);
     process.stdout.write(`  default agent  : ${ctx.agent} (from ${ctx.agent_source})\n`);
+    // #508 phase A2 `qqdh4p` — surfaces le flag no_claim du project yaml.
+    // Quand vrai : engage skip le pool global et ne prend que les tickets
+    // explicitement assignés. claude-loop exporte AIBALL_NO_CLAIM=1 vers
+    // claude + hooks → AiballClient inject `x-aiball-no-claim: 1`.
+    process.stdout.write(`  no_claim       : ${ctx.no_claim ? "true (assignment-only — engage skips the global pool)" : "false (claim normally)"}\n`);
     process.stdout.write(`  .aiball.yaml   : ${ctx.config_path ?? "(none — built-in defaults)"}\n`);
     process.stdout.write(`  project cwd    : ${formatProjectCwd(name, statusPlate)}\n`);
 
