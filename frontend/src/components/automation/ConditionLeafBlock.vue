@@ -219,10 +219,22 @@ function setValueSelect(v: string) {
     align-items: center;
     padding: 0.4rem 0.5rem;
     border: 1px solid var(--p-content-border-color);
-    border-left: 3px solid var(--p-cyan-500);
+    /* david `4eb8gf` : couleur par field — chaque .leaf-block--<field>
+       override `--leaf-accent`. Fallback cyan = couleur historique pour
+       un field inconnu. */
+    --leaf-accent: var(--p-cyan-500);
+    border-left: 3px solid var(--leaf-accent);
     border-radius: 0.35rem;
-    background: color-mix(in srgb, var(--p-cyan-500) 4%, var(--p-content-background, transparent));
+    background: color-mix(in srgb, var(--leaf-accent) 4%, var(--p-content-background, transparent));
 }
+.leaf-block--project        { --leaf-accent: var(--p-cyan-500); }
+.leaf-block--kind           { --leaf-accent: var(--p-purple-500); }
+.leaf-block--by_agent       { --leaf-accent: var(--p-pink-500); }
+.leaf-block--intent         { --leaf-accent: var(--p-indigo-500); }
+.leaf-block--priority       { --leaf-accent: var(--p-orange-500); }
+.leaf-block--tags           { --leaf-accent: var(--p-teal-500); }
+.leaf-block--tag_added      { --leaf-accent: var(--p-emerald-500); }
+.leaf-block--scope_consumer { --leaf-accent: var(--p-rose-500); }
 .leaf-block__field {
     min-width: 0;
 }

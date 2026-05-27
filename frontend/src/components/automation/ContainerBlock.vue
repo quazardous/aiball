@@ -57,12 +57,47 @@ const addMenuItems = [
     {
         label: "Group : NOT",
         icon: "pi pi-ban",
-        // david (#498) : NOT pré-rempli avec un AND vide, pas un leaf —
-        // l'utilisateur compose ensuite via le +add interne du AND
-        // (et bascule en OR via son Select s'il préfère).
+        // david (#498 + #477 `4eb8gf`) : un NOT créé vient sans contenu
+        // visible. Le placeholder AND vide reste pour satisfaire le schéma
+        // (`not.child` requis côté validateConditionTree), mais il est rendu
+        // comme "rien" + un +Add interne où l'utilisateur choisit lui-même
+        // sa sous-condition (Condition / Group AND / Group OR).
         command: () => addChild({ kind: "not", child: { kind: "and", children: [] } }),
     },
 ];
+
+// david `4eb8gf` : "rien dans le NOT" + "je dois pouvoir choisir la
+// sous-condition que je veux". On garde le placeholder dans la data (schéma
+// `not.child` requis) mais on le rend invisible et on remplace le ConditionNode
+// récursif par un menu +Add à 3 options. L'utilisateur compose à sa main.
+function isNotPlaceholder(child: ConditionTree): boolean {
+    return child.kind === "and" && child.children.length === 0;
+}
+const notIsEmpty = computed(() => props.node.kind === "not" && isNotPlaceholder(props.node.child));
+
+const notAddMenu = ref();
+const notAddMenuItems = [
+    {
+        label: "Condition",
+        icon: "pi pi-bolt",
+        command: () => emit("update", { kind: "not", child: blankLeaf() }),
+    },
+    {
+        label: "Group : ALL of (AND)",
+        icon: "pi pi-th-large",
+        command: () => emit("update", { kind: "not", child: { kind: "and", children: [blankLeaf()] } }),
+    },
+    {
+        label: "Group : ANY of (OR)",
+        icon: "pi pi-th-large",
+        command: () => emit("update", { kind: "not", child: { kind: "or", children: [blankLeaf()] } }),
+    },
+    // Pas de NOT-dans-NOT — c'est une double négation peu lisible. Si besoin
+    // l'utilisateur peut toujours basculer via l'éditeur Code.
+];
+function openNotAddMenu(event: Event) {
+    notAddMenu.value?.toggle(event);
+}
 
 function blankLeaf(): ConditionTree {
     // Default leaf : project = "" (empty string ; the user will type or
@@ -164,12 +199,17 @@ function openAddMenu(event: Event) {
 
         <div class="container-block__children">
             <template v-if="isNot">
+                <!-- david `4eb8gf` : NOT vide affiche rien + un +Add interne ;
+                     dès qu'un child réel est posé on retombe sur ConditionNode. -->
                 <ConditionNode
-                    v-if="node.kind === 'not'"
+                    v-if="node.kind === 'not' && !notIsEmpty"
                     :node="node.child"
                     @update="(c) => updateChild(0, c)"
                     @remove="removeChild(0)"
                 />
+                <div v-else class="container-block__empty">
+                    <em>(empty — pick a sub-condition to negate)</em>
+                </div>
             </template>
             <template v-else-if="node.kind !== 'not'">
                 <ConditionNode
@@ -194,6 +234,16 @@ function openAddMenu(event: Event) {
                 @click="openAddMenu"
             />
             <Menu ref="addMenu" :model="addMenuItems" :popup="true" />
+        </div>
+        <div v-else-if="notIsEmpty" class="container-block__add">
+            <Button
+                icon="pi pi-plus"
+                label="add condition to negate"
+                text
+                size="small"
+                @click="openNotAddMenu"
+            />
+            <Menu ref="notAddMenu" :model="notAddMenuItems" :popup="true" />
         </div>
     </div>
 </template>
