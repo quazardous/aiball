@@ -59,6 +59,23 @@ export interface ProxyConfig {
      *       label: "my-laptop"     # overrides hostname()
      */
     nodeLabel?: string;
+    /**
+     * #508 phase A2 — consumers que CE node déclare "no-claim" : leur
+     * `ticket_engage` ne pioche QUE dans les tickets explicitement assignés
+     * (skip le pool claimable global). David `pbkych` : config sur le poste
+     * où tourne l'agent, pas via l'admin UI upstream. Exemple :
+     *
+     *   proxy:
+     *     ...
+     *     no_claim_consumers:
+     *       - aiball-windows
+     *
+     * Quand le proxy forward une request dont `x-aiball-consumer` est dans
+     * cette liste, il inject `x-aiball-no-claim: 1`. Le middleware upstream
+     * lit le header et l'applique au lens claimable (en plus du flag DB
+     * `consumers.can_claim` posé via l'admin UI — l'UN OU L'AUTRE suffit).
+     */
+    noClaimConsumers?: string[];
 }
 
 /** Read the `proxy:` block from the GLOBAL config. Null when absent → the
@@ -73,6 +90,7 @@ export function loadProxy(): ProxyConfig | null {
                 token?: unknown;
                 strict?: unknown;
                 node?: { label?: unknown };
+                no_claim_consumers?: unknown;
             };
         };
         const px = raw.proxy;
@@ -87,7 +105,11 @@ export function loadProxy(): ProxyConfig | null {
         // without any extra config).
         const labelRaw = typeof px.node?.label === "string" ? px.node.label.trim() : "";
         const nodeLabel = labelRaw || hostname();
-        return { url, token, strict, nodeLabel };
+        // #508 phase A2 — liste de consumer_ids no-claim (cf doc dans ProxyConfig).
+        const noClaimConsumers = Array.isArray(px.no_claim_consumers)
+            ? px.no_claim_consumers.filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+            : [];
+        return { url, token, strict, nodeLabel, noClaimConsumers };
     } catch {
         return null;
     }
@@ -164,6 +186,20 @@ export function proxyMiddleware(cfg: ProxyConfig, tokens?: ProxyTokenStore): Req
         // when not set (shouldn't happen — loadProxy() defaults to hostname()
         // — but defensive).
         if (cfg.nodeLabel) headers["x-aiball-node-label"] = cfg.nodeLabel;
+        // #508 phase A2 — si le consumer relayé est dans le no_claim_consumers
+        // local, on inject le hint pour qu'upstream skip le pool claimable et
+        // ne lui donne que ce qui est explicitement assigné. Le proxy gate
+        // précède la décision DB upstream — le node sait QUI il relaie.
+        if (cfg.noClaimConsumers && cfg.noClaimConsumers.length > 0) {
+            const declaredConsumer = (typeof headers["x-aiball-consumer"] === "string"
+                ? headers["x-aiball-consumer"] as string
+                : Array.isArray(headers["x-aiball-consumer"])
+                    ? (headers["x-aiball-consumer"] as string[])[0]
+                    : "").trim();
+            if (declaredConsumer && cfg.noClaimConsumers.includes(declaredConsumer)) {
+                headers["x-aiball-no-claim"] = "1";
+            }
+        }
         // #394 node-managed store : si le bearer entrant est un token LOCAL
         // connu, on le SWAP contre le token A per-consumer mappé → A reçoit la
         // preuve dure per-consumer (le token A est la preuve), et ce token A ne

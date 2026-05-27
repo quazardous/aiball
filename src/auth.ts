@@ -102,6 +102,10 @@ export async function verifyPassword(password: string, stored: string): Promise<
 export interface AuthenticatedRequest extends Request {
     consumer_id?: string;
     token_kind?: Token["kind"];
+    /** #508 phase A2 — set true when a node-token request carries
+     *  `x-aiball-no-claim: 1` for this consumer (declared no-claim by the
+     *  relaying proxy). Effective in addition to `consumers.can_claim=false`. */
+    no_claim_hint?: boolean;
 }
 
 // Paths are relative to the router mount (`api = Router()` mounted at
@@ -197,6 +201,15 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
         const ar = req as AuthenticatedRequest;
         ar.consumer_id = cid;
         ar.token_kind = "node";
+        // #508 phase A2 — le node peut déclarer que CE consumer relayé est
+        // no-claim via le header `x-aiball-no-claim: 1`. On stash sur l'ar
+        // pour que le lens claimable (api/tickets.ts) puisse l'appliquer
+        // EN PLUS du flag DB `consumers.can_claim` (OU logique : un OU l'autre
+        // suffit pour gater le claim).
+        const noClaimHint = req.header("x-aiball-no-claim");
+        if (typeof noClaimHint === "string" && (noClaimHint === "1" || noClaimHint.toLowerCase() === "true")) {
+            ar.no_claim_hint = true;
+        }
         // Auto-register a relayed agent we haven't seen yet (the loop on B has
         // no token of its own — the node vouches for it). Never touches humans.
         if (explicit && !isHuman(cid)) ensureConsumer(cid);

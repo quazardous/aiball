@@ -65,6 +65,7 @@ import { RELATION_KINDS, isRelationKind, isLineageRelationKind, type RelationKin
 import { broadcast } from "../ws.js";
 import { parseMeta } from "../questions.js";
 import { badRequest, consumerOf, notFound, withTags } from "./_helpers.js";
+import type { AuthenticatedRequest } from "../auth.js";
 import { moveTicketTo } from "../messages.js";
 import { paginateFeed, type FeedPagination } from "./feed-paginate.js";
 
@@ -745,8 +746,15 @@ ticketsRouter.get("/tickets", (req, res) => {
     // claimable = uniquement les tickets explicitement assignés (assignee=lui).
     // Engage / wake-CTA prennent la tête de ce set → le no-claim ne consomme
     // que ce qu'on lui pousse.
+    //
+    // Phase A2 (`pbkych`) : un hint relayé par le proxy node via le header
+    // `x-aiball-no-claim` (loadProxy().noClaimConsumers) compte AUSSI — un OU
+    // l'autre suffit (le node "sait" quels consumers locaux sont spécialistes,
+    // même si l'admin upstream n'a pas posé le flag DB).
     const consumerRow = getConsumer(consumerId);
-    const consumerCanClaim = !consumerRow || consumerRow.can_claim !== false;
+    const dbCanClaim = !consumerRow || consumerRow.can_claim !== false;
+    const proxyHint = (req as AuthenticatedRequest).no_claim_hint === true;
+    const consumerCanClaim = dbCanClaim && !proxyHint;
     const isClaimable = (id: number, proj: string, assignee: string | null): boolean => {
         if (!consumerCanClaim) {
             // Assignment-only : claimable = (assigné à moi ET actionable).

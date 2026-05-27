@@ -17,6 +17,26 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+### Consumer no-claim flag — assignment-only specialists (#508)
+
+A consumer can now be marked **no-claim**: `ticket_engage` skips the global
+claimable pool and only surfaces tickets explicitly assigned to that consumer
+via `ticket_assign`. Receiving a push, commenting, resolving and closing still
+work — only the auto-claim is gated.
+
+- **Admin UI** (`ConsumerEditPage`): new "can claim" checkbox. Off = the
+  consumer is assignment-only.
+- **Per-node YAML override**: a proxy node's `~/.config/aiball/config.yaml`
+  can list `proxy.no_claim_consumers: [consumer_id, …]`. The proxy injects
+  `x-aiball-no-claim: 1` on forwarded requests for those consumers; the
+  upstream's claimable lens treats them as no-claim regardless of the DB flag.
+  Lets the policy live with the agent's machine (e.g. configure a Windows-only
+  agent as no-claim from its host).
+- Either gate suffices (OR): DB flag OR proxy hint → assignment-only.
+- Migration `0043_consumers_can_claim.sql` adds the column (default 1 =
+  claim allowed, existing rows preserved).
+- Doc updated in `docs/REMOTE.md` § proxy config.
+
 ### docs/INSTALL.md — Linux/macOS install reference (#487)
 
 - New reader-facing doc that mirrors `docs/WIN-INSTALL.md` for the Linux /
