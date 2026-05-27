@@ -333,8 +333,8 @@ function save() {
                         <h3>Equivalent YAML</h3>
                         <p class="aiball-explainer aiball-explainer--muted">
                             Canonical representation of the current draft as a YAML
-                            <code>automation:</code> entry — copy-paste tel quel
-                            dans un <code>.aiball.yaml</code> (global ou per-project).
+                            <code>automation:</code> entry — paste as-is into a
+                            <code>.aiball.yaml</code> (global or per-project).
                             Read-only for now — to edit, switch back to <strong>Builder</strong>
                             (a future slice can add an "Apply YAML" button that parses and
                             validates this textarea back into the form).

@@ -171,32 +171,7 @@ fn parse_field(b: &[u8]) -> u32 {
 /// - `ESC O .` (SS3) → kept whole.
 /// - any other run → raw bytes (paste / non-ESC), vt = the bytes, down.
 ///
-/// "Eager" mode : si la dernière séquence n'est pas terminée (CSI sans final
-/// byte, SS3 sans 3e byte, ESC isolé), elle est EMISE AU CHOIX comme un Unit
-/// non-décodé. Utilisable en one-shot mais perd l'info si on lit un buffer
-/// après l'autre — le split-CSI cross-buffer drop l'ESC, et `[20~` ressort
-/// en raw (#500). Pour le streaming, voir `split_units_streaming`.
-///
-/// Conservé pour les tests + une éventuelle utilisation one-shot future (ex.
-/// re-parser un buffer complet stocké d'un coup) ; aucun call site de
-/// production en stdin loop (`split_units_streaming` à la place).
-#[allow(dead_code)]
-pub fn split_units(data: &[u8]) -> Vec<Unit> {
-    let (units, consumed) = split_units_with_consumed(data);
-    // Eager mode : si tail incomplet, le fallback de l'ancien comportement
-    // émettait quand même un Unit pour ce tail. On reproduit ça en émettant
-    // les bytes restants comme un raw unit unique.
-    if consumed < data.len() {
-        let mut out = units;
-        let seq = data[consumed..].to_vec();
-        out.push(Unit { vt: seq.clone(), raw: seq, is_down: true });
-        out
-    } else {
-        units
-    }
-}
-
-/// #500 — version streaming de `split_units` : porte un buffer `pending` que
+/// #500 — version streaming du parser : porte un buffer `pending` que
 /// le caller maintient entre 2 reads de stdin. Tail incomplet (CSI sans final
 /// byte, SS3 partiel, ESC isolé) est gardé dans `pending` au lieu d'être
 /// émis comme raw — la concat avec le read suivant peut le compléter en CSI
@@ -207,8 +182,16 @@ pub fn split_units_streaming(data: &[u8], pending: &mut Vec<u8>) -> Vec<Unit> {
     combined.extend_from_slice(data);
     let (units, consumed) = split_units_with_consumed(&combined);
     // Garde la queue non-consommée pour le prochain read. Cap raisonnable
-    // (~64 bytes) : un CSI valide tient en < 32 bytes ; si on accumule
-    // plus c'est du garbage, on flush pour pas ballooner.
+    // (#526 aiball-win `na463p` réf. tail.len() > 64) :
+    //   - un CSI keystroke valide tient en < 32 bytes (le plus long en
+    //     pratique : win32-input-mode `ESC[Vk;Sc;Uc;Kd;Cs;Rc_` borne ~22
+    //     chars pour des champs courts ; large marge à 32) ;
+    //   - SS3 valide = 3 bytes ;
+    //   - DCS (ESC P …) ou OSC (ESC ]…) ne devraient PAS arriver sur stdin
+    //     keystroke en win32-input-mode (ConPTY ne les émet pas en entrée).
+    //   - 64 = marge ×2 sur le worst-case attendu. Au-delà, c'est du
+    //     garbage / buffer corrompu / paste massif d'un ESC sans suite
+    //     valide ; on flush en raw au lieu de ballooner indéfiniment.
     if consumed < combined.len() {
         let tail = &combined[consumed..];
         if tail.len() > 64 {
@@ -530,7 +513,20 @@ mod tests {
         assert_eq!(win32_to_vt(0x25, 0, 0), Vec::<u8>::new()); // Left arrow → none
     }
 
-    // --- split_units ---
+    // --- split_units (via streaming with empty pending = same as the old
+    //     eager wrapper for COMPLETE sequences ; the eager wrapper was
+    //     removed in the post-CR cleanup #526 `na463p`) ---
+
+    /// Test-only helper : call `split_units_streaming` with a throwaway
+    /// pending. Sémantique identique au feu wrapper `split_units` pour les
+    /// buffers contenant des séquences COMPLÈTES (qui est le cas de tous
+    /// les tests pré-cleanup). Pour tester l'incomplete-tail handling,
+    /// utiliser `split_units_streaming` directement avec un pending portable.
+    fn split_units(data: &[u8]) -> Vec<Unit> {
+        let mut pending = Vec::new();
+        split_units_streaming(data, &mut pending)
+    }
+
     #[test]
     fn split_one_win32_event() {
         let u = split_units(&k_char('a'));
