@@ -131,6 +131,22 @@ cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml
 it, claude-loop still works — it just falls back to the idle-only pane-diff
 detection (`claude-loop check` will say so).
 
+### Redeploying on a running setup
+
+`cl-pty-proxy.exe` is held open by every active claude-loop session, so a
+plain `cargo build --release` fails with `Access denied (os error 5)` until
+every session is stopped. Sequence:
+
+```powershell
+claude-loop stop <name>     # repeat for each active session
+cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml
+claude-loop start <name>    # sessions resume with the new binary
+```
+
+The "picks it up automatically on next launch" note above describes the
+first install — for a steady-state redeploy you have to free the binary
+first.
+
 ## Parity with the Unix proxy
 
 On Windows, the **proxy is the prioritized path** (project decision): it keeps

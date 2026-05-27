@@ -33,6 +33,12 @@ interface SubRow { consumer_id: string; muted: boolean; subscribed_at: string }
 const subs = ref<SubRow[]>([]);
 const agents = ref<string[]>([]);
 const owner = ref<string | null>(props.ticket.by_agent);
+// #514 (david `ysnj8e`) : assignee aussi éditable depuis la manage panel.
+// Liste consumers (vs agents pour owner — owner = "qui a posté", agents
+// suffisent ; assignee = "qui doit s'occuper", peut être n'importe quel
+// consumer enregistré incl. agents qui n'ont jamais posté).
+const consumers = ref<string[]>([]);
+const assignee = ref<string | null>(props.ticket.assignee ?? null);
 const loading = ref(true);
 const busy = ref(false);
 const error = ref<string | null>(null);
@@ -41,12 +47,14 @@ async function load() {
     loading.value = true;
     error.value = null;
     try {
-        const [s, m] = await Promise.all([
+        const [s, m, c] = await Promise.all([
             api.ticketSubscriptions(props.ticket.id),
             api.mentionSuggestions(),
+            api.listConsumers(),
         ]);
         subs.value = s.subscriptions;
         agents.value = m.agents;
+        consumers.value = c.map((cc) => cc.consumer_id);
     } catch (e) {
         error.value = (e as Error).message;
     } finally {
@@ -79,6 +87,25 @@ async function changeOwner(next: string | null) {
     try {
         await api.changeTicketOwner(props.ticket.id, next);
         owner.value = next;
+    } catch (e) { error.value = (e as Error).message; } finally { busy.value = false; }
+}
+
+// #514 (`ysnj8e`) — change/clear assignee. Empty → API attend "" pour
+// self-claim mais ici on veut UNASSIGN. Pas d'endpoint unassign dédié,
+// donc on POST assign avec une string vide spéciale ? Non — on utilise
+// la release endpoint qui retire l'assignment. Cf. POST /tickets/:id/release.
+async function changeAssignee(next: string | null) {
+    if (next === (assignee.value ?? null)) return;
+    busy.value = true;
+    try {
+        if (next === null || next === "") {
+            // show-clear cliqué → unassign via release endpoint.
+            await api.releaseTicket(props.ticket.id);
+            assignee.value = null;
+        } else {
+            await api.assignTicket(props.ticket.id, next);
+            assignee.value = next;
+        }
     } catch (e) { error.value = (e as Error).message; } finally { busy.value = false; }
 }
 </script>
@@ -147,7 +174,8 @@ async function changeOwner(next: string | null) {
             </ul>
         </div>
 
-        <!-- #377: owner + project side by side on desktop, one per line on smartphone. -->
+        <!-- #377: owner + project side by side on desktop, one per line on smartphone.
+             #514 (`ysnj8e`): assignee aussi en update — 3 sections wrap. -->
         <div class="tmp-pair">
             <div class="tmp-section">
                 <span class="tmp-label">Owner</span>
@@ -162,6 +190,23 @@ async function changeOwner(next: string | null) {
                 <small class="tmp-hint">
                     Reassign the ticket's reporter/owner. The new owner is subscribed
                     and can close/reopen.
+                </small>
+            </div>
+
+            <div class="tmp-section">
+                <span class="tmp-label">Assignee</span>
+                <Select
+                    :model-value="assignee"
+                    :options="consumers"
+                    filter
+                    show-clear
+                    placeholder="(unassigned)"
+                    :disabled="busy"
+                    @update:model-value="changeAssignee"
+                />
+                <small class="tmp-hint">
+                    Push responsibility to a specific consumer (clear to unassign).
+                    Distinct from owner — the assignee is who should act.
                 </small>
             </div>
 

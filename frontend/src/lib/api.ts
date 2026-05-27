@@ -775,6 +775,10 @@ export const api = {
      *  with new `assignee` + `assigned_by` + `assigned_at`. */
     assignTicket: (id: number, assignee: string) =>
         req<Message>("POST", `/api/tickets/${id}/assign`, { assignee }),
+    /** #514 follow-up — release the current assignment/claim. Used by the
+     *  ManagePanel to UNASSIGN a ticket (show-clear on the assignee Select). */
+    releaseTicket: (id: number) =>
+        req<Message>("POST", `/api/tickets/${id}/release`, {}),
     /** #518 — vote +1 / -1 / 0 (retract) sur un commentaire, per-author.
      *  Le serveur stocke par consumer_id dans meta.votes. Renvoie le message
      *  décoré avec `votes_summary` recalculé pour le caller. */
