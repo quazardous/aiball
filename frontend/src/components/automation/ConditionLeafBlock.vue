@@ -100,20 +100,16 @@ const statusOptions = [
 
 // #504 david `6twrgq` + `bhc88v` : tous les fields sont en mode multi
 // (op=in), donc plus de `isMulti` — c'est toujours vrai.
-const isEnum = computed<boolean>(() =>
-    props.node.field === "kind"
-    || props.node.field === "intent"
-    || props.node.field === "priority"
-    || props.node.field === "status",
-);
+// #522 david : "tous les valeur qui sont pas des tags peuvent est
+// autocomplete" — `isAutocomplete` couvre maintenant TOUS les fields non-tag
+// (project / by_agent / scope_consumer + kind / intent / priority / status).
+// Les enums utilisent le même composant AutoComplete avec des suggestions
+// fixes (`sourceFor` retourne la liste enum). Garde la cohérence UX et
+// permet la multi-sélection chip-style sur tout le set.
 const isTagField = computed(() =>
     props.node.field === "tags" || props.node.field === "tag_added",
 );
-const isAutocomplete = computed<boolean>(() =>
-    props.node.field === "project"
-    || props.node.field === "by_agent"
-    || props.node.field === "scope_consumer",
-);
+const isAutocomplete = computed<boolean>(() => !isTagField.value);
 
 function enumOptionsFor(field: ConditionField): { label: string; value: string }[] {
     if (field === "kind") return kindOptions;
@@ -124,6 +120,11 @@ function enumOptionsFor(field: ConditionField): { label: string; value: string }
 }
 
 function sourceFor(field: ConditionField): string[] {
+    // #522 — enums (kind/intent/priority/status) ont des valeurs fixes
+    // connues côté UI ; pas de fetch externe. On retourne les values des
+    // options enum pour qu'AutoComplete les surface comme suggestions.
+    const enumOpts = enumOptionsFor(field);
+    if (enumOpts.length > 0) return enumOpts.map((o) => o.value);
     if (!sources) return [];
     if (field === "project") return sources.projects.value;
     if (field === "by_agent") return sources.agents.value;
@@ -226,24 +227,14 @@ function setNegate(v: boolean) {
         </div>
 
         <!-- Corps : juste le value widget (#504 `6twrgq`+`bhc88v` op picker
-             entièrement supprimé — toujours `in`, négation via NOT). -->
+             entièrement supprimé — toujours `in`, négation via NOT).
+             #522 david : tous les fields non-tag passent par AutoComplete
+             (UX consistente, multi chip-style). Tags gardent leur chip-row
+             dédié avec TagBadge pour les couleurs catalogue. -->
         <div class="leaf-block__body leaf-block__body--no-op">
-            <!-- enum : chip row textuel, toggle multi -->
-            <div v-if="isEnum" class="leaf-block__chips">
-                <button
-                    v-for="opt in enumOptionsFor(node.field)"
-                    :key="opt.value"
-                    type="button"
-                    class="leaf-chip"
-                    :class="{ 'leaf-chip--selected': isChipSelected(opt.value) }"
-                    @click="toggleChip(opt.value)"
-                >
-                    {{ opt.label }}
-                </button>
-            </div>
             <!-- tags / tag_added : chip row de TagBadge depuis le catalogue
                  (mêmes couleurs que TagPicker). #504 `ftj93r`. -->
-            <div v-else-if="isTagField" class="leaf-block__chips">
+            <div v-if="isTagField" class="leaf-block__chips">
                 <button
                     v-for="t in tagBadgeOptions"
                     :key="t.name"
