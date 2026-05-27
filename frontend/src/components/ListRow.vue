@@ -261,10 +261,15 @@ function onClick(ev: MouseEvent) {
     white-space: nowrap;
     display: block;
     font-size: 0.92rem;
-    /* #530 — explicit line-height: with `normal`, Segoe UI on Windows
-       Chrome resolves to ~1.31, which clips descenders (g/p/y) under
-       `overflow: hidden`. 1.5 = standard typography buffer. */
-    line-height: 1.5;
+    /* #530 — descender clip Segoe UI / Windows Chrome : `line-height:1.5`
+       (PR #35) fixed the clip mais sur FF/Linux ça inflate les rows
+       (david `qx3vuq` "ff linux cassé"). Switch sur padding-bottom :
+       ajoute la marge sous le glyphe pour que les descenders (g/p/y)
+       fittent dans le box `overflow: hidden` SANS toucher au calcul
+       line-height (qui varie selon la font OS) → comportement uniforme
+       cross-platform. 0.15rem ≈ 2.4px à 16px root, suffit pour Segoe UI
+       et invisible sur fonts plus larges. */
+    padding-bottom: 0.15rem;
 }
 .list-row__line--chips {
     flex-wrap: wrap;
