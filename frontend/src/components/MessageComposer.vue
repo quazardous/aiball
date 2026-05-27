@@ -394,17 +394,33 @@ const mentionCatalog = ref<{ projects: string[]; agents: string[] } | null>(null
 const mentionQuery = ref<string | null>(null);  // null = popover closed
 const mentionTokenStart = ref(0);                // body index where the `@` sits
 const mentionSelectedIdx = ref(0);
+// #515 — filtre catégorie. Default "all" (les 2 mélangés avec icônes
+// distinctes pi-folder / pi-user). L'utilisateur peut narrow sur agents
+// uniquement ou projects uniquement via les chips du header de popover.
+type MentionFilter = "all" | "agents" | "projects";
+const mentionFilter = ref<MentionFilter>("all");
 
 const mentionSuggestions = computed<MentionSuggestion[]>(() => {
     if (mentionQuery.value === null || !mentionCatalog.value) return [];
     const q = mentionQuery.value.toLowerCase();
-    const matchProj = mentionCatalog.value.projects.filter((p) => p.toLowerCase().includes(q));
-    const matchAgent = mentionCatalog.value.agents.filter((a) => a.toLowerCase().includes(q));
+    const matchProj = mentionFilter.value === "agents"
+        ? []
+        : mentionCatalog.value.projects.filter((p) => p.toLowerCase().includes(q));
+    const matchAgent = mentionFilter.value === "projects"
+        ? []
+        : mentionCatalog.value.agents.filter((a) => a.toLowerCase().includes(q));
     return [
         ...matchProj.map((v): MentionSuggestion => ({ kind: "project", value: v })),
         ...matchAgent.map((v): MentionSuggestion => ({ kind: "agent", value: v })),
     ].slice(0, 8);
 });
+
+// #515 — quand on switche de filtre, l'index sélectionné peut pointer hors
+// de la nouvelle liste plus courte. Reset à 0 pour éviter un highlight cassé.
+function setMentionFilter(f: MentionFilter) {
+    mentionFilter.value = f;
+    mentionSelectedIdx.value = 0;
+}
 
 function detectMentionAtCaret() {
     const el = bodyTextareaRef.value?.$el;
@@ -641,25 +657,65 @@ async function onAttachPicked(ev: Event) {
                 @keydown.meta.enter.prevent="submit"
                 @blur="mentionQuery = null"
             />
-            <ul
-                v-if="mentionQuery !== null && mentionSuggestions.length > 0"
+            <div
+                v-if="mentionQuery !== null"
                 class="mention-popover"
                 role="listbox"
             >
-                <li
-                    v-for="(s, i) in mentionSuggestions"
-                    :key="`${s.kind}-${s.value}`"
-                    class="mention-popover__item"
-                    :class="{ 'mention-popover__item--selected': i === mentionSelectedIdx }"
-                    role="option"
-                    :aria-selected="i === mentionSelectedIdx"
-                    @mousedown.prevent="selectMention(s)"
-                >
-                    <i :class="s.kind === 'project' ? 'pi pi-folder' : 'pi pi-user'" />
-                    <span class="mention-popover__name">@{{ s.value }}</span>
-                    <span class="mention-popover__kind">{{ s.kind }}</span>
-                </li>
-            </ul>
+                <!-- #515 — chips filtre par catégorie. Default "all" (les
+                     2 mélangés). Mousedown.prevent pour ne pas blur le
+                     textarea (qui fermerait le popover). -->
+                <div class="mention-popover__filters" role="tablist">
+                    <button
+                        type="button"
+                        class="mention-popover__filter-chip"
+                        :class="{ 'mention-popover__filter-chip--active': mentionFilter === 'all' }"
+                        role="tab"
+                        :aria-selected="mentionFilter === 'all'"
+                        @mousedown.prevent="setMentionFilter('all')"
+                    >
+                        <i class="pi pi-list" /> all
+                    </button>
+                    <button
+                        type="button"
+                        class="mention-popover__filter-chip"
+                        :class="{ 'mention-popover__filter-chip--active': mentionFilter === 'agents' }"
+                        role="tab"
+                        :aria-selected="mentionFilter === 'agents'"
+                        @mousedown.prevent="setMentionFilter('agents')"
+                    >
+                        <i class="pi pi-user" /> agents
+                    </button>
+                    <button
+                        type="button"
+                        class="mention-popover__filter-chip"
+                        :class="{ 'mention-popover__filter-chip--active': mentionFilter === 'projects' }"
+                        role="tab"
+                        :aria-selected="mentionFilter === 'projects'"
+                        @mousedown.prevent="setMentionFilter('projects')"
+                    >
+                        <i class="pi pi-folder" /> projects
+                    </button>
+                </div>
+                <ul v-if="mentionSuggestions.length > 0" class="mention-popover__list">
+                    <li
+                        v-for="(s, i) in mentionSuggestions"
+                        :key="`${s.kind}-${s.value}`"
+                        class="mention-popover__item"
+                        :class="{ 'mention-popover__item--selected': i === mentionSelectedIdx }"
+                        role="option"
+                        :aria-selected="i === mentionSelectedIdx"
+                        @mousedown.prevent="selectMention(s)"
+                    >
+                        <i :class="s.kind === 'project' ? 'pi pi-folder' : 'pi pi-user'" />
+                        <span class="mention-popover__name">@{{ s.value }}</span>
+                        <span class="mention-popover__kind">{{ s.kind }}</span>
+                    </li>
+                </ul>
+                <div v-else class="mention-popover__empty">
+                    no match in {{ mentionFilter === "all" ? "agents + projects" : mentionFilter }}
+                </div>
+            </div>
         </div>
         <div v-else class="composer-preview">
             <h3 v-if="isTicket && title" style="margin: 0 0 0.4rem">{{ title }}</h3>
@@ -785,6 +841,53 @@ async function onAttachPicked(ev: Event) {
 .mention-popover__kind {
     font-size: 0.75rem;
     color: var(--p-text-muted-color);
+}
+/* #515 — bandeau filtre par catégorie (all / agents / projects). */
+.mention-popover__filters {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.15rem 0.25rem 0.3rem;
+    border-bottom: 1px solid var(--p-content-border-color);
+    margin-bottom: 0.15rem;
+}
+.mention-popover__filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.5rem;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.3rem;
+    background: transparent;
+    color: var(--p-text-muted-color);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background 120ms, color 120ms, border-color 120ms;
+}
+.mention-popover__filter-chip i {
+    font-size: 0.85em;
+}
+.mention-popover__filter-chip:hover {
+    background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
+}
+.mention-popover__filter-chip--active {
+    background: color-mix(in srgb, var(--p-primary-color) 18%, transparent);
+    border-color: var(--p-primary-color);
+    color: var(--p-primary-color);
+    font-weight: 600;
+}
+.mention-popover__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+}
+.mention-popover__empty {
+    padding: 0.4rem 0.5rem;
+    font-size: 0.78rem;
+    color: var(--p-text-muted-color);
+    font-style: italic;
 }
 .composer-meta {
     display: flex;
