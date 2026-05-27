@@ -176,6 +176,11 @@ fn parse_field(b: &[u8]) -> u32 {
 /// non-décodé. Utilisable en one-shot mais perd l'info si on lit un buffer
 /// après l'autre — le split-CSI cross-buffer drop l'ESC, et `[20~` ressort
 /// en raw (#500). Pour le streaming, voir `split_units_streaming`.
+///
+/// Conservé pour les tests + une éventuelle utilisation one-shot future (ex.
+/// re-parser un buffer complet stocké d'un coup) ; aucun call site de
+/// production en stdin loop (`split_units_streaming` à la place).
+#[allow(dead_code)]
 pub fn split_units(data: &[u8]) -> Vec<Unit> {
     let (units, consumed) = split_units_with_consumed(data);
     // Eager mode : si tail incomplet, le fallback de l'ancien comportement
