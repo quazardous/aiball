@@ -218,7 +218,9 @@ export function attachProxyWs(server: Server): void {
                 conn.last_frame_ms = Date.now();
                 bumpLastUsed(token);
             });
-            ws.on("close", () => {
+            ws.on("close", (code, reason) => {
+                const lifetimeSec = ((Date.now() - conn.last_frame_ms) / 1000).toFixed(1);
+                console.log(`[proxy WS] node disconnected: id=${nid} label=${row.label ?? "(unset)"} code=${code} reason=${reason?.toString() || "(none)"} silent_for=${lifetimeSec}s`);
                 // N'enlève la map QUE si on est encore le conn courant (sinon
                 // un supersede a déjà installé le nouveau).
                 if (nodes.get(nid) === conn) nodes.delete(nid);
@@ -229,11 +231,12 @@ export function attachProxyWs(server: Server): void {
         });
     });
 
-    // Keepalive : ping toutes les 25s, terminate les conns non-pong (#B.191 same
-    // pattern que `src/ws.ts`). Les middleboxes (NAT, load balancers) coupent
-    // les TCP idle ~30-60s, ce ping garde la conn warm.
-    const PING_INTERVAL_MS = 25_000;
-    const STALE_MS = 60_000;
+    // Keepalive : ping toutes les 10s, terminate les conns non-pong à 30s.
+    // Initialement 25s/60s mais david `3pq2kj` montre que graphite reconnecte
+    // toutes les 12-30s — probablement un reverse-proxy (tailscale serve ?)
+    // qui coupe les WS idle plus court que 30s. 10s/30s laisse de la marge.
+    const PING_INTERVAL_MS = 10_000;
+    const STALE_MS = 30_000;
     const interval = setInterval(() => {
         const now = Date.now();
         for (const [nid, conn] of nodes) {
