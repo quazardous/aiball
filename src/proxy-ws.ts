@@ -245,6 +245,16 @@ export function attachProxyWs(server: Server): void {
         const now = Date.now();
         for (const [nid, conn] of nodes) {
             if (conn.socket.readyState !== WebSocket.OPEN) {
+                // #505 — close event didn't fire (TCP RST sans handshake, ou
+                // close handler buggé) mais le socket est mort côté lib. On
+                // log AVANT de remove pour que la disparition ne soit pas
+                // silencieuse. Code 0 = inconnu (pas de code reçu).
+                const stateName = conn.socket.readyState === WebSocket.CLOSING
+                    ? "CLOSING" : conn.socket.readyState === WebSocket.CLOSED
+                    ? "CLOSED" : conn.socket.readyState === WebSocket.CONNECTING
+                    ? "CONNECTING" : String(conn.socket.readyState);
+                const silentSec = ((now - conn.last_frame_ms) / 1000).toFixed(1);
+                console.log(`[proxy WS] dead socket swept from map: id=${nid} state=${stateName} silent_for=${silentSec}s (close event never fired — TCP RST ?)`);
                 nodes.delete(nid);
                 continue;
             }
