@@ -277,12 +277,14 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
                 },
                 handshakeTimeout: 10_000,
             });
-        } catch {
+        } catch (e) {
+            console.warn(`[proxy WS] connect threw: ${(e as Error).message}`);
             scheduleReconnect();
             return;
         }
         ws.on("open", () => {
             attempt = 0; // succès → reset le backoff
+            console.log(`[proxy WS] connected to ${wsUrl}`);
             // Hello + label : on advertise le label au handshake comme on le
             // faisait sur le header `x-aiball-node-label` de chaque request
             // HTTP forwardée. Le serveur fera la même sync de `tokens.label`.
@@ -294,15 +296,26 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
                 }));
             } catch { /* noop — le close handler reprendra */ }
         });
+        ws.on("unexpected-response", (_req, res) => {
+            console.warn(`[proxy WS] handshake refused by upstream: HTTP ${res.statusCode} (check node token + that ${wsUrl} reaches a daemon on the new code)`);
+        });
         ws.on("message", (data) => { handleServerFrame(data.toString()); });
-        ws.on("close", () => {
+        ws.on("close", (code, reason) => {
+            const reasonStr = reason?.toString() || "";
             // Cleanup les streams en cours — l'autre côté a coupé, plus de
             // destinataire pour les frames qu'on aurait pu envoyer.
             for (const iv of activeStreams.values()) clearInterval(iv);
             activeStreams.clear();
+            if (code !== 1000) {
+                console.warn(`[proxy WS] closed (code=${code}${reasonStr ? ` reason=${reasonStr}` : ""}), retry in ${(backoffMs() / 1000).toFixed(1)}s`);
+                // backoffMs already incremented attempt — rewind so scheduleReconnect doesn't double-count
+                attempt = Math.max(0, attempt - 1);
+            }
             scheduleReconnect();
         });
-        ws.on("error", () => { /* silencieux : le close suit + reconnect */ });
+        ws.on("error", (e) => {
+            console.warn(`[proxy WS] socket error: ${e.message}`);
+        });
         ws.on("ping", () => {
             // Le `ws` lib auto-pong, mais en explicit ça reset le timer interne.
         });

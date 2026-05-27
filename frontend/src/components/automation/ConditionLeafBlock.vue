@@ -29,8 +29,10 @@ import type {
     ConditionField,
     ConditionOp,
     ConditionTree,
+    Tag,
 } from "../../lib/api";
 import { LEAF_SOURCES_KEY, type LeafSources } from "../../lib/leaf-sources";
+import TagBadge from "../TagBadge.vue";
 
 const props = defineProps<{
     node: ConditionTree & { kind: "leaf" };
@@ -102,13 +104,17 @@ const isEnum = computed<boolean>(() =>
     || props.node.field === "intent"
     || props.node.field === "priority",
 );
+// #504 `ftj93r` : tags + tag_added utilisent un chip row de TagBadge, comme la
+// création de ticket — population bornée + colorée. Pas d'AutoComplete pour
+// ces deux-là (l'AutoComplete reste pour les listes textuelles ouvertes).
+const isTagField = computed(() =>
+    props.node.field === "tags" || props.node.field === "tag_added",
+);
 const isAutocomplete = computed<boolean>(() =>
     props.node.field === "project"
     || props.node.field === "by_agent"
-    || props.node.field === "tag_added"
     || props.node.field === "scope_consumer",
 );
-const isTags = computed(() => props.node.field === "tags");
 
 function enumOptionsFor(field: ConditionField): { label: string; value: string }[] {
     if (field === "kind") return kindOptions;
@@ -128,6 +134,11 @@ function sourceFor(field: ConditionField): string[] {
 
 const acSuggestions = computed<string[]>(() => sourceFor(props.node.field));
 const acFiltered = ref<string[]>([]);
+
+// #504 `ftj93r` : tags / tag_added → chip row de TagBadge, populé depuis le
+// catalogue (avec couleurs). On lit `sources.tagObjects` (Tag[]) plutôt que
+// `sources.tags` (string[]) pour avoir les colors.
+const tagBadgeOptions = computed<Tag[]>(() => sources?.tagObjects.value ?? []);
 function onAcComplete(e: { query: string }) {
     const q = (e.query ?? "").trim().toLowerCase();
     const all = acSuggestions.value;
@@ -255,7 +266,7 @@ function setNegate(v: boolean) {
                 @update:model-value="setOp"
             />
 
-            <!-- enum : chip row, toggle (multi) ou exclusif (single) -->
+            <!-- enum : chip row textuel (toggle multi / exclusif single) -->
             <div v-if="isEnum" class="leaf-block__chips">
                 <button
                     v-for="opt in enumOptionsFor(node.field)"
@@ -267,6 +278,24 @@ function setNegate(v: boolean) {
                 >
                     {{ opt.label }}
                 </button>
+            </div>
+            <!-- tags / tag_added : chip row de TagBadge depuis le catalogue
+                 (mêmes couleurs que TagPicker). #504 `ftj93r`. -->
+            <div v-else-if="isTagField" class="leaf-block__chips">
+                <button
+                    v-for="t in tagBadgeOptions"
+                    :key="t.name"
+                    type="button"
+                    class="leaf-chip leaf-chip--tag"
+                    :class="{ 'leaf-chip--selected': isChipSelected(t.name) }"
+                    :title="t.note ?? t.name"
+                    @click="toggleChip(t.name)"
+                >
+                    <TagBadge :tag="t" size="sm" />
+                </button>
+                <span v-if="tagBadgeOptions.length === 0" class="leaf-block__empty">
+                    no tags in the catalog — define some in Settings → Tags first.
+                </span>
             </div>
             <!-- autocomplete mono (free-text + suggestions) -->
             <AutoComplete
@@ -291,27 +320,14 @@ function setNegate(v: boolean) {
                 @complete="onAcComplete"
                 @update:model-value="setValueMulti"
             />
-            <!-- tags : `⊇ carries` → un seul tag à choisir ; `∈ in list` → liste -->
-            <AutoComplete
-                v-else-if="isTags && node.op === 'includes'"
+            <!-- fallback : free-text. Garde un input texte pour les fields
+                 sans population connue (rien en pratique aujourd'hui). -->
+            <InputText
+                v-else
                 :model-value="valueSingle"
-                :suggestions="acFiltered"
-                placeholder="pick a tag"
-                dropdown
+                placeholder="(value)"
                 class="leaf-block__value"
-                @complete="onAcComplete"
                 @update:model-value="setValueSingle"
-            />
-            <AutoComplete
-                v-else-if="isTags"
-                :model-value="valueArray"
-                :suggestions="acFiltered"
-                placeholder="pick tags"
-                multiple
-                dropdown
-                class="leaf-block__value"
-                @complete="onAcComplete"
-                @update:model-value="setValueMulti"
             />
         </div>
     </div>

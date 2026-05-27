@@ -10,12 +10,15 @@
  *  - `consumers` (depuis `/api/consumers`, on remonte les `consumer_id`)
  */
 import { ref, type Ref, type InjectionKey } from "vue";
-import { api } from "./api";
+import { api, type Tag } from "./api";
 
 export interface LeafSources {
     projects: Ref<string[]>;
     agents: Ref<string[]>;
+    /** Noms seuls — utile pour AutoComplete textuelle. */
     tags: Ref<string[]>;
+    /** Tags complets (avec color, pour le rendu en TagBadge chip row, #504 `ftj93r`). */
+    tagObjects: Ref<Tag[]>;
     consumers: Ref<string[]>;
     loading: Ref<boolean>;
     error: Ref<string | null>;
@@ -28,6 +31,7 @@ export function createLeafSources(): LeafSources {
     const projects = ref<string[]>([]);
     const agents = ref<string[]>([]);
     const tags = ref<string[]>([]);
+    const tagObjects = ref<Tag[]>([]);
     const consumers = ref<string[]>([]);
     const loading = ref(false);
     const error = ref<string | null>(null);
@@ -43,6 +47,7 @@ export function createLeafSources(): LeafSources {
             ]);
             projects.value = mention.projects ?? [];
             agents.value = mention.agents ?? [];
+            tagObjects.value = tagRows ?? [];
             tags.value = (tagRows ?? []).map((t) => t.name);
             consumers.value = (consumerRows ?? []).map((c) => c.consumer_id);
         } catch (e) {
@@ -52,5 +57,5 @@ export function createLeafSources(): LeafSources {
         }
     }
 
-    return { projects, agents, tags, consumers, loading, error, refresh };
+    return { projects, agents, tags, tagObjects, consumers, loading, error, refresh };
 }
