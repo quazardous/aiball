@@ -1,26 +1,27 @@
 <script setup lang="ts">
 /**
- * #504 — leaf condition block, retravaillé : un widget spécialisé par field +
- * autocomplete (depuis `leaf-sources` injecté par RuleEditor) + multi-valeurs
- * via l'op `in` + une coche **NOT** au leaf qui inverse via `node.negate`
- * (cf #504 schema-level, engine `evaluateExpression`).
+ * #504 — leaf condition block, retravaillé : widgets spécialisés par field +
+ * autocomplete (via `leaf-sources` injecté par RuleEditor) + multi-valeurs via
+ * l'op `in` + une coche **NOT** au leaf (david `7yvf5f` q1=sugar : la coche
+ * NE modifie PAS le data du leaf ; elle remonte à `ConditionNode` qui
+ * wrap/unwrap en `{kind:"not", child:leaf}` côté tree — schema inchangé).
  *
  * Layout d'un block :
  *   [☐NOT] [icon] [field-picker]                 [×]
- *          [op-picker]  [value widget]
+ *          [op-picker]  [value widget (chips ou autocomplete)]
  *
- * - Champs free-text + autocomplete (project / by_agent / tag_added / scope_consumer)
- *   → PrimeVue AutoComplete (single quand op=eq/neq, multiple quand op=in).
- * - Champs enum (kind / intent / priority) → Select (single) ou MultiSelect (in).
- * - Champ tags → toujours multiple (op=includes single-value, op=in multi-value).
+ * Widgets, selon la *population* du field (david `7yvf5f` : "la forme peut être
+ * adaptée à la population") :
+ *  - enums (kind/intent/priority — 3-4 valeurs) → chip row à cliquer (toggle
+ *    quand multi, sélection exclusive quand single), pattern TagPicker.
+ *  - listes longues (project/by_agent/tag_added/scope_consumer/tags) →
+ *    AutoComplete (single ou multiple selon l'op).
  *
- * Garde l'accent couleur par field (border-left + tint, #477 `e8d056d`) +
- * ajoute un header icon pour distinction visuelle au scan.
+ * Accents couleurs par field préservés (#477 `e8d056d`, david `7yvf5f` q3 =
+ * inclus dans la supersede).
  */
 import { computed, inject, ref } from "vue";
-import InputText from "primevue/inputtext";
 import Select from "primevue/select";
-import MultiSelect from "primevue/multiselect";
 import AutoComplete from "primevue/autocomplete";
 import Button from "primevue/button";
 import ToggleSwitch from "primevue/toggleswitch";
@@ -33,9 +34,13 @@ import { LEAF_SOURCES_KEY, type LeafSources } from "../../lib/leaf-sources";
 
 const props = defineProps<{
     node: ConditionTree & { kind: "leaf" };
+    /** #504 UI-sugar : true quand le tree est `{not:{leaf}}`. La coche NOT du
+     *  leaf émet `update:negate` ; le wrap/unwrap se fait côté ConditionNode. */
+    negate?: boolean;
 }>();
 const emit = defineEmits<{
     (e: "update", node: ConditionTree): void;
+    (e: "update:negate", value: boolean): void;
     (e: "remove"): void;
 }>();
 
@@ -57,8 +62,6 @@ const fieldIcon = computed<string>(() =>
     fieldOptions.find((f) => f.value === props.node.field)?.icon ?? "pi pi-bolt",
 );
 
-// Le set d'ops dépend du field. Pour les enums et autocomplete on offre =,≠,∈ ;
-// pour `tags` (array natif côté event) on offre ⊇ et ∈.
 const opOptionsStandard: { label: string; value: ConditionOp }[] = [
     { label: "=",  value: "eq" },
     { label: "≠",  value: "neq" },
@@ -123,9 +126,6 @@ function sourceFor(field: ConditionField): string[] {
     return [];
 }
 
-// AutoComplete dispose d'un buffer local de suggestions filtrées par le query
-// in-flight de l'utilisateur. On le repopule sur demande (`@complete`) depuis
-// la source statique. Map field → buffer.
 const acSuggestions = computed<string[]>(() => sourceFor(props.node.field));
 const acFiltered = ref<string[]>([]);
 function onAcComplete(e: { query: string }) {
@@ -135,7 +135,6 @@ function onAcComplete(e: { query: string }) {
     else acFiltered.value = all.filter((s) => s.toLowerCase().includes(q)).slice(0, 50);
 }
 
-// Valeur normalisée vers chaîne (single) ou tableau (in/includes ambigu).
 const valueSingle = computed<string>(() => {
     const v = props.node.value;
     if (v == null) return "";
@@ -149,6 +148,25 @@ const valueArray = computed<string[]>(() => {
     return [String(v)];
 });
 
+// --- chip helpers (enum click-chips, david `7yvf5f` "tags à cliquer") ----
+
+function isChipSelected(opt: string): boolean {
+    if (isMulti.value) return valueArray.value.includes(opt);
+    return valueSingle.value === opt;
+}
+function toggleChip(opt: string) {
+    if (isMulti.value) {
+        const cur = new Set(valueArray.value);
+        if (cur.has(opt)) cur.delete(opt);
+        else cur.add(opt);
+        emitPatch({ value: [...cur] });
+    } else {
+        // Single-select : clic = sélectionne (re-cliquer ne désélectionne pas
+        // pour éviter "value vide" silencieux ; passer par × pour supprimer).
+        emitPatch({ value: opt });
+    }
+}
+
 // --- emit helpers ----------------------------------------------------------
 
 function emitPatch(patch: Partial<ConditionTree & { kind: "leaf" }>) {
@@ -156,22 +174,17 @@ function emitPatch(patch: Partial<ConditionTree & { kind: "leaf" }>) {
 }
 
 function setField(field: ConditionField) {
-    // Reset op + value selon le nouveau type. Préserve `negate` pour ne pas
-    // surprendre l'utilisateur qui vient de cocher NOT puis change le field.
     const next: ConditionTree = {
         kind: "leaf",
         field,
         op: field === "tags" ? "includes" : "eq",
         value: field === "tags" ? [] : "",
-        ...(props.node.negate ? { negate: true } : {}),
     };
     emit("update", next);
 }
 
 function setOp(op: ConditionOp) {
-    // Bascule single↔multi : on convertit la value (string ↔ array) au passage
-    // pour ne pas la perdre / pour donner un état initial cohérent.
-    const goingMulti = op === "in" || (op === "includes" && Array.isArray(props.node.value) === false && isTags.value === false);
+    const goingMulti = op === "in";
     if (goingMulti && !Array.isArray(props.node.value)) {
         const seed = String(props.node.value ?? "").trim();
         emit("update", { ...props.node, op, value: seed ? [seed] : [] });
@@ -190,33 +203,25 @@ function setValueSingle(v: string | undefined) {
 function setValueMulti(v: string[] | undefined) {
     emitPatch({ value: v ?? [] });
 }
-
 function setNegate(v: boolean) {
-    // On omet la clé quand false pour garder la wire-shape minimale (validator
-    // côté daemon strippe les junk de toute façon).
-    if (v) emitPatch({ negate: true });
-    else {
-        const next = { ...props.node };
-        delete (next as { negate?: boolean }).negate;
-        emit("update", next);
-    }
+    emit("update:negate", v);
 }
 </script>
 
 <template>
     <div
         class="leaf-block"
-        :class="[`leaf-block--${node.field}`, { 'leaf-block--negated': node.negate }]"
+        :class="[`leaf-block--${node.field}`, { 'leaf-block--negated': negate }]"
     >
         <!-- En-tête : toggle NOT + icon + field-picker + remove × -->
         <div class="leaf-block__head">
-            <label class="leaf-block__not" :title="node.negate ? 'Negation active (matches when the condition is false)' : 'Negate this condition'">
+            <label class="leaf-block__not" :title="negate ? 'Negation active (matches when the condition is false)' : 'Negate this condition'">
                 <ToggleSwitch
-                    :model-value="!!node.negate"
+                    :model-value="!!negate"
                     size="small"
                     @update:model-value="setNegate"
                 />
-                <span class="leaf-block__not-label" :class="{ 'leaf-block__not-label--active': node.negate }">NOT</span>
+                <span class="leaf-block__not-label" :class="{ 'leaf-block__not-label--active': negate }">NOT</span>
             </label>
             <i class="leaf-block__icon" :class="fieldIcon" />
             <Select
@@ -239,7 +244,7 @@ function setNegate(v: boolean) {
             />
         </div>
 
-        <!-- Corps : op-picker + value widget (per-field) -->
+        <!-- Corps : op-picker + value widget -->
         <div class="leaf-block__body">
             <Select
                 :model-value="node.op"
@@ -250,28 +255,20 @@ function setNegate(v: boolean) {
                 @update:model-value="setOp"
             />
 
-            <!-- enum mono -->
-            <Select
-                v-if="isEnum && !isMulti"
-                :model-value="valueSingle"
-                :options="enumOptionsFor(node.field)"
-                option-label="label"
-                option-value="value"
-                class="leaf-block__value"
-                @update:model-value="setValueSingle"
-            />
-            <!-- enum multi -->
-            <MultiSelect
-                v-else-if="isEnum && isMulti"
-                :model-value="valueArray"
-                :options="enumOptionsFor(node.field)"
-                option-label="label"
-                option-value="value"
-                display="chip"
-                class="leaf-block__value"
-                @update:model-value="setValueMulti"
-            />
-            <!-- autocomplete mono -->
+            <!-- enum : chip row, toggle (multi) ou exclusif (single) -->
+            <div v-if="isEnum" class="leaf-block__chips">
+                <button
+                    v-for="opt in enumOptionsFor(node.field)"
+                    :key="opt.value"
+                    type="button"
+                    class="leaf-chip"
+                    :class="{ 'leaf-chip--selected': isChipSelected(opt.value) }"
+                    @click="toggleChip(opt.value)"
+                >
+                    {{ opt.label }}
+                </button>
+            </div>
+            <!-- autocomplete mono (free-text + suggestions) -->
             <AutoComplete
                 v-else-if="isAutocomplete && !isMulti"
                 :model-value="valueSingle"
@@ -282,7 +279,7 @@ function setNegate(v: boolean) {
                 @complete="onAcComplete"
                 @update:model-value="setValueSingle"
             />
-            <!-- autocomplete multi -->
+            <!-- autocomplete multi (chips PrimeVue) -->
             <AutoComplete
                 v-else-if="isAutocomplete && isMulti"
                 :model-value="valueArray"
@@ -294,7 +291,7 @@ function setNegate(v: boolean) {
                 @complete="onAcComplete"
                 @update:model-value="setValueMulti"
             />
-            <!-- tags : op `includes` = single tag carried, `in` = multi-tag list -->
+            <!-- tags : `⊇ carries` → un seul tag à choisir ; `∈ in list` → liste -->
             <AutoComplete
                 v-else-if="isTags && node.op === 'includes'"
                 :model-value="valueSingle"
@@ -315,14 +312,6 @@ function setNegate(v: boolean) {
                 class="leaf-block__value"
                 @complete="onAcComplete"
                 @update:model-value="setValueMulti"
-            />
-            <!-- fallback : free-text -->
-            <InputText
-                v-else
-                :model-value="valueSingle"
-                placeholder="(value)"
-                class="leaf-block__value"
-                @update:model-value="setValueSingle"
             />
         </div>
     </div>
@@ -349,8 +338,6 @@ function setNegate(v: boolean) {
 .leaf-block--tag_added      { --leaf-accent: var(--p-emerald-500); }
 .leaf-block--scope_consumer { --leaf-accent: var(--p-rose-500); }
 
-/* État "négué" : on accentue par un cadre dashed rouge léger + un fond
-   un peu plus mat pour signaler que le sens du leaf est inversé. */
 .leaf-block--negated {
     border-style: dashed;
     border-color: var(--p-red-400);
@@ -403,5 +390,35 @@ function setNegate(v: boolean) {
 .leaf-block__value {
     min-width: 0;
     width: 100%;
+}
+
+/* Chip row pour enums (kind / intent / priority) — pattern TagPicker
+   adapté : tous les choix visibles d'un coup, click = toggle (multi) ou
+   sélection exclusive (single). Couleur d'accent = celle du leaf-accent
+   du field, pour rester cohérent avec la border. */
+.leaf-block__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+}
+.leaf-chip {
+    background: transparent;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 999px;
+    padding: 0.15rem 0.7rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    color: var(--p-text-muted-color);
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.leaf-chip:hover {
+    border-color: var(--leaf-accent);
+    color: var(--p-text-color);
+}
+.leaf-chip--selected {
+    background: color-mix(in srgb, var(--leaf-accent) 22%, var(--p-content-background, transparent));
+    border-color: var(--leaf-accent);
+    color: var(--p-text-color);
+    font-weight: 600;
 }
 </style>

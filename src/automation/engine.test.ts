@@ -353,40 +353,6 @@ test("evaluateExpression : leaf eq / neq on event fields", () => {
         { kind: "leaf", field: "intent", op: "eq", value: "fyi" }, ev), false);
 });
 
-// #504 — `leaf.negate=true` inverse le résultat sans wrap NOT. Doit marcher
-// sur tous les ops + l'absence de `negate` (undefined/false) reste un no-op.
-test("evaluateExpression : leaf.negate=true inverts each op", () => {
-    const ev = ticketCreatedEv({ project: "aiball", intent: "urgent", ticket_tags: ["bug", "win"] });
-    // eq : aiball=aiball → true ; negated → false
-    assert.equal(evaluateExpression(
-        { kind: "leaf", field: "project", op: "eq", value: "aiball", negate: true }, ev), false);
-    // neq : aiball≠other → true ; negated → false
-    assert.equal(evaluateExpression(
-        { kind: "leaf", field: "project", op: "neq", value: "other", negate: true }, ev), false);
-    // in : "urgent" ∈ ["urgent","high"] → true ; negated → false
-    assert.equal(evaluateExpression(
-        { kind: "leaf", field: "intent", op: "in", value: ["urgent", "high"], negate: true }, ev), false);
-    // includes : ticket-tags contiennent "bug" → true ; negated → false
-    assert.equal(evaluateExpression(
-        { kind: "leaf", field: "tags", op: "includes", value: "bug", negate: true }, ev), false);
-    // negate=false ou absent → comportement identique au cas sans negate
-    assert.equal(evaluateExpression(
-        { kind: "leaf", field: "project", op: "eq", value: "aiball", negate: false }, ev), true);
-    assert.equal(evaluateExpression(
-        { kind: "leaf", field: "project", op: "eq", value: "other", negate: true }, ev), true);
-});
-
-// #504 — field absent du trigger (fail-closed) reste fail-closed même négué.
-// Sinon un leaf "field manquant + negate" ferait `!false = true` et matcherait
-// tout n'importe quel event, ce qui n'a aucun sens.
-test("evaluateExpression : leaf.negate ne flippe pas le fail-closed (field absent)", () => {
-    const ev = ticketCreatedEv({}); // ticket_created porte project mais pas tag_added
-    // tag_added n'est pas dans le payload de ticket_created → present=undefined → fail-closed
-    assert.equal(evaluateExpression(
-        { kind: "leaf", field: "tag_added", op: "eq", value: "bug" }, ev), false);
-    assert.equal(evaluateExpression(
-        { kind: "leaf", field: "tag_added", op: "eq", value: "bug", negate: true }, ev), false);
-});
 
 test("evaluateExpression : leaf `in` matches when event value ∈ list", () => {
     const ev = ticketCreatedEv({ intent: "question" });

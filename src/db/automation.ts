@@ -80,11 +80,7 @@ export type ConditionTree =
     | { kind: "and"; children: ConditionTree[] }
     | { kind: "or"; children: ConditionTree[] }
     | { kind: "not"; child: ConditionTree }
-    /** #504 — `negate?: boolean` inverts the leaf's match without wrapping it in
-     *  a NOT container. Optional + defaults to false → old rows (no negate)
-     *  keep evaluating identically. Lets the UI offer a per-leaf "NOT" toggle
-     *  instead of forcing the user to nest a NOT container. */
-    | { kind: "leaf"; field: ConditionField; op: ConditionOp; value: unknown; negate?: boolean };
+    | { kind: "leaf"; field: ConditionField; op: ConditionOp; value: unknown };
 
 const VALID_FIELDS: ConditionField[] = [
     "project", "kind", "by_agent", "intent", "priority",
@@ -119,16 +115,12 @@ export function validateConditionTree(raw: unknown): ConditionTree | null {
             const op = o.op;
             if (typeof field !== "string" || !(VALID_FIELDS as string[]).includes(field)) return null;
             if (typeof op !== "string" || !(VALID_OPS as string[]).includes(op)) return null;
-            const leaf: { kind: "leaf"; field: ConditionField; op: ConditionOp; value: unknown; negate?: boolean } = {
+            return {
                 kind: "leaf",
                 field: field as ConditionField,
                 op: op as ConditionOp,
                 value: o.value,
             };
-            // #504 — `negate` optional boolean. Tolerant : strip junk, default
-            // to omitted (= not present in serialized form, equivalent to false).
-            if (o.negate === true) leaf.negate = true;
-            return leaf;
         }
         default:
             return null;
