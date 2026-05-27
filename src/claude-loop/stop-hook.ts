@@ -17,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
+import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
 import { createLogger } from "../log.js";
@@ -173,7 +173,12 @@ function readPane(): string {
         // honoring user-took-over too, so nothing else wakes claude
         // until grace lapses. We still write idle-since so the bar
         // doesn't get stuck on busy when claude returns the prompt.
-        if (userIsTakingOver(sd!, userGraceSec)) {
+        // #501 david `73af3e` : stop ⊂ wait — un user qui tape MAINTENANT
+        // (human-typing < 5s) est aussi "présent" et doit suppresser le wake,
+        // pas juste celui qui a soumis < 60s (user-took-over). Sans cette
+        // OR, le wake auto fire entre 2 frappes du user (entre submits) et
+        // clobber la frappe en cours.
+        if (userIsTakingOver(sd!, userGraceSec) || humanIsTyping(sd!)) {
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
             // David #B.198: plain `[idle]` here mis-signaled "ready
             // for wakes" — we're actually deferring wakes. Surface
@@ -183,7 +188,7 @@ function readPane(): string {
             // `user` (plus spécifique que « grace humaine en cours »).
             const sub = interrupted ? "interrupted" : "user";
             setTmuxStatus(name!, "idle", sub);
-            log(`  → SUPPRESS (user-grace<${userGraceSec}s) became=idle:${sub}`);
+            log(`  → SUPPRESS (user-grace<${userGraceSec}s or typing-now) became=idle:${sub}`);
             emit();
         }
         // #B.198 david: "si pane=busy:true on attend 5 secondes de
