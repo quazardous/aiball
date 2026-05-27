@@ -14,6 +14,7 @@ import { listExpiredPostpones, setTicketPostpone, getMessage, backfillParentTick
 import { broadcast as wsBroadcast } from "./ws.js";
 import { checkSandboxPings } from "./sandbox/watcher.js";
 import { registerAutomationRuntime } from "./automation/runtime.js";
+import { loadProxy, startProxyHeartbeat } from "./proxy.js";
 
 /**
  * Snooze reveal cron (per #B.329). Every 60s, find tickets whose
@@ -172,6 +173,15 @@ function main(): void {
         if (process.env.AIBALL_SANDBOX_WATCHER !== "0") {
             checkSandboxPings();
             setInterval(checkSandboxPings, 30_000).unref();
+        }
+        // #502 — en mode proxy, on tape un heartbeat upstream toutes les 30s
+        // pour que le Nodes panel puisse afficher une vraie pastille up/down
+        // (le middleware auth bumpe `tokens.last_used_at` au passage, c'est ce
+        // timestamp qui dérive la couleur côté UI). Pas-op en mode normal.
+        const px = loadProxy();
+        if (px) {
+            startProxyHeartbeat(px);
+            console.log(`proxy heartbeat → ${px.url}/api/proxy/heartbeat every 30s`);
         }
     });
 

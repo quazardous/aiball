@@ -13,7 +13,7 @@
  * de corps — c'est le layout qui le fait, identique à toutes les pages
  * détail form-style.
  */
-import { ref, watch } from "vue";
+import { ref, watch, onMounted, onUnmounted } from "vue";
 import Button from "primevue/button";
 import { useConfirm } from "primevue/useconfirm";
 import { useToast } from "primevue/usetoast";
@@ -21,6 +21,8 @@ import { api, type NodeView } from "../lib/api";
 import DataList from "./ui/DataList.vue";
 import FieldRow from "./ui/FieldRow.vue";
 import AdminDetailLayout from "./ui/AdminDetailLayout.vue";
+import StatusPill from "./ui/StatusPill.vue";
+import { nodeLivenessStatus, nodeLivenessLabel } from "../lib/node-liveness";
 
 const props = defineProps<{ nodeId: string }>();
 const emit = defineEmits<{
@@ -61,6 +63,27 @@ function fmt(ts: string | null): string {
     if (!ts) return "—";
     const d = new Date(ts);
     return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
+}
+
+// #502 — pastille liveness : recompute toutes les 15s pour que la couleur
+// vieillisse sans Ctrl-R (cf. NodesPanel — même pattern).
+const nowMs = ref(Date.now());
+let nowTimer: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+    nowTimer = setInterval(() => { nowMs.value = Date.now(); }, 15_000);
+});
+onUnmounted(() => {
+    if (nowTimer) clearInterval(nowTimer);
+});
+function liveness(lastUsedAt: string | null): "up" | "stale" | "down" {
+    return nodeLivenessStatus(lastUsedAt, new Date(nowMs.value));
+}
+function livenessTitle(lastUsedAt: string | null): string {
+    if (!lastUsedAt) return "never seen";
+    const ageSec = Math.max(0, Math.round((nowMs.value - Date.parse(lastUsedAt)) / 1000));
+    if (ageSec < 60) return `last activity ${ageSec}s ago`;
+    if (ageSec < 3600) return `last activity ${Math.round(ageSec / 60)}min ago`;
+    return `last activity ${Math.round(ageSec / 3600)}h ago`;
 }
 
 // #433: confirm before revoking (destructive — cuts the node + every consumer
@@ -113,6 +136,13 @@ async function doRevoke(n: NodeView): Promise<void> {
             {{ error }}
         </div>
         <template v-else-if="node">
+            <FieldRow label="status">
+                <StatusPill
+                    :status="liveness(node.last_used_at)"
+                    :label="nodeLivenessLabel(liveness(node.last_used_at))"
+                    :title="livenessTitle(node.last_used_at)"
+                />
+            </FieldRow>
             <FieldRow label="label">{{ node.label || "(unlabelled)" }}</FieldRow>
             <FieldRow label="node id"><span class="aiball-mono">{{ node.node_id }}</span></FieldRow>
             <FieldRow label="last peer IP">{{ node.last_seen_ip ?? "—" }}</FieldRow>

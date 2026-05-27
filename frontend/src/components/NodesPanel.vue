@@ -3,11 +3,13 @@
 // last activity and last peer IP — each row links to the node detail page.
 // Read-only list; revoke + relayed consumers live on the detail page (#452).
 // The token value is never exposed — a node is keyed by a non-secret `node_id`.
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
 import { api, type NodeView } from "../lib/api";
 import NodeDetailPage from "./NodeDetailPage.vue";
 import DataList from "./ui/DataList.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
+import StatusPill from "./ui/StatusPill.vue";
+import { nodeLivenessStatus, nodeLivenessLabel } from "../lib/node-liveness";
 
 // Set on /nodes/<id> → render the dedicated detail view. Parent (App.vue) owns
 // the ref so browser back/forward works (#452, mirrors ConsumersPanel #B.193).
@@ -45,7 +47,30 @@ function fmt(ts: string | null): string {
     return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
 }
 
-onMounted(load);
+// #502 — la pastille est dérivée de `last_used_at` + l'horloge courante. Un
+// node sain reste vert tant que le heartbeat (30s) tape ≤ 90s. Pour que la
+// couleur se rafraîchisse sans Ctrl-R, on tick `nowMs` toutes les 15s — la
+// recompute coûte rien (3 nodes max en pratique).
+const nowMs = ref(Date.now());
+let nowTimer: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+    load();
+    nowTimer = setInterval(() => { nowMs.value = Date.now(); }, 15_000);
+});
+onUnmounted(() => {
+    if (nowTimer) clearInterval(nowTimer);
+});
+
+function liveness(lastUsedAt: string | null): "up" | "stale" | "down" {
+    return nodeLivenessStatus(lastUsedAt, new Date(nowMs.value));
+}
+function livenessTitle(lastUsedAt: string | null): string {
+    if (!lastUsedAt) return "never seen";
+    const ageSec = Math.max(0, Math.round((nowMs.value - Date.parse(lastUsedAt)) / 1000));
+    if (ageSec < 60) return `last activity ${ageSec}s ago`;
+    if (ageSec < 3600) return `last activity ${Math.round(ageSec / 60)}min ago`;
+    return `last activity ${Math.round(ageSec / 3600)}h ago`;
+}
 </script>
 
 <template>
@@ -71,12 +96,20 @@ onMounted(load);
                 </div>
             </template>
             <template #head>
+                <th>Status</th>
                 <th>Node</th>
                 <th>Last IP</th>
                 <th>Last activity</th>
             </template>
             <template #body>
                 <tr v-for="n in nodes" :key="n.node_id">
+                    <td>
+                        <StatusPill
+                            :status="liveness(n.last_used_at)"
+                            :label="nodeLivenessLabel(liveness(n.last_used_at))"
+                            :title="livenessTitle(n.last_used_at)"
+                        />
+                    </td>
                     <td>
                         <a
                             :href="`/nodes/${encodeURIComponent(n.node_id)}`"

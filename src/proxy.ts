@@ -221,6 +221,58 @@ export function proxyMiddleware(cfg: ProxyConfig, tokens?: ProxyTokenStore): Req
     };
 }
 
+/**
+ * #502 — heartbeat tick : POST `${cfg.url}/api/proxy/heartbeat` avec le node
+ * token + `x-aiball-node-label`. Silencieux : aucune erreur réseau ne sort, le
+ * prochain tick règle le cas. Le middleware auth bumpe `tokens.last_used_at`
+ * côté upstream → c'est ce timestamp qui alimente la pastille up/down (≤ 90s
+ * = vert) dans le Nodes panel. Pas de body, pas de retry.
+ */
+export function sendProxyHeartbeat(cfg: ProxyConfig): void {
+    let target: URL;
+    try {
+        target = new URL("/api/proxy/heartbeat", cfg.url);
+    } catch {
+        return; // URL malformée → on n'a rien à faire
+    }
+    const reqFn = target.protocol === "https:" ? httpsRequest : httpRequest;
+    const port = target.port || (target.protocol === "https:" ? "443" : "80");
+    const headers: Record<string, string> = {
+        authorization: `Bearer ${cfg.token}`,
+        "content-length": "0",
+    };
+    if (cfg.nodeLabel) headers["x-aiball-node-label"] = cfg.nodeLabel;
+    const req = reqFn({
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port,
+        method: "POST",
+        path: target.pathname,
+        headers,
+    }, (res) => {
+        // Drain (Node garde la socket sinon). 204 attendu mais n'importe quel
+        // statut est OK — l'auth middleware a déjà bumpé last_used_at au passage.
+        res.resume();
+    });
+    req.on("error", () => { /* upstream unreachable → silent, next tick retries */ });
+    req.end();
+}
+
+/**
+ * #502 — démarre la boucle heartbeat (tick immédiat + setInterval). Retourne le
+ * handle de l'interval pour cleanup au shutdown. `intervalMs` par défaut = 30s,
+ * overridable via `AIBALL_PROXY_HEARTBEAT_MS` (tests). `.unref()` pour ne pas
+ * garder le process en vie tout seul.
+ */
+export function startProxyHeartbeat(cfg: ProxyConfig, intervalMs?: number): NodeJS.Timeout {
+    const envMs = Number(process.env.AIBALL_PROXY_HEARTBEAT_MS);
+    const ms = intervalMs ?? (Number.isFinite(envMs) && envMs > 0 ? envMs : 30_000);
+    sendProxyHeartbeat(cfg); // beat #1 tout de suite, pour pas attendre 30s
+    const handle = setInterval(() => sendProxyHeartbeat(cfg), ms);
+    handle.unref();
+    return handle;
+}
+
 /** Minimal HTML escaping for the operator-controlled proxy URL. */
 function esc(s: string): string {
     return s
