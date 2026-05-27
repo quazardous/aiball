@@ -9,6 +9,10 @@ license = "MIT"
 name = "cl-pty-proxy"
 path = "src/main.rs"
 
+[[bin]]
+name = "fake-claude-log"
+path = "src/bin/fake-claude-log.rs"
+
 [dependencies]
 # ConPTY allocation + child spawn + master reader/writer + resize. Same
 # crate family psmux is built on (it vendors portable-pty-psmux); we use
