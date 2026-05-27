@@ -229,14 +229,3 @@ consumersRouter.delete("/nodes/:node_id", (req: Request, res: Response) => {
     res.json({ node_id, revoked: true });
 });
 
-// #502 — heartbeat ping pour un proxy node. Hit toutes les ~30s par le proxy
-// daemon avec son node token ; le middleware auth bumpe déjà `tokens.last_used_at`
-// + sync le label via `x-aiball-node-label`, donc on n'a rien à faire ici à part
-// répondre 204. Gated node-token : un agent token qui taperait ici bumperait SON
-// token (inutile + trompeur côté Nodes panel), donc 403 explicite.
-consumersRouter.post("/proxy/heartbeat", (req: Request, res: Response) => {
-    if (tokenKindOf(req) !== "node") {
-        return res.status(403).json({ error: "node token required" });
-    }
-    res.status(204).end();
-});

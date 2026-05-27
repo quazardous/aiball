@@ -14,7 +14,8 @@ import { listExpiredPostpones, setTicketPostpone, getMessage, backfillParentTick
 import { broadcast as wsBroadcast } from "./ws.js";
 import { checkSandboxPings } from "./sandbox/watcher.js";
 import { registerAutomationRuntime } from "./automation/runtime.js";
-import { loadProxy, startProxyHeartbeat } from "./proxy.js";
+import { loadProxy, startProxyWsClient } from "./proxy.js";
+import { attachProxyWs } from "./proxy-ws.js";
 
 /**
  * Snooze reveal cron (per #B.329). Every 60s, find tickets whose
@@ -143,6 +144,12 @@ function main(): void {
 
     const server = createServer(app);
     attachWs(server, "/ws");
+    // #505 — canal inverse WS pour les proxy nodes. Le serveur monte la route
+    // `/ws/proxy-node` en mode noServer + handleUpgrade pour pouvoir refuser
+    // l'auth proprement (401/403 avant upgrade). Pas-op dans une instance qui
+    // n'est pas upstream (un node proxy n'a pas de nodes qui se connectent à
+    // lui), mais c'est juste un listener supplémentaire — coût zéro à attacher.
+    attachProxyWs(server);
 
     server.listen(PORT, HOST, () => {
         console.log(`aiball daemon listening on http://${HOST}:${PORT}`);
@@ -174,14 +181,15 @@ function main(): void {
             checkSandboxPings();
             setInterval(checkSandboxPings, 30_000).unref();
         }
-        // #502 — en mode proxy, on tape un heartbeat upstream toutes les 30s
-        // pour que le Nodes panel puisse afficher une vraie pastille up/down
-        // (le middleware auth bumpe `tokens.last_used_at` au passage, c'est ce
-        // timestamp qui dérive la couleur côté UI). Pas-op en mode normal.
+        // #505 — en mode proxy, on ouvre une WS persistante vers `papy`. Elle
+        // sert à la fois de heartbeat (chaque frame bumpe `tokens.last_used_at`
+        // → pastille up/down) ET de canal d'ordres pour les ops cross-host
+        // (phase 2 = pane stream/keys routés ici). David `medh7z` : remplace
+        // l'ancien HTTP heartbeat #502, simplifie d'un cran.
         const px = loadProxy();
         if (px) {
-            startProxyHeartbeat(px);
-            console.log(`proxy heartbeat → ${px.url}/api/proxy/heartbeat every 30s`);
+            startProxyWsClient(px);
+            console.log(`proxy WS client → ${px.url}/ws/proxy-node (persistent, with reconnect)`);
         }
     });
 
