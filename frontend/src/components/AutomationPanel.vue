@@ -27,8 +27,14 @@ const emit = defineEmits<{
 
 <template>
     <div class="aiball-panel">
+        <!-- #521 : `:key` force un remount complet quand `editRuleId` change
+             (ex. "42" → "new", ou save+close+reopen "new"). Sans ça, Vue
+             réutilise la même instance et l'état interne de RuleEditor
+             (refs triggers/expression/actions/note) persistait — d'où la
+             rule précédente qui s'affichait en réouvrant "new". -->
         <AutomationRuleDetailPage
             v-if="editRuleId !== null"
+            :key="editRuleId"
             :rule-id="editRuleId"
             @close="emit('close-edit')"
         />
