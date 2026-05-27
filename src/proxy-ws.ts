@@ -51,7 +51,17 @@ const nodes = new Map<string, ProxyNodeConn>();
  *  requêtes pane vers le bon proxy. Null si le node n'est pas connecté. */
 export function getProxyNodeSocket(nodeId: string): WebSocket | null {
     const c = nodes.get(nodeId);
-    return c && c.socket.readyState === WebSocket.OPEN ? c.socket : null;
+    if (!c) return null;
+    if (c.socket.readyState === WebSocket.OPEN) return c.socket;
+    // #505 — la conn est dans la map mais pas OPEN (CLOSING/CLOSED). Loggue
+    // pour identifier le décalage entre "node connected" et le moment où
+    // une requête trouve le socket déjà mort, sans attendre le sweep 25s.
+    const stateName = c.socket.readyState === WebSocket.CLOSING
+        ? "CLOSING" : c.socket.readyState === WebSocket.CLOSED
+        ? "CLOSED" : c.socket.readyState === WebSocket.CONNECTING
+        ? "CONNECTING" : String(c.socket.readyState);
+    console.log(`[proxy WS] lookup found node ${nodeId} in map but socket state=${stateName} (last_frame ${((Date.now() - c.last_frame_ms) / 1000).toFixed(1)}s ago)`);
+    return null;
 }
 
 /**
