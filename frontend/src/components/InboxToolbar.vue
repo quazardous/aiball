@@ -35,6 +35,11 @@ export interface ProjectOption {
     unread?: number;
     open?: number;
     resolved?: number;
+    /** #537 — mirror Sidebar.vue: drives the active/inactive split here too
+     *  (sidebar is hidden on mobile, so the toolbar dropdown IS the picker
+     *  there — david `f5cjs3` flagged the split was missing). */
+    running?: boolean;
+    last_activity?: string | null;
 }
 
 import { computed } from "vue";
@@ -82,7 +87,30 @@ const activeProjectBadges = computed(() => {
 function pickProject(v: string | null) {
     emit("update:project", v);
     projectOpen.value = false;
+    inactiveOpen.value = false;
 }
+
+// #537 mirror Sidebar.vue split (david `f5cjs3` : ça marche pas sur mobile,
+// parce que le sidebar est `display:none` sous 720px et ce dropdown est le
+// picker mobile — il faut appliquer la même séparation actifs/inactifs ici).
+const INACTIVE_AGE_DAYS = 14;
+function isProjectActive(p: ProjectOption): boolean {
+    if (p.running) return true;
+    const hasSignal = (p.pending ?? 0) > 0 || (p.unread ?? 0) > 0 || (p.resolved ?? 0) > 0;
+    if (!hasSignal) return false;
+    if (!p.last_activity) return true;
+    const ageMs = Date.now() - Date.parse(p.last_activity);
+    if (Number.isNaN(ageMs)) return true;
+    return ageMs < INACTIVE_AGE_DAYS * 24 * 60 * 60 * 1000;
+}
+const allProjectOption = computed(() => props.projectOptions.find((p) => p.value === null) ?? null);
+const activeProjectOptions = computed(() =>
+    props.projectOptions.filter((p) => p.value !== null && (isProjectActive(p) || p.value === props.project)),
+);
+const inactiveProjectOptions = computed(() =>
+    props.projectOptions.filter((p) => p.value !== null && !isProjectActive(p) && p.value !== props.project),
+);
+const inactiveOpen = ref(false);
 
 // #B.161: filters collapse on mobile (<720px). Default-open on
 // desktop, default-collapsed on mobile; resize keeps the state in
@@ -125,9 +153,27 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
                 <i class="pi pi-chevron-down filter-project-dropdown__chev" />
             </summary>
             <div class="filter-project-dropdown__menu">
+                <!-- #537 — All projects row : toujours en tête. -->
                 <button
-                    v-for="p in projectOptions"
-                    :key="p.value ?? '__all__'"
+                    v-if="allProjectOption"
+                    :key="'__all__'"
+                    type="button"
+                    class="filter-project-dropdown__item"
+                    :class="{ 'filter-project-dropdown__item--current': project === null }"
+                    @click="pickProject(null)"
+                >
+                    <span class="filter-project-dropdown__item-label">{{ allProjectOption.label }}</span>
+                    <span class="filter-project-dropdown__badges">
+                        <span v-if="allProjectOption.pending && allProjectOption.pending > 0" class="filter-project-dropdown__badge filter-project-dropdown__badge--pending">{{ allProjectOption.pending }}</span>
+                        <span v-if="allProjectOption.resolved && allProjectOption.resolved > 0" class="filter-project-dropdown__badge filter-project-dropdown__badge--resolved">{{ allProjectOption.resolved }}</span>
+                        <span v-if="allProjectOption.unread && allProjectOption.unread > 0" class="filter-project-dropdown__badge filter-project-dropdown__badge--unread">{{ allProjectOption.unread }}</span>
+                        <span v-if="allProjectOption.open && allProjectOption.open > 0" class="filter-project-dropdown__badge filter-project-dropdown__badge--open">{{ allProjectOption.open }}</span>
+                    </span>
+                </button>
+                <!-- Active projects (running OU signal counter récent). -->
+                <button
+                    v-for="p in activeProjectOptions"
+                    :key="p.value ?? '__active__'"
                     type="button"
                     class="filter-project-dropdown__item"
                     :class="{ 'filter-project-dropdown__item--current': p.value === project }"
@@ -138,6 +184,30 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
                         <span v-if="p.pending && p.pending > 0" class="filter-project-dropdown__badge filter-project-dropdown__badge--pending">{{ p.pending }}</span>
                         <span v-if="p.resolved && p.resolved > 0" class="filter-project-dropdown__badge filter-project-dropdown__badge--resolved">{{ p.resolved }}</span>
                         <span v-if="p.unread && p.unread > 0" class="filter-project-dropdown__badge filter-project-dropdown__badge--unread">{{ p.unread }}</span>
+                        <span v-if="p.open && p.open > 0" class="filter-project-dropdown__badge filter-project-dropdown__badge--open">{{ p.open }}</span>
+                    </span>
+                </button>
+                <!-- More toggle pour révéler les projets inactifs. -->
+                <button
+                    v-if="inactiveProjectOptions.length > 0"
+                    type="button"
+                    class="filter-project-dropdown__item filter-project-dropdown__item--more"
+                    @click="inactiveOpen = !inactiveOpen"
+                >
+                    <i :class="`pi ${inactiveOpen ? 'pi-chevron-up' : 'pi-chevron-down'}`" style="font-size: 0.7rem; opacity: 0.6" />
+                    <span class="filter-project-dropdown__item-label filter-project-dropdown__item-label--muted">{{ inactiveOpen ? 'Less' : `More (${inactiveProjectOptions.length})` }}</span>
+                </button>
+                <!-- Inactive projects (juste open/snoozed, OU activity > 14j). -->
+                <button
+                    v-for="p in (inactiveOpen ? inactiveProjectOptions : [])"
+                    :key="`inactive-${p.value}`"
+                    type="button"
+                    class="filter-project-dropdown__item filter-project-dropdown__item--inactive"
+                    :class="{ 'filter-project-dropdown__item--current': p.value === project }"
+                    @click="pickProject(p.value)"
+                >
+                    <span class="filter-project-dropdown__item-label">{{ p.label }}</span>
+                    <span class="filter-project-dropdown__badges">
                         <span v-if="p.open && p.open > 0" class="filter-project-dropdown__badge filter-project-dropdown__badge--open">{{ p.open }}</span>
                     </span>
                 </button>
@@ -371,6 +441,20 @@ onUnmounted(() => window.removeEventListener("resize", syncFilters));
 .filter-project-dropdown__badge--unread  { background: var(--p-blue-500); color: white; }
 .filter-project-dropdown__badge--resolved{ background: var(--p-green-500); color: white; }
 .filter-project-dropdown__badge--open    { background: var(--p-surface-200); color: var(--p-text-color); }
+/* #537 — toggle « More (N) » pour révéler les projets inactifs, mirror du
+   sidebar : chevron + label muted, visuellement discret. */
+.filter-project-dropdown__item--more {
+    gap: 0.4rem;
+    color: var(--p-text-muted-color);
+    font-size: 0.78rem;
+    padding-block: 0.3rem;
+}
+.filter-project-dropdown__item-label--muted {
+    color: var(--p-text-muted-color);
+}
+.filter-project-dropdown__item--inactive .filter-project-dropdown__item-label {
+    color: var(--p-text-muted-color);
+}
 .filter-project-settings {
     background: transparent;
     border: 0;

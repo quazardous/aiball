@@ -825,6 +825,8 @@ watch(showSnoozed, (v) => {
                             unread: p.unread,
                             open: p.open,
                             resolved: p.resolved,
+                            running: p.running,
+                            last_activity: p.last_activity,
                         }))"
                         :priority-filter="priorityFilter"
                         @update:status-filter="statusFilter = $event"
