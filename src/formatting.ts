@@ -62,7 +62,11 @@ export const DEFAULT_FORMATTING_PATTERNS: readonly FormattingPattern[] = [
     },
     {
         id: "mention",
-        match: "(?<![\\w@>\"'/])@([a-zA-Z0-9_-]{2,64})\\b",
+        // #535 : `>` retiré de la lookbehind (était bloqué pour éviter du nesting
+        // dans `<a>@x</a>` mais ça bloquait au passage les mentions juste après
+        // `<p>` du markdown rendu — david : « @aiball-win » au début d'un
+        // paragraphe n'était jamais wrapé en chip).
+        match: "(?<![\\w@\"'/])@([a-zA-Z0-9_-]{2,64})\\b",
         canonical: "@{1}",
         class: "mention",
     },

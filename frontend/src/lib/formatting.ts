@@ -35,7 +35,14 @@ export interface FormattingPattern {
 const DEFAULTS: FormattingPattern[] = [
     { id: "ticket", match: "#[Bb]?[._/-]?(\\d+)\\b", canonical: "#{1}", href: "/b/{1}", class: "ticket-ref" },
     { id: "comment", match: "#[Cc][._/-]?([a-hjkmnp-z2-9]{4,8})\\b", canonical: "#C.{1}", href: "/b/{1}", class: "comment-ref" },
-    { id: "mention", match: "(?<![\\w@>\"'/])@([a-zA-Z0-9_-]{2,64})\\b", canonical: "@{1}", class: "mention" },
+    // #535 : `>` retiré de la lookbehind (était bloqué pour éviter du nesting
+    // dans `<a>@x</a>`, mais ça bloquait au passage les mentions juste après
+    // `<p>` du markdown rendu — symptôme david : « @aiball-win » au début d'un
+    // paragraphe n'était jamais wrapé en chip). Le risque false-positive
+    // (re-wrap d'un `<span class="mention">@x</span>` déjà rendu) est marginal :
+    // la chain markdown ne re-render pas, donc le post-sanitize ne tourne
+    // qu'une fois par source.
+    { id: "mention", match: "(?<![\\w@\"'/])@([a-zA-Z0-9_-]{2,64})\\b", canonical: "@{1}", class: "mention" },
 ];
 
 /** HTML-escape for safe insertion into text or double-quoted attributes. */
