@@ -17,14 +17,12 @@ defineProps<{
     globalOpenCount: number;
     showSnoozed: boolean;
     dark: boolean;
-    loading: boolean;
-    autoRefresh: boolean;
 }>();
+// #539 david : refresh + auto-refresh buttons retirés. WS reverse (`useInboxWs`)
+// pousse les updates inbox en temps réel — pas besoin de polling manuel ou auto.
 const emit = defineEmits<{
     (e: "update:showSnoozed", v: boolean): void;
     (e: "update:dark", v: boolean): void;
-    (e: "update:autoRefresh", v: boolean): void;
-    (e: "refresh"): void;
 }>();
 </script>
 
@@ -82,22 +80,6 @@ const emit = defineEmits<{
             rounded
             @click="emit('update:dark', !dark)"
         />
-        <Button
-            icon="pi pi-refresh"
-            severity="secondary"
-            text
-            rounded
-            :loading="loading"
-            @click="emit('refresh')"
-        />
-        <Button
-            :icon="autoRefresh ? 'pi pi-clock' : 'pi pi-stop-circle'"
-            :severity="autoRefresh ? 'success' : 'secondary'"
-            :title="autoRefresh ? 'Auto-refresh on (every 60s) — click to stop' : 'Auto-refresh off — click to enable (60s)'"
-            text
-            rounded
-            @click="emit('update:autoRefresh', !autoRefresh)"
-        />
     </header>
 </template>
 
@@ -130,10 +112,9 @@ const emit = defineEmits<{
         gap: 0.2rem 0.15rem;
         padding: 0.35rem 0.45rem;
     }
-    /* PrimeVue rounded buttons in the header (notif, dark, refresh,
-       auto-refresh) had visible inter-button space from their own
-       :not(:last-child) margin + the header gap. Strip margin so the
-       row reads as a tight cluster. */
+    /* PrimeVue rounded buttons in the header (notif, dark) had visible
+       inter-button space from their own :not(:last-child) margin + the
+       header gap. Strip margin so the row reads as a tight cluster. */
     .aiball-header .p-button.p-button-rounded {
         margin: 0;
     }

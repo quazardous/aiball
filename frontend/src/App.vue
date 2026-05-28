@@ -202,21 +202,9 @@ const aiballMainWide = computed((): boolean => {
 // the `bulkCounts` computed all come from the composable. Wired below
 // once `rows` + `pagedRows` are in scope.
 //
-// Auto-refresh: optional 60s heartbeat that triggers a refresh of the
-// current view. WS push already keeps things fresh; this is a fallback
-// for environments where the WS may have silently dropped.
-const autoRefresh = ref(localStorage.getItem("aiball.autoRefresh") === "1");
-let autoRefreshTimer: number | null = null;
-watch(autoRefresh, (v) => {
-    localStorage.setItem("aiball.autoRefresh", v ? "1" : "0");
-    if (autoRefreshTimer !== null) {
-        clearInterval(autoRefreshTimer);
-        autoRefreshTimer = null;
-    }
-    if (v) {
-        autoRefreshTimer = window.setInterval(() => refresh(), 60_000);
-    }
-}, { immediate: true });
+// #539 david : auto-refresh polling retiré. WS reverse (`useInboxWs`) push
+// les updates en temps réel — le polling 60s était un fallback historique
+// inutile (et le bouton manuel idem).
 
 const strategy = ref<Strategy>("auto-reply");
 
@@ -347,17 +335,6 @@ async function loadRows() {
         });
     } finally {
         loading.value = false;
-    }
-}
-
-function refresh() {
-    // Hard manual refresh (toolbar button + 60s heartbeat fallback for
-    // WS-less envs). Route through the bus so consumers stay in sync.
-    bus.emit("projects.refresh");
-    if (openTicketId.value !== null) {
-        bus.emit("thread.refresh", { ticketId: openTicketId.value });
-    } else {
-        bus.emit("inbox.refresh");
     }
 }
 
@@ -691,12 +668,8 @@ watch(showSnoozed, (v) => {
             :global-open-count="globalOpenCount"
             :show-snoozed="showSnoozed"
             :dark="dark"
-            :loading="loading"
-            :auto-refresh="autoRefresh"
             @update:show-snoozed="showSnoozed = $event"
             @update:dark="dark = $event"
-            @update:auto-refresh="autoRefresh = $event"
-            @refresh="refresh"
         />
 
         <div class="aiball-layout">
