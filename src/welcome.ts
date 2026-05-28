@@ -1,7 +1,7 @@
 /**
  * #565 — welcome kit builder. Pure I/O scanning of the `welcome/` tree
  * shipped at the install root (`<install>/welcome/<type>/`), composed
- * into a stable JSON shape the MCP tool returns to the agent.
+ * into a stable JSON shape the MCP tools return to the agent.
  *
  * Layout convention (per david `87dp6p` — each `<type>` directory is
  * autonomous, no inheritance, no overlay):
@@ -20,27 +20,39 @@
  * considered drafts and stay invisible. That gives us "add a type =
  * create a folder + a WELCOME.md, zero code change".
  *
- * Note : earlier iterations carried a `rules/` subfolder, but david
- * `87dp6p` formalised the type structure as just `WELCOME.md +
- * templates/`. The "rules" are now part of the master tone doc.
+ * V1.2 split (david `zrdffz`) — token-efficiency : `welcome()` returns
+ * only the manifest of templates (`{name, path_hint}`), the agent
+ * fetches the bodies on-demand via `welcome_template({name})`. Bodies
+ * are not paid until the agent actually applies a template.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-/** A template file under `welcome/<type>/templates/`. */
-export interface WelcomeTemplate {
+/**
+ * Manifest entry for a template — name + drop location, no body.
+ * Lightweight by design (V1.2 token-efficiency split, david `zrdffz` :
+ * « `templates[]` ça renvoit juste une liste de template dispo (on
+ * avait dit token effective), il faut un outil pour récup le
+ * template »). The full body is fetched on-demand via
+ * `getWelcomeTemplate(installRoot, project_type, name)`.
+ */
+export interface WelcomeTemplateManifest {
     /** Filename without extension (slug; e.g. `README`, `CHANGELOG`). */
     name: string;
     /** Where the agent is invited to drop the file in the project,
      *  relative to the project root. Defaults to the basename of the
      *  template file (`README.md`, `CHANGELOG.md`, …). */
     path_hint: string;
+}
+
+/** Full template (manifest + body) returned by `welcome_template`. */
+export interface WelcomeTemplate extends WelcomeTemplateManifest {
     /** Raw markdown / text content. Starts with an HTML comment
      *  explaining the template's intent (per david `87dp6p`). */
     source_md: string;
 }
 
-/** Full kit returned to the agent. */
+/** Full kit returned to the agent by `welcome()`. */
 export interface WelcomeKit {
     /** The validated `project_type`. */
     project_type: string;
@@ -52,9 +64,12 @@ export interface WelcomeKit {
      *  by the agent ; it carries the type's rules + the spirit in
      *  which to operate. */
     welcome_md: string;
-    /** Scaffolding templates the agent can drop into the project. May
-     *  be empty (the type's whole proposition can be "tone only"). */
-    templates: WelcomeTemplate[];
+    /** Manifest of scaffolding templates (name + path_hint only). The
+     *  agent fetches the bodies on-demand via `welcome_template({name})`
+     *  — V1.2 token-efficiency : only pays the bodies it actually
+     *  applies (typically 1-2 out of N), instead of N inline. May be
+     *  empty (a type's whole proposition can be "tone only"). */
+    templates: WelcomeTemplateManifest[];
 }
 
 /** Error thrown when the requested `project_type` is not a valid type
@@ -67,6 +82,19 @@ export class UnknownProjectTypeError extends Error {
         );
         this.name = "UnknownProjectTypeError";
         this.availableTypes = available;
+    }
+}
+
+/** Error thrown when `welcome_template({name})` asks for a name that
+ *  doesn't exist in the type's `templates/` folder. */
+export class UnknownTemplateError extends Error {
+    readonly availableTemplates: string[];
+    constructor(requested: string, type: string, available: string[]) {
+        super(
+            `unknown template "${requested}" for project_type "${type}" (available: [${available.join(", ")}])`,
+        );
+        this.name = "UnknownTemplateError";
+        this.availableTemplates = available;
     }
 }
 
@@ -107,15 +135,33 @@ export function availableTypes(installRoot: string): string[] {
 }
 
 /**
- * Read every regular file under `welcome/<type>/templates/`. Skipped
- * silently if the dir is missing. `path_hint` defaults to the
- * basename — the agent drops the file at the project root unless it
- * decides otherwise.
+ * Resolve + validate `project_type` against the install's discovered
+ * types. Empty / whitespace falls back to `DEFAULT_PROJECT_TYPE`.
+ * Throws `UnknownProjectTypeError` on a name not present under
+ * `welcome/<name>/WELCOME.md`. Shared by `buildWelcomeKit` and
+ * `getWelcomeTemplate` so both go through the same gate.
  */
-function loadTemplates(typeDir: string): WelcomeTemplate[] {
+function resolveProjectType(installRoot: string, requested: string | null | undefined): {
+    project_type: string;
+    available_types: string[];
+} {
+    const available = availableTypes(installRoot);
+    const project_type = (requested ?? "").trim() || DEFAULT_PROJECT_TYPE;
+    if (!available.includes(project_type)) {
+        throw new UnknownProjectTypeError(project_type, available);
+    }
+    return { project_type, available_types: available };
+}
+
+/**
+ * Scan a type's `templates/` directory and return the manifest entries
+ * (no bodies). `path_hint` defaults to the file basename. Sorted by
+ * filename for deterministic order. Empty list if the dir is missing.
+ */
+function loadTemplateManifest(typeDir: string): WelcomeTemplateManifest[] {
     const dir = join(typeDir, "templates");
     if (!existsSync(dir)) return [];
-    const out: WelcomeTemplate[] = [];
+    const out: WelcomeTemplateManifest[] = [];
     for (const name of readdirSync(dir).sort()) {
         if (name.startsWith(".")) continue;
         const full = join(dir, name);
@@ -126,16 +172,9 @@ function loadTemplates(typeDir: string): WelcomeTemplate[] {
             continue;
         }
         if (!s.isFile()) continue;
-        let content: string;
-        try {
-            content = readFileSync(full, "utf8");
-        } catch {
-            continue;
-        }
         out.push({
             name: name.replace(/\.[^.]+$/, "") || name,
             path_hint: name,
-            source_md: content,
         });
     }
     return out;
@@ -146,23 +185,57 @@ function loadTemplates(typeDir: string): WelcomeTemplate[] {
  * `UnknownProjectTypeError` if the type isn't discovered under
  * `welcome/`. The `welcome_md` field is the master `WELCOME.md` body
  * — the agent reads it first to grasp the tone before adopting
- * templates.
+ * templates. V1.2 : `templates[]` is a manifest only (`{name,
+ * path_hint}`) ; pay the body via `getWelcomeTemplate`.
  */
 export function buildWelcomeKit(
     installRoot: string,
     requestedType: string | null | undefined,
 ): WelcomeKit {
-    const types = availableTypes(installRoot);
-    const project_type = (requestedType ?? "").trim() || DEFAULT_PROJECT_TYPE;
-    if (!types.includes(project_type)) {
-        throw new UnknownProjectTypeError(project_type, types);
-    }
+    const { project_type, available_types } = resolveProjectType(installRoot, requestedType);
     const typeDir = join(welcomeRoot(installRoot), project_type);
     const welcome_md = readFileSync(join(typeDir, "WELCOME.md"), "utf8");
     return {
         project_type,
-        available_types: types,
+        available_types,
         welcome_md,
-        templates: loadTemplates(typeDir),
+        templates: loadTemplateManifest(typeDir),
+    };
+}
+
+/**
+ * Fetch a single template (manifest + body) by name from a given
+ * type's `templates/` folder. Throws `UnknownProjectTypeError` if the
+ * type doesn't exist, `UnknownTemplateError` if the name doesn't match
+ * a file in the type's `templates/`. The error's `availableTemplates`
+ * carries the manifest so the caller (typically an agent that mis-typed)
+ * can self-correct in one round trip.
+ */
+export function getWelcomeTemplate(
+    installRoot: string,
+    requestedType: string | null | undefined,
+    name: string,
+): WelcomeTemplate {
+    const { project_type } = resolveProjectType(installRoot, requestedType);
+    const typeDir = join(welcomeRoot(installRoot), project_type);
+    const manifest = loadTemplateManifest(typeDir);
+    const trimmedName = (name ?? "").trim();
+    const entry = manifest.find((t) => t.name === trimmedName);
+    if (!entry) {
+        throw new UnknownTemplateError(
+            trimmedName,
+            project_type,
+            manifest.map((t) => t.name),
+        );
+    }
+    // Read the body using the file the manifest entry corresponds to —
+    // `path_hint` is the basename inside `templates/`.
+    const body = readFileSync(
+        join(typeDir, "templates", entry.path_hint),
+        "utf8",
+    );
+    return {
+        ...entry,
+        source_md: body,
     };
 }
