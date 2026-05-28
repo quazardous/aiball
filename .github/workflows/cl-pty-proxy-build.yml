@@ -1,0 +1,31 @@
+name: cl-pty-proxy build
+
+# Validate Rust changes to the Windows ConPTY proxy on a real Windows runner
+# (cross-compile from Linux misses the ConPTY runtime path). Triggers only
+# on paths under windows/cl-pty-proxy/ + this workflow itself, so unrelated
+# PRs don't pay the ~5 min cold-build cost. See aiball ticket #527.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'windows/cl-pty-proxy/**'
+      - '.github/workflows/cl-pty-proxy-build.yml'
+  pull_request:
+    paths:
+      - 'windows/cl-pty-proxy/**'
+      - '.github/workflows/cl-pty-proxy-build.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: windows/cl-pty-proxy
+      - name: cargo build --release
+        run: cargo build --release --manifest-path windows/cl-pty-proxy/Cargo.toml
+      - name: cargo test
+        run: cargo test --manifest-path windows/cl-pty-proxy/Cargo.toml
