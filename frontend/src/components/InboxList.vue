@@ -177,6 +177,14 @@ function onRowClick(r: InboxRow) {
                 title="An agent has recent activity on this ticket (within the hot window). Claim status is shown separately by the bookmark icon."
                 style="margin-right: 0.3rem"
             >🔥</span>
+            <!-- #560 david : en multi-projet (`!project`), le nom du projet va
+                 sur la title-line AVANT le #N, pas dans un badge. Texte plain
+                 (pas un Tag PrimeVue), couleur muted pour rester discret. -->
+            <span
+                v-if="!project"
+                class="list-row__project"
+                :title="`Project: ${r.project}`"
+            >{{ r.project }}</span>
             <span class="ticket-id">{{ formatTicketRef(r.id) }}</span>
             {{ titleOf(r) }}
             <!-- #B.245: per-event scope badge. Only render for
@@ -196,7 +204,7 @@ function onRowClick(r: InboxRow) {
         </template>
         <template v-if="snippetOf(r)" #snippet>{{ snippetOf(r) }}</template>
         <template
-            v-if="r.status !== 'approved' || r.intent || (r.priority && r.priority !== 'normal') || r.tags.length || !project || r.by_agent"
+            v-if="r.status !== 'approved' || r.intent || (r.priority && r.priority !== 'normal') || r.tags.length || r.by_agent"
             #chips
         >
             <Tag
@@ -225,12 +233,8 @@ function onRowClick(r: InboxRow) {
                 :tag="tg"
                 size="sm"
             />
-            <Tag
-                v-if="!project"
-                :value="r.project"
-                severity="info"
-                style="font-size: 0.7rem"
-            />
+            <!-- #560 david : le project passe sur la title-line (pas en chip).
+                 Voir le `<span class="list-row__project">` au-dessus. -->
             <!-- #542 david : reporter (`by_agent`) en chip après les tags
                  plutôt qu'en tête de title-line — info au repos, libère le
                  title-line pour l'essentiel (id + titre + snippet). -->
@@ -325,6 +329,21 @@ function onRowClick(r: InboxRow) {
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-size: 0.85em;
     margin-right: 0.4rem;
+}
+/* #560 david : nom du projet en préfixe title-line (multi-projet only).
+   Texte muted + monospace pour s'aligner visuellement avec le `#N` qui
+   suit, mais pas un badge — david : « pas dasn un badge ». Séparateur
+   `/` discret pour marquer la frontière project/ticket. */
+.list-row__project {
+    color: var(--p-text-muted-color);
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.85em;
+    margin-right: 0.4rem;
+}
+.list-row__project::after {
+    content: "/";
+    margin-left: 0.35rem;
+    opacity: 0.6;
 }
 .read-toggle-lead {
     appearance: none;
