@@ -425,6 +425,138 @@ Don't hardcode `https://github.com/…/blob/…` for cross-repo references
 
 ## 4. Agent kit
 
-_(coming next slice)_
+Claude agents have finite context. The "agent kit" is the discipline
+of *what to preload vs what to look up vs what to remember across
+sessions* so the context window stays usable.
+
+### 4.1 Always preload
+
+These are the docs an agent should have in context before starting
+any non-trivial task on aiball:
+
+1. **[`CLAUDE.md`](../CLAUDE.md)** (repo root) — operational truth
+   for the live-runtime checkout (rebuild, hard restart for
+   migrations, env vars). Loaded automatically by Claude Code.
+2. **This doc** (`docs/CONTRIBUTING.md`) — the practical guide. If a
+   convention conflicts with CLAUDE.md, this doc wins (CLAUDE.md is
+   getting trimmed to operational ops over time).
+3. **The engaged ticket's thread**, in `brief` mode. The pivot snapshot
+   + the latest comment body is enough to resume; older bodies are
+   captured in the snapshot by contract (§ 1.5).
+
+That's it for the always-on layer. Everything else is lazy.
+
+### 4.2 Lookup table: task type → which doc
+
+When the task touches a subsystem, read the corresponding doc BEFORE
+editing. Skim the headers first if the doc is large.
+
+| Touching…                                      | Read first                                       |
+| ---------------------------------------------- | ------------------------------------------------ |
+| DB schema / queries / migrations               | [`docs/MIGRATIONS.md`](MIGRATIONS.md) + the relevant schema file |
+| Config files / `.aiball.yaml` / per-project    | [`docs/CONFIGS.md`](CONFIGS.md) — the russian-doll layering |
+| claude-loop, timer, wake logic                 | [`docs/CLAUDE-LOOP.md`](CLAUDE-LOOP.md)          |
+| `windows/cl-pty-proxy/`                        | [`docs/PTY-PROXY-WINDOWS.md`](PTY-PROXY-WINDOWS.md) |
+| Unix PTY proxy (`pty-proxy.py`)                | [`docs/PTY-PROXY.md`](PTY-PROXY.md)              |
+| Tickets, comments, automation, lifecycle       | [`docs/TICKET_LIFECYCLE.md`](TICKET_LIFECYCLE.md) |
+| Remote nodes / proxy mode / tailnet            | [`docs/REMOTE.md`](REMOTE.md) + [`docs/SECURITY.md`](SECURITY.md) |
+| Tailscale specifics                            | [`docs/TAILSCALE.md`](TAILSCALE.md)              |
+| Sandbox / autonomous agents                    | [`docs/SANDBOX.md`](SANDBOX.md)                  |
+| Install paths, install modes                   | [`docs/INSTALL.md`](INSTALL.md) (Linux/macOS) or [`docs/WIN-INSTALL.md`](WIN-INSTALL.md) |
+| MCP client / agent-facing tool surface         | [`MCP-CLIENT.md`](../MCP-CLIENT.md)              |
+| Workflow (feature vs mainstream branch model)  | [`docs/WORKFLOW.md`](WORKFLOW.md)                |
+
+When in doubt about which doc applies, grep first
+(`grep -l <symbol> docs/`) rather than read everything.
+
+### 4.3 Don't preload (read on demand)
+
+- Source files. Don't pre-read `src/**/*.ts` unless the task targets
+  them; use Grep / Glob to find the relevant module and Read only
+  the relevant function.
+- The full ticket thread on a long history. Use `ticket_get` with
+  `brief: true` (default) for the resume snapshot + latest bodies;
+  use `digest: true` for a bird's-eye scan of state progression
+  across many comments; only use `full: true` with `limit` for a
+  specific range.
+- `node_modules/`, generated dist, lockfiles. Treat as opaque.
+- Migration SQL files unless touching that migration. The journal
+  (`drizzle/meta/_journal.json`) is the index.
+
+### 4.4 Memory protocol
+
+Claude Code maintains a persistent memory directory at
+`~/.claude/projects/<project-slug>/memory/` with an `MEMORY.md`
+index pointing to individual memory files. The contents survive
+across sessions, so what you save shapes future-you's behavior.
+
+**What to save:**
+
+- **user** — the user's role, preferences, knowledge level,
+  responsibilities. Helps tailor explanations and decisions.
+- **feedback** — corrections and validated choices. Save the rule +
+  the WHY (so future-you can apply it to edge cases). Save
+  validations as well as corrections (so you don't drift away from
+  approaches that worked).
+- **project** — ephemeral state the user told you that isn't in the
+  code (deadlines, who's blocking whom, the reason behind a refactor).
+  Convert relative dates to absolute (`Thursday` → `2026-03-05`)
+  before saving.
+- **reference** — pointers to external systems (Linear projects,
+  Slack channels, dashboard URLs).
+
+**What NOT to save** (these can be derived from the live state):
+
+- Code patterns, file paths, architecture. Read the code.
+- Git history, who changed what. `git log` / `git blame` are
+  authoritative.
+- Debugging recipes ("how I fixed X"). The fix is in the code; the
+  commit message has the WHY.
+- Anything already documented in this repo.
+- Ephemeral task state (in-progress work, current ticket details).
+  Use TaskCreate / aiball ticket threads instead.
+
+The exclusions apply even if the user explicitly asks to "remember"
+something redundant — ask back what was *surprising* or *non-obvious*
+about it; that's the kernel worth keeping.
+
+**Before recommending from memory:**
+
+A memory that names a file path, function, or flag is a claim that
+it existed *when the memory was written*. It may have been renamed,
+removed, or never merged. Before acting on such a memory:
+
+- If the memory names a file: check the file exists.
+- If the memory names a function or flag: grep for it.
+- If the user is about to act on your recommendation: verify first.
+
+"The memory says X exists" is not the same as "X exists now."
+
+### 4.5 Cross-platform awareness
+
+aiball runs on Linux, macOS, and Windows. A few load-bearing
+specifics:
+
+- **Mux command**: `tmux` on Linux/macOS, `psmux` on Windows
+  (compiled fork). Use `MUX_CMD` from `src/claude-loop/state.ts`
+  rather than hardcoding.
+- **Proxy node mode**: some hosts (e.g. graphite on Windows) run as
+  a proxy relaying to a central daemon over Tailscale. Local DB is
+  bypassed; everything flows to the upstream. See
+  [`docs/REMOTE.md`](REMOTE.md) and the proxy-node architecture
+  in [`docs/SECURITY.md`](SECURITY.md).
+- **ConPTY vs Unix PTY**: Windows uses the ConPTY proxy
+  (`cl-pty-proxy`, Rust), Linux uses the Python PTY proxy. They
+  expose the same interface — write the calling code platform-agnostic
+  and let the launcher pick.
+
+When a behavior is platform-specific, say so explicitly in the
+ticket / commit / comment. "Works on Linux" is not the same as
+"ships" until Windows is verified too.
+
+---
+
+*This doc is a living guide — flag drift via a ticket; don't let two
+sources of truth diverge silently.*
 
 [#319]: # "feature intent — branch + PR isolated work"
