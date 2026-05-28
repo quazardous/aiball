@@ -4,21 +4,70 @@ import Button from "primevue/button";
 import IdentityPicker from "./IdentityPicker.vue";
 import { HEADER_BADGE_TOOLTIPS } from "../lib/labels";
 
-// #540 david : goto ticket — input compact dans le header qui accepte un
-// numéro de ticket (avec ou sans `#`) et navigate vers `/b/N`. Le router
-// dans App.vue picke ensuite l'openTicketId via parseUrl. Pas de hashid
-// pour l'instant (hashids = comments-only, et `/b/<hashid>` n'est pas
-// route-parsé côté frontend ; lookup int suffit pour l'usage « j'ai vu
-// #538 mentionné, je veux y sauter »).
+// #540 / #570 — goto ticket : input compact qui accepte
+//   - un id ticket numérique (avec ou sans `#`) → /b/N direct
+//   - un hashid de commentaire (avec ou sans préfixe `#C.`) → on
+//     resolve via `/api/tickets/<hashid>` pour atterrir sur le ticket
+//     parent + focus_message_id (pareil pattern que MarkdownView pour
+//     les `/b/<hashid>` cliqués dans un body).
+//
+// Le router SPA (`parseUrl`) ne parse que `/b/N` (int) ; pour les
+// hashids on fait le lookup-puis-redirect ici plutôt que dans le router
+// (qui doit rester sync). David `#570` : « le goto ticket doit accepter
+// les numéro de ticket et de commentaire (hash) ».
 const gotoInput = ref("");
-function submitGoto() {
-    const raw = gotoInput.value.trim().replace(/^#/, "");
-    const id = parseInt(raw, 10);
-    if (!Number.isNaN(id) && id > 0) {
+const gotoBusy = ref(false);
+const gotoError = ref<string | null>(null);
+
+/** Hashids sont en base32-ish 6 chars (cf. `pickFreshHashid`). On
+ *  accepte 4-8 char pour rester souple (futur-proofing). Optionnel
+ *  préfixe `#C.` ou `#c.` pour matcher la convention rendue. */
+const HASHID_RE = /^#?[Cc]?\.?([a-hjkmnp-z2-9]{4,8})$/;
+
+async function submitGoto() {
+    const raw = gotoInput.value.trim();
+    if (!raw) return;
+    gotoError.value = null;
+    // Numeric ticket id (with or without leading `#`).
+    const numeric = raw.replace(/^#/, "");
+    const id = parseInt(numeric, 10);
+    if (!Number.isNaN(id) && id > 0 && String(id) === numeric) {
         window.history.pushState({}, "", `/b/${id}`);
-        // Trigger the router's popstate watcher in App.vue.
         window.dispatchEvent(new PopStateEvent("popstate"));
         gotoInput.value = "";
+        return;
+    }
+    // Comment hashid — resolve via the backend, then navigate to the
+    // canonical /b/<parentId>. Same auth shape as MarkdownView's click
+    // handler (#B.94).
+    const m = HASHID_RE.exec(raw);
+    if (!m) {
+        gotoError.value = `unrecognised : "${raw}" — expected #N or hashid`;
+        return;
+    }
+    const hashid = m[1];
+    gotoBusy.value = true;
+    try {
+        const tok = localStorage.getItem("aiball.token");
+        const headers: Record<string, string> = {};
+        if (tok) headers["authorization"] = `Bearer ${tok}`;
+        const res = await fetch(`/api/tickets/${encodeURIComponent(hashid)}`, { headers });
+        if (!res.ok) {
+            gotoError.value = `not found : ${hashid}`;
+            return;
+        }
+        const data = await res.json();
+        if (!data?.ticket?.id) {
+            gotoError.value = `not found : ${hashid}`;
+            return;
+        }
+        window.history.pushState({}, "", `/b/${data.ticket.id}`);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+        gotoInput.value = "";
+    } catch (e) {
+        gotoError.value = (e as Error).message;
+    } finally {
+        gotoBusy.value = false;
     }
 }
 
@@ -95,11 +144,12 @@ const emit = defineEmits<{
             <input
                 v-model="gotoInput"
                 type="text"
-                inputmode="numeric"
-                pattern="#?[0-9]+"
-                placeholder="#N"
-                title="Go to ticket — type a ticket number (e.g. 540) and press Enter"
+                placeholder="#N or hashid"
+                :title="gotoError ?? 'Go to ticket — type a ticket number (#540) or a comment hashid (#C.abc123 or abc123) and press Enter'"
                 class="header-goto__input"
+                :class="{ 'header-goto__input--error': !!gotoError, 'header-goto__input--busy': gotoBusy }"
+                :disabled="gotoBusy"
+                @input="gotoError = null"
             />
         </form>
         <IdentityPicker />
@@ -180,7 +230,9 @@ const emit = defineEmits<{
     margin: 0;
 }
 .header-goto__input {
-    width: 4.5rem;
+    /* #570 : accommode aussi un hashid (#C.abc123) → 6.5rem au lieu de
+       4.5rem pour rester lisible sans clip. */
+    width: 6.5rem;
     padding: 0.2rem 0.5rem;
     border: 1px solid var(--p-content-border-color);
     border-radius: 0.3rem;
@@ -193,6 +245,12 @@ const emit = defineEmits<{
 .header-goto__input:focus {
     outline: none;
     border-color: var(--p-primary-color);
+}
+.header-goto__input--error {
+    border-color: var(--p-red-500, #ef4444);
+}
+.header-goto__input--busy {
+    opacity: 0.65;
 }
 .connection-dot {
     display: inline-block;
