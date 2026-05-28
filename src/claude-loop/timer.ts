@@ -277,13 +277,67 @@ function selfReloadIfStale(): void {
 // wake carries unread/open counts + a drain directive too. Async
 // because the wrap helper queries the daemon; tryWakeInner already
 // awaits checkHasWork so adding another await here is a no-op.
+//
+// #544 david `hdc7hn` : avant d'emettre le directive "Handle ticket #X",
+// on check si cet agent est stakeholder (assignee/claimant/@mentioné).
+// Sinon on retombe sur le contextPhrase generique (info only, pas
+// d'ordre "Handle" qui pousserait l'agent à toucher un ticket qui n'est
+// pas le sien). Filtre agent-side car la même SSE peut servir plusieurs
+// usages (UI notifs vs wake) ; la décision "wake me?" est privée à
+// l'agent.
 async function pickPhrase(hint?: WakeHint): Promise<string> {
-    if (hint?.ticket_id) return buildWakePhrase(hint, pingsPath(sd!));
+    if (hint?.ticket_id) {
+        const me = process.env.AIBALL_AGENT;
+        if (await isWakeStakeholder(hint, me)) {
+            return buildWakePhrase(hint, pingsPath(sd!));
+        }
+        log(`wake-hint #${hint.ticket_id}${hint.comment_hashid ? ` (comment #${hint.comment_hashid})` : ""} not for me (${me}) — falling back to generic context phrase`);
+    }
     return buildContextPhrase(
         client(),
         process.env.AIBALL_PROJECT ?? null,
         pingsPath(sd!),
     );
+}
+
+/**
+ * #544 — does this agent care about being woken specifically for this
+ * ticket ? True iff one of :
+ *   - the agent holds a live claim on the ticket
+ *   - the agent is the explicit assignee
+ *   - the comment body @-mentions the agent
+ *
+ * Reporter (`by_agent`) alone n'est PAS suffisant (david `hdc7hn` :
+ * « aiball-win est le reporter/owner mais il doit pas le claim »).
+ *
+ * Fail-open : si la lookup foire (daemon down, hashid manquant,
+ * timeout), on suppose stakeholder → mieux vaut un wake gratuit qu'un
+ * miss silencieux. Si AIBALL_AGENT n'est pas set côté env (back-compat
+ * tests), on suppose stakeholder aussi.
+ */
+async function isWakeStakeholder(hint: WakeHint, me: string | undefined): Promise<boolean> {
+    if (!me || !hint.ticket_id) return true;
+    try {
+        const resp = await client().getTicket(hint.ticket_id, { brief: true }) as {
+            ticket?: { claimant?: string | null; assignee?: string | null };
+            comments?: Array<{ hashid?: string; body?: string | null }>;
+        };
+        const t = resp.ticket;
+        if (!t) return true;
+        if (t.claimant === me || t.assignee === me) return true;
+        if (hint.comment_hashid && Array.isArray(resp.comments)) {
+            const cm = resp.comments.find((x) => x.hashid === hint.comment_hashid);
+            const body = cm?.body ?? "";
+            // Same lookbehind shape as the formatting mention regex (#535),
+            // minus `>` to also catch mentions au start de markdown paragraphs.
+            const escaped = me.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const re = new RegExp(`(?<![\\w@"'/])@${escaped}\\b`);
+            if (re.test(body)) return true;
+        }
+        return false;
+    } catch {
+        return true;
+    }
 }
 
 /**
