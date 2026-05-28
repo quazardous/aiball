@@ -316,14 +316,61 @@ export function listPendingResolvedForTicket(ticketId: number): Message[] {
     return rows.map((r) => messageRowToMessage(r, project));
 }
 
+/**
+ * Update the moderation status of a ticket OR a non-ticket message
+ * (comment_added / ticket_closed / ticket_resolved / …).
+ *
+ * #569 (workaround #568) — tickets and messages have **distinct id
+ * counters** (`nextTicketId` / `nextMessageId`, cf. migration 0007), so
+ * id=42 can refer to BOTH a ticket and a message simultaneously. The
+ * previous "try tickets, then messages" probe could update the wrong
+ * row when both existed at the same id (rare at high counters, common
+ * at low ones — typical for tests and freshly bootstrapped DBs).
+ *
+ * The caller passes `kind` to disambiguate :
+ *   - `"ticket_created"` → target the `tickets` table.
+ *   - any other `MessageKind` (comment_added / ticket_closed / …) →
+ *     target the `messages` table.
+ *   - `undefined` / `null` → legacy fallback (ticket first then message
+ *     probe). Same buggy behaviour as before on id collision — kept so
+ *     unhinted callers don't regress, but every new caller should pass
+ *     the kind it already has in hand.
+ */
 export function updateMessageStatus(
     id: number,
     status: MessageStatus,
     decidedBy: "human" | "auto" | "owner",
     matchedRuleId: number | null = null,
+    kind?: MessageKind | "ticket_created" | null,
 ): Message | null {
     const db = getDb();
     const decidedAt = nowIso();
+    if (kind === "ticket_created") {
+        db.update(schema.tickets)
+            .set({ status, decidedAt, decidedBy, matchedRuleId })
+            .where(eq(schema.tickets.id, id))
+            .run();
+        const t = db.select().from(schema.tickets)
+            .where(eq(schema.tickets.id, id))
+            .get();
+        return t ? ticketRowToMessage(t) : null;
+    }
+    if (kind) {
+        // Any MessageKind that isn't "ticket_created" lives in `messages`.
+        db.update(schema.messages)
+            .set({ status, decidedAt, decidedBy, matchedRuleId })
+            .where(eq(schema.messages.id, id))
+            .run();
+        const m = db.select().from(schema.messages)
+            .where(eq(schema.messages.id, id))
+            .get();
+        if (!m) return null;
+        const parent = db.select({ project: schema.tickets.project })
+            .from(schema.tickets).where(eq(schema.tickets.id, m.ticketId)).get();
+        return messageRowToMessage(m, parent?.project ?? "");
+    }
+    // Legacy unhinted probe — kept for back-compat. Still buggy on id
+    // collisions ; new code should always pass `kind`.
     const t = db.update(schema.tickets)
         .set({ status, decidedAt, decidedBy, matchedRuleId })
         .where(eq(schema.tickets.id, id))

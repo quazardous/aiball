@@ -222,6 +222,49 @@ function assertCloseAuthority(input: NewMessage): void {
 }
 
 /**
+ * #569 (mrtroove-claude, david `j8t4qa` greenlight A+C) — proposer une
+ * `resolution` ou un `plan` (=`ticket_reply then:"resolved"` / `then:"plan"`)
+ * sur un ticket **encore en moderation pending** est procéduralement cassé :
+ * l'agent court-circuite le flow `pending → approved → working → proposed →
+ * accepted/rejected` avant que le reporter n'ait formellement validé le
+ * ticket comme actionable.
+ *
+ * Avant ce guard, l'API acceptait sans broncher — l'agent apprenait la règle
+ * par feedback humain, reproductible à chaque nouvel agent qui n'a jamais
+ * fait l'erreur.
+ *
+ * Règle : si `kind === "comment_added"` ET `decision_kind` est posé
+ * (resolution|plan), le ticket parent doit être `status === "approved"`.
+ * Sinon throw `code: "PARENT_PENDING_MODERATION"` (mappé HTTP 409 côté API)
+ * avec un message qui explique précisément le problème + la voie de sortie
+ * (faire approuver le ticket d'abord ou poster un comment plain).
+ *
+ * Bypass humain : un human moderator peut court-circuiter (utile pour
+ * orchestrer ticket+resolution+approve en chaîne, ou patcher d'anciens
+ * threads). L'erreur ne tire que sur les agents (qui sont la cible du
+ * pédagogique).
+ *
+ * Exempte close/reopen (qui ont leur propre `assertCloseAuthority`).
+ */
+function assertDecisionOnApprovedTicket(input: NewMessage): void {
+    if (input.kind !== "comment_added") return;
+    if (!input.decision_kind) return;
+    if (!input.ticket_id) return;
+    // Human moderator bypass — chaining ticket+resolution+approve en une rafale
+    // est un cas légitime côté humain (orchestration manuelle, patch
+    // d'anciens threads). La règle vise les agents.
+    if (input.by_agent && isHuman(input.by_agent)) return;
+    const parent = getMessage(input.ticket_id);
+    if (!parent || parent.kind !== "ticket_created") return;
+    if (parent.status === "approved") return;
+    const err = new Error(
+        `cannot propose ${input.decision_kind} on a ticket in status "${parent.status}" — the reporter must moderate (approve) the ticket first ; post a plain comment_added (without "then:") until then`,
+    );
+    (err as Error & { code?: string }).code = "PARENT_PENDING_MODERATION";
+    throw err;
+}
+
+/**
  * Extract every `#NN` / `#B.NN` / `#BNN` ticket reference from a body,
  * **outside** of code fences and inline-backtick spans (so `#123` inside
  * a code block stays inert, per #B.62). Returns unique numeric refs.
@@ -346,6 +389,7 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
  */
 export function submitMessage(input: NewMessage): Message {
     assertCloseAuthority(input);
+    assertDecisionOnApprovedTicket(input);
     // #561 david : un ticket ne doit pas pouvoir naître sur un projet qui
     // n'existe pas — sinon on auto-crée silencieusement un projet via le
     // simple fait de poster, et le user qui tape un nom à côté finit avec
@@ -420,6 +464,7 @@ export function submitMessage(input: NewMessage): Message {
             "approved",
             ownerLifecycle ? "owner" : "auto",
             decision.matched_rule_id,
+            input.kind, // #569 — disambiguate tickets vs messages on id collision
         );
         if (updated) {
             msg = updated;
@@ -443,12 +488,14 @@ export function submitMessage(input: NewMessage): Message {
             // TICKET row, not the close message — and `msg.kind` flips to
             // `"ticket_created"`. We use `input.kind` (immutable) instead.
             // The deeper updateMessageStatus bug is filed separately.
-            if (input.kind === "ticket_closed" && input.ticket_id !== null) {
+            if (input.kind === "ticket_closed" && input.ticket_id != null) {
                 // ⚠ Use `input.ticket_id` (immutable) plutôt que `msg.ticket_id`
                 // car `msg` peut avoir flippé vers la row TICKET (cf. note plus
                 // haut sur la collision tickets.id × messages.id avec
-                // updateMessageStatus).
-                const closedTicketId = input.ticket_id;
+                // updateMessageStatus). Local const re-narrows pour TS sous
+                // strictNullChecks (input.ticket_id?:number|null peut être
+                // undefined dans le type, le `!= null` côté if écarte les deux).
+                const closedTicketId: number = input.ticket_id;
                 // Pending ticket_resolved on this ticket → auto-approve
                 // (closing implies acceptance of the resolution proposal).
                 for (const stale of listPendingResolvedForTicket(closedTicketId)) {
@@ -457,6 +504,7 @@ export function submitMessage(input: NewMessage): Message {
                         "approved",
                         "owner",
                         null,
+                        stale.kind, // #569 — disambiguate
                     );
                     if (promoted) {
                         deliverToOutbox(promoted);
@@ -490,6 +538,7 @@ export function submitMessage(input: NewMessage): Message {
                         "rejected",
                         "owner",
                         null,
+                        stale.kind, // #569 — disambiguate
                     );
                     if (rejected) {
                         deletePingsForMessage(stale.id);

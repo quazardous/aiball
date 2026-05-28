@@ -1320,6 +1320,14 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         // detail view fetches via ticket_get, so without this the badge had no
         // data when a ticket was opened directly. null until any usage captured.
         token_usage: getTicketTokenUsage([t.id]).get(t.id) ?? null,
+        // #569 david `j8t4qa` A+C : flag explicite que l'agent peut tester
+        // AVANT de poster un `ticket_reply then:"resolved"` / `then:"plan"`.
+        // True ssi le ticket est `status: "approved"`. Faux sur pending /
+        // rejected — l'API renverra de toute façon HTTP 409
+        // (PARENT_PENDING_MODERATION) si l'agent tente, mais le flag
+        // est plus pédagogique : l'agent lit le ticket → voit le flag →
+        // décide d'attendre / d'asker un plain comment.
+        decision_proposable: t.status === "approved",
     };
     if (summary) {
         const commentCount = threadMessages.filter(

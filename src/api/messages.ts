@@ -68,6 +68,13 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
         if (code === "PROJECT_NOT_FOUND") {
             return res.status(400).json({ error: (err as Error).message });
         }
+        // #569 david `j8t4qa` A+C : proposer une resolution/plan sur un ticket
+        // pending = état illégal (cf. `assertDecisionOnApprovedTicket`).
+        // HTTP 409 conflict — l'agent doit attendre que le ticket soit approved
+        // ou poster un plain comment.
+        if (code === "PARENT_PENDING_MODERATION") {
+            return res.status(409).json({ error: (err as Error).message });
+        }
         throw err;
     }
 });
@@ -101,7 +108,7 @@ function decide(
     if (existing.status !== "pending") {
         return badRequest(res, `message already ${existing.status}`);
     }
-    const updated = updateMessageStatus(id, status, "human", null);
+    const updated = updateMessageStatus(id, status, "human", null, existing.kind);
     if (!updated) return notFound(res);
     if (status === "approved") {
         deliverToOutbox(updated);
