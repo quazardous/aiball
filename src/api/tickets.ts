@@ -36,6 +36,7 @@ import {
     markTicketSeen,
     markTicketUnseen,
     ticketUnreadFlags,
+    ticketAgentLastActivity,
     addTicketTokenUsage,
     getTicketTokenUsage,
     isHuman,
@@ -489,19 +490,19 @@ ticketsRouter.get("/inbox", (req, res) => {
     // query for the whole page). Absent for tickets with no captured usage
     // yet — the row renders the bolt chip only when estTokenCost > 0.
     const tokenUsageMap = getTicketTokenUsage(tickets.map((m) => m.id));
-    // #405/#408/#532: hot-zone focus for the inbox rows. PER-AGENT (#532 david
-    // `bmzpfr`: « le hot égal le focus actuel d'un agent ») — uses the
-    // requesting consumer's OWN activity, not a cross-agent MAX. The #408 rule
-    // (humans don't make tickets hot) is preserved by SKIPPING the computation
-    // for human consumers entirely (empty set) — for them the concept doesn't
-    // apply (no "focus" to track).
-    const hotFocus = isHuman(consumerId)
-        ? new Set<number>()
-        : computeHotFocus(
-            ticketSelfLastActivity(consumerId, tickets.map((m) => m.id)),
-            Date.now(),
-            hotWindowSec() * 1000,
-        );
+    // #405/#408/#532 (david `sfbsdy` + `neg428`) — VISIBILITY hot focus :
+    // agrégé sur l'activité de TOUS les agents (#408 cross-agent restauré),
+    // OR-é avec « ticket actuellement claimé par un agent » (david `neg428` :
+    // « avec le claim ça devrait etre plus simple à flag »). Tous les viewers
+    // (humans inclus) voient le même 🔥 → david peut spot « les tickets hot
+    // de vos agents » sans imperonser. Pas de sort tiebreak dans /inbox donc
+    // pas de selfHotFocus ici (utilisé dans /tickets pour le sort, là-bas
+    // séparé pour préserver le ranking per-agent #532 `bmzpfr`).
+    const crossAgentHotFocus = computeHotFocus(
+        ticketAgentLastActivity(tickets.map((m) => m.id)),
+        Date.now(),
+        hotWindowSec() * 1000,
+    );
     const nowStr = new Date().toISOString();
     let rows = tickets.map((t) => {
         const agg =
@@ -564,9 +565,11 @@ ticketsRouter.get("/inbox", (req, res) => {
             // Per-consumer unread flag (≥1 unseen ping on the thread for
             // the caller, resolved from the X-Aiball-Consumer header).
             unread: unreadMap.get(t.id) ?? false,
-            // #405: in the consumer's hot-zone focus (the ticket they're
-            // actively working) → drives the 🔥 list flag.
-            hot: hotFocus.has(t.id),
+            // #405/#532 (sfbsdy + neg428) : visibility cross-agent — un 🔥
+            // s'allume dès QU'UN agent (n'importe lequel) est focus sur le
+            // ticket récemment, OU détient une live claim. David humain spot
+            // les tickets « hot » de ses agents sans imperonser.
+            hot: crossAgentHotFocus.has(t.id) || t.claimant != null,
             // Snooze (#B.329). `postponed=true` means the deadline hasn't
             // passed yet — UI hides the row from the open inbox the same
             // way `closed=true` does. `postponed_until` is the deadline
@@ -803,16 +806,25 @@ ticketsRouter.get("/tickets", (req, res) => {
     }
     // #404: per-ticket token-effort tally (empty until the capture side lands).
     const tokenUsageMap = getTicketTokenUsage(created.map((m) => m.id));
-    // #405/#408/#532: HOT-ZONE = every ticket the requesting agent has touched
-    // within the hot window (PER-AGENT + multi-hotzone, david `bmzpfr`). #408
-    // rule preserved by skipping for human consumers (empty set). One source of
-    // truth: drives both the `hot` flag below AND the work-order tiebreak.
-    const hotFocus = isHuman(consumerId)
+    // #405/#408/#532 (sfbsdy + neg428) : SPLIT visibility vs sort tiebreak.
+    // - `crossAgentHotFocus` → drives the VISIBLE 🔥 flag (everyone sees same,
+    //   union of any agent's recent activity + tickets currently claimed).
+    // - `selfHotFocus` → per-agent, drives the work-order tiebreak (ranking
+    //   MY own focus higher in MY queue — preserves #532 `bmzpfr`). Empty for
+    //   humans (no work order applicable).
+    const hotWinMs = hotWindowSec() * 1000;
+    const createdIds = created.map((m) => m.id);
+    const crossAgentHotFocus = computeHotFocus(
+        ticketAgentLastActivity(createdIds),
+        Date.now(),
+        hotWinMs,
+    );
+    const selfHotFocus = isHuman(consumerId)
         ? new Set<number>()
         : computeHotFocus(
-            ticketSelfLastActivity(consumerId, created.map((m) => m.id)),
+            ticketSelfLastActivity(consumerId, createdIds),
             Date.now(),
-            hotWindowSec() * 1000,
+            hotWinMs,
         );
     const tickets = created.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
@@ -844,8 +856,10 @@ ticketsRouter.get("/tickets", (req, res) => {
             tags: tagsMap.get(m.id) ?? [],
             // #404: accumulated token-effort tally (null until any usage pushed).
             token_usage: tokenUsageMap.get(m.id) ?? null,
-            // #405: in the consumer's hot-zone (focus) → the 🔥 UI flag.
-            hot: hotFocus.has(m.id),
+            // #405/#532 (sfbsdy + neg428) : visibility cross-agent — un 🔥
+            // s'allume dès qu'un agent (n'importe lequel) est focus récemment
+            // OU détient une live claim.
+            hot: crossAgentHotFocus.has(m.id) || m.claimant != null,
             // #418/#436: assignment (responsibility, persistent) + claim (focus,
             // transient) are now distinct fields. `is_claim` kept for back-compat
             // (true when claimed), derived from `claimant`.
@@ -904,9 +918,10 @@ ticketsRouter.get("/tickets", (req, res) => {
     // whatever's left. Sets are nested: unread ⊂ actionable ⊂ open.
     {
         const PRIORITY_WEIGHT: Record<string, number> = { urgent: 4, high: 3, normal: 2, low: 1 };
-        // #402/#405: hot = the consumer's hot-zone FOCUS (computed once above as
-        // `hotFocus`, mono-focus = the most-recent self-touched ticket). Same set
-        // drives the tiebreak and the `hot` row flag.
+        // #402/#405/#532 : pour le sort tiebreak on prend SELF (per-agent), pas
+        // cross-agent. Le ranking d'un agent suit son propre focus, pas celui
+        // des autres (préserve la sémantique #532 `bmzpfr`). Le `hot` row flag
+        // au-dessus utilise crossAgent pour la visibility (séparé exprès).
         const ctx: WorkOrderCtx = {
             tierOf: (id) =>
                 // #461 — `assume_drained` flag skips the unread-tier check so
@@ -915,7 +930,7 @@ ticketsRouter.get("/tickets", (req, res) => {
                 // agent drains its pings.
                 (!assumeDrained && unreadMap.get(id)) ? 0 : actionableIds.has(id) ? 1 : openIds.has(id) ? 2 : 3,
             priorityWeight: (p) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2,
-            isHot: (id) => hotFocus.has(id),
+            isHot: (id) => selfHotFocus.has(id),
             isOwnClaim: (id) => ownClaimIds.has(id), // #430: own live claim sorts above hot
             isAssignedToMe: (id) => assignedToMeIds.has(id), // #436(4): handed to me → below claim, above hot
         };

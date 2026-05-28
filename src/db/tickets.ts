@@ -6,7 +6,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { and, asc, eq, inArray, isNotNull, lte, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, lte, ne, notInArray, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { listTypedRelationsForTicket } from "./messages.js";
@@ -497,6 +497,38 @@ export function ticketSelfLastActivity(consumer_id: string, ticket_ids: number[]
             eq(schema.messages.byAgent, consumer_id),
             inArray(schema.messages.ticketId, ticket_ids),
         ))
+        .groupBy(schema.messages.ticketId)
+        .all();
+    for (const r of rows) if (r.ticketId != null && r.last) out.set(r.ticketId, r.last);
+    return out;
+}
+
+/**
+ * #408 + #532 (re-restored sfbsdy) — per-ticket last activity by ANY AGENT
+ * (non-human) consumer : MAX(created_at) over messages authored by non-humans,
+ * grouped by ticket. Used for the **cross-agent VISIBILITY** of hot tickets
+ * (the 🔥 chip rendered in the inbox row, that david wants to see for « vos
+ * tickets hot » = mine + aiball-win's). Distinct from `ticketSelfLastActivity`
+ * (used for the PER-AGENT work-order tiebreak, #532 david `bmzpfr`). Both
+ * coexist : self for ranking, agent for visibility.
+ */
+export function ticketAgentLastActivity(ticket_ids: number[]): Map<number, string> {
+    const out = new Map<number, string>();
+    if (ticket_ids.length === 0) return out;
+    const db = getDb();
+    const humanIds = db.select({ id: schema.consumers.consumerId })
+        .from(schema.consumers)
+        .where(eq(schema.consumers.kind, "human"))
+        .all()
+        .map((r) => r.id);
+    const conds = [inArray(schema.messages.ticketId, ticket_ids)];
+    if (humanIds.length > 0) conds.push(notInArray(schema.messages.byAgent, humanIds));
+    const rows = db.select({
+        ticketId: schema.messages.ticketId,
+        last: sql<string>`MAX(${schema.messages.createdAt})`,
+    })
+        .from(schema.messages)
+        .where(and(...conds))
         .groupBy(schema.messages.ticketId)
         .all();
     for (const r of rows) if (r.ticketId != null && r.last) out.set(r.ticketId, r.last);
