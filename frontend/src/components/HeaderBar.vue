@@ -19,10 +19,20 @@ const gotoInput = ref("");
 const gotoBusy = ref(false);
 const gotoError = ref<string | null>(null);
 
-/** Hashids sont en base32-ish 6 chars (cf. `pickFreshHashid`). On
- *  accepte 4-8 char pour rester souple (futur-proofing). Optionnel
- *  préfixe `#C.` ou `#c.` pour matcher la convention rendue. */
+/** Hashids sont en base32-ish 6 chars, alphabet `abcdefghjkmnpqrstuvwxyz23456789`
+ *  (cf. `pickFreshHashid` + `HASHID_ALPHABET` côté backend) — pas d'`i`,`l`,`o`,
+ *  `0`,`1` (chars confusables). On accepte 4-8 char pour rester souple.
+ *  Préfixe optionnel `#C.` / `#c.` pour matcher la convention rendue. */
 const HASHID_RE = /^#?[Cc]?\.?([a-hjkmnp-z2-9]{4,8})$/;
+
+/** #571 david : `c061e74` (git commit SHA hex) tapé en goto-ticket fail
+ *  silencieusement parce que `0` et `1` ne sont pas dans l'alphabet
+ *  hashid. Détection explicite des git SHAs (hex 7-40 chars typique
+ *  git short/full) pour pousser un message d'erreur clair plutôt
+ *  qu'un `unrecognised` générique. Aiball n'indexe pas les commits
+ *  côté navigation — c'est la job de l'upstream provider chip (cf. #160).
+ */
+const GIT_SHA_RE = /^#?([0-9a-f]{7,40})$/i;
 
 async function submitGoto() {
     const raw = gotoInput.value.trim();
@@ -42,7 +52,14 @@ async function submitGoto() {
     // handler (#B.94).
     const m = HASHID_RE.exec(raw);
     if (!m) {
-        gotoError.value = `unrecognised : "${raw}" — expected #N or hashid`;
+        // #571 : git commit SHA looks-like detection — donne un message
+        // qui explique pourquoi aiball ne sait pas naviguer dessus,
+        // plutôt qu'un "unrecognised" générique trompeur.
+        if (GIT_SHA_RE.test(raw)) {
+            gotoError.value = `"${raw}" looks like a git commit hash — aiball doesn't index commits ; use #N for a ticket or #C.xxxxx for a comment`;
+        } else {
+            gotoError.value = `unrecognised : "${raw}" — expected #N or hashid`;
+        }
         return;
     }
     const hashid = m[1];
