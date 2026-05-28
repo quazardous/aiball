@@ -168,8 +168,36 @@ function log(msg: string): void {
     logger.info(msg);
 }
 
+/**
+ * Transient-tolerant tmux session check. Distinguishes between:
+ *   - `r.error` set : spawn failed entirely (binary missing/locked/etc.) —
+ *     treated as transient, returns `true` (assume alive) up to
+ *     SPAWN_RETRY_LIMIT consecutive times; only then declared dead.
+ *   - `r.status === 0` : session exists.
+ *   - `r.status !== 0` (no spawn error) : binary ran and reported no such
+ *     session — genuine teardown, exit immediately.
+ *
+ * Motivation: a transient `has-session` spawn failure (mux binary swap
+ * during an upgrade — Windows rename + replace, Linux package upgrade,
+ * brief PATH glitch) used to instantly exit the timer loop, which then
+ * dropped the SSE presence signal even though the tmux session and the
+ * loop's claude were still very much alive. Portable across platforms
+ * (the spawnSync.error mechanism is identical on Linux + Windows).
+ */
+const SPAWN_RETRY_LIMIT = 5;
+let consecutiveSpawnErr = 0;
 function tmuxAlive(): boolean {
     const r = spawnSync(MUX_CMD, ["has-session", "-t", tname], { stdio: "ignore" });
+    if (r.error) {
+        consecutiveSpawnErr++;
+        if (consecutiveSpawnErr <= SPAWN_RETRY_LIMIT) {
+            log(`tmux probe spawn error (${r.error.message}, streak ${consecutiveSpawnErr}/${SPAWN_RETRY_LIMIT}) — treating session as alive`);
+            return true;
+        }
+        log(`tmux probe spawn error persisting (${SPAWN_RETRY_LIMIT}× in a row) — declaring session gone`);
+        return false;
+    }
+    consecutiveSpawnErr = 0;
     return r.status === 0;
 }
 
