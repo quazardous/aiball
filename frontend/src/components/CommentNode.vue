@@ -553,14 +553,14 @@ async function doDelete() {
                 :loading="classifyBusy"
                 @click="classifyActions[0].command()"
             />
-            <!-- #518 (david `uzwfc3` option A) — votes binaires +1/-1.
-                 Compteur muté + bouton actif si voté. Re-cliquer dans la
-                 même direction retract (toggle). Pas de fan-out (no
-                 trigger v1, david). -->
+            <!-- #518 (david `uzwfc3` option A + `7b3jc7` style update) —
+                 votes binaires +1/-1. Pas de border button, juste l'icône
+                 en couleur (muted par défaut, accent green/red quand voté).
+                 Re-cliquer même direction retract (toggle). Pas de fan-out. -->
             <span class="comment-votes" :class="{ 'comment-votes--busy': voteBusy }">
                 <button
                     type="button"
-                    class="comment-vote-btn"
+                    class="comment-vote-btn comment-vote-btn--up"
                     :class="{ 'comment-vote-btn--mine': votesSummary.mine === 1 }"
                     :disabled="voteBusy"
                     :title="votesSummary.mine === 1 ? 'Retract your up-vote' : 'Up-vote this comment'"
@@ -571,7 +571,7 @@ async function doDelete() {
                 </button>
                 <button
                     type="button"
-                    class="comment-vote-btn"
+                    class="comment-vote-btn comment-vote-btn--down"
                     :class="{ 'comment-vote-btn--mine': votesSummary.mine === -1 }"
                     :disabled="voteBusy"
                     :title="votesSummary.mine === -1 ? 'Retract your down-vote' : 'Down-vote this comment'"
@@ -595,12 +595,13 @@ async function doDelete() {
     color: var(--p-text-muted-color, #888);
     font-size: 0.85rem;
 }
-/* #518 — vote buttons inline footer. Discret par défaut, accent quand
-   l'utilisateur a voté. */
+/* #518 (david `7b3jc7`) — vote buttons inline footer. Pas de border button,
+   juste l'icône. Muted neutre par défaut, accent vert (up) / rouge (down)
+   quand l'utilisateur a voté. */
 .comment-votes {
     display: inline-flex;
     align-items: center;
-    gap: 0.2rem;
+    gap: 0.5rem;
     margin-left: auto;
 }
 .comment-votes--busy { opacity: 0.6; }
@@ -608,27 +609,23 @@ async function doDelete() {
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
-    padding: 0.2rem 0.45rem;
-    border: 1px solid transparent;
-    border-radius: 0.3rem;
+    padding: 0;
+    border: none;
     background: transparent;
     color: var(--p-text-muted-color);
-    font-size: 0.78rem;
+    font-size: 0.95rem;
     cursor: pointer;
-    transition: background 120ms, color 120ms, border-color 120ms;
+    transition: color 120ms;
 }
 .comment-vote-btn:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--p-primary-color) 8%, transparent);
     color: var(--p-text-color);
 }
-.comment-vote-btn--mine {
-    border-color: var(--p-primary-color);
-    color: var(--p-primary-color);
-    background: color-mix(in srgb, var(--p-primary-color) 12%, transparent);
-}
+.comment-vote-btn--up.comment-vote-btn--mine { color: var(--p-green-500); }
+.comment-vote-btn--down.comment-vote-btn--mine { color: var(--p-red-500); }
 .comment-vote-btn:disabled { cursor: progress; }
 .comment-vote-count {
     font-variant-numeric: tabular-nums;
     font-weight: 500;
+    font-size: 0.78rem;
 }
 </style>
