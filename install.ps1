@@ -234,22 +234,41 @@ function Test-IsAdmin {
 
 function Write-TrayShortcuts {
     # Desktop + Start Menu .lnk shortcuts (manual launch) pointing at
-    # $TrayCmd with $AiballIco as the icon. Used by the full install + -Minimal.
+    # powershell.exe with the tray script as an argument. $AiballIco for branding.
+    # Used by the full install + -Minimal.
+    #
+    # #536 — `$target` is `powershell.exe` (not `aiball-tray.cmd`) so the
+    # shortcut becomes pinnable to the Start menu. Windows refuses "Pin to
+    # Start" on .lnks pointing at .cmd / .bat scripts ; pointing at a real
+    # .exe (powershell.exe is a system-shipped .exe) lifts the gate while
+    # producing the same hidden-window launch (the `-WindowStyle Hidden`
+    # arg + the shortcut's WindowStyle=7 keep the no-console-flash UX).
+    #
+    # Pin to taskbar stays blocked on Win11 regardless of the target —
+    # even pointing at our own .exe doesn't unlock it (verified empirically
+    # in #536). Microsoft tightened the taskbar guardrail beyond what a
+    # plain .lnk indirection can bypass. Start-menu pin is the practical
+    # outcome of this change.
+    #
     # NOTE (#tray-couple): no Startup-folder shortcut anymore — the scheduled
     # task IS the autostart and launches the tray (which owns the daemon), so a
     # Startup shortcut would only double-launch (deduped by the tray's mutex).
     # Clean up a stale Startup shortcut from a previous (decoupled) install.
-    if (-not (Test-Path $TrayCmd)) {
-        Warn "tray launcher not found at $TrayCmd — skipping shortcut creation"
+    $trayPs1 = Join-Path $AppDir 'bin\aiball-tray.ps1'
+    if (-not (Test-Path $trayPs1)) {
+        Warn "tray script not found at $trayPs1 — skipping shortcut creation"
         return
     }
-    $icoArg = if (Test-Path $AiballIco) { $AiballIco } else { $TrayCmd }
+    $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $trayArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$trayPs1`""
+    $trayWorkDir = Split-Path $trayPs1 -Parent
+    $icoArg = if (Test-Path $AiballIco) { $AiballIco } else { $powershell }
     if (-not (Test-Path (Split-Path $StartLnk -Parent))) {
         New-Item -ItemType Directory -Force -Path (Split-Path $StartLnk -Parent) | Out-Null
     }
-    New-AiballShortcut $DesktopLnk $TrayCmd $icoArg "aiball — open the local UI"
+    New-AiballShortcut $DesktopLnk $powershell $icoArg "aiball — open the local UI" $trayArgs $trayWorkDir
     Log "wrote desktop shortcut: $DesktopLnk"
-    New-AiballShortcut $StartLnk   $TrayCmd $icoArg "aiball — open the local UI"
+    New-AiballShortcut $StartLnk   $powershell $icoArg "aiball — open the local UI" $trayArgs $trayWorkDir
     Log "wrote start menu shortcut: $StartLnk"
     if (Test-Path $StartupLnk) {
         Remove-Item $StartupLnk -Force -ErrorAction SilentlyContinue
@@ -257,16 +276,21 @@ function Write-TrayShortcuts {
     }
 }
 
-function New-AiballShortcut($lnkPath, $target, $iconPath, $description) {
+function New-AiballShortcut($lnkPath, $target, $iconPath, $description, $arguments = $null, $workingDir = $null) {
     # .lnk creation via WScript.Shell COM. The shortcut's IconLocation
-    # is what shows the Death Star — .cmd files don't carry icons
+    # is what shows the Death Star — script files don't carry icons
     # themselves, the .lnk is where branding lives.
+    #
+    # #536 — `$target` should be a real `.exe` (e.g. powershell.exe) rather
+    # than a `.cmd` so Windows allows "Pin to Start" on the shortcut.
+    # Script invocation goes through `$arguments`.
     $shell = New-Object -ComObject WScript.Shell
     try {
         $shortcut = $shell.CreateShortcut($lnkPath)
         try {
             $shortcut.TargetPath = $target
-            $shortcut.WorkingDirectory = Split-Path $target -Parent
+            if ($arguments) { $shortcut.Arguments = $arguments }
+            $shortcut.WorkingDirectory = if ($workingDir) { $workingDir } else { Split-Path $target -Parent }
             $shortcut.IconLocation = "$iconPath,0"
             $shortcut.Description = $description
             $shortcut.WindowStyle = 7   # 7 = minimized — no console flash on launch
