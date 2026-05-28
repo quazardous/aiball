@@ -484,6 +484,7 @@ async function doDelete() {
             :message-id="msg.id"
             :questions-clickable="true"
             :self-ticket-id="msg.ticket_id ?? undefined"
+            :project="msg.project"
         />
         <div v-if="msg.human_note" class="comment-note">
             <i class="pi pi-comment" />

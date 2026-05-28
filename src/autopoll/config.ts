@@ -193,6 +193,18 @@ export interface AiballConfig {
         hint_worktree: boolean;
     };
     /**
+     * #160 Phase 1 (david `f9agk3` + `#552 b4y2yx`) — upstream provider
+     * bindings for textual refs like `gh#1160`. **Keyed by project name**
+     * (per-project per david `b4y2yx` — `gh#123` dans projet X ≠ Y). Each
+     * entry binds a provider (`kind: github`) to a target (`ref:
+     * github:owner/repo`). The first entry with `default: true` for a
+     * given provider resolves the bare form `<prefix>#NNN`; explicit
+     * `<prefix>:owner/repo#NNN` always overrides. Phase 1 = rendering
+     * only, no API/sync. Lives in the daemon's `.aiball.yaml`
+     * (`/home/david/.config/aiball/config.yaml` or the daemon cwd).
+     */
+    upstream: Record<string, Array<{ kind: string; ref: string; default?: boolean }>>;
+    /**
      * #385 (david wstfea): the claude-loop tmux bar colour profile. Layered on
      * THREE levels (defaults → global `~/.config/aiball/config.yaml colors:` →
      * per-project `.aiball.yaml colors:`), so a user sets a machine-wide theme
@@ -296,6 +308,10 @@ const DEFAULTS: AiballConfig = {
         hint_branch: false,
         hint_worktree: false,
     },
+    // #160 Phase 1: no upstream bindings by default — opt-in per-project via
+    // `.aiball.yaml upstream: { <project>: [...] }`. Without a binding,
+    // `gh#NNN` renders as plain text (graceful degrade).
+    upstream: {},
     // #385 (david wstfea): bar colour profile. bar_fg defaults BLACK (colour16) —
     // david's bar runs the electric-blue busy state where white washed out
     // (white-on-yellow boot was unreadable too). The island stays white. State
@@ -420,6 +436,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         consumer: { ...DEFAULTS.consumer },
         claude_loop: { ...DEFAULTS.claude_loop },
         workflow: { ...DEFAULTS.workflow },
+        upstream: { ...DEFAULTS.upstream },
         colors: { ...DEFAULTS.colors },
         mcp_json_deprecated: mcpJsonHasIdentityEnv(projectDir),
         configPath,
@@ -517,6 +534,32 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             const cb = (raw.claude ?? {}) as Record<string, unknown>;
             if (typeof cb.always_resume === "boolean") {
                 cfg.claude.always_resume = cb.always_resume;
+            }
+            // #160 Phase 1: upstream bindings (provider refs like gh#NNN),
+            // keyed par projet. Format YAML :
+            //   upstream:
+            //     <project-name>:
+            //       - kind: github
+            //         ref: github:owner/repo
+            //         default: true
+            if (raw.upstream && typeof raw.upstream === "object" && !Array.isArray(raw.upstream)) {
+                const out: Record<string, Array<{ kind: string; ref: string; default?: boolean }>> = {};
+                for (const [projName, rawList] of Object.entries(raw.upstream as Record<string, unknown>)) {
+                    if (!Array.isArray(rawList)) continue;
+                    const valid: Array<{ kind: string; ref: string; default?: boolean }> = [];
+                    for (const entry of rawList as unknown[]) {
+                        if (!entry || typeof entry !== "object") continue;
+                        const e = entry as Record<string, unknown>;
+                        if (typeof e.kind !== "string" || typeof e.ref !== "string") continue;
+                        valid.push({
+                            kind: e.kind,
+                            ref: e.ref,
+                            ...(typeof e.default === "boolean" ? { default: e.default } : {}),
+                        });
+                    }
+                    if (valid.length > 0) out[projName] = valid;
+                }
+                cfg.upstream = out;
             }
             // #319: workflow hint flags (layered like claude_loop above).
             const wf = (raw.workflow ?? {}) as Record<string, unknown>;

@@ -449,7 +449,7 @@ async function copyTicketRef() {
                     @priority-change="changePriority"
                     @tags-changed="onTagsChanged"
                 />
-                <MarkdownView :source="data.ticket.body" :self-ticket-id="data.ticket.id" />
+                <MarkdownView :source="data.ticket.body" :self-ticket-id="data.ticket.id" :project="data.ticket.project" />
             </article>
 
             <!-- #B.130 follow-up: the TLDR banner used to sit between

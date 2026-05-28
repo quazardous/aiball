@@ -155,6 +155,10 @@ export function applyPostSanitize(html: string, pats: FormattingPattern[]): stri
 /** Effective patterns + the Marked instance built from them (reactive). */
 export const patterns = ref<FormattingPattern[]>(DEFAULTS);
 export const markedInstance = ref<Marked>(buildMarked(DEFAULTS));
+/** #160 Phase 1 — per-project upstream bindings, fetched from /api/config.
+ *  Reactive so the post-sanitize pass re-renders if the config changes. */
+import type { UpstreamBinding } from "./upstream-providers";
+export const upstreamBindings = ref<Record<string, UpstreamBinding[]>>({});
 
 /**
  * Format a bare ticket id as a ticket reference using the configured
@@ -195,6 +199,10 @@ export async function loadFormatting(): Promise<void> {
         if (Array.isArray(next) && next.length > 0) {
             patterns.value = next as FormattingPattern[];
             markedInstance.value = buildMarked(patterns.value);
+        }
+        // #160 Phase 1 : also pick up upstream bindings (per-project).
+        if (data?.upstream && typeof data.upstream === "object") {
+            upstreamBindings.value = data.upstream as Record<string, UpstreamBinding[]>;
         }
     } catch {
         /* keep DEFAULTS */

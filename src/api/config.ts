@@ -15,7 +15,7 @@
  * settings getters. The frontend hits it once at boot, so no cache layer.
  */
 import { Router } from "express";
-import { findConfigUpwards, globalConfigPath } from "../autopoll/config.js";
+import { findConfigUpwards, globalConfigPath, loadConfig } from "../autopoll/config.js";
 import { defaultPingsPath } from "../claude-loop/state.js";
 import { getStrategy, getUploadMaxBytes } from "../db.js";
 import { resolveFormatting } from "../formatting.js";
@@ -23,6 +23,10 @@ import { resolveFormatting } from "../formatting.js";
 export const configRouter = Router();
 
 configRouter.get("/config", (_req, res) => {
+    // #160 Phase 1 — expose les upstream bindings (Record<project, bindings[]>)
+    // pour que le frontend résolve `gh#NNN` localement au rendering. Layered
+    // comme le reste de la config (defaults → global → daemon cwd).
+    const cfg = loadConfig(process.cwd());
     res.json({
         formatting: resolveFormatting({
             shippedDefaultsPath: defaultPingsPath(),
@@ -31,5 +35,6 @@ configRouter.get("/config", (_req, res) => {
         }),
         strategy: getStrategy(),
         uploadMaxBytes: getUploadMaxBytes(),
+        upstream: cfg.upstream,
     });
 });

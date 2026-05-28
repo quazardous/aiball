@@ -4,7 +4,8 @@ import DOMPurify from "dompurify";
 import { bus } from "../lib/bus";
 import { promoteTrigger } from "../lib/prefs";
 import { extractQuestions } from "../lib/questions";
-import { applyPostSanitize, markedInstance, patterns } from "../lib/formatting";
+import { applyPostSanitize, markedInstance, patterns, upstreamBindings } from "../lib/formatting";
+import { applyUpstreamRefs } from "../lib/upstream-providers";
 
 /**
  * `messageId` + `questionsClickable` opt the body into the #B.104
@@ -26,6 +27,13 @@ const props = defineProps<{
      * route to the promote popup as before.
      */
     selfTicketId?: number;
+    /**
+     * #160 Phase 1 — project name this body lives under. Used to resolve
+     * upstream refs like `gh#NNN` via the project's `upstream` bindings
+     * (cf. `applyUpstreamRefs`). When undefined or the project has no
+     * binding, the refs stay as plain text (graceful degrade).
+     */
+    project?: string | null;
 }>();
 
 // Linkify cross-message refs (`#B.123`, `#C.<hashid>`) and `@mentions`.
@@ -54,7 +62,11 @@ const html = computed(() => {
         ALLOWED_ATTR: ["href", "title", "alt", "src", "type", "checked", "disabled", "class"],
         ALLOW_DATA_ATTR: false,
     });
-    return applyPostSanitize(sanitized, patterns.value);
+    const withMentions = applyPostSanitize(sanitized, patterns.value);
+    // #160 Phase 1 — resolve upstream refs (gh#NNN etc.) into clickable
+    // chips when the project has a binding. No-op when project missing or
+    // no binding configured (graceful : ref stays as text in the body).
+    return applyUpstreamRefs(withMentions, props.project ?? null, upstreamBindings.value);
 });
 
 // Intercept clicks on internal links (any /b/N, /rules, /tags, /projects, etc.)
@@ -340,5 +352,24 @@ watch(html, () => { void wireQuestionClicks(); }, { flush: "post", immediate: tr
     color: var(--p-primary-color);
     font-weight: 500;
     font-size: 0.92em;
+}
+/* #160 Phase 1 — upstream-provider chips (gh#NNN style). Visuellement
+ * proche du mention chip mais teinté différemment pour distinguer
+ * « ref externe » vs « ref interne aiball ». Couleur générique par
+ * défaut + override par provider (github = colour spécifique GitHub). */
+.md-body .upstream-ref {
+    display: inline-block;
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.25rem;
+    background: color-mix(in srgb, var(--p-text-muted-color) 14%, transparent);
+    color: var(--p-text-color);
+    font-weight: 500;
+    font-size: 0.92em;
+    text-decoration: none;
+}
+.md-body .upstream-ref:hover { background: color-mix(in srgb, var(--p-text-muted-color) 24%, transparent); }
+.md-body .upstream-ref--github {
+    background: color-mix(in srgb, #6e7681 18%, transparent);
+    color: #1f2328;
 }
 </style>

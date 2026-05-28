@@ -220,6 +220,23 @@ autopoll:
 #     #   cmd: "make preflight"
 #     #   message: "⚠ preflight failing — fix before new work"
 
+# Upstream provider bindings (#160 Phase 1 — refs `gh#NNN` cliquables).
+# Per-project map : la clé est le nom du projet aiball, la valeur est la liste
+# de ses bindings. Une seule entrée par provider peut avoir `default: true` —
+# c'est celle qui résout le `<prefix>#NNN` non-préfixé. L'override explicite
+# `<prefix>:owner/repo#NNN` ignore les bindings (résout direct).
+# Phase 1 = rendering only (chip cliquable dans les bodies markdown). Pas de
+# sync API GitHub (webhook inbound, closure outbound) à ce stade.
+# upstream:
+#   mrtroove:
+#     - kind: github
+#       ref: github:mrtroove/mrtroove
+#       default: true
+#   aiball:
+#     - kind: github
+#       ref: github:quazardous/aiball
+#       default: true
+
 # Options du binaire `claude` lui-même (les flags qu'on lui passe au spawn).
 # Distincts de `claude_loop:` qui décrit la machinerie loop autour de claude.
 # claude:
