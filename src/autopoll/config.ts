@@ -356,6 +356,36 @@ function readColorsBlock(path: string): Partial<AiballConfig["colors"]> {
     }
 }
 
+/** #160 Phase 1 — read an `upstream:` block from a YAML file (global or per-project).
+ *  Returns the parsed `Record<project, bindings[]>`, dropping malformed entries
+ *  silently. Missing file / parse error → {} (no-op). */
+function readUpstreamBlock(path: string): AiballConfig["upstream"] {
+    if (!existsSync(path)) return {};
+    try {
+        const raw = (parseYaml(readFileSync(path, "utf8")) ?? {}) as Record<string, unknown>;
+        if (!raw.upstream || typeof raw.upstream !== "object" || Array.isArray(raw.upstream)) return {};
+        const out: AiballConfig["upstream"] = {};
+        for (const [projName, rawList] of Object.entries(raw.upstream as Record<string, unknown>)) {
+            if (!Array.isArray(rawList)) continue;
+            const valid: Array<{ kind: string; ref: string; default?: boolean }> = [];
+            for (const entry of rawList as unknown[]) {
+                if (!entry || typeof entry !== "object") continue;
+                const e = entry as Record<string, unknown>;
+                if (typeof e.kind !== "string" || typeof e.ref !== "string") continue;
+                valid.push({
+                    kind: e.kind,
+                    ref: e.ref,
+                    ...(typeof e.default === "boolean" ? { default: e.default } : {}),
+                });
+            }
+            if (valid.length > 0) out[projName] = valid;
+        }
+        return out;
+    } catch {
+        return {};
+    }
+}
+
 export function findConfigUpwards(start: string): string | null {
     let dir = resolve(start);
     const rootPath = parsePath(dir).root;
@@ -448,6 +478,15 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
     // defaults → global → project. Missing global file → {} (no-op).
     Object.assign(cfg.colors, readColorsBlock(globalConfigPath()));
 
+    // #160 Phase 1 — upstream bindings GLOBAL layer. Read AVANT le per-project
+    // pour que celui-ci puisse override. Format YAML attendu (per-project map) :
+    //   upstream:
+    //     <project-name>:
+    //       - kind: github
+    //         ref: github:owner/repo
+    //         default: true
+    Object.assign(cfg.upstream, readUpstreamBlock(globalConfigPath()));
+
     // No .aiball.json → autopoll disabled. The hook wiring in
     // ~/.claude/settings.json is global; per-project opt-in lives in
     // the file. Drop a `{}` in at the project root to activate with
@@ -535,32 +574,11 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof cb.always_resume === "boolean") {
                 cfg.claude.always_resume = cb.always_resume;
             }
-            // #160 Phase 1: upstream bindings (provider refs like gh#NNN),
-            // keyed par projet. Format YAML :
-            //   upstream:
-            //     <project-name>:
-            //       - kind: github
-            //         ref: github:owner/repo
-            //         default: true
-            if (raw.upstream && typeof raw.upstream === "object" && !Array.isArray(raw.upstream)) {
-                const out: Record<string, Array<{ kind: string; ref: string; default?: boolean }>> = {};
-                for (const [projName, rawList] of Object.entries(raw.upstream as Record<string, unknown>)) {
-                    if (!Array.isArray(rawList)) continue;
-                    const valid: Array<{ kind: string; ref: string; default?: boolean }> = [];
-                    for (const entry of rawList as unknown[]) {
-                        if (!entry || typeof entry !== "object") continue;
-                        const e = entry as Record<string, unknown>;
-                        if (typeof e.kind !== "string" || typeof e.ref !== "string") continue;
-                        valid.push({
-                            kind: e.kind,
-                            ref: e.ref,
-                            ...(typeof e.default === "boolean" ? { default: e.default } : {}),
-                        });
-                    }
-                    if (valid.length > 0) out[projName] = valid;
-                }
-                cfg.upstream = out;
-            }
+            // #160 Phase 1: upstream bindings (provider refs like gh#NNN).
+            // Per-project layer overrides global (Object.assign merges la
+            // global layer déjà appliquée plus haut). Format yaml documenté
+            // dans `readUpstreamBlock`.
+            Object.assign(cfg.upstream, readUpstreamBlock(configPath));
             // #319: workflow hint flags (layered like claude_loop above).
             const wf = (raw.workflow ?? {}) as Record<string, unknown>;
             if (typeof wf.hint_branch === "boolean") cfg.workflow.hint_branch = wf.hint_branch;
