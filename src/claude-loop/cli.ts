@@ -632,12 +632,13 @@ async function cmdStart(opts: StartOpts): Promise<void> {
 
     // claude passthrough args. Shell-escape per-arg so the inline
     // bash command keeps them intact.
-    // #538 david : `claude_loop.always_resume: true` injecte `--resume` si
+    // #538 david `hwxbkk` : `claude.always_resume: true` injecte `--resume` si
     // pas déjà présent (ni la forme `--resume` ni `--resume=<x>` ni le
     // sentinel `--no-resume`). Idempotent — un user qui a déjà --resume
-    // dans claudeArgs n'a pas un double flag.
+    // dans claudeArgs n'a pas un double flag. Namespacé `claude:` (et non
+    // `claude_loop:`) parce que ça concerne le binaire claude lui-même.
     let effectiveClaudeArgs = opts.claudeArgs;
-    if (ctx.claude_loop.always_resume) {
+    if (ctx.claude.always_resume) {
         const hasResume = opts.claudeArgs.some((a) => a === "--resume" || a.startsWith("--resume=") || a === "--no-resume");
         if (!hasResume) effectiveClaudeArgs = ["--resume", ...opts.claudeArgs];
     }

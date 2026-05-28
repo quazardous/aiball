@@ -151,13 +151,6 @@ export interface AiballConfig {
          *  CLI default stays no-wait (#343); an explicit flag always wins.
          *  Drives CL_WAIT. */
         wait: boolean;
-        /** #538 david : si `true`, injecte automatiquement `--resume` dans
-         *  les claudeArgs s'il n'y est pas déjà présent. Pratique pour les
-         *  projets où on veut systématiquement reprendre la session
-         *  précédente sans avoir à le repasser sur la cli à chaque
-         *  `claude-loop start`. Default `false` (préserve l'existant —
-         *  claude démarre sur une session vide par défaut). */
-        always_resume: boolean;
         /** #379: what to do at heartbeat when ONLY a gated backlog remains
          *  (pings=0, actionable=0, open>0 — all in the human's court). Spec:
          *  `silent|once|stale[:PT]|backoff[:PT[/PT]]|persistent[:PT]`. Default
@@ -173,6 +166,20 @@ export interface AiballConfig {
          *  `parseGates` (each entry needs a built-in `type` or a custom `cmd`).
          *  When a gate triggers, its message is surfaced in the wake CTA. */
         gates: Array<Record<string, unknown>>;
+    };
+    /**
+     * #538 david `hwxbkk` : options qui concernent le binaire `claude`
+     * lui-même (les flags qu'on lui passe au spawn), pas la machinerie loop.
+     * Namespace séparé pour clarifier la sémantique.
+     */
+    claude: {
+        /** Si `true`, injecte automatiquement `--resume` dans les claudeArgs
+         *  s'il n'y est pas déjà présent. Pratique pour les projets où on
+         *  veut systématiquement reprendre la session précédente sans avoir
+         *  à le repasser sur la cli à chaque `claude-loop start`. Default
+         *  `false` (préserve l'existant — claude démarre sur une session
+         *  vide par défaut). */
+        always_resume: boolean;
     };
     /**
      * #319: workflow hints surfaced by claude-loop at wake for `feature`-intent
@@ -265,10 +272,6 @@ const DEFAULTS: AiballConfig = {
         // #305: no-wait by default (#343); a project flips it per-tree via
         // `.aiball.yaml claude_loop.wait: true`.
         wait: false,
-        // #538: opt-in `--resume` auto-injection. Default false = comportement
-        // existant (claude démarre sur session vide). Flip per-tree via
-        // `.aiball.yaml claude_loop.always_resume: true`.
-        always_resume: false,
         // #379 (david krwnqu): remind ONCE by default when the pool first
         // drains (actionable=0 but open>0 — the backlog handed back to the
         // human), then quiet until the landscape moves. Tune per-project via
@@ -278,6 +281,14 @@ const DEFAULTS: AiballConfig = {
         log_level: "info",
         // #428: no custom gates by default (opt-in per project).
         gates: [],
+    },
+    // #538 david `hwxbkk` : options claude-binary spawn-time, namespacé `claude:`
+    // pour le distinguer de `claude_loop:` (machinerie loop).
+    claude: {
+        // Opt-in `--resume` auto-injection. Default false = comportement
+        // existant (claude démarre sur session vide). Flip per-tree via
+        // `.aiball.yaml claude.always_resume: true`.
+        always_resume: false,
     },
     // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
     // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.
@@ -488,10 +499,6 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof cl.wait === "boolean") {
                 cfg.claude_loop.wait = cl.wait;
             }
-            // #538: per-project always-resume default.
-            if (typeof cl.always_resume === "boolean") {
-                cfg.claude_loop.always_resume = cl.always_resume;
-            }
             // #379: drained-backlog reminder strategy (validated at use site
             // by parseDrainedStrategy — an unknown spec degrades to silent).
             if (typeof cl.drained_strategy === "string" && cl.drained_strategy.trim()) {
@@ -505,6 +512,11 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // #428: custom wake gates — stored raw, validated at use via parseGates.
             if (Array.isArray(cl.gates)) {
                 cfg.claude_loop.gates = cl.gates as Array<Record<string, unknown>>;
+            }
+            // #538: `claude:` namespace pour les options spawn-time du binaire.
+            const cb = (raw.claude ?? {}) as Record<string, unknown>;
+            if (typeof cb.always_resume === "boolean") {
+                cfg.claude.always_resume = cb.always_resume;
             }
             // #319: workflow hint flags (layered like claude_loop above).
             const wf = (raw.workflow ?? {}) as Record<string, unknown>;

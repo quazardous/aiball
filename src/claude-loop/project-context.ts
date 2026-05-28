@@ -50,12 +50,15 @@ export interface ProjectContext {
         afk_window_ms: number;
         /** #305 (option a): per-project boot-grace wait default (no-flag). */
         wait: boolean;
-        /** #538: when true, auto-inject `--resume` into claudeArgs if absent. */
-        always_resume: boolean;
         /** #379: drained-backlog reminder strategy (default "once"). */
         drained_strategy: string;
         /** #412: PSR-style log-level threshold (default "info"). Drives CL_LOG_LEVEL. */
         log_level: string;
+    };
+    /** #538 david `hwxbkk` : claude-binary spawn-time options namespacé séparé. */
+    claude: {
+        /** Auto-inject `--resume` into claudeArgs if absent. */
+        always_resume: boolean;
     };
     /** #385: tmux bar colour profile (layered defaults → global → project). */
     colors: {
@@ -88,6 +91,7 @@ export function resolveProjectContext(opts: ResolveOpts = {}): ProjectContext {
         mcp_json_deprecated: cfg.mcp_json_deprecated,
         config_path: cfg.configPath,
         claude_loop: { ...cfg.claude_loop },
+        claude: { ...cfg.claude },
         colors: { ...cfg.colors },
     };
 }
