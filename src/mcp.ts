@@ -23,6 +23,7 @@ import { registerTicketRelationTools } from "./mcp/ticket-relations.js";
 import { registerSubscriptionTools } from "./mcp/subscription.js";
 import { registerInboxTools } from "./mcp/inbox.js";
 import { registerUploadTools } from "./mcp/upload.js";
+import { registerWelcomeTools } from "./mcp/welcome.js";
 import { AIBALL_VERSION } from "./version.js";
 
 // `aiball-mcp --version` / `-v`: the launcher forwards argv through, so
@@ -44,6 +45,7 @@ registerTicketRelationTools(server);
 registerSubscriptionTools(server);
 registerInboxTools(server);
 registerUploadTools(server);
+registerWelcomeTools(server);
 
 // ---- start ----------------------------------------------------------------
 

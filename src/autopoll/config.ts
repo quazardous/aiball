@@ -226,6 +226,15 @@ export interface AiballConfig {
         idle_bg: string;
         boot_bg: string;
     };
+    /**
+     * #565 david — declared `project_type` (`.aiball.yaml project_type:`)
+     * used by the MCP `welcome` tool to pick the rules + templates kit.
+     * Free-string : the MCP tool validates it against the install's
+     * `welcome/<type>` folders at call-time, so the set of valid values
+     * is discovered (not hardcoded). `null` here = no key in the yaml ;
+     * `welcome` then applies its own fail-safe default (`public`).
+     */
+    project_type: string | null;
     /** Absolute path to the loaded `.aiball.yaml`, or null when none was found. */
     configPath: string | null;
     /**
@@ -324,6 +333,7 @@ const DEFAULTS: AiballConfig = {
         idle_bg: "colour240",      // dark grey
         boot_bg: "colour178",      // yellow
     },
+    project_type: null,
     configPath: null,
     prompts: {},
 };
@@ -469,6 +479,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
         upstream: { ...DEFAULTS.upstream },
         colors: { ...DEFAULTS.colors },
         mcp_json_deprecated: mcpJsonHasIdentityEnv(projectDir),
+        project_type: DEFAULTS.project_type,
         configPath,
         prompts: {},
     };
@@ -573,6 +584,14 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             const cb = (raw.claude ?? {}) as Record<string, unknown>;
             if (typeof cb.always_resume === "boolean") {
                 cfg.claude.always_resume = cb.always_resume;
+            }
+            // #565 david : per-project `project_type:` — picked up by the
+            // MCP `welcome` tool. Free-string ; absent = null (welcome
+            // applies its own `public` default + validates against the
+            // install's `welcome/<type>` folders, so an unknown name
+            // surfaces a clear error rather than silently mis-applying).
+            if (typeof raw.project_type === "string" && raw.project_type.trim()) {
+                cfg.project_type = raw.project_type.trim();
             }
             // #160 Phase 1: upstream bindings (provider refs like gh#NNN).
             // Per-project layer overrides global (Object.assign merges la
