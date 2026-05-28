@@ -335,7 +335,93 @@ becomes silent dead weight.
 
 ## 3. Doc style
 
-_(coming next slice)_
+### 3.1 Reader-facing vs internal
+
+aiball's docs split by audience, and the audience changes the rules:
+
+| Surface                                  | Audience           | Internal refs (`#NN`, hashids) | Tone        |
+| ---------------------------------------- | ------------------ | ------------------------------ | ----------- |
+| `README.md`, `ROADMAP.md`, `MCP-CLIENT.md`, `docs/*.md`, `.aiball.yaml.example` | Public / users     | **No**                         | Tutorial    |
+| `CHANGELOG.md`, `CLAUDE.md`, this doc    | Internal           | Yes                            | Telegraphic |
+| Ticket threads, code comments            | Internal           | Yes                            | Free-form   |
+| Commit messages, PR bodies               | Internal (history) | Yes                            | Imperative  |
+
+The aiball ticket board isn't public, so `#530` / `#B.130` /
+hashids mean nothing to a reader. Keep them OUT of the reader-facing
+surfaces — link to behavior or cite a doc section instead. They
+remain fine everywhere else.
+
+### 3.2 Where to write things
+
+| You're describing…                                  | Goes in                                                |
+| --------------------------------------------------- | ------------------------------------------------------ |
+| What aiball is, how to install/use it               | `README.md` (+ `docs/INSTALL.md`, `docs/WIN-INSTALL.md`) |
+| Direction & planned work                            | `ROADMAP.md`                                           |
+| User-facing changes between releases                | `CHANGELOG.md`                                         |
+| How an agent should work on this codebase           | This doc (`docs/CONTRIBUTING.md`)                      |
+| Operational surface (live runtime, restart, build)  | `CLAUDE.md`                                            |
+| Subsystem deep-dive (loop, PTY, sandbox…)           | `docs/<TOPIC>.md`                                      |
+| Decision rationale, alternatives considered         | The ticket thread                                      |
+| WHY a piece of code is non-obvious                  | Code comment (one line) — see § 2.2                    |
+
+When in doubt: ask whether a public user reading the doc cold needs
+the information. If yes → reader-facing. If no → internal.
+
+### 3.3 CHANGELOG flow
+
+`CHANGELOG.md` follows the Keep-a-Changelog spirit, lightly. Two
+sections matter:
+
+- **`[Unreleased]`** — landed on `main` but not yet tagged. You add
+  one bullet per user-visible change as you ship it.
+- **`[X.Y.Z]` — YYYY-MM-DD** — the version cut. When you tag a
+  release, the `[Unreleased]` bullets move under the new version
+  header.
+
+Skip the CHANGELOG entry when the change is purely internal (a
+refactor with no behavior delta, a doc edit, a CI tweak). The reader
+of CHANGELOG cares about *what changed for them*, not the audit
+trail (the ticket thread + commit log handle that).
+
+### 3.4 Versioning
+
+The source of truth for the version is the `package.json` at the
+repo root (the qcmp `aiball` component). It's surfaced via:
+
+- `aiball --version` CLI
+- `/api/health` JSON
+- Footer of the web UI
+
+Don't bump the version manually unless cutting a release. Releases
+are the human's call; agents propose them via tickets when relevant
+(e.g. accumulated `[Unreleased]` bullets warrant a tag).
+
+### 3.5 Frontmatter & structure
+
+No required YAML frontmatter for `docs/*.md` files. Conventions that
+have emerged:
+
+- Open with one paragraph stating what the doc is and who it's for.
+- TOC (manual, `[label](#anchor)` list) is welcome above ~150 lines.
+- Use `##` for top-level sections, `###` for sub-sections — `#` is
+  the doc title.
+- Code samples use triple-backtick fences with language tags
+  (`yaml`, `ts`, `bash`, `powershell`).
+- Tables for comparison or quick-ref material; bullets for narrative.
+
+Match the surrounding docs' style when editing — don't introduce a
+new flavor inside one file.
+
+### 3.6 Link discipline
+
+Cross-doc links use relative paths from the editing file:
+
+- From `docs/CONTRIBUTING.md` → `MIGRATIONS.md` (sibling)
+- From `docs/CONTRIBUTING.md` → `../README.md` or `../CLAUDE.md`
+- From `README.md` → `docs/INSTALL.md`
+
+Don't hardcode `https://github.com/…/blob/…` for cross-repo references
+— relative paths survive forks and renames.
 
 ## 4. Agent kit
 
