@@ -196,7 +196,142 @@ Deep dives on the lifecycle and event model live in
 
 ## 2. Code style
 
-_(coming next slice — see #541 plan)_
+### 2.1 Language: English
+
+**All code is in English** — comments, identifiers, log messages,
+string literals, error messages, test names. UI strings shown to the
+end user are also English (the project has no i18n surface today; see
+[`docs/I18N.md`](I18N.md) for the policy + the proposed approach if
+that ever changes).
+
+This applies to new code AND to edits you make to existing code: if
+you touch a file with French legacy comments, you don't have to
+retranslate the whole file, but anything you *write* is in English.
+The legacy French slowly disappears as files are revisited.
+
+(Older agent guidance said "code comments are French" — that's stale
+since david switched to English. This doc is now the source of
+truth.)
+
+### 2.2 Comments: default to none
+
+The default is to write **no comment**. A well-named identifier and a
+small function are self-documenting.
+
+Write a comment only when:
+
+- The WHY is non-obvious — a hidden constraint, a subtle invariant,
+  a workaround for a specific bug, behavior that would surprise the
+  next reader.
+- A ticket exists that explains the choice and would help someone
+  understand the code's surrounding context. Reference it with the
+  ticket number (`#530`) and optionally the comment hashid that
+  carries the decision (`d8ghfz`). The reader can look it up.
+
+Don't write comments that:
+
+- Restate what the code does (`// increment counter`).
+- Reference the current task ("added for the X flow", "used by Y").
+  That belongs in the PR description and goes stale fast.
+- Explain to future-you that you "tried Z first and it didn't work."
+  That belongs in the ticket thread.
+
+One-line max in almost every case. Multi-paragraph docstrings or
+multi-line comment blocks are noise unless you're documenting a
+genuinely complex algorithm — and even then ask whether refactoring
+to make the code clearer is the better fix.
+
+### 2.3 No premature scope
+
+When fixing a bug, fix the bug. When adding a feature, add the
+feature. Resist:
+
+- "While I'm here" surrounding-cleanup commits in the same PR. Open a
+  separate PR for cleanup if it's worth doing.
+- New abstractions for hypothetical future requirements. Three similar
+  call sites is better than a premature abstraction.
+- Error handling for scenarios that can't happen. Trust internal code
+  and framework guarantees. Validate only at system boundaries (user
+  input, external APIs).
+- Backwards-compat shims when you can just change the code (this
+  codebase is single-deployment; there are no clients to keep happy).
+
+### 2.4 Commits, branches, PRs
+
+**Commit messages** follow conventional-commits style with ticket
+refs:
+
+```
+fix(#530 cerqc8): swap line-height for padding-bottom to avoid FF/Linux inflation
+
+PR #35 added `line-height: 1.5` to fix the descender clip on Segoe UI
+/ Windows Chrome. On FF/Linux where the default line-height computed
+is more generous, 1.5 visibly inflated the rows (david `qx3vuq`).
+[...]
+```
+
+- Prefix with `fix(...)`, `feat(...)`, `docs(...)`, `ci(...)`, etc.
+  matching the change type.
+- Ticket ref `#NN` in the prefix when one applies, optionally with
+  the comment hashid (`#530 cerqc8`) when the trigger was a specific
+  comment. Internal refs are fine in commit messages (release
+  history is internal-audience).
+- Body explains WHY, not WHAT. The diff already says what.
+
+**Branch naming**: `feat/<scope>`, `fix/<scope>`, `docs/<scope>`,
+`ci/<scope>`. The scope is short and descriptive (`fix/timer-resilience`,
+`docs/contributing`, `ci/cl-pty-proxy-windows-build`). Numeric ticket
+prefix optional (`fix/537-mobile-project-picker-split` is fine when
+the ticket is the main driver).
+
+**One PR per logical scope**. If you find yourself opening two PRs
+because "they're related," stop — most of the time the right move is
+a single `feat/<scope>` branch with one PR. Stacked tiny PRs are
+churn. (David explicitly prefers this.) Exception: when the work has
+genuinely independent deliverables that can land at different times
+(see [§ 1.7 Sub-tickets vs comments](#17-sub-tickets-vs-comments)).
+
+**Don't skip hooks.** `--no-verify` is off-limits unless the user
+explicitly asks. If a pre-commit hook fails, fix the issue and create
+a NEW commit — never amend a commit the hook already rejected (the
+commit didn't land, so `--amend` would mutate the *previous* commit
+and likely destroy work).
+
+### 2.5 Migrations
+
+Touching the schema needs care because the dev checkout IS the live
+runtime — see `CLAUDE.md` § "How this checkout runs."
+
+The hard rule: **apply the migration via `aiball restart` BEFORE
+committing the code that reads the new column.** Otherwise the live
+daemon crashes on reload (`tsx watch` reloads code but does NOT
+re-run migrations — a hard restart does).
+
+Full conventions, journal entries, naming, the `drizzle-kit generate`
+flow: see [`docs/MIGRATIONS.md`](MIGRATIONS.md). When touching DB,
+preload that doc.
+
+### 2.6 Tests
+
+aiball uses Node's native test runner (`vitest`-style suites under
+`src/**/*.test.ts` and `frontend/src/**/*.test.ts`).
+
+- Add a test when fixing a bug that has a stable repro (the test
+  guarantees we don't regress).
+- Add a test when shipping a new public API surface (the contract
+  needs locking in).
+- Don't add a test for code you can't reach from a test (UI visual
+  rendering, OS-specific PTY behavior). Note the gap in the PR.
+- Keep tests fast — anything > 100 ms per case warrants a comment
+  explaining why.
+- Run `npm test` (root) before pushing a PR. CI (`#527`) covers Rust
+  on Windows; Node tests still run locally and on the upstream when
+  enabled.
+
+Skipping a test (`.skip`, `xfail`) is acceptable as a tracker for a
+known follow-up — but write down the WHY and the condition for
+unskipping in a comment or a ticket, otherwise the skip rots and
+becomes silent dead weight.
 
 ## 3. Doc style
 
