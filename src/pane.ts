@@ -55,10 +55,44 @@ export interface CaptureResult {
     target: string;
     truncated: boolean;
     captured_at: string;
+    /** #531 — pane's actual cursor position (`display-message #{cursor_x}` /
+     *  `#{cursor_y}`, 0-based). The `capture-pane -e -p` snapshot doesn't
+     *  always carry a positioning escape at its tail (psmux on Windows is
+     *  one such case ; tmux on Linux tends to include one), so the
+     *  consumer-side terminal must explicitly re-position the cursor after
+     *  rendering the snapshot. `null` when the lookup fails (target gone,
+     *  spawn errored). */
+    cursor?: { x: number; y: number } | null;
     /** #505 debug : exit code + stderr du `capture-pane` (utile pour repérer
      *  les sessions invalides ou les flags non supportés par psmux/Windows
      *  qui sortent 0 mais avec stdout vide). */
     debug?: { exit_code: number | null; stderr: string };
+}
+
+/**
+ * #531 — fetch the pane's current cursor position (0-based column / row).
+ * `psmux display-message -p '#{cursor_x},#{cursor_y}'` works on both psmux
+ * (Windows) and tmux (Linux/macOS). Returns `null` on spawn / parse failure
+ * — the caller falls back to whatever the snapshot positioned (or nothing).
+ */
+export function captureCursor(target: string): Promise<{ x: number; y: number } | null> {
+    return new Promise((resolve) => {
+        const child = spawn(
+            MUX_CMD,
+            ["display-message", "-p", "-t", target, "#{cursor_x},#{cursor_y}"],
+            { stdio: ["ignore", "pipe", "ignore"] },
+        );
+        const chunks: Buffer[] = [];
+        child.stdout.on("data", (b: Buffer) => chunks.push(b));
+        child.on("error", () => resolve(null));
+        child.on("close", (code) => {
+            if (code !== 0) return resolve(null);
+            const out = Buffer.concat(chunks).toString("utf8").trim();
+            const m = /^(\d+),(\d+)$/.exec(out);
+            if (!m) return resolve(null);
+            resolve({ x: Number(m[1]), y: Number(m[2]) });
+        });
+    });
 }
 
 /**
@@ -71,7 +105,20 @@ export interface CaptureResult {
  * capture-pane CLI dispatcher (returned exit 0 + empty stdout). Fixed upstream
  * in psmux commit 72d08aa; passing separated flags works on every version.
  */
-export function captureOnce(target: string): Promise<CaptureResult | { error: string; target: string }> {
+export async function captureOnce(target: string): Promise<CaptureResult | { error: string; target: string }> {
+    // #531 — fetch content + cursor in parallel. capture-pane is the slow
+    // call ; display-message is essentially free (~1 ms). Running them in
+    // parallel keeps the tick latency at ~capture-pane's cost.
+    const [contentR, cursor] = await Promise.all([
+        captureContent(target),
+        captureCursor(target),
+    ]);
+    if ("error" in contentR) return contentR;
+    contentR.cursor = cursor;
+    return contentR;
+}
+
+function captureContent(target: string): Promise<CaptureResult | { error: string; target: string }> {
     return new Promise((resolve) => {
         const child = spawn(MUX_CMD, ["capture-pane", "-e", "-p", "-t", target], { stdio: ["ignore", "pipe", "pipe"] });
         const chunks: Buffer[] = [];
