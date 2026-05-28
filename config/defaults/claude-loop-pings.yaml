@@ -162,6 +162,9 @@ formatting:
       href: "/b/{1}"
       class: "comment-ref"
     - id: mention
-      match: "(?<![\\w@>\"'/])@([a-zA-Z0-9_-]{2,64})\\b"
+      # #535 : `>` retiré de la lookbehind (était bloqué pour éviter du nesting
+      # dans `<a>@x</a>` mais ça bloquait au passage les mentions juste après
+      # `<p>` du markdown rendu).
+      match: "(?<![\\w@\"'/])@([a-zA-Z0-9_-]{2,64})\\b"
       canonical: "@{1}"
       class: "mention"
