@@ -5,7 +5,7 @@
  * Slice 1 shipped a plain `<pre>` rendering (`capture-pane -p`, no ANSI).
  * David `anz94c` : "du moment que le runtime js est en cache osef du
  * poids" → upgrade to real terminal rendering with xterm.js (~200KB
- * gzip). Backend now spawns `capture-pane -ep` so ANSI escapes reach
+ * gzip). Backend now spawns `capture-pane -e -p` so ANSI escapes reach
  * the browser ; here we feed them into a real `Terminal` instance.
  *
  * Each SSE frame carries the FULL visible pane (capture-pane is a

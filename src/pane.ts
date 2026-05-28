@@ -62,34 +62,18 @@ export interface CaptureResult {
 }
 
 /**
- * #464 — spawn `${MUX_CMD} capture-pane -ep -t <target>` une fois. Renvoie le
- * texte capturé (avec ANSI préservé, `-e`) ou une erreur. Borne la taille à
- * `MAX_PAYLOAD_BYTES`. Async non-bloquant.
+ * Spawn `${MUX_CMD} capture-pane -e -p -t <target>` once. Returns the captured
+ * text (ANSI preserved via `-e`) or an error. Capped at `MAX_PAYLOAD_BYTES`.
+ * Async, non-blocking.
  *
- * #505 fallback (`4r9q34`) : si la 1ʳᵉ tentative avec `-e` retourne text="" +
- * exit=0 + pas de stderr, on retry sans `-e`. Symptôme observé côté graphite
- * (psmux/Windows) : psmux peut accepter `-e` silencieusement mais sortir
- * stdout vide. Sans `-e` on perd les couleurs ANSI mais on récupère le texte.
+ * Flags are passed separated (`-e -p`) rather than clustered (`-ep`):
+ * psmux <= v3.3.4 silently dropped POSIX short-flag clusters in the
+ * capture-pane CLI dispatcher (returned exit 0 + empty stdout). Fixed upstream
+ * in psmux commit 72d08aa; passing separated flags works on every version.
  */
-export async function captureOnce(target: string): Promise<CaptureResult | { error: string; target: string }> {
-    const first = await captureOnceImpl(target, true);
-    if ("error" in first) return first;
-    if (first.text === "" && !first.debug) {
-        // text vide + pas de stderr → essaye sans -e.
-        const second = await captureOnceImpl(target, false);
-        if ("error" in second) return first; // return first quand-même (au moins le timestamp est cohérent)
-        if (second.text !== "") {
-            second.debug = { exit_code: 0, stderr: `[fallback] -e returned empty; -p alone got ${second.text.length} bytes` };
-            return second;
-        }
-    }
-    return first;
-}
-
-function captureOnceImpl(target: string, withAnsi: boolean): Promise<CaptureResult | { error: string; target: string }> {
+export function captureOnce(target: string): Promise<CaptureResult | { error: string; target: string }> {
     return new Promise((resolve) => {
-        const args = withAnsi ? ["capture-pane", "-ep", "-t", target] : ["capture-pane", "-p", "-t", target];
-        const child = spawn(MUX_CMD, args, { stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn(MUX_CMD, ["capture-pane", "-e", "-p", "-t", target], { stdio: ["ignore", "pipe", "pipe"] });
         const chunks: Buffer[] = [];
         const errChunks: Buffer[] = [];
         let total = 0;
