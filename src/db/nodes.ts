@@ -22,6 +22,14 @@ export interface NodeView {
     last_used_at: string | null;
     /** The node's last peer IP (stamped on relay). NULL if never used since #424. */
     last_seen_ip: string | null;
+    /** #524: provider-resolved hostname shipped in the WS `hello` frame
+     *  (tailscale → hostname → …). NULL if the node never advertised it
+     *  (legacy pre-#524 or non-WS node). */
+    display_host: string | null;
+    /** #524: id of the provider that resolved `display_host` (`"tailscale"`,
+     *  `"hostname"`, …). NULL when display_host is NULL. Used by the UI for a
+     *  chip beside the host. */
+    display_host_provider: string | null;
     /** Consumers this node relays (matched by last_seen_ip). */
     relayed: RelayedConsumer[];
     relayed_count: number;
@@ -65,6 +73,8 @@ export function listNodes(): NodeView[] {
             created_at: n.createdAt,
             last_used_at: n.lastUsedAt,
             last_seen_ip: n.lastSeenIp ?? null,
+            display_host: n.displayHost ?? null,
+            display_host_provider: n.displayHostProvider ?? null,
             relayed: rel,
             relayed_count: rel.length,
         };

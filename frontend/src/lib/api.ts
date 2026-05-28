@@ -1108,6 +1108,12 @@ export interface NodeView {
     created_at: string;
     last_used_at: string | null;
     last_seen_ip: string | null;
+    /** #524: provider-resolved hostname (tailscale → hostname → …) shipped by
+     *  the node in its WS `hello` frame. NULL when never advertised (legacy or
+     *  non-WS node). The companion `display_host_provider` tells which
+     *  provider gave it (used by the UI chip). */
+    display_host: string | null;
+    display_host_provider: string | null;
     relayed: { consumer_id: string; last_seen_at: string | null }[];
     relayed_count: number;
     /** #510 — état du WS reverse (canal /ws/proxy-node) si le daemon

@@ -28,7 +28,7 @@ import type { IncomingMessage, Server } from "node:http";
 import { randomBytes } from "node:crypto";
 import { getToken } from "./db/tokens.js";
 import { nodeId as computeNodeId, listNodes } from "./db/nodes.js";
-import { setTokenLastSeenIp } from "./db/tokens.js";
+import { setTokenLastSeenIp, setTokenDisplayHost } from "./db/tokens.js";
 import { nowIso } from "./db/connection.js";
 import { getDb } from "./db/connection.js";
 import * as schema from "./schema.js";
@@ -281,12 +281,17 @@ export function attachProxyWs(server: Server): void {
                 const nodeCommit = typeof frame.commit === "string" ? frame.commit : "(unknown)";
                 const match = nodeVer === AIBALL_VERSION && nodeCommit === AIBALL_COMMIT;
                 const tag = match ? "match" : "MISMATCH";
-                console.log(`[proxy WS] hello from id=${nid}: node v=${nodeVer} commit=${nodeCommit} | upstream v=${AIBALL_VERSION} commit=${AIBALL_COMMIT} → ${tag}`);
+                // #524 : provider-resolved display_host. Frame légacy (pre-#524)
+                // ne ship pas les champs → on persiste null/null (clear), normal.
+                const dh = typeof frame.display_host === "string" ? frame.display_host : null;
+                const dhProv = typeof frame.display_host_provider === "string" ? frame.display_host_provider : null;
+                console.log(`[proxy WS] hello from id=${nid}: node v=${nodeVer} commit=${nodeCommit} display_host=${dh ?? "(none)"}${dhProv ? `/${dhProv}` : ""} | upstream v=${AIBALL_VERSION} commit=${AIBALL_COMMIT} → ${tag}`);
                 // #513 — persiste la version sur la conn pour l'exposer côté UI
                 // (NodeDetailPage). On stocke même "(unknown)" pour refléter
                 // l'état exact (un proxy pre-version-frame se signale ainsi).
                 conn.node_version = nodeVer;
                 conn.node_commit = nodeCommit;
+                setTokenDisplayHost(token, dh, dhProv);
             }
             if (typeof frame.request_id === "string") {
                 const handler = responseHandlers.get(frame.request_id);

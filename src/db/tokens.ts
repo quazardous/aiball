@@ -133,6 +133,18 @@ export function setTokenLastSeenIp(token: string, ip: string | null): void {
         .run();
 }
 
+/** #524: stamp the provider-resolved `display_host` shipped in the WS `hello`
+ *  frame. Both fields move together (host + which provider gave it) so the UI
+ *  can render a chip beside the name. NULL clears (a node downgrading to no
+ *  provider after a chain change). */
+export function setTokenDisplayHost(token: string, host: string | null, provider: string | null): void {
+    if (!token) return;
+    getDb().update(schema.tokens)
+        .set({ displayHost: host ?? null, displayHostProvider: provider ?? null })
+        .where(eq(schema.tokens.token, token))
+        .run();
+}
+
 /**
  * #463 — update a token's label. Called from the auth node-branch when the
  * proxy node advertises a label via `x-aiball-node-label` and it differs

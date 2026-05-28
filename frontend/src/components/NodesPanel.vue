@@ -113,7 +113,7 @@ function proxyVersionShort(s: WsState): string | null {
             <template #head>
                 <th>Status</th>
                 <th>Node</th>
-                <th>Last IP</th>
+                <th>Host</th>
                 <th>Last activity</th>
             </template>
             <template #body>
@@ -142,7 +142,25 @@ function proxyVersionShort(s: WsState): string | null {
                             :title="`proxy version (${n.ws_state.node_version ?? '?'} commit ${n.ws_state.node_commit ?? '?'})`"
                         >{{ proxyVersionShort(n.ws_state) }}</code>
                     </td>
-                    <td>{{ n.last_seen_ip ?? "—" }}</td>
+                    <td>
+                        <!-- #524 : display_host (résolu côté node par sa
+                             provider chain) à la place de l'IP. L'IP du peer
+                             reste accessible en title et dans NodeDetailPage
+                             pour le debug réseau. Quand le node n'a jamais
+                             advertise (legacy ou non-WS), on retombe sur l'IP
+                             pour ne pas afficher "—" partout. -->
+                        <template v-if="n.display_host">
+                            <span class="nodes-host" :title="n.last_seen_ip ? `peer ip ${n.last_seen_ip}` : undefined">
+                                {{ n.display_host }}
+                            </span>
+                            <span
+                                v-if="n.display_host_provider"
+                                class="nodes-host-provider"
+                                :title="`resolved by provider '${n.display_host_provider}'`"
+                            >{{ n.display_host_provider }}</span>
+                        </template>
+                        <template v-else>{{ n.last_seen_ip ?? "—" }}</template>
+                    </td>
                     <td :title="`created ${fmt(n.created_at)}`">{{ fmt(n.last_used_at) }}</td>
                 </tr>
             </template>
@@ -168,5 +186,21 @@ function proxyVersionShort(s: WsState): string | null {
     opacity: 0.6;
     font-style: italic;
     color: var(--p-text-muted-color);
+}
+/* #524 : display_host (provider-resolved hostname) + chip provider compact. */
+.nodes-host {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem;
+}
+.nodes-host-provider {
+    margin-left: 0.4rem;
+    padding: 0 0.35rem;
+    border-radius: 0.4rem;
+    background: var(--p-surface-200);
+    color: var(--p-text-muted-color);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03rem;
+    vertical-align: middle;
 }
 </style>

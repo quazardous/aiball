@@ -316,6 +316,13 @@
       "when": 1782000000000,
       "tag": "0044_consumers_notify_project_broadcasts",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1782100000000,
+      "tag": "0045_tokens_display_host",
+      "breakpoints": true
     }
   ]
 }

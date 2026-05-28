@@ -608,6 +608,14 @@ export const tokens = sqliteTable("tokens", {
      *  (consumers.last_seen_via='node' with matching last_seen_ip). NULL for
      *  non-node tokens and nodes never used since the column landed. */
     lastSeenIp: text("last_seen_ip"),
+    /** #524: provider-resolved hostname the node ships in the WS `hello` frame.
+     *  Each provider (tailscale → hostname → …) knows how to give a "correct"
+     *  name (tailscale = `Self.HostName`, generic = `os.hostname()`). NULL =
+     *  node never advertised, or non-node token. The companion `displayHostProvider`
+     *  identifies which provider resolved it (`"tailscale"` / `"hostname"` / …),
+     *  used by the UI to render a tiny provider chip beside the host. */
+    displayHost: text("display_host"),
+    displayHostProvider: text("display_host_provider"),
 }, (t) => [
     index("idx_tokens_consumer").on(t.consumerId),
     index("idx_tokens_kind").on(t.kind),

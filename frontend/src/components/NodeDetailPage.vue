@@ -200,6 +200,14 @@ async function doRevoke(n: NodeView): Promise<void> {
             </FieldRow>
             <FieldRow label="label">{{ node.label || "(unlabelled)" }}</FieldRow>
             <FieldRow label="node id"><span class="aiball-mono">{{ node.node_id }}</span></FieldRow>
+            <!-- #524 : display_host résolu côté node par sa provider chain
+                 (tailscale → hostname → …). NULL pour les nodes legacy ou
+                 jamais connectés en WS — on cache la row alors plutôt que
+                 d'afficher "—". -->
+            <FieldRow v-if="node.display_host" label="host">
+                <span class="aiball-mono">{{ node.display_host }}</span>
+                <span v-if="node.display_host_provider" class="node-host-provider">via {{ node.display_host_provider }}</span>
+            </FieldRow>
             <FieldRow label="last peer IP">{{ node.last_seen_ip ?? "—" }}</FieldRow>
 
             <div class="node-detail__meta">
@@ -294,5 +302,15 @@ async function doRevoke(n: NodeView): Promise<void> {
     justify-content: flex-end;
     gap: 0.5rem;
     margin-top: 0.4rem;
+}
+/* #524 : provider chip à côté du display_host. */
+.node-host-provider {
+    margin-left: 0.5rem;
+    padding: 0 0.35rem;
+    border-radius: 0.4rem;
+    background: var(--p-surface-200);
+    color: var(--p-text-muted-color);
+    font-size: 0.7rem;
+    text-transform: lowercase;
 }
 </style>

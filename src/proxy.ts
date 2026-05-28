@@ -31,6 +31,7 @@ import { WebSocket } from "ws";
 import { globalConfigPath } from "./autopoll/config.js";
 import { resolveLoopName, paneTarget, captureOnce, sendKeys } from "./pane.js";
 import { AIBALL_VERSION, AIBALL_COMMIT } from "./version.js";
+import { resolveDisplayHost } from "./proxy-host-providers.js";
 
 export interface ProxyConfig {
     url: string;
@@ -287,11 +288,16 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
         }
         ws.on("open", () => {
             attempt = 0; // succès → reset le backoff
-            console.log(`[proxy WS] connected to ${wsUrl} (sending hello v=${AIBALL_VERSION} commit=${AIBALL_COMMIT})`);
-            // Hello + label + version/commit : le label re-sync `tokens.label`
-            // (comme le vieux header `x-aiball-node-label`). version/commit
-            // (#505 david `mwm67f`) loggués côté serveur pour spotter un node
-            // qui tourne du code outdated vs l'upstream.
+            // #524 : résout le display_host via la provider chain (tailscale →
+            // hostname). Mémoïsé, donc ce 1er appel paie le `tailscale status`
+            // ; les reconnects sont gratuits. Null si même hostname() fail.
+            const dh = resolveDisplayHost();
+            console.log(`[proxy WS] connected to ${wsUrl} (sending hello v=${AIBALL_VERSION} commit=${AIBALL_COMMIT} display_host=${dh?.host ?? "(none)"}${dh ? `/${dh.provider}` : ""})`);
+            // Hello + label + version/commit + display_host : le label re-sync
+            // `tokens.label` (comme le vieux header `x-aiball-node-label`).
+            // version/commit (#505 david `mwm67f`) loggués côté serveur pour
+            // spotter un node qui tourne du code outdated vs l'upstream.
+            // display_host (#524) re-sync `tokens.display_host` + provider.
             try {
                 ws?.send(JSON.stringify({
                     kind: "hello",
@@ -299,6 +305,8 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
                     client_ts: Date.now(),
                     version: AIBALL_VERSION,
                     commit: AIBALL_COMMIT,
+                    display_host: dh?.host ?? null,
+                    display_host_provider: dh?.provider ?? null,
                 }));
             } catch { /* noop — le close handler reprendra */ }
         });
