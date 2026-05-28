@@ -5,6 +5,15 @@ sessions into persistent, remotely-pilotable agents (one per project).
 Daemon (Express + SQLite/Drizzle) + Vue frontend + the `claude-loop`
 tmux wrapper + a stdio MCP server. See [`README.md`](./README.md).
 
+## Start here
+
+**Before doing anything on this codebase, read
+[`CONTRIBUTING.md`](./CONTRIBUTING.md).** It owns the conventions —
+code style, multi-agent norms, doc style, and the agent kit (what to
+preload vs what to look up vs what to remember). This file (CLAUDE.md)
+stays focused on operational truth: how the checkout runs, how to
+restart, what the daemon expects.
+
 ## How this checkout runs (read before editing)
 
 - **The dev checkout IS the live runtime.** `~/.local/lib/aiball` symlinks
@@ -58,6 +67,7 @@ Root:
 
 ## Conventions
 
-- User-facing strings + docs are **English**; code comments are French (see [`docs/I18N.md`](./docs/I18N.md)).
-- **No internal ticket refs in reader-facing docs.** aiball's ticket board isn't public, so `#123` / `#B.123` numbers mean nothing to a reader — keep them OUT of the published docs (`README.md`, `docs/*.md`, `MCP-CLIENT.md`, `ROADMAP.md`, `.aiball.yaml.example`). They stay fine where the audience is internal: ticket threads, code comments, this guide + `CHANGELOG.md` (release history), and any doc not committed to the repo.
-- Versioning: source of truth is `package.json` (qcmp `aiball` component); surfaced via `aiball --version`, `/api/health`, the UI footer.
+Owned by [`CONTRIBUTING.md`](./CONTRIBUTING.md) — code in English,
+no internal ticket refs in reader-facing docs, versioning source of
+truth is `package.json` (surfaced via `aiball --version`,
+`/api/health`, the UI footer). See that doc for the full set.
