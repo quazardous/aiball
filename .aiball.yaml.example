@@ -259,6 +259,19 @@ autopoll:
 #   hint_worktree: false
 #   # (both false → no branch hint on feature wakes; opt in per project)
 
+# Project "type" — picked up by the MCP `welcome` tool to choose which
+# onboarding kit (rules + templates) to serve when the user asks the
+# agent to call `welcome`. Free-string : the tool validates it at
+# call-time against the install's `welcome/<type>/` folders, so the
+# set of valid values is discovered (not hardcoded). Out of the box
+# the install ships `public` and `private` ; add a type = drop a
+# sibling folder under `welcome/` with a `WELCOME.md`, no code change.
+#
+# Absent here = fail-safe default `public` (strict scrubbing rules
+# apply rather than no rules) — set explicitly when this project is
+# internal-only and you want to skip the public-repo conventions.
+# project_type: public
+
 # claude-loop tmux bar colour profile. Each value is a raw tmux colour
 # token (`colour16`, `colour15`, a named colour like `red`, or a hex `#0087ff`).
 # Layered on THREE levels — defaults → global `~/.config/aiball/config.yaml`

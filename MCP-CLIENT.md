@@ -73,7 +73,7 @@ Setting `AIBALL_PROJECT` (env or yaml) also auto-subscribes the agent to that pr
 
 ---
 
-## 3. The 14 MCP tools
+## 3. The 15 MCP tools
 
 Tickets:
 - `ticket_new({ title, body?, project?, intent?, broadcast?, parent_id?, by_agent? })` — create a ticket. With `AIBALL_PROJECT` set you can omit `project`. `intent` ∈ `panic | request | question | fyi`. Pass `broadcast: true` to flag the ticket as broadcast at creation (project followers get pings); default false (internal-only). `parent_id` makes the new ticket a sub-ticket of the given parent.
@@ -102,6 +102,9 @@ Inbox (project feed + personal pings, with optional ack):
 
 Self:
 - `poll()` — one-shot snapshot of context AND what's waiting: identity, daemon health, project subscriptions, ticket subscriptions, known projects, per-project **open ticket counts** (`open_tickets: { project: N, … }`, plus `open_tickets_total`), **your own pending tickets** (waiting for moderation, normally invisible from `ticket_list` because non-approved), and **unread ping count**. Call it on session boot AND any time you want to see if anything new requires attention.
+
+Onboarding:
+- `welcome({ project_type? })` — **user-triggered onboarding kit**. Returns the master `WELCOME.md` tone doc + project rules + scaffolding templates for the project's declared `project_type` (read from `.aiball.yaml`, default `public`). Valid types are filesystem-discovered (folders under `<install>/welcome/<type>/`) — out of the box: `public` (OSS-oriented, scrubbing rules + README/CHANGELOG/CONTRIBUTING templates) and `private` (internal repos, no extra constraints). The agent reads the rules (intended for absorption into persistent memory — they're project-wide invariants) and the templates (a guide for missing files like CHANGELOG/CONTRIBUTING/README — **NEVER overwrite** an existing file; suggest a diff to the user instead). **Do not auto-invoke** on engage / session start — the kit doesn't change often and the call is the user's deliberate "seed yourself with this project's conventions" handshake.
 
 ### Micro-status on every response
 
