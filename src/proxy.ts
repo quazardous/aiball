@@ -370,6 +370,10 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
             // #505 `4r9q34` : forward debug (stderr / fallback hint) au papy
             // SSE pour visualiser pourquoi text est vide quand on l'est.
             if (r.debug) frame.debug = r.debug;
+            // #531 — the node-side `captureOnce` already fetched the cursor
+            // ; forward it so papy's SSE consumer (TerminalView.vue) can
+            // re-position after writing the snapshot.
+            if (r.cursor !== undefined) frame.cursor = r.cursor;
             send(frame);
         };
         void tick();

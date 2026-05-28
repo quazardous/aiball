@@ -30,6 +30,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { MUX_CMD, tmuxName } from "../claude-loop/state.js";
+import { captureCursor } from "../pane.js";
 import { getConsumer } from "../db.js";
 import {
     getNodeSocketForConsumerIp,
@@ -229,18 +230,25 @@ agentsRouter.get("/agents/:name/pane/stream", (req: Request, res: Response) => {
                 chunks.push(b);
             }
         });
+        // #531 — fetch the pane's cursor in parallel with capture-pane. psmux
+        // on Windows does not emit a positioning escape at the tail of the
+        // capture-pane output (tmux on Linux does), so the frontend must
+        // explicitly re-position the cursor after writing the snapshot or it
+        // lands wherever the last char of the snapshot left it.
+        const cursorPromise = captureCursor(target);
         child.on("error", (e) => {
             if (stopped) return;
             send({ error: `spawn failed : ${e.message}` }, "error");
         });
-        child.on("close", (code) => {
+        child.on("close", async (code) => {
             if (stopped) return;
             if (code !== 0 && !truncated) {
                 send({ error: `capture-pane exited ${code}`, target }, "error");
                 return;
             }
             const text = Buffer.concat(chunks).toString("utf8");
-            send({ text, target, truncated, captured_at: new Date().toISOString() });
+            const cursor = await cursorPromise;
+            send({ text, target, truncated, captured_at: new Date().toISOString(), cursor });
         });
     }
 

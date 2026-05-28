@@ -95,6 +95,11 @@ interface PaneFrame {
     target: string;
     truncated?: boolean;
     captured_at: string;
+    /** #531 — actual cursor position in the pane (0-based), fetched server-side
+     *  via `display-message #{cursor_x},#{cursor_y}` since the `capture-pane`
+     *  snapshot doesn't always carry a positioning escape at its tail (psmux
+     *  on Windows is one such case). Optional for backwards-compat. */
+    cursor?: { x: number; y: number } | null;
 }
 interface PaneError {
     error: string;
@@ -235,13 +240,24 @@ watch(isReadWrite, (rw) => {
 });
 watch(hasConfirmedRw, (v) => writeSession(RW_CONFIRMED_KEY, v));
 
-function applyFrame(text: string) {
+function applyFrame(text: string, cursor?: { x: number; y: number } | null) {
     if (!term) return;
     // Snapshot semantics : the whole visible pane lands every tick. Reset
     // wipes the screen + scrollback + cursor + colour state, then write
     // re-paints the snapshot. Accumulating would balloon the buffer.
     term.reset();
     term.write(text);
+    // #531 — re-position the cursor to where the pane actually has it.
+    // `capture-pane -e -p` on psmux (Windows) does not emit a positioning
+    // escape at the tail, so without this step the cursor lands wherever
+    // `term.write` left it (= end of the last char of the snapshot, not
+    // the real claude prompt position). xterm.js uses 1-based CSI rows
+    // and columns, our server payload is 0-based — hence the +1 offset.
+    // tmux (Linux/macOS) does emit a positioning tail, so this just
+    // re-affirms the position it already moved to (idempotent).
+    if (cursor && typeof cursor.x === "number" && typeof cursor.y === "number") {
+        term.write(`\x1b[${cursor.y + 1};${cursor.x + 1}H`);
+    }
 }
 
 function openStream() {
@@ -269,7 +285,7 @@ function openStream() {
     es.onmessage = (e) => {
         try {
             const frame = JSON.parse(e.data) as PaneFrame;
-            applyFrame(frame.text);
+            applyFrame(frame.text, frame.cursor);
             lastCapturedAt.value = frame.captured_at;
             truncated.value = !!frame.truncated;
             lastError.value = null;
