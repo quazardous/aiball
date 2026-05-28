@@ -3,15 +3,13 @@
  * shipped at the install root (`<install>/welcome/<type>/`), composed
  * into a stable JSON shape the MCP tool returns to the agent.
  *
- * Layout convention (each `<type>` directory is autonomous — no
- * inheritance, no overlay):
+ * Layout convention (per david `87dp6p` — each `<type>` directory is
+ * autonomous, no inheritance, no overlay):
  *
  *     welcome/
  *       <type>/                e.g. "public", "private"
- *         WELCOME.md           master "tone" doc (required for a type
- *                              to be considered valid).
- *         rules/               optional. .md files seeded into the
- *                              agent's persistent memory.
+ *         WELCOME.md           master "tone" doc (REQUIRED for a
+ *                              type to be considered valid).
  *         templates/           optional. files the agent is invited
  *                              to drop into the project at
  *                              `path_hint = <basename>` IF the file
@@ -19,24 +17,15 @@
  *
  * Discovery — `availableTypes(installRoot)` lists every subfolder of
  * `welcome/` that owns a `WELCOME.md`. Folders without WELCOME.md are
- * skipped (they're considered drafts). That gives us "add a type =
- * create a folder + a WELCOME.md, zero code change", per david `87dp6p`.
+ * considered drafts and stay invisible. That gives us "add a type =
+ * create a folder + a WELCOME.md, zero code change".
+ *
+ * Note : earlier iterations carried a `rules/` subfolder, but david
+ * `87dp6p` formalised the type structure as just `WELCOME.md +
+ * templates/`. The "rules" are now part of the master tone doc.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-
-/** A rule file under `welcome/<type>/rules/`. */
-export interface WelcomeRule {
-    /** Filename without `.md` (slug used for memory tagging). */
-    name: string;
-    /** First paragraph of the body (post-front-matter / post-comment),
-     *  intended as a one-liner the agent can scan without reading the
-     *  detail. */
-    summary: string;
-    /** Full markdown body, intent comment included. The agent reads
-     *  this when absorbing the rule into memory. */
-    detail: string;
-}
 
 /** A template file under `welcome/<type>/templates/`. */
 export interface WelcomeTemplate {
@@ -59,9 +48,12 @@ export interface WelcomeKit {
      *  Surfacing this lets a user editing `.aiball.yaml` know what's
      *  valid without `ls`-ing the daemon's install dir. */
     available_types: string[];
-    /** Master `WELCOME.md` body for the type (tone doc). */
+    /** Master `WELCOME.md` body for the type (tone doc). Read FIRST
+     *  by the agent ; it carries the type's rules + the spirit in
+     *  which to operate. */
     welcome_md: string;
-    rules: WelcomeRule[];
+    /** Scaffolding templates the agent can drop into the project. May
+     *  be empty (the type's whole proposition can be "tone only"). */
     templates: WelcomeTemplate[];
 }
 
@@ -115,35 +107,6 @@ export function availableTypes(installRoot: string): string[] {
 }
 
 /**
- * Read every `.md` under `welcome/<type>/rules/`. Skipped silently if
- * the dir is missing. Summary = first non-empty line that isn't an
- * HTML comment line or a heading marker; falls back to the heading
- * if no plain paragraph is present.
- */
-function loadRules(typeDir: string): WelcomeRule[] {
-    const dir = join(typeDir, "rules");
-    if (!existsSync(dir)) return [];
-    const out: WelcomeRule[] = [];
-    for (const name of readdirSync(dir).sort()) {
-        if (!name.endsWith(".md")) continue;
-        if (name.startsWith(".")) continue;
-        const full = join(dir, name);
-        let body: string;
-        try {
-            body = readFileSync(full, "utf8");
-        } catch {
-            continue;
-        }
-        out.push({
-            name: name.replace(/\.md$/, ""),
-            summary: extractSummary(body),
-            detail: body,
-        });
-    }
-    return out;
-}
-
-/**
  * Read every regular file under `welcome/<type>/templates/`. Skipped
  * silently if the dir is missing. `path_hint` defaults to the
  * basename — the agent drops the file at the project root unless it
@@ -179,40 +142,11 @@ function loadTemplates(typeDir: string): WelcomeTemplate[] {
 }
 
 /**
- * Extract a short summary from a rule's markdown body. Strategy:
- *   - Skip leading HTML comments (`<!-- … -->`), whitespace, and
- *     heading lines (`# …`).
- *   - Return the first non-empty plain text line, trimmed to its
- *     first 200 chars.
- *   - Fall back to the first heading text if no plain paragraph
- *     exists.
- *   - Return `""` if the body has nothing usable.
- */
-function extractSummary(body: string): string {
-    const stripped = body.replace(/<!--[\s\S]*?-->/g, "").trim();
-    const lines = stripped.split(/\r?\n/);
-    let firstHeading = "";
-    for (const raw of lines) {
-        const line = raw.trim();
-        if (!line) continue;
-        if (line.startsWith("#")) {
-            if (!firstHeading) {
-                firstHeading = line.replace(/^#+\s*/, "");
-            }
-            continue;
-        }
-        // First non-heading text — that's the summary.
-        return line.length > 200 ? `${line.slice(0, 197)}…` : line;
-    }
-    return firstHeading;
-}
-
-/**
  * Assemble the kit for a given (installRoot, project_type). Throws
  * `UnknownProjectTypeError` if the type isn't discovered under
  * `welcome/`. The `welcome_md` field is the master `WELCOME.md` body
- * — the agent reads it first to grasp the tone before applying rules
- * or proposing templates.
+ * — the agent reads it first to grasp the tone before adopting
+ * templates.
  */
 export function buildWelcomeKit(
     installRoot: string,
@@ -229,7 +163,6 @@ export function buildWelcomeKit(
         project_type,
         available_types: types,
         welcome_md,
-        rules: loadRules(typeDir),
         templates: loadTemplates(typeDir),
     };
 }
