@@ -313,6 +313,17 @@ async function submit() {
                 ...(scope.value !== "default" ? { scope: scope.value } : {}),
             });
             createdId = typeof r?.id === "number" ? r.id : null;
+            // #553 david : assignee picker dispo en comment mode aussi.
+            // Quand l'utilisateur change l'assignee dans le composer d'update,
+            // on push l'assign au ticket parent best-effort après le post.
+            // Empty string = no change (l'utilisateur n'a pas touché le widget).
+            if (props.ticketId && assignee.value.trim()) {
+                try {
+                    await api.assignTicket(props.ticketId, assignee.value.trim());
+                } catch (e) {
+                    console.warn("[composer] failed to assign ticket on reply:", e);
+                }
+            }
         }
         // #B.104: after the reply lands, mark every question that was
         // queued via the click-to-quote flow as answered. Done after
@@ -390,9 +401,8 @@ onMounted(() => {
     api.mentionSuggestions()
         .then((r) => { mentionCatalog.value = r; })
         .catch(() => { /* offline OK — autocomplete just stays inert */ });
-    // #514 — assignee picker (tickets only) : on charge le catalog des
-    // consumers une fois au mount. Ignoré si offline ou si on est en
-    // mode comment (le picker ne s'affiche pas alors).
+    // #514 + #553 — assignee picker (tickets + comments) : on charge le
+    // catalog des consumers une fois au mount. Ignoré si offline.
     api.listConsumers()
         .then((r) => { consumerCatalog.value = r.map((c) => c.consumer_id); })
         .catch(() => { /* assignee picker just stays empty */ });
@@ -584,7 +594,13 @@ async function onAttachPicked(ev: Event) {
             <slot name="headline" />
         </div>
         <div class="composer-meta">
+            <!-- #553 david : scope picker affiché UNIQUEMENT à la création de
+                 ticket (ticket mode). En comment/update mode, le scope
+                 disparaît du composer (ira dans ManagePanel quand le PATCH
+                 endpoint sera prêt — Phase 2). Replies se font donc avec le
+                 scope ticket-level inherited (default → fan-out normal). -->
             <Select
+                v-if="isTicket"
                 v-model="scope"
                 :options="scopeOptions"
                 option-label="label"
@@ -622,12 +638,12 @@ async function onAttachPicked(ev: Event) {
                     </span>
                 </template>
             </Select>
-            <!-- #514 (david `4dfqj4`) : assignee picker à côté du scope,
-                 icone-only (pas de label "assignee"). Tickets only.
-                 Compact : la #value slot affiche juste l'icone bonhomme
-                 (+ le consumer_id sélectionné) ; sinon placeholder vide. -->
+            <!-- #514 + #553 — assignee picker disponible dans TICKET mode
+                 (création) ET COMMENT mode (update/reply). En reply, change
+                 l'assignee du ticket parent au moment du submit. Icone-only,
+                 compact. -->
             <Select
-                v-if="isTicket"
+                v-if="isTicket || props.mode === 'comment'"
                 v-model="assignee"
                 :options="consumerCatalog"
                 size="small"
