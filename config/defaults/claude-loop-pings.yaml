@@ -152,7 +152,9 @@ prompts:
 formatting:
   patterns:
     - id: ticket
-      match: "#[Bb]?[._/-]?(\\d+)\\b"
+      # #160 — negative lookbehind sur [A-Za-z] pour ne pas matcher `#NNN`
+      # quand préfixé d'une lettre (préserve `gh#NNN` pour le post-pass upstream).
+      match: "(?<![A-Za-z])#[Bb]?[._/-]?(\\d+)\\b"
       canonical: "#{1}"
       href: "/b/{1}"
       class: "ticket-ref"

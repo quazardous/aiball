@@ -48,7 +48,10 @@ export interface FormattingPattern {
 export const DEFAULT_FORMATTING_PATTERNS: readonly FormattingPattern[] = [
     {
         id: "ticket",
-        match: "#[Bb]?[._/-]?(\\d+)\\b",
+        // #160 Phase 1 (david `rwwjfr`) : negative lookbehind sur `[A-Za-z]`
+        // pour ne PAS matcher `#NNN` quand il est précédé d'une lettre
+        // (ex: `gh#1346` doit rester intact pour le post-pass upstream).
+        match: "(?<![A-Za-z])#[Bb]?[._/-]?(\\d+)\\b",
         canonical: "#{1}",
         href: "/b/{1}",
         class: "ticket-ref",
