@@ -128,6 +128,23 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
             error: "assigning another consumer is moderator-only (an agent can only claim for itself)",
         });
     }
+    // #575 david : un agent ne peut pas claim un ticket encore pending
+    // moderation. Symétrique au guard #569 (`then:resolved/plan` sur
+    // pending) : claim = "I'm focusing on this NOW" = work intent. Sur un
+    // ticket pending l'agent ne peut rien faire d'utile (poster un comment
+    // peut être bloqué par la rule engine, proposer une résolution est
+    // déjà rejeté par #569), donc claim n'a aucun sens. Humains bypass :
+    // un moderator peut claim pendant la review (focus de modération).
+    // Push-assign (isClaim=false) reste discretionnel : moderator peut
+    // pré-déléguer un pending à un agent, qui sera notifié à l'approve.
+    // Couvre aussi MCP `ticket_engage` qui delegate via
+    // `client.assignTicket(head.id)` (cf. src/mcp/ticket-write.ts).
+    if (isClaim && t.status !== "approved" && !isHuman(caller)) {
+        return res.status(409).json({
+            error: `cannot claim a ticket in status "${t.status}" — the reporter must moderate (approve) the ticket first`,
+            code: "PARENT_PENDING_MODERATION",
+        });
+    }
     // #436: self → CLAIM (focus, transient); other → ASSIGNMENT (responsibility,
     // persistent). Two distinct fields now — a ticket can be both.
     let releasedClaims: number[] = [];

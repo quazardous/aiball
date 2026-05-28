@@ -571,6 +571,15 @@ export function submitMessage(input: NewMessage): Message {
         if (author && author !== "auto" && !isHuman(author)) {
             const t = getMessage(msg.ticket_id);
             if (t && t.kind === "ticket_created"
+                // #575 david : never auto-claim on a pending parent ticket. La
+                // rule engine peut auto-approuver un comment d'un agent
+                // whitelist même si le ticket parent reste pending — sans ce
+                // garde, l'auto-claim mordrait. Pareil principe que le guard
+                // explicit du `/tickets/:id/assign` au-dessus (et que le
+                // #569 sur `then:resolved/plan`). Pas de bypass humain ici
+                // parce que l'auto-claim ne s'applique qu'aux agents (cf.
+                // `!isHuman(author)` ci-dessus).
+                && t.status === "approved"
                 && !isHeldByOther(t.assignee, t.claimant, t.claimed_at, author, Date.now(), assignWindowSec() * 1000)) {
                 // #436: auto-claim sets the CLAIM (focus), not an assignment.
                 // #439: stamp claimed_at with the COMMENT's created_at (not a fresh
