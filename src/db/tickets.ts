@@ -6,7 +6,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { and, asc, eq, inArray, isNotNull, lte, ne, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, lte, ne, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { listTypedRelationsForTicket } from "./messages.js";
@@ -503,33 +503,3 @@ export function ticketSelfLastActivity(consumer_id: string, ticket_ids: number[]
     return out;
 }
 
-/**
- * #408 — per-ticket last activity by an AGENT (non-human) consumer. The hot-zone
- * is the AGENT's focus, NOT the viewer's: when a HUMAN (david) comments, the
- * ticket must NOT go hot (david `#408`: « c'est pas moi qui dois passer un ticket
- * en hot ») — only an agent working it does. So: MAX(created_at) per ticket over
- * messages authored by consumers whose kind is NOT `human`. Used for the hot-zone
- * (sort tiebreak + `hot` flag) instead of the requester's own activity.
- */
-export function ticketAgentLastActivity(ticket_ids: number[]): Map<number, string> {
-    const out = new Map<number, string>();
-    if (ticket_ids.length === 0) return out;
-    const db = getDb();
-    const humanIds = db.select({ id: schema.consumers.consumerId })
-        .from(schema.consumers)
-        .where(eq(schema.consumers.kind, "human"))
-        .all()
-        .map((r) => r.id);
-    const conds = [inArray(schema.messages.ticketId, ticket_ids)];
-    if (humanIds.length > 0) conds.push(notInArray(schema.messages.byAgent, humanIds));
-    const rows = db.select({
-        ticketId: schema.messages.ticketId,
-        last: sql<string>`MAX(${schema.messages.createdAt})`,
-    })
-        .from(schema.messages)
-        .where(and(...conds))
-        .groupBy(schema.messages.ticketId)
-        .all();
-    for (const r of rows) if (r.ticketId != null && r.last) out.set(r.ticketId, r.last);
-    return out;
-}

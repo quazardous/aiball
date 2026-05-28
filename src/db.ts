@@ -179,7 +179,6 @@ export {
     getTicketStages,
     getTicketBookends,
     ticketSelfLastActivity,
-    ticketAgentLastActivity,
     type SubTicketSummary,
     type TicketStage,
     type TicketBookend,

@@ -36,7 +36,6 @@ import {
     markTicketSeen,
     markTicketUnseen,
     ticketUnreadFlags,
-    ticketAgentLastActivity,
     addTicketTokenUsage,
     getTicketTokenUsage,
     isHuman,
@@ -490,14 +489,19 @@ ticketsRouter.get("/inbox", (req, res) => {
     // query for the whole page). Absent for tickets with no captured usage
     // yet — the row renders the bolt chip only when estTokenCost > 0.
     const tokenUsageMap = getTicketTokenUsage(tickets.map((m) => m.id));
-    // #405/#408: hot-zone focus for the inbox rows. Computed over AGENT
-    // (non-human) activity — a human commenting must NOT make a ticket hot
-    // (david #408); only an agent working it does.
-    const hotFocus = computeHotFocus(
-        ticketAgentLastActivity(tickets.map((m) => m.id)),
-        Date.now(),
-        hotWindowSec() * 1000,
-    );
+    // #405/#408/#532: hot-zone focus for the inbox rows. PER-AGENT (#532 david
+    // `bmzpfr`: « le hot égal le focus actuel d'un agent ») — uses the
+    // requesting consumer's OWN activity, not a cross-agent MAX. The #408 rule
+    // (humans don't make tickets hot) is preserved by SKIPPING the computation
+    // for human consumers entirely (empty set) — for them the concept doesn't
+    // apply (no "focus" to track).
+    const hotFocus = isHuman(consumerId)
+        ? new Set<number>()
+        : computeHotFocus(
+            ticketSelfLastActivity(consumerId, tickets.map((m) => m.id)),
+            Date.now(),
+            hotWindowSec() * 1000,
+        );
     const nowStr = new Date().toISOString();
     let rows = tickets.map((t) => {
         const agg =
@@ -799,16 +803,17 @@ ticketsRouter.get("/tickets", (req, res) => {
     }
     // #404: per-ticket token-effort tally (empty until the capture side lands).
     const tokenUsageMap = getTicketTokenUsage(created.map((m) => m.id));
-    // #405/#408: the HOT-ZONE (focus) = the single most-recent AGENT-touched
-    // ticket within the hot window (mono-focus, Set-modeled for multi-hotzone).
-    // #408: computed over AGENT (non-human) activity — a human (david) commenting
-    // must NOT make a ticket hot; only an agent working it does. One source of
+    // #405/#408/#532: HOT-ZONE = every ticket the requesting agent has touched
+    // within the hot window (PER-AGENT + multi-hotzone, david `bmzpfr`). #408
+    // rule preserved by skipping for human consumers (empty set). One source of
     // truth: drives both the `hot` flag below AND the work-order tiebreak.
-    const hotFocus = computeHotFocus(
-        ticketAgentLastActivity(created.map((m) => m.id)),
-        Date.now(),
-        hotWindowSec() * 1000,
-    );
+    const hotFocus = isHuman(consumerId)
+        ? new Set<number>()
+        : computeHotFocus(
+            ticketSelfLastActivity(consumerId, created.map((m) => m.id)),
+            Date.now(),
+            hotWindowSec() * 1000,
+        );
     const tickets = created.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;

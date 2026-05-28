@@ -76,15 +76,17 @@ test("#436(4) assigned-to-me beats hot, below own-claim", () => {
     assert.deepEqual(sorted([{ id: 1, priority: "normal" }, { id: 2, priority: "normal" }], c2), [1, 2]);
 });
 
-test("#405 computeHotFocus: mono-focus = the most recent self-activity within the window", () => {
+test("#532 computeHotFocus: multi-hot — every ticket within the window is hot (no mono-focus reduction)", () => {
     const now = Date.parse("2026-05-24T10:00:00Z");
     const win = 600_000; // 10 min
     const self = new Map<number, string>([
-        [1, "2026-05-24T09:58:00Z"], // 2 min ago
+        [1, "2026-05-24T09:58:00Z"], // 2 min ago — in
         [2, "2026-05-24T09:50:00Z"], // 10 min ago (== window edge → out)
-        [3, "2026-05-24T09:59:30Z"], // 30 s ago → the focus
+        [3, "2026-05-24T09:59:30Z"], // 30 s ago — in
+        [4, "2026-05-24T09:55:00Z"], // 5 min ago — in
     ]);
-    assert.deepEqual([...computeHotFocus(self, now, win)], [3]); // single most-recent
+    const focus = computeHotFocus(self, now, win);
+    assert.deepEqual([...focus].sort((a, b) => a - b), [1, 3, 4]);
 });
 
 test("#405 computeHotFocus: empty when nothing is within the window", () => {
