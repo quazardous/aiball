@@ -312,25 +312,40 @@ function closeStream() {
     connected.value = false;
 }
 
-async function toggleFullscreen() {
-    isFullscreen.value = !isFullscreen.value;
-    // #472 david `6d56gs` "quand on sort du mode plein ecran la hauteur
-    // est incorrect" : un seul `nextTick` ne suffisait pas — Vue avait
-    // mis à jour le DOM mais le navigateur n'avait pas encore recalculé
-    // le layout flex parent. fit() mesurait alors l'ancienne hauteur
-    // (fullscreen) et appliquait des rows qui ne tenaient pas dans la
-    // nouvelle. On enchaîne nextTick + requestAnimationFrame (Vue puis
-    // une vraie frame de paint) avant de fit pour que les dimensions
-    // soient stables. Symétrique : ça aide aussi à l'entrée fullscreen.
+async function settleAndFit(): Promise<void> {
+    // #533 (david) "la hauteur quand on revient est pas bonne (trop haut
+    // perdu dans le bottom)" : le fix #472 (nextTick + 1 RAF + fit) suffit
+    // pour Win Chrome la plupart du temps, mais sur certaines configs la
+    // 1ère fit() mesure encore une dimension chicken-egg (canvas xterm
+    // garde la taille fullscreen → wrapper le contient → fit lit la mauvaise
+    // hauteur). Pattern double-fit + scrollToBottom :
+    //  1. nextTick : Vue applique la classe .terminal-view--fullscreen
+    //  2. 1 RAF + fit : 1ère mesure (peut être mid-transition)
+    //  3. 1 RAF + fit : 2ème mesure (les dimensions ont settle, fit final)
+    //  4. scrollToBottom : si le rows-count a shrunk, garde le contenu
+    //     récent visible au lieu du scrollback haut (qui était l'effet
+    //     « vide en bas » que david voyait — la viewport était en haut du
+    //     buffer, pas en bas).
     await nextTick();
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
     fitAddon?.fit();
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    fitAddon?.fit();
+    term?.scrollToBottom();
+}
+
+async function toggleFullscreen() {
+    isFullscreen.value = !isFullscreen.value;
+    await settleAndFit();
 }
 
 function onKeydown(e: KeyboardEvent) {
     if (e.key === "Escape" && isFullscreen.value) {
         isFullscreen.value = false;
-        nextTick().then(() => fitAddon?.fit());
+        // #533 : même pattern que toggleFullscreen, l'Escape sortait
+        // précédemment avec juste nextTick + fit (héritage du fix #472
+        // incomplet pour ce path).
+        settleAndFit();
     }
 }
 
