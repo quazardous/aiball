@@ -14,6 +14,12 @@ export interface ProjectListItem {
     local?: boolean;
     /** #393 (3c): a claude-loop is currently running (rooted consumer fresh). */
     running?: boolean;
+    /** #537 — ISO timestamp of the project's latest ticket activity. Used by
+     *  the active/inactive split : un projet avec des counters mais dont la
+     *  dernière activité est très vieille est dormant, pas actif (david
+     *  `vr4mwj` : « inactif c'est aussi un projet dont le derniier ticket
+     *  est tres vieux »). Absent (undefined) = treated as fresh (back-compat). */
+    last_activity?: string | null;
 }
 
 // #506 — `rules` + `work-filters` retirés (panels legacy supprimés, leur UI
@@ -64,11 +70,24 @@ const activeProjectLabel = computed(() => {
 
 // #537 david : split active / inactive — un projet est "actif" si une loop
 // tourne dessus OU s'il a au moins un counter non-trivial (pending /
-// unread / resolved). « Inactif » = seulement open / snoozed (= juste un
-// reservoir de tickets backloggés). On garde le projet courant TOUJOURS
-// visible même s'il est inactif (sinon il disparaît quand sélectionné).
+// unread / resolved) ET son dernier ticket est récent (≤14j, sinon les
+// counters sont stales — david `vr4mwj` : « inactif c'est aussi un projet
+// dont le derniier ticket est tres vieux »). `running` court-circuite : une
+// loop qui tourne = actif définitionnellement, peu importe l'âge du dernier
+// ticket. On garde le projet courant TOUJOURS visible même s'il est inactif
+// (sinon il disparaît quand sélectionné). Même Sidebar.vue sert mobile/
+// « version portable » via le `<details>` collapse #B.161 → le fix bénéficie
+// aux deux viewports d'un seul changement.
+const INACTIVE_AGE_DAYS = 14;
 function isProjectActive(p: ProjectListItem): boolean {
-    return !!(p.running || p.pending > 0 || p.unread > 0 || p.resolved > 0);
+    if (p.running) return true; // loop running = actif sans question
+    const hasSignal = p.pending > 0 || p.unread > 0 || p.resolved > 0;
+    if (!hasSignal) return false;
+    // Recency check : si le dernier ticket est trop vieux, on dort.
+    if (!p.last_activity) return true; // absent = back-compat, on assume fresh
+    const ageMs = Date.now() - Date.parse(p.last_activity);
+    if (Number.isNaN(ageMs)) return true; // ISO mal formé, on assume fresh
+    return ageMs < INACTIVE_AGE_DAYS * 24 * 60 * 60 * 1000;
 }
 const allProjectItem = computed(() => props.items.find((p) => p.value === null) ?? null);
 const activeProjects = computed(() =>

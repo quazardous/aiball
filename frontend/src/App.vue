@@ -627,6 +627,9 @@ const projectListItems = computed<ProjectListItem[]>(() => [
         local: p.local === true,
         // #393 (3c): a loop is currently running (rooted consumer heartbeating).
         running: p.running === true,
+        // #537 : recency du dernier ticket — drive le critère « inactif si
+        // dernier ticket très vieux » dans Sidebar.isProjectActive.
+        last_activity: p.last_activity ?? null,
     })),
 ]);
 
