@@ -83,6 +83,7 @@ import {
     type WakeHint,
 } from "./state.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
+import { stripMarkdown } from "./markdown-strip.js";
 
 const sd = process.env.CL_STATE_DIR;
 const name = process.env.CL_NAME;
@@ -288,8 +289,15 @@ function selfReloadIfStale(): void {
 async function pickPhrase(hint?: WakeHint): Promise<string> {
     if (hint?.ticket_id) {
         const me = process.env.AIBALL_AGENT;
-        if (await isWakeStakeholder(hint, me)) {
-            return buildWakePhrase(hint, pingsPath(sd!));
+        const ctx = await fetchWakeContext(hint, me);
+        if (ctx.stakeholder) {
+            // #555 : enrich hint avec le body strippé du commentaire avant de
+            // build la phrase. Pas de mutation du hint d'origine (recordWakeHint
+            // serialize comment_body inutilement sinon).
+            const enriched: WakeHint = ctx.commentBody
+                ? { ...hint, comment_body: ctx.commentBody }
+                : hint;
+            return buildWakePhrase(enriched, pingsPath(sd!));
         }
         log(`wake-hint #${hint.ticket_id}${hint.comment_hashid ? ` (comment #${hint.comment_hashid})` : ""} not for me (${me}) — falling back to generic context phrase`);
     }
@@ -301,42 +309,58 @@ async function pickPhrase(hint?: WakeHint): Promise<string> {
 }
 
 /**
- * #544 — does this agent care about being woken specifically for this
- * ticket ? True iff one of :
- *   - the agent holds a live claim on the ticket
- *   - the agent is the explicit assignee
- *   - the comment body @-mentions the agent
+ * #544 + #555 — one-shot fetch qui sert à la fois (a) le filtre stakeholder
+ * et (b) l'extraction du body du commentaire pour l'inject dans le wake.
+ * Mutualise l'appel daemon (auparavant `isWakeStakeholder` faisait ce fetch
+ * pour le seul check booléen, on jetait le body — maintenant on le retient).
  *
- * Reporter (`by_agent`) alone n'est PAS suffisant (david `hdc7hn` :
+ * **Stakeholder** = true iff l'un de :
+ *   - l'agent tient un claim live sur le ticket
+ *   - l'agent est l'assignee explicite
+ *   - le body du commentaire @-mentionne l'agent
+ *
+ * Reporter (`by_agent`) seul N'est PAS suffisant (david `hdc7hn` :
  * « aiball-win est le reporter/owner mais il doit pas le claim »).
  *
- * Fail-open : si la lookup foire (daemon down, hashid manquant,
- * timeout), on suppose stakeholder → mieux vaut un wake gratuit qu'un
- * miss silencieux. Si AIBALL_AGENT n'est pas set côté env (back-compat
- * tests), on suppose stakeholder aussi.
+ * **commentBody** = extrait markdown-strippé via `stripMarkdown`, renseigné
+ * dès que le hint porte un `comment_hashid` et que le comment est trouvé
+ * dans la réponse — indépendamment du verdict stakeholder (le caller décide
+ * s'il l'utilise).
+ *
+ * Fail-open sur stakeholder : si la lookup foire (daemon down, hashid
+ * manquant, timeout), on suppose stakeholder=true → mieux vaut un wake
+ * gratuit qu'un miss silencieux. commentBody reste vide dans ce cas.
  */
-async function isWakeStakeholder(hint: WakeHint, me: string | undefined): Promise<boolean> {
-    if (!me || !hint.ticket_id) return true;
+async function fetchWakeContext(
+    hint: WakeHint,
+    me: string | undefined,
+): Promise<{ stakeholder: boolean; commentBody?: string }> {
+    if (!me || !hint.ticket_id) return { stakeholder: true };
     try {
         const resp = await client().getTicket(hint.ticket_id, { brief: true }) as {
             ticket?: { claimant?: string | null; assignee?: string | null };
             comments?: Array<{ hashid?: string; body?: string | null }>;
         };
         const t = resp.ticket;
-        if (!t) return true;
-        if (t.claimant === me || t.assignee === me) return true;
+        if (!t) return { stakeholder: true };
+        // Extraire body avant le verdict pour que l'enrichment marche aussi
+        // sur le chemin claim/assignee (sans @-mention dans le body).
+        let commentBody: string | undefined;
+        let mentionsMe = false;
         if (hint.comment_hashid && Array.isArray(resp.comments)) {
             const cm = resp.comments.find((x) => x.hashid === hint.comment_hashid);
             const body = cm?.body ?? "";
+            if (body) commentBody = stripMarkdown(body);
             // Same lookbehind shape as the formatting mention regex (#535),
             // minus `>` to also catch mentions au start de markdown paragraphs.
             const escaped = me.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
             const re = new RegExp(`(?<![\\w@"'/])@${escaped}\\b`);
-            if (re.test(body)) return true;
+            mentionsMe = re.test(body);
         }
-        return false;
+        const stakeholder = t.claimant === me || t.assignee === me || mentionsMe;
+        return { stakeholder, commentBody };
     } catch {
-        return true;
+        return { stakeholder: true };
     }
 }
 

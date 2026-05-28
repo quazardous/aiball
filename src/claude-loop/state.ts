@@ -1406,6 +1406,14 @@ export interface WakeHint {
     comment_id?: number;
     comment_hashid?: string;
     intent?: Intent;
+    /**
+     * #555 — extrait du body du commentaire qui a déclenché le wake,
+     * markdown-strippé + tronqué (cf. `stripMarkdown`). Optionnel : seul le
+     * path commentaire le renseigne (le path ticket-only n'a rien à
+     * injecter). Utilisé par `buildWakePhrase` pour le token `{body}`.
+     * Non persisté dans `lastWakeHintPath` (pas utile pour la coalescence).
+     */
+    comment_body?: string;
 }
 
 /**
@@ -1436,26 +1444,34 @@ const DEFAULT_WAKE_TEMPLATES: WakeTemplates = {
     // #B.230: must mention "aiball" explicitly so claude doesn't
     // confuse the ticket id with another tracker (mantis, etc.) when
     // the project has multiple MCP-exposed trackers configured.
+    // #555: `{body}` token inséré sur les slots `with_comment` — extrait
+    // markdown-strippé du commentaire qui a déclenché le wake. Token
+    // resolved à `""` si pas de body (back-compat avec yaml personnalisés
+    // sans `{body}` : token absent = no-op). La séquence `{body:+ — "{body}"}`
+    // wrap l'extrait entre guillemets séparé par ` — ` pour qu'il se lise
+    // comme une citation inline. Pas de newline → la wake-phrase reste un
+    // single-liner injecté via `send-keys` (multi-line déclencherait un
+    // submit prématuré).
     panic: {
-        with_comment: "URGENT: aiball ticket #{ticket} needs you — new comment #{comment}.",
+        with_comment: "URGENT: aiball ticket #{ticket} needs you — new comment #{comment}.{body:+ — \"{body}\"}",
         ticket_only: "URGENT: aiball ticket #{ticket} needs you.",
     },
     request: {
-        with_comment: "Handle aiball ticket #{ticket} — new comment #{comment}.",
+        with_comment: "Handle aiball ticket #{ticket} — new comment #{comment}.{body:+ — \"{body}\"}",
         ticket_only: "Handle aiball ticket #{ticket}.",
     },
     question: {
-        with_comment: "aiball ticket #{ticket} waits for your answer — comment #{comment}.",
+        with_comment: "aiball ticket #{ticket} waits for your answer — comment #{comment}.{body:+ — \"{body}\"}",
         ticket_only: "aiball ticket #{ticket} waits for your answer.",
     },
     fyi: {
-        with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}.",
+        with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}.{body:+ — \"{body}\"}",
         ticket_only: "Heads-up on aiball ticket #{ticket}.",
     },
     // #319: feature work. Base wording; buildWakePhrase appends the config-driven
     // branch hint (workflow.hint_branch / hint_worktree) for this intent.
     feature: {
-        with_comment: "Build aiball feature ticket #{ticket} — new comment #{comment}.",
+        with_comment: "Build aiball feature ticket #{ticket} — new comment #{comment}.{body:+ — \"{body}\"}",
         ticket_only: "Build aiball feature ticket #{ticket}.",
     },
 };
@@ -1519,9 +1535,20 @@ export function buildWakePhrase(hint: WakeHint | undefined, pingsAbsPath: string
     const templates = loadWakeTemplates(pingsAbsPath) ?? DEFAULT_WAKE_TEMPLATES;
     const slot = templates[intent] ?? templates.request ?? DEFAULT_WAKE_TEMPLATES.request;
     const tpl = commentHashid ? slot.with_comment : slot.ticket_only;
+    // #555 : grammar `{body:+ <text>}` = `<text>` (avec `{body}` ré-injecté)
+    // si comment_body est non-vide, "" sinon. Permet aux templates yaml de
+    // choisir où placer l'extrait + son habillage (séparateur, quotes…).
+    // Substitution faite AVANT le {body} plain pour que les deux formes
+    // coexistent (yaml authors peuvent utiliser l'une ou l'autre). Le regex
+    // intérieur autorise un `{body}` imbriqué (le seul token légal dans le
+    // bloc) pour ne pas couper sur le `}` du body literal.
+    const body = (hint?.comment_body ?? "").trim();
     let phrase = tpl
         .replace(/\{ticket\}/g, String(ticketId))
-        .replace(/\{comment\}/g, commentHashid ?? "");
+        .replace(/\{comment\}/g, commentHashid ?? "")
+        .replace(/\{body:\+((?:[^{}]|\{body\})*)\}/g, (_, text: string) =>
+            body ? text.replace(/\{body\}/g, body) : "")
+        .replace(/\{body\}/g, body);
     // #319: for `feature` tickets, claude-loop "habille" the wake with a
     // config-driven branch hint (workflow.hint_branch / hint_worktree, from the
     // layered .aiball.yaml). Wording is non-technical + project-tunable
