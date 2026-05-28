@@ -313,19 +313,24 @@ function closeStream() {
 }
 
 async function settleAndFit(): Promise<void> {
-    // #533 (david) "la hauteur quand on revient est pas bonne (trop haut
-    // perdu dans le bottom)" : le fix #472 (nextTick + 1 RAF + fit) suffit
-    // pour Win Chrome la plupart du temps, mais sur certaines configs la
-    // 1ère fit() mesure encore une dimension chicken-egg (canvas xterm
-    // garde la taille fullscreen → wrapper le contient → fit lit la mauvaise
-    // hauteur). Pattern double-fit + scrollToBottom :
-    //  1. nextTick : Vue applique la classe .terminal-view--fullscreen
-    //  2. 1 RAF + fit : 1ère mesure (peut être mid-transition)
-    //  3. 1 RAF + fit : 2ème mesure (les dimensions ont settle, fit final)
-    //  4. scrollToBottom : si le rows-count a shrunk, garde le contenu
-    //     récent visible au lieu du scrollback haut (qui était l'effet
-    //     « vide en bas » que david voyait — la viewport était en haut du
-    //     buffer, pas en bas).
+    // #533 (david repro claude-in-chrome Win DPI 1.25) — chicken-egg
+    // mesure : canvas xterm conserve sa taille fullscreen tant que pas
+    // de term.resize() explicite, push le wrapper, fit() lit la mauvaise
+    // hauteur. Belt-and-suspenders :
+    //  1. CSS `max-height: 22rem` sur `.terminal-view__xterm` borne le
+    //     wrapper (cf style block). Override `max-height: none` en
+    //     fullscreen.
+    //  2. JS ici : avant `fit()`, on PRÉ-SHRINK le terminal à 80x24 quand
+    //     on sort de fullscreen → casse le chicken-egg, le wrapper
+    //     collapse à son min-height, fit() mesure correctement la nouvelle
+    //     hauteur. Pré-shrink uniquement sur exit (entry fullscreen est
+    //     déjà une croissance, fit() catch sans assistance).
+    //  3. nextTick + RAF avant fit() pour laisser Vue + browser settle.
+    //  4. scrollToBottom : si rows-count shrinke (60→24), garde le contenu
+    //     récent visible au lieu du scrollback haut (vide-en-bas perçu).
+    if (!isFullscreen.value) {
+        try { term?.resize(80, 24); } catch { /* noop */ }
+    }
     await nextTick();
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
     fitAddon?.fit();
@@ -496,12 +501,21 @@ onBeforeUnmount(() => {
 }
 .terminal-view__xterm {
     flex: 1;
+    /* #533 (david repro Win DPI 1.25 — chicken-egg) : `min-height` seul ne
+       suffit pas — au sortir de fullscreen le canvas xterm garde sa taille
+       fullscreen (629px observé), push le wrapper, et `fit()` mesure ce
+       wrapper grow → pas de shrink. `max-height` capé borne le wrapper, et
+       `overflow: hidden` empêche le canvas de déborder visiblement (xterm
+       gère son propre scroll interne). En fullscreen ces deux contraintes
+       sont relâchées (cf override ci-dessous). */
     min-height: 22rem;
+    max-height: 22rem;
+    overflow: hidden;
     padding: 0.4rem;
     background: #0f172a;
-    /* xterm.js puts its own canvas inside this div ; just give it room. */
 }
 .terminal-view--fullscreen .terminal-view__xterm {
     min-height: 0;
+    max-height: none;
 }
 </style>
