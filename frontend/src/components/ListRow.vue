@@ -161,6 +161,15 @@ function onClick(ev: MouseEvent) {
        qu'avant, mais le title line a maintenant DEUX leviers contre le
        clip descender (line box tall + padding safety net). */
     padding: 0.25rem 0.7rem;
+    /* #530 (suite 2k5nfe) : `flex-shrink: 0` empêche le main parent
+       (display:flex column avec height fixé) de squeeze les rows quand
+       la liste est longue. Avant : rows comprimées à min-height (54.4px)
+       → flex distribue les enfants → soit title se compresse en clip
+       descender soit chips débordent. Avec flex-shrink 0 sur le row,
+       chaque row prend SA taille naturelle (~61.4px), main scrolle si
+       besoin (overflow:auto déjà set). Cohérent avec le min-height qui
+       agit comme floor visuel pour les rows COURTES. */
+    flex-shrink: 0;
     border-bottom: 1px solid var(--p-content-border-color);
     cursor: pointer;
     transition: background 0.1s;
@@ -266,19 +275,19 @@ function onClick(ev: MouseEvent) {
     white-space: nowrap;
     display: block;
     font-size: 0.92rem;
-    /* #530 (suite cerqc8) — descender clip cross-platform : combo
-       belt-and-suspenders, deux leviers conjugués :
-       1. `line-height: 1.5` (standard accessibilité MDN) → line box
-          assez tall pour fitter les descenders dans la majorité des
-          fonts / OS.
-       2. `padding-bottom: 0.25rem` → marge supplémentaire SOUS le line
-          box mais DEDANS le clip overflow:hidden (qui clip au padding
-          edge, pas au line box). Catch les glyphs qui escape le line
-          box pour cause de DPI/zoom Windows ou métriques font exotiques
-          (Segoe UI « g » à 125% scaling = descender qui dépasse le
-          half-leading de 1.5 line-height).
-       Row padding compense plus haut (0.4→0.25rem) pour rester équivalent
-       en hauteur totale. */
+    /* #530 (suite 2k5nfe — repro Win Chrome DPI 1.25 via claude-in-chrome) :
+       ROOT CAUSE trouvée — la title-line se faisait shrink par le flex
+       distribution dans .list-row (min-height 3.4rem capait la row, et
+       title shrinkait pour fitter — chips ne shrinkaient pas, glyphs
+       fixés). Title content area passait de 26px naturel à 19px → clip
+       de 7px sur les descenders.
+       Fix : `flex-shrink: 0` empêche la title-line de shrink dans le flex
+       parent. La row grow alors au-delà de son min-height pour fitter le
+       title à sa taille naturelle. Side : rows peuvent être qq px plus
+       hauts en cas de long title, mais zero descender clip.
+       Combo line-height 1.5 + padding-bottom 0.25rem maintenu (belt-and-
+       suspenders) pour DPI extrême / fonts exotiques au cas où. */
+    flex-shrink: 0;
     line-height: 1.5;
     padding-bottom: 0.25rem;
 }
