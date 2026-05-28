@@ -74,13 +74,27 @@ mod core;
 
 const CP_UTF8: u32 = 65001;
 
-/// Opt-in byte tracing to stderr (set CL_PROXY_DEBUG=1). Logs the first
-/// bytes of each stdin / inject chunk so the channel classification can be
-/// verified without a debugger.
+/// Opt-in byte tracing. CL_PROXY_DEBUG=1 → stderr (mixes with claude in the
+/// pane). CL_PROXY_DEBUG_FILE=<path> → append to that file (quiet, persistent,
+/// preferred for autonomous diagnostic). Either or both can be set.
 fn dbg_bytes(tag: &str, data: &[u8]) {
-    if env::var("CL_PROXY_DEBUG").map(|v| !v.is_empty()).unwrap_or(false) {
-        let head: Vec<String> = data.iter().take(12).map(|b| format!("{b:02x}")).collect();
-        eprintln!("[cl-pty-proxy] {tag} n={} head=[{}]", data.len(), head.join(" "));
+    let to_stderr = env::var("CL_PROXY_DEBUG").map(|v| !v.is_empty()).unwrap_or(false);
+    let file_path = env::var("CL_PROXY_DEBUG_FILE").ok().filter(|s| !s.is_empty());
+    if !to_stderr && file_path.is_none() {
+        return;
+    }
+    // Log the FULL byte run (not just head) so the diagnostic captures every
+    // bit of split / coalesced data.
+    let hex: Vec<String> = data.iter().map(|b| format!("{b:02x}")).collect();
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let line = format!("[cl-pty-proxy] ts={ts} {tag} n={} bytes=[{}]", data.len(), hex.join(" "));
+    if to_stderr {
+        eprintln!("{line}");
+    }
+    if let Some(p) = file_path {
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+            let _ = writeln!(f, "{line}");
+        }
     }
 }
 
@@ -685,6 +699,7 @@ fn real_main() -> i32 {
                                 apply_marker(*m);
                             }
                             if !v.forward.is_empty() {
+                                dbg_bytes("forward", &v.forward);
                                 if let Ok(mut w) = writer.lock() {
                                     let _ = w.write_all(&v.forward);
                                     let _ = w.flush();
