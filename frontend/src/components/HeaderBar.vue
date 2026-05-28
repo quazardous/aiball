@@ -1,7 +1,26 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import Button from "primevue/button";
 import IdentityPicker from "./IdentityPicker.vue";
 import { HEADER_BADGE_TOOLTIPS } from "../lib/labels";
+
+// #540 david : goto ticket — input compact dans le header qui accepte un
+// numéro de ticket (avec ou sans `#`) et navigate vers `/b/N`. Le router
+// dans App.vue picke ensuite l'openTicketId via parseUrl. Pas de hashid
+// pour l'instant (hashids = comments-only, et `/b/<hashid>` n'est pas
+// route-parsé côté frontend ; lookup int suffit pour l'usage « j'ai vu
+// #538 mentionné, je veux y sauter »).
+const gotoInput = ref("");
+function submitGoto() {
+    const raw = gotoInput.value.trim().replace(/^#/, "");
+    const id = parseInt(raw, 10);
+    if (!Number.isNaN(id) && id > 0) {
+        window.history.pushState({}, "", `/b/${id}`);
+        // Trigger the router's popstate watcher in App.vue.
+        window.dispatchEvent(new PopStateEvent("popstate"));
+        gotoInput.value = "";
+    }
+}
 
 // #438: the moderation-strategy picker moved out of the header into the
 // dedicated Settings > General page (GeneralSettingsPanel) — david wanted
@@ -72,6 +91,17 @@ const emit = defineEmits<{
             <i class="pi pi-history" /> {{ globalSnoozedCount }}
         </button>
         <span class="spacer" />
+        <form class="header-goto" @submit.prevent="submitGoto">
+            <input
+                v-model="gotoInput"
+                type="text"
+                inputmode="numeric"
+                pattern="#?[0-9]+"
+                placeholder="#N"
+                title="Go to ticket — type a ticket number (e.g. 540) and press Enter"
+                class="header-goto__input"
+            />
+        </form>
         <IdentityPicker />
         <Button
             :icon="dark ? 'pi pi-sun' : 'pi pi-moon'"
@@ -142,6 +172,27 @@ const emit = defineEmits<{
 }
 .aiball-header .spacer {
     flex: 1;
+}
+/* #540 — goto ticket input : compact, mono, blends-in. */
+.header-goto {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+}
+.header-goto__input {
+    width: 4.5rem;
+    padding: 0.2rem 0.5rem;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.3rem;
+    background: var(--p-surface-50);
+    color: var(--p-text-color);
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.85rem;
+    text-align: center;
+}
+.header-goto__input:focus {
+    outline: none;
+    border-color: var(--p-primary-color);
 }
 .connection-dot {
     display: inline-block;
