@@ -4,10 +4,10 @@ Single entry point for **how we work on this codebase**. The audience is
 both human contributors and the Claude agents that drive most of the
 work (aiball-win on Windows, claude-aiball-dev on Linux, etc.).
 
-The repo's [`README.md`](../README.md) tells you what aiball *is*; this
+The repo's [`README.md`](./README.md) tells you what aiball *is*; this
 doc tells you how to *change* it. Operational instructions for the dev
 checkout (the live runtime, frontend rebuild, hard restart for
-migrations…) live in [`CLAUDE.md`](../CLAUDE.md) — load it first, then
+migrations…) live in [`CLAUDE.md`](./CLAUDE.md) — load it first, then
 come back here for the *how*.
 
 ## Sections
@@ -190,7 +190,7 @@ Triage based on audience:
   release history. Reader-facing docs stay clean of these refs.
 
 Deep dives on the lifecycle and event model live in
-[`docs/TICKET_LIFECYCLE.md`](TICKET_LIFECYCLE.md).
+[`docs/TICKET_LIFECYCLE.md`](docs/TICKET_LIFECYCLE.md).
 
 ---
 
@@ -201,7 +201,7 @@ Deep dives on the lifecycle and event model live in
 **All code is in English** — comments, identifiers, log messages,
 string literals, error messages, test names. UI strings shown to the
 end user are also English (the project has no i18n surface today; see
-[`docs/I18N.md`](I18N.md) for the policy + the proposed approach if
+[`docs/I18N.md`](docs/I18N.md) for the policy + the proposed approach if
 that ever changes).
 
 This applies to new code AND to edits you make to existing code: if
@@ -308,7 +308,7 @@ daemon crashes on reload (`tsx watch` reloads code but does NOT
 re-run migrations — a hard restart does).
 
 Full conventions, journal entries, naming, the `drizzle-kit generate`
-flow: see [`docs/MIGRATIONS.md`](MIGRATIONS.md). When touching DB,
+flow: see [`docs/MIGRATIONS.md`](docs/MIGRATIONS.md). When touching DB,
 preload that doc.
 
 ### 2.6 Tests
@@ -434,7 +434,7 @@ sessions* so the context window stays usable.
 These are the docs an agent should have in context before starting
 any non-trivial task on aiball:
 
-1. **[`CLAUDE.md`](../CLAUDE.md)** (repo root) — operational truth
+1. **[`CLAUDE.md`](./CLAUDE.md)** (repo root) — operational truth
    for the live-runtime checkout (rebuild, hard restart for
    migrations, env vars). Loaded automatically by Claude Code.
 2. **This doc** (`docs/CONTRIBUTING.md`) — the practical guide. If a
@@ -453,18 +453,18 @@ editing. Skim the headers first if the doc is large.
 
 | Touching…                                      | Read first                                       |
 | ---------------------------------------------- | ------------------------------------------------ |
-| DB schema / queries / migrations               | [`docs/MIGRATIONS.md`](MIGRATIONS.md) + the relevant schema file |
-| Config files / `.aiball.yaml` / per-project    | [`docs/CONFIGS.md`](CONFIGS.md) — the russian-doll layering |
-| claude-loop, timer, wake logic                 | [`docs/CLAUDE-LOOP.md`](CLAUDE-LOOP.md)          |
-| `windows/cl-pty-proxy/`                        | [`docs/PTY-PROXY-WINDOWS.md`](PTY-PROXY-WINDOWS.md) |
-| Unix PTY proxy (`pty-proxy.py`)                | [`docs/PTY-PROXY.md`](PTY-PROXY.md)              |
-| Tickets, comments, automation, lifecycle       | [`docs/TICKET_LIFECYCLE.md`](TICKET_LIFECYCLE.md) |
-| Remote nodes / proxy mode / tailnet            | [`docs/REMOTE.md`](REMOTE.md) + [`docs/SECURITY.md`](SECURITY.md) |
-| Tailscale specifics                            | [`docs/TAILSCALE.md`](TAILSCALE.md)              |
-| Sandbox / autonomous agents                    | [`docs/SANDBOX.md`](SANDBOX.md)                  |
-| Install paths, install modes                   | [`docs/INSTALL.md`](INSTALL.md) (Linux/macOS) or [`docs/WIN-INSTALL.md`](WIN-INSTALL.md) |
-| MCP client / agent-facing tool surface         | [`MCP-CLIENT.md`](../MCP-CLIENT.md)              |
-| Workflow (feature vs mainstream branch model)  | [`docs/WORKFLOW.md`](WORKFLOW.md)                |
+| DB schema / queries / migrations               | [`docs/MIGRATIONS.md`](docs/MIGRATIONS.md) + the relevant schema file |
+| Config files / `.aiball.yaml` / per-project    | [`docs/CONFIGS.md`](docs/CONFIGS.md) — the russian-doll layering |
+| claude-loop, timer, wake logic                 | [`docs/CLAUDE-LOOP.md`](docs/CLAUDE-LOOP.md)          |
+| `windows/cl-pty-proxy/`                        | [`docs/PTY-PROXY-WINDOWS.md`](docs/PTY-PROXY-WINDOWS.md) |
+| Unix PTY proxy (`pty-proxy.py`)                | [`docs/PTY-PROXY.md`](docs/PTY-PROXY.md)              |
+| Tickets, comments, automation, lifecycle       | [`docs/TICKET_LIFECYCLE.md`](docs/TICKET_LIFECYCLE.md) |
+| Remote nodes / proxy mode / tailnet            | [`docs/REMOTE.md`](docs/REMOTE.md) + [`docs/SECURITY.md`](docs/SECURITY.md) |
+| Tailscale specifics                            | [`docs/TAILSCALE.md`](docs/TAILSCALE.md)              |
+| Sandbox / autonomous agents                    | [`docs/SANDBOX.md`](docs/SANDBOX.md)                  |
+| Install paths, install modes                   | [`docs/INSTALL.md`](docs/INSTALL.md) (Linux/macOS) or [`docs/WIN-INSTALL.md`](docs/WIN-INSTALL.md) |
+| MCP client / agent-facing tool surface         | [`MCP-CLIENT.md`](./MCP-CLIENT.md)              |
+| Workflow (feature vs mainstream branch model)  | [`docs/WORKFLOW.md`](docs/WORKFLOW.md)                |
 
 When in doubt about which doc applies, grep first
 (`grep -l <symbol> docs/`) rather than read everything.
@@ -543,8 +543,8 @@ specifics:
 - **Proxy node mode**: some hosts (e.g. graphite on Windows) run as
   a proxy relaying to a central daemon over Tailscale. Local DB is
   bypassed; everything flows to the upstream. See
-  [`docs/REMOTE.md`](REMOTE.md) and the proxy-node architecture
-  in [`docs/SECURITY.md`](SECURITY.md).
+  [`docs/REMOTE.md`](docs/REMOTE.md) and the proxy-node architecture
+  in [`docs/SECURITY.md`](docs/SECURITY.md).
 - **ConPTY vs Unix PTY**: Windows uses the ConPTY proxy
   (`cl-pty-proxy`, Rust), Linux uses the Python PTY proxy. They
   expose the same interface — write the calling code platform-agnostic
