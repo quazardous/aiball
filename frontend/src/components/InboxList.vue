@@ -170,7 +170,7 @@ function onRowClick(r: InboxRow) {
             <span
                 v-if="r.hot"
                 class="list-hot-focus"
-                :title="r.claimant ? `Claimed by ${r.claimant} — an agent is currently focused on this ticket.` : 'An agent has recent activity on this ticket (within the hot window).'"
+                title="An agent has recent activity on this ticket (within the hot window). Claim status is shown separately by the bookmark icon."
                 style="margin-right: 0.3rem"
             >🔥</span>
             <span class="ticket-id">{{ formatTicketRef(r.id) }}</span>

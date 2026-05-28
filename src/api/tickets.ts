@@ -565,11 +565,14 @@ ticketsRouter.get("/inbox", (req, res) => {
             // Per-consumer unread flag (≥1 unseen ping on the thread for
             // the caller, resolved from the X-Aiball-Consumer header).
             unread: unreadMap.get(t.id) ?? false,
-            // #405/#532 (sfbsdy + neg428) : visibility cross-agent — un 🔥
-            // s'allume dès QU'UN agent (n'importe lequel) est focus sur le
-            // ticket récemment, OU détient une live claim. David humain spot
-            // les tickets « hot » de ses agents sans imperonser.
-            hot: crossAgentHotFocus.has(t.id) || t.claimant != null,
+            // #405/#532 (sfbsdy + s2sjxz) : visibility cross-agent — un 🔥
+            // s'allume dès QU'UN agent (n'importe lequel) a une activité
+            // récente (< hot_window_sec). PAS le claim, qui peut être stale
+            // (david `s2sjxz` : #509 marqué hot car claim 15h vieux mais
+            // zéro activité). Le claim reste visible via la bookmark-fill
+            // chip distincte dans le meta slot — pas besoin de le conflate
+            // avec hot. Hot = focus ACTIF maintenant.
+            hot: crossAgentHotFocus.has(t.id),
             // Snooze (#B.329). `postponed=true` means the deadline hasn't
             // passed yet — UI hides the row from the open inbox the same
             // way `closed=true` does. `postponed_until` is the deadline
@@ -856,10 +859,9 @@ ticketsRouter.get("/tickets", (req, res) => {
             tags: tagsMap.get(m.id) ?? [],
             // #404: accumulated token-effort tally (null until any usage pushed).
             token_usage: tokenUsageMap.get(m.id) ?? null,
-            // #405/#532 (sfbsdy + neg428) : visibility cross-agent — un 🔥
-            // s'allume dès qu'un agent (n'importe lequel) est focus récemment
-            // OU détient une live claim.
-            hot: crossAgentHotFocus.has(m.id) || m.claimant != null,
+            // #405/#532 (sfbsdy + s2sjxz) : visibility cross-agent —
+            // recency only, pas le claim (stale claim ≠ hot, david `s2sjxz`).
+            hot: crossAgentHotFocus.has(m.id),
             // #418/#436: assignment (responsibility, persistent) + claim (focus,
             // transient) are now distinct fields. `is_claim` kept for back-compat
             // (true when claimed), derived from `claimant`.
