@@ -62,6 +62,23 @@ const activeProjectLabel = computed(() => {
     return active?.label ?? "Projects";
 });
 
+// #537 david : split active / inactive — un projet est "actif" si une loop
+// tourne dessus OU s'il a au moins un counter non-trivial (pending /
+// unread / resolved). « Inactif » = seulement open / snoozed (= juste un
+// reservoir de tickets backloggés). On garde le projet courant TOUJOURS
+// visible même s'il est inactif (sinon il disparaît quand sélectionné).
+function isProjectActive(p: ProjectListItem): boolean {
+    return !!(p.running || p.pending > 0 || p.unread > 0 || p.resolved > 0);
+}
+const allProjectItem = computed(() => props.items.find((p) => p.value === null) ?? null);
+const activeProjects = computed(() =>
+    props.items.filter((p) => p.value !== null && (isProjectActive(p) || p.value === props.project)),
+);
+const inactiveProjects = computed(() =>
+    props.items.filter((p) => p.value !== null && !isProjectActive(p) && p.value !== props.project),
+);
+const inactiveOpen = ref(false);
+
 // #B.161 desktop: clicking the project summary on desktop should NOT
 // toggle the details (the projects list is always visible there;
 // collapse only makes sense on mobile where vertical space is
@@ -125,10 +142,33 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
                  boutons settings gardent leurs icons), on style le label
                  selon p.running / p.local pour différencier (vert si une
                  loop tourne, muted-italic si local sans loop, normal sinon),
-                 et on rétrécit les badges count. -->
+                 et on rétrécit les badges count.
+                 #537 david : projets actifs (running OU pending/unread/resolved>0)
+                 en haut, inactifs (juste open/snoozed) cachés derrière un
+                 « More (N) » toggle. Le projet courant reste toujours visible
+                 même s'il est inactif. -->
+            <!-- All projects row (toujours en tête, quel que soit son état). -->
             <button
-                v-for="p in items"
-                :key="p.value ?? '__all__'"
+                v-if="allProjectItem"
+                :key="'__all__'"
+                type="button"
+                class="sidebar-item sidebar-item--project"
+                :class="{ active: panel === null && projectPage === null && project === null }"
+                @click="emit('select', null)"
+            >
+                <span
+                    class="sidebar-item-label sidebar-item-label--project"
+                    :title="allProjectItem.label"
+                >{{ allProjectItem.label }}</span>
+                <span v-if="allProjectItem.pending > 0" class="sidebar-badge sidebar-badge--pending sidebar-badge--mini" :title="`${allProjectItem.pending} pending moderation`">{{ allProjectItem.pending }}</span>
+                <span v-if="allProjectItem.resolved > 0" class="sidebar-badge sidebar-badge--resolved sidebar-badge--mini" :title="`${allProjectItem.resolved} resolution proposal${allProjectItem.resolved > 1 ? 's' : ''} waiting for your accept/reject`">{{ allProjectItem.resolved }}</span>
+                <span v-if="allProjectItem.unread > 0" class="sidebar-badge sidebar-badge--unread sidebar-badge--mini" :title="`${allProjectItem.unread} unread tickets for you`">{{ allProjectItem.unread }}</span>
+                <span v-if="allProjectItem.open > 0" class="sidebar-badge sidebar-badge--open sidebar-badge--mini" :title="`${allProjectItem.open} open tickets`">{{ allProjectItem.open }}</span>
+            </button>
+            <!-- Actifs : running OU comptables non-triviaux OU sélectionné. -->
+            <button
+                v-for="p in activeProjects"
+                :key="p.value ?? '__active__'"
                 type="button"
                 class="sidebar-item sidebar-item--project"
                 :class="{ active: panel === null && projectPage === null && project === p.value }"
@@ -146,26 +186,38 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
                             ? `${p.label} — local (root known, no loop running)`
                             : p.label)"
                 >{{ p.label }}</span>
+                <span v-if="p.pending > 0" class="sidebar-badge sidebar-badge--pending sidebar-badge--mini" :title="`${p.pending} pending moderation`">{{ p.pending }}</span>
+                <span v-if="p.resolved > 0" class="sidebar-badge sidebar-badge--resolved sidebar-badge--mini" :title="`${p.resolved} resolution proposal${p.resolved > 1 ? 's' : ''} waiting for your accept/reject`">{{ p.resolved }}</span>
+                <span v-if="p.unread > 0" class="sidebar-badge sidebar-badge--unread sidebar-badge--mini" :title="`${p.unread} unread tickets for you`">{{ p.unread }}</span>
+                <span v-if="p.open > 0" class="sidebar-badge sidebar-badge--open sidebar-badge--mini" :title="`${p.open} open tickets`">{{ p.open }}</span>
+            </button>
+            <!-- Inactifs : just open/snoozed, derrière un toggle. -->
+            <button
+                v-if="inactiveProjects.length > 0"
+                type="button"
+                class="sidebar-item sidebar-item--more"
+                @click="inactiveOpen = !inactiveOpen"
+                :title="inactiveOpen ? 'Hide inactive projects' : `Show ${inactiveProjects.length} inactive project${inactiveProjects.length > 1 ? 's' : ''}`"
+            >
+                <i :class="`pi ${inactiveOpen ? 'pi-chevron-up' : 'pi-chevron-down'}`" style="font-size: 0.7rem; opacity: 0.6" />
+                <span class="sidebar-item-more-label">{{ inactiveOpen ? 'Less' : `More (${inactiveProjects.length})` }}</span>
+            </button>
+            <button
+                v-for="p in (inactiveOpen ? inactiveProjects : [])"
+                :key="`inactive-${p.value}`"
+                type="button"
+                class="sidebar-item sidebar-item--project sidebar-item--inactive"
+                :class="{ active: panel === null && projectPage === null && project === p.value }"
+                @click="emit('select', p.value)"
+            >
                 <span
-                    v-if="p.pending > 0"
-                    class="sidebar-badge sidebar-badge--pending sidebar-badge--mini"
-                    :title="`${p.pending} pending moderation`"
-                >{{ p.pending }}</span>
-                <span
-                    v-if="p.resolved > 0"
-                    class="sidebar-badge sidebar-badge--resolved sidebar-badge--mini"
-                    :title="`${p.resolved} resolution proposal${p.resolved > 1 ? 's' : ''} waiting for your accept/reject`"
-                >{{ p.resolved }}</span>
-                <span
-                    v-if="p.unread > 0"
-                    class="sidebar-badge sidebar-badge--unread sidebar-badge--mini"
-                    :title="`${p.unread} unread tickets for you`"
-                >{{ p.unread }}</span>
-                <span
-                    v-if="p.open > 0"
-                    class="sidebar-badge sidebar-badge--open sidebar-badge--mini"
-                    :title="`${p.open} open tickets`"
-                >{{ p.open }}</span>
+                    class="sidebar-item-label sidebar-item-label--project"
+                    :class="{ 'sidebar-item-label--local': p.local && !p.running && p.value }"
+                    :title="p.local && p.value
+                        ? `${p.label} — local (root known, no loop running)`
+                        : p.label"
+                >{{ p.label }}</span>
+                <span v-if="p.open > 0" class="sidebar-badge sidebar-badge--open sidebar-badge--mini" :title="`${p.open} open tickets`">{{ p.open }}</span>
             </button>
         </details>
 
@@ -452,6 +504,17 @@ const appVersion = typeof __AIBALL_VERSION__ === "string" ? __AIBALL_VERSION__ :
 .sidebar-item-label--local { font-style: italic; opacity: 0.85; }
 .sidebar-item.active .sidebar-item-label--running,
 .sidebar-item.active .sidebar-item-label--local { color: inherit; }
+/* #537 — toggle « More (N) » pour révéler les projets inactifs. Visuellement
+   discret : chevron + label muted, pas d'hover prominent. Les inactifs
+   eux-mêmes héritent du style --local (déjà muted) ou rien. */
+.sidebar-item--more {
+    gap: 0.4rem;
+    color: var(--p-text-muted-color);
+    font-size: 0.78rem;
+    padding-block: 0.25rem;
+}
+.sidebar-item-more-label { flex: 1; }
+.sidebar-item--inactive { /* hérite du sidebar-item--project ; pas de tweak supplémentaire */ }
 .sidebar-badge {
     font-size: 0.72rem;
     font-weight: 600;
