@@ -5,7 +5,7 @@ import { bus } from "../lib/bus";
 import { promoteTrigger } from "../lib/prefs";
 import { extractQuestions } from "../lib/questions";
 import { applyPostSanitize, markedInstance, patterns, upstreamBindings } from "../lib/formatting";
-import { applyUpstreamRefs } from "../lib/upstream-providers";
+import { decorateUpstreamPreMarked } from "../lib/upstream-providers";
 
 /**
  * `messageId` + `questionsClickable` opt the body into the #B.104
@@ -44,9 +44,19 @@ const props = defineProps<{
 // `applyPostSanitize` handles the post-sanitize passes (codespan refs +
 // `@mention` spans). Both are reactive so a live config change re-renders.
 const html = computed(() => {
-    const src = props.source ?? "";
-    if (!src) return "";
-    const raw = markedInstance.value.parse(src, { async: false }) as string;
+    const rawSrc = props.source ?? "";
+    if (!rawSrc) return "";
+    // #160 Commit A : pre-marked pass des upstream refs (gh#NNN, gl#NNN…).
+    // Substitue les refs par des placeholders Unicode AVANT marked → évite
+    // que la grammar marked (notamment le ticket inline ext) ne grab le
+    // `#NNN` partagé avec gh#NNN. Restore en post-sanitize re-injecte les
+    // `<a>` chips.
+    const upstreamPre = decorateUpstreamPreMarked(
+        rawSrc,
+        props.project ?? null,
+        upstreamBindings.value,
+    );
+    const raw = markedInstance.value.parse(upstreamPre.src, { async: false }) as string;
     const sanitized = DOMPurify.sanitize(raw, {
         ALLOWED_TAGS: [
             "h1", "h2", "h3", "h4", "h5", "h6",
@@ -63,10 +73,7 @@ const html = computed(() => {
         ALLOW_DATA_ATTR: false,
     });
     const withMentions = applyPostSanitize(sanitized, patterns.value);
-    // #160 Phase 1 — resolve upstream refs (gh#NNN etc.) into clickable
-    // chips when the project has a binding. No-op when project missing or
-    // no binding configured (graceful : ref stays as text in the body).
-    return applyUpstreamRefs(withMentions, props.project ?? null, upstreamBindings.value);
+    return upstreamPre.restore(withMentions);
 });
 
 // Intercept clicks on internal links (any /b/N, /rules, /tags, /projects, etc.)

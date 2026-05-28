@@ -80,45 +80,78 @@ export function resolveProjectRef(
 }
 
 /**
- * HTML post-pass : scan `html` for `gh#NNN` style refs, replace each with an
- * `<a>` chip when resolvable, leave as plain text otherwise (graceful degrade).
+ * #160 Commit A — pre-marked placeholder approach (david `6nyfdk`/`n3e99g`
+ * "go refactor, soit futur proof"). Au lieu de scanner le HTML rendu post-
+ * sanitize (qui force des lookbehinds hacks sur le ticket pattern), on
+ * substitue les `gh#NNN` par des placeholders Unicode AVANT marked. Marked
+ * voit du texte opaque, sa grammar (incl. ticket inline ext) ne matche pas
+ * dessus. Après sanitize, on re-injecte les `<a>` chips à la place des
+ * placeholders.
  *
- * Skips text already inside <a>, <code>, <pre> to avoid mangling URLs or
- * inserting links inside code blocks.
+ * Avantages :
+ * - Plus de conflit avec le ticket regex (revert le lookbehind hack).
+ * - Symétrique pour ajout de gl/gt/futur providers.
+ * - Placeholder = U+E000 (private use area) → marked le voit comme texte,
+ *   pas de risque de collision avec user content.
+ * - `<a>` injecté POST-sanitize → target/rel survivent (sinon DOMPurify les
+ *   stripperait, l'ALLOWED_ATTR ne les inclut pas).
  */
-export function applyUpstreamRefs(
-    html: string,
+const PH_START = "";
+const PH_END = "";
+
+function escHtml(s: string): string {
+    return s.replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
+}
+
+function buildUpstreamRegex(providers: readonly UpstreamProvider[]): RegExp {
+    const prefixAlt = providers.map((p) => p.refPrefix).join("|");
+    // Précédé par non-word (évite `foogh#1`) ; capture le prefixe + optional
+    // `:owner/repo` + `#NNN`.
+    return new RegExp(`(?<![\\w@])(${prefixAlt})(?::([^\\s#<>"']+))?#(\\d+)\\b`, "gi");
+}
+
+/**
+ * Pre-marked pass : substitue `gh#NNN` (et autres provider prefixes) par des
+ * placeholders Unicode. Retourne `{src: modified, restore: html→html}`. Le
+ * `restore` re-injecte les `<a>` chips à la place des placeholders dans le
+ * HTML sanitized.
+ *
+ * Si pas de project ou pas de bindings : `src` inchangée, `restore` no-op
+ * (graceful : la ref reste en texte plain dans le rendu final, identique au
+ * comportement pré-refactor).
+ */
+export function decorateUpstreamPreMarked(
+    src: string,
     projectName: string | null,
     upstream: Record<string, UpstreamBinding[]>,
     providers: readonly UpstreamProvider[] = BUILT_IN_PROVIDERS,
-): string {
-    if (!projectName) return html;
+): { src: string; restore: (html: string) => string } {
+    if (!projectName) return { src, restore: (h) => h };
     const bindings = upstream[projectName];
-    if (!bindings || bindings.length === 0) return html;
-    // Match any registered provider prefix followed by optional `:owner/repo`
-    // and `#NNN`. Skip when preceded by word char (avoid `foogh#1` matches).
-    const prefixAlt = providers.map((p) => p.refPrefix).join("|");
-    const re = new RegExp(`(?<![\\w@])(${prefixAlt})(?::([^\\s#<>"']+))?#(\\d+)\\b`, "gi");
-    // We replace token-by-token but skip occurrences inside <a>...</a>,
-    // <code>...</code>, <pre>...</pre>. Cheapest correct: split the html on
-    // these blocks, only run the regex on the OUTSIDE chunks.
-    const blockSplit = html.split(/(<a\b[^>]*>.*?<\/a>|<code\b[^>]*>.*?<\/code>|<pre\b[^>]*>[\s\S]*?<\/pre>)/g);
-    const out: string[] = [];
-    for (const chunk of blockSplit) {
-        if (!chunk) continue;
-        if (chunk.startsWith("<a") || chunk.startsWith("<code") || chunk.startsWith("<pre")) {
-            out.push(chunk);
-            continue;
-        }
-        out.push(chunk.replace(re, (raw) => {
-            const r = resolveProjectRef(raw, bindings, providers);
-            if (!r) return raw;
-            // esc the url + label (raw is provider-prefix + digits + maybe owner/repo —
-            // safe charset, but defensive).
-            const esc = (s: string): string => s.replace(/[&<>"']/g, (c) =>
-                ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
-            return `<a href="${esc(r.url)}" class="upstream-ref upstream-ref--${esc(r.provider)}" target="_blank" rel="noopener noreferrer">${esc(r.label)}</a>`;
-        }));
-    }
-    return out.join("");
+    if (!bindings || bindings.length === 0) return { src, restore: (h) => h };
+    const re = buildUpstreamRegex(providers);
+    const replacements = new Map<string, string>();
+    let idx = 0;
+    const newSrc = src.replace(re, (raw) => {
+        const r = resolveProjectRef(raw, bindings, providers);
+        if (!r) return raw;
+        const placeholder = `${PH_START}UP${idx++}${PH_END}`;
+        replacements.set(
+            placeholder,
+            `<a href="${escHtml(r.url)}" class="upstream-ref upstream-ref--${escHtml(r.provider)}" target="_blank" rel="noopener noreferrer">${escHtml(r.label)}</a>`,
+        );
+        return placeholder;
+    });
+    if (replacements.size === 0) return { src, restore: (h) => h };
+    return {
+        src: newSrc,
+        restore(html: string): string {
+            let out = html;
+            for (const [ph, replacement] of replacements) {
+                out = out.split(ph).join(replacement);
+            }
+            return out;
+        },
+    };
 }

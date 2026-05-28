@@ -33,10 +33,9 @@ export interface FormattingPattern {
 // match catches both `#NN` and the legacy `#B.NN`, with the bare `#{1}`
 // canonical (#489). The yaml chain overrides these by id.
 const DEFAULTS: FormattingPattern[] = [
-    // #160 Phase 1 — negative lookbehind sur `[A-Za-z]` pour ne pas matcher
-    // `#NNN` quand préfixé d'une lettre (préserve `gh#NNN` pour le post-pass
-    // upstream).
-    { id: "ticket", match: "(?<![A-Za-z])#[Bb]?[._/-]?(\\d+)\\b", canonical: "#{1}", href: "/b/{1}", class: "ticket-ref" },
+    // #160 Commit A : revert le lookbehind hack — l'upstream pre-marked pass
+    // substitue `gh#NNN` par des placeholders avant marked, plus de collision.
+    { id: "ticket", match: "#[Bb]?[._/-]?(\\d+)\\b", canonical: "#{1}", href: "/b/{1}", class: "ticket-ref" },
     { id: "comment", match: "#[Cc][._/-]?([a-hjkmnp-z2-9]{4,8})\\b", canonical: "#C.{1}", href: "/b/{1}", class: "comment-ref" },
     // #535 : `>` retiré de la lookbehind (était bloqué pour éviter du nesting
     // dans `<a>@x</a>`, mais ça bloquait au passage les mentions juste après
