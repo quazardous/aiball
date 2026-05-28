@@ -212,11 +212,58 @@ function onQuestionClick(ev: Event) {
     });
 }
 
+// #556: copy-button overlay on every rendered `<pre>` (fenced code block).
+// Comme `wireQuestionClicks`, on agit en post-render DOM (plutôt qu'en
+// modifiant le renderer marked) parce que le bouton vit en dehors du flow
+// markdown : il est purement chrome UI, n'a pas à survivre à un copy/paste
+// du body lui-même (textContent du `<code>` reste propre).
+async function wireCopyButtons() {
+    await nextTick();
+    const root = rootRef.value;
+    if (!root) return;
+    const pres = root.querySelectorAll("pre");
+    for (const pre of pres) {
+        if (pre.querySelector(":scope > .md-copy-btn")) continue; // idempotent
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "md-copy-btn";
+        btn.setAttribute("aria-label", "Copy code");
+        btn.textContent = "Copy";
+        btn.addEventListener("click", onCopyClick);
+        pre.appendChild(btn);
+    }
+}
+
+async function onCopyClick(ev: Event) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const btn = ev.currentTarget as HTMLButtonElement;
+    const pre = btn.parentElement as HTMLElement | null;
+    const code = pre?.querySelector("code");
+    if (!code) return;
+    const text = code.textContent ?? "";
+    try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = "Copied";
+        btn.classList.add("is-copied");
+    } catch {
+        btn.textContent = "Failed";
+        btn.classList.add("is-failed");
+    }
+    window.setTimeout(() => {
+        btn.textContent = "Copy";
+        btn.classList.remove("is-copied", "is-failed");
+    }, 1500);
+}
+
 // `immediate: true` so the very first render also wires clicks —
 // `watch` without it only fires on subsequent changes, which means a
 // freshly mounted MarkdownView would leave its checkboxes inert until
 // the source changes again.
-watch(html, () => { void wireQuestionClicks(); }, { flush: "post", immediate: true });
+watch(html, () => {
+    void wireQuestionClicks();
+    void wireCopyButtons();
+}, { flush: "post", immediate: true });
 </script>
 
 <template>
@@ -255,12 +302,47 @@ watch(html, () => { void wireQuestionClicks(); }, { flush: "post", immediate: tr
     font-size: 0.9em;
 }
 .md-body pre {
+    position: relative; /* #556: anchor for .md-copy-btn overlay */
     background: var(--p-surface-100);
     padding: 0.6em 0.8em;
     border-radius: 0.3rem;
     overflow-x: auto;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.85em;
+}
+/* #556: copy-to-clipboard button, top-right of each fenced code block.
+   Toujours visible (un code block invite à l'action). Discret par défaut
+   (background semi-transparent + faible opacité), franc au hover. */
+.md-body pre > .md-copy-btn {
+    position: absolute;
+    top: 0.3em;
+    right: 0.3em;
+    padding: 0.15em 0.5em;
+    font: inherit;
+    font-size: 0.85em;
+    line-height: 1.2;
+    background: var(--p-surface-0, #fff);
+    color: var(--p-text-muted-color);
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.25rem;
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+}
+.md-body pre > .md-copy-btn:hover,
+.md-body pre > .md-copy-btn:focus-visible {
+    opacity: 1;
+    color: var(--p-text-color);
+}
+.md-body pre > .md-copy-btn.is-copied {
+    opacity: 1;
+    color: var(--p-primary-color);
+    border-color: var(--p-primary-color);
+}
+.md-body pre > .md-copy-btn.is-failed {
+    opacity: 1;
+    color: #b31d28;
+    border-color: #b31d28;
 }
 .md-body pre > code {
     background: transparent;
