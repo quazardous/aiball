@@ -12,7 +12,7 @@ import {
     applyMessageDecision,
     listPendingLifecycleForTicket,
     deletePingsForMessage,
-    releaseTicketHold,
+    releaseTicketClaim,
     setTicketClaim,
     ensureConsumer,
     isHuman,
@@ -433,10 +433,25 @@ export function submitMessage(input: NewMessage): Message {
             // longer awaiting moderation, the close just validated them.
             // Auto-approve them so the inbox / UI stop surfacing stale
             // pending state.
-            if (msg.kind === "ticket_closed" && msg.ticket_id !== null) {
+            //
+            // ⚠ Don't trust `msg.kind` here: `updateMessageStatus(msg.id,
+            // ...)` looks up `tickets.id == msg.id` FIRST then falls back
+            // to `messages.id == msg.id`. tickets and messages have
+            // distinct id counters (cf. nextTicketId / nextMessageId), so
+            // when the close message's id happens to equal the parent
+            // ticket's id (common at low counter values), `updated` is the
+            // TICKET row, not the close message — and `msg.kind` flips to
+            // `"ticket_created"`. We use `input.kind` (immutable) instead.
+            // The deeper updateMessageStatus bug is filed separately.
+            if (input.kind === "ticket_closed" && input.ticket_id !== null) {
+                // ⚠ Use `input.ticket_id` (immutable) plutôt que `msg.ticket_id`
+                // car `msg` peut avoir flippé vers la row TICKET (cf. note plus
+                // haut sur la collision tickets.id × messages.id avec
+                // updateMessageStatus).
+                const closedTicketId = input.ticket_id;
                 // Pending ticket_resolved on this ticket → auto-approve
                 // (closing implies acceptance of the resolution proposal).
-                for (const stale of listPendingResolvedForTicket(msg.ticket_id)) {
+                for (const stale of listPendingResolvedForTicket(closedTicketId)) {
                     const promoted = updateMessageStatus(
                         stale.id,
                         "approved",
@@ -452,11 +467,11 @@ export function submitMessage(input: NewMessage): Message {
                 // #B.129 phase 2: same idea for decision-on-comment
                 // resolutions still pending — closing the ticket
                 // implicitly accepts every dangling resolution decision.
-                for (const c of listPendingResolutionDecisionsForTicket(msg.ticket_id)) {
+                for (const c of listPendingResolutionDecisionsForTicket(closedTicketId)) {
                     const accepted = applyMessageDecision(
                         c.id,
                         "accepted",
-                        msg.by_agent ?? "owner",
+                        input.by_agent ?? "owner",
                     );
                     if (accepted) {
                         broadcast({ type: "message_edited", data: accepted });
@@ -466,7 +481,7 @@ export function submitMessage(input: NewMessage): Message {
                 // moot once a close lands → auto-reject them so they stop
                 // polluting the moderation queue. Their pings get wiped too.
                 for (const stale of listPendingLifecycleForTicket(
-                    msg.ticket_id,
+                    closedTicketId,
                     ["ticket_closed", "ticket_reopened"],
                     msg.id, // don't reject the close we just approved
                 )) {
@@ -481,10 +496,16 @@ export function submitMessage(input: NewMessage): Message {
                         broadcast({ type: "message_decided", data: rejected });
                     }
                 }
-                // #418/#436: a closed ticket is out of every pool — release BOTH
-                // its assignment AND its claim so a later reopen starts back in the
-                // shared pool (and the data stays clean). No-op when unheld.
-                releaseTicketHold(msg.ticket_id);
+                // #418/#436 (révisé #568) : sur un close, on relâche UNIQUEMENT
+                // le claim (focus transient — l'agent n'est plus en train de
+                // bosser dessus, sa session se termine). L'**assignment** reste
+                // collé au ticket — c'est une responsabilité persistante (audit
+                // qui était owner du sujet) + sur un reopen ultérieur l'historique
+                // assignee reste pertinent. David `#568` : « quand je close un
+                // ticket ça desassign... c'est bizarre non ? ». Avant ce fix on
+                // perdait silencieusement le trace de qui owned le sujet à la
+                // résolution. No-op quand unheld.
+                releaseTicketClaim(closedTicketId);
             }
         }
     }
