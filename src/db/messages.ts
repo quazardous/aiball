@@ -346,6 +346,10 @@ export function editMessage(
         /** #B.222: urgency hint. Tickets only; ignored on comments. NULL
          *  resets to the schema default 'normal' (= no override). */
         priority?: Priority | null;
+        /** #553 (david `3r3vjq`) : ticket-level fan-out scope (= default
+         *  scope for new events on this ticket). Tickets only ; ignored
+         *  on comments. NULL resets to schema default 'default'. */
+        scope?: string | null;
     },
 ): Message | null {
     const db = getDb();
@@ -370,6 +374,11 @@ export function editMessage(
         // mcp validate up front so the column is never touched with
         // garbage from here.
         ticketPatch.priority = fields.priority ?? "normal";
+    }
+    if (fields.scope !== undefined) {
+        // #553 — same pattern as priority : NULL clears to schema
+        // default 'default'. api.ts validates the value upfront.
+        ticketPatch.scope = fields.scope ?? "default";
     }
     if (Object.keys(ticketPatch).length > 0) {
         const t = db.update(schema.tickets)

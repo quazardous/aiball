@@ -875,7 +875,7 @@ export const api = {
      *  409 when the decision is already terminal. */
     untagMessage: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/untag`, {}),
-    edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null }) =>
+    edit: (id: number, body: { title?: string; body?: string; intent?: Intent | null; priority?: Priority | null; scope?: "internal" | "default" | "broadcast" | null }) =>
         req<Message>("POST", `/api/messages/${id}/edit`, body),
     note: (id: number, note: string | null) =>
         req<Message>("POST", `/api/messages/${id}/note`, { note }),

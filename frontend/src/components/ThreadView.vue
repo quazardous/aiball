@@ -178,6 +178,23 @@ async function changePriority(v: Priority | null) {
         priorityBusy.value = false;
     }
 }
+// #553 david `3r3vjq` — ticket-level scope edit (à côté de priority dans
+// le edit panel). Pilote le fan-out par défaut des events futurs sur ce
+// ticket (le composer per-comment scope a été retiré par #8864778).
+const scopeBusy = ref(false);
+async function changeScope(v: "internal" | "default" | "broadcast") {
+    if (!data.value) return;
+    const tid = data.value.ticket.id;
+    scopeBusy.value = true;
+    try {
+        await api.edit(tid, { scope: v });
+        broadcastRefresh(tid);
+    } catch (e) {
+        error.value = (e as Error).message;
+    } finally {
+        scopeBusy.value = false;
+    }
+}
 // #294: move-to-project. Destinations are loaded lazily the first time
 // the edit panel opens (watch below) so the Select can offer them.
 const projectOptions = ref<{ label: string; value: string }[]>([]);
@@ -443,8 +460,10 @@ async function copyTicketRef() {
                     :intent-busy="intentBusy"
                     :intent-options="intentOptions"
                     :priority-busy="priorityBusy"
+                    :scope-busy="scopeBusy"
                     @save="saveAndCloseEdit"
                     @cancel="cancelEdit"
+                    @scope-change="changeScope"
                     @intent-change="changeIntent"
                     @priority-change="changePriority"
                     @tags-changed="onTagsChanged"

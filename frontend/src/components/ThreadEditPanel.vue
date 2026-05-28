@@ -31,6 +31,8 @@ defineProps<{
      *  be touched to surface the priority editor. */
     priorityOptions?: { label: string; value: Priority | null }[];
     priorityBusy?: boolean;
+    /** #553 — scope busy flag (driven by parent). */
+    scopeBusy?: boolean;
 }>();
 const emit = defineEmits<{
     (e: "update:titleDraft", v: string): void;
@@ -39,6 +41,8 @@ const emit = defineEmits<{
     (e: "cancel"): void;
     (e: "intent-change", v: Intent | null): void;
     (e: "priority-change", v: Priority | null): void;
+    /** #553 — emitted when the user changes the ticket-level scope. */
+    (e: "scope-change", v: "internal" | "default" | "broadcast"): void;
     (e: "tags-changed", tags: TagType[]): void;
 }>();
 
@@ -47,6 +51,16 @@ const emit = defineEmits<{
 // the parent started passing them explicitly.
 const defaultPriorityOptions: { label: string; value: Priority | null }[] =
     PRIORITIES.map((p) => ({ label: p, value: p }));
+
+// #553 — scope options (#B.245 tristate). Internal = owners + @mentions
+// only ; default = subscribers + project owners + @mentions ; broadcast =
+// default + project followers. Tickets only (per-comment scope retiré du
+// composer côté #553 `8864778`).
+const scopeOptions: { label: string; value: "internal" | "default" | "broadcast" }[] = [
+    { label: "internal", value: "internal" },
+    { label: "default", value: "default" },
+    { label: "broadcast", value: "broadcast" },
+];
 
 const bodyTextareaRef = ref<{ $el?: HTMLTextAreaElement } | null>(null);
 defineExpose({ bodyTextareaRef });
@@ -109,6 +123,23 @@ defineExpose({ bodyTextareaRef });
                     :disabled="priorityBusy"
                     style="min-width: 9rem"
                     @update:model-value="(v: Priority | null) => emit('priority-change', v)"
+                />
+            </div>
+            <!-- #553 david `3r3vjq` : scope éditable depuis l'edit panel (à
+                 côté de priority). Per-comment scope retiré du composer
+                 (cf. `8864778`) ; le scope ticket-level pilote le fan-out
+                 par défaut des events futurs. -->
+            <div class="thread-edit-row">
+                <span class="thread-edit-label">Scope</span>
+                <Select
+                    :model-value="ticket.scope ?? 'default'"
+                    :options="scopeOptions"
+                    option-label="label"
+                    option-value="value"
+                    size="small"
+                    :disabled="scopeBusy"
+                    style="min-width: 9rem"
+                    @update:model-value="(v: 'internal' | 'default' | 'broadcast') => emit('scope-change', v)"
                 />
             </div>
         </div>

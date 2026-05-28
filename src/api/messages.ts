@@ -141,15 +141,16 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
     const id = Number(req.params.id);
     const existing = getMessage(id);
     if (!existing) return notFound(res);
-    const { title, body, summary, intent, priority } = req.body ?? {};
+    const { title, body, summary, intent, priority, scope } = req.body ?? {};
     if (
         title === undefined &&
         body === undefined &&
         summary === undefined &&
         intent === undefined &&
-        priority === undefined
+        priority === undefined &&
+        scope === undefined
     ) {
-        return badRequest(res, "provide title, body, summary, intent, and/or priority");
+        return badRequest(res, "provide title, body, summary, intent, priority, and/or scope");
     }
     if (intent !== undefined && intent !== null) {
         if (typeof intent !== "string" || !INTENTS.includes(intent as Intent)) {
@@ -161,7 +162,14 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
             return badRequest(res, `priority must be one of ${PRIORITIES.join(", ")}`);
         }
     }
-    const updated = editMessage(id, { title, body, summary, intent, priority });
+    // #553 — scope is one of: internal / default / broadcast (#B.245 tristate).
+    const VALID_SCOPES = ["internal", "default", "broadcast"];
+    if (scope !== undefined && scope !== null) {
+        if (typeof scope !== "string" || !VALID_SCOPES.includes(scope)) {
+            return badRequest(res, `scope must be one of ${VALID_SCOPES.join(", ")}`);
+        }
+    }
+    const updated = editMessage(id, { title, body, summary, intent, priority, scope });
     if (!updated) return notFound(res);
     const decorated = withTagsOne(updated);
     broadcast({ type: "message_edited", data: decorated });
