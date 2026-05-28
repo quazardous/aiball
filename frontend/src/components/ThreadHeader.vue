@@ -29,6 +29,24 @@ const emit = defineEmits<{
     (e: "start-edit"): void;
     (e: "start-manage"): void;
 }>();
+
+/**
+ * #567 — tooltip de la chip "claim by". Quand l'assignee est la même
+ * personne que le claimant (cas fréquent : l'agent claim son propre
+ * assignment), on ne rend QU'UNE chip, mais le tooltip mentionne les
+ * deux statuts pour ne pas perdre l'info — surtout `assigned_at` qui
+ * indique l'ancienneté de la responsabilité (vs `claimed_at` =
+ * dernier engage, transient).
+ */
+function claimerTooltip(t: TicketSummary): string {
+    const parts = [`Claimed by ${t.claimant}`];
+    if (t.claimed_at) parts.push(new Date(t.claimed_at).toLocaleString());
+    if (t.assignee === t.claimant) {
+        parts.push("(also the assignee)");
+        if (t.assigned_at) parts.push(`assigned ${new Date(t.assigned_at).toLocaleString()}`);
+    }
+    return parts.join(" · ");
+}
 </script>
 
 <template>
@@ -46,37 +64,47 @@ const emit = defineEmits<{
     <span v-if="ticket.hot" class="thread-hot-focus" title="Hot-zone — an agent is actively working this ticket (recent agent activity within the hot window).">
         🔥 focus
     </span>
+    <!-- #567 david : subline compacte (claimant / assignee / token cost) sur
+         UNE seule ligne inline-flex, wrap si débord. Avant : 3 spans empilés
+         (héritage `align-self: flex-start` + margins verticaux dans un flex
+         column parent). David : « on peut rendre plus compact, si le assignee
+         et le claimed sont pareil on mais que claim by » → quand
+         `claimant === assignee`, on ne rend que la chip claim et son tooltip
+         précise que l'assignment correspond. -->
     <!-- #418/#429: who currently holds this ticket. david (#429): "afficher qui
-         a claim mais pas dans un badge" — so this is DISCREET muted inline text,
-         NOT a pill. (The pill's background made its blockified-inline-flex stretch
-         render as an oversized full-width bar — dropping the background fixes the
-         "trop grand" while keeping the claimer visible.) Read-only here; agents
-         claim/release via MCP, a human moderator pushes via the manage panel. -->
-    <!-- #436: claim (focus) and assignment (responsibility) are distinct now —
-         a ticket can show both. Discreet muted text, not badges (david #429). -->
-    <span
-        v-if="ticket.claimant"
-        class="thread-assignee"
-        :title="`Claimed by ${ticket.claimant}${ticket.claimed_at ? ' · ' + new Date(ticket.claimed_at).toLocaleString() : ''}`"
+         a claim mais pas dans un badge" — DISCREET muted inline text, NOT a
+         pill. Read-only here ; agents claim/release via MCP, a human moderator
+         pushes via the manage panel.
+         #436: claim (focus) and assignment (responsibility) are distinct now —
+         a ticket can show both. -->
+    <div
+        v-if="ticket.claimant || ticket.assignee || estTokenEffort(ticket.token_usage) > 0"
+        class="thread-subline"
     >
-        <i class="pi pi-bookmark-fill" /> claimed by {{ ticket.claimant }}
-    </span>
-    <span
-        v-if="ticket.assignee"
-        class="thread-assignee"
-        :title="`Assigned to ${ticket.assignee}${ticket.assigned_at ? ' · ' + new Date(ticket.assigned_at).toLocaleString() : ''}`"
-    >
-        <i class="pi pi-user-plus" /> assigned to {{ ticket.assignee }}
-    </span>
-    <!-- #404/#406: per-ticket token-effort cost (shown once any usage is
-         captured; cost-equivalent — cache reads weighted 0.1×). -->
-    <span
-        v-if="estTokenEffort(ticket.token_usage) > 0"
-        class="thread-token-cost"
-        :title="tokenBreakdownTitle(ticket.token_usage)"
-    >
-        <i class="pi pi-bolt" /> {{ formatTokens(estTokenEffort(ticket.token_usage)) }} tok
-    </span>
+        <span
+            v-if="ticket.claimant"
+            class="thread-subline__item"
+            :title="claimerTooltip(ticket)"
+        >
+            <i class="pi pi-bookmark-fill" /> claim by {{ ticket.claimant }}
+        </span>
+        <span
+            v-if="ticket.assignee && ticket.assignee !== ticket.claimant"
+            class="thread-subline__item"
+            :title="`Assigned to ${ticket.assignee}${ticket.assigned_at ? ' · ' + new Date(ticket.assigned_at).toLocaleString() : ''}`"
+        >
+            <i class="pi pi-user-plus" /> assigned to {{ ticket.assignee }}
+        </span>
+        <!-- #404/#406: per-ticket token-effort cost (cost-equivalent — cache
+             reads weighted 0.1×). Inline avec le reste de la subline (#567). -->
+        <span
+            v-if="estTokenEffort(ticket.token_usage) > 0"
+            class="thread-subline__item"
+            :title="tokenBreakdownTitle(ticket.token_usage)"
+        >
+            <i class="pi pi-bolt" /> {{ formatTokens(estTokenEffort(ticket.token_usage)) }} tok
+        </span>
+    </div>
     <template v-if="showBanners">
         <div
             v-if="ticket.resolved && !ticket.closed"
@@ -158,34 +186,29 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-/* #406: per-ticket token-effort cost badge. */
-.thread-token-cost {
-    display: inline-flex;
+/* #567 david : subline compacte regroupant claim / assignee / token cost
+   sur UNE ligne (wrap si débord). Avant : 3 spans frères, chacun
+   `display: inline-flex` mais avec `align-self: flex-start` + margin
+   verticale dans un flex column parent → empilés. Le wrapper unique
+   contourne ça + le `flex-wrap: wrap` garde une dégradation propre sur
+   mobile. Discreet muted (pas un badge, david #429). */
+.thread-subline {
+    display: flex;
+    flex-wrap: wrap;
+    align-self: flex-start;
     align-items: center;
-    gap: 0.3rem;
+    gap: 0.3rem 0.9rem;
     margin: 0.2rem 0 0.4rem;
     font-size: 0.78rem;
     color: var(--p-text-muted-color);
     font-variant-numeric: tabular-nums;
 }
-.thread-token-cost .pi {
-    font-size: 0.72rem;
-    opacity: 0.7;
-}
-/* #418/#429: claim/assignee — DISCREET muted inline text, deliberately NOT a
-   badge (david: "afficher qui a claim mais pas dans un badge"). No background,
-   so no visible full-width stretch; align-self keeps it shrink-to-content even
-   when it's a flex item of the header column. */
-.thread-assignee {
+.thread-subline__item {
     display: inline-flex;
-    align-self: flex-start;
     align-items: center;
     gap: 0.3rem;
-    margin: 0.2rem 0 0.3rem;
-    font-size: 0.78rem;
-    color: var(--p-text-muted-color);
 }
-.thread-assignee .pi {
+.thread-subline__item .pi {
     font-size: 0.72rem;
     opacity: 0.7;
 }
