@@ -1,0 +1,119 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>POC #531 — cursor in xterm.js from capture-pane snapshot</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+<style>
+body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: #0f172a; color: #f8fafc; }
+header { padding: 0.8rem 1rem; background: #1e293b; }
+header h1 { font-size: 1rem; margin: 0; font-weight: 600; }
+header .meta { font-size: 0.85rem; opacity: 0.8; margin-top: 0.3rem; }
+main { padding: 1rem; display: grid; grid-template-columns: 1fr 320px; gap: 1rem; }
+#term { background: #0f172a; }
+#term .xterm { padding: 0.5rem; }
+.panel { background: #1e293b; padding: 0.8rem; border-radius: 0.4rem; font-size: 0.9rem; }
+.panel h2 { font-size: 0.9rem; margin: 0 0 0.5rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.04em; }
+.panel pre { margin: 0; white-space: pre-wrap; word-break: break-all; font-family: ui-monospace, monospace; font-size: 0.78rem; color: #cbd5e1; }
+.row { display: flex; justify-content: space-between; padding: 0.15rem 0; }
+.row > span:last-child { font-family: ui-monospace, monospace; color: #f8fafc; }
+.divergent { color: #fb7185 !important; }
+.match { color: #34d399 !important; }
+</style>
+</head>
+<body>
+<header>
+    <h1>POC #531 — capture-pane → xterm.js cursor landing</h1>
+    <div class="meta">Open the JS console for the full per-tick log. Reload to reset.</div>
+</header>
+<main>
+    <div id="term"></div>
+    <div>
+        <div class="panel">
+            <h2>Expected (display-message)</h2>
+            <div class="row"><span>cursor x</span><span id="expX">—</span></div>
+            <div class="row"><span>cursor y</span><span id="expY">—</span></div>
+        </div>
+        <div class="panel" style="margin-top: 0.7rem;">
+            <h2>Actual (xterm.js after term.write)</h2>
+            <div class="row"><span>cursor x</span><span id="actX">—</span></div>
+            <div class="row"><span>cursor y</span><span id="actY">—</span></div>
+            <div class="row"><span>delta y</span><span id="deltaY">—</span></div>
+        </div>
+        <div class="panel" style="margin-top: 0.7rem;">
+            <h2>Last 64 bytes of capture (utf8)</h2>
+            <pre id="tail">—</pre>
+        </div>
+        <div class="panel" style="margin-top: 0.7rem;">
+            <h2>Captured at</h2>
+            <pre id="ts">—</pre>
+        </div>
+    </div>
+</main>
+<script type="module">
+import { Terminal } from 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/+esm';
+import { FitAddon } from 'https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/+esm';
+
+const term = new Terminal({
+    cols: 80, rows: 24,
+    fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+    fontSize: 13,
+    theme: { background: '#0f172a', foreground: '#f8fafc', cursor: '#facc15' },
+    scrollback: 0,
+    cursorBlink: true,
+});
+const fit = new FitAddon();
+term.loadAddon(fit);
+term.open(document.getElementById('term'));
+fit.fit();
+
+const $ = (id) => document.getElementById(id);
+
+async function tick() {
+    try {
+        const [textResp, curResp] = await Promise.all([
+            fetch('/capture'),
+            fetch('/cursor'),
+        ]);
+        const text = await textResp.text();
+        const curJ = await curResp.json();
+        if (curJ.error) {
+            console.error('cursor:', curJ.error);
+            return;
+        }
+        const { x: expX, y: expY } = curJ.cursor;
+
+        // Apply snapshot exactly the way aiball does it.
+        term.reset();
+        term.write(text, () => {
+            // xterm.js writes are async — wait for it then read the cursor.
+            const actX = term.buffer.active.cursorX;
+            const actY = term.buffer.active.cursorY;
+            const dY = actY - expY;
+            $('expX').textContent = expX;
+            $('expY').textContent = expY;
+            $('actX').textContent = actX;
+            $('actY').textContent = actY;
+            $('actY').className = dY === 0 ? 'match' : 'divergent';
+            $('deltaY').textContent = dY > 0 ? `+${dY}` : `${dY}`;
+            $('deltaY').className = dY === 0 ? 'match' : 'divergent';
+            $('ts').textContent = new Date().toISOString();
+            const utf8 = text.slice(-64).replace(/\x1b/g, '\\x1b').replace(/\n/g, '\\n\n');
+            $('tail').textContent = utf8;
+            console.log('[tick]', JSON.stringify({
+                expected: { x: expX, y: expY },
+                actual: { x: actX, y: actY },
+                deltaY: dY,
+                tailBytes: Array.from(text.slice(-32)).map((c) => c.codePointAt(0).toString(16).padStart(2, '0')).join(' '),
+            }));
+        });
+    } catch (e) {
+        console.error('tick failed', e);
+    }
+}
+
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
