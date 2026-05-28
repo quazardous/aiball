@@ -193,6 +193,18 @@ interface StartOpts {
     /** #393: launch the loop in this directory instead of the invoker's cwd
      *  (e.g. the daemon starting a loop for a known project root from the UI). */
     cwd?: string;
+    /**
+     * #557 : run `claude-loop init` first (bootstrap .mcp.json/.aiball.yaml
+     * + persist remote if `--aiball-url` is given), then start the loop —
+     * one-liner pour le user qui veut bootstraper-puis-lancer en une commande.
+     */
+    init?: boolean;
+    /** #557 : forwarded to bootstrap when `--init` is set. */
+    initForce?: boolean;
+    /** #557 : forwarded to bootstrap (--stop-hook) when `--init` is set. */
+    initStopHook?: boolean;
+    /** #557 : forwarded to bootstrap (--global) when `--init` is set. */
+    initGlobal?: boolean;
     claudeArgs: string[];
 }
 
@@ -298,6 +310,33 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const startCwd = opts.cwd ? resolve(opts.cwd) : undefined;
     if (startCwd && !existsSync(startCwd)) {
         die(`--cwd path does not exist: ${startCwd}`);
+    }
+    // #557 : `--init` = `claude-loop init` + start, en un coup. Bootstrap se
+    // déroule AVANT toute autre logique de start (ProjectContext.resolve,
+    // start-lock, plate, etc.) pour que les fichiers `.mcp.json`/`.aiball.yaml`
+    // soient en place quand le start lit ensuite la config. Init est
+    // idempotent (skip silencieux si fichiers déjà présents — sauf --force).
+    // Note : init doit tourner DANS le cwd cible (--cwd) si fourni, sinon
+    // bootstrap écrirait dans le mauvais dossier. Bootstrap utilise
+    // `process.cwd()`, donc on bascule temporairement.
+    if (opts.init) {
+        const origCwd = process.cwd();
+        if (startCwd) process.chdir(startCwd);
+        try {
+            cmdInitRemote({
+                aiballUrl: opts.aiballUrl,
+                aiballToken: opts.aiballToken,
+                consumer: opts.consumer,
+                project: opts.project,
+            });
+            await bootstrapInit({
+                force: opts.initForce === true,
+                stopHook: opts.initStopHook === true,
+                global: opts.initGlobal === true,
+            });
+        } finally {
+            if (startCwd) process.chdir(origCwd);
+        }
     }
     // #394 volet A: a persisted remote config (`claude-loop init`) makes a plain
     // `claude-loop start` reconnect to the same REMOTE aiball without re-passing
@@ -1541,6 +1580,13 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         // #393: launch in an explicit dir (e.g. the daemon spawning a loop for a
         // known project root from the UI) instead of the invoker's cwd.
         .option("--cwd <path>", "#393: launch the loop in this directory instead of the current one.")
+        // #557 : `claude-loop --init` = bootstrap (.mcp.json + .aiball.yaml,
+        // + remote persist si --aiball-url) PUIS start, en un coup. Idempotent
+        // (skip si fichiers déjà là, sauf --init-force).
+        .option("--init", "#557: run `claude-loop init` first (bootstrap project + persist remote if --aiball-url given), then start.")
+        .option("--init-force", "#557: with --init, pass --force to bootstrap (overwrite existing entries).")
+        .option("--init-stop-hook", "#557: with --init, also wire Claude Code's Stop hook into .claude/settings.json.")
+        .option("--init-global", "#557: with --init --init-stop-hook, write to ~/.claude/settings.json instead of project-local.")
         .allowExcessArguments(false)
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
@@ -1548,6 +1594,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             resumeMode?: string; wait: boolean;
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             cwd?: string;
+            init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
         }, command: Command) => {
             // #305 (option a): only forward `wait` when --wait/--no-wait was
             // ACTUALLY passed. Otherwise leave it undefined so cmdStart falls
@@ -1569,6 +1616,10 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 consumer: opts.consumer ?? opts.agent, // #420: --agent is an alias for --consumer
                 project: opts.project,
                 cwd: opts.cwd,
+                init: opts.init === true,
+                initForce: opts.initForce === true,
+                initStopHook: opts.initStopHook === true,
+                initGlobal: opts.initGlobal === true,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });
