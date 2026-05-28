@@ -155,11 +155,12 @@ function onClick(ev: MouseEvent) {
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
-    /* #530 (suite ym6f3k) : padding vertical réduit 0.4→0.3rem pour
-       compenser la bumpe line-height:1.5 sur le title line (cf. plus bas).
-       Net : row sensiblement même hauteur qu'avant, mais le title line
-       contient ses descenders (« p » / « j » / « g » plus rognés). */
-    padding: 0.3rem 0.7rem;
+    /* #530 (suite cerqc8) : padding vertical réduit 0.4→0.25rem pour
+       compenser la combo line-height:1.5 + padding-bottom:0.25rem sur le
+       title line (cf. plus bas). Net : row sensiblement même hauteur
+       qu'avant, mais le title line a maintenant DEUX leviers contre le
+       clip descender (line box tall + padding safety net). */
+    padding: 0.25rem 0.7rem;
     border-bottom: 1px solid var(--p-content-border-color);
     cursor: pointer;
     transition: background 0.1s;
@@ -265,18 +266,21 @@ function onClick(ev: MouseEvent) {
     white-space: nowrap;
     display: block;
     font-size: 0.92rem;
-    /* #530 (suite cyr7ty + ym6f3k) — descender clip Segoe UI / Windows
-       Chrome + FF Linux : seul `line-height` modifie la HAUTEUR DU LINE
-       BOX, qui est ce que `overflow: hidden` clippe. `padding-bottom`
-       seul (tentative `ec661c8`) n'aide qu'à la marge pour des descenders
-       qui dépassent légèrement le line box, mais ne change pas le clip
-       du box lui-même → insuffisant.
-       1.5 = standard accessibilité (MDN), fitte les descenders cross-
-       platform (proven sur Win Chrome via PR #35). Le padding vertical
-       du row au-dessus est réduit 0.4→0.3rem pour compenser la légère
-       bumpe de hauteur de ligne et éviter le « cassé » FF Linux initial
-       (qui était une PERCEPTION d'inflation row plus que descender). */
+    /* #530 (suite cerqc8) — descender clip cross-platform : combo
+       belt-and-suspenders, deux leviers conjugués :
+       1. `line-height: 1.5` (standard accessibilité MDN) → line box
+          assez tall pour fitter les descenders dans la majorité des
+          fonts / OS.
+       2. `padding-bottom: 0.25rem` → marge supplémentaire SOUS le line
+          box mais DEDANS le clip overflow:hidden (qui clip au padding
+          edge, pas au line box). Catch les glyphs qui escape le line
+          box pour cause de DPI/zoom Windows ou métriques font exotiques
+          (Segoe UI « g » à 125% scaling = descender qui dépasse le
+          half-leading de 1.5 line-height).
+       Row padding compense plus haut (0.4→0.25rem) pour rester équivalent
+       en hauteur totale. */
     line-height: 1.5;
+    padding-bottom: 0.25rem;
 }
 .list-row__line--chips {
     flex-wrap: wrap;
