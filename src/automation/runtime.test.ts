@@ -22,10 +22,17 @@ const { registerAutomationRuntime } = await import("./runtime.js");
 const { emitLifecycle } = await import("../event-bus.js");
 const { getMessage } = await import("../db/messages.js");
 const { insertTag, addMessageTag, listMessageTags } = await import("../db/tags.js");
+const { createProject } = await import("../db/projects.js");
 
 // Open the DB up front (runs migrations) so subsequent test ordering doesn't
 // race the first-call boot path.
 getDb();
+
+// #561 : submitMessage(ticket_created) requires the project to exist. Pre-create
+// both fixtures projects so the auto-assign scenarios can post tickets without
+// tripping the new guard.
+createProject({ name: "sim-457-slice2" });
+createProject({ name: "sim-other" });
 
 // Register the runtime once. Subsequent calls inside the same process are
 // idempotent — guarded in registerAutomationRuntime().

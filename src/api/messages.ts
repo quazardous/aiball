@@ -62,6 +62,12 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
         if (code === "FORBIDDEN_CLOSE") {
             return res.status(403).json({ error: (err as Error).message });
         }
+        // #561 david : créer un ticket sur un projet inexistant => 400 propre
+        // (pas un 500), pour que la UI / le client MCP puissent surfacer un
+        // message exploitable plutôt qu'une stack interne.
+        if (code === "PROJECT_NOT_FOUND") {
+            return res.status(400).json({ error: (err as Error).message });
+        }
         throw err;
     }
 });

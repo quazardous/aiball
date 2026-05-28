@@ -8,8 +8,10 @@
  * the destination as part of the same flow.
  *
  * Behaviour:
- *   - Lists every known project in a dropdown (plus an "(other)"
- *     option that reveals a free-text input for new projects).
+ *   - Lists every known project in a dropdown. Project creation is a
+ *     deliberate Projects-panel step (#561) — pas de free-text "new
+ *     project" input qui auto-créait silencieusement un projet
+ *     fantôme via le simple fait de poster.
  *   - Pre-selects the current project from URL state if set, falling
  *     back to the saved aiball.compose.last_project.
  *   - Submits via MessageComposer; on success, navigates to the
@@ -19,7 +21,6 @@
  */
 import { computed, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
-import InputText from "primevue/inputtext";
 import Select from "primevue/select";
 import { api, type ProjectMeta } from "../lib/api";
 import { bus } from "../lib/bus";
@@ -38,27 +39,18 @@ const projects = ref<ProjectMeta[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
-const SENTINEL_OTHER = "__other__";
-const projectChoice = ref<string>(SENTINEL_OTHER);
-const newProjectName = ref("");
+// #561 : plus de SENTINEL_OTHER / free-text "new project" — la création
+// d'un projet est un step explicite via Projects panel. La dropdown ne
+// liste QUE les projets existants ; si la liste est vide, on affiche un
+// hint qui pointe vers le panel.
+const projectChoice = ref<string>("");
 const composerBody = ref("");
 
-/** Final project name used when posting — resolved from the dropdown
- *  + the "(other)" text input. Trimmed; empty if invalid. */
-const resolvedProject = computed(() => {
-    if (projectChoice.value === SENTINEL_OTHER) {
-        return newProjectName.value.trim();
-    }
-    return projectChoice.value;
-});
+const resolvedProject = computed(() => projectChoice.value || null);
 
-const projectOptions = computed(() => [
-    ...projects.value.map((p) => ({
-        label: p.name,
-        value: p.name,
-    })),
-    { label: "(other — new project)", value: SENTINEL_OTHER },
-]);
+const projectOptions = computed(() =>
+    projects.value.map((p) => ({ label: p.name, value: p.name })),
+);
 
 async function loadProjects() {
     loading.value = true;
@@ -79,7 +71,7 @@ async function loadProjects() {
         } else if (projects.value.length > 0) {
             projectChoice.value = projects.value[0].name;
         } else {
-            projectChoice.value = SENTINEL_OTHER;
+            projectChoice.value = "";
         }
     } catch (e) {
         error.value = (e as Error).message;
@@ -93,10 +85,9 @@ onMounted(loadProjects);
 // Keep "last used" sticky so a power user creating several tickets on
 // the same project doesn't re-pick it each time.
 watch(projectChoice, (v) => {
-    if (v && v !== SENTINEL_OTHER) {
-        localStorage.setItem("aiball.compose.last_project", v);
-    }
+    if (v) localStorage.setItem("aiball.compose.last_project", v);
 });
+
 
 function onComposerSubmitted(messageId: number | null) {
     // The composer fires the bus events; forward the newly-created
@@ -128,7 +119,20 @@ function onComposerSubmitted(messageId: number | null) {
         </div>
 
         <div v-else class="new-ticket-form">
-            <div class="new-ticket-row">
+            <!-- #561 : si aucun projet n'existe encore, on ne peut PAS poser
+                 de ticket — l'auto-création silencieuse via l'input free-text
+                 a été retirée. Hint qui pointe vers le Projects panel pour
+                 créer explicitement. -->
+            <div
+                v-if="!loading && projects.length === 0"
+                class="new-ticket-hint"
+            >
+                No project exists yet. Open the <strong>Projects</strong>
+                panel (settings sidebar / footer) and create one first,
+                then come back here.
+            </div>
+
+            <div v-else class="new-ticket-row">
                 <label class="new-ticket-label">Project</label>
                 <Select
                     v-model="projectChoice"
@@ -140,21 +144,6 @@ function onComposerSubmitted(messageId: number | null) {
                     class="new-ticket-project-select"
                     placeholder="Choose a project"
                 />
-                <InputText
-                    v-if="projectChoice === SENTINEL_OTHER"
-                    v-model="newProjectName"
-                    placeholder="new-project-name"
-                    size="small"
-                    class="new-ticket-project-input"
-                />
-            </div>
-
-            <div
-                v-if="!resolvedProject"
-                class="new-ticket-hint"
-            >
-                Pick an existing project or type a new project name to
-                continue.
             </div>
 
             <MessageComposer

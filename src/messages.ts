@@ -1,5 +1,6 @@
 import {
     getMessage,
+    getProject,
     insertMessage,
     moveTicket,
     insertRelationEvent,
@@ -345,6 +346,25 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
  */
 export function submitMessage(input: NewMessage): Message {
     assertCloseAuthority(input);
+    // #561 david : un ticket ne doit pas pouvoir naître sur un projet qui
+    // n'existe pas — sinon on auto-crée silencieusement un projet via le
+    // simple fait de poster, et le user qui tape un nom à côté finit avec
+    // un projet fantôme. La règle s'applique UNIQUEMENT à `ticket_created` :
+    //   - les commentaires/lifecycle (comment_added, ticket_closed, …)
+    //     n'ont jamais besoin de cette garde — leur ticket parent existe
+    //     déjà, donc son projet aussi.
+    //   - création d'un nouveau projet = passage explicite par le panneau
+    //     Projects, pas un side-effect d'un POST /messages.
+    // Le projet doit être pré-créé via le panneau settings (ou
+    // `aiball project create`) avant tout ticket. Erreur typée pour
+    // que la HTTP layer renvoie un 400 explicite plutôt qu'un 500.
+    if (input.kind === "ticket_created") {
+        if (!getProject(input.project)) {
+            const err = new Error(`project "${input.project}" does not exist — create it first (Projects panel or 'aiball project create')`);
+            (err as { code?: string }).code = "PROJECT_NOT_FOUND";
+            throw err;
+        }
+    }
     // Lazy-register the author so the moderator sees them in Settings >
     // Consumers and can tag kind/display_name retroactively (#B.79).
     // No-op when already present.
