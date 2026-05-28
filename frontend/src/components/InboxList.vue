@@ -165,7 +165,11 @@ function onRowClick(r: InboxRow) {
                 :style="`color: var(${LIFECYCLE_ICONS[lifecycleStage(r)].color})`"
             />
         </template>
-        <template v-if="r.by_agent" #from>{{ r.by_agent }}</template>
+        <!-- #542 david : `from` (reporter/owner) déplacé du title-line vers
+             le chip-line après les tags. Le `#from` slot du ListRow n'est
+             plus utilisé ici (le nom prenait de la place au start du titre
+             pour 0 valeur quotidienne — c'est de l'info au repos, pas le
+             principal). -->
         <template #title>
             <span
                 v-if="r.hot"
@@ -192,7 +196,7 @@ function onRowClick(r: InboxRow) {
         </template>
         <template v-if="snippetOf(r)" #snippet>{{ snippetOf(r) }}</template>
         <template
-            v-if="r.status !== 'approved' || r.intent || (r.priority && r.priority !== 'normal') || r.tags.length || !project"
+            v-if="r.status !== 'approved' || r.intent || (r.priority && r.priority !== 'normal') || r.tags.length || !project || r.by_agent"
             #chips
         >
             <Tag
@@ -227,6 +231,14 @@ function onRowClick(r: InboxRow) {
                 severity="info"
                 style="font-size: 0.7rem"
             />
+            <!-- #542 david : reporter (`by_agent`) en chip après les tags
+                 plutôt qu'en tête de title-line — info au repos, libère le
+                 title-line pour l'essentiel (id + titre + snippet). -->
+            <span
+                v-if="r.by_agent"
+                class="list-row__by-agent"
+                :title="`Reported by ${r.by_agent}`"
+            >{{ r.by_agent }}</span>
         </template>
         <template #meta>
             <!-- #429: who currently holds this ticket — compact icon + tooltip
@@ -374,5 +386,13 @@ function onRowClick(r: InboxRow) {
     color: var(--p-text-color);
     padding: 0 0.1rem;
     border-radius: 2px;
+}
+/* #542 — reporter chip dans la chip-line (post-tags). Discret, italic muted,
+   pas de fond — c'est de l'info au repos, pas un Tag importable. */
+.list-row__by-agent {
+    font-size: 0.72rem;
+    color: var(--p-text-muted-color);
+    font-style: italic;
+    margin-left: 0.2rem;
 }
 </style>
