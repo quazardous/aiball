@@ -632,7 +632,16 @@ async function cmdStart(opts: StartOpts): Promise<void> {
 
     // claude passthrough args. Shell-escape per-arg so the inline
     // bash command keeps them intact.
-    const passthrough = opts.claudeArgs.map(shQuote).join(" ");
+    // #538 david : `claude_loop.always_resume: true` injecte `--resume` si
+    // pas déjà présent (ni la forme `--resume` ni `--resume=<x>` ni le
+    // sentinel `--no-resume`). Idempotent — un user qui a déjà --resume
+    // dans claudeArgs n'a pas un double flag.
+    let effectiveClaudeArgs = opts.claudeArgs;
+    if (ctx.claude_loop.always_resume) {
+        const hasResume = opts.claudeArgs.some((a) => a === "--resume" || a.startsWith("--resume=") || a === "--no-resume");
+        if (!hasResume) effectiveClaudeArgs = ["--resume", ...opts.claudeArgs];
+    }
+    const passthrough = effectiveClaudeArgs.map(shQuote).join(" ");
     // CL_CLAUDE_CMD lets you swap the binary+flags (everything before
     // --settings) for debugging: see what the inner command receives
     // without claude repainting the screen. Useful values:

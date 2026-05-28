@@ -151,6 +151,13 @@ export interface AiballConfig {
          *  CLI default stays no-wait (#343); an explicit flag always wins.
          *  Drives CL_WAIT. */
         wait: boolean;
+        /** #538 david : si `true`, injecte automatiquement `--resume` dans
+         *  les claudeArgs s'il n'y est pas déjà présent. Pratique pour les
+         *  projets où on veut systématiquement reprendre la session
+         *  précédente sans avoir à le repasser sur la cli à chaque
+         *  `claude-loop start`. Default `false` (préserve l'existant —
+         *  claude démarre sur une session vide par défaut). */
+        always_resume: boolean;
         /** #379: what to do at heartbeat when ONLY a gated backlog remains
          *  (pings=0, actionable=0, open>0 — all in the human's court). Spec:
          *  `silent|once|stale[:PT]|backoff[:PT[/PT]]|persistent[:PT]`. Default
@@ -258,6 +265,10 @@ const DEFAULTS: AiballConfig = {
         // #305: no-wait by default (#343); a project flips it per-tree via
         // `.aiball.yaml claude_loop.wait: true`.
         wait: false,
+        // #538: opt-in `--resume` auto-injection. Default false = comportement
+        // existant (claude démarre sur session vide). Flip per-tree via
+        // `.aiball.yaml claude_loop.always_resume: true`.
+        always_resume: false,
         // #379 (david krwnqu): remind ONCE by default when the pool first
         // drains (actionable=0 but open>0 — the backlog handed back to the
         // human), then quiet until the landscape moves. Tune per-project via
@@ -476,6 +487,10 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             // #305 (option a): per-project wait default (no-flag behaviour).
             if (typeof cl.wait === "boolean") {
                 cfg.claude_loop.wait = cl.wait;
+            }
+            // #538: per-project always-resume default.
+            if (typeof cl.always_resume === "boolean") {
+                cfg.claude_loop.always_resume = cl.always_resume;
             }
             // #379: drained-backlog reminder strategy (validated at use site
             // by parseDrainedStrategy — an unknown spec degrades to silent).

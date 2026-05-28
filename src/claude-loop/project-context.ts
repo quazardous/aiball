@@ -50,6 +50,8 @@ export interface ProjectContext {
         afk_window_ms: number;
         /** #305 (option a): per-project boot-grace wait default (no-flag). */
         wait: boolean;
+        /** #538: when true, auto-inject `--resume` into claudeArgs if absent. */
+        always_resume: boolean;
         /** #379: drained-backlog reminder strategy (default "once"). */
         drained_strategy: string;
         /** #412: PSR-style log-level threshold (default "info"). Drives CL_LOG_LEVEL. */

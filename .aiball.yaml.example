@@ -122,6 +122,14 @@ autopoll:
 #   # --wait each time. An explicit --wait/--no-wait still overrides. Default false.
 #   wait: false
 #
+#   # Always inject `--resume` into the claude command if not already
+#   # passed on the CLI. Set true here for projects where you systematically
+#   # want claude to resume the previous session (avoid retyping --resume on
+#   # every `claude-loop start`). Default false — claude starts on a fresh
+#   # session by default. An explicit --resume/--no-resume in `claude-loop
+#   # start -- <args>` still wins (no double-inject).
+#   always_resume: false
+#
 #   # Wake-in-flight TTL: how long the marker stays "fresh"
 #   # after the timer touches it pre-send-keys. The UserPromptSubmit
 #   # hook checks this to distinguish auto-wake from human input.
