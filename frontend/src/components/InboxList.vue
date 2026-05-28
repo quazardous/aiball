@@ -332,18 +332,21 @@ function onRowClick(r: InboxRow) {
 }
 /* #560 david : nom du projet en préfixe title-line (multi-projet only).
    Texte muted + monospace pour s'aligner visuellement avec le `#N` qui
-   suit, mais pas un badge — david : « pas dasn un badge ». Séparateur
-   `/` discret pour marquer la frontière project/ticket. */
+   suit, mais pas un badge — david : « pas dasn un badge ». David `atsmzc` :
+   pas de séparateur `/`, collé au `#N` qui suit ; la distinction visuelle
+   passe par la couleur (project = muted, #N = primary, cf. ci-dessous). */
 .list-row__project {
     color: var(--p-text-muted-color);
     font-family: ui-monospace, SFMono-Regular, monospace;
     font-size: 0.85em;
-    margin-right: 0.4rem;
+    margin-right: 0.15rem;
 }
-.list-row__project::after {
-    content: "/";
-    margin-left: 0.35rem;
-    opacity: 0.6;
+/* #560 david `atsmzc` : couleur primary sur le `#N` quand il vit dans la
+   title-line, pour ressortir face au project name muted juste avant. On
+   override uniquement dans ce contexte (pas le global `.ticket-id` qui sert
+   aussi à la search-hit head + ailleurs). */
+.list-row__line--title .ticket-id {
+    color: var(--p-primary-color);
 }
 .read-toggle-lead {
     appearance: none;
