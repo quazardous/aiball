@@ -210,11 +210,11 @@ agentsRouter.get("/agents/:name/pane/stream", (req: Request, res: Response) => {
         // Async spawn so a slow capture doesn't block the event loop. capture-pane
         // is normally instant ; we still cap the lifetime + payload size.
         // `-e` preserves ANSI escape sequences (colours / bold / cursor) so the
-        // browser-side xterm.js renders the pane with its actual colours (david
-        // `anz94c` : "du moment que le runtime js est en cache osef du poids" →
-        // OK to ship xterm.js for proper rendering). Caveat psmux : its
-        // `capture-pane` may handle `-e` differently — to validate with #467.
-        const child = spawn(MUX_CMD, ["capture-pane", "-ep", "-t", target], { stdio: ["ignore", "pipe", "pipe"] });
+        // browser-side xterm.js renders the pane with its actual colours.
+        // Flags are passed separated (`-e -p`): psmux <= v3.3.4 silently dropped
+        // clustered short-flag forms in capture-pane (returned exit 0 + empty
+        // stdout); upstream fix is in psmux commit 72d08aa.
+        const child = spawn(MUX_CMD, ["capture-pane", "-e", "-p", "-t", target], { stdio: ["ignore", "pipe", "pipe"] });
         const chunks: Buffer[] = [];
         let total = 0;
         let truncated = false;
