@@ -157,10 +157,24 @@ export function applyPostSanitize(html: string, pats: FormattingPattern[]): stri
 /** Effective patterns + the Marked instance built from them (reactive). */
 export const patterns = ref<FormattingPattern[]>(DEFAULTS);
 export const markedInstance = ref<Marked>(buildMarked(DEFAULTS));
-/** #160 Phase 1 — per-project upstream bindings, fetched from /api/config.
- *  Reactive so the post-sanitize pass re-renders if the config changes. */
+// #160 — upstreamBindings vit dans upstream-providers.ts. loadFormatting()
+// l'écrit ici pour que tout le câblage `/api/config` reste centralisé.
 import type { UpstreamBinding } from "./upstream-providers";
-export const upstreamBindings = ref<Record<string, UpstreamBinding[]>>({});
+import { upstreamBindings } from "./upstream-providers";
+
+/**
+ * #160 Commit B — décorateur registered via `body-decorators.ts`. Wrap les
+ * passes data-driven (mention spans href-less + code-wrapped refs) derrière
+ * la même interface que les upstream chips. Lit `patterns.value` au render.
+ */
+import type { BodyDecorator } from "./body-decorators";
+
+export const patternsDecorator: BodyDecorator = {
+    id: "patterns",
+    postSanitize(html) {
+        return applyPostSanitize(html, patterns.value);
+    },
+};
 
 /**
  * Format a bare ticket id as a ticket reference using the configured

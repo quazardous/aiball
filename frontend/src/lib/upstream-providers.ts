@@ -155,3 +155,28 @@ export function decorateUpstreamPreMarked(
         },
     };
 }
+
+/**
+ * #160 Phase 1 — per-project upstream bindings, mis à jour par
+ * `loadFormatting()` (cf. `./formatting.ts`) à partir de `/api/config`.
+ * Ref réactif partagé : MarkdownView re-render quand la config change.
+ * Vit ici (et pas dans formatting.ts) parce que c'est de la donnée
+ * upstream-providers — formatting.ts l'importe comme valeur via ESM.
+ */
+import { ref } from "vue";
+export const upstreamBindings = ref<Record<string, UpstreamBinding[]>>({});
+
+/**
+ * #160 Commit B — décorateur registered via `body-decorators.ts`. Lit le ref
+ * réactif `upstreamBindings` au moment du rendu (pas en argument du factory)
+ * pour que les updates de config se propagent sans reconstruire le registry.
+ * Le decorator object lui-même est statique.
+ */
+import type { BodyDecorator } from "./body-decorators";
+
+export const upstreamDecorator: BodyDecorator = {
+    id: "upstream",
+    preMarked(src, ctx) {
+        return decorateUpstreamPreMarked(src, ctx.project, upstreamBindings.value);
+    },
+};

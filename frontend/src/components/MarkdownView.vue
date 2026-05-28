@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import DOMPurify from "dompurify";
 import { bus } from "../lib/bus";
 import { promoteTrigger } from "../lib/prefs";
 import { extractQuestions } from "../lib/questions";
-import { applyPostSanitize, markedInstance, patterns, upstreamBindings } from "../lib/formatting";
-import { decorateUpstreamPreMarked } from "../lib/upstream-providers";
+import { markedInstance } from "../lib/formatting";
+import { BUILT_IN_BODY_DECORATORS, renderBody } from "../lib/body-decorators";
 
 /**
  * `messageId` + `questionsClickable` opt the body into the #B.104
@@ -36,45 +35,19 @@ const props = defineProps<{
     project?: string | null;
 }>();
 
-// Linkify cross-message refs (`#B.123`, `#C.<hashid>`) and `@mentions`.
-// The patterns are no longer hardcoded here — they come from the merged
-// config (`GET /api/config`, #B.235) via `../lib/formatting`, which seeds
-// in-code defaults synchronously and swaps in the effective set once the
-// fetch resolves. `markedInstance` carries the inline link extensions;
-// `applyPostSanitize` handles the post-sanitize passes (codespan refs +
-// `@mention` spans). Both are reactive so a live config change re-renders.
-const html = computed(() => {
-    const rawSrc = props.source ?? "";
-    if (!rawSrc) return "";
-    // #160 Commit A : pre-marked pass des upstream refs (gh#NNN, gl#NNN…).
-    // Substitue les refs par des placeholders Unicode AVANT marked → évite
-    // que la grammar marked (notamment le ticket inline ext) ne grab le
-    // `#NNN` partagé avec gh#NNN. Restore en post-sanitize re-injecte les
-    // `<a>` chips.
-    const upstreamPre = decorateUpstreamPreMarked(
-        rawSrc,
-        props.project ?? null,
-        upstreamBindings.value,
-    );
-    const raw = markedInstance.value.parse(upstreamPre.src, { async: false }) as string;
-    const sanitized = DOMPurify.sanitize(raw, {
-        ALLOWED_TAGS: [
-            "h1", "h2", "h3", "h4", "h5", "h6",
-            "p", "br", "hr",
-            "strong", "em", "del", "code", "pre",
-            "span", // #440: highlight.js token spans inside code blocks
-            "blockquote",
-            "ul", "ol", "li",
-            "a", "img",
-            "table", "thead", "tbody", "tr", "th", "td",
-            "input", // gfm checkboxes
-        ],
-        ALLOWED_ATTR: ["href", "title", "alt", "src", "type", "checked", "disabled", "class"],
-        ALLOW_DATA_ATTR: false,
-    });
-    const withMentions = applyPostSanitize(sanitized, patterns.value);
-    return upstreamPre.restore(withMentions);
-});
+// Linkify cross-message refs (`#B.123`, `#C.<hashid>`) and `@mentions`. Le
+// pipeline body (preMarked → marked → sanitize → postSanitize → restore) vit
+// dans `../lib/body-decorators` (#160 Commit B) — chaque feature qui veut
+// décorer un body (upstream chips, mention spans, futurs emoji-shortcodes,
+// etc.) s'enregistre dans `BUILT_IN_BODY_DECORATORS` plutôt que de câbler son
+// passe ad-hoc ici. `markedInstance` reste réactif (rebuild quand la config
+// formatting change) ; les décorateurs lisent leurs propres refs au render.
+const html = computed(() => renderBody(
+    props.source ?? "",
+    markedInstance.value,
+    { project: props.project ?? null },
+    BUILT_IN_BODY_DECORATORS,
+));
 
 // Intercept clicks on internal links (any /b/N, /rules, /tags, /projects, etc.)
 // so the SPA router handles them instead of triggering a full reload.
