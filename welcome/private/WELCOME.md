@@ -94,6 +94,25 @@ The `mcp__aiball__welcome` tool returns this `WELCOME.md`. The
 point is "no extra constraints beyond writing the code, just the
 non-negotiables above".
 
+The agent's first two steps are :
+
+1. Read `WELCOME.md` (this file) — the **starting** tone for the
+   session.
+2. **Immediately after**, open the project's actual convention
+   files to register any deviation from this kit (mandatory before
+   any other action — see "Bootstrap, not authority" above) :
+   - `CLAUDE.md` at the repo root if present — the project's
+     primary place for rules that diverge from this kit OR that
+     don't fit any standard artefact. Treat this as the **highest
+     authority** for project-specific behaviour.
+   - The top section of `CONTRIBUTING.md` if present.
+   - The persistent header / quote block at the top of
+     `CHANGELOG.md` if present.
+
+The working baseline for the session is *kit conventions, overridden
+by anything the project explicitly states in those files.* When in
+doubt, the project's file wins.
+
 If you want more structure on a `private` project, copy a template
 from `welcome/public/templates/` and adapt — `private` doesn't ban
 OSS conventions, it just doesn't require them.

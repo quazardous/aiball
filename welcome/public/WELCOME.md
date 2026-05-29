@@ -110,16 +110,29 @@ everywhere" overrides and pushes comments to English too.
 The `mcp__aiball__welcome` tool returns this `WELCOME.md` plus the
 templates shipped under `templates/`. The agent then:
 
-1. Reads `WELCOME.md` first — that's the tone you're applying for
-   the whole session on this project. Absorb it into your memory as
-   project-wide invariants.
-2. For each template, checks whether the equivalent file exists in
+1. Reads `WELCOME.md` first — that's the **starting** tone for the
+   session. Absorb it as project-wide invariants.
+2. **Immediately after**, opens the project's actual convention
+   files to register any deviation from this kit (mandatory before
+   any other action — see "Bootstrap, not authority" above) :
+   - `CLAUDE.md` at the repo root if present — the project's
+     primary place for rules that diverge from this kit OR that
+     don't fit any standard artefact. Treat this as the **highest
+     authority** for project-specific behaviour.
+   - The top section of `CONTRIBUTING.md` if present — code style,
+     PR conventions, test commands.
+   - The persistent header / quote block at the top of
+     `CHANGELOG.md` — house style for entries, bump conventions.
+   The result is the agent's working baseline for the session :
+   *kit conventions, overridden by anything the project explicitly
+   states in those files.* When in doubt, the project's file wins.
+3. For each template, checks whether the equivalent file exists in
    the project. If missing, the agent reads the template (which
    starts with an HTML comment explaining intent), strips that
    intent comment, adapts the body to the project, and creates the
    file. If present, the agent leaves it alone — `welcome` is a
    guide, not a scaffolder that overwrites.
-3. Templates ship with `<!-- intent: … -->` headers. They're for
+4. Templates ship with `<!-- intent: … -->` headers. They're for
    the agent's benefit only. **Drop the comment block before
    shipping** — it doesn't belong in the public artefact.
 
