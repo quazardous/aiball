@@ -818,14 +818,12 @@ def _boot_grace_remaining():
 
 
 def _rest_word():
-    """Mot au repos (pas de frappe) : `wait` pendant la boot-grace (#305,
-    nulle sous --no-wait) OU la grace window (max user/ask, default
-    600s — #619 collapse, armée même sous --no-wait, ex. après un ESC) ;
-    `wait` aussi quand l'AFK est armé (#601 : F9 doit toggler loop↔wait
-    visuellement) ; sinon `loop`."""
+    """Mot au repos (pas de frappe) : `wait` pendant la boot-grace ou la
+    user-grace, `wait` aussi quand l'AFK est armé, sinon `loop`. La
+    décomposition fine (countdown / ∞) vit à côté du hint AFK:F9 dans
+    le status-right — voir `_paint_afk_state`."""
     if _boot_grace_remaining() > 0.0 or _user_grace_remaining() > 0.0:
         return _HUMAN_WAIT
-    # #601 : AFK actif → bar `wait` (toggle visible loop↔wait via F9).
     afk_set = _afk_path() and os.path.exists(_afk_path())
     if afk_set:
         return _HUMAN_WAIT
@@ -852,6 +850,49 @@ def _paint_word(word):
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
         )
         # -S = rafraîchit la ligne de statut des clients attachés.
+        subprocess.run(
+            mux + ["refresh-client", "-S"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+    except OSError:
+        pass
+
+
+# #619 david `jjfdea` : status-right segment showing the AFK gate state
+# next to the AFK:F9 hint. Painted by the proxy whenever the underlying
+# state changes (timer-driven repaint at ~5s cadence while in wait).
+#
+#   AFK off,  no grace : ` ∘`            (dim circle — nothing armed)
+#   AFK off,  grace 9m : ` 9m`           (countdown until auto-release)
+#   AFK on   (F9 set)  : ` ●∞`           (lit dot + infinity — held by F9)
+#
+# Written to `@cl_afk_state` ; the status-right format (seeded in cli.ts)
+# references `#{@cl_afk_state}` right after `AFK:F9`.
+def _format_afk_state():
+    afk_set = _afk_path() and os.path.exists(_afk_path())
+    if afk_set:
+        return "#[fg=colour40] ●∞"
+    rem = max(_user_grace_remaining(), _boot_grace_remaining(), 0.0)
+    if rem <= 0.0:
+        return "#[fg=colour238] ∘"
+    if rem >= 60:
+        mins = int(rem / 60) + (0 if rem % 60 == 0 else 1)
+        return f"#[fg=colour178] {mins}m"
+    secs = max(1, int(rem))
+    return f"#[fg=colour178] {secs}s"
+
+
+def _paint_afk_state():
+    """Push `@cl_afk_state` to tmux (no-op if no live target)."""
+    target = os.environ.get("CL_TMUX") or ""
+    if not target:
+        return
+    mux = _mux_argv()
+    try:
+        subprocess.run(
+            mux + ["set-option", "-t", target, "@cl_afk_state", _format_afk_state()],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
         subprocess.run(
             mux + ["refresh-client", "-S"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
@@ -1062,6 +1103,7 @@ def main(argv):
         _emit_log(dec)
 
     try:
+        last_afk_state = ""
         while True:
             rfds = [master_fd]
             if stdin_open:
@@ -1071,8 +1113,9 @@ def main(argv):
             rfds.extend(inject_conns)
             # Timeout = prochain changement de mot : d'abord l'expiration de
             # la frappe (5 s → ré-évalue wait/loop), puis la plus proche des
-            # fins de boot-grace (#305) / user-grace (wait→loop). Sinon on
-            # bloque (None). (#302/#305)
+            # fins de boot-grace (#305) / user-grace (wait→loop). #619 jjfdea :
+            # capper à 5s quand on est en `wait` pour rafraîchir le compteur
+            # dans `@cl_afk_state` (status-right).
             now_ts = datetime.datetime.now().timestamp()
             typing_rem = HUMAN_TTL_SEC - (now_ts - decider.last_keystroke)
             if typing_rem > 0.0:
@@ -1080,6 +1123,9 @@ def main(argv):
             else:
                 rems = [r for r in (_boot_grace_remaining(), _user_grace_remaining()) if r > 0.0]
                 timeout = min(rems) if rems else None
+            in_wait = current_word == _HUMAN_WAIT
+            if in_wait:
+                timeout = min(timeout, 5.0) if timeout is not None else 5.0
             try:
                 ready, _, _ = select.select(rfds, [], [], timeout)
             except (InterruptedError, OSError):
@@ -1092,6 +1138,14 @@ def main(argv):
                 if want != current_word:
                     _paint_word(want)
                     current_word = want
+
+            # #619 jjfdea : refresh AFK state segment (status-right) whenever
+            # its formatted value changes (countdown tick / AFK toggle / grace
+            # boundary). Cheap diff — most ticks are no-ops.
+            afk_state = _format_afk_state()
+            if afk_state != last_afk_state:
+                _paint_afk_state()
+                last_afk_state = afk_state
 
             # 1) Frappe humaine (tmux → nous → claude).
             if stdin_fd in ready:

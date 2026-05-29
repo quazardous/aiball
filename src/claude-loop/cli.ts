@@ -877,15 +877,17 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const afkPart = afkSpecJson
         ? `#[fg=${ctx.colors.afk_label_fg}]AFK:#[fg=${ctx.colors.bar_fg}]${afkKeyDisp}`
         : `#[fg=${ctx.colors.afk_label_fg}]AFK:OFF`;
-    const keysHint = `${afkPart} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
+    // #619 jjfdea : status-right also embeds `#{@cl_afk_state}` — the proxy
+    // paints it with a countdown (`9m` / `45s`) while a grace window is
+    // active, or `●∞` when AFK is explicitly held, or `∘` otherwise. Sits
+    // right after `AFK:F9` so the keybind + its current effect are one chunk.
+    const keysHint = `${afkPart}#{@cl_afk_state} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", keysHint], { stdio: "ignore" });
-    spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right-length", "50"], { stdio: "ignore" });
-    // #274: seed the per-owner status-left segments so the static format
-    // setTmuxStatus installs never renders an unset `#{@cl_*}` (empty is
-    // fine; unset would show literally on some tmux). The proxy and
-    // setTmuxStatus take ownership from here. (#385: @cl_keys retired — the
-    // hint is status-right now, no longer referenced by the status-left format.)
-    for (const [opt, val] of [["@cl_human", "#[fg=colour178]loop"], ["@cl_proxy", ""], ["@cl_state", ""]]) {
+    spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right-length", "60"], { stdio: "ignore" });
+    // #274 + #619 : seed the per-owner status segments so the static format
+    // never renders an unset `#{@cl_*}` (empty is fine; unset shows literally
+    // on some tmux). The proxy and setTmuxStatus take ownership from here.
+    for (const [opt, val] of [["@cl_human", "#[fg=colour178]loop"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_afk_state", "#[fg=colour238] ∘"]]) {
         spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
     }
     // #281 strategy A: tell psmux to touch the human-typing marker natively
