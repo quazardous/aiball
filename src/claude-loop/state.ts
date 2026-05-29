@@ -164,6 +164,35 @@ export function envPath(sd: string): string { return join(sd, "env"); }
  *  hooks were reading `Date.now()` at module-load (= hook start), so they
  *  thought the boot window was always fresh. */
 export function loopStartTsPath(sd: string): string { return join(sd, "loop-start-ts"); }
+/** #624 david `8pwvm3` : marker that exists while the Claude Code resume
+ *  picker is on screen. `session-start-hook` calls `setResumePicker(sd, true)`
+ *  the moment its probe matches the picker, `setResumePicker(sd, false)`
+ *  after the picker has been dismissed (auto-pick or user-pick). The
+ *  LoopState service treats the boot phase as still active as long as
+ *  this marker exists. */
+export function resumePickerActivePath(sd: string): string { return join(sd, "resume-picker-active"); }
+/** #624 david `8pwvm3` : written ONCE when the session-start-hook completes
+ *  (claude is past whatever pickers / loading were needed). The LoopState
+ *  service ends the boot phase the moment this marker appears — the
+ *  time-based cap (`bootGraceMs`) becomes a fail-safe for hooks that
+ *  crash or never run. */
+export function bootCompletePath(sd: string): string { return join(sd, "boot-complete"); }
+
+/** #624 david `8pwvm3` : explicit setter the hook calls to signal the
+ *  resume-picker lifecycle. `setResumePicker(sd, true)` at picker detect,
+ *  `setResumePicker(sd, false)` after picker dismissed (also marks
+ *  boot-complete). Pure marker ops ; the state machine reads them via
+ *  `readLoopStateInput`. */
+export function setResumePicker(sd: string, active: boolean): void {
+    const pickerPath = resumePickerActivePath(sd);
+    if (active) {
+        try { writeFileSync(pickerPath, new Date().toISOString() + "\n"); } catch { /* best-effort */ }
+        return;
+    }
+    // Picker dismissed — remove the active marker AND mark boot complete.
+    try { if (existsSync(pickerPath)) unlinkSync(pickerPath); } catch { /* race */ }
+    try { writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n"); } catch { /* best-effort */ }
+}
 export function pingsPath(sd: string): string { return join(sd, "pings.yaml"); }
 export function idleMarkerPath(sd: string): string { return join(sd, "idle-since"); }
 export function wakeRequestedPath(sd: string): string { return join(sd, "wake-requested"); }
@@ -777,7 +806,13 @@ export function readLoopStateInput(
 ): import("./loop-state.js").LoopStateInput {
     const nowMs = Date.now();
     const startMs = loopStartMs(sd);
-    const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
+    // #624 david `8pwvm3` : `bootGraceMs` is now a safety cap — the
+    // authoritative end-of-boot is `bootComplete` (set via
+    // `setResumePicker(sd, false)` by session-start-hook). Bumped to
+    // 5 min so a slow resume picker never trips it.
+    const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 300)) * 1000;
+    const resumePickerActive = existsSync(resumePickerActivePath(sd));
+    const bootComplete = existsSync(bootCompletePath(sd));
     const noWait = process.env[CL_ENV.WAIT] === "0";
     // user-grace window = max(user, ask) for back-compat with projects
     // that still set ask_grace_seconds in .aiball.yaml (#619 collapse).
@@ -804,6 +839,8 @@ export function readLoopStateInput(
         nowMs,
         loopStartMs: startMs,
         bootGraceMs,
+        resumePickerActive,
+        bootComplete,
         noWait,
         humanTypingAtMs: safeMtime(humanTypingPath(sd)),
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,

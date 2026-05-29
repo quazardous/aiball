@@ -44,8 +44,10 @@ import {
     DEFAULT_USER_GRACE_SEC,
     LOOP_STATUS,
     armAfk10m,
+    bootCompletePath,
     createViewPusher,
     readLoopStateInput,
+    setResumePicker,
     viewPushSockPath,
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
@@ -175,7 +177,10 @@ try { writeFileSync(timerPidPath(sd!), `${process.pid}\n`); } catch { /* best ef
 // the end of the window. Fixes #302 (auto-ping firing at startup while the
 // bar shows `wait`).
 const NO_WAIT = process.env[CL_ENV.WAIT] === "0";
-const BOOT_GRACE_MS = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
+// #624 david `8pwvm3` : safety cap for settleBoot only (the
+// `boot-complete` marker is the authoritative end-of-boot signal).
+// Bumped from 60s → 300s so a slow resume picker never trips it.
+const BOOT_GRACE_MS = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 300)) * 1000;
 // #627 — BOOT_TIME used to feed the inline boot-grace if/else trees ;
 // the LoopState service now reads `loop-start-ts` from the state-dir
 // (shared marker, same as the hooks). Kept the constant declaration
@@ -800,12 +805,22 @@ async function mainSse(): Promise<void> {
             return;
         }
         bootSettled = true;
-        log("boot grace elapsed — settling to idle/busy via check");
-        // #624 + #627 : à la fin du boot-grace, le service décide si
-        // settleBoot doit armer NOT AFK 10m (true sous --wait, false
-        // sous --no-wait). L'idée : le user voit immédiatement après
-        // boot la cible logique du mode du loop, pas un état dérivé
-        // accidentellement de typing pendant le chargement.
+        // #624 david `8pwvm3` : settleBoot is now the SAFETY path. If the
+        // session-start-hook already signalled `setResumePicker(false)`,
+        // boot-complete exists on disk → hook drove the transition (arm,
+        // setTmuxStatus, …). settleBoot becomes a no-op so we don't
+        // double-arm AFK at T+300s when the user has been working for
+        // 5 min.
+        if (existsSync(bootCompletePath(sd!))) {
+            log("settleBoot skipped — boot-complete already signalled by session-start-hook");
+            return;
+        }
+        log("boot grace elapsed (safety cap) — settling to idle/busy via check");
+        // Hook never fired (--resume aborted, picker stuck past 5 min,
+        // hook crashed). Drive the transition ourselves : sign boot-complete
+        // so the state machine flips out of boot, arm under --wait, seed
+        // idle-since, try a wake.
+        setResumePicker(sd!, false);
         if (shouldArmAfk10mOnSettleBoot({ noWait: NO_WAIT })) {
             armAfk10m(sd!);
             log("settleBoot: --wait mode → armed NOT AFK 10m (bar will read `wait`)");
@@ -874,7 +889,8 @@ async function mainSse(): Promise<void> {
             // Only react to the markers the LoopState service actually reads.
             if (name === "afk" || name === "user-took-over" || name === "human-typing"
                 || name === "idle-since" || name === "wake-in-flight"
-                || name === "busy-defer-until" || name === "loop-start-ts") {
+                || name === "busy-defer-until" || name === "loop-start-ts"
+                || name === "resume-picker-active" || name === "boot-complete") {
                 schedulePush();
             }
         });

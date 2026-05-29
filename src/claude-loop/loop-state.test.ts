@@ -31,6 +31,8 @@ function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
         nowMs: T0,
         loopStartMs: T0,
         bootGraceMs: 60 * SEC,
+        resumePickerActive: false,
+        bootComplete: false,
         noWait: false,
         humanTypingAtMs: null,
         humanTypingTtlMs: 5 * SEC,
@@ -568,8 +570,81 @@ test("isAutonomous : true only when bar word is `loop`", () => {
 test("isBootPhase : tracks phase === 'boot'", () => {
     const boot = computeLoopView(baseInput({ nowMs: T0 + 5 * SEC }));
     const idle = computeLoopView(baseInput({
-        nowMs: T0 + 90 * SEC, loopStartMs: T0, idleSinceMs: T0 + 89 * SEC,
+        nowMs: T0 + 90 * SEC, loopStartMs: T0, idleSinceMs: T0 + 89 * SEC, bootComplete: true,
     }));
     assert.equal(isBootPhase(boot), true);
     assert.equal(isBootPhase(idle), false);
+});
+
+// ---------------------------------------------------------------------------
+//  Resume picker awareness (#624 david `8pwvm3`) — explicit signals
+//  stretch / end the boot phase, time cap is fail-safe only
+// ---------------------------------------------------------------------------
+
+test("resume picker active 10 min in → still in boot (no time cap)", () => {
+    const start = T0;
+    const now = start + 10 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        bootGraceMs: 5 * MIN, // legacy cap < elapsed time
+        resumePickerActive: true,
+    }));
+    assert.equal(v.inBootGrace, true);
+    assert.equal(v.barWord, "boot");
+    assert.equal(v.phase, "boot");
+});
+
+test("bootComplete signal flips boot OFF immediately, regardless of time cap", () => {
+    const start = T0;
+    const now = start + 5 * SEC; // way inside time cap
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        bootComplete: true,
+        idleSinceMs: now,
+    }));
+    assert.equal(v.inBootGrace, false);
+    assert.equal(v.barWord, "loop");
+});
+
+test("picker active wins over bootComplete (re-entered picker race)", () => {
+    // Defensive : if both markers somehow exist, picker active takes
+    // priority — the user is interacting with a picker right now.
+    const start = T0;
+    const now = start + 2 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        resumePickerActive: true,
+        bootComplete: true,
+    }));
+    assert.equal(v.inBootGrace, true);
+    assert.equal(v.barWord, "boot");
+});
+
+test("no signal + time cap exceeded → boot ends as safety", () => {
+    // Hook crashed / never ran → fall back to the time-based cap.
+    const start = T0;
+    const now = start + 6 * MIN; // past 5 min cap
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        bootGraceMs: 5 * MIN,
+        idleSinceMs: now,
+    }));
+    assert.equal(v.inBootGrace, false);
+    assert.equal(v.barWord, "loop");
+});
+
+test("no signal + within time cap → still boot (initial loading window)", () => {
+    const start = T0;
+    const now = start + 30 * SEC;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        bootGraceMs: 5 * MIN,
+    }));
+    assert.equal(v.inBootGrace, true);
+    assert.equal(v.barWord, "boot");
 });

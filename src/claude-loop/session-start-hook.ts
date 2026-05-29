@@ -24,8 +24,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { LOOP_STATUS, MUX_CMD, idleMarkerPath, readLoopStateInput, setTmuxStatus, tmuxName } from "./state.js";
-import { canFlipBgFromBoot } from "./loop-state.js";
+import { LOOP_STATUS, MUX_CMD, idleMarkerPath, setResumePicker, setTmuxStatus, tmuxName } from "./state.js";
 import { CL_ENV } from "./env-vars.js";
 
 function emit(): never {
@@ -117,6 +116,10 @@ if (source === "resume") {
                 if (/Resume session\b/i.test(text) && /Space to preview/i.test(text)) {
                     matched = true;
                     log(`session-picker: matched at ${elapsed + probeStepMs}ms (paneLen=${text.length}) → pick:${pickMode} (Enter)`);
+                    // #624 david `8pwvm3` : explicitement signaler que le
+                    // picker est ON. La state machine étend la phase boot
+                    // tant que ce marker existe (peu importe le time cap).
+                    setResumePicker(sd!, true);
                     setTmuxStatus(name!, LOOP_STATUS.BOOT, `pick:${pickMode}`);
                     sendKey("Enter");
                     sessionPicked = true;
@@ -154,6 +157,8 @@ if (source === "resume") {
                 if (summaryRegex.test(capturePane())) {
                     matched = true;
                     log(`summary-picker: matched at ${elapsed + probeStepMs}ms → pick→${mode}`);
+                    // #624 david `8pwvm3` : aussi un picker (summary) — ON.
+                    setResumePicker(sd!, true);
                     setTmuxStatus(name!, LOOP_STATUS.BOOT, `pick→${mode}`);
                     if (mode === "as-is") sendKey("Down");
                     sendKey("Enter");
@@ -186,15 +191,14 @@ if (source === "resume") {
 // as a separate flag for compatibility with `claude-loop --no-startup-ping`.
 try {
     writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-    // #624 + #627 : ne pas flipper le BG à IDLE pendant boot-grace —
-    // settleBoot du timer reste l'autorité unique pour la transition.
-    // Le service LoopState (loop-state.ts) owns the rule via
-    // `canFlipBgFromBoot(input)`.
-    if (canFlipBgFromBoot(readLoopStateInput(sd!))) {
-        setTmuxStatus(name!, LOOP_STATUS.IDLE);
-        log(`seed idle + flip bar IDLE + exit (source=${source})`);
-    } else {
-        log(`seed idle (bar BG left to settleBoot — still in boot-grace) + exit (source=${source})`);
-    }
+    // #624 david `8pwvm3` : explicit end-of-boot signal. Removes the
+    // `resume-picker-active` marker (in case the hook had set it) AND
+    // writes `boot-complete`. The state machine treats this as the
+    // authoritative end of the boot phase — bar flips out of `[boot]`
+    // on the next view-push tick, regardless of the time cap.
+    setResumePicker(sd!, false);
+    // Now that bootComplete is set, canFlipBgFromBoot returns true.
+    setTmuxStatus(name!, LOOP_STATUS.IDLE);
+    log(`seed idle + signal boot-complete + flip bar IDLE + exit (source=${source})`);
 } catch { /* swallow */ }
 emit();

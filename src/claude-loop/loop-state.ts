@@ -29,8 +29,19 @@ export interface LoopStateInput {
     nowMs: number;
     /** ms-since-epoch when the loop session started. */
     loopStartMs: number;
-    /** Boot-grace window length in ms (typically 60_000). */
+    /** Boot-grace safety cap in ms (the `boot-complete` signal is the
+     *  authoritative end-of-boot ; this cap fires only as a fail-safe
+     *  for crashed hooks). Typically 300_000 (5 min). */
     bootGraceMs: number;
+    /** #624 david `8pwvm3` : true while the Claude Code resume picker is
+     *  on screen (set by `setResumePicker(true)` from `session-start-hook`).
+     *  Stretches the boot phase indefinitely — users can take their time
+     *  picking a session without the bar flipping out of `[boot]`. */
+    resumePickerActive: boolean;
+    /** #624 david `8pwvm3` : true once `session-start-hook` has signalled
+     *  `setResumePicker(false)` (claude is past the picker / loading).
+     *  Authoritative end-of-boot signal. */
+    bootComplete: boolean;
     /** True when launched with `--no-wait` (eager drain). */
     noWait: boolean;
 
@@ -110,6 +121,19 @@ export interface LoopStateView {
 // ---------------------------------------------------------------------------
 
 function isInBootGrace(input: LoopStateInput): boolean {
+    // #624 david `8pwvm3` — three explicit signals, in priority order :
+    //
+    //   1. `resumePickerActive` (set by session-start-hook) STRETCHES the
+    //      boot phase indefinitely. As long as the picker is on screen,
+    //      the user is "inside boot".
+    //   2. `bootComplete` (signalled by session-start-hook on its way out)
+    //      ENDS the boot phase. The picker — if any — is gone, claude is
+    //      at the prompt.
+    //   3. `bootGraceMs` time cap is now a SAFETY net for hooks that never
+    //      signal (crash, --resume aborted, claude exits before the hook
+    //      runs). Typically 5 min so a slow boot never trips it.
+    if (input.resumePickerActive) return true;
+    if (input.bootComplete) return false;
     if (input.bootGraceMs <= 0) return false;
     return (input.nowMs - input.loopStartMs) < input.bootGraceMs;
 }
