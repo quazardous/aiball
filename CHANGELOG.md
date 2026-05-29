@@ -25,6 +25,28 @@ dates are YYYY-MM-DD.
 
 *Nothing yet.*
 
+## [0.10.0] — 2026-05-29
+
+### Added
+
+- `claude-loop` now auto-detects whether `claude` has any prior
+  session for the current directory before injecting `--resume`.
+  If the directory is fresh (no `~/.claude/projects/<encoded>/`
+  entry), the auto-resume is skipped with a one-line log so a
+  brand-new project doesn't land on an empty resume picker. An
+  explicit `--resume` or `--resume=<id>` still wins.
+
+### Fixed
+
+- The Automation rules list now shows each rule's `#id` in the
+  rank cell, matching what the detail page says (the previous 1-based
+  visual position no longer disagrees with `Rule #N`).
+- Accepting a pending resolution no longer flashes the dock's
+  buttons mid-flight. The two-step approve+close used to land an
+  intermediate WS refresh that briefly reset the dock to a
+  no-decision state ; the thread now defers refreshes while a
+  multi-step verb is in flight and catches up once it settles.
+
 ## [0.9.5] — 2026-05-29
 
 ### Changed
