@@ -930,26 +930,29 @@ def _paint_word(word):
         pass
 
 
-# #619 david `jjfdea` + `33zghr` + `f97nu6` : the AFK label segment
-# in status-right is painted by the proxy. 3 AFK states now (F9 cycle),
-# each with its own prefix + colour:
+# #619 david `jjfdea` + `33zghr` + `f97nu6` + `a2f2gk` : the AFK chunk in
+# status-right is painted by the proxy. The `AFK:` LABEL itself colours
+# the AFK state (per `a2f2gk` — strict 3-state, AFK only, user-grace is
+# NOT in this segment) :
 #
-#   loop autonomous     : `AFK:F9`            (label dim, no prefix)
-#   user-grace active   : `9m AFK:F9`         (yellow countdown, label lit)
-#   AFK 10min (F9 1×)   : `9m AFK:F9`         (ORANGE countdown, label lit)
-#   AFK ∞ (F9 2×)       : `∞ AFK:F9`          (RED ∞, label lit)
+#   OFF (no AFK)        : `AFK:F9`            (label dim ≈ noir, pas de prefix)
+#   AFK 10min (F9 1×)   : `9m AFK:F9`         (label + countdown JAUNE)
+#   AFK ∞ (F9 2×)       : `∞ AFK:F9`          (label + ∞ ROUGE)
 #
-# The label colour itself = binary "is anything holding the loop back".
-# The prefix colour = WHO is holding (yellow = passive user-grace,
-# orange = AFK auto-release, red = AFK held indefinitely).
+# The remaining-minutes prefix in 10min mode is computed from the file's
+# absolute expiry timestamp every tick (cheap diff repaint) — toggle never
+# resets an in-progress countdown ; only OFF→10m freshly arms a new
+# expiry, ∞→OFF clears, 10m→∞ replaces with an indefinite hold.
+# User-grace lives elsewhere (the bar's `claude-wait` word in the black
+# island), no longer paints this chunk.
 def _format_afk_state():
     key = os.environ.get("CL_AFK_KEY_DISP") or "F9"
     fg_dim = os.environ.get("CL_AFK_LABEL_FG_DIM") or "colour238"
     fg_lit = os.environ.get("CL_AFK_LABEL_FG_LIT") or "colour16"
     mode = _afk_mode()
     if mode == "inf":
-        # AFK ∞ — red.
-        return f"#[fg=colour196]∞ #[fg={fg_lit}]AFK:#[fg={fg_lit}]{key}"
+        # AFK ∞ — label rouge.
+        return f"#[fg=colour196]∞ AFK:#[fg={fg_lit}]{key}"
     if isinstance(mode, tuple):  # ("until", expiry_ts)
         rem = mode[1] - datetime.datetime.now().timestamp()
         if rem >= 60:
@@ -957,18 +960,9 @@ def _format_afk_state():
             prefix = f"{mins}m"
         else:
             prefix = f"{max(1, int(rem))}s"
-        # AFK 10min — orange.
-        return f"#[fg=colour208]{prefix} #[fg={fg_lit}]AFK:#[fg={fg_lit}]{key}"
-    rem = _user_grace_remaining()
-    if rem > 0.0:
-        # User-grace — yellow.
-        if rem >= 60:
-            mins = int(rem / 60) + (0 if rem % 60 == 0 else 1)
-            prefix = f"{mins}m"
-        else:
-            prefix = f"{max(1, int(rem))}s"
-        return f"#[fg=colour178]{prefix} #[fg={fg_lit}]AFK:#[fg={fg_lit}]{key}"
-    # Nothing held — AFK dim.
+        # AFK 10min — label jaune.
+        return f"#[fg=colour178]{prefix} AFK:#[fg={fg_lit}]{key}"
+    # OFF — label dim (≈ noir), no countdown.
     return f"#[fg={fg_dim}]AFK:#[fg={fg_lit}]{key}"
 
 
