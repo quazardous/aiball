@@ -228,7 +228,10 @@ defineExpose({ load });
     font-weight: 600;
 }
 
-/* #B.254 — narrow viewports : 2-line cards, no attribute labels. */
+/* #B.254 / #610 — narrow viewports : 2-line cards. #610 david — re-add
+   the per-cell label (data-label injecté par DataList) en préfixe muted
+   pour que l'utilisateur reconnaisse les colonnes (avant, thead caché
+   ET pas de label → cards anonymes). */
 @media (max-width: 720px) {
     .projects-panel {
         gap: 0.6rem;
@@ -253,15 +256,20 @@ defineExpose({ load });
         width: 100%;
     }
     .projects-table tr {
+        /* #610 david — "les cards doivent devenir plus des row" : on
+           drop le chrome card (border full + radius + background), on
+           garde juste un border-bottom comme séparateur de row. Padding
+           interne conservé pour que le texte ne touche pas le bord. */
         display: flex;
         flex-wrap: wrap;
         align-items: baseline;
         gap: 0.25rem 0.7rem;
-        border: 1px solid var(--p-content-border-color);
-        border-radius: 0.5rem;
-        padding: 0.45rem 0.65rem;
-        margin-bottom: 0.5rem;
-        background: var(--p-surface-50);
+        border: none;
+        border-bottom: 1px solid var(--p-content-border-color);
+        border-radius: 0;
+        padding: 0.5rem 0.7rem;
+        margin-bottom: 0;
+        background: transparent;
     }
     .projects-table td {
         flex: 0 0 auto;
@@ -272,6 +280,16 @@ defineExpose({ load });
         min-height: 0;
         display: inline-flex;
         align-items: baseline;
+    }
+    /* #610 : préfixe le contenu de chaque cellule par son header (data-label
+       injecté par DataList). Skip pour la 1ère cellule (Name) qui se
+       présente seule, et pour l'indicator-cell (juste un dot, pas de label).
+       attr() avec fallback vide → si data-label est absent, rien ne s'affiche. */
+    .projects-table td:not(:first-child):not(.indicator-cell)[data-label]::before {
+        content: attr(data-label) ": ";
+        color: var(--p-text-muted-color);
+        font-size: 0.78rem;
+        margin-right: 0.3rem;
     }
     .projects-table td.indicator-cell {
         margin-left: auto;

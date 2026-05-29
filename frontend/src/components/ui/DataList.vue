@@ -124,6 +124,26 @@ const sortedRows = computed<readonly T[]>(() => {
 });
 
 const useColumnsMode = computed(() => Array.isArray(props.columns));
+
+// #610 david — sortable columns surfaced as a mobile-only `<select>`
+// above the table (thead is hidden on mobile because the table reflows
+// to a card layout, so the user has no other handle to pick a sort
+// axis). Pattern shared across panels via DataList.
+const sortableColumns = computed<readonly DataListColumn[]>(() =>
+    (props.columns ?? []).filter((c) => c.sortable),
+);
+
+function onMobileSortKeyChange(e: Event): void {
+    const v = (e.target as HTMLSelectElement).value;
+    if (!v) return;
+    sortKey.value = v;
+    const col = colByKey(v);
+    if (col?.defaultDir) sortDir.value = col.defaultDir;
+}
+
+function toggleMobileSortDir(): void {
+    sortDir.value = sortDir.value === "asc" ? "desc" : "asc";
+}
 </script>
 
 <template>
@@ -135,7 +155,37 @@ const useColumnsMode = computed(() => Array.isArray(props.columns));
         <slot v-else-if="isEmpty" name="empty">
             <div class="aiball-empty">Nothing here.</div>
         </slot>
-        <table v-else class="aiball-table" :class="tableClass">
+        <template v-else>
+            <!-- #610 david — mobile sort chooser : visible UNIQUEMENT
+                 sur petits viewports via CSS, où thead est caché et le
+                 user n'a sinon aucun moyen de choisir un axe de tri.
+                 N'affiche que les colonnes `sortable: true`. -->
+            <div
+                v-if="useColumnsMode && sortableColumns.length > 0"
+                class="datalist-mobile-sort"
+            >
+                <label class="datalist-mobile-sort__label">Sort by</label>
+                <select
+                    class="datalist-mobile-sort__select"
+                    :value="sortKey ?? ''"
+                    @change="onMobileSortKeyChange"
+                >
+                    <option v-if="!sortKey" value="">—</option>
+                    <option
+                        v-for="col in sortableColumns"
+                        :key="col.key"
+                        :value="col.key"
+                    >{{ col.label }}</option>
+                </select>
+                <button
+                    type="button"
+                    class="datalist-mobile-sort__dir"
+                    :disabled="!sortKey"
+                    :title="sortDir === 'asc' ? 'Ascending — click to reverse' : 'Descending — click to reverse'"
+                    @click="toggleMobileSortDir"
+                >{{ sortDir === "asc" ? "↑" : "↓" }}</button>
+            </div>
+            <table class="aiball-table" :class="tableClass">
             <thead>
                 <tr>
                     <!-- #592 columns-mode : declarative headers + sort affordance -->
@@ -166,6 +216,7 @@ const useColumnsMode = computed(() => Array.isArray(props.columns));
                             v-for="col in columns"
                             :key="col.key"
                             :class="col.cellClass"
+                            :data-label="col.label"
                         >
                             <slot :name="`cell-${col.key}`" :row="row" :value="sortValueFor(row, col.key)" />
                         </td>
@@ -173,7 +224,8 @@ const useColumnsMode = computed(() => Array.isArray(props.columns));
                 </template>
                 <slot v-else name="body" />
             </tbody>
-        </table>
+            </table>
+        </template>
     </div>
 </template>
 
@@ -240,5 +292,51 @@ const useColumnsMode = computed(() => Array.isArray(props.columns));
     text-align: right;
     min-width: 6rem;
     white-space: nowrap;
+}
+
+/* #610 david — mobile sort chooser. Hidden on desktop (thead clicks
+   handle sort there). Visible only on narrow viewports where thead is
+   hidden by the panel's mobile pattern. Pattern shipped from DataList
+   so every consumer panel (Projects / Consumers / Nodes / Tags) gets it
+   uniformly. */
+.datalist-mobile-sort {
+    display: none;
+}
+@media (max-width: 720px) {
+    .datalist-mobile-sort {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.4rem 0.5rem 0.5rem;
+        font-size: 0.85rem;
+    }
+    .datalist-mobile-sort__label {
+        color: var(--p-text-muted-color);
+    }
+    .datalist-mobile-sort__select {
+        flex: 1 1 auto;
+        background: var(--p-content-background);
+        color: var(--p-text-color);
+        border: 1px solid var(--p-content-border-color);
+        border-radius: 0.35rem;
+        padding: 0.25rem 0.4rem;
+        font: inherit;
+    }
+    .datalist-mobile-sort__dir {
+        background: transparent;
+        border: 1px solid var(--p-content-border-color);
+        border-radius: 0.35rem;
+        padding: 0.1rem 0.6rem;
+        cursor: pointer;
+        font: inherit;
+        color: var(--p-text-color);
+    }
+    .datalist-mobile-sort__dir:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+    .datalist-mobile-sort__dir:hover:not(:disabled) {
+        background: var(--p-surface-100);
+    }
 }
 </style>
