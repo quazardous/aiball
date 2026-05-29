@@ -2,16 +2,22 @@
 
 Notable changes to aiball — the MCP surface, HTTP API, UI, and CLI.
 
-**Style**: human-friendly, synthetic. Each entry is a short paragraph or a
-handful of bullets describing what changed for users / integrators, not a
-file-by-file diff. Dates are YYYY-MM-DD; format inspired by Keep a
-Changelog.
+**House style**:
 
-**Versioning**: the source of truth is the repo-root `package.json` (the
-`aiball` component in `qcmp.yaml`). The running version is surfaced via
-`aiball --version`, `GET /api/health`, and the web UI footer. Frontend and
-other components track their own versions; this file is the human-readable
-narrative for the product as a whole.
+- One short bullet per change, grouped by Added / Changed / Fixed.
+  Multi-paragraph entries are only for the major changes a user
+  really needs to read in full.
+- Plain language, no commit-message phrasing, no file paths / class
+  names / pseudo-code. Lead with the user-visible *what + why*.
+- **No internal tracker IDs** (`#NNN`) — aiball's tracker isn't
+  externally browsable; cite-without-link is just noise.
+- **Version bump = SemVer**: any `### Added` entry is at least
+  MINOR; `### Fixed` alone is PATCH; breaking change is MAJOR.
+
+**Versioning**: the source of truth is the repo-root `package.json`. The
+running version is surfaced via `aiball --version`, `GET /api/health`,
+and the web UI footer. Format inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
+dates are YYYY-MM-DD.
 
 ---
 
