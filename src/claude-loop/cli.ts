@@ -336,6 +336,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
                 stopHook: opts.initStopHook === true,
                 global: opts.initGlobal === true,
                 private: opts.initPrivate === true,
+                // #603 (4dzxp2) : forward identity to bootstrap so `start --init`
+                // matches `init` behavior (consumer + project also seeded
+                // dans .aiball.yaml, pas juste .aiball.local.yaml).
+                consumer: opts.consumer,
+                project: opts.project,
             });
         } finally {
             if (startCwd) process.chdir(origCwd);
@@ -1752,13 +1757,19 @@ async function main(): Promise<void> {
         .option("--private", "#593: seed .aiball.yaml with `project_type: private` (welcome serves the private kit)")
         .option("--aiball-url <url>", "#394: persist a REMOTE aiball URL (http[s]://host:port) so `start` (no flags) slaves to it")
         .option("--aiball-token <token>", "#394: bearer token for the remote (required with --aiball-url; mint with `aiball auth issue --consumer <id>`)")
-        .option("--consumer <id>", "#394: loop identity = consumer_id (persisted with the remote)")
-        .option("--project <name>", "#394: project name (persisted with the remote)")
-        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; aiballUrl?: string; aiballToken?: string; consumer?: string; project?: string }) => {
+        .option("--consumer <id>", "#394/#603: loop identity = consumer_id. Persisted with the remote AND seeded into .aiball.yaml's `consumer.agent`.")
+        .option("--agent <id>", "#603: alias for --consumer (the loop's agent identity).")
+        .option("--project <name>", "#394/#603: project name. Persisted with the remote AND seeded into .aiball.yaml's `consumer.project`.")
+        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string }) => {
+            // #603 david `4dzxp2` : --agent est un alias de --consumer (#420 le faisait
+            // déjà sur `start`, on harmonise sur `init`).
+            const consumer = opts.consumer ?? opts.agent;
             // #394: persist the remote connection first (validates --aiball-token).
-            cmdInitRemote(opts);
-            // Existing behavior: bootstrap the project (.mcp.json + .aiball.yaml).
-            await bootstrapInit(opts);
+            cmdInitRemote({ ...opts, consumer });
+            // #603 (4dzxp2) : forward consumer + project to bootstrapInit so
+            // they ALSO land in .aiball.yaml (avant : seul .aiball.local.yaml
+            // recevait l'identité remote → la config locale ignorait l'override).
+            await bootstrapInit({ ...opts, consumer });
         });
 
     // -h / --help at top level → root help, not start help.

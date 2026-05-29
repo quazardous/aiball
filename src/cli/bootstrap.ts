@@ -91,14 +91,36 @@ async function resolveIdentityHint(): Promise<string> {
  * (#304 — david: "alias de aiball init"). Writes .mcp.json + a minimal
  * .aiball.yaml, optionally wires the Stop hook, then prints the identity hint.
  */
-export async function bootstrapInit(opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean }): Promise<void> {
+export async function bootstrapInit(opts: {
+    force?: boolean;
+    stopHook?: boolean;
+    global?: boolean;
+    private?: boolean;
+    /** #603 (david 4dzxp2) : seed `consumer.agent` into .aiball.yaml. `--agent`
+     *  alias on the CLI is mapped to this same field upstream. Existing yaml
+     *  gets patched in place (Document API, comments preserved). */
+    consumer?: string;
+    /** #603 : seed `consumer.project` into .aiball.yaml. Patches existing yaml
+     *  in place when present. */
+    project?: string;
+}): Promise<void> {
     const force = opts.force === true;
     await mcpInitAction(force);
     // Inline minimal .aiball.yaml — the verbose annotated template lives at
     // .aiball.yaml.example; the bootstrap stays tight.
     const yamlPath = join(userCwd(), ".aiball.yaml");
-    if (existsSync(yamlPath) && !force) {
-        process.stdout.write(`${yamlPath}: already exists — re-run with --force to overwrite\n`);
+    const yamlExists = existsSync(yamlPath);
+    const hasIdentity = !!opts.consumer || !!opts.project;
+    if (yamlExists && !force) {
+        // #603 (4dzxp2) : even when the yaml exists, patch in --consumer /
+        // --project so a `claude-loop init --consumer foo` on an already-
+        // bootstrapped project actually persists the identity. Preserves
+        // existing keys + comments via the yaml Document API.
+        if (hasIdentity) {
+            patchIdentity(yamlPath, opts.consumer, opts.project);
+        } else {
+            process.stdout.write(`${yamlPath}: already exists — re-run with --force to overwrite\n`);
+        }
     } else {
         // #593 — `--private` seeds `project_type: private` so the MCP `welcome`
         // tool serves the private kit (relaxed conventions : internal refs OK,
@@ -106,20 +128,52 @@ export async function bootstrapInit(opts: { force?: boolean; stopHook?: boolean;
         // welcome tool's fail-safe applies the strict public conventions when
         // unset, so a project that's actually private should declare it).
         const projectTypeLine = opts.private === true ? "project_type: private\n" : "";
+        const consumerLines = hasIdentity
+            ? "consumer:\n"
+                + (opts.consumer ? `  agent: ${opts.consumer}\n` : "")
+                + (opts.project ? `  project: ${opts.project}\n` : "")
+            : "";
         const body =
             "# Bootstrapped by `aiball init`. See .aiball.yaml.example for the full annotated template.\n" +
             projectTypeLine +
+            consumerLines +
             "autopoll:\n" +
             "  enabled: true\n";
         writeFileSync(yamlPath, body);
-        const suffix = opts.private === true ? " (autopoll enabled, project_type: private)" : " (autopoll enabled)";
-        process.stdout.write(`${existsSync(yamlPath) && force ? "overwrote" : "created"} ${yamlPath}${suffix}\n`);
+        const tags: string[] = ["autopoll enabled"];
+        if (opts.private === true) tags.push("project_type: private");
+        if (opts.consumer) tags.push(`consumer.agent: ${opts.consumer}`);
+        if (opts.project) tags.push(`consumer.project: ${opts.project}`);
+        process.stdout.write(`${yamlExists && force ? "overwrote" : "created"} ${yamlPath} (${tags.join(", ")})\n`);
     }
     if (opts.stopHook === true) {
         wireStopHook({ global: opts.global === true });
     }
     process.stdout.write(`\n${await resolveIdentityHint()}\n`);
     process.stdout.write(`Run \`aiball check\` to verify everything resolves.\n`);
+}
+
+/**
+ * #603 — merge `consumer.agent` / `consumer.project` into an existing
+ * `.aiball.yaml`. Document API so comments + unrelated keys survive.
+ */
+function patchIdentity(path: string, agent: string | undefined, project: string | undefined): void {
+    let doc;
+    try {
+        doc = parseDocument(readFileSync(path, "utf8"));
+    } catch {
+        die(`init: ${path} exists but isn't valid YAML — fix or remove it first`);
+    }
+    if (!doc.has("consumer")) doc.set("consumer", {});
+    const consumer = doc.get("consumer") as { set: (k: string, v: unknown) => void } | undefined;
+    if (!consumer || typeof (consumer as { set?: unknown }).set !== "function") {
+        die(`init: ${path} has a non-mapping 'consumer' value — fix by hand, then re-run`);
+    }
+    const changed: string[] = [];
+    if (agent) { consumer.set("agent", agent); changed.push(`agent=${agent}`); }
+    if (project) { consumer.set("project", project); changed.push(`project=${project}`); }
+    writeFileSync(path, String(doc));
+    process.stdout.write(`${path}: patched consumer (${changed.join(", ")})\n`);
 }
 
 /**
@@ -326,8 +380,14 @@ export function registerBootstrapCommands(program: Command): void {
         .option("--stop-hook", "Also wire Claude Code's Stop hook into .claude/settings.json so this project's autopoll triggers")
         .option("--global", "With --stop-hook, write to ~/.claude/settings.json instead of <PWD>/.claude/settings.json (fires in every Claude Code session)")
         .option("--private", "Seed the .aiball.yaml with `project_type: private` so the welcome MCP serves the private kit (relaxed conventions). Default = public (welcome's fail-safe).")
-        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean }) => {
-            await bootstrapInit(opts);
+        .option("--agent <id>", "#603: seed `consumer.agent` in .aiball.yaml (loop identity). Patches an existing file in place.")
+        .option("--consumer <id>", "#603: alias for --agent (the consumer_id IS the loop identity).")
+        .option("--project <name>", "#603: seed `consumer.project` in .aiball.yaml (default project for this checkout).")
+        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; agent?: string; consumer?: string; project?: string }) => {
+            await bootstrapInit({
+                ...opts,
+                consumer: opts.consumer ?? opts.agent,
+            });
         });
 
     // #380: `aiball init tailscale` — configure host-level remote access by
