@@ -19,6 +19,96 @@ narrative for the product as a whole.
 
 *Nothing yet.*
 
+## [0.9.4] — 2026-05-29
+
+### `bin/fake-claude` reborn over `textual` (#605)
+
+The first cut of the simulator mixed `rich.live.Live(Panel)` for the
+streaming output with manual ANSI cursor positioning for the prompt
+zone. Live's 10-FPS repaint trampled the cursor, and the input that
+followed inherited a parasitized position. Switched to `textual` —
+the TUI framework by the same authors as rich — where each region is
+a real widget that owns its area:
+
+```
+┌────────────────────────────────┐
+│ Static  : flash header         │   ← `✻ Working…`
+├────────────────────────────────┤
+│ RichLog : echoes + stream      │   ← scrollable output
+├────────────────────────────────┤
+│ Input   : `❯` composer         │   ← cursor lives here, native
+├────────────────────────────────┤
+│ Static  : `⏵⏵ auto mode on`    │   ← state footer
+└────────────────────────────────┘
+```
+
+Screens become typed (`header_flash` / `picker` / `prompt` / `stream`
+/ `write`) and the play loop dispatches on kind. The streamer and the
+user input run truly in parallel via textual's async event loop, so
+the lorem flux can keep pushing lines into `RichLog` while the
+composer stays alive in `Input`. Markers (`esc to interrupt`,
+`Resume session` + `Space to preview`, `auto mode on`, …) preserved
+verbatim — claude-loop's pane probe doesn't care how the bytes were
+rendered, only that they're on screen.
+
+`Ctrl+D ×2` quits bash-style (first press shows a 2-second window
+hint in the header); `Ctrl+Q` quits directly. PEP-723 inline deps
+bumped to `textual>=0.50` + `pyyaml>=6`. Pipe mode disappeared (the
+TUI refuses to render outside a TTY, by design); use
+`App.run_test()` from a Python harness for non-interactive smoke.
+
+### Mobile borders edge-to-edge (#609)
+
+On smartphone viewports (`max-width: 720px`), the inbox list, the
+thread comments, and the reply composer all sat inside a 0.5 rem
+horizontal padding with full per-comment borders, doubling the
+visible separation. Two passes :
+
+- Drop the horizontal padding off `.aiball-main` and the
+  left/right/radius off `.comment-card` and `.composer` — content
+  reaches the screen edge, internal padding keeps text aerated.
+- Drop `.comment-card` border-top too so two adjacent comments
+  separate with a single 1 px line, not the `bottom + top` doubling
+  that the first pass left in place.
+
+Inbox list-rows already had only a `border-bottom`, so the first
+change was enough there. Desktop layout untouched (all gated by
+`@media (max-width: 720px)`).
+
+### Mobile sort chooser, shared in DataList (#610)
+
+Admin lists (Projects, Consumers, …) hide `<thead>` on smartphone and
+reflow the table into card-style rows. Two consequences fixed :
+
+- **Anonymous cells**: with thead gone, the user saw raw values
+  (`3   12   2 minutes ago`) without knowing which column they belong
+  to. `DataList` now stamps `:data-label="col.label"` on every `<td>`,
+  and `ProjectsPanel` mobile CSS prefixes each cell with its column
+  label via `::before { content: attr(data-label) ": " }`. Result:
+  `Owners: 3`  `Followers: 12`  `Last activity: 2 minutes ago`
+  inline in muted gray.
+- **No way to pick a sort axis**: thead clicks are the only sort
+  handle, and thead is hidden. `DataList` now renders a
+  `.datalist-mobile-sort` strip above the table (label + native
+  `<select>` of `sortable: true` columns + asc/desc toggle button)
+  visible only on `max-width: 720px`. Wired to the same internal
+  `sortKey`/`sortDir` the thead clicks drive on desktop, so the two
+  surfaces are one source of truth. Consumer panels get the chooser
+  for free as long as at least one column declares `sortable: true`.
+
+Also flatten the ProjectsPanel mobile cards into plain rows (drop
+border-radius / per-card background / margin, keep only
+`border-bottom` + internal padding). Looks like a list, not a stack
+of floating cards.
+
+### Goto-ticket input slimmer (#608)
+
+Two small UX tweaks: the header's goto-ticket input dropped its
+"or hashid" suffix from the placeholder (`#N` is enough — the tooltip
+still documents the full grammar) and shrank back from 6.5 rem to
+4.5 rem (its pre-#570 width). A typed hashid still fits via
+horizontal scroll inside the input.
+
 ## [0.9.3] — 2026-05-29
 
 ### `claude.always_resume` is now on by default (#577)
