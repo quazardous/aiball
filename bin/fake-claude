@@ -1,49 +1,59 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["rich>=13", "pyyaml>=6"]
+# dependencies = ["textual>=0.50", "pyyaml>=6"]
 # ///
 """fake-claude — scriptable claude(1) simulator for claude-loop debugging.
 
-Reads a YAML scenario and plays it on stdout/stdin so claude-loop, hooks,
-and the pty-proxy can be debugged without burning real Claude tokens.
+Reads a YAML scenario and plays it through a `textual` TUI app so the
+prompt input and the streaming output have their OWN widgets (each owns
+its region — no cursor/repaint parasitage, the bug that killed the rich
+V0.1, #605 nups2s).
 
-Usage:
-    fake-claude scenarios/picker-resume.yaml
-    fake-claude                           # default scenario (REPL)
-    claude-loop start --command "fake-claude /abs/path/to/scenario.yaml"
+Architecture (Vertical layout):
+    ┌──────────────────────────────────────────────────┐
+    │ Static  : "✻ Working…"  /  ""  (boot/busy hint)  │   ← dynamic header
+    ├──────────────────────────────────────────────────┤
+    │ RichLog : echoes + streamed lines, scrollable    │   ← own region
+    ├──────────────────────────────────────────────────┤
+    │ Input   : `❯ ` composer (cursor lives here)      │   ← own region
+    ├──────────────────────────────────────────────────┤
+    │ Static  : "⏵⏵ auto mode on · esc to interrupt"   │   ← state footer
+    └──────────────────────────────────────────────────┘
 
-Built-in screens preserve verbatim the strings that claude-loop's pane
-probe regexes look for: `esc to interrupt`, `Resume session` + `Space to
-preview`, `auto mode on`, `Compacting conversation`, etc.
+Markers preserved VERBATIM in their widgets so claude-loop's pane-probe
+regexes (state.ts:1018 `esc to interrupt`, session-start-hook.ts:116
+`Resume session`+`Space to preview`, etc.) match on tmux capture-pane:
+the regex doesn't care WHO rendered the bytes, only that they're on
+screen. textual writes them straight via Static/RichLog.
 
-Refactored over `rich` (#605 — david : "dans une fenêtre, lib semi-graph")
-— panels for the boot/idle/busy/picker screens, line-buffered streaming
-for the lorem flux. Shebang uses `uv run --script` so the rich + pyyaml
-deps are auto-resolved into a cached venv on first run (no manual pip).
+Shebang uses `uv run --script` with PEP-723 inline deps (`textual`,
+`pyyaml`) so the deps are auto-resolved into a cached venv on first
+run — single-file script, no manual pip.
 """
+from __future__ import annotations
+
 import argparse
+import asyncio
 import random
-import re
-import select
 import sys
-import time
 from pathlib import Path
 
 import yaml
-from rich.box import HEAVY, ROUNDED, SIMPLE
-from rich.console import Console, Group
-from rich.live import Live
-from rich.padding import Padding
-from rich.panel import Panel
-from rich.text import Text
-
-console = Console(highlight=False)
+from textual import on
+from textual.app import App, ComposeResult
+from textual.containers import Vertical
+from textual.widgets import Input, RichLog, Static
 
 
-# #605 david `w8psk2` + `k5phqp` : flux lorem ipsum pour simuler le
-# travail de claude. Stream LINE-PAR-LINE (par salves) avec un délai
-# 1-3s entre chaque ligne, plus naturel que token-par-token.
+# Markers the claude-loop pane probe regexes expect (verbatim).
+MARKER_ESC_INTERRUPT = "esc to interrupt"
+MARKER_AUTO_MODE = "⏵⏵ auto mode on (shift+tab to cycle)"
+MARKER_RESUME_TITLE = "Resume session"
+MARKER_RESUME_HINT = "Space to preview"
+
+
+# Lorem ipsum, line-per-salvo (1-3 s between each in the stream).
 LOREM_IPSUM_LINES = [
     "Lorem ipsum dolor sit amet, consectetur adipiscing elit.",
     "Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.",
@@ -54,330 +64,263 @@ LOREM_IPSUM_LINES = [
     "Nullam varius, turpis et commodo pharetra, est eros bibendum elit, nec luctus magna felis sollicitudin mauris.",
     "Integer in mauris eu nibh euismod gravida. Duis ac tellus et risus vulputate vehicula.",
 ]
-LOREM_IPSUM_WORDS = " ".join(LOREM_IPSUM_LINES).split()
 
 
-# Markers the claude-loop pane probe regexes expect (keep verbatim).
-MARKER_ESC_INTERRUPT = "esc to interrupt"
-MARKER_AUTO_MODE = "⏵⏵ auto mode on (shift+tab to cycle)"
-MARKER_RESUME_TITLE = "Resume session"
-MARKER_RESUME_HINT = "Space to preview"
+# Built-in screen specs. A YAML scenario can declare its own under
+# `screens:`. Each spec is one of these kinds — the textual app
+# dispatches on `kind`:
+#
+#   kind=header_flash : update the header to <text> for <duration> s
+#                       then clear. Used for `✻ Loading Claude…`,
+#                       `*  Resuming conversation…`, etc.
+#   kind=write        : push <text> as one line into the output log.
+#   kind=picker       : push a multi-line block (resume picker), set
+#                       header `[choose a session]`, wait for the
+#                       next Input.Submitted, then clear.
+#   kind=prompt       : suspend the play-loop until the user submits
+#                       a line via Input.Submitted. The submitted line
+#                       is echo'd into the log as `> {input}`.
+#   kind=stream       : header → busy marker, push <lines> into the
+#                       log one by one with random <delay_min>/<delay_max>
+#                       between, then header cleared.
+#
+# duration is optional; defaults to 1.0 for header_flash.
 
-
-def render_idle() -> None:
-    """The idle composer — a rounded panel for the prompt + footer line
-    with the auto-mode marker. After rendering, an ANSI sequence puts
-    the cursor INSIDE the panel after `❯ ` (Up 2 lines past the footer
-    + rule, col 5 past `│ ❯ `). #605 david : "le curseur doit être dans
-    la zone prompt"."""
-    prompt_panel = Panel(
-        Text("❯ ", style="bold"),
-        box=ROUNDED,
-        padding=(0, 1),
-        title_align="left",
-        border_style="dim",
-        # Take the full console width so the panel feels like the real
-        # claude composer (which spans the pane).
-        width=console.width,
-    )
-    footer = Text(
-        f"  {MARKER_AUTO_MODE} · ← for agents",
-        style="dim",
-    )
-    console.print(prompt_panel)
-    console.print(footer)
-    # Up 2 rows (past footer + bottom border), col 5 (past `│ ❯ ` =
-    # border + space + ❯ + space, with padding(0,1) adding the inner
-    # spaces). The user's typing lands inside the panel, just like real
-    # claude. After Enter, input() returns and the cursor naturally drops
-    # past the panel — echo_format starts with \n to clear safely.
-    sys.stdout.write("\033[2A\033[5G")
-    sys.stdout.flush()
-
-
-def render_busy_header(verb: str = "Working") -> None:
-    """`✻ <verb>… + esc to interrupt` — the busy footer that gates
-    claude-loop auto-wakes. Verbatim string (no rich styling that would
-    confuse the regex)."""
-    console.print(f"✻ {verb}…")
-    console.print(f"  {MARKER_AUTO_MODE} · {MARKER_ESC_INTERRUPT}")
-    console.print()
-
-
-def render_resume_picker() -> None:
-    """The session-resume picker (`claude --resume` with ≥2 sessions).
-    Verbatim from david's capture (#605 ezq3ea): Resume session title +
-    Search box + per-project section + entry list + shortcuts footer
-    (where `Space to preview` lives, picked up by session-start-hook.ts)."""
-    body = Group(
-        Padding(Text("Resume session", style="bold"), (0, 0, 1, 0)),
-        Panel(
-            Text("⌕ Search…", style="dim"),
-            box=ROUNDED,
-            border_style="dim",
-            padding=(0, 1),
-        ),
-        Padding(Text("skybot", style="bold cyan"), (1, 0, 0, 4)),
-        Padding(Text("❯ Review open issues in skybot", style="bold"), (1, 0, 0, 2)),
-        Padding(Text("1 minute ago · main · 8.9MB", style="dim"), (0, 0, 0, 4)),
-        Padding(Text("Engage ticket 478 in skybot"), (1, 0, 0, 4)),
-        Padding(Text("2 days ago · main · 968.7KB", style="dim"), (0, 0, 0, 4)),
-        Padding(Text("Process AIball pings and engage work ticket"), (1, 0, 0, 4)),
-        Padding(Text("2 days ago · main · 1.1MB", style="dim"), (0, 0, 0, 4)),
-        Padding(
-            Text(
-                "Ctrl+A to show all projects · Ctrl+B to only show current branch · "
-                f"{MARKER_RESUME_HINT} · Ctrl+R to rename · Type to search · Esc to cancel",
-                style="dim",
-            ),
-            (2, 0, 0, 4),
-        ),
-    )
-    console.print(body)
-
-
-# Built-in screens. Each entry declares its renderable behavior. A screen
-# may carry `render` (callable), `stream` (line-by-line lorem), `duration`
-# (auto-clear sleep), `wait_input` (block on stdin with optional echo).
-BUILTIN_SCREENS = {
+BUILTIN_SCREENS: dict[str, dict] = {
     "boot.loading": {
-        "render": lambda: console.print("✻ Loading Claude…", style="bold yellow"),
+        "kind": "header_flash",
+        "text": "✻ Loading Claude…",
         "duration": 1.0,
     },
     "boot.resume_picker": {
-        "render": render_resume_picker,
-        "wait_input": {"type": "line", "timeout": 30, "on_timeout": "pick_default"},
+        "kind": "picker",
+        # Verbatim from david's #605 ezq3ea capture. Both regex
+        # markers (Resume session / Space to preview) are present.
+        "lines": [
+            MARKER_RESUME_TITLE,
+            "",
+            "    skybot",
+            "",
+            "  ❯ Review open issues in skybot",
+            "    1 minute ago · main · 8.9MB",
+            "",
+            "    Engage ticket 478 in skybot",
+            "    2 days ago · main · 968.7KB",
+            "",
+            "    Process AIball pings and engage work ticket",
+            "    2 days ago · main · 1.1MB",
+            "",
+            f"    Ctrl+A to show all projects · Ctrl+B to only show current branch · {MARKER_RESUME_HINT} · Ctrl+R to rename · Type to search · Esc to cancel",
+        ],
     },
     "transition.resuming": {
-        # double space `*  Resuming` — verbatim from david's b9crta capture.
-        "render": lambda: console.print("*  Resuming conversation…", style="dim"),
+        "kind": "header_flash",
+        # Double space `*  Resuming` verbatim (b9crta).
+        "text": "*  Resuming conversation…",
         "duration": 2.0,
     },
     "transition.compacting": {
-        # Live compacting needs BOTH the ✶ line AND esc to interrupt
-        # (#B.185 — without esc-to-interrupt the probe sees it as stale).
-        "render": lambda: (
-            console.print("✶ Compacting conversation… (12s)", style="bold magenta"),
-            console.print(f"  {MARKER_AUTO_MODE} · {MARKER_ESC_INTERRUPT}", style="dim"),
-        ),
+        "kind": "header_flash",
+        "text": f"✶ Compacting conversation… (12s)   {MARKER_ESC_INTERRUPT}",
         "duration": 3.0,
     },
     "transition.crunched": {
-        # Post-turn summary — verbs vary in the wild: Crunched / Baked /
-        # Churned (#605 haq6rr).
-        "render": lambda: console.print("✻ Crunched for 47s", style="dim"),
+        "kind": "header_flash",
+        "text": "✻ Crunched for 47s",
         "duration": 0.5,
     },
     "main.idle": {
-        "render": render_idle,
-        "wait_input": {
-            "type": "line",
-            "timeout": None,
-            "echo": True,
-            # After Enter inside the box, terminal cursor is on the
-            # bottom border line. 2 leading \n skip the border + footer
-            # so the echo prints below — without those, `> ssss` would
-            # overwrite the bottom border and footer (#605 k5phqp).
-            "echo_format": "\n\n> {input}",
-        },
+        "kind": "prompt",
     },
     "main.busy": {
-        "render": render_busy_header,
+        "kind": "header_flash",
+        "text": f"✽ Working…   {MARKER_ESC_INTERRUPT}",
         "duration": 10.0,
     },
     "main.streaming_output": {
-        # #605 w8psk2 + k5phqp — busy header + lorem flux par salves
-        # (1 ligne, sleep 1-3s, next ligne). `esc to interrupt` visible
-        # tout du long → claude-loop gate auto-wakes correctly.
-        "render": render_busy_header,
-        "stream": {
-            "lines": LOREM_IPSUM_LINES,
-            "delay_min": 1.0,
-            "delay_max": 3.0,
-            "max_lines": 6,
-        },
-    },
-    "main.with_question": {
-        # Placeholder — david sends a real capture, we'll match its frame.
-        "render": lambda: console.print(
-            Panel(
-                Group(
-                    Text("Should I proceed?", style="bold"),
-                    Text(""),
-                    Text("  1. Yes"),
-                    Text("  2. No"),
-                    Text("  3. Other"),
-                ),
-                title="Question",
-                box=HEAVY,
-                border_style="cyan",
-                padding=(1, 2),
-            )
-        ),
-        "wait_input": {"type": "choice", "choices": ["1", "2", "3"], "timeout": 60},
+        "kind": "stream",
+        "lines": LOREM_IPSUM_LINES,
+        "delay_min": 1.0,
+        "delay_max": 3.0,
+        "max_lines": 6,
     },
 }
 
 
-# #605 david `p2hsng` : si aucun scenario n'est passé, on charge celui-ci
-# (situé relativement au binaire). Permet `claude-loop start --command fake-claude`
-# tout court → un default REPL inputtable s'affiche.
+# #605 david `p2hsng` : default scenario relative to the binary.
 DEFAULT_SCENARIO_PATH = Path(__file__).resolve().parent.parent / "examples" / "fake-claude" / "scenarios" / "default.yaml"
 
 
-class StdinClosed(Exception):
-    """Raised when stdin EOFs mid-scenario so the outer loop can stop."""
+class FakeClaudeApp(App):
+    """Textual app — fakes claude's interactive UI for claude-loop debugging.
 
-
-def _read_input(wait: dict) -> str | None:
-    """Blocking or timed read on stdin honoring wait_input rules.
-
-    Returns the accepted line (without trailing newline) or None on
-    EOF / timeout / interrupted read.
+    The play loop runs as an async task launched on_mount; widgets are
+    queried by id from the task. Input.Submitted fires a future that the
+    prompt step awaits so the play loop yields control to the textual
+    event loop while waiting for the user.
     """
-    kind = wait.get("type", "line")
-    timeout = wait.get("timeout")
-    deadline = time.monotonic() + float(timeout) if timeout else None
-    while True:
-        if deadline is not None:
-            rem = deadline - time.monotonic()
-            if rem <= 0:
-                on_timeout = wait.get("on_timeout")
-                if on_timeout:
-                    console.print(f"[dim italic][fake-claude] timeout → {on_timeout}[/]", style="dim")
-                return None
-            r, _, _ = select.select([sys.stdin], [], [], min(rem, 1.0))
-            if not r:
-                continue
-        line = sys.stdin.readline()
-        if not line:
-            return None
-        if kind == "choice":
-            choices = wait.get("choices", [])
-            if line.strip() not in choices:
-                console.print(f"(invalid — pick one of {choices})", style="yellow")
-                continue
-        elif kind == "regex":
-            pat = wait.get("pattern", "")
-            if pat and not re.search(pat, line):
-                console.print(f"(input doesn't match /{pat}/)", style="yellow")
-                continue
-        return line.rstrip("\n")
 
+    CSS = """
+    Screen { background: $surface; }
+    #header {
+        height: 1;
+        color: $accent;
+        padding: 0 1;
+    }
+    #output {
+        height: 1fr;
+        border: solid $primary 30%;
+        padding: 0 1;
+    }
+    #prompt {
+        height: 3;
+        border: round $primary;
+    }
+    #footer {
+        height: 1;
+        color: $text-muted;
+        padding: 0 1;
+    }
+    """
 
-def play_screen(screen: dict) -> None:
-    render = screen.get("render")
-    if render is not None:
-        render()
-    # #605 w8psk2 + k5phqp — stream un flux après le render (simule
-    # claude qui répond, busy footer encore actif). 2 modes :
-    #   - `lines:` salvo-style — 1 ligne complète, sleep delay_min..delay_max
-    #     entre chaque (défaut 1-3s).
-    #   - `words:` token-par-token avec `delay_per_word` (legacy).
-    stream = screen.get("stream")
-    if stream:
-        if "lines" in stream:
-            lines = stream.get("lines") or LOREM_IPSUM_LINES
-            dmin = float(stream.get("delay_min", 1.0))
-            dmax = float(stream.get("delay_max", 3.0))
-            max_lines = int(stream.get("max_lines", len(lines)))
-            # #605 david `k5phqp` "dans une fenêtre" : le flux pousse les
-            # lignes DANS un Panel rich.Live qui grandit à chaque salve,
-            # au lieu d'imprimer brut sous le busy header. Donne l'effet
-            # "fenêtre" : un cadre qui se remplit progressivement.
-            accumulated: list[str] = []
-            framed = stream.get("framed", True)
+    # #605 david `tq86bm` : "ctrl-d x2 pour quitter ?" — bash-style.
+    # Ctrl+D fires `confirm_quit` ; un 2e Ctrl+D dans les 2s quitte.
+    # Premier appui : hint dans le header. Ctrl+Q reste le shortcut
+    # direct (textual standard).
+    BINDINGS = [
+        ("ctrl+d", "confirm_quit", "Quit (×2)"),
+        ("ctrl+q", "quit", "Quit"),
+    ]
 
-            def _renderable() -> "Group | Panel":
-                body = Text("\n".join(accumulated)) if accumulated else Text("…", style="dim")
-                if not framed:
-                    return body
-                return Panel(
-                    body,
-                    box=ROUNDED,
-                    border_style="cyan",
-                    padding=(0, 1),
-                    width=console.width,
-                )
+    def __init__(self, screens: dict, steps: list) -> None:
+        super().__init__()
+        self.screens = screens
+        self.steps = steps
+        self._pending_input: asyncio.Future[str] | None = None
+        self._quit_armed_until: float = 0.0
 
-            with Live(_renderable(), console=console, refresh_per_second=10, transient=False) as live:
-                for i, line in enumerate(lines):
-                    if i >= max_lines:
-                        break
-                    accumulated.append(line)
-                    live.update(_renderable())
-                    if i < max_lines - 1:
-                        time.sleep(random.uniform(dmin, dmax))
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static("", id="header"),
+            RichLog(id="output", wrap=True, highlight=False, markup=False, auto_scroll=True),
+            Input(id="prompt", placeholder="❯"),
+            Static(f"  {MARKER_AUTO_MODE} · ← for agents", id="footer"),
+        )
+
+    def on_mount(self) -> None:
+        self.query_one("#prompt", Input).focus()
+        # Kick off the scenario play loop as a task.
+        self.run_worker(self._run_steps(), exclusive=True, group="scenario")
+
+    @on(Input.Submitted, "#prompt")
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        line = event.value
+        event.input.value = ""
+        if self._pending_input is not None and not self._pending_input.done():
+            self._pending_input.set_result(line)
         else:
-            words = stream.get("words") or LOREM_IPSUM_WORDS
-            delay = float(stream.get("delay_per_word", 0.08))
-            max_words = int(stream.get("max_words", len(words)))
-            buf = []
-            for i, w in enumerate(words):
-                if i >= max_words:
-                    break
-                buf.append(w)
-                time.sleep(delay)
-            console.print(" ".join(buf))
-    wait = screen.get("wait_input")
-    if wait is not None:
+            # Stray Enter outside a prompt step — just echo it.
+            self.query_one("#output", RichLog).write(f"> {line}")
+
+    async def _wait_for_input(self) -> str:
+        loop = asyncio.get_event_loop()
+        self._pending_input = loop.create_future()
         try:
-            line = _read_input(wait)
-        except KeyboardInterrupt:
-            raise
-        if line is None and wait.get("timeout") is None:
-            # No timeout AND read returned None → stdin EOF, not a
-            # transient miss. A `loop:` step around us would otherwise
-            # spin forever reprinting the screen — propagate cleanly.
-            raise StdinClosed()
-        if line is not None and wait.get("echo"):
-            fmt = wait.get("echo_format", "> {input}")
-            console.print(fmt.format(input=line), style="bold cyan")
-    duration = screen.get("duration")
-    if duration:
-        time.sleep(float(duration))
+            return await self._pending_input
+        finally:
+            self._pending_input = None
 
+    async def _set_header(self, text: str) -> None:
+        self.query_one("#header", Static).update(text)
 
-def play_steps(steps: list, screens: dict) -> int:
-    for step in steps:
-        if "sleep" in step:
-            time.sleep(float(step["sleep"]))
-        elif "print" in step:
-            console.print(step["print"], end="")
-        elif "screen" in step:
-            slug = step["screen"]
-            if slug not in screens:
-                console.print(f"fake-claude: unknown screen '{slug}'", style="red")
-                return 3
-            play_screen(screens[slug])
-        elif "loop" in step:
-            # `loop: [step, step, ...]` + optional `times: N` (defaults
-            # to infinite). Stops cleanly on Ctrl+C OR stdin EOF.
-            inner = step["loop"]
-            if not isinstance(inner, list):
-                console.print("fake-claude: 'loop' expects a list of steps", style="red")
-                return 4
-            times = step.get("times")
-            remaining = int(times) if times is not None else None
-            try:
+    async def _write(self, text: str) -> None:
+        self.query_one("#output", RichLog).write(text)
+
+    async def _play_screen(self, spec: dict) -> None:
+        kind = spec.get("kind")
+        if kind == "header_flash":
+            await self._set_header(spec.get("text", ""))
+            await asyncio.sleep(float(spec.get("duration", 1.0)))
+            await self._set_header("")
+        elif kind == "write":
+            await self._write(spec.get("text", ""))
+        elif kind == "picker":
+            await self._set_header("[choose a session — type 1/2/3 + Enter]")
+            for line in spec.get("lines", []):
+                await self._write(line)
+            await self._wait_for_input()
+            await self._set_header("")
+        elif kind == "prompt":
+            line = await self._wait_for_input()
+            await self._write(f"> {line}")
+        elif kind == "stream":
+            await self._set_header(f"✻ Working…   {MARKER_ESC_INTERRUPT}")
+            lines = spec.get("lines") or LOREM_IPSUM_LINES
+            dmin = float(spec.get("delay_min", 1.0))
+            dmax = float(spec.get("delay_max", 3.0))
+            max_lines = int(spec.get("max_lines", len(lines)))
+            for i, ln in enumerate(lines):
+                if i >= max_lines:
+                    break
+                if i > 0:
+                    await asyncio.sleep(random.uniform(dmin, dmax))
+                await self._write(ln)
+            await self._set_header("")
+        else:
+            await self._write(f"[fake-claude] unknown screen kind: {kind!r}")
+
+    async def _play_steps(self, steps: list) -> None:
+        for step in steps:
+            if "sleep" in step:
+                await asyncio.sleep(float(step["sleep"]))
+            elif "print" in step:
+                await self._write(step["print"].rstrip("\n"))
+            elif "screen" in step:
+                slug = step["screen"]
+                spec = self.screens.get(slug)
+                if spec is None:
+                    await self._write(f"[fake-claude] unknown screen '{slug}'")
+                    continue
+                await self._play_screen(spec)
+            elif "loop" in step:
+                inner = step["loop"]
+                if not isinstance(inner, list):
+                    await self._write("[fake-claude] 'loop' expects a list of steps")
+                    continue
+                times = step.get("times")
+                remaining = int(times) if times is not None else None
                 while remaining is None or remaining > 0:
-                    rc = play_steps(inner, screens)
-                    if rc != 0:
-                        return rc
+                    await self._play_steps(inner)
                     if remaining is not None:
                         remaining -= 1
-            except (KeyboardInterrupt, StdinClosed):
-                return 0
+            else:
+                await self._write(f"[fake-claude] unknown step {step!r}")
+
+    async def _run_steps(self) -> None:
+        try:
+            await self._play_steps(self.steps)
+        except asyncio.CancelledError:
+            pass
+
+    def action_confirm_quit(self) -> None:
+        """Ctrl+D once : arm + show hint. Within 2 s, a second Ctrl+D
+        actually quits — bash style. Outside the window, re-arms."""
+        import time as _t
+        now = _t.monotonic()
+        if now < self._quit_armed_until:
+            self.exit()
         else:
-            console.print(f"fake-claude: unknown step {step!r}", style="red")
-            return 4
-    return 0
+            self._quit_armed_until = now + 2.0
+            self.query_one("#header", Static).update(
+                "Press Ctrl+D again within 2 s to quit (or Ctrl+Q)"
+            )
+            self.set_timer(2.0, lambda: self.query_one("#header", Static).update(""))
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(
         prog="fake-claude",
-        description="Scriptable claude(1) simulator for claude-loop debugging.",
+        description="Scriptable claude(1) simulator for claude-loop debugging (textual TUI).",
     )
     ap.add_argument("scenario", nargs="?", type=Path, help="YAML scenario file (defaults to examples/fake-claude/scenarios/default.yaml next to this binary)")
     ap.add_argument("--list-screens", action="store_true", help="dump built-in screen slugs + exit")
@@ -385,33 +328,28 @@ def main() -> int:
 
     if args.list_screens:
         for slug in BUILTIN_SCREENS:
-            console.print(slug)
+            print(slug)
         return 0
 
     scenario = args.scenario or DEFAULT_SCENARIO_PATH
 
     if not scenario.exists():
-        console.print(f"fake-claude: {scenario}: no such file", style="red")
+        sys.stderr.write(f"fake-claude: {scenario}: no such file\n")
         return 2
 
     doc = yaml.safe_load(scenario.read_text()) or {}
-    # YAML-defined screens override built-ins — but for V0 the YAML side
-    # can only set `print:` (raw string) since `render:` callables aren't
-    # serializable. Stays compat with the pre-rich shape.
+    # YAML-defined screens override built-ins. Each entry should declare
+    # a `kind:` field (header_flash / write / picker / prompt / stream).
+    # Legacy `print: "..."` is lifted into `kind: write`.
     yaml_screens = doc.get("screens") or {}
     for slug, scr in yaml_screens.items():
-        if "print" in scr and "render" not in scr:
-            # Lift a raw `print:` field into a render callable so the
-            # play loop is uniform.
-            text = scr["print"]
-            scr["render"] = lambda t=text: console.print(t, end="")
+        if "kind" not in scr and "print" in scr:
+            scr["kind"] = "write"
+            scr["text"] = scr.pop("print")
     screens = {**BUILTIN_SCREENS, **yaml_screens}
     steps = doc.get("steps") or []
-    try:
-        return play_steps(steps, screens)
-    except (StdinClosed, KeyboardInterrupt):
-        # Stdin EOF / Ctrl+C outside a `loop:` step still exits cleanly.
-        return 0
+    FakeClaudeApp(screens, steps).run()
+    return 0
 
 
 if __name__ == "__main__":

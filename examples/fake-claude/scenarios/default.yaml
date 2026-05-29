@@ -1,10 +1,8 @@
 # Default scenario — joué quand `fake-claude` est appelé sans arg.
 # REPL minimal : boot + boucle [prompt → echo → flux lorem ipsum → prompt].
-# Chaque ligne tapée + Enter est echo'ée, puis simule un flux de travail
-# claude (busy + output token par token, `esc to interrupt` visible) avant
-# de revenir au prompt.
-#
-# Ctrl+D (2x rapide) ou Ctrl+C pour quitter.
+# La frappe vit dans le widget Input (en bas), le flux sort dans le widget
+# RichLog (au milieu) — chacun sa région, pas de parasitage curseur/refresh.
+# Ctrl+Q ou Ctrl+C pour quitter (binding textual standard).
 meta:
   name: default
   describes: "REPL inputtable — boot + loop [main.idle echo → main.streaming_output]"
