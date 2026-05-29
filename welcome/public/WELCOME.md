@@ -61,6 +61,27 @@ Public-only additions:
   the README invites them to. MIT / Apache-2.0 / GPL are sane
   defaults — pick one deliberately.
 
+## Record project rules in `CLAUDE.md`
+
+This kit ships **starting** conventions — once an artefact lives in
+the repo, the project owns its style and may have diverged on
+purpose. The rendered files (CHANGELOG.md, CONTRIBUTING.md, …) are
+the source of truth for the project's conventions; this kit is just
+the bootstrap.
+
+For **project-specific** rules that don't naturally fit in any of
+the standard artefacts (preferred PR shape, deploy procedure,
+internal-only architecture invariants, a custom commit-message
+format, …), write them to a top-level `CLAUDE.md`. Claude Code
+auto-loads it at session start, so incoming agents pick the rules
+up natively without having to be reminded.
+
+A minimal `CLAUDE.md` is fine — one short paragraph per rule, with
+the *why*. Keep it terse ; if it grows past a screen, split into
+linked docs under `docs/`. The point is to give the next agent
+enough context to act consistently with the rest of the project
+without re-asking.
+
 ## Tiebreaker
 
 When a non-negotiable from the common ground appears to clash with a

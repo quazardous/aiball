@@ -50,6 +50,21 @@ consider applying the `public` discipline (English everywhere,
 no internal refs) preemptively. It's cheap on day 1, expensive
 to retrofit on a 200-commit history.
 
+## Record project rules in `CLAUDE.md`
+
+This kit ships **starting** conventions — once an artefact lives in
+the repo, the project owns its style and may have diverged on
+purpose. Whatever's in the rendered files is the project's voice ;
+this kit is just where it bootstrapped from.
+
+For **project-specific** rules that don't fit in a standard artefact
+(internal architecture notes, deploy procedure, in-house commit
+format, on-call escalation, …), write them to a top-level
+`CLAUDE.md`. Claude Code auto-loads it at session start, so incoming
+agents pick the rules up natively — no welcome detour, no manual
+reminder. On a `private` project the file can be as verbose and
+internal-jargon-heavy as the team needs.
+
 ## Tiebreaker
 
 When a non-negotiable from the common ground appears to clash with
