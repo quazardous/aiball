@@ -135,18 +135,18 @@ function isInBootGrace(input: LoopStateInput): boolean {
     //   1. `resumePickerActive` (set by session-start-hook) STRETCHES the
     //      boot phase indefinitely. As long as the picker is on screen,
     //      the user is "inside boot".
-    //   2. `bootComplete` (signalled by session-start-hook only when it
-    //      has confidence claude is past picker — sessionPicked or
-    //      pickMode=abort or source!=resume) ENDS the boot phase.
-    //   3. `bootGraceMs` time cap : SAFETY net. Fires when no signal
-    //      lands (crash, manual pick without auto-pick, slow boot, …).
-    //
-    // NOTE : we deliberately do NOT use `paneReady` here — the claude
-    // splash flashes `Claude Code v` BEFORE the resume picker renders,
-    // so trusting paneReady alone would end boot prematurely during
-    // the splash→picker window.
+    //   2. `bootComplete` (signalled by session-start-hook only with
+    //      confidence — sessionPicked / abort / non-resume) ENDS the
+    //      boot phase.
+    //   3. `paneReady` (set by the timer's pane probe, EXCLUDES picker
+    //      UI text and `Resuming…`/`Compacting…` loaders — see
+    //      refreshPaneMarkers) ENDS the boot phase. Covers the case
+    //      where the hook didn't signal (manual pick, --resume +
+    //      pickMode=abort, slow boot past hook timeout).
+    //   4. `bootGraceMs` time cap : SAFETY net only.
     if (input.resumePickerActive) return true;
     if (input.bootComplete) return false;
+    if (input.paneReady) return false;
     if (input.bootGraceMs <= 0) return false;
     return (input.nowMs - input.loopStartMs) < input.bootGraceMs;
 }

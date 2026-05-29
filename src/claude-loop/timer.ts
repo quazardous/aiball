@@ -464,17 +464,25 @@ async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
 
 // #264: timestamp of the loop's last send-keys, so the human-typing
 // detector can exclude the loop's own injected text from "a human typed".
-/** #624 david `62ys4g` — capture the pane and write the pane-* markers
- *  (busy, ready, compacting, interrupted) so the LoopState service sees
- *  the freshest values. Called by tryWake (out-of-band SSE) and the
- *  heartbeat probe (~30s cadence). No-op if `capturePane()` fails. */
+/** #624 david `62ys4g` + #629 `44ca88` — capture the pane and write the
+ *  pane-* markers so the LoopState service sees the freshest values.
+ *  Called by tryWake (out-of-band SSE) and the heartbeat probe (~30s).
+ *
+ *  `paneReady` is smarter than a raw "prompt signature visible" check :
+ *  picker UI text (`Resume session`, `Resume from summary`, `Don't ask
+ *  me again`, `Compact this conversation`) AND transient loaders
+ *  (`Resuming conversation…`, `Compacting conversation`) all force
+ *  `paneReady=false`. Without this guard, the splash's `Claude Code v`
+ *  match → ends boot prematurely (#629 Bug 4 david `bgbkmg` + `jt3d6t`). */
 function refreshPaneMarkers(): void {
     if (!sd) return;
     const paneText = capturePane();
     if (!paneText) return;
     const snap = snapshotPane(paneText);
     setPaneBusy(sd, snap.busy);
-    setPaneReady(sd, /Claude Code v|❯ |^> /m.test(paneText));
+    const pickerOrTransient = /Resume session\b|Resume from summary|Don't ask me again|Compact this conversation|Resuming conversation|Compacting conversation/i.test(paneText);
+    const promptVisible = /Claude Code v|❯ |^> /m.test(paneText);
+    setPaneReady(sd, promptVisible && !pickerOrTransient);
     setCompacting(sd, snap.special === "compacting");
     setInterrupted(sd, paneShowsInterrupted(paneText));
 }

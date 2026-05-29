@@ -80,16 +80,32 @@ test("boot phase with idle marker (rare race) → boot-grace gate wins", () => {
     assert.match(v.wakeSkipReason ?? "", /boot-grace/);
 });
 
-test("boot phase under --no-wait, picker delayed → still boot until T+grace", () => {
+test("boot phase under --no-wait + picker active → boot stretches (picker wins over paneReady)", () => {
     const v = computeLoopView(baseInput({
         nowMs: T0 + 30 * SEC,
         noWait: true,
         paneBusy: false,
-        paneReady: true, // claude splash rendered — but boot-grace still wins for phase
+        // Picker is up : refreshPaneMarkers writes paneReady=false even
+        // when prompt regex matches (splash leak). Simulate that.
+        paneReady: false,
+        resumePickerActive: true,
     }));
     assert.equal(v.phase, "boot");
     assert.equal(v.barWord, "boot");
     assert.equal(v.inBootGrace, true);
+});
+
+test("paneReady=true (post-picker, no transient text) → boot ends", () => {
+    // #629 david `44ca88` : refreshPaneMarkers filters out picker UI +
+    // `Resuming…` / `Compacting…` from paneReady. When paneReady becomes
+    // true, claude IS at the prompt past every transient state.
+    const v = computeLoopView(baseInput({
+        nowMs: T0 + 30 * SEC,
+        paneReady: true,
+        idleSinceMs: T0 + 30 * SEC,
+    }));
+    assert.equal(v.inBootGrace, false);
+    assert.equal(v.barWord, "loop");
 });
 
 test("boot phase: claude shows `esc to interrupt` (transient) → bar still boot", () => {
