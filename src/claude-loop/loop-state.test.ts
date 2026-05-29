@@ -6,7 +6,18 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeLoopView, type LoopStateInput } from "./loop-state.js";
+import {
+    canArmAfk10mOnTyping,
+    canFireWake,
+    canFlipBgFromBoot,
+    canPaintStopOnTyping,
+    computeLoopView,
+    isAfkHeld,
+    isAutonomous,
+    isBootPhase,
+    shouldArmAfk10mOnSettleBoot,
+    type LoopStateInput,
+} from "./loop-state.js";
 
 const T0 = Date.parse("2026-05-29T17:00:00.000Z");
 const SEC = 1000;
@@ -458,4 +469,107 @@ test("busy-defer with deadline in the past → no longer gates", () => {
         idleSinceMs: now,
     }));
     assert.equal(v.wakeAllowed, true);
+});
+
+// ---------------------------------------------------------------------------
+//  Semantic helpers — canX / isX (david `vnhdku`)
+// ---------------------------------------------------------------------------
+
+test("canArmAfk10mOnTyping : false in boot-grace", () => {
+    const input = baseInput({ nowMs: T0 + 10 * SEC });
+    assert.equal(canArmAfk10mOnTyping(input), false);
+});
+
+test("canArmAfk10mOnTyping : false in NOT AFK ∞ (only F9 releases)", () => {
+    const input = baseInput({
+        nowMs: T0 + 5 * MIN,
+        loopStartMs: T0,
+        afkMode: "wait_inf",
+    });
+    assert.equal(canArmAfk10mOnTyping(input), false);
+});
+
+test("canArmAfk10mOnTyping : true post-boot in AFK off (arms fresh 10m)", () => {
+    const input = baseInput({
+        nowMs: T0 + 5 * MIN,
+        loopStartMs: T0,
+    });
+    assert.equal(canArmAfk10mOnTyping(input), true);
+});
+
+test("canArmAfk10mOnTyping : true post-boot in NOT AFK 10m (refreshes)", () => {
+    const now = T0 + 5 * MIN;
+    const input = baseInput({
+        nowMs: now,
+        loopStartMs: T0,
+        afkMode: "wait_10m",
+        afkExpiryMs: now + 5 * MIN,
+    });
+    assert.equal(canArmAfk10mOnTyping(input), true);
+});
+
+test("canPaintStopOnTyping : false in boot-grace, true after", () => {
+    assert.equal(canPaintStopOnTyping(baseInput({ nowMs: T0 + 5 * SEC })), false);
+    assert.equal(canPaintStopOnTyping(baseInput({ nowMs: T0 + 90 * SEC, loopStartMs: T0 })), true);
+});
+
+test("canFlipBgFromBoot : false in boot-grace, true after", () => {
+    assert.equal(canFlipBgFromBoot(baseInput({ nowMs: T0 + 5 * SEC })), false);
+    assert.equal(canFlipBgFromBoot(baseInput({ nowMs: T0 + 90 * SEC, loopStartMs: T0 })), true);
+});
+
+test("shouldArmAfk10mOnSettleBoot : true under --wait, false under --no-wait", () => {
+    assert.equal(shouldArmAfk10mOnSettleBoot({ noWait: false }), true);
+    assert.equal(shouldArmAfk10mOnSettleBoot({ noWait: true }), false);
+});
+
+test("canFireWake : mirrors view.wakeAllowed", () => {
+    const view = computeLoopView(baseInput({
+        nowMs: T0 + 2 * MIN,
+        loopStartMs: T0,
+        idleSinceMs: T0 + 119 * SEC,
+    }));
+    assert.equal(canFireWake(view), view.wakeAllowed);
+});
+
+test("isAfkHeld : true under NOT AFK 10m and ∞, false otherwise", () => {
+    const start = T0;
+    const now = start + 2 * MIN;
+    const off = computeLoopView(baseInput({ nowMs: now, loopStartMs: start, idleSinceMs: now }));
+    const wait10m = computeLoopView(baseInput({
+        nowMs: now, loopStartMs: start, idleSinceMs: now,
+        afkMode: "wait_10m", afkExpiryMs: now + 5 * MIN,
+    }));
+    const waitInf = computeLoopView(baseInput({
+        nowMs: now, loopStartMs: start, idleSinceMs: now, afkMode: "wait_inf",
+    }));
+    assert.equal(isAfkHeld(off), false);
+    assert.equal(isAfkHeld(wait10m), true);
+    assert.equal(isAfkHeld(waitInf), true);
+});
+
+test("isAutonomous : true only when bar word is `loop`", () => {
+    const start = T0;
+    const now = start + 2 * MIN;
+    const loop = computeLoopView(baseInput({ nowMs: now, loopStartMs: start, idleSinceMs: now }));
+    const stop = computeLoopView(baseInput({
+        nowMs: now, loopStartMs: start, idleSinceMs: now,
+        humanTypingAtMs: now - SEC,
+    }));
+    const wait = computeLoopView(baseInput({
+        nowMs: now, loopStartMs: start, idleSinceMs: now,
+        afkMode: "wait_inf",
+    }));
+    assert.equal(isAutonomous(loop), true);
+    assert.equal(isAutonomous(stop), false);
+    assert.equal(isAutonomous(wait), false);
+});
+
+test("isBootPhase : tracks phase === 'boot'", () => {
+    const boot = computeLoopView(baseInput({ nowMs: T0 + 5 * SEC }));
+    const idle = computeLoopView(baseInput({
+        nowMs: T0 + 90 * SEC, loopStartMs: T0, idleSinceMs: T0 + 89 * SEC,
+    }));
+    assert.equal(isBootPhase(boot), true);
+    assert.equal(isBootPhase(idle), false);
 });

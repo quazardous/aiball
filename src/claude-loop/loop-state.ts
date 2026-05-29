@@ -251,3 +251,61 @@ export function computeLoopView(input: LoopStateInput): LoopStateView {
         inBootGrace: isInBootGrace(input),
     };
 }
+
+// ---------------------------------------------------------------------------
+//  Semantic helpers (#627 david `vnhdku` "ajoute aussi des helper semantique,
+//  des canCeci ou canCela") — intent-shaped questions the consumers ASK
+//  instead of recomputing from view fields. They take either the raw input
+//  (for the consumers that need pre-view answers, like the proxy typing
+//  branch) or the computed view (for the consumers painting/gating).
+// ---------------------------------------------------------------------------
+
+/** True iff a typing keystroke should arm/refresh the NOT AFK 10m hold.
+ *  Skipped during boot-grace (resume-picker typing) and in NOT AFK ∞
+ *  (only F9 releases the indefinite hold). */
+export function canArmAfk10mOnTyping(input: LoopStateInput): boolean {
+    if (isInBootGrace(input)) return false;
+    if (effectiveAfkMode(input) === "wait_inf") return false;
+    return true;
+}
+
+/** True iff a typing keystroke should paint the bar word `stop` (red).
+ *  Skipped during boot-grace (the `boot` word stays put). */
+export function canPaintStopOnTyping(input: LoopStateInput): boolean {
+    return !isInBootGrace(input);
+}
+
+/** True iff the session-start hook / pane probe is allowed to flip the
+ *  bar BG out of `[boot]`. False during boot-grace — settleBoot is the
+ *  single authority for that transition. */
+export function canFlipBgFromBoot(input: LoopStateInput): boolean {
+    return !isInBootGrace(input);
+}
+
+/** True iff `settleBoot` should arm NOT AFK 10m at the boot-grace
+ *  transition. Driven by the launch mode (--wait arms, --no-wait skips). */
+export function shouldArmAfk10mOnSettleBoot(input: Pick<LoopStateInput, "noWait">): boolean {
+    return !input.noWait;
+}
+
+/** Alias for the view's `wakeAllowed` — reads more naturally at call sites. */
+export function canFireWake(view: LoopStateView): boolean {
+    return view.wakeAllowed;
+}
+
+/** True iff the AFK chunk says `NOT AFK` (human is holding the loop,
+ *  either via the 10m countdown or the ∞ hold). */
+export function isAfkHeld(view: LoopStateView): boolean {
+    return view.afkChunk.label === "NOT AFK";
+}
+
+/** True iff the loop is autonomous (bar word `loop`, AFK chunk dim). */
+export function isAutonomous(view: LoopStateView): boolean {
+    return view.barWord === "loop";
+}
+
+/** True iff the bar is in the boot visual phase. Use this rather than
+ *  comparing the word string at call sites — single source of truth. */
+export function isBootPhase(view: LoopStateView): boolean {
+    return view.phase === "boot";
+}
