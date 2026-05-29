@@ -16,6 +16,15 @@ WRITING STYLE — lead with the USER-FACING INTENTION, not the implementation :
   pseudo-code, and "refactor X" entries that hide what the user gets.
 - Lead with the "what + why for whom" ; the implementation is a footnote
   at best, usually skipped.
+- ONE-LINE entries by default. Multi-paragraph entries are only justified
+  for a major change a user genuinely needs to read in full ; tiny tweaks
+  and follow-ups should fit on a single bullet (or be merged into a
+  neighbour). If your section looks like the commit log paraphrased, cut.
+- DO NOT cite internal issue tracker IDs (`#NNN`, `JIRA-123`, etc.) when
+  that tracker is not externally browsable — they're noise without a
+  link. Internal-only context belongs in the commit log + ticket thread,
+  not the user-facing CHANGELOG. Reference public refs (GitHub PRs,
+  upstream issues) only.
 
 Examples :
 
@@ -29,6 +38,13 @@ Examples :
 
   ❌ fix bug in parser
   ✅ Quoted paths with spaces no longer corrupt the upload manifest.
+
+  ❌ Visual cue for the read-transition dwell (#596). When you open an unread
+     ticket, an envelope icon appears next to the title and flickers
+     green → muted gray over the 2-second auto-mark-read window — a
+     "dying lamp" animation so the moderation moment is visible.
+  ✅ Unread tickets now show a brief envelope flicker while they're being
+     marked as read, so the transition is visible instead of silent.
 
 Keep the header line below in the rendered file — it's the persistent
 reminder for future editors (the intent block above is stripped when this

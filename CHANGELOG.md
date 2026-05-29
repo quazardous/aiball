@@ -21,86 +21,33 @@ narrative for the product as a whole.
 
 ## [0.9.5] — 2026-05-29
 
-### Mobile borders, round two (#609)
+### Changed
 
-After the first edge-to-edge pass landed in 0.9.4, the ticket
-cartouche article wrapper (`.thread-ticket`, the box carrying the meta
-strip + tags + edit/manage buttons) was still a full-bordered card on
-smartphone — visible in a david screenshot once the comments above
-were already flat. Same treatment now applied: drop
-left/right/top borders + radius on mobile, keep `border-bottom` as the
-sole separator. `.composer` mobile rule also bumped to `!important`
-after david reported the first pass didn't take (cache/specificity
-weirdness on a tailscale-hosted mobile session).
+- The admin Nodes table on smartphone now matches the card layout
+  Projects uses (data-label inline prefixes, no duplicate sort UI).
+- The Node cell stacks label / id / version vertically on smartphone
+  again — they were briefly glued on one line after the card reflow.
+- The Automation rules list dropped its per-row card chrome and now
+  reuses the same list rendering Projects / Consumers / Nodes use.
+  Rules stay non-sortable in the UI to reflect the first-match-wins
+  evaluation order.
 
-### Mobile pattern propagates to Nodes + the Node cell stacks (#610, #615)
+### Added
 
-`NodesPanel` had no `@media (max-width: 720px)` rules at all, so on
-smartphone the table stayed in full tabular mode (thead visible) AND
-DataList's new mobile sort chooser showed up — two sort surfaces at
-the same time. Aligned `NodesPanel` on the ProjectsPanel mobile
-pattern (thead hidden + reflow rows + data-label inline prefix) via
-`:deep()` (the panel's `<style>` is scoped and the `<table>` is
-rendered by the child DataList).
+- `aiball init` / `claude-loop init` / `claude-loop start --init`
+  accept `--no-claim` to seed an assignment-only identity in the
+  project config. Re-running init without the flag leaves any
+  existing `no_claim` setting untouched (same rule already in place
+  for `--agent` / `--project`).
+- `claude-loop --no-resume` (and `claude-loop start --no-resume`) opt
+  out of the auto `--resume` injection for a single invocation,
+  without the older `-- --no-resume` passthrough form.
 
-The `Node` cell renders three `display: block` children (label / id /
-version) that the new mobile `td { display: inline-flex }` rule glued
-on the baseline. Targeted override `td[data-label="Node"] { display:
-flex; flex-direction: column }` — uses the per-cell `data-label`
-DataList stamps for the prefix trick. Label / id / version stack as
-on desktop.
+### Fixed
 
-### `--no-claim` on init, respecting prior config (#612)
-
-`aiball init` / `claude-loop init` / `claude-loop start --init` all
-gain a `--no-claim` flag that seeds `consumer.no_claim: true` in
-`.aiball.yaml`. When set, the consumer is assignment-only :
-`ticket_engage` skips the claimable pool, only explicitly assigned
-tickets surface.
-
-The flag is **tri-state** by design : commander's `--no-X` magic
-defaults to true and flips false when passed, but `init` needs the
-*undefined* state too — without it, an init without `--no-claim`
-would silently reset any pre-existing `no_claim: true` in the yaml.
-Detect the flag explicitly via `process.argv.includes` so absent =
-"leave whatever was there alone". This finalizes the rule already
-applied to `--consumer` / `--project` in 0.9.3 : *init respects the
-config already in place except where a flag explicitly overrides it*.
-
-### `--no-resume` as a first-class claude-loop flag (#616)
-
-`claude-loop --no-resume` and `claude-loop start --no-resume` now opt
-out of the `claude.always_resume: true` injection without needing the
-older `--` passthrough form. Three equivalents, all reach the same
-end-state :
-
-```
-claude-loop --no-resume                # new top-level
-claude-loop start --no-resume          # new sub-command
-claude-loop start -- --no-resume       # legacy passthrough (still works)
-```
-
-Injection of `--no-resume` happens BEFORE the always_resume detection
-so the sentinel is seen and the `--resume` auto-inject skipped.
-
-### Automation rules list moves to DataList (#614)
-
-`AutomationRulesSection` used to render its rules as a custom `<ol>`
-with per-row card chrome (border + radius + background) inside the
-section card — david: "il y a des card dans des card". Migrated to
-the shared `DataList` columns-mode (the same one Projects / Consumers
-/ Nodes use), columns: `#` (rank pill), Rule (label + yaml badge), On
-(triggers), Action (compact action), Enabled (ToggleSwitch or
-"read-only" for YAML rules).
-
-All columns are NON-sortable on purpose : rules evaluate in the order
-shown (first-match-wins), exposing a sort UI would lie about runtime
-behavior. The DataList mobile sort chooser auto-hides for the same
-reason (no sortable columns → nothing to surface), so on smartphone
-the panel inherits the same data-label-prefix card pattern as the
-other admin panels. YAML rules keep their visual distinctness (blue
-left accent + tinted background, disabled rules go to 0.55 opacity)
-via the new `rowClass` prop on DataList.
+- The ticket cartouche on smartphone is now edge-to-edge like the
+  comment cards (the meta strip + edit/manage buttons no longer sit
+  in a floating bordered box).
 
 ## [0.9.4] — 2026-05-29
 
