@@ -206,4 +206,61 @@ function sortValue(n: NodeView, key: string): string | number {
     letter-spacing: 0.03rem;
     vertical-align: middle;
 }
+
+/* #610 david `ptedtq` — narrow viewports : aligne Nodes sur le pattern
+   Projects (thead caché + reflow en rows aplaties + data-label inline).
+   Le mobile sort chooser de DataList prend le relais pour le tri.
+   `:deep()` parce que le <table> est rendu par DataList (enfant de ce
+   composant scoped). */
+@media (max-width: 720px) {
+    :deep(.nodes-table thead) {
+        display: none;
+    }
+    :deep(.nodes-table),
+    :deep(.nodes-table tbody),
+    :deep(.nodes-table tr) {
+        display: block;
+        width: 100%;
+    }
+    :deep(.nodes-table tr) {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.25rem 0.7rem;
+        border: none;
+        border-bottom: 1px solid var(--p-content-border-color);
+        padding: 0.5rem 0.7rem;
+    }
+    :deep(.nodes-table td) {
+        flex: 0 0 auto;
+        padding: 0;
+        border: none;
+        text-align: left !important;
+        width: auto !important;
+        min-height: 0;
+        display: inline-flex;
+        align-items: baseline;
+    }
+    /* #615 david : la cellule "Node" contient label + id + version qui
+       sont `display: block` côté desktop pour stacker verticalement.
+       En mobile, le td devient inline-flex (par défaut ci-dessus) →
+       tous les enfants s'alignent en flex items collés baseline →
+       label/hash/version se touchent. Override : cette cellule passe
+       en flex-direction: column pour respecter le stacking vertical. */
+    :deep(.nodes-table td[data-label="Node"]) {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    :deep(.nodes-table td:not(:first-child):not(.indicator-cell)[data-label]::before) {
+        content: attr(data-label) ": ";
+        color: var(--p-text-muted-color);
+        font-size: 0.78rem;
+        margin-right: 0.3rem;
+    }
+    :deep(.nodes-table td.indicator-cell) {
+        margin-left: auto;
+        padding-right: 0;
+    }
+}
 </style>
