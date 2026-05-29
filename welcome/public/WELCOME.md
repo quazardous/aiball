@@ -7,6 +7,22 @@ as the reference for the conventions to apply.
 A "public" project is code that lives on a public remote (GitHub,
 GitLab, codeberg, …) — readable by anyone, contributable by anyone.
 
+> **Read me as bootstrap, not as authority.** This kit is the
+> *starting* convention set, meant for early-stage projects. If
+> you're calling `welcome()` on an established repo, the project has
+> probably evolved — some divergences from this kit are deliberate
+> (good reasons : team-specific preferences, OSS tooling change,
+> performance trade-offs, dependencies dropped, …) and the project's
+> own artefacts (CHANGELOG, CONTRIBUTING, CLAUDE.md, README) are the
+> *current* authority. Cross-check before "correcting" anything to
+> match this kit.
+>
+> Welcome is still useful on a mature repo : as a **reference** to
+> spot accidental drift (a CHANGELOG that grew internal `#NNN` refs
+> by inertia, a CONTRIBUTING that forgot to mention the test
+> command, …), or as a **corrective** when the team agrees a past
+> divergence was a mistake. Use it to *inform*, not to *enforce*.
+
 ## Non-negotiables
 
 Common ground with `private` (apply on every project regardless of

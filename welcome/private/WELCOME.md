@@ -8,6 +8,20 @@ A "private" project is internal code: tooling, recipes, services
 the team owns and runs internally, things that won't see a public
 remote.
 
+> **Read me as bootstrap, not as authority.** This kit is the
+> *starting* convention set, meant for early-stage projects. If
+> you're calling `welcome()` on an established repo, the project has
+> probably evolved — some divergences from this kit are deliberate
+> (good reasons : team's internal tooling, workflow tuned to the
+> team, dependencies dropped, …) and the project's own artefacts
+> (CLAUDE.md, README, CONTRIBUTING) are the *current* authority.
+> Cross-check before "correcting" anything to match this kit.
+>
+> Welcome is still useful on a mature repo : as a **reference** to
+> spot accidental drift, or as a **corrective** when the team agrees
+> a past divergence was a mistake. Use it to *inform*, not to
+> *enforce*.
+
 ## Non-negotiables
 
 Common ground with `public` (apply on every project regardless of
