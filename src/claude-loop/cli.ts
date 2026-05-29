@@ -47,6 +47,7 @@ import {
     idleMarkerPath,
     installRootSha,
     isLoopStale,
+    loopStartTsPath,
     pickPingPhrase,
     pingsPath,
     platePath,
@@ -505,6 +506,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     if (!existsSync(pingsSrc)) die(`pings file not found: ${pingsSrc}`);
 
     ensureDir(sd);
+    // #622 — write the loop session start once at launch so short-lived
+    // hooks (session-start, user-prompt-submit, stop) all derive boot-grace
+    // from the SAME instant. Without it each hook read its own module-load
+    // time as the start, so the boot window appeared eternally fresh and
+    // the bar word fallback (degraded mode) stayed `boot` forever.
+    writeFileSync(loopStartTsPath(sd), String(Date.now()));
     copyFileSync(pingsSrc, pingsPath(sd));
 
     // #B.180 david: resolve timeouts (CLI flag > .aiball.yaml > built-in

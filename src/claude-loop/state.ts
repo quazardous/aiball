@@ -157,6 +157,12 @@ export function isLoopStale(plate: Plate): boolean {
 
 export function platePath(sd: string): string { return join(sd, "plate.json"); }
 export function envPath(sd: string): string { return join(sd, "env"); }
+/** #622 — loop session start timestamp (ms-since-epoch), written ONCE by
+ *  `cli.ts` at launch. Both the long-lived timer and the short-lived hooks
+ *  derive the boot-grace window from this single source — without it the
+ *  hooks were reading `Date.now()` at module-load (= hook start), so they
+ *  thought the boot window was always fresh. */
+export function loopStartTsPath(sd: string): string { return join(sd, "loop-start-ts"); }
 export function pingsPath(sd: string): string { return join(sd, "pings.yaml"); }
 export function idleMarkerPath(sd: string): string { return join(sd, "idle-since"); }
 export function wakeRequestedPath(sd: string): string { return join(sd, "wake-requested"); }
@@ -859,14 +865,23 @@ function barColors(): AiballConfig["colors"] {
 const stateBg = (col: AiballConfig["colors"], s: LoopStatus): string =>
     s === "busy" ? col.busy_bg : s === "boot" ? col.boot_bg : col.idle_bg;
 
-// #305 : seconds since the loop process started, used by the boot-grace
-// branch of humanPresenceWord (paints a dedicated `boot` word during the
-// launch window). #619 david `zm2ehq` : the claude-WORD island keeps its
-// black BG even during boot (bar BG yellow surrounds it), so a dedicated
-// `boot` word in yellow is legible AND distinct from `wait` — better than
-// reusing `wait` (was: jaune-sur-jaune) or dropping the branch entirely
-// (was: indistinguishable from `loop`).
+// #305 + #622 : loop session start in ms-since-epoch. Hooks live for ~ms,
+// so reading `Date.now()` at module-load gave them a "boot window always
+// fresh" view — `humanPresenceWord` then returned `boot` on every hook
+// invocation (degraded mode painted the bar permanently boot). Source of
+// truth is the `loop-start-ts` file written by `cli.ts` once at launch.
+// `PROC_START_MS` (module load) stays as a last-resort fallback when no
+// state-dir is reachable (kept for the rare timer-without-sd path).
 const PROC_START_MS = Date.now();
+function loopStartMs(sd: string | undefined): number {
+    if (!sd) return PROC_START_MS;
+    try {
+        const v = parseInt(readFileSync(loopStartTsPath(sd), "utf8").trim(), 10);
+        return Number.isFinite(v) && v > 0 ? v : PROC_START_MS;
+    } catch {
+        return PROC_START_MS;
+    }
+}
 
 /**
  * #302/#305: the 3-state human-presence WORD for the tmux bar (`@cl_human`),
@@ -902,7 +917,7 @@ export function humanPresenceWord(sd: string | undefined, graceSec: number): "st
     // Suppressed under --no-wait (boot grace is bypassed entirely there).
     const noWait = process.env[CL_ENV.WAIT] === "0";
     const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
-    if (!noWait && (Date.now() - PROC_START_MS) < bootGraceMs) return "boot";
+    if (!noWait && (Date.now() - loopStartMs(sd)) < bootGraceMs) return "boot";
     // #619 david `x4myqb` : the bar word reflects AFK state ONLY. user-grace
     // still gates auto-wakes silently (timer.ts:tryWake), but it no longer
     // paints `wait` — otherwise typing in the terminal armed user-grace for

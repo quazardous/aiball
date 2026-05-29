@@ -1201,17 +1201,24 @@ def main(argv):
             if inject_srv is not None:
                 rfds.append(inject_srv)
             rfds.extend(inject_conns)
-            # Timeout = prochain changement de mot : d'abord l'expiration de
-            # la frappe (5 s → ré-évalue wait/loop), puis la plus proche des
-            # fins de boot-grace (#305) / user-grace (wait→loop). #619 jjfdea :
-            # capper à 5s quand on est en `wait` pour rafraîchir le compteur
-            # dans `@cl_afk_state` (status-right).
+            # Timeout = prochain changement de mot : d'abord l'expiration
+            # de la frappe (5s → ré-évalue stop→rest), puis la plus proche
+            # des fins de boot-grace (#305 → bar word `boot`→`loop`/`wait`)
+            # et de l'AFK 10m auto-release (#619 → bar word `wait`→`loop`,
+            # AFK chunk jaune→dim). user-grace ne peint plus le bar word
+            # (#622 c724a89) donc ne contribue plus au timeout.
+            # #619 jjfdea : capper à 5s quand on est en `wait` pour
+            # rafraîchir le countdown dans `@cl_afk_state` (status-right).
             now_ts = datetime.datetime.now().timestamp()
             typing_rem = HUMAN_TTL_SEC - (now_ts - decider.last_keystroke)
             if typing_rem > 0.0:
                 timeout = typing_rem
             else:
-                rems = [r for r in (_boot_grace_remaining(), _user_grace_remaining()) if r > 0.0]
+                mode = _afk_mode()
+                afk_rem = 0.0
+                if isinstance(mode, tuple):  # ("until", expiry_ts)
+                    afk_rem = max(0.0, mode[1] - now_ts)
+                rems = [r for r in (_boot_grace_remaining(), afk_rem) if r > 0.0]
                 timeout = min(rems) if rems else None
             in_wait = current_word == _HUMAN_WAIT
             if in_wait:
