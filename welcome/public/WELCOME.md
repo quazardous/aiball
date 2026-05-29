@@ -46,25 +46,24 @@ Public-only additions:
   docstrings, README, CHANGELOG, commit messages, PR descriptions.
   Mixing languages confuses contributors who don't speak the team's
   language. The bar is uniform.
-- **Zero internal references** — the public artefacts must read
-  cold for a stranger. That means no:
-  - aiball ticket ids in any form: `#NNN`, `#B.NNN`, `aiball#NNN`,
-    `aiball/NNN`.
-  - aiball comment hashids: `#C.abc123`, `comment c6q9wr`.
-  - aiball-specific commands: `aiball restart`, `ticket_engage`,
-    `claude-loop`, etc.
-  - aiball board URLs (`https://<host>/b/<id>`, Tailscale
-    hostnames).
-  - internal agent identities: `claude-aiball-dev`,
-    `<project>-claude`, etc.
-  - internal project names: `aiball`, `skybot`, `runic`, etc.
-  - other internal infra hints: `*.internal`, `*.local` URLs,
-    RFC1918 IPs in docs, dev paths (`/home/...`, `/Users/...`).
-  Frame everything in terms the external reader can act on. Commit:
-  `fix upstream chip rendering`, not `fix(aiball#160): upstream
-  chip mangling`. Same fix, the public artefact loses the cross-
-  reference that goes nowhere outside the tracker. The mirror lives
-  on the ticket thread.
+- **No references to tools / artefacts the external reader can't
+  reach.** Public artefacts must read cold for a stranger ; anything
+  cited needs to be something they can actually follow. The criterion
+  is *external visibility*, not "the word is internal-sounding". So :
+  - **Forbidden** : private issue tracker IDs (`#NNN`, `JIRA-PROJ-12`)
+    that point to a board no outsider can browse ; private chat / wiki
+    URLs (`*.internal.*`, Tailscale / VPN-only hosts, intranet links) ;
+    dev-machine paths (`/home/...`, `/Users/...`, `C:\Users\...`) ;
+    internal-only agent / consumer identities, dashboards, runbooks.
+  - **Allowed** : the project's own name (a public project naming
+    itself is fine), upstream OSS dependencies, public GitHub issue
+    / PR links, public docs URLs — basically anything someone reading
+    cold can follow without credentials.
+  Frame commits / CHANGELOG / README in terms the external reader
+  can act on. Commit: `fix upstream chip rendering`, not
+  `fix(JIRA-160): upstream chip mangling`. Same fix, the public
+  artefact loses the cross-reference that goes nowhere outside the
+  team. The mirror lives on the tracker thread.
   A pre-commit grep / `gitleaks`-style scanner on these patterns is
   the right enforcement — exhortation alone forgets at the first
   pressed commit.

@@ -41,12 +41,12 @@ Private-only relaxations:
   usual language.** Code stays English ; the prose around it does
   not have to. A team that thinks in French keeps the friction low
   by writing comments in French.
-- **Internal references are fine.** Internal tracker ids
-  (`aiball#NNN`), internal project names (`aiball`, `skybot`,
-  `runic`), internal URLs (`*.internal.*`, Tailscale hostnames),
-  even on-call dashboards — all appropriate in code comments,
-  README, runbooks. The audience already has the context, no need
-  to paraphrase.
+- **References to internal tools are fine.** Private tracker IDs
+  (`PROJ-NNN`, internal-only board hashids), VPN-only URLs
+  (`*.internal.*`, Tailscale hostnames), on-call dashboards,
+  intranet wikis — all appropriate in code comments, README,
+  runbooks. The audience already has the context (and the access)
+  to follow them, no need to paraphrase.
 - **Operational details welcome in the README** — deploy commands,
   internal endpoints, on-call rotations. They're not leaks; they're
   useful for whoever picks this up next.
