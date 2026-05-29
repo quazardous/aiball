@@ -352,3 +352,115 @@ export function isAutonomous(view: LoopStateView): boolean {
 export function isBootPhase(view: LoopStateView): boolean {
     return view.phase === "boot";
 }
+
+// ---------------------------------------------------------------------------
+//  #630 david `e4ejra` — LoopStateBus
+//
+//  Pure compute stays pure ; the bus is the LAYER above. It owns the last
+//  view, diffs against the next, and emits typed events. Consumers
+//  subscribe instead of polling — fewer redundant repaints, richer
+//  transition logs.
+// ---------------------------------------------------------------------------
+
+/** Typed event map. Consumer code uses `bus.on("event", cb)` ; TypeScript
+ *  infers the callback signature from this map. */
+export type LoopStateEvents = {
+    /** Fired whenever the view changes at all (any field). Always fires
+     *  before the typed events below. */
+    transition: (prev: LoopStateView, next: LoopStateView) => void;
+    /** Bar word transitioned (boot / stop / wait / loop). */
+    barWordChanged: (prev: BarWord, next: BarWord) => void;
+    /** Bar BG phase transitioned (boot / idle / busy). */
+    phaseChanged: (prev: Phase, next: Phase) => void;
+    /** boot grace just ended (in→out of boot). */
+    bootEnded: (next: LoopStateView) => void;
+    /** boot grace re-entered (rare — typically on reload). */
+    bootStarted: (next: LoopStateView) => void;
+    /** AFK 10m hold just armed (off → 10m, or 10m refreshed via re-arm). */
+    afkArmed10m: (expiryMs: number) => void;
+    /** AFK ∞ hold just armed. */
+    afkArmedInf: () => void;
+    /** AFK cleared (any → off). */
+    afkCleared: () => void;
+    /** Wake gate flipped from closed to open. */
+    wakeBecameAllowed: (next: LoopStateView) => void;
+    /** Wake gate flipped from open to closed. */
+    wakeBecameBlocked: (reason: string) => void;
+    /** Resume picker showed up (signal from session-start-hook). */
+    pickerOpened: () => void;
+    /** Resume picker dismissed (auto-pick or user-pick). */
+    pickerClosed: () => void;
+};
+
+type AnyListener = (...args: unknown[]) => void;
+type EventListeners = Record<string, AnyListener[] | undefined>;
+
+/** Stateful wrapper around `computeLoopView` — maintains the last view +
+ *  emits diffs. Pure-compute stays pure ; bus is the layer above. */
+export class LoopStateBus {
+    private lastView: LoopStateView | null = null;
+    private lastInput: LoopStateInput | null = null;
+    private listeners: EventListeners = {};
+
+    /** Subscribe to an event. Returns an unsubscribe function. */
+    on<K extends keyof LoopStateEvents>(event: K, cb: LoopStateEvents[K]): () => void {
+        const list = (this.listeners[event] ||= []) as AnyListener[];
+        list.push(cb as unknown as AnyListener);
+        return () => {
+            const i = list.indexOf(cb as unknown as AnyListener);
+            if (i >= 0) list.splice(i, 1);
+        };
+    }
+
+    /** Current view (last computed). Null until the first `update`. */
+    current(): LoopStateView | null {
+        return this.lastView;
+    }
+
+    /** Recompute the view from `input`, diff against the last, emit
+     *  events for every transition. Returns the new view. */
+    update(input: LoopStateInput): LoopStateView {
+        const next = computeLoopView(input);
+        if (this.lastView !== null && this.lastInput !== null) {
+            this.emitDiffs(this.lastView, next, this.lastInput, input);
+        }
+        this.lastView = next;
+        this.lastInput = input;
+        return next;
+    }
+
+    private emitDiffs(prev: LoopStateView, next: LoopStateView, prevInput: LoopStateInput, nextInput: LoopStateInput): void {
+        const changed = JSON.stringify(prev) !== JSON.stringify(next);
+        if (changed) this.emit("transition", prev, next);
+        if (prev.barWord !== next.barWord) this.emit("barWordChanged", prev.barWord, next.barWord);
+        if (prev.phase !== next.phase) this.emit("phaseChanged", prev.phase, next.phase);
+        if (prev.inBootGrace && !next.inBootGrace) this.emit("bootEnded", next);
+        if (!prev.inBootGrace && next.inBootGrace) this.emit("bootStarted", next);
+        // AFK transitions — driven by the underlying file mode, not the
+        // chunk label (which can flip color without semantic change).
+        const prevAfk = effectiveAfkMode(prevInput);
+        const nextAfk = effectiveAfkMode(nextInput);
+        if (prevAfk !== nextAfk) {
+            if (nextAfk === "wait_10m") this.emit("afkArmed10m", nextInput.afkExpiryMs ?? 0);
+            else if (nextAfk === "wait_inf") this.emit("afkArmedInf");
+            else this.emit("afkCleared");
+        } else if (nextAfk === "wait_10m" && prevInput.afkExpiryMs !== nextInput.afkExpiryMs && nextInput.afkExpiryMs !== null) {
+            // 10m re-armed (timer refreshed via typing in the 10m window)
+            this.emit("afkArmed10m", nextInput.afkExpiryMs);
+        }
+        if (!prev.wakeAllowed && next.wakeAllowed) this.emit("wakeBecameAllowed", next);
+        if (prev.wakeAllowed && !next.wakeAllowed) this.emit("wakeBecameBlocked", next.wakeSkipReason ?? "unknown");
+        if (!prevInput.resumePickerActive && nextInput.resumePickerActive) this.emit("pickerOpened");
+        if (prevInput.resumePickerActive && !nextInput.resumePickerActive) this.emit("pickerClosed");
+    }
+
+    private emit<K extends keyof LoopStateEvents>(event: K, ...args: Parameters<LoopStateEvents[K]>): void {
+        const list = this.listeners[event];
+        if (!list) return;
+        for (const cb of list) {
+            try {
+                cb(...args);
+            } catch { /* listener throws are swallowed — never break the bus */ }
+        }
+    }
+}

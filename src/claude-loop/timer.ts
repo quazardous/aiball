@@ -96,7 +96,7 @@ import {
 } from "./state.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
-import { canFlipBgFromBoot, computeLoopView } from "./loop-state.js";
+import { canFlipBgFromBoot, computeLoopView, LoopStateBus } from "./loop-state.js";
 import { CL_ENV } from "./env-vars.js";
 import { stripMarkdown } from "./markdown-strip.js";
 
@@ -892,17 +892,25 @@ async function mainSse(): Promise<void> {
     // dedicated UDS (`view-push.sock`), persistent connection,
     // newline-delimited JSON. The pusher reconnects transparently
     // if the socket drops (proxy reload, etc.).
+    // #630 david `d59zge` : LoopStateBus owns the prev-view + emits
+    // typed events on transitions. The push-to-proxy hook listens to
+    // `transition` (any change) and forwards via the existing pusher.
+    // Other consumers can subscribe to specific events (bootEnded,
+    // afkArmed10m, …) for log decoration or future reactive painters
+    // without re-implementing the diff.
     const viewPusher = createViewPusher(viewPushSockPath(sd!));
-    let lastPushedJson = "";
+    const loopBus = new LoopStateBus();
+    loopBus.on("transition", (_prev, next) => viewPusher.push(next));
+    loopBus.on("bootEnded", () => log("state-bus: boot phase ended"));
+    loopBus.on("afkArmed10m", (expiry) => log(`state-bus: AFK 10m armed (expires ${new Date(expiry).toISOString()})`));
+    loopBus.on("afkArmedInf", () => log("state-bus: AFK ∞ armed"));
+    loopBus.on("afkCleared", () => log("state-bus: AFK cleared"));
+    loopBus.on("pickerOpened", () => log("state-bus: resume picker opened"));
+    loopBus.on("pickerClosed", () => log("state-bus: resume picker closed"));
     const pushViewIfChanged = (): void => {
-        let view;
         try {
-            view = computeLoopView(readLoopStateInput(sd!));
-        } catch { return; }
-        const json = JSON.stringify(view);
-        if (json === lastPushedJson) return;
-        lastPushedJson = json;
-        viewPusher.push(view);
+            loopBus.update(readLoopStateInput(sd!));
+        } catch { /* swallow — next tick retries */ }
     };
     // Debounced trigger : coalesce a burst of marker writes into a single
     // push (proxy typing branch writes 3 markers per keystroke).

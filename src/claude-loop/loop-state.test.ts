@@ -15,6 +15,7 @@ import {
     isAfkHeld,
     isAutonomous,
     isBootPhase,
+    LoopStateBus,
     shouldArmAfk10mOnSettleBoot,
     type LoopStateInput,
 } from "./loop-state.js";
@@ -93,6 +94,186 @@ test("boot phase under --no-wait + picker active → boot stretches (picker wins
     assert.equal(v.phase, "boot");
     assert.equal(v.barWord, "boot");
     assert.equal(v.inBootGrace, true);
+});
+
+// ---------------------------------------------------------------------------
+//  LoopStateBus (#630 david `e4ejra` / `d59zge`) — event diffs over the
+//  pure compute layer
+// ---------------------------------------------------------------------------
+
+test("LoopStateBus: first update doesn't emit (no prior view to diff)", () => {
+    const bus = new LoopStateBus();
+    let calls = 0;
+    bus.on("transition", () => calls++);
+    bus.update(baseInput());
+    assert.equal(calls, 0);
+});
+
+test("LoopStateBus: second update with same view → no emit", () => {
+    const bus = new LoopStateBus();
+    bus.update(baseInput());
+    let calls = 0;
+    bus.on("transition", () => calls++);
+    bus.update(baseInput());
+    assert.equal(calls, 0);
+});
+
+test("LoopStateBus: bootEnded fires when inBootGrace flips true→false", () => {
+    const bus = new LoopStateBus();
+    bus.update(baseInput({ nowMs: T0 + 5 * SEC })); // in boot
+    let fired = false;
+    bus.on("bootEnded", () => { fired = true; });
+    bus.update(baseInput({
+        nowMs: T0 + 5 * SEC,
+        bootComplete: true,
+        idleSinceMs: T0 + 5 * SEC,
+    }));
+    assert.equal(fired, true);
+});
+
+test("LoopStateBus: afkArmed10m fires on off → 10m", () => {
+    const bus = new LoopStateBus();
+    const start = T0;
+    const now = start + 5 * MIN;
+    bus.update(baseInput({
+        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
+    }));
+    let expiry = 0;
+    bus.on("afkArmed10m", (e) => { expiry = e; });
+    const newExpiry = now + 10 * MIN;
+    bus.update(baseInput({
+        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
+        afkMode: "wait_10m", afkExpiryMs: newExpiry,
+    }));
+    assert.equal(expiry, newExpiry);
+});
+
+test("LoopStateBus: afkArmedInf fires on 10m → ∞", () => {
+    const bus = new LoopStateBus();
+    const start = T0;
+    const now = start + 5 * MIN;
+    bus.update(baseInput({
+        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
+        afkMode: "wait_10m", afkExpiryMs: now + 5 * MIN,
+    }));
+    let fired = false;
+    bus.on("afkArmedInf", () => { fired = true; });
+    bus.update(baseInput({
+        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
+        afkMode: "wait_inf",
+    }));
+    assert.equal(fired, true);
+});
+
+test("LoopStateBus: afkCleared fires on ∞ → off", () => {
+    const bus = new LoopStateBus();
+    const start = T0;
+    const now = start + 5 * MIN;
+    bus.update(baseInput({
+        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
+        afkMode: "wait_inf",
+    }));
+    let fired = false;
+    bus.on("afkCleared", () => { fired = true; });
+    bus.update(baseInput({
+        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
+    }));
+    assert.equal(fired, true);
+});
+
+test("LoopStateBus: wakeBecameAllowed fires when gate flips closed→open", () => {
+    const bus = new LoopStateBus();
+    const start = T0;
+    const now = start + 5 * MIN;
+    bus.update(baseInput({
+        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
+        afkMode: "wait_inf", // blocks wake
+    }));
+    let view = null as null | { wakeAllowed: boolean };
+    bus.on("wakeBecameAllowed", (v) => { view = v; });
+    bus.update(baseInput({
+        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
+        // afkMode default off → wake opens
+    }));
+    assert.notEqual(view, null);
+    assert.equal(view!.wakeAllowed, true);
+});
+
+test("LoopStateBus: wakeBecameBlocked fires on open→closed + reason passed", () => {
+    const bus = new LoopStateBus();
+    const start = T0;
+    const now = start + 5 * MIN;
+    bus.update(baseInput({
+        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
+    }));
+    let reason = "";
+    bus.on("wakeBecameBlocked", (r) => { reason = r; });
+    bus.update(baseInput({
+        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
+        paneBusy: true,
+    }));
+    assert.match(reason, /esc to interrupt/);
+});
+
+test("LoopStateBus: pickerOpened / pickerClosed fire on resumePickerActive flips", () => {
+    const bus = new LoopStateBus();
+    bus.update(baseInput());
+    let opened = false, closed = false;
+    bus.on("pickerOpened", () => { opened = true; });
+    bus.on("pickerClosed", () => { closed = true; });
+    bus.update(baseInput({ resumePickerActive: true }));
+    assert.equal(opened, true);
+    assert.equal(closed, false);
+    bus.update(baseInput({ resumePickerActive: false, bootComplete: true, idleSinceMs: T0 }));
+    assert.equal(closed, true);
+});
+
+test("LoopStateBus: barWordChanged + phaseChanged fire independently", () => {
+    const bus = new LoopStateBus();
+    const start = T0;
+    bus.update(baseInput({ nowMs: start + 5 * SEC })); // boot
+    const words: [string, string][] = [];
+    const phases: [string, string][] = [];
+    bus.on("barWordChanged", (p, n) => words.push([p, n]));
+    bus.on("phaseChanged", (p, n) => phases.push([p, n]));
+    bus.update(baseInput({
+        nowMs: start + 5 * SEC,
+        bootComplete: true,
+        idleSinceMs: start + 5 * SEC,
+    }));
+    assert.deepEqual(words, [["boot", "loop"]]);
+    assert.deepEqual(phases, [["boot", "idle"]]);
+});
+
+test("LoopStateBus: unsubscribe stops further calls", () => {
+    const bus = new LoopStateBus();
+    bus.update(baseInput()); // boot view
+    let calls = 0;
+    const off = bus.on("transition", () => calls++);
+    // Flip bootComplete → view changes (boot → idle, loop word)
+    bus.update(baseInput({ bootComplete: true, idleSinceMs: T0 }));
+    assert.equal(calls, 1);
+    off();
+    bus.update(baseInput({ bootComplete: true, idleSinceMs: T0, paneBusy: true }));
+    assert.equal(calls, 1); // not incremented
+});
+
+test("LoopStateBus: listener throw doesn't break the bus", () => {
+    const bus = new LoopStateBus();
+    bus.update(baseInput());
+    bus.on("transition", () => { throw new Error("boom"); });
+    let secondCalled = false;
+    bus.on("transition", () => { secondCalled = true; });
+    bus.update(baseInput({ bootComplete: true, idleSinceMs: T0 }));
+    assert.equal(secondCalled, true);
+});
+
+test("LoopStateBus: current() returns null until first update, then the last view", () => {
+    const bus = new LoopStateBus();
+    assert.equal(bus.current(), null);
+    bus.update(baseInput());
+    assert.notEqual(bus.current(), null);
+    assert.equal(bus.current()!.barWord, "boot");
 });
 
 test("paneReady=true (post-picker, no transient text) → boot ends", () => {
