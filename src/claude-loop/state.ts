@@ -21,7 +21,7 @@ import { AiballClient } from "../client.js";
 import type { Intent } from "../domain.js";
 import type { DrainedState } from "./drained-strategy.js";
 import { CL_ENV } from "./env-vars.js";
-import { computeLoopView } from "./loop-state.js";
+import { canFlipBgFromBoot, computeLoopView } from "./loop-state.js";
 import { parseGates, runGates } from "./gates.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
@@ -1060,6 +1060,17 @@ export function setTmuxStatus(
     const bg = stateBg(col, status);
     const sd = process.env[CL_ENV.STATE_DIR];
     const proxyAlive = !!sd && proxyIsAlive(sd);
+    // #627 + #624 david `knb52u` : pendant la fenêtre boot-grace, le BG
+    // reste `[boot]` jaune. Les hooks (stop / user-prompt-submit) qui
+    // appellent `setTmuxStatus(IDLE, "user")` ou `setTmuxStatus(BUSY)`
+    // au milieu du resume picker créaient le mismatch BG gris/blue +
+    // word `boot`. settleBoot du timer est la seule autorité pour
+    // sortir du BG `[boot]`. `BOOT` lui-même reste toujours peignable
+    // (seed cli.ts, settleBoot's own paint, hooks BOOT info update).
+    if (sd && status !== "boot" && !canFlipBgFromBoot(readLoopStateInput(sd))) {
+        // Skip silencieux — settleBoot fera la transition propre.
+        return;
+    }
     const setOpt = (opt: string, val: string) =>
         spawnSync(MUX_CMD, ["set-option", "-t", tn, opt, val], { stdio: "ignore" });
 
