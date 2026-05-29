@@ -193,6 +193,46 @@ export function setResumePicker(sd: string, active: boolean): void {
     try { if (existsSync(pickerPath)) unlinkSync(pickerPath); } catch { /* race */ }
     try { writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n"); } catch { /* best-effort */ }
 }
+
+// #624 david `62ys4g` : "le pane est pas contrôlable donc reste externe go".
+// Pane-* signals are external (claude TUI drives them) — same setter pattern
+// as `setResumePicker`. Each writes/removes a marker file ; the state machine
+// reads them via `readLoopStateInput`. The TIMER's pane probe (mainSse) is
+// the canonical caller, but stop-hook also writes some of them on its own
+// snapshot.
+export function paneBusyPath(sd: string): string { return join(sd, "pane-busy"); }
+export function paneReadyPath(sd: string): string { return join(sd, "pane-ready"); }
+export function paneCompactingPath(sd: string): string { return join(sd, "pane-compacting"); }
+export function paneInterruptedPath(sd: string): string { return join(sd, "pane-interrupted"); }
+
+function writeOrUnlink(p: string, set: boolean): void {
+    if (set) {
+        try { writeFileSync(p, new Date().toISOString() + "\n"); } catch { /* best-effort */ }
+    } else {
+        try { if (existsSync(p)) unlinkSync(p); } catch { /* race */ }
+    }
+}
+
+/** #624 david `62ys4g` : claude pane shows `esc to interrupt` in its
+ *  footer. Setter called by the pane probe (timer / stop-hook). */
+export function setPaneBusy(sd: string, busy: boolean): void {
+    writeOrUnlink(paneBusyPath(sd), busy);
+}
+/** #624 david `62ys4g` : claude pane shows the prompt signature
+ *  (`Claude Code v`, `❯ `, …). Setter called by the pane probe. */
+export function setPaneReady(sd: string, ready: boolean): void {
+    writeOrUnlink(paneReadyPath(sd), ready);
+}
+/** #624 david `62ys4g` : claude is mid-compact (`/compact` or auto-compact).
+ *  Wake gate skips while this is on. */
+export function setCompacting(sd: string, compacting: boolean): void {
+    writeOrUnlink(paneCompactingPath(sd), compacting);
+}
+/** #624 david `62ys4g` : claude pane shows `interrupted by user`. Decorates
+ *  the bar tag `[idle:interrupted]` ; not a wake gate. */
+export function setInterrupted(sd: string, interrupted: boolean): void {
+    writeOrUnlink(paneInterruptedPath(sd), interrupted);
+}
 export function pingsPath(sd: string): string { return join(sd, "pings.yaml"); }
 export function idleMarkerPath(sd: string): string { return join(sd, "idle-since"); }
 export function wakeRequestedPath(sd: string): string { return join(sd, "wake-requested"); }
@@ -794,15 +834,12 @@ export function readAfkState(sd: string): { mode: "off" | "wait_10m" | "wait_inf
 
 /** #627 — read every state-dir marker + env knob into a `LoopStateInput`
  *  the central `computeLoopView` (loop-state.ts) consumes. Pure read,
- *  no mutation. Caller provides the dynamic bits the timer maintains
- *  in-process (pane probe results, manual-wake flag). */
+ *  no mutation. The only caller-supplied opt left is `manualWake` (a
+ *  per-invocation flag, not external state) — every other signal is a
+ *  marker (#624 david `62ys4g`). */
 export function readLoopStateInput(
     sd: string,
-    opts: {
-        paneBusy?: boolean;
-        paneReady?: boolean;
-        manualWake?: boolean;
-    } = {},
+    opts: { manualWake?: boolean } = {},
 ): import("./loop-state.js").LoopStateInput {
     const nowMs = Date.now();
     const startMs = loopStartMs(sd);
@@ -841,6 +878,10 @@ export function readLoopStateInput(
         bootGraceMs,
         resumePickerActive,
         bootComplete,
+        paneBusy: existsSync(paneBusyPath(sd)),
+        paneReady: existsSync(paneReadyPath(sd)),
+        paneCompacting: existsSync(paneCompactingPath(sd)),
+        paneInterrupted: existsSync(paneInterruptedPath(sd)),
         noWait,
         humanTypingAtMs: safeMtime(humanTypingPath(sd)),
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,
@@ -852,8 +893,6 @@ export function readLoopStateInput(
         wakeInFlightAtMs: safeMtime(wakeInFlightPath(sd)),
         wakeInFlightTtlMs,
         busyDeferUntilMs: safeIsoMs(busyDeferUntilPath(sd)),
-        paneBusy: opts.paneBusy ?? false,
-        paneReady: opts.paneReady ?? false,
         manualWake: opts.manualWake ?? false,
     };
 }

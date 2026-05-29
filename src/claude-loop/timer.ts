@@ -46,7 +46,12 @@ import {
     armAfk10m,
     bootCompletePath,
     createViewPusher,
+    paneShowsInterrupted,
     readLoopStateInput,
+    setCompacting,
+    setInterrupted,
+    setPaneBusy,
+    setPaneReady,
     setResumePicker,
     viewPushSockPath,
     MUX_CMD,
@@ -55,7 +60,6 @@ import {
     buildWakePhrase,
     injectWakePhrase,
     checkHasWork,
-    formatPaneSnapshot,
     idleMarkerPath,
     humanTypingPath,
     userTookOverPath,
@@ -458,6 +462,21 @@ async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
 
 // #264: timestamp of the loop's last send-keys, so the human-typing
 // detector can exclude the loop's own injected text from "a human typed".
+/** #624 david `62ys4g` — capture the pane and write the pane-* markers
+ *  (busy, ready, compacting, interrupted) so the LoopState service sees
+ *  the freshest values. Called by tryWake (out-of-band SSE) and the
+ *  heartbeat probe (~30s cadence). No-op if `capturePane()` fails. */
+function refreshPaneMarkers(): void {
+    if (!sd) return;
+    const paneText = capturePane();
+    if (!paneText) return;
+    const snap = snapshotPane(paneText);
+    setPaneBusy(sd, snap.busy);
+    setPaneReady(sd, /Claude Code v|❯ |^> /m.test(paneText));
+    setCompacting(sd, snap.special === "compacting");
+    setInterrupted(sd, paneShowsInterrupted(paneText));
+}
+
 let lastSendAt = 0;
 async function sendKeys(phrase: string): Promise<void> {
     // #B.180: touch the wake-in-flight marker BEFORE send-keys so
@@ -588,35 +607,19 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         log(`skip wake (${reason}) — no idle marker (claude is busy or boot grace not yet elapsed)`);
         return false;
     }
-    // #627 — single central gate via the LoopState service. The service
-    // reads every marker + env knob and returns one verdict with a
-    // single skip-reason. Adds a fresh pane probe to feed `paneBusy` so
-    // the catch-the-brief-race check at line ~624 stays effective (was
-    // a separate snapshot block before).
+    // #627 + #624 david `62ys4g` — single central gate via the LoopState
+    // service. Every external signal is a marker — including pane state
+    // (busy/ready/compacting/interrupted), written by the heartbeat
+    // pane probe below. tryWake just reads the verdict.
     if (!manualWake) {
-        const paneText = capturePane();
-        let paneBusyForGate = false;
-        let paneReadyForGate = false;
-        let paneSnapReason: string | null = null;
-        if (paneText) {
-            const snap = snapshotPane(paneText);
-            // #B.198 — skip if either busy (esc-to-interrupt) or special
-            // (compacting); both mean claude is internally busy.
-            // #335 — pane-error detection lives in the Stop hook only;
-            // re-scanning here re-armed backoff every heartbeat.
-            if (snap.busy || snap.special !== null) {
-                paneBusyForGate = true;
-                paneSnapReason = formatPaneSnapshot(snap);
-            }
-        }
-        const view = computeLoopView(readLoopStateInput(sd!, {
-            paneBusy: paneBusyForGate,
-            paneReady: paneReadyForGate,
-        }));
+        // Refresh pane markers before computing the view so the gate
+        // sees the just-observed state (the heartbeat probe at line
+        // ~937 also writes them, but tryWake can fire from SSE
+        // out-of-band).
+        refreshPaneMarkers();
+        const view = computeLoopView(readLoopStateInput(sd!));
         if (!view.wakeAllowed) {
-            // Prefer the pane snapshot's rich format when the gate fired
-            // on pane-busy; otherwise use the service's plain reason.
-            log(`skip wake (${reason}) — ${paneSnapReason ?? view.wakeSkipReason}`);
+            log(`skip wake (${reason}) — ${view.wakeSkipReason}`);
             return false;
         }
     }

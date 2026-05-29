@@ -33,6 +33,10 @@ function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
         bootGraceMs: 60 * SEC,
         resumePickerActive: false,
         bootComplete: false,
+        paneBusy: false,
+        paneReady: false,
+        paneCompacting: false,
+        paneInterrupted: false,
         noWait: false,
         humanTypingAtMs: null,
         humanTypingTtlMs: 5 * SEC,
@@ -44,8 +48,6 @@ function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
         wakeInFlightAtMs: null,
         wakeInFlightTtlMs: 2 * SEC,
         busyDeferUntilMs: null,
-        paneBusy: false,
-        paneReady: false,
         manualWake: false,
         ...overrides,
     };
@@ -647,4 +649,65 @@ test("no signal + within time cap → still boot (initial loading window)", () =
     }));
     assert.equal(v.inBootGrace, true);
     assert.equal(v.barWord, "boot");
+});
+
+// ---------------------------------------------------------------------------
+//  Pane-* signals as markers (#624 david `62ys4g`) — pane is external,
+//  so it gets the same setter pattern as setResumePicker
+// ---------------------------------------------------------------------------
+
+test("pane compacting → wake skipped (internal busy)", () => {
+    const start = T0;
+    const now = start + 5 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        bootComplete: true,
+        idleSinceMs: now,
+        paneCompacting: true,
+    }));
+    assert.equal(v.wakeAllowed, false);
+    assert.match(v.wakeSkipReason ?? "", /compact/);
+});
+
+test("pane interrupted → does NOT gate wake (decorative)", () => {
+    const start = T0;
+    const now = start + 5 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        bootComplete: true,
+        idleSinceMs: now,
+        paneInterrupted: true,
+    }));
+    // `interrupted` is just a bar tag, not a gate — wake should still fire
+    // (the user explicitly ESCaped ; the next wake re-engages claude).
+    assert.equal(v.wakeAllowed, true);
+});
+
+test("pane busy + paneCompacting both true → busy reason wins (first checked)", () => {
+    const start = T0;
+    const now = start + 5 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        bootComplete: true,
+        idleSinceMs: now,
+        paneBusy: true,
+        paneCompacting: true,
+    }));
+    assert.equal(v.wakeAllowed, false);
+    assert.match(v.wakeSkipReason ?? "", /esc to interrupt/);
+});
+
+test("pane busy=false, compacting=false → wake allowed when nothing else gates", () => {
+    const start = T0;
+    const now = start + 5 * MIN;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        bootComplete: true,
+        idleSinceMs: now,
+    }));
+    assert.equal(v.wakeAllowed, true);
 });

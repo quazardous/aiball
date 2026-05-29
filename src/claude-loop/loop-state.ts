@@ -71,10 +71,19 @@ export interface LoopStateInput {
      *  `null` = no defer set. Past-now = defer expired (treated as null). */
     busyDeferUntilMs: number | null;
 
-    /** Pane probe results : `esc to interrupt` (busy) or `Claude Code v` /
-     *  prompt signature (ready). Both can be true (busy wins for phase). */
+    /** #624 david `62ys4g` : pane-* signals are external (claude TUI
+     *  drives them) so the state machine treats them as marker-backed
+     *  inputs like every other signal. Setters live in `state.ts`
+     *  (`setPaneBusy`, `setPaneReady`, `setCompacting`, `setInterrupted`).
+     *
+     *  - `paneBusy`     : `esc to interrupt` visible in the footer
+     *  - `paneReady`    : prompt signature (`Claude Code v`, `❯ `, …)
+     *  - `paneCompacting`: `/compact` or auto-compact running
+     *  - `paneInterrupted`: `interrupted by user` notice in pane */
     paneBusy: boolean;
     paneReady: boolean;
+    paneCompacting: boolean;
+    paneInterrupted: boolean;
 
     /** True when this tryWake invocation was manually requested (file
      *  marker bypass) — skips most gates (boot, user-grace, AFK, defer). */
@@ -252,6 +261,12 @@ function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: str
     }
     if (input.paneBusy) {
         return { allowed: false, reason: "pane footer shows `esc to interrupt`" };
+    }
+    if (input.paneCompacting) {
+        // #624 david `62ys4g` : `/compact` (manual or auto) is internally
+        // busy ; firing a wake on top of it loses the wake to the
+        // compaction's pending prompt.
+        return { allowed: false, reason: "pane shows /compact (claude is internally busy)" };
     }
     return { allowed: true, reason: null };
 }
