@@ -43,6 +43,7 @@ import {
     DEFAULT_ASK_GRACE_SEC,
     DEFAULT_USER_GRACE_SEC,
     LOOP_STATUS,
+    afkActive,
     armAfk10m,
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
@@ -590,6 +591,15 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // human who just typed / submitted / hit ESC (the regression #343 added).
     if (!manualWake && userIsTakingOver(sd!, userGraceSec)) {
         log(`skip wake (${reason}) — user-grace active (human acted within ${userGraceSec}s, F9 to release)`);
+        return false;
+    }
+    // #624 david `735bhe` : NOT AFK active (10m countdown or ∞ hold) means
+    // the human is explicitly holding the loop. Auto-wakes skip until the
+    // file expires (10m auto-release) or F9 clears it. Without this gate
+    // settleBoot's `armAfk10m()` was immediately followed by a wake fire
+    // — the post-boot `wait` state lasted milliseconds.
+    if (!manualWake && afkActive(sd!)) {
+        log(`skip wake (${reason}) — NOT AFK hold active (10m countdown or ∞, F9 to release)`);
         return false;
     }
     // #345 B: also yield to a human typing RIGHT NOW (live human-typing
