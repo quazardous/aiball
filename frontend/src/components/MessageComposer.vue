@@ -1058,17 +1058,20 @@ async function onAttachPicked(ev: Event) {
 }
 .spacer { flex: 1; }
 
-/* #609 david `3rhsxf` : le composer (zone détail du message en bas du
-   thread) garde encore ses bordures gauche/droite en mobile → look
-   "card" alors que le reste de la liste est edge-to-edge. On drop
-   left/right border + radius pour s'aligner sur le pattern flat
-   smartphone. Top + bottom restent (cohérent avec la séparation
-   horizontale du thread). Padding interne conservé pour le texte. */
+/* #609 david `3rhsxf` + `v9j6nw` : le composer (zone détail du message
+   en bas du thread, OU en haut en top-down mode) garde encore ses
+   bordures gauche/droite en mobile → look "card" alors que le reste
+   de la liste est edge-to-edge. On drop left/right border + radius
+   pour s'aligner sur le pattern flat smartphone. Top + bottom restent
+   (cohérent avec la séparation horizontale du thread). Padding interne
+   conservé pour le texte. `!important` parce que la specificity de
+   `.composer { border: 1px solid }` est égale + david rapporte que le
+   premier fix ne prenait pas (probable cache + soyons safe). */
 @media (max-width: 720px) {
     .composer {
-        border-left: none;
-        border-right: none;
-        border-radius: 0;
+        border-left: none !important;
+        border-right: none !important;
+        border-radius: 0 !important;
     }
 }
 </style>

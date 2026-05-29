@@ -458,4 +458,16 @@
         border-top: none;
         border-radius: 0;
     }
+    /* #609 david `fxeame` (screenshot) — `.thread-ticket` est la
+       cartouche article du ticket (meta + title + tags + boutons
+       edit/manage). En bottom-up mode elle apparaît APRÈS les comments
+       sur mobile et reste une box arrondie pleine bordée, en rupture
+       avec le reste edge-to-edge. Même traitement que .comment-card :
+       drop borders latérales + top + radius. */
+    .thread-ticket {
+        border-left: none;
+        border-right: none;
+        border-top: none;
+        border-radius: 0;
+    }
 }
