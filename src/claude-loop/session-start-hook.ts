@@ -36,6 +36,12 @@ const sd = process.env[CL_ENV.STATE_DIR];
 const name = process.env[CL_ENV.NAME];
 if (!sd || !name) emit();
 
+// #629 david `y43etd` : track whether the hook actually dismissed a picker.
+// Only THEN do we signal boot-complete at exit — otherwise we'd write
+// it prematurely when the probe timed out without matching (claude
+// could still be at the picker, the user picking manually).
+let sessionPicked = false;
+
 // #577 h9axuc — log each fire so we can diagnose silent regex misses
 // without a tmux-pane replay. Lives next to stop-hook.log + timer.log
 // in the loop's state dir ; tail with `claude-loop tail <name>` or
@@ -92,7 +98,6 @@ if (source === "resume") {
     // happens to mention either string. The `Ctrl+A to show all projects`
     // marker tried earlier can be absent when too few sessions are listed.
     const pickMode = process.env[CL_ENV.RESUME_PICK] ?? "latest";
-    let sessionPicked = false;
     log(`resume: pickMode=${pickMode} resumeMode=${process.env[CL_ENV.RESUME_MODE] ?? "as-is"} tmuxTarget=${tmuxName(name!)}.0`);
     if (pickMode !== "abort") {
         try {
@@ -191,14 +196,31 @@ if (source === "resume") {
 // as a separate flag for compatibility with `claude-loop --no-startup-ping`.
 try {
     writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-    // #624 david `8pwvm3` : explicit end-of-boot signal. Removes the
-    // `resume-picker-active` marker (in case the hook had set it) AND
-    // writes `boot-complete`. The state machine treats this as the
-    // authoritative end of the boot phase — bar flips out of `[boot]`
-    // on the next view-push tick, regardless of the time cap.
-    setResumePicker(sd!, false);
-    // Now that bootComplete is set, canFlipBgFromBoot returns true.
-    setTmuxStatus(name!, LOOP_STATUS.IDLE);
-    log(`seed idle + signal boot-complete + flip bar IDLE + exit (source=${source})`);
+    // #629 david `y43etd` : ne write `boot-complete` QUE si on a vraiment
+    // dismissé un picker (auto-pick a fire) OU si on est sous --resume
+    // abort (= user demande pas d'aide). Sinon (probe picker n'a pas
+    // matché dans 15s — pourrait être pas de picker du tout OU picker
+    // qui tarde) on LAISSE l'état des markers tel quel : le timer's
+    // pane probe verra `paneReady=true` une fois claude vraiment prompt,
+    // ce qui sortira de boot via la règle paneReady (à venir #629).
+    // Pour l'instant : le time cap (300s) reste fail-safe.
+    // #629 david `y43etd` : decide whether the hook is confident enough
+    // to signal boot-complete :
+    //   - source !== "resume"   → no picker expected, claude is direct
+    //     at the prompt. Safe to signal.
+    //   - sessionPicked === true → auto-pick fired Enter, claude is past
+    //     the picker. Safe to signal.
+    //   - else (probe didn't match, --resume + pickMode=abort, slow boot)
+    //     → DON'T signal. Bar stays [boot] until the timer's pane probe
+    //     sees the prompt OR the safety cap fires.
+    const sessionPickerAborted = (process.env[CL_ENV.RESUME_PICK] ?? "latest") === "abort";
+    const safeToSignal = source !== "resume" || sessionPicked || sessionPickerAborted;
+    if (safeToSignal) {
+        setResumePicker(sd!, false);
+        setTmuxStatus(name!, LOOP_STATUS.IDLE);
+        log(`seed idle + signal boot-complete (source=${source} sessionPicked=${sessionPicked} aborted=${sessionPickerAborted}) + flip bar IDLE + exit`);
+    } else {
+        log(`seed idle (probe didn't match picker, boot-complete NOT signalled — bar stays [boot] until pane probe sees prompt or safety cap fires) + exit (source=${source})`);
+    }
 } catch { /* swallow */ }
 emit();

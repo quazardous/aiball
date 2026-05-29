@@ -43,7 +43,6 @@ import {
     DEFAULT_ASK_GRACE_SEC,
     DEFAULT_USER_GRACE_SEC,
     LOOP_STATUS,
-    armAfk10m,
     bootCompletePath,
     createViewPusher,
     paneShowsInterrupted,
@@ -96,7 +95,7 @@ import {
     type WakeHint,
 } from "./state.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
-import { canFlipBgFromBoot, computeLoopView, shouldArmAfk10mOnSettleBoot } from "./loop-state.js";
+import { canFlipBgFromBoot, computeLoopView } from "./loop-state.js";
 import { CL_ENV } from "./env-vars.js";
 import { stripMarkdown } from "./markdown-strip.js";
 
@@ -180,7 +179,10 @@ try { writeFileSync(timerPidPath(sd!), `${process.pid}\n`); } catch { /* best ef
 // human has the take-over window — only `boot-settle` (grace-aware) fires at
 // the end of the window. Fixes #302 (auto-ping firing at startup while the
 // bar shows `wait`).
-const NO_WAIT = process.env[CL_ENV.WAIT] === "0";
+// #629 david `y43etd` : NO_WAIT removed — the only place it gated
+// was `shouldArmAfk10mOnSettleBoot`, which is gone (user-grace already
+// silently gates wakes if user typed during boot). Kept the env var
+// `CL_WAIT` shape ; readers in the proxy still honor it.
 // #624 david `8pwvm3` : safety cap for settleBoot only (the
 // `boot-complete` marker is the authoritative end-of-boot signal).
 // Bumped from 60s → 300s so a slow resume picker never trips it.
@@ -821,13 +823,13 @@ async function mainSse(): Promise<void> {
         log("boot grace elapsed (safety cap) — settling to idle/busy via check");
         // Hook never fired (--resume aborted, picker stuck past 5 min,
         // hook crashed). Drive the transition ourselves : sign boot-complete
-        // so the state machine flips out of boot, arm under --wait, seed
-        // idle-since, try a wake.
+        // so the state machine flips out of boot, seed idle-since, try a
+        // wake. #629 david `y43etd` : DON'T auto-arm NOT AFK 10m anymore
+        // — user-grace silently gates wakes if user typed pendant le
+        // boot (typing → user-took-over → tryWake skip via user-grace).
+        // Forcer le bar `wait` jaune à T+grace était intrusif ; bar reste
+        // `loop` vert, user appuie F9 si besoin d'un hold visible.
         setResumePicker(sd!, false);
-        if (shouldArmAfk10mOnSettleBoot({ noWait: NO_WAIT })) {
-            armAfk10m(sd!);
-            log("settleBoot: --wait mode → armed NOT AFK 10m (bar will read `wait`)");
-        }
         // Seed idle-since so tryWake's gate passes; tryWake will
         // flip to busy if there's work or stay idle otherwise.
         try {
