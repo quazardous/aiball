@@ -1303,6 +1303,11 @@ async function cmdStatus(name: string | undefined): Promise<void> {
     // explicitement assignés. claude-loop exporte AIBALL_NO_CLAIM=1 vers
     // claude + hooks → AiballClient inject `x-aiball-no-claim: 1`.
     process.stdout.write(`  no_claim       : ${ctx.no_claim ? "true (assignment-only — engage skips the global pool)" : "false (claim normally)"}\n`);
+    // #624 david `j3zzxg` : surface the wait mode so a launched loop can be
+    // inspected without parsing the env file. `wait: true` (managed) =
+    // boot-grace honored + post-boot armed NOT AFK 10m. `wait: false`
+    // (--no-wait, default per project yaml) = eager drain at boot end.
+    process.stdout.write(`  wait           : ${ctx.claude_loop.wait ? "true (--wait — boot-grace honored, post-boot arms NOT AFK 10m)" : "false (--no-wait — eager drain at boot end, post-boot bar `loop`)"}\n`);
     // #591 qef8m6 — surface project_type so it's visible from the CLI without
     // calling the welcome MCP. Null = welcome falls back to `public`.
     process.stdout.write(`  project_type   : ${ctx.project_type ?? "(unset — welcome defaults to 'public')"}\n`);
