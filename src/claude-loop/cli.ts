@@ -22,7 +22,7 @@ import {
     rmSync,
     writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -229,6 +229,31 @@ function pruneDeadStateDirs(): void {
         if (tmuxAlive(name)) continue;
         try { rmSync(stateDirFor(name), { recursive: true, force: true }); }
         catch { /* ignore */ }
+    }
+}
+
+/**
+ * #616 (david arf8xs) — does claude have any prior conversation
+ * recorded for this cwd ? claude stores sessions under
+ * `~/.claude/projects/<encoded-cwd>/*.jsonl`, where `encoded-cwd`
+ * is the absolute path with every `/` replaced by `-` and a leading
+ * `-` (e.g. `~/.claude/projects/-home-david-Private-dev-projects-foo/`).
+ *
+ * Used by the always_resume injection : if the dir is missing or
+ * empty, `claude --resume` would block on an empty picker — skip the
+ * auto-inject and let the user start fresh. Best-effort : returns
+ * `true` on any IO error so a permissions glitch falls back to the
+ * pre-#616 behaviour (inject --resume, claude figures it out).
+ */
+function hasClaudeSessions(cwd: string): boolean {
+    try {
+        const abs = resolve(cwd);
+        const encoded = "-" + abs.replace(/^\//, "").replace(/\//g, "-");
+        const dir = join(homedir(), ".claude", "projects", encoded);
+        if (!existsSync(dir)) return false;
+        return readdirSync(dir).some((f) => f.endsWith(".jsonl"));
+    } catch {
+        return true;
     }
 }
 
@@ -715,7 +740,21 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     }
     if (ctx.claude.always_resume) {
         const hasResume = effectiveClaudeArgs.some((a) => a === "--resume" || a.startsWith("--resume=") || a === "--no-resume");
-        if (!hasResume) effectiveClaudeArgs = ["--resume", ...effectiveClaudeArgs];
+        if (!hasResume) {
+            // #616 follow-up (david arf8xs) : auto-skip --resume si AUCUNE
+            // session claude n'existe pour ce cwd. Sinon, `claude --resume`
+            // sur un projet vierge bloque sur le picker vide. La détection
+            // est best-effort (lecture du dossier ~/.claude/projects/<encoded-cwd>)
+            // — silencieusement skip à la moindre IO error : on retombe sur
+            // le comportement précédent (--resume inject, claude se débrouille).
+            if (!hasClaudeSessions(cwd)) {
+                process.stdout.write(
+                    `claude-loop: no prior claude session found for ${cwd} — skipping auto --resume (override with explicit --resume or --resume=<id>)\n`,
+                );
+            } else {
+                effectiveClaudeArgs = ["--resume", ...effectiveClaudeArgs];
+            }
+        }
     }
     const passthrough = effectiveClaudeArgs.map(shQuote).join(" ");
     // CL_CLAUDE_CMD lets you swap the binary+flags (everything before
