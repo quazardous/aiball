@@ -632,28 +632,41 @@ class _Decider:
         #     buffering de la « 1re combo » (la séquence à 2 touches a disparu) →
         #     l'ESC d'interruption atteint claude SANS le délai de 400ms qu'imposait
         #     l'ancien buffer.
+        # #624 david `n5kmsz` + `fdj78d` : pendant la fenêtre boot-grace
+        # les keystrokes sont IGNORÉS côté AFK / bar — l'utilisateur
+        # peut taper pour choisir une discussion --resume sans armer
+        # NOT AFK 10m et sans flicker le bar entre stop/wait. Les
+        # bytes restent forwardés à claude.
+        in_boot = _boot_grace_remaining() > 0.0
         if is_typing_keystroke(data):
             d["typing"] = True
-            # #622 david `jzcgmh` : typing arms NOT AFK 10m (or refreshes
-            # an existing 10m countdown). In NOT AFK ∞ mode it's a no-op
-            # (only F9 can release the indefinite hold). Stays distinct
-            # from `touch_user_grace` for back-compat — both arm the
-            # same effective 10-min window but mean different things.
-            d["markers"] += ["arm_afk_10m", "touch_marker", "touch_user_grace"]
-            # Post-marker: AFK is always active after typing — either
-            # we just armed 10m (was OFF or refreshed), or we're in ∞
-            # (no-op, was already active).
-            self.afk_active = True
+            if not in_boot:
+                # #622 david `jzcgmh` : typing arms NOT AFK 10m (or refreshes
+                # an existing 10m countdown). In NOT AFK ∞ mode it's a no-op
+                # (only F9 can release the indefinite hold). Stays distinct
+                # from `touch_user_grace` for back-compat — both arm the
+                # same effective 10-min window but mean different things.
+                d["markers"] += ["arm_afk_10m", "touch_marker", "touch_user_grace"]
+                # Post-marker: AFK is always active after typing — either
+                # we just armed 10m (was OFF or refreshed), or we're in ∞
+                # (no-op, was already active).
+                self.afk_active = True
+                d["word"] = "stop"
+            else:
+                # In boot-grace : keep the bar as `_HUMAN_BOOT` (no stop
+                # red flicker). Don't touch any state markers — boot is
+                # for resume-picker typing, not human takeover.
+                d["word"] = "rest"
             self.last_keystroke = now
-            d["word"] = "stop"
         elif self.esc_takeover and _is_lone_esc(data):
             d["lone_esc"] = True
-            # #622 david `jzcgmh` : ESC behaves like typing — arms NOT
-            # AFK 10m (or refreshes), no-op in ∞. The "interrupt
-            # claude" payload still forwards below ; we just don't
-            # release the AFK hold the way the old `clear_afk` did.
-            d["markers"] += ["arm_afk_10m", "touch_user_grace"]
-            self.afk_active = True
+            if not in_boot:
+                # #622 david `jzcgmh` : ESC behaves like typing — arms NOT
+                # AFK 10m (or refreshes), no-op in ∞. The "interrupt
+                # claude" payload still forwards below ; we just don't
+                # release the AFK hold the way the old `clear_afk` did.
+                d["markers"] += ["arm_afk_10m", "touch_user_grace"]
+                self.afk_active = True
             d["word"] = "rest"
         d["forward"] += data
         return d
