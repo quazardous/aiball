@@ -26,6 +26,17 @@ WRITING STYLE — lead with the USER-FACING INTENTION, not the implementation :
   not the user-facing CHANGELOG. Reference public refs (GitHub PRs,
   upstream issues) only.
 
+VERSIONING — SemVer (https://semver.org/) :
+
+- Any new flag / command / endpoint / behaviour-toggle is **MINOR** (Y+1).
+  Even small ones. If your section has an `### Added`, the bump is at
+  least MINOR.
+- Pure bug fixes (`### Fixed`) → **PATCH** (Z+1).
+- Breaking changes (removed flag, renamed endpoint, response shape that
+  loses a field) → **MAJOR** (X+1).
+- Pre-1.0 stays loose, but the spirit holds: a PATCH bump should NOT
+  contain feat() commits.
+
 Examples :
 
   ❌ add parse_routing_spec() + pick_upstream() in routing.rs
