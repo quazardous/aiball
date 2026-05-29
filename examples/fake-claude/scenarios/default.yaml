@@ -1,0 +1,16 @@
+# Default scenario — joué quand `fake-claude` est appelé sans arg.
+# REPL minimal : boot + boucle [prompt → echo → flux lorem ipsum → prompt].
+# Chaque ligne tapée + Enter est echo'ée, puis simule un flux de travail
+# claude (busy + output token par token, `esc to interrupt` visible) avant
+# de revenir au prompt.
+#
+# Ctrl+D (2x rapide) ou Ctrl+C pour quitter.
+meta:
+  name: default
+  describes: "REPL inputtable — boot + loop [main.idle echo → main.streaming_output]"
+  expects_input: true
+steps:
+  - screen: boot.loading
+  - loop:
+      - screen: main.idle
+      - screen: main.streaming_output

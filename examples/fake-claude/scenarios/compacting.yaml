@@ -1,0 +1,12 @@
+# Mi-session compacting — vérifie que classifyPaneSpecial détecte
+# bien le « live compacting » (esc to interrupt + ligne ✶) et non
+# un compacting stale dans le scrollback (#B.185).
+meta:
+  name: compacting
+  describes: "idle → compacting 3s → idle (test live vs stale)"
+  expects_input: false
+steps:
+  - screen: main.idle
+  - sleep: 1
+  - screen: transition.compacting
+  - screen: main.idle

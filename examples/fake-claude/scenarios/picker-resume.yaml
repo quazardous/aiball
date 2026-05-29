@@ -1,0 +1,12 @@
+# Boot avec session picker (claude --resume + ≥2 sessions),
+# user pick une session, resume reprend, prompt s'installe.
+# Test direct du session-start-hook auto-pick (#577).
+meta:
+  name: picker-resume
+  describes: "claude --resume → picker à 3 sessions → resume → idle"
+  expects_input: true
+steps:
+  - screen: boot.loading
+  - screen: boot.resume_picker
+  - screen: transition.resuming
+  - screen: main.idle

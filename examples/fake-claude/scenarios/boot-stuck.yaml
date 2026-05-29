@@ -1,0 +1,9 @@
+# Boot qui ne sort jamais — sert à tester boot-grace timeout +
+# detection « toujours en boot » dans le timer.
+meta:
+  name: boot-stuck
+  describes: "boot infini — teste les fallback boot-grace / timeout"
+  expects_input: false
+steps:
+  - screen: boot.loading
+  - sleep: 600     # 10 min de boot, claude-loop devrait flag boot-stuck

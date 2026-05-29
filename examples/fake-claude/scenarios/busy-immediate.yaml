@@ -1,0 +1,13 @@
+# Boot OK puis claude part en busy direct (longue réponse).
+# Test du gating « esc to interrupt » : claude-loop ne doit PAS
+# auto-wake pendant les 10s de busy.
+meta:
+  name: busy-immediate
+  describes: "boot → idle 2s → busy 10s → idle (test esc-to-interrupt gate)"
+  expects_input: false
+steps:
+  - screen: boot.loading
+  - screen: main.idle
+  - sleep: 2
+  - screen: main.busy
+  - screen: main.idle

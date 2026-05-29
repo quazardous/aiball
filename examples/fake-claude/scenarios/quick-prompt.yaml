@@ -1,0 +1,9 @@
+# Boot rapide direct sur le prompt (cas le plus banal : pas de picker,
+# pas de resume). Sert de baseline « tout est OK ».
+meta:
+  name: quick-prompt
+  describes: "boot direct → prompt idle"
+  expects_input: true
+steps:
+  - screen: boot.loading
+  - screen: main.idle
