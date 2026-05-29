@@ -207,6 +207,11 @@ interface StartOpts {
     initGlobal?: boolean;
     /** #593 : forwarded to bootstrap (--private) when `--init` is set. */
     initPrivate?: boolean;
+    /** #616 : --no-resume → opt out from `claude.always_resume: true` for
+     *  this invocation only. Injected as `--no-resume` into claudeArgs so
+     *  the existing detection at the always_resume site sees the sentinel
+     *  and skips the auto-inject. */
+    noResume?: boolean;
     claudeArgs: string[];
 }
 
@@ -341,6 +346,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
                 // dans .aiball.yaml, pas juste .aiball.local.yaml).
                 consumer: opts.consumer,
                 project: opts.project,
+                // #612 — same tri-state for --no-claim on the start --init path.
+                noClaim: process.argv.includes("--no-claim") ? true : undefined,
             });
         } finally {
             if (startCwd) process.chdir(origCwd);
@@ -698,9 +705,17 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // dans claudeArgs n'a pas un double flag. Namespacé `claude:` (et non
     // `claude_loop:`) parce que ça concerne le binaire claude lui-même.
     let effectiveClaudeArgs = opts.claudeArgs;
+    // #616 — first-class `claude-loop --no-resume` flag (top-level, no `--`
+    // dash-dash needed). Inject `--no-resume` into claudeArgs so the
+    // always_resume detection below sees it as the sentinel and skips
+    // the auto-inject. Same end-effect as `claude-loop start -- --no-resume`,
+    // just a more discoverable per-invocation opt-out.
+    if (opts.noResume && !opts.claudeArgs.includes("--no-resume")) {
+        effectiveClaudeArgs = ["--no-resume", ...opts.claudeArgs];
+    }
     if (ctx.claude.always_resume) {
-        const hasResume = opts.claudeArgs.some((a) => a === "--resume" || a.startsWith("--resume=") || a === "--no-resume");
-        if (!hasResume) effectiveClaudeArgs = ["--resume", ...opts.claudeArgs];
+        const hasResume = effectiveClaudeArgs.some((a) => a === "--resume" || a.startsWith("--resume=") || a === "--no-resume");
+        if (!hasResume) effectiveClaudeArgs = ["--resume", ...effectiveClaudeArgs];
     }
     const passthrough = effectiveClaudeArgs.map(shQuote).join(" ");
     // CL_CLAUDE_CMD lets you swap the binary+flags (everything before
@@ -1579,6 +1594,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         // Commander convention: `--no-foo` flips foo to false.
         .option("--no-attach", "Don't attach after spawn (wrapper exits silently)")
         .option("--no-startup-ping", "Don't send a wake-up message on launch")
+        .option("--no-resume", "#616: don't auto-inject `--resume` even when `.aiball.yaml claude.always_resume: true` says to. Per-invocation opt-out. Equivalent to `claude-loop start -- --no-resume`.")
         .option("--force", "Spawn even if another live loop already runs in this cwd")
         .addOption(new Option(
             "--resume-mode <mode>",
@@ -1616,7 +1632,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
             attach: boolean; startupPing: boolean; userGrace?: string; force?: boolean;
-            resumeMode?: string; wait: boolean;
+            resumeMode?: string; wait: boolean; resume: boolean;
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             cwd?: string;
             init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
@@ -1645,6 +1661,9 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 initForce: opts.initForce === true,
                 initStopHook: opts.initStopHook === true,
                 initGlobal: opts.initGlobal === true,
+                // #616 — commander's `--no-resume` defaults opts.resume to
+                // true ; only consider it "passed" when explicitly false.
+                noResume: opts.resume === false,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });
@@ -1760,16 +1779,24 @@ async function main(): Promise<void> {
         .option("--consumer <id>", "#394/#603: loop identity = consumer_id. Persisted with the remote AND seeded into .aiball.yaml's `consumer.agent`.")
         .option("--agent <id>", "#603: alias for --consumer (the loop's agent identity).")
         .option("--project <name>", "#394/#603: project name. Persisted with the remote AND seeded into .aiball.yaml's `consumer.project`.")
-        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string }) => {
+        .option("--no-claim", "#612: seed `consumer.no_claim: true` in .aiball.yaml (assignment-only agent).")
+        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string; claim?: boolean }) => {
             // #603 david `4dzxp2` : --agent est un alias de --consumer (#420 le faisait
             // déjà sur `start`, on harmonise sur `init`).
             const consumer = opts.consumer ?? opts.agent;
+            // #612 — tri-state for --no-claim : commander's `--no-X` magic
+            // sets opts.X=false when passed (defaults true otherwise). We
+            // want undefined when NOT passed so the existing field in
+            // .aiball.yaml is left untouched ("init respecte les param
+            // déjà posés sauf si dans la ligne de flag"). Detect explicitly.
+            const noClaim = process.argv.includes("--no-claim") ? true : undefined;
             // #394: persist the remote connection first (validates --aiball-token).
             cmdInitRemote({ ...opts, consumer });
-            // #603 (4dzxp2) : forward consumer + project to bootstrapInit so
-            // they ALSO land in .aiball.yaml (avant : seul .aiball.local.yaml
-            // recevait l'identité remote → la config locale ignorait l'override).
-            await bootstrapInit({ ...opts, consumer });
+            // #603 (4dzxp2) + #612 : forward consumer + project + no-claim to
+            // bootstrapInit so they ALSO land in .aiball.yaml (avant : seul
+            // .aiball.local.yaml recevait l'identité remote → la config locale
+            // ignorait l'override).
+            await bootstrapInit({ ...opts, consumer, noClaim });
         });
 
     // -h / --help at top level → root help, not start help.

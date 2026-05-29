@@ -103,6 +103,10 @@ export async function bootstrapInit(opts: {
     /** #603 : seed `consumer.project` into .aiball.yaml. Patches existing yaml
      *  in place when present. */
     project?: string;
+    /** #612 (david) : seed `consumer.no_claim: true|false` into .aiball.yaml.
+     *  When undefined, the existing field is left untouched (init respecte
+     *  les param déjà posés sauf si dans la ligne de flag). */
+    noClaim?: boolean;
 }): Promise<void> {
     const force = opts.force === true;
     await mcpInitAction(force);
@@ -110,14 +114,15 @@ export async function bootstrapInit(opts: {
     // .aiball.yaml.example; the bootstrap stays tight.
     const yamlPath = join(userCwd(), ".aiball.yaml");
     const yamlExists = existsSync(yamlPath);
-    const hasIdentity = !!opts.consumer || !!opts.project;
+    const hasIdentity = !!opts.consumer || !!opts.project || opts.noClaim !== undefined;
     if (yamlExists && !force) {
-        // #603 (4dzxp2) : even when the yaml exists, patch in --consumer /
-        // --project so a `claude-loop init --consumer foo` on an already-
-        // bootstrapped project actually persists the identity. Preserves
-        // existing keys + comments via the yaml Document API.
+        // #603 (4dzxp2) + #612 : even when the yaml exists, patch in
+        // --consumer / --project / --no-claim so subsequent inits actually
+        // persist new flags. Preserves existing keys + comments via the
+        // yaml Document API (`init respecte les param déjà posés sauf si
+        // dans la ligne de flag` — david #612).
         if (hasIdentity) {
-            patchIdentity(yamlPath, opts.consumer, opts.project);
+            patchIdentity(yamlPath, opts.consumer, opts.project, opts.noClaim);
         } else {
             process.stdout.write(`${yamlPath}: already exists — re-run with --force to overwrite\n`);
         }
@@ -132,6 +137,7 @@ export async function bootstrapInit(opts: {
             ? "consumer:\n"
                 + (opts.consumer ? `  agent: ${opts.consumer}\n` : "")
                 + (opts.project ? `  project: ${opts.project}\n` : "")
+                + (opts.noClaim !== undefined ? `  no_claim: ${opts.noClaim}\n` : "")
             : "";
         const body =
             "# Bootstrapped by `aiball init`. See .aiball.yaml.example for the full annotated template.\n" +
@@ -144,6 +150,7 @@ export async function bootstrapInit(opts: {
         if (opts.private === true) tags.push("project_type: private");
         if (opts.consumer) tags.push(`consumer.agent: ${opts.consumer}`);
         if (opts.project) tags.push(`consumer.project: ${opts.project}`);
+        if (opts.noClaim !== undefined) tags.push(`consumer.no_claim: ${opts.noClaim}`);
         process.stdout.write(`${yamlExists && force ? "overwrote" : "created"} ${yamlPath} (${tags.join(", ")})\n`);
     }
     if (opts.stopHook === true) {
@@ -154,10 +161,13 @@ export async function bootstrapInit(opts: {
 }
 
 /**
- * #603 — merge `consumer.agent` / `consumer.project` into an existing
- * `.aiball.yaml`. Document API so comments + unrelated keys survive.
+ * #603 + #612 — merge `consumer.agent` / `consumer.project` / `consumer.no_claim`
+ * into an existing `.aiball.yaml`. Document API so comments + unrelated keys
+ * survive. Each field is only touched when explicitly passed (undefined → keep
+ * whatever was there) — `init est respectueux des param déjà posés sauf si
+ * dans la ligne de flag` (david #612).
  */
-function patchIdentity(path: string, agent: string | undefined, project: string | undefined): void {
+function patchIdentity(path: string, agent: string | undefined, project: string | undefined, noClaim: boolean | undefined): void {
     let doc;
     try {
         doc = parseDocument(readFileSync(path, "utf8"));
@@ -172,6 +182,7 @@ function patchIdentity(path: string, agent: string | undefined, project: string 
     const changed: string[] = [];
     if (agent) { consumer.set("agent", agent); changed.push(`agent=${agent}`); }
     if (project) { consumer.set("project", project); changed.push(`project=${project}`); }
+    if (noClaim !== undefined) { consumer.set("no_claim", noClaim); changed.push(`no_claim=${noClaim}`); }
     writeFileSync(path, String(doc));
     process.stdout.write(`${path}: patched consumer (${changed.join(", ")})\n`);
 }
@@ -383,10 +394,18 @@ export function registerBootstrapCommands(program: Command): void {
         .option("--agent <id>", "#603: seed `consumer.agent` in .aiball.yaml (loop identity). Patches an existing file in place.")
         .option("--consumer <id>", "#603: alias for --agent (the consumer_id IS the loop identity).")
         .option("--project <name>", "#603: seed `consumer.project` in .aiball.yaml (default project for this checkout).")
-        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; agent?: string; consumer?: string; project?: string }) => {
+        .option("--no-claim", "#612: seed `consumer.no_claim: true` in .aiball.yaml (assignment-only agent — no claimable pool).")
+        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; agent?: string; consumer?: string; project?: string; claim?: boolean }) => {
+            // #612 — commander's `--no-X` sets `opts.X = false` when passed,
+            // defaults to `true` otherwise. We want a tri-state for the
+            // yaml patcher (undefined → leave existing field alone, david's
+            // rule "init respecte les param déjà posés sauf si dans la
+            // ligne de flag"). Detect the flag explicitly via argv.
+            const noClaim = process.argv.includes("--no-claim") ? true : undefined;
             await bootstrapInit({
                 ...opts,
                 consumer: opts.consumer ?? opts.agent,
+                noClaim,
             });
         });
 
