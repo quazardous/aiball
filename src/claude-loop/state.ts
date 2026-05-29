@@ -878,12 +878,17 @@ export function humanPresenceWord(sd: string | undefined, graceSec: number): "st
     const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
     if (!noWait && Date.now() - PROC_START_MS < bootGraceMs) return "wait";
     if (sd && userIsTakingOver(sd, graceSec)) return "wait";
+    // #601 david : AFK actif → bar `wait` (toggle visible loop↔wait via F9).
+    // Avant : set_afk clearait la user-grace ET ce branch retombait sur "loop"
+    // sans regarder l'AFK → F9 ne togglait pas visuellement. Pareil correctif
+    // dans pty-proxy.py:_rest_word pour le path direct via le proxy.
+    if (sd && afkActive(sd)) return "wait";
     // #426: past user-grace but still within the (longer) ASK-grace, and not
     // AFK → the AskUserQuestion dialog is STILL allowed (it won't redirect to a
     // ticket) even though auto-wakes are now autonomous. Surface that otherwise
     // invisible window as `ask` so the bar stops reading a flat `loop` while a
     // multi-choice dialog can still pop. Mirrors the PreToolUse gate.
-    if (sd && !afkActive(sd)) {
+    if (sd) {
         const askGraceSec = Math.max(0, Number(process.env[CL_ENV.ASK_GRACE_SEC] ?? DEFAULT_ASK_GRACE_SEC));
         if (askGraceSec > graceSec && userIsTakingOver(sd, askGraceSec)) return "ask";
     }

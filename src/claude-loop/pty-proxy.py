@@ -291,20 +291,71 @@ class _AfkDetector:
     def feed(self, data, now):
         self.last_residual = False
         if not self.combos:
+            _log_afk_keystroke(data, now, matched=False, fired=False, reason="no-combos-configured")
             return False
         # Debounce : avale le key-repeat des octets du combo juste déclenché.
         if now < self.cooldown_until:
             if data and all(b in self._combo_bytes for b in data):
                 self.last_residual = True
+                _log_afk_keystroke(data, now, matched=False, fired=False, reason="debounce-residual")
                 return False
             self.cooldown_until = 0.0  # toute autre frappe clôt le debounce
-        if any(data == c for c in self.combos):
+        matched = any(data == c for c in self.combos)
+        if matched:
             self.cooldown_until = now + self.window_ms / 1000.0
+            _log_afk_keystroke(data, now, matched=True, fired=True, reason="combo-match")
             return True  # TOGGLE
+        # Log non-matches too — c'est ce qui permet à david de voir si F9
+        # arrive bien jusqu'au détecteur mais avec des bytes != attendus
+        # (ex. terminal qui émet une autre séquence pour F9). #601 tappj6.
+        _log_afk_keystroke(data, now, matched=False, fired=False, reason="no-combo-match")
         return False
 
 
+# #601 david `tappj6` : log AFK-key trafic dans <state_dir>/afk.log pour
+# diagnostic. Always-on (le volume est trivial : une ligne par keystroke
+# de l'utilisateur). Trace : bytes reçus + résultat du matcher + combos
+# attendus (écrits une fois au boot). Best-effort — ne casse jamais l'I/O.
+def _afk_keylog_path():
+    sd = os.environ.get("CL_STATE_DIR") or ""
+    return os.path.join(sd, "afk.log") if sd else ""
+
+
+def _log_afk_keystroke(data, now, matched, fired, reason):
+    p = _afk_keylog_path()
+    if not p:
+        return
+    try:
+        with open(p, "a") as f:
+            ts = datetime.datetime.fromtimestamp(now).isoformat(timespec="milliseconds")
+            f.write(
+                f"{ts}  raw={data.hex() if data else ''}  "
+                f"len={len(data) if data else 0}  "
+                f"matched={matched}  fired={fired}  reason={reason}\n"
+            )
+    except OSError:
+        pass
+
+
+def _log_afk_boot():
+    p = _afk_keylog_path()
+    if not p:
+        return
+    try:
+        with open(p, "a") as f:
+            ts = datetime.datetime.now().isoformat(timespec="milliseconds")
+            combos_hex = [c.hex() for c in _AFK_COMBOS]
+            f.write(
+                f"{ts}  === BOOT ===  pid={os.getpid()}  "
+                f"combos={combos_hex}  window_ms={_AFK_WINDOW_MS}  "
+                f"esc_takeover={_ESC_TAKEOVER}\n"
+            )
+    except OSError:
+        pass
+
+
 _afk = _AfkDetector(_AFK_COMBOS, _AFK_WINDOW_MS)
+_log_afk_boot()  # #601 tappj6 : trace la config AFK au boot
 clear_afk()  # #351: drop any stale afk marker left by a previous run, on boot
 # #357: idem pour la présence. Depuis #345 (aafe511), `user-took-over` pilote
 # le mot `wait` MÊME sous --no-wait (avant : --no-wait => toujours `loop`).
@@ -453,7 +504,14 @@ class _Decider:
         if self.afk.feed(data, now):
             d["afk_fired"] = True
             if self.afk_active:           # était away → on REVIENT
-                d["markers"] += ["clear_afk", "touch_user_grace"]
+                # #601 (david 2sa76j) : F9 OFF doit basculer la bar à `loop`
+                # visiblement. Avant : `touch_user_grace` armait la fenêtre
+                # de présence 60s → `_rest_word` retombait sur `wait` à cause
+                # de `_user_grace_remaining() > 0` → bar restait jaune malgré
+                # l'AFK OFF. Maintenant `clear_user_grace` → pas de présence
+                # latente → bar = `loop` (vert) immédiatement. La prochaine
+                # frappe texte ré-arme naturellement le user-grace.
+                d["markers"] += ["clear_afk", "clear_user_grace"]
                 self.afk_active = False
             else:                          # était présent → on PART
                 d["markers"] += ["set_afk", "clear_user_grace"]
@@ -769,14 +827,21 @@ def _boot_grace_remaining():
 def _rest_word():
     """Mot au repos (pas de frappe) : `wait` pendant la boot-grace (#305, nulle
     sous --no-wait) OU la fenêtre user-grace (#345 : armée même sous --no-wait,
-    ex. après un ESC) ; #426 : `ask` (orange) pendant l'ASK-grace résiduelle
-    (post user-grace, hors AFK) — AskUserQuestion encore autorisé bien que les
-    auto-wakes soient autonomes ; sinon `loop`."""
+    ex. après un ESC) ; `wait` aussi quand l'AFK est armé (#601 : F9 doit
+    toggler loop↔wait visuellement, alors qu'avant set_afk clearait la
+    user-grace ET _rest_word ignorait l'AFK → retombait sur loop) ; #426 :
+    `ask` (orange) pendant l'ASK-grace résiduelle (post user-grace, hors AFK)
+    — AskUserQuestion encore autorisé bien que les auto-wakes soient
+    autonomes ; sinon `loop`."""
     if _boot_grace_remaining() > 0.0 or _user_grace_remaining() > 0.0:
+        return _HUMAN_WAIT
+    # #601 : AFK actif → bar `wait` (toggle visible loop↔wait via F9).
+    afk_set = _afk_path() and os.path.exists(_afk_path())
+    if afk_set:
         return _HUMAN_WAIT
     # #426 : AFK → la gate AskUserQuestion redirige immédiatement, donc pas de
     # `ask` (on est de fait en autonome → loop). Sinon, reste-t-il de l'ASK-grace ?
-    if not (_afk_path() and os.path.exists(_afk_path())) and _ask_grace_remaining() > 0.0:
+    if _ask_grace_remaining() > 0.0:
         return _HUMAN_ASK
     return _HUMAN_LOOP
 
