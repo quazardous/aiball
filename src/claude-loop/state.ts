@@ -21,6 +21,7 @@ import { AiballClient } from "../client.js";
 import type { Intent } from "../domain.js";
 import type { DrainedState } from "./drained-strategy.js";
 import { CL_ENV } from "./env-vars.js";
+import { computeLoopView } from "./loop-state.js";
 import { parseGates, runGates } from "./gates.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
@@ -735,6 +736,86 @@ export function armAfk10m(sd: string, seconds = 600): void {
     } catch { /* best-effort */ }
 }
 
+/** #627 — read the AFK file and derive {mode, expiryMs} for the LoopState
+ *  service. File format mirrors the proxy's `_afk_mode` :
+ *    absent / empty / "inf" → mode "wait_inf" if "inf", "off" if absent
+ *    parseable ISO ts > now → ("wait_10m", expiry)
+ *    parseable ISO ts ≤ now → "off" (auto-expired)
+ *    unparseable content    → "wait_inf" (degrade to held rather than
+ *                              clear silently)
+ *  Note: a missing file is "off". An empty file is unusual — the proxy
+ *  clears it on read (#622). Here we treat empty as off to align. */
+export function readAfkState(sd: string): { mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null } {
+    const p = afkPath(sd);
+    if (!existsSync(p)) return { mode: "off", expiryMs: null };
+    let content = "";
+    try { content = readFileSync(p, "utf8").trim(); } catch { return { mode: "off", expiryMs: null }; }
+    if (content === "") return { mode: "off", expiryMs: null };
+    if (content === "inf") return { mode: "wait_inf", expiryMs: null };
+    const until = new Date(content).getTime();
+    if (Number.isNaN(until)) return { mode: "wait_inf", expiryMs: null };
+    if (until <= Date.now()) return { mode: "off", expiryMs: null };
+    return { mode: "wait_10m", expiryMs: until };
+}
+
+/** #627 — read every state-dir marker + env knob into a `LoopStateInput`
+ *  the central `computeLoopView` (loop-state.ts) consumes. Pure read,
+ *  no mutation. Caller provides the dynamic bits the timer maintains
+ *  in-process (pane probe results, manual-wake flag). */
+export function readLoopStateInput(
+    sd: string,
+    opts: {
+        paneBusy?: boolean;
+        paneReady?: boolean;
+        manualWake?: boolean;
+    } = {},
+): import("./loop-state.js").LoopStateInput {
+    const nowMs = Date.now();
+    const startMs = loopStartMs(sd);
+    const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
+    const noWait = process.env[CL_ENV.WAIT] === "0";
+    // user-grace window = max(user, ask) for back-compat with projects
+    // that still set ask_grace_seconds in .aiball.yaml (#619 collapse).
+    const userGraceSec = Math.max(
+        Number(process.env[CL_ENV.USER_GRACE_SEC] ?? DEFAULT_USER_GRACE_SEC),
+        Number(process.env[CL_ENV.ASK_GRACE_SEC] ?? DEFAULT_ASK_GRACE_SEC),
+        0,
+    );
+    const wakeInFlightTtlMs = Math.max(0, Number(process.env[CL_ENV.WAKE_IN_FLIGHT_TTL_MS] ?? 2000));
+
+    function safeMtime(p: string): number | null {
+        try { return existsSync(p) ? statSync(p).mtimeMs : null; } catch { return null; }
+    }
+    function safeIsoMs(p: string): number | null {
+        try {
+            if (!existsSync(p)) return null;
+            const v = new Date(readFileSync(p, "utf8").trim()).getTime();
+            return Number.isNaN(v) ? null : v;
+        } catch { return null; }
+    }
+
+    const afk = readAfkState(sd);
+    return {
+        nowMs,
+        loopStartMs: startMs,
+        bootGraceMs,
+        noWait,
+        humanTypingAtMs: safeMtime(humanTypingPath(sd)),
+        humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,
+        userTookOverAtMs: safeMtime(userTookOverPath(sd)),
+        userGraceMs: userGraceSec * 1000,
+        afkMode: afk.mode,
+        afkExpiryMs: afk.expiryMs,
+        idleSinceMs: safeMtime(idleMarkerPath(sd)),
+        wakeInFlightAtMs: safeMtime(wakeInFlightPath(sd)),
+        wakeInFlightTtlMs,
+        busyDeferUntilMs: safeIsoMs(busyDeferUntilPath(sd)),
+        paneBusy: opts.paneBusy ?? false,
+        paneReady: opts.paneReady ?? false,
+        manualWake: opts.manualWake ?? false,
+    };
+}
+
 /**
  * #264: short TTL for the near-live "human typing" chip. The detection
  * poll refreshes the marker while the human types; once they stop, the
@@ -929,25 +1010,14 @@ function loopStartMs(sd: string | undefined): number {
  *              marker armed
  *   - `loop` — autonomous (managed mode), incl. --no-wait
  */
-export function humanPresenceWord(sd: string | undefined, graceSec: number): "stop" | "wait" | "boot" | "loop" {
-    if (sd && humanIsTyping(sd)) return "stop";
-    // #305 + #619 `zm2ehq` : dedicated `boot` word during the launch grace
-    // window. The bar BG also paints jaune via [boot], but the claude-WORD
-    // island stays black — so jaune `boot` inside the black island is BOTH
-    // legible AND a stronger signal than reusing `wait` (which means a
-    // human is actively holding the loop, distinct from "still launching").
-    // Suppressed under --no-wait (boot grace is bypassed entirely there).
-    const noWait = process.env[CL_ENV.WAIT] === "0";
-    const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
-    if (!noWait && (Date.now() - loopStartMs(sd)) < bootGraceMs) return "boot";
-    // #619 david `x4myqb` : the bar word reflects AFK state ONLY. user-grace
-    // still gates auto-wakes silently (timer.ts:tryWake), but it no longer
-    // paints `wait` — otherwise typing in the terminal armed user-grace for
-    // 10 min, and pressing F9 to clear AFK back to OFF left a stale `wait`
-    // jaune on the bar (looked like AFK had re-armed itself). Now F9 OFF
-    // returns the bar to `loop` immediately, regardless of recent typing.
-    if (sd && afkActive(sd)) return "wait";
-    return "loop";
+export function humanPresenceWord(sd: string | undefined, _graceSec: number): "stop" | "wait" | "boot" | "loop" {
+    // #627 — delegate to the central LoopState service so the bar word
+    // computation matches the one used by every other consumer (timer,
+    // proxy mirror, hooks). The `graceSec` arg is preserved for API
+    // back-compat but unused here — the service reads user_grace from
+    // the env (CL_USER_GRACE_SEC + CL_ASK_GRACE_SEC max).
+    if (!sd) return "loop";
+    return computeLoopView(readLoopStateInput(sd)).barWord;
 }
 
 export function humanBarWord(sd: string | undefined, graceSec: number): string {

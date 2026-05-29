@@ -43,8 +43,8 @@ import {
     DEFAULT_ASK_GRACE_SEC,
     DEFAULT_USER_GRACE_SEC,
     LOOP_STATUS,
-    afkActive,
     armAfk10m,
+    readLoopStateInput,
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
     buildContextPhrase,
@@ -88,6 +88,7 @@ import {
     type WakeHint,
 } from "./state.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
+import { canFlipBgFromBoot, computeLoopView, shouldArmAfk10mOnSettleBoot } from "./loop-state.js";
 import { CL_ENV } from "./env-vars.js";
 import { stripMarkdown } from "./markdown-strip.js";
 
@@ -173,7 +174,10 @@ try { writeFileSync(timerPidPath(sd!), `${process.pid}\n`); } catch { /* best ef
 // bar shows `wait`).
 const NO_WAIT = process.env[CL_ENV.WAIT] === "0";
 const BOOT_GRACE_MS = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
-const BOOT_TIME = Date.now();
+// #627 — BOOT_TIME used to feed the inline boot-grace if/else trees ;
+// the LoopState service now reads `loop-start-ts` from the state-dir
+// (shared marker, same as the hooks). Kept the constant declaration
+// noted here for grep history.
 
 // #412: timer log routed through the level logger (tag `claude-loop:<name>`,
 // stdout → redirected to timer.log by the launcher). Existing calls map to
@@ -577,60 +581,16 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         log(`skip wake (${reason}) — no idle marker (claude is busy or boot grace not yet elapsed)`);
         return false;
     }
-    // #302: boot-grace window (--wait default). Hold off EVERY auto-wake for
-    // the first BOOT_GRACE_MS so the human can take over at launch; only
-    // `boot-settle` (fired AT the window's end, grace-aware) gets through.
-    // --no-wait (NO_WAIT) skips this → eager drain for unattended loops.
-    if (!manualWake && !NO_WAIT && (Date.now() - BOOT_TIME) < BOOT_GRACE_MS) {
-        const leftS = Math.ceil((BOOT_GRACE_MS - (Date.now() - BOOT_TIME)) / 1000);
-        log(`skip wake (${reason}) — boot-grace ${leftS}s left (--wait: letting the human take over)`);
-        return false;
-    }
-    // #345 A: user-grace is honored regardless of NO_WAIT — --no-wait only
-    // skips the boot-grace (above), it must NOT make the loop barge over a
-    // human who just typed / submitted / hit ESC (the regression #343 added).
-    if (!manualWake && userIsTakingOver(sd!, userGraceSec)) {
-        log(`skip wake (${reason}) — user-grace active (human acted within ${userGraceSec}s, F9 to release)`);
-        return false;
-    }
-    // #624 david `735bhe` : NOT AFK active (10m countdown or ∞ hold) means
-    // the human is explicitly holding the loop. Auto-wakes skip until the
-    // file expires (10m auto-release) or F9 clears it. Without this gate
-    // settleBoot's `armAfk10m()` was immediately followed by a wake fire
-    // — the post-boot `wait` state lasted milliseconds.
-    if (!manualWake && afkActive(sd!)) {
-        log(`skip wake (${reason}) — NOT AFK hold active (10m countdown or ∞, F9 to release)`);
-        return false;
-    }
-    // #345 B: also yield to a human typing RIGHT NOW (live human-typing
-    // marker), which the gate never consulted before — so a wake couldn't be
-    // held off mid-keystroke between submits.
-    if (!manualWake && humanIsTyping(sd!)) {
-        log(`skip wake (${reason}) — human typing right now`);
-        return false;
-    }
-    // #B.198 david: state-based busy defer set by the Stop hook when
-    // the FIRE-time pane still showed `esc to interrupt`. We honor
-    // it on every tryWake path EXCEPT manual (file-marker is an
-    // explicit user override). Marker auto-clears once its target
-    // ISO is past (handled inside `readBusyDefer`).
-    if (!manualWake) {
-        const defer = readBusyDefer(sd!);
-        if (defer) {
-            log(`skip wake (${reason}) — busy-defer ${defer.activeMs}ms remaining (until ${defer.until.toISOString()})`);
-            return false;
-        }
-    }
-    // #B.198: catch the brief race where the idle marker has been
-    // written (Stop hook just fired) but claude is still mid-turn
-    // (a slash command, a hook in flight, or just hasn't repainted
-    // the prompt). Without this probe, a fast SSE ping landing in
-    // that window pastes a wake phrase on top of visible output —
-    // david: "même si claude est busy il se fait pop culture pingué".
-    // Skip the probe for manual wakes (file-marker bypass) since
-    // those are explicit user requests.
+    // #627 — single central gate via the LoopState service. The service
+    // reads every marker + env knob and returns one verdict with a
+    // single skip-reason. Adds a fresh pane probe to feed `paneBusy` so
+    // the catch-the-brief-race check at line ~624 stays effective (was
+    // a separate snapshot block before).
     if (!manualWake) {
         const paneText = capturePane();
+        let paneBusyForGate = false;
+        let paneReadyForGate = false;
+        let paneSnapReason: string | null = null;
         if (paneText) {
             const snap = snapshotPane(paneText);
             // #B.198 — skip if either busy (esc-to-interrupt) or special
@@ -638,9 +598,19 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             // #335 — pane-error detection lives in the Stop hook only;
             // re-scanning here re-armed backoff every heartbeat.
             if (snap.busy || snap.special !== null) {
-                log(`skip wake (${reason}) — ${formatPaneSnapshot(snap)}`);
-                return false;
+                paneBusyForGate = true;
+                paneSnapReason = formatPaneSnapshot(snap);
             }
+        }
+        const view = computeLoopView(readLoopStateInput(sd!, {
+            paneBusy: paneBusyForGate,
+            paneReady: paneReadyForGate,
+        }));
+        if (!view.wakeAllowed) {
+            // Prefer the pane snapshot's rich format when the gate fired
+            // on pane-busy; otherwise use the service's plain reason.
+            log(`skip wake (${reason}) — ${paneSnapReason ?? view.wakeSkipReason}`);
+            return false;
         }
     }
     let gateOpenCount = 0;
@@ -829,16 +799,12 @@ async function mainSse(): Promise<void> {
         }
         bootSettled = true;
         log("boot grace elapsed — settling to idle/busy via check");
-        // #624 david `e3a6nn` : à la fin de la fenêtre boot-grace, le mode
-        // détermine la cible visuelle :
-        //   --wait (managed)  → arme NOT AFK 10m → bar `wait` jaune
-        //                       (countdown visible côté status-right)
-        //   --no-wait (eager) → ne rien faire → bar passe à `loop` vert
-        // L'idée : le user voit immédiatement après boot la cible logique
-        // du mode dans lequel le loop tourne, au lieu d'un état dérivé
-        // accidentellement de la présence/absence de frappes pendant
-        // le chargement.
-        if (!NO_WAIT) {
+        // #624 + #627 : à la fin du boot-grace, le service décide si
+        // settleBoot doit armer NOT AFK 10m (true sous --wait, false
+        // sous --no-wait). L'idée : le user voit immédiatement après
+        // boot la cible logique du mode du loop, pas un état dérivé
+        // accidentellement de typing pendant le chargement.
+        if (shouldArmAfk10mOnSettleBoot({ noWait: NO_WAIT })) {
             armAfk10m(sd!);
             log("settleBoot: --wait mode → armed NOT AFK 10m (bar will read `wait`)");
         }
@@ -959,16 +925,12 @@ async function mainSse(): Promise<void> {
         if (paneText) {
             const claudeWorking = paneFooterShowsBusy(paneText);
             const claudeReady = /Claude Code v|❯ |^> /m.test(paneText);
-            // #624 david `e3a6nn` + `ccy2pd` : pendant la fenêtre boot-grace
-            // (par défaut 60s), le bar BG doit rester `[boot]` jaune dans
-            // les DEUX modes. "claude-loop doit démarrer en mode boot,
-            // c'est le concept du boot" — la phase boot est visuelle, pas
-            // liée au mode wake. Sans ce gate, la probe (qui détecte
-            // `Claude Code v` / `esc to interrupt`) flippait settledStatus
-            // dès le splash de claude. L'eager drain --no-wait continue
-            // de fonctionner via settleBoot (toujours appelé à T+grace,
-            // qui write idle-marker + tryWake).
-            const inBootGrace = (Date.now() - BOOT_TIME) < BOOT_GRACE_MS;
+            // #624 + #627 : pendant boot-grace, le bar BG reste `[boot]`
+            // jaune dans les DEUX modes. Le service LoopState owns this
+            // rule via `canFlipBgFromBoot(input)` — false en boot-grace,
+            // true après. settleBoot reste l'autorité unique pour la
+            // transition.
+            const inBootGrace = !canFlipBgFromBoot(readLoopStateInput(sd!));
             if (inBootGrace) {
                 // Skip — settleBoot fera la transition propre à T+grace.
             } else if (claudeWorking && settledStatus !== "busy") {
