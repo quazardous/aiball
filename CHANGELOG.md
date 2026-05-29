@@ -29,13 +29,13 @@ dates are YYYY-MM-DD.
 
 ### Added
 
-- The `F9` AFK key is the visible hold control. F9 is a binary
-  toggle between `AFK` (autonomous, dim `AFK:F9`) and the
-  indefinite `NOT AFK ∞` hold (red `∞ NOT AFK:F9`). The 10-minute
-  auto-release hold (yellow `Nm NOT AFK:F9` countdown) is reached
-  via typing — every keystroke arms or refreshes the 10:00 timer.
-  Typing in `∞` mode is a no-op : only F9 releases the indefinite
-  hold. Default `f9` key, configurable via `claude_loop.afk_key`.
+- The `F9` AFK key cycles three states (the visible hold control):
+  `AFK` (autonomous, dim `AFK:F9`) → `NOT AFK 10m` (yellow
+  countdown `Nm NOT AFK:F9`) → `NOT AFK ∞` (red `∞ NOT AFK:F9`)
+  → back to `AFK`. Typing also arms or refreshes the 10-minute
+  hold from any non-∞ state ; typing in `∞` mode is a no-op
+  (only F9 releases the indefinite hold). Default `f9` key,
+  configurable via `claude_loop.afk_key`.
 - New `boot` word on the bar during the launch-grace window
   (yellow, in the black `claude-...` island) so the loading state
   is visually distinct from `wait`. Pre-existing `[boot]` bar

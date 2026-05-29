@@ -326,20 +326,23 @@ def clear_afk():
 
 
 def toggle_afk():
-    """#622 david `jzcgmh` : F9 = pure 2-state toggle AFK ↔ NOT AFK ∞.
-    The 10-min hold is reached ONLY via typing (see arm_afk_10m).
-       AFK (file absent)  → NOT AFK ∞ (file = "inf")
-       NOT AFK 10m or ∞   → AFK (clear, also clear user-grace so wake
-                            gate frees up alongside the visible state)
-    """
+    """#622 david `jzcgmh` + `2yqjcg` : F9 cycles 3 states (tristate toggle).
+       AFK (file absent)  → NOT AFK 10m (set_afk_until 600s)
+       NOT AFK 10m        → NOT AFK ∞ (set_afk_infinite)
+       NOT AFK ∞          → AFK (clear file + clear user-grace)
+    The transition NOT AFK ∞ → AFK clears user-grace too, so the wake
+    gate frees up alongside the visible release."""
     mode = _afk_mode()
     if mode is None:
-        set_afk_infinite()  # AFK → NOT AFK ∞
-        return
-    # NOT AFK (any) → AFK : explicit release of both AFK file AND
-    # user-grace, so wake gate unfreezes alongside the bar.
-    clear_afk()
-    clear_user_grace()
+        # AFK → NOT AFK 10m
+        set_afk_until(600)
+    elif isinstance(mode, tuple):  # ("until", ts) = NOT AFK 10m
+        # NOT AFK 10m → NOT AFK ∞
+        set_afk_infinite()
+    else:  # mode == "inf" = NOT AFK ∞
+        # NOT AFK ∞ → AFK (explicit release of both holds)
+        clear_afk()
+        clear_user_grace()
 
 
 def arm_afk_10m():
@@ -605,16 +608,16 @@ class _Decider:
         #     « esc esc toggle [on] mais après une seule pression suffit [off] »).
         if self.afk.feed(data, now):
             d["afk_fired"] = True
-            # #622 david `jzcgmh` : F9 = pure 2-state toggle AFK ↔ NOT
-            # AFK ∞ (the 10m hold is reached only via typing). On the
-            # transition NOT AFK → AFK, toggle_afk also clears
-            # user-grace so the wake gate frees up alongside.
+            # #622 david `2yqjcg` : F9 cycles 3 states (AFK → 10m → ∞ → AFK).
+            # `arm_afk_10m` for typing exists in parallel (typing can also
+            # land you in 10m / refresh it / no-op in ∞).
             d["markers"] += ["toggle_afk"]
-            # #622 david `gpwv8h` : keep the in-decider register in sync
-            # with the file state after the toggle, so a next F9 reads
-            # the just-changed state correctly (otherwise the cooldown +
-            # any pure-decider check would lag a tick behind).
-            self.afk_active = not self.afk_active
+            # Predict post-toggle state for the in-decider register —
+            # pre-toggle: None → 10m (active), 10m → ∞ (active), ∞ → AFK
+            # (off). Source of truth stays the file (read fresh in
+            # apply_decision).
+            pre = _afk_mode()
+            self.afk_active = (pre is None) or isinstance(pre, tuple)
             d["word"] = "rest"
             return d
 

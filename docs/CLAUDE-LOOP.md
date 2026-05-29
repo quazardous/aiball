@@ -278,24 +278,23 @@ T+600 user-grace expired
 `max(user_grace_seconds, ask_grace_seconds)`, never shrinks. New
 configs should set only `user_grace_seconds`.)
 
-**F9 is the binary toggle ; typing arms the 10-minute hold.** The
-AFK state machine has three states but only two inputs :
+**F9 cycles three states ; typing arms the 10-minute hold.** The
+AFK state machine has three states and two inputs :
 
-- **F9** = explicit toggle between `AFK` (autonomous) and the
-  indefinite `NOT AFK ∞` hold.
+- **F9** = tristate cycle `AFK → NOT AFK 10m → NOT AFK ∞ → AFK`.
 - **Text keystroke / ESC** = arm or refresh the `NOT AFK 10 min`
   countdown — except in `∞` mode, where typing is a no-op (only
   F9 releases the indefinite hold).
 
 State transitions :
 
-| From          | F9                  | Typing                  | Timer expiry |
-|---------------|---------------------|-------------------------|--------------|
-| AFK           | → NOT AFK ∞         | → NOT AFK 10 min        | n/a          |
-| NOT AFK 10 min | → AFK (clear)      | reset countdown to 10:00 | → AFK        |
-| NOT AFK ∞     | → AFK (clear)       | no-op                   | n/a          |
+| From          | F9                | Typing                   | Timer expiry |
+|---------------|-------------------|--------------------------|--------------|
+| AFK           | → NOT AFK 10m     | → NOT AFK 10m            | n/a          |
+| NOT AFK 10m   | → NOT AFK ∞       | reset countdown to 10:00 | → AFK        |
+| NOT AFK ∞     | → AFK (clear)     | no-op                    | n/a          |
 
-F9 from any NOT AFK state also clears `user-took-over` so the wake
+F9 on the `∞ → AFK` leg also clears `user-took-over` so the wake
 gate frees up alongside the visible release. The 10-minute timer is
 absolute (stored as expiry timestamp), so re-paints reflect the
 real remaining time and the toggle never accidentally resets an
