@@ -360,6 +360,23 @@ async function submit() {
         ticketTagIds.value = [];
         preview.value = false;
         pendingAnswers.value = [];
+        // #606 david : quand l'utilisateur poste lui-même un commentaire
+        // sur un thread, il l'a, par définition, lu — mark-read jusqu'à
+        // ce nouvel id IMMÉDIATEMENT, sans attendre le dwell autoMarkRead.
+        // Sinon l'inbox row du ticket reste unread (le up_to_id du dwell
+        // précédent ne couvre que les comments ANTÉRIEURS au reply).
+        if (!isTicket.value && props.ticketId !== undefined && createdId !== null) {
+            try {
+                await api.markTicketRead(props.ticketId, createdId);
+                bus.emit("read-state.changed", {
+                    ticket_id: props.ticketId,
+                    consumer_id: author,
+                    unread: false,
+                });
+            } catch (e) {
+                console.warn("[composer] failed to mark-read after own reply:", e);
+            }
+        }
         // Refresh fan-out: WS will fire for everyone, but emitting
         // locally now makes the sender's UI feel instant.
         if (props.ticketId !== undefined) {
