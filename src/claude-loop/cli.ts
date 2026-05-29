@@ -251,9 +251,15 @@ function pruneDeadStateDirs(): void {
 function hasClaudeSessions(cwd: string): boolean {
     try {
         const abs = resolve(cwd);
-        // Strip leading `/` then collapse every non-alnum/non-dash
-        // char to `-` (matches claude's own encoding).
-        const encoded = "-" + abs.replace(/^\//, "").replace(/[^a-zA-Z0-9-]/g, "-");
+        // #620 (aiball-win) : Windows fix. The old encoder stripped a
+        // leading `/` then prepended `-` — Unix-shaped only. On Windows
+        // the absolute path starts with a drive letter (`C:\\Users\\…`),
+        // so there's no leading `/` to strip + the prepend yielded
+        // `-C--Users-…` while claude's real dir is `C--Users-…`. Drop
+        // the special-case : just collapse every non-alnum char to `-`
+        // (matches claude's own encoder). On Unix the leading `/` maps
+        // to `-` by the same rule, so output stays identical.
+        const encoded = abs.replace(/[^a-zA-Z0-9]/g, "-");
         const dir = join(homedir(), ".claude", "projects", encoded);
         if (!existsSync(dir)) return false;
         return readdirSync(dir).some((f) => f.endsWith(".jsonl"));
