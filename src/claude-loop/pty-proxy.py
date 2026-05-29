@@ -888,15 +888,16 @@ def _boot_grace_remaining():
 
 def _rest_word():
     """Mot au repos (pas de frappe) : `boot` pendant la boot-grace
-    (#619 zm2ehq — mot dédié, jaune sur l'ilot noir), `wait` quand la
-    user-grace est active OU l'AFK est armé (mode `inf` ou `until > now`),
-    sinon `loop`. La décomposition fine AFK (countdown / ∞ / couleur)
-    vit à côté du hint AFK:F9 dans le status-right — voir
-    `_format_afk_state`."""
+    (#619 zm2ehq — mot dédié, jaune sur l'ilot noir), `wait` quand
+    l'AFK est armé (mode `inf` ou `until > now`), sinon `loop`.
+    #619 david `x4myqb` : user-grace ne peint plus `wait` — elle
+    continue de geler les auto-pings côté wake gate (silencieux),
+    mais le bar word reflète l'état AFK UNIQUEMENT, sinon une frappe
+    récente laisse un `wait` jaune même après F9 clear AFK. La
+    décomposition fine AFK (countdown / ∞ / couleur) vit à côté du
+    hint AFK:F9 dans le status-right — voir `_format_afk_state`."""
     if _boot_grace_remaining() > 0.0:
         return _HUMAN_BOOT
-    if _user_grace_remaining() > 0.0:
-        return _HUMAN_WAIT
     if _afk_mode() is not None:
         return _HUMAN_WAIT
     return _HUMAN_LOOP

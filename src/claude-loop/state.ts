@@ -903,12 +903,12 @@ export function humanPresenceWord(sd: string | undefined, graceSec: number): "st
     const noWait = process.env[CL_ENV.WAIT] === "0";
     const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
     if (!noWait && (Date.now() - PROC_START_MS) < bootGraceMs) return "boot";
-    // #619 collapse — single user-grace window (default 600s) drives the
-    // `wait` word. Auto-wakes are gated AND AskUserQuestion stays allowed
-    // for the full window. A project that still sets `ask_grace_seconds`
-    // widens the same window (max of user + ask, in the caller).
-    if (sd && userIsTakingOver(sd, graceSec)) return "wait";
-    // #601 david : AFK actif → bar `wait` (toggle visible loop↔wait via F9).
+    // #619 david `x4myqb` : the bar word reflects AFK state ONLY. user-grace
+    // still gates auto-wakes silently (timer.ts:tryWake), but it no longer
+    // paints `wait` — otherwise typing in the terminal armed user-grace for
+    // 10 min, and pressing F9 to clear AFK back to OFF left a stale `wait`
+    // jaune on the bar (looked like AFK had re-armed itself). Now F9 OFF
+    // returns the bar to `loop` immediately, regardless of recent typing.
     if (sd && afkActive(sd)) return "wait";
     return "loop";
 }
