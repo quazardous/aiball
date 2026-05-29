@@ -584,6 +584,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export CL_ASK_GRACE_SEC=${shQuote(String(askGraceSec))}`,
         `export CL_AFK_SPEC=${shQuote(afkSpecJson)}`,
         `export CL_AFK_WINDOW_MS=${shQuote(String(ctx.claude_loop.afk_window_ms))}`,
+        // #619 jjfdea : passed to the proxy so it can render the full
+        // `<prefix> AFK:<key>` label with on/off colour toggling.
+        `export CL_AFK_KEY_DISP=${shQuote(ctx.claude_loop.afk_key.trim().toUpperCase())}`,
+        `export CL_AFK_LABEL_FG_DIM=${shQuote(ctx.colors.afk_label_fg)}`,
+        `export CL_AFK_LABEL_FG_LIT=${shQuote(ctx.colors.bar_fg)}`,
         // #379: drained-backlog reminder strategy, read by the timer's heartbeat
         // (parseDrainedStrategy). Default "once" (david krwnqu) → one reminder
         // when the pool first drains, then quiet until the landscape moves.
@@ -874,20 +879,25 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // hint is accurate; fall back to the tmux default C-b.
     const prefixRes = spawnSync(MUX_CMD, ["show-option", "-gv", "prefix"], { encoding: "utf8" });
     const detachDisp = `${(prefixRes.stdout ?? "").trim() || "C-b"} d`;
-    const afkPart = afkSpecJson
+    // #619 jjfdea / 33zghr : the whole `AFK:F9` chunk is now painted by
+    // the proxy via `#{@cl_afk_state}` so it can :
+    //   - toggle the label colour ON (lit) / OFF (dim) by AFK state,
+    //   - prepend a countdown (`9m AFK:F9`) or `∞ AFK:F9` while AFK is held,
+    //   - render nothing extra when the loop is autonomous (just `AFK:F9`).
+    // The proxy reads CL_AFK_KEY_DISP + CL_AFK_LABEL_FG_DIM/LIT from the
+    // launch env (exported above) to know how to format the chunk. Initial
+    // seed below renders an OFF state so the static format doesn't show a
+    // bare `#{@cl_afk_state}` placeholder before the proxy paints.
+    const afkInitialOff = afkSpecJson
         ? `#[fg=${ctx.colors.afk_label_fg}]AFK:#[fg=${ctx.colors.bar_fg}]${afkKeyDisp}`
         : `#[fg=${ctx.colors.afk_label_fg}]AFK:OFF`;
-    // #619 jjfdea : status-right also embeds `#{@cl_afk_state}` — the proxy
-    // paints it with a countdown (`9m` / `45s`) while a grace window is
-    // active, or `●∞` when AFK is explicitly held, or `∘` otherwise. Sits
-    // right after `AFK:F9` so the keybind + its current effect are one chunk.
-    const keysHint = `${afkPart}#{@cl_afk_state} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
+    const keysHint = `#{@cl_afk_state} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", keysHint], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right-length", "60"], { stdio: "ignore" });
     // #274 + #619 : seed the per-owner status segments so the static format
     // never renders an unset `#{@cl_*}` (empty is fine; unset shows literally
     // on some tmux). The proxy and setTmuxStatus take ownership from here.
-    for (const [opt, val] of [["@cl_human", "#[fg=colour178]loop"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_afk_state", "#[fg=colour238] ∘"]]) {
+    for (const [opt, val] of [["@cl_human", "#[fg=colour178]loop"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_afk_state", afkInitialOff]]) {
         spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
     }
     // #281 strategy A: tell psmux to touch the human-typing marker natively

@@ -858,28 +858,37 @@ def _paint_word(word):
         pass
 
 
-# #619 david `jjfdea` : status-right segment showing the AFK gate state
-# next to the AFK:F9 hint. Painted by the proxy whenever the underlying
-# state changes (timer-driven repaint at ~5s cadence while in wait).
+# #619 david `jjfdea` + `33zghr` : the AFK label in status-right is
+# painted by the proxy as a single segment that owns both the optional
+# countdown prefix AND the label colour toggle. Layout :
 #
-#   AFK off,  no grace : ` ∘`            (dim circle — nothing armed)
-#   AFK off,  grace 9m : ` 9m`           (countdown until auto-release)
-#   AFK on   (F9 set)  : ` ●∞`           (lit dot + infinity — held by F9)
+#   loop autonomous : `AFK:F9`               (label dim)
+#   grace 9m active : `9m AFK:F9`            (label lit + prefix yellow)
+#   AFK held (F9)   : `∞ AFK:F9`             (label lit + prefix yellow)
 #
-# Written to `@cl_afk_state` ; the status-right format (seeded in cli.ts)
-# references `#{@cl_afk_state}` right after `AFK:F9`.
+# Nothing is shown before `AFK:` when the loop is autonomous ; the
+# label colour is the binary on/off signal.
 def _format_afk_state():
+    key = os.environ.get("CL_AFK_KEY_DISP") or "F9"
+    fg_dim = os.environ.get("CL_AFK_LABEL_FG_DIM") or "colour238"
+    fg_lit = os.environ.get("CL_AFK_LABEL_FG_LIT") or "colour16"
     afk_set = _afk_path() and os.path.exists(_afk_path())
-    if afk_set:
-        return "#[fg=colour40] ●∞"
     rem = max(_user_grace_remaining(), _boot_grace_remaining(), 0.0)
-    if rem <= 0.0:
-        return "#[fg=colour238] ∘"
-    if rem >= 60:
+    active = afk_set or rem > 0.0
+    if not active:
+        # OFF — label dim, no prefix.
+        return f"#[fg={fg_dim}]AFK:#[fg={fg_lit}]{key}"
+    if afk_set:
+        prefix = "∞"
+    elif rem >= 60:
+        # Round UP so a 9m window doesn't show "8m" for most of its
+        # life. Drops to "0m" only when < 60s — handled below.
         mins = int(rem / 60) + (0 if rem % 60 == 0 else 1)
-        return f"#[fg=colour178] {mins}m"
-    secs = max(1, int(rem))
-    return f"#[fg=colour178] {secs}s"
+        prefix = f"{mins}m"
+    else:
+        prefix = f"{max(1, int(rem))}s"
+    # ON — prefix yellow + label LIT colour.
+    return f"#[fg=colour178]{prefix} #[fg={fg_lit}]AFK:#[fg={fg_lit}]{key}"
 
 
 def _paint_afk_state():
