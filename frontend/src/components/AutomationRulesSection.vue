@@ -26,6 +26,7 @@ import {
 import { bus, useBus } from "../lib/bus";
 import { formatActionCompact, formatExpressionCompact } from "../lib/format";
 import DataList, { type DataListColumn } from "./ui/DataList.vue";
+import PanelHeader from "./ui/PanelHeader.vue";
 
 // #614 david `79nsue` — migrate rule-list to DataList columns-mode. All
 // columns are NON-sortable on purpose : the rules are evaluated in the
@@ -96,25 +97,25 @@ onMounted(load);
 
 <template>
     <div class="aiball-panel">
-        <section class="aiball-section">
-            <div class="aiball-section__head">
-                <h3>Automation rules ({{ sortedRules.length }})</h3>
+        <PanelHeader :title="`Automation rules (${sortedRules.length})`">
+            <template #actions>
                 <Button
                     label="new rule"
                     icon="pi pi-plus"
                     size="small"
                     @click="emit('open-edit', 'new')"
                 />
-            </div>
-            <p class="aiball-explainer">
+            </template>
+            <p class="aiball-explainer aiball-explainer--muted">
                 Unified <em>trigger → conditions → action</em> rules. First-match-wins
                 — evaluated in the order shown. <strong>DB</strong> rules first
                 (operator-controlled, top), then <strong>YAML</strong> rules
                 (versioned defaults, bordered blue). Click a row to open its
                 detail.
             </p>
+        </PanelHeader>
 
-            <DataList
+        <DataList
                 table-class="rules-table"
                 :columns="columns"
                 :rows="sortedRules"
@@ -161,7 +162,6 @@ onMounted(load);
                     </template>
                 </template>
             </DataList>
-        </section>
 
         <div v-if="error" class="aiball-form-error">
             <i class="pi pi-exclamation-triangle" /> {{ error }}
@@ -170,12 +170,6 @@ onMounted(load);
 </template>
 
 <style scoped>
-.aiball-section__head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-}
 .rule-rank-pill {
     display: inline-flex;
     width: 1.6rem;
