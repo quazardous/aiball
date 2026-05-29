@@ -687,11 +687,24 @@ export function userIsTakingOver(sd: string, graceSec: number): boolean {
  *  knob silently shrinks the deferential window. */
 export const DEFAULT_ASK_GRACE_SEC = DEFAULT_USER_GRACE_SEC;
 
-/** #351: true when the human has flagged AFK and nothing has cleared it.
- *  Existence = active (the proxy deletes the marker on any other keystroke
- *  and on boot). Lets the AskUserQuestion gate redirect even within ask-grace. */
+/** #351 + #619 david `f97nu6` : true when the human has flagged AFK
+ *  (3-state cycle via the AFK key). File format :
+ *    absent       → OFF
+ *    "inf"        → AFK ∞ (held)
+ *    "<iso-ts>"   → AFK auto-release at that timestamp
+ *  Returns true for any active mode (`inf` or `until > now`). */
 export function afkActive(sd: string): boolean {
-    return existsSync(afkPath(sd));
+    const p = afkPath(sd);
+    if (!existsSync(p)) return false;
+    try {
+        const content = readFileSync(p, "utf8").trim();
+        if (!content || content === "inf") return true;
+        const until = new Date(content).getTime();
+        if (Number.isNaN(until)) return true; // unparseable → degrade to ∞
+        return until > Date.now();
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -846,10 +859,9 @@ function barColors(): AiballConfig["colors"] {
 const stateBg = (col: AiballConfig["colors"], s: LoopStatus): string =>
     s === "busy" ? col.busy_bg : s === "boot" ? col.boot_bg : col.idle_bg;
 
-// #305: this module is imported by the timer at launch, so its load time ≈
-// loop boot for the process that owns setTmuxStatus. humanBarWord's degraded
-// (no-proxy) boot-grace branch measures against it — see below.
-const PROC_START_MS = Date.now();
+// #305 + #619 tx2ukf : retired. The boot-grace branch in humanPresenceWord
+// was the only consumer ; it was dropped to avoid jaune-sur-jaune redundancy
+// (the bar BG already signals boot via the [boot] tag in setTmuxStatus).
 
 /**
  * #302/#305: the 3-state human-presence WORD for the tmux bar (`@cl_human`),
@@ -875,20 +887,15 @@ const PROC_START_MS = Date.now();
  *   - `loop` — autonomous (managed mode), incl. --no-wait; a question redirects
  */
 export function humanPresenceWord(sd: string | undefined, graceSec: number): "stop" | "wait" | "loop" {
-    // #345 D: a present human is reflected even under --no-wait (CL_WAIT=0).
-    // NO_WAIT only suppresses the boot-grace `wait` (no human assumed AT
-    // LAUNCH); live typing → `stop` and an armed user-grace → `wait` still show.
     if (sd && humanIsTyping(sd)) return "stop";
-    const noWait = process.env[CL_ENV.WAIT] === "0";
-    // #305: boot-grace freezes auto-wakes at launch → `wait` during the window,
-    // but only when we're actually waiting for a human at boot (not --no-wait).
-    const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
-    if (!noWait && Date.now() - PROC_START_MS < bootGraceMs) return "wait";
+    // #619 david `tx2ukf` : boot ne paint PAS `wait` dans le bar word — le
+    // bar BG passe déjà en jaune via le tag [boot] de setTmuxStatus, donc
+    // doubler en mettant `wait` ici serait jaune-sur-jaune redondant. Le
+    // timer gate les wakes pendant boot-grace via sa propre branche.
     // #619 collapse — single user-grace window (default 600s) drives the
     // `wait` word. Auto-wakes are gated AND AskUserQuestion stays allowed
-    // for the full window. The pre-collapse `ask` orange word is retired ;
-    // a project that still sets `ask_grace_seconds` widens the same window
-    // (max of user + ask) — handled in the caller via the env var.
+    // for the full window. A project that still sets `ask_grace_seconds`
+    // widens the same window (max of user + ask, in the caller).
     if (sd && userIsTakingOver(sd, graceSec)) return "wait";
     // #601 david : AFK actif → bar `wait` (toggle visible loop↔wait via F9).
     if (sd && afkActive(sd)) return "wait";

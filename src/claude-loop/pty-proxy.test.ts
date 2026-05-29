@@ -78,7 +78,8 @@ test("combo unique → TOGGLE ON, rien forwardé à claude", { skip: SKIP }, () 
     assert.equal(v[0].afk_fired, true);
     assert.equal(v[0].afk_active, true);
     assert.equal(v[0].forward, "");            // le combo est avalé
-    assert.ok(v[0].markers.includes("set_afk"));
+    // #619 : F9 emits `cycle_afk` (3-state cycle) instead of `set_afk`.
+    assert.ok(v[0].markers.includes("cycle_afk"));
 });
 
 test("combo x2 → ON puis OFF (vrai toggle)", { skip: SKIP }, () => {

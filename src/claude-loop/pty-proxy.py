@@ -246,13 +246,57 @@ def _afk_path():
     return os.path.join(sd, "afk") if sd else ""
 
 
-def set_afk():
+def _afk_mode():
+    """#619 david `3ezsk5` : AFK is now a 3-state. File content :
+       absent      → OFF
+       "inf"       → AFK ∞ (held indefinitely)
+       "<iso-ts>"  → AFK auto-release at that timestamp (or OFF if past)
+    Returns None / "inf" / ("until", expiry_ts) — None for both
+    "file missing" and "file present but timestamp past"."""
+    p = _afk_path()
+    if not p or not os.path.exists(p):
+        return None
+    try:
+        with open(p) as f:
+            content = f.read().strip()
+    except OSError:
+        return None
+    if not content or content == "inf":
+        # Empty content = legacy ∞ marker from pre-#619 (#601 used the
+        # ISO timestamp of "now" as the body — also accepted as ∞).
+        return "inf" if content == "inf" else "inf"
+    # Treat as ISO expiry timestamp.
+    try:
+        until = datetime.datetime.fromisoformat(content).timestamp()
+    except ValueError:
+        # Unparseable content → degrade to ∞ rather than racy clear.
+        return "inf"
+    if until <= datetime.datetime.now().timestamp():
+        return None  # auto-expired
+    return ("until", until)
+
+
+def set_afk_until(seconds):
+    """#619 : AFK auto-release after `seconds` (10min state in the F9 cycle)."""
+    p = _afk_path()
+    if not p:
+        return
+    expiry = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
+    try:
+        with open(p, "w") as f:
+            f.write(expiry.isoformat() + "\n")
+    except OSError:
+        pass
+
+
+def set_afk_infinite():
+    """#619 : AFK held indefinitely (∞ state in the F9 cycle)."""
     p = _afk_path()
     if not p:
         return
     try:
         with open(p, "w") as f:
-            f.write(datetime.datetime.now().isoformat() + "\n")
+            f.write("inf\n")
     except OSError:
         pass
 
@@ -265,6 +309,22 @@ def clear_afk():
         os.remove(p)
     except OSError:
         pass
+
+
+def cycle_afk():
+    """#619 david `f97nu6` : F9 cycle through 3 states.
+       OFF       → AFK 10min (orange countdown)
+       AFK 10min → AFK ∞ (red infinite)
+       AFK ∞     → OFF
+    Pure marker effect — no side touch on user-grace (F9 is now
+    orthogonal to typing, david `3ezsk5`)."""
+    mode = _afk_mode()
+    if mode is None:
+        set_afk_until(600)  # 10 minutes
+    elif isinstance(mode, tuple):  # ("until", ts)
+        set_afk_infinite()
+    else:  # "inf"
+        clear_afk()
 
 
 class _AfkDetector:
@@ -500,19 +560,12 @@ class _Decider:
         #     « esc esc toggle [on] mais après une seule pression suffit [off] »).
         if self.afk.feed(data, now):
             d["afk_fired"] = True
-            if self.afk_active:           # était away → on REVIENT
-                # #601 (david 2sa76j) : F9 OFF doit basculer la bar à `loop`
-                # visiblement. Avant : `touch_user_grace` armait la fenêtre
-                # de présence 60s → `_rest_word` retombait sur `wait` à cause
-                # de `_user_grace_remaining() > 0` → bar restait jaune malgré
-                # l'AFK OFF. Maintenant `clear_user_grace` → pas de présence
-                # latente → bar = `loop` (vert) immédiatement. La prochaine
-                # frappe texte ré-arme naturellement le user-grace.
-                d["markers"] += ["clear_afk", "clear_user_grace"]
-                self.afk_active = False
-            else:                          # était présent → on PART
-                d["markers"] += ["set_afk", "clear_user_grace"]
-                self.afk_active = True
+            # #619 david `3ezsk5` + `f97nu6` : F9 is now a 3-state cycle
+            # (OFF → 10min → ∞ → OFF) and pilots ONLY the AFK marker.
+            # The user-grace marker is untouched — that knob belongs to
+            # typing, not AFK. `_rest_word` derives wait/loop from the
+            # union of {boot, user-grace, AFK} downstream.
+            d["markers"] += ["cycle_afk"]
             d["word"] = "rest"
             return d
 
@@ -603,11 +656,17 @@ def _run_replay(args):
                         for u in split_keystrokes(_token_to_bytes(token))]
             for dec in decs:
                 # Reconstruit l'état logique afk/grace depuis les markers émis.
+                # #619 : `cycle_afk` (F9) marker remplaçe le binary set/clear ;
+                # le replay simule un cycle 2-state (OFF↔ON) pour rester simple
+                # — le test couvre la SÉQUENCE des fires, pas le state machine
+                # 3-state run-time qui vit dans cycle_afk() (state.ts/proxy).
                 for m in dec.get("markers", []):
                     if m == "set_afk":
                         afk_active = True
                     elif m == "clear_afk":
                         afk_active = False
+                    elif m == "cycle_afk":
+                        afk_active = not afk_active
                     elif m == "touch_user_grace":
                         grace_until = clock + grace
                     elif m == "clear_user_grace":
@@ -663,6 +722,10 @@ def _run_replay_log(args):
                 state["afk_active"] = True
             elif m == "clear_afk":
                 state["afk_active"] = False
+            elif m == "cycle_afk":
+                # #619 : cycle simulation = 2-state toggle in the replay
+                # log (same shortcut as _run_replay above).
+                state["afk_active"] = not state["afk_active"]
             elif m == "touch_user_grace":
                 state["grace_until"] = clock + grace
             elif m == "clear_user_grace":
@@ -818,14 +881,17 @@ def _boot_grace_remaining():
 
 
 def _rest_word():
-    """Mot au repos (pas de frappe) : `wait` pendant la boot-grace ou la
-    user-grace, `wait` aussi quand l'AFK est armé, sinon `loop`. La
-    décomposition fine (countdown / ∞) vit à côté du hint AFK:F9 dans
-    le status-right — voir `_paint_afk_state`."""
-    if _boot_grace_remaining() > 0.0 or _user_grace_remaining() > 0.0:
+    """Mot au repos (pas de frappe) : `wait` quand la user-grace est
+    active OU l'AFK est armé (mode `inf` ou `until > now`), sinon `loop`.
+    #619 david `tx2ukf` : boot ne paint PAS `wait` — le bar BG passe
+    déjà en jaune via le tag [boot] de setTmuxStatus, donc l'info "boot
+    phase" est déjà visible. Doubler en mettant `wait` dans le bar word
+    serait redondant. La décomposition fine (countdown / ∞ / couleur)
+    vit à côté du hint AFK:F9 dans le status-right — voir
+    `_format_afk_state`."""
+    if _user_grace_remaining() > 0.0:
         return _HUMAN_WAIT
-    afk_set = _afk_path() and os.path.exists(_afk_path())
-    if afk_set:
+    if _afk_mode() is not None:
         return _HUMAN_WAIT
     return _HUMAN_LOOP
 
@@ -858,37 +924,46 @@ def _paint_word(word):
         pass
 
 
-# #619 david `jjfdea` + `33zghr` : the AFK label in status-right is
-# painted by the proxy as a single segment that owns both the optional
-# countdown prefix AND the label colour toggle. Layout :
+# #619 david `jjfdea` + `33zghr` + `f97nu6` : the AFK label segment
+# in status-right is painted by the proxy. 3 AFK states now (F9 cycle),
+# each with its own prefix + colour:
 #
-#   loop autonomous : `AFK:F9`               (label dim)
-#   grace 9m active : `9m AFK:F9`            (label lit + prefix yellow)
-#   AFK held (F9)   : `∞ AFK:F9`             (label lit + prefix yellow)
+#   loop autonomous     : `AFK:F9`            (label dim, no prefix)
+#   user-grace active   : `9m AFK:F9`         (yellow countdown, label lit)
+#   AFK 10min (F9 1×)   : `9m AFK:F9`         (ORANGE countdown, label lit)
+#   AFK ∞ (F9 2×)       : `∞ AFK:F9`          (RED ∞, label lit)
 #
-# Nothing is shown before `AFK:` when the loop is autonomous ; the
-# label colour is the binary on/off signal.
+# The label colour itself = binary "is anything holding the loop back".
+# The prefix colour = WHO is holding (yellow = passive user-grace,
+# orange = AFK auto-release, red = AFK held indefinitely).
 def _format_afk_state():
     key = os.environ.get("CL_AFK_KEY_DISP") or "F9"
     fg_dim = os.environ.get("CL_AFK_LABEL_FG_DIM") or "colour238"
     fg_lit = os.environ.get("CL_AFK_LABEL_FG_LIT") or "colour16"
-    afk_set = _afk_path() and os.path.exists(_afk_path())
-    rem = max(_user_grace_remaining(), _boot_grace_remaining(), 0.0)
-    active = afk_set or rem > 0.0
-    if not active:
-        # OFF — label dim, no prefix.
-        return f"#[fg={fg_dim}]AFK:#[fg={fg_lit}]{key}"
-    if afk_set:
-        prefix = "∞"
-    elif rem >= 60:
-        # Round UP so a 9m window doesn't show "8m" for most of its
-        # life. Drops to "0m" only when < 60s — handled below.
-        mins = int(rem / 60) + (0 if rem % 60 == 0 else 1)
-        prefix = f"{mins}m"
-    else:
-        prefix = f"{max(1, int(rem))}s"
-    # ON — prefix yellow + label LIT colour.
-    return f"#[fg=colour178]{prefix} #[fg={fg_lit}]AFK:#[fg={fg_lit}]{key}"
+    mode = _afk_mode()
+    if mode == "inf":
+        # AFK ∞ — red.
+        return f"#[fg=colour196]∞ #[fg={fg_lit}]AFK:#[fg={fg_lit}]{key}"
+    if isinstance(mode, tuple):  # ("until", expiry_ts)
+        rem = mode[1] - datetime.datetime.now().timestamp()
+        if rem >= 60:
+            mins = int(rem / 60) + (0 if rem % 60 == 0 else 1)
+            prefix = f"{mins}m"
+        else:
+            prefix = f"{max(1, int(rem))}s"
+        # AFK 10min — orange.
+        return f"#[fg=colour208]{prefix} #[fg={fg_lit}]AFK:#[fg={fg_lit}]{key}"
+    rem = _user_grace_remaining()
+    if rem > 0.0:
+        # User-grace — yellow.
+        if rem >= 60:
+            mins = int(rem / 60) + (0 if rem % 60 == 0 else 1)
+            prefix = f"{mins}m"
+        else:
+            prefix = f"{max(1, int(rem))}s"
+        return f"#[fg=colour178]{prefix} #[fg={fg_lit}]AFK:#[fg={fg_lit}]{key}"
+    # Nothing held — AFK dim.
+    return f"#[fg={fg_dim}]AFK:#[fg={fg_lit}]{key}"
 
 
 def _paint_afk_state():
@@ -1088,9 +1163,14 @@ def main(argv):
         nonlocal current_word
         for m in dec.get("markers", []):
             if m == "set_afk":
-                set_afk()
+                # #619 : legacy set/clear kept callable for replay shim
+                # + future code that wants a hard-set. F9 itself now uses
+                # cycle_afk.
+                set_afk_infinite()
             elif m == "clear_afk":
                 clear_afk()
+            elif m == "cycle_afk":
+                cycle_afk()
             elif m == "touch_marker":
                 touch_marker()
             elif m == "touch_user_grace":
