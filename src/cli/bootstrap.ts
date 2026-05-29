@@ -91,7 +91,7 @@ async function resolveIdentityHint(): Promise<string> {
  * (#304 — david: "alias de aiball init"). Writes .mcp.json + a minimal
  * .aiball.yaml, optionally wires the Stop hook, then prints the identity hint.
  */
-export async function bootstrapInit(opts: { force?: boolean; stopHook?: boolean; global?: boolean }): Promise<void> {
+export async function bootstrapInit(opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean }): Promise<void> {
     const force = opts.force === true;
     await mcpInitAction(force);
     // Inline minimal .aiball.yaml — the verbose annotated template lives at
@@ -100,12 +100,20 @@ export async function bootstrapInit(opts: { force?: boolean; stopHook?: boolean;
     if (existsSync(yamlPath) && !force) {
         process.stdout.write(`${yamlPath}: already exists — re-run with --force to overwrite\n`);
     } else {
+        // #593 — `--private` seeds `project_type: private` so the MCP `welcome`
+        // tool serves the private kit (relaxed conventions : internal refs OK,
+        // French in comments OK, LICENSE optional…). Default = public (the
+        // welcome tool's fail-safe applies the strict public conventions when
+        // unset, so a project that's actually private should declare it).
+        const projectTypeLine = opts.private === true ? "project_type: private\n" : "";
         const body =
             "# Bootstrapped by `aiball init`. See .aiball.yaml.example for the full annotated template.\n" +
+            projectTypeLine +
             "autopoll:\n" +
             "  enabled: true\n";
         writeFileSync(yamlPath, body);
-        process.stdout.write(`${existsSync(yamlPath) && force ? "overwrote" : "created"} ${yamlPath} (autopoll enabled)\n`);
+        const suffix = opts.private === true ? " (autopoll enabled, project_type: private)" : " (autopoll enabled)";
+        process.stdout.write(`${existsSync(yamlPath) && force ? "overwrote" : "created"} ${yamlPath}${suffix}\n`);
     }
     if (opts.stopHook === true) {
         wireStopHook({ global: opts.global === true });
@@ -317,7 +325,8 @@ export function registerBootstrapCommands(program: Command): void {
         .option("--force", "Overwrite existing entries (passes through to both subactions)")
         .option("--stop-hook", "Also wire Claude Code's Stop hook into .claude/settings.json so this project's autopoll triggers")
         .option("--global", "With --stop-hook, write to ~/.claude/settings.json instead of <PWD>/.claude/settings.json (fires in every Claude Code session)")
-        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean }) => {
+        .option("--private", "Seed the .aiball.yaml with `project_type: private` so the welcome MCP serves the private kit (relaxed conventions). Default = public (welcome's fail-safe).")
+        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean }) => {
             await bootstrapInit(opts);
         });
 

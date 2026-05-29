@@ -80,6 +80,13 @@ function statusSeverity(s: "pending" | "approved" | "rejected"): Severity {
             severity="success"
             icon="pi pi-check-circle"
         />
+        <!-- #599 david : priorité dans la cartouche, plus en bandeau isolé.
+             Skip `normal` (default, pas une info utile). -->
+        <Tag
+            v-if="ticket.priority && ticket.priority !== 'normal'"
+            :value="ticket.priority"
+            :severity="ticket.priority === 'urgent' ? 'danger' : ticket.priority === 'high' ? 'warn' : 'info'"
+        />
         <span v-if="ticket.by_agent">by {{ ticket.by_agent }}</span>
         <span class="spacer" />
         <span :title="ticket.created_at">

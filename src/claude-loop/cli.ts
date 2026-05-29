@@ -24,7 +24,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
 import { AiballClient } from "../client.js";
@@ -131,29 +131,27 @@ function selfRoot(): string {
     return resolve(here, "..", "..");
 }
 
-function defaultName(project?: string, agent?: string): string {
-    // #420: derive a stable, readable loop name. A loop is per-(dir, agent), so
-    // the natural disambiguator ACROSS dirs is the PROJECT (dir); the AGENT only
-    // matters when several agents share ONE dir. So prefer `cl-<project>`; if it's
-    // taken (a 2nd agent in the same dir, or the same project basename elsewhere)
-    // try `cl-<project>-<agent>`; random suffix only as a last resort. Keeps the
-    // common cases readable — same agent in two dirs → cl-<projA>/cl-<projB> (not
-    // an opaque suffix, david 9w9n54); two agents in one dir → cl-<proj> + cl-<proj>-<agent>.
+/**
+ * #594 — single-shot loop name format : `cl-<project>-<hash6>` where
+ * `hash6 = sha256(canonicalCwd + ':' + agent).slice(0, 6)`.
+ *
+ * Stable (same cwd + agent → same hash → same loop retrieved), distinct
+ * by default (no fallback chain), aligned with `tmuxName` (identity) +
+ * `stateDirFor` (uses the name as-is) so the 3 derived strings match.
+ *
+ * Older loops (pre-#594) carry the legacy `cl-<project>` shape ; voie A
+ * migration (david `nndjjb`) — no rename, the legacy loops survive until
+ * `claude-loop rm` and the next start uses the new format.
+ */
+function shortHash(cwd: string, agent: string | undefined): string {
+    const input = `${cwd}:${agent ?? ""}`;
+    return createHash("sha256").update(input).digest("hex").slice(0, 6);
+}
+
+function defaultName(project: string | undefined, agent: string | undefined, cwd: string): string {
     const slug = (s: string): string => s.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
-    const p = project ? slug(project) : "";
-    const a = agent ? slug(agent) : "";
-    const candidates: string[] = [];
-    if (p) {
-        candidates.push(`cl-${p}`);
-        if (a) candidates.push(`cl-${p}-${a}`);
-    } else if (a) {
-        candidates.push(`cl-${a}`);
-    }
-    for (const c of candidates) {
-        if (!existsSync(stateDirFor(c))) return c;
-    }
-    const base = candidates[0] ?? "cl";
-    return `${base}-${randomBytes(2).toString("hex")}`;
+    const p = project ? slug(project) : "loop";
+    return `cl-${p}-${shortHash(canonicalCwd(cwd), agent)}`;
 }
 
 interface StartOpts {
@@ -207,6 +205,8 @@ interface StartOpts {
     initStopHook?: boolean;
     /** #557 : forwarded to bootstrap (--global) when `--init` is set. */
     initGlobal?: boolean;
+    /** #593 : forwarded to bootstrap (--private) when `--init` is set. */
+    initPrivate?: boolean;
     claudeArgs: string[];
 }
 
@@ -335,6 +335,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
                 force: opts.initForce === true,
                 stopHook: opts.initStopHook === true,
                 global: opts.initGlobal === true,
+                private: opts.initPrivate === true,
             });
         } finally {
             if (startCwd) process.chdir(origCwd);
@@ -359,10 +360,23 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // #420: resolve the loop name AFTER the agent is known, so an omitted --name
     // defaults to a per-agent slug → two loops in the same dir under different
     // agents auto-get distinct names. Explicit --name still wins.
-    const name = opts.name ?? defaultName(ctx.project, ctx.agent);
+    // #594 — pass cwd so the hash is stable per (cwd, agent).
+    const name = opts.name ?? defaultName(ctx.project, ctx.agent, startCwd ?? process.cwd());
     const sd = stateDirFor(name);
     if (existsSync(sd)) {
-        die(`loop '${name}' already exists at ${sd}. Use 'rm ${name}' first or pick another --name.`);
+        // #602 — with the deterministic naming (#594), restarting from the
+        // same (cwd, agent) always hits the SAME state-dir. If the previous
+        // loop crashed / was killed leaving its state-dir behind, the old
+        // "die unless --name override" path forced the user to manually
+        // `rm` it before restarting (regression vs the pre-#594 random
+        // suffix fallback). Auto-clean a dead state-dir so a plain
+        // `claude-loop start` from a project that recently had a loop
+        // just works.
+        if (tmuxAlive(name)) {
+            die(`loop '${name}' already alive at ${sd}. Attach via 'claude-loop attach' or 'rm ${name}' first to start fresh.`);
+        }
+        rmSync(sd, { recursive: true, force: true });
+        process.stdout.write(`claude-loop: removed stale state-dir for dead loop '${name}' (cleared so restart can reuse the same deterministic name)\n`);
     }
     applyToProcessEnv(ctx);
     warnIfDeprecated(ctx);
@@ -1592,6 +1606,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--init-force", "#557: with --init, pass --force to bootstrap (overwrite existing entries).")
         .option("--init-stop-hook", "#557: with --init, also wire Claude Code's Stop hook into .claude/settings.json.")
         .option("--init-global", "#557: with --init --init-stop-hook, write to ~/.claude/settings.json instead of project-local.")
+        .option("--init-private", "#593: with --init, seed .aiball.yaml with `project_type: private` (welcome serves the private kit)")
         .allowExcessArguments(false)
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
@@ -1734,11 +1749,12 @@ async function main(): Promise<void> {
         .option("--force", "Overwrite existing entries")
         .option("--stop-hook", "Also wire Claude Code's Stop hook into .claude/settings.json")
         .option("--global", "With --stop-hook, write to ~/.claude/settings.json (every Claude Code session)")
+        .option("--private", "#593: seed .aiball.yaml with `project_type: private` (welcome serves the private kit)")
         .option("--aiball-url <url>", "#394: persist a REMOTE aiball URL (http[s]://host:port) so `start` (no flags) slaves to it")
         .option("--aiball-token <token>", "#394: bearer token for the remote (required with --aiball-url; mint with `aiball auth issue --consumer <id>`)")
         .option("--consumer <id>", "#394: loop identity = consumer_id (persisted with the remote)")
         .option("--project <name>", "#394: project name (persisted with the remote)")
-        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; aiballUrl?: string; aiballToken?: string; consumer?: string; project?: string }) => {
+        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; aiballUrl?: string; aiballToken?: string; consumer?: string; project?: string }) => {
             // #394: persist the remote connection first (validates --aiball-token).
             cmdInitRemote(opts);
             // Existing behavior: bootstrap the project (.mcp.json + .aiball.yaml).

@@ -13,7 +13,6 @@
  * #352 — "manage" opens in-place like edit, not a popover.
  */
 import Button from "primevue/button";
-import Tag from "primevue/tag";
 import type { TicketSummary } from "../lib/api";
 import { estTokenEffort, formatTokens, tokenBreakdownTitle } from "../lib/format";
 
@@ -24,6 +23,12 @@ defineProps<{
     showEditButton?: boolean;
     editing?: boolean;
     managing?: boolean;
+    /** #596 — auto-mark-read dwell in progress. The header shows a
+     *  pulsing dot near the title so the human SEES the 2s grace
+     *  window instead of just discovering "it became read" silently. */
+    markingRead?: boolean;
+    /** #596 — sync the CSS animation duration with the dwell window. */
+    markReadDwellMs?: number;
 }>();
 const emit = defineEmits<{
     (e: "start-edit"): void;
@@ -50,14 +55,26 @@ function claimerTooltip(t: TicketSummary): string {
 </script>
 
 <template>
-    <!-- #382 : la priorité passe AU-DESSUS du titre (david). -->
-    <Tag
-        v-if="ticket.priority && ticket.priority !== 'normal'"
-        class="thread-priority"
-        :value="ticket.priority"
-        :severity="ticket.priority === 'urgent' ? 'danger' : ticket.priority === 'high' ? 'warn' : 'info'"
-    />
-    <h2 class="thread-title">{{ ticket.title }}</h2>
+    <!-- #599 david : la priorité est désormais dans la cartouche
+         (ThreadMetaHeader, à côté de #NN / project / status), plus dans
+         un bandeau isolé au-dessus du titre. Avant : Tag standalone ici
+         (#382 — david avait choisi cette position quand la cartouche
+         était plus chargée ; aujourd'hui qu'elle l'est moins, la prio
+         rentre naturellement avec les autres chips). -->
+    <h2 class="thread-title">
+        <!-- #596 — envelope icon during the auto-mark-read dwell. Same
+             icon as the inbox unread marker (david `27b5wv` : "petite
+             enveloppe qui pulse gris vert genre flickering de lampe qui
+             va s'éteindre puis passe au gris"). Green flicker → settle
+             to gray = visual "unread → read" handover. -->
+        <i
+            v-if="markingRead"
+            class="pi pi-envelope thread-marking-read"
+            :style="{ animationDuration: `${(markReadDwellMs ?? 2000) / 1000}s` }"
+            title="Marking as read — comments arriving after the dwell window stay flagged unread"
+            aria-hidden="true"
+        />{{ ticket.title }}
+    </h2>
     <!-- #405/#408: hot-zone focus flag — the ticket an AGENT is actively working
          (most recent agent activity within the hot window). #408: a human
          commenting does NOT make a ticket hot; only an agent's work does. -->
@@ -224,5 +241,35 @@ function claimerTooltip(t: TicketSummary): string {
     border-radius: 0.7rem;
     color: var(--p-orange-600, #c2410c);
     background: var(--p-orange-100, #ffedd5);
+}
+
+/* #596 / david `27b5wv` — envelope icon flicker during the auto-mark-read
+   dwell. Same envelope icon + green-unread colour as the inbox row, with a
+   "dying lamp" flicker (green↔gray a few times) that settles to muted gray
+   = the read state. `animation-fill-mode: forwards` keeps the final gray
+   sticking until the component unmounts. */
+.thread-marking-read {
+    display: inline-block;
+    margin-right: 0.45rem;
+    vertical-align: middle;
+    font-size: 0.9em;
+    color: var(--p-green-500, #22c55e);
+    animation-name: thread-marking-read-flicker;
+    animation-timing-function: linear;
+    animation-iteration-count: 1;
+    animation-fill-mode: forwards;
+}
+@keyframes thread-marking-read-flicker {
+    0%   { color: var(--p-green-500, #22c55e); }
+    8%   { color: var(--p-text-muted-color, #94a3b8); }
+    11%  { color: var(--p-green-500, #22c55e); }
+    25%  { color: var(--p-green-500, #22c55e); }
+    28%  { color: var(--p-text-muted-color, #94a3b8); }
+    32%  { color: var(--p-green-500, #22c55e); }
+    50%  { color: var(--p-green-500, #22c55e); }
+    53%  { color: var(--p-text-muted-color, #94a3b8); }
+    57%  { color: var(--p-green-500, #22c55e); }
+    70%  { color: var(--p-green-500, #22c55e); }
+    100% { color: var(--p-text-muted-color, #94a3b8); }
 }
 </style>

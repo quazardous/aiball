@@ -55,6 +55,13 @@ export const messagesRouter = Router();
 messagesRouter.post("/messages", (req: Request, res: Response) => {
     const v = validateNewMessage(req.body);
     if ("error" in v) return badRequest(res, v.error);
+    // #595 — auto-fill by_agent from the auth context when the caller omits
+    // it. The bulk-close UI in App.vue calls POST /messages without by_agent
+    // and `submitMessage` then can't run `assertCloseAuthority` properly
+    // (no consumer to compare to the ticket reporter, no isHuman bypass) —
+    // every close on a ticket the moderator didn't open returned 403. Same
+    // pattern as api/tickets.ts:assign which has always done `consumerOf(req)`.
+    if (!v.by_agent) v.by_agent = consumerOf(req);
     try {
         const msg = submitMessage(v);
         return res.status(201).json(withTagsOne(msg));

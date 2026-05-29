@@ -6,9 +6,12 @@
  * keep their unseen ping so the inbox row stays bold+green for new
  * content). Pure side-effect composable: it wires a watcher that
  * resets the timer on ticketId change and an onBeforeUnmount cleanup.
- * Nothing to destructure on the call site.
+ *
+ * #596 — also returns a `markingRead` ref that flips true while the
+ * dwell timer is running on an UNREAD ticket, so the UI can render a
+ * visual "transition in progress" hint (a pulsing dot, etc.).
  */
-import { onBeforeUnmount, watch, type Ref } from "vue";
+import { onBeforeUnmount, ref, watch, type Ref } from "vue";
 import { api, type ThreadView as ThreadViewData } from "./api";
 import { bus } from "./bus";
 
@@ -19,12 +22,33 @@ interface UseAutoMarkReadArgs {
     ticketId: () => number;
 }
 
-export function useAutoMarkRead({ data, ticketId }: UseAutoMarkReadArgs): void {
+interface UseAutoMarkReadReturn {
+    /** True while the dwell timer is counting down on an UNREAD ticket
+     *  — the UI uses it to render the "marking-as-read" pulse (#596). */
+    markingRead: Ref<boolean>;
+    /** Same constant the timer uses, exposed so the UI can sync its
+     *  CSS animation duration to the dwell window without re-encoding it. */
+    dwellMs: number;
+}
+
+export function useAutoMarkRead({ data, ticketId }: UseAutoMarkReadArgs): UseAutoMarkReadReturn {
     let timer: ReturnType<typeof setTimeout> | null = null;
+    const markingRead = ref(false);
 
     function schedule() {
-        if (timer) clearTimeout(timer);
+        if (timer) {
+            clearTimeout(timer);
+            markingRead.value = false;
+        }
         const id = ticketId();
+        // #596 — always paint the pulse during the dwell. We don't gate
+        // on "was the ticket unread when we landed" because the
+        // ThreadView's TicketSummary doesn't carry the per-consumer
+        // unread flag (only the inbox row does). The mark-read call is a
+        // cheap no-op when the ticket was already read, and a brief
+        // pulse on every visit is less surprising than an inconsistent
+        // "sometimes-pulse" behaviour. KISS for the first cut.
+        markingRead.value = true;
         timer = setTimeout(() => {
             const snapshot = data.value;
             const lastSeenId = snapshot && snapshot.ticket?.id === id
@@ -48,6 +72,7 @@ export function useAutoMarkRead({ data, ticketId }: UseAutoMarkReadArgs): void {
                 })
                 .catch(() => {/* silent — read state is best-effort */});
             timer = null;
+            markingRead.value = false;
         }, AUTO_MARK_READ_MS);
     }
 
@@ -58,5 +83,8 @@ export function useAutoMarkRead({ data, ticketId }: UseAutoMarkReadArgs): void {
             clearTimeout(timer);
             timer = null;
         }
+        markingRead.value = false;
     });
+
+    return { markingRead, dwellMs: AUTO_MARK_READ_MS };
 }

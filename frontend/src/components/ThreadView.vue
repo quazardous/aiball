@@ -101,9 +101,12 @@ useBus("thread.refresh", ({ ticketId }) => {
     if (ticketId === props.ticketId) load();
 });
 
-// Auto-mark-as-read dwell timer (#B.91 / #B.191) — wired by the
-// composable; no surface in this file.
-useAutoMarkRead({ data, ticketId: () => props.ticketId });
+// Auto-mark-as-read dwell timer (#B.91 / #B.191). #596 — `markingRead`
+// flips true during the dwell so ThreadHeader can render a pulsing dot.
+const { markingRead: threadMarkingRead, dwellMs: markReadDwellMs } = useAutoMarkRead({
+    data,
+    ticketId: () => props.ticketId,
+});
 
 /**
  * After any state-mutating action, emit on the bus so the open thread,
@@ -439,6 +442,8 @@ async function copyTicketRef() {
                     show-edit-button
                     :editing="editing"
                     :managing="managing"
+                    :marking-read="threadMarkingRead"
+                    :mark-read-dwell-ms="markReadDwellMs"
                     @start-edit="editing = true"
                     @start-manage="managing = true"
                 />
@@ -529,6 +534,8 @@ async function copyTicketRef() {
                     <ThreadHeader
                         :ticket="data.ticket"
                         :is-snoozed="isSnoozed"
+                        :marking-read="threadMarkingRead"
+                        :mark-read-dwell-ms="markReadDwellMs"
                     />
                 </template>
                 <template #extra-actions>

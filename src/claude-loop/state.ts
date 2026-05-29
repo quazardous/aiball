@@ -33,8 +33,16 @@ export function stateDirFor(name: string): string {
     return join(STATE_ROOT, name);
 }
 
+/**
+ * Tmux session name for a loop. Identity-pass-through : the loop name
+ * itself carries the `cl-<project>-<hash>` prefix (#594), so we don't
+ * re-wrap it here. Older loops created before #594 still have a bare
+ * name like `cl-aiball` — `cl-${name}` would have produced the visible
+ * double-`cl-` bug in `tmux ls`. Identity also makes the 3 names
+ * (loop / state-dir / tmux session) align : same string everywhere.
+ */
 export function tmuxName(name: string): string {
-    return `cl-${name}`;
+    return name;
 }
 
 /**

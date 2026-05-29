@@ -22,7 +22,8 @@
  * now means "skip the human-takeover grace", NOT "fire immediately".
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { LOOP_STATUS, MUX_CMD, idleMarkerPath, setTmuxStatus, tmuxName } from "./state.js";
 import { CL_ENV } from "./env-vars.js";
 
@@ -34,6 +35,19 @@ function emit(): never {
 const sd = process.env[CL_ENV.STATE_DIR];
 const name = process.env[CL_ENV.NAME];
 if (!sd || !name) emit();
+
+// #577 h9axuc — log each fire so we can diagnose silent regex misses
+// without a tmux-pane replay. Lives next to stop-hook.log + timer.log
+// in the loop's state dir ; tail with `claude-loop tail <name>` or
+// `tail -f ~/.claude-loop/<name>/session-start-hook.log`.
+function log(msg: string): void {
+    try {
+        appendFileSync(
+            join(sd!, "session-start-hook.log"),
+            `${new Date().toISOString()} ${msg}\n`,
+        );
+    } catch { /* nowhere to log */ }
+}
 // #577 — CL_NO_STARTUP_PING / CL_WAIT no longer gate this hook's behavior :
 // the hook always seeds idle and exits, the timer drives every wake. Both
 // envs are kept exported by the CLI for backwards compat with `--no-startup-ping`
@@ -79,19 +93,39 @@ if (source === "resume") {
     // marker tried earlier can be absent when too few sessions are listed.
     const pickMode = process.env[CL_ENV.RESUME_PICK] ?? "latest";
     let sessionPicked = false;
+    log(`resume: pickMode=${pickMode} resumeMode=${process.env[CL_ENV.RESUME_MODE] ?? "as-is"} tmuxTarget=${tmuxName(name!)}.0`);
     if (pickMode !== "abort") {
         try {
             setTmuxStatus(name!, LOOP_STATUS.BOOT, "session?");
-            spawnSync("sleep", ["1.0"], { stdio: "ignore" });
-            const text = capturePane();
-            if (/Resume session\b/i.test(text) && /Space to preview/i.test(text)) {
-                setTmuxStatus(name!, LOOP_STATUS.BOOT, `pick:${pickMode}`);
-                sendKey("Enter");
-                sessionPicked = true;
+            // #577 h9axuc + hzbhxh — probe loop instead of fixed sleep : claude's
+            // session-list can take 2-10s to render on a heavy MCP boot. Match
+            // BOTH markers (header + control bar) so a transient half-rendered
+            // pane doesn't false-positive. Bumped to 15s after david's capture
+            // proved the markers ARE there but our 6s probe missed them — likely
+            // the picker appears later than 6s on MCP-heavy boots.
+            const probeMaxMs = 15000;
+            const probeStepMs = 500;
+            let matched = false;
+            let firstCaptureLen = -1;
+            let lastCaptureLen = -1;
+            for (let elapsed = 0; elapsed < probeMaxMs && !matched; elapsed += probeStepMs) {
+                spawnSync("sleep", [String(probeStepMs / 1000)], { stdio: "ignore" });
+                const text = capturePane();
+                if (firstCaptureLen === -1) firstCaptureLen = text.length;
+                lastCaptureLen = text.length;
+                if (/Resume session\b/i.test(text) && /Space to preview/i.test(text)) {
+                    matched = true;
+                    log(`session-picker: matched at ${elapsed + probeStepMs}ms (paneLen=${text.length}) → pick:${pickMode} (Enter)`);
+                    setTmuxStatus(name!, LOOP_STATUS.BOOT, `pick:${pickMode}`);
+                    sendKey("Enter");
+                    sessionPicked = true;
+                }
             }
-        } catch { /* swallow */ }
+            if (!matched) log(`session-picker: no match in ${probeMaxMs}ms (firstCaptureLen=${firstCaptureLen} lastCaptureLen=${lastCaptureLen})`);
+        } catch (e) { log(`session-picker: error ${(e as Error).message ?? e}`); }
     } else {
         setTmuxStatus(name!, LOOP_STATUS.BOOT, "session:abort");
+        log(`session-picker: skipped (CL_RESUME_PICK=abort)`);
     }
 
     // #B.154 — summary-vs-as-is picker (always second). The user may
@@ -118,15 +152,20 @@ if (source === "resume") {
                 spawnSync("sleep", [String(probeStepMs / 1000)], { stdio: "ignore" });
                 if (summaryRegex.test(capturePane())) {
                     matched = true;
+                    log(`summary-picker: matched at ${elapsed + probeStepMs}ms → pick→${mode}`);
                     setTmuxStatus(name!, LOOP_STATUS.BOOT, `pick→${mode}`);
                     if (mode === "as-is") sendKey("Down");
                     sendKey("Enter");
                 }
             }
-            if (!matched) setTmuxStatus(name!, LOOP_STATUS.BOOT, "no-picker");
-        } catch { /* swallow */ }
+            if (!matched) {
+                log(`summary-picker: no match in ${probeMaxMs}ms`);
+                setTmuxStatus(name!, LOOP_STATUS.BOOT, "no-picker");
+            }
+        } catch (e) { log(`summary-picker: error ${(e as Error).message ?? e}`); }
     } else {
         setTmuxStatus(name!, LOOP_STATUS.BOOT, "resume:abort");
+        log(`summary-picker: skipped (CL_RESUME_MODE=abort)`);
     }
 }
 
@@ -147,5 +186,6 @@ if (source === "resume") {
 try {
     writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
     setTmuxStatus(name!, LOOP_STATUS.IDLE);
+    log(`seed idle + exit (source=${source})`);
 } catch { /* swallow */ }
 emit();

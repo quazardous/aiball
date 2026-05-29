@@ -19,6 +19,95 @@ narrative for the product as a whole.
 
 *Nothing yet.*
 
+## [0.9.2] — 2026-05-29
+
+### Visual cue for the read-transition dwell (#596)
+
+When you open an unread ticket, a small envelope icon (same one the
+inbox uses to mark unread) appears next to the title and flickers
+green → muted gray over the 2-second auto-mark-read window — a "dying
+lamp" animation so the moderation moment is visible instead of
+silently flipping behind your back.
+
+### Priority chip moves into the cartouche (#599)
+
+The `urgent` / `high` / `low` priority Tag used to sit alone on its
+own row above the ticket title. It's now inline with the other meta
+chips (`#NN`, `project`, `intent`, `status`, lifecycle, `by <agent>`)
+so the identity strip reads as one line. Hidden when priority is
+`normal` (default).
+
+### Bulk close on the inbox works for any moderator (#595)
+
+The "close N selected tickets" button no longer fails for tickets the
+moderator didn't open. The API route now resolves the caller from the
+auth context when the request body omits `by_agent`, so the
+`assertCloseAuthority` check passes via the `isHuman` bypass. Same
+pattern other routes have always used.
+
+### `claude-loop` rename: `cl-<project>-<hash6>` (#594, #602)
+
+- **Naming** — the auto-generated loop name is now a deterministic
+  `cl-<project>-<sha256(cwd:agent)[0:6]>`, e.g. `cl-aiball-89c365`.
+  The same `(cwd, agent)` pair always resolves to the same name (no
+  more "find my loop"); the tmux session name no longer doubles its
+  `cl-` prefix (`cl-cl-foo` → `cl-foo-…`). Pre-rename loops keep
+  their old names until you `rm` + `start` again — no migration.
+- **Restart after a crash** — a `start` whose deterministic name
+  matches a state-dir left behind by a dead loop now auto-cleans the
+  state-dir and proceeds, instead of refusing with "already exists".
+  Restoring the pre-rename behaviour where a dead loop's state didn't
+  block a fresh `start`.
+
+### `--private` flag on `init` (#593)
+
+`aiball init --private`, `claude-loop init --private`, and
+`claude-loop start --init --init-private` now seed the generated
+`.aiball.yaml` with `project_type: private` so the welcome MCP serves
+the private kit (relaxed conventions). Default stays public — the
+welcome tool's fail-safe applies.
+
+### `claude --resume` auto-pick + boot-phase rework (#577)
+
+- **Boot phase** — the SessionStart hook no longer eager-injects on
+  `--no-wait`. It always seeds the idle marker and exits; the timer
+  drives every wake, gated on the pane probe (`esc to interrupt`
+  visible = still busy / still loading). Closes the "wake hits claude
+  mid-compact" class of bugs.
+- **Compacting detection** — pane-state probe is footer-scoped (5
+  lines) so a stale `✶ Compacting conversation…` line in scrollback
+  doesn't gate wakes forever after `/compact` finishes.
+- **Session-list auto-pick** — on `claude --resume` with multiple
+  sessions, the hook detects the picker (`Resume session` +
+  `Space to preview`) and sends Enter to take the most recent entry.
+  Probes up to 15 s with 500 ms granularity (MCP-heavy boots can take
+  several seconds to render the picker). Override via
+  `CL_RESUME_PICK=abort`.
+- **Diagnostics** — every fire is now logged to
+  `~/.claude-loop/<name>/session-start-hook.log` with the resolved
+  picker mode + tmux target + match timing, so a silent regex miss is
+  debuggable.
+
+### `welcome` MCP reads the caller's project (#591)
+
+`bin/aiball-mcp` (+ Windows `.cmd`) preserve the caller's PWD in
+`AIBALL_CWD` before `cd`-ing to the install root, and `welcome.ts`
+walks `AIBALL_CWD ?? process.cwd()`. Without this, the MCP server's
+cwd was the install dir → `welcome` resolved `project_type` from
+aiball's own yaml instead of the caller's project. `claude-loop
+status` now displays the resolved `project_type` so it's visible
+from the CLI without invoking `welcome`.
+
+### CHANGELOG template tells what it is (#598)
+
+The `CHANGELOG.md` template served by the welcome MCP for new
+projects now carries an explicit "this is a curated, human-readable
+record — not a commit log" header in the rendered file, plus
+expanded `<!-- intent: … -->` guidance with good/bad examples so the
+agent writing future entries doesn't fall back to commit-message
+phrasing. Reported in by `runic-claude` after a welcome-driven
+bootstrap surfaced overly technical entries.
+
 ## [0.9.1] — 2026-05-29
 
 ### List harmonisation : declarative columns + DRY pass (#592, #597, #589)
