@@ -610,6 +610,11 @@ class _Decider:
             # transition NOT AFK → AFK, toggle_afk also clears
             # user-grace so the wake gate frees up alongside.
             d["markers"] += ["toggle_afk"]
+            # #622 david `gpwv8h` : keep the in-decider register in sync
+            # with the file state after the toggle, so a next F9 reads
+            # the just-changed state correctly (otherwise the cooldown +
+            # any pure-decider check would lag a tick behind).
+            self.afk_active = not self.afk_active
             d["word"] = "rest"
             return d
 
