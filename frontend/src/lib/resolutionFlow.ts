@@ -111,7 +111,6 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
         const effectiveKind = asKind ?? "resolution";
         resolutionBusy.value = true;
         try {
-            await api.approve(msg.id);
             // #B.129 follow-up: the reporter can reclassify a legacy
             // ticket_resolved row as "really a plan" — same mechanic as
             // the new decision-on-comment flow. We approve the message
@@ -119,6 +118,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
             // When reclassifying, post a marker comment so the audit
             // trail shows the reclassification.
             if (effectiveKind === "plan") {
+                await api.approve(msg.id);
                 if (composerBody.value.trim()) {
                     // The typed body becomes a plan-accepted comment so it
                     // carries the chip (per #B.129 / #C.ffvfgm david: chip
@@ -150,11 +150,16 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
                     }
                 }
             } else {
-                // The typed body (if any) rides along on the close event so
-                // the reporter's "yes, this is done" gets a single decorated
-                // card instead of being split between a comment and a bare
-                // close.
-                await postBodyAs("ticket_closed");
+                // #618 — single atomic call : the server approves the
+                // pending resolution + inserts the ticket_closed event
+                // in one request, with both broadcasts arriving
+                // back-to-back. Replaces the previous 2-step
+                // `approve` + `postBodyAs("ticket_closed")` whose
+                // network gap caused the dock-flicker fixed in #617.
+                // The typed body (if any) rides along on the close
+                // event so the reporter's "yes, this is done" gets a
+                // single decorated card.
+                await api.acceptAndClose(msg.id, composerBody.value.trim() || undefined);
             }
             composerBody.value = "";
             broadcastRefresh(tid);

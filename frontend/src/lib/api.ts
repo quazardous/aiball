@@ -848,6 +848,19 @@ export const api = {
         req<Message>("POST", `/api/messages/${id}/approve`),
     reject: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/reject`),
+    /** #618 — atomic accept-and-close. Replaces the 2-step
+     *  `approve(id)` + `postMessage({kind:"ticket_closed"})` flow with
+     *  a single round-trip ; the server enchaîne synchroniquement les
+     *  2 effects + leurs broadcasts WS arrivent dos-à-dos chez le
+     *  client. The `body` optional rides along on the close event so
+     *  the reporter's note is part of the same audit row. Returns the
+     *  approved decision + the close event as separate Messages. */
+    acceptAndClose: (id: number, body?: string) =>
+        req<{ approved: Message; closed: Message }>(
+            "POST",
+            `/api/messages/${id}/accept-and-close`,
+            body ? { body } : {},
+        ),
     /** Accept or reject a comment's decision (#B.129). The comment must
      *  carry `meta.decision={kind, status:"pending"}` set by the
      *  author at post time. Idempotent; 409 if the decision is

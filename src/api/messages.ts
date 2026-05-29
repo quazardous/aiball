@@ -154,6 +154,80 @@ function decide(
 messagesRouter.post("/messages/:id/approve", (req, res) => decide(req, res, "approved"));
 messagesRouter.post("/messages/:id/reject", (req, res) => decide(req, res, "rejected"));
 
+/**
+ * #618 (spinoff de #617) — atomic accept-and-close. Avant : le client
+ * faisait 2 round-trips (approve + post ticket_closed) avec un
+ * intermediate-state WS visible entre les 2, qui flickait la dock
+ * d'actions. Le client gate de #617 a masqué le symptôme côté UI ;
+ * cet endpoint élimine la cause (le round-trip dual).
+ *
+ * Server-side : on enchaîne synchroniquement (1) approve la décision
+ * pending, (2) insert un message `ticket_closed` sur le ticket parent.
+ * Les WS broadcasts existants se déclenchent toujours côté chaque étape
+ * mais arrivent dos-à-dos chez le client (~1ms vs ~200ms réseau avant)
+ * → la fenêtre intermédiaire est essentiellement invisible.
+ *
+ * Pas de vraie transaction SQL atomique pour V0 — si l'insert close
+ * échoue après l'approve, on retourne 500 et le client doit catch-up
+ * (le state-changed du approve reste valide). Future-work pour
+ * envelopper les 2 dans une transaction Drizzle si on observe des
+ * échecs partiels.
+ */
+messagesRouter.post("/messages/:id/accept-and-close", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    const existing = getMessage(id);
+    if (!existing) return notFound(res);
+    if (existing.status !== "pending") {
+        return badRequest(res, `message already ${existing.status}`);
+    }
+    if (!existing.ticket_id) {
+        return badRequest(res, "message has no parent ticket to close");
+    }
+    // Step 1 : approve the pending decision message. Inline mirror of
+    // decide(req, res, "approved") minus the res.json — we want to ship
+    // the combined response below.
+    const approved = updateMessageStatus(id, "approved", "human", null, existing.kind);
+    if (!approved) return notFound(res);
+    const approvedDecorated = withTagsOne(approved);
+    deliverToOutbox(approved);
+    fanOutPings(approved);
+    notifyDecision(approved, consumerOf(req));
+    broadcast({ type: "message_decided", data: approvedDecorated });
+    emitLifecycle({ op: "decided", message: approvedDecorated });
+    // No status_changed emit : that hook fires only for ticket_created
+    // status flips ; this is a comment-with-decision approval.
+    // Step 2 : insert the ticket_closed event. submitMessage handles its
+    // own broadcasts + close-time cleanup (autoApproveStaleDecisionsOnClose
+    // etc) inside its existing path.
+    const byAgent = consumerOf(req);
+    const body = typeof req.body?.body === "string" ? req.body.body : undefined;
+    try {
+        const closeMsg = submitMessage({
+            project: approved.project,
+            kind: "ticket_closed",
+            ticket_id: existing.ticket_id,
+            parent_id: existing.ticket_id,
+            body,
+            by_agent: byAgent,
+        });
+        return res.json({
+            approved: approvedDecorated,
+            closed: withTagsOne(closeMsg),
+        });
+    } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === ERROR_CODES.FORBIDDEN_CLOSE) {
+            return res.status(403).json({ error: (err as Error).message });
+        }
+        // The approve already landed ; we surface the close error so the
+        // client knows to refresh + retry the close manually.
+        return res.status(500).json({
+            error: `accepted resolution but failed to close: ${(err as Error).message}`,
+            approved: approvedDecorated,
+        });
+    }
+});
+
 messagesRouter.post("/messages/:id/edit", (req, res) => {
     const id = Number(req.params.id);
     const existing = getMessage(id);
