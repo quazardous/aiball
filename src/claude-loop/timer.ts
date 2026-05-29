@@ -959,14 +959,16 @@ async function mainSse(): Promise<void> {
         if (paneText) {
             const claudeWorking = paneFooterShowsBusy(paneText);
             const claudeReady = /Claude Code v|❯ |^> /m.test(paneText);
-            // #624 david `e3a6nn` : pendant la fenêtre boot-grace (par
-            // défaut 60s), le bar BG doit rester `[boot]` jaune. La probe
-            // sautait l'attente quand le splash de claude montrait sa
-            // signature ou un `esc to interrupt` transient → flash gris/
-            // bleu pendant le chargement. On gate les overrides probe
-            // sous --wait (mode managé). --no-wait garde l'ancien
-            // comportement (eager drain).
-            const inBootGrace = !NO_WAIT && (Date.now() - BOOT_TIME) < BOOT_GRACE_MS;
+            // #624 david `e3a6nn` + `ccy2pd` : pendant la fenêtre boot-grace
+            // (par défaut 60s), le bar BG doit rester `[boot]` jaune dans
+            // les DEUX modes. "claude-loop doit démarrer en mode boot,
+            // c'est le concept du boot" — la phase boot est visuelle, pas
+            // liée au mode wake. Sans ce gate, la probe (qui détecte
+            // `Claude Code v` / `esc to interrupt`) flippait settledStatus
+            // dès le splash de claude. L'eager drain --no-wait continue
+            // de fonctionner via settleBoot (toujours appelé à T+grace,
+            // qui write idle-marker + tryWake).
+            const inBootGrace = (Date.now() - BOOT_TIME) < BOOT_GRACE_MS;
             if (inBootGrace) {
                 // Skip — settleBoot fera la transition propre à T+grace.
             } else if (claudeWorking && settledStatus !== "busy") {
