@@ -161,7 +161,7 @@ const emit = defineEmits<{
             <input
                 v-model="gotoInput"
                 type="text"
-                placeholder="#N or hashid"
+                placeholder="#N"
                 :title="gotoError ?? 'Go to ticket — type a ticket number (#540) or a comment hashid (#C.abc123 or abc123) and press Enter'"
                 class="header-goto__input"
                 :class="{ 'header-goto__input--error': !!gotoError, 'header-goto__input--busy': gotoBusy }"
@@ -247,9 +247,11 @@ const emit = defineEmits<{
     margin: 0;
 }
 .header-goto__input {
-    /* #570 : accommode aussi un hashid (#C.abc123) → 6.5rem au lieu de
-       4.5rem pour rester lisible sans clip. */
-    width: 6.5rem;
+    /* #608 david `p5jc5j` : placeholder = `#N`, l'input n'a plus à
+       afficher un hashid en placeholder → on revient à 4.5rem (avant
+       #570). Les hashids restent acceptés à la saisie (l'input scroll
+       horizontalement quand l'utilisateur tape plus long que la box). */
+    width: 4.5rem;
     padding: 0.2rem 0.5rem;
     border: 1px solid var(--p-content-border-color);
     border-radius: 0.3rem;
