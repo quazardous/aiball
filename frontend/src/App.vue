@@ -992,7 +992,12 @@ watch(showSnoozed, (v) => {
         display: none;
     }
     .aiball-main {
-        padding: 0.5rem;
+        /* #609 david : en smartphone on supprime le padding horizontal
+           pour que les list-rows et les comment-cards atteignent les
+           bords de l'écran (les bordures gauche/droite inutiles
+           disparaissent). On garde le padding vertical pour respirer.
+           Le padding interne des rows + cards garde le texte aéré. */
+        padding: 0.5rem 0;
     }
     /* #B.161 v3: footer settings rendered INSIDE main so it scrolls
        with the inbox content — user only sees it after scrolling

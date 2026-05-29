@@ -441,3 +441,21 @@
     flex-direction: column;
     gap: 0.4rem;
 }
+
+/* #609 david : en smartphone les comment-cards perdent leurs bordures
+   gauche/droite (et leur radius) pour s'étendre jusqu'aux bords de
+   l'écran — moins de chrome inutile sur petit viewport. Le padding
+   interne (0.7rem 0.9rem) reste pour que le texte ne touche pas le
+   bord.
+   #609 david `3rhsxf` follow-up : on retire AUSSI border-top pour ne
+   garder QUE border-bottom — sinon 2 cards adjacents = card1.bottom +
+   card2.top = double ligne visible. Avec seul bottom, chaque séparation
+   = 1px net. */
+@media (max-width: 720px) {
+    .comment-card {
+        border-left: none;
+        border-right: none;
+        border-top: none;
+        border-radius: 0;
+    }
+}

@@ -1057,4 +1057,18 @@ async function onAttachPicked(ev: Event) {
     resize: vertical;
 }
 .spacer { flex: 1; }
+
+/* #609 david `3rhsxf` : le composer (zone détail du message en bas du
+   thread) garde encore ses bordures gauche/droite en mobile → look
+   "card" alors que le reste de la liste est edge-to-edge. On drop
+   left/right border + radius pour s'aligner sur le pattern flat
+   smartphone. Top + bottom restent (cohérent avec la séparation
+   horizontale du thread). Padding interne conservé pour le texte. */
+@media (max-width: 720px) {
+    .composer {
+        border-left: none;
+        border-right: none;
+        border-radius: 0;
+    }
+}
 </style>
