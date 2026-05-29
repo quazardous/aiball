@@ -24,7 +24,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { LOOP_STATUS, MUX_CMD, idleMarkerPath, setTmuxStatus, tmuxName } from "./state.js";
+import { LOOP_STATUS, MUX_CMD, idleMarkerPath, loopStartTsPath, setTmuxStatus, tmuxName } from "./state.js";
 import { CL_ENV } from "./env-vars.js";
 
 function emit(): never {
@@ -185,7 +185,25 @@ if (source === "resume") {
 // as a separate flag for compatibility with `claude-loop --no-startup-ping`.
 try {
     writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-    setTmuxStatus(name!, LOOP_STATUS.IDLE);
-    log(`seed idle + exit (source=${source})`);
+    // #624 david `g36g6y` : ne pas flipper le BG à IDLE pendant la
+    // boot-grace — sinon la barre passe gris dès que le hook exit
+    // (typiquement au timeout du picker probe si claude met >15s à
+    // afficher le picker, ou si l'user attend au picker sans le
+    // dismisser). settleBoot du timer reste l'autorité pour la
+    // transition BG (à T+grace, avec ou sans armAfk10m selon mode).
+    const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
+    let inBoot = false;
+    try {
+        const startTs = parseInt(readFileSync(loopStartTsPath(sd!), "utf8").trim(), 10);
+        if (Number.isFinite(startTs) && startTs > 0) {
+            inBoot = (Date.now() - startTs) < bootGraceMs;
+        }
+    } catch { /* no marker → leave bar to settleBoot */ }
+    if (!inBoot) {
+        setTmuxStatus(name!, LOOP_STATUS.IDLE);
+        log(`seed idle + flip bar IDLE + exit (source=${source})`);
+    } else {
+        log(`seed idle (bar BG left to settleBoot — still in boot-grace) + exit (source=${source})`);
+    }
 } catch { /* swallow */ }
 emit();
