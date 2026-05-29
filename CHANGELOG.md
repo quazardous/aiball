@@ -19,6 +19,106 @@ narrative for the product as a whole.
 
 *Nothing yet.*
 
+## [0.9.3] — 2026-05-29
+
+### `claude.always_resume` is now on by default (#577)
+
+`claude-loop` (no flags) now spawns `claude` with `--resume`, so the
+most recent session in the cwd is picked up automatically. Opt-out
+per-tree via `.aiball.yaml` `claude.always_resume: false`, or
+per-invocation via an explicit `--no-resume`. An explicit `--resume`
+or `--resume=<id>` always wins regardless.
+
+### Your own reply is read at birth (#606)
+
+When you post a comment on a thread, the row sometimes fell back to
+unread because the auto-mark-read dwell had already snapshotted an
+`up_to_id` that predated your new comment. The composer now fires
+`markTicketRead(ticketId, newCommentId)` straight after a successful
+reply — cogito ergo scriptum, no more "my own message is unread until
+I revisit". Mark-read remains best-effort; a failure only warns.
+
+### Mark-read flicker now only fires on actually-unread threads (#596 follow-up)
+
+The "marking-as-read" envelope chip used to pulse on every thread
+visit because the `TicketSummary` didn't carry the per-consumer
+unread flag (only the inbox row did). The thread payload now ships
+that flag, and the `useAutoMarkRead` composable gates the flicker on
+it — re-visiting an already-read ticket leaves the chip statically
+gray. Also moved the chip off the H2 title into the subline so it's
+always visible (gray = read, green→gray flicker = transition).
+
+### `claude-loop init` gains `--agent` + actually writes the consumer to `.aiball.yaml` (#603)
+
+Two fixes on one ticket:
+
+- `--agent <id>` is now a documented alias for `--consumer <id>` on
+  `claude-loop init` (the `start` command already accepted both via
+  #420). Same alias added to top-level `aiball init` for parity.
+- `claude-loop init --consumer foo` (or `--agent foo`) now actually
+  seeds `consumer.agent: foo` into `.aiball.yaml`. Before, the
+  identity was forwarded only to the remote persistence
+  (`.aiball.local.yaml`) and silently dropped for the local consumer
+  block — so `aiball check` post-init reported the default identity
+  instead of what was just passed. If `.aiball.yaml` already exists,
+  the block is patched in place via the yaml Document API
+  (comments + unrelated keys preserved).
+
+`claude-loop start --init` forwards the same fields, so all three
+init surfaces share one UX.
+
+### F9 (or your `afk_key`) now toggles the bar visibly + always-on AFK log (#601)
+
+After the rename pass that fixed F9 firing the AFK detector, the bar
+still didn't bounce between `wait` (yellow) and `loop` (green) — it
+went `loop → wait → wait → wait`, because the F9 OFF marker armed a
+60-second user-grace window that the `_rest_word` resolver
+short-circuits on before checking AFK. F9 OFF now clears user-grace
+instead of touching it: the toggle is a clean `loop ↔ wait` cycle.
+The first text keystroke after F9 OFF naturally re-arms the
+user-grace via the existing typing-keystroke handler, so the
+"presence" semantics for real typing are unchanged.
+
+Also: the PTY proxy now writes an always-on log at
+`<state_dir>/afk.log` — one BOOT line with the configured combos
+(hex) + window/esc_takeover settings, then one line per AFK-detector
+feed with raw bytes, length, match/fire status, and a reason
+(`combo-match`, `debounce-residual`, `no-combo-match`,
+`no-combos-configured`). Lets you diagnose 3 cases without
+instrumenting: (a) AFK key intercepted by your WM/tmux before
+reaching the proxy → empty log, (b) AFK key reaches proxy but
+emits a non-standard byte sequence → `no-combo-match`, (c) AFK key
+fires correctly but the bar/state behaviour is off downstream.
+
+### `bin/fake-claude` — scriptable `claude` simulator (#605)
+
+New dev/test tool: a Python script that plays a YAML scenario on
+stdout/stdin, mimicking the parts of `claude` that `claude-loop`,
+its hooks, and the PTY proxy probe — boot splash, resume picker
+(`Resume session` + `Space to preview` verbatim), `* Resuming
+conversation…`, busy footer (`esc to interrupt`), `✶ Compacting`
+transition, idle composer, multi-choice question. Built-in screens
+match the regex markers claude-loop already relies on (no rewrites
+on the consumer side).
+
+The script uses a `uv run --script` shebang with PEP-723 inline
+dependencies (`rich`, `pyyaml`) — zero manual `pip install`, single
+file, deps resolved into a cached venv on first run. Renders via
+`rich`: rounded `Panel` for the composer (cursor positioned inside
+the box), `Group` for the resume picker, busy header above a
+`Live(Panel)` cyan that fills line by line for the streaming output
+(salvo style, configurable random 1–3 s between lines).
+
+5 example scenarios ship in `examples/fake-claude/scenarios/`:
+`default` (REPL — boot + loop on the idle composer), `picker-resume`,
+`quick-prompt`, `boot-stuck`, `busy-immediate`, `compacting`. Calling
+`fake-claude` with no argument loads the default scenario relative to
+the binary.
+
+`docs/FAKE-CLAUDE.md` documents the built-in screens, scenario shape,
+step / screen kinds, and the shipped examples. Requires `uv` in
+`PATH` (one-line install at `https://astral.sh/uv`).
+
 ## [0.9.2] — 2026-05-29
 
 ### Visual cue for the read-transition dwell (#596)
