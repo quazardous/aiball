@@ -119,7 +119,8 @@ claude_loop:
 claude:
   # Auto-inject `--resume` at spawn unless already passed on the CLI.
   # An explicit --resume / --resume=<id> / --no-resume always wins.
-  always_resume: false
+  # Default true (claude-loop resumes the most recent session by default).
+  always_resume: true
 
 # --- workflow hints -----------------------------------------------------------
 # claude-loop wraps `feature`-intent ticket wakes with a branch hint

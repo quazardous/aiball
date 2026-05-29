@@ -306,10 +306,11 @@ const DEFAULTS: AiballConfig = {
     // #538 david `hwxbkk` : options claude-binary spawn-time, namespacé `claude:`
     // pour le distinguer de `claude_loop:` (machinerie loop).
     claude: {
-        // Opt-in `--resume` auto-injection. Default false = comportement
-        // existant (claude démarre sur session vide). Flip per-tree via
-        // `.aiball.yaml claude.always_resume: true`.
-        always_resume: false,
+        // #577 david `czkwg4` : flipped from false → true. `claude-loop start`
+        // injects `--resume` automatically unless the user passed --no-resume
+        // (or an explicit --resume / --resume=<id>). Opt-out per-tree via
+        // `.aiball.yaml claude.always_resume: false`.
+        always_resume: true,
     },
     // #319 (david c2v7w8): both hints OFF by default — opt-in per project via
     // `.aiball.yaml` `workflow:`. Both off → no branch hint on feature wakes.
