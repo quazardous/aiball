@@ -939,29 +939,31 @@ def _paint_word(word):
         pass
 
 
-# #619 david `jjfdea` + `33zghr` + `f97nu6` + `a2f2gk` : the AFK chunk in
-# status-right is painted by the proxy. The `AFK:` LABEL itself colours
-# the AFK state (per `a2f2gk` — strict 3-state, AFK only, user-grace is
-# NOT in this segment) :
+# #619 david `jjfdea` + `33zghr` + `f97nu6` + `a2f2gk` + #622 : the AFK
+# chunk in status-right is painted by the proxy. David's mental model
+# inversion-clarification: `AFK` means "Away From Keyboard" → loop is
+# autonomous (the human IS away). The wait states are the OPPOSITE
+# semantic — human is present, holding the loop — so the label reads
+# `NOT AFK` there. Strict 3-state, AFK file only :
 #
-#   OFF (no AFK)        : `AFK:F9`            (label dim ≈ noir, pas de prefix)
-#   AFK 10min (F9 1×)   : `9m AFK:F9`         (label + countdown JAUNE)
-#   AFK ∞ (F9 2×)       : `∞ AFK:F9`          (label + ∞ ROUGE)
+#   OFF / loop          : `AFK:F9`            (label dim ≈ noir — "you're AFK, claude runs")
+#   AFK-off 10min       : `9m NOT AFK:F9`     (label + countdown JAUNE — "you're here, 10m hold")
+#   AFK-off ∞           : `∞ NOT AFK:F9`      (label + ∞ ROUGE — "you're here, indefinite hold")
 #
 # The remaining-minutes prefix in 10min mode is computed from the file's
 # absolute expiry timestamp every tick (cheap diff repaint) — toggle never
 # resets an in-progress countdown ; only OFF→10m freshly arms a new
 # expiry, ∞→OFF clears, 10m→∞ replaces with an indefinite hold.
-# User-grace lives elsewhere (the bar's `claude-wait` word in the black
-# island), no longer paints this chunk.
+# User-grace lives elsewhere (silently gates auto-pings via the wake
+# timer ; no longer paints any segment).
 def _format_afk_state():
     key = os.environ.get("CL_AFK_KEY_DISP") or "F9"
     fg_dim = os.environ.get("CL_AFK_LABEL_FG_DIM") or "colour238"
     fg_lit = os.environ.get("CL_AFK_LABEL_FG_LIT") or "colour16"
     mode = _afk_mode()
     if mode == "inf":
-        # AFK ∞ — label rouge.
-        return f"#[fg=colour196]∞ AFK:#[fg={fg_lit}]{key}"
+        # AFK ∞ hold — human is here, NOT AFK, label rouge.
+        return f"#[fg=colour196]∞ NOT AFK:#[fg={fg_lit}]{key}"
     if isinstance(mode, tuple):  # ("until", expiry_ts)
         rem = mode[1] - datetime.datetime.now().timestamp()
         if rem >= 60:
@@ -969,9 +971,9 @@ def _format_afk_state():
             prefix = f"{mins}m"
         else:
             prefix = f"{max(1, int(rem))}s"
-        # AFK 10min — label jaune.
-        return f"#[fg=colour178]{prefix} AFK:#[fg={fg_lit}]{key}"
-    # OFF — label dim (≈ noir), no countdown.
+        # AFK 10m hold — human is here, NOT AFK, label jaune.
+        return f"#[fg=colour178]{prefix} NOT AFK:#[fg={fg_lit}]{key}"
+    # OFF — human is away, AFK is "on" by default, label dim.
     return f"#[fg={fg_dim}]AFK:#[fg={fg_lit}]{key}"
 
 
