@@ -894,10 +894,21 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const keysHint = `#{@cl_afk_state} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", keysHint], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right-length", "60"], { stdio: "ignore" });
+    // #619 david `ge2emb` : suppress the tmux window-status list (the
+    // default `0:python3*` segment between status-left and status-right).
+    // A claude-loop session has exactly one window with a process name we
+    // don't pick, so the chip carries no useful signal — just visual noise
+    // ("c'est quoi ? pour moi ça sert à rien"). window-status-format is a
+    // WINDOW option, so scope to the loop window (-t tname targets it).
+    spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "window-status-format", ""], { stdio: "ignore" });
+    spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "window-status-current-format", ""], { stdio: "ignore" });
     // #274 + #619 : seed the per-owner status segments so the static format
     // never renders an unset `#{@cl_*}` (empty is fine; unset shows literally
     // on some tmux). The proxy and setTmuxStatus take ownership from here.
-    for (const [opt, val] of [["@cl_human", "#[fg=colour178]loop"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_afk_state", afkInitialOff]]) {
+    // #619 `zm2ehq` : seed @cl_human to `boot` (jaune) — the session opens
+    // in boot phase and the proxy/timer will repaint to wait/loop on their
+    // first tick. Avoids a flash of `loop` (vert) over the jaune boot bar.
+    for (const [opt, val] of [["@cl_human", "#[fg=colour178,bg=colour16]boot"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_afk_state", afkInitialOff]]) {
         spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
     }
     // #281 strategy A: tell psmux to touch the human-typing marker natively

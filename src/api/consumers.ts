@@ -204,10 +204,12 @@ consumersRouter.put("/consumers/:consumer_id/state", (req: Request, res: Respons
     }
     // #280: optional live human-presence flag pushed alongside the state.
     const human = typeof body.human === "boolean" ? body.human : undefined;
-    // #310/#426: optional presence word (stop/wait/ask/loop), mirrors the bar.
+    // #310/#426/#619: optional presence word (stop/wait/boot/loop), mirrors
+    // the bar. `ask` retired by #619 collapse ; `boot` added by #619 zm2ehq
+    // for the launch-grace dedicated word.
     const humanWord =
         body.human_word === "stop" || body.human_word === "wait"
-        || body.human_word === "ask" || body.human_word === "loop"
+        || body.human_word === "boot" || body.human_word === "loop"
             ? body.human_word
             : undefined;
     // #393: optional loop root, pushed on each heartbeat → marks the project local.

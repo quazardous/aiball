@@ -29,7 +29,8 @@ export function presenceWord(human?: boolean | null, word?: string | null): stri
 export function presenceClass(human?: boolean | null, word?: string | null): string {
     const w = presenceWord(human, word);
     if (w === "stop") return "ld-tag--stop";
-    // #426 — `ask` (ASK-grace) shares the grace-state tint on this coarser web view.
-    if (w === "wait" || w === "human" || w === "ask") return "ld-tag--wait";
+    // #619 — `boot` (launch-grace) shares the grace-state tint here ; `ask`
+    // is retired but legacy db rows may still surface it, keep tolerant.
+    if (w === "wait" || w === "human" || w === "boot" || w === "ask") return "ld-tag--wait";
     return "ld-tag--loop";
 }

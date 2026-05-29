@@ -859,9 +859,14 @@ function barColors(): AiballConfig["colors"] {
 const stateBg = (col: AiballConfig["colors"], s: LoopStatus): string =>
     s === "busy" ? col.busy_bg : s === "boot" ? col.boot_bg : col.idle_bg;
 
-// #305 + #619 tx2ukf : retired. The boot-grace branch in humanPresenceWord
-// was the only consumer ; it was dropped to avoid jaune-sur-jaune redundancy
-// (the bar BG already signals boot via the [boot] tag in setTmuxStatus).
+// #305 : seconds since the loop process started, used by the boot-grace
+// branch of humanPresenceWord (paints a dedicated `boot` word during the
+// launch window). #619 david `zm2ehq` : the claude-WORD island keeps its
+// black BG even during boot (bar BG yellow surrounds it), so a dedicated
+// `boot` word in yellow is legible AND distinct from `wait` — better than
+// reusing `wait` (was: jaune-sur-jaune) or dropping the branch entirely
+// (was: indistinguishable from `loop`).
+const PROC_START_MS = Date.now();
 
 /**
  * #302/#305: the 3-state human-presence WORD for the tmux bar (`@cl_human`),
@@ -876,22 +881,28 @@ const stateBg = (col: AiballConfig["colors"], s: LoopStatus): string =>
  * two in sync.
  */
 /**
- * #310/#426: the bare presence WORD (`stop` / `wait` / `ask` / `loop`), decoupled
+ * #310/#426: the bare presence WORD (`stop` / `wait` / `boot` / `loop`), decoupled
  * from the tmux colour formatting so the SAME logic feeds both the bar
  * (humanBarWord below) and the heartbeat push to the consumers page
  * (timer.ts → pushState). Keep in sync with pty-proxy.py's _rest_word.
  *   - `stop` — a human is typing NOW (human-typing < 5s)
- *   - `wait` — auto-pings FROZEN: boot-grace window (#305) OR user-grace
- *   - `ask`  — #426: past user-grace but within ASK-grace (not AFK) → auto-wakes
- *              are autonomous yet an AskUserQuestion dialog is still allowed
- *   - `loop` — autonomous (managed mode), incl. --no-wait; a question redirects
+ *   - `boot` — launch window (#305 boot-grace) ; claude still loading,
+ *              auto-pings frozen
+ *   - `wait` — auto-pings FROZEN: user-grace window after a submit OR AFK
+ *              marker armed
+ *   - `loop` — autonomous (managed mode), incl. --no-wait
  */
-export function humanPresenceWord(sd: string | undefined, graceSec: number): "stop" | "wait" | "loop" {
+export function humanPresenceWord(sd: string | undefined, graceSec: number): "stop" | "wait" | "boot" | "loop" {
     if (sd && humanIsTyping(sd)) return "stop";
-    // #619 david `tx2ukf` : boot ne paint PAS `wait` dans le bar word — le
-    // bar BG passe déjà en jaune via le tag [boot] de setTmuxStatus, donc
-    // doubler en mettant `wait` ici serait jaune-sur-jaune redondant. Le
-    // timer gate les wakes pendant boot-grace via sa propre branche.
+    // #305 + #619 `zm2ehq` : dedicated `boot` word during the launch grace
+    // window. The bar BG also paints jaune via [boot], but the claude-WORD
+    // island stays black — so jaune `boot` inside the black island is BOTH
+    // legible AND a stronger signal than reusing `wait` (which means a
+    // human is actively holding the loop, distinct from "still launching").
+    // Suppressed under --no-wait (boot grace is bypassed entirely there).
+    const noWait = process.env[CL_ENV.WAIT] === "0";
+    const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
+    if (!noWait && (Date.now() - PROC_START_MS) < bootGraceMs) return "boot";
     // #619 collapse — single user-grace window (default 600s) drives the
     // `wait` word. Auto-wakes are gated AND AskUserQuestion stays allowed
     // for the full window. A project that still sets `ask_grace_seconds`
@@ -905,12 +916,12 @@ export function humanPresenceWord(sd: string | undefined, graceSec: number): "st
 export function humanBarWord(sd: string | undefined, graceSec: number): string {
     // #302 david: black bg (colour16) behind the word so it stays readable over
     // any bar state colour (busy blue / idle gray / boot yellow). fg encodes the
-    // word: stop=red / wait=yellow / loop=green. Logic lives in humanPresenceWord.
-    // #619 collapse — `ask` (orange) retired ; all three remaining words are
-    // 4 chars so the pad-to-4 keeps the bar width constant by accident.
+    // word: stop=red / wait=yellow / boot=yellow / loop=green. Logic lives in
+    // humanPresenceWord. All four words are 4 chars so pad-to-4 keeps the bar
+    // width constant by accident.
     const word = humanPresenceWord(sd, graceSec);
     const fg = word === "stop" ? "colour196"
-        : word === "wait" ? "colour178"
+        : word === "wait" || word === "boot" ? "colour178"
         : "colour40";
     return `#[fg=${fg},bg=colour16]${word.padEnd(4)}`;
 }

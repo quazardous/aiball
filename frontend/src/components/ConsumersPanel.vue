@@ -142,7 +142,9 @@ function presenceLabel(r: Consumer): string {
 function presenceSeverity(r: Consumer): "danger" | "warn" | "success" {
     const w = presenceLabel(r);
     if (w === "stop") return "danger";
-    if (w === "wait" || w === "human" || w === "ask") return "warn";
+    // #619 — `boot` (launch-grace) tints warn like wait ; legacy `ask` rows
+    // (retired by #619 collapse) kept tolerant.
+    if (w === "wait" || w === "human" || w === "boot" || w === "ask") return "warn";
     return "success";
 }
 function activitySeverity(r: Consumer): "info" | "warn" | "secondary" {

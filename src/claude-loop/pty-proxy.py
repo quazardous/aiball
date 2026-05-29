@@ -207,9 +207,15 @@ HUMAN_TTL_SEC = 5  # doit suivre HUMAN_TYPING_TTL_SEC côté TS
 # loop=vert ; #426 : ask=orange.
 _HUMAN_STOP = "#[fg=colour196,bg=colour16]stop"
 _HUMAN_WAIT = "#[fg=colour178,bg=colour16]wait"
-# #426 + #619 collapse : the 4e mot `ask` (orange) a été retiré.
-# La fenêtre unique user-grace (max user/ask, default 600s) gate
-# auto-wakes ET AskUserQuestion, donc plus besoin d'un visuel distinct.
+# #619 david `zm2ehq` : 4ème mot dédié `boot` (jaune) pendant la boot-grace.
+# Le bar BG passe aussi en jaune via [boot], mais l'ilot noir de claude-WORD
+# le laisse parfaitement lisible — donc le `boot` jaune sur ilot noir signale
+# clairement "en cours de lancement", distinct de `wait` (humain qui tient
+# activement le loop) et de `loop` (autonome).
+_HUMAN_BOOT = "#[fg=colour178,bg=colour16]boot"
+# #426 + #619 collapse : le mot `ask` (orange) a été retiré. La fenêtre
+# unique user-grace (max user/ask, default 600s) gate auto-wakes ET
+# AskUserQuestion, donc plus besoin d'un visuel distinct.
 _HUMAN_LOOP = "#[fg=colour40,bg=colour16]loop"
 # #302/#345: --no-wait (CL_WAIT=0) skips only the boot-grace; a present human
 # (live typing → `stop`, armed user-grace → `wait`) is still reflected, aligned
@@ -881,14 +887,14 @@ def _boot_grace_remaining():
 
 
 def _rest_word():
-    """Mot au repos (pas de frappe) : `wait` quand la user-grace est
-    active OU l'AFK est armé (mode `inf` ou `until > now`), sinon `loop`.
-    #619 david `tx2ukf` : boot ne paint PAS `wait` — le bar BG passe
-    déjà en jaune via le tag [boot] de setTmuxStatus, donc l'info "boot
-    phase" est déjà visible. Doubler en mettant `wait` dans le bar word
-    serait redondant. La décomposition fine (countdown / ∞ / couleur)
+    """Mot au repos (pas de frappe) : `boot` pendant la boot-grace
+    (#619 zm2ehq — mot dédié, jaune sur l'ilot noir), `wait` quand la
+    user-grace est active OU l'AFK est armé (mode `inf` ou `until > now`),
+    sinon `loop`. La décomposition fine AFK (countdown / ∞ / couleur)
     vit à côté du hint AFK:F9 dans le status-right — voir
     `_format_afk_state`."""
+    if _boot_grace_remaining() > 0.0:
+        return _HUMAN_BOOT
     if _user_grace_remaining() > 0.0:
         return _HUMAN_WAIT
     if _afk_mode() is not None:
