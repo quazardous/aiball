@@ -95,6 +95,7 @@ import {
     type WakeHint,
 } from "./state.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
+import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
 import { canFlipBgFromBoot, computeLoopView } from "./loop-state.js";
 import { CL_ENV } from "./env-vars.js";
 import { stripMarkdown } from "./markdown-strip.js";
@@ -464,16 +465,23 @@ async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
 
 // #264: timestamp of the loop's last send-keys, so the human-typing
 // detector can exclude the loop's own injected text from "a human typed".
-/** #624 david `62ys4g` + #629 `44ca88` — capture the pane and write the
- *  pane-* markers so the LoopState service sees the freshest values.
- *  Called by tryWake (out-of-band SSE) and the heartbeat probe (~30s).
+/** #624 david `62ys4g` + #629 `44ca88` + #611 `78seq9` — capture the pane
+ *  and write the pane-* markers so the LoopState service sees the freshest
+ *  values. Called by tryWake (out-of-band SSE) and the heartbeat probe
+ *  (~30s).
  *
  *  `paneReady` is smarter than a raw "prompt signature visible" check :
  *  picker UI text (`Resume session`, `Resume from summary`, `Don't ask
  *  me again`, `Compact this conversation`) AND transient loaders
  *  (`Resuming conversation…`, `Compacting conversation`) all force
  *  `paneReady=false`. Without this guard, the splash's `Claude Code v`
- *  match → ends boot prematurely (#629 Bug 4 david `bgbkmg` + `jt3d6t`). */
+ *  match → ends boot prematurely (#629 Bug 4 david `bgbkmg` + `jt3d6t`).
+ *
+ *  #611 `78seq9` : also detect API errors here (api-500, rate-limited,
+ *  overloaded). Stop-hook does the same on turn-end ; the heartbeat
+ *  catches errors that crashed claude mid-turn (no Stop hook fires).
+ *  `armErrorBackoff` writes `busy-defer-until` which the state machine
+ *  already gates against — no new plumbing needed. */
 function refreshPaneMarkers(): void {
     if (!sd) return;
     const paneText = capturePane();
@@ -485,6 +493,17 @@ function refreshPaneMarkers(): void {
     setPaneReady(sd, promptVisible && !pickerOrTransient);
     setCompacting(sd, snap.special === "compacting");
     setInterrupted(sd, paneShowsInterrupted(paneText));
+    // #611 — error detection in heartbeat probe (parallel to stop-hook).
+    const errId = matchPaneError(paneText);
+    if (errId) {
+        const bo = armErrorBackoff(sd, errId);
+        log(`probe: api error '${errId}' detected → backoff ${bo.ms}ms (attempt ${bo.attempts}, until=${bo.untilIso})`);
+    } else if (readErrorBackoff(sd)) {
+        // Pane is clean again — clear the backoff counter so a future
+        // error restarts at the base delay.
+        resetErrorBackoff(sd);
+        log("probe: pane error cleared — resetting backoff counter");
+    }
 }
 
 let lastSendAt = 0;
