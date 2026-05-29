@@ -224,35 +224,66 @@ Both signals collapse into one human-presence word on the status bar
 |--------|--------|--------------------------------------------------------------|
 | `stop` | red    | a human is typing **now** (`human-typing` < 5s)              |
 | `wait` | yellow | auto-pings **frozen** — boot-grace at launch *or* user-grace |
-| `ask`  | orange | past user-grace but within **ask-grace** — auto-wakes are autonomous yet an `AskUserQuestion` dialog is still allowed (see below) |
+| `ask`  | orange | past user-grace but within **ask-grace** — auto-pings still frozen and an `AskUserQuestion` dialog still allowed |
 | `loop` | green  | autonomous, gate open (managed mode / `--no-wait`)           |
 
 When the proxy is alive it paints this segment live (instant on the
 first keystroke); otherwise the timer paints it from the markers.
 
-### AskUserQuestion in a headless loop
+### The take-over workflow — what happens when you type
 
-`AskUserQuestion` is gated by a `PreToolUse` hook — but on a **separate,
-longer window** than the auto-wake user-grace. Two distinct grace windows
-share the one `user-took-over` marker:
+The two windows are nested in length, and they share the **same**
+`user-took-over` marker (refreshed on every text keystroke):
 
-- **user-grace** (`CL_USER_GRACE_SEC`, default **60s**) — how long auto-wakes
-  stay frozen after a human prompt. Drives the `wait` bar word.
-- **ask-grace** (`CL_ASK_GRACE_SEC`, default **600s / 10min**) — how long an
-  `AskUserQuestion` dialog is still **allowed** (the bet: a present-but-quiet
-  human can still click). A stalled question is cheap vs a lost one.
+- **user-grace** (`CL_USER_GRACE_SEC`, default **60s**) — short
+  window that paints the bar `wait` (yellow) and freezes auto-pings.
+  "I just typed; back off for a minute."
+- **ask-grace** (`CL_ASK_GRACE_SEC`, default **600s / 10min**) —
+  longer window that paints the bar `ask` (orange), keeps auto-pings
+  frozen *and* keeps `AskUserQuestion` dialogs allowed. "I might
+  still be sitting here ; if Claude needs an answer it can pop a
+  dialog ; don't barge with auto-wakes."
+- Past ask-grace : bar `loop` (green), auto-pings resume, an
+  `AskUserQuestion` would be denied and redirected to the aiball
+  ticket thread.
 
-So between ~60s and ~600s after your last keystroke the auto-wakes are
-autonomous yet a multi-choice dialog can still pop — that's the `ask` (orange)
-bar word, surfacing the otherwise-invisible window. Past ask-grace (or once you
-flag yourself AFK with the afk key), the hook **denies** the dialog and
-redirects Claude to ask on the aiball ticket thread instead. With a human
-present the dialog is **allowed** — best of both worlds, not an amputation.
+Time-line of a single human interaction :
 
-(Orthogonal third gate: the Stop hook / timer also read `esc to
-interrupt` in the pane footer and arm a `busy-defer-until` window so a
-wake isn't fired while claude is visibly mid-turn. That's claude-busy,
-not human-present, but it's the other reason a tick may skip.)
+```
+T=0   you type something on the pane
+      ├─ bar = stop (red, ~5s)
+      ├─ user-took-over marker mtime = now
+      │
+T+5   typing stopped
+      └─ bar = wait (yellow)
+      │
+T+60  user-grace expired
+      └─ bar = ask (orange) ← auto-wakes STILL frozen, AskUserQuestion still allowed
+      │
+T+600 ask-grace expired
+      └─ bar = loop (green) ← autonomous again
+```
+
+**F9 to release early.** The AFK key (default `f9`, configurable via
+`.aiball.yaml claude_loop.afk_key`) toggles an explicit AFK marker
+that bypasses both windows :
+
+- F9 (off → on) : bar = `wait` indefinitely, auto-pings frozen,
+  `AskUserQuestion` denied. "I'm AFK, redirect questions to the
+  ticket thread."
+- F9 (on → off) : marker cleared, bar reverts to `loop` (or whatever
+  the natural state computes to). Any text keystroke ALSO clears the
+  AFK marker.
+
+So the rule of thumb : type to engage (locks the loop out for up to
+10 minutes), F9 to either *force* lock-out beyond that or *release*
+faster than the natural decay.
+
+(Orthogonal third gate : the Stop hook / timer also read `esc to
+interrupt` in the pane footer and arm a `busy-defer-until` window so
+a wake isn't fired while claude is visibly mid-turn. That's
+claude-busy, not human-present, but it's the other reason a tick
+may skip.)
 
 ---
 
