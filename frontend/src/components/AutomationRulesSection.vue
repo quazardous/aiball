@@ -25,6 +25,20 @@ import {
 } from "../lib/api";
 import { bus, useBus } from "../lib/bus";
 import { formatActionCompact, formatExpressionCompact } from "../lib/format";
+import DataList, { type DataListColumn } from "./ui/DataList.vue";
+
+// #614 david `79nsue` — migrate rule-list to DataList columns-mode. All
+// columns are NON-sortable on purpose : the rules are evaluated in the
+// order shown (first-match-wins), exposing a sort UI would lie about the
+// runtime behavior. The mobile sort chooser auto-hides for the same
+// reason (no sortable columns = nothing to show).
+const columns: DataListColumn[] = [
+    { key: "rank", label: "#", cellClass: "rule-col-rank" },
+    { key: "label", label: "Rule", cellClass: "rule-col-label" },
+    { key: "triggers", label: "On", cellClass: "rule-col-triggers" },
+    { key: "action", label: "Action", cellClass: "rule-col-action" },
+    { key: "enabled", label: "Enabled", cellClass: "rule-col-enabled" },
+];
 
 const emit = defineEmits<{ (e: "open-edit", id: string): void }>();
 
@@ -67,6 +81,15 @@ function ruleLabel(r: AutomationRule): string {
     return formatExpressionCompact(r.expression);
 }
 
+function ruleRowClass(r: AutomationRule): unknown {
+    return {
+        "rule-row": true,
+        "rule-row--disabled": !r.enabled,
+        "rule-row--yaml": r.id < 0,
+        "dl-clickable": true,
+    };
+}
+
 useBus("automation.refresh", () => load());
 onMounted(load);
 </script>
@@ -91,52 +114,53 @@ onMounted(load);
                 detail.
             </p>
 
-            <div v-if="!sortedRules.length" class="aiball-empty">
-                No automation rules yet. <a href="#" @click.prevent="emit('open-edit', 'new')">Create your first rule.</a>
-            </div>
-
-            <ol class="rule-list">
-                <li
-                    v-for="(r, i) in sortedRules"
-                    :key="r.id"
-                    class="rule-item"
-                    :class="{ disabled: !r.enabled, 'rule-item--yaml': r.id < 0 }"
-                >
-                    <div class="rule-rank">{{ i + 1 }}</div>
-                    <button
-                        class="rule-body"
-                        type="button"
-                        @click="emit('open-edit', String(r.id))"
-                    >
-                        <div class="rule-label">
-                            <span v-if="r.id < 0" class="source-badge" title="defined in .aiball.yaml — read-only">
-                                <i class="pi pi-file" /> yaml
-                            </span>
-                            <span class="rule-label__text">{{ ruleLabel(r) }}</span>
-                        </div>
-                        <div class="rule-meta">
-                            <span class="rule-meta__triggers">on {{ r.triggers.join(", ") || "(no triggers)" }}</span>
-                            <span class="rule-meta__sep">→</span>
-                            <span class="rule-meta__action">{{ r.actions.map(formatActionCompact).join(" + ") }}</span>
-                        </div>
-                    </button>
-                    <div class="rule-controls">
-                        <template v-if="r.id < 0">
-                            <!-- YAML rule : read-only, edit the file. -->
-                            <span class="aiball-explainer aiball-explainer--muted yaml-readonly">
-                                read-only
-                            </span>
-                        </template>
-                        <template v-else>
-                            <ToggleSwitch
-                                :model-value="!!r.enabled"
-                                @update:model-value="(v) => toggle(r, !!v)"
-                                @click.stop
-                            />
-                        </template>
+            <DataList
+                table-class="rules-table"
+                :columns="columns"
+                :rows="sortedRules"
+                :row-key="(r) => r.id"
+                :row-class="ruleRowClass"
+                :is-empty="sortedRules.length === 0"
+                @row-click="(r: AutomationRule) => emit('open-edit', String(r.id))"
+            >
+                <template #empty>
+                    <div class="aiball-empty">
+                        No automation rules yet. <a href="#" @click.prevent="emit('open-edit', 'new')">Create your first rule.</a>
                     </div>
-                </li>
-            </ol>
+                </template>
+
+                <template #cell-rank="{ row }">
+                    <span class="rule-rank-pill">{{ sortedRules.indexOf(row as AutomationRule) + 1 }}</span>
+                </template>
+
+                <template #cell-label="{ row }">
+                    <span v-if="(row as AutomationRule).id < 0" class="source-badge" title="defined in .aiball.yaml — read-only">
+                        <i class="pi pi-file" /> yaml
+                    </span>
+                    <span class="rule-label__text">{{ ruleLabel(row as AutomationRule) }}</span>
+                </template>
+
+                <template #cell-triggers="{ row }">
+                    <span class="rule-triggers">{{ (row as AutomationRule).triggers.join(", ") || "(no triggers)" }}</span>
+                </template>
+
+                <template #cell-action="{ row }">
+                    <span class="rule-action">{{ (row as AutomationRule).actions.map(formatActionCompact).join(" + ") }}</span>
+                </template>
+
+                <template #cell-enabled="{ row }">
+                    <template v-if="(row as AutomationRule).id < 0">
+                        <span class="yaml-readonly">read-only</span>
+                    </template>
+                    <template v-else>
+                        <ToggleSwitch
+                            :model-value="!!(row as AutomationRule).enabled"
+                            @update:model-value="(v) => toggle(row as AutomationRule, !!v)"
+                            @click.stop
+                        />
+                    </template>
+                </template>
+            </DataList>
         </section>
 
         <div v-if="error" class="aiball-form-error">
@@ -152,104 +176,32 @@ onMounted(load);
     justify-content: space-between;
     gap: 1rem;
 }
-.rule-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-.rule-item {
-    display: grid;
-    grid-template-columns: 2rem 1fr auto;
-    gap: 0.7rem;
-    align-items: stretch;
-    padding: 0.6rem 0.8rem;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.4rem;
-    background: var(--p-content-background, transparent);
-    transition: background 0.1s;
-}
-.rule-item:hover {
-    background: var(--p-surface-50);
-}
-.rule-item.disabled {
-    opacity: 0.55;
-    background: var(--p-surface-50);
-}
-.rule-item--yaml {
-    border-left: 3px solid var(--p-blue-500);
-    background: color-mix(in srgb, var(--p-blue-500) 4%, transparent);
-}
-.rule-item--yaml:hover {
-    background: color-mix(in srgb, var(--p-blue-500) 8%, transparent);
-}
-.rule-rank {
-    width: 1.8rem;
-    height: 1.8rem;
+.rule-rank-pill {
+    display: inline-flex;
+    width: 1.6rem;
+    height: 1.6rem;
     border-radius: 50%;
     background: var(--p-surface-100);
     color: var(--p-text-color);
     font-weight: 600;
-    display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.85rem;
-    align-self: center;
-}
-.rule-body {
-    /* The row's body is a button — full row of the label/meta area is
-       clickable to open the rule detail page. Reset button-ish styles
-       to keep the look identical to the previous non-clickable rendering. */
-    all: unset;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    text-align: left;
-    min-width: 0;
-}
-.rule-body:focus-visible {
-    outline: 2px solid var(--p-primary-color);
-    outline-offset: 2px;
-    border-radius: 0.3rem;
-}
-.rule-label {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-weight: 500;
-    font-size: 0.95rem;
-    line-height: 1.3;
+    font-size: 0.8rem;
 }
 .rule-label__text {
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-weight: 500;
+    font-size: 0.92rem;
 }
-.rule-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    align-items: center;
-    font-size: 0.8rem;
+.rule-triggers {
+    font-family: ui-monospace, monospace;
+    font-size: 0.82rem;
     color: var(--p-text-muted-color);
 }
-.rule-meta__triggers {
+.rule-action {
     font-family: ui-monospace, monospace;
-}
-.rule-meta__sep {
-    opacity: 0.6;
-}
-.rule-meta__action {
+    font-size: 0.82rem;
     color: var(--p-purple-600);
-    font-family: ui-monospace, monospace;
-}
-.rule-controls {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
 }
 .source-badge {
     display: inline-flex;
@@ -259,12 +211,72 @@ onMounted(load);
     color: var(--p-blue-600);
     padding: 0.05rem 0.4rem;
     border-radius: 0.25rem;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     font-family: ui-monospace, monospace;
+    margin-right: 0.4rem;
 }
 .yaml-readonly {
     font-size: 0.75rem;
     font-style: italic;
-    align-self: center;
+    color: var(--p-text-muted-color);
+}
+/* YAML rules get a discreet left accent + tinted bg, same intent as
+   the old `.rule-item--yaml` border-left. Applied via rowClass. */
+:deep(.rules-table tr.rule-row--yaml td:first-child) {
+    border-left: 3px solid var(--p-blue-500);
+}
+:deep(.rules-table tr.rule-row--yaml) {
+    background: color-mix(in srgb, var(--p-blue-500) 4%, transparent);
+}
+:deep(.rules-table tr.rule-row--yaml:hover) {
+    background: color-mix(in srgb, var(--p-blue-500) 8%, transparent);
+}
+:deep(.rules-table tr.rule-row--disabled) {
+    opacity: 0.55;
+}
+/* Narrow viewports — mobile card pattern (Projects/Nodes-style). The
+   data-label injected by DataList prefixes each cell so the values stay
+   self-describing without a thead. Rank stays alone on its own line. */
+@media (max-width: 720px) {
+    :deep(.rules-table thead) {
+        display: none;
+    }
+    :deep(.rules-table),
+    :deep(.rules-table tbody),
+    :deep(.rules-table tr) {
+        display: block;
+        width: 100%;
+    }
+    :deep(.rules-table tr) {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 0.25rem 0.7rem;
+        border: none;
+        border-bottom: 1px solid var(--p-content-border-color);
+        padding: 0.5rem 0.7rem;
+    }
+    :deep(.rules-table td) {
+        flex: 0 0 auto;
+        padding: 0;
+        border: none;
+        text-align: left !important;
+        width: auto !important;
+        min-height: 0;
+        display: inline-flex;
+        align-items: baseline;
+    }
+    :deep(.rules-table td:not(.rule-col-rank):not(.rule-col-label)[data-label]::before) {
+        content: attr(data-label) ": ";
+        color: var(--p-text-muted-color);
+        font-size: 0.78rem;
+        margin-right: 0.3rem;
+    }
+    :deep(.rules-table tr.rule-row--yaml td:first-child) {
+        border-left: none;
+    }
+    :deep(.rules-table tr.rule-row--yaml) {
+        border-left: 3px solid var(--p-blue-500);
+    }
 }
 </style>
