@@ -82,13 +82,16 @@ claude_loop:
   # `max(user_grace_seconds, ask_grace_seconds)`. New configs should set
   # only `user_grace_seconds`.
 
-  # AFK key — cycles a 3-state hold (OFF → 10 min auto-release → ∞ → OFF).
-  # The visible, explicit hold control: bar shows `wait` while armed,
-  # status-right reads `Nm NOT AFK:F9` (jaune 10m / rouge ∞) or `AFK:F9`
-  # (dim) when off. Chord notation: VS Code, SPACE = OR. f9 has no
-  # OS/tmux/claude conflict. Avoid alt+… (WM/terminal), ctrl+s/q (flow
-  # control), ctrl+c/d/z/b and readline keys, f1/f10/f11/f12. Verify any
-  # candidate with `claude-loop debug-keys`. Requires the PTY proxy.
+  # AFK key — binary toggle between `AFK` (autonomous loop) and
+  # `NOT AFK ∞` (indefinite hold). The 10-min auto-release hold is
+  # reached only via typing (resets the 10:00 countdown on every
+  # keystroke ; no-op in ∞ mode — only F9 releases that). Bar shows
+  # `wait` while armed, status-right reads `Nm NOT AFK:F9` (jaune 10m)
+  # / `∞ NOT AFK:F9` (rouge ∞) / `AFK:F9` (dim, off). Chord notation:
+  # VS Code, SPACE = OR. f9 has no OS/tmux/claude conflict. Avoid alt+…
+  # (WM/terminal), ctrl+s/q (flow control), ctrl+c/d/z/b and readline
+  # keys, f1/f10/f11/f12. Verify any candidate with
+  # `claude-loop debug-keys`. Requires the PTY proxy.
   afk_key: "f9"
 
   # Post-fire key-repeat debounce (ms): a held chord repeats the same

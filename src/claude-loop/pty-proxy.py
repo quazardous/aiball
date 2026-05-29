@@ -325,13 +325,44 @@ def clear_afk():
         pass
 
 
+def toggle_afk():
+    """#622 david `jzcgmh` : F9 = pure 2-state toggle AFK ↔ NOT AFK ∞.
+    The 10-min hold is reached ONLY via typing (see arm_afk_10m).
+       AFK (file absent)  → NOT AFK ∞ (file = "inf")
+       NOT AFK 10m or ∞   → AFK (clear, also clear user-grace so wake
+                            gate frees up alongside the visible state)
+    """
+    mode = _afk_mode()
+    if mode is None:
+        set_afk_infinite()  # AFK → NOT AFK ∞
+        return
+    # NOT AFK (any) → AFK : explicit release of both AFK file AND
+    # user-grace, so wake gate unfreezes alongside the bar.
+    clear_afk()
+    clear_user_grace()
+
+
+def arm_afk_10m():
+    """#622 david `jzcgmh` : typing arms/refreshes a NOT AFK 10m hold
+    EXCEPT when already in NOT AFK ∞ (only F9 can release that).
+    From AFK : arm 10m fresh. From NOT AFK 10m : reset the timer to
+    10:00. From NOT AFK ∞ : no-op."""
+    if _afk_mode() == "inf":
+        return
+    set_afk_until(600)
+
+
+# Legacy cycle_afk alias kept for replay shim compatibility — old NDJSON
+# runs still emit `cycle_afk` markers ; we map them to the new toggle
+# semantics (the test rewrite happens alongside).
 def cycle_afk():
-    """#619 david `f97nu6` : F9 cycle through 3 states.
-       OFF       → AFK 10min (orange countdown)
-       AFK 10min → AFK ∞ (red infinite)
-       AFK ∞     → OFF
-    Pure marker effect — no side touch on user-grace (F9 is now
-    orthogonal to typing, david `3ezsk5`)."""
+    """Deprecated alias for toggle_afk (#622 jzcgmh refactor)."""
+    toggle_afk()
+
+
+def _cycle_afk_legacy_3state():
+    """Pre-#622 cycle: OFF → 10m → ∞ → OFF. Kept dead-code for reference
+    in case the 3-state visualisation comes back. Not wired anywhere."""
     mode = _afk_mode()
     if mode is None:
         set_afk_until(600)  # 10 minutes
@@ -574,12 +605,11 @@ class _Decider:
         #     « esc esc toggle [on] mais après une seule pression suffit [off] »).
         if self.afk.feed(data, now):
             d["afk_fired"] = True
-            # #619 david `3ezsk5` + `f97nu6` : F9 is now a 3-state cycle
-            # (OFF → 10min → ∞ → OFF) and pilots ONLY the AFK marker.
-            # The user-grace marker is untouched — that knob belongs to
-            # typing, not AFK. `_rest_word` derives wait/loop from the
-            # union of {boot, user-grace, AFK} downstream.
-            d["markers"] += ["cycle_afk"]
+            # #622 david `jzcgmh` : F9 = pure 2-state toggle AFK ↔ NOT
+            # AFK ∞ (the 10m hold is reached only via typing). On the
+            # transition NOT AFK → AFK, toggle_afk also clears
+            # user-grace so the wake gate frees up alongside.
+            d["markers"] += ["toggle_afk"]
             d["word"] = "rest"
             return d
 
@@ -596,14 +626,26 @@ class _Decider:
         #     l'ancien buffer.
         if is_typing_keystroke(data):
             d["typing"] = True
-            d["markers"] += ["clear_afk", "touch_marker", "touch_user_grace"]
-            self.afk_active = False   # toute frappe texte = l'humain est de retour
+            # #622 david `jzcgmh` : typing arms NOT AFK 10m (or refreshes
+            # an existing 10m countdown). In NOT AFK ∞ mode it's a no-op
+            # (only F9 can release the indefinite hold). Stays distinct
+            # from `touch_user_grace` for back-compat — both arm the
+            # same effective 10-min window but mean different things.
+            d["markers"] += ["arm_afk_10m", "touch_marker", "touch_user_grace"]
+            # Post-marker: AFK is always active after typing — either
+            # we just armed 10m (was OFF or refreshed), or we're in ∞
+            # (no-op, was already active).
+            self.afk_active = True
             self.last_keystroke = now
             d["word"] = "stop"
         elif self.esc_takeover and _is_lone_esc(data):
             d["lone_esc"] = True
-            d["markers"] += ["clear_afk", "touch_user_grace"]
-            self.afk_active = False
+            # #622 david `jzcgmh` : ESC behaves like typing — arms NOT
+            # AFK 10m (or refreshes), no-op in ∞. The "interrupt
+            # claude" payload still forwards below ; we just don't
+            # release the AFK hold the way the old `clear_afk` did.
+            d["markers"] += ["arm_afk_10m", "touch_user_grace"]
+            self.afk_active = True
             d["word"] = "rest"
         d["forward"] += data
         return d
@@ -679,8 +721,15 @@ def _run_replay(args):
                         afk_active = True
                     elif m == "clear_afk":
                         afk_active = False
-                    elif m == "cycle_afk":
+                    elif m == "cycle_afk" or m == "toggle_afk":
+                        # #622 jzcgmh: F9 = 2-state toggle AFK ↔ NOT AFK ∞.
                         afk_active = not afk_active
+                    elif m == "arm_afk_10m":
+                        # #622 jzcgmh: typing arms 10m unless in ∞. In
+                        # the simulator we don't distinguish 10m vs ∞,
+                        # so we just mark active (was-active stays
+                        # active, was-off becomes active).
+                        afk_active = True
                     elif m == "touch_user_grace":
                         grace_until = clock + grace
                     elif m == "clear_user_grace":
@@ -736,10 +785,12 @@ def _run_replay_log(args):
                 state["afk_active"] = True
             elif m == "clear_afk":
                 state["afk_active"] = False
-            elif m == "cycle_afk":
-                # #619 : cycle simulation = 2-state toggle in the replay
-                # log (same shortcut as _run_replay above).
+            elif m == "cycle_afk" or m == "toggle_afk":
+                # #622 jzcgmh: F9 = 2-state toggle AFK ↔ NOT AFK ∞.
                 state["afk_active"] = not state["afk_active"]
+            elif m == "arm_afk_10m":
+                # #622 jzcgmh: typing arms 10m unless in ∞.
+                state["afk_active"] = True
             elif m == "touch_user_grace":
                 state["grace_until"] = clock + grace
             elif m == "clear_user_grace":
@@ -1174,14 +1225,18 @@ def main(argv):
         nonlocal current_word
         for m in dec.get("markers", []):
             if m == "set_afk":
-                # #619 : legacy set/clear kept callable for replay shim
-                # + future code that wants a hard-set. F9 itself now uses
-                # cycle_afk.
+                # #619/#622 : legacy set/clear kept callable for replay
+                # shim + future code that wants a hard-set. F9 itself
+                # uses toggle_afk now.
                 set_afk_infinite()
             elif m == "clear_afk":
                 clear_afk()
-            elif m == "cycle_afk":
-                cycle_afk()
+            elif m == "cycle_afk" or m == "toggle_afk":
+                # #622 jzcgmh: F9 path. cycle_afk is the legacy alias.
+                toggle_afk()
+            elif m == "arm_afk_10m":
+                # #622 jzcgmh: typing / ESC path.
+                arm_afk_10m()
             elif m == "touch_marker":
                 touch_marker()
             elif m == "touch_user_grace":

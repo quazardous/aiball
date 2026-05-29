@@ -278,24 +278,29 @@ T+600 user-grace expired
 `max(user_grace_seconds, ask_grace_seconds)`, never shrinks. New
 configs should set only `user_grace_seconds`.)
 
-**F9 cycles a 3-state AFK toggle.** The AFK key (default `f9`,
-configurable via `.aiball.yaml claude_loop.afk_key`) is the visible,
-explicit hold control. Each press advances :
+**F9 is the binary toggle ; typing arms the 10-minute hold.** The
+AFK state machine has three states but only two inputs :
 
-- **OFF → 10 min** : bar = `wait` (yellow), status-right
-  `9m NOT AFK:F9` countdown. The 10-min timer is absolute — it
-  ticks down from the file's stored expiry, so re-paints reflect
-  the real remaining time (the toggle never "resets" an in-flight
-  timer).
-- **10 min → ∞** : bar = `wait` (yellow word, red label
-  `∞ NOT AFK:F9`). Held indefinitely until the next F9 press.
-- **∞ → OFF** : bar = `loop` (green), status-right back to
-  `AFK:F9` dim.
+- **F9** = explicit toggle between `AFK` (autonomous) and the
+  indefinite `NOT AFK ∞` hold.
+- **Text keystroke / ESC** = arm or refresh the `NOT AFK 10 min`
+  countdown — except in `∞` mode, where typing is a no-op (only
+  F9 releases the indefinite hold).
 
-F9 only writes the AFK file ; it does **not** touch user-grace.
-The two are orthogonal — typing arms user-grace silently, F9 arms
-AFK visibly. A corrupt AFK file (empty or unparseable content) is
-auto-cleared on next read so the cycle never stalls.
+State transitions :
+
+| From          | F9                  | Typing                  | Timer expiry |
+|---------------|---------------------|-------------------------|--------------|
+| AFK           | → NOT AFK ∞         | → NOT AFK 10 min        | n/a          |
+| NOT AFK 10 min | → AFK (clear)      | reset countdown to 10:00 | → AFK        |
+| NOT AFK ∞     | → AFK (clear)       | no-op                   | n/a          |
+
+F9 from any NOT AFK state also clears `user-took-over` so the wake
+gate frees up alongside the visible release. The 10-minute timer is
+absolute (stored as expiry timestamp), so re-paints reflect the
+real remaining time and the toggle never accidentally resets an
+in-flight countdown. A corrupt AFK file (empty or unparseable
+content) is auto-cleared on next read so the cycle never stalls.
 
 (Orthogonal third gate : the Stop hook / timer also read `esc to
 interrupt` in the pane footer and arm a `busy-defer-until` window so

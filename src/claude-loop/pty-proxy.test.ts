@@ -78,8 +78,8 @@ test("combo unique → TOGGLE ON, rien forwardé à claude", { skip: SKIP }, () 
     assert.equal(v[0].afk_fired, true);
     assert.equal(v[0].afk_active, true);
     assert.equal(v[0].forward, "");            // le combo est avalé
-    // #619 : F9 emits `cycle_afk` (3-state cycle) instead of `set_afk`.
-    assert.ok(v[0].markers.includes("cycle_afk"));
+    // #622 jzcgmh : F9 = pure 2-state toggle, emits `toggle_afk`.
+    assert.ok(v[0].markers.includes("toggle_afk"));
 });
 
 test("combo x2 → ON puis OFF (vrai toggle)", { skip: SKIP }, () => {
@@ -130,11 +130,18 @@ test("frappe texte ordinaire → typing, forward, mot stop", { skip: SKIP }, () 
     assert.ok(v[0].markers.includes("touch_user_grace"));
 });
 
-test("frappe ordinaire APRÈS afk → clear_afk (toute activité = retour humain)", { skip: SKIP }, () => {
-    const v = replay("0 1b61\n2000 61\n", ALT_A);  // combo (on) puis 'a'
-    assert.equal(v[0].afk_active, true);
-    assert.equal(v.at(-1)!.afk_active, false);
-    assert.ok(v.at(-1)!.markers.includes("clear_afk"));
+test("frappe ordinaire APRÈS afk ∞ → no-op (only F9 peut release l'∞)", { skip: SKIP }, () => {
+    // #622 jzcgmh : combo (NOT AFK ∞) puis 'a' (typing). En ∞, typing
+    // est un no-op pour l'AFK (`arm_afk_10m` retourne sans rien faire
+    // si mode == "inf"). Le marker est émis mais l'effet est nul. Le
+    // simulateur de replay (n'ayant pas accès au "vrai" mode du fichier)
+    // applique le marker comme "set active" — c'est suffisant pour la
+    // sémantique : l'AFK reste actif après typing en ∞.
+    const v = replay("0 1b61\n2000 61\n", ALT_A);
+    assert.equal(v[0].afk_active, true);                       // combo → NOT AFK ∞
+    assert.equal(v.at(-1)!.afk_active, true);                  // typing → reste actif
+    assert.ok(v.at(-1)!.markers.includes("arm_afk_10m"));
+    assert.ok(!v.at(-1)!.markers.includes("clear_afk"));       // plus de clear sur typing
 });
 
 // ---- split combo-aware : combo détaché du texte coalescé --------------------
