@@ -40,6 +40,7 @@ import { AiballClient } from "../client.js";
 import { createLogger } from "../log.js";
 import {
     isInternalCheckCmd,
+    DEFAULT_ASK_GRACE_SEC,
     DEFAULT_USER_GRACE_SEC,
     LOOP_STATUS,
     MUX_CMD,
@@ -99,6 +100,14 @@ const loopProject = process.env.AIBALL_PROJECT || undefined;
 const intervalRaw = process.env[CL_ENV.INTERVAL];
 const checkCmd = process.env[CL_ENV.CHECK_CMD] ?? "true";
 const userGraceSec = Math.max(0, Number(process.env[CL_ENV.USER_GRACE_SEC] ?? DEFAULT_USER_GRACE_SEC));
+// #619 david — the bar's "ask" word marks a longer window after a
+// human action where AskUserQuestion is still allowed. Previously
+// auto-wakes only honored `userGraceSec` (60s default), so the loop
+// barged back after a minute even though the bar still read "ask"
+// for the next 9 minutes. Now wakes also yield to ask-grace : if a
+// human acted within `askGraceSec`, skip the auto-wake too. F9 still
+// hands control back early.
+const askGraceSec = Math.max(0, Number(process.env[CL_ENV.ASK_GRACE_SEC] ?? DEFAULT_ASK_GRACE_SEC));
 if (!sd || !name || !intervalRaw) {
     process.stderr.write("[claude-loop:timer] missing CL_* env vars\n");
     process.exit(1);
@@ -581,6 +590,16 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // human who just typed / submitted / hit ESC (the regression #343 added).
     if (!manualWake && userIsTakingOver(sd!, userGraceSec)) {
         log(`skip wake (${reason}) — user-grace active (human acted within ${userGraceSec}s)`);
+        return false;
+    }
+    // #619 david : ask-grace est la fenêtre étendue (default 600s) où
+    // le bar affiche `ask` ET la dialog AskUserQuestion est encore
+    // permise. Avant : seul user_grace gatait les auto-wakes → la loop
+    // barge revenait après 60s même si le bar disait encore "ask". Ici
+    // on étend le gate : ask-grace gate AUSSI les auto-wakes. F9 (AFK)
+    // reste le mécanisme pour rendre la main plus tôt.
+    if (!manualWake && askGraceSec > userGraceSec && userIsTakingOver(sd!, askGraceSec)) {
+        log(`skip wake (${reason}) — ask-grace active (human acted within ${askGraceSec}s, F9 to release)`);
         return false;
     }
     // #345 B: also yield to a human typing RIGHT NOW (live human-typing
