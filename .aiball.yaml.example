@@ -55,8 +55,9 @@ claude_loop:
 
   # Grace window after a human prompt — auto-wakes stay skipped and
   # `AskUserQuestion` dialogs stay allowed until this many seconds elapse
-  # since the last keystroke. F9 (afk_key) releases / locks-in early.
-  # 600s (10min) = the loop stays out of your way after you start typing.
+  # since the last keystroke. SILENT on the bar (no visible word change)
+  # — F9 is the visible hold control. 600s (10min) = the loop stays out
+  # of your way after you start typing.
   user_grace_seconds: 600
 
   # WAIT default when neither --wait nor --no-wait is passed. Global CLI
@@ -81,7 +82,10 @@ claude_loop:
   # `max(user_grace_seconds, ask_grace_seconds)`. New configs should set
   # only `user_grace_seconds`.
 
-  # AFK toggle combo (chord, VS Code notation; SPACE = OR). f9 has no
+  # AFK key — cycles a 3-state hold (OFF → 10 min auto-release → ∞ → OFF).
+  # The visible, explicit hold control: bar shows `wait` while armed,
+  # status-right reads `Nm NOT AFK:F9` (jaune 10m / rouge ∞) or `AFK:F9`
+  # (dim) when off. Chord notation: VS Code, SPACE = OR. f9 has no
   # OS/tmux/claude conflict. Avoid alt+… (WM/terminal), ctrl+s/q (flow
   # control), ctrl+c/d/z/b and readline keys, f1/f10/f11/f12. Verify any
   # candidate with `claude-loop debug-keys`. Requires the PTY proxy.

@@ -25,6 +25,53 @@ dates are YYYY-MM-DD.
 
 *Nothing yet.*
 
+## [0.11.0] — 2026-05-29
+
+### Added
+
+- The `F9` AFK key now cycles a 3-state hold instead of a binary
+  toggle: off → 10-minute auto-release (yellow countdown) → ∞
+  (red, indefinite) → off. The status-right chunk shows the
+  remaining time live ; the label flips between `AFK:F9` (you're
+  away, claude runs) and `NOT AFK:F9` (you're here, holding the
+  loop). Default `f9` key, configurable via `claude_loop.afk_key`.
+- New `boot` word on the bar during the launch-grace window
+  (yellow, in the black `claude-...` island) so the loading state
+  is visually distinct from `wait`. Pre-existing `[boot]` bar
+  background still surrounds it.
+
+### Changed
+
+- The bar word now reflects AFK state ONLY. User-grace (the 10-min
+  hold after typing) still gates auto-pings silently behind the
+  scenes, but stops painting the bar yellow — so pressing F9 to
+  release AFK actually returns the bar to `loop` green instead of
+  lingering on `wait` from a stale typing window. Use F9 to make
+  any hold visible and explicit.
+- The tmux window-status list (the default `0:python3*` chip
+  between the bar and the right-side hint) is suppressed on
+  claude-loop sessions ; the loop only ever has one window with an
+  auto-named process, so the chip carried no useful signal.
+- Wake messages with identical operational context now coalesce
+  even when the random culture phrase varies. Previously four
+  heartbeat re-fires saying "drain N ping(s), engage #X first"
+  stacked because each opened with a different `*tap tap*` /
+  `Beep boop` / `Allons-y` lead. Default coalesce window for
+  same-context wakes: 60s, env-tunable via
+  `CL_WAKE_SIGNATURE_WINDOW_MS`.
+
+### Fixed
+
+- The bar's fallback paint (when the PTY proxy isn't alive)
+  no longer reads its own process start time as the loop session
+  start — short-lived hooks were thinking the boot-grace window
+  was eternally fresh and pinning the bar to `boot`. The loop
+  session start is now written once at launch into a shared file.
+- A corrupt or empty AFK marker file used to be silently treated
+  as `∞` (held indefinitely). It's now cleared on read so the
+  next F9 press arms a fresh 10-minute window instead of holding
+  the loop forever.
+
 ## [0.10.0] — 2026-05-29
 
 ### Added

@@ -215,48 +215,62 @@ feeders, best-to-worst:
   separate your keystrokes from the loop's own injection as cleanly —
   exactly the blind spot the proxy was built to close.
 
-### 3. The tmux bar word — `stop` / `wait` / `loop`
+### 3. The tmux bar word — `stop` / `boot` / `wait` / `loop`
 
-Both signals collapse into one human-presence word on the status bar
-(`humanPresenceWord`):
+The human-presence word on the bar reads **AFK state ONLY** —
+user-grace gates auto-wakes silently behind the scenes but doesn't
+paint a colour here. F9 is the single visible control.
 
 | Word   | Colour | Meaning                                                       |
 |--------|--------|--------------------------------------------------------------|
 | `stop` | red    | a human is typing **now** (`human-typing` < 5s)              |
-| `wait` | yellow | auto-pings **frozen** *and* `AskUserQuestion` allowed — boot-grace at launch, the user-grace window post-keystroke, or explicit AFK |
+| `boot` | yellow | the launch-grace window — claude is still loading            |
+| `wait` | yellow | F9-armed hold (10-min auto-release or indefinite)             |
 | `loop` | green  | autonomous, gate open (managed mode / `--no-wait`)           |
 
 When the proxy is alive it paints this segment live (instant on the
 first keystroke); otherwise the timer paints it from the markers.
 
+The status-right segment shows the AFK chunk in matching colours :
+
+| State                  | Status-right chunk     | Bar word colour |
+|------------------------|------------------------|-----------------|
+| autonomous (AFK on)    | `AFK:F9` (dim)         | green `loop`    |
+| F9-armed 10 min        | `9m NOT AFK:F9` (yellow) | yellow `wait` |
+| F9-armed ∞             | `∞ NOT AFK:F9` (red)    | yellow `wait` |
+
+The label flip `AFK:` ↔ `NOT AFK:` matches the literal "Away From
+Keyboard" reading — when the bar is `loop` the human is presumed
+away (claude runs), when `wait` the human is present and holding
+the loop.
+
 ### The take-over workflow — what happens when you type
 
-A single grace window drives **both** the auto-wake gate and the
-`AskUserQuestion` gate (since the #619 collapse — the two were a
-distinction without a difference once both gates honored the longer
-window).
+Typing in the pane refreshes the **user-grace** marker
+(`CL_USER_GRACE_SEC`, default **600 s / 10 min**). user-grace gates :
 
-- **user-grace** (`CL_USER_GRACE_SEC`, default **600s / 10min**) —
-  while the `user-took-over` marker is fresher than this, the bar
-  reads `wait` (yellow), auto-pings stay frozen, and
-  `AskUserQuestion` dialogs stay allowed. The marker is refreshed on
-  every text keystroke, so typing keeps the loop deferential.
-- Past user-grace : bar `loop` (green), auto-pings resume, an
-  `AskUserQuestion` would be denied and redirected to the aiball
-  ticket thread.
+- auto-pings (timer.tryWake skips while it's fresh),
+- `AskUserQuestion` (still allowed for the same window — the #619
+  collapse merged the historical ask-grace into user-grace).
 
-Time-line of a single human interaction :
+user-grace is **silent** on the bar — typing prints `stop` red for
+~5 s then the bar returns to whatever the AFK state says (usually
+`loop` green, since typing alone doesn't arm AFK). The auto-wake
+suppression keeps running invisibly. To make the hold *visible* and
+controllable, press F9.
+
+Time-line of a single human interaction (no F9) :
 
 ```
 T=0   you type something on the pane
       ├─ bar = stop (red, ~5s)
-      ├─ user-took-over marker mtime = now
+      ├─ user-took-over marker mtime = now (silent gate)
       │
 T+5   typing stopped
-      └─ bar = wait (yellow) ← auto-wakes frozen, AskUserQuestion allowed
+      └─ bar = loop (green) ← but auto-wakes still frozen behind the scenes
       │
 T+600 user-grace expired
-      └─ bar = loop (green) ← autonomous again
+      └─ auto-pings resume (no visible bar change — was already `loop`)
 ```
 
 (Back-compat : a project that still sets `ask_grace_seconds` in
@@ -264,20 +278,24 @@ T+600 user-grace expired
 `max(user_grace_seconds, ask_grace_seconds)`, never shrinks. New
 configs should set only `user_grace_seconds`.)
 
-**F9 to release early.** The AFK key (default `f9`, configurable via
-`.aiball.yaml claude_loop.afk_key`) toggles an explicit AFK marker
-that bypasses both windows :
+**F9 cycles a 3-state AFK toggle.** The AFK key (default `f9`,
+configurable via `.aiball.yaml claude_loop.afk_key`) is the visible,
+explicit hold control. Each press advances :
 
-- F9 (off → on) : bar = `wait` indefinitely, auto-pings frozen,
-  `AskUserQuestion` denied. "I'm AFK, redirect questions to the
-  ticket thread."
-- F9 (on → off) : marker cleared, bar reverts to `loop` (or whatever
-  the natural state computes to). Any text keystroke ALSO clears the
-  AFK marker.
+- **OFF → 10 min** : bar = `wait` (yellow), status-right
+  `9m NOT AFK:F9` countdown. The 10-min timer is absolute — it
+  ticks down from the file's stored expiry, so re-paints reflect
+  the real remaining time (the toggle never "resets" an in-flight
+  timer).
+- **10 min → ∞** : bar = `wait` (yellow word, red label
+  `∞ NOT AFK:F9`). Held indefinitely until the next F9 press.
+- **∞ → OFF** : bar = `loop` (green), status-right back to
+  `AFK:F9` dim.
 
-So the rule of thumb : type to engage (locks the loop out for up to
-10 minutes), F9 to either *force* lock-out beyond that or *release*
-faster than the natural decay.
+F9 only writes the AFK file ; it does **not** touch user-grace.
+The two are orthogonal — typing arms user-grace silently, F9 arms
+AFK visibly. A corrupt AFK file (empty or unparseable content) is
+auto-cleared on next read so the cycle never stalls.
 
 (Orthogonal third gate : the Stop hook / timer also read `esc to
 interrupt` in the pane footer and arm a `busy-defer-until` window so
