@@ -291,10 +291,10 @@ export function dedupeWakeInjection(
  * Fails open (inject) on any fs error — a missed dedup is harmless, a
  * dropped wake is not.
  */
-function skipDuplicateWakeInjection(sd: string, phrase: string): boolean {
+function skipDuplicateWakeInjection(sd: string, dedupeKey: string, windowMs: number): boolean {
     let prev: string | null = null;
     try { prev = readFileSync(lastInjectedWakePath(sd), "utf8"); } catch { /* no marker yet */ }
-    const { skip, write } = dedupeWakeInjection(prev, phrase, Date.now(), WAKE_COALESCE_WINDOW_MS);
+    const { skip, write } = dedupeWakeInjection(prev, dedupeKey, Date.now(), windowMs);
     if (skip) return true;
     try { if (write !== null) writeFileSync(lastInjectedWakePath(sd), write); } catch { /* ignore — fail open */ }
     return false;
@@ -1180,11 +1180,17 @@ export function pickPingPhrase(pingsAbsPath: string): string {
  * or both counts come back zero — never blocks the wake on a missing
  * daemon, and never invents a directive when there's nothing to do.
  */
+/** #623 — phrase + dedupe signature returned together. The phrase has
+ *  a random culture pick at the start ; the signature is the structured
+ *  context (counts + head_id + gates) so two wakes with the SAME
+ *  context but DIFFERENT random cultures dedupe correctly. */
+export type ContextPhraseResult = { phrase: string; signature: string };
+
 export async function buildContextPhrase(
     client: AiballClient,
     project: string | null,
     pingsAbsPath: string,
-): Promise<string> {
+): Promise<ContextPhraseResult> {
     const culture = pickPingPhrase(pingsAbsPath);
     try {
         const [pingsR, projects, headRows, consumerR] = await Promise.all([
@@ -1239,7 +1245,7 @@ export async function buildContextPhrase(
                 : 0;
         const actionableCount = sumBy("actionable_count");
         const openCount = sumBy("open_count");
-        if (pingCount === 0 && openCount === 0) return culture;
+        if (pingCount === 0 && openCount === 0) return { phrase: culture, signature: "empty-context" };
 
         // #B.232: when BOTH pings and open tickets are pending, chain
         // both directives so the agent doesn't drain pings and stop —
@@ -1340,13 +1346,25 @@ export async function buildContextPhrase(
         // their prompt slot (per-project overridable + tone-aware + {vars});
         // custom gates use their literal message / cmd stdout. Template-agnostic
         // (works even when a custom wake_master has no {gates} placeholder).
-        if (gateResults.length === 0) return cta;
+        // #623 — signature = structured context only (no culture / lead),
+        // so heartbeat re-fires with same numbers but different culture
+        // pick dedupe at the injection layer.
+        const signature = JSON.stringify({
+            pingCount,
+            actionableCount,
+            openCount,
+            headId: head?.id ?? null,
+            blocking,
+            gates: gateResults.map((g) => g.slot ?? g.message),
+            project: project ?? null,
+        });
+        if (gateResults.length === 0) return { phrase: cta, signature };
         const banner = gateResults
             .map((g) => (g.slot ? renderSlot(promptMap, g.slot, g.vars, g.message, tone) : g.message))
             .join("  ");
-        return `${blocking ? "🛑 " : ""}${banner}  ${cta}`;
+        return { phrase: `${blocking ? "🛑 " : ""}${banner}  ${cta}`, signature };
     } catch {
-        return culture;
+        return { phrase: culture, signature: "culture-fallback" };
     }
 }
 
@@ -1371,7 +1389,7 @@ export async function buildContextPhrase(
  * wake, timer no-hint wake, and SSE-hinted wakes — short phrases pay
  * a ~200ms latency but consistency beats branching on length.
  */
-export async function injectWakePhrase(paneTarget: string, phrase: string): Promise<void> {
+export async function injectWakePhrase(paneTarget: string, phrase: string, opts?: { dedupeKey?: string; dedupeWindowMs?: number }): Promise<void> {
     // #269: when the pane runs under the PTY proxy, deliver the wake
     // straight to claude's PTY via the proxy's control channel — that
     // bypasses tmux/psmux stdin, so the proxy's human-typing detector
@@ -1383,7 +1401,15 @@ export async function injectWakePhrase(paneTarget: string, phrase: string): Prom
     // identical CTA already injected within the coalesce window by a sibling
     // wake site (timer / Stop-hook / session-start), which the per-decider
     // upstream coalesces can't catch. Marker written here, before the inject.
-    if (sd && skipDuplicateWakeInjection(sd, phrase)) return;
+    // #623 — `dedupeKey` lets the caller dedupe on the STRUCTURED context
+    // (counts + head_id) instead of the rendered phrase, so heartbeat
+    // re-fires with the same context but a different random culture
+    // coalesce correctly. `dedupeWindowMs` overrides the default
+    // WAKE_COALESCE_WINDOW_MS (typically a wider window for the
+    // context-based key, ~60s, vs the default 3s for exact-phrase).
+    const key = opts?.dedupeKey ?? phrase;
+    const win = opts?.dedupeWindowMs ?? WAKE_COALESCE_WINDOW_MS;
+    if (sd && skipDuplicateWakeInjection(sd, key, win)) return;
     if (sd) {
         if (process.platform === "win32") {
             // #281 strategy B: Windows uses a named pipe. It can't be

@@ -300,7 +300,7 @@ function selfReloadIfStale(): void {
 // pas le sien). Filtre agent-side car la même SSE peut servir plusieurs
 // usages (UI notifs vs wake) ; la décision "wake me?" est privée à
 // l'agent.
-async function pickPhrase(hint?: WakeHint): Promise<string> {
+async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; signature: string | null }> {
     if (hint?.ticket_id) {
         const me = process.env.AIBALL_AGENT;
         const ctx = await fetchWakeContext(hint, me);
@@ -311,15 +311,21 @@ async function pickPhrase(hint?: WakeHint): Promise<string> {
             const enriched: WakeHint = ctx.commentBody
                 ? { ...hint, comment_body: ctx.commentBody }
                 : hint;
-            return buildWakePhrase(enriched, pingsPath(sd!));
+            // SSE-hint wakes carry a stable (ticket, comment) tuple — that's
+            // their natural dedupe key. lastWakeHint already coalesces
+            // upstream so we don't need a separate signature here.
+            return { phrase: buildWakePhrase(enriched, pingsPath(sd!)), signature: null };
         }
         log(`wake-hint #${hint.ticket_id}${hint.comment_hashid ? ` (comment #${hint.comment_hashid})` : ""} not for me (${me}) — falling back to generic context phrase`);
     }
-    return buildContextPhrase(
+    // #623 — context phrase carries a structured signature so the random
+    // culture pick doesn't defeat the injection-layer dedupe.
+    const ctx = await buildContextPhrase(
         client(),
         process.env.AIBALL_PROJECT ?? null,
         pingsPath(sd!),
     );
+    return { phrase: ctx.phrase, signature: ctx.signature };
 }
 
 /**
@@ -449,7 +455,18 @@ async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
 // #264: timestamp of the loop's last send-keys, so the human-typing
 // detector can exclude the loop's own injected text from "a human typed".
 let lastSendAt = 0;
-async function sendKeys(phrase: string): Promise<void> {
+// #623 — context-signature dedupe window. Long enough to coalesce
+// repeated heartbeat fires that share the same structured context (counts +
+// head_id) even when the random culture pick differs. Env-tunable via the
+// same CL_WAKE_COALESCE_WINDOW_MS as exact-phrase but multiplied by a
+// signature factor that defaults to 20× (so 3000ms → 60s). Override via
+// CL_WAKE_SIGNATURE_WINDOW_MS for full control.
+const SIGNATURE_DEDUPE_MS = (() => {
+    const raw = process.env.CL_WAKE_SIGNATURE_WINDOW_MS;
+    if (raw !== undefined) return Math.max(0, Number(raw) || 0);
+    return WAKE_COALESCE_WINDOW_MS * 20;
+})();
+async function sendKeys(phrase: string, signature: string | null = null): Promise<void> {
     // #B.180: touch the wake-in-flight marker BEFORE send-keys so
     // UserPromptSubmit hook sees it when claude processes the wake
     // prompt and skips the user-took-over update. Without this, the
@@ -465,7 +482,11 @@ async function sendKeys(phrase: string): Promise<void> {
         writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n");
     } catch { /* ignore — coalesce will just fail open */ }
     lastSendAt = Date.now();
-    await injectWakePhrase(`${tname}.0`, phrase);
+    await injectWakePhrase(
+        `${tname}.0`,
+        phrase,
+        signature ? { dedupeKey: signature, dedupeWindowMs: SIGNATURE_DEDUPE_MS } : undefined,
+    );
 }
 
 function sleep(ms: number): Promise<void> {
@@ -693,8 +714,8 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
-    const phrase = await pickPhrase(hint);
-    await sendKeys(phrase);
+    const picked = await pickPhrase(hint);
+    await sendKeys(picked.phrase, picked.signature);
     // #B.198 david: "on cumule pas les event identique on les merge".
     // Persist the just-fired hint so subsequent SSE pings about the
     // same (ticket, comment) within `WAKE_COALESCE_WINDOW_MS` get
@@ -707,7 +728,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     if (gateHash !== undefined) recordOpenWakeHash(sd!, gateHash);
     else if (gateOpenCount > 0) recordOpenWakeCount(sd!, gateOpenCount);
     setTmuxStatus(name!, LOOP_STATUS.BUSY);
-    log(`wake (${reason}) → '${phrase}'`);
+    log(`wake (${reason}) → '${picked.phrase}'`);
     return true;
 }
 
