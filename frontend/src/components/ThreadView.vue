@@ -97,9 +97,9 @@ onMounted(load);
 // any sibling component). The thread reloads itself instead of being
 // poked imperatively by the parent through a ref — the parent only has
 // to emit on the bus and any open thread that matches reloads.
-useBus("thread.refresh", ({ ticketId }) => {
-    if (ticketId === props.ticketId) load();
-});
+// #617 — registered AFTER useResolutionFlow below so the handler can
+// gate on resolutionBusy (avoid an intermediate render during a
+// 2-step accept-and-close flow).
 
 // Auto-mark-as-read dwell timer (#B.91 / #B.191). #596 — `markingRead`
 // flips true during the dwell so ThreadHeader can render a pulsing dot.
@@ -310,6 +310,30 @@ const {
     decisionMenu,
 } = useResolutionFlow({ data, error, broadcastRefresh });
 
+// #617 — thread.refresh bus handler gated on resolutionBusy. While a
+// multi-step verb (accept-resolution → close, accept-active → close,
+// etc.) is mid-flight, the API does two round-trips ; a WS event
+// landing between the two refreshes data into an intermediate state
+// where the dock's v-else-if branches resolve to the "no decision /
+// not closed yet" cell, briefly rendering then disappearing the
+// dock's buttons. We defer the refresh until the busy flag clears,
+// then fire one catch-up load via the watcher below.
+const pendingRefreshDuringBusy = ref(false);
+useBus("thread.refresh", ({ ticketId }) => {
+    if (ticketId !== props.ticketId) return;
+    if (resolutionBusy.value) {
+        pendingRefreshDuringBusy.value = true;
+        return;
+    }
+    load();
+});
+watch(resolutionBusy, (busy) => {
+    if (busy) return;
+    if (pendingRefreshDuringBusy.value) {
+        pendingRefreshDuringBusy.value = false;
+        load();
+    }
+});
 
 // Snooze flow (#B.329) — popover ref + busy + the three "set aside"
 // verbs (preset duration / custom datetime / unsnooze). Lives in
