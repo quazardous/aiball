@@ -21,7 +21,7 @@
  * always exits 0 — a hook failure must never block a tool call.
  */
 import { readFileSync } from "node:fs";
-import { DEFAULT_ASK_GRACE_SEC, afkActive, humanPresent } from "./state.js";
+import { DEFAULT_ASK_GRACE_SEC, DEFAULT_USER_GRACE_SEC, afkActive, humanPresent } from "./state.js";
 import { CL_ENV } from "./env-vars.js";
 
 function allow(): never {
@@ -66,12 +66,15 @@ try {
     // Redirect immediately rather than stall on a dialog nobody will click.
     if (afkActive(sd)) deny(redirect);
 
-    // #351: AskUserQuestion uses the longer ASK-grace (default 10 min), not
-    // the 60s wake user-grace — a present-but-quiet human should still get
-    // the dialog; only a silent timeout (departure) falls back to redirect.
+    // #351 / #619 collapse — AskUserQuestion shares the same grace
+    // window as the auto-wake gate (both honor the longer of user/ask
+    // for back-compat with projects that still set both). A
+    // present-but-quiet human gets the dialog ; a silent timeout falls
+    // back to the ticket-thread redirect.
     const graceSec = Math.max(
-        0,
+        Number(process.env[CL_ENV.USER_GRACE_SEC] ?? DEFAULT_USER_GRACE_SEC),
         Number(process.env[CL_ENV.ASK_GRACE_SEC] ?? DEFAULT_ASK_GRACE_SEC),
+        0,
     );
     // #501 david `73af3e` : stop ⊂ wait — un user qui tape maintenant est
     // aussi présent. allow() s'il est sous l'ask-grace OR en train de taper.

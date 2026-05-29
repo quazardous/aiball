@@ -215,7 +215,7 @@ feeders, best-to-worst:
   separate your keystrokes from the loop's own injection as cleanly —
   exactly the blind spot the proxy was built to close.
 
-### 3. The tmux bar word — `stop` / `wait` / `ask` / `loop`
+### 3. The tmux bar word — `stop` / `wait` / `loop`
 
 Both signals collapse into one human-presence word on the status bar
 (`humanPresenceWord`):
@@ -223,8 +223,7 @@ Both signals collapse into one human-presence word on the status bar
 | Word   | Colour | Meaning                                                       |
 |--------|--------|--------------------------------------------------------------|
 | `stop` | red    | a human is typing **now** (`human-typing` < 5s)              |
-| `wait` | yellow | auto-pings **frozen** — boot-grace at launch *or* user-grace |
-| `ask`  | orange | past user-grace but within **ask-grace** — auto-pings still frozen and an `AskUserQuestion` dialog still allowed |
+| `wait` | yellow | auto-pings **frozen** *and* `AskUserQuestion` allowed — boot-grace at launch, the user-grace window post-keystroke, or explicit AFK |
 | `loop` | green  | autonomous, gate open (managed mode / `--no-wait`)           |
 
 When the proxy is alive it paints this segment live (instant on the
@@ -232,18 +231,17 @@ first keystroke); otherwise the timer paints it from the markers.
 
 ### The take-over workflow — what happens when you type
 
-The two windows are nested in length, and they share the **same**
-`user-took-over` marker (refreshed on every text keystroke):
+A single grace window drives **both** the auto-wake gate and the
+`AskUserQuestion` gate (since the #619 collapse — the two were a
+distinction without a difference once both gates honored the longer
+window).
 
-- **user-grace** (`CL_USER_GRACE_SEC`, default **60s**) — short
-  window that paints the bar `wait` (yellow) and freezes auto-pings.
-  "I just typed; back off for a minute."
-- **ask-grace** (`CL_ASK_GRACE_SEC`, default **600s / 10min**) —
-  longer window that paints the bar `ask` (orange), keeps auto-pings
-  frozen *and* keeps `AskUserQuestion` dialogs allowed. "I might
-  still be sitting here ; if Claude needs an answer it can pop a
-  dialog ; don't barge with auto-wakes."
-- Past ask-grace : bar `loop` (green), auto-pings resume, an
+- **user-grace** (`CL_USER_GRACE_SEC`, default **600s / 10min**) —
+  while the `user-took-over` marker is fresher than this, the bar
+  reads `wait` (yellow), auto-pings stay frozen, and
+  `AskUserQuestion` dialogs stay allowed. The marker is refreshed on
+  every text keystroke, so typing keeps the loop deferential.
+- Past user-grace : bar `loop` (green), auto-pings resume, an
   `AskUserQuestion` would be denied and redirected to the aiball
   ticket thread.
 
@@ -255,14 +253,16 @@ T=0   you type something on the pane
       ├─ user-took-over marker mtime = now
       │
 T+5   typing stopped
-      └─ bar = wait (yellow)
+      └─ bar = wait (yellow) ← auto-wakes frozen, AskUserQuestion allowed
       │
-T+60  user-grace expired
-      └─ bar = ask (orange) ← auto-wakes STILL frozen, AskUserQuestion still allowed
-      │
-T+600 ask-grace expired
+T+600 user-grace expired
       └─ bar = loop (green) ← autonomous again
 ```
+
+(Back-compat : a project that still sets `ask_grace_seconds` in
+`.aiball.yaml` is honored — the deferential window widens to
+`max(user_grace_seconds, ask_grace_seconds)`, never shrinks. New
+configs should set only `user_grace_seconds`.)
 
 **F9 to release early.** The AFK key (default `f9`, configurable via
 `.aiball.yaml claude_loop.afk_key`) toggles an explicit AFK marker

@@ -207,12 +207,9 @@ HUMAN_TTL_SEC = 5  # doit suivre HUMAN_TYPING_TTL_SEC côté TS
 # loop=vert ; #426 : ask=orange.
 _HUMAN_STOP = "#[fg=colour196,bg=colour16]stop"
 _HUMAN_WAIT = "#[fg=colour178,bg=colour16]wait"
-# #426 : 4e mot `ask` (orange) entre `wait` et `loop` — fenêtre ASK-grace
-# (post user-grace) où les auto-wakes sont autonomes MAIS AskUserQuestion est
-# encore autorisé (pas encore redirigé vers un ticket). #426 (david g23pqn) :
-# padder à 4 (longueur max stop/wait/loop) — `ask` (3) décalerait la barre d'une
-# cellule au changement de mot. Les 3 autres font déjà 4.
-_HUMAN_ASK = "#[fg=colour208,bg=colour16]ask "
+# #426 + #619 collapse : the 4e mot `ask` (orange) a été retiré.
+# La fenêtre unique user-grace (max user/ask, default 600s) gate
+# auto-wakes ET AskUserQuestion, donc plus besoin d'un visuel distinct.
 _HUMAN_LOOP = "#[fg=colour40,bg=colour16]loop"
 # #302/#345: --no-wait (CL_WAIT=0) skips only the boot-grace; a present human
 # (live typing → `stop`, armed user-grace → `wait`) is still reflected, aligned
@@ -769,44 +766,40 @@ def _run_fake_claude(_args):
     return 0
 
 
+def _grace_seconds():
+    """#619 collapse : single grace window pour wait/AUQ. Pour back-compat,
+    on prend le max de CL_USER_GRACE_SEC et CL_ASK_GRACE_SEC — un projet
+    qui set encore les 2 verra la plus longue. Défaut 600s."""
+    try:
+        u = float(os.environ.get("CL_USER_GRACE_SEC") or "600")
+    except ValueError:
+        u = 600.0
+    try:
+        a = float(os.environ.get("CL_ASK_GRACE_SEC") or "600")
+    except ValueError:
+        a = 600.0
+    return max(u, a, 0.0)
+
+
 def _user_grace_remaining():
-    """#302 : secondes de user-grace restantes (marqueur `user-took-over`
-    < CL_USER_GRACE_SEC), 0.0 hors-grâce. Permet au proxy de peindre `wait`
-    (jaune) tant que la fenêtre tient, puis `loop` (vert) une fois expirée."""
+    """#302 + #619 collapse : secondes de grace restantes (marqueur
+    `user-took-over` < max(CL_USER_GRACE_SEC, CL_ASK_GRACE_SEC), default
+    600s), 0.0 hors-grâce. Permet au proxy de peindre `wait` (jaune)
+    tant que la fenêtre tient, puis `loop` (vert) une fois expirée."""
     sd = os.environ.get("CL_STATE_DIR") or ""
     if not sd:
         return 0.0
     try:
-        grace = float(os.environ.get("CL_USER_GRACE_SEC") or "60")
-    except ValueError:
-        grace = 60.0
-    try:
         mtime = os.stat(os.path.join(sd, "user-took-over")).st_mtime
     except OSError:
         return 0.0
-    rem = grace - (datetime.datetime.now().timestamp() - mtime)
+    rem = _grace_seconds() - (datetime.datetime.now().timestamp() - mtime)
     return rem if rem > 0.0 else 0.0
 
 
-def _ask_grace_remaining():
-    """#426 : secondes d'ASK-grace restantes (marqueur `user-took-over` <
-    CL_ASK_GRACE_SEC, défaut 600). Fenêtre PLUS LONGUE que la user-grace : entre
-    la fin de la user-grace (~60s) et la fin de l'ASK-grace (~600s), les
-    auto-wakes sont autonomes mais AskUserQuestion est encore autorisé → la barre
-    doit lire `ask`, pas `loop`. Symétrique de _user_grace_remaining."""
-    sd = os.environ.get("CL_STATE_DIR") or ""
-    if not sd:
-        return 0.0
-    try:
-        grace = float(os.environ.get("CL_ASK_GRACE_SEC") or "600")
-    except ValueError:
-        grace = 600.0
-    try:
-        mtime = os.stat(os.path.join(sd, "user-took-over")).st_mtime
-    except OSError:
-        return 0.0
-    rem = grace - (datetime.datetime.now().timestamp() - mtime)
-    return rem if rem > 0.0 else 0.0
+# #619 collapse — _ask_grace_remaining et le bar word `ask` retirés.
+# La fenêtre unique `_user_grace_remaining` (max user/ask, default 600s)
+# couvre maintenant les deux usages historiques.
 
 
 def _boot_grace_remaining():
@@ -825,24 +818,17 @@ def _boot_grace_remaining():
 
 
 def _rest_word():
-    """Mot au repos (pas de frappe) : `wait` pendant la boot-grace (#305, nulle
-    sous --no-wait) OU la fenêtre user-grace (#345 : armée même sous --no-wait,
-    ex. après un ESC) ; `wait` aussi quand l'AFK est armé (#601 : F9 doit
-    toggler loop↔wait visuellement, alors qu'avant set_afk clearait la
-    user-grace ET _rest_word ignorait l'AFK → retombait sur loop) ; #426 :
-    `ask` (orange) pendant l'ASK-grace résiduelle (post user-grace, hors AFK)
-    — AskUserQuestion encore autorisé bien que les auto-wakes soient
-    autonomes ; sinon `loop`."""
+    """Mot au repos (pas de frappe) : `wait` pendant la boot-grace (#305,
+    nulle sous --no-wait) OU la grace window (max user/ask, default
+    600s — #619 collapse, armée même sous --no-wait, ex. après un ESC) ;
+    `wait` aussi quand l'AFK est armé (#601 : F9 doit toggler loop↔wait
+    visuellement) ; sinon `loop`."""
     if _boot_grace_remaining() > 0.0 or _user_grace_remaining() > 0.0:
         return _HUMAN_WAIT
     # #601 : AFK actif → bar `wait` (toggle visible loop↔wait via F9).
     afk_set = _afk_path() and os.path.exists(_afk_path())
     if afk_set:
         return _HUMAN_WAIT
-    # #426 : AFK → la gate AskUserQuestion redirige immédiatement, donc pas de
-    # `ask` (on est de fait en autonome → loop). Sinon, reste-t-il de l'ASK-grace ?
-    if _ask_grace_remaining() > 0.0:
-        return _HUMAN_ASK
     return _HUMAN_LOOP
 
 

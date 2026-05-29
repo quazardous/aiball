@@ -650,13 +650,15 @@ export function isInternalCheckCmd(checkCmd: string | null | undefined): boolean
 
 /**
  * Default user-grace window in seconds (#B.145 v2.2, recalibrated
- * #B.185). When the user has typed a prompt within this window, the
- * timer skips its wake so the wrapper doesn't `send-keys` over a
- * human-driven session. 60s aligns with the heartbeat / boot grace —
- * david: "recalibre les defaut du meme ordre de grandeur". Tunable
+ * #B.185, then #619 david `e54hx2` bumped 60s → 600s). When the user
+ * has typed a prompt within this window, the timer skips its wake so
+ * the wrapper doesn't `send-keys` over a human-driven session AND the
+ * `AskUserQuestion` dialog stays allowed. 600s = 10min matches the
+ * pre-collapse `ask_grace_seconds` so a present-but-quiet human can
+ * still pop a dialog ; F9 (afk_key) lets you release earlier. Tunable
  * via `CL_USER_GRACE_SEC`.
  */
-export const DEFAULT_USER_GRACE_SEC = 60;
+export const DEFAULT_USER_GRACE_SEC = 600;
 
 /**
  * Is the human actively driving the session? True iff the
@@ -675,10 +677,15 @@ export function userIsTakingOver(sd: string, graceSec: number): boolean {
     }
 }
 
-/** #351: default ask-grace (10 min). The AskUserQuestion window — longer
- *  than the wake user-grace (60s) because a stalled question is cheap vs a
- *  lost one. Overridable via `claude_loop.ask_grace_seconds` / CL_ASK_GRACE_SEC. */
-export const DEFAULT_ASK_GRACE_SEC = 600;
+/** #351 / #619 collapse — kept as an alias of `DEFAULT_USER_GRACE_SEC`
+ *  for back-compat. The historical 2-window distinction (short user-grace
+ *  for wakes vs long ask-grace for AskUserQuestion) was retired in #619 :
+ *  both gates now share the single user-grace window. A project that
+ *  still sets `ask_grace_seconds` in `.aiball.yaml` is honored at the
+ *  config layer (treated as user_grace_seconds) ; setting both with
+ *  different values is OK — the gate uses `max(user, ask)` so neither
+ *  knob silently shrinks the deferential window. */
+export const DEFAULT_ASK_GRACE_SEC = DEFAULT_USER_GRACE_SEC;
 
 /** #351: true when the human has flagged AFK and nothing has cleared it.
  *  Existence = active (the proxy deletes the marker on any other keystroke
@@ -867,7 +874,7 @@ const PROC_START_MS = Date.now();
  *              are autonomous yet an AskUserQuestion dialog is still allowed
  *   - `loop` — autonomous (managed mode), incl. --no-wait; a question redirects
  */
-export function humanPresenceWord(sd: string | undefined, graceSec: number): "stop" | "wait" | "ask" | "loop" {
+export function humanPresenceWord(sd: string | undefined, graceSec: number): "stop" | "wait" | "loop" {
     // #345 D: a present human is reflected even under --no-wait (CL_WAIT=0).
     // NO_WAIT only suppresses the boot-grace `wait` (no human assumed AT
     // LAUNCH); live typing → `stop` and an armed user-grace → `wait` still show.
@@ -877,21 +884,14 @@ export function humanPresenceWord(sd: string | undefined, graceSec: number): "st
     // but only when we're actually waiting for a human at boot (not --no-wait).
     const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
     if (!noWait && Date.now() - PROC_START_MS < bootGraceMs) return "wait";
+    // #619 collapse — single user-grace window (default 600s) drives the
+    // `wait` word. Auto-wakes are gated AND AskUserQuestion stays allowed
+    // for the full window. The pre-collapse `ask` orange word is retired ;
+    // a project that still sets `ask_grace_seconds` widens the same window
+    // (max of user + ask) — handled in the caller via the env var.
     if (sd && userIsTakingOver(sd, graceSec)) return "wait";
     // #601 david : AFK actif → bar `wait` (toggle visible loop↔wait via F9).
-    // Avant : set_afk clearait la user-grace ET ce branch retombait sur "loop"
-    // sans regarder l'AFK → F9 ne togglait pas visuellement. Pareil correctif
-    // dans pty-proxy.py:_rest_word pour le path direct via le proxy.
     if (sd && afkActive(sd)) return "wait";
-    // #426: past user-grace but still within the (longer) ASK-grace, and not
-    // AFK → the AskUserQuestion dialog is STILL allowed (it won't redirect to a
-    // ticket) even though auto-wakes are now autonomous. Surface that otherwise
-    // invisible window as `ask` so the bar stops reading a flat `loop` while a
-    // multi-choice dialog can still pop. Mirrors the PreToolUse gate.
-    if (sd) {
-        const askGraceSec = Math.max(0, Number(process.env[CL_ENV.ASK_GRACE_SEC] ?? DEFAULT_ASK_GRACE_SEC));
-        if (askGraceSec > graceSec && userIsTakingOver(sd, askGraceSec)) return "ask";
-    }
     return "loop";
 }
 
@@ -899,15 +899,12 @@ export function humanBarWord(sd: string | undefined, graceSec: number): string {
     // #302 david: black bg (colour16) behind the word so it stays readable over
     // any bar state colour (busy blue / idle gray / boot yellow). fg encodes the
     // word: stop=red / wait=yellow / loop=green. Logic lives in humanPresenceWord.
+    // #619 collapse — `ask` (orange) retired ; all three remaining words are
+    // 4 chars so the pad-to-4 keeps the bar width constant by accident.
     const word = humanPresenceWord(sd, graceSec);
     const fg = word === "stop" ? "colour196"
         : word === "wait" ? "colour178"
-        : word === "ask" ? "colour208" // #426: orange — ASK-grace window
         : "colour40";
-    // #426 (david g23pqn): pad to the longest word (4) so the bar width is
-    // constant — `ask` (3) would otherwise shift the rest of the bar by a cell
-    // when the presence word changes. The bare word (humanPresenceWord) stays
-    // unpadded for the consumers page; only the tmux segment is fixed-width.
     return `#[fg=${fg},bg=colour16]${word.padEnd(4)}`;
 }
 
