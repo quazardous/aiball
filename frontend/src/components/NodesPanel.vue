@@ -6,7 +6,7 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import { api, type NodeView } from "../lib/api";
 import NodeDetailPage from "./NodeDetailPage.vue";
-import DataList from "./ui/DataList.vue";
+import DataList, { type DataListColumn } from "./ui/DataList.vue";
 import PanelHeader from "./ui/PanelHeader.vue";
 import StatusPill from "./ui/StatusPill.vue";
 import { nodeLivenessStatus, nodeLivenessLabel } from "../lib/node-liveness";
@@ -20,8 +20,7 @@ const emit = defineEmits<{
     (e: "open-edit", nodeId: string): void;
     (e: "close-edit"): void;
     /** #458 — forwarded from NodeDetailPage: the breadcrumb's "Inbox" crumb
-     *  resets BOTH the panel and the node-edit slot in one shot, instead of
-     *  the user double-back-clicking. */
+     *  resets BOTH the panel and the node-edit slot in one shot. */
     (e: "close-to-inbox"): void;
 }>();
 
@@ -47,10 +46,7 @@ function fmt(ts: string | null): string {
     return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
 }
 
-// #502 — la pastille est dérivée de `last_used_at` + l'horloge courante. Un
-// node sain reste vert tant que le heartbeat (30s) tape ≤ 90s. Pour que la
-// couleur se rafraîchisse sans Ctrl-R, on tick `nowMs` toutes les 15s — la
-// recompute coûte rien (3 nodes max en pratique).
+// #502 — la pastille est dérivée de `last_used_at` + l'horloge courante.
 const nowMs = ref(Date.now());
 let nowTimer: ReturnType<typeof setInterval> | null = null;
 onMounted(() => {
@@ -72,9 +68,7 @@ function livenessTitle(lastUsedAt: string | null): string {
     return `last activity ${Math.round(ageSec / 3600)}h ago`;
 }
 
-// #513 (suite j48y3b) : format compact pour la liste — `v0.9.0 · abc12345`.
-// Mêmes règles que NodeDetailPage : commit tronqué 8 chars, fallback gracieux
-// si l'un des 2 manque, null si rien d'utile (la row n'apparaît pas).
+// #513 — version proxy compacte pour la liste.
 type WsState = NonNullable<NodeView["ws_state"]>;
 function proxyVersionShort(s: WsState): string | null {
     const v = s.node_version;
@@ -85,6 +79,29 @@ function proxyVersionShort(s: WsState): string | null {
     if (ver) return ver;
     if (commit) return commit;
     return null;
+}
+
+// #592 — declarative columns. Sort by liveness (down < stale < up) when
+// status is the key, by date for activity, etc.
+const columns: DataListColumn[] = [
+    { key: "status", label: "Status", sortable: true, defaultDir: "asc" },
+    { key: "node", label: "Node", sortable: true, defaultDir: "asc" },
+    { key: "host", label: "Host", sortable: true, defaultDir: "asc" },
+    { key: "last_activity", label: "Last activity", sortable: true, defaultDir: "desc" },
+];
+
+function sortValue(n: NodeView, key: string): string | number {
+    switch (key) {
+        // down < stale < up so asc surfaces problems first.
+        case "status": {
+            const order = { down: 0, stale: 1, up: 2 } as const;
+            return order[liveness(n.last_used_at)];
+        }
+        case "node": return (n.label ?? n.node_id).toLowerCase();
+        case "host": return (n.display_host ?? n.last_seen_ip ?? "").toLowerCase();
+        case "last_activity": return n.last_used_at ? Date.parse(n.last_used_at) : 0;
+        default: return "";
+    }
 }
 </script>
 
@@ -103,66 +120,58 @@ function proxyVersionShort(s: WsState): string | null {
             </p>
         </PanelHeader>
 
-        <DataList :loading="loading && !nodes.length" :error="error" :is-empty="!nodes.length">
+        <DataList
+            table-class="nodes-table"
+            :columns="columns"
+            :rows="nodes"
+            :row-key="(n: NodeView) => n.node_id"
+            :row-title="(n: NodeView) => `View node ${n.label || n.node_id}${n.relayed_count ? ` — ${n.relayed_count} relayed consumer${n.relayed_count > 1 ? 's' : ''}` : ''}`"
+            :row-class="() => 'dl-clickable'"
+            :get-sort-value="sortValue"
+            default-sort-key="last_activity"
+            default-sort-dir="desc"
+            :loading="loading && !nodes.length"
+            :error="error"
+            :is-empty="!nodes.length"
+            @row-click="(n: NodeView) => emit('open-edit', n.node_id)"
+        >
             <template #empty>
                 <div class="aiball-empty">
                     <i class="pi pi-sitemap" style="font-size: 1.6rem" />
                     <p>No proxy nodes. Mint one on this host with <code>aiball auth issue --node</code>.</p>
                 </div>
             </template>
-            <template #head>
-                <th>Status</th>
-                <th>Node</th>
-                <th>Host</th>
-                <th>Last activity</th>
+            <template #cell-status="{ row }">
+                <StatusPill
+                    :status="liveness((row as NodeView).last_used_at)"
+                    :label="nodeLivenessLabel(liveness((row as NodeView).last_used_at))"
+                    :title="livenessTitle((row as NodeView).last_used_at)"
+                />
             </template>
-            <template #body>
-                <tr v-for="n in nodes" :key="n.node_id">
-                    <td>
-                        <StatusPill
-                            :status="liveness(n.last_used_at)"
-                            :label="nodeLivenessLabel(liveness(n.last_used_at))"
-                            :title="livenessTitle(n.last_used_at)"
-                        />
-                    </td>
-                    <td>
-                        <a
-                            :href="`/nodes/${encodeURIComponent(n.node_id)}`"
-                            class="nodes-label-link"
-                            :title="`View node details${n.relayed_count ? ` — ${n.relayed_count} relayed consumer${n.relayed_count > 1 ? 's' : ''}` : ''}`"
-                            @click.prevent="emit('open-edit', n.node_id)"
-                        >{{ n.label || "(unlabelled)" }}</a>
-                        <code class="nodes-id">{{ n.node_id }}</code>
-                        <!-- #513 (suite j48y3b) : version aussi dans la liste,
-                             pas que dans le detail page. Format compact à
-                             côté du node_id : "v0.9.0 · abc12345". -->
-                        <code
-                            v-if="n.ws_state?.connected && proxyVersionShort(n.ws_state)"
-                            class="nodes-version"
-                            :title="`proxy version (${n.ws_state.node_version ?? '?'} commit ${n.ws_state.node_commit ?? '?'})`"
-                        >{{ proxyVersionShort(n.ws_state) }}</code>
-                    </td>
-                    <td>
-                        <!-- #524 : display_host (résolu côté node par sa
-                             provider chain) à la place de l'IP. L'IP du peer
-                             reste accessible en title et dans NodeDetailPage
-                             pour le debug réseau. Quand le node n'a jamais
-                             advertise (legacy ou non-WS), on retombe sur l'IP
-                             pour ne pas afficher "—" partout. -->
-                        <template v-if="n.display_host">
-                            <span class="nodes-host" :title="n.last_seen_ip ? `peer ip ${n.last_seen_ip}` : undefined">
-                                {{ n.display_host }}
-                            </span>
-                            <span
-                                v-if="n.display_host_provider"
-                                class="nodes-host-provider"
-                                :title="`resolved by provider '${n.display_host_provider}'`"
-                            >{{ n.display_host_provider }}</span>
-                        </template>
-                        <template v-else>{{ n.last_seen_ip ?? "—" }}</template>
-                    </td>
-                    <td :title="`created ${fmt(n.created_at)}`">{{ fmt(n.last_used_at) }}</td>
-                </tr>
+            <template #cell-node="{ row }">
+                <span class="nodes-label">{{ (row as NodeView).label || "(unlabelled)" }}</span>
+                <code class="nodes-id">{{ (row as NodeView).node_id }}</code>
+                <code
+                    v-if="(row as NodeView).ws_state?.connected && proxyVersionShort((row as NodeView).ws_state!)"
+                    class="nodes-version"
+                    :title="`proxy version (${(row as NodeView).ws_state?.node_version ?? '?'} commit ${(row as NodeView).ws_state?.node_commit ?? '?'})`"
+                >{{ proxyVersionShort((row as NodeView).ws_state!) }}</code>
+            </template>
+            <template #cell-host="{ row }">
+                <template v-if="(row as NodeView).display_host">
+                    <span class="nodes-host" :title="(row as NodeView).last_seen_ip ? `peer ip ${(row as NodeView).last_seen_ip}` : undefined">
+                        {{ (row as NodeView).display_host }}
+                    </span>
+                    <span
+                        v-if="(row as NodeView).display_host_provider"
+                        class="nodes-host-provider"
+                        :title="`resolved by provider '${(row as NodeView).display_host_provider}'`"
+                    >{{ (row as NodeView).display_host_provider }}</span>
+                </template>
+                <template v-else>{{ (row as NodeView).last_seen_ip ?? "—" }}</template>
+            </template>
+            <template #cell-last_activity="{ row }">
+                <span :title="`created ${fmt((row as NodeView).created_at)}`">{{ fmt((row as NodeView).last_used_at) }}</span>
             </template>
         </DataList>
     </div>
@@ -170,16 +179,11 @@ function proxyVersionShort(s: WsState): string | null {
 
 <style scoped>
 .nodes-panel { padding: 1rem; }
-.nodes-label-link {
+.nodes-label {
     font-weight: 600;
     color: var(--p-primary-color);
-    text-decoration: none;
-    cursor: pointer;
 }
-.nodes-label-link:hover { text-decoration: underline; }
 .nodes-id { display: block; font-size: 0.7rem; opacity: 0.5; }
-/* #513 — version proxy juste sous le node_id, plus discret encore (italic
-   pour visuellement distinguer de l'id stable). */
 .nodes-version {
     display: block;
     font-size: 0.7rem;
@@ -187,7 +191,6 @@ function proxyVersionShort(s: WsState): string | null {
     font-style: italic;
     color: var(--p-text-muted-color);
 }
-/* #524 : display_host (provider-resolved hostname) + chip provider compact. */
 .nodes-host {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.85rem;

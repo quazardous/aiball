@@ -29,20 +29,22 @@
  */
 import { existsSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import {
+    LOOP_STATUS,
     idleMarkerPath,
     setTmuxStatus,
     userTookOverPath,
     wakeInFlightPath,
     WAKE_IN_FLIGHT_TTL_MS,
 } from "./state.js";
+import { CL_ENV } from "./env-vars.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
     process.exit(0);
 }
 
-const sd = process.env.CL_STATE_DIR;
-const name = process.env.CL_NAME;
+const sd = process.env[CL_ENV.STATE_DIR];
+const name = process.env[CL_ENV.NAME];
 if (!sd || !name) emit();
 
 try {
@@ -66,7 +68,7 @@ try {
     if (existsSync(idleMarkerPath(sd!))) {
         try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
     }
-    setTmuxStatus(name!, "busy");
+    setTmuxStatus(name!, LOOP_STATUS.BUSY);
 } catch {
     /* swallow — never block submit */
 }

@@ -44,7 +44,13 @@ function resolveType(arg: string | undefined): {
     fromArg: string | null;
     fromYaml: string | null;
 } {
-    const cfg = loadConfig(process.cwd());
+    // #591 — bin/aiball-mcp cd's to the install root before exec, so
+    // process.cwd() inside this subprocess is the AIBALL install dir, NOT
+    // the project the agent was launched in. AIBALL_CWD preserves the
+    // caller's PWD (same pattern as bin/aiball, src/mcp/_helpers.ts,
+    // src/client.ts). Without this, loadConfig walks up from the install
+    // root and never sees the per-project .aiball.yaml.
+    const cfg = loadConfig(process.env.AIBALL_CWD ?? process.cwd());
     return {
         requested: arg ?? cfg.project_type ?? DEFAULT_PROJECT_TYPE,
         fromArg: arg ?? null,

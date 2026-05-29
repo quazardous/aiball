@@ -38,6 +38,9 @@ export interface ProjectContext {
     mcp_json_deprecated: boolean;
     /** Absolute path to the loaded `.aiball.yaml`, if any. */
     config_path: string | null;
+    /** #565 — declared `project_type:` (welcome MCP kit selector). Null when
+     *  unset; welcome itself applies its `public` fail-safe default. */
+    project_type: string | null;
     /** #B.180 david: claude-loop timeouts, yaml-configurable. */
     claude_loop: {
         interval_seconds: number;
@@ -90,6 +93,7 @@ export function resolveProjectContext(opts: ResolveOpts = {}): ProjectContext {
         no_claim: cfg.consumer.no_claim,
         mcp_json_deprecated: cfg.mcp_json_deprecated,
         config_path: cfg.configPath,
+        project_type: cfg.project_type,
         claude_loop: { ...cfg.claude_loop },
         claude: { ...cfg.claude },
         colors: { ...cfg.colors },

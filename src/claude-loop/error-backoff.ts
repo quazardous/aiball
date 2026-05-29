@@ -24,6 +24,7 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { armBusyDefer } from "./state.js";
+import { CL_ENV } from "./env-vars.js";
 
 /**
  * One recognized error type. `id` labels the log line / bar suffix;
@@ -82,11 +83,11 @@ export function matchPaneError(text: string, footerLines = 8): string | null {
 
 // Exponential backoff knobs, env-overridable like the rest of CL_*.
 export const ERROR_BACKOFF_BASE_MS =
-    Math.max(0, Number(process.env.CL_ERROR_BACKOFF_BASE_MS ?? 5000));
+    Math.max(0, Number(process.env[CL_ENV.ERROR_BACKOFF_BASE_MS] ?? 5000));
 export const ERROR_BACKOFF_FACTOR =
-    Math.max(1, Number(process.env.CL_ERROR_BACKOFF_FACTOR ?? 2));
+    Math.max(1, Number(process.env[CL_ENV.ERROR_BACKOFF_FACTOR] ?? 2));
 export const ERROR_BACKOFF_CAP_MS =
-    Math.max(0, Number(process.env.CL_ERROR_BACKOFF_CAP_MS ?? 600_000)); // 10 min
+    Math.max(0, Number(process.env[CL_ENV.ERROR_BACKOFF_CAP_MS] ?? 600_000)); // 10 min
 
 /**
  * Dumb exponential schedule: `base · factor^(attempts-1)`, capped.

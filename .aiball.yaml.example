@@ -1,484 +1,208 @@
-# aiball per-project config
+# aiball per-project config (.aiball.yaml)
 #
-# Drop this file at your project root as `.aiball.yaml` to enable the
-# autopoll hook (Stop event → "you have N aiball pings to drain").
-# Without this file, the hook is inactive even if it's wired in
-# ~/.claude/settings.json. Everything below is optional with sensible
-# defaults — `{}` (empty YAML) is enough to turn autopoll on.
-#
-# Pilot from the CLI: `aiball autopoll enable|disable|tone X|throttle N`
-# Inspect current state: `aiball check`
+# Drop at the project root to enable the autopoll hook. `{}` (empty YAML)
+# is enough to turn autopoll on; everything below has a sensible default.
+# Full reference + layering rules: docs/CONFIGS.md.
+# Pilot from the CLI: `aiball check`, `aiball autopoll enable|disable|tone X`.
+
+# --- autopoll -----------------------------------------------------------------
 
 autopoll:
-  # Master switch. The hook in ~/.claude/settings.json is global; this
-  # is the per-project opt-in. Default when this file exists: true.
+  # Master switch. The hook in ~/.claude/settings.json is global; this is
+  # the per-project opt-in.
   enabled: true
 
-  # Reminder behavior :
-  #
-  #   false (default) — persistent. The hook re-fires after
-  #                     `throttle_seconds` even if you didn't drain.
-  #                     New pings (max_id moves) always notify
-  #                     immediately, bypassing the throttle.
-  #   true            — one-shot. Notify only when a strictly newer
-  #                     ping arrives (max_id watermark moves). No
-  #                     time-based reminders — "tell me once and
-  #                     leave me alone".
+  # false = persistent reminder (re-fires after throttle_seconds);
+  # true  = one-shot (only notify when a strictly newer ping arrives).
   volatile: false
 
-  # Reminder cadence (ignored when volatile: true). 0 means "every
-  # Stop"; with persistent mode that's spammy. Bumped to 120s
-  # so fast back-and-forth conversations (each turn ≪ 30s) don't
-  # re-fire the standing reminder every turn — new pings and new
-  # open tickets still bypass the throttle and notify instantly.
-  # State persists in ~/.cache/aiball/autopoll-<agent>.json.
+  # Reminder cadence (ignored when volatile). 0 = every Stop (spammy).
   throttle_seconds: 120
 
-  # How aggressively the hook nudges the agent.
-  #
-  #   hint       — "Consider calling unread(...)." Polite, easy to ignore.
-  #                Use when the agent's own system prompt already
-  #                handles proactivity.
-  #   directive  — "Drain via unread(...) then react. Do not ask first."
-  #                Default. Names the action explicitly.
-  #   imperative — "**YOU MUST** drain N pings BEFORE doing anything."
-  #                Last resort if the agent persists in asking
-  #                permission patterns.
+  # Reminder tone: hint | directive | imperative.
   tone: directive
 
-  # Include up to N recent unread ticket titles in the hook's reason,
-  # so the agent knows what's waiting before draining. 0 = count only.
+  # Up to N recent unread ticket titles in the hook reason. 0 = count only.
   include_recent_tickets: 3
 
-  # Open-tickets count handling :
-  #
-  #   true (default) — the count is also a trigger: notify when open
-  #                    tickets exist in your scope, even without unread
-  #                    pings. New open tickets bump the watermark.
-  #   false          — context only: the count is still displayed in
-  #                    the reason if there are pings, but doesn't
-  #                    trigger by itself.
+  # When true, the open-tickets count is itself a trigger (notify even
+  # without unread pings). false = display only.
   backlog: true
 
-# Identity — consumer_id and project for this project. The CANONICAL
-# source (david: ".aiball.yaml est la source canonique").
-# Resolution chain across every aiball tool (autopoll, claude-loop,
-# `aiball` CLI, MCP server):
-#
-#   1. `AIBALL_AGENT` / `AIBALL_PROJECT` env  ← priority override.
-#                                               Reserved for special
-#                                               cases (shell scripts
-#                                               running as another
-#                                               identity, one-off
-#                                               scopes). Don't use as
-#                                               the everyday setting.
-#   2. `consumer:` block here                 ← canonical, recommended
-#   3. `.mcp.json` mcpServers.aiball.env      ← DEPRECATED. Still
-#                                               works, but `aiball
-#                                               check` + claude-loop
-#                                               warn. Migrate.
-#   4. Defaults                                project: basename(cwd)
-#                                              agent: <project>-claude
-#
-# Set the `consumer:` block once here and you stop maintaining the
-# values in `.mcp.json`'s env block (which only ever reached the MCP
-# subprocess anyway — not claude-loop or the bash CLI).
-#
+# --- consumer identity --------------------------------------------------------
+# Canonical source for this project's agent + project name. Resolution
+# order: AIBALL_AGENT/AIBALL_PROJECT env > this block > .mcp.json env
+# (DEPRECATED) > defaults (project = basename(cwd), agent = <project>-claude).
+
 # consumer:
-#   agent: skybot-claude
-#   project: skybot
-#   # Optional. When true, this project's agent is "assignment-only":
-#   # ticket_engage skips the global claimable pool and only returns
-#   # tickets explicitly assigned via ticket_assign. The agent can still
-#   # receive a push, comment, resolve, close — only the auto-claim is
-#   # gated. OR'd with the upstream `consumers.can_claim=false` admin flag.
-#   # Default false (claim normally).
+#   agent: my-agent
+#   project: my-project
+#   # If true, agent is "assignment-only": ticket_engage skips the claimable
+#   # pool and only returns explicitly assigned tickets.
 #   no_claim: false
 
-# claude-loop timeouts. All optional — the defaults below
-# are what ship today. CLI flags (`--interval`, `--user-grace`) still
-# win over yaml when explicitly passed.
-#
-# claude_loop:
-#   # Heartbeat tick in seconds. Lower = bar more reactive + faster
-#   # polling-fallback, higher = less daemon load. Default 30
-#   # (recalibrated — old 60s was sluggish enough that the
-#   # bar lagged visibly behind real state changes).
-#   interval_seconds: 30
-#
-#   # Boot-grace before settleBoot fires. The pane-probe can sortir
-#   # du `[boot]` plus tôt si elle detecte le prompt. Default 60.
-#   boot_grace_seconds: 60
-#
-#   # User-grace window after a human prompt — tryWake refuses to
-#   # send-keys during this period. Default 60 (aligned on the
-#   # heartbeat / boot-grace order).
-#   user_grace_seconds: 60
-#
-#   # Boot-grace WAIT default when NEITHER --wait nor --no-wait is
-#   # passed on `claude-loop start`. The global CLI default stays no-wait
-#   # (eager boot drain). Set true here so THIS project's loops boot
-#   # in `wait` (yield the boot-grace for a human take-over) without typing
-#   # --wait each time. An explicit --wait/--no-wait still overrides. Default false.
-#   wait: false
-#
-#   # Wake-in-flight TTL: how long the marker stays "fresh"
-#   # after the timer touches it pre-send-keys. The UserPromptSubmit
-#   # hook checks this to distinguish auto-wake from human input.
-#   # Default 2000 (2s) — only reduce if your shell is faster than
-#   # 2s round-trip on send-keys → hook fire.
-#   wake_in_flight_ttl_ms: 2000
-#
-#   # ESC takeover. When ON, pressing ESC in the loop pane (the
-#   # gesture you use to interrupt claude / take over) arms the
-#   # user-grace window — the loop stops auto-pinging for
-#   # `user_grace_seconds` so it doesn't barge back in over you, and the
-#   # tmux bar reads `wait`. ESC is otherwise invisible to the wrapper
-#   # (it's a control byte, not a prompt submit). Requires the PTY proxy
-#   # (the default launch path; without it ESC can't be detected).
-#   # Default true — set false to keep ESC purely a claude interrupt
-#   # with no effect on the loop.
-#   esc_takeover: true
-#
-#   # AskUserQuestion gate. In a loop, the multi-choice dialog is
-#   # allowed only if a human acted within ask_grace_seconds; past that it
-#   # redirects the agent to ask via a ticket comment. Longer than
-#   # user_grace_seconds — a stalled question is cheap vs a lost one.
-#   # Default 600 (10 min).
-#   ask_grace_seconds: 600
-#
-#   # AFK combo: press it to TOGGLE yourself away/back IMMEDIATELY
-#   # (the AskUserQuestion gate redirects while away, without waiting for the
-#   # timeout); resuming typing also clears it ("I'm back"). David s4r9n8:
-#   # it's now a SINGLE ATOMIC combo (chord), no 2-press timing sequence — the
-#   # sequence was irreparably ambiguous (key-repeat bytes == two deliberate
-#   # taps; and a bare ESC doubles as claude's interrupt key, so it's REJECTED).
-#   # VS Code notation: `+` joins modifiers; a SPACE means OR (alternatives, any
-#   # toggles), e.g. "f9 ctrl+g". Only what the terminal emits as distinct bytes
-#   # is supported: ctrl+<char>, alt+<char>, f-keys, named keys, and literals
-#   # (incl. non-ASCII like the AZERTY "²" key — encoded as its UTF-8 bytes).
-#   # Default "f9": the previous "alt+esc" was confirmed SWALLOWED BY THE
-#   # OS/window manager (GNOME) before reaching the proxy. A function key has no
-#   # OS/tmux/claude conflict. AVOID alt+… (WM/terminal shortcuts), ctrl+s/q
-#   # (flow-control freeze), ctrl+c/d/z/b and the readline editing ctrls, and
-#   # f1/f10/f11/f12 (help/menu/fullscreen). A literal printable key (e.g. "²")
-#   # works too but is then SWALLOWED — you can't type it to claude. Confirm any
-#   # candidate reaches aiball on YOUR setup with `claude-loop debug-keys`. The
-#   # matched combo is swallowed by the proxy (claude never sees it). Requires
-#   # the PTY proxy.
-#   afk_key: "f9"
-#
-#   # Post-fire key-repeat DEBOUNCE in ms: a held chord repeats the same
-#   # bytes; within this window after a toggle they're swallowed (one net toggle
-#   # per physical press). NOT a sequence window anymore. Default 400.
-#   afk_window_ms: 400
-#
-#   # Drained-backlog reminder. What the heartbeat does when ONLY a gated
-#   # backlog remains: pings=0, actionable=0 (nothing in your court), but open>0
-#   # (tickets awaiting YOUR accept/reject/reply). Default "once" (david
-#   # krwnqu). Syntax: kind[:PT…[/PT…]] (ISO-8601 durations):
-#   #   silent              — never remind (opt out of the nudge entirely).
-#   #   once                — one wake when the pool empties, then quiet until the
-#   #                         landscape moves (a ticket opens/closes or someone acts). (default)
-#   #   stale[:PT2H]        — auto-memo: remind only when the backlog has been
-#   #                         untouched for > the window (exploits last_actor_at).
-#   #                         Silent while you work. Default window PT2H.
-#   #   backoff[:PT10M[/PT1D]] — polite persistent: first reminder at +base, then
-#   #                         the gap doubles (base, 2×, 4×…) up to the cap. Resets
-#   #                         when the landscape moves. Defaults base PT10M, cap PT1D.
-#   #   persistent[:PT30M]  — remind every eligible tick while open>0, spaced by
-#   #                         at least the param (none → every heartbeat).
-#   # Reminders are about the backlog in YOUR court — they nudge you to clear it,
-#   # which hands tickets back to the agent. Recommended for solo use: "stale".
-#   drained_strategy: "once"
-#
-#   # Minimum log level for the claude-loop timer + hooks (PSR-3 / RFC 5424).
-#   # Messages below the threshold are dropped (cheap). Levels, low→high:
-#   #   debug, info, notice, warning, error, critical, alert, emergency
-#   # Default "info". Set "debug" to see the noisy diagnostic lines, or
-#   # "warning" to quiet routine activity. Format stays `<ts> [tag] LEVEL msg`
-#   # so `claude-loop tail` / `--log` keep working.
-#   log_level: "info"
-#
-#   # Custom wake gates. Each gate runs at heartbeat; when it triggers, its
-#   # message is prepended to the wake CTA (so the agent sees it before taking
-#   # new work). Two forms in the same list:
-#   #   - built-in `type:` — a pre-wired detector, zero shell to write.
-#   #                        Available: unmerged_pr (open PR(s) not merged).
-#   #   - custom `cmd:`     — your own check; exit 0 = triggered, and the cmd's
-#   #                         stdout (if any) overrides the static `message`.
-#   # `blocks: true` makes the wake LEAD with the gate and suppresses the
-#   # "engage #N" directive ("resolve this before taking new work"). Default is
-#   # warn (the message is just surfaced). Built-in wording is overridable in
-#   # the prompts: block (slot `gate_<type>`, e.g. gate_unmerged_pr), tone-aware,
-#   # with detector placeholders like {count}.
-#   gates:
-#     - type: unmerged_pr           # built-in, warn
-#     # - type: unmerged_pr         # …or hard-stop:
-#     #   blocks: true
-#     # - name: preflight           # custom check
-#     #   cmd: "make preflight"
-#     #   message: "⚠ preflight failing — fix before new work"
+# --- claude-loop --------------------------------------------------------------
+# The tmux wrapper around `claude`. CLI flags (--interval, --user-grace, …)
+# still win over this block when explicitly passed.
 
-# Upstream provider bindings (#160 Phase 1 — refs `gh#NNN` cliquables).
-# Per-project map : la clé est le nom du projet aiball, la valeur est la liste
-# de ses bindings. Une seule entrée par provider peut avoir `default: true` —
-# c'est celle qui résout le `<prefix>#NNN` non-préfixé. L'override explicite
-# `<prefix>:owner/repo#NNN` ignore les bindings (résout direct).
-# Phase 1 = rendering only (chip cliquable dans les bodies markdown). Pas de
-# sync API GitHub (webhook inbound, closure outbound) à ce stade.
-# upstream:
-#   mrtroove:
-#     - kind: github
-#       ref: github:mrtroove/mrtroove
-#       default: true
-#   aiball:
-#     - kind: github
-#       ref: github:quazardous/aiball
-#       default: true
+claude_loop:
+  # Heartbeat tick (seconds). Lower = bar more reactive + faster polling.
+  interval_seconds: 30
 
-# Options du binaire `claude` lui-même (les flags qu'on lui passe au spawn).
-# Distincts de `claude_loop:` qui décrit la machinerie loop autour de claude.
-# claude:
-#   # Auto-inject `--resume` dans la commande claude au spawn si pas déjà
-#   # passé sur la CLI. Set true ici pour les projets où tu veux
-#   # systématiquement reprendre la session précédente sans retyping
-#   # `--resume` à chaque `claude-loop start`. Default false (claude démarre
-#   # session vide). Un `--resume` / `--resume=<id>` / `--no-resume` explicite
-#   # dans `claude-loop start -- <args>` gagne toujours (pas de double-inject).
-#   always_resume: false
+  # Boot-grace before settleBoot fires. The pane probe can leave [boot]
+  # earlier if it detects the prompt.
+  boot_grace_seconds: 60
 
-# Workflow hints. claude-loop "habille" the WAKE of a `feature`-intent
-# ticket with a branch hint ("🌿 Feature: build it in …, not on main."). Lets
-# you tune the wording per project without forcing a workflow; layered like
-# claude_loop (defaults → this file). request/other intents get no hint.
-# workflow:
-#   # Hint to build feature tickets on a dedicated branch + PR. Default false.
-#   hint_branch: false
-#   # Also mention a git worktree (too technical). Default false.
-#   hint_worktree: false
-#   # (both false → no branch hint on feature wakes; opt in per project)
+  # Grace window after a human prompt — tryWake skips send-keys during it.
+  user_grace_seconds: 60
 
-# Project "type" — picked up by the MCP `welcome` tool to choose which
-# onboarding kit (rules + templates) to serve when the user asks the
-# agent to call `welcome`. Free-string : the tool validates it at
-# call-time against the install's `welcome/<type>/` folders, so the
-# set of valid values is discovered (not hardcoded). Out of the box
-# the install ships `public` and `private` ; add a type = drop a
-# sibling folder under `welcome/` with a `WELCOME.md`, no code change.
-#
-# Absent here = fail-safe default `public` (strict scrubbing rules
-# apply rather than no rules) — set explicitly when this project is
-# internal-only and you want to skip the public-repo conventions.
-# project_type: public
+  # WAIT default when neither --wait nor --no-wait is passed. Global CLI
+  # default stays no-wait (eager boot drain); flip true to yield boot-grace
+  # for a human take-over without typing --wait each time.
+  wait: false
 
-# claude-loop tmux bar colour profile. Each value is a raw tmux colour
-# token (`colour16`, `colour15`, a named colour like `red`, or a hex `#0087ff`).
-# Layered on THREE levels — defaults → global `~/.config/aiball/config.yaml`
-# `colors:` → this file's `colors:` (project wins). Set a machine-wide theme once
-# in the global file; tune per project here. Any key you omit keeps the layer
-# below.
-#
-# The bar text sits on TWO backgrounds, so it has TWO foregrounds:
-#   • the black "island" holds `claude-…`           → island_fg (keep it light)
-#   • the state-coloured region holds `name [state] · afk:key` → bar_fg
-# So "make the bar font black" = bar_fg (the default — white washed out on
-# the busy electric-blue bar; white-on-yellow boot was unreadable). The island
-# stays light so `claude-` reads on the black gradient.
+  # How long the wake-in-flight marker stays "fresh" after the timer
+  # touches it pre-send-keys (ms). The UserPromptSubmit hook uses this
+  # to distinguish auto-wake from human input.
+  wake_in_flight_ttl_ms: 2000
+
+  # When ON, pressing ESC in the loop pane arms the user-grace window
+  # (so the loop stops auto-pinging while you take over). Requires the
+  # PTY proxy (the default launch path).
+  esc_takeover: true
+
+  # AskUserQuestion gate: the dialog is allowed only if a human acted
+  # within this many seconds; past that it redirects via a ticket comment.
+  ask_grace_seconds: 600
+
+  # AFK toggle combo (chord, VS Code notation; SPACE = OR). f9 has no
+  # OS/tmux/claude conflict. Avoid alt+… (WM/terminal), ctrl+s/q (flow
+  # control), ctrl+c/d/z/b and readline keys, f1/f10/f11/f12. Verify any
+  # candidate with `claude-loop debug-keys`. Requires the PTY proxy.
+  afk_key: "f9"
+
+  # Post-fire key-repeat debounce (ms): a held chord repeats the same
+  # bytes; within this window after a toggle they're swallowed.
+  afk_window_ms: 400
+
+  # Drained-backlog reminder strategy. Fires when pings=0 + actionable=0
+  # but open>0 (tickets awaiting YOUR accept/reject/reply).
+  # Syntax: kind[:PT…[/PT…]] (ISO-8601 durations).
+  #   silent              — never remind.
+  #   once                — one wake when the pool first empties.
+  #   stale[:PT2H]        — remind only after the backlog stayed untouched
+  #                         for the window (defaults to PT2H).
+  #   backoff[:PT10M[/PT1D]] — first reminder at +base, then doubles up to cap.
+  #   persistent[:PT30M]  — every eligible tick spaced by ≥ the param.
+  drained_strategy: "once"
+
+  # Minimum log level for the timer + hooks (PSR-3 / RFC 5424). Levels:
+  # debug | info | notice | warning | error | critical | alert | emergency.
+  log_level: "info"
+
+  # Custom wake gates. Each runs at heartbeat; on trigger its message is
+  # prepended to the wake CTA. Two forms: built-in `type:` or custom `cmd:`.
+  # `blocks: true` makes the wake lead with the gate and suppress the
+  # "engage #N" directive. See docs/CONFIGS.md for the full grammar.
+  # gates:
+  #   - type: unmerged_pr
+  #   # - type: unmerged_pr
+  #   #   blocks: true
+  #   # - name: preflight
+  #   #   cmd: "make preflight"
+  #   #   message: "preflight failing — fix before new work"
+
+# --- claude binary ------------------------------------------------------------
+# Spawn-time options for `claude` itself (distinct from claude_loop, the
+# machinery around it).
+
+claude:
+  # Auto-inject `--resume` at spawn unless already passed on the CLI.
+  # An explicit --resume / --resume=<id> / --no-resume always wins.
+  always_resume: false
+
+# --- workflow hints -----------------------------------------------------------
+# claude-loop wraps `feature`-intent ticket wakes with a branch hint
+# ("Feature: build it in <branch>, not on main."). Request/other intents
+# get no hint.
+
+workflow:
+  hint_branch: false
+  hint_worktree: false
+
+# --- project type -------------------------------------------------------------
+# Picked up by the MCP `welcome` tool to choose the onboarding kit. Out of
+# the box: `public` (strict scrubbing) and `private`. Validated at call
+# time against the install's `welcome/<type>/` folders. Absent here = `public`.
+
+project_type: public
+
+# --- tmux bar colours ---------------------------------------------------------
+# Each value is a raw tmux colour token (`colour16`, named like `red`, or
+# `#0087ff`). Layered: shipped defaults → ~/.config/aiball/config.yaml
+# `colors:` → this block. The bar has TWO foregrounds: the black "island"
+# (`island_fg`) and the state-coloured region (`bar_fg`).
+
 # colors:
-#   island_fg: "colour15"     # `claude-…` on the black island (default white)
-#   bar_fg: "colour16"        # name / [state] / afk key on the coloured bar (default black)
-#   afk_label_fg: "colour238" # the dim `· afk:` control-key label
-#   busy_bg: "colour33"       # bar background while claude is working (electric blue)
-#   idle_bg: "colour240"      # bar background at the prompt (dark grey)
-#   boot_bg: "colour178"      # bar background while booting (yellow)
+#   island_fg: "colour15"     # `claude-…` on the black island (white)
+#   bar_fg: "colour16"        # name / [state] / afk on the coloured bar (black)
+#   afk_label_fg: "colour238" # dim `· afk:` label
+#   busy_bg: "colour33"       # claude working (electric blue)
+#   idle_bg: "colour240"      # at the prompt (dark grey)
+#   boot_bg: "colour178"      # booting (yellow)
 
-# Wake-CTA / state-prompt template overrides.
-# Optional per-project section. When absent, the skill-shipped defaults
-# in `config/defaults/claude-loop-pings.yaml` apply — you don't need anything here
-# for the wake-CTA to work. Use this block to localize wording (FR/EN),
-# experiment with directiveness levels, or tune the prompt for a project
-# with multiple agents talking to claude.
-#
-# Resolution chain: three layers, project wins.
-#
-#   1. Shipped defaults — at `config/defaults/claude-loop-pings.yaml`.
-#                        Read at every wake by the central service.
-#   2. Global per-user — optional, at `$XDG_CONFIG_HOME/aiball/config.yaml`
-#                       or `~/.config/aiball/config.yaml`. Use this when
-#                       you want the SAME wording across every project
-#                       you work on (e.g. an "always-FR" preference).
-#   3. Per-project — this file's `prompts:` block. Overrides global +
-#                    defaults, slot by slot.
-#
-# Slot-grain replace at each step (no deep merge inside a slot, so a
-# user can switch shape forms freely between layers).
-#
-# ── Placeholder grammar ────────────────────────────────────────────────────
-# All the conditional logic lives IN the template (no `if` in code, david:
-# « pas du `if` partout »). A shell-inspired grammar:
-#
-#   {var}            → the value (empty string when unset/empty)
-#   {var:-default}   → the value, or `default` when unset/empty
-#   {var:+text}      → `text` ONLY when var is non-empty, else "" (inline if)
-#
-# `text`/`default` may themselves contain `{…}` and LITERAL braces, so a
-# tool-call like `unread({pings: true})` is safe inside a `{x:+ … }` body.
-# Counts are passed as "" when zero, so a `{count:+ … }` block disappears at
-# zero with no branching in code.
-#
-# ── Slot shapes (tone + round-robin kept, david b296px) ────────────────────
-#   string                   → fixed wording.
-#   list[string]             → ROUND-ROBIN: a random element is picked each
-#                              wake (variety, so the prompt feels less canned).
-#   { <tone>: string|list }  → per-TONE bucket. The active tone is
-#                              `autopoll.tone` above (hint | directive |
-#                              imperative); a missing tone falls back to
-#                              `directive`. The selected bucket is then a
-#                              string or a round-robin list. Tone is a uniform
-#                              selection layer, never a per-placeholder rule.
-#
-# No `_one/_other` plural slugs: write a flat `(s)` in the template
-# (`ping(s)`, `ouvert(s)`). A count-driven suffix would be a per-placeholder
-# rule the code must remember — exactly what this grammar removes (david d7zcj5).
-#
-# ── Placeholders exposed to the wake templates (always provided) ───────────
-#   {culture}          random pop-culture phrase from `ping_messages`
-#                      (auto-resolved fresh each render).
-#   {lead}             the rendered `wake_lead` slot (for the active tone).
-#   {ping_count}       unread aiball ping count ("" when zero).
-#   {open_count}       open ticket count ("" when zero).
-#   {actionable_count} tickets in your court ("" when zero).
-#   {head_id}          id of the work-order head (priority desc,
-#                      then oldest) — the ticket to engage first.
-#   {head_title}       title of that head ticket.
-#   {project_scope}    "`<project>`" or "your scope".
-#   {consumer_prompt}  this consumer's micro-prompt — a standing
-#                      instruction edited per-agent in the UI (Consumers →
-#                      edit → micro-prompt). Empty when unset (opt-in): drop
-#                      the placeholder into your wake_master where you want
-#                      the agent to see it (e.g. "{consumer_prompt:+ {consumer_prompt}}").
-#
-# ── Slots (the whole wake-CTA, two slots) ──────────────────────────────────
-#   wake_lead    → conversational lead between {culture} and the state report
-#                  (avoids the old `[aiball: …]` bracket that tripped
-#                  prompt-injection defenses on cold sessions, david 6ehkvn).
-#   wake_master  → the ENTIRE wake-CTA in one template: pings line + engage
-#                  line + open count, each gated by its own `{x:+ … }` block.
-#                  A missing wake_master falls back to the in-code default.
-#
-# ── Partials (reusable fragments, david 54phhg) ────────────────────────────
-# Any slot whose NAME STARTS WITH `_` is a partial: reference it as {_name}
-# from any template and it expands where it sits — resolved through the same
-# path (active tone + round-robin), so a partial may itself be a string, a
-# list, or a per-tone bucket, and may reference other partials. Use it to
-# factor wording you'd otherwise repeat across tone buckets (e.g. the drain /
-# engage verbs). A cyclic reference renders "" (no hang).
-#
-# A missing slot in the override falls back to the lower layers; a slot here
-# REPLACES the default for that slot (no deep merge inside a slot, so you can
-# switch shape forms freely between layers).
-#
+# --- upstream provider bindings -----------------------------------------------
+# Renders `<prefix>#NNN` refs as clickable chips in markdown bodies
+# (render-only — no API sync). Key = aiball project name. Per-provider:
+# at most ONE entry can have `default: true`.
+
+# upstream:
+#   my-project:
+#     - kind: github
+#       ref: github:owner/repo
+#       default: true
+
+# --- wake-CTA / state-prompt overrides ----------------------------------------
+# Shipped defaults at `config/defaults/claude-loop-pings.yaml` already
+# work — this block is optional and only needed to localize wording,
+# tune directiveness, or tweak for a multi-agent setup. Layering:
+# shipped → ~/.config/aiball/config.yaml → this block (slot-grain replace).
+# Placeholder grammar + slot shapes documented in docs/CONFIGS.md.
+
 # prompts:
-#   # Partials: factor the verbs once (tone-aware, round-robin), reuse via {_…}.
-#   _drain:
-#     directive: ["drain via `unread({pings: true, mark_read: true})`",
-#                 "ack via `unread({pings: true, mark_read: true})`"]
-#     imperative: ["DRAIN now via `unread({pings: true, mark_read: true})`"]
-#   _engage:
-#     directive: ["engage #{head_id} first — top of the work order — via `ticket_list({actionable: true})`"]
-#     imperative: ["ENGAGE #{head_id} first — via `ticket_list({actionable: true})`"]
-#
-#   # Tone buckets, round-robin within each.
 #   wake_lead:
 #     directive: ["fyi:", "heads up —", "quick note:"]
-#     hint:      ["btw,", "fyi,", "just so you know,"]
+#     hint:      ["btw,", "fyi,"]
 #     imperative: ["**heads up**:", "**ACTION**:"]
-#
-#   # The whole wake-CTA, one template per tone. {_drain}/{_engage} pull the
-#   # partials above (at the current tone). Each {x:+ … } block renders only
-#   # when its var is set.
 #   wake_master:
-#     directive: "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — {_drain}.}{actionable_count:+ {_engage}.}{open_count:+ ({open_count} open in {project_scope})}"
-#     imperative: "{culture} {lead}{ping_count:+ {ping_count} unread ping(s) — {_drain}.}{actionable_count:+ {_engage}.}{open_count:+ ({open_count} open in {project_scope})}"
+#     directive: "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}{actionable_count:+ engage #{head_id} first — via `ticket_list({actionable: true})`.}{open_count:+ ({open_count} open in {project_scope})}"
 
-# Ticket-text linkifier patterns. Same 3-layer chain as
-# `prompts:` — shipped defaults at `config/defaults/claude-loop-pings.yaml`,
-# global at `~/.config/aiball/config.yaml`, per-project here. Merge is by
-# `id`: shipped defaults are non-removable (they always run as fallback);
-# entries here either OVERRIDE a default by reusing the same id, or ADD
-# a new linkifier with a fresh id.
-#
-# Regex is validated at load (`new RegExp(match)`). Invalid entries log
-# to stderr and are dropped — the rest of the merge still ships.
-#
-# Fields:
-#   id         stable identifier
-#   match      ECMAScript regex source
-#   canonical  visible label template — `{1}`, `{2}` reference capture
-#              groups (1-indexed). `{0}` = whole match.
-#   href       optional URL template (same `{N}` syntax). Captures are
-#              URL-encoded before insertion. When omitted, the match is
-#              styled but not wrapped in <a>.
-#   class      optional CSS class on the rendered element
-#
-# Example overrides:
-#
+# --- ticket-text linkifier patterns -------------------------------------------
+# Merge by `id` (3 layers, ADDITIVE: shipped defaults always run; entries
+# here OVERRIDE by reusing an id or ADD with a fresh id). Regex validated
+# at load; invalid entries logged + dropped.
+
 # formatting:
 #   patterns:
-#     # Override the canonical form of an existing pattern (id=ticket).
 #     - id: ticket
 #       match: "#[Bb][._/-]?(\\d+)\\b"
 #       canonical: "[B-{1}]"
 #       href: "/b/{1}"
 #       class: "ticket-ref"
-#
-#     # Add a project-specific pattern (e.g. JIRA references).
 #     - id: jira
 #       match: "\\b(PROJ-\\d+)\\b"
 #       canonical: "{1}"
 #       href: "https://jira.example.com/browse/{1}"
 #       class: "external-ref"
 
-# Config-defined tags. Tags declared here show up in the Tags
-# admin panel as READ-ONLY entries (a lock badge, no delete) next to the
-# DB tags you create from the UI. Use them to ship a curated component
-# catalog (`claude-code`, `mcp`, `daemon`, `hook`, …) that can't be
-# accidentally deleted.
+# --- config-defined tags ------------------------------------------------------
+# Read-only in the Tags admin panel (lock badge, no delete). Layering is
+# COMPOSITE — every layer ADDS (unlike prompts/formatting which replace).
+# A tag's display order follows the LAST layer that mentions it.
 #
-# Inheritance is COMPOSITE — every layer ADDS (unlike `prompts:` /
-# `formatting:`, which replace slot-by-slot). Three layers, low→high:
-#   0. shipped dist    — `config/defaults/tags.yaml` (the classic catalog:
-#                        bug / feature / urgent / … — read-only, ships with
-#                        the install)
-#   1. global per-user — `~/.config/aiball/config.yaml` → tags:
-#   2. per-project     — this file's `tags:` block
-#
-# A tag's display order follows the LAST layer that mentions it (restate
-# a tag to move it to the end); color/note carry over from earlier layers
-# when a later one omits them.
-#
-# Each entry is a bare name or an object with optional `color` / `note`:
-#   - claude-code
-#   - { name: mcp, color: "#7e57c2", note: "MCP server surface" }
-#
-# PER-PROJECT scope: the daemon resolves config from a SINGLE cwd, so it
-# only ever reads ONE project's `.aiball.yaml`. To declare tags for other
-# projects (the Tags panel has a project selector spanning all of them),
-# use the project-keyed map in the GLOBAL file:
-#
-#   # ~/.config/aiball/config.yaml
-#   tags:
-#     global:                      # apply to every project
-#       - bug
-#       - { name: mcp, color: "#7e57c2" }
-#     projects:
-#       aiball: [frontend, daemon, hook]
-#       m2m:    [{ name: datamart, note: "BI sync" }]
-#
-# In THIS per-project file, a bare list is shorthand for "tags for this
-# project" (it won't leak to siblings):
-#
+# Per-project file: bare list = "tags for this project". For cross-project
+# tags, use the project-keyed map in the global file (~/.config/aiball/config.yaml).
+
 # tags:
 #   - claude-code
 #   - { name: hook, color: "#0ea5e9", note: "settings.json hooks" }

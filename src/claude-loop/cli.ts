@@ -38,6 +38,7 @@ import {
     canonicalCwd,
     DEFAULT_CHECK_CMD,
     isInternalCheckCmd,
+    LOOP_STATUS,
     MUX_CMD,
     STATE_ROOT,
     defaultPingsPath,
@@ -62,6 +63,7 @@ import {
 } from "./state.js";
 import { cmdTail, type TailMode } from "./cmds/tail.js";
 import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake } from "./cmds/manage.js";
+import { CL_ENV } from "./env-vars.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -533,7 +535,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // `pty-proxy.py --replay-log <file>` to replay the REAL byte stream
         // (coalescing/key-repeat included) — the faithful test the idealized
         // `--replay` tokens couldn't be. Absent = no capture (zero overhead).
-        ...(process.env.CL_PROXY_LOG ? [`export CL_PROXY_LOG=${shQuote(process.env.CL_PROXY_LOG)}`] : []),
+        ...(process.env[CL_ENV.PROXY_LOG] ? [`export ${CL_ENV.PROXY_LOG}=${shQuote(process.env[CL_ENV.PROXY_LOG]!)}`] : []),
         // #B.154: resume picker auto-dismiss mode. Read by the
         // SessionStart hook when source=resume.
         `export CL_RESUME_MODE=${shQuote(opts.resumeMode ?? "as-is")}`,
@@ -690,7 +692,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // Default = real claude. Read once at spawn time, baked into the
     // session's inner command (so a fresh `claude-loop start` picks
     // up the current env, but in-flight loops stay as-spawned).
-    const claudeBin = process.env.CL_CLAUDE_CMD ?? "claude --permission-mode auto";
+    const claudeBin = process.env[CL_ENV.CLAUDE_CMD] ?? "claude --permission-mode auto";
     // IMPORTANT: no `{ … }` brace groups here. psmux interprets a
     // command starting with `{` as a PowerShell script block and
     // base64-UTF16-encodes it for `powershell -EncodedCommand`, which
@@ -833,7 +835,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         "bind-key", "-T", "copy-mode", "MouseDragEnd1Pane",
         ...pipeArgs,
     ], { stdio: "ignore" });
-    setTmuxStatus(name, "boot");
+    setTmuxStatus(name, LOOP_STATUS.BOOT);
 
     // Detached timer process. Inherits CL_* env via the env file
     // sourced in the child shell. nohup-like: ignore SIGHUP, detach.
@@ -1007,7 +1009,7 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
             } catch { /* ignore */ }
         }
     }
-    const checkCmd = opts.checkCmd ?? plateCheckCmd ?? process.env.CL_CHECK_CMD ?? DEFAULT_CHECK_CMD;
+    const checkCmd = opts.checkCmd ?? plateCheckCmd ?? process.env[CL_ENV.CHECK_CMD] ?? DEFAULT_CHECK_CMD;
     process.stdout.write(`claude-loop check\n`);
     process.stdout.write(`  loop name      : ${plateName ?? name ?? "(no loop)"}\n`);
     process.stdout.write(`  check-cmd      : ${checkCmd}\n`);
@@ -1187,6 +1189,9 @@ async function cmdStatus(name: string | undefined): Promise<void> {
     // explicitement assignés. claude-loop exporte AIBALL_NO_CLAIM=1 vers
     // claude + hooks → AiballClient inject `x-aiball-no-claim: 1`.
     process.stdout.write(`  no_claim       : ${ctx.no_claim ? "true (assignment-only — engage skips the global pool)" : "false (claim normally)"}\n`);
+    // #591 qef8m6 — surface project_type so it's visible from the CLI without
+    // calling the welcome MCP. Null = welcome falls back to `public`.
+    process.stdout.write(`  project_type   : ${ctx.project_type ?? "(unset — welcome defaults to 'public')"}\n`);
     process.stdout.write(`  .aiball.yaml   : ${ctx.config_path ?? "(none — built-in defaults)"}\n`);
     process.stdout.write(`  project cwd    : ${formatProjectCwd(name, statusPlate)}\n`);
 
@@ -1276,7 +1281,7 @@ async function cmdTrace(opts: { checkCmd?: string; interval?: string; once?: boo
         return;
     }
 
-    const checkCmd = opts.checkCmd ?? process.env.CL_CHECK_CMD ?? DEFAULT_CHECK_CMD;
+    const checkCmd = opts.checkCmd ?? process.env[CL_ENV.CHECK_CMD] ?? DEFAULT_CHECK_CMD;
     const interval = Math.max(1, Number(opts.interval ?? 10));
     process.stdout.write(`claude-loop trace — check-cmd=${checkCmd}, interval=${interval}s\n`);
     process.stdout.write(`(no claude spawn, no tmux session — Ctrl-C to exit)\n\n`);

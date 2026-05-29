@@ -17,9 +17,10 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { DEFAULT_USER_GRACE_SEC, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, userIsTakingOver, userTookOverPath, wakeInFlightPath } from "./state.js";
+import { DEFAULT_USER_GRACE_SEC, LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanPresent, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, userTookOverPath, wakeInFlightPath } from "./state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
+import { CL_ENV } from "./env-vars.js";
 import { createLogger } from "../log.js";
 
 function emit(): never {
@@ -27,10 +28,10 @@ function emit(): never {
     process.exit(0);
 }
 
-const sd = process.env.CL_STATE_DIR;
-const name = process.env.CL_NAME;
-const checkCmd = process.env.CL_CHECK_CMD ?? "true";
-const userGraceSec = Math.max(0, Number(process.env.CL_USER_GRACE_SEC ?? DEFAULT_USER_GRACE_SEC));
+const sd = process.env[CL_ENV.STATE_DIR];
+const name = process.env[CL_ENV.NAME];
+const checkCmd = process.env[CL_ENV.CHECK_CMD] ?? "true";
+const userGraceSec = Math.max(0, Number(process.env[CL_ENV.USER_GRACE_SEC] ?? DEFAULT_USER_GRACE_SEC));
 if (!sd || !name) emit();
 
 // #B.149: tail-friendly log of every Stop hook fire — so we can spot
@@ -151,7 +152,7 @@ function readPane(): string {
             // idle-since so the timer is allowed to re-ping once the
             // backoff window elapses (it gates on the idle marker).
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-            setTmuxStatus(name!, "busy", `retry ${bo.attempts}`);
+            setTmuxStatus(name!, LOOP_STATUS.BUSY, `retry ${bo.attempts}`);
             log(`  → ERROR-BACKOFF '${errId}' ${bo.ms}ms (attempt ${bo.attempts}) until=${bo.untilIso} became=busy:retry ${bo.attempts}`);
             emit();
         }
@@ -162,7 +163,7 @@ function readPane(): string {
             // Suppress wake — claude is doing something internal
             // (compacting, etc.) or blocked on backend. Surface the
             // SUB-STATE in the bar as a `busy:<special>` suffix.
-            setTmuxStatus(name!, "busy", pane.special);
+            setTmuxStatus(name!, LOOP_STATUS.BUSY, pane.special);
             log(`  → SUPPRESS (pane=${pane.special}) became=busy:${pane.special}`);
             emit();
         }
@@ -178,7 +179,7 @@ function readPane(): string {
         // pas juste celui qui a soumis < 60s (user-took-over). Sans cette
         // OR, le wake auto fire entre 2 frappes du user (entre submits) et
         // clobber la frappe en cours.
-        if (userIsTakingOver(sd!, userGraceSec) || humanIsTyping(sd!)) {
+        if (humanPresent(sd!, userGraceSec)) {
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
             // David #B.198: plain `[idle]` here mis-signaled "ready
             // for wakes" — we're actually deferring wakes. Surface
@@ -187,32 +188,24 @@ function readPane(): string {
             // #345 B: si claude a été interrompu, le marquer prime sur
             // `user` (plus spécifique que « grace humaine en cours »).
             const sub = interrupted ? "interrupted" : "user";
-            setTmuxStatus(name!, "idle", sub);
+            setTmuxStatus(name!, LOOP_STATUS.IDLE, sub);
             log(`  → SUPPRESS (user-grace<${userGraceSec}s or typing-now) became=idle:${sub}`);
             emit();
         }
-        // #B.198 david: "si pane=busy:true on attend 5 secondes de
-        // plus pour faire quoi que ce soit" + "le sleep devrait etre
-        // loop/state based pas promise (pour staker oublié c plus
-        // facile)". State-based defer: arm the `busy-defer-until`
-        // marker, exit. Timer's `tryWake` honors the marker on its
-        // next SSE ping / heartbeat tick — so the defer survives
-        // this process exiting (durable) and is inspectable
-        // (`cat busy-defer-until`).
+        // #B.198 — arm the `busy-defer-until` marker (state-based, not
+        // an in-hook `await sleep`) so the defer survives this hook
+        // process exiting. Timer's tryWake honors it on next tick.
         //
-        // Bar display (#B.203 #me29ma david: "la barre marque busy
-        // alors qu'on a plus d'activité"): the Stop hook fires
-        // POST-turn so the footer is stale — by defer-arm time
-        // claude is most likely back at the prompt even if pane.busy
-        // snapshot still showed `esc to interrupt`. Show `[idle:wait]`
-        // to match what the human visually sees, and seed idle-since
-        // so subsequent state consumers (heartbeat probe, count
+        // #B.203 — show `[idle:wait]`: Stop fires POST-turn so the
+        // pane.busy snapshot is stale; by defer-arm time claude is
+        // almost certainly back at the prompt. Seed idle-since so
+        // subsequent state consumers (heartbeat probe, count
         // refresh) treat claude as at the prompt. The defer marker
         // still silently gates wakes during the window.
         if (pane.busy && PANE_BUSY_DELAY_MS > 0) {
             const until = armBusyDefer(sd!, PANE_BUSY_DELAY_MS);
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-            setTmuxStatus(name!, "idle", "wait");
+            setTmuxStatus(name!, LOOP_STATUS.IDLE, "wait");
             log(`  → BUSY-DEFER armed until=${until} became=idle:wait`);
             emit();
         }
@@ -231,7 +224,7 @@ function readPane(): string {
             const sinceLastWakeMs = Date.now() - lastWakeMs;
             if (lastWakeMs > 0 && sinceLastWakeMs < WAKE_COALESCE_WINDOW_MS) {
                 writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-                setTmuxStatus(name!, "idle");
+                setTmuxStatus(name!, LOOP_STATUS.IDLE);
                 log(`  → COALESCE (last-wake=${sinceLastWakeMs}ms<${WAKE_COALESCE_WINDOW_MS}ms) became=idle`);
                 emit();
             }
@@ -255,14 +248,14 @@ function readPane(): string {
             await injectWakePhrase(`${tmuxName(name!)}.0`, phrase);
             // #B.232 ch887f: bump open-tickets watermark post-wake.
             if (gate.openCount > 0) recordOpenWakeCount(sd!, gate.openCount);
-            setTmuxStatus(name!, "busy");
+            setTmuxStatus(name!, LOOP_STATUS.BUSY);
             log(`  → WAKE '${phrase}' became=busy`);
         } else {
             // Nothing to do — mark idle so the timer can take over.
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
             // #345 B: garder le marqueur interrupted visible tant que le
             // pane le montre, même hors user-grace.
-            setTmuxStatus(name!, "idle", interrupted ? "interrupted" : undefined);
+            setTmuxStatus(name!, LOOP_STATUS.IDLE, interrupted ? "interrupted" : undefined);
             log(`  → IDLE (no work) became=idle${interrupted ? ":interrupted" : ""}`);
         }
     } catch (e) {

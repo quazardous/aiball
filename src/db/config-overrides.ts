@@ -12,9 +12,13 @@ import {
     CONFIG_SCHEMA,
     allowsGlobalOverride,
     allowsProjectOverride,
+    effectiveSources,
     getSchemaEntry,
+    type ConfigSchemaEntry,
+    type ConfigSource,
     type ConfigValue,
 } from "../config/schema.js";
+import { readFileValue } from "../config/file-reader.js";
 
 /** PURE: pick the effective value — project beats global beats the default. */
 export function resolveConfigValue(
@@ -42,18 +46,61 @@ function readOverride(project: string, key: string): ConfigValue | undefined {
     return row ? parseStored(row.value) : undefined;
 }
 
+/** #590 — read one (source × layer) value for an entry. Returns undefined
+ *  when the layer is out of scope, the source isn't declared, or no value
+ *  is set at that path. Pure dispatch; the DB / FILE specifics live in
+ *  their own helpers. */
+function readSourceLayer(
+    entry: ConfigSchemaEntry,
+    source: ConfigSource,
+    layer: "project" | "global",
+    project?: string | null,
+    cwd?: string | null,
+): ConfigValue | undefined {
+    if (layer === "project" && !allowsProjectOverride(entry)) return undefined;
+    if (layer === "global" && !allowsGlobalOverride(entry)) return undefined;
+    if (source === "db") {
+        if (layer === "project" && project) return readOverride(project, entry.key);
+        if (layer === "global") return readOverride("", entry.key);
+        return undefined;
+    }
+    // source === "file"
+    if (layer === "project") return cwd ? readFileValue("project", entry.key, cwd) : undefined;
+    return readFileValue("global", entry.key);
+}
+
 /**
  * The effective value of one key for an optional project, resolved through the
  * layers. Returns the schema default when there's no override; `undefined` only
  * when the key isn't in the schema. Synchronous (composes inside other queries,
  * e.g. ticket creation).
+ *
+ * #590 — resolution policy : **layer-first, then source-within-layer**.
+ *   1. project layer : for each source in `effectiveSources(entry)`, first hit wins.
+ *   2. global layer : same.
+ *   3. schema default.
+ *
+ * Per-tree intent (project layer) always wins over server-wide (global layer);
+ * within a layer, the more authoritative source wins (DB / UI by default beats
+ * the committed FILE yaml). `cwd` is needed for FILE-source project reads —
+ * omit when the caller doesn't have a per-project cwd context (legacy DB-only
+ * keys keep working with `getConfig(key)` / `getConfig(key, project)`).
  */
-export function getConfig(key: string, project?: string | null): ConfigValue | undefined {
+export function getConfig(
+    key: string,
+    project?: string | null,
+    cwd?: string | null,
+): ConfigValue | undefined {
     const entry = getSchemaEntry(key);
     if (!entry) return undefined;
-    const globalOv = allowsGlobalOverride(entry) ? readOverride("", key) : undefined;
-    const projectOv = project && allowsProjectOverride(entry) ? readOverride(project, key) : undefined;
-    return resolveConfigValue(entry.default, globalOv, projectOv);
+    const sources = effectiveSources(entry);
+    for (const layer of ["project", "global"] as const) {
+        for (const source of sources) {
+            const v = readSourceLayer(entry, source, layer, project, cwd);
+            if (v !== undefined) return v;
+        }
+    }
+    return entry.default;
 }
 
 /** One resolved row for the settings UI: schema meta + each layer + effective. */

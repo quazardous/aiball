@@ -7,11 +7,6 @@ import {
     insertTypedRelation,
     updateMessageStatus,
     upsertTicketSubscription,
-    listPendingResolvedForTicket,
-    listPendingResolutionDecisionsForTicket,
-    applyMessageDecision,
-    listPendingLifecycleForTicket,
-    deletePingsForMessage,
     releaseTicketClaim,
     setTicketClaim,
     ensureConsumer,
@@ -22,6 +17,8 @@ import {
     type MessageKind,
     type Intent,
 } from "./db.js";
+import { ERROR_CODES } from "./domain.js";
+import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } from "./close-cleanup.js";
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
 import { isHeldByOther } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
@@ -217,7 +214,7 @@ function assertCloseAuthority(input: NewMessage): void {
     const err = new Error(
         `only the ticket reporter (${parent.by_agent ?? "unknown"}) can close this ticket — post ticket_resolved instead to propose resolution`,
     );
-    (err as Error & { code?: string }).code = "FORBIDDEN_CLOSE";
+    (err as Error & { code?: string }).code = ERROR_CODES.FORBIDDEN_CLOSE;
     throw err;
 }
 
@@ -260,7 +257,7 @@ function assertDecisionOnApprovedTicket(input: NewMessage): void {
     const err = new Error(
         `cannot propose ${input.decision_kind} on a ticket in status "${parent.status}" — the reporter must moderate (approve) the ticket first ; post a plain comment_added (without "then:") until then`,
     );
-    (err as Error & { code?: string }).code = "PARENT_PENDING_MODERATION";
+    (err as Error & { code?: string }).code = ERROR_CODES.PARENT_PENDING_MODERATION;
     throw err;
 }
 
@@ -390,22 +387,13 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
 export function submitMessage(input: NewMessage): Message {
     assertCloseAuthority(input);
     assertDecisionOnApprovedTicket(input);
-    // #561 david : un ticket ne doit pas pouvoir naître sur un projet qui
-    // n'existe pas — sinon on auto-crée silencieusement un projet via le
-    // simple fait de poster, et le user qui tape un nom à côté finit avec
-    // un projet fantôme. La règle s'applique UNIQUEMENT à `ticket_created` :
-    //   - les commentaires/lifecycle (comment_added, ticket_closed, …)
-    //     n'ont jamais besoin de cette garde — leur ticket parent existe
-    //     déjà, donc son projet aussi.
-    //   - création d'un nouveau projet = passage explicite par le panneau
-    //     Projects, pas un side-effect d'un POST /messages.
-    // Le projet doit être pré-créé via le panneau settings (ou
-    // `aiball project create`) avant tout ticket. Erreur typée pour
-    // que la HTTP layer renvoie un 400 explicite plutôt qu'un 500.
+    // #561 : reject ticket_created on unknown project so a typo can't
+    // silently birth a phantom project. Only ticket_created needs the
+    // guard; comments/lifecycle inherit the parent ticket's project.
     if (input.kind === "ticket_created") {
         if (!getProject(input.project)) {
             const err = new Error(`project "${input.project}" does not exist — create it first (Projects panel or 'aiball project create')`);
-            (err as { code?: string }).code = "PROJECT_NOT_FOUND";
+            (err as { code?: string }).code = ERROR_CODES.PROJECT_NOT_FOUND;
             throw err;
         }
     }
@@ -473,87 +461,17 @@ export function submitMessage(input: NewMessage): Message {
             // …and announce the auto-approval so subscribers transition state
             // (status: pending → approved) without polling.
             broadcast({ type: "message_decided", data: msg });
-            // Closing a ticket is the canonical "yes, this is done" — any
-            // dangling `ticket_resolved` proposals on this ticket are no
-            // longer awaiting moderation, the close just validated them.
-            // Auto-approve them so the inbox / UI stop surfacing stale
-            // pending state.
-            //
-            // ⚠ Don't trust `msg.kind` here: `updateMessageStatus(msg.id,
-            // ...)` looks up `tickets.id == msg.id` FIRST then falls back
-            // to `messages.id == msg.id`. tickets and messages have
-            // distinct id counters (cf. nextTicketId / nextMessageId), so
-            // when the close message's id happens to equal the parent
-            // ticket's id (common at low counter values), `updated` is the
-            // TICKET row, not the close message — and `msg.kind` flips to
-            // `"ticket_created"`. We use `input.kind` (immutable) instead.
-            // The deeper updateMessageStatus bug is filed separately.
+            // #568 — use `input.kind` (immutable), not `msg.kind`: when
+            // tickets.id == messages.id (low counters), the legacy
+            // updateMessageStatus probe flips msg.kind to "ticket_created".
+            // #586 — close-time cleanup extracted to `close-cleanup.ts`.
             if (input.kind === "ticket_closed" && input.ticket_id != null) {
-                // ⚠ Use `input.ticket_id` (immutable) plutôt que `msg.ticket_id`
-                // car `msg` peut avoir flippé vers la row TICKET (cf. note plus
-                // haut sur la collision tickets.id × messages.id avec
-                // updateMessageStatus). Local const re-narrows pour TS sous
-                // strictNullChecks (input.ticket_id?:number|null peut être
-                // undefined dans le type, le `!= null` côté if écarte les deux).
                 const closedTicketId: number = input.ticket_id;
-                // Pending ticket_resolved on this ticket → auto-approve
-                // (closing implies acceptance of the resolution proposal).
-                for (const stale of listPendingResolvedForTicket(closedTicketId)) {
-                    const promoted = updateMessageStatus(
-                        stale.id,
-                        "approved",
-                        "owner",
-                        null,
-                        stale.kind, // #569 — disambiguate
-                    );
-                    if (promoted) {
-                        deliverToOutbox(promoted);
-                        fanOutPings(promoted);
-                        broadcast({ type: "message_decided", data: promoted });
-                    }
-                }
-                // #B.129 phase 2: same idea for decision-on-comment
-                // resolutions still pending — closing the ticket
-                // implicitly accepts every dangling resolution decision.
-                for (const c of listPendingResolutionDecisionsForTicket(closedTicketId)) {
-                    const accepted = applyMessageDecision(
-                        c.id,
-                        "accepted",
-                        input.by_agent ?? "owner",
-                    );
-                    if (accepted) {
-                        broadcast({ type: "message_edited", data: accepted });
-                    }
-                }
-                // Pending ticket_closed / ticket_reopened on this ticket are
-                // moot once a close lands → auto-reject them so they stop
-                // polluting the moderation queue. Their pings get wiped too.
-                for (const stale of listPendingLifecycleForTicket(
-                    closedTicketId,
-                    ["ticket_closed", "ticket_reopened"],
-                    msg.id, // don't reject the close we just approved
-                )) {
-                    const rejected = updateMessageStatus(
-                        stale.id,
-                        "rejected",
-                        "owner",
-                        null,
-                        stale.kind, // #569 — disambiguate
-                    );
-                    if (rejected) {
-                        deletePingsForMessage(stale.id);
-                        broadcast({ type: "message_decided", data: rejected });
-                    }
-                }
-                // #418/#436 (révisé #568) : sur un close, on relâche UNIQUEMENT
-                // le claim (focus transient — l'agent n'est plus en train de
-                // bosser dessus, sa session se termine). L'**assignment** reste
-                // collé au ticket — c'est une responsabilité persistante (audit
-                // qui était owner du sujet) + sur un reopen ultérieur l'historique
-                // assignee reste pertinent. David `#568` : « quand je close un
-                // ticket ça desassign... c'est bizarre non ? ». Avant ce fix on
-                // perdait silencieusement le trace de qui owned le sujet à la
-                // résolution. No-op quand unheld.
+                autoApproveStaleDecisionsOnClose(closedTicketId, input.by_agent ?? "owner");
+                rejectStaleClosedReopenedForTicket(closedTicketId, msg.id);
+                // #418/#436 (révisé #568) : on relâche le claim seulement
+                // (transient focus), pas l'assignment (responsabilité audit
+                // qui reste pertinente sur un reopen ultérieur).
                 releaseTicketClaim(closedTicketId);
             }
         }
@@ -571,14 +489,10 @@ export function submitMessage(input: NewMessage): Message {
         if (author && author !== "auto" && !isHuman(author)) {
             const t = getMessage(msg.ticket_id);
             if (t && t.kind === "ticket_created"
-                // #575 david : never auto-claim on a pending parent ticket. La
-                // rule engine peut auto-approuver un comment d'un agent
-                // whitelist même si le ticket parent reste pending — sans ce
-                // garde, l'auto-claim mordrait. Pareil principe que le guard
-                // explicit du `/tickets/:id/assign` au-dessus (et que le
-                // #569 sur `then:resolved/plan`). Pas de bypass humain ici
-                // parce que l'auto-claim ne s'applique qu'aux agents (cf.
-                // `!isHuman(author)` ci-dessus).
+                // #575 : never auto-claim on a pending parent ticket
+                // (mirror of the explicit assign guard + #569 decision
+                // guard). The rule engine can auto-approve a whitelisted
+                // agent's comment while the parent stays pending.
                 && t.status === "approved"
                 && !isHeldByOther(t.assignee, t.claimant, t.claimed_at, author, Date.now(), assignWindowSec() * 1000)) {
                 // #436: auto-claim sets the CLAIM (focus), not an assignment.

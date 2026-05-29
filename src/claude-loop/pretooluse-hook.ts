@@ -21,7 +21,8 @@
  * always exits 0 — a hook failure must never block a tool call.
  */
 import { readFileSync } from "node:fs";
-import { DEFAULT_ASK_GRACE_SEC, afkActive, humanIsTyping, userIsTakingOver } from "./state.js";
+import { DEFAULT_ASK_GRACE_SEC, afkActive, humanPresent } from "./state.js";
+import { CL_ENV } from "./env-vars.js";
 
 function allow(): never {
     process.stdout.write("{}\n");
@@ -51,7 +52,7 @@ try {
         /* no stdin available */
     }
 
-    const sd = process.env.CL_STATE_DIR;
+    const sd = process.env[CL_ENV.STATE_DIR];
     // Not inside a loop → interactive session, a human can answer. Allow.
     if (!sd) allow();
 
@@ -70,11 +71,11 @@ try {
     // the dialog; only a silent timeout (departure) falls back to redirect.
     const graceSec = Math.max(
         0,
-        Number(process.env.CL_ASK_GRACE_SEC ?? DEFAULT_ASK_GRACE_SEC),
+        Number(process.env[CL_ENV.ASK_GRACE_SEC] ?? DEFAULT_ASK_GRACE_SEC),
     );
     // #501 david `73af3e` : stop ⊂ wait — un user qui tape maintenant est
     // aussi présent. allow() s'il est sous l'ask-grace OR en train de taper.
-    if (userIsTakingOver(sd, graceSec) || humanIsTyping(sd)) allow();
+    if (humanPresent(sd, graceSec)) allow();
 
     // Autonomous loop / human long-gone → the dialog would stall. Redirect.
     deny(redirect);

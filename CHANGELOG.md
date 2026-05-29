@@ -17,6 +17,120 @@ narrative for the product as a whole.
 
 ## [Unreleased]
 
+*Nothing yet.*
+
+## [0.9.1] — 2026-05-29
+
+### List harmonisation : declarative columns + DRY pass (#592, #597, #589)
+
+Admin tables (Projects / Consumers / Nodes / NodeDetail relayed-list)
+now share a single declarative API on the `DataList` shell. Pass
+`columns` + `getSortValue` instead of per-panel sort state + header
+markup ; per-cell rendering stays in scoped `cell-<key>` slots so
+panels keep their custom badges, links and tags. Row-hover, indicator
+dot and right-aligned numeric columns are now CSS utilities on the
+shell, so improving any of them propagates everywhere. TagsPanel stays
+in slot-mode (inline-edit cells don't fit columns-mode).
+
+### Welcome MCP reads the caller's project (#591)
+
+`bin/aiball-mcp` (+ Windows `.cmd`) now preserve the caller's PWD in
+`AIBALL_CWD` before `cd "$ROOT"` ; `welcome` resolves `project_type`
+from `AIBALL_CWD ?? process.cwd()` (the same pattern as the aiball CLI
+and the MCP helpers). Without this, the MCP server's cwd was the
+install dir → `welcome` saw aiball's own yaml (no `project_type`)
+instead of the caller's. `claude-loop status` now displays
+`project_type` so it's visible from the CLI without invoking welcome.
+
+### claude-loop boot-phase rework + auto-pick `claude --resume` (#577)
+
+- **Boot phase** : `SessionStart` no longer eager-injects on
+  `--no-wait`. The hook always seeds `idle` + exits ; the timer drives
+  every wake. Boot is detected via the pane probe (`esc to interrupt`
+  visible = busy / still loading), so a wake can't fire while claude is
+  loading MCP servers or compacting.
+- **Compacting bug** : `classifyPaneSpecial` is now footer-scoped (5
+  lines) instead of whole-pane — stale `Compacting conversation…`
+  strings in scrollback no longer gate wakes forever after `/compact`
+  finishes.
+- **Session-list picker auto-pick** : on `claude --resume` with
+  multiple sessions, the hook detects `Resume session` + `Space to
+  preview` and sends Enter to take the most recent entry. Override via
+  `CL_RESUME_PICK=abort` to leave the pick to the human.
+
+### Unified config schema — infrastructure (#590 phases 1-3)
+
+`ConfigSchemaEntry` gains `sources?: ("db" | "file")[]` + `precedence?`
+so an entry can declare where it can be SET (DB SQLite admin Settings,
+FILE `.aiball.yaml`, or both). A new generic FILE reader walks a dotted
+key (`autopoll.tone`) into the project's `.aiball.yaml` / global yaml
+with mtime-cached parsing. `getConfig(key, project, cwd?)` walks the
+layers project-first then global, db-first within a layer.
+Backwards-compatible (default `["db"]` preserves the #449 behavior).
+Phases 4-5 (mass migration of the FILE-side scalars + auto-generated
+example) are gated on the final policy decisions.
+
+### `.aiball.yaml.example` readable rewrite (#588)
+
+Rewritten 485 → 207 lines. Real options now uncommented with their
+default values ; complex examples (consumer identity, custom wake
+gates, colors, upstream bindings, prompts, formatting, tags) in
+commented blocks with brief explanations + pointer to
+`docs/CONFIGS.md`. 100% English, no internal ticket refs.
+
+### Consolidation pass (#578 umbrella : #582-#587)
+
+A targeted sweep on code that grew organically with copy-paste — no
+behavior change, all enforcement of existing types or extraction of
+duplicated logic :
+
+- **#582** — `MESSAGE_SCOPES` + `ERROR_CODES` constants exported from
+  `domain.ts` (+ frontend mirror) ; 10 magic-string sites unified
+  (throws, catches, Zod enums, local `VALID_SCOPES` array).
+- **#583** — 20 `CL_*` env var names centralised in
+  `src/claude-loop/env-vars.ts` ; 37 read-sites typed via
+  `process.env[CL_ENV.X]` (typo-safe at compile time).
+- **#584** — `LOOP_STATUS` const (`"boot" | "idle" | "busy"`) +
+  `satisfies` constraint ; 21 `setTmuxStatus(name, "raw")` call sites
+  unified across 6 files.
+- **#585** — `humanPresent(sd, graceSec)` composite helper collapses
+  the `userIsTakingOver || humanIsTyping` OR pattern at 3 hooks
+  (timer, stop-hook, pretooluse-hook).
+- **#586** — close-time cleanup extracted to `src/close-cleanup.ts` :
+  `autoApproveStaleDecisionsOnClose` + `rejectStaleClosedReopenedForTicket`
+  ; ~60 lines of nested logic in `submitMessage` become 5 lines + 2
+  named helpers + 3 focused tests.
+- **#587** — comments discipline pass : ~10 verbose blocks trimmed
+  (~54 lines), stale `david: "..."` verbatim quotes dropped where the
+  code is self-explanatory ; WHY > WHAT.
+
+### Lifecycle hardening : pending-ticket guards (#568, #569, #575)
+
+- **#568** — closing a ticket no longer collides with `tickets.id ==
+  messages.id` ids : `submitMessage` gates the close branch on the
+  immutable `input.kind` instead of the corrupted `msg.kind` (which
+  flipped to `"ticket_created"` under id collision).
+  `updateMessageStatus` extended with an optional `kind` discriminator
+  so callers route to the right table.
+- **#569** — `ticket_reply then:"resolved"` / `then:"plan"` on a
+  pending parent ticket now rejects with HTTP 409
+  (`PARENT_PENDING_MODERATION`). `ticket_get` brief response carries a
+  `decision_proposable` flag so the agent knows when it's safe to
+  propose.
+- **#575** — `POST /tickets/:id/assign` claim path + the auto-claim in
+  `submitMessage` both reject with HTTP 409 when the parent ticket is
+  still pending moderation. Closes a back-door where a rule-engine
+  whitelist on a pending ticket could trigger an auto-claim.
+
+### Goto-ticket smart input (#570, #571)
+
+- The header search box now accepts comment hashids (`#egrqmh` or
+  `#cegrqmh`) and navigates to the parent ticket scrolled to the
+  comment.
+- Git commit SHAs (7-40 hex chars, with or without `#`) get a clear
+  "this looks like a git commit SHA, not a ticket id" message instead
+  of failing silently.
+
 ### no_claim consumer UX cleanup — silent autopoll, no broadcast spam, gated CTA (#516)
 
 Three-part follow-up to the per-consumer no_claim flag from earlier this

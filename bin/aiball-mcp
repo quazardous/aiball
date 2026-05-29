@@ -13,6 +13,11 @@ done
 BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 ROOT="$(cd "$BIN_DIR/.." && pwd)"
 
+# #591 — preserve the caller's PWD so the MCP server (welcome resolver
+# etc.) can find the right `.aiball.yaml` by walking up from the project
+# the agent was launched in, not from the install root we cd into below.
+AIBALL_CWD="$PWD"
+export AIBALL_CWD
 cd "$ROOT"
 
 # Local-trust transport (#B.94 follow-up). UDS first; fall back to the

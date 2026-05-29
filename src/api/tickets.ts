@@ -19,6 +19,7 @@
  * /tickets/:id thread builder uses it.
  */
 import { Router, type Request, type Response } from "express";
+import { ERROR_CODES } from "../domain.js";
 import {
     listMessages,
     listMessageTags,
@@ -142,7 +143,7 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
     if (isClaim && t.status !== "approved" && !isHuman(caller)) {
         return res.status(409).json({
             error: `cannot claim a ticket in status "${t.status}" — the reporter must moderate (approve) the ticket first`,
-            code: "PARENT_PENDING_MODERATION",
+            code: ERROR_CODES.PARENT_PENDING_MODERATION,
         });
     }
     // #436: self → CLAIM (focus, transient); other → ASSIGNMENT (responsibility,
@@ -175,17 +176,14 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
         }
         setTicketClaim(id, caller);
     } else {
-        // #523 david `dzakgw` : setTicketAssignment auto-release le claim si
-        // claimant existant ≠ nouveau assignee (rule "assignment reset le
-        // claim"). Le retour signal qui s'est fait éjecter pour audit + pour
-        // que l'UI X refresh (broadcast plus bas).
+        // #523 — setTicketAssignment auto-releases the existing claim if
+        // claimant ≠ new assignee. Surface who got ejected for audit +
+        // for the broadcast below.
         const ar = setTicketAssignment(id, target, caller);
         if (ar.released_claim) {
-            // Pas de ping dédié (david : "ça va se faire s'il est abonné,
-            // hors scope"). Le broadcast `message_edited` ci-dessous suffit
-            // pour que l'UI de l'ex-claimant voie son icon claim disparaître
-            // au prochain SSE tick — X perd aussi le own-claim boost dans
-            // son work-order, signal naturel.
+            // No dedicated ping for the ex-claimant: the broadcast below
+            // refreshes their UI on the next SSE tick (claim icon drops,
+            // own-claim boost in work-order drops too).
             assignReleasedClaim = ar.released_claim;
         }
     }

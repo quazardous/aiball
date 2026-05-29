@@ -40,6 +40,10 @@ export type Priority = typeof PRIORITIES[number];
 export const STRATEGIES = ["manual", "auto", "auto-reply"] as const;
 export type Strategy = typeof STRATEGIES[number];
 
+// #B.245 event scope tristate. Mirror of src/domain.ts.
+export const MESSAGE_SCOPES = ["internal", "default", "broadcast"] as const;
+export type MessageScope = typeof MESSAGE_SCOPES[number];
+
 export function isMessageKind(s: string): s is MessageKind {
     return (MESSAGE_KINDS as readonly string[]).includes(s);
 }
@@ -54,4 +58,7 @@ export function isPriority(s: string): s is Priority {
 }
 export function isStrategy(s: string): s is Strategy {
     return (STRATEGIES as readonly string[]).includes(s);
+}
+export function isMessageScope(s: string): s is MessageScope {
+    return (MESSAGE_SCOPES as readonly string[]).includes(s);
 }

@@ -26,6 +26,11 @@ export type ConfigValueType = "string" | "number" | "boolean" | "enum";
 
 export type ConfigValue = string | number | boolean;
 
+/** #590 — where a key can be SET. `db` = SQLite `config_overrides` table
+ *  (UI admin Settings). `file` = .aiball.yaml / global yaml. A key may
+ *  declare either, both, or (rare) none. */
+export type ConfigSource = "db" | "file";
+
 export interface ConfigSchemaEntry {
     /** Dotted key, e.g. `tickets.default_priority`. Unique across the schema. */
     key: string;
@@ -43,6 +48,16 @@ export interface ConfigSchemaEntry {
     /** Human label + one-line help for the settings UI. */
     label: string;
     description: string;
+    /** #590 — storage locations for this key, ordered by default precedence.
+     *  When unset, defaults to `["db"]` (backwards compat with the #449 model).
+     *  Set `["file"]` for per-tree-committed settings (e.g. claude-loop knobs),
+     *  or `["db", "file"]` to allow either (UI override wins unless `precedence`
+     *  flips it). */
+    sources?: readonly ConfigSource[];
+    /** #590 — explicit precedence when `sources.length === 2`. Default `"db"`
+     *  (UI override wins over the committed yaml). Set `"file"` for the rare
+     *  case where the per-tree value MUST win (e.g. a checked-in policy). */
+    precedence?: ConfigSource;
 }
 
 /**
@@ -53,6 +68,7 @@ export interface ConfigSchemaEntry {
  * the others are declared and consumed as each gets wired.
  */
 export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
+    // #449 — DB-source ticket defaults (admin Settings).
     {
         key: "tickets.default_priority",
         scope: "global+project",
@@ -72,6 +88,61 @@ export const CONFIG_SCHEMA: readonly ConfigSchemaEntry[] = [
         description:
             "When on, a new ticket with no explicit scope is flagged broadcast (project followers are pinged). Declared; enforcement lands with its consumer.",
     },
+
+    // #590 — autopoll FILE entries (migrated from autopoll/config.ts DEFAULTS).
+    // `autopoll.enabled` stays special-cased in loadConfig (derived from file
+    // presence) and is NOT modelled here — see #590 case #2.
+    {
+        key: "autopoll.volatile",
+        scope: "project",
+        type: "boolean",
+        default: false,
+        sources: ["file"],
+        label: "Autopoll: one-shot reminders",
+        description:
+            "true = notify only when a strictly newer ping arrives (no time-based reminders). false (default) = persistent reminder re-fires after throttle_seconds.",
+    },
+    {
+        key: "autopoll.throttle_seconds",
+        scope: "project",
+        type: "number",
+        default: 120,
+        sources: ["file"],
+        label: "Autopoll: reminder cadence (s)",
+        description:
+            "Reminder cadence in seconds, ignored when volatile=true. 0 = every Stop (spammy). New pings / new open tickets bypass the throttle.",
+    },
+    {
+        key: "autopoll.include_recent_tickets",
+        scope: "project",
+        type: "number",
+        default: 3,
+        sources: ["file"],
+        label: "Autopoll: recent ticket titles to include",
+        description:
+            "Up to N recent unread ticket titles in the hook's reason so the agent knows what's waiting before draining. 0 = count only.",
+    },
+    {
+        key: "autopoll.backlog",
+        scope: "project",
+        type: "boolean",
+        default: true,
+        sources: ["file"],
+        label: "Autopoll: backlog as a trigger",
+        description:
+            "true (default) = open tickets in scope trigger notifications even without unread pings. false = context-only (display in reason, never the trigger).",
+    },
+    {
+        key: "autopoll.tone",
+        scope: "project",
+        type: "enum",
+        options: ["hint", "directive", "imperative"],
+        default: "directive",
+        sources: ["file"],
+        label: "Autopoll: tone",
+        description:
+            "hint = polite, easy to ignore. directive (default) = names the action explicitly. imperative = last resort if the agent persists in asking permission patterns.",
+    },
 ];
 
 const BY_KEY = new Map(CONFIG_SCHEMA.map((e) => [e.key, e] as const));
@@ -89,6 +160,16 @@ export function allowsProjectOverride(entry: ConfigSchemaEntry): boolean {
 /** True when the key may carry a global-layer override. */
 export function allowsGlobalOverride(entry: ConfigSchemaEntry): boolean {
     return entry.scope === "global" || entry.scope === "global+project";
+}
+
+/** #590 — sources for an entry, ordered by effective precedence. Defaults to
+ *  `["db"]` when `sources` is unset (backwards compat). When both sources are
+ *  declared, the entry's `precedence` (or the default `"db"`) is read FIRST. */
+export function effectiveSources(entry: ConfigSchemaEntry): readonly ConfigSource[] {
+    const sources = entry.sources ?? ["db"];
+    if (sources.length < 2) return sources;
+    const first = entry.precedence ?? "db";
+    return sources[0] === first ? sources : [...sources].reverse();
 }
 
 /**

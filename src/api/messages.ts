@@ -18,6 +18,7 @@
  * `decide()` helper is local — shared by approve/reject; not exported.
  */
 import { Router, type Request, type Response } from "express";
+import { ERROR_CODES, MESSAGE_SCOPES } from "../domain.js";
 import {
     INTENTS,
     PRIORITIES,
@@ -59,20 +60,17 @@ messagesRouter.post("/messages", (req: Request, res: Response) => {
         return res.status(201).json(withTagsOne(msg));
     } catch (err) {
         const code = (err as { code?: string }).code;
-        if (code === "FORBIDDEN_CLOSE") {
+        if (code === ERROR_CODES.FORBIDDEN_CLOSE) {
             return res.status(403).json({ error: (err as Error).message });
         }
-        // #561 david : créer un ticket sur un projet inexistant => 400 propre
-        // (pas un 500), pour que la UI / le client MCP puissent surfacer un
-        // message exploitable plutôt qu'une stack interne.
-        if (code === "PROJECT_NOT_FOUND") {
+        // #561 — 400 (not 500) so the UI/MCP client can surface a usable
+        // message when the project doesn't exist.
+        if (code === ERROR_CODES.PROJECT_NOT_FOUND) {
             return res.status(400).json({ error: (err as Error).message });
         }
-        // #569 david `j8t4qa` A+C : proposer une resolution/plan sur un ticket
-        // pending = état illégal (cf. `assertDecisionOnApprovedTicket`).
-        // HTTP 409 conflict — l'agent doit attendre que le ticket soit approved
-        // ou poster un plain comment.
-        if (code === "PARENT_PENDING_MODERATION") {
+        // #569 — 409 conflict: agent must wait for the ticket to be approved
+        // or post a plain comment instead of a resolution/plan proposal.
+        if (code === ERROR_CODES.PARENT_PENDING_MODERATION) {
             return res.status(409).json({ error: (err as Error).message });
         }
         throw err;
@@ -112,8 +110,7 @@ function decide(
     if (!updated) return notFound(res);
     if (status === "approved") {
         deliverToOutbox(updated);
-        // #B.245 tristate: fanOutPings itself bails out at `scope ===
-        // "internal"`, so the call is unconditional again.
+        // #B.245 — fanOutPings self-gates on scope=="internal".
         fanOutPings(updated);
     } else if (status === "rejected") {
         // At-insertion fan-out had already delivered pings to subscribers.
@@ -175,11 +172,10 @@ messagesRouter.post("/messages/:id/edit", (req, res) => {
             return badRequest(res, `priority must be one of ${PRIORITIES.join(", ")}`);
         }
     }
-    // #553 — scope is one of: internal / default / broadcast (#B.245 tristate).
-    const VALID_SCOPES = ["internal", "default", "broadcast"];
+    // #553 — scope is the #B.245 tristate.
     if (scope !== undefined && scope !== null) {
-        if (typeof scope !== "string" || !VALID_SCOPES.includes(scope)) {
-            return badRequest(res, `scope must be one of ${VALID_SCOPES.join(", ")}`);
+        if (typeof scope !== "string" || !(MESSAGE_SCOPES as readonly string[]).includes(scope)) {
+            return badRequest(res, `scope must be one of ${MESSAGE_SCOPES.join(", ")}`);
         }
     }
     const updated = editMessage(id, { title, body, summary, intent, priority, scope });

@@ -18,7 +18,7 @@ import Button from "primevue/button";
 import { useConfirm } from "primevue/useconfirm";
 import { useToast } from "primevue/usetoast";
 import { api, type NodeView } from "../lib/api";
-import DataList from "./ui/DataList.vue";
+import DataList, { type DataListColumn } from "./ui/DataList.vue";
 import FieldRow from "./ui/FieldRow.vue";
 import AdminDetailLayout from "./ui/AdminDetailLayout.vue";
 import StatusPill from "./ui/StatusPill.vue";
@@ -158,6 +158,18 @@ async function doRevoke(n: NodeView): Promise<void> {
         });
     }
 }
+
+// #592 — declarative columns for the relayed-consumers list.
+const relayedColumns: DataListColumn[] = [
+    { key: "consumer_id", label: "Consumer", sortable: true, defaultDir: "asc" },
+    { key: "last_seen_at", label: "Last seen", sortable: true, defaultDir: "desc" },
+];
+
+interface RelayedRow { consumer_id: string; last_seen_at: string | null }
+function relayedSortValue(c: RelayedRow, key: string): string | number {
+    if (key === "last_seen_at") return c.last_seen_at ? Date.parse(c.last_seen_at) : 0;
+    return c.consumer_id.toLowerCase();
+}
 </script>
 
 <template>
@@ -224,27 +236,25 @@ async function doRevoke(n: NodeView): Promise<void> {
                     Consumers attributed to this node by its peer IP — the clients it relays
                     to this daemon. Revoking the node cuts them until it is re-enrolled.
                 </p>
-                <DataList :is-empty="!node.relayed_count">
+                <DataList
+                    :columns="relayedColumns"
+                    :rows="node.relayed ?? []"
+                    :row-key="(c: RelayedRow) => c.consumer_id"
+                    :get-sort-value="relayedSortValue"
+                    :is-empty="!node.relayed_count"
+                >
                     <template #empty>
                         <div class="node-detail__none">No consumers attributed to this node.</div>
                     </template>
-                    <template #head>
-                        <th>Consumer</th>
-                        <th>Last seen</th>
+                    <template #cell-consumer_id="{ row }">
+                        <!-- #460 — chip cliquable vers la page consumer détail. -->
+                        <a
+                            :href="`/consumers/${encodeURIComponent((row as RelayedRow).consumer_id)}`"
+                            class="aiball-mono node-detail__relayed-link"
+                            :title="`Open consumer details for ${(row as RelayedRow).consumer_id}`"
+                        >{{ (row as RelayedRow).consumer_id }}</a>
                     </template>
-                    <template #body>
-                        <tr v-for="c in node.relayed" :key="c.consumer_id">
-                            <td>
-                                <!-- #460 — chip cliquable vers la page consumer détail. -->
-                                <a
-                                    :href="`/consumers/${encodeURIComponent(c.consumer_id)}`"
-                                    class="aiball-mono node-detail__relayed-link"
-                                    :title="`Open consumer details for ${c.consumer_id}`"
-                                >{{ c.consumer_id }}</a>
-                            </td>
-                            <td>{{ fmt(c.last_seen_at) }}</td>
-                        </tr>
-                    </template>
+                    <template #cell-last_seen_at="{ row }">{{ fmt((row as RelayedRow).last_seen_at) }}</template>
                 </DataList>
             </section>
 

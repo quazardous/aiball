@@ -20,6 +20,7 @@ import { loadConfig, type AiballConfig } from "../autopoll/config.js";
 import { AiballClient } from "../client.js";
 import type { Intent } from "../domain.js";
 import type { DrainedState } from "./drained-strategy.js";
+import { CL_ENV } from "./env-vars.js";
 import { parseGates, runGates } from "./gates.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
@@ -195,7 +196,7 @@ export function wakeInFlightPath(sd: string): string { return join(sd, "wake-in-
  *  wake reaches the hook (unlikely but possible). #B.180:
  *  yaml-configurable via `.aiball.yaml claude_loop.wake_in_flight_ttl_ms`,
  *  exposed to child processes via CL_WAKE_IN_FLIGHT_TTL_MS env. */
-export const WAKE_IN_FLIGHT_TTL_MS = Math.max(0, Number(process.env.CL_WAKE_IN_FLIGHT_TTL_MS ?? 2000));
+export const WAKE_IN_FLIGHT_TTL_MS = Math.max(0, Number(process.env[CL_ENV.WAKE_IN_FLIGHT_TTL_MS] ?? 2000));
 
 /**
  * Touched by ANY wake path (Stop hook chain-fire AND timer's
@@ -213,7 +214,7 @@ export function lastWakeAtPath(sd: string): string { return join(sd, "last-wake-
  *  prior wake was sent within this many ms ago. Default 3s covers
  *  the typical short pop-phrase turn (1-5s) that produced the
  *  "wake-on-busy" perception in #B.198. */
-export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env.CL_WAKE_COALESCE_WINDOW_MS ?? 3000));
+export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env[CL_ENV.WAKE_COALESCE_WINDOW_MS] ?? 3000));
 
 /**
  * Last successful wake's hint, written as JSON `{ticket_id,
@@ -407,15 +408,11 @@ export function isDuplicateWakeHint(sd: string, hint: WakeHint | undefined, wind
     } catch { return false; }
 }
 
-/** Delay applied when the visible pane STILL shows `esc to interrupt`
- *  at Stop-hook FIRE time (#B.198 david: "si pane=busy:true on attend
- *  5 secondes de plus pour faire quoi que ce soit"). The Stop hook
- *  fires post-turn so the footer may be stale (#B.185) — we don't
- *  gate forever, just defer the next wake by this much. Realized via
- *  the `busy-defer-until` marker so the gate survives the hook
- *  process exiting (#B.198 david: "le sleep devrait etre loop/state
- *  based pas promise (pour staker oublié c plus facile)"). */
-export const PANE_BUSY_DELAY_MS = Math.max(0, Number(process.env.CL_PANE_BUSY_DELAY_MS ?? 5000));
+/** #B.198 — defer (not gate) the next wake when the Stop-hook fire-time
+ *  pane still shows `esc to interrupt`. The footer may be stale (#B.185)
+ *  so a hard skip would lose wakes; the marker-based defer survives the
+ *  hook process exiting. */
+export const PANE_BUSY_DELAY_MS = Math.max(0, Number(process.env[CL_ENV.PANE_BUSY_DELAY_MS] ?? 5000));
 
 /**
  * Wake-defer gate. File content is the ISO target time at which the
@@ -731,6 +728,13 @@ export function humanIsTyping(sd: string, ttlSec = HUMAN_TYPING_TTL_SEC): boolea
     }
 }
 
+/** #585 — composite "human present right now" gate: recent user-grace activity
+ *  OR keystrokes happening this very moment. Single source so the definition
+ *  of presence stays in lock-step across timer/stop-hook/pretooluse-hook. */
+export function humanPresent(sd: string, graceSec: number): boolean {
+    return userIsTakingOver(sd, graceSec) || humanIsTyping(sd);
+}
+
 /**
  * Lightweight tmux status-left display. Three states (#B.154 final
  * collapse, david: "busy a pas de sens clair, pour moi busy égal
@@ -752,6 +756,14 @@ export function humanIsTyping(sd: string, ttlSec = HUMAN_TYPING_TTL_SEC): boolea
  * No-op when tmux is gone (loop was just rm'd) — never throw.
  */
 export type LoopStatus = "idle" | "boot" | "busy";
+
+// #584 — const enum companion. Callers pass `LOOP_STATUS.BOOT` instead of the
+// raw `"boot"` literal so a typo like `"bot"` is caught at compile time.
+export const LOOP_STATUS = {
+    IDLE: "idle",
+    BOOT: "boot",
+    BUSY: "busy",
+} as const satisfies Record<string, LoopStatus>;
 
 // #385 (david wstfea): the bar colour profile is config-driven (defaults →
 // global `~/.config/aiball/config.yaml` → per-project `.aiball.yaml`, resolved in
@@ -790,7 +802,7 @@ export type ProjectCwdInfo = {
 export function projectCwdInfo(): ProjectCwdInfo {
     const envOverride = process.env.AIBALL_PROJECT_CWD;
     if (envOverride) return { cwd: envOverride, source: "env" };
-    const sd = process.env.CL_STATE_DIR;
+    const sd = process.env[CL_ENV.STATE_DIR];
     if (sd) {
         try {
             const plate = readPlate(sd);
@@ -852,10 +864,10 @@ export function humanPresenceWord(sd: string | undefined, graceSec: number): "st
     // NO_WAIT only suppresses the boot-grace `wait` (no human assumed AT
     // LAUNCH); live typing → `stop` and an armed user-grace → `wait` still show.
     if (sd && humanIsTyping(sd)) return "stop";
-    const noWait = process.env.CL_WAIT === "0";
+    const noWait = process.env[CL_ENV.WAIT] === "0";
     // #305: boot-grace freezes auto-wakes at launch → `wait` during the window,
     // but only when we're actually waiting for a human at boot (not --no-wait).
-    const bootGraceMs = Math.max(0, Number(process.env.CL_BOOT_GRACE_SEC ?? 60)) * 1000;
+    const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
     if (!noWait && Date.now() - PROC_START_MS < bootGraceMs) return "wait";
     if (sd && userIsTakingOver(sd, graceSec)) return "wait";
     // #426: past user-grace but still within the (longer) ASK-grace, and not
@@ -864,7 +876,7 @@ export function humanPresenceWord(sd: string | undefined, graceSec: number): "st
     // invisible window as `ask` so the bar stops reading a flat `loop` while a
     // multi-choice dialog can still pop. Mirrors the PreToolUse gate.
     if (sd && !afkActive(sd)) {
-        const askGraceSec = Math.max(0, Number(process.env.CL_ASK_GRACE_SEC ?? DEFAULT_ASK_GRACE_SEC));
+        const askGraceSec = Math.max(0, Number(process.env[CL_ENV.ASK_GRACE_SEC] ?? DEFAULT_ASK_GRACE_SEC));
         if (askGraceSec > graceSec && userIsTakingOver(sd, askGraceSec)) return "ask";
     }
     return "loop";
@@ -906,7 +918,7 @@ export function setTmuxStatus(
     const tn = tmuxName(name);
     const col = barColors();
     const bg = stateBg(col, status);
-    const sd = process.env.CL_STATE_DIR;
+    const sd = process.env[CL_ENV.STATE_DIR];
     const proxyAlive = !!sd && proxyIsAlive(sd);
     const setOpt = (opt: string, val: string) =>
         spawnSync(MUX_CMD, ["set-option", "-t", tn, opt, val], { stdio: "ignore" });
@@ -962,7 +974,7 @@ export function setTmuxStatus(
     // from the markers — skipped when the proxy is alive so the two never
     // fight over it.
     if (!proxyAlive) {
-        const graceSec = Math.max(0, Number(process.env.CL_USER_GRACE_SEC ?? DEFAULT_USER_GRACE_SEC));
+        const graceSec = Math.max(0, Number(process.env[CL_ENV.USER_GRACE_SEC] ?? DEFAULT_USER_GRACE_SEC));
         setOpt("@cl_human", humanBarWord(sd, graceSec));
     }
 }
@@ -1051,9 +1063,22 @@ export interface PaneSnapshot {
  * agree on what counts as "claude is internally busy and shouldn't
  * be poked". Returns null when nothing special — caller falls through
  * to the regular busy/idle decision.
+ *
+ * Footer-scoped (default 5 lines) — same fix as #B.185 for
+ * `paneFooterShowsBusy`. Without this, stale `✶ Compacting
+ * conversation… (42s)` lines left in scrollback after `/compact`
+ * finishes keep matching forever and block every wake until the
+ * scrollback rolls past them. Live compacting still pins the marker
+ * at the bottom of the pane, so footer-scope catches it.
  */
-export function classifyPaneSpecial(text: string): PaneSpecial | null {
-    if (/Compacting|compacting conversation|Summarizing the conversation/i.test(text)) {
+export function classifyPaneSpecial(text: string, footerLines = 5): PaneSpecial | null {
+    const footer = text
+        .split("\n")
+        .map((l) => l.trimEnd())
+        .filter((l) => l.length > 0)
+        .slice(-footerLines)
+        .join("\n");
+    if (/Compacting|compacting conversation|Summarizing the conversation/i.test(footer)) {
         return "compacting";
     }
     // rate-limit / api-error / overloaded are handled by error-backoff.ts
@@ -1072,7 +1097,7 @@ export function classifyPaneSpecial(text: string): PaneSpecial | null {
 export function snapshotPane(paneText: string, footerLines = 5): PaneSnapshot {
     return {
         busy: paneFooterShowsBusy(paneText, footerLines),
-        special: classifyPaneSpecial(paneText),
+        special: classifyPaneSpecial(paneText, footerLines),
     };
 }
 
@@ -1310,7 +1335,7 @@ export async function injectWakePhrase(paneTarget: string, phrase: string): Prom
     // never mistakes our own injection for a human keystroke (#efuuau).
     // Fall back to the tmux paste/send-keys path for loops not under the
     // proxy or if the write fails.
-    const sd = process.env.CL_STATE_DIR;
+    const sd = process.env[CL_ENV.STATE_DIR];
     // #409: cross-process dedup at the single injection chokepoint — skip an
     // identical CTA already injected within the coalesce window by a sibling
     // wake site (timer / Stop-hook / session-start), which the per-decider

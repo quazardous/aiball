@@ -41,6 +41,7 @@ import { createLogger } from "../log.js";
 import {
     isInternalCheckCmd,
     DEFAULT_USER_GRACE_SEC,
+    LOOP_STATUS,
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
     buildContextPhrase,
@@ -52,6 +53,7 @@ import {
     humanTypingPath,
     userTookOverPath,
     humanIsTyping,
+    humanPresent,
     injectSockPath,
     installRoot,
     installRootSha,
@@ -83,19 +85,20 @@ import {
     type WakeHint,
 } from "./state.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
+import { CL_ENV } from "./env-vars.js";
 import { stripMarkdown } from "./markdown-strip.js";
 
-const sd = process.env.CL_STATE_DIR;
-const name = process.env.CL_NAME;
+const sd = process.env[CL_ENV.STATE_DIR];
+const name = process.env[CL_ENV.NAME];
 // #393: the loop's root (stable for its lifetime) — pushed with each state
 // heartbeat so the daemon can mark the project "local". Read once from the plate.
 const loopCwd = (() => { try { return sd ? readPlate(sd).cwd : undefined; } catch { return undefined; } })();
 // #393 (Option A): the loop's project (from the env the loop exports) — pushed
 // with each heartbeat so the daemon attributes the root to EXACTLY this project.
 const loopProject = process.env.AIBALL_PROJECT || undefined;
-const intervalRaw = process.env.CL_INTERVAL;
-const checkCmd = process.env.CL_CHECK_CMD ?? "true";
-const userGraceSec = Math.max(0, Number(process.env.CL_USER_GRACE_SEC ?? DEFAULT_USER_GRACE_SEC));
+const intervalRaw = process.env[CL_ENV.INTERVAL];
+const checkCmd = process.env[CL_ENV.CHECK_CMD] ?? "true";
+const userGraceSec = Math.max(0, Number(process.env[CL_ENV.USER_GRACE_SEC] ?? DEFAULT_USER_GRACE_SEC));
 if (!sd || !name || !intervalRaw) {
     process.stderr.write("[claude-loop:timer] missing CL_* env vars\n");
     process.exit(1);
@@ -155,8 +158,8 @@ try { writeFileSync(timerPidPath(sd!), `${process.pid}\n`); } catch { /* best ef
 // human has the take-over window — only `boot-settle` (grace-aware) fires at
 // the end of the window. Fixes #302 (auto-ping firing at startup while the
 // bar shows `wait`).
-const NO_WAIT = process.env.CL_WAIT === "0";
-const BOOT_GRACE_MS = Math.max(0, Number(process.env.CL_BOOT_GRACE_SEC ?? 60)) * 1000;
+const NO_WAIT = process.env[CL_ENV.WAIT] === "0";
+const BOOT_GRACE_MS = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 60)) * 1000;
 const BOOT_TIME = Date.now();
 
 // #412: timer log routed through the level logger (tag `claude-loop:<name>`,
@@ -427,7 +430,7 @@ async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
     }
     await sleep(200);
     spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
-    setTmuxStatus(name!, "busy");
+    setTmuxStatus(name!, LOOP_STATUS.BUSY);
     log(`panic (${reason}) → interrupted + injected body (${msg.length} chars) for ticket #${hint.ticket_id} by ${author}`);
     return true;
 }
@@ -512,7 +515,7 @@ function detectHumanTyping(): void {
         // marker expires ~HUMAN_TYPING_TTL_SEC after the last keystroke).
         const showing = humanIsTyping(sd!);
         if (showing !== humanChipShown) {
-            setTmuxStatus(name!, "idle");
+            setTmuxStatus(name!, LOOP_STATUS.IDLE);
             humanChipShown = showing;
         }
     } catch { /* never throw from the detection poll */ }
@@ -539,15 +542,10 @@ function client(): AiballClient {
  * the check-cmd; only the idle-since gate stays because pinging over
  * a busy claude is always wrong.
  */
-// #B.205 david: "tous les event joue avec la meme balle (...) on
-// donne le premier les autre viendront plus tard au hook suivant".
-// In-flight mutex: when N SSE pings for DIFFERENT comments arrive in a
-// burst, all tryWake calls used to pass the synchronous gates and
-// queue at the `await checkHasWork` line — then all fired send-keys
-// once the network call returned, pasting N phrases. With the mutex,
-// only the first wake proceeds; concurrent attempts drop. The Stop
-// hook (or next heartbeat) sees pings still unread post-turn and
-// fires the next wake. Same ball, one at a time.
+// #B.205 — in-flight mutex: bursts of SSE pings used to queue at
+// `await checkHasWork` then all fire send-keys at once, pasting N
+// phrases. Only the first wake proceeds; the Stop hook / next
+// heartbeat picks up what's still unread post-turn.
 let tryWakeInFlight: Promise<boolean> | null = null;
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint): Promise<boolean> {
     if (tryWakeInFlight) {
@@ -616,18 +614,10 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         const paneText = capturePane();
         if (paneText) {
             const snap = snapshotPane(paneText);
-            // Both `busy` (esc-to-interrupt mid-turn) and the `special`
-            // internal state (compacting) are reasons to skip — same
-            // family of "claude is internally busy". Log the snapshot so
-            // david sees why a wake was withheld (#B.198 david: "ajoute
-            // la detection esc to interrupt dans les log").
-            //
-            // #335: pane-error detection does NOT live here. The Stop
-            // hook owns it (it fires on turn-end = when a real API error
-            // aborts a turn). Re-scanning on every heartbeat made a
-            // static error keyword in the pane re-arm an ever-growing
-            // backoff that starved SSE wakes. The timer only honors the
-            // busy-defer the Stop hook armed.
+            // #B.198 — skip if either busy (esc-to-interrupt) or special
+            // (compacting); both mean claude is internally busy.
+            // #335 — pane-error detection lives in the Stop hook only;
+            // re-scanning here re-armed backoff every heartbeat.
             if (snap.busy || snap.special !== null) {
                 log(`skip wake (${reason}) — ${formatPaneSnapshot(snap)}`);
                 return false;
@@ -664,7 +654,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             // open>0) and the configured strategy says so. Default `silent` →
             // never fires (zero regression). State is persisted on EVERY drained
             // tick so backoff/stale/once track when the landscape appeared.
-            const strat = parseDrainedStrategy(process.env.CL_DRAINED_STRATEGY);
+            const strat = parseDrainedStrategy(process.env[CL_ENV.DRAINED_STRATEGY]);
             const drainable = strat.kind !== "silent"
                 && gate.openCount === 0
                 && gate.totalOpenCount > 0
@@ -705,7 +695,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // manual/legacy wakes leave both empty, which is fine.
     if (gateHash !== undefined) recordOpenWakeHash(sd!, gateHash);
     else if (gateOpenCount > 0) recordOpenWakeCount(sd!, gateOpenCount);
-    setTmuxStatus(name!, "busy");
+    setTmuxStatus(name!, LOOP_STATUS.BUSY);
     log(`wake (${reason}) → '${phrase}'`);
     return true;
 }
@@ -834,7 +824,7 @@ async function mainSse(): Promise<void> {
             // surface either this line (it WAS flipped) or its
             // absence (settleBoot didn't reach the idle-marker check).
             log("settleBoot: idle-marker present → setTmuxStatus(idle)");
-            setTmuxStatus(name!, "idle");
+            setTmuxStatus(name!, LOOP_STATUS.IDLE);
         } else {
             log("settleBoot: idle-marker missing after tryWake (wake fired?) — bar stays as set by wake path");
         }
@@ -1003,7 +993,7 @@ async function mainSse(): Promise<void> {
         // same signal the tmux bar uses for its loop/stop word (a human
         // typing now, or within user-grace after a manual prompt).
         try {
-            const human = userIsTakingOver(sd!, userGraceSec) || humanIsTyping(sd!);
+            const human = humanPresent(sd!, userGraceSec);
             // #310: also push the 3-state presence word (stop/wait/loop) so the
             // consumers page mirrors the tmux bar, not just the binary human flag.
             const humanWord = humanPresenceWord(sd, userGraceSec);

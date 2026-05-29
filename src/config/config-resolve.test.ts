@@ -5,6 +5,7 @@ import {
     allowsGlobalOverride,
     allowsProjectOverride,
     coerceConfigValue,
+    effectiveSources,
     type ConfigSchemaEntry,
 } from "./schema.js";
 import { resolveConfigValue } from "../db/config-overrides.js";
@@ -46,4 +47,31 @@ test("coerceConfigValue: types + rejection", () => {
     const str: ConfigSchemaEntry = { key: "s", scope: "global", type: "string", default: "", label: "", description: "" };
     assert.equal(coerceConfigValue(str, "hello"), "hello");
     assert.equal(coerceConfigValue(str, 5), null);
+});
+
+// #590 — effectiveSources : default `["db"]` for backwards compat, single-source
+// returned as-is, dual-source ordered by `precedence` (default `"db"`).
+test("effectiveSources: unset sources → default ['db'] (backwards compat)", () => {
+    const e: ConfigSchemaEntry = { key: "k", scope: "global", type: "boolean", default: false, label: "", description: "" };
+    assert.deepEqual(effectiveSources(e), ["db"]);
+});
+
+test("effectiveSources: single source returned as-is", () => {
+    const dbOnly: ConfigSchemaEntry = { key: "k", scope: "global", type: "boolean", default: false, label: "", description: "", sources: ["db"] };
+    const fileOnly: ConfigSchemaEntry = { key: "k", scope: "global", type: "boolean", default: false, label: "", description: "", sources: ["file"] };
+    assert.deepEqual(effectiveSources(dbOnly), ["db"]);
+    assert.deepEqual(effectiveSources(fileOnly), ["file"]);
+});
+
+test("effectiveSources: dual source defaults to db-first", () => {
+    const both: ConfigSchemaEntry = { key: "k", scope: "global", type: "boolean", default: false, label: "", description: "", sources: ["db", "file"] };
+    assert.deepEqual(effectiveSources(both), ["db", "file"]);
+    // Author-listed order doesn't matter — db wins by default.
+    const reversed: ConfigSchemaEntry = { key: "k", scope: "global", type: "boolean", default: false, label: "", description: "", sources: ["file", "db"] };
+    assert.deepEqual(effectiveSources(reversed), ["db", "file"]);
+});
+
+test("effectiveSources: precedence='file' makes file-first", () => {
+    const fileWins: ConfigSchemaEntry = { key: "k", scope: "global", type: "boolean", default: false, label: "", description: "", sources: ["db", "file"], precedence: "file" };
+    assert.deepEqual(effectiveSources(fileWins), ["file", "db"]);
 });

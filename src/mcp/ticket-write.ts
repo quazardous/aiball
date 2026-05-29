@@ -9,6 +9,7 @@
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { MESSAGE_SCOPES } from "../domain.js";
 import { asText, client, effectiveBy, markActiveTicket } from "./_helpers.js";
 
 /**
@@ -77,7 +78,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                         "Urgency hint (#B.222) orthogonal to intent. urgent = drop everything to handle; high = next available turn; normal = default (omit); low = pick up when idle. Influences ticket_list sort + listPings secondary tiebreaker + poll my_pending order. Choose deliberately: most tickets are 'normal'.",
                     ),
                 scope: z
-                    .enum(["internal", "default", "broadcast"])
+                    .enum(MESSAGE_SCOPES)
                     .optional()
                     .describe(
                         "Event scope (#B.245 tristate): `internal` = owners only + @mentions explicit; `default` = ticket subscribers + project owners + @mentions; `broadcast` = `default` + project followers. Default `'default'`. Set `'broadcast'` to surface a public/API-impacting ticket to followers from the start.",
@@ -213,7 +214,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                         "Optional intent on the comment. `resolved` (#B.129) = tag the comment as a resolution decision (`meta.decision={kind:\"resolution\",status:\"pending\"}`); the reporter accept/reject — no separate ticket_resolved row anymore, the comment IS the proposal and the audit lives on it. `plan` (#B.243) = symmetric to `resolved` for plan proposals (`meta.decision={kind:\"plan\",status:\"pending\"}`): use it when the comment body describes HOW you intend to tackle the ticket and you want the reporter to validate the approach before you execute. Accepted plan = go-signal (the agent re-enters actionable to execute); pending plan gates actionable identically to pending resolution. `close` = close the ticket (reporter-only). `reopen` = bring a closed ticket back. `close`/`reopen` are still emitted as distinct lifecycle event rows; `resolved` and `plan` are comment+decision sidecars. There is no agent→human `blocked` option — post a plain comment with your question if you need info before proceeding.",
                     ),
                 scope: z
-                    .enum(["internal", "default", "broadcast"])
+                    .enum(MESSAGE_SCOPES)
                     .optional()
                     .describe(
                         "Event scope (#B.245 tristate). `internal` = owners only + @mentions explicit (@projet narrows to owners); `default` = ticket subscribers + project owners + @mentions; `broadcast` = `default` + project followers. **Default `'default'`** (#253 — replies behave like the standard fan-out). Pass `'internal'` to narrow (no subs/followers ping, only @mentions), or `'broadcast'` to widen to followers. Each comment decides its own fan-out independently.",

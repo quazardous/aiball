@@ -9,6 +9,10 @@ REM Same AIBALL_SOCK / cli-env resolution as the bash script.
 set "BIN_DIR=%~dp0"
 for %%I in ("%BIN_DIR%..") do set "ROOT=%%~fI"
 
+REM #591 — preserve the caller's PWD so the MCP server (welcome resolver
+REM etc.) can find the right `.aiball.yaml` by walking up from the project
+REM the agent was launched in, not from the install root we cd into below.
+set "AIBALL_CWD=%CD%"
 cd /d "%ROOT%"
 
 if not defined AIBALL_HOME set "AIBALL_HOME=%USERPROFILE%\.local\share\aiball"

@@ -61,6 +61,21 @@ export type Priority = typeof PRIORITIES[number];
 export const STRATEGIES = ["manual", "auto", "auto-reply"] as const;
 export type Strategy = typeof STRATEGIES[number];
 
+// #B.245 event scope tristate. `internal` = owners only + explicit @mentions;
+// `default` = ticket subscribers + project owners + @mentions; `broadcast` =
+// `default` + project followers. Default `default` (#253).
+export const MESSAGE_SCOPES = ["internal", "default", "broadcast"] as const;
+export type MessageScope = typeof MESSAGE_SCOPES[number];
+
+// #582 — error codes thrown by submitMessage / api handlers and mapped to HTTP
+// status by the API layer. Single source for both throw sites and catch sites.
+export const ERROR_CODES = {
+    FORBIDDEN_CLOSE: "FORBIDDEN_CLOSE",
+    PROJECT_NOT_FOUND: "PROJECT_NOT_FOUND",
+    PARENT_PENDING_MODERATION: "PARENT_PENDING_MODERATION",
+} as const;
+export type ErrorCode = typeof ERROR_CODES[keyof typeof ERROR_CODES];
+
 export function isMessageKind(s: string): s is MessageKind {
     return (MESSAGE_KINDS as readonly string[]).includes(s);
 }
@@ -75,4 +90,7 @@ export function isPriority(s: string): s is Priority {
 }
 export function isStrategy(s: string): s is Strategy {
     return (STRATEGIES as readonly string[]).includes(s);
+}
+export function isMessageScope(s: string): s is MessageScope {
+    return (MESSAGE_SCOPES as readonly string[]).includes(s);
 }

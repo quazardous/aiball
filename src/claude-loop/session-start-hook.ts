@@ -1,157 +1,151 @@
 #!/usr/bin/env -S npx --no-install tsx
 /**
- * claude-loop SessionStart hook (#B.63 v2.1 follow-up). Runs once
- * when a claude session opens. Replaces the fragile `sleep 3 &&
- * tmux send-keys` hack the wrapper used to schedule a startup ping:
- * now the ping is gated on the SAME conditions as a timer tick (idle
- * check + check-cmd exit code), but triggered AT the moment the
- * session is actually ready (no race with claude's own startup
- * prompts — MCP-server-trust, etc).
+ * claude-loop SessionStart hook (#B.63 v2.1 + #577 boot-phase rework).
  *
- * David #B.63: "y a un bug lorsque claude demande des choses au
- * startup. donc il faut voir s'il y a un hook qui se déclanche
- * quand la session s'ouvre" + "on attend que la session s'ouvre
- * complètement pour déclencher le ping (ou pas) et entrer dans
- * l'idle".
+ * Runs once when a claude session opens. Always emits `{}` and exits 0
+ * (never block claude's boot). Two side-effects only :
+ *   1. On `source: "resume"`, walk the claude --resume pickers : first
+ *      the session-list (if claude has multiple recent sessions to pick
+ *      from), then the summary-vs-as-is mode. Both auto-dismiss with
+ *      sensible defaults, configurable per env (CL_RESUME_PICK,
+ *      CL_RESUME_MODE).
+ *   2. Seed the `idle-since` marker + status bar to `idle`. The timer
+ *      drives every wake from here — boot phase is detected via the
+ *      pane probe (`esc to interrupt` visible = still boot/busy), so a
+ *      wake CAN'T fire while claude is still settling, regardless of
+ *      `--wait` / `--no-wait` (#577 mg7gkf : "tant qu'on detecte esc to
+ *      interrupt = phase boot").
  *
- * Behavior:
- *   - Always emits `{}` and exits 0 (never block claude's session
- *     boot — the hook's purpose is observation + side-effect, not
- *     gating).
- *   - If `CL_NO_STARTUP_PING` is set, no-op (user opted out via
- *     `claude-loop --no-startup-ping`).
- *   - Otherwise run the same check-cmd the timer would: on exit 0,
- *     `tmux send-keys` a random ping phrase into pane 0. On non-
- *     zero, do nothing — claude is idle, the timer takes over from
- *     here.
+ * Previously a `--no-wait` branch would eager-inject a wake at hook
+ * fire-time. That bypassed the boot detection (claude could still be
+ * loading MCP servers / compacting) and is now dropped — `--no-wait`
+ * now means "skip the human-takeover grace", NOT "fire immediately".
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { AiballClient } from "../client.js";
-import { MUX_CMD, buildContextPhrase, checkHasWork, idleMarkerPath, injectWakePhrase, pingsPath, recordOpenWakeCount, setTmuxStatus, tmuxName } from "./state.js";
+import { LOOP_STATUS, MUX_CMD, idleMarkerPath, setTmuxStatus, tmuxName } from "./state.js";
+import { CL_ENV } from "./env-vars.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
     process.exit(0);
 }
 
-const sd = process.env.CL_STATE_DIR;
-const name = process.env.CL_NAME;
-const checkCmd = process.env.CL_CHECK_CMD ?? "true";
-const noStartup = process.env.CL_NO_STARTUP_PING === "1";
-// #302: --wait (default) → don't eager-ping at boot; the timer's boot-settle
-// (grace-aware, after BOOT_GRACE) handles the startup wake so the human gets
-// the take-over window. --no-wait (CL_WAIT=0) = no human → eager inject below.
-const noWait = process.env.CL_WAIT === "0";
+const sd = process.env[CL_ENV.STATE_DIR];
+const name = process.env[CL_ENV.NAME];
 if (!sd || !name) emit();
+// #577 — CL_NO_STARTUP_PING / CL_WAIT no longer gate this hook's behavior :
+// the hook always seeds idle and exits, the timer drives every wake. Both
+// envs are kept exported by the CLI for backwards compat with `--no-startup-ping`
+// / `--no-wait` flags, but the per-hook gating moved into the timer (boot
+// detection + grace windows).
 
-// #B.149/#B.154: Claude Code passes JSON on stdin with a `source`
-// field (startup / resume / clear). On `resume`, claude shows a
-// resume-mode picker before reaching the prompt. David's #B.154
-// strategy: auto-dismiss the picker by sending Enter (= accept
-// default, typically "resume as-is") so we don't sit in [boot]
-// forever waiting for the user. Then fall through to the normal
-// startup logic. Configurable resume mode (compact / abort) is a
-// future follow-up via .aiball.yaml `claude_loop:` section.
+// Claude Code passes JSON on stdin with a `source` field (startup /
+// resume / clear). On `resume`, claude may show 1 or 2 pickers before
+// reaching the prompt — handled below.
 let source = "startup";
 try {
     const raw = readFileSync(0, "utf8");
     if (raw) source = (JSON.parse(raw) as { source?: string }).source ?? source;
 } catch { /* no stdin, assume startup */ }
 
+function capturePane(): string {
+    try {
+        const pane = spawnSync(MUX_CMD, [
+            "capture-pane", "-t", `${tmuxName(name!)}.0`, "-p",
+        ], { encoding: "utf8" });
+        return pane.stdout ?? "";
+    } catch {
+        return "";
+    }
+}
+
+function sendKey(key: string): void {
+    spawnSync(MUX_CMD, ["send-keys", "-t", `${tmuxName(name!)}.0`, key], { stdio: "ignore" });
+}
+
 if (source === "resume") {
-    // #B.154: auto-dismiss the resume picker — but only if it's
-    // actually showing. The user might have ticked "don't ask me
-    // again" in claude, in which case there's no picker and our
-    // send-keys would spew garbage into the prompt.
+    // #577 phase 2 — session-list picker. When `claude --resume` is run
+    // without a session id AND claude has multiple recent sessions, it
+    // shows a list to choose from BEFORE the summary-vs-as-is mode picker.
+    // Default pick: latest = send Enter on the highlighted (first = most
+    // recent) entry. Override via CL_RESUME_PICK=abort (leave to human).
     //
-    // Mode selection (CL_RESUME_MODE env, default "as-is"):
-    //   - "summary" → option 1 (recommended), just Enter
-    //   - "as-is"   → option 2, Down + Enter
-    //   - "abort"   → no auto-dismiss (user picks manually)
-    // Future: configurable via .aiball.yaml `claude_loop:` section.
-    const mode = process.env.CL_RESUME_MODE ?? "as-is";
-    if (mode !== "abort") {
+    // Detection requires BOTH (#577 usngbr david) :
+    //   - `Resume session` header → confirms WHERE we are
+    //   - `Space to preview` control bar → confirms claude is awaiting input
+    // Pairing both eliminates false-positives on a regular prompt that
+    // happens to mention either string. The `Ctrl+A to show all projects`
+    // marker tried earlier can be absent when too few sessions are listed.
+    const pickMode = process.env[CL_ENV.RESUME_PICK] ?? "latest";
+    let sessionPicked = false;
+    if (pickMode !== "abort") {
         try {
-            // Surface what we're doing in the bar so the user can
-            // follow the phase without tailing logs (#B.154).
-            setTmuxStatus(name!, "boot", "resume?");
-            spawnSync("sleep", ["1.2"], { stdio: "ignore" });
-            const pane = spawnSync(MUX_CMD, [
-                "capture-pane", "-t", `${tmuxName(name!)}.0`, "-p",
-            ], { encoding: "utf8" });
-            const text = pane.stdout ?? "";
-            if (/Resume from summary|Resume full session as-is|Don't ask me again/.test(text)) {
-                setTmuxStatus(name!, "boot", `pick→${mode}`);
-                if (mode === "as-is") {
-                    spawnSync(MUX_CMD, ["send-keys", "-t", `${tmuxName(name!)}.0`, "Down"], { stdio: "ignore" });
-                }
-                spawnSync(MUX_CMD, ["send-keys", "-t", `${tmuxName(name!)}.0`, "Enter"], { stdio: "ignore" });
-            } else {
-                // No picker → claude is already at the prompt, fall
-                // through to the normal check + status flip below.
-                setTmuxStatus(name!, "boot", "no-picker");
+            setTmuxStatus(name!, LOOP_STATUS.BOOT, "session?");
+            spawnSync("sleep", ["1.0"], { stdio: "ignore" });
+            const text = capturePane();
+            if (/Resume session\b/i.test(text) && /Space to preview/i.test(text)) {
+                setTmuxStatus(name!, LOOP_STATUS.BOOT, `pick:${pickMode}`);
+                sendKey("Enter");
+                sessionPicked = true;
             }
         } catch { /* swallow */ }
     } else {
-        setTmuxStatus(name!, "boot", "resume:abort");
+        setTmuxStatus(name!, LOOP_STATUS.BOOT, "session:abort");
+    }
+
+    // #B.154 — summary-vs-as-is picker (always second). The user may
+    // have ticked "Don't ask me again" → no picker → no-op.
+    //   CL_RESUME_MODE (default "as-is"):
+    //     - "summary" → option 1 (recommended), just Enter
+    //     - "as-is"   → option 2, Down + Enter
+    //     - "abort"   → no auto-dismiss
+    //
+    // #577 qbpwy9 — when we just picked a session above, claude needs
+    // a few seconds to LOAD that session before showing the next picker.
+    // Probe up to ~5s with 500ms granularity instead of a single fixed
+    // sleep, so we catch the picker as soon as it shows AND don't waste
+    // time when no picker is expected.
+    const mode = process.env[CL_ENV.RESUME_MODE] ?? "as-is";
+    if (mode !== "abort") {
+        try {
+            setTmuxStatus(name!, LOOP_STATUS.BOOT, "resume?");
+            const probeMaxMs = sessionPicked ? 6000 : 1500;
+            const probeStepMs = 500;
+            const summaryRegex = /Resume from summary|Resume full session as-is|Don't ask me again/;
+            let matched = false;
+            for (let elapsed = 0; elapsed < probeMaxMs && !matched; elapsed += probeStepMs) {
+                spawnSync("sleep", [String(probeStepMs / 1000)], { stdio: "ignore" });
+                if (summaryRegex.test(capturePane())) {
+                    matched = true;
+                    setTmuxStatus(name!, LOOP_STATUS.BOOT, `pick→${mode}`);
+                    if (mode === "as-is") sendKey("Down");
+                    sendKey("Enter");
+                }
+            }
+            if (!matched) setTmuxStatus(name!, LOOP_STATUS.BOOT, "no-picker");
+        } catch { /* swallow */ }
+    } else {
+        setTmuxStatus(name!, LOOP_STATUS.BOOT, "resume:abort");
     }
 }
 
-if (noStartup) {
-    // Don't ping at boot, but still seed the idle state so the bar
-    // doesn't carry over the cli's startup placeholder and so the
-    // timer's idle-since watch starts immediately.
-    try {
-        writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-        setTmuxStatus(name!, "idle");
-    } catch { /* swallow */ }
-    emit();
-}
-
-// #302: --wait (default) — don't eager-ping at boot. Seed idle + bar; the
-// timer's boot-settle (grace-aware) fires the startup wake at the end of the
-// boot-grace ONLY if the human hasn't taken over. --no-wait falls through to
-// the eager inject below (unattended → drain immediately).
-if (!noWait) {
-    try {
-        writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-        setTmuxStatus(name!, "idle");
-    } catch { /* swallow */ }
-    emit();
-}
-
-(async () => {
-    try {
-        const gate = await checkHasWork(checkCmd, undefined, process.env.AIBALL_PROJECT ?? null, sd!);
-        if (gate.has) {
-            // #B.221 david: bare cultural phrases ("Allons-y!" / "tap
-            // tap") gave claude zero operational context — she would
-            // greet back and burn a turn before noticing the inbox.
-            // `buildContextPhrase` wraps the culture phrase with the
-            // current unread/open counts + a drain directive so the
-            // very first turn is oriented toward pending work.
-            // Same helper now feeds stop-hook + timer fallback so the
-            // wrapping is consistent across every no-hint wake path.
-            const phrase = await buildContextPhrase(
-                new AiballClient(),
-                process.env.AIBALL_PROJECT ?? null,
-                pingsPath(sd!),
-            );
-            await injectWakePhrase(`${tmuxName(name!)}.0`, phrase);
-            // #B.232 ch887f: bump watermark so the timer heartbeat
-            // doesn't immediately re-wake on the same open tickets.
-            if (gate.openCount > 0) recordOpenWakeCount(sd!, gate.openCount);
-            setTmuxStatus(name!, "busy");
-        } else {
-            // Nothing to do at boot — mark idle so the timer takes
-            // over the watch immediately (no need to wait for claude's
-            // first Stop). Mirrors the Stop hook's "sleep" branch.
-            writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-            setTmuxStatus(name!, "idle");
-        }
-    } catch {
-        /* swallow — never block startup */
-    }
-    emit();
-})();
+// #577 — always seed idle + emit. Timer drives every wake. Boot phase
+// (claude still loading, MCP trusts, compacting) is detected via the
+// pane probe (`esc to interrupt` visible) and suppresses wakes until
+// the prompt is clean. The previous `--no-wait` eager-inject branch is
+// gone: it bypassed boot detection and was the source of the "wake hits
+// claude mid-compact" class of bugs.
+//
+// `--no-wait` still has meaning : it shortens / skips the human-takeover
+// grace at the timer level (BOOT_GRACE_MS path) so the loop starts
+// firing as soon as the pane is clean, instead of waiting BOOT_GRACE
+// extra seconds for a human to grab the keyboard.
+//
+// `CL_NO_STARTUP_PING` is the same end-state (idle marker + bar), kept
+// as a separate flag for compatibility with `claude-loop --no-startup-ping`.
+try {
+    writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+    setTmuxStatus(name!, LOOP_STATUS.IDLE);
+} catch { /* swallow */ }
+emit();
