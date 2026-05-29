@@ -236,11 +236,19 @@ function pruneDeadStateDirs(): void {
  * #616 (david arf8xs) — does claude have any prior conversation
  * recorded for this cwd ? claude stores sessions under
  * `~/.claude/projects/<encoded-cwd>/*.jsonl`. The encoding replaces
- * every NON-alphanumeric character (slash, underscore, dot, …) by
- * `-`, then prepends a leading `-`. Confirmed by david's `azuc5s`
- * repro on `/home/david/work/test_no_resume_auto` →
- * `~/.claude/projects/-home-david-work-test-no-resume-auto/` (the
- * underscores collapsed to dashes alongside the slashes).
+ * every NON-alphanumeric character (slash, backslash, drive-colon,
+ * underscore, dot, …) by `-`, with NO leading dash prepended — the
+ * leading separator is just another char that maps to `-`. This is
+ * platform-symmetric:
+ *   Unix:    `/home/david/work/test_no_resume_auto`
+ *            → `-home-david-work-test-no-resume-auto` (leading `/` → `-`)
+ *   Windows: `C:\Users\david\dev\aiball`
+ *            → `C--Users-david-dev-aiball` (drive letter stays, NO leading `-`)
+ * The earlier `"-" + …strip-leading-/…` form was Unix-shaped : on
+ * Windows the path has no leading `/` to strip, so the unconditional
+ * `-` prefix produced `-C--Users-…`, which never matched the real dir
+ * `C--Users-…` → `hasClaudeSessions` always returned false and auto
+ * --resume was wrongly skipped on every Windows run.
  *
  * Used by the always_resume injection : if the dir is missing or
  * empty, `claude --resume` would block on an empty picker — skip the
@@ -251,9 +259,10 @@ function pruneDeadStateDirs(): void {
 function hasClaudeSessions(cwd: string): boolean {
     try {
         const abs = resolve(cwd);
-        // Strip leading `/` then collapse every non-alnum/non-dash
-        // char to `-` (matches claude's own encoding).
-        const encoded = "-" + abs.replace(/^\//, "").replace(/[^a-zA-Z0-9-]/g, "-");
+        // Collapse every non-alnum char to `-` — matches claude's own
+        // encoder. The leading path separator (`/` on Unix, drive letter
+        // on Windows) is handled by the same rule, so no special-casing.
+        const encoded = abs.replace(/[^a-zA-Z0-9]/g, "-");
         const dir = join(homedir(), ".claude", "projects", encoded);
         if (!existsSync(dir)) return false;
         return readdirSync(dir).some((f) => f.endsWith(".jsonl"));
