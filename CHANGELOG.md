@@ -23,7 +23,16 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
-*Nothing yet.*
+### Added
+
+- The bar BG stays `[boot]` yellow stable through the whole
+  boot-grace window — claude's splash / a transient
+  `esc to interrupt` no longer flickers the bar grey or blue
+  mid-load. At the end of boot-grace the loop flips the bar
+  based on launch mode : `--wait` arms a fresh 10-minute hold
+  (yellow `wait` with countdown) ; `--no-wait` leaves AFK off
+  (green `loop`). Matches the user's launch intent instead of
+  whatever happened to be in the pane.
 
 ## [0.11.0] — 2026-05-29
 

@@ -43,6 +43,7 @@ import {
     DEFAULT_ASK_GRACE_SEC,
     DEFAULT_USER_GRACE_SEC,
     LOOP_STATUS,
+    armAfk10m,
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
     buildContextPhrase,
@@ -818,6 +819,19 @@ async function mainSse(): Promise<void> {
         }
         bootSettled = true;
         log("boot grace elapsed — settling to idle/busy via check");
+        // #624 david `e3a6nn` : à la fin de la fenêtre boot-grace, le mode
+        // détermine la cible visuelle :
+        //   --wait (managed)  → arme NOT AFK 10m → bar `wait` jaune
+        //                       (countdown visible côté status-right)
+        //   --no-wait (eager) → ne rien faire → bar passe à `loop` vert
+        // L'idée : le user voit immédiatement après boot la cible logique
+        // du mode dans lequel le loop tourne, au lieu d'un état dérivé
+        // accidentellement de la présence/absence de frappes pendant
+        // le chargement.
+        if (!NO_WAIT) {
+            armAfk10m(sd!);
+            log("settleBoot: --wait mode → armed NOT AFK 10m (bar will read `wait`)");
+        }
         // Seed idle-since so tryWake's gate passes; tryWake will
         // flip to busy if there's work or stay idle otherwise.
         try {
@@ -935,7 +949,17 @@ async function mainSse(): Promise<void> {
         if (paneText) {
             const claudeWorking = paneFooterShowsBusy(paneText);
             const claudeReady = /Claude Code v|❯ |^> /m.test(paneText);
-            if (claudeWorking && settledStatus !== "busy") {
+            // #624 david `e3a6nn` : pendant la fenêtre boot-grace (par
+            // défaut 60s), le bar BG doit rester `[boot]` jaune. La probe
+            // sautait l'attente quand le splash de claude montrait sa
+            // signature ou un `esc to interrupt` transient → flash gris/
+            // bleu pendant le chargement. On gate les overrides probe
+            // sous --wait (mode managé). --no-wait garde l'ancien
+            // comportement (eager drain).
+            const inBootGrace = !NO_WAIT && (Date.now() - BOOT_TIME) < BOOT_GRACE_MS;
+            if (inBootGrace) {
+                // Skip — settleBoot fera la transition propre à T+grace.
+            } else if (claudeWorking && settledStatus !== "busy") {
                 // #B.228: trace probe-driven state flips so a
                 // "barre reste jaune" repro shows whether the
                 // probe ever fired and what it saw.

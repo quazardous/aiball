@@ -724,6 +724,17 @@ export function afkActive(sd: string): boolean {
     }
 }
 
+/** #624 david `e3a6nn` : arm a NOT AFK 10m hold from the TS side
+ *  (settleBoot's `--wait` path). Writes an ISO expiry timestamp,
+ *  mirror of the proxy's `set_afk_until`. No-op on fs error — the
+ *  bar just stays at whatever the natural state computes to. */
+export function armAfk10m(sd: string, seconds = 600): void {
+    try {
+        const expiry = new Date(Date.now() + seconds * 1000);
+        writeFileSync(afkPath(sd), expiry.toISOString() + "\n");
+    } catch { /* best-effort */ }
+}
+
 /**
  * #264: short TTL for the near-live "human typing" chip. The detection
  * poll refreshes the marker while the human types; once they stop, the
