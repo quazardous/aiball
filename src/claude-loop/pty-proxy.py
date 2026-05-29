@@ -267,16 +267,24 @@ def _afk_mode():
             content = f.read().strip()
     except OSError:
         return None
-    if not content or content == "inf":
-        # Empty content = legacy ∞ marker from pre-#619 (#601 used the
-        # ISO timestamp of "now" as the body — also accepted as ∞).
-        return "inf" if content == "inf" else "inf"
+    if content == "inf":
+        return "inf"
+    if not content:
+        # #622 — empty AFK file = corrupt write or pre-#619 legacy marker.
+        # Either way it's not a state the cycle can advance from cleanly
+        # (the OFF→10m→∞→OFF cycle needs the file to be either absent or
+        # carry a parseable expiry/inf). Clear it so the next F9 arms a
+        # fresh 10m.
+        clear_afk()
+        return None
     # Treat as ISO expiry timestamp.
     try:
         until = datetime.datetime.fromisoformat(content).timestamp()
     except ValueError:
-        # Unparseable content → degrade to ∞ rather than racy clear.
-        return "inf"
+        # #622 — unparseable content is corrupt state, clear it. Was
+        # previously treated as ∞ which silently held the loop.
+        clear_afk()
+        return None
     if until <= datetime.datetime.now().timestamp():
         return None  # auto-expired
     return ("until", until)
