@@ -1343,6 +1343,10 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         // est plus pédagogique : l'agent lit le ticket → voit le flag →
         // décide d'attendre / d'asker un plain comment.
         decision_proposable: t.status === "approved",
+        // #596 david `sa44wy` : ≥1 unseen ping on this thread for the
+        // requesting consumer. Frontend uses it to skip the
+        // "marking-as-read" pulse when landing on an already-read ticket.
+        unread: ticketUnreadFlags(consumerOf(req), [t.id]).get(t.id) ?? false,
     };
     if (summary) {
         const commentCount = threadMessages.filter(

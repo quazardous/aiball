@@ -8,8 +8,9 @@
  * resets the timer on ticketId change and an onBeforeUnmount cleanup.
  *
  * #596 — also returns a `markingRead` ref that flips true while the
- * dwell timer is running on an UNREAD ticket, so the UI can render a
- * visual "transition in progress" hint (a pulsing dot, etc.).
+ * dwell timer is running on an UNREAD ticket (per-consumer flag on the
+ * thread payload), so the UI can render a "transition in progress"
+ * pulse. Re-visits of an already-read ticket: chip stays static.
  */
 import { onBeforeUnmount, ref, watch, type Ref } from "vue";
 import { api, type ThreadView as ThreadViewData } from "./api";
@@ -34,27 +35,33 @@ interface UseAutoMarkReadReturn {
 export function useAutoMarkRead({ data, ticketId }: UseAutoMarkReadArgs): UseAutoMarkReadReturn {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const markingRead = ref(false);
+    let scheduledForId: number | null = null;
 
-    function schedule() {
+    function cancel() {
         if (timer) {
             clearTimeout(timer);
-            markingRead.value = false;
+            timer = null;
         }
+        markingRead.value = false;
+        scheduledForId = null;
+    }
+
+    // Schedule fires only when `data` has loaded for the current ticketId
+    // — so we read the FRESH per-consumer unread flag, not the previous
+    // ticket's. #596 david `sa44wy` : pas de flicker sur un ticket déjà
+    // lu (la chip reste grise statique).
+    function maybeSchedule() {
         const id = ticketId();
-        // #596 — always paint the pulse during the dwell. We don't gate
-        // on "was the ticket unread when we landed" because the
-        // ThreadView's TicketSummary doesn't carry the per-consumer
-        // unread flag (only the inbox row does). The mark-read call is a
-        // cheap no-op when the ticket was already read, and a brief
-        // pulse on every visit is less surprising than an inconsistent
-        // "sometimes-pulse" behaviour. KISS for the first cut.
-        markingRead.value = true;
+        const snapshot = data.value;
+        if (!snapshot || snapshot.ticket?.id !== id) return;
+        if (scheduledForId === id) return;
+        scheduledForId = id;
+        markingRead.value = snapshot.ticket.unread === true;
         timer = setTimeout(() => {
-            const snapshot = data.value;
-            const lastSeenId = snapshot && snapshot.ticket?.id === id
+            const lastSeenId = data.value && data.value.ticket?.id === id
                 ? Math.max(
-                    snapshot.ticket.id,
-                    ...snapshot.comments.map((c) => c.id),
+                    data.value.ticket.id,
+                    ...data.value.comments.map((c) => c.id),
                   )
                 : undefined;
             api.markTicketRead(id, lastSeenId)
@@ -76,7 +83,8 @@ export function useAutoMarkRead({ data, ticketId }: UseAutoMarkReadArgs): UseAut
         }, AUTO_MARK_READ_MS);
     }
 
-    watch(ticketId, schedule, { immediate: true });
+    watch(ticketId, cancel);
+    watch(data, maybeSchedule, { immediate: true });
 
     onBeforeUnmount(() => {
         if (timer) {

@@ -329,6 +329,10 @@ export interface TicketSummary {
     claimant?: string | null;
     claimed_at?: string | null;
     is_claim?: boolean;
+    /** #596 — per-consumer: ≥1 unseen ping on this thread for the
+     *  requesting consumer. Lets the UI skip the "marking-as-read"
+     *  pulse when landing on an already-read ticket. */
+    unread?: boolean;
 }
 
 /** #404: per-ticket token-effort tally (raw counts from the Claude transcript). */

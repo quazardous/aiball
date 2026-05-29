@@ -61,20 +61,7 @@ function claimerTooltip(t: TicketSummary): string {
          (#382 — david avait choisi cette position quand la cartouche
          était plus chargée ; aujourd'hui qu'elle l'est moins, la prio
          rentre naturellement avec les autres chips). -->
-    <h2 class="thread-title">
-        <!-- #596 — envelope icon during the auto-mark-read dwell. Same
-             icon as the inbox unread marker (david `27b5wv` : "petite
-             enveloppe qui pulse gris vert genre flickering de lampe qui
-             va s'éteindre puis passe au gris"). Green flicker → settle
-             to gray = visual "unread → read" handover. -->
-        <i
-            v-if="markingRead"
-            class="pi pi-envelope thread-marking-read"
-            :style="{ animationDuration: `${(markReadDwellMs ?? 2000) / 1000}s` }"
-            title="Marking as read — comments arriving after the dwell window stay flagged unread"
-            aria-hidden="true"
-        />{{ ticket.title }}
-    </h2>
+    <h2 class="thread-title">{{ ticket.title }}</h2>
     <!-- #405/#408: hot-zone focus flag — the ticket an AGENT is actively working
          (most recent agent activity within the hot window). #408: a human
          commenting does NOT make a ticket hot; only an agent's work does. -->
@@ -94,10 +81,21 @@ function claimerTooltip(t: TicketSummary): string {
          pushes via the manage panel.
          #436: claim (focus) and assignment (responsibility) are distinct now —
          a ticket can show both. -->
-    <div
-        v-if="ticket.claimant || ticket.assignee || estTokenEffort(ticket.token_usage) > 0"
-        class="thread-subline"
-    >
+    <div class="thread-subline">
+        <!-- #596 david `6xjrxf` — envelope sur la subline (pas dans le H2)
+             ALWAYS visible. Gris static = ticket lu. Flicker green→gris
+             pendant le dwell auto-mark-read = transition unread→read.
+             Mêmes icône+couleur que l'inbox `read-toggle-lead` pour la
+             consistency visuelle. -->
+        <span
+            class="thread-subline__item thread-subline__read-state"
+            :class="{ 'thread-subline__read-state--marking': markingRead }"
+            :style="markingRead ? { animationDuration: `${(markReadDwellMs ?? 2000) / 1000}s` } : undefined"
+            :title="markingRead ? 'Marking as read — comments arriving after the dwell window stay flagged unread' : 'Already read'"
+            aria-hidden="true"
+        >
+            <i class="pi pi-envelope" />
+        </span>
         <span
             v-if="ticket.claimant"
             class="thread-subline__item"
@@ -243,17 +241,17 @@ function claimerTooltip(t: TicketSummary): string {
     background: var(--p-orange-100, #ffedd5);
 }
 
-/* #596 / david `27b5wv` — envelope icon flicker during the auto-mark-read
-   dwell. Same envelope icon + green-unread colour as the inbox row, with a
-   "dying lamp" flicker (green↔gray a few times) that settles to muted gray
-   = the read state. `animation-fill-mode: forwards` keeps the final gray
-   sticking until the component unmounts. */
-.thread-marking-read {
-    display: inline-block;
-    margin-right: 0.45rem;
-    vertical-align: middle;
-    font-size: 0.9em;
-    color: var(--p-green-500, #22c55e);
+/* #596 — envelope chip on the subline, always rendered. Static muted gray
+   = "read" (= the steady state). The `--marking` modifier kicks in during
+   the auto-mark-read dwell : a "dying lamp" green↔gray flicker (3 quick
+   pulses on the first half of the dwell, then smooth fade to muted gray
+   on the second half). `animation-fill-mode: forwards` keeps the final
+   gray sticking after the animation ends — the chip then matches the
+   default static gray with no perceptible jump. */
+.thread-subline__read-state {
+    color: var(--p-text-muted-color, #94a3b8);
+}
+.thread-subline__read-state--marking {
     animation-name: thread-marking-read-flicker;
     animation-timing-function: linear;
     animation-iteration-count: 1;
