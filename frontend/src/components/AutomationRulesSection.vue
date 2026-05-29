@@ -33,8 +33,15 @@ import PanelHeader from "./ui/PanelHeader.vue";
 // order shown (first-match-wins), exposing a sort UI would lie about the
 // runtime behavior. The mobile sort chooser auto-hides for the same
 // reason (no sortable columns = nothing to show).
+// #614 david `vcd2vk` : la cellule rank affichait l'index 1-based dans
+// le sorted-list, mais la page detail dit "Rule #<id>" → discordance
+// visuelle ("liste affiche 1 mais détail Rule #5"). On affiche l'id
+// directement (alignée avec la detail page). L'ORDRE d'évaluation reste
+// porté par l'ordre des rows dans la table (sortedRules déjà sorted en
+// position+id). YAML rules (id < 0) gardent leur badge inline dans la
+// colonne Rule.
 const columns: DataListColumn[] = [
-    { key: "rank", label: "#", cellClass: "rule-col-rank" },
+    { key: "id", label: "#", cellClass: "rule-col-rank" },
     { key: "label", label: "Rule", cellClass: "rule-col-label" },
     { key: "triggers", label: "On", cellClass: "rule-col-triggers" },
     { key: "action", label: "Action", cellClass: "rule-col-action" },
@@ -130,8 +137,8 @@ onMounted(load);
                     </div>
                 </template>
 
-                <template #cell-rank="{ row }">
-                    <span class="rule-rank-pill">{{ sortedRules.indexOf(row as AutomationRule) + 1 }}</span>
+                <template #cell-id="{ row }">
+                    <span class="rule-rank-pill">#{{ (row as AutomationRule).id }}</span>
                 </template>
 
                 <template #cell-label="{ row }">
