@@ -57,6 +57,14 @@ def _inject_sock_path():
     return os.path.join(sd, "inject.sock") if sd else ""
 
 
+def _view_push_sock_path():
+    """#627 — UDS the proxy listens on for view-push from the timer.
+    Newline-delimited JSON ; timer connects once and holds the
+    connection open."""
+    sd = _state_dir()
+    return os.path.join(sd, "view-push.sock") if sd else ""
+
+
 def _proxy_alive_path():
     sd = _state_dir()
     return os.path.join(sd, "proxy-alive") if sd else ""
@@ -1194,7 +1202,27 @@ def main(argv):
         except OSError:
             inject_srv = None  # injection retombera sur send-keys côté TS
 
+    # #627 — Socket pour le view-push depuis le timer. Newline-delimited JSON,
+    # connection persistante côté timer (auto-reconnect). On peint le bar
+    # word + AFK chunk depuis la view reçue ; les rules locales (_rest_word /
+    # _format_afk_state) restent en bootstrap fallback tant que le timer
+    # n'a pas pushé sa première view.
+    view_push_srv = None
+    view_push_sock_path = _view_push_sock_path()
+    if view_push_sock_path:
+        try:
+            if os.path.exists(view_push_sock_path):
+                os.unlink(view_push_sock_path)
+            view_push_srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            view_push_srv.bind(view_push_sock_path)
+            view_push_srv.listen(2)
+            view_push_srv.setblocking(False)
+        except OSError:
+            view_push_srv = None  # fallback : rules locales
+
     inject_conns = []
+    # Per-connection JSON line buffers for view-push.
+    view_push_conns = []   # list of (sock, recv_buffer:bytearray)
     stdin_open = True
 
     # #274/#302 état du segment human : on ne repeint QUE sur transition.
@@ -1238,6 +1266,97 @@ def main(argv):
                 os.unlink(sock_path)
             except OSError:
                 pass
+        if view_push_srv is not None:
+            try:
+                view_push_srv.close()
+            except OSError:
+                pass
+            try:
+                os.unlink(view_push_sock_path)
+            except OSError:
+                pass
+
+    # #627 — `pushed_view` = the last view received from the timer (or None
+    # until the first push lands). When set, the painters use it instead of
+    # _rest_word / _format_afk_state. Lets us strip the rule code from the
+    # proxy without losing bootstrap paint (rules fallback when None).
+    pushed_view = {"value": None}  # dict-wrap so nested fns can mutate
+
+    def _apply_pushed_view(view):
+        """#627 — paint the bar word + AFK chunk from a view dict received
+        over view-push. Schema matches `LoopStateView` from loop-state.ts :
+        {barWord:"boot"|"stop"|"wait"|"loop", afkChunk:{label, prefix, color},
+         phase:..., wakeAllowed:..., wakeSkipReason:..., inBootGrace:...}.
+        We use barWord + afkChunk here ; phase/wake are timer-internal."""
+        nonlocal current_word
+        pushed_view["value"] = view
+        # Bar word: convert "boot"/"stop"/"wait"/"loop" to the right
+        # _HUMAN_* token. Skip if the proxy is currently in a typing-stop
+        # paint (let it finish its 5s flash naturally).
+        word_token = {
+            "boot": _HUMAN_BOOT,
+            "stop": _HUMAN_STOP,
+            "wait": _HUMAN_WAIT,
+            "loop": _HUMAN_LOOP,
+        }.get(view.get("barWord", ""))
+        if word_token is not None and word_token != current_word:
+            _paint_word(word_token)
+            current_word = word_token
+        # AFK chunk: convert the {label, prefix, color} dict to the tmux
+        # format string the proxy's _format_afk_state used to emit.
+        chunk = view.get("afkChunk") or {}
+        label = chunk.get("label") or "AFK"
+        prefix = chunk.get("prefix")
+        color = chunk.get("color") or "dim"
+        key = os.environ.get("CL_AFK_KEY_DISP") or "F9"
+        fg_dim = os.environ.get("CL_AFK_LABEL_FG_DIM") or "colour238"
+        fg_lit = os.environ.get("CL_AFK_LABEL_FG_LIT") or "colour16"
+        col_code = {"red": "colour196", "yellow": "colour178", "dim": fg_dim}.get(color, fg_dim)
+        if prefix:
+            chunk_str = f"#[fg={col_code}]{prefix} {label}:#[fg={fg_lit}]{key}"
+        else:
+            chunk_str = f"#[fg={col_code}]{label}:#[fg={fg_lit}]{key}"
+        target = os.environ.get("CL_TMUX") or ""
+        if target:
+            mux = _mux_argv()
+            try:
+                subprocess.run(
+                    mux + ["set-option", "-t", target, "@cl_afk_state", chunk_str],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+                )
+                subprocess.run(
+                    mux + ["refresh-client", "-S"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+                )
+            except OSError:
+                pass
+
+    def _process_view_push_recv(conn, buf):
+        """#627 — drain a view-push connection. Parses every full
+        newline-terminated JSON line, applies each as a view. Leftover
+        bytes stay buffered for the next read."""
+        try:
+            chunk = conn.recv(65536)
+        except OSError:
+            chunk = b""
+        if not chunk:
+            return False  # peer closed
+        buf.extend(chunk)
+        while True:
+            nl = buf.find(b"\n")
+            if nl < 0:
+                break
+            line = bytes(buf[:nl])
+            del buf[:nl + 1]
+            if not line.strip():
+                continue
+            try:
+                view = _json.loads(line.decode("utf-8", errors="replace"))
+            except (ValueError, UnicodeDecodeError):
+                continue  # malformed — skip
+            if isinstance(view, dict):
+                _apply_pushed_view(view)
+        return True  # still open
 
     def apply_decision(dec):
         """#360 : exécute les EFFETS d'une Decision (markers afk/présence,
@@ -1287,6 +1406,9 @@ def main(argv):
             if inject_srv is not None:
                 rfds.append(inject_srv)
             rfds.extend(inject_conns)
+            if view_push_srv is not None:
+                rfds.append(view_push_srv)
+            rfds.extend(c for (c, _buf) in view_push_conns)
             # Timeout = prochain changement de mot : d'abord l'expiration
             # de la frappe (5s → ré-évalue stop→rest), puis la plus proche
             # des fins de boot-grace (#305 → bar word `boot`→`loop`/`wait`)
@@ -1314,21 +1436,22 @@ def main(argv):
             except (InterruptedError, OSError):
                 continue  # SIGWINCH etc. interrompent select
 
-            # 0) Hors-frappe (>HUMAN_TTL_SEC) → mot au repos (`wait` pendant la
-            #    user-grace, sinon `loop`) ; repeint seulement sur transition. (#302)
-            if (datetime.datetime.now().timestamp() - decider.last_keystroke) >= HUMAN_TTL_SEC:
-                want = _rest_word()
-                if want != current_word:
-                    _paint_word(want)
-                    current_word = want
-
-            # #619 jjfdea : refresh AFK state segment (status-right) whenever
-            # its formatted value changes (countdown tick / AFK toggle / grace
-            # boundary). Cheap diff — most ticks are no-ops.
-            afk_state = _format_afk_state()
-            if afk_state != last_afk_state:
-                _paint_afk_state()
-                last_afk_state = afk_state
+            # #627 — bootstrap fallback only. Once the timer has pushed
+            # its first view (`_apply_pushed_view`), all paints come
+            # from there ; the local rules below are only used during
+            # the brief window from proxy start to first push receive.
+            if pushed_view["value"] is None:
+                # 0) Hors-frappe (>HUMAN_TTL_SEC) → mot au repos (#302).
+                if (datetime.datetime.now().timestamp() - decider.last_keystroke) >= HUMAN_TTL_SEC:
+                    want = _rest_word()
+                    if want != current_word:
+                        _paint_word(want)
+                        current_word = want
+                # AFK chunk diff (#619 jjfdea).
+                afk_state = _format_afk_state()
+                if afk_state != last_afk_state:
+                    _paint_afk_state()
+                    last_afk_state = afk_state
 
             # 1) Frappe humaine (tmux → nous → claude).
             if stdin_fd in ready:
@@ -1409,6 +1532,26 @@ def main(argv):
                         inject_conns.remove(conn)
                         try:
                             conn.close()
+                        except OSError:
+                            pass
+
+            # 5) #627 — view-push : nouvelle connection du timer.
+            if view_push_srv is not None and view_push_srv in ready:
+                try:
+                    vp_conn, _ = view_push_srv.accept()
+                    vp_conn.setblocking(False)
+                    view_push_conns.append((vp_conn, bytearray()))
+                except OSError:
+                    pass
+
+            # 6) #627 — drain les view-push connections.
+            for entry in list(view_push_conns):
+                vp_conn, vp_buf = entry
+                if vp_conn in ready:
+                    if not _process_view_push_recv(vp_conn, vp_buf):
+                        view_push_conns.remove(entry)
+                        try:
+                            vp_conn.close()
                         except OSError:
                             pass
     finally:

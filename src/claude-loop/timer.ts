@@ -33,7 +33,7 @@
  * per-menu settings flags. Interim: user runs `claude` once to clear
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
-import { appendFileSync, existsSync, openSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, openSync, readdirSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
@@ -44,7 +44,9 @@ import {
     DEFAULT_USER_GRACE_SEC,
     LOOP_STATUS,
     armAfk10m,
+    createViewPusher,
     readLoopStateInput,
+    viewPushSockPath,
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
     buildContextPhrase,
@@ -832,6 +834,60 @@ async function mainSse(): Promise<void> {
     // Independent of the wake heartbeat — fast cadence so the chip
     // tracks typing closely. Fail-safe (detectHumanTyping never throws).
     setInterval(detectHumanTyping, HUMAN_POLL_MS);
+
+    // #627 — view-push loop. The timer owns the LoopState rules ;
+    // here we watch the state-dir markers and push the recomputed
+    // view to the proxy whenever it changes (or once a second, to
+    // tick the AFK 10m countdown). The proxy paints from the pushed
+    // view ; its local rules are bootstrap fallback only.
+    //
+    // Architecture (david `fdzg4e`) : timer ↔ proxy IPC via a
+    // dedicated UDS (`view-push.sock`), persistent connection,
+    // newline-delimited JSON. The pusher reconnects transparently
+    // if the socket drops (proxy reload, etc.).
+    const viewPusher = createViewPusher(viewPushSockPath(sd!));
+    let lastPushedJson = "";
+    const pushViewIfChanged = (): void => {
+        let view;
+        try {
+            view = computeLoopView(readLoopStateInput(sd!));
+        } catch { return; }
+        const json = JSON.stringify(view);
+        if (json === lastPushedJson) return;
+        lastPushedJson = json;
+        viewPusher.push(view);
+    };
+    // Debounced trigger : coalesce a burst of marker writes into a single
+    // push (proxy typing branch writes 3 markers per keystroke).
+    let viewPushTimer: NodeJS.Timeout | null = null;
+    const schedulePush = (): void => {
+        if (viewPushTimer) return;
+        viewPushTimer = setTimeout(() => {
+            viewPushTimer = null;
+            pushViewIfChanged();
+        }, 50);
+    };
+    // Watch the state-dir for ANY marker change → schedule a push.
+    try {
+        watch(sd!, { persistent: false }, (_evt, name) => {
+            if (!name) return;
+            // Only react to the markers the LoopState service actually reads.
+            if (name === "afk" || name === "user-took-over" || name === "human-typing"
+                || name === "idle-since" || name === "wake-in-flight"
+                || name === "busy-defer-until" || name === "loop-start-ts") {
+                schedulePush();
+            }
+        });
+    } catch (e) {
+        log(`view-push: fs.watch on state-dir failed (${(e as Error).message ?? e}) — relying on periodic tick only`);
+    }
+    // Periodic tick : countdown ticks down second-by-second even with no
+    // marker change ; push once a second so the AFK chunk reflects it.
+    // Also acts as a safety net if fs.watch missed an event.
+    setInterval(pushViewIfChanged, 1000);
+    // Send the initial view ASAP so the proxy paints from it instead of
+    // its local bootstrap. The pusher queues until the socket is up.
+    pushViewIfChanged();
     // #B.149: track the "settled" status so the count-refresh below
     // doesn't reset bar to idle while claude is busy. tryWake flips
     // to busy on wake; we mirror that. Boot stays until settleBoot.

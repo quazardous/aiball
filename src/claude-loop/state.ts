@@ -181,6 +181,11 @@ export function humanTypingPath(sd: string): string { return join(sd, "human-typ
 // Present ⇒ the pane runs under the proxy (injection goes here instead of
 // tmux send-keys; the proxy owns the human-typing marker).
 export function injectSockPath(sd: string): string { return join(sd, "inject.sock"); }
+/** #627 — UDS the proxy listens on for view-push messages from the timer.
+ *  Separate from `inject.sock` (raw wake bytes) so the protocols stay
+ *  isolated. Newline-delimited JSON, persistent connection from the
+ *  timer side (auto-reconnect on drop). */
+export function viewPushSockPath(sd: string): string { return join(sd, "view-push.sock"); }
 // #281 (strategy B): Windows has no AF_UNIX file sockets, so the Rust
 // ConPTY proxy listens on a NAMED PIPE instead. Both sides derive the
 // name from the loop name (= basename of the state dir, == CL_NAME).
@@ -1498,6 +1503,74 @@ export async function injectWakePhrase(paneTarget: string, phrase: string): Prom
     }
     await new Promise<void>((res) => setTimeout(res, 200));
     spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" });
+}
+
+/**
+ * #627 — persistent UDS connection from the timer to the PTY proxy's
+ * view-push socket. The timer holds one connection open ; each call to
+ * `push(view)` sends a newline-delimited JSON line. On any error
+ * (proxy gone, socket dropped) we close, mark the connection dead, and
+ * the next `push()` will reconnect. Pure best-effort : no view loss is
+ * fatal (the proxy keeps the last pushed view + falls back to its
+ * local rules until the next push lands).
+ */
+export interface ViewPusher {
+    push(view: import("./loop-state.js").LoopStateView): void;
+    close(): void;
+}
+
+export function createViewPusher(sockPath: string): ViewPusher {
+    let sock: ReturnType<typeof netConnect> | null = null;
+    let connecting = false;
+    let queued: string[] = [];
+
+    const connect = (): void => {
+        if (sock || connecting) return;
+        connecting = true;
+        try {
+            const s = netConnect(sockPath);
+            s.on("error", () => {
+                try { s.end(); } catch { /* ignore */ }
+                if (sock === s) sock = null;
+                connecting = false;
+            });
+            s.on("close", () => {
+                if (sock === s) sock = null;
+                connecting = false;
+            });
+            s.on("connect", () => {
+                sock = s;
+                connecting = false;
+                // Flush any queued payloads accumulated while we were
+                // reconnecting (typically the very first call from
+                // settleBoot before the timer's view-watcher started).
+                for (const line of queued) {
+                    try { s.write(line); } catch { /* ignore */ }
+                }
+                queued = [];
+            });
+        } catch {
+            connecting = false;
+        }
+    };
+
+    return {
+        push(view) {
+            const line = JSON.stringify(view) + "\n";
+            if (sock && !sock.destroyed) {
+                try { sock.write(line); return; } catch { /* fall through */ }
+            }
+            // Queue the FIRST few pushes while we (re)connect ; drop
+            // anything beyond a cap so a dead proxy doesn't leak memory.
+            if (queued.length < 4) queued.push(line);
+            connect();
+        },
+        close() {
+            try { sock?.end(); } catch { /* ignore */ }
+            sock = null;
+            queued = [];
+        },
+    };
 }
 
 /**
