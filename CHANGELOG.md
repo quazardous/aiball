@@ -53,13 +53,12 @@ dates are YYYY-MM-DD.
   between the bar and the right-side hint) is suppressed on
   claude-loop sessions ; the loop only ever has one window with an
   auto-named process, so the chip carried no useful signal.
-- Wake messages with identical operational context now coalesce
-  even when the random culture phrase varies. Previously four
-  heartbeat re-fires saying "drain N ping(s), engage #X first"
-  stacked because each opened with a different `*tap tap*` /
-  `Beep boop` / `Allons-y` lead. Default coalesce window for
-  same-context wakes: 60s, env-tunable via
-  `CL_WAKE_SIGNATURE_WINDOW_MS`.
+- Wake injection follows a counter model — at most one wake fires
+  per "opportunity". Any subsequent trigger that lands within the
+  coalesce window is dropped regardless of its phrase content, so
+  a burst of heartbeat / SSE pings stops stacking N copies of the
+  same CTA in the pane. Default coalesce window bumped to 30 s
+  (env-tunable via `CL_WAKE_COALESCE_WINDOW_MS`).
 
 ### Fixed
 

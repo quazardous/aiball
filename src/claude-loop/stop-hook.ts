@@ -234,7 +234,7 @@ function readPane(): string {
             // the boot ping (counts + drain directive). Without this
             // the wake fires a bare "Excellent." and claude greets
             // back with no awareness of pending pings.
-            const ctx = await buildContextPhrase(
+            const phrase = await buildContextPhrase(
                 new AiballClient(),
                 process.env.AIBALL_PROJECT ?? null,
                 pingsPath(sd!),
@@ -245,18 +245,11 @@ function readPane(): string {
             // #B.198 fix A: also touch the coalesce marker so the
             // next Stop hook fire can detect "we just sent a wake".
             try { writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
-            // #623 — pass the structured signature so a heartbeat fire with
-            // the same context but a different random culture coalesces.
-            // Window default: WAKE_COALESCE_WINDOW_MS × 20 (~60s) ; the env
-            // CL_WAKE_SIGNATURE_WINDOW_MS overrides if set.
-            const sigWin = process.env.CL_WAKE_SIGNATURE_WINDOW_MS !== undefined
-                ? Math.max(0, Number(process.env.CL_WAKE_SIGNATURE_WINDOW_MS) || 0)
-                : WAKE_COALESCE_WINDOW_MS * 20;
-            await injectWakePhrase(`${tmuxName(name!)}.0`, ctx.phrase, { dedupeKey: ctx.signature, dedupeWindowMs: sigWin });
+            await injectWakePhrase(`${tmuxName(name!)}.0`, phrase);
             // #B.232 ch887f: bump open-tickets watermark post-wake.
             if (gate.openCount > 0) recordOpenWakeCount(sd!, gate.openCount);
             setTmuxStatus(name!, LOOP_STATUS.BUSY);
-            log(`  → WAKE '${ctx.phrase}' became=busy`);
+            log(`  → WAKE '${phrase}' became=busy`);
         } else {
             // Nothing to do — mark idle so the timer can take over.
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
