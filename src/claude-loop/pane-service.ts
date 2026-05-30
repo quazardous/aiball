@@ -79,7 +79,8 @@ export const ERROR_GROUP: readonly PaneMarker[] = [
     PaneMarker.ErrorApiError,
 ] as const;
 
-export type Unsubscribe = () => void;
+import { Observable, type Unsubscribe } from "./observable.js";
+export type { Unsubscribe } from "./observable.js";
 export type MarkerListener = (active: boolean, marker: PaneMarker) => void;
 
 /**
@@ -87,17 +88,29 @@ export type MarkerListener = (active: boolean, marker: PaneMarker) => void;
  * The emitter calls `set` / `setExclusive` ; consumers (bar renderer,
  * wake gate, log writer) call `get` / `snapshot` / `subscribe`.
  *
- * Pure data — no I/O, no fs, no proxy-events knowledge. The dispatcher
- * (slice 3) translates wire events into `set` calls on this instance.
+ * Pure data — no I/O, no fs, no proxy-events knowledge.
+ *
+ * #649 Slice 1 : converged onto `Observable<T>` primitive. Each marker
+ * is backed by its own `Observable<boolean>` — gives us idempotence,
+ * throw-safety, and re-entrant unsubscribe for free. The cross-marker
+ * `subscribeAny` and `setExclusive` are PaneService-specific glue on top.
  */
 export class PaneService {
-    private readonly active = new Set<PaneMarker>();
-    private readonly listeners = new Map<PaneMarker, Set<MarkerListener>>();
-    /** Catch-all subscribers — notified on every change. */
+    private readonly markers = new Map<PaneMarker, Observable<boolean>>();
+    /** Catch-all subscribers — notified on every change across markers. */
     private readonly anyListeners = new Set<MarkerListener>();
 
+    private obs(m: PaneMarker): Observable<boolean> {
+        let o = this.markers.get(m);
+        if (!o) {
+            o = new Observable<boolean>(false);
+            this.markers.set(m, o);
+        }
+        return o;
+    }
+
     get(m: PaneMarker): boolean {
-        return this.active.has(m);
+        return this.markers.get(m)?.get() ?? false;
     }
 
     /**
@@ -107,20 +120,26 @@ export class PaneService {
      * enough for bar rendering.
      */
     snapshot(): Set<PaneMarker> {
-        return new Set(this.active);
+        const out = new Set<PaneMarker>();
+        for (const [m, o] of this.markers) if (o.get()) out.add(m);
+        return out;
     }
 
     /**
      * Toggle a marker. Notifies the marker's listeners AND the
      * catch-all listeners when the value actually flips. Idempotent —
-     * setting the same value twice is a silent no-op.
+     * setting the same value twice is a silent no-op (Observable<T> guarantee).
      */
     set(m: PaneMarker, active: boolean): void {
-        const was = this.active.has(m);
+        const o = this.obs(m);
+        const was = o.get();
         if (was === active) return;
-        if (active) this.active.add(m);
-        else this.active.delete(m);
-        this.notify(m, active);
+        o.set(active);
+        // Fan out to catch-all listeners (cross-marker) — per-marker
+        // subscribers already fired via o.set(); we add the wide net.
+        for (const cb of [...this.anyListeners]) {
+            try { cb(active, m); } catch { /* observer model */ }
+        }
     }
 
     /**
@@ -147,16 +166,10 @@ export class PaneService {
      * Subscribe to changes of a specific marker. Returns an unsubscribe
      * function. The listener is NOT called with the current value at
      * subscribe time — callers wanting initial state should `get()`
-     * first.
+     * first. Delegates to the marker's Observable<boolean>.
      */
     subscribe(m: PaneMarker, cb: MarkerListener): Unsubscribe {
-        let s = this.listeners.get(m);
-        if (!s) {
-            s = new Set();
-            this.listeners.set(m, s);
-        }
-        s.add(cb);
-        return () => { s!.delete(cb); };
+        return this.obs(m).subscribe((active) => cb(active, m));
     }
 
     /**
@@ -166,20 +179,6 @@ export class PaneService {
     subscribeAny(cb: MarkerListener): Unsubscribe {
         this.anyListeners.add(cb);
         return () => { this.anyListeners.delete(cb); };
-    }
-
-    private notify(m: PaneMarker, active: boolean): void {
-        const targeted = this.listeners.get(m);
-        if (targeted) {
-            // Snapshot the listener set so a listener that subscribes /
-            // unsubscribes during the callback doesn't trip iteration.
-            for (const cb of [...targeted]) {
-                try { cb(active, m); } catch { /* swallow — observer model */ }
-            }
-        }
-        for (const cb of [...this.anyListeners]) {
-            try { cb(active, m); } catch { /* swallow */ }
-        }
     }
 }
 
