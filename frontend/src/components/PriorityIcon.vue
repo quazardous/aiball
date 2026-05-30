@@ -3,16 +3,22 @@ import type { Priority } from "../lib/api";
 
 defineProps<{ priority: Priority }>();
 
-// #632 david `qjmg84` : Google Material Symbols chevrons inlined as SVG
-// paths (no font dep, no CDN — keeps the bundle small and works offline).
-// Paths from Material Symbols Outlined 24px : keyboard_double_arrow_up
-// / keyboard_arrow_up / keyboard_arrow_down. `normal` stays null — the
-// caller is expected to skip rendering for the default.
+// #632 david `atvf3q` : Google Material Symbols inlined as SVG paths (no
+// font dep, no CDN — keeps the bundle small and works offline).
+//   urgent : `arrow_shape_up_stack` — two stacked filled chevrons
+//   high   : `arrow_shape_up`       — single filled chevron
+//   low    : `low_priority`         — official low-priority glyph
+//   normal : null (caller skips render)
+// Material Symbols Outlined 24px. Filled-shape series reads as a chunkier
+// weight ladder vs the previous keyboard_arrow chevrons.
 const PATHS: Record<Priority, string | null> = {
-    urgent: "M6 17.59 7.41 19 12 14.41 16.59 19 18 17.59l-6-6zM6 11 7.41 12.41 12 7.83 16.59 12.41 18 11l-6-6z",
-    high: "M7.41 15.41 12 10.83l4.59 4.58L18 14l-6-6-6 6z",
+    // arrow_shape_up_stack — bottom chevron + top chevron (filled triangular shapes)
+    urgent: "M12 2l-7 7h4v3h6V9h4l-7-7zm-7 13l7 7 7-7h-4v-3H9v3H5z",
+    // arrow_shape_up — single filled up chevron with stem
+    high: "M12 4l-8 8h5v8h6v-8h5l-8-8z",
     normal: null,
-    low: "M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z",
+    // low_priority — three horizontal bars + curved arrow underneath
+    low: "M14 5h8v2h-8V5zm0 5.5h8v2h-8v-2zm0 5.5h8v2h-8v-2zM2 11.5C2 15.08 4.92 18 8.5 18H9v2l3-3-3-3v2h-.5C6.02 16 4 13.98 4 11.5S6.02 7 8.5 7H12V5H8.5C4.92 5 2 7.92 2 11.5z",
 };
 </script>
 
