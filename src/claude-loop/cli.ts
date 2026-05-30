@@ -65,6 +65,7 @@ import {
 } from "./state.js";
 import { cmdTail, type TailMode } from "./cmds/tail.js";
 import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake } from "./cmds/manage.js";
+import { cmdInspect } from "./cmds/inspect.js";
 import { CL_ENV } from "./env-vars.js";
 
 function die(msg: string): never {
@@ -1782,7 +1783,7 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "debug-proxy-tty", "debug-keys", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "debug-proxy-tty", "debug-keys", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -1843,6 +1844,9 @@ async function main(): Promise<void> {
         .option("--events", "Open SSE and tail every aiball event live (no gate eval)")
         .action((opts: { checkCmd?: string; interval?: string; once?: boolean; events?: boolean }) => cmdTrace(opts));
     program.command("prune").description("Interactively clean orphan state dirs").action(cmdPrune);
+    program.command("inspect [name]")
+        .description("#613 — JSON dump of a loop's full state (view + markers + runtime). Pure read, no side-effects. Pytest harnesses spawn the loop, wait a tick, then `inspect` to assert behaviour. Exits 1 if the state dir doesn't exist. Name optional — defaults to the current-cwd loop.")
+        .action((name: string | undefined) => cmdInspect(name ?? resolveCurrentLoopName()));
     // #381 (david): "--debug-proxy-tty pour piper des choses et avoir un faux claude
     // logger derriere". Real PTY proxy + fake-claude byte logger, attached to this
     // terminal — see/capture EXACTLY what your keyboard emits + the AFK decision.
