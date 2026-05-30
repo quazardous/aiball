@@ -182,19 +182,9 @@ export const PRIORITY_SEVERITY: Record<Priority, Severity> = {
     low: "info",
 };
 
-/**
- * #632 david : icon-only priority badges. Continuity glyph series so the
- * eye reads the relative weight at a glance — double-up = extra-high
- * (urgent), single up = high, single down = low. `normal` returns empty
- * because the call-site already skips rendering the badge for the
- * default ; mapping is exhaustive to keep TS happy.
- */
-export const PRIORITY_ICON: Record<Priority, string> = {
-    urgent: "pi pi-angle-double-up",
-    high: "pi pi-angle-up",
-    normal: "",
-    low: "pi pi-angle-down",
-};
+// #632 david `qjmg84` : the inlined Material Symbols SVG paths now live in
+// `PriorityIcon.vue` (zero extra dep). PRIORITY_ICON kept removed — call
+// sites use the component directly.
 
 // =====================================================================
 //  Bulk action metadata

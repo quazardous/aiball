@@ -8,13 +8,13 @@ import { attentionOf, lifecycleStage } from "../lib/ticket-state";
 import { formatTicketRef } from "../lib/formatting";
 import {
     INTENT_SEVERITY,
-    PRIORITY_ICON,
     PRIORITY_SEVERITY,
     LIFECYCLE_ICONS,
     STATUS_SEVERITY,
     type StatusFilter,
     snoozedTooltip,
 } from "../lib/labels";
+import PriorityIcon from "./PriorityIcon.vue";
 import { scopeIcon, scopeTitle, type Scope } from "../lib/scope";
 import ListRow from "./ListRow.vue";
 import TagBadge from "./TagBadge.vue";
@@ -220,17 +220,20 @@ function onRowClick(r: InboxRow) {
                 :severity="r.intent ? INTENT_SEVERITY[r.intent] : 'secondary'"
                 style="font-size: 0.7rem"
             />
-            <!-- #B.222 + #632 : priority badge as icon only — hidden when
-                 "normal" (default). The icon series (double-up / up / down)
-                 reads as a relative-weight ladder ; severity color reinforces.
-                 ⏫ urgent / ↑ high / (nothing) normal / ↓ low. -->
+            <!-- #B.222 + #632 : priority badge as Google Material Symbols
+                 chevrons (inlined SVG, no font dep). Series reads as a
+                 relative-weight ladder, severity color reinforces.
+                 keyboard_double_arrow_up = urgent (red), keyboard_arrow_up
+                 = high (orange), keyboard_arrow_down = low (blue) ;
+                 normal hidden (90% of tickets stay clean). -->
             <Tag
                 v-if="r.priority && r.priority !== 'normal'"
-                :icon="PRIORITY_ICON[r.priority]"
                 :severity="PRIORITY_SEVERITY[r.priority]"
                 :title="r.priority"
                 style="font-size: 0.7rem"
-            />
+            >
+                <PriorityIcon :priority="r.priority" />
+            </Tag>
             <TagBadge
                 v-for="tg in r.tags"
                 :key="tg.id"
