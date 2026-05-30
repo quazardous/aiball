@@ -668,33 +668,24 @@ class _Decider:
         # NOT AFK 10m et sans flicker le bar entre stop/wait. Les
         # bytes restent forwardés à claude.
         in_boot = _boot_grace_remaining() > 0.0
-        # #629 david `jf6efv` — under --no-wait, the loop is declared
-        # autonomous : typing must NOT auto-arm NOT AFK 10m. F9 stays
-        # the only path to engage the hold. Without this guard, the
-        # picker-selection keystrokes (or any post-boot keystroke)
-        # systematically armed AFK 10m → bar landed in `wait` jaune
-        # right at boot exit, contradicting --no-wait's intent.
-        no_wait = _NO_WAIT
         if is_typing_keystroke(data):
             d["typing"] = True
-            if not in_boot and not no_wait:
+            if not in_boot:
                 # #622 david `jzcgmh` : typing arms NOT AFK 10m (or refreshes
                 # an existing 10m countdown). In NOT AFK ∞ mode it's a no-op
                 # (only F9 can release the indefinite hold). Stays distinct
                 # from `touch_user_grace` for back-compat — both arm the
                 # same effective 10-min window but mean different things.
+                # #629 david — under --no-wait the picker-typing window
+                # also triggers this branch (in_boot=False from T0). The
+                # apply_decision layer filters arm_afk_10m out when the
+                # bus says barWord=boot, so picker selection doesn't engage
+                # AFK while genuine post-boot typing still does.
                 d["markers"] += ["arm_afk_10m", "touch_marker", "touch_user_grace"]
                 # Post-marker: AFK is always active after typing — either
                 # we just armed 10m (was OFF or refreshed), or we're in ∞
                 # (no-op, was already active).
                 self.afk_active = True
-                d["word"] = "stop"
-            elif not in_boot and no_wait:
-                # --no-wait : touche le marker `human-typing` pour le
-                # flash `stop` éphémère mais N'ARME PAS AFK 10m. user-grace
-                # touchée quand même (silently gates auto-wakes pour 600s
-                # comme avant — la convention "human just acted" tient).
-                d["markers"] += ["touch_marker", "touch_user_grace"]
                 d["word"] = "stop"
             else:
                 # In boot-grace : keep the bar as `_HUMAN_BOOT` (no stop
@@ -704,17 +695,13 @@ class _Decider:
             self.last_keystroke = now
         elif self.esc_takeover and _is_lone_esc(data):
             d["lone_esc"] = True
-            if not in_boot and not no_wait:
+            if not in_boot:
                 # #622 david `jzcgmh` : ESC behaves like typing — arms NOT
                 # AFK 10m (or refreshes), no-op in ∞. The "interrupt
                 # claude" payload still forwards below ; we just don't
                 # release the AFK hold the way the old `clear_afk` did.
                 d["markers"] += ["arm_afk_10m", "touch_user_grace"]
                 self.afk_active = True
-            elif not in_boot and no_wait:
-                # --no-wait : ESC ne déclenche plus AFK 10m. user-grace
-                # touchée pour le wake-gate convention.
-                d["markers"] += ["touch_user_grace"]
             d["word"] = "rest"
         d["forward"] += data
         return d
@@ -1421,7 +1408,18 @@ def main(argv):
         forward vers claude, peinture du mot) puis log diag. SEUL endroit qui
         touche l'I/O — le `_Decider` qui la produit, lui, reste pur."""
         nonlocal current_word
-        for m in dec.get("markers", []):
+        # #629 david — bus authoritative for boot phase. During boot, drop
+        # `arm_afk_10m` from the decider's markers : picker-selection typing
+        # must not engage NOT AFK (the bar should stay clean past boot end).
+        # Under --no-wait the local `_boot_grace_remaining` returns 0 from T0,
+        # so the decider always emits arm_afk_10m on typing ; filtering here
+        # bridges the gap with the bus's real boot phase.
+        pushed_now = pushed_view["value"] if pushed_view["value"] else None
+        in_boot_view_now = pushed_now and pushed_now.get("barWord") == "boot"
+        markers = dec.get("markers", [])
+        if in_boot_view_now:
+            markers = [m for m in markers if m != "arm_afk_10m"]
+        for m in markers:
             if m == "set_afk":
                 # #619/#622 : legacy set/clear kept callable for replay
                 # shim + future code that wants a hard-set. F9 itself

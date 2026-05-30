@@ -938,6 +938,21 @@ async function mainSse(): Promise<void> {
             // next probe cycle if claude is mid-turn.
             setTmuxStatus(name!, LOOP_STATUS.IDLE);
         } catch { /* best-effort */ }
+        // #629 david `7zqtgf` — drain stacked pings at boot exit. SSE pings
+        // arriving during picker selection were silently skipped by user-grace
+        // (picker keystrokes set user-took-over → 600s lock). At boot end the
+        // user is implicitly done with the picker, so we clear user-took-over
+        // FIRST then fire a wake. Subsequent typing (real session, post-boot)
+        // re-arms user-grace as usual.
+        try { unlinkSync(userTookOverPath(sd!)); } catch { /* race */ }
+        void tryWake("boot-ended-drain");
+    });
+    // #629 david `7zqtgf` — same drain trigger when AFK is cleared (F9 from
+    // NOT AFK 10m/∞ back to AFK). The bar word goes wait→loop ; any ping
+    // that came while the hold was active should now fire. user-took-over
+    // is the AFK-orthogonal gate, so we leave it intact here.
+    loopBus.on("afkCleared", () => {
+        void tryWake("afk-cleared-drain");
     });
     // #629 — fast probe 1s pendant boot. Arme au start (on est forcément
     // en boot à T0 via le floor), désarme sur bootEnded, ré-arme sur

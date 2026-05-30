@@ -143,23 +143,6 @@ test("frappe texte ordinaire → typing, forward, mot stop", { skip: SKIP }, () 
     assert.ok(v[0].markers.includes("touch_user_grace"));
 });
 
-test("frappe sous --no-wait → STOP flash mais PAS d'arm AFK 10m (jf6efv)", { skip: SKIP }, () => {
-    // #629 david `jf6efv` — under --no-wait, the loop is autonomous : typing
-    // must NOT auto-engage NOT AFK. Picker-selection keystrokes (or any
-    // post-boot typing) used to systematically land the bar in `wait` jaune
-    // right after boot, contradicting --no-wait's intent.
-    const v = replay("0 61\n", ALT_A, 400, { CL_WAIT: "0" });
-    assert.equal(v[0].typing, true);
-    assert.equal(v[0].forward, "61");
-    assert.equal(v[0].word_resolved, "stop");
-    // Touch markers fired (bar STOP flash + user-grace silently for wakes)…
-    assert.ok(v[0].markers.includes("touch_marker"));
-    assert.ok(v[0].markers.includes("touch_user_grace"));
-    // … but arm_afk_10m did NOT fire (the bar won't drift to `wait` once
-    // the typing flash dissipates). F9 stays the only path to NOT AFK.
-    assert.ok(!v[0].markers.includes("arm_afk_10m"));
-});
-
 test("frappe ordinaire APRÈS afk ∞ → no-op (only F9 peut release l'∞)", { skip: SKIP }, () => {
     // #622 jzcgmh : combo (NOT AFK ∞) puis 'a' (typing). En ∞, typing
     // est un no-op pour l'AFK (`arm_afk_10m` retourne sans rien faire
