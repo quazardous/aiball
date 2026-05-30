@@ -1204,6 +1204,13 @@ async function mainSse(): Promise<void> {
             const humanWord = humanPresenceWord(sd, userGraceSec);
             await client().pushState(settledStatus, human, humanWord, loopCwd, loopProject);
         } catch { /* daemon down or transient — next tick retries */ }
+        // #636 david — pytest harnesses spawn the loop with CL_RUN_ONCE=1, wait
+        // for the inspect JSON to settle, then exit. Break after the first full
+        // heartbeat cycle. claude + tmux stay alive ; the test cleans them up.
+        if (process.env[CL_ENV.RUN_ONCE] === "1") {
+            log("CL_RUN_ONCE=1 — exiting after one heartbeat cycle");
+            break;
+        }
     }
     log("tmux session gone — timer exiting");
     wakeBus.close();

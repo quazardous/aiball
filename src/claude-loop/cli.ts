@@ -169,6 +169,10 @@ interface StartOpts {
     pings?: string;
     attach?: boolean;
     noStartupPing?: boolean;
+    /** #636 david — pytest harness mode : the timer process exits after
+     *  one full heartbeat cycle (boot probe + tick + wake check). claude
+     *  + tmux stay alive ; the caller orchestrates cleanup. */
+    runOnce?: boolean;
     /** #302: false = `--no-wait` (no human at the terminal → eager boot
      *  drain, no boot-grace deferral). Default/undefined = `--wait`. */
     wait?: boolean;
@@ -575,6 +579,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // Read by the SessionStart hook to decide whether to ping at
         // boot. Empty / unset = ping (per default). "1" = stay silent.
         `export CL_NO_STARTUP_PING=${shQuote(opts.noStartupPing ? "1" : "")}`,
+        // #636 david — pytest harness flag, exits the timer after 1 cycle.
+        `export CL_RUN_ONCE=${shQuote(opts.runOnce ? "1" : "")}`,
         // #302/#343: CL_WAIT="1" ONLY when --wait is explicitly passed.
         // Default (and explicit --no-wait) → "0": no human at the terminal,
         // eager boot drain, no boot-grace deferral. Read by the timer
@@ -1719,6 +1725,8 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--init-stop-hook", "#557: with --init, also wire Claude Code's Stop hook into .claude/settings.json.")
         .option("--init-global", "#557: with --init --init-stop-hook, write to ~/.claude/settings.json instead of project-local.")
         .option("--init-private", "#593: with --init, seed .aiball.yaml with `project_type: private` (welcome serves the private kit)")
+        // #636: pytest harness mode — the timer exits after one heartbeat cycle.
+        .option("--once", "#636: pytest harness flag — exit the timer after one full heartbeat cycle (boot probe + tick + wake check). claude + tmux stay alive ; the caller orchestrates cleanup. Use with `claude-loop inspect` to snapshot state.")
         .allowExcessArguments(false)
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
@@ -1727,6 +1735,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             cwd?: string;
             init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
+            once?: boolean;
         }, command: Command) => {
             // #305 (option a): only forward `wait` when --wait/--no-wait was
             // ACTUALLY passed. Otherwise leave it undefined so cmdStart falls
@@ -1739,6 +1748,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 pings: opts.pings,
                 attach: opts.attach !== false,
                 noStartupPing: opts.startupPing === false,
+                runOnce: opts.once === true,
                 userGraceSec: opts.userGrace !== undefined ? Math.max(0, Number(opts.userGrace)) : null,
                 force: opts.force === true,
                 resumeMode: opts.resumeMode,

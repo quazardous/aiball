@@ -30,6 +30,8 @@ export const CL_ENV = {
     ASK_GRACE_SEC: "CL_ASK_GRACE_SEC",
     BOOT_GRACE_SEC: "CL_BOOT_GRACE_SEC",
     BOOT_MIN_SEC: "CL_BOOT_MIN_SEC",
+    // #636 — timer exits after 1 heartbeat tick. For pytest harnesses.
+    RUN_ONCE: "CL_RUN_ONCE",
 
     // Wake coalesce / mutex windows (ms)
     PANE_BUSY_DELAY_MS: "CL_PANE_BUSY_DELAY_MS",
