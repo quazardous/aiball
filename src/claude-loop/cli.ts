@@ -219,6 +219,10 @@ interface StartOpts {
      *  the existing detection at the always_resume site sees the sentinel
      *  and skips the auto-inject. */
     noResume?: boolean;
+    /** #639 (david `uqdava`) : --resume → force both `claude.always_resume`
+     *  AND `claude_loop.auto_resume` to true for this invocation, regardless
+     *  of `.aiball.yaml`. Mirror of `noResume` for the positive case. */
+    forceResume?: boolean;
     claudeArgs: string[];
 }
 
@@ -526,6 +530,13 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const userGraceSec = opts.userGraceSec ?? ctx.claude_loop.user_grace_seconds;
     const bootGraceSec = ctx.claude_loop.boot_grace_seconds; // no CLI flag yet — yaml-only
     const bootMinSec = ctx.claude_loop.boot_min_seconds; // #629 — yaml-only floor
+    // #639 (david `uqdava`) — `--resume` / `--no-resume` CLI flags override
+    // BOTH `claude_loop.auto_resume` (loop auto-crosses picker) AND
+    // `claude.always_resume` (binary --resume injection). Precedence : flag
+    // wins, fallback to yaml config defaults.
+    const autoResume = opts.forceResume ? true
+        : opts.noResume ? false
+        : ctx.claude_loop.auto_resume;
     const wakeInFlightTtlMs = ctx.claude_loop.wake_in_flight_ttl_ms; // yaml-only
     const escTakeover = ctx.claude_loop.esc_takeover; // #345, yaml-only
     const askGraceSec = ctx.claude_loop.ask_grace_seconds; // #351, yaml-only
@@ -594,6 +605,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export CL_BOOT_GRACE_SEC=${shQuote(String(bootGraceSec))}`,
         // #629 david `2hwuan` : floor inviolable (default 30 s).
         `export CL_BOOT_MIN_SEC=${shQuote(String(bootMinSec))}`,
+        // #639 david `uqdava` : auto-cross resume picker (1=on, default).
+        `export CL_AUTO_RESUME=${shQuote(autoResume ? "1" : "0")}`,
         `export CL_WAKE_IN_FLIGHT_TTL_MS=${shQuote(String(wakeInFlightTtlMs))}`,
         // #345: bare ESC in the pane = human takeover (PTY proxy arms user-grace).
         `export CL_ESC_TAKEOVER=${shQuote(escTakeover ? "1" : "0")}`,
@@ -772,7 +785,11 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     if (opts.noResume && !opts.claudeArgs.includes("--no-resume")) {
         effectiveClaudeArgs = ["--no-resume", ...opts.claudeArgs];
     }
-    if (ctx.claude.always_resume) {
+    // #639 david `uqdava` : `--resume` flag also forces `claude.always_resume`
+    // to true regardless of yaml config (mirror of how `--no-resume` forces it
+    // to false via the sentinel injection above).
+    const alwaysResume = opts.forceResume ? true : ctx.claude.always_resume;
+    if (alwaysResume) {
         const hasResume = effectiveClaudeArgs.some((a) => a === "--resume" || a.startsWith("--resume=") || a === "--no-resume");
         if (!hasResume) {
             // #616 follow-up (david arf8xs) : auto-skip --resume si AUCUNE
@@ -1692,6 +1709,10 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--no-attach", "Don't attach after spawn (wrapper exits silently)")
         .option("--no-startup-ping", "Don't send a wake-up message on launch")
         .option("--no-resume", "#616: don't auto-inject `--resume` even when `.aiball.yaml claude.always_resume: true` says to. Per-invocation opt-out. Equivalent to `claude-loop start -- --no-resume`.")
+        // #639 (david `uqdava`): explicit `--resume` flag forces BOTH
+        // `claude.always_resume` AND `claude_loop.auto_resume` to true,
+        // regardless of what the per-project .aiball.yaml says.
+        .option("--resume", "#639: force resume mode for this invocation — overrides both `claude.always_resume` and `claude_loop.auto_resume` to true, regardless of yaml config. Mirror of `--no-resume` for the positive case.")
         .option("--force", "Spawn even if another live loop already runs in this cwd")
         .addOption(new Option(
             "--resume-mode <mode>",
@@ -1764,7 +1785,9 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 initGlobal: opts.initGlobal === true,
                 // #616 — commander's `--no-resume` defaults opts.resume to
                 // true ; only consider it "passed" when explicitly false.
+                // #639 (david `uqdava`) — `--resume` explicitly true → force.
                 noResume: opts.resume === false,
+                forceResume: opts.resume === true && command.getOptionValueSource?.("resume") === "cli",
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });

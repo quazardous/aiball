@@ -32,6 +32,8 @@ export const CL_ENV = {
     BOOT_MIN_SEC: "CL_BOOT_MIN_SEC",
     // #636 — timer exits after 1 heartbeat tick. For pytest harnesses.
     RUN_ONCE: "CL_RUN_ONCE",
+    // #639 — auto-cross the resume picker (press Enter on highlighted session).
+    AUTO_RESUME: "CL_AUTO_RESUME",
 
     // Wake coalesce / mutex windows (ms)
     PANE_BUSY_DELAY_MS: "CL_PANE_BUSY_DELAY_MS",

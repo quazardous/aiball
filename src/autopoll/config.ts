@@ -133,6 +133,13 @@ export interface AiballConfig {
          *  est ready avant qu'il ait vraiment dessiné son prompt.
          *  CL_BOOT_MIN_SEC. */
         boot_min_seconds: number;
+        /** #639 david `uqdava` : when true (default), the loop auto-crosses
+         *  the resume picker that `claude --resume` shows at startup —
+         *  press Enter on the highlighted session so unattended/autonomous
+         *  loops aren't stuck on the picker. Set false to require manual
+         *  picker selection. The `--resume` / `--no-resume` CLI flags
+         *  override both this AND `claude.always_resume`. CL_AUTO_RESUME. */
+        auto_resume: boolean;
         /** User-took-over grace window. CL_USER_GRACE_SEC. */
         user_grace_seconds: number;
         /** Wake-in-flight marker TTL (#B.180). CL_WAKE_IN_FLIGHT_TTL_MS. */
@@ -282,6 +289,7 @@ const DEFAULTS: AiballConfig = {
         interval_seconds: 30,
         boot_grace_seconds: 60,
         boot_min_seconds: 30,
+        auto_resume: true,
         user_grace_seconds: 60,
         wake_in_flight_ttl_ms: 2000,
         esc_takeover: true,
@@ -553,6 +561,9 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             }
             if (typeof cl.boot_min_seconds === "number" && cl.boot_min_seconds >= 0) {
                 cfg.claude_loop.boot_min_seconds = cl.boot_min_seconds;
+            }
+            if (typeof cl.auto_resume === "boolean") {
+                cfg.claude_loop.auto_resume = cl.auto_resume;
             }
             if (typeof cl.user_grace_seconds === "number" && cl.user_grace_seconds >= 0) {
                 cfg.claude_loop.user_grace_seconds = cl.user_grace_seconds;
