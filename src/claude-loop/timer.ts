@@ -56,6 +56,8 @@ import {
     setInterrupted,
     setPaneBusy,
     setPaneReady,
+    setResumeModePicker,
+    setResumeSessionPicker,
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
     buildContextPhrase,
@@ -496,7 +498,16 @@ function refreshPaneMarkers(): void {
     if (!paneText) return;
     const snap = snapshotPane(paneText);
     setPaneBusy(sd, snap.busy);
-    const pickerOrTransient = /Resume session\b|Resume from summary|Don't ask me again|Compact this conversation|Resuming conversation|Compacting conversation/i.test(paneText);
+    // #647 david `6e2uzf` : le timer DOIT aussi détecter les pickers
+    // (avant : seul le hook les détectait, et si hook rate/skip, fast-probe
+    // n'avait rien à pousser → bar restait `[boot:session?]`). Mêmes regex
+    // que session-start-hook.ts. Idempotent — setters no-op si état stable.
+    const sessionPickerVisible = /Resume session\b/i.test(paneText) && /Space to preview/i.test(paneText);
+    const modePickerVisible = /Resume from summary|Resume full session as-is|Don't ask me again/.test(paneText);
+    setResumeSessionPicker(sd, sessionPickerVisible);
+    setResumeModePicker(sd, modePickerVisible);
+    const pickerOrTransient = sessionPickerVisible || modePickerVisible
+        || /Compact this conversation|Resuming conversation|Compacting conversation/i.test(paneText);
     const promptVisible = /Claude Code v|❯ |^> /m.test(paneText);
     setPaneReady(sd, promptVisible && !pickerOrTransient);
     setCompacting(sd, snap.special === "compacting");
@@ -989,6 +1000,10 @@ async function mainSse(): Promise<void> {
     // bootStarted (n'arrive qu'en theory — bootComplete bloque la
     // ré-entrée, mais ceinture+bretelle).
     let fastProbeTimer: NodeJS.Timeout | null = null;
+    // #647 david `db83ep` : memoize last painted info so we don't call
+    // setTmuxStatus every second when nothing changed. Tmux set-option
+    // is non-trivial (spawnSync). Null = "no info painted yet".
+    let lastPaintedBootInfo: string | null = null;
     const armFastProbe = (): void => {
         if (fastProbeTimer) return;
         fastProbeTimer = setInterval(() => {
@@ -997,11 +1012,14 @@ async function mainSse(): Promise<void> {
             // heartbeat 30s n'a pas tourné encore → setTmuxStatus du tick
             // ne fire pas. Faut peindre la barre depuis paneService ICI
             // pour que `[boot:picker:session]` etc. soit visible la
-            // fenêtre entière du picker (et pas juste l'instant où le
-            // hook peint son `pick:latest`).
+            // fenêtre entière du picker. Memoized (#647 david `db83ep`) :
+            // only repaint when info changes (transitions only).
             try {
                 const info = paneMarkerBarInfo();
-                if (info) setTmuxStatus(name!, LOOP_STATUS.BOOT, info);
+                if (info && info !== lastPaintedBootInfo) {
+                    setTmuxStatus(name!, LOOP_STATUS.BOOT, info);
+                    lastPaintedBootInfo = info;
+                }
             } catch { /* best-effort */ }
         }, 1000);
         log("fast-probe: armed (1s cadence during boot)");
