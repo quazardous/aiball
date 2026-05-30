@@ -1,0 +1,158 @@
+/**
+ * #633 Slice F — unit tests for the proxy→timer back-channel dispatcher.
+ * Each scenario stands up a tmp state-dir, optionally seeds markers, sends
+ * a synthetic event, and asserts both the returned verdict + the on-disk
+ * marker changes.
+ */
+import { test } from "node:test";
+import assert from "node:assert";
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+    afkPath,
+    bootCompletePath,
+    humanTypingPath,
+    paneReadyPath,
+    userTookOverPath,
+    loopStartTsPath,
+} from "./state.js";
+import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
+
+function tmp(): string {
+    return mkdtempSync(join(tmpdir(), "proxy-event-test-"));
+}
+
+/** Mark boot as settled : floor elapsed + paneReady + bootComplete sealed. */
+function seedPostBoot(sd: string): void {
+    // loopStartTs far enough in the past that the 30s floor is over.
+    writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
+    writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
+    writeFileSync(paneReadyPath(sd), new Date().toISOString() + "\n");
+}
+
+test("#633F dispatch typing post-boot → arms NOT AFK 10m", () => {
+    const sd = tmp();
+    try {
+        seedPostBoot(sd);
+        const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "typing", now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "typing-armed" });
+        // AFK file now has a parseable ISO expiry ~10 min ahead.
+        const content = readFileSync(afkPath(sd), "utf8").trim();
+        const expiry = new Date(content).getTime();
+        assert.ok(Number.isFinite(expiry));
+        const delta = expiry - Date.now();
+        assert.ok(delta > 595_000 && delta < 605_000, `expiry delta ${delta}ms out of ±5s of 600s`);
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#633F dispatch typing during boot → no arm (state.inBootGrace)", () => {
+    const sd = tmp();
+    try {
+        // loop started "now" → still in 30s floor, no bootComplete, no paneReady.
+        writeFileSync(loopStartTsPath(sd), String(Date.now()));
+        const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "typing", now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "typing-skipped-boot" });
+        // AFK file untouched.
+        assert.equal(existsSync(afkPath(sd)), false);
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#633F dispatch afk_key from off → wait_10m (toggle cycle)", () => {
+    const sd = tmp();
+    try {
+        seedPostBoot(sd);
+        const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "afk-toggled", nextMode: "wait_10m" });
+        // AFK file now has a 10m expiry.
+        const content = readFileSync(afkPath(sd), "utf8").trim();
+        assert.ok(!Number.isNaN(new Date(content).getTime()));
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#633F dispatch afk_key from wait_10m → wait_inf", () => {
+    const sd = tmp();
+    try {
+        seedPostBoot(sd);
+        writeFileSync(afkPath(sd), new Date(Date.now() + 600_000).toISOString() + "\n");
+        const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "afk-toggled", nextMode: "wait_inf" });
+        assert.equal(readFileSync(afkPath(sd), "utf8").trim(), "inf");
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#633F dispatch afk_key from wait_inf → off (clears AFK + user-grace)", () => {
+    const sd = tmp();
+    try {
+        seedPostBoot(sd);
+        writeFileSync(afkPath(sd), "inf\n");
+        writeFileSync(userTookOverPath(sd), new Date().toISOString() + "\n");
+        const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "afk-toggled", nextMode: "off" });
+        assert.equal(existsSync(afkPath(sd)), false);
+        // user-grace cleared alongside (atomic NOT AFK ∞ → AFK release).
+        assert.equal(existsSync(userTookOverPath(sd)), false);
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#633F dispatch marker touch_marker → writes human-typing", () => {
+    const sd = tmp();
+    try {
+        seedPostBoot(sd);
+        const before = Date.now();
+        const v = dispatchProxyEvent(sd, { event: "marker", name: "touch_marker", now_ms: before });
+        assert.deepEqual(v, { kind: "marker-touched", name: "touch_marker" });
+        assert.ok(existsSync(humanTypingPath(sd)));
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#633F dispatch marker touch_user_grace → writes user-took-over", () => {
+    const sd = tmp();
+    try {
+        seedPostBoot(sd);
+        const v = dispatchProxyEvent(sd, { event: "marker", name: "touch_user_grace", now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "marker-touched", name: "touch_user_grace" });
+        assert.ok(existsSync(userTookOverPath(sd)));
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#633F dispatch marker clear_user_grace → removes user-took-over", () => {
+    const sd = tmp();
+    try {
+        seedPostBoot(sd);
+        writeFileSync(userTookOverPath(sd), new Date().toISOString() + "\n");
+        const v = dispatchProxyEvent(sd, { event: "marker", name: "clear_user_grace", now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "marker-touched", name: "clear_user_grace" });
+        assert.equal(existsSync(userTookOverPath(sd)), false);
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#633F dispatch unknown event kind → returns unknown verdict, no fs touch", () => {
+    const sd = tmp();
+    try {
+        seedPostBoot(sd);
+        const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "unknown_future_kind", now_ms: 0 });
+        assert.equal(v.kind, "unknown");
+        // AFK file should not have been created.
+        assert.equal(existsSync(afkPath(sd)), false);
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#633F dispatch unknown marker name → returns unknown verdict", () => {
+    const sd = tmp();
+    try {
+        seedPostBoot(sd);
+        const v = dispatchProxyEvent(sd, { event: "marker", name: "future_unknown_marker", now_ms: 0 });
+        assert.equal(v.kind, "unknown");
+        assert.equal((v as { raw: string }).raw, "marker:future_unknown_marker");
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#633F formatVerdictLogLine covers every verdict variant", () => {
+    assert.equal(formatVerdictLogLine({ kind: "typing-armed" }), "proxy-event: typing → armed NOT AFK 10m");
+    assert.equal(formatVerdictLogLine({ kind: "typing-skipped-boot" }), "proxy-event: typing during boot → no arm (state.inBootGrace)");
+    assert.equal(formatVerdictLogLine({ kind: "afk-toggled", nextMode: "wait_10m" }), "proxy-event: afk_key → toggled to wait_10m");
+    assert.equal(formatVerdictLogLine({ kind: "marker-touched", name: "touch_marker" }), "proxy-event: marker 'touch_marker' applied");
+    assert.equal(formatVerdictLogLine({ kind: "unknown", raw: "keystroke:foo" }), "proxy-event: unknown 'keystroke:foo'");
+    assert.equal(formatVerdictLogLine({ kind: "error", message: "boom" }), "proxy-event handler error: boom");
+});

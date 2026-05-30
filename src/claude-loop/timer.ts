@@ -44,14 +44,9 @@ import {
     DEFAULT_USER_GRACE_SEC,
     LOOP_STATUS,
     bootCompletePath,
-    armAfk10m,
-    clearUserGrace,
     createProxyEventsServer,
     createViewPusher,
     proxyEventsSockPath,
-    toggleAfk,
-    touchHumanTyping,
-    touchUserGrace,
     viewPushSockPath,
     paneShowsInterrupted,
     readLoopStateInput,
@@ -105,6 +100,7 @@ import {
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
 import { canFlipBgFromBoot, computeLoopView, LoopStateBus } from "./loop-state.js";
+import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { CL_ENV } from "./env-vars.js";
 import { stripMarkdown } from "./markdown-strip.js";
 
@@ -920,44 +916,12 @@ async function mainSse(): Promise<void> {
     // (incl. bootComplete marker), eliminating the layer-2 hacks where
     // the proxy guessed locally and the timer filtered post-fact.
     const proxyEventsServer = createProxyEventsServer(proxyEventsSockPath(sd!), (event) => {
-        try {
-            const kind = (event as { event?: string }).event;
-            const eventKind = (event as { kind?: string }).kind;
-            if (kind === "keystroke" && eventKind === "typing") {
-                // typing → arm NOT AFK 10m ONLY when not in boot phase.
-                // The bus's pushed view doesn't matter ; the marker file
-                // bootComplete is authoritative for "boot ended" — once
-                // sealed, typing always arms.
-                const view = computeLoopView(readLoopStateInput(sd!));
-                if (view.inBootGrace) {
-                    log("proxy-event: typing during boot → no arm (state.inBootGrace)");
-                    return;
-                }
-                armAfk10m(sd!);
-                log("proxy-event: typing → armed NOT AFK 10m");
-            } else if (kind === "keystroke" && eventKind === "afk_key") {
-                // #633 Slice C — F9 cycles 3 states (off → 10m → ∞ → off).
-                // No boot guard : the user explicitly pressed F9, they want
-                // the bar to react even during picker (bypass).
-                toggleAfk(sd!);
-                const next = readLoopStateInput(sd!).afkMode;
-                log(`proxy-event: afk_key → toggled to ${next}`);
-            } else if (kind === "marker") {
-                // #633 Slice D — generic marker touch/clear events. Proxy
-                // routes touch_marker (human-typing) / touch_user_grace /
-                // clear_user_grace via emit instead of writing the files
-                // directly. The state machine could intercept (e.g. skip
-                // touch_user_grace during boot) if needed in the future,
-                // but for now the mapping is 1:1.
-                const name = (event as { name?: string }).name;
-                if (name === "touch_marker") touchHumanTyping(sd!);
-                else if (name === "touch_user_grace") touchUserGrace(sd!);
-                else if (name === "clear_user_grace") clearUserGrace(sd!);
-                else log(`proxy-event: unknown marker '${name}'`);
-            }
-        } catch (e) {
-            log(`proxy-event handler error: ${(e as Error).message}`);
-        }
+        // #633 Slice F (david `yau5jc`) — dispatcher logic lives in its
+        // own module (`proxy-event-dispatcher.ts`), unit-testable with a
+        // tmp state-dir. The timer here just bridges the UDS callback to
+        // the dispatcher and logs the verdict.
+        const verdict = dispatchProxyEvent(sd!, event);
+        log(formatVerdictLogLine(verdict));
     });
     process.on("exit", () => proxyEventsServer.close());
     const loopBus = new LoopStateBus();
