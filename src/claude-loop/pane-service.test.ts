@@ -181,6 +181,12 @@ test("paneMarkerBarInfo: ResumeModePicker → 'picker:mode'", () => {
     assert.equal(paneMarkerBarInfo(svc), "picker:mode");
 });
 
+test("paneMarkerBarInfo: Resuming → 'resuming'", () => {
+    const svc = new PaneService();
+    svc.setExclusive(SCREEN_TAKEOVER_GROUP, PaneMarker.Resuming);
+    assert.equal(paneMarkerBarInfo(svc), "resuming");
+});
+
 test("paneMarkerBarInfo: Compacting → 'compacting'", () => {
     const svc = new PaneService();
     svc.setExclusive(SCREEN_TAKEOVER_GROUP, PaneMarker.Compacting);

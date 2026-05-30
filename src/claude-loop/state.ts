@@ -256,6 +256,12 @@ export function logBarPaint(sd: string | undefined, writer: string, value: strin
 export function paneBusyPath(sd: string): string { return join(sd, "pane-busy"); }
 export function paneReadyPath(sd: string): string { return join(sd, "pane-ready"); }
 export function paneCompactingPath(sd: string): string { return join(sd, "pane-compacting"); }
+/** #647 david `4h75nk` : marker pour l'écran "Resuming conversation…"
+ *  qui apparaît après l'auto-pick du picker session, avant que claude
+ *  affiche le prompt. Transitoire (1-3s sur sessions courtes, plus sur
+ *  grosses) mais visible à l'écran → mérite sa propre catégorie. Membre
+ *  du SCREEN_TAKEOVER_GROUP (exclusif des pickers et Compacting). */
+export function paneResumingPath(sd: string): string { return join(sd, "pane-resuming"); }
 export function paneInterruptedPath(sd: string): string { return join(sd, "pane-interrupted"); }
 
 function writeOrUnlink(p: string, set: boolean): void {
@@ -280,6 +286,11 @@ export function setPaneReady(sd: string, ready: boolean): void {
  *  Wake gate skips while this is on. */
 export function setCompacting(sd: string, compacting: boolean): void {
     writeOrUnlink(paneCompactingPath(sd), compacting);
+}
+/** #647 david `4h75nk` : claude pane shows "Resuming conversation…" —
+ *  post-picker, pre-prompt. */
+export function setResuming(sd: string, resuming: boolean): void {
+    writeOrUnlink(paneResumingPath(sd), resuming);
 }
 /** #624 david `62ys4g` : claude pane shows `interrupted by user`. Decorates
  *  the bar tag `[idle:interrupted]` ; not a wake gate. */

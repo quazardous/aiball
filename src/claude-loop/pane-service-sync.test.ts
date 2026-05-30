@@ -16,6 +16,7 @@ const {
     setPaneBusy,
     setPaneReady,
     setCompacting,
+    setResuming,
     setResumeSessionPicker,
     setResumeModePicker,
     clearResumePickers,
@@ -33,6 +34,7 @@ function clearAll(): void {
     setPaneBusy(dir, false);
     setPaneReady(dir, false);
     setCompacting(dir, false);
+    setResuming(dir, false);
     clearResumePickers(dir);
 }
 
@@ -88,17 +90,28 @@ test("sync : ResumeModePicker file → matching marker (screen-takeover)", () =>
     assert.equal(svc.get(PaneMarker.ResumeSessionPicker), false);
 });
 
-test("sync : screen-takeover priority — session > mode > compacting", () => {
-    // All three "present" simultaneously (defensive — emitter promises
+test("sync : Resuming file → matching marker (screen-takeover)", () => {
+    setResuming(dir, true);
+    syncPaneServiceFromMarkers(dir);
+    const svc = getPaneService();
+    assert.equal(svc.get(PaneMarker.Resuming), true);
+    assert.equal(svc.get(PaneMarker.ResumeSessionPicker), false);
+    assert.equal(svc.get(PaneMarker.Compacting), false);
+});
+
+test("sync : screen-takeover priority — session > mode > resuming > compacting", () => {
+    // All four "present" simultaneously (defensive — emitter promises
     // only one but we tolerate the race). Sync picks the highest-
     // priority and clears the rest in the service.
     setResumeSessionPicker(dir, true);
     setResumeModePicker(dir, true);
+    setResuming(dir, true);
     setCompacting(dir, true);
     syncPaneServiceFromMarkers(dir);
     const svc = getPaneService();
     assert.equal(svc.get(PaneMarker.ResumeSessionPicker), true);
     assert.equal(svc.get(PaneMarker.ResumeModePicker), false);
+    assert.equal(svc.get(PaneMarker.Resuming), false);
     assert.equal(svc.get(PaneMarker.Compacting), false);
 });
 

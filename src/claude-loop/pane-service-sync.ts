@@ -22,6 +22,7 @@ import {
     paneCompactingPath,
     paneInterruptedPath,
     paneReadyPath,
+    paneResumingPath,
     resumeModePickerActivePath,
     resumeSessionPickerActivePath,
 } from "./state.js";
@@ -69,13 +70,16 @@ export function syncPaneServiceFromMarkers(
     // Screen-takeover group — pick the one whose file exists ; the
     // emitter (session-start-hook + refreshPaneMarkers) guarantees only
     // one is set at a time, but defensively we pick first-match order
-    // session > mode > compacting and clear the rest via setExclusive.
+    // session > mode > resuming > compacting and clear the rest via
+    // setExclusive.
     const session = existsSync(resumeSessionPickerActivePath(sd));
     const mode = existsSync(resumeModePickerActivePath(sd));
+    const resuming = existsSync(paneResumingPath(sd));
     const compacting = existsSync(paneCompactingPath(sd));
     let takeover: PaneMarker | null = null;
     if (session) takeover = PaneMarker.ResumeSessionPicker;
     else if (mode) takeover = PaneMarker.ResumeModePicker;
+    else if (resuming) takeover = PaneMarker.Resuming;
     else if (compacting) takeover = PaneMarker.Compacting;
     svc.setExclusive(SCREEN_TAKEOVER_GROUP, takeover);
 

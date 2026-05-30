@@ -58,6 +58,7 @@ import {
     setPaneReady,
     setResumeModePicker,
     setResumeSessionPicker,
+    setResuming,
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
     buildContextPhrase,
@@ -504,10 +505,15 @@ function refreshPaneMarkers(): void {
     // que session-start-hook.ts. Idempotent — setters no-op si état stable.
     const sessionPickerVisible = /Resume session\b/i.test(paneText) && /Space to preview/i.test(paneText);
     const modePickerVisible = /Resume from summary|Resume full session as-is|Don't ask me again/.test(paneText);
+    // #647 david `4h75nk` : Resuming = post-picker, pre-prompt. Mutually
+    // exclusive avec pickers (= already past them).
+    const resumingVisible = /Resuming conversation/i.test(paneText)
+        && !sessionPickerVisible && !modePickerVisible;
     setResumeSessionPicker(sd, sessionPickerVisible);
     setResumeModePicker(sd, modePickerVisible);
-    const pickerOrTransient = sessionPickerVisible || modePickerVisible
-        || /Compact this conversation|Resuming conversation|Compacting conversation/i.test(paneText);
+    setResuming(sd, resumingVisible);
+    const pickerOrTransient = sessionPickerVisible || modePickerVisible || resumingVisible
+        || /Compact this conversation|Compacting conversation/i.test(paneText);
     const promptVisible = /Claude Code v|❯ |^> /m.test(paneText);
     setPaneReady(sd, promptVisible && !pickerOrTransient);
     setCompacting(sd, snap.special === "compacting");

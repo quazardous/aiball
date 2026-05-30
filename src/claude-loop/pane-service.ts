@@ -47,6 +47,7 @@ export const PaneMarker = {
     PaneReady: "PaneReady",
     ResumeSessionPicker: "ResumeSessionPicker",
     ResumeModePicker: "ResumeModePicker",
+    Resuming: "Resuming",
     Compacting: "Compacting",
     ErrorRateLimit: "ErrorRateLimit",
     ErrorOverloaded: "ErrorOverloaded",
@@ -63,6 +64,7 @@ export type PaneMarker = typeof PaneMarker[keyof typeof PaneMarker];
 export const SCREEN_TAKEOVER_GROUP: readonly PaneMarker[] = [
     PaneMarker.ResumeSessionPicker,
     PaneMarker.ResumeModePicker,
+    PaneMarker.Resuming,
     PaneMarker.Compacting,
 ] as const;
 
@@ -216,6 +218,7 @@ export function paneMarkerBarInfo(svc?: PaneService): string | null {
     const s = (svc ?? getPaneService()).snapshot();
     if (s.has(PaneMarker.ResumeSessionPicker)) return "picker:session";
     if (s.has(PaneMarker.ResumeModePicker)) return "picker:mode";
+    if (s.has(PaneMarker.Resuming)) return "resuming";
     if (s.has(PaneMarker.Compacting)) return "compacting";
     if (s.has(PaneMarker.ErrorRateLimit)) return "err:rate-limit";
     if (s.has(PaneMarker.ErrorOverloaded)) return "err:overloaded";

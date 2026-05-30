@@ -25,6 +25,7 @@ import {
     paneCompactingPath,
     paneInterruptedPath,
     paneReadyPath,
+    paneResumingPath,
     proxyAlivePath,
     readLoopStateInput,
     resumeSessionPickerActivePath,
@@ -89,6 +90,7 @@ export function cmdInspect(name: string): void {
             busy: input.paneBusy,
             ready: input.paneReady,
             compacting: input.paneCompacting,
+            resuming: existsSync(paneResumingPath(sd)),
             interrupted: input.paneInterrupted,
         },
         afk: {
