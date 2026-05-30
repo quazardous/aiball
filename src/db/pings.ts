@@ -15,7 +15,7 @@
  * For inserts the caller must say which kind it is (we wrap that in
  * `insertPing(recipient, msg)` where msg.kind decides the column).
  */
-import { and, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, ne, or } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { emitPing } from "../event-bus.js";
 import {
@@ -46,6 +46,54 @@ function targetInArray(ids: number[]) {
         inArray(schema.pings.ticketId, ids),
         inArray(schema.pings.commentId, ids),
     );
+}
+
+/**
+ * #643 — un unread c'est "quelque chose que j'ai pas lu" qui reste
+ * actionable. Un ticket fermé ou snoozé n'est plus actionable → on l'exclut
+ * de TOUS les compteurs/feeds unread (sidebar, MCP `_status`, wake-phrase,
+ * inbox unread feed). David `nch7je` : pending compte, snoozed pas, closed
+ * pas. Le filtre status moderation reste libre — pending est unread aussi.
+ *
+ * Retourne un predicate `isActionable(ticket_id) => boolean` qui rejette
+ * les tickets fermés (dernier event lifecycle approved = `ticket_closed`)
+ * ou snoozés (postponed_until > now). Charger en deux requêtes one-shot
+ * + filter en JS — plus simple qu'un sous-requête SQL gnarly + pas de
+ * limite IN(...) à 999.
+ */
+export function actionableTicketGate(): (ticket_id: number | null) => boolean {
+    const db = getDb();
+    // Dernier event lifecycle approved par ticket : si c'est un close →
+    // fermé. Aligné sur `pendingTicketsByAuthor` + `listProjectsDetailed`.
+    const events = db.select({
+        ticket_id: schema.messages.ticketId,
+        kind: schema.messages.kind,
+        id: schema.messages.id,
+    })
+        .from(schema.messages)
+        .where(and(
+            inArray(schema.messages.kind, ["ticket_closed", "ticket_reopened"]),
+            eq(schema.messages.status, "approved"),
+        ))
+        .orderBy(asc(schema.messages.id))
+        .all();
+    const lastByTid = new Map<number, "close" | "reopen">();
+    for (const ev of events) {
+        if (ev.ticket_id == null) continue;
+        lastByTid.set(ev.ticket_id, ev.kind === "ticket_closed" ? "close" : "reopen");
+    }
+    const closed = new Set<number>();
+    for (const [tid, last] of lastByTid) if (last === "close") closed.add(tid);
+    const now = nowIso();
+    const snoozedRows = db.select({ id: schema.tickets.id })
+        .from(schema.tickets)
+        .where(and(
+            isNotNull(schema.tickets.postponedUntil),
+            gt(schema.tickets.postponedUntil, now),
+        ))
+        .all();
+    const snoozed = new Set(snoozedRows.map((r) => r.id));
+    return (tid) => tid != null && !closed.has(tid) && !snoozed.has(tid);
 }
 
 // =====================================================================
@@ -316,6 +364,7 @@ export function listUnread(
     limit = 100,
 ): Message[] {
     const db = getDb();
+    const isActionable = actionableTicketGate();
     // Ticket-pings: join pings.ticket_id → tickets.id.
     const ticketHits = db.select({ t: schema.tickets, ping: schema.pings })
         .from(schema.pings)
@@ -329,10 +378,11 @@ export function listUnread(
                 ne(schema.pings.actor, consumer_id),
             ),
         ))
-        .all();
+        .all()
+        .filter((r) => isActionable(r.t.id));
 
     // Comment-pings: join pings.comment_id → _messages.id, then tickets for project filter.
-    const messageHits = db.select({ m: schema.messages, project: schema.tickets.project })
+    const messageHits = db.select({ m: schema.messages, project: schema.tickets.project, ticketId: schema.tickets.id })
         .from(schema.pings)
         .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
@@ -345,7 +395,8 @@ export function listUnread(
                 ne(schema.pings.actor, consumer_id),
             ),
         ))
-        .all();
+        .all()
+        .filter((r) => isActionable(r.ticketId));
 
     const merged: Message[] = [
         ...ticketHits.map((r) => ticketRowToMessage(r.t)),
@@ -408,7 +459,8 @@ export function pendingTicketsByAuthor(by_agent: string): number {
 
 export function unreadCount(consumer_id: string, project: string): number {
     const db = getDb();
-    const t = db.select({ n: sql<number>`COUNT(*)` })
+    const isActionable = actionableTicketGate();
+    const ticketHits = db.select({ ticketId: schema.tickets.id })
         .from(schema.pings)
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
         .where(and(
@@ -419,8 +471,8 @@ export function unreadCount(consumer_id: string, project: string): number {
                 isNull(schema.pings.actor),
                 ne(schema.pings.actor, consumer_id),
             ),
-        )).get();
-    const m = db.select({ n: sql<number>`COUNT(*)` })
+        )).all();
+    const messageHits = db.select({ ticketId: schema.tickets.id })
         .from(schema.pings)
         .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
@@ -432,8 +484,11 @@ export function unreadCount(consumer_id: string, project: string): number {
                 isNull(schema.pings.actor),
                 ne(schema.pings.actor, consumer_id),
             ),
-        )).get();
-    return Number(t?.n ?? 0) + Number(m?.n ?? 0);
+        )).all();
+    let n = 0;
+    for (const r of ticketHits) if (isActionable(r.ticketId)) n++;
+    for (const r of messageHits) if (isActionable(r.ticketId)) n++;
+    return n;
 }
 
 /**
@@ -522,11 +577,13 @@ export function listPings(opts: {
         ),
     ];
 
+    const isActionable = actionableTicketGate();
     const ticketHits = db.select({ ping: schema.pings, t: schema.tickets })
         .from(schema.pings)
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
         .where(and(...ticketConds))
-        .all();
+        .all()
+        .filter((r) => isActionable(r.t.id));
 
     // #B.214 (a): pull the PARENT ticket's intent on every comment ping
     // so we can panic-fastpass the merged list. The comment row's own
@@ -536,12 +593,14 @@ export function listPings(opts: {
         m: schema.messages,
         project: schema.tickets.project,
         parent_intent: schema.tickets.intent,
+        ticketId: schema.tickets.id,
     })
         .from(schema.pings)
         .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
         .where(and(...messageConds))
-        .all();
+        .all()
+        .filter((r) => isActionable(r.ticketId));
 
     // #B.214 david "a+c": sort panic-first, then chronological reverse.
     // Panic-tagged tickets bubble to the top of the merged list so the
@@ -582,7 +641,8 @@ export function listPings(opts: {
 
 export function unreadPingCount(recipient: string): number {
     const db = getDb();
-    const t = db.select({ n: sql<number>`COUNT(*)` })
+    const isActionable = actionableTicketGate();
+    const ticketHits = db.select({ ticketId: schema.tickets.id })
         .from(schema.pings)
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
         .where(and(
@@ -592,10 +652,15 @@ export function unreadPingCount(recipient: string): number {
                 isNull(schema.pings.actor),
                 ne(schema.pings.actor, recipient),
             ),
-        )).get();
-    const m = db.select({ n: sql<number>`COUNT(*)` })
+        )).all();
+    // #643 : side-fix — l'ancienne version manquait le join _messages → tickets
+    // côté comment-pings (juste pings → messages), donc impossible de filtrer
+    // par ticket status. On joint maintenant tickets pour récupérer l'id et
+    // appliquer le gate actionable comme les 3 autres fonctions.
+    const messageHits = db.select({ ticketId: schema.tickets.id })
         .from(schema.pings)
         .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
+        .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
         .where(and(
             eq(schema.pings.recipient, recipient),
             isNull(schema.pings.seenAt),
@@ -603,6 +668,9 @@ export function unreadPingCount(recipient: string): number {
                 isNull(schema.pings.actor),
                 ne(schema.pings.actor, recipient),
             ),
-        )).get();
-    return Number(t?.n ?? 0) + Number(m?.n ?? 0);
+        )).all();
+    let n = 0;
+    for (const r of ticketHits) if (isActionable(r.ticketId)) n++;
+    for (const r of messageHits) if (isActionable(r.ticketId)) n++;
+    return n;
 }

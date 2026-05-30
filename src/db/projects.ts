@@ -634,24 +634,19 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
                 ),
             ))
             .all();
-        const ticketStatusById = new Map<number, string>();
         const snoozedTicketIds = new Set<number>();
         for (const t of openCounts) {
-            ticketStatusById.set(t.id, t.status);
             if (t.postponedUntil && t.postponedUntil > nowStr) snoozedTicketIds.add(t.id);
         }
         const byProjectSets = new Map<string, Set<number>>();
         function note(project: string, ticket_id: number) {
-            // #456: le compteur unread DOIT matcher EXACTEMENT le filtre par
-            // défaut de l'inbox (open + approved + non-snoozé) — sinon des
-            // tickets cachés gonflent le badge avec un unread « introuvable ».
-            // Bug : on n'excluait que rejected + closed → les tickets PENDING
-            // (en modération) et SNOOZÉS comptaient alors qu'ils ne sont pas
-            // dans l'inbox. On aligne sur le même filtre que openPerProject.
-            const status = ticketStatusById.get(ticket_id);
-            if (status !== "approved") return; // exclut rejected ET pending
+            // #643 david `nch7je` : un unread = "quelque chose que j'ai pas
+            // lu", indépendant du status moderation. Pending compte donc
+            // comme unread (revers partiel du #456). Snoozed reste exclu
+            // (ticket repoussé dans le temps, pas due maintenant). Closed
+            // reste exclu (ticket clos = plus actionnable).
             if (closedByTicket.get(ticket_id) === true) return; // exclut fermés
-            if (snoozedTicketIds.has(ticket_id)) return; // exclut snoozés (hors inbox)
+            if (snoozedTicketIds.has(ticket_id)) return; // exclut snoozés (repoussés)
             let s = byProjectSets.get(project);
             if (!s) {
                 s = new Set();
