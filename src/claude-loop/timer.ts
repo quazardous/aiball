@@ -51,11 +51,11 @@ import {
     viewPushSockPath,
     paneShowsInterrupted,
     readLoopStateInput,
+    clearResumePickers,
     setCompacting,
     setInterrupted,
     setPaneBusy,
     setPaneReady,
-    setResumePicker,
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
     buildContextPhrase,
@@ -850,7 +850,7 @@ async function mainSse(): Promise<void> {
         // boot (typing → user-took-over → tryWake skip via user-grace).
         // Forcer le bar `wait` jaune à T+grace était intrusif ; bar reste
         // `loop` vert, user appuie F9 si besoin d'un hold visible.
-        setResumePicker(sd!, false);
+        clearResumePickers(sd!);
         // #629 david `8wgq7f` — setResumePicker no longer seals bootComplete
         // (delegated to bus.on("bootEnded")). At the safety cap we WANT to
         // force the exit regardless of pending stretches (Resuming…, etc.)

@@ -24,7 +24,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { LOOP_STATUS, MUX_CMD, idleMarkerPath, setResumePicker, setTmuxStatus, tmuxName } from "./state.js";
+import { LOOP_STATUS, MUX_CMD, clearResumePickers, idleMarkerPath, setResumeModePicker, setResumeSessionPicker, setTmuxStatus, tmuxName } from "./state.js";
 import { CL_ENV } from "./env-vars.js";
 
 function emit(): never {
@@ -121,10 +121,9 @@ if (source === "resume") {
                 if (/Resume session\b/i.test(text) && /Space to preview/i.test(text)) {
                     matched = true;
                     log(`session-picker: matched at ${elapsed + probeStepMs}ms (paneLen=${text.length}) → pick:${pickMode} (Enter)`);
-                    // #624 david `8pwvm3` : explicitement signaler que le
-                    // picker est ON. La state machine étend la phase boot
-                    // tant que ce marker existe (peu importe le time cap).
-                    setResumePicker(sd!, true);
+                    // #647 Slice 2 david `sr9kqw` : marker spécifique
+                    // session-picker (1er écran resume). #624 originel.
+                    setResumeSessionPicker(sd!, true);
                     setTmuxStatus(name!, LOOP_STATUS.BOOT, `pick:${pickMode}`);
                     sendKey("Enter");
                     sessionPicked = true;
@@ -162,8 +161,9 @@ if (source === "resume") {
                 if (summaryRegex.test(capturePane())) {
                     matched = true;
                     log(`summary-picker: matched at ${elapsed + probeStepMs}ms → pick→${mode}`);
-                    // #624 david `8pwvm3` : aussi un picker (summary) — ON.
-                    setResumePicker(sd!, true);
+                    // #647 Slice 2 david `sr9kqw` : marker spécifique
+                    // mode-picker (2e écran resume : summary vs as-is).
+                    setResumeModePicker(sd!, true);
                     setTmuxStatus(name!, LOOP_STATUS.BOOT, `pick→${mode}`);
                     if (mode === "as-is") sendKey("Down");
                     sendKey("Enter");
@@ -216,7 +216,7 @@ try {
     const sessionPickerAborted = (process.env[CL_ENV.RESUME_PICK] ?? "latest") === "abort";
     const safeToSignal = source !== "resume" || sessionPicked || sessionPickerAborted;
     if (safeToSignal) {
-        setResumePicker(sd!, false);
+        clearResumePickers(sd!);
         setTmuxStatus(name!, LOOP_STATUS.IDLE);
         log(`seed idle + signal boot-complete (source=${source} sessionPicked=${sessionPicked} aborted=${sessionPickerAborted}) + flip bar IDLE + exit`);
     } else {

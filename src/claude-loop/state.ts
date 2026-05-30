@@ -164,13 +164,22 @@ export function envPath(sd: string): string { return join(sd, "env"); }
  *  hooks were reading `Date.now()` at module-load (= hook start), so they
  *  thought the boot window was always fresh. */
 export function loopStartTsPath(sd: string): string { return join(sd, "loop-start-ts"); }
-/** #624 david `8pwvm3` : marker that exists while the Claude Code resume
- *  picker is on screen. `session-start-hook` calls `setResumePicker(sd, true)`
- *  the moment its probe matches the picker, `setResumePicker(sd, false)`
- *  after the picker has been dismissed (auto-pick or user-pick). The
- *  LoopState service treats the boot phase as still active as long as
- *  this marker exists. */
-export function resumePickerActivePath(sd: string): string { return join(sd, "resume-picker-active"); }
+/** #647 Slice 2 david `sr9kqw` : claude --resume montre deux écrans
+ *  successifs ; ils sont des markers DISTINCTS pour débugger un boot
+ *  bloqué (savoir LEQUEL est à l'écran). Les writers vivent dans
+ *  session-start-hook.ts (probes regex).
+ *
+ *  - `resume-session-picker-active` : 1er écran "Resume session" + "Space
+ *    to preview" — choix de la session à reprendre.
+ *  - `resume-mode-picker-active`    : 2e écran "Resume from summary" /
+ *    "Resume full session as-is" / "Don't ask me again" — choix du mode
+ *    de reprise.
+ *
+ *  Le legacy `resume-picker-active` (single file) n'existe plus, mais
+ *  `readLoopStateInput.resumePickerActive` reste un OR des deux pour
+ *  les consommateurs de l'API LoopStateInput. */
+export function resumeSessionPickerActivePath(sd: string): string { return join(sd, "resume-session-picker-active"); }
+export function resumeModePickerActivePath(sd: string): string { return join(sd, "resume-mode-picker-active"); }
 /** #624 david `8pwvm3` : written ONCE when the session-start-hook completes
  *  (claude is past whatever pickers / loading were needed). The LoopState
  *  service ends the boot phase the moment this marker appears — the
@@ -178,29 +187,44 @@ export function resumePickerActivePath(sd: string): string { return join(sd, "re
  *  crash or never run. */
 export function bootCompletePath(sd: string): string { return join(sd, "boot-complete"); }
 
-/** #624 david `8pwvm3` + #629 david `8wgq7f` : explicit setter the hook
- *  calls to signal the resume-picker lifecycle. `setResumePicker(sd, true)`
- *  at picker detect, `setResumePicker(sd, false)` after picker dismissed.
+/** #647 Slice 2 david `sr9kqw` : setters explicites pour chaque picker
+ *  resume distinct (vs l'ancien `setResumePicker` qui ne disait pas
+ *  lequel). session-start-hook appelle :
+ *    - `setResumeSessionPicker(sd, true)`  au match du 1er écran
+ *    - `setResumeModePicker(sd, true)`     au match du 2e écran
+ *    - `clearResumePickers(sd)`            après dismiss des deux
  *
- *  #629 — bootComplete is NO LONGER written here. The hook can be confident
- *  the picker is gone but claude may STILL be transitioning (Resuming
- *  conversation…, Compacting after resume, splash). Writing bootComplete
- *  here would short-circuit `isInBootGrace`'s `if (input.bootComplete)`
- *  early-return and leave boot prematurely, ignoring the !paneReady /
- *  paneCompacting stretches. Now only the bus's `bootEnded` event (in
- *  timer.ts) seals bootComplete, when ALL conditions say boot is truly
- *  done. settleBoot writes it directly as a safety override at
- *  T+bootGraceMs.
+ *  bootComplete reste séparé (sealing via bus.on("bootEnded") + settleBoot).
  */
-export function setResumePicker(sd: string, active: boolean): void {
-    const pickerPath = resumePickerActivePath(sd);
+function _writePickerMarker(sd: string, p: string, active: boolean): void {
     if (active) {
-        try { writeFileSync(pickerPath, new Date().toISOString() + "\n"); } catch { /* best-effort */ }
+        try { writeFileSync(p, new Date().toISOString() + "\n"); } catch { /* best-effort */ }
         return;
     }
-    // Picker dismissed — remove the active marker. bootComplete sealing
-    // is delegated to bus.on("bootEnded") and settleBoot.
-    try { if (existsSync(pickerPath)) unlinkSync(pickerPath); } catch { /* race */ }
+    try { if (existsSync(p)) unlinkSync(p); } catch { /* race */ }
+}
+
+export function setResumeSessionPicker(sd: string, active: boolean): void {
+    _writePickerMarker(sd, resumeSessionPickerActivePath(sd), active);
+}
+
+export function setResumeModePicker(sd: string, active: boolean): void {
+    _writePickerMarker(sd, resumeModePickerActivePath(sd), active);
+}
+
+/** Clear both resume picker markers. Called when the hook is past the
+ *  resume flow entirely (line 219 of session-start-hook). */
+export function clearResumePickers(sd: string): void {
+    setResumeSessionPicker(sd, false);
+    setResumeModePicker(sd, false);
+}
+
+/** Back-compat alias kept for callers outside session-start-hook (notably
+ *  the timer's safety-net dismiss). DEPRECATED in #647 ; new code should
+ *  use the kind-specific setters above. */
+export function setResumePicker(sd: string, active: boolean): void {
+    if (active) setResumeSessionPicker(sd, true);
+    else clearResumePickers(sd);
 }
 
 // #629 david `xyss9z` — debug log for tracing every `@cl_human` paint
@@ -937,7 +961,13 @@ export function readLoopStateInput(
     // #629 david `2hwuan` : floor INVIOLABLE 30 s par défaut. cli.ts exporte
     // le yaml `claude_loop.boot_min_seconds` via cette env var.
     const bootMinMs = Math.max(0, Number(process.env[CL_ENV.BOOT_MIN_SEC] ?? 30)) * 1000;
-    const resumePickerActive = existsSync(resumePickerActivePath(sd));
+    // #647 Slice 2 : resumePickerActive = OR des deux nouveaux markers.
+    // Conserve la sémantique "any resume picker is up" pour les consommateurs
+    // existants ; la distinction session vs mode est exposable via les
+    // chemins dédiés (resumeSessionPickerActivePath / resumeModePickerActivePath)
+    // pour les futurs consommateurs (bar slice 4).
+    const resumePickerActive = existsSync(resumeSessionPickerActivePath(sd))
+        || existsSync(resumeModePickerActivePath(sd));
     const bootComplete = existsSync(bootCompletePath(sd));
     const noWait = process.env[CL_ENV.WAIT] === "0";
     // user-grace window = max(user, ask) for back-compat with projects
