@@ -1502,30 +1502,16 @@ def main(argv):
                 clear_user_grace()
         if dec.get("forward"):
             os.write(master_fd, dec["forward"])
-        word = dec.get("word")
-        # #629 david `yrvy8r` — pendant la phase boot, le bus est AUTORITÉ
-        # sur le bar word. Le _Decider local décide stop/rest sans connaître
-        # l'état boot du timer (notamment sous --no-wait où in_boot local = False
-        # immédiatement). Si la dernière view pushée dit `barWord=boot`, on
-        # FIGE le mot à `boot` ici — sinon le proxy peint stop sur le premier
-        # keystroke du picker, puis loop après le 5s TTL, alors que le timer
-        # voulait `boot` tout du long. Override clean : bus authoritative pour
-        # le phase, local pour stop/rest hors boot.
-        pushed = pushed_view["value"] if pushed_view["value"] else None
-        in_boot_view = pushed and pushed.get("barWord") == "boot"
-        if in_boot_view:
-            if current_word != _HUMAN_BOOT:
-                _paint_word(_HUMAN_BOOT)
-                current_word = _HUMAN_BOOT
-        elif word == "stop":
-            if current_word != _HUMAN_STOP:
-                _paint_word(_HUMAN_STOP)
-                current_word = _HUMAN_STOP
-        elif word == "rest":
-            want = _rest_word()
-            if want != current_word:
-                _paint_word(want)
-                current_word = want
+        # #633 Slice B david `wb69mf` — paint authority migrée à la state
+        # machine. apply_decision ne peint plus @cl_human : la touch_marker
+        # `human-typing` côté Python + le bus côté timer émettent transition
+        # → view pushée → `_apply_pushed_view` peint le bon mot (boot pendant
+        # boot grace, stop pendant typing, wait sous AFK, loop sinon).
+        # Latence typing → paint stop ≈ 50ms (watch debounce) — invisible.
+        # Le hack 0a45bba (override paint _HUMAN_BOOT quand bus dit boot)
+        # disparaît : le bus EST l'autorité, plus besoin d'override post-fact.
+        # Le fallback bootstrap (pushed_view = None) reste plus bas dans la
+        # boucle select pour la fenêtre proxy-start → première view-push.
         _emit_log(dec)
 
     try:
