@@ -858,6 +858,13 @@ async function mainSse(): Promise<void> {
         // Forcer le bar `wait` jaune à T+grace était intrusif ; bar reste
         // `loop` vert, user appuie F9 si besoin d'un hold visible.
         setResumePicker(sd!, false);
+        // #629 david `8wgq7f` — setResumePicker no longer seals bootComplete
+        // (delegated to bus.on("bootEnded")). At the safety cap we WANT to
+        // force the exit regardless of pending stretches (Resuming…, etc.)
+        // because we've already burned bootGraceMs. Write it explicitly.
+        try {
+            writeFileSync(bootCompletePath(sd!), new Date().toISOString() + "\n");
+        } catch { /* best-effort */ }
         // Seed idle-since so tryWake's gate passes; tryWake will
         // flip to busy if there's work or stay idle otherwise.
         try {
@@ -908,13 +915,18 @@ async function mainSse(): Promise<void> {
         // the pushed view — but the timer is the ORIGIN of the value.
         logBarPaint(sd, "timer.ts:bus.transition", next.barWord);
     });
-    // #629 david `2hwuan` — sceller la fin de boot : écrit bootComplete
-    // marker via setResumePicker(sd, false). Une fois posé, isInBootGrace
-    // early-return false ad vitam, donc /compact mid-session ne peut pas
-    // ré-entrer en boot (option B strict).
+    // #629 david `2hwuan` + `8wgq7f` — sceller la fin de boot : écrit
+    // bootComplete marker directement (plus via setResumePicker, qui ne
+    // touche plus bootComplete depuis #629). Une fois posé, isInBootGrace
+    // early-return false ad vitam — donc Resuming conversation… puis /compact
+    // mid-session ne peuvent pas ré-entrer en boot. L'event ne fire QUE
+    // quand toutes les conditions ont vraiment dit not-in-boot (post-floor,
+    // paneReady, no picker, no compacting) — c'est THE moment où on scelle.
     loopBus.on("bootEnded", () => {
         log("state-bus: boot phase ended — sealing bootComplete marker");
-        try { setResumePicker(sd!, false); } catch { /* best-effort */ }
+        try {
+            writeFileSync(bootCompletePath(sd!), new Date().toISOString() + "\n");
+        } catch { /* best-effort */ }
     });
     // #629 — fast probe 1s pendant boot. Arme au start (on est forcément
     // en boot à T0 via le floor), désarme sur bootEnded, ré-arme sur
@@ -1128,6 +1140,14 @@ async function mainSse(): Promise<void> {
                 // matches the Stop hook's `[idle:user]` rendering so
                 // the bar stays consistent across the whole window.
                 // Count comes back once grace lapses.
+                // #629 david `8wgq7f` (Bug 3) — flush the bus before flipping
+                // status-bg. The bus's transition listener pushes the new
+                // view to the proxy synchronously (UDS write), so the proxy
+                // can repaint @cl_human BEFORE the tmux status-bg flips here.
+                // Without this, status-bg gray lands first and the word
+                // `boot` lingers ~50ms (watch debounce) before the proxy
+                // catches up — visible race at boot exit.
+                pushViewIfChanged();
                 if (settledStatus === "idle" && userIsTakingOver(sd!, userGraceSec)) {
                     setTmuxStatus(name!, settledStatus, "user");
                 } else {

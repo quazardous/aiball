@@ -178,20 +178,29 @@ export function resumePickerActivePath(sd: string): string { return join(sd, "re
  *  crash or never run. */
 export function bootCompletePath(sd: string): string { return join(sd, "boot-complete"); }
 
-/** #624 david `8pwvm3` : explicit setter the hook calls to signal the
- *  resume-picker lifecycle. `setResumePicker(sd, true)` at picker detect,
- *  `setResumePicker(sd, false)` after picker dismissed (also marks
- *  boot-complete). Pure marker ops ; the state machine reads them via
- *  `readLoopStateInput`. */
+/** #624 david `8pwvm3` + #629 david `8wgq7f` : explicit setter the hook
+ *  calls to signal the resume-picker lifecycle. `setResumePicker(sd, true)`
+ *  at picker detect, `setResumePicker(sd, false)` after picker dismissed.
+ *
+ *  #629 — bootComplete is NO LONGER written here. The hook can be confident
+ *  the picker is gone but claude may STILL be transitioning (Resuming
+ *  conversation…, Compacting after resume, splash). Writing bootComplete
+ *  here would short-circuit `isInBootGrace`'s `if (input.bootComplete)`
+ *  early-return and leave boot prematurely, ignoring the !paneReady /
+ *  paneCompacting stretches. Now only the bus's `bootEnded` event (in
+ *  timer.ts) seals bootComplete, when ALL conditions say boot is truly
+ *  done. settleBoot writes it directly as a safety override at
+ *  T+bootGraceMs.
+ */
 export function setResumePicker(sd: string, active: boolean): void {
     const pickerPath = resumePickerActivePath(sd);
     if (active) {
         try { writeFileSync(pickerPath, new Date().toISOString() + "\n"); } catch { /* best-effort */ }
         return;
     }
-    // Picker dismissed — remove the active marker AND mark boot complete.
+    // Picker dismissed — remove the active marker. bootComplete sealing
+    // is delegated to bus.on("bootEnded") and settleBoot.
     try { if (existsSync(pickerPath)) unlinkSync(pickerPath); } catch { /* race */ }
-    try { writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n"); } catch { /* best-effort */ }
 }
 
 // #629 david `xyss9z` — debug log for tracing every `@cl_human` paint

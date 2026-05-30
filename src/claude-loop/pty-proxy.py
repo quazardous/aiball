@@ -1185,9 +1185,13 @@ def main(argv):
     # proxy-alive avant tout le reste (le setup socket/termios qui suit peut
     # échouer, mais le pont, lui, est en place).
     drop_proxy_alive()
-    # On possède désormais le segment human de la barre : on le pose à
-    # `loop` au repos (claim d'ownership avant que le TS voie proxy-alive).
-    paint_human(False)
+    # #629 david `8wgq7f` (Bug 2) — no startup paint. cli.ts a déjà seedé
+    # `boot` au moment de la création de la session tmux. Painter ici
+    # appellerait `_rest_word()` qui retourne LOOP au démarrage (pas d'AFK,
+    # pas de typing) → écrase le seed `boot` → flicker boot→loop→boot le
+    # temps que le timer pousse sa première view. On reste silencieux ; le
+    # premier `_apply_pushed_view` du timer (dans la seconde qui suit)
+    # peint correctement le mot.
     # Propage la taille de fenêtre courante au PTY de claude.
     set_winsize(master_fd, get_winsize(sys.stdout.fileno()))
 
@@ -1252,9 +1256,11 @@ def main(argv):
     # `current_word` = dernier mot peint (stop/wait/loop). Le select se
     # réveille à l'expiration de la frappe (5 s), de la boot-grace (#305) puis
     # de la user-grace pour enchaîner stop→wait→loop sans round-trip par le TS.
-    # Init aligné sur ce que paint_human(False) vient de peindre (≈ `wait` si
-    # on démarre en boot-grace, sinon `loop`) → pas de repeint redondant.
-    current_word = _rest_word()
+    # #629 david `8wgq7f` — on n'a PAS peint au startup (le seed cli.ts est
+    # `boot`), donc init `current_word` à None pour qu'un éventuel premier
+    # paint via _apply_pushed_view force l'écriture (None != n'importe quel
+    # mot ⇒ branche `word_token != current_word` passe).
+    current_word = None
     # #360 : la décision frappe→action vit désormais dans le cœur PUR `_Decider`
     # (mirror exact de l'ancienne boucle inline ; bufferisation #345 incluse —
     # la 1re combo d'un afk_key à 2 (ex. 1er ESC de `esc esc`) est gardée jusqu'à
