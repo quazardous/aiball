@@ -8,7 +8,7 @@ import { attentionOf, lifecycleStage } from "../lib/ticket-state";
 import { formatTicketRef } from "../lib/formatting";
 import {
     INTENT_SEVERITY,
-    PRIORITY_SEVERITY,
+    PRIORITY_COLOR_VAR,
     LIFECYCLE_ICONS,
     STATUS_SEVERITY,
     type StatusFilter,
@@ -137,6 +137,15 @@ function onRowClick(r: InboxRow) {
                 binary
                 @update:model-value="(v: boolean) => emit('toggle-selected', r.id, v)"
             />
+            <!-- #632 david `xsgcg6` : priority chevron juste après la case à
+                 cocher (sans Tag/decoration badge). Couleur via severity, le
+                 glyph porte toute l'info. Hidden quand normal (90% des tickets). -->
+            <PriorityIcon
+                v-if="r.priority && r.priority !== 'normal'"
+                :priority="r.priority"
+                :style="`color: var(${PRIORITY_COLOR_VAR[r.priority]}); margin-left: 0.25rem;`"
+                :title="r.priority"
+            />
         </template>
         <template #lead>
             <!--
@@ -220,20 +229,9 @@ function onRowClick(r: InboxRow) {
                 :severity="r.intent ? INTENT_SEVERITY[r.intent] : 'secondary'"
                 style="font-size: 0.7rem"
             />
-            <!-- #B.222 + #632 : priority badge as Google Material Symbols
-                 chevrons (inlined SVG, no font dep). Series reads as a
-                 relative-weight ladder, severity color reinforces.
-                 keyboard_double_arrow_up = urgent (red), keyboard_arrow_up
-                 = high (orange), keyboard_arrow_down = low (blue) ;
-                 normal hidden (90% of tickets stay clean). -->
-            <Tag
-                v-if="r.priority && r.priority !== 'normal'"
-                :severity="PRIORITY_SEVERITY[r.priority]"
-                :title="r.priority"
-                style="font-size: 0.7rem"
-            >
-                <PriorityIcon :priority="r.priority" />
-            </Tag>
+            <!-- #B.222 + #632 david `xsgcg6` : la priority a quitté la chip row
+                 pour rejoindre le slot `#select` (juste après la case à cocher),
+                 sans decoration Tag. Le chevron coloré porte l'info à lui seul. -->
             <TagBadge
                 v-for="tg in r.tags"
                 :key="tg.id"

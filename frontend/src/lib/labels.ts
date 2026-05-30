@@ -186,6 +186,21 @@ export const PRIORITY_SEVERITY: Record<Priority, Severity> = {
 // `PriorityIcon.vue` (zero extra dep). PRIORITY_ICON kept removed — call
 // sites use the component directly.
 
+/**
+ * #632 david `xsgcg6` : the priority chevron now lives next to the
+ * checkbox (no Tag/decoration), so its color must be applied via
+ * `style="color: var(...)"`. PRIORITY_SEVERITY stays for any future
+ * Tag-style consumer ; this map is the bare CSS var name companion
+ * for icon-only rendering. `normal` has no color (caller skips render).
+ * Uses PrimeVue's --p-* color tokens so dark/light theme follow.
+ */
+export const PRIORITY_COLOR_VAR: Record<Priority, string> = {
+    urgent: "--p-red-500",
+    high: "--p-orange-500",
+    normal: "",
+    low: "--p-blue-500",
+};
+
 // =====================================================================
 //  Bulk action metadata
 // =====================================================================
