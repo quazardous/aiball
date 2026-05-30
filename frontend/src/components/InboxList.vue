@@ -8,6 +8,7 @@ import { attentionOf, lifecycleStage } from "../lib/ticket-state";
 import { formatTicketRef } from "../lib/formatting";
 import {
     INTENT_SEVERITY,
+    PRIORITY_ICON,
     PRIORITY_SEVERITY,
     LIFECYCLE_ICONS,
     STATUS_SEVERITY,
@@ -219,12 +220,15 @@ function onRowClick(r: InboxRow) {
                 :severity="r.intent ? INTENT_SEVERITY[r.intent] : 'secondary'"
                 style="font-size: 0.7rem"
             />
-            <!-- #B.222: priority badge — hidden when "normal" (default) so
-                 the chip row stays clean for the 90% of unprioritized tickets. -->
+            <!-- #B.222 + #632 : priority badge as icon only — hidden when
+                 "normal" (default). The icon series (double-up / up / down)
+                 reads as a relative-weight ladder ; severity color reinforces.
+                 ⏫ urgent / ↑ high / (nothing) normal / ↓ low. -->
             <Tag
                 v-if="r.priority && r.priority !== 'normal'"
-                :value="r.priority"
+                :icon="PRIORITY_ICON[r.priority]"
                 :severity="PRIORITY_SEVERITY[r.priority]"
+                :title="r.priority"
                 style="font-size: 0.7rem"
             />
             <TagBadge
