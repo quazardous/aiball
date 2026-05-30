@@ -45,6 +45,7 @@ export interface ProjectContext {
     claude_loop: {
         interval_seconds: number;
         boot_grace_seconds: number;
+        boot_min_seconds: number;
         user_grace_seconds: number;
         wake_in_flight_ttl_ms: number;
         esc_takeover: boolean;

@@ -53,6 +53,13 @@ claude_loop:
   # earlier if it detects the prompt.
   boot_grace_seconds: 60
 
+  # Floor INVIOLABLE — boot phase ne peut pas finir avant ce minimum
+  # (default 30 s). Couvre le flicker au démarrage où des hooks early
+  # peuvent prétendre que claude est ready avant qu'il ait vraiment
+  # dessiné son prompt. Rien n'autorise à quitter [boot] inside this
+  # window — pas le hook, pas la pane probe.
+  boot_min_seconds: 30
+
   # Grace window after a human prompt — auto-wakes stay skipped and
   # `AskUserQuestion` dialogs stay allowed until this many seconds elapse
   # since the last keystroke. SILENT on the bar (no visible word change)

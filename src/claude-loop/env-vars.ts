@@ -29,6 +29,7 @@ export const CL_ENV = {
     USER_GRACE_SEC: "CL_USER_GRACE_SEC",
     ASK_GRACE_SEC: "CL_ASK_GRACE_SEC",
     BOOT_GRACE_SEC: "CL_BOOT_GRACE_SEC",
+    BOOT_MIN_SEC: "CL_BOOT_MIN_SEC",
 
     // Wake coalesce / mutex windows (ms)
     PANE_BUSY_DELAY_MS: "CL_PANE_BUSY_DELAY_MS",

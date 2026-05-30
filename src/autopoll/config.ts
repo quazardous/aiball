@@ -127,6 +127,12 @@ export interface AiballConfig {
         interval_seconds: number;
         /** Boot-grace before settleBoot fires. CL_BOOT_GRACE_SEC. */
         boot_grace_seconds: number;
+        /** #629 david `2hwuan` : floor INVIOLABLE — boot phase ne peut PAS
+         *  finir avant ce minimum (default 30 s). Couvre le flicker au
+         *  démarrage où des hooks early pourraient prétendre que claude
+         *  est ready avant qu'il ait vraiment dessiné son prompt.
+         *  CL_BOOT_MIN_SEC. */
+        boot_min_seconds: number;
         /** User-took-over grace window. CL_USER_GRACE_SEC. */
         user_grace_seconds: number;
         /** Wake-in-flight marker TTL (#B.180). CL_WAKE_IN_FLIGHT_TTL_MS. */
@@ -275,6 +281,7 @@ const DEFAULTS: AiballConfig = {
         // magnitude, all yaml-overridable (#B.180, #B.185).
         interval_seconds: 30,
         boot_grace_seconds: 60,
+        boot_min_seconds: 30,
         user_grace_seconds: 60,
         wake_in_flight_ttl_ms: 2000,
         esc_takeover: true,
@@ -543,6 +550,9 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             }
             if (typeof cl.boot_grace_seconds === "number" && cl.boot_grace_seconds >= 0) {
                 cfg.claude_loop.boot_grace_seconds = cl.boot_grace_seconds;
+            }
+            if (typeof cl.boot_min_seconds === "number" && cl.boot_min_seconds >= 0) {
+                cfg.claude_loop.boot_min_seconds = cl.boot_min_seconds;
             }
             if (typeof cl.user_grace_seconds === "number" && cl.user_grace_seconds >= 0) {
                 cfg.claude_loop.user_grace_seconds = cl.user_grace_seconds;

@@ -33,6 +33,13 @@ export interface LoopStateInput {
      *  authoritative end-of-boot ; this cap fires only as a fail-safe
      *  for crashed hooks). Typically 300_000 (5 min). */
     bootGraceMs: number;
+    /** #629 david `2hwuan` : floor INVIOLABLE — boot phase ne peut PAS
+     *  finir avant `loopStartMs + bootMinMs`. Aucun signal externe
+     *  (bootComplete du hook, paneReady, etc.) ne peut court-circuiter
+     *  ce minimum. Couvre le flicker `loop`/`boot` au démarrage où des
+     *  hooks early peuvent prétendre que claude est ready avant qu'il
+     *  ait vraiment dessiné le prompt. Typiquement 30_000 (30 s). */
+    bootMinMs: number;
     /** #624 david `8pwvm3` : true while the Claude Code resume picker is
      *  on screen (set by `setResumePicker(true)` from `session-start-hook`).
      *  Stretches the boot phase indefinitely — users can take their time
@@ -130,25 +137,30 @@ export interface LoopStateView {
 // ---------------------------------------------------------------------------
 
 function isInBootGrace(input: LoopStateInput): boolean {
-    // #624 + #629 — explicit signals, priority order :
+    // #629 david `2hwuan` — modèle final floor + stretches + no-re-entry :
     //
-    //   1. `resumePickerActive` (set by session-start-hook) STRETCHES the
-    //      boot phase indefinitely. As long as the picker is on screen,
-    //      the user is "inside boot".
-    //   2. `bootComplete` (signalled by session-start-hook only with
-    //      confidence — sessionPicked / abort / non-resume) ENDS the
-    //      boot phase.
-    //   3. `paneReady` (set by the timer's pane probe, EXCLUDES picker
-    //      UI text and `Resuming…`/`Compacting…` loaders — see
-    //      refreshPaneMarkers) ENDS the boot phase. Covers the case
-    //      where the hook didn't signal (manual pick, --resume +
-    //      pickMode=abort, slow boot past hook timeout).
-    //   4. `bootGraceMs` time cap : SAFETY net only.
-    if (input.resumePickerActive) return true;
+    //   1. FLOOR INVIOLABLE : pendant `bootMinMs` (typ. 30 s), rien
+    //      n'autorise à quitter boot. Couvre le flicker au démarrage
+    //      où des hooks early peuvent prétendre que claude est ready
+    //      avant qu'il ait vraiment dessiné le prompt.
+    //   2. `bootComplete` marker = boot a SETTLED une fois ; on n'y
+    //      retourne JAMAIS. Garantit que /compact mid-session ne
+    //      ré-affiche pas le bar `[boot]` (option B strict de
+    //      `rjd3x4`). Écrit par session-start-hook avec confiance
+    //      ET par `bootEnded` event handler dans timer.ts.
+    //   3. Pré-settle, STRETCHES : tant que le picker est on screen,
+    //      tant que compacting est observé (post-resume), tant que le
+    //      prompt n'est pas visible → on reste en boot.
+    //   4. `bootGraceMs` SAFETY cap : settleBoot timeout dans timer.ts
+    //      forcera la sortie via setResumePicker(sd, false) qui écrit
+    //      bootComplete. La pure compute ici reste indépendante du cap.
+    const elapsed = input.nowMs - input.loopStartMs;
+    if (input.bootMinMs > 0 && elapsed < input.bootMinMs) return true;
     if (input.bootComplete) return false;
-    if (input.paneReady) return false;
-    if (input.bootGraceMs <= 0) return false;
-    return (input.nowMs - input.loopStartMs) < input.bootGraceMs;
+    if (input.resumePickerActive) return true;
+    if (input.paneCompacting) return true;
+    if (!input.paneReady) return true;
+    return false;
 }
 
 function isTypingNow(input: LoopStateInput): boolean {
@@ -243,8 +255,17 @@ function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: str
     if (manual) return { allowed: true, reason: null };
 
     if (isInBootGrace(input)) {
-        const leftS = Math.ceil((input.bootGraceMs - (input.nowMs - input.loopStartMs)) / 1000);
-        return { allowed: false, reason: `boot-grace ${leftS}s left (--wait: letting the human take over)` };
+        // #629 — boot peut être actif pour 3 raisons distinctes (floor /
+        // stretches / time cap), chacune avec une trace utile.
+        const elapsed = input.nowMs - input.loopStartMs;
+        if (input.bootMinMs > 0 && elapsed < input.bootMinMs) {
+            const leftS = Math.ceil((input.bootMinMs - elapsed) / 1000);
+            return { allowed: false, reason: `boot floor ${leftS}s left (inviolable)` };
+        }
+        if (input.resumePickerActive) return { allowed: false, reason: "boot stretched by resume picker" };
+        if (input.paneCompacting)     return { allowed: false, reason: "boot stretched by /compact" };
+        if (!input.paneReady)         return { allowed: false, reason: "boot — claude prompt not yet visible" };
+        return { allowed: false, reason: "boot phase (safety cap)" };
     }
     if (isUserGraceFresh(input)) {
         const secs = Math.floor(input.userGraceMs / 1000);

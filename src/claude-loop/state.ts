@@ -868,6 +868,9 @@ export function readLoopStateInput(
     // `setResumePicker(sd, false)` by session-start-hook). Bumped to
     // 5 min so a slow resume picker never trips it.
     const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 300)) * 1000;
+    // #629 david `2hwuan` : floor INVIOLABLE 30 s par défaut. cli.ts exporte
+    // le yaml `claude_loop.boot_min_seconds` via cette env var.
+    const bootMinMs = Math.max(0, Number(process.env[CL_ENV.BOOT_MIN_SEC] ?? 30)) * 1000;
     const resumePickerActive = existsSync(resumePickerActivePath(sd));
     const bootComplete = existsSync(bootCompletePath(sd));
     const noWait = process.env[CL_ENV.WAIT] === "0";
@@ -896,6 +899,7 @@ export function readLoopStateInput(
         nowMs,
         loopStartMs: startMs,
         bootGraceMs,
+        bootMinMs,
         resumePickerActive,
         bootComplete,
         paneBusy: existsSync(paneBusyPath(sd)),
@@ -1327,9 +1331,14 @@ export function classifyPaneSpecial(text: string, footerLines = 5): PaneSpecial 
         .filter((l) => l.length > 0)
         .slice(-footerLines)
         .join("\n");
-    if (/Compacting|compacting conversation|Summarizing the conversation/i.test(footer)) {
-        return "compacting";
-    }
+    // #629 david `2hwuan`+`yt3h5y` : tighten — require BOTH the "Compacting
+    // conversation" / "Summarizing the conversation" text AND a `NN%` digit-
+    // percent anywhere in the footer (live compaction always shows progress
+    // like `42%` or `(42%)`). Stale lines left in scrollback after compaction
+    // ended carry the text but no live percent → false positive éliminé.
+    const hasCompactingText = /Compacting conversation|Summarizing the conversation/i.test(footer);
+    const hasPercent = /\d+\s?%/.test(footer);
+    if (hasCompactingText && hasPercent) return "compacting";
     // rate-limit / api-error / overloaded are handled by error-backoff.ts
     // (#332) — they're errors, not internal busy states.
     return null;

@@ -47,9 +47,27 @@ test("fenêtre compte les lignes NON vides", () => {
 // Sans ça, un `✶ Compacting conversation… (42s)` qui traîne dans le scrollback
 // après `/compact` terminé reste matché et bloque tous les wakes pour toujours.
 
-test("classifyPaneSpecial: live compacting en footer → 'compacting'", () => {
-    const live = "● earlier output\n✶ Compacting conversation… (12s)\n  ⏵⏵ auto mode on · esc to interrupt";
+// #629 david `2hwuan`+`yt3h5y` : la classification exige MAINTENANT à la
+// fois le texte "Compacting conversation" ET un `NN%` quelque part dans
+// le footer. Le live affiche un progrès en pourcentage ; le stale n'en a
+// jamais (le timer affichait juste `(42s)` historiquement).
+
+test("classifyPaneSpecial: live compacting avec NN% → 'compacting'", () => {
+    const live = "● earlier output\n✶ Compacting conversation… 42%\n  ⏵⏵ auto mode on · esc to interrupt";
     assert.equal(classifyPaneSpecial(live), "compacting");
+});
+
+test("classifyPaneSpecial: 'Compacting conversation' SANS % → null (yt3h5y guard)", () => {
+    // Le `(12s)` ancien-style n'a pas de %. Sans % → on ne pin pas le marker.
+    const noPercent = "● earlier output\n✶ Compacting conversation… (12s)\n  esc to interrupt";
+    assert.equal(classifyPaneSpecial(noPercent), null);
+});
+
+test("classifyPaneSpecial: % et 'Compacting' sur lignes différentes → 'compacting'", () => {
+    // david `yt3h5y` : pas forcément sur la même ligne — n'importe où dans
+    // le footer suffit.
+    const multiline = "✶ Compacting conversation…\n  progress: 42%\n  esc to interrupt";
+    assert.equal(classifyPaneSpecial(multiline), "compacting");
 });
 
 test("classifyPaneSpecial: stale 'Compacting' dans le scrollback (prompt revenu) → null", () => {
@@ -59,6 +77,12 @@ test("classifyPaneSpecial: stale 'Compacting' dans le scrollback (prompt revenu)
     const stale = "✶ Compacting conversation… (42s)";
     const filler = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n");
     assert.equal(classifyPaneSpecial(`${stale}\n${filler}\n${prompt}`), null);
+});
+
+test("classifyPaneSpecial: % sans 'Compacting' (progress bar quelconque) → null", () => {
+    // Une autre ligne avec % (build, download…) ne doit pas matcher.
+    const other = "Downloading model… 42%\n  esc to interrupt";
+    assert.equal(classifyPaneSpecial(other), null);
 });
 
 test("classifyPaneSpecial: pane idle normal → null", () => {
@@ -75,8 +99,8 @@ test("snapshotPane: stale 'Compacting' scrollback + prompt → busy:false specia
     assert.equal(snap.special, null);
 });
 
-test("snapshotPane: live compacting (esc to interrupt + Compacting au footer) → busy:true special:'compacting'", () => {
-    const live = "● earlier\n✶ Compacting conversation… (12s)\n  ⏵⏵ auto mode on · esc to interrupt";
+test("snapshotPane: live compacting (esc to interrupt + Compacting NN% au footer) → busy:true special:'compacting'", () => {
+    const live = "● earlier\n✶ Compacting conversation… 42%\n  ⏵⏵ auto mode on · esc to interrupt";
     const snap = snapshotPane(live);
     assert.equal(snap.busy, true);
     assert.equal(snap.special, "compacting");

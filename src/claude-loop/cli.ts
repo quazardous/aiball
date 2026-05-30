@@ -520,6 +520,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const interval = opts.interval ?? ctx.claude_loop.interval_seconds;
     const userGraceSec = opts.userGraceSec ?? ctx.claude_loop.user_grace_seconds;
     const bootGraceSec = ctx.claude_loop.boot_grace_seconds; // no CLI flag yet — yaml-only
+    const bootMinSec = ctx.claude_loop.boot_min_seconds; // #629 — yaml-only floor
     const wakeInFlightTtlMs = ctx.claude_loop.wake_in_flight_ttl_ms; // yaml-only
     const escTakeover = ctx.claude_loop.esc_takeover; // #345, yaml-only
     const askGraceSec = ctx.claude_loop.ask_grace_seconds; // #351, yaml-only
@@ -584,6 +585,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export CL_USER_GRACE_SEC=${shQuote(String(userGraceSec))}`,
         // #B.180: boot-grace + wake-in-flight TTL, yaml-only knobs.
         `export CL_BOOT_GRACE_SEC=${shQuote(String(bootGraceSec))}`,
+        // #629 david `2hwuan` : floor inviolable (default 30 s).
+        `export CL_BOOT_MIN_SEC=${shQuote(String(bootMinSec))}`,
         `export CL_WAKE_IN_FLIGHT_TTL_MS=${shQuote(String(wakeInFlightTtlMs))}`,
         // #345: bare ESC in the pane = human takeover (PTY proxy arms user-grace).
         `export CL_ESC_TAKEOVER=${shQuote(escTakeover ? "1" : "0")}`,

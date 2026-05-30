@@ -28,14 +28,21 @@ const MIN = 60 * SEC;
  *  Mirrors the real defaults : 60s boot-grace, 5s typing TTL, 10min
  *  user-grace, 2s wake-in-flight TTL. */
 function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
+    // #629 david `2hwuan` : new default = post-boot, claude ready. The OLD
+    // baseInput defaulted to inside-boot via no signals + time-cap exit ;
+    // the new model has no time-cap exit (settleBoot in timer.ts seals
+    // bootComplete via setResumePicker). Tests that need boot phase set
+    // `bootComplete: false` + `paneReady: false` explicitly, or rely on
+    // the 30s floor (nowMs within bootMinMs of loopStartMs).
     return {
         nowMs: T0,
         loopStartMs: T0,
         bootGraceMs: 60 * SEC,
+        bootMinMs: 30 * SEC,
         resumePickerActive: false,
-        bootComplete: false,
+        bootComplete: true,
         paneBusy: false,
-        paneReady: false,
+        paneReady: true,
         paneCompacting: false,
         paneInterrupted: false,
         noWait: false,
@@ -69,7 +76,7 @@ test("boot phase under --wait, picker not yet rendered", () => {
     // The first failing gate wins — during boot the idle-marker isn't
     // written yet (settleBoot writes it at T+grace), so that reason
     // surfaces before the boot-grace check.
-    assert.match(v.wakeSkipReason ?? "", /no idle marker|boot-grace/);
+    assert.match(v.wakeSkipReason ?? "", /no idle marker|boot floor|boot phase|boot — /);
 });
 
 test("boot phase with idle marker (rare race) → boot-grace gate wins", () => {
@@ -78,17 +85,17 @@ test("boot phase with idle marker (rare race) → boot-grace gate wins", () => {
         idleSinceMs: T0 + 4 * SEC,
     }));
     assert.equal(v.wakeAllowed, false);
-    assert.match(v.wakeSkipReason ?? "", /boot-grace/);
+    // #629 — at T+5s with 30s floor, the inviolable floor branch fires first.
+    assert.match(v.wakeSkipReason ?? "", /boot floor/);
 });
 
-test("boot phase under --no-wait + picker active → boot stretches (picker wins over paneReady)", () => {
+test("boot phase under --no-wait + picker active → boot stretches (picker pre-settle)", () => {
     const v = computeLoopView(baseInput({
         nowMs: T0 + 30 * SEC,
         noWait: true,
         paneBusy: false,
-        // Picker is up : refreshPaneMarkers writes paneReady=false even
-        // when prompt regex matches (splash leak). Simulate that.
         paneReady: false,
+        bootComplete: false,    // #629 — pre-settle
         resumePickerActive: true,
     }));
     assert.equal(v.phase, "boot");
@@ -119,14 +126,19 @@ test("LoopStateBus: second update with same view → no emit", () => {
 });
 
 test("LoopStateBus: bootEnded fires when inBootGrace flips true→false", () => {
+    // #629 — past the inviolable 30s floor for bootComplete to take effect.
     const bus = new LoopStateBus();
-    bus.update(baseInput({ nowMs: T0 + 5 * SEC })); // in boot
+    bus.update(baseInput({
+        nowMs: T0 + 45 * SEC, loopStartMs: T0,
+        bootComplete: false, paneReady: false,  // explicitly in boot
+    }));
     let fired = false;
     bus.on("bootEnded", () => { fired = true; });
     bus.update(baseInput({
-        nowMs: T0 + 5 * SEC,
+        nowMs: T0 + 45 * SEC,
+        loopStartMs: T0,
         bootComplete: true,
-        idleSinceMs: T0 + 5 * SEC,
+        idleSinceMs: T0 + 45 * SEC,
     }));
     assert.equal(fired, true);
 });
@@ -231,15 +243,20 @@ test("LoopStateBus: pickerOpened / pickerClosed fire on resumePickerActive flips
 test("LoopStateBus: barWordChanged + phaseChanged fire independently", () => {
     const bus = new LoopStateBus();
     const start = T0;
-    bus.update(baseInput({ nowMs: start + 5 * SEC })); // boot
+    // #629 — past 30s floor so bootComplete can take effect.
+    bus.update(baseInput({
+        nowMs: start + 45 * SEC, loopStartMs: start,
+        bootComplete: false, paneReady: false,  // explicitly in boot
+    }));
     const words: [string, string][] = [];
     const phases: [string, string][] = [];
     bus.on("barWordChanged", (p, n) => words.push([p, n]));
     bus.on("phaseChanged", (p, n) => phases.push([p, n]));
     bus.update(baseInput({
-        nowMs: start + 5 * SEC,
+        nowMs: start + 45 * SEC,
+        loopStartMs: start,
         bootComplete: true,
-        idleSinceMs: start + 5 * SEC,
+        idleSinceMs: start + 45 * SEC,
     }));
     assert.deepEqual(words, [["boot", "loop"]]);
     assert.deepEqual(phases, [["boot", "idle"]]);
@@ -596,11 +613,14 @@ test("post-boot + idle → phase = idle", () => {
 //  Edge cases — empty file, expired-but-present, zero boot-grace
 // ---------------------------------------------------------------------------
 
-test("zero boot-grace → never in boot phase", () => {
+test("zero boot-grace + zero floor + paneReady → never in boot phase", () => {
     const v = computeLoopView(baseInput({
         nowMs: T0,
         loopStartMs: T0,
         bootGraceMs: 0,
+        bootMinMs: 0,
+        bootComplete: true,   // #629 sealed
+        paneReady: true,
         idleSinceMs: T0,
     }));
     assert.equal(v.inBootGrace, false);
@@ -711,12 +731,17 @@ test("canArmAfk10mOnTyping : true post-boot in NOT AFK 10m (refreshes)", () => {
 
 test("canPaintStopOnTyping : false in boot-grace, true after", () => {
     assert.equal(canPaintStopOnTyping(baseInput({ nowMs: T0 + 5 * SEC })), false);
-    assert.equal(canPaintStopOnTyping(baseInput({ nowMs: T0 + 90 * SEC, loopStartMs: T0 })), true);
+    // #629 : post-floor requires bootComplete (or paneReady) to leave boot.
+    assert.equal(canPaintStopOnTyping(baseInput({
+        nowMs: T0 + 90 * SEC, loopStartMs: T0, bootComplete: true,
+    })), true);
 });
 
 test("canFlipBgFromBoot : false in boot-grace, true after", () => {
     assert.equal(canFlipBgFromBoot(baseInput({ nowMs: T0 + 5 * SEC })), false);
-    assert.equal(canFlipBgFromBoot(baseInput({ nowMs: T0 + 90 * SEC, loopStartMs: T0 })), true);
+    assert.equal(canFlipBgFromBoot(baseInput({
+        nowMs: T0 + 90 * SEC, loopStartMs: T0, bootComplete: true,
+    })), true);
 });
 
 test("shouldArmAfk10mOnSettleBoot : true under --wait, false under --no-wait", () => {
@@ -787,6 +812,8 @@ test("resume picker active 10 min in → still in boot (no time cap)", () => {
         nowMs: now,
         loopStartMs: start,
         bootGraceMs: 5 * MIN, // legacy cap < elapsed time
+        bootComplete: false,  // #629 — pre-settle
+        paneReady: false,
         resumePickerActive: true,
     }));
     assert.equal(v.inBootGrace, true);
@@ -794,22 +821,34 @@ test("resume picker active 10 min in → still in boot (no time cap)", () => {
     assert.equal(v.phase, "boot");
 });
 
-test("bootComplete signal flips boot OFF immediately, regardless of time cap", () => {
+test("bootComplete signal flips boot OFF post-floor (floor still wins inside)", () => {
+    // #629 david `2hwuan` : floor is INVIOLABLE — bootComplete cannot
+    // short-circuit it. Test both sides of the floor.
     const start = T0;
-    const now = start + 5 * SEC; // way inside time cap
-    const v = computeLoopView(baseInput({
-        nowMs: now,
+    // Inside floor (T+5s, default 30s floor) : still boot despite bootComplete.
+    const inside = computeLoopView(baseInput({
+        nowMs: start + 5 * SEC,
         loopStartMs: start,
         bootComplete: true,
-        idleSinceMs: now,
+        idleSinceMs: start,
     }));
-    assert.equal(v.inBootGrace, false);
-    assert.equal(v.barWord, "loop");
+    assert.equal(inside.inBootGrace, true);
+    assert.equal(inside.barWord, "boot");
+    // Past floor (T+45s) : bootComplete flips out of boot.
+    const past = computeLoopView(baseInput({
+        nowMs: start + 45 * SEC,
+        loopStartMs: start,
+        bootComplete: true,
+        idleSinceMs: start + 44 * SEC,
+    }));
+    assert.equal(past.inBootGrace, false);
+    assert.equal(past.barWord, "loop");
 });
 
-test("picker active wins over bootComplete (re-entered picker race)", () => {
-    // Defensive : if both markers somehow exist, picker active takes
-    // priority — the user is interacting with a picker right now.
+test("bootComplete wins over picker post-floor (no re-entry once sealed)", () => {
+    // #629 david `rjd3x4` : once bootComplete is sealed, NOTHING can
+    // re-enter boot — not picker (defensive race) nor paneCompacting
+    // (mid-session /compact). The sealed marker is authoritative.
     const start = T0;
     const now = start + 2 * MIN;
     const v = computeLoopView(baseInput({
@@ -817,32 +856,83 @@ test("picker active wins over bootComplete (re-entered picker race)", () => {
         loopStartMs: start,
         resumePickerActive: true,
         bootComplete: true,
-    }));
-    assert.equal(v.inBootGrace, true);
-    assert.equal(v.barWord, "boot");
-});
-
-test("no signal + time cap exceeded → boot ends as safety", () => {
-    // Hook crashed / never ran → fall back to the time-based cap.
-    const start = T0;
-    const now = start + 6 * MIN; // past 5 min cap
-    const v = computeLoopView(baseInput({
-        nowMs: now,
-        loopStartMs: start,
-        bootGraceMs: 5 * MIN,
         idleSinceMs: now,
     }));
     assert.equal(v.inBootGrace, false);
     assert.equal(v.barWord, "loop");
 });
 
-test("no signal + within time cap → still boot (initial loading window)", () => {
+test("paneReady=true post-floor → boot ends (probe-driven settle)", () => {
+    // #629 : pure-compute settles via paneReady when no bootComplete signal
+    // yet. The bus's bootEnded event handler in timer.ts seals bootComplete
+    // immediately after — this test exercises the first transition.
     const start = T0;
-    const now = start + 30 * SEC;
+    const now = start + 45 * SEC; // past 30s floor
     const v = computeLoopView(baseInput({
         nowMs: now,
         loopStartMs: start,
-        bootGraceMs: 5 * MIN,
+        paneReady: true,
+        idleSinceMs: now,
+    }));
+    assert.equal(v.inBootGrace, false);
+    assert.equal(v.barWord, "loop");
+});
+
+test("paneReady=false post-floor → still boot (claude not at prompt yet)", () => {
+    // The pane probe writes paneReady=false while the splash / loading is
+    // visible. State stays boot until probe sees the prompt.
+    const start = T0;
+    const now = start + 45 * SEC;
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        bootComplete: false,    // #629 — pre-settle, no hook signal yet
+        paneReady: false,
+    }));
+    assert.equal(v.inBootGrace, true);
+    assert.equal(v.barWord, "boot");
+});
+
+test("paneCompacting stretches boot only PRE-settle (post-resume compact)", () => {
+    const start = T0;
+    const now = start + 45 * SEC;
+    // Pre-settle : compacting after resume → boot stretches.
+    const pre = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        paneCompacting: true,
+        paneReady: false,
+        bootComplete: false,
+    }));
+    assert.equal(pre.inBootGrace, true);
+    assert.equal(pre.barWord, "boot");
+    // Post-settle : mid-session /compact does NOT re-enter boot.
+    const post = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        paneCompacting: true,
+        paneReady: true,
+        bootComplete: true,   // sealed by earlier bootEnded
+        paneBusy: true,        // claude is in a turn doing the compaction
+        idleSinceMs: now,
+    }));
+    assert.equal(post.inBootGrace, false);
+    assert.equal(post.phase, "busy");
+    assert.equal(post.barWord, "loop");
+});
+
+test("floor inviolable : no signal can leave boot before bootMinMs elapses", () => {
+    // #629 david `2hwuan` : floor 30s — every "we're ready" signal is
+    // ignored inside the floor. Covers Bug 1 (loop/boot flicker startup)
+    // and Bug 2 (BG gray during picker before hook fires).
+    const start = T0;
+    const now = start + 15 * SEC; // inside 30s floor
+    const v = computeLoopView(baseInput({
+        nowMs: now,
+        loopStartMs: start,
+        bootComplete: true,
+        paneReady: true,
+        idleSinceMs: now,
     }));
     assert.equal(v.inBootGrace, true);
     assert.equal(v.barWord, "boot");

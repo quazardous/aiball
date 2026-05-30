@@ -908,7 +908,35 @@ async function mainSse(): Promise<void> {
         // the pushed view — but the timer is the ORIGIN of the value.
         logBarPaint(sd, "timer.ts:bus.transition", next.barWord);
     });
-    loopBus.on("bootEnded", () => log("state-bus: boot phase ended"));
+    // #629 david `2hwuan` — sceller la fin de boot : écrit bootComplete
+    // marker via setResumePicker(sd, false). Une fois posé, isInBootGrace
+    // early-return false ad vitam, donc /compact mid-session ne peut pas
+    // ré-entrer en boot (option B strict).
+    loopBus.on("bootEnded", () => {
+        log("state-bus: boot phase ended — sealing bootComplete marker");
+        try { setResumePicker(sd!, false); } catch { /* best-effort */ }
+    });
+    // #629 — fast probe 1s pendant boot. Arme au start (on est forcément
+    // en boot à T0 via le floor), désarme sur bootEnded, ré-arme sur
+    // bootStarted (n'arrive qu'en theory — bootComplete bloque la
+    // ré-entrée, mais ceinture+bretelle).
+    let fastProbeTimer: NodeJS.Timeout | null = null;
+    const armFastProbe = (): void => {
+        if (fastProbeTimer) return;
+        fastProbeTimer = setInterval(() => {
+            try { refreshPaneMarkers(); } catch { /* best-effort */ }
+        }, 1000);
+        log("fast-probe: armed (1s cadence during boot)");
+    };
+    const disarmFastProbe = (): void => {
+        if (!fastProbeTimer) return;
+        clearInterval(fastProbeTimer);
+        fastProbeTimer = null;
+        log("fast-probe: disarmed (boot ended)");
+    };
+    armFastProbe();
+    loopBus.on("bootEnded", disarmFastProbe);
+    loopBus.on("bootStarted", armFastProbe);
     loopBus.on("afkArmed10m", (expiry) => log(`state-bus: AFK 10m armed (expires ${new Date(expiry).toISOString()})`));
     loopBus.on("afkArmedInf", () => log("state-bus: AFK ∞ armed"));
     loopBus.on("afkCleared", () => log("state-bus: AFK cleared"));
