@@ -677,6 +677,16 @@ export class AiballClient {
         );
     }
 
+    /** #634 david `svzkpw` — push a turn's token-usage delta onto a PROJECT
+     *  (no-marker fallback path in the Stop-hook). Additive ; best-effort. */
+    postProjectTokenUsage(project: string, u: { in: number; out: number; cacheW: number; cacheR: number }) {
+        return this.http(
+            "POST",
+            `/api/projects/${encodeURIComponent(project)}/token-usage`,
+            { in: u.in, out: u.out, cache_w: u.cacheW, cache_r: u.cacheR },
+        );
+    }
+
     /**
      * #B.177 B1: push the current claude-loop state for this consumer
      * (own-state only — the daemon refuses cross-consumer pushes).

@@ -291,16 +291,38 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.ticketTokenUsage.ticketId))
         .groupBy(schema.tickets.project)
         .all();
+    // #634 david `svzkpw` — sum direct project tokens into the same aggregate.
+    // A project's total cost = SUM(its tickets' usage) + this row.
+    const directAgg = db.select().from(schema.projectTokenUsage).all();
+    const directByProject = new Map<string, typeof directAgg[number]>();
+    for (const d of directAgg) directByProject.set(d.project, d);
     for (const tk of tokenAgg) {
         const cur = byProject.get(tk.project);
-        const total = Number(tk.tokens_in) + Number(tk.tokens_out) + Number(tk.cache_w) + Number(tk.cache_r);
+        const direct = directByProject.get(tk.project);
+        directByProject.delete(tk.project);   // consumed
+        const tokens_in = Number(tk.tokens_in) + (direct?.tokensIn ?? 0);
+        const tokens_out = Number(tk.tokens_out) + (direct?.tokensOut ?? 0);
+        const cache_w = Number(tk.cache_w) + (direct?.cacheW ?? 0);
+        const cache_r = Number(tk.cache_r) + (direct?.cacheR ?? 0);
+        const total = tokens_in + tokens_out + cache_w + cache_r;
+        if (cur && total > 0) {
+            const updated_at = direct && (tk.updated_at ?? "") < direct.updatedAt
+                ? direct.updatedAt : (tk.updated_at ?? "");
+            cur.token_usage = { tokens_in, tokens_out, cache_w, cache_r, updated_at };
+        }
+    }
+    // #634 — projects with ONLY direct tokens (no tickets with usage yet)
+    // still need their tally surfaced.
+    for (const [project, d] of directByProject) {
+        const cur = byProject.get(project);
+        const total = d.tokensIn + d.tokensOut + d.cacheW + d.cacheR;
         if (cur && total > 0) {
             cur.token_usage = {
-                tokens_in: Number(tk.tokens_in),
-                tokens_out: Number(tk.tokens_out),
-                cache_w: Number(tk.cache_w),
-                cache_r: Number(tk.cache_r),
-                updated_at: tk.updated_at ?? "",
+                tokens_in: d.tokensIn,
+                tokens_out: d.tokensOut,
+                cache_w: d.cacheW,
+                cache_r: d.cacheR,
+                updated_at: d.updatedAt,
             };
         }
     }

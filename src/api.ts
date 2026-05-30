@@ -21,6 +21,7 @@ import {
     getProjectStats,
     isHuman,
     type Strategy,
+    addProjectTokenUsage,
 } from "./db.js";
 import { existsSync, unlinkSync, statSync, readdirSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -129,6 +130,21 @@ api.patch("/projects/:project/strategy", (req: Request, res: Response) => {
     setProjectStrategy(project, s as Strategy);
     broadcast({ type: "strategy_changed", data: { project, strategy: s } });
     res.json({ project, strategy: s, global: getStrategy() });
+});
+
+/**
+ * #634 david `svzkpw` — push a turn's token-usage delta onto a PROJECT
+ * (called by the claude-loop Stop-hook's no-marker fallback path).
+ * Additive — accumulates. Body: `{ in?, out?, cache_w?, cache_r? }`.
+ * Symmetric to POST /tickets/:id/token-usage.
+ */
+api.post("/projects/:project/token-usage", (req: Request, res: Response) => {
+    const project = String(req.params.project ?? "");
+    if (!project) return badRequest(res, "project required");
+    const b = (req.body ?? {}) as { in?: unknown; out?: unknown; cache_w?: unknown; cache_r?: unknown };
+    const n = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0);
+    addProjectTokenUsage(project, { in: n(b.in), out: n(b.out), cacheW: n(b.cache_w), cacheR: n(b.cache_r) });
+    res.json({ project, ok: true });
 });
 
 // -------- messages -------------------------------------------------------

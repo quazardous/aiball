@@ -125,6 +125,43 @@ test("#404 captureTokenUsage: no marker → no push, but still records the id (n
     } finally { rmSync(tdir, { recursive: true, force: true }); rmSync(sdir, { recursive: true, force: true }); }
 });
 
+test("#634 captureTokenUsage: no marker + fallbackProject → pushed-project", async () => {
+    const tdir = tmp(); const sdir = tmp();
+    try {
+        writeFileSync(join(tdir, "s.jsonl"), turn("msg_634", { input_tokens: 11, output_tokens: 22, cache_creation_input_tokens: 3, cache_read_input_tokens: 44 }));
+        const projectPushed: Array<{ p: string; u: TurnUsage }> = [];
+        const r = await captureTokenUsage({
+            transcriptDir: tdir, stateDir: sdir,
+            postUsage: () => { throw new Error("must not push to ticket — no marker"); },
+            fallbackProject: "aiball",
+            postProjectUsage: (p, u) => { projectPushed.push({ p, u }); },
+        });
+        assert.equal(projectPushed.length, 1);
+        assert.equal(projectPushed[0].p, "aiball");
+        assert.deepEqual(projectPushed[0].u, { id: "msg_634", in: 11, out: 22, cacheW: 3, cacheR: 44 });
+        assert.deepEqual(r, {
+            status: "pushed-project", project: "aiball",
+            turn: { id: "msg_634", in: 11, out: 22, cacheW: 3, cacheR: 44 },
+        });
+    } finally { rmSync(tdir, { recursive: true, force: true }); rmSync(sdir, { recursive: true, force: true }); }
+});
+
+test("#634 captureTokenUsage: fallbackProject without postProjectUsage → still no-marker", async () => {
+    // Defensive : if the caller wires fallbackProject without the post fn,
+    // we DON'T try anything (no-op) and surface no-marker as before.
+    const tdir = tmp(); const sdir = tmp();
+    try {
+        writeFileSync(join(tdir, "s.jsonl"), turn("msg_x", { input_tokens: 1, output_tokens: 1 }));
+        const r = await captureTokenUsage({
+            transcriptDir: tdir, stateDir: sdir,
+            postUsage: () => { throw new Error("nope"); },
+            fallbackProject: "aiball",
+            // no postProjectUsage
+        });
+        assert.deepEqual(r, { status: "no-marker", id: "msg_x" });
+    } finally { rmSync(tdir, { recursive: true, force: true }); rmSync(sdir, { recursive: true, force: true }); }
+});
+
 test("#404 captureTokenUsage: no transcript dir → no-file (the #404 bug surface)", async () => {
     const sdir = tmp();
     try {

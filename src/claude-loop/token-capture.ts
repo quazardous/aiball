@@ -90,12 +90,15 @@ export function activeTicketMarkerPath(stateDir: string): string {
  * david `wezr82` "y a eu un enregistrement mais là ça bouge plus").
  */
 export type CaptureResult =
-    | { status: "no-file" }                                   // transcript dir empty / wrong
-    | { status: "no-turn" }                                   // no assistant turn with usage
-    | { status: "deduped"; id: string }                       // this turn already pushed
-    | { status: "no-marker"; id: string }                     // no active-ticket focus
-    | { status: "push-failed"; ticketId: number; id: string } // marker ok, POST threw
-    | { status: "pushed"; ticketId: number; turn: TurnUsage }; // success
+    | { status: "no-file" }                                       // transcript dir empty / wrong
+    | { status: "no-turn" }                                       // no assistant turn with usage
+    | { status: "deduped"; id: string }                           // this turn already pushed
+    | { status: "no-marker"; id: string }                         // no active-ticket + no fallback project
+    | { status: "push-failed"; ticketId: number; id: string }     // marker ok, POST threw
+    | { status: "pushed"; ticketId: number; turn: TurnUsage }     // ticket success
+    // #634 david `svzkpw` — no marker but project fallback configured
+    | { status: "pushed-project"; project: string; turn: TurnUsage }
+    | { status: "project-push-failed"; project: string; id: string };
 
 /**
  * Read each turn's usage once and push it to the active ticket. Best-effort:
@@ -117,6 +120,17 @@ export async function captureTokenUsage(opts: {
      * is counted ONCE whichever drains it first.
      */
     targetTicketId?: number;
+    /**
+     * #634 david `svzkpw` — when set, push the turn's usage to THIS project's
+     * direct tally if no ticket marker is found. The Stop-hook passes the
+     * loop's `AIBALL_PROJECT` env. Without this, no-marker turns are lost.
+     */
+    fallbackProject?: string;
+    /**
+     * #634 — companion to `postUsage`, called when the no-marker fallback
+     * fires. Injected by the hook (a client call) so this module stays pure.
+     */
+    postProjectUsage?: (project: string, u: TurnUsage) => Promise<unknown> | void;
 }): Promise<CaptureResult> {
     const file = latestSessionFile(opts.transcriptDir);
     if (!file) return { status: "no-file" };
@@ -144,15 +158,23 @@ export async function captureTokenUsage(opts: {
     // push so we don't re-scan it (statistical by design).
     try { writeFileSync(lastIdPath, turn.id); } catch { /* best-effort */ }
 
-    let pushed = false;
     if (hasMarker) {
+        let pushed = false;
         // Awaited so the hook doesn't exit before the request flushes; wrapped
         // so a failed push never throws into the wake path (best-effort).
         try { await opts.postUsage(ticketId, turn); pushed = true; } catch { /* best-effort */ }
+        return pushed
+            ? { status: "pushed", ticketId, turn }
+            : { status: "push-failed", ticketId, id: turn.id };
     }
 
-    if (!hasMarker) return { status: "no-marker", id: turn.id };
-    return pushed
-        ? { status: "pushed", ticketId, turn }
-        : { status: "push-failed", ticketId, id: turn.id };
+    // #634 — no marker : fall back to the loop's project tally if configured.
+    if (opts.fallbackProject && opts.postProjectUsage) {
+        let pushed = false;
+        try { await opts.postProjectUsage(opts.fallbackProject, turn); pushed = true; } catch { /* best-effort */ }
+        return pushed
+            ? { status: "pushed-project", project: opts.fallbackProject, turn }
+            : { status: "project-push-failed", project: opts.fallbackProject, id: turn.id };
+    }
+    return { status: "no-marker", id: turn.id };
 }

@@ -63,3 +63,39 @@ export function getTicketTokenUsage(ticket_ids: number[]): Map<number, TokenTall
     }
     return out;
 }
+
+/** #634 david `svzkpw` — add a turn's usage to a PROJECT (upsert + accumulate).
+ *  Mirror of `addTicketTokenUsage` for the Stop-hook's no-marker path :
+ *  tokens consumed in a direct session (no ticket-scoped MCP call) land
+ *  here keyed by project name. */
+export function addProjectTokenUsage(project: string, d: TokenDelta): void {
+    const now = nowIso();
+    const i = d.in ?? 0, o = d.out ?? 0, cw = d.cacheW ?? 0, cr = d.cacheR ?? 0;
+    getDb().insert(schema.projectTokenUsage).values({
+        project,
+        tokensIn: i, tokensOut: o, cacheW: cw, cacheR: cr,
+        updatedAt: now,
+    }).onConflictDoUpdate({
+        target: schema.projectTokenUsage.project,
+        set: {
+            tokensIn: sql`${schema.projectTokenUsage.tokensIn} + ${i}`,
+            tokensOut: sql`${schema.projectTokenUsage.tokensOut} + ${o}`,
+            cacheW: sql`${schema.projectTokenUsage.cacheW} + ${cw}`,
+            cacheR: sql`${schema.projectTokenUsage.cacheR} + ${cr}`,
+            updatedAt: now,
+        },
+    }).run();
+}
+
+/** #634 — read accumulated direct tally for a project (absent = no direct
+ *  usage yet, returns null). */
+export function getProjectTokenUsage(project: string): TokenTally | null {
+    const rows = getDb().select().from(schema.projectTokenUsage)
+        .where(sql`${schema.projectTokenUsage.project} = ${project}`).all();
+    const r = rows[0];
+    if (!r) return null;
+    return {
+        tokens_in: r.tokensIn, tokens_out: r.tokensOut,
+        cache_w: r.cacheW, cache_r: r.cacheR, updated_at: r.updatedAt,
+    };
+}

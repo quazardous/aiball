@@ -186,7 +186,9 @@ export {
 } from "./db/tickets.js";
 export {
     addTicketTokenUsage,
+    addProjectTokenUsage,
     getTicketTokenUsage,
+    getProjectTokenUsage,
     type TokenDelta,
     type TokenTally,
 } from "./db/token-usage.js";

@@ -637,6 +637,23 @@ export const ticketTokenUsage = sqliteTable("ticket_token_usage", {
     updatedAt: text("updated_at").notNull(),
 });
 
+/**
+ * #634 david `svzkpw` — per-project DIRECT token-effort tally. Sink for
+ * the Stop-hook's `no-marker` path : a turn that ran outside any
+ * ticket-scoped MCP call (user typed a prompt directly, no engage, no
+ * tool call setting `active-ticket`). Tokens land here keyed by the
+ * loop's AIBALL_PROJECT env. Project cost = SUM(ticket usage in project)
+ * + this row.
+ */
+export const projectTokenUsage = sqliteTable("project_token_usage", {
+    project: text("project").primaryKey(),
+    tokensIn: integer("tokens_in").notNull().default(0),
+    tokensOut: integer("tokens_out").notNull().default(0),
+    cacheW: integer("cache_w").notNull().default(0),
+    cacheR: integer("cache_r").notNull().default(0),
+    updatedAt: text("updated_at").notNull(),
+});
+
 // ---- inferred types ------------------------------------------------------
 
 export type Project = typeof projects.$inferSelect;
@@ -674,3 +691,4 @@ export type Token = typeof tokens.$inferSelect;
 export type NewTokenRow = typeof tokens.$inferInsert;
 
 export type TicketTokenUsage = typeof ticketTokenUsage.$inferSelect;
+export type ProjectTokenUsage = typeof projectTokenUsage.$inferSelect;

@@ -323,6 +323,13 @@
       "when": 1782100000000,
       "tag": "0045_tokens_display_host",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1782200000000,
+      "tag": "0046_project_token_usage",
+      "breakpoints": true
     }
   ]
 }

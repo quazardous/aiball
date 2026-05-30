@@ -129,14 +129,23 @@ function readPane(): string {
     // ever capturing → only the rare non-busy turn was counted. Capture is
     // independent of the wake logic; awaited so the POST flushes; never throws.
     try {
+        // #634 david `svzkpw` — pass the loop's project as the no-marker
+        // fallback : a direct session (no ticket-scoped MCP call) attributes
+        // its turn tokens to the project tally instead of dropping them.
+        const fallbackProject = process.env.AIBALL_PROJECT || undefined;
         const cap = await captureTokenUsage({
             transcriptDir: projectTranscriptDir(process.cwd()),
             stateDir: sd!,
             postUsage: (ticketId, u) => new AiballClient().postTokenUsage(ticketId, u),
+            fallbackProject,
+            postProjectUsage: (project, u) => new AiballClient().postProjectTokenUsage(project, u),
         });
         const detail = cap.status === "pushed"
             ? ` #${cap.ticketId} (+in${cap.turn.in}/out${cap.turn.out}/cw${cap.turn.cacheW}/cr${cap.turn.cacheR})`
+            : cap.status === "pushed-project"
+            ? ` ${cap.project} (+in${cap.turn.in}/out${cap.turn.out}/cw${cap.turn.cacheW}/cr${cap.turn.cacheR})`
             : "ticketId" in cap ? ` #${cap.ticketId}`
+            : "project" in cap ? ` ${cap.project}`
             : "id" in cap ? ` ${cap.id}` : "";
         log(`  token-capture: ${cap.status}${detail}`);
     } catch (e) { log(`  token-capture: ERROR ${(e as Error).message ?? String(e)}`); }
