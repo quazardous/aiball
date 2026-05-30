@@ -1444,7 +1444,21 @@ def main(argv):
         if dec.get("forward"):
             os.write(master_fd, dec["forward"])
         word = dec.get("word")
-        if word == "stop":
+        # #629 david `yrvy8r` — pendant la phase boot, le bus est AUTORITÉ
+        # sur le bar word. Le _Decider local décide stop/rest sans connaître
+        # l'état boot du timer (notamment sous --no-wait où in_boot local = False
+        # immédiatement). Si la dernière view pushée dit `barWord=boot`, on
+        # FIGE le mot à `boot` ici — sinon le proxy peint stop sur le premier
+        # keystroke du picker, puis loop après le 5s TTL, alors que le timer
+        # voulait `boot` tout du long. Override clean : bus authoritative pour
+        # le phase, local pour stop/rest hors boot.
+        pushed = pushed_view["value"] if pushed_view["value"] else None
+        in_boot_view = pushed and pushed.get("barWord") == "boot"
+        if in_boot_view:
+            if current_word != _HUMAN_BOOT:
+                _paint_word(_HUMAN_BOOT)
+                current_word = _HUMAN_BOOT
+        elif word == "stop":
             if current_word != _HUMAN_STOP:
                 _paint_word(_HUMAN_STOP)
                 current_word = _HUMAN_STOP
