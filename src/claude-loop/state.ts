@@ -1438,14 +1438,19 @@ export function classifyPaneSpecial(text: string, footerLines = 5): PaneSpecial 
         .filter((l) => l.length > 0)
         .slice(-footerLines)
         .join("\n");
-    // #629 david `2hwuan`+`yt3h5y` : tighten — require BOTH the "Compacting
-    // conversation" / "Summarizing the conversation" text AND a `NN%` digit-
-    // percent anywhere in the footer (live compaction always shows progress
-    // like `42%` or `(42%)`). Stale lines left in scrollback after compaction
-    // ended carry the text but no live percent → false positive éliminé.
+    // #650 — tighten via co-presence of `esc to interrupt` instead of the
+    // earlier `\d+\s?%` requirement (#629 yt3h5y). Claude Code's UI doesn't
+    // reliably show a percentage during compaction — recent versions display
+    // `Compacting conversation… (12s · ↓ N tokens · esc to interrupt)` with
+    // an elapsed-time stamp instead. The `%` requirement silently broke the
+    // detection (marker never fired). `esc to interrupt` is the canonical
+    // live-mid-turn signal (same one `paneFooterShowsBusy` uses) — it
+    // disappears the moment the prompt comes back, so stale `Compacting`
+    // lines lingering in scrollback after compaction ends never co-occur
+    // with it in the same footer window.
     const hasCompactingText = /Compacting conversation|Summarizing the conversation/i.test(footer);
-    const hasPercent = /\d+\s?%/.test(footer);
-    if (hasCompactingText && hasPercent) return "compacting";
+    const hasLiveSignal = /esc to interrupt/i.test(footer);
+    if (hasCompactingText && hasLiveSignal) return "compacting";
     // rate-limit / api-error / overloaded are handled by error-backoff.ts
     // (#332) — they're errors, not internal busy states.
     return null;
