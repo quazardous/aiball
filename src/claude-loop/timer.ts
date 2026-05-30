@@ -43,6 +43,7 @@ import {
     DEFAULT_ASK_GRACE_SEC,
     DEFAULT_USER_GRACE_SEC,
     LOOP_STATUS,
+    armAfk10m,
     bootCompletePath,
     createProxyEventsServer,
     createViewPusher,
@@ -857,6 +858,14 @@ async function mainSse(): Promise<void> {
         try {
             writeFileSync(bootCompletePath(sd!), new Date().toISOString() + "\n");
         } catch { /* best-effort */ }
+        // #639 david `pn97zf` — same wait-mode contract as the bus.on("bootEnded")
+        // branch above. The bus path is the normal exit ; this safety cap
+        // fires only when the bus didn't (paneReady never became true).
+        // Keep the two paths consistent for the AFK arm.
+        if (process.env[CL_ENV.WAIT] === "1") {
+            armAfk10m(sd!);
+            log("settleBoot: --wait → armed NOT AFK 10m");
+        }
         // Seed idle-since so tryWake's gate passes; tryWake will
         // flip to busy if there's work or stay idle otherwise.
         try {
@@ -933,6 +942,15 @@ async function mainSse(): Promise<void> {
         try {
             writeFileSync(bootCompletePath(sd!), new Date().toISOString() + "\n");
         } catch { /* best-effort */ }
+        // #639 david `pn97zf` — `--wait` (CL_WAIT=1) arms NOT AFK 10m at
+        // boot exit so the bar reads `wait` yellow with a countdown : the
+        // documented "managed mode" contract. `--no-wait` (CL_WAIT=0)
+        // leaves AFK off — bar reads `loop` and auto-pings resume.
+        const isWaitMode = process.env[CL_ENV.WAIT] === "1";
+        if (isWaitMode) {
+            armAfk10m(sd!);
+            log("state-bus: boot phase ended — --wait → armed NOT AFK 10m");
+        }
         // #629 david `jf6efv` — flip the bar BG out of [boot] IMMEDIATELY.
         // Without this, the BG stays yellow until the next heartbeat tick
         // (up to `interval` seconds = 30s default) — david observed boot
