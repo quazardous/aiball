@@ -180,3 +180,24 @@ export class PaneService {
         }
     }
 }
+
+/**
+ * Per-process singleton (#647 Slice 3). The timer hydrates this on boot
+ * and pushes updates after each pane probe. Other consumers (slice 4 :
+ * the bar) read it via `getPaneService().get(...)` / `snapshot()`.
+ *
+ * Per-process : session-start-hook lives in a different process and
+ * has its own (unread) singleton — it pushes to the timer's instance via
+ * proxy-events (slice 5). For now the marker files remain the cross-
+ * process bridge.
+ */
+let _singleton: PaneService | null = null;
+export function getPaneService(): PaneService {
+    if (!_singleton) _singleton = new PaneService();
+    return _singleton;
+}
+
+/** Reset the singleton — tests only, never call in prod paths. */
+export function resetPaneServiceForTests(): void {
+    _singleton = new PaneService();
+}

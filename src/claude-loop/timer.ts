@@ -100,6 +100,7 @@ import {
 } from "./state.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
+import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
 import { canFlipBgFromBoot, computeLoopView, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
@@ -510,6 +511,10 @@ function refreshPaneMarkers(): void {
         resetErrorBackoff(sd);
         log("probe: pane error cleared — resetting backoff counter");
     }
+    // #647 Slice 3 : mirror the marker-file state into the typed
+    // PaneService singleton. Bar (slice 4) and future subscribers read
+    // from there instead of doing existsSync(...) x N.
+    syncPaneServiceFromMarkers(sd, { errId });
 }
 
 let lastSendAt = 0;
