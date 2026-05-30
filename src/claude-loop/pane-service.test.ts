@@ -2,7 +2,7 @@
 // effects (the service is pure data). Run: `npx tsx --test src/claude-loop/pane-service.test.ts`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PaneService, PaneMarker, SCREEN_TAKEOVER_GROUP, ERROR_GROUP } from "./pane-service.js";
+import { PaneService, PaneMarker, SCREEN_TAKEOVER_GROUP, ERROR_GROUP, paneMarkerBarInfo } from "./pane-service.js";
 
 test("get returns false for unset markers", () => {
     const svc = new PaneService();
@@ -157,4 +157,49 @@ test("listener that unsubscribes itself during callback doesn't trip iteration",
     svc.set(PaneMarker.Busy, true);
     svc.set(PaneMarker.Busy, false);
     assert.equal(calls, 1, "second transition should NOT call (we unsubscribed)");
+});
+
+// #647 Slice 4 — paneMarkerBarInfo : short label for tmux bar's [...:info].
+test("paneMarkerBarInfo: null when only routine markers active", () => {
+    const svc = new PaneService();
+    assert.equal(paneMarkerBarInfo(svc), null);
+    svc.set(PaneMarker.Busy, true);
+    svc.set(PaneMarker.Ready, true);
+    svc.set(PaneMarker.PaneReady, true);
+    assert.equal(paneMarkerBarInfo(svc), null, "routine markers don't surface in info");
+});
+
+test("paneMarkerBarInfo: ResumeSessionPicker → 'picker:session'", () => {
+    const svc = new PaneService();
+    svc.setExclusive(SCREEN_TAKEOVER_GROUP, PaneMarker.ResumeSessionPicker);
+    assert.equal(paneMarkerBarInfo(svc), "picker:session");
+});
+
+test("paneMarkerBarInfo: ResumeModePicker → 'picker:mode'", () => {
+    const svc = new PaneService();
+    svc.setExclusive(SCREEN_TAKEOVER_GROUP, PaneMarker.ResumeModePicker);
+    assert.equal(paneMarkerBarInfo(svc), "picker:mode");
+});
+
+test("paneMarkerBarInfo: Compacting → 'compacting'", () => {
+    const svc = new PaneService();
+    svc.setExclusive(SCREEN_TAKEOVER_GROUP, PaneMarker.Compacting);
+    assert.equal(paneMarkerBarInfo(svc), "compacting");
+});
+
+test("paneMarkerBarInfo: each error variant → 'err:<kind>'", () => {
+    const svc = new PaneService();
+    svc.setExclusive(ERROR_GROUP, PaneMarker.ErrorRateLimit);
+    assert.equal(paneMarkerBarInfo(svc), "err:rate-limit");
+    svc.setExclusive(ERROR_GROUP, PaneMarker.ErrorOverloaded);
+    assert.equal(paneMarkerBarInfo(svc), "err:overloaded");
+    svc.setExclusive(ERROR_GROUP, PaneMarker.ErrorApiError);
+    assert.equal(paneMarkerBarInfo(svc), "err:api");
+});
+
+test("paneMarkerBarInfo: screen-takeover wins over error if both somehow coexist", () => {
+    const svc = new PaneService();
+    svc.setExclusive(ERROR_GROUP, PaneMarker.ErrorRateLimit);
+    svc.setExclusive(SCREEN_TAKEOVER_GROUP, PaneMarker.Compacting);
+    assert.equal(paneMarkerBarInfo(svc), "compacting");
 });

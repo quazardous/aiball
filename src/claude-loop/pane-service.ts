@@ -201,3 +201,24 @@ export function getPaneService(): PaneService {
 export function resetPaneServiceForTests(): void {
     _singleton = new PaneService();
 }
+
+/**
+ * #647 Slice 4 — short label for the tmux bar's `[…:label]` segment when
+ * a screen-takeover or error marker is active. Returns null when only
+ * routine markers (Busy/Ready/PaneReady) are present — the bar then
+ * falls back to its usual count / user-grace info.
+ *
+ * Priority is mutex-aware : at most one screen-takeover and one error
+ * can be active at a time (PaneService.setExclusive enforces it) ;
+ * screen-takeover beats error if both happen to coexist.
+ */
+export function paneMarkerBarInfo(svc?: PaneService): string | null {
+    const s = (svc ?? getPaneService()).snapshot();
+    if (s.has(PaneMarker.ResumeSessionPicker)) return "picker:session";
+    if (s.has(PaneMarker.ResumeModePicker)) return "picker:mode";
+    if (s.has(PaneMarker.Compacting)) return "compacting";
+    if (s.has(PaneMarker.ErrorRateLimit)) return "err:rate-limit";
+    if (s.has(PaneMarker.ErrorOverloaded)) return "err:overloaded";
+    if (s.has(PaneMarker.ErrorApiError)) return "err:api";
+    return null;
+}

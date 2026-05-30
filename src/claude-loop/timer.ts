@@ -101,6 +101,7 @@ import {
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
 import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
+import { paneMarkerBarInfo } from "./pane-service.js";
 import { canFlipBgFromBoot, computeLoopView, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
@@ -1032,7 +1033,11 @@ async function mainSse(): Promise<void> {
             if (name === "afk" || name === "user-took-over" || name === "human-typing"
                 || name === "idle-since" || name === "wake-in-flight"
                 || name === "busy-defer-until" || name === "loop-start-ts"
-                || name === "resume-picker-active" || name === "boot-complete") {
+                // #647 Slice 2 follow-up — watch the new split picker files
+                // (the legacy single `resume-picker-active` no longer exists).
+                || name === "resume-session-picker-active"
+                || name === "resume-mode-picker-active"
+                || name === "boot-complete") {
                 schedulePush();
             }
         });
@@ -1203,7 +1208,15 @@ async function mainSse(): Promise<void> {
                 // `boot` lingers ~50ms (watch debounce) before the proxy
                 // catches up — visible race at boot exit.
                 pushViewIfChanged();
-                if (settledStatus === "idle" && userIsTakingOver(sd!, userGraceSec)) {
+                // #647 Slice 4 : pane-derived markers (screen-takeover or
+                // error) trump count/user as bar info — david `sr9kqw`
+                // wants `[busy:compacting]` / `[boot:picker:mode]` etc.
+                // visible. `paneMarkerBarInfo()` returns null when no
+                // marker is salient, falling back to the existing logic.
+                const paneInfo = paneMarkerBarInfo();
+                if (paneInfo) {
+                    setTmuxStatus(name!, settledStatus, paneInfo);
+                } else if (settledStatus === "idle" && userIsTakingOver(sd!, userGraceSec)) {
                     setTmuxStatus(name!, settledStatus, "user");
                 } else {
                     setTmuxStatus(name!, settledStatus, r.unread ?? 0);
