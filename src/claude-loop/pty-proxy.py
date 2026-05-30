@@ -1477,24 +1477,19 @@ def main(argv):
     def apply_decision(dec):
         """#360 : exécute les EFFETS d'une Decision (markers afk/présence,
         forward vers claude, peinture du mot) puis log diag. SEUL endroit qui
-        touche l'I/O — le `_Decider` qui la produit, lui, reste pur."""
+        touche l'I/O — le `_Decider` qui la produit, lui, reste pur.
+
+        #633 Slices A-E — tous les markers de présence sont maintenant
+        routés via le back-channel UDS `proxy-events.sock` vers la state
+        machine TS (timer.ts). Le fallback local est conservé pour le
+        degraded mode (timer absent — debug-proxy-tty, timer crashed).
+        `set_afk` / `clear_afk` legacy ne sont plus dispatché ici (jamais
+        émis par le _Decider dans le path normal ; F9 utilise toggle_afk).
+        Ils restent disponibles comme fonctions appellables si du code
+        externe / un test en a besoin."""
         nonlocal current_word
-        # #633 Slice A david `ecmrvn` — `arm_afk_10m` is now routed via the
-        # proxy-events back-channel : the timer's state machine decides
-        # based on the authoritative bootComplete marker. Replaces the
-        # layer-2 filter from 25d9dd2 which guessed via pushed_view.barWord.
-        # If the back-channel isn't connected (timer dead, or degraded
-        # mode like debug-proxy-tty), we fall back to calling arm_afk_10m()
-        # locally — bar visuals stay consistent.
         for m in dec.get("markers", []):
-            if m == "set_afk":
-                # #619/#622 : legacy set/clear kept callable for replay
-                # shim + future code that wants a hard-set. F9 itself
-                # uses toggle_afk now.
-                set_afk_infinite()
-            elif m == "clear_afk":
-                clear_afk()
-            elif m == "cycle_afk" or m == "toggle_afk":
+            if m == "cycle_afk" or m == "toggle_afk":
                 # #633 Slice C : F9 toggle routed via back-channel ; the
                 # TS state machine cycles AFK off → 10m → ∞ → off (last
                 # transition also clears user-grace). Fallback to local
