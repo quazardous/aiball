@@ -101,6 +101,7 @@ import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
 import { canFlipBgFromBoot, computeLoopView, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
+import { WakeBus } from "./wake-bus.js";
 import { CL_ENV } from "./env-vars.js";
 import { stripMarkdown } from "./markdown-strip.js";
 
@@ -750,67 +751,55 @@ async function mainSse(): Promise<void> {
     // this against the live HEAD to flag a ghost daemon.
     const bootSha = installRootSha();
     if (bootSha) log(`timer source: install-root SHA ${bootSha.slice(0, 7)}`);
-    let unsubscribe: (() => void) | null = null;
-    let lastConnectAt = 0;
-    const reconnect = () => {
-        // Throttle reconnects (one per 5s) so a daemon flap doesn't
-        // turn into a hot loop.
-        const now = Date.now();
-        if (now - lastConnectAt < 5000) return;
-        lastConnectAt = now;
-        unsubscribe?.();
-        unsubscribe = client().subscribeEvents({
-            onHello: (h) => { log(`SSE hello: unread=${h.unread}`); },
-            // #442: remote hard-kill. A `control:kill` arrives on the SSE this
-            // loop already holds → self-destruct from inside.
-            onControl: (c) => {
-                if (c.action === "kill") cleanShutdown("sse:control:kill");
-                // #451: operator-supplied RAW prompt → inject it into the Claude
-                // session exactly like a wake (sendKeys sets the wake-in-flight +
-                // coalesce markers so the timer doesn't auto-wake on top of it).
-                else if (c.action === "prompt") {
-                    const preview = c.text.length > 80 ? c.text.slice(0, 80) + "…" : c.text;
-                    log(`SSE control: prompt injection (${c.text.length} chars): ${preview}`);
-                    void sendKeys(c.text);
-                }
-                else log(`SSE control ignored (unknown action): ${JSON.stringify(c)}`);
-            },
-            onPing: (p) => {
-                // #B.214: panic intent → interrupt-this-turn path,
-                // bypasses every gate. Routed FIRST so the dup-hint
-                // coalesce below doesn't swallow a panic that
-                // happens to share a (ticket, comment) tuple with a
-                // recent normal wake. Rate-limit lives inside
-                // tryPanic itself (1/min floor).
-                if (p.intent === "panic") {
-                    log(`SSE ping received: ${JSON.stringify(p)} → tryPanic`);
-                    void tryPanic("sse:ping:panic", p);
-                    return;
-                }
-                // #B.198 david: "on cumule pas les event identique on
-                // les merge". When N SSE pings about the same
-                // (ticket, comment) arrive in a burst, only the first
-                // gets a wake; the rest are dropped here at the event
-                // boundary. Hook layer only — model is untouched.
-                if (isDuplicateWakeHint(sd!, p, WAKE_COALESCE_WINDOW_MS)) {
-                    log(`SSE ping coalesced (dup hint <${WAKE_COALESCE_WINDOW_MS}ms): ${JSON.stringify(p)}`);
-                    return;
-                }
-                log(`SSE ping received: ${JSON.stringify(p)} → tryWake`);
-                // #B.198 david: pass the SSE payload as a hint so the
-                // wake phrase names the concrete artifact ("Poll ticket
-                // #X — new comment #Y.") instead of a random pop-culture
-                // line, which left claude guessing what to do.
-                void tryWake("sse:ping", false, p);
-            },
-            onError: (e) => {
-                log(`SSE error: ${e.message ?? String(e)} — will reconnect on next heartbeat`);
-                unsubscribe = null;
-            },
-        });
-        log("SSE subscribed");
-    };
-    reconnect();
+    // #628 david `mquuep` — WakeBus : façade typed sur le canal SSE
+    // daemon→loop. Le timer souscrit aux events ; le bus gère le
+    // throttle reconnect (5s) en interne. Future consumers (hooks,
+    // MCP, fake-claude tests) peuvent subscribe via le même bus sans
+    // re-créer un EventSource.
+    const wakeBus = new WakeBus(client());
+    wakeBus.on("hello", (h) => log(`SSE hello: unread=${h.unread}`));
+    wakeBus.on("control", (c) => {
+        if (c.action === "kill") cleanShutdown("sse:control:kill");
+        // #451: operator-supplied RAW prompt → inject it into the Claude
+        // session exactly like a wake (sendKeys sets the wake-in-flight +
+        // coalesce markers so the timer doesn't auto-wake on top of it).
+        else if (c.action === "prompt" && typeof c.text === "string") {
+            const preview = c.text.length > 80 ? c.text.slice(0, 80) + "…" : c.text;
+            log(`SSE control: prompt injection (${c.text.length} chars): ${preview}`);
+            void sendKeys(c.text);
+        }
+        else log(`SSE control ignored (unknown action): ${JSON.stringify(c)}`);
+    });
+    wakeBus.on("ping", (p) => {
+        // #B.214: panic intent → interrupt-this-turn path, bypasses every
+        // gate. Routed FIRST so the dup-hint coalesce below doesn't
+        // swallow a panic that happens to share a (ticket, comment) tuple
+        // with a recent normal wake. Rate-limit lives inside tryPanic
+        // itself (1/min floor).
+        if (p.intent === "panic") {
+            log(`SSE ping received: ${JSON.stringify(p)} → tryPanic`);
+            void tryPanic("sse:ping:panic", p);
+            return;
+        }
+        // #B.198 david: "on cumule pas les event identique on les merge".
+        // When N SSE pings about the same (ticket, comment) arrive in a
+        // burst, only the first gets a wake ; the rest are dropped here
+        // at the event boundary. Hook layer only — model is untouched.
+        if (isDuplicateWakeHint(sd!, p, WAKE_COALESCE_WINDOW_MS)) {
+            log(`SSE ping coalesced (dup hint <${WAKE_COALESCE_WINDOW_MS}ms): ${JSON.stringify(p)}`);
+            return;
+        }
+        log(`SSE ping received: ${JSON.stringify(p)} → tryWake`);
+        // #B.198 : pass the SSE payload as a hint so the wake phrase
+        // names the concrete artifact (`Poll ticket #X — new comment #Y.`)
+        // instead of a random pop-culture line.
+        void tryWake("sse:ping", false, p);
+    });
+    wakeBus.on("error", (e) => {
+        log(`SSE error: ${e.message ?? String(e)} — will reconnect on next heartbeat`);
+    });
+    wakeBus.connect();
+    log("SSE subscribed");
     // #B.148 bug: SSE only fires on NEW pings — existing unread at
     // boot would never trigger a wake until a fresh ping arrives.
     // Immediate tryWake covers the case where pings already exist
@@ -1069,7 +1058,7 @@ async function mainSse(): Promise<void> {
             continue;
         }
         // SSE-drop safety net: re-check the gate ourselves.
-        if (!unsubscribe) reconnect();
+        if (!wakeBus.isConnected()) wakeBus.connect();
         const woke = await tryWake("heartbeat");
         if (woke) {
             if (settledStatus !== "busy") log(`heartbeat: woke=true settledStatus=${settledStatus}→busy`);
@@ -1217,7 +1206,7 @@ async function mainSse(): Promise<void> {
         } catch { /* daemon down or transient — next tick retries */ }
     }
     log("tmux session gone — timer exiting");
-    if (unsubscribe) (unsubscribe as () => void)();
+    wakeBus.close();
 }
 
 /**
