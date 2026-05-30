@@ -11,7 +11,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -192,6 +192,26 @@ export function setResumePicker(sd: string, active: boolean): void {
     // Picker dismissed — remove the active marker AND mark boot complete.
     try { if (existsSync(pickerPath)) unlinkSync(pickerPath); } catch { /* race */ }
     try { writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n"); } catch { /* best-effort */ }
+}
+
+// #629 david `xyss9z` — debug log for tracing every `@cl_human` paint
+// across cli.ts seed, setTmuxStatus, proxy paint_human, _apply_pushed_view,
+// and the timer's bus transition listener. Off by default ; opt in with
+// `CL_BAR_PAINT_LOG=1`. Each writer emits one line with monotonic
+// `T+Xms` since process start of the writer + the value being painted.
+// Appends to `<state_dir>/bar-paint.log`. Reading the file from the
+// outside (`tail -f`) lets the user (david) trace the flicker order.
+export function barPaintLogPath(sd: string): string { return join(sd, "bar-paint.log"); }
+
+const BAR_PAINT_LOG_ENABLED = process.env.CL_BAR_PAINT_LOG === "1";
+const BAR_PAINT_LOG_T0 = Date.now();
+
+export function logBarPaint(sd: string | undefined, writer: string, value: string): void {
+    if (!BAR_PAINT_LOG_ENABLED || !sd) return;
+    try {
+        const tMs = Date.now() - BAR_PAINT_LOG_T0;
+        appendFileSync(barPaintLogPath(sd), `[bar-paint] T+${tMs}ms ${writer} @cl_human=${value}\n`);
+    } catch { /* best-effort */ }
 }
 
 // #624 david `62ys4g` : "le pane est pas contrôlable donc reste externe go".
@@ -1202,7 +1222,9 @@ export function setTmuxStatus(
     // fight over it.
     if (!proxyAlive) {
         const graceSec = Math.max(0, Number(process.env[CL_ENV.USER_GRACE_SEC] ?? DEFAULT_USER_GRACE_SEC));
-        setOpt("@cl_human", humanBarWord(sd, graceSec));
+        const word = humanBarWord(sd, graceSec);
+        setOpt("@cl_human", word);
+        logBarPaint(sd, `state.ts:setTmuxStatus(${status})`, word);
     }
 }
 

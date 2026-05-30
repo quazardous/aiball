@@ -70,6 +70,28 @@ def _proxy_alive_path():
     return os.path.join(sd, "proxy-alive") if sd else ""
 
 
+# #629 david `xyss9z` — mirror du logBarPaint TS. Off par défaut, on
+# par `CL_BAR_PAINT_LOG=1`. Append à `<state_dir>/bar-paint.log` une
+# ligne par paint @cl_human depuis le proxy (_paint_word direct ou
+# _apply_pushed_view via le timer).
+_BAR_PAINT_LOG_ENABLED = os.environ.get("CL_BAR_PAINT_LOG") == "1"
+_BAR_PAINT_LOG_T0 = datetime.datetime.now()
+
+
+def _log_bar_paint(writer, value):
+    if not _BAR_PAINT_LOG_ENABLED:
+        return
+    sd = _state_dir()
+    if not sd:
+        return
+    try:
+        t_ms = int((datetime.datetime.now() - _BAR_PAINT_LOG_T0).total_seconds() * 1000)
+        with open(os.path.join(sd, "bar-paint.log"), "a") as f:
+            f.write(f"[bar-paint] T+{t_ms}ms {writer} @cl_human={value}\n")
+    except OSError:
+        pass
+
+
 def is_typing_keystroke(data: bytes) -> bool:
     """Vrai si `data` ressemble à de la frappe humaine de TEXTE.
 
@@ -996,7 +1018,7 @@ def _mux_argv():
     return (os.environ.get("MUX_CMD") or "tmux").split()
 
 
-def _paint_word(word):
+def _paint_word(word, writer="proxy:_paint_word"):
     """Écrit `@cl_human = word` sur la session tmux + force un refresh.
 
     No-op silencieux si la cible tmux est inconnue ou si tmux échoue — la
@@ -1004,6 +1026,7 @@ def _paint_word(word):
     target = os.environ.get("CL_TMUX") or ""
     if not target:
         return
+    _log_bar_paint(writer, word)
     mux = _mux_argv()
     try:
         subprocess.run(
@@ -1300,7 +1323,7 @@ def main(argv):
             "loop": _HUMAN_LOOP,
         }.get(view.get("barWord", ""))
         if word_token is not None and word_token != current_word:
-            _paint_word(word_token)
+            _paint_word(word_token, writer="proxy:_apply_pushed_view")
             current_word = word_token
         # AFK chunk: convert the {label, prefix, color} dict to the tmux
         # format string the proxy's _format_afk_state used to emit.

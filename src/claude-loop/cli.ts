@@ -47,6 +47,7 @@ import {
     idleMarkerPath,
     installRootSha,
     isLoopStale,
+    logBarPaint,
     loopStartTsPath,
     pickPingPhrase,
     pingsPath,
@@ -917,6 +918,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // first tick. Avoids a flash of `loop` (vert) over the jaune boot bar.
     for (const [opt, val] of [["@cl_human", "#[fg=colour178,bg=colour16]boot"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_afk_state", afkInitialOff]]) {
         spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
+        if (opt === "@cl_human") logBarPaint(sd, "cli.ts:seed", val);
     }
     // #281 strategy A: tell psmux to touch the human-typing marker natively
     // on real client keystrokes (busy included), via the same file

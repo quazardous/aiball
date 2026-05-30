@@ -83,6 +83,7 @@ import {
     snapshotPane,
     tmuxName,
     humanPresenceWord,
+    logBarPaint,
     userIsTakingOver,
     wakeInFlightPath,
     wakeRequestedPath,
@@ -900,7 +901,13 @@ async function mainSse(): Promise<void> {
     // without re-implementing the diff.
     const viewPusher = createViewPusher(viewPushSockPath(sd!));
     const loopBus = new LoopStateBus();
-    loopBus.on("transition", (_prev, next) => viewPusher.push(next));
+    loopBus.on("transition", (_prev, next) => {
+        viewPusher.push(next);
+        // #629 (xyss9z) : trace which writer drove the @cl_human change.
+        // The timer doesn't setOpt directly — the proxy does, after receiving
+        // the pushed view — but the timer is the ORIGIN of the value.
+        logBarPaint(sd, "timer.ts:bus.transition", next.barWord);
+    });
     loopBus.on("bootEnded", () => log("state-bus: boot phase ended"));
     loopBus.on("afkArmed10m", (expiry) => log(`state-bus: AFK 10m armed (expires ${new Date(expiry).toISOString()})`));
     loopBus.on("afkArmedInf", () => log("state-bus: AFK ∞ armed"));
