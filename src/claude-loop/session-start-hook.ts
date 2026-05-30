@@ -124,7 +124,11 @@ if (source === "resume") {
                     // #647 Slice 2 david `sr9kqw` : marker spécifique
                     // session-picker (1er écran resume). #624 originel.
                     setResumeSessionPicker(sd!, true);
-                    setTmuxStatus(name!, LOOP_STATUS.BOOT, `pick:${pickMode}`);
+                    // #647 Slice 4 — align label avec paneMarkerBarInfo
+                    // (fast-probe 1s peint identique) pour pas que la barre
+                    // oscille `pick:latest` ↔ `picker:session` pendant
+                    // la fenêtre du picker. Mode pick reste dans le log.
+                    setTmuxStatus(name!, LOOP_STATUS.BOOT, "picker:session");
                     sendKey("Enter");
                     sessionPicked = true;
                 }
@@ -164,7 +168,8 @@ if (source === "resume") {
                     // #647 Slice 2 david `sr9kqw` : marker spécifique
                     // mode-picker (2e écran resume : summary vs as-is).
                     setResumeModePicker(sd!, true);
-                    setTmuxStatus(name!, LOOP_STATUS.BOOT, `pick→${mode}`);
+                    // #647 Slice 4 — align (cf. picker:session ci-dessus).
+                    setTmuxStatus(name!, LOOP_STATUS.BOOT, "picker:mode");
                     if (mode === "as-is") sendKey("Down");
                     sendKey("Enter");
                 }

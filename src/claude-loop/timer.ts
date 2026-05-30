@@ -993,6 +993,16 @@ async function mainSse(): Promise<void> {
         if (fastProbeTimer) return;
         fastProbeTimer = setInterval(() => {
             try { refreshPaneMarkers(); } catch { /* best-effort */ }
+            // #647 Slice 4 follow-up (david `a9njm5`) : pendant boot le
+            // heartbeat 30s n'a pas tourné encore → setTmuxStatus du tick
+            // ne fire pas. Faut peindre la barre depuis paneService ICI
+            // pour que `[boot:picker:session]` etc. soit visible la
+            // fenêtre entière du picker (et pas juste l'instant où le
+            // hook peint son `pick:latest`).
+            try {
+                const info = paneMarkerBarInfo();
+                if (info) setTmuxStatus(name!, LOOP_STATUS.BOOT, info);
+            } catch { /* best-effort */ }
         }, 1000);
         log("fast-probe: armed (1s cadence during boot)");
     };
