@@ -50,16 +50,16 @@ wake_phrases:
   # rien sinon. Grammar identique au prompts: section (`{var:+text}`).
   # `{body}` plain marche aussi pour un placement custom.
   panic:
-    with_comment: "URGENT: aiball ticket #{ticket} needs you — new comment #{comment}.{body:+ — \"{body}\"}"
+    with_comment: "URGENT: aiball ticket #{ticket} needs you — new comment #{comment}.{body:+ — {body}}"
     ticket_only:  "URGENT: aiball ticket #{ticket} needs you."
   request:
-    with_comment: "Handle aiball ticket #{ticket} — new comment #{comment}.{body:+ — \"{body}\"}"
+    with_comment: "Handle aiball ticket #{ticket} — new comment #{comment}.{body:+ — {body}}"
     ticket_only:  "Handle aiball ticket #{ticket}."
   question:
-    with_comment: "aiball ticket #{ticket} waits for your answer — comment #{comment}.{body:+ — \"{body}\"}"
+    with_comment: "aiball ticket #{ticket} waits for your answer — comment #{comment}.{body:+ — {body}}"
     ticket_only:  "aiball ticket #{ticket} waits for your answer."
   fyi:
-    with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}.{body:+ — \"{body}\"}"
+    with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}.{body:+ — {body}}"
     ticket_only:  "Heads-up on aiball ticket #{ticket}."
 
 # State-CTA wake assembled by claude-loop's `buildContextPhrase` when a wake

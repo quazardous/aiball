@@ -74,9 +74,12 @@ test("buildWakePhrase: comment_body inséré entre quotes via {body:+ …}", () 
         },
         p,
     );
+    // #635 david `yqv38b` — guillemets retirés du default template, le body
+    // s'insère bare après le ` — `. Le commit lisible reste explicite via
+    // le séparateur unicode.
     assert.equal(
         out,
-        'Handle aiball ticket #555 — new comment #abcdef. — "fix the upstream chip rendering"',
+        "Handle aiball ticket #555 — new comment #abcdef. — fix the upstream chip rendering",
     );
 });
 
@@ -124,8 +127,9 @@ test("buildWakePhrase: panic intent injecte aussi le body", () => {
         },
         p,
     );
+    // #635 david `yqv38b` — guillemets retirés du default template (cf. ci-dessus).
     assert.equal(
         out,
-        'URGENT: aiball ticket #9 needs you — new comment #zz. — "drop everything"',
+        "URGENT: aiball ticket #9 needs you — new comment #zz. — drop everything",
     );
 });

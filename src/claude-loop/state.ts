@@ -1916,25 +1916,25 @@ const DEFAULT_WAKE_TEMPLATES: WakeTemplates = {
     // single-liner injecté via `send-keys` (multi-line déclencherait un
     // submit prématuré).
     panic: {
-        with_comment: "URGENT: aiball ticket #{ticket} needs you — new comment #{comment}.{body:+ — \"{body}\"}",
+        with_comment: "URGENT: aiball ticket #{ticket} needs you — new comment #{comment}.{body:+ — {body}}",
         ticket_only: "URGENT: aiball ticket #{ticket} needs you.",
     },
     request: {
-        with_comment: "Handle aiball ticket #{ticket} — new comment #{comment}.{body:+ — \"{body}\"}",
+        with_comment: "Handle aiball ticket #{ticket} — new comment #{comment}.{body:+ — {body}}",
         ticket_only: "Handle aiball ticket #{ticket}.",
     },
     question: {
-        with_comment: "aiball ticket #{ticket} waits for your answer — comment #{comment}.{body:+ — \"{body}\"}",
+        with_comment: "aiball ticket #{ticket} waits for your answer — comment #{comment}.{body:+ — {body}}",
         ticket_only: "aiball ticket #{ticket} waits for your answer.",
     },
     fyi: {
-        with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}.{body:+ — \"{body}\"}",
+        with_comment: "Heads-up on aiball ticket #{ticket} — new comment #{comment}.{body:+ — {body}}",
         ticket_only: "Heads-up on aiball ticket #{ticket}.",
     },
     // #319: feature work. Base wording; buildWakePhrase appends the config-driven
     // branch hint (workflow.hint_branch / hint_worktree) for this intent.
     feature: {
-        with_comment: "Build aiball feature ticket #{ticket} — new comment #{comment}.{body:+ — \"{body}\"}",
+        with_comment: "Build aiball feature ticket #{ticket} — new comment #{comment}.{body:+ — {body}}",
         ticket_only: "Build aiball feature ticket #{ticket}.",
     },
 };
