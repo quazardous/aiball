@@ -44,7 +44,11 @@ import {
     DEFAULT_USER_GRACE_SEC,
     LOOP_STATUS,
     bootCompletePath,
+    armAfk10m,
+    createProxyEventsServer,
     createViewPusher,
+    proxyEventsSockPath,
+    viewPushSockPath,
     paneShowsInterrupted,
     readLoopStateInput,
     setCompacting,
@@ -52,7 +56,6 @@ import {
     setPaneBusy,
     setPaneReady,
     setResumePicker,
-    viewPushSockPath,
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
     buildContextPhrase,
@@ -907,6 +910,35 @@ async function mainSse(): Promise<void> {
     // afkArmed10m, …) for log decoration or future reactive painters
     // without re-implementing the diff.
     const viewPusher = createViewPusher(viewPushSockPath(sd!));
+    // #633 Slice A (david `ecmrvn`) — back-channel server : the proxy
+    // connects + emits raw events (typing, AFK key, lone-esc). The state
+    // machine here decides what to do based on the AUTHORITATIVE view
+    // (incl. bootComplete marker), eliminating the layer-2 hacks where
+    // the proxy guessed locally and the timer filtered post-fact.
+    const proxyEventsServer = createProxyEventsServer(proxyEventsSockPath(sd!), (event) => {
+        try {
+            const kind = (event as { event?: string }).event;
+            const eventKind = (event as { kind?: string }).kind;
+            if (kind !== "keystroke") return;
+            if (eventKind === "typing") {
+                // typing → arm NOT AFK 10m ONLY when not in boot phase.
+                // The bus's pushed view doesn't matter ; the marker file
+                // bootComplete is authoritative for "boot ended" — once
+                // sealed, typing always arms.
+                const view = computeLoopView(readLoopStateInput(sd!));
+                if (view.inBootGrace) {
+                    log("proxy-event: typing during boot → no arm (state.inBootGrace)");
+                    return;
+                }
+                armAfk10m(sd!);
+                log("proxy-event: typing → armed NOT AFK 10m");
+            }
+            // future kinds (afk_key, lone_esc) come in later slices
+        } catch (e) {
+            log(`proxy-event handler error: ${(e as Error).message}`);
+        }
+    });
+    process.on("exit", () => proxyEventsServer.close());
     const loopBus = new LoopStateBus();
     loopBus.on("transition", (_prev, next) => {
         viewPusher.push(next);

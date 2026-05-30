@@ -65,6 +65,14 @@ def _view_push_sock_path():
     return os.path.join(sd, "view-push.sock") if sd else ""
 
 
+def _proxy_events_sock_path():
+    """#633 Slice A — UDS the proxy CONNECTS TO to emit raw events
+    (typing, AFK key, lone-esc). Inverse direction of view-push.sock.
+    Newline-delimited JSON ; persistent connection, retry on fail."""
+    sd = _state_dir()
+    return os.path.join(sd, "proxy-events.sock") if sd else ""
+
+
 def _proxy_alive_path():
     sd = _state_dir()
     return os.path.join(sd, "proxy-alive") if sd else ""
@@ -379,10 +387,64 @@ def arm_afk_10m():
     """#622 david `jzcgmh` : typing arms/refreshes a NOT AFK 10m hold
     EXCEPT when already in NOT AFK ∞ (only F9 can release that).
     From AFK : arm 10m fresh. From NOT AFK 10m : reset the timer to
-    10:00. From NOT AFK ∞ : no-op."""
+    10:00. From NOT AFK ∞ : no-op.
+
+    #633 Slice A : in non-degraded mode this is now driven by the timer
+    via the proxy-events back-channel — apply_decision routes the
+    arm_afk_10m intent to `_proxy_events.emit_typing()` instead of
+    calling this function locally. This function stays the FALLBACK for
+    degraded mode (no timer connected) so debug-proxy-tty still works."""
     if _afk_mode() == "inf":
         return
     set_afk_until(600)
+
+
+# #633 Slice A david `ecmrvn` — back-channel client that emits raw events
+# to the timer's `proxy-events.sock`. Persistent connection, reconnect on
+# failure, silent no-op if the timer isn't there (degraded mode — the
+# caller falls back to local logic). Single instance lazily created.
+class _ProxyEventEmitter:
+    def __init__(self):
+        self._sock = None
+
+    def _ensure(self):
+        if self._sock is not None:
+            return True
+        path = _proxy_events_sock_path()
+        if not path or not os.path.exists(path):
+            return False
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(path)
+            s.setblocking(False)
+            self._sock = s
+            return True
+        except OSError:
+            self._sock = None
+            return False
+
+    def emit(self, payload):
+        """Best-effort fire-and-forget. Returns True if the event was
+        handed to the kernel send buffer, False if no timer is reachable
+        (caller falls back to local logic)."""
+        if not self._ensure():
+            return False
+        try:
+            line = (_json.dumps(payload) + "\n").encode("utf-8")
+            self._sock.sendall(line)
+            return True
+        except OSError:
+            # Connection dropped — drop it, next call will retry.
+            try: self._sock.close()
+            except OSError: pass
+            self._sock = None
+            return False
+
+    def emit_typing(self, now_ms):
+        return self.emit({"event": "keystroke", "kind": "typing", "now_ms": now_ms})
+
+
+_proxy_events = _ProxyEventEmitter()
 
 
 # Legacy cycle_afk alias kept for replay shim compatibility — old NDJSON
@@ -1408,18 +1470,14 @@ def main(argv):
         forward vers claude, peinture du mot) puis log diag. SEUL endroit qui
         touche l'I/O — le `_Decider` qui la produit, lui, reste pur."""
         nonlocal current_word
-        # #629 david — bus authoritative for boot phase. During boot, drop
-        # `arm_afk_10m` from the decider's markers : picker-selection typing
-        # must not engage NOT AFK (the bar should stay clean past boot end).
-        # Under --no-wait the local `_boot_grace_remaining` returns 0 from T0,
-        # so the decider always emits arm_afk_10m on typing ; filtering here
-        # bridges the gap with the bus's real boot phase.
-        pushed_now = pushed_view["value"] if pushed_view["value"] else None
-        in_boot_view_now = pushed_now and pushed_now.get("barWord") == "boot"
-        markers = dec.get("markers", [])
-        if in_boot_view_now:
-            markers = [m for m in markers if m != "arm_afk_10m"]
-        for m in markers:
+        # #633 Slice A david `ecmrvn` — `arm_afk_10m` is now routed via the
+        # proxy-events back-channel : the timer's state machine decides
+        # based on the authoritative bootComplete marker. Replaces the
+        # layer-2 filter from 25d9dd2 which guessed via pushed_view.barWord.
+        # If the back-channel isn't connected (timer dead, or degraded
+        # mode like debug-proxy-tty), we fall back to calling arm_afk_10m()
+        # locally — bar visuals stay consistent.
+        for m in dec.get("markers", []):
             if m == "set_afk":
                 # #619/#622 : legacy set/clear kept callable for replay
                 # shim + future code that wants a hard-set. F9 itself
@@ -1431,8 +1489,11 @@ def main(argv):
                 # #622 jzcgmh: F9 path. cycle_afk is the legacy alias.
                 toggle_afk()
             elif m == "arm_afk_10m":
-                # #622 jzcgmh: typing / ESC path.
-                arm_afk_10m()
+                # #633 Slice A : delegate to timer via back-channel.
+                # Fall back to local on failure (degraded mode).
+                now_ms = int(datetime.datetime.now().timestamp() * 1000)
+                if not _proxy_events.emit_typing(now_ms):
+                    arm_afk_10m()
             elif m == "touch_marker":
                 touch_marker()
             elif m == "touch_user_grace":

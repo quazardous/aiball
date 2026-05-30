@@ -10,7 +10,7 @@
  * - `timer.log`   — stdout/stderr of the timer
  */
 import { spawnSync } from "node:child_process";
-import { connect as netConnect } from "node:net";
+import { connect as netConnect, createServer as netCreateServer } from "node:net";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -298,6 +298,11 @@ export function injectPipeName(sd: string): string {
 // proxy self-falls-back to exec-claude if PTY init fails). Read by
 // setTmuxStatus to paint the discreet proxy glyph.
 export function proxyAlivePath(sd: string): string { return join(sd, "proxy-alive"); }
+// #633 david `ecmrvn` (Slice A) — back-channel UDS the proxy connects to
+// at startup, emitting raw events (typing, AFK key, lone-esc) so the
+// timer's state machine decides what to do (arm AFK, toggle, …). Inverse
+// direction of view-push.sock (timer→proxy). Newline-delimited JSON.
+export function proxyEventsSockPath(sd: string): string { return join(sd, "proxy-events.sock"); }
 export function timerPidPath(sd: string): string { return join(sd, "timer.pid"); }
 export function timerLogPath(sd: string): string { return join(sd, "timer.log"); }
 /**
@@ -1696,6 +1701,53 @@ export function createViewPusher(sockPath: string): ViewPusher {
             try { sock?.end(); } catch { /* ignore */ }
             sock = null;
             queued = [];
+        },
+    };
+}
+
+/**
+ * #633 (Slice A) — server side of the proxy→timer back-channel. The
+ * timer binds the UDS at `proxyEventsSockPath(sd)`, accepts one or more
+ * proxy connections, parses newline-delimited JSON events, and invokes
+ * `onEvent` for each. Errors are swallowed (best-effort) — a dead
+ * proxy or malformed line never crashes the timer. The bound server
+ * socket is cleaned up on returned `close()`.
+ */
+export interface ProxyEventsServer {
+    close(): void;
+}
+
+export function createProxyEventsServer(
+    sockPath: string,
+    onEvent: (event: Record<string, unknown>) => void,
+): ProxyEventsServer {
+    try { if (existsSync(sockPath)) unlinkSync(sockPath); } catch { /* race */ }
+    const server = netCreateServer((conn) => {
+        let buf = "";
+        conn.on("data", (chunk) => {
+            buf += chunk.toString("utf8");
+            let nl: number;
+            while ((nl = buf.indexOf("\n")) >= 0) {
+                const line = buf.slice(0, nl).trim();
+                buf = buf.slice(nl + 1);
+                if (!line) continue;
+                try {
+                    const parsed = JSON.parse(line) as unknown;
+                    if (parsed && typeof parsed === "object") {
+                        onEvent(parsed as Record<string, unknown>);
+                    }
+                } catch { /* malformed — skip silently */ }
+            }
+        });
+        conn.on("error", () => { try { conn.end(); } catch { /* ignore */ } });
+        conn.on("close", () => { /* connection gone — server stays open */ });
+    });
+    try { server.listen(sockPath); } catch { /* bind failed — events lost, OK */ }
+    server.on("error", () => { /* keep listening on next reconnect attempt */ });
+    return {
+        close() {
+            try { server.close(); } catch { /* ignore */ }
+            try { if (existsSync(sockPath)) unlinkSync(sockPath); } catch { /* ignore */ }
         },
     };
 }
