@@ -13,8 +13,9 @@
  */
 import Tag from "primevue/tag";
 import type { TicketSummary } from "../lib/api";
-import { STATUS_SEVERITY, type Severity } from "../lib/labels";
+import { PRIORITY_COLOR_VAR, STATUS_SEVERITY, type Severity } from "../lib/labels";
 import { formatTicketRef } from "../lib/formatting";
+import PriorityIcon from "./PriorityIcon.vue";
 
 defineProps<{
     ticket: TicketSummary;
@@ -81,11 +82,13 @@ function statusSeverity(s: "pending" | "approved" | "rejected"): Severity {
             icon="pi pi-check-circle"
         />
         <!-- #599 david : priorité dans la cartouche, plus en bandeau isolé.
+             #632 david `rmbsvx` : même chevron coloré que l'inbox (sans Tag).
              Skip `normal` (default, pas une info utile). -->
-        <Tag
+        <PriorityIcon
             v-if="ticket.priority && ticket.priority !== 'normal'"
-            :value="ticket.priority"
-            :severity="ticket.priority === 'urgent' ? 'danger' : ticket.priority === 'high' ? 'warn' : 'info'"
+            :priority="ticket.priority"
+            :style="`color: var(${PRIORITY_COLOR_VAR[ticket.priority]});`"
+            :title="ticket.priority"
         />
         <span v-if="ticket.by_agent">by {{ ticket.by_agent }}</span>
         <span class="spacer" />
