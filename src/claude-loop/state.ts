@@ -863,6 +863,22 @@ export function clearUserGrace(sd: string): void {
     try { if (existsSync(userTookOverPath(sd))) unlinkSync(userTookOverPath(sd)); } catch { /* race */ }
 }
 
+/** #633 Slice D — touch the `human-typing` marker (writes mtime to now).
+ *  The bus reads its mtime via `safeMtime` to compute `isTypingNow` →
+ *  bar word "stop" during the 5s TTL. Mirror of the proxy's
+ *  `touch_marker`. */
+export function touchHumanTyping(sd: string): void {
+    try { writeFileSync(humanTypingPath(sd), new Date().toISOString() + "\n"); } catch { /* best-effort */ }
+}
+
+/** #633 Slice D — touch the `user-took-over` marker (writes mtime to now).
+ *  The bus reads its mtime to compute `isUserGraceFresh` → silently gates
+ *  auto-wakes for the user-grace window. Mirror of the proxy's
+ *  `touch_user_grace`. */
+export function touchUserGrace(sd: string): void {
+    try { writeFileSync(userTookOverPath(sd), new Date().toISOString() + "\n"); } catch { /* best-effort */ }
+}
+
 /** #633 Slice C — F9 toggle implemented on the TS side. Reads the
  *  current AFK mode and cycles to the next : off → wait_10m → wait_inf
  *  → off. The ∞ → off branch also clears user-grace (atomic release

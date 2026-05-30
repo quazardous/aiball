@@ -447,6 +447,11 @@ class _ProxyEventEmitter:
         # #633 Slice C — F9 toggle event. State machine TS cycles AFK.
         return self.emit({"event": "keystroke", "kind": "afk_key", "now_ms": now_ms})
 
+    def emit_marker(self, name, now_ms):
+        # #633 Slice D — touch/clear marker events (human-typing,
+        # user-took-over). TS writes the file ; 1:1 mapping for now.
+        return self.emit({"event": "marker", "name": name, "now_ms": now_ms})
+
 
 _proxy_events = _ProxyEventEmitter()
 
@@ -1504,11 +1509,19 @@ def main(argv):
                 if not _proxy_events.emit_typing(now_ms):
                     arm_afk_10m()
             elif m == "touch_marker":
-                touch_marker()
+                # #633 Slice D : delegate to TS state machine via back-channel.
+                # Fallback local on failure (degraded mode).
+                now_ms = int(datetime.datetime.now().timestamp() * 1000)
+                if not _proxy_events.emit_marker("touch_marker", now_ms):
+                    touch_marker()
             elif m == "touch_user_grace":
-                touch_user_grace()
+                now_ms = int(datetime.datetime.now().timestamp() * 1000)
+                if not _proxy_events.emit_marker("touch_user_grace", now_ms):
+                    touch_user_grace()
             elif m == "clear_user_grace":
-                clear_user_grace()
+                now_ms = int(datetime.datetime.now().timestamp() * 1000)
+                if not _proxy_events.emit_marker("clear_user_grace", now_ms):
+                    clear_user_grace()
         if dec.get("forward"):
             os.write(master_fd, dec["forward"])
         # #633 Slice B david `wb69mf` — paint authority migrée à la state

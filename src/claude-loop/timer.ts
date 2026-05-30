@@ -45,10 +45,13 @@ import {
     LOOP_STATUS,
     bootCompletePath,
     armAfk10m,
+    clearUserGrace,
     createProxyEventsServer,
     createViewPusher,
     proxyEventsSockPath,
     toggleAfk,
+    touchHumanTyping,
+    touchUserGrace,
     viewPushSockPath,
     paneShowsInterrupted,
     readLoopStateInput,
@@ -920,8 +923,7 @@ async function mainSse(): Promise<void> {
         try {
             const kind = (event as { event?: string }).event;
             const eventKind = (event as { kind?: string }).kind;
-            if (kind !== "keystroke") return;
-            if (eventKind === "typing") {
+            if (kind === "keystroke" && eventKind === "typing") {
                 // typing → arm NOT AFK 10m ONLY when not in boot phase.
                 // The bus's pushed view doesn't matter ; the marker file
                 // bootComplete is authoritative for "boot ended" — once
@@ -933,15 +935,26 @@ async function mainSse(): Promise<void> {
                 }
                 armAfk10m(sd!);
                 log("proxy-event: typing → armed NOT AFK 10m");
-            } else if (eventKind === "afk_key") {
+            } else if (kind === "keystroke" && eventKind === "afk_key") {
                 // #633 Slice C — F9 cycles 3 states (off → 10m → ∞ → off).
                 // No boot guard : the user explicitly pressed F9, they want
                 // the bar to react even during picker (bypass).
                 toggleAfk(sd!);
                 const next = readLoopStateInput(sd!).afkMode;
                 log(`proxy-event: afk_key → toggled to ${next}`);
+            } else if (kind === "marker") {
+                // #633 Slice D — generic marker touch/clear events. Proxy
+                // routes touch_marker (human-typing) / touch_user_grace /
+                // clear_user_grace via emit instead of writing the files
+                // directly. The state machine could intercept (e.g. skip
+                // touch_user_grace during boot) if needed in the future,
+                // but for now the mapping is 1:1.
+                const name = (event as { name?: string }).name;
+                if (name === "touch_marker") touchHumanTyping(sd!);
+                else if (name === "touch_user_grace") touchUserGrace(sd!);
+                else if (name === "clear_user_grace") clearUserGrace(sd!);
+                else log(`proxy-event: unknown marker '${name}'`);
             }
-            // future kinds (lone_esc, touch_marker, …) come in later slices
         } catch (e) {
             log(`proxy-event handler error: ${(e as Error).message}`);
         }
