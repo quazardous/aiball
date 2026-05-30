@@ -443,6 +443,10 @@ class _ProxyEventEmitter:
     def emit_typing(self, now_ms):
         return self.emit({"event": "keystroke", "kind": "typing", "now_ms": now_ms})
 
+    def emit_afk_key(self, now_ms):
+        # #633 Slice C — F9 toggle event. State machine TS cycles AFK.
+        return self.emit({"event": "keystroke", "kind": "afk_key", "now_ms": now_ms})
+
 
 _proxy_events = _ProxyEventEmitter()
 
@@ -1486,8 +1490,13 @@ def main(argv):
             elif m == "clear_afk":
                 clear_afk()
             elif m == "cycle_afk" or m == "toggle_afk":
-                # #622 jzcgmh: F9 path. cycle_afk is the legacy alias.
-                toggle_afk()
+                # #633 Slice C : F9 toggle routed via back-channel ; the
+                # TS state machine cycles AFK off → 10m → ∞ → off (last
+                # transition also clears user-grace). Fallback to local
+                # toggle in degraded mode.
+                now_ms = int(datetime.datetime.now().timestamp() * 1000)
+                if not _proxy_events.emit_afk_key(now_ms):
+                    toggle_afk()
             elif m == "arm_afk_10m":
                 # #633 Slice A : delegate to timer via back-channel.
                 # Fall back to local on failure (degraded mode).

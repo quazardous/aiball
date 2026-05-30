@@ -844,6 +844,42 @@ export function armAfk10m(sd: string, seconds = 600): void {
     } catch { /* best-effort */ }
 }
 
+/** #633 Slice C — mirror of the proxy's `set_afk_infinite` : write the
+ *  AFK file with content `inf` (NOT AFK ∞ hold, released only by F9). */
+export function setAfkInfinite(sd: string): void {
+    try { writeFileSync(afkPath(sd), "inf\n"); } catch { /* best-effort */ }
+}
+
+/** #633 Slice C — mirror of the proxy's `clear_afk` : remove the AFK
+ *  marker file → bar returns to AFK (autonomous loop, no hold). */
+export function clearAfk(sd: string): void {
+    try { if (existsSync(afkPath(sd))) unlinkSync(afkPath(sd)); } catch { /* race */ }
+}
+
+/** #633 Slice C — clear the user-took-over marker (release the silent
+ *  user-grace wake gate). Companion to `clearAfk` in the toggle path
+ *  NOT AFK ∞ → AFK (both holds released atomically). */
+export function clearUserGrace(sd: string): void {
+    try { if (existsSync(userTookOverPath(sd))) unlinkSync(userTookOverPath(sd)); } catch { /* race */ }
+}
+
+/** #633 Slice C — F9 toggle implemented on the TS side. Reads the
+ *  current AFK mode and cycles to the next : off → wait_10m → wait_inf
+ *  → off. The ∞ → off branch also clears user-grace (atomic release
+ *  of both holds — matches the proxy's `toggle_afk`). */
+export function toggleAfk(sd: string, seconds = 600): void {
+    const cur = readAfkState(sd);
+    if (cur.mode === "off") {
+        armAfk10m(sd, seconds);
+    } else if (cur.mode === "wait_10m") {
+        setAfkInfinite(sd);
+    } else {
+        // wait_inf → off (release both holds)
+        clearAfk(sd);
+        clearUserGrace(sd);
+    }
+}
+
 /** #627 — read the AFK file and derive {mode, expiryMs} for the LoopState
  *  service. File format mirrors the proxy's `_afk_mode` :
  *    absent / empty / "inf" → mode "wait_inf" if "inf", "off" if absent

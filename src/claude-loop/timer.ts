@@ -48,6 +48,7 @@ import {
     createProxyEventsServer,
     createViewPusher,
     proxyEventsSockPath,
+    toggleAfk,
     viewPushSockPath,
     paneShowsInterrupted,
     readLoopStateInput,
@@ -932,8 +933,15 @@ async function mainSse(): Promise<void> {
                 }
                 armAfk10m(sd!);
                 log("proxy-event: typing → armed NOT AFK 10m");
+            } else if (eventKind === "afk_key") {
+                // #633 Slice C — F9 cycles 3 states (off → 10m → ∞ → off).
+                // No boot guard : the user explicitly pressed F9, they want
+                // the bar to react even during picker (bypass).
+                toggleAfk(sd!);
+                const next = readLoopStateInput(sd!).afkMode;
+                log(`proxy-event: afk_key → toggled to ${next}`);
             }
-            // future kinds (afk_key, lone_esc) come in later slices
+            // future kinds (lone_esc, touch_marker, …) come in later slices
         } catch (e) {
             log(`proxy-event handler error: ${(e as Error).message}`);
         }
