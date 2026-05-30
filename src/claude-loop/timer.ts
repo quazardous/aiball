@@ -927,6 +927,17 @@ async function mainSse(): Promise<void> {
         try {
             writeFileSync(bootCompletePath(sd!), new Date().toISOString() + "\n");
         } catch { /* best-effort */ }
+        // #629 david `jf6efv` — flip the bar BG out of [boot] IMMEDIATELY.
+        // Without this, the BG stays yellow until the next heartbeat tick
+        // (up to `interval` seconds = 30s default) — david observed boot
+        // bar ending "at least 30s after the prompt returns". The bus
+        // event fires the moment isInBootGrace transitions ; flip the
+        // bar in the same tick.
+        try {
+            // Idle is the right default at boot exit ; busy-detect by the
+            // next probe cycle if claude is mid-turn.
+            setTmuxStatus(name!, LOOP_STATUS.IDLE);
+        } catch { /* best-effort */ }
     });
     // #629 — fast probe 1s pendant boot. Arme au start (on est forcément
     // en boot à T0 via le floor), désarme sur bootEnded, ré-arme sur

@@ -668,9 +668,16 @@ class _Decider:
         # NOT AFK 10m et sans flicker le bar entre stop/wait. Les
         # bytes restent forwardés à claude.
         in_boot = _boot_grace_remaining() > 0.0
+        # #629 david `jf6efv` — under --no-wait, the loop is declared
+        # autonomous : typing must NOT auto-arm NOT AFK 10m. F9 stays
+        # the only path to engage the hold. Without this guard, the
+        # picker-selection keystrokes (or any post-boot keystroke)
+        # systematically armed AFK 10m → bar landed in `wait` jaune
+        # right at boot exit, contradicting --no-wait's intent.
+        no_wait = _NO_WAIT
         if is_typing_keystroke(data):
             d["typing"] = True
-            if not in_boot:
+            if not in_boot and not no_wait:
                 # #622 david `jzcgmh` : typing arms NOT AFK 10m (or refreshes
                 # an existing 10m countdown). In NOT AFK ∞ mode it's a no-op
                 # (only F9 can release the indefinite hold). Stays distinct
@@ -682,6 +689,13 @@ class _Decider:
                 # (no-op, was already active).
                 self.afk_active = True
                 d["word"] = "stop"
+            elif not in_boot and no_wait:
+                # --no-wait : touche le marker `human-typing` pour le
+                # flash `stop` éphémère mais N'ARME PAS AFK 10m. user-grace
+                # touchée quand même (silently gates auto-wakes pour 600s
+                # comme avant — la convention "human just acted" tient).
+                d["markers"] += ["touch_marker", "touch_user_grace"]
+                d["word"] = "stop"
             else:
                 # In boot-grace : keep the bar as `_HUMAN_BOOT` (no stop
                 # red flicker). Don't touch any state markers — boot is
@@ -690,13 +704,17 @@ class _Decider:
             self.last_keystroke = now
         elif self.esc_takeover and _is_lone_esc(data):
             d["lone_esc"] = True
-            if not in_boot:
+            if not in_boot and not no_wait:
                 # #622 david `jzcgmh` : ESC behaves like typing — arms NOT
                 # AFK 10m (or refreshes), no-op in ∞. The "interrupt
                 # claude" payload still forwards below ; we just don't
                 # release the AFK hold the way the old `clear_afk` did.
                 d["markers"] += ["arm_afk_10m", "touch_user_grace"]
                 self.afk_active = True
+            elif not in_boot and no_wait:
+                # --no-wait : ESC ne déclenche plus AFK 10m. user-grace
+                # touchée pour le wake-gate convention.
+                d["markers"] += ["touch_user_grace"]
             d["word"] = "rest"
         d["forward"] += data
         return d
@@ -1261,6 +1279,9 @@ def main(argv):
     # paint via _apply_pushed_view force l'écriture (None != n'importe quel
     # mot ⇒ branche `word_token != current_word` passe).
     current_word = None
+    # #631 david `zfj6s7` — pareil pour @cl_afk_state : init à None pour
+    # que la première view force le paint. Skip ensuite si chunk_str inchangé.
+    current_afk_chunk = None
     # #360 : la décision frappe→action vit désormais dans le cœur PUR `_Decider`
     # (mirror exact de l'ancienne boucle inline ; bufferisation #345 incluse —
     # la 1re combo d'un afk_key à 2 (ex. 1er ESC de `esc esc`) est gardée jusqu'à
@@ -1345,8 +1366,16 @@ def main(argv):
             chunk_str = f"#[fg={col_code}]{prefix} {label}:#[fg={fg_lit}]{key}"
         else:
             chunk_str = f"#[fg={col_code}]{label}:#[fg={fg_lit}]{key}"
+        # #631 david `zfj6s7` — event-driven : ne repeint @cl_afk_state
+        # QUE si le chunk_str change. Le timer push toutes les 1 s pour le
+        # countdown AFK 10m, mais en steady-state (AFK off, ou pendant la
+        # même minute affichée comme "9m"), chunk_str est stable → 0
+        # set-option / 0 refresh-client. Économise typiquement ~50 paints/min
+        # (1 push/s × 2 subprocess each) en idle.
+        nonlocal current_afk_chunk
         target = os.environ.get("CL_TMUX") or ""
-        if target:
+        if target and chunk_str != current_afk_chunk:
+            current_afk_chunk = chunk_str
             mux = _mux_argv()
             try:
                 subprocess.run(

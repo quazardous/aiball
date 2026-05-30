@@ -50,16 +50,29 @@ interface Verdict {
  * le tableau des verdicts NDJSON. `afkSpec` = combos AFK (JSON, ex.
  * `[[27,97]]` pour `alt+a`), `windowMs` = debounce key-repeat post-fire.
  */
-function replay(seq: string, afkSpec: string, windowMs = 400): Verdict[] {
+function replay(seq: string, afkSpec: string, windowMs = 400, extraEnv: Record<string, string> = {}): Verdict[] {
     const r = spawnSync(PY, [PROXY, "--replay"], {
         input: seq,
         encoding: "utf8",
         env: {
             ...process.env,
+            // #629 `jf6efv` — explicitly DEFAULT to --wait so tests don't
+            // inherit the env of a parent claude-loop session running
+            // under --no-wait (which would silently flip the AFK-on-typing
+            // semantics). Tests for the --no-wait branch pass `CL_WAIT: "0"`.
+            CL_WAIT: "",
+            // Force boot grace to 0 so `_boot_grace_remaining()` always
+            // returns 0 → `in_boot=False` deterministically. Without this
+            // the test depends on real wall-clock vs proxy start time, and
+            // any test running within 60s of process start would see the
+            // "in_boot" branch fire (no arm_afk_10m), breaking assertions
+            // that target the post-boot behavior.
+            CL_BOOT_GRACE_SEC: "0",
             CL_AFK_SPEC: afkSpec,
             CL_AFK_WINDOW_MS: String(windowMs),
             CL_ESC_TAKEOVER: "1",
             CL_USER_GRACE_SEC: "60",
+            ...extraEnv,
         },
     });
     assert.equal(r.status, 0, `--replay exit ${r.status}: ${r.stderr}`);
@@ -128,6 +141,23 @@ test("frappe texte ordinaire → typing, forward, mot stop", { skip: SKIP }, () 
     assert.equal(v[0].forward, "61");
     assert.equal(v[0].word_resolved, "stop");
     assert.ok(v[0].markers.includes("touch_user_grace"));
+});
+
+test("frappe sous --no-wait → STOP flash mais PAS d'arm AFK 10m (jf6efv)", { skip: SKIP }, () => {
+    // #629 david `jf6efv` — under --no-wait, the loop is autonomous : typing
+    // must NOT auto-engage NOT AFK. Picker-selection keystrokes (or any
+    // post-boot typing) used to systematically land the bar in `wait` jaune
+    // right after boot, contradicting --no-wait's intent.
+    const v = replay("0 61\n", ALT_A, 400, { CL_WAIT: "0" });
+    assert.equal(v[0].typing, true);
+    assert.equal(v[0].forward, "61");
+    assert.equal(v[0].word_resolved, "stop");
+    // Touch markers fired (bar STOP flash + user-grace silently for wakes)…
+    assert.ok(v[0].markers.includes("touch_marker"));
+    assert.ok(v[0].markers.includes("touch_user_grace"));
+    // … but arm_afk_10m did NOT fire (the bar won't drift to `wait` once
+    // the typing flash dissipates). F9 stays the only path to NOT AFK.
+    assert.ok(!v[0].markers.includes("arm_afk_10m"));
 });
 
 test("frappe ordinaire APRÈS afk ∞ → no-op (only F9 peut release l'∞)", { skip: SKIP }, () => {
