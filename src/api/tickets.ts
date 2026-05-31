@@ -365,6 +365,11 @@ ticketsRouter.get("/inbox", (req, res) => {
         // Latest-wins symmetric with resolution.
         latestPlanId: number;
         latestPlanRejected: boolean;
+        // #656 david: symmetric to pendingResolution — surface a pending
+        // PLAN decision on the latest plan-decision comment so the inbox
+        // row can flag "you have a plan to accept/reject" same way it
+        // flags pending resolutions. Latest-wins (matches latestPlanId).
+        pendingPlan: boolean;
         // #B.132: who spoke last on this thread. Tracks the by_agent
         // of the most recent non-rejected approved comment_added.
         // Falls back to the ticket creator if no comments yet.
@@ -391,6 +396,7 @@ ticketsRouter.get("/inbox", (req, res) => {
                 latestResolutionRejected: false,
                 latestPlanId: 0,
                 latestPlanRejected: false,
+                pendingPlan: false,
                 lastSpeaker: null,
                 lastSpeakerId: 0,
             } as Agg);
@@ -460,6 +466,7 @@ ticketsRouter.get("/inbox", (req, res) => {
                 if (cur.latestPlanId === 0 || m.id > cur.latestPlanId) {
                     cur.latestPlanId = m.id;
                     cur.latestPlanRejected = d.status === "rejected";
+                    cur.pendingPlan = d.status === "pending";
                 }
             }
         }
@@ -534,6 +541,7 @@ ticketsRouter.get("/inbox", (req, res) => {
                 latestResolutionRejected: false,
                 latestPlanId: 0,
                 latestPlanRejected: false,
+                pendingPlan: false,
                 lastSpeaker: null,
                 lastSpeakerId: 0,
             } as Agg);
@@ -576,6 +584,12 @@ ticketsRouter.get("/inbox", (req, res) => {
                 — cleared once the ticket is closed/rejected so the
                 badge represents "live unresolved rejection". */
             latest_plan_rejected: agg.latestPlanRejected && !(agg.closed || t.status === "rejected"),
+            /** #656 david: pending PLAN flag. Symmetric to
+                pending_resolution — surfaced so the inbox row can
+                show "you have a plan to accept/reject" the same way
+                it shows pending resolutions. Cleared once the ticket
+                is closed/rejected. */
+            pending_plan: agg.pendingPlan && !(agg.closed || t.status === "rejected"),
             scope: t.scope,
             // Per-consumer unread flag (≥1 unseen ping on the thread for
             // the caller, resolved from the X-Aiball-Consumer header).

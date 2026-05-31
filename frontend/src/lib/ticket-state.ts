@@ -65,6 +65,7 @@ export type LifecycleStage =
     | "closed"
     | "resolved"
     | "pending-resolved"
+    | "pending-plan"
     | "rejected-resolved"
     | "rejected-plan"
     | "blocked"
@@ -80,6 +81,11 @@ export function lifecycleStage(r: InboxRow): LifecycleStage {
     // yet. Visually distinct from final-resolved so the reporter sees
     // there's a pending decision (#B.120).
     if (r.pending_resolution) return "pending-resolved";
+    // #656 david: same surfacing for pending PLAN decisions. Lower
+    // priority than pending-resolved (a pending resolution is "later
+    // in the pipeline" — agent says done, awaiting accept) ; a pending
+    // plan is "earlier" — agent proposes a direction, awaiting validate.
+    if (r.pending_plan) return "pending-plan";
     // #B.168 follow-up: latest resolution was rejected and the thread
     // is still open — distinct red X badge so the reporter sees their
     // earlier rejection still leaves work on the table.
@@ -108,6 +114,10 @@ export type Attention = "moderation" | "resolution" | "comments" | null;
 export function attentionOf(r: InboxRow): Attention {
     if (isPending(r)) return "moderation";
     if (r.pending_resolution) return "resolution";
+    // #656 david: same "resolution" tint for pending plans — both are
+    // "decision pending on the reporter". Distinct icons / labels
+    // surface the kind ; the row accent groups them as "your call".
+    if (r.pending_plan) return "resolution";
     if (r.pending_comment_count > 0) return "comments";
     return null;
 }

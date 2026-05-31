@@ -405,6 +405,11 @@ export interface InboxRow {
     blocked?: boolean;
     /** Some agent has proposed this ticket as resolved, awaiting reporter's accept/reject. */
     pending_resolution?: boolean;
+    /** #656 david: symmetric to pending_resolution — an agent has
+     *  proposed a PLAN (HOW choice) and the reporter still has to
+     *  accept/reject. Surfaced so the inbox row can flag pending
+     *  plans the same way it flags pending resolutions. */
+    pending_plan?: boolean;
     /** #B.168 follow-up: the LATEST resolution decision on this
      *  ticket was rejected — UI shows a `× rejected` badge so the
      *  reporter sees "I rejected, the thread is still open". */

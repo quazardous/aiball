@@ -57,6 +57,18 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         color: "--p-amber-500",
         title: "an agent proposed resolution — accept (close) or reject to bring it back",
     },
+    "pending-plan": {
+        // #656 david: symmetric to pending-resolved but for plan
+        // decisions (HOW choice awaiting reporter validation). Same
+        // amber but a directions-flag glyph so the visual scan pairs
+        // it with the rejected-plan family (which uses `pi-ban` for
+        // "direction's a no"). Lightbulb / question-mark — `pi-question-circle`
+        // reads as "a question on direction" without overloading the
+        // resolve family.
+        icon: "pi pi-question-circle",
+        color: "--p-amber-500",
+        title: "an agent proposed a plan — accept (greenlight) or reject to redirect",
+    },
     "rejected-resolved": {
         // #B.168 follow-up: latest resolution was rejected, thread
         // still open. Red X mirrors the green check-circle of
