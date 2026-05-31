@@ -1,0 +1,217 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["pyyaml>=6"]
+# ///
+"""#671 — live visual playback of an integration yaml scenario.
+
+Spawns claude-loop in a tmux session with fake-claude as the claude
+binary, walks the scenario's time-ordered steps in real time : sleep
+to the next at_seconds, apply Drive actions, evaluate Expect
+assertions with ✓ / ✗ output. The tmux session stays alive after the
+scenario ends so the operator can `claude-loop attach NAME` to inspect
+the final pane state for debug.
+
+Different from the pytest runner (#638 slice 2) :
+  - pytest runner is HEADLESS + asserts → fails the test on mismatch
+  - this is VISUAL + reports → never blocks, useful for "why did this
+    scenario fail in CI?"
+
+Usage :
+  bin/play-scenario tests/integration/scenarios/prompt-ready-basic.yaml
+  bin/play-scenario --keep tests/integration/scenarios/picker.yaml
+                    └─ skip cleanup ; loop stays running for inspection
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+
+# Resolve sibling yaml_scenario module living under tests/integration/.
+# The script lives in bin/ at the repo root ; the scenario parser is
+# in tests/integration/. Add the parser dir to sys.path before import.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCENARIO_DIR = REPO_ROOT / "tests" / "integration"
+sys.path.insert(0, str(SCENARIO_DIR))
+
+from yaml_scenario import (  # noqa: E402
+    DriveStep,
+    ExpectStep,
+    SpawnStep,
+    get_inspect_path,
+    parse_scenario,
+)
+
+BIN_CLAUDE_LOOP = REPO_ROOT / "bin" / "claude-loop"
+BIN_FAKE_CLAUDE = REPO_ROOT / "bin" / "fake-claude"
+
+# ANSI color helpers — degrade gracefully when piped to a non-tty.
+def _color(code: str, text: str) -> str:
+    if not sys.stdout.isatty():
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+def green(t: str) -> str: return _color("32", t)
+def red(t: str) -> str: return _color("31", t)
+def yellow(t: str) -> str: return _color("33", t)
+def cyan(t: str) -> str: return _color("36", t)
+def dim(t: str) -> str: return _color("2", t)
+
+
+def spawn_loop(name: str, fake_claude_scenario: str, interval_s: int) -> None:
+    """Spawn `claude-loop start NAME` in the foreground but detached
+    from the play script's stdin/stdout. The loop forks its own tmux
+    session ; this call returns once that's set up. No --once, so the
+    loop stays alive for the duration of the playback."""
+    env = {
+        **__import__("os").environ,
+        "CL_CLAUDE_CMD": f"{BIN_FAKE_CLAUDE} --probe-mode {fake_claude_scenario}",
+    }
+    cmd = [
+        str(BIN_CLAUDE_LOOP), "start", name,
+        "--interval", str(interval_s),
+        "--check-cmd", "false",
+        "--no-wait",
+        "--no-attach",
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=env)
+    if res.returncode != 0:
+        sys.stderr.write(red(f"✗ claude-loop start failed (rc={res.returncode})\n"))
+        sys.stderr.write(f"  stdout: {res.stdout.strip()}\n")
+        sys.stderr.write(f"  stderr: {res.stderr.strip()}\n")
+        sys.exit(1)
+
+
+def inspect_state(name: str) -> dict:
+    """Return the parsed `claude-loop inspect NAME` JSON. Returns
+    `{}` on error so the play loop reports a clean miss instead of
+    crashing on a transient inspect failure during boot."""
+    try:
+        res = subprocess.run(
+            [str(BIN_CLAUDE_LOOP), "inspect", name],
+            capture_output=True, text=True, timeout=5,
+        )
+        if res.returncode != 0:
+            return {}
+        return json.loads(res.stdout)
+    except Exception:
+        return {}
+
+
+def apply_drive(name: str, step: DriveStep) -> None:
+    """Execute a Drive action against the live loop. Only `key`
+    (= tmux send-keys to the pane) is wired today — other actions
+    print a warning and continue."""
+    if step.action == "key":
+        key = step.payload.get("key", "")
+        subprocess.run(
+            ["tmux", "send-keys", "-t", f"cl-{name}.0", key],
+            capture_output=True, timeout=3,
+        )
+        print(f"  {cyan('🔧')} key: {key}")
+        return
+    print(f"  {yellow('⚠')}  drive action '{step.action}' not implemented — skipping")
+
+
+def evaluate_expect(state: dict, step: ExpectStep) -> tuple[int, int]:
+    """Print each assertion with ✓ / ✗ ; return (ok_count, fail_count)."""
+    ok, fail = 0, 0
+    for path, expected in step.assertions.items():
+        try:
+            actual = get_inspect_path(state, path)
+        except KeyError as e:
+            print(f"  {red('✗')} {path}: KeyError {e}")
+            fail += 1
+            continue
+        if actual == expected:
+            print(f"  {green('✓')} {path}: {actual!r}")
+            ok += 1
+        else:
+            print(f"  {red('✗')} {path}: expected {expected!r}, got {actual!r}")
+            fail += 1
+    return ok, fail
+
+
+def cleanup(name: str) -> None:
+    """Best-effort cleanup : `claude-loop rm NAME` + tmux kill-session.
+    Both swallow errors — teardown should never block the operator."""
+    try:
+        subprocess.run([str(BIN_CLAUDE_LOOP), "rm", name], capture_output=True, timeout=5)
+    except Exception:
+        pass
+    try:
+        subprocess.run(["tmux", "kill-session", "-t", f"cl-{name}"], capture_output=True, timeout=2)
+    except Exception:
+        pass
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        prog="play-scenario",
+        description="Live visual playback of an integration yaml scenario (#671).",
+    )
+    ap.add_argument("yaml_path", type=Path, help="Path to the yaml scenario file.")
+    ap.add_argument("--keep", action="store_true", help="Skip cleanup — leave the tmux session running for post-mortem inspection (you'll need to `claude-loop rm NAME` manually).")
+    ap.add_argument("--interval", type=int, default=2, help="Heartbeat interval in seconds (default 2). Lower = snappier inspect ; bumps render lag.")
+    args = ap.parse_args()
+
+    if not args.yaml_path.exists():
+        sys.stderr.write(red(f"✗ {args.yaml_path}: no such file\n"))
+        return 2
+
+    sc = parse_scenario(args.yaml_path)
+    name = f"play-{uuid.uuid4().hex[:8]}"
+    spawn = sc.steps[0]
+    if not isinstance(spawn, SpawnStep):
+        sys.stderr.write(red(f"✗ scenario must start with a spawn step\n"))
+        return 3
+
+    print(cyan(f"▶ scenario: {sc.name}"))
+    print(cyan(f"  tmux session: cl-{name}"))
+    print(cyan(f"  attach via:   claude-loop attach {name}"))
+    print(cyan(f"  fake-claude:  --probe-mode {spawn.fake_claude}"))
+    print()
+
+    spawn_loop(name, spawn.fake_claude, args.interval)
+    started_at = time.monotonic()
+
+    total_ok, total_fail = 0, 0
+    try:
+        for step in sc.steps[1:]:
+            at = float(getattr(step, "at_seconds", 0))
+            elapsed = time.monotonic() - started_at
+            wait = at - elapsed
+            if wait > 0:
+                print(dim(f"⏱  sleep {wait:.1f}s (target t={at}s)"))
+                time.sleep(wait)
+            print(f"\n{yellow(f'@ t={at}s')}")
+            if isinstance(step, DriveStep):
+                apply_drive(name, step)
+            elif isinstance(step, ExpectStep):
+                state = inspect_state(name)
+                ok, fail = evaluate_expect(state, step)
+                total_ok += ok
+                total_fail += fail
+    finally:
+        print()
+        summary = f"{green('✓')} {total_ok} ok"
+        if total_fail:
+            summary += f"  {red('✗')} {total_fail} fail"
+        print(cyan(f"━━━ summary: {summary} ━━━"))
+        if args.keep:
+            print(dim(f"(--keep) tmux session left running ; rm via: claude-loop rm {name}"))
+        else:
+            print(dim(f"cleaning up tmux session cl-{name}…"))
+            cleanup(name)
+
+    return 1 if total_fail else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
