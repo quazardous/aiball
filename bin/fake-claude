@@ -317,19 +317,119 @@ class FakeClaudeApp(App):
             self.set_timer(2.0, lambda: self.query_one("#header", Static).update(""))
 
 
+# #637 Slice 1 — built-in PROBE scenarios. Each scenario is a list of
+# (screen_slug, advance_on) tuples. The probe runner renders the screen
+# at index 0 to stdout immediately, then loops reading stdin lines ;
+# when the advance_on condition matches (typically a blank line = Enter,
+# or a specific token), it advances to the next index. Reaching the end
+# of the list = quit cleanly. The TUI textual app is bypassed entirely.
+#
+# Adding a scenario : just append a list of screen slugs (each must
+# resolve in BUILTIN_SCREENS) ; the advance is "any line" by default.
+# Sub-second timings (header_flash duration, stream delays) are
+# ignored in probe mode — tests drive sequencing explicitly via stdin.
+PROBE_SCENARIOS: dict[str, list[str]] = {
+    # The session picker is on screen ; an Enter on stdin advances to
+    # the idle prompt (simulates the session-start-hook auto-pick).
+    "picker-2-sessions": ["boot.resume_picker", "main.idle"],
+    # Compacting screen alone — the probe loop holds it until any
+    # stdin line, then advances to the idle prompt.
+    "compacting-42": ["transition.compacting", "main.idle"],
+    # Plain ready state — useful as a baseline.
+    "prompt-ready": ["main.idle"],
+}
+
+
+def _render_screen_sync(spec: dict, out=sys.stdout) -> None:
+    """#637 Slice 1 — sync render of a screen spec to `out` (no event
+    loop, no textual widgets). Used by probe-mode so claude-loop's
+    capture-pane regex sees the same markers without the TUI overhead.
+    Sub-second timings (`duration`, `delay_min/max`) are ignored —
+    the test drives sequencing via stdin advance commands instead."""
+    kind = spec.get("kind")
+    if kind == "header_flash":
+        out.write(spec.get("text", "") + "\n")
+    elif kind == "write":
+        out.write(spec.get("text", "") + "\n")
+    elif kind == "picker":
+        out.write("[choose a session — type 1/2/3 + Enter]\n")
+        for line in spec.get("lines", []):
+            out.write(line + "\n")
+    elif kind == "prompt":
+        out.write(f"❯ \n  {MARKER_AUTO_MODE}\n")
+    elif kind == "stream":
+        out.write(f"✽ Working…   {MARKER_ESC_INTERRUPT}\n")
+        lines = spec.get("lines") or LOREM_IPSUM_LINES
+        max_lines = int(spec.get("max_lines", len(lines)))
+        for i, ln in enumerate(lines):
+            if i >= max_lines:
+                break
+            out.write(ln + "\n")
+    else:
+        out.write(f"[fake-claude] unknown screen kind: {kind!r}\n")
+    out.flush()
+
+
+def _run_probe_mode(scenario_name: str, screens: dict) -> int:
+    """#637 Slice 1 — non-event-loop runner for `--probe-mode SCENARIO`.
+    Renders the first screen, then reads stdin line by line ; each line
+    advances to the next screen in the scenario. Reaching the end
+    exits cleanly (return 0).
+
+    A blank line (= raw Enter from tmux send-keys, which is what
+    claude-loop's session-start-hook uses to dismiss the picker)
+    advances. `quit` on stdin also exits."""
+    seq = PROBE_SCENARIOS.get(scenario_name)
+    if seq is None:
+        sys.stderr.write(
+            f"fake-claude: unknown probe scenario '{scenario_name}' "
+            f"(available: {', '.join(sorted(PROBE_SCENARIOS))})\n"
+        )
+        return 2
+    idx = 0
+    while idx < len(seq):
+        slug = seq[idx]
+        spec = screens.get(slug)
+        if spec is None:
+            sys.stderr.write(f"fake-claude: probe scenario '{scenario_name}' references unknown screen '{slug}'\n")
+            return 3
+        _render_screen_sync(spec)
+        idx += 1
+        if idx >= len(seq):
+            break
+        # Wait for the next advance signal. Any line (including blank)
+        # advances ; `quit` exits.
+        line = sys.stdin.readline()
+        if not line:  # EOF
+            break
+        if line.strip() == "quit":
+            break
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         prog="fake-claude",
-        description="Scriptable claude(1) simulator for claude-loop debugging (textual TUI).",
+        description="Scriptable claude(1) simulator for claude-loop debugging (textual TUI ; or --probe-mode for sync stdout / stdin-driven runs in tests).",
     )
     ap.add_argument("scenario", nargs="?", type=Path, help="YAML scenario file (defaults to examples/fake-claude/scenarios/default.yaml next to this binary)")
     ap.add_argument("--list-screens", action="store_true", help="dump built-in screen slugs + exit")
+    ap.add_argument("--probe-mode", metavar="NAME", help="#637 Slice 1 — non-TUI probe runner : render a built-in scenario synchronously to stdout, advance on stdin lines. NAME is one of the keys in PROBE_SCENARIOS (--list-probes to list).")
+    ap.add_argument("--list-probes", action="store_true", help="#637 Slice 1 — dump built-in probe scenarios + exit.")
     args = ap.parse_args()
 
     if args.list_screens:
         for slug in BUILTIN_SCREENS:
             print(slug)
         return 0
+
+    if args.list_probes:
+        for name in sorted(PROBE_SCENARIOS):
+            print(f"{name}: {' → '.join(PROBE_SCENARIOS[name])}")
+        return 0
+
+    if args.probe_mode:
+        return _run_probe_mode(args.probe_mode, BUILTIN_SCREENS)
 
     scenario = args.scenario or DEFAULT_SCENARIO_PATH
 
