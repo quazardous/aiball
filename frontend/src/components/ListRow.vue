@@ -219,7 +219,11 @@ function onClick(ev: MouseEvent) {
     border-left: 3px solid var(--p-yellow-500);
 }
 .list-row--attention-resolution {
-    border-left: 3px solid var(--p-green-500);
+    /* #656 david `8wegju` : pointillé pour la bande verte — distinguer
+       visuellement les "your call" (decision pending) du moderation
+       solide jaune et du comments solide pâle. Le pointillé connote
+       "à valider, pas figé". */
+    border-left: 3px dashed var(--p-green-500);
 }
 .list-row--attention-comments {
     border-left: 3px solid color-mix(in srgb, var(--p-yellow-500) 60%, transparent);
