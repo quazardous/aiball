@@ -2,12 +2,15 @@
 // Run: `npx tsx --test src/claude-loop/afk-service-sync.test.ts`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
     afkMarkerExists,
+    armAfkViaService,
+    clearAfkViaService,
     hydrateAfkServiceFromMarker,
+    setAfkInfViaService,
     watchAfkMarker,
 } from "./afk-service-sync.js";
 import { AfkService } from "./afk-service.js";
@@ -167,4 +170,68 @@ test("watchAfkMarker: unwatch stops further updates", async () => {
     writeFileSync(afkPath(sd), "inf\n");
     await sleep(150);
     assert.equal(svc.getState(), "off", "no update after unwatch");
+});
+
+test("armAfkViaService: sets service state + writes file with ISO expiry", () => {
+    const sd = mkSd();
+    const svc = new AfkService();
+    const before = Date.now();
+    const expiry = armAfkViaService(sd, 600, svc);
+    const after = Date.now();
+    assert.equal(svc.getState(), "wait_10m");
+    assert.equal(svc.expiryMs(), expiry);
+    assert.ok(expiry >= before + 600_000 && expiry <= after + 600_000, "expiry ≈ now+10min");
+    const content = readFileSync(afkPath(sd), "utf8").trim();
+    assert.equal(content, new Date(expiry).toISOString());
+});
+
+test("armAfkViaService: mid-countdown re-arm updates both service expiry + file", () => {
+    const sd = mkSd();
+    const svc = new AfkService();
+    armAfkViaService(sd, 600, svc);
+    const exp1 = svc.expiryMs();
+    const exp2 = armAfkViaService(sd, 300, svc);
+    assert.equal(svc.getState(), "wait_10m");
+    assert.notEqual(exp2, exp1, "expiry rewritten");
+    assert.equal(svc.expiryMs(), exp2);
+    const content = readFileSync(afkPath(sd), "utf8").trim();
+    assert.equal(content, new Date(exp2).toISOString());
+});
+
+test("setAfkInfViaService: sets wait_inf + writes 'inf' to file", () => {
+    const sd = mkSd();
+    const svc = new AfkService();
+    setAfkInfViaService(sd, svc);
+    assert.equal(svc.getState(), "wait_inf");
+    assert.equal(svc.expiryMs(), null);
+    assert.equal(readFileSync(afkPath(sd), "utf8").trim(), "inf");
+});
+
+test("clearAfkViaService: sets off + unlinks file", () => {
+    const sd = mkSd();
+    writeFileSync(afkPath(sd), "inf\n");
+    const svc = new AfkService("wait_inf");
+    clearAfkViaService(sd, svc);
+    assert.equal(svc.getState(), "off");
+    assert.equal(svc.expiryMs(), null);
+    assert.equal(existsSync(afkPath(sd)), false);
+});
+
+test("clearAfkViaService: no-op when file already absent (race-safe)", () => {
+    const sd = mkSd();
+    const svc = new AfkService();
+    clearAfkViaService(sd, svc);
+    assert.equal(svc.getState(), "off");
+    assert.equal(existsSync(afkPath(sd)), false);
+});
+
+test("via-service helpers fire transition events on subscribers", () => {
+    const sd = mkSd();
+    const svc = new AfkService();
+    const seen: string[] = [];
+    svc.subscribe((state) => { seen.push(state); });
+    armAfkViaService(sd, 600, svc);
+    setAfkInfViaService(sd, svc);
+    clearAfkViaService(sd, svc);
+    assert.deepEqual(seen, ["wait_10m", "wait_inf", "off"]);
 });

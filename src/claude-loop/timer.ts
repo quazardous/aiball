@@ -43,7 +43,6 @@ import {
     DEFAULT_ASK_GRACE_SEC,
     DEFAULT_USER_GRACE_SEC,
     LOOP_STATUS,
-    armAfk10m,
     bootCompletePath,
     createProxyEventsServer,
     createViewPusher,
@@ -105,7 +104,7 @@ import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
 import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
 import { paneMarkerBarInfo } from "./pane-service.js";
-import { watchAfkMarker } from "./afk-service-sync.js";
+import { armAfkViaService, watchAfkMarker } from "./afk-service-sync.js";
 import { canFlipBgFromBoot, computeLoopView, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
@@ -887,8 +886,8 @@ async function mainSse(): Promise<void> {
         // fires only when the bus didn't (paneReady never became true).
         // Keep the two paths consistent for the AFK arm.
         if (process.env[CL_ENV.WAIT] === "1") {
-            armAfk10m(sd!);
-            log("settleBoot: --wait → armed NOT AFK 10m");
+            armAfkViaService(sd!);
+            log("settleBoot: --wait → armed NOT AFK 10m (via service)");
         }
         // Seed idle-since so tryWake's gate passes; tryWake will
         // flip to busy if there's work or stay idle otherwise.
@@ -980,8 +979,8 @@ async function mainSse(): Promise<void> {
         // leaves AFK off — bar reads `loop` and auto-pings resume.
         const isWaitMode = process.env[CL_ENV.WAIT] === "1";
         if (isWaitMode) {
-            armAfk10m(sd!);
-            log("state-bus: boot phase ended — --wait → armed NOT AFK 10m");
+            armAfkViaService(sd!);
+            log("state-bus: boot phase ended — --wait → armed NOT AFK 10m (via service)");
         }
         // #629 david `jf6efv` — flip the bar BG out of [boot] IMMEDIATELY.
         // Without this, the BG stays yellow until the next heartbeat tick

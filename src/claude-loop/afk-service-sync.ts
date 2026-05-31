@@ -16,7 +16,7 @@
  * on both state.ts (file paths + readAfkState) and afk-service.ts
  * (service), never the reverse.
  */
-import { existsSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, unlinkSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { afkPath, readAfkState } from "./state.js";
 import { type AfkService, getAfkService } from "./afk-service.js";
 
@@ -80,4 +80,46 @@ export function watchAfkMarker(sd: string, svc?: AfkService): () => void {
  */
 export function afkMarkerExists(sd: string): boolean {
     return existsSync(afkPath(sd));
+}
+
+/**
+ * #649 Slice 5a — in-process mutation helpers : update AfkService AND
+ * write the marker file in one call. Use these from in-process code
+ * (timer.ts) instead of the legacy state.ts `armAfk10m` / `setAfkInfinite`
+ * / `clearAfk` direct file writers — the service is updated synchronously
+ * (instead of waiting for the fs.watch round-trip), and the file stays
+ * the cross-process API for hooks + the PTY proxy.
+ *
+ * The writes are always emitted unconditionally — even when the state
+ * doesn't transition (set10m → set10m with a NEW expiry) — so the file
+ * tracks the latest expiry. The watcher then re-fires on the same write
+ * and re-hydrates the service ; that's idempotent (Observable<T>
+ * guarantee + set10m updates expiryMs even on equal state) so no loop.
+ */
+export function armAfkViaService(
+    sd: string,
+    seconds = 600,
+    svc?: AfkService,
+): number {
+    const s = svc ?? getAfkService();
+    const expiry = Date.now() + seconds * 1000;
+    s.set10m(expiry);
+    try {
+        writeFileSync(afkPath(sd), new Date(expiry).toISOString() + "\n");
+    } catch { /* best-effort — service still updated in-process */ }
+    return expiry;
+}
+
+export function setAfkInfViaService(sd: string, svc?: AfkService): void {
+    const s = svc ?? getAfkService();
+    s.setInf();
+    try { writeFileSync(afkPath(sd), "inf\n"); } catch { /* best-effort */ }
+}
+
+export function clearAfkViaService(sd: string, svc?: AfkService): void {
+    const s = svc ?? getAfkService();
+    s.setOff();
+    try {
+        if (existsSync(afkPath(sd))) unlinkSync(afkPath(sd));
+    } catch { /* race — file may have been cleared by another writer */ }
 }
