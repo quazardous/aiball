@@ -181,10 +181,16 @@ function onRowClick(r: InboxRow) {
              pour 0 valeur quotidienne — c'est de l'info au repos, pas le
              principal). -->
         <template #title>
+            <!-- #657 david `4vtj93` : fusion claim+hot. Le 🔥 ne s'affiche
+                 QUE quand il n'y a pas de claim (hot purement cross-agent
+                 activity sans claimant). Quand un claim existe, l'état
+                 hot est porté par la couleur de la chip bookmark dans le
+                 #meta slot (verte si hot, muted sinon). Évite la
+                 redondance 🔥 + bookmark côte à côte. -->
             <span
-                v-if="r.hot"
+                v-if="r.hot && !r.claimant"
                 class="list-hot-focus"
-                title="An agent has recent activity on this ticket (within the hot window). Claim status is shown separately by the bookmark icon."
+                title="An agent has recent activity on this ticket (within the hot window)."
                 style="margin-right: 0.3rem"
             >🔥</span>
             <!-- #560 david : en multi-projet (`!project`), le nom du projet va
@@ -256,10 +262,15 @@ function onRowClick(r: InboxRow) {
                  distinct (#436); a row can show both. Role-specific glyph,
                  same as the thread header (bookmark-fill = self-claim,
                  user-plus = pushed assignment). -->
+            <!-- #657 david `4vtj93` : claim chip absorbe l état hot.
+                 Vert quand hot (claim récent OU activité cross-agent
+                 dans le hot_window) ; muted/default sinon (claim sans
+                 activité récente — "présent mais stale"). -->
             <span
                 v-if="r.claimant"
                 class="list-row__hold"
-                :title="`Claimed by ${r.claimant}${r.claimed_at ? ' · ' + new Date(r.claimed_at).toLocaleString() : ''}`"
+                :class="{ 'list-row__hold--hot': r.hot }"
+                :title="`Claimed by ${r.claimant}${r.claimed_at ? ' · ' + new Date(r.claimed_at).toLocaleString() : ''}${r.hot ? ' · hot (recent claim or activity)' : ''}`"
             >
                 <i class="pi pi-bookmark-fill" />
             </span>
@@ -328,6 +339,15 @@ function onRowClick(r: InboxRow) {
 .list-row__hold .pi {
     font-size: 0.78rem;
     opacity: 0.75;
+}
+/* #657 david `4vtj93` : claim hot = bookmark vert + full opacity.
+   Marque visuellement « ce claim est actif » (recent claim ou recent
+   activity dans hot_window_sec) vs un claim stale (muted/default). */
+.list-row__hold--hot {
+    color: var(--p-green-500);
+}
+.list-row__hold--hot .pi {
+    opacity: 1;
 }
 .ticket-id {
     color: var(--p-text-muted-color);
