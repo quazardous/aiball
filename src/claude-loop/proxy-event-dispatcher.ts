@@ -137,6 +137,12 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                 getHookService().emit(hookEvent);
                 return { kind: "hook-event", hookEvent };
             }
+            if (hookKind === "UserPromptSubmit") {
+                const fromAutoWake = event.from_auto_wake === true;
+                const hookEvent: HookEvent = { kind: "UserPromptSubmit", from_auto_wake: fromAutoWake, at_ms: atMs };
+                getHookService().emit(hookEvent);
+                return { kind: "hook-event", hookEvent };
+            }
             return { kind: "unknown", raw: `hook:${String(hookKind)}` };
         }
         return { kind: "unknown", raw: `${String(kind)}:${String(eventKind)}` };
@@ -154,7 +160,7 @@ export function formatVerdictLogLine(v: DispatchVerdict): string {
         case "afk-toggled":          return `proxy-event: afk_key → toggled to ${v.nextMode}`;
         case "marker-touched":       return `proxy-event: marker '${v.name}' applied`;
         case "afk-service-set":      return `proxy-event: AfkService → ${v.mode}${v.expiryMs !== null ? ` (expiry=${new Date(v.expiryMs).toISOString()})` : ""}`;
-        case "hook-event":           return `proxy-event: HookService ← ${v.hookEvent.kind}${v.hookEvent.kind === "SessionStart" ? ` (source=${v.hookEvent.source})` : v.hookEvent.kind === "PreToolUse" ? ` (tool=${v.hookEvent.tool_name})` : ""}`;
+        case "hook-event":           return `proxy-event: HookService ← ${v.hookEvent.kind}${v.hookEvent.kind === "SessionStart" ? ` (source=${v.hookEvent.source})` : v.hookEvent.kind === "PreToolUse" ? ` (tool=${v.hookEvent.tool_name})` : v.hookEvent.kind === "UserPromptSubmit" ? ` (from_auto_wake=${v.hookEvent.from_auto_wake})` : ""}`;
         case "unknown":              return `proxy-event: unknown '${v.raw}'`;
         case "error":                return `proxy-event handler error: ${v.message}`;
     }

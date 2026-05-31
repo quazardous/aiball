@@ -22,21 +22,27 @@
  *   2. **busy-state precision** — flip the tmux status to `[busy]`
  *      immediately (claude is about to process the prompt). Without
  *      this, the bar would lag until the next Stop hook flips it
- *      back. Also clears `idle-since` so the timer correctly sees
- *      "claude is in a turn".
+ *      back.
+ *
+ *      **#652 Slice 6** — the direct `setTmuxStatus(BUSY)` call moved
+ *      to a HookService subscriber on the timer side. This hook now
+ *      emits a `UserPromptSubmit` event carrying `from_auto_wake`,
+ *      and the subscriber (`hook-bar-subscriber.ts`) flips the bar.
+ *      Best-effort emit : if the timer is down the bar lag returns,
+ *      but the hook's other side-effects (user-took-over marker,
+ *      idle-since cleanup) still run.
  *
  * Always emits `{}` and exits 0 — never block claude's run.
  */
 import { existsSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import {
-    LOOP_STATUS,
     idleMarkerPath,
-    setTmuxStatus,
     userTookOverPath,
     wakeInFlightPath,
     WAKE_IN_FLIGHT_TTL_MS,
 } from "./state.js";
 import { CL_ENV } from "./env-vars.js";
+import { emitHookEventToTimer } from "./hook-emit.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -68,7 +74,15 @@ try {
     if (existsSync(idleMarkerPath(sd!))) {
         try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
     }
-    setTmuxStatus(name!, LOOP_STATUS.BUSY);
+    // #652 Slice 6 — emit the event ; the timer-side subscriber paints
+    // the bar BUSY. Best-effort : silent no-op if the timer isn't up
+    // (the bar lags to the next heartbeat tick, acceptable degraded mode).
+    await emitHookEventToTimer(sd!, {
+        event: "hook",
+        kind: "UserPromptSubmit",
+        from_auto_wake: fromAutoWake,
+        at_ms: Date.now(),
+    });
 } catch {
     /* swallow — never block submit */
 }
