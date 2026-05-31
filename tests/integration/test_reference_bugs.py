@@ -32,12 +32,15 @@ import pytest
 
 @pytest.mark.xfail(
     reason=(
-        "#650 detection works live (manual /compact verifies) but the "
-        "--once harness exits before fake-claude's render reaches the pane "
-        "in a stable window. Needs the slice 4 timing knobs (or a "
-        "wait_for on the compacting marker after spawn-without-once) to "
-        "make the assertion deterministic. Tracking : write-up the "
-        "exact timing on slice 4 docs."
+        "#650 detection works LIVE — manual /compact verifies the bar "
+        "shows `[…:compacting]` (fix fd4b8f0). In the harness, the "
+        "timer's heartbeat probe under boot-grace (the first 30s of "
+        "any loop) calls refreshPaneMarkers but `capturePane()` "
+        "returns content that doesn't match the regex stably — needs "
+        "investigation of the PTY proxy path (proxy.alive=False in "
+        "the harness, may explain the empty capture). Tracking : "
+        "open follow-up ticket once docs/INTEGRATION-TESTS.md is "
+        "merged ; this xfail stays as the live regression contract."
     ),
     strict=False,
 )
@@ -47,7 +50,7 @@ def test_650_compacting_detected_during_compact(loop_runner):
     renders the verbatim marker line ; the timer's heartbeat probe
     (snapshotPane → classifyPaneSpecial) should detect it.
     """
-    handle = loop_runner(scenario="compacting-42")
+    handle = loop_runner(scenario="compacting-42", interval_s=3)
     state = handle.inspect()
     pane = state.get("pane", {})
     assert pane.get("compacting") is True, (

@@ -123,7 +123,13 @@ def loop_runner(tmp_path: Path) -> Callable[..., LoopHandle]:
     """
     handles: list[LoopHandle] = []
 
-    def _run(scenario: str = "prompt-ready", timeout_s: float = 20.0) -> LoopHandle:
+    def _run(scenario: str = "prompt-ready", timeout_s: float = 20.0, interval_s: int = 1) -> LoopHandle:
+        """Spawn a claude-loop for the given scenario, run `--once` (one
+        heartbeat cycle), return a handle. `interval_s` controls the
+        wait BEFORE the first heartbeat fires (default 1s, enough for
+        fake-claude to render its initial screen into the pane).
+        Bump it (e.g., `interval_s=3`) if a scenario needs more render
+        settle time before the probe fires (#637 slice 4)."""
         name = f"cl-test-{uuid.uuid4().hex[:8]}"
         state_dir = tmp_path / name
         state_dir.mkdir(parents=True, exist_ok=True)
@@ -140,6 +146,7 @@ def loop_runner(tmp_path: Path) -> Callable[..., LoopHandle]:
         cmd = [
             str(BIN_CLAUDE_LOOP), "start", name,
             "--once",
+            "--interval", str(interval_s),
             "--check-cmd", "false",
             "--no-wait",
             "--no-attach",
