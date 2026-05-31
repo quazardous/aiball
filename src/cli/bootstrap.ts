@@ -250,7 +250,7 @@ function copySkill(opts: { project: boolean; global: boolean; target?: string; f
     return { kind: "installed", dest, src };
 }
 
-function installSkill(opts: { project: boolean; global: boolean; target?: string; force: boolean }): void {
+export function installSkill(opts: { project: boolean; global: boolean; target?: string; force: boolean }): void {
     if (opts.project && opts.global) {
         die("init skill: --project and --global are mutually exclusive");
     }

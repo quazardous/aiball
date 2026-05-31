@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
 import { Command, Option } from "commander";
 import { AiballClient } from "../client.js";
 import { AIBALL_VERSION } from "../version.js";
-import { bootstrapInit } from "../cli/bootstrap.js";
+import { bootstrapInit, installSkill } from "../cli/bootstrap.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
 import { readLocalRemote, writeLocalRemote } from "./local-config.js";
 import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
@@ -1895,7 +1895,7 @@ async function main(): Promise<void> {
     // .aiball.yaml) without leaving the claude-loop workflow. Shares the body.
     // #394 volet A: with --aiball-url, ALSO persist a REMOTE aiball connection
     // to .aiball.local.yaml so a plain `claude-loop start` slaves to it.
-    program.command("init")
+    const initCmd = program.command("init")
         .description("Bootstrap this project (.mcp.json + .aiball.yaml). With --aiball-url, also persist a REMOTE aiball connection (#394) so `start` slaves to it.")
         .option("--force", "Overwrite existing entries")
         .option("--stop-hook", "Also wire Claude Code's Stop hook into .claude/settings.json")
@@ -1924,6 +1924,26 @@ async function main(): Promise<void> {
             // .aiball.local.yaml recevait l'identité remote → la config locale
             // ignorait l'override).
             await bootstrapInit({ ...opts, consumer, noClaim });
+        });
+
+    // #651 david `w9sk25` — also expose `claude-loop init skill --overwrite`
+    // so a user who ran `claude-loop init` can refresh the skill with the
+    // same tool. Mirrors `aiball init skill` exactly (same flags, same
+    // bootstrap.ts installSkill underneath).
+    initCmd
+        .command("skill")
+        .description("Install or refresh the aiball Claude Code skill into ~/.claude/skills/aiball/ (or <cwd>/.claude/skills/aiball/ with --project)")
+        .option("--project", "Install into <cwd>/.claude/skills/ instead of ~/.claude/skills/")
+        .option("--global", "Install into ~/.claude/skills/ (default)")
+        .option("--target <path>", "Explicit destination directory (overrides --project / --global)")
+        .option("--overwrite", "Overwrite an existing SKILL.md at the destination")
+        .action((o: { project?: boolean; global?: boolean; target?: string; overwrite?: boolean }) => {
+            installSkill({
+                project: o.project === true,
+                global: o.global === true,
+                target: o.target,
+                force: o.overwrite === true,
+            });
         });
 
     // -h / --help at top level → root help, not start help.
