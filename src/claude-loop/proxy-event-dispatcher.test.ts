@@ -298,6 +298,42 @@ test("#652 dispatch hook PreToolUse without tool_name → unknown verdict", () =
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
+test("#652 Slice 6 — dispatch hook UserPromptSubmit (human) → HookService.emit", () => {
+    const sd = tmp();
+    try {
+        resetHookServiceForTests();
+        const seen: HookEvent[] = [];
+        getHookService().subscribe((e) => { seen.push(e); });
+        const v = dispatchProxyEvent(sd, { event: "hook", kind: "UserPromptSubmit", from_auto_wake: false, at_ms: 4_000 });
+        assert.equal(v.kind, "hook-event");
+        assert.deepEqual(seen[0], { kind: "UserPromptSubmit", from_auto_wake: false, at_ms: 4_000 });
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#652 Slice 6 — dispatch hook UserPromptSubmit (auto-wake) → from_auto_wake true", () => {
+    const sd = tmp();
+    try {
+        resetHookServiceForTests();
+        const seen: HookEvent[] = [];
+        getHookService().subscribe((e) => { seen.push(e); });
+        dispatchProxyEvent(sd, { event: "hook", kind: "UserPromptSubmit", from_auto_wake: true, at_ms: 5_000 });
+        assert.equal(seen.length, 1);
+        assert.equal((seen[0] as Extract<HookEvent, { kind: "UserPromptSubmit" }>).from_auto_wake, true);
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#652 Slice 6 — dispatch hook UserPromptSubmit defaults from_auto_wake to false when missing", () => {
+    const sd = tmp();
+    try {
+        resetHookServiceForTests();
+        const seen: HookEvent[] = [];
+        getHookService().subscribe((e) => { seen.push(e); });
+        dispatchProxyEvent(sd, { event: "hook", kind: "UserPromptSubmit", at_ms: 5_000 });
+        assert.equal(seen.length, 1);
+        assert.equal((seen[0] as Extract<HookEvent, { kind: "UserPromptSubmit" }>).from_auto_wake, false, "missing → false (legitimately a human submission)");
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
 test("#652 hook event defaults at_ms to now when missing", () => {
     const sd = tmp();
     try {

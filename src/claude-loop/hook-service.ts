@@ -38,7 +38,15 @@ export type SessionStartSource = "startup" | "resume" | "compact" | "clear";
 export type HookEvent =
     | { kind: "SessionStart"; source: SessionStartSource; at_ms: number }
     | { kind: "Stop"; at_ms: number }
-    | { kind: "PreToolUse"; tool_name: string; at_ms: number };
+    | { kind: "PreToolUse"; tool_name: string; at_ms: number }
+    /**
+     * #652 Slice 6 — the user (or auto-wake) submitted a prompt ; claude
+     * is about to process. The bar subscriber typically flips to BUSY.
+     * `from_auto_wake` distinguishes the timer's own send-keys (= still
+     * autonomous) from a human-typed submission ; the user-prompt-submit
+     * hook computes it via the wake-in-flight marker (#B.180).
+     */
+    | { kind: "UserPromptSubmit"; from_auto_wake: boolean; at_ms: number };
 
 /** Subscriber callback — receives every event in fire order. */
 export type HookListener = (event: HookEvent) => void;

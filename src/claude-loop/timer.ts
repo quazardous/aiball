@@ -105,6 +105,7 @@ import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } 
 import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
 import { paneMarkerBarInfo } from "./pane-service.js";
 import { armAfkViaService, watchAfkMarker } from "./afk-service-sync.js";
+import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
 import { canFlipBgFromBoot, computeLoopView, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
@@ -945,6 +946,12 @@ async function mainSse(): Promise<void> {
         log(formatVerdictLogLine(verdict));
     });
     process.on("exit", () => proxyEventsServer.close());
+    // #652 Slice 6 — wire the HookService → bar subscriber. Currently
+    // only paints on UserPromptSubmit (→ BUSY) ; future slices can add
+    // SessionStart / Stop paints once the events carry the substate
+    // the existing hooks compute inline.
+    const hookBarSub = installHookBarSubscriber(name!);
+    process.on("exit", () => hookBarSub.close());
     // #649 Slice 4 — hydrate the in-process AfkService singleton from
     // the afk marker file + keep it in sync via fs.watch. The file
     // remains the cross-process source of truth (proxy F9, timer's own
