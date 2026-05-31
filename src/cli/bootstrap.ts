@@ -18,6 +18,7 @@ import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "y
 import { die, userCwd, resolveInstallRoot } from "./_helpers.js";
 import { globalConfigPath } from "../autopoll/config.js";
 import { proxyTokensPath, type ProxyTokenEntry } from "../proxy.js";
+import { installRoot as aiballInstallRoot } from "../claude-loop/state.js";
 
 /**
  * Shared `mcp init` body so both `aiball mcp init` and the combined
@@ -156,6 +157,14 @@ export async function bootstrapInit(opts: {
     if (opts.stopHook === true) {
         wireStopHook({ global: opts.global === true });
     }
+    // #651 david `fzsqeg` — drop the aiball Claude Code skill into the
+    // GLOBAL ~/.claude/skills/aiball/ on first init. Idempotent : skipped
+    // if already present (the user gets a one-liner pointing to
+    // `aiball init skill --overwrite` for refresh). Discipline-bearing
+    // skill auto-suggests on aiball-related contexts in the next Claude
+    // Code session ; bundling it with init means `claude-loop init` ALSO
+    // gets it (it delegates to bootstrapInit) — david's expectation.
+    maybeInstallSkillGlobal();
     process.stdout.write(`\n${await resolveIdentityHint()}\n`);
     process.stdout.write(`Run \`aiball check\` to verify everything resolves.\n`);
 }
@@ -202,15 +211,27 @@ function patchIdentity(path: string, agent: string | undefined, project: string 
  * the discipline is agent-behavior, not project-specific. `--project` lands
  * it under `<cwd>/.claude/skills/` for project-scoped overrides.
  */
-function installSkill(opts: { project: boolean; global: boolean; target?: string; force: boolean }): void {
-    if (opts.project && opts.global) {
-        die("init skill: --project and --global are mutually exclusive");
-    }
-    const installRoot = resolveInstallRoot();
+/**
+ * Pure helper that copies the skill — returns a verdict instead of
+ * dying so it can be called from `bootstrapInit` (where a pre-existing
+ * skill is a no-op, not a fatal error). The CLI wrapper below turns
+ * "already exists" into a `die()` when the user explicitly asked for
+ * the skill via `init skill`.
+ */
+export type SkillInstallVerdict =
+    | { kind: "installed"; dest: string; src: string }
+    | { kind: "skipped-exists"; dest: string }
+    | { kind: "missing-source"; src: string };
+
+function copySkill(opts: { project: boolean; global: boolean; target?: string; force: boolean }): SkillInstallVerdict {
+    // #651 fzsqeg fix : resolveInstallRoot() returns process.cwd() (where
+    // the user invoked aiball from), not where aiball is actually
+    // installed. The shipped skill lives at <installRoot>/skill/SKILL.md
+    // and `aiballInstallRoot()` walks up from the source file's URL to
+    // find that path correctly across hard / symlink install modes.
+    const installRoot = aiballInstallRoot();
     const src = join(installRoot, "skill", "SKILL.md");
-    if (!existsSync(src)) {
-        die(`init skill: source SKILL.md not found at ${src} — is the install root correct?`);
-    }
+    if (!existsSync(src)) return { kind: "missing-source", src };
     let destDir: string;
     if (opts.target !== undefined) {
         destDir = opts.target;
@@ -222,22 +243,53 @@ function installSkill(opts: { project: boolean; global: boolean; target?: string
     }
     const skillDir = join(destDir, "aiball");
     const dest = join(skillDir, "SKILL.md");
-    if (existsSync(dest) && !opts.force) {
-        die(`init skill: ${dest} already exists — pass --overwrite to refresh`);
-    }
+    if (existsSync(dest) && !opts.force) return { kind: "skipped-exists", dest };
     mkdirSync(skillDir, { recursive: true });
     const content = readFileSync(src, "utf8");
     writeFileSync(dest, content, "utf8");
+    return { kind: "installed", dest, src };
+}
+
+function installSkill(opts: { project: boolean; global: boolean; target?: string; force: boolean }): void {
+    if (opts.project && opts.global) {
+        die("init skill: --project and --global are mutually exclusive");
+    }
+    const v = copySkill(opts);
+    if (v.kind === "missing-source") {
+        die(`init skill: source SKILL.md not found at ${v.src} — is the install root correct?`);
+    }
+    if (v.kind === "skipped-exists") {
+        die(`init skill: ${v.dest} already exists — pass --overwrite to refresh`);
+    }
     process.stdout.write(
         [
-            `Installed aiball skill → ${dest}`,
+            `Installed aiball skill → ${v.dest}`,
             ``,
-            `Source: ${src}`,
+            `Source: ${v.src}`,
             `The skill is auto-suggested by Claude Code when it sees an aiball-related context.`,
             `Re-run with --overwrite to refresh after an aiball upgrade.`,
             ``,
         ].join("\n"),
     );
+}
+
+/**
+ * #651 david `fzsqeg` — called from `bootstrapInit` so `aiball init` and
+ * `claude-loop init` automatically deploy the skill to the GLOBAL
+ * ~/.claude/skills/aiball/ on first run. Idempotent : a pre-existing
+ * skill is left alone (no clobber) ; the user can refresh via
+ * `aiball init skill --overwrite` after an upgrade.
+ */
+function maybeInstallSkillGlobal(): void {
+    const v = copySkill({ project: false, global: true, force: false });
+    if (v.kind === "installed") {
+        process.stdout.write(`Installed aiball skill → ${v.dest} (Claude Code will pick it up next session)\n`);
+    } else if (v.kind === "skipped-exists") {
+        process.stdout.write(`aiball skill already at ${v.dest} (refresh with: aiball init skill --overwrite)\n`);
+    }
+    // missing-source is silent here — bootstrap shouldn't loudly fail
+    // when the install root is non-standard ; the explicit `init skill`
+    // command surfaces it.
 }
 
 function initTailscale(opts: { http: boolean; port?: number; autostart: boolean }): void {
