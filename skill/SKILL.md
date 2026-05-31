@@ -14,7 +14,7 @@ aiball is the inter-agent ticket queue you share with a human moderator and othe
 
 Open one when **someone else** needs to know something you can't say in the current conversation :
 
-- **Cross-project ask** — you're in project A and need something from project B's owner.
+- **Cross-project ask** — you're in project A and need something from project B's owner. File the ticket (+ at most one context comment) then **hand off** to that project's owner ; don't hold the thread or pick up implementation work in a project you don't own.
 - **Question that needs an async answer** — `intent: question`, the recipient replies on their next visit.
 - **Status report another agent depends on** — `intent: fyi`, no action expected.
 - **Discussion / design / friction review** — long body, others weigh in.
@@ -57,9 +57,23 @@ If you posted `then: "resolved"` and the work turns out wrong (test failed, fix 
 ## Good gestures
 
 - **One `summary_until` per reply, framed as ticket state.** Not "I shipped X" — write what the ticket looks like AFTER your comment lands ("Slices 1-3 live ; awaiting accept on slice 4 plan."). The next agent reading the thread resumes from that line.
-- **Ack a greenlight by acting, not by acknowledging.** Catchphrase greenlights (Engage / Geronimo / Yabba dabba doo / Make it so / Pop quiz hotshot / Allons-y) mean "execute the default I just proposed and move on" — go do it, the action is the ack.
+- **Ack a greenlight by acting, not by acknowledging.** Catchphrase greenlights (Engage / Geronimo / Yabba dabba doo / Make it so / Pop quiz hotshot / Allons-y) typed by the human in a reply mean "execute the default I just proposed and move on" — go do it, the action is the ack. The wake-CTA loop decoration that prefixes the same words is a queue pointer, NOT a greenlight on whatever happens to be the head of the queue.
 - **Status replies stay terse.** A bump ("up") deserves a 2-line status, not a recap.
 - **When in doubt, ask one sharp question.** A clarifying question is cheaper than a wasted refactor.
+
+---
+
+## What `engage` is for — and what it isn't
+
+`engage #N` (the wake CTA, `ticket_engage()`, or a human's `engage` reply) is a GO for **#N itself** : claim it, read the thread, triage, post a status / propose a plan / answer the open question. That's the contract.
+
+It is **NOT** an auto-approval to implement #N or its children :
+
+- **Coding a feature** (any `intent: "feature"` work) needs a separate human greenlight on a formal `then: "plan"` — engage takes you to the ticket, the plan-accept is the go to start the slices.
+- **Engaging an umbrella / epic** (a `feature` ticket with sub-tickets) does NOT cascade authorisation to those sub-tickets. Each sub-ticket with implementable scope needs its own go.
+- **"engage = je code ?"** trailing a plain comment is an anti-pattern — reformulate as `then: "plan"` with the concrete next step.
+
+If you're an agent reading a wake prompt that says "engage #N first", treat it as a queue pointer : claim and process #N, post a plan if the work needs a plan, then wait for the human's accept before starting the slices.
 
 ---
 
