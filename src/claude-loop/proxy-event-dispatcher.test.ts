@@ -148,11 +148,75 @@ test("#633F dispatch unknown marker name → returns unknown verdict", () => {
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
+// #653 step 1 — AFK marker events from the proxy update AfkService.
+import { getAfkService, resetAfkServiceForTests } from "./afk-service.js";
+
+test("#653 dispatch set_afk_10m → AfkService.set10m, returns afk-service-set", () => {
+    const sd = tmp();
+    try {
+        resetAfkServiceForTests();
+        const exp = Date.now() + 600_000;
+        const v = dispatchProxyEvent(sd, { event: "marker", name: "set_afk_10m", expiry_ms: exp, now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "afk-service-set", mode: "wait_10m", expiryMs: exp });
+        const svc = getAfkService();
+        assert.equal(svc.getState(), "wait_10m");
+        assert.equal(svc.expiryMs(), exp);
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#653 dispatch set_afk_10m without expiry_ms → unknown verdict", () => {
+    const sd = tmp();
+    try {
+        resetAfkServiceForTests();
+        const v = dispatchProxyEvent(sd, { event: "marker", name: "set_afk_10m", now_ms: Date.now() });
+        assert.equal(v.kind, "unknown");
+        assert.match((v as { raw: string }).raw, /set_afk_10m.*missing expiry_ms/);
+        assert.equal(getAfkService().getState(), "off", "no state change on bad payload");
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#653 dispatch set_afk_inf → AfkService.setInf, returns afk-service-set", () => {
+    const sd = tmp();
+    try {
+        resetAfkServiceForTests();
+        const v = dispatchProxyEvent(sd, { event: "marker", name: "set_afk_inf", now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "afk-service-set", mode: "wait_inf", expiryMs: null });
+        const svc = getAfkService();
+        assert.equal(svc.getState(), "wait_inf");
+        assert.equal(svc.expiryMs(), null);
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#653 dispatch clear_afk → AfkService.setOff, returns afk-service-set", () => {
+    const sd = tmp();
+    try {
+        resetAfkServiceForTests();
+        getAfkService().setInf();  // start from a non-off state
+        const v = dispatchProxyEvent(sd, { event: "marker", name: "clear_afk", now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "afk-service-set", mode: "off", expiryMs: null });
+        assert.equal(getAfkService().getState(), "off");
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#653 dispatcher does NOT write the afk file (proxy still owns it in step 1)", () => {
+    const sd = tmp();
+    try {
+        resetAfkServiceForTests();
+        const exp = Date.now() + 600_000;
+        dispatchProxyEvent(sd, { event: "marker", name: "set_afk_10m", expiry_ms: exp, now_ms: Date.now() });
+        // File NOT written by the dispatcher — the proxy writes it itself
+        // in step 1. Step 2 will flip this contract.
+        assert.equal(existsSync(afkPath(sd)), false, "file untouched by dispatcher");
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
 test("#633F formatVerdictLogLine covers every verdict variant", () => {
     assert.equal(formatVerdictLogLine({ kind: "typing-armed" }), "proxy-event: typing → armed NOT AFK 10m");
     assert.equal(formatVerdictLogLine({ kind: "typing-skipped-boot" }), "proxy-event: typing during boot → no arm (state.inBootGrace)");
     assert.equal(formatVerdictLogLine({ kind: "afk-toggled", nextMode: "wait_10m" }), "proxy-event: afk_key → toggled to wait_10m");
     assert.equal(formatVerdictLogLine({ kind: "marker-touched", name: "touch_marker" }), "proxy-event: marker 'touch_marker' applied");
+    assert.match(formatVerdictLogLine({ kind: "afk-service-set", mode: "wait_10m", expiryMs: 1_000_000_000_000 }), /AfkService → wait_10m \(expiry=.*\)/);
+    assert.equal(formatVerdictLogLine({ kind: "afk-service-set", mode: "off", expiryMs: null }), "proxy-event: AfkService → off");
     assert.equal(formatVerdictLogLine({ kind: "unknown", raw: "keystroke:foo" }), "proxy-event: unknown 'keystroke:foo'");
     assert.equal(formatVerdictLogLine({ kind: "error", message: "boom" }), "proxy-event handler error: boom");
 });
