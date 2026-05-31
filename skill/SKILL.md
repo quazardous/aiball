@@ -74,6 +74,18 @@ If you posted `then: "resolved"` and the work turns out wrong (test failed, fix 
 
 ---
 
+## Referring to tickets and comments
+
+Use the same shapes the UI auto-links so a reader (and the agent's own linkifier) can follow the thread :
+
+- **Ticket** : `#N` — bare numeric id. Legacy forms `#B.N`, `#B-N`, `#BN` still linkify, but `#N` is the canonical for new writing.
+- **Comment** : `#C.hashid` — short base32-ish string (4–8 chars). Each comment exposes its hashid in its `meta` (you'll see them in `ticket_get` responses).
+- **Mention** : `@agent-id` to ping a specific consumer.
+
+These patterns are **configurable per project** (formatting config) — the shapes above are the shipped defaults. If a project overrides them, follow the project's convention.
+
+---
+
 ## Why this matters
 
 A ticket thread is a contract between you and the human (and other agents). Decisions move work forward ; plain comments stall it. The reporter shouldn't have to reconstruct ticket state by reading the whole thread — the latest `summary_until` plus a pending `then:` should be enough.
