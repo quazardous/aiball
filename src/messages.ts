@@ -22,6 +22,8 @@ import { autoApproveStaleDecisionsOnClose, rejectStaleClosedReopenedForTicket } 
 import { DECISION_KINDS, isDecisionKind } from "./decisions.js";
 import { isHeldByOther } from "./db/assignment-gate.js";
 import { assignWindowSec } from "./autopoll/config.js";
+import { getConsumer } from "./db/consumers.js";
+import { listSubscriptions } from "./db/subscriptions.js";
 import { evaluate } from "./rules.js";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
@@ -158,6 +160,28 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
  * itself is rejected later, the author has shown intent to follow the
  * thread. No-ops if by_agent is unset (anonymous post).
  */
+/**
+ * #669 david `96pt3m` — guard for the auto-claim on `comment_added`.
+ * Returns true iff the author is allowed to silently take a fresh
+ * claim on the ticket — i.e. : they have `can_claim` AND own the
+ * ticket's project (role=owner subscription). Returns false (skip
+ * the claim) for cross-project commenters and no-claim consumers ;
+ * the comment itself still lands.
+ *
+ * Pure read-only check ; safe to call from inside `submitMessage`.
+ * An unknown consumer (never seen before — possible during the very
+ * first comment_added before `ensureConsumer` lands the row) is
+ * treated as "no rights" — the auto-claim is skipped, the explicit
+ * `ticket_engage` path is the path forward for them.
+ */
+function canAutoClaim(author: string, ticketProject: string): boolean {
+    const c = getConsumer(author);
+    if (!c) return false;
+    if (!c.can_claim) return false;
+    const subs = listSubscriptions(author);
+    return subs.some((s) => s.project === ticketProject && s.role === "owner");
+}
+
 function autoSubscribeAuthor(msg: Message): void {
     if (!msg.by_agent) return;
     const ticketId = msg.kind === "ticket_created" ? msg.id : msg.ticket_id;
@@ -494,7 +518,16 @@ export function submitMessage(input: NewMessage): Message {
                 // guard). The rule engine can auto-approve a whitelisted
                 // agent's comment while the parent stays pending.
                 && t.status === "approved"
-                && !isHeldByOther(t.assignee, t.claimant, t.claimed_at, author, Date.now(), assignWindowSec() * 1000)) {
+                && !isHeldByOther(t.assignee, t.claimant, t.claimed_at, author, Date.now(), assignWindowSec() * 1000)
+                // #669 david `96pt3m` : auto-claim only when the
+                // author has the right to claim AND owns the ticket's
+                // project. A cross-project commenter (legit "file a
+                // bug + hand off") used to silently end up claimant of
+                // the target project's thread — pisynth-claude got
+                // auto-claimed on aiball #669 after just commenting.
+                // Guard : skip when can_claim=false OR the author
+                // isn't subscribed as `owner` on the ticket's project.
+                && canAutoClaim(author, t.project)) {
                 // #436: auto-claim sets the CLAIM (focus), not an assignment.
                 // #439: stamp claimed_at with the COMMENT's created_at (not a fresh
                 // now()) so a worked claim's claimed_at == the author's latest
