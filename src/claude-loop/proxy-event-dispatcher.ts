@@ -26,7 +26,7 @@ import {
     touchUserGrace,
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
-import { getAfkService } from "./afk-service.js";
+import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
 
 /** Verdict surfaced for logging + tests. Caller logs the string ;
  *  null means the event was unknown / no-op. */
@@ -77,27 +77,29 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                 clearUserGrace(sd);
                 return { kind: "marker-touched", name };
             }
-            // #653 step 1 — AFK mutations from the proxy. Update the
-            // in-process AfkService directly (no file write — the proxy
-            // still writes the file in step 1, and the fs.watch picks it
-            // up too). Step 2 will flip the proxy to events-only and the
-            // dispatcher will become the single writer via the
-            // armAfkViaService family.
+            // #653 step 2 — AFK mutations from the proxy. Dispatcher is
+            // now the SINGLE WRITER : via-service helpers update the
+            // AfkService AND write the marker file in one call. The
+            // proxy stopped writing the file in step 2 (it emits these
+            // events instead) ; degraded-mode (no proxy connection) is
+            // covered by the proxy's fallback path which writes the
+            // file directly when emit() returns false.
             if (name === "set_afk_10m") {
                 const exp = typeof event.expiry_ms === "number" ? event.expiry_ms : NaN;
                 if (!Number.isFinite(exp)) return { kind: "unknown", raw: `marker:set_afk_10m (missing expiry_ms)` };
-                const svc = getAfkService();
-                svc.set10m(exp);
+                // armAfkViaService takes seconds, but the event carries
+                // an absolute expiry — convert back so the helper writes
+                // the right ISO timestamp.
+                const secondsFromNow = Math.max(0, Math.round((exp - Date.now()) / 1000));
+                armAfkViaService(sd, secondsFromNow);
                 return { kind: "afk-service-set", mode: "wait_10m", expiryMs: exp };
             }
             if (name === "set_afk_inf") {
-                const svc = getAfkService();
-                svc.setInf();
+                setAfkInfViaService(sd);
                 return { kind: "afk-service-set", mode: "wait_inf", expiryMs: null };
             }
             if (name === "clear_afk") {
-                const svc = getAfkService();
-                svc.setOff();
+                clearAfkViaService(sd);
                 return { kind: "afk-service-set", mode: "off", expiryMs: null };
             }
             return { kind: "unknown", raw: `marker:${String(name)}` };

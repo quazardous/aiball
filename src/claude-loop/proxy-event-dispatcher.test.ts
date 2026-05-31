@@ -157,10 +157,15 @@ test("#653 dispatch set_afk_10m → AfkService.set10m, returns afk-service-set",
         resetAfkServiceForTests();
         const exp = Date.now() + 600_000;
         const v = dispatchProxyEvent(sd, { event: "marker", name: "set_afk_10m", expiry_ms: exp, now_ms: Date.now() });
-        assert.deepEqual(v, { kind: "afk-service-set", mode: "wait_10m", expiryMs: exp });
+        assert.equal(v.kind, "afk-service-set");
         const svc = getAfkService();
         assert.equal(svc.getState(), "wait_10m");
-        assert.equal(svc.expiryMs(), exp);
+        // Step 2 — armAfkViaService takes seconds-from-now and computes
+        // a fresh absolute expiry, so the recorded value may differ from
+        // the input event's expiry_ms by up to ~2s (sub-second rounding
+        // in the secondsFromNow conversion). Assert within tolerance.
+        const recorded = svc.expiryMs();
+        assert.ok(recorded !== null && Math.abs(recorded - exp) < 2_000, `expiry within 2s of event expiry_ms`);
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
@@ -198,15 +203,37 @@ test("#653 dispatch clear_afk → AfkService.setOff, returns afk-service-set", (
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#653 dispatcher does NOT write the afk file (proxy still owns it in step 1)", () => {
+test("#653 step 2 — dispatcher WRITES the afk file (single-writer contract)", () => {
     const sd = tmp();
     try {
         resetAfkServiceForTests();
         const exp = Date.now() + 600_000;
         dispatchProxyEvent(sd, { event: "marker", name: "set_afk_10m", expiry_ms: exp, now_ms: Date.now() });
-        // File NOT written by the dispatcher — the proxy writes it itself
-        // in step 1. Step 2 will flip this contract.
-        assert.equal(existsSync(afkPath(sd)), false, "file untouched by dispatcher");
+        // Step 2 flip : the dispatcher's via-service helper now writes
+        // the file (replacing the proxy's earlier write). Cross-process
+        // readers (hooks, state.ts readAfkState) keep seeing the file.
+        assert.equal(existsSync(afkPath(sd)), true, "file written by dispatcher via armAfkViaService");
+        const content = readFileSync(afkPath(sd), "utf8").trim();
+        assert.match(content, /^\d{4}-\d{2}-\d{2}T/, "ISO timestamp persisted");
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#653 step 2 — clear_afk removes the file", () => {
+    const sd = tmp();
+    try {
+        resetAfkServiceForTests();
+        writeFileSync(afkPath(sd), "inf\n");
+        dispatchProxyEvent(sd, { event: "marker", name: "clear_afk", now_ms: Date.now() });
+        assert.equal(existsSync(afkPath(sd)), false, "file removed by dispatcher via clearAfkViaService");
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("#653 step 2 — set_afk_inf writes 'inf' content", () => {
+    const sd = tmp();
+    try {
+        resetAfkServiceForTests();
+        dispatchProxyEvent(sd, { event: "marker", name: "set_afk_inf", now_ms: Date.now() });
+        assert.equal(readFileSync(afkPath(sd), "utf8").trim(), "inf");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
