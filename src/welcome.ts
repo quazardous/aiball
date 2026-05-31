@@ -27,6 +27,9 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { findConfigUpwards, globalConfigPath } from "./autopoll/config.js";
+import { defaultPingsPath } from "./claude-loop/state.js";
+import { resolveFormatting } from "./formatting.js";
 
 /**
  * Manifest entry for a template — name + drop location, no body.
@@ -70,6 +73,14 @@ export interface WelcomeKit {
      *  applies (typically 1-2 out of N), instead of N inline. May be
      *  empty (a type's whole proposition can be "tone only"). */
     templates: WelcomeTemplateManifest[];
+    /** #667 david — effective formatting patterns for this project
+     *  (ticket / comment / mention ID shapes). The shipped defaults are
+     *  `#N` / `#C.hashid` / `@agent-id` ; a project's `.aiball.yaml`
+     *  can override these. The agent reads `canonical` to know how
+     *  to write IDs, and `match` (regex) to recognise them in incoming
+     *  text. Field is present even when the project uses the defaults
+     *  — so the skill / agent never has to hardcode the shapes. */
+    formatting: { id: string; match: string; canonical: string }[];
 }
 
 /** Error thrown when the requested `project_type` is not a valid type
@@ -195,11 +206,21 @@ export function buildWelcomeKit(
     const { project_type, available_types } = resolveProjectType(installRoot, requestedType);
     const typeDir = join(welcomeRoot(installRoot), project_type);
     const welcome_md = readFileSync(join(typeDir, "WELCOME.md"), "utf8");
+    // #667 — resolve the effective formatting patterns from the same
+    // 3-layer chain as /api/config (shipped defaults → global → project).
+    // Surfaced here so agents reading the welcome kit also get the ID
+    // shapes (no separate round-trip to /api/config from the MCP side).
+    const formatting = resolveFormatting({
+        shippedDefaultsPath: defaultPingsPath(),
+        globalConfigPath: globalConfigPath(),
+        projectConfigPath: findConfigUpwards(process.cwd()),
+    }).map((p) => ({ id: p.id, match: p.match, canonical: p.canonical }));
     return {
         project_type,
         available_types,
         welcome_md,
         templates: loadTemplateManifest(typeDir),
+        formatting,
     };
 }
 

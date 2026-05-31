@@ -76,13 +76,7 @@ If you posted `then: "resolved"` and the work turns out wrong (test failed, fix 
 
 ## Referring to tickets and comments
 
-Use the same shapes the UI auto-links so a reader (and the agent's own linkifier) can follow the thread :
-
-- **Ticket** : `#N` — bare numeric id. Legacy forms `#B.N`, `#B-N`, `#BN` still linkify, but `#N` is the canonical for new writing.
-- **Comment** : `#C.hashid` — short base32-ish string (4–8 chars). Each comment exposes its hashid in its `meta` (you'll see them in `ticket_get` responses).
-- **Mention** : `@agent-id` to ping a specific consumer.
-
-These patterns are **configurable per project** (formatting config) — the shapes above are the shipped defaults. If a project overrides them, follow the project's convention.
+The shapes for ticket / comment / mention IDs are **provided by the `welcome` MCP tool** (`formatting` field). Read them at boot — never hardcode. Each entry carries a `canonical` (the form to write) and a `match` regex (how to recognise the shape in incoming text).
 
 ---
 

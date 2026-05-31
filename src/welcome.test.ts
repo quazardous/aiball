@@ -97,6 +97,23 @@ test("buildWelcomeKit: private type → tone only, empty templates", () => {
     assert.deepEqual(kit.templates, []);
 });
 
+test("#667 buildWelcomeKit: formatting field carries effective ticket/comment/mention patterns", () => {
+    const root = scaffold();
+    const kit = buildWelcomeKit(root, "public");
+    assert.ok(Array.isArray(kit.formatting), "formatting is an array");
+    // Shipped defaults guarantee these 3 ids are present.
+    const byId = new Map(kit.formatting.map((p) => [p.id, p]));
+    assert.ok(byId.has("ticket"), "ticket pattern present");
+    assert.ok(byId.has("comment"), "comment pattern present");
+    assert.ok(byId.has("mention"), "mention pattern present");
+    // Each entry exposes canonical + match — the agent reads canonical
+    // to know how to WRITE an id, match to recognise an incoming one.
+    const ticket = byId.get("ticket")!;
+    assert.equal(typeof ticket.canonical, "string");
+    assert.equal(typeof ticket.match, "string");
+    assert.match(ticket.canonical, /\{1\}/, "canonical has a {1} substitution slot");
+});
+
 test("buildWelcomeKit: empty/whitespace type → defaults to `public`", () => {
     const root = scaffold();
     const kit = buildWelcomeKit(root, "");
