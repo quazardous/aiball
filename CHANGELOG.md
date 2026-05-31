@@ -23,6 +23,8 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-05-31
+
 ### Added
 
 - The bar BG stays `[boot]` yellow stable through the whole
@@ -33,6 +35,53 @@ dates are YYYY-MM-DD.
   (yellow `wait` with countdown) ; `--no-wait` leaves AFK off
   (green `loop`). Matches the user's launch intent instead of
   whatever happened to be in the pane.
+- The bar now shows live screen-takeover labels during boot and
+  busy phases — `[boot:picker:session]` / `[boot:picker:mode]` /
+  `[boot:resuming]` / `[boot:compacting]` / `[idle:err:rate-limit]`
+  etc. — so what claude is doing on the pane is visible at a
+  glance without a tmux peek.
+- `aiball init skill` deploys the aiball Claude Code skill (the
+  operating manual + ticket-reply discipline) into
+  `~/.claude/skills/aiball/` (global, default) or
+  `<cwd>/.claude/skills/aiball/` with `--project`. The skill
+  auto-suggests on aiball-related contexts so the next session
+  has the rules in-hand without re-reading docs.
+- New `auto_resume` config knob + `--resume` CLI flag that forces
+  both auto_resume on AND auto-picks the resume picker.
+- New `--once` flag for `claude-loop` : the timer exits after one
+  heartbeat cycle (test-harness friendly).
+- New `claude-loop inspect` subcommand : JSON dump of the loop's
+  full state for debugging.
+
+### Changed
+
+- Priority badges become icon-only chevrons (`⏫ ↑ ↓` Material
+  Symbols) — tighter list rows, same priority hierarchy.
+- The sidebar unread counter is now aligned with the API : pending
+  tickets count (they need a human decision), closed and snoozed
+  tickets don't. No more discrepancy between sidebar and the
+  `unread` MCP response.
+- Internal refactor (no user-visible behavior change) : the pane
+  markers (busy / ready / picker / compacting / errors) and the AFK
+  state are exposed via typed observable services in-process.
+  Mutation paths route through service-level helpers for
+  synchronous state propagation.
+
+### Fixed
+
+- `Compacting conversation…` is now reliably detected during
+  `/compact` (manual or auto). The bar shows the `compacting`
+  label and the loop suppresses wakes while compaction is running.
+  The previous release required a `NN%` in the footer ; recent
+  claude builds dropped the percent in some layouts, silently
+  breaking the detection. The new check matches any of progress-bar
+  characters, percent, or `esc to interrupt`.
+- Typing during boot now arms the AFK 10-minute hold instead of
+  being swallowed by boot-grace.
+- Pings that stacked during a slow boot now drain at boot exit
+  instead of being silently dropped.
+- `--no-wait` no longer arms an AFK 10-minute hold at boot exit
+  (it should leave AFK off so the autonomous loop pings).
 
 ## [0.11.0] — 2026-05-29
 
