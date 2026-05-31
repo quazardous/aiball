@@ -148,10 +148,11 @@ def evaluate_expect(state: dict, step: ExpectStep) -> tuple[int, int]:
 # Terminal emulator probe table for the outside-tmux fallback. Each
 # entry is (binary, prefix-args-before-command). The cmd-exec syntax
 # varies — GTK/wayland terminals use `--`, X11 classics use `-e` /
-# `-x`. Order = preference (newest GNOME first ; xterm last). The
-# `$TERMINAL` env var (if set) wins over the probe.
+# `-x`. Order = preference. ptyxis is LAST (#671 e5cmd5) : its
+# podman/crun backend errors silently on some Fedora setups, so any
+# alternative wins. Override the whole probe with `--external-term`
+# or `$AIBALL_EXTERNAL_TERM` when the auto-pick misbehaves.
 _TERM_PROBES: list[tuple[str, list[str]]] = [
-    ("ptyxis",          ["--"]),
     ("kgx",             ["--"]),
     ("gnome-terminal",  ["--"]),
     ("foot",            []),
@@ -163,16 +164,28 @@ _TERM_PROBES: list[tuple[str, list[str]]] = [
     ("xterm",           ["-e"]),
     ("urxvt",           ["-e"]),
     ("st",              ["-e"]),
+    ("ptyxis",          ["--"]),
 ]
 
 
-def _spawn_external_terminal(attach_cmd: list[str]) -> dict | None:
+def _spawn_external_terminal(attach_cmd: list[str], override: str = "") -> dict | None:
     """Spawn an external terminal emulator window running `attach_cmd`.
-    Returns `{kind:"ext_term", pid}` on success, None if no terminal
-    could be found / launched.
+    Returns `{kind:"ext_term", pid, binary}` on success, None if no
+    terminal could be found / launched.
 
-    Honors `$TERMINAL` first (allows things like `TERMINAL='foot -T x'`
-    via shlex split), then falls through `_TERM_PROBES` in order."""
+    Override precedence (highest first) :
+      1. `override` arg (= `--external-term="CMD"`)
+      2. `$AIBALL_EXTERNAL_TERM` env var (shlex-split, command prefix)
+      3. `$TERMINAL` env var
+      4. `_TERM_PROBES` auto-pick"""
+    explicit = override.strip() or os.environ.get("AIBALL_EXTERNAL_TERM", "").strip()
+    if explicit:
+        try:
+            proc = subprocess.Popen([*shlex.split(explicit), *attach_cmd])
+            return {"kind": "ext_term", "pid": proc.pid, "binary": explicit}
+        except FileNotFoundError:
+            sys.stderr.write(red(f"  ✗  explicit term '{explicit}' not found\n"))
+            return None
     env_term = os.environ.get("TERMINAL", "").strip()
     if env_term:
         try:
@@ -180,11 +193,19 @@ def _spawn_external_terminal(attach_cmd: list[str]) -> dict | None:
             return {"kind": "ext_term", "pid": proc.pid, "binary": env_term}
         except FileNotFoundError:
             sys.stderr.write(yellow(f"  ⚠  $TERMINAL='{env_term}' not found — falling through probes\n"))
+    picked = None
     for binary, prefix in _TERM_PROBES:
         if not shutil.which(binary):
             continue
         try:
             proc = subprocess.Popen([binary, *prefix, *attach_cmd])
+            picked = binary
+            if binary == "ptyxis":
+                sys.stderr.write(yellow(
+                    "  ⚠  picked ptyxis (sole terminal on $PATH) — its podman/crun "
+                    "backend can fail silently.\n"
+                    "     If the window stays empty : `sudo dnf install xterm` "
+                    "(or pass --external-term=CMD).\n"))
             return {"kind": "ext_term", "pid": proc.pid, "binary": binary}
         except Exception as e:
             sys.stderr.write(yellow(f"  ⚠  spawn {binary} failed: {e}\n"))
@@ -192,7 +213,7 @@ def _spawn_external_terminal(attach_cmd: list[str]) -> dict | None:
     return None
 
 
-def open_visual_pane(name: str) -> dict:
+def open_visual_pane(name: str, external_term: str = "") -> dict:
     """Open a visible view of the loop's tmux session for the operator.
 
     - Inside tmux (`$TMUX` set) : split the current window horizontally
@@ -200,8 +221,9 @@ def open_visual_pane(name: str) -> dict:
       with `TMUX` unset so the nested-session protection is lifted.
       Returns `{kind: "tmux_pane", pane_id: "%N"}` for cleanup.
     - Outside tmux : spawn an external terminal emulator running
-      `claude-loop attach NAME` (probes ptyxis / gnome-terminal /
-      kitty / xterm / etc.). Returns `{kind: "ext_term", pid, binary}`.
+      `claude-loop attach NAME`. `external_term` overrides the
+      auto-probe ; see `_spawn_external_terminal()` for precedence.
+      Returns `{kind: "ext_term", pid, binary}`.
     - No terminal found : print attach instruction + sleep 3s.
       Returns `{kind: "instruction"}` (no cleanup)."""
     if os.environ.get("TMUX"):
@@ -221,7 +243,7 @@ def open_visual_pane(name: str) -> dict:
         return {"kind": "instruction"}
 
     attach_cmd = [str(BIN_CLAUDE_LOOP), "attach", name]
-    ext = _spawn_external_terminal(attach_cmd)
+    ext = _spawn_external_terminal(attach_cmd, override=external_term)
     if ext:
         print(dim(f"  → spawned external terminal ({ext['binary']}, pid {ext['pid']})"))
         return ext
@@ -275,6 +297,7 @@ def main() -> int:
     ap.add_argument("--keep", action="store_true", help="Skip cleanup — leave the tmux session running for post-mortem inspection (you'll need to `claude-loop rm NAME` manually).")
     ap.add_argument("--interval", type=int, default=2, help="Heartbeat interval in seconds (default 2). Lower = snappier inspect ; bumps render lag.")
     ap.add_argument("--no-visual", action="store_true", help="Don't auto-open a visible view of the loop's tmux session. Useful for CI / headless scripting.")
+    ap.add_argument("--external-term", default="", metavar="CMD", help="Override the auto-probed terminal emulator for the outside-tmux path. Shlex-split + appended with `claude-loop attach NAME`. Example: --external-term=\"xterm -e\". Also settable via $AIBALL_EXTERNAL_TERM env var.")
     args = ap.parse_args()
 
     if not args.yaml_path.exists():
@@ -295,7 +318,7 @@ def main() -> int:
     print()
 
     spawn_loop(name, spawn.fake_claude, args.interval)
-    visual = {"kind": "none"} if args.no_visual else open_visual_pane(name)
+    visual = {"kind": "none"} if args.no_visual else open_visual_pane(name, external_term=args.external_term)
     started_at = time.monotonic()
 
     total_ok, total_fail = 0, 0
