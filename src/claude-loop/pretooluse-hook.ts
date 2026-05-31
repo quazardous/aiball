@@ -5,40 +5,26 @@
  * David's "best of 2 mondes" (#nt5w7b): don't amputate Claude's
  * AskUserQuestion feature, but in an AUTONOMOUS loop (no human in front)
  * a multi-choice dialog stalls the loop — there's nobody to click. So we
- * deny AskUserQuestion ONLY when we're inside a loop AND no human is
- * taking over, and the deny reason redirects the agent to ask via an
- * aiball ticket comment instead (the "réponse passe-partout + prompt"
- * david asked for).
+ * deny AskUserQuestion ONLY when no human is taking over OR an AFK hold
+ * is active, and the deny reason redirects the agent to ask via an
+ * aiball ticket comment instead.
  *
- * Fail-open by design (matters: getting it backwards would block the
- * dialog in every interactive session):
- *   - not a loop session (no CL_STATE_DIR)  → allow
- *   - loop + human present (userIsTakingOver) → allow
- *   - loop + no human                         → deny + redirect
- *   - any error                               → allow
+ * #652 Slice 4 — refactored to use the slice 2 helpers :
+ *   - `queryLoopState(sd)` returns a typed `LoopStateSnapshot` (extends
+ *     LoopStateView with `humanPresent` + `afkHoldActive`).
+ *   - `buildHookVerdict(state, context)` is the pure mapping that
+ *     decides allow / deny. The deny semantics port verbatim from the
+ *     pre-refactor hook (afk hold OR no human present → deny).
  *
- * Only fires for AskUserQuestion (the settings matcher scopes it), and
- * always exits 0 — a hook failure must never block a tool call.
+ * Fail-open by design : any error short-circuits to allow, and the
+ * matcher already scopes us to AskUserQuestion. Always exits 0.
  */
 import { readFileSync } from "node:fs";
-import { DEFAULT_ASK_GRACE_SEC, DEFAULT_USER_GRACE_SEC, afkActive, humanPresent } from "./state.js";
+import { buildHookVerdict, queryLoopState } from "./hook-verdict.js";
 import { CL_ENV } from "./env-vars.js";
 
 function allow(): never {
     process.stdout.write("{}\n");
-    process.exit(0);
-}
-
-function deny(reason: string): never {
-    process.stdout.write(
-        JSON.stringify({
-            hookSpecificOutput: {
-                hookEventName: "PreToolUse",
-                permissionDecision: "deny",
-                permissionDecisionReason: reason,
-            },
-        }) + "\n",
-    );
     process.exit(0);
 }
 
@@ -56,32 +42,10 @@ try {
     // Not inside a loop → interactive session, a human can answer. Allow.
     if (!sd) allow();
 
-    const redirect =
-        "AskUserQuestion (multi-choice dialog) stalls the autonomous aiball loop — no human is in front to click an answer. " +
-        "Post your question as an aiball ticket comment instead (ticket_reply on the relevant ticket); the conversation IS the channel. " +
-        "When a human is present (interactive session) this dialog is allowed.";
-
-    // #351: the human explicitly flagged AFK (the afk_key combo, e.g.
-    // double-ESC) → they've stepped away even if they were just active.
-    // Redirect immediately rather than stall on a dialog nobody will click.
-    if (afkActive(sd)) deny(redirect);
-
-    // #351 / #619 collapse — AskUserQuestion shares the same grace
-    // window as the auto-wake gate (both honor the longer of user/ask
-    // for back-compat with projects that still set both). A
-    // present-but-quiet human gets the dialog ; a silent timeout falls
-    // back to the ticket-thread redirect.
-    const graceSec = Math.max(
-        Number(process.env[CL_ENV.USER_GRACE_SEC] ?? DEFAULT_USER_GRACE_SEC),
-        Number(process.env[CL_ENV.ASK_GRACE_SEC] ?? DEFAULT_ASK_GRACE_SEC),
-        0,
-    );
-    // #501 david `73af3e` : stop ⊂ wait — un user qui tape maintenant est
-    // aussi présent. allow() s'il est sous l'ask-grace OR en train de taper.
-    if (humanPresent(sd, graceSec)) allow();
-
-    // Autonomous loop / human long-gone → the dialog would stall. Redirect.
-    deny(redirect);
+    const state = queryLoopState(sd);
+    const verdict = buildHookVerdict(state, { kind: "PreToolUse", tool_name: "AskUserQuestion" });
+    process.stdout.write(JSON.stringify(verdict) + "\n");
+    process.exit(0);
 } catch {
     allow();
 }
