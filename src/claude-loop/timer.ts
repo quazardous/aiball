@@ -105,6 +105,7 @@ import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
 import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
 import { paneMarkerBarInfo } from "./pane-service.js";
+import { watchAfkMarker } from "./afk-service-sync.js";
 import { canFlipBgFromBoot, computeLoopView, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
@@ -945,6 +946,14 @@ async function mainSse(): Promise<void> {
         log(formatVerdictLogLine(verdict));
     });
     process.on("exit", () => proxyEventsServer.close());
+    // #649 Slice 4 — hydrate the in-process AfkService singleton from
+    // the afk marker file + keep it in sync via fs.watch. The file
+    // remains the cross-process source of truth (proxy F9, timer's own
+    // armAfk10m paths) ; AfkService is the typed observable façade for
+    // in-process subscribers (future bar countdown + wake gate). The
+    // watcher does the initial hydrate itself.
+    const unwatchAfk = watchAfkMarker(sd!);
+    process.on("exit", () => unwatchAfk());
     const loopBus = new LoopStateBus();
     loopBus.on("transition", (_prev, next) => {
         viewPusher.push(next);
