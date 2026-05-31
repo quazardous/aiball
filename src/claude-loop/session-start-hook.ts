@@ -24,8 +24,9 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { LOOP_STATUS, MUX_CMD, clearResumePickers, idleMarkerPath, setResumeModePicker, setResumeSessionPicker, setTmuxStatus, tmuxName } from "./state.js";
+import { MUX_CMD, clearResumePickers, idleMarkerPath, setResumeModePicker, setResumeSessionPicker, tmuxName } from "./state.js";
 import { CL_ENV } from "./env-vars.js";
+import { emitHookEventToTimer } from "./hook-emit.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -69,6 +70,25 @@ try {
     if (raw) source = (JSON.parse(raw) as { source?: string }).source ?? source;
 } catch { /* no stdin, assume startup */ }
 
+// #652 Slice 3 — emit the SessionStart event to the timer's HookService
+// BEFORE the picker probe logic, so the in-process subscribers know
+// immediately that a new session began. Best-effort : if the timer
+// isn't up the emit silently no-ops and we fall through to the
+// existing fs.marker-based flow. Top-level await ; tsx + ES2022 + NodeNext
+// support it.
+if (source === "startup" || source === "resume" || source === "compact" || source === "clear") {
+    try {
+        const ok = await emitHookEventToTimer(sd!, {
+            event: "hook",
+            kind: "SessionStart",
+            source,
+            at_ms: Date.now(),
+        });
+        if (ok) log(`hook-emit: SessionStart source=${source} → HookService`);
+        else log(`hook-emit: SessionStart source=${source} → not reachable (timer down?)`);
+    } catch (e) { log(`hook-emit: SessionStart error ${(e as Error).message ?? e}`); }
+}
+
 function capturePane(): string {
     try {
         const pane = spawnSync(MUX_CMD, [
@@ -101,7 +121,12 @@ if (source === "resume") {
     log(`resume: pickMode=${pickMode} resumeMode=${process.env[CL_ENV.RESUME_MODE] ?? "as-is"} tmuxTarget=${tmuxName(name!)}.0`);
     if (pickMode !== "abort") {
         try {
-            setTmuxStatus(name!, LOOP_STATUS.BOOT, "session?");
+            // #652 Slice 3 — bar paint dropped : the timer's fast-probe
+            // (1s during boot) detects the picker via the same regex and
+            // paints `[boot:picker:session]` via paneMarkerBarInfo. The
+            // hook's own paint was the source of the #650
+            // `[boot:session?]` oscillation when SessionStart fired more
+            // than once per resume.
             // #577 h9axuc + hzbhxh — probe loop instead of fixed sleep : claude's
             // session-list can take 2-10s to render on a heavy MCP boot. Match
             // BOTH markers (header + control bar) so a transient half-rendered
@@ -124,11 +149,8 @@ if (source === "resume") {
                     // #647 Slice 2 david `sr9kqw` : marker spécifique
                     // session-picker (1er écran resume). #624 originel.
                     setResumeSessionPicker(sd!, true);
-                    // #647 Slice 4 — align label avec paneMarkerBarInfo
-                    // (fast-probe 1s peint identique) pour pas que la barre
-                    // oscille `pick:latest` ↔ `picker:session` pendant
-                    // la fenêtre du picker. Mode pick reste dans le log.
-                    setTmuxStatus(name!, LOOP_STATUS.BOOT, "picker:session");
+                    // #652 Slice 3 — bar paint dropped, timer fast-probe
+                    // owns it (see paneMarkerBarInfo).
                     sendKey("Enter");
                     sessionPicked = true;
                 }
@@ -136,7 +158,6 @@ if (source === "resume") {
             if (!matched) log(`session-picker: no match in ${probeMaxMs}ms (firstCaptureLen=${firstCaptureLen} lastCaptureLen=${lastCaptureLen})`);
         } catch (e) { log(`session-picker: error ${(e as Error).message ?? e}`); }
     } else {
-        setTmuxStatus(name!, LOOP_STATUS.BOOT, "session:abort");
         log(`session-picker: skipped (CL_RESUME_PICK=abort)`);
     }
 
@@ -155,7 +176,7 @@ if (source === "resume") {
     const mode = process.env[CL_ENV.RESUME_MODE] ?? "as-is";
     if (mode !== "abort") {
         try {
-            setTmuxStatus(name!, LOOP_STATUS.BOOT, "resume?");
+            // #652 Slice 3 — bar paint dropped (timer fast-probe owns it).
             const probeMaxMs = sessionPicked ? 6000 : 1500;
             const probeStepMs = 500;
             const summaryRegex = /Resume from summary|Resume full session as-is|Don't ask me again/;
@@ -168,19 +189,16 @@ if (source === "resume") {
                     // #647 Slice 2 david `sr9kqw` : marker spécifique
                     // mode-picker (2e écran resume : summary vs as-is).
                     setResumeModePicker(sd!, true);
-                    // #647 Slice 4 — align (cf. picker:session ci-dessus).
-                    setTmuxStatus(name!, LOOP_STATUS.BOOT, "picker:mode");
+                    // #652 Slice 3 — bar paint dropped (timer fast-probe owns it).
                     if (mode === "as-is") sendKey("Down");
                     sendKey("Enter");
                 }
             }
             if (!matched) {
                 log(`summary-picker: no match in ${probeMaxMs}ms`);
-                setTmuxStatus(name!, LOOP_STATUS.BOOT, "no-picker");
             }
         } catch (e) { log(`summary-picker: error ${(e as Error).message ?? e}`); }
     } else {
-        setTmuxStatus(name!, LOOP_STATUS.BOOT, "resume:abort");
         log(`summary-picker: skipped (CL_RESUME_MODE=abort)`);
     }
 }
@@ -222,8 +240,12 @@ try {
     const safeToSignal = source !== "resume" || sessionPicked || sessionPickerAborted;
     if (safeToSignal) {
         clearResumePickers(sd!);
-        setTmuxStatus(name!, LOOP_STATUS.IDLE);
-        log(`seed idle + signal boot-complete (source=${source} sessionPicked=${sessionPicked} aborted=${sessionPickerAborted}) + flip bar IDLE + exit`);
+        // #652 Slice 3 — bar IDLE paint dropped. The timer's
+        // bus.bootEnded handler in timer.ts already calls
+        // setTmuxStatus(IDLE) when boot phase settles, so the hook's
+        // paint was redundant ; removing it kills the last remaining
+        // bar-paint site in this hook (the #650 oscillation root).
+        log(`seed idle + signal boot-complete (source=${source} sessionPicked=${sessionPicked} aborted=${sessionPickerAborted}) + exit`);
     } else {
         log(`seed idle (probe didn't match picker, boot-complete NOT signalled — bar stays [boot] until pane probe sees prompt or safety cap fires) + exit (source=${source})`);
     }

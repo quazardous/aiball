@@ -27,6 +27,7 @@ import {
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
+import { getHookService, type HookEvent } from "./hook-service.js";
 
 /** Verdict surfaced for logging + tests. Caller logs the string ;
  *  null means the event was unknown / no-op. */
@@ -36,6 +37,7 @@ export type DispatchVerdict =
     | { kind: "afk-toggled"; nextMode: "off" | "wait_10m" | "wait_inf" }
     | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" }
     | { kind: "afk-service-set"; mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null }
+    | { kind: "hook-event"; hookEvent: HookEvent }
     | { kind: "unknown"; raw: string }
     | { kind: "error"; message: string };
 
@@ -104,6 +106,39 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             }
             return { kind: "unknown", raw: `marker:${String(name)}` };
         }
+        // #652 Slice 3 — hook events from spawn-per-call subprocesses
+        // (session-start-hook, stop-hook, pretooluse-hook). The hook
+        // process emits via emitHookEventToTimer (UDS client) and we
+        // dispatch into the in-process HookService here. Subscribers
+        // on the service (bar / wake gate / future state machine)
+        // pick them up.
+        if (kind === "hook") {
+            const hookKind = event.kind;
+            const atMs = typeof event.at_ms === "number" ? event.at_ms : Date.now();
+            if (hookKind === "SessionStart") {
+                const rawSource = event.source;
+                const source = rawSource === "startup" || rawSource === "resume" || rawSource === "compact" || rawSource === "clear"
+                    ? rawSource
+                    : null;
+                if (!source) return { kind: "unknown", raw: `hook:SessionStart (bad source ${String(rawSource)})` };
+                const hookEvent: HookEvent = { kind: "SessionStart", source, at_ms: atMs };
+                getHookService().emit(hookEvent);
+                return { kind: "hook-event", hookEvent };
+            }
+            if (hookKind === "Stop") {
+                const hookEvent: HookEvent = { kind: "Stop", at_ms: atMs };
+                getHookService().emit(hookEvent);
+                return { kind: "hook-event", hookEvent };
+            }
+            if (hookKind === "PreToolUse") {
+                const toolName = typeof event.tool_name === "string" ? event.tool_name : null;
+                if (!toolName) return { kind: "unknown", raw: `hook:PreToolUse (missing tool_name)` };
+                const hookEvent: HookEvent = { kind: "PreToolUse", tool_name: toolName, at_ms: atMs };
+                getHookService().emit(hookEvent);
+                return { kind: "hook-event", hookEvent };
+            }
+            return { kind: "unknown", raw: `hook:${String(hookKind)}` };
+        }
         return { kind: "unknown", raw: `${String(kind)}:${String(eventKind)}` };
     } catch (e) {
         return { kind: "error", message: (e as Error).message ?? String(e) };
@@ -119,6 +154,7 @@ export function formatVerdictLogLine(v: DispatchVerdict): string {
         case "afk-toggled":          return `proxy-event: afk_key → toggled to ${v.nextMode}`;
         case "marker-touched":       return `proxy-event: marker '${v.name}' applied`;
         case "afk-service-set":      return `proxy-event: AfkService → ${v.mode}${v.expiryMs !== null ? ` (expiry=${new Date(v.expiryMs).toISOString()})` : ""}`;
+        case "hook-event":           return `proxy-event: HookService ← ${v.hookEvent.kind}${v.hookEvent.kind === "SessionStart" ? ` (source=${v.hookEvent.source})` : v.hookEvent.kind === "PreToolUse" ? ` (tool=${v.hookEvent.tool_name})` : ""}`;
         case "unknown":              return `proxy-event: unknown '${v.raw}'`;
         case "error":                return `proxy-event handler error: ${v.message}`;
     }
