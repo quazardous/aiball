@@ -10,6 +10,9 @@
  *   { event: "keystroke", kind: "typing",   now_ms: <ms> }
  *   { event: "keystroke", kind: "afk_key",  now_ms: <ms> }
  *   { event: "marker",    name: "touch_marker"|"touch_user_grace"|"clear_user_grace", now_ms: <ms> }
+ *   { event: "marker",    name: "set_afk_10m", expiry_ms: <ms>, now_ms: <ms> }  (#653)
+ *   { event: "marker",    name: "set_afk_inf", now_ms: <ms> }                   (#653)
+ *   { event: "marker",    name: "clear_afk",   now_ms: <ms> }                   (#653)
  *
  * Unknown event kinds are logged + ignored (forward-compatible : a future
  * proxy emitting a new kind doesn't crash an old timer).
@@ -23,6 +26,7 @@ import {
     touchUserGrace,
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
+import { getAfkService } from "./afk-service.js";
 
 /** Verdict surfaced for logging + tests. Caller logs the string ;
  *  null means the event was unknown / no-op. */
@@ -31,6 +35,7 @@ export type DispatchVerdict =
     | { kind: "typing-skipped-boot" }
     | { kind: "afk-toggled"; nextMode: "off" | "wait_10m" | "wait_inf" }
     | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" }
+    | { kind: "afk-service-set"; mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null }
     | { kind: "unknown"; raw: string }
     | { kind: "error"; message: string };
 
@@ -72,6 +77,29 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                 clearUserGrace(sd);
                 return { kind: "marker-touched", name };
             }
+            // #653 step 1 — AFK mutations from the proxy. Update the
+            // in-process AfkService directly (no file write — the proxy
+            // still writes the file in step 1, and the fs.watch picks it
+            // up too). Step 2 will flip the proxy to events-only and the
+            // dispatcher will become the single writer via the
+            // armAfkViaService family.
+            if (name === "set_afk_10m") {
+                const exp = typeof event.expiry_ms === "number" ? event.expiry_ms : NaN;
+                if (!Number.isFinite(exp)) return { kind: "unknown", raw: `marker:set_afk_10m (missing expiry_ms)` };
+                const svc = getAfkService();
+                svc.set10m(exp);
+                return { kind: "afk-service-set", mode: "wait_10m", expiryMs: exp };
+            }
+            if (name === "set_afk_inf") {
+                const svc = getAfkService();
+                svc.setInf();
+                return { kind: "afk-service-set", mode: "wait_inf", expiryMs: null };
+            }
+            if (name === "clear_afk") {
+                const svc = getAfkService();
+                svc.setOff();
+                return { kind: "afk-service-set", mode: "off", expiryMs: null };
+            }
             return { kind: "unknown", raw: `marker:${String(name)}` };
         }
         return { kind: "unknown", raw: `${String(kind)}:${String(eventKind)}` };
@@ -88,6 +116,7 @@ export function formatVerdictLogLine(v: DispatchVerdict): string {
         case "typing-skipped-boot":  return "proxy-event: typing during boot → no arm (state.inBootGrace)";
         case "afk-toggled":          return `proxy-event: afk_key → toggled to ${v.nextMode}`;
         case "marker-touched":       return `proxy-event: marker '${v.name}' applied`;
+        case "afk-service-set":      return `proxy-event: AfkService → ${v.mode}${v.expiryMs !== null ? ` (expiry=${new Date(v.expiryMs).toISOString()})` : ""}`;
         case "unknown":              return `proxy-event: unknown '${v.raw}'`;
         case "error":                return `proxy-event handler error: ${v.message}`;
     }

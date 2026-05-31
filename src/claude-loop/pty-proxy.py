@@ -329,11 +329,23 @@ def _afk_mode():
 
 
 def set_afk_until(seconds):
-    """#619 : AFK auto-release after `seconds` (10min state in the F9 cycle)."""
+    """#619 : AFK auto-release after `seconds` (10min state in the F9 cycle).
+
+    #653 step 1 — also emits a `marker:set_afk_10m` event with the expiry
+    timestamp (ms) over proxy-events.sock so the timer's AfkService is
+    updated synchronously alongside the file. Event is best-effort (silent
+    no-op if the timer isn't connected — falls back on fs.watch picking up
+    the file write)."""
     p = _afk_path()
     if not p:
         return
     expiry = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
+    expiry_ms = int(expiry.timestamp() * 1000)
+    # Emit BEFORE the write so a dispatcher running in lock-step sees the
+    # event first and the file second — order doesn't matter for state
+    # correctness (idempotent on equal values) but lets `node --test`
+    # tests observe a deterministic sequence.
+    _proxy_events.emit({"event": "marker", "name": "set_afk_10m", "expiry_ms": expiry_ms, "now_ms": int(datetime.datetime.now().timestamp() * 1000)})
     try:
         with open(p, "w") as f:
             f.write(expiry.isoformat() + "\n")
@@ -342,10 +354,14 @@ def set_afk_until(seconds):
 
 
 def set_afk_infinite():
-    """#619 : AFK held indefinitely (∞ state in the F9 cycle)."""
+    """#619 : AFK held indefinitely (∞ state in the F9 cycle).
+
+    #653 step 1 — also emits a `marker:set_afk_inf` event so the timer's
+    AfkService is updated synchronously. Best-effort (see set_afk_until)."""
     p = _afk_path()
     if not p:
         return
+    _proxy_events.emit({"event": "marker", "name": "set_afk_inf", "now_ms": int(datetime.datetime.now().timestamp() * 1000)})
     try:
         with open(p, "w") as f:
             f.write("inf\n")
@@ -354,9 +370,12 @@ def set_afk_infinite():
 
 
 def clear_afk():
+    """#653 step 1 — also emits a `marker:clear_afk` event so the timer's
+    AfkService is updated synchronously. Best-effort (see set_afk_until)."""
     p = _afk_path()
     if not p:
         return
+    _proxy_events.emit({"event": "marker", "name": "clear_afk", "now_ms": int(datetime.datetime.now().timestamp() * 1000)})
     try:
         os.remove(p)
     except OSError:
