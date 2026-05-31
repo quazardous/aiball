@@ -594,14 +594,18 @@ ticketsRouter.get("/inbox", (req, res) => {
             // Per-consumer unread flag (≥1 unseen ping on the thread for
             // the caller, resolved from the X-Aiball-Consumer header).
             unread: unreadMap.get(t.id) ?? false,
-            // #405/#532 (sfbsdy + s2sjxz) : visibility cross-agent — un 🔥
-            // s'allume dès QU'UN agent (n'importe lequel) a une activité
-            // récente (< hot_window_sec). PAS le claim, qui peut être stale
-            // (david `s2sjxz` : #509 marqué hot car claim 15h vieux mais
-            // zéro activité). Le claim reste visible via la bookmark-fill
-            // chip distincte dans le meta slot — pas besoin de le conflate
-            // avec hot. Hot = focus ACTIF maintenant.
-            hot: crossAgentHotFocus.has(t.id),
+            // #405/#532 (sfbsdy + s2sjxz) + #657 david — visibility cross-
+            // agent : 🔥 s'allume sur activité récente (< hot_window_sec)
+            // OR claim récent (claimed_at < hot_window_sec). Le claim
+            // récent est un signal fort « un agent vient de prendre
+            // ça » même avant qu il poste quoi que ce soit ; le filtre
+            // sur hot_window_sec évite la régression #509 (s2sjxz —
+            // claim 15h vieux marquant hot indéfiniment). Le bookmark-
+            // fill chip distincte dans le meta slot reste pour exposer
+            // QUI claim (info que `hot` seul perd).
+            hot: crossAgentHotFocus.has(t.id)
+                || (typeof t.claimed_at === "string"
+                    && Date.now() - new Date(t.claimed_at).getTime() < hotWindowSec() * 1000),
             // Snooze (#B.329). `postponed=true` means the deadline hasn't
             // passed yet — UI hides the row from the open inbox the same
             // way `closed=true` does. `postponed_until` is the deadline
