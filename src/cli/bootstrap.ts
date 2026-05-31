@@ -193,6 +193,53 @@ function patchIdentity(path: string, agent: string | undefined, project: string 
  * keys AND comments are preserved — only the tailscale entry is set. Remote
  * access is host-level, so this is global (not per-project `.aiball.yaml`).
  */
+/**
+ * #651 david `cbeqv3`+`ycajaf` — deploy the aiball Claude Code skill shipped
+ * with the install (`<installRoot>/skill/SKILL.md`) into a destination
+ * `.claude/skills/aiball/SKILL.md` so the next Claude Code session has the
+ * ticket-reply discipline + MCP usage rules in-context without relying on
+ * memory alone. Default destination is global (`~/.claude/skills/`) since
+ * the discipline is agent-behavior, not project-specific. `--project` lands
+ * it under `<cwd>/.claude/skills/` for project-scoped overrides.
+ */
+function installSkill(opts: { project: boolean; global: boolean; target?: string; force: boolean }): void {
+    if (opts.project && opts.global) {
+        die("init skill: --project and --global are mutually exclusive");
+    }
+    const installRoot = resolveInstallRoot();
+    const src = join(installRoot, "skill", "SKILL.md");
+    if (!existsSync(src)) {
+        die(`init skill: source SKILL.md not found at ${src} — is the install root correct?`);
+    }
+    let destDir: string;
+    if (opts.target !== undefined) {
+        destDir = opts.target;
+    } else if (opts.project) {
+        destDir = join(userCwd(), ".claude", "skills");
+    } else {
+        // --global is the default ; explicit flag included for clarity
+        destDir = join(homedir(), ".claude", "skills");
+    }
+    const skillDir = join(destDir, "aiball");
+    const dest = join(skillDir, "SKILL.md");
+    if (existsSync(dest) && !opts.force) {
+        die(`init skill: ${dest} already exists — pass --overwrite to refresh`);
+    }
+    mkdirSync(skillDir, { recursive: true });
+    const content = readFileSync(src, "utf8");
+    writeFileSync(dest, content, "utf8");
+    process.stdout.write(
+        [
+            `Installed aiball skill → ${dest}`,
+            ``,
+            `Source: ${src}`,
+            `The skill is auto-suggested by Claude Code when it sees an aiball-related context.`,
+            `Re-run with --overwrite to refresh after an aiball upgrade.`,
+            ``,
+        ].join("\n"),
+    );
+}
+
 function initTailscale(opts: { http: boolean; port?: number; autostart: boolean }): void {
     const path = globalConfigPath();
     let doc;
@@ -406,6 +453,28 @@ export function registerBootstrapCommands(program: Command): void {
                 ...opts,
                 consumer: opts.consumer ?? opts.agent,
                 noClaim,
+            });
+        });
+
+    // #651: `aiball init skill` — deploy the shipped aiball Claude Code skill
+    // (skill/SKILL.md in the install root) into a user's ~/.claude/skills/
+    // (global, default) or <cwd>/.claude/skills/ (--project). The skill
+    // teaches the ticket-reply discipline (then:resolved/then:plan vs plain
+    // comments) so the next session has the rules in-context without relying
+    // on memory alone.
+    initCmd
+        .command("skill")
+        .description("Install the aiball Claude Code skill into ~/.claude/skills/aiball/ (or <cwd>/.claude/skills/aiball/ with --project)")
+        .option("--project", "Install into <cwd>/.claude/skills/ instead of ~/.claude/skills/")
+        .option("--global", "Install into ~/.claude/skills/ (default)")
+        .option("--target <path>", "Explicit destination directory (overrides --project / --global ; SKILL.md lands at <path>/aiball/SKILL.md)")
+        .option("--overwrite", "Overwrite an existing SKILL.md at the destination (parent `init --force` is reserved for project bootstrap)")
+        .action((o: { project?: boolean; global?: boolean; target?: string; overwrite?: boolean }) => {
+            installSkill({
+                project: o.project === true,
+                global: o.global === true,
+                target: o.target,
+                force: o.overwrite === true,
             });
         });
 

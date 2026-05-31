@@ -79,11 +79,48 @@ ticket_new({
 ```
 ticket_reply({
     target_id: <ticket_id_or_comment_id>,
-    body: "your reply"
+    body: "your reply",
+    summary_until: "one-line state snapshot AFTER this comment"
 })
 ```
 
 `target_id` accepts either a ticket id (top-level comment on the thread) or a comment id (still posts a comment on the same thread; UI / clients flatten — no nesting tree). To reference a specific previous comment in your body, write `#42` and the link will resolve.
+
+`summary_until` is **required** on agent replies — a one-line snapshot of the ticket state AFTER your comment lands, so the next agent reading the thread can resume from just that line. Describe ticket state, not what you just did. Bad: "Shipped slice 3." Good: "Slices 1-3 live ; awaiting david accept on slice 4 plan."
+
+---
+
+## Decision discipline — when to use `then:`
+
+aiball replies carry an optional `then:` field that tags the comment as a **proposal** the reporter (human) accepts or rejects via a UI under the composer. Two flavors :
+
+- `then: "resolved"` — proposes the ticket can close. Use when you shipped substantive work (commit landed, fix live) and the ticket's scope is satisfied.
+- `then: "plan"` — proposes HOW you'll tackle the ticket (approach, design, slicing, scope choice). The reporter's accept IS the greenlight to execute.
+
+Plain comments (no `then:`) carry no decision UI — the reader has to reconstruct ticket state by reading the whole thread. **For these three cases, the default is decision-bearing, NOT plain :**
+
+| You're about to say | Use |
+|---|---|
+| "Shipped commit XYZ, awaiting test" | `then: "resolved"` immediately — don't wait for the human to test ; they accept on success, reopen on failure |
+| "Tu préfères A ou B ?" | `then: "plan"` describing A vs B — the accept binds your next action |
+| "Engage = je code ?" | reformulate as `then: "plan"` with the concrete next step |
+
+### Reject pending before amending
+
+If you posted `then: "resolved"` and the work turns out wrong (test failed, fix invalidated, scope misread), **reject the pending decision explicitly** before posting any follow-up plain comment. Stacking a new comment over a stale pending resolution leaves the ticket in a stuck state ; the reporter has to clean up.
+
+To **refine** a still-valid pending plan (small adjustment, no semantic change), a plain reply IS correct — that's the amend-with-plain-comment rule. But it only applies when the original plan is still substantially the right path.
+
+### When plain comments ARE right
+
+- Status updates (no deliverable, no HOW choice).
+- Refining a pending plan that's still on the right path.
+- Answering a clarification question without proposing a new action.
+- Idle pings, acks of catchphrase greenlights.
+
+### Why this matters
+
+Without `then:` tags the reporter has to reconstruct state by reading the thread. Tags surface a decision UI directly. Skipping them pushes tracking and cleanup overhead onto the human — exactly what the discipline was built to prevent.
 
 ---
 
