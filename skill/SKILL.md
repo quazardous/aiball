@@ -75,6 +75,8 @@ It is **NOT** an auto-approval to implement #N or its children :
 
 If you're an agent reading a wake prompt that says "engage #N first", treat it as a queue pointer : claim and process #N, post a plan if the work needs a plan, then wait for the human's accept before starting the slices.
 
+**Pending tickets are off-limits for work.** A ticket with `status: "pending"` is waiting on the human moderator — you may discuss / analyse / ask a clarification on the thread, but DO NOT take it as the starting point for code, a sub-ticket, or a plan that implies execution. Wait for it to be approved.
+
 ---
 
 ## Anti-patterns
