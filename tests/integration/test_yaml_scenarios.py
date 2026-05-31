@@ -60,8 +60,22 @@ def _load_all() -> list[Scenario]:
 SCENARIOS = _load_all()
 
 
+def _scenario_params() -> list:
+    """Build pytest.param entries with per-scenario marks. A scenario
+    carrying `xfail: "reason"` gets `pytest.mark.xfail(strict=False)`
+    so the runner accepts known-fragile cases without poisoning the
+    suite."""
+    params = []
+    for sc in SCENARIOS:
+        marks = []
+        if sc.xfail:
+            marks.append(pytest.mark.xfail(reason=sc.xfail, strict=False))
+        params.append(pytest.param(sc, marks=marks, id=_scenario_id(sc)))
+    return params
+
+
 @pytest.mark.skipif(not SCENARIOS, reason="no yaml scenarios under tests/integration/scenarios/")
-@pytest.mark.parametrize("scenario", SCENARIOS, ids=_scenario_id)
+@pytest.mark.parametrize("scenario", _scenario_params())
 def test_yaml_scenario(scenario: Scenario, loop_runner):
     """Execute one scenario : every ExpectStep spawns a fresh loop
     with `interval_s = at_seconds` so the single heartbeat lands at

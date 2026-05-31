@@ -1,0 +1,24 @@
+# Slice 3 of #638 — yaml conversion of test_reference_bugs::test_650_compacting_detected_during_compact.
+# The `compacting-42` probe renders the verbatim "Compacting conversation… esc to
+# interrupt" marker line ; the timer's heartbeat probe (snapshotPane →
+# classifyPaneSpecial) should flip pane.compacting to true.
+#
+# Known fragile : the pytest version is @pytest.mark.xfail because in the
+# harness, the boot-grace window (first 30s) + the PTY proxy path returning
+# proxy.alive=false combine to make the capture intermittent. Live the
+# detection works (fix fd4b8f0) — manual /compact verifies the bar shows
+# "[…:compacting]". This yaml replays the same path for visual debugging.
+scenario: compacting-detect
+xfail: >
+  Detection works LIVE — manual /compact verifies the bar shows
+  [...:compacting] (fix fd4b8f0). In the harness, the timer's
+  heartbeat probe under boot-grace (first 30s of any loop) calls
+  refreshPaneMarkers but capturePane() returns content that doesn't
+  match the regex stably — needs investigation of the PTY proxy
+  path (proxy.alive=false in the harness, may explain the empty
+  capture). This xfail stays as the live regression contract.
+steps:
+  - spawn: { fake_claude: compacting-42 }
+  - at_seconds: 3
+    expect:
+      pane.compacting: true

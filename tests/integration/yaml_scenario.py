@@ -82,10 +82,12 @@ class Scenario:
     the scenario identifier (declared via `scenario:` key, falls back
     to the file stem if absent). `path` is the original file path
     for diagnostics. `steps` are time-ordered (sorted by at_seconds
-    with spawn first)."""
+    with spawn first). `xfail` is the expected-failure reason string
+    when set ; slice 2 runner converts this to `pytest.mark.xfail`."""
     name: str
     path: Path
     steps: tuple[Step, ...] = field(default_factory=tuple)
+    xfail: str | None = None
 
 
 def parse_scenario(path: Path) -> Scenario:
@@ -102,6 +104,10 @@ def parse_scenario(path: Path) -> Scenario:
     if not isinstance(doc, dict):
         raise ScenarioError(f"{path}: top-level YAML must be a mapping, got {type(doc).__name__}")
     name = str(doc.get("scenario", path.stem))
+    raw_xfail = doc.get("xfail")
+    if raw_xfail is not None and not isinstance(raw_xfail, str):
+        raise ScenarioError(f"{path}: 'xfail' must be a string (reason), got {type(raw_xfail).__name__}")
+    xfail = raw_xfail or None  # treat empty string as not-xfail
     raw_steps = doc.get("steps")
     if raw_steps is None or not isinstance(raw_steps, list):
         raise ScenarioError(f"{path}: 'steps' must be a list, got {type(raw_steps).__name__}")
@@ -123,7 +129,7 @@ def parse_scenario(path: Path) -> Scenario:
     # Sort timed steps by at_seconds ; spawn stays at index 0.
     timed = sorted(steps[1:], key=lambda s: s.at_seconds)  # type: ignore[union-attr]
     ordered: tuple[Step, ...] = (steps[0], *timed)
-    return Scenario(name=name, path=path, steps=ordered)
+    return Scenario(name=name, path=path, steps=ordered, xfail=xfail)
 
 
 def _parse_step(path: Path, idx: int, raw: dict) -> Step:
