@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -70,8 +71,11 @@ def spawn_loop(name: str, fake_claude_scenario: str, interval_s: int) -> None:
     session ; this call returns once that's set up. No --once, so the
     loop stays alive for the duration of the playback."""
     env = {
-        **__import__("os").environ,
+        **os.environ,
         "CL_CLAUDE_CMD": f"{BIN_FAKE_CLAUDE} --probe-mode {fake_claude_scenario}",
+        # Synthetic agent so we don't collide with any live claude-loop
+        # already running on this project for the operator's real agent.
+        "AIBALL_AGENT": f"play-scenario-{name}",
     }
     cmd = [
         str(BIN_CLAUDE_LOOP), "start", name,
@@ -138,6 +142,51 @@ def evaluate_expect(state: dict, step: ExpectStep) -> tuple[int, int]:
     return ok, fail
 
 
+def open_visual_pane(name: str) -> dict:
+    """Open a visible view of the loop's tmux session for the operator.
+
+    - Inside tmux (`$TMUX` set) : split the current window horizontally
+      and attach cl-NAME in the new pane. The inner `tmux attach` runs
+      with `TMUX` unset so the nested-session protection is lifted.
+      Returns `{kind: "tmux_pane", pane_id: "%N"}` for cleanup.
+    - Outside tmux : print an instruction + sleep 3s so the operator
+      can `claude-loop attach NAME` in another terminal. Returns
+      `{kind: "instruction"}` — nothing to cleanup."""
+    if os.environ.get("TMUX"):
+        try:
+            res = subprocess.run(
+                ["tmux", "split-window", "-h", "-P", "-F", "#{pane_id}",
+                 f"env -u TMUX tmux attach -t cl-{name}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if res.returncode == 0:
+                pane_id = res.stdout.strip()
+                print(dim(f"  → visible in tmux pane {pane_id} (Ctrl-B + ← to switch back)"))
+                return {"kind": "tmux_pane", "pane_id": pane_id}
+            sys.stderr.write(yellow(f"  ⚠  tmux split-window rc={res.returncode}: {res.stderr.strip()}\n"))
+        except Exception as e:
+            sys.stderr.write(yellow(f"  ⚠  tmux split-window failed: {e}\n"))
+        return {"kind": "instruction"}
+    print(yellow(f"  ⚠  not running inside tmux — open another terminal and run:"))
+    print(yellow(f"     claude-loop attach {name}"))
+    print(dim(f"  sleeping 3s to give you time…"))
+    time.sleep(3)
+    return {"kind": "instruction"}
+
+
+def close_visual_pane(meta: dict) -> None:
+    """Tear down whatever open_visual_pane() opened. No-op for
+    instruction mode (the operator's terminal isn't ours to close)."""
+    if meta.get("kind") == "tmux_pane" and meta.get("pane_id"):
+        try:
+            subprocess.run(
+                ["tmux", "kill-pane", "-t", meta["pane_id"]],
+                capture_output=True, timeout=2,
+            )
+        except Exception:
+            pass
+
+
 def cleanup(name: str) -> None:
     """Best-effort cleanup : `claude-loop rm NAME` + tmux kill-session.
     Both swallow errors — teardown should never block the operator."""
@@ -159,6 +208,7 @@ def main() -> int:
     ap.add_argument("yaml_path", type=Path, help="Path to the yaml scenario file.")
     ap.add_argument("--keep", action="store_true", help="Skip cleanup — leave the tmux session running for post-mortem inspection (you'll need to `claude-loop rm NAME` manually).")
     ap.add_argument("--interval", type=int, default=2, help="Heartbeat interval in seconds (default 2). Lower = snappier inspect ; bumps render lag.")
+    ap.add_argument("--no-visual", action="store_true", help="Don't auto-open a visible view of the loop's tmux session. Useful for CI / headless scripting.")
     args = ap.parse_args()
 
     if not args.yaml_path.exists():
@@ -179,6 +229,7 @@ def main() -> int:
     print()
 
     spawn_loop(name, spawn.fake_claude, args.interval)
+    visual = {"kind": "none"} if args.no_visual else open_visual_pane(name)
     started_at = time.monotonic()
 
     total_ok, total_fail = 0, 0
@@ -208,6 +259,7 @@ def main() -> int:
             print(dim(f"(--keep) tmux session left running ; rm via: claude-loop rm {name}"))
         else:
             print(dim(f"cleaning up tmux session cl-{name}…"))
+            close_visual_pane(visual)
             cleanup(name)
 
     return 1 if total_fail else 0
