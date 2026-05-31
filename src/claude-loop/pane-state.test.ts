@@ -47,54 +47,64 @@ test("fenêtre compte les lignes NON vides", () => {
 // Sans ça, un `✶ Compacting conversation… (42s)` qui traîne dans le scrollback
 // après `/compact` terminé reste matché et bloque tous les wakes pour toujours.
 
-// #650 — la classification exige MAINTENANT à la fois le texte
-// "Compacting conversation" ET la co-présence de `esc to interrupt` dans
-// le footer. Le `\d+\s?%` requirement précédent (#629 yt3h5y) cassait
-// silencieusement la détection : l'UI Claude Code actuelle affiche
-// `(12s · ↓ tokens · esc to interrupt)` SANS pourcentage. Le `esc to
-// interrupt` est le signal canonique de turn live ; il disparaît dès
-// que le prompt revient, donc le stale est filtré pareil.
+// #650 david `tjab9e` — la classification exige texte "Compacting
+// conversation" + au moins un signal "live" parmi : progress bar
+// Unicode (▰/▱), percentage (NN%), ou `esc to interrupt`. La capture
+// réelle du UI Claude montre progress + % (parfois sans esc-to-
+// interrupt visible). Le stale "✶ Compacting conversation… (42s)" sans
+// progress ni % est filtré. Premier essai (esc-to-interrupt only) cassé
+// car les nouveaux formats compact n'ont PAS esc-to-interrupt au footer.
 
 test("classifyPaneSpecial: live compacting avec NN% → 'compacting'", () => {
     const live = "● earlier output\n✶ Compacting conversation… 42%\n  ⏵⏵ auto mode on · esc to interrupt";
     assert.equal(classifyPaneSpecial(live), "compacting");
 });
 
-test("classifyPaneSpecial: 'Compacting conversation' avec (12s) + esc to interrupt → 'compacting'", () => {
-    // #650 — l'UI actuelle de Claude Code montre le temps elapsed `(12s)`
-    // sans pourcentage ; le `esc to interrupt` reste le signal live.
-    const live = "● earlier output\n✶ Compacting conversation… (12s)\n  esc to interrupt";
-    assert.equal(classifyPaneSpecial(live), "compacting");
+test("classifyPaneSpecial: format réel David (progress bar + %, sans esc to interrupt) → 'compacting'", () => {
+    // #650 david `tjab9e` capture : progress bar Unicode + percent au
+    // footer, pas de esc-to-interrupt. Doit matcher.
+    const real = "✽ Compacting conversation… (1m 12s)\n  ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 55%";
+    assert.equal(classifyPaneSpecial(real), "compacting");
 });
 
-test("classifyPaneSpecial: 'Compacting' et 'esc to interrupt' sur lignes différentes → 'compacting'", () => {
-    // Pas forcément sur la même ligne — n'importe où dans le footer suffit.
-    const multiline = "✶ Compacting conversation…\n  progress\n  esc to interrupt";
+test("classifyPaneSpecial: format minimal (texte + progress bar seule, pas de %) → 'compacting'", () => {
+    // Variant intermédiaire : le progress bar Unicode suffit comme live
+    // signal même si le pourcentage n'est pas encore rendu (frame initial).
+    const initial = "Compacting conversation… \n  ▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱";
+    assert.equal(classifyPaneSpecial(initial), "compacting");
+});
+
+test("classifyPaneSpecial: 'Compacting' + esc to interrupt (sans progress/%) → 'compacting'", () => {
+    // Format legacy / variante rare : pas de progress visible mais turn
+    // toujours interruptible. Live signal via esc-to-interrupt.
+    const legacy = "● earlier output\n✶ Compacting conversation… (12s)\n  esc to interrupt";
+    assert.equal(classifyPaneSpecial(legacy), "compacting");
+});
+
+test("classifyPaneSpecial: % et 'Compacting' sur lignes différentes → 'compacting'", () => {
+    const multiline = "✶ Compacting conversation…\n  progress: 42%\n  esc to interrupt";
     assert.equal(classifyPaneSpecial(multiline), "compacting");
 });
 
 test("classifyPaneSpecial: stale 'Compacting' dans le scrollback (prompt revenu) → null", () => {
-    // Reproduit le scénario #577 : /compact terminé, le prompt est de retour,
-    // mais la ligne `✶ Compacting conversation… (42s)` reste 20+ lignes plus
-    // haut dans le scrollback rendu par tmux capture-pane. Le `prompt`
-    // helper n'a pas `esc to interrupt` → co-présence échoue → null.
+    // Reproduit le scénario #577 : /compact terminé, le prompt est de retour.
+    // Le `prompt` helper n'a ni %, ni progress bar Unicode, ni esc-to-
+    // interrupt → tous les live signals échouent → null.
     const stale = "✶ Compacting conversation… (42s)";
     const filler = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n");
     assert.equal(classifyPaneSpecial(`${stale}\n${filler}\n${prompt}`), null);
 });
 
-test("classifyPaneSpecial: 'Compacting' SANS 'esc to interrupt' (fin de turn) → null", () => {
-    // Cas où Compacting est dans le footer mais le prompt est déjà revenu
-    // sur la dernière ligne (esc to interrupt parti). Filtré par le live
-    // signal manquant.
-    const finished = "✶ Compacting conversation… (42s)\n────\n❯ \n  ⏵⏵ auto mode on";
-    assert.equal(classifyPaneSpecial(finished), null);
+test("classifyPaneSpecial: stale 'Compacting' avec (42s) seul dans footer → null", () => {
+    // Même cas mais le stale lui-même est dans le footer (juste lui +
+    // prompt). Aucun live signal → null.
+    const stale = "✶ Compacting conversation… (42s)\n────\n❯ \n  ⏵⏵ auto mode on";
+    assert.equal(classifyPaneSpecial(stale), null);
 });
 
-test("classifyPaneSpecial: 'esc to interrupt' sans 'Compacting' (turn normal) → null", () => {
-    // Un turn normal a esc to interrupt mais pas de Compacting → pas matché.
-    const normalTurn = "● doing work\n● more work\n  ⏵⏵ auto mode on · esc to interrupt";
-    assert.equal(classifyPaneSpecial(normalTurn), null);
+test("classifyPaneSpecial: % sans 'Compacting' (progress bar quelconque) → null", () => {
+    const other = "Downloading model… 42%\n  esc to interrupt";
+    assert.equal(classifyPaneSpecial(other), null);
 });
 
 test("classifyPaneSpecial: pane idle normal → null", () => {

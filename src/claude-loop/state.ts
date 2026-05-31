@@ -1438,18 +1438,21 @@ export function classifyPaneSpecial(text: string, footerLines = 5): PaneSpecial 
         .filter((l) => l.length > 0)
         .slice(-footerLines)
         .join("\n");
-    // #650 — tighten via co-presence of `esc to interrupt` instead of the
-    // earlier `\d+\s?%` requirement (#629 yt3h5y). Claude Code's UI doesn't
-    // reliably show a percentage during compaction — recent versions display
-    // `Compacting conversation… (12s · ↓ N tokens · esc to interrupt)` with
-    // an elapsed-time stamp instead. The `%` requirement silently broke the
-    // detection (marker never fired). `esc to interrupt` is the canonical
-    // live-mid-turn signal (same one `paneFooterShowsBusy` uses) — it
-    // disappears the moment the prompt comes back, so stale `Compacting`
-    // lines lingering in scrollback after compaction ends never co-occur
-    // with it in the same footer window.
+    // #650 david `tjab9e` (revised) — discriminant live vs stale. Capture
+    // réelle du UI Claude actuel :
+    //   `✽ Compacting conversation… (1m 12s)`
+    //   `  ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 55%`
+    // ⇒ pas de `esc to interrupt` (premier essai cassé) — la barre de
+    // progression Unicode ▰/▱ OU le percentage `NN%` sont les vrais
+    // marqueurs uniques-au-live. Le stale `✶ Compacting conversation…
+    // (42s)` n'en a aucun (texte seul, progress effacé quand /compact se
+    // termine). On garde `esc to interrupt` en 3e OR pour le rare format
+    // sans progress mais avec turn live (legacy / variant rare).
     const hasCompactingText = /Compacting conversation|Summarizing the conversation/i.test(footer);
-    const hasLiveSignal = /esc to interrupt/i.test(footer);
+    const hasProgressBar = /[▰▱]/.test(footer);
+    const hasPercent = /\d+\s?%/.test(footer);
+    const hasEscInterrupt = /esc to interrupt/i.test(footer);
+    const hasLiveSignal = hasProgressBar || hasPercent || hasEscInterrupt;
     if (hasCompactingText && hasLiveSignal) return "compacting";
     // rate-limit / api-error / overloaded are handled by error-backoff.ts
     // (#332) — they're errors, not internal busy states.
