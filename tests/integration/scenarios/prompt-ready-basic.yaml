@@ -1,0 +1,12 @@
+# #638 Slice 2 — minimal yaml scenario to exercise the runner.
+# Spawns fake-claude with the `prompt-ready` probe scenario, waits 2s
+# for the heartbeat, asserts the loop name is reported back by inspect.
+# (The bar_word will be `boot` because we're still inside the 30s floor —
+# this scenario doesn't try to break that.)
+scenario: prompt-ready-basic
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at_seconds: 2
+    expect:
+      view.bar_word: boot
+      view.in_boot_grace: true
