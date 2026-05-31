@@ -28,6 +28,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
+import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -142,6 +145,53 @@ def evaluate_expect(state: dict, step: ExpectStep) -> tuple[int, int]:
     return ok, fail
 
 
+# Terminal emulator probe table for the outside-tmux fallback. Each
+# entry is (binary, prefix-args-before-command). The cmd-exec syntax
+# varies — GTK/wayland terminals use `--`, X11 classics use `-e` /
+# `-x`. Order = preference (newest GNOME first ; xterm last). The
+# `$TERMINAL` env var (if set) wins over the probe.
+_TERM_PROBES: list[tuple[str, list[str]]] = [
+    ("ptyxis",          ["--"]),
+    ("kgx",             ["--"]),
+    ("gnome-terminal",  ["--"]),
+    ("foot",            []),
+    ("kitty",           []),
+    ("wezterm",         ["start", "--"]),
+    ("alacritty",       ["-e"]),
+    ("konsole",         ["-e"]),
+    ("xfce4-terminal",  ["-x"]),
+    ("xterm",           ["-e"]),
+    ("urxvt",           ["-e"]),
+    ("st",              ["-e"]),
+]
+
+
+def _spawn_external_terminal(attach_cmd: list[str]) -> dict | None:
+    """Spawn an external terminal emulator window running `attach_cmd`.
+    Returns `{kind:"ext_term", pid}` on success, None if no terminal
+    could be found / launched.
+
+    Honors `$TERMINAL` first (allows things like `TERMINAL='foot -T x'`
+    via shlex split), then falls through `_TERM_PROBES` in order."""
+    env_term = os.environ.get("TERMINAL", "").strip()
+    if env_term:
+        try:
+            proc = subprocess.Popen([*shlex.split(env_term), *attach_cmd])
+            return {"kind": "ext_term", "pid": proc.pid, "binary": env_term}
+        except FileNotFoundError:
+            sys.stderr.write(yellow(f"  ⚠  $TERMINAL='{env_term}' not found — falling through probes\n"))
+    for binary, prefix in _TERM_PROBES:
+        if not shutil.which(binary):
+            continue
+        try:
+            proc = subprocess.Popen([binary, *prefix, *attach_cmd])
+            return {"kind": "ext_term", "pid": proc.pid, "binary": binary}
+        except Exception as e:
+            sys.stderr.write(yellow(f"  ⚠  spawn {binary} failed: {e}\n"))
+            continue
+    return None
+
+
 def open_visual_pane(name: str) -> dict:
     """Open a visible view of the loop's tmux session for the operator.
 
@@ -149,9 +199,11 @@ def open_visual_pane(name: str) -> dict:
       and attach cl-NAME in the new pane. The inner `tmux attach` runs
       with `TMUX` unset so the nested-session protection is lifted.
       Returns `{kind: "tmux_pane", pane_id: "%N"}` for cleanup.
-    - Outside tmux : print an instruction + sleep 3s so the operator
-      can `claude-loop attach NAME` in another terminal. Returns
-      `{kind: "instruction"}` — nothing to cleanup."""
+    - Outside tmux : spawn an external terminal emulator running
+      `claude-loop attach NAME` (probes ptyxis / gnome-terminal /
+      kitty / xterm / etc.). Returns `{kind: "ext_term", pid, binary}`.
+    - No terminal found : print attach instruction + sleep 3s.
+      Returns `{kind: "instruction"}` (no cleanup)."""
     if os.environ.get("TMUX"):
         try:
             res = subprocess.run(
@@ -167,7 +219,14 @@ def open_visual_pane(name: str) -> dict:
         except Exception as e:
             sys.stderr.write(yellow(f"  ⚠  tmux split-window failed: {e}\n"))
         return {"kind": "instruction"}
-    print(yellow(f"  ⚠  not running inside tmux — open another terminal and run:"))
+
+    attach_cmd = [str(BIN_CLAUDE_LOOP), "attach", name]
+    ext = _spawn_external_terminal(attach_cmd)
+    if ext:
+        print(dim(f"  → spawned external terminal ({ext['binary']}, pid {ext['pid']})"))
+        return ext
+
+    print(yellow(f"  ⚠  no terminal emulator found and not in tmux — open another terminal and run:"))
     print(yellow(f"     claude-loop attach {name}"))
     print(dim(f"  sleeping 3s to give you time…"))
     time.sleep(3)
@@ -183,6 +242,13 @@ def close_visual_pane(meta: dict) -> None:
                 ["tmux", "kill-pane", "-t", meta["pane_id"]],
                 capture_output=True, timeout=2,
             )
+        except Exception:
+            pass
+    elif meta.get("kind") == "ext_term" and meta.get("pid"):
+        try:
+            os.kill(meta["pid"], signal.SIGTERM)
+        except ProcessLookupError:
+            pass
         except Exception:
             pass
 
