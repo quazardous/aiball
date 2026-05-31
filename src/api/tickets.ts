@@ -590,6 +590,20 @@ ticketsRouter.get("/inbox", (req, res) => {
                 it shows pending resolutions. Cleared once the ticket
                 is closed/rejected. */
             pending_plan: agg.pendingPlan && !(agg.closed || t.status === "rejected"),
+            /** #656 david `2c9qm4`: true iff a pending decision exists
+                AND the decision-bearing comment IS the latest comment
+                on the thread (no newer activity past the proposal).
+                Drives the visual : fresh proposal = solid attention
+                band, stale proposal (conversation continued past it)
+                = dashed band. Null/false on rows with no pending
+                decision. */
+            pending_decision_is_latest: ((): boolean => {
+                if (agg.closed || t.status === "rejected") return false;
+                const pendingId = agg.pendingPlan ? agg.latestPlanId
+                    : agg.pendingResolution ? agg.latestResolutionId
+                    : 0;
+                return pendingId > 0 && pendingId === agg.lastSpeakerId;
+            })(),
             scope: t.scope,
             // Per-consumer unread flag (≥1 unseen ping on the thread for
             // the caller, resolved from the X-Aiball-Consumer header).

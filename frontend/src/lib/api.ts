@@ -410,6 +410,12 @@ export interface InboxRow {
      *  accept/reject. Surfaced so the inbox row can flag pending
      *  plans the same way it flags pending resolutions. */
     pending_plan?: boolean;
+    /** #656 david `2c9qm4`: true iff a pending decision exists AND
+     *  the decision-bearing comment IS the latest comment on the
+     *  thread (no newer activity past it). UI uses this to keep
+     *  the attention band solid for "fresh proposal" vs dashed for
+     *  "proposal hanging while conversation continued". */
+    pending_decision_is_latest?: boolean;
     /** #B.168 follow-up: the LATEST resolution decision on this
      *  ticket was rejected — UI shows a `× rejected` badge so the
      *  reporter sees "I rejected, the thread is still open". */

@@ -14,6 +14,15 @@ defineProps<{
      *   comment_added awaiting mod) > null (nothing actionable).
      */
     attention?: "moderation" | "resolution" | "comments" | null;
+    /**
+     * #656 david `2c9qm4`: only applicable when attention === "resolution".
+     * True iff the pending decision is the LATEST comment on the thread
+     * (fresh proposal, nothing posted after) — band stays SOLID. False
+     * means the conversation continued past the proposal — band turns
+     * DASHED to signal the proposal is hanging but no longer the freshest
+     * signal.
+     */
+    resolutionFresh?: boolean;
 }>();
 const emit = defineEmits<{
     (e: "click", ev: MouseEvent): void;
@@ -110,6 +119,7 @@ function onClick(ev: MouseEvent) {
             'list-row--long-pressing': isLongPressing,
             'list-row--attention-moderation': attention === 'moderation',
             'list-row--attention-resolution': attention === 'resolution',
+            'list-row--attention-resolution-fresh': attention === 'resolution' && resolutionFresh,
             'list-row--attention-comments': attention === 'comments',
         }"
         @click="onClick"
@@ -219,11 +229,16 @@ function onClick(ev: MouseEvent) {
     border-left: 3px solid var(--p-yellow-500);
 }
 .list-row--attention-resolution {
-    /* #656 david `8wegju` : pointillé pour la bande verte — distinguer
-       visuellement les "your call" (decision pending) du moderation
-       solide jaune et du comments solide pâle. Le pointillé connote
-       "à valider, pas figé". */
+    /* #656 david `8wegju` + `2c9qm4` : la bande verte est DASHED par
+       défaut (proposition pending mais discussion continuée après) et
+       repasse SOLID via `--attention-resolution-fresh` quand la
+       proposition est le dernier message du thread (fresh, untouched).
+       Pointillé connote "à valider, pas figé" ; solid connote "fresh
+       agent proposal, clean state, your call". */
     border-left: 3px dashed var(--p-green-500);
+}
+.list-row--attention-resolution-fresh {
+    border-left-style: solid;
 }
 .list-row--attention-comments {
     border-left: 3px solid color-mix(in srgb, var(--p-yellow-500) 60%, transparent);

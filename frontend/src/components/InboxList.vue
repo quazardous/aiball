@@ -128,6 +128,7 @@ function onRowClick(r: InboxRow) {
         :unread="r.unread"
         :closed="r.closed"
         :attention="attentionOf(r)"
+        :resolution-fresh="r.pending_decision_is_latest === true"
         @click="onRowClick(r)"
         @long-press="emit('toggle-selected', r.id, !selectedIds.has(r.id))"
     >
