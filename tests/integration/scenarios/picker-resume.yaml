@@ -1,0 +1,16 @@
+# Slice 3 of #638 — yaml conversion of test_reference_bugs::test_647_session_picker_visible_when_rendered.
+# The `picker-2-sessions` probe renders the resume picker initially ; the
+# session-start-hook detects it and sends Enter, advancing fake-claude to
+# the idle prompt. By the time the timer's heartbeat probe fires post-Enter,
+# the picker is gone — the regex-driven marker has been cleared back to false.
+#
+# This pins the WIRING contract : both picker markers exist on the boot block
+# and are valued false once the hook has done its job. Loss of either key
+# would mean the boot wiring regressed (slice 3 of #647).
+scenario: picker-resume
+steps:
+  - spawn: { fake_claude: picker-2-sessions }
+  - at_seconds: 3
+    expect:
+      boot.resume_session_picker_active: false
+      boot.resume_mode_picker_active: false
