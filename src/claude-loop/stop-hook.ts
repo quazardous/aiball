@@ -22,6 +22,7 @@ import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-back
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
 import { CL_ENV } from "./env-vars.js";
 import { createLogger } from "../log.js";
+import { emitHookEventToTimer } from "./hook-emit.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -33,6 +34,15 @@ const name = process.env[CL_ENV.NAME];
 const checkCmd = process.env[CL_ENV.CHECK_CMD] ?? "true";
 const userGraceSec = Math.max(0, Number(process.env[CL_ENV.USER_GRACE_SEC] ?? DEFAULT_USER_GRACE_SEC));
 if (!sd || !name) emit();
+
+// #652 Slice 5 — emit the Stop event to the timer's HookService
+// before the rest of the hook runs. Best-effort : if the timer isn't
+// up the emit silently no-ops and the hook falls through to its
+// existing wake / idle decision logic. Top-level await ; tsx + ES2022
+// + NodeNext support it.
+try {
+    await emitHookEventToTimer(sd, { event: "hook", kind: "Stop", at_ms: Date.now() });
+} catch { /* best-effort emit, never block the hook */ }
 
 // #B.149: tail-friendly log of every Stop hook fire — so we can spot
 // from outside the session whether the hook actually ran, what branch
