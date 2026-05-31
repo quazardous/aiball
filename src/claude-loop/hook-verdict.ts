@@ -1,5 +1,5 @@
 /**
- * #652 Slice 2 — pull-state proto + verdict API for Claude Code hooks.
+ * #652 Slice 2 + Slice 4 — pull-state proto + verdict API for Claude Code hooks.
  *
  * Hooks (session-start-hook, pretooluse-hook, stop-hook) need to ASK the
  * loop "what's the current state?" before deciding what to do (block a
@@ -18,31 +18,61 @@
  * the timer), a slice 2b can add an HTTP variant on top of the same
  * `LoopStateSnapshot` shape ; the verdict-builder stays unchanged.
  *
- * Slice 2 ships : the snapshot wrapper, the verdict builder, the
- * Claude Code output JSON shape, and tests. No hook migration yet
- * (slice 3 = session-start-hook, slice 4 = pretooluse-hook).
+ * Slice 4 — extended the snapshot with the `humanPresent` / `afkHoldActive`
+ * derived flags so the verdict builder can match the original
+ * `pretooluse-hook` deny semantics (which used `afkActive` + `humanPresent`
+ * directly — wider than `barWord === "stop"` because user-grace recency
+ * also counts as present).
  */
-import { readLoopStateInput } from "./state.js";
+import { readLoopStateInput, type HUMAN_TYPING_TTL_SEC } from "./state.js";
 import { computeLoopView, type LoopStateView } from "./loop-state.js";
 
 /**
- * Loop-state snapshot the hook reads at fire-time. Re-export of the
- * full `LoopStateView` for now — same shape the timer paints from.
- * If a future cross-process channel needs a trimmed serializable subset,
- * narrow this type at that point.
+ * Loop-state snapshot the hook reads at fire-time. Extends `LoopStateView`
+ * (what the timer paints from) with two derived flags useful to hook
+ * decision-makers : whether a human is currently present (typing now OR
+ * within the user-grace window), and whether an AFK hold is active.
  */
-export type LoopStateSnapshot = LoopStateView;
+export type LoopStateSnapshot = LoopStateView & {
+    /** True iff there's a recent live signal of a human present : the
+     *  human is typing within the typing TTL (default 5s) OR submitted
+     *  a prompt within the user-grace window. Mirrors `humanPresent` in
+     *  state.ts (#585). */
+    humanPresent: boolean;
+    /** True iff the AFK file represents an active hold (`wait_10m` with
+     *  a future expiry, or `wait_inf`). Mirrors `afkActive` in state.ts
+     *  (#351). */
+    afkHoldActive: boolean;
+};
 
 /**
  * Sync read of the current loop state from the marker files under `sd`.
- * Builds the same view the timer's `tryWake` consults. Safe to call from
- * a spawn-per-call hook subprocess — pure fs reads, no fork, no socket.
- * Throws if `sd` doesn't exist (the caller decides : default-allow on
- * error is the historical pretooluse-hook fail-open behavior).
+ * Builds the same view the timer's `tryWake` consults + the two derived
+ * flags `humanPresent` / `afkHoldActive` consumed by the verdict builder.
+ * Safe to call from a spawn-per-call hook subprocess — pure fs reads,
+ * no fork, no socket. Throws if `sd` doesn't exist (the caller decides :
+ * default-allow on error is the historical pretooluse-hook fail-open
+ * behavior).
  */
 export function queryLoopState(sd: string): LoopStateSnapshot {
-    return computeLoopView(readLoopStateInput(sd));
+    const input = readLoopStateInput(sd);
+    const view = computeLoopView(input);
+    // humanPresent : typing within TTL OR user-grace within graceMs.
+    const typingNow = input.humanTypingAtMs !== null
+        && (input.nowMs - input.humanTypingAtMs) < input.humanTypingTtlMs;
+    const userGraceFresh = input.userTookOverAtMs !== null
+        && (input.nowMs - input.userTookOverAtMs) < input.userGraceMs;
+    const humanPresent = typingNow || userGraceFresh;
+    // afkHoldActive : wait_inf, or wait_10m with future expiry.
+    const afkHoldActive =
+        input.afkMode === "wait_inf"
+        || (input.afkMode === "wait_10m" && input.afkExpiryMs !== null && input.afkExpiryMs > input.nowMs);
+    return { ...view, humanPresent, afkHoldActive };
 }
+
+// Re-export marker so an importer doesn't drag in a transitive type-only
+// dependency on state.ts internals (linter convenience).
+export type { HUMAN_TYPING_TTL_SEC };
 
 /**
  * Context the hook supplies to the verdict builder. `kind` mirrors the
@@ -78,36 +108,33 @@ export interface HookVerdict {
  *  serializes this as `{}` which is Claude Code's allow-by-default path. */
 export const ALLOW: HookVerdict = {};
 
+const ASK_USER_QUESTION_REDIRECT =
+    "AskUserQuestion (multi-choice dialog) stalls the autonomous aiball loop — no human is in front to click an answer. " +
+    "Post your question as an aiball ticket comment instead (ticket_reply on the relevant ticket); the conversation IS the channel. " +
+    "When a human is present (interactive session) this dialog is allowed.";
+
 /**
- * Pure mapping `(state, context) → verdict`. Encapsulates the current
- * deny logic from `pretooluse-hook.ts:67-84` so the hook becomes a
- * thin wrapper that just feeds state in and prints the verdict out.
+ * Pure mapping `(state, context) → verdict`. Encapsulates the deny logic
+ * the hooks used to inline ; each hook becomes a thin wrapper that just
+ * feeds state in and prints the verdict out.
  *
- * Today's only deny rule (PreToolUse + AskUserQuestion + AFK active or
- * no human present) ports verbatim. Slice 3+ can add more rules as the
- * hooks migrate ; each rule lands here as a branch on `context.kind` +
- * `state.*`, keeping the hook code itself trivial.
+ * AskUserQuestion deny rule (ported from `pretooluse-hook.ts:67-84`) :
+ *   - afkHoldActive → deny (user explicitly said "wait for me" via F9 ;
+ *     the dialog would stall their hold)
+ *   - !humanPresent → deny (no one to click the dialog, autonomous loop)
+ *   - else → allow (human is here, let the dialog through)
  *
  * Returns `ALLOW` (= `{}`) for every case not explicitly denied —
  * fail-open by design, mirrors pretooluse-hook's catch-all.
  */
 export function buildHookVerdict(state: LoopStateSnapshot, context: HookContext): HookVerdict {
     if (context.kind === "PreToolUse" && context.tool_name === "AskUserQuestion") {
-        // AFK active → no human will click the dialog ; redirect.
-        // No human present (no recent user-grace, no recent typing) →
-        // autonomous loop ; redirect.
-        // Note: `state.barWord` reflects the composite : `loop` = autonomous
-        // (no human, no AFK hold), `wait` / `stop` = human-present in
-        // various flavors. The deny rule fires when barWord === `loop`.
-        if (state.barWord === "loop") {
+        if (state.afkHoldActive || !state.humanPresent) {
             return {
                 hookSpecificOutput: {
                     hookEventName: "PreToolUse",
                     permissionDecision: "deny",
-                    permissionDecisionReason:
-                        "AskUserQuestion (multi-choice dialog) stalls the autonomous aiball loop — no human is in front to click an answer. " +
-                        "Post your question as an aiball ticket comment instead (ticket_reply on the relevant ticket); the conversation IS the channel. " +
-                        "When a human is present (interactive session) this dialog is allowed.",
+                    permissionDecisionReason: ASK_USER_QUESTION_REDIRECT,
                 },
             };
         }
