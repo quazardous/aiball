@@ -23,6 +23,17 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-06-01
+
+### Added
+
+- New `CL_PANE_CAPTURE_LOG=1` debug env saves every `tmux
+  capture-pane` frame the heartbeat probe sees to
+  `<state_dir>/pane-captures/<ISO>.txt`. Off by default; consecutive
+  identical frames are deduped (gap in the sorted listing = pane
+  unchanged). Lets us trace retrospectively what the regex actually
+  sees during a `/compact` to fix detection without live tailing.
+
 ## [0.12.0] — 2026-05-31
 
 ### Added

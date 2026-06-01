@@ -247,6 +247,31 @@ export function logBarPaint(sd: string | undefined, writer: string, value: strin
     } catch { /* best-effort */ }
 }
 
+// #678 david `64j23n`/`242wh7` — debug dump of every `tmux capture-pane`
+// frame, opt-in via `CL_PANE_CAPTURE_LOG=1`. One file per capture under
+// `<state_dir>/pane-captures/<ISO>.txt` (`:` → `-` for filesystem-safety),
+// content = raw pane text. Consecutive dedup : if a new capture is
+// identical to the previously written one, skip — a gap in the sorted
+// listing means the pane didn't change. Goal : trace retrospectively
+// what `capture-pane` actually sees during a /compact so we can update
+// the `classifyPaneSpecial` regex/live-signal once and for all.
+export function paneCaptureDir(sd: string): string { return join(sd, "pane-captures"); }
+
+const PANE_CAPTURE_LOG_ENABLED = process.env.CL_PANE_CAPTURE_LOG === "1";
+let lastPaneCaptureWritten: string | null = null;
+
+export function logPaneCapture(sd: string | undefined, text: string): void {
+    if (!PANE_CAPTURE_LOG_ENABLED || !sd) return;
+    if (text === lastPaneCaptureWritten) return;
+    try {
+        const dir = paneCaptureDir(sd);
+        mkdirSync(dir, { recursive: true });
+        const iso = new Date().toISOString().replace(/:/g, "-");
+        writeFileSync(join(dir, `${iso}.txt`), text);
+        lastPaneCaptureWritten = text;
+    } catch { /* best-effort */ }
+}
+
 // #624 david `62ys4g` : "le pane est pas contrôlable donc reste externe go".
 // Pane-* signals are external (claude TUI drives them) — same setter pattern
 // as `setResumePicker`. Each writes/removes a marker file ; the state machine

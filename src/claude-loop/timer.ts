@@ -89,6 +89,7 @@ import {
     tmuxName,
     humanPresenceWord,
     logBarPaint,
+    logPaneCapture,
     userIsTakingOver,
     wakeInFlightPath,
     wakeRequestedPath,
@@ -258,7 +259,9 @@ function capturePane(): string {
         const r = spawnSync(MUX_CMD, [
             "capture-pane", "-t", `${tname}.0`, "-p",
         ], { encoding: "utf8" });
-        return r.stdout ?? "";
+        const text = r.stdout ?? "";
+        logPaneCapture(sd, text);
+        return text;
     } catch {
         return "";
     }
