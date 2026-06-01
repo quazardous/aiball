@@ -39,45 +39,13 @@ const emit = defineEmits<{
 const activeTab = ref<"detail" | "stats" | "settings">("detail");
 const toast = useToast();
 const confirmDialog = useConfirm();
-const deleting = ref(false);
 const purging = ref(false);
 
-function confirmDelete() {
-    confirmDialog.require({
-        header: "Delete project",
-        message: `Delete project "${props.project}"? This hard-removes the project record along with every ticket and comment attached to it. The action is irreversible.`,
-        icon: "pi pi-trash",
-        acceptLabel: "Delete",
-        rejectLabel: "Cancel",
-        acceptClass: "p-button-danger",
-        accept: () => { void doDelete(); },
-    });
-}
-async function doDelete() {
-    deleting.value = true;
-    try {
-        const r = await api.deleteProject(props.project);
-        toast.add({
-            severity: "success",
-            summary: `Deleted project "${r.project}"`,
-            detail: `${r.deleted_messages} message(s) removed`,
-            life: 8000,
-        });
-        bus.emit("project.deleted", { project: r.project });
-        bus.emit("projects.refresh");
-        bus.emit("inbox.refresh");
-        emit("close");
-    } catch (e) {
-        toast.add({
-            severity: "error",
-            summary: "Delete failed",
-            detail: (e as Error).message,
-            life: 8000,
-        });
-    } finally {
-        deleting.value = false;
-    }
-}
+// #699 david — project deletion was removed from the UI ; destructive
+// project ops are CLI-only now (`aiball project delete <name>`,
+// `aiball project rename <old> <new>`). The danger-zone purge below
+// stays in-UI because it only removes OLD closed rows, not the project
+// itself.
 
 function confirmPurge() {
     confirmDialog.require({
@@ -170,9 +138,11 @@ async function doPurge() {
                     <section v-if="activeTab === 'settings'" class="project-overview__danger">
                         <h3>Danger zone</h3>
                         <p class="aiball-explainer aiball-explainer--muted">
-                            Maintenance actions on this project. Both are gated by
-                            a confirmation dialog — no stray clicks. Delete is
-                            irreversible.
+                            Bulk maintenance on this project. Use
+                            <code>aiball project delete &lt;name&gt;</code> or
+                            <code>aiball project rename &lt;old&gt; &lt;new&gt;</code>
+                            from a terminal for destructive ops on the project itself
+                            (#699 — moved to CLI to avoid stray clicks).
                         </p>
                         <div class="project-overview__danger-actions">
                             <Button
@@ -182,14 +152,6 @@ async function doPurge() {
                                 outlined
                                 :loading="purging"
                                 @click="confirmPurge"
-                            />
-                            <Button
-                                icon="pi pi-trash"
-                                label="Delete project"
-                                severity="danger"
-                                outlined
-                                :loading="deleting"
-                                @click="confirmDelete"
                             />
                         </div>
                     </section>

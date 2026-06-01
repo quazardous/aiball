@@ -23,6 +23,45 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-06-01
+
+### Added
+
+- New `aiball project rename <old> <new>` CLI command (#699) for
+  typo recovery. Cascades across every table that stores the
+  project name (tickets, subscriptions, rules, work_filters,
+  automation_rules, consumers, project_token_usage,
+  config_overrides, `tickets.from_project`) inside one
+  transaction with `defer_foreign_keys`. The outbox feed file is
+  renamed in lockstep ; a `project_renamed` WebSocket event lets
+  live UI panes refresh their cache. Backed by
+  `POST /api/projects/:name/rename`.
+- New `aiball project delete <name>` CLI command (#699) — same
+  underlying call the UI used, exposed for terminal use now that
+  the delete button is no longer in the UI.
+
+### Changed
+
+- The web UI no longer exposes a "Delete project" button. Project
+  deletion and rename are destructive enough that they belong on
+  the CLI — a stray click was too cheap. The danger zone in the
+  per-project Settings tab now points at the CLI commands and
+  keeps only the closed-tickets purge action (which leaves the
+  project itself intact).
+
+### Notes
+
+- Schema discipline (#699 follow-up) : every column that stores a
+  project name SHOULD declare a `REFERENCES projects(name)
+  ON UPDATE CASCADE` foreign key so the rename collapses to a
+  single UPDATE. The PRAGMA `writable_schema=1` shortcut wasn't
+  compatible with the Drizzle migration transaction wrap ; the
+  temp-table-swap rebuild that would replace `renameProject`'s
+  hard-coded UPDATE list is left as a follow-up migration. Until
+  it ships, future columns named `project` must update
+  `renameProject` too — drift documented at the top of
+  `src/schema.ts:projects`.
+
 ## [0.19.0] — 2026-06-01
 
 ### Added

@@ -15,6 +15,7 @@ import {
     createProject,
     getProject,
     deleteProject,
+    renameProject,
     getProjectStatsRich,
     purgeOldClosedTickets,
     getGlobalCounts,
@@ -23,7 +24,7 @@ import {
     type Strategy,
     addProjectTokenUsage,
 } from "./db.js";
-import { existsSync, unlinkSync, statSync, readdirSync } from "node:fs";
+import { existsSync, unlinkSync, statSync, readdirSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { installRoot } from "./claude-loop/state.js";
@@ -394,6 +395,39 @@ api.delete("/projects/:name", (req, res) => {
     }
     broadcast({ type: "project_deleted", data: { project: name, deleted_messages } });
     res.json({ project: name, deleted_messages, ok: true });
+});
+
+/**
+ * #699 — rename a project across every table that stores its name (cascade
+ * via transactional UPDATEs). Body : `{ new_name: string }`. Returns the
+ * per-table row counts so the caller can audit the cascade. 404 when the
+ * old name doesn't exist, 409 when the new name collides.
+ */
+api.post("/projects/:name/rename", (req, res) => {
+    const oldName = req.params.name;
+    const newName = typeof req.body?.new_name === "string" ? req.body.new_name : "";
+    if (!newName) return res.status(400).json({ error: "new_name required (string)" });
+    try {
+        const result = renameProject(oldName, newName);
+        // Outbox file follows the project name — rename it too.
+        try {
+            const oldPath = outboxPath(oldName);
+            const newPath = outboxPath(result.new_name);
+            if (existsSync(oldPath)) {
+                writeFileSync(newPath, "");
+                unlinkSync(oldPath);
+            }
+        } catch {
+            /* best-effort — DB is the source of truth */
+        }
+        broadcast({ type: "project_renamed", data: { old: result.old_name, new: result.new_name } });
+        res.json({ ...result, ok: true });
+    } catch (e) {
+        const msg = (e as Error).message ?? String(e);
+        if (msg.includes("does not exist")) return res.status(404).json({ error: msg });
+        if (msg.includes("already exists")) return res.status(409).json({ error: msg });
+        return res.status(400).json({ error: msg });
+    }
 });
 
 api.get("/search", (req: Request, res: Response) => {

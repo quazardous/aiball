@@ -860,6 +860,39 @@ export class AiballClient {
      * which surfaces drafts of THIS agent's still in moderation (waiting on a
      * moderator). `myArbitrage` is the inverse : work waiting on THIS agent.
      */
+    /**
+     * #699 — rename a project across every table that stores its name.
+     * Cascades via the daemon's transactional helper (db/projects.ts:
+     * renameProject). 404 / 409 / 400 surface as `http()` errors.
+     */
+    renameProject(oldName: string, newName: string) {
+        return this.http<{
+            ok: boolean;
+            old_name: string;
+            new_name: string;
+            tickets: number;
+            tickets_from_project: number;
+            subscriptions: number;
+            rules: number;
+            work_filters: number;
+            automation_rules: number;
+            consumers: number;
+            config_overrides: number;
+            project_token_usage: number;
+        }>("POST", `/api/projects/${encodeURIComponent(oldName)}/rename`, { new_name: newName });
+    }
+    /**
+     * #699 — delete a project. Surface for the new CLI command after the
+     * UI delete button was removed (david : "pour supprimer il faut
+     * appeler le aiball cli").
+     */
+    deleteProject(name: string) {
+        return this.http<{
+            ok: boolean;
+            project: string;
+            deleted_messages: number;
+        }>("DELETE", `/api/projects/${encodeURIComponent(name)}`);
+    }
     myArbitrage() {
         return this.http<{
             decisions: Array<{

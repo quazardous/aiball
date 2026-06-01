@@ -112,6 +112,8 @@ export {
     type ProjectStatsRich,
     createProject,
     deleteProject,
+    renameProject,
+    type ProjectRenameResult,
     getProject,
     getProjectStatsRich,
     listProjects,

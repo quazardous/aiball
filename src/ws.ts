@@ -14,6 +14,7 @@ export type WsEvent =
     | { type: "tag_changed"; data: unknown }
     | { type: "strategy_changed"; data: unknown }
     | { type: "project_deleted"; data: unknown }
+    | { type: "project_renamed"; data: unknown }
     | { type: "project_purged"; data: unknown }
     | { type: "consumer_changed"; data: unknown };
 

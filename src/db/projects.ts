@@ -872,6 +872,129 @@ export function purgeOldClosedTickets(
  * registry row itself — sans ça le projet réapparaît dans `listProjects`
  * (qui merge le registre + les projects distincts des tickets).
  */
+/**
+ * #699 — rename a project across every table that stores its name. SQLite
+ * doesn't currently have a real FK declared on these columns (TODO :
+ * temp-table-swap migration to add `ON UPDATE CASCADE`), so the rename
+ * is a cascade of explicit UPDATEs wrapped in a single transaction with
+ * `defer_foreign_keys` on so intermediate FK checks (parent_ticket_id,
+ * source_ticket_id) don't trip during the cascade.
+ *
+ * Returns row counts per touched table for caller-side audit.
+ *
+ * Throws when :
+ *   - `oldName` doesn't exist (404-style) ;
+ *   - `newName` already exists (409-style — collision) ;
+ *   - `newName` is empty / contains whitespace.
+ */
+export interface ProjectRenameResult {
+    old_name: string;
+    new_name: string;
+    tickets: number;
+    tickets_from_project: number;
+    subscriptions: number;
+    rules: number;
+    work_filters: number;
+    automation_rules: number;
+    consumers: number;
+    config_overrides: number;
+    project_token_usage: number;
+}
+
+export function renameProject(oldName: string, newName: string): ProjectRenameResult {
+    const oldTrim = oldName.trim();
+    const newTrim = newName.trim();
+    if (!oldTrim) throw new Error("rename_project: old name required");
+    if (!newTrim) throw new Error("rename_project: new name required");
+    if (oldTrim === newTrim) {
+        throw new Error("rename_project: new name is identical to old name");
+    }
+    if (/\s/.test(newTrim)) {
+        throw new Error(`rename_project: new name "${newTrim}" must not contain whitespace`);
+    }
+    const db = getDb();
+    return db.transaction((tx) => {
+        const oldRow = tx.select({ name: schema.projects.name })
+            .from(schema.projects)
+            .where(eq(schema.projects.name, oldTrim))
+            .get();
+        if (!oldRow) {
+            throw new Error(`rename_project: project "${oldTrim}" does not exist`);
+        }
+        const collision = tx.select({ name: schema.projects.name })
+            .from(schema.projects)
+            .where(eq(schema.projects.name, newTrim))
+            .get();
+        if (collision) {
+            throw new Error(`rename_project: project "${newTrim}" already exists`);
+        }
+        tx.run(sql`PRAGMA defer_foreign_keys = ON`);
+        // Insert the new project row first so referencing rows (cascade
+        // below) can point at a valid name BEFORE the old row goes away.
+        // Drop the old row last so existing rows keep a valid FK target
+        // throughout the transaction.
+        const orig = tx.select().from(schema.projects).where(eq(schema.projects.name, oldTrim)).get();
+        tx.insert(schema.projects).values({
+            name: newTrim,
+            displayName: orig?.displayName ?? null,
+            description: orig?.description ?? null,
+            createdAt: orig?.createdAt ?? nowIso(),
+            createdBy: orig?.createdBy ?? null,
+            defaultStrategy: orig?.defaultStrategy ?? null,
+        }).run();
+        const tickets = tx.update(schema.tickets)
+            .set({ project: newTrim })
+            .where(eq(schema.tickets.project, oldTrim))
+            .run().changes;
+        const ticketsFromProject = tx.update(schema.tickets)
+            .set({ fromProject: newTrim })
+            .where(eq(schema.tickets.fromProject, oldTrim))
+            .run().changes;
+        const subscriptions = tx.update(schema.subscriptions)
+            .set({ project: newTrim })
+            .where(eq(schema.subscriptions.project, oldTrim))
+            .run().changes;
+        const rules = tx.update(schema.rules)
+            .set({ matchProject: newTrim })
+            .where(eq(schema.rules.matchProject, oldTrim))
+            .run().changes;
+        const workFilters = tx.update(schema.workFilters)
+            .set({ project: newTrim })
+            .where(eq(schema.workFilters.project, oldTrim))
+            .run().changes;
+        const automationRules = tx.update(schema.automationRules)
+            .set({ matchProject: newTrim })
+            .where(eq(schema.automationRules.matchProject, oldTrim))
+            .run().changes;
+        const consumers = tx.update(schema.consumers)
+            .set({ project: newTrim })
+            .where(eq(schema.consumers.project, oldTrim))
+            .run().changes;
+        const configOverrides = tx.update(schema.configOverrides)
+            .set({ project: newTrim })
+            .where(eq(schema.configOverrides.project, oldTrim))
+            .run().changes;
+        const projectTokenUsage = tx.update(schema.projectTokenUsage)
+            .set({ project: newTrim })
+            .where(eq(schema.projectTokenUsage.project, oldTrim))
+            .run().changes;
+        tx.delete(schema.projects).where(eq(schema.projects.name, oldTrim)).run();
+        return {
+            old_name: oldTrim,
+            new_name: newTrim,
+            tickets,
+            tickets_from_project: ticketsFromProject,
+            subscriptions,
+            rules,
+            work_filters: workFilters,
+            automation_rules: automationRules,
+            consumers,
+            config_overrides: configOverrides,
+            project_token_usage: projectTokenUsage,
+        };
+    });
+}
+
 export function deleteProject(name: string): { deleted_messages: number } {
     const db = getDb();
     return db.transaction((tx) => {

@@ -100,6 +100,29 @@ export function registerAdminCommands(program: Command): void {
             out(row, gOpts(cmd), (r) => `project "${r.name}" registered`);
         });
 
+    // #699 — rename a project (typo recovery). Cascades to every table
+    // that stores the name. See db/projects.ts:renameProject for the audit
+    // trail. Per david : delete + rename are CLI-only (removed from UI).
+    project
+        .command("rename <old> <new>")
+        .description("Rename a project across all tables (typo recovery)")
+        .action(async (oldName: string, newName: string, _opts, cmd) => {
+            const client = buildClient(gOpts(cmd));
+            const r = await client.renameProject(oldName, newName);
+            out(r, gOpts(cmd), (x) => `project "${x.old_name}" renamed to "${x.new_name}" (tickets:${x.tickets} subs:${x.subscriptions} rules:${x.rules + x.automation_rules} consumers:${x.consumers})`);
+        });
+
+    // #699 — delete a project + every row that references it. Moved out of
+    // the UI per david : destructive, CLI-only.
+    project
+        .command("delete <name>")
+        .description("Delete a project and every row that references it (DESTRUCTIVE — no undo)")
+        .action(async (name: string, _opts, cmd) => {
+            const client = buildClient(gOpts(cmd));
+            const r = await client.deleteProject(name);
+            out(r, gOpts(cmd), (x) => `project "${name}" deleted (${(x as { deleted_messages?: number }).deleted_messages ?? 0} messages)`);
+        });
+
     // ---- feed-path (top-level) ------------------------------------------
     program
         .command("feed-path <project>")

@@ -35,6 +35,27 @@ import { sql } from "drizzle-orm";
  * endpoint (pass 2) read from this table; the implicit-project path
  * stays available as a fallback.
  */
+/**
+ * DISCIPLINE — every column that stores a project name (`tickets.project`,
+ * `subscriptions.project`, `tickets.from_project`, `rules.match_project`,
+ * `work_filters.project`, `automation_rules.match_project`,
+ * `consumers.project`, `project_token_usage.project`, …) SHOULD declare a
+ * real foreign-key with
+ * `.references(() => projects.name, { onUpdate: "cascade", onDelete: …})`
+ * so a project rename cascades automatically (#699 david "go B" — TODO
+ * follow-up : backfill the existing columns via temp-table-swap migration ;
+ * the `writable_schema=1` shortcut wasn't compatible with the Drizzle
+ * migration transaction wrap).
+ *
+ * Until the FK backfill ships, `renameProject` keeps a hard-coded list of
+ * tables to UPDATE inside its transaction. Adding a NEW column named
+ * `project` without the REFERENCES — and without also updating
+ * `renameProject` — is silent drift the next rename will miss.
+ *
+ * Single exception : `config_overrides.project` uses `''` (empty string)
+ * to mark the "global layer", which would fail a strict FK ; it stays a
+ * plain TEXT column and renameProject patches it explicitly.
+ */
 export const projects = sqliteTable("projects", {
     /** Immutable lookup key — must match `tickets.project`. */
     name: text("name").primaryKey(),
