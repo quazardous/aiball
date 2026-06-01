@@ -1937,7 +1937,8 @@ async function main(): Promise<void> {
         .option("--agent <id>", "#603: alias for --consumer (the loop's agent identity).")
         .option("--project <name>", "#394/#603: project name. Persisted with the remote AND seeded into .aiball.yaml's `consumer.project`.")
         .option("--no-claim", "#612: seed `consumer.no_claim: true` in .aiball.yaml (assignment-only agent).")
-        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string; claim?: boolean }) => {
+        .option("--migrate-from <name>", "#701: rename the project from <name> to the new project name (resolved from --project / .aiball.yaml / basename cwd) BEFORE the init body runs. Typo-recovery in one shot: `claude-loop init --migrate-from pisynt` from `~/dev/projects/pisynth` flips the DB pointer + initialises the new yaml.")
+        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string; claim?: boolean; migrateFrom?: string }) => {
             // #603 david `4dzxp2` : --agent est un alias de --consumer (#420 le faisait
             // déjà sur `start`, on harmonise sur `init`).
             const consumer = opts.consumer ?? opts.agent;
@@ -1953,7 +1954,7 @@ async function main(): Promise<void> {
             // bootstrapInit so they ALSO land in .aiball.yaml (avant : seul
             // .aiball.local.yaml recevait l'identité remote → la config locale
             // ignorait l'override).
-            await bootstrapInit({ ...opts, consumer, noClaim });
+            await bootstrapInit({ ...opts, consumer, noClaim, migrateFrom: opts.migrateFrom });
         });
 
     // #651 david `w9sk25` — also expose `claude-loop init skill --overwrite`

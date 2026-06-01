@@ -25,6 +25,64 @@ import { installRoot as aiballInstallRoot } from "../claude-loop/state.js";
  * `aiball init` can call it. Returns false when the entry already
  * exists and --force wasn't passed (caller decides if that's an error).
  */
+/**
+ * #701 — resolve the "new" project name the user is migrating TO and call
+ * the daemon's rename endpoint to flip the DB pointer. Done BEFORE the
+ * rest of `bootstrapInit` runs so the freshly-written `.aiball.yaml` lines
+ * up with whatever the user reads next.
+ *
+ * Resolution order for the new name : `--project` flag → existing
+ * `.aiball.yaml` `consumer.project` → `basename(userCwd())`. Same chain
+ * `resolveIdentityHint` uses for the post-init hint.
+ */
+async function runMigrateFrom(oldName: string, projectFlag: string | undefined): Promise<void> {
+    let newName = projectFlag?.trim() ?? "";
+    if (!newName) {
+        // Probe an existing yaml first ; fall back to cwd basename.
+        const yamlPath = join(userCwd(), ".aiball.yaml");
+        if (existsSync(yamlPath)) {
+            try {
+                const parsed = parseYaml(readFileSync(yamlPath, "utf8")) as
+                    | { consumer?: { project?: string } }
+                    | null;
+                const fromYaml = parsed?.consumer?.project?.trim();
+                if (fromYaml) newName = fromYaml;
+            } catch {
+                /* malformed yaml — fall through to basename */
+            }
+        }
+        if (!newName) newName = basename(userCwd()).trim();
+    }
+    if (!newName) {
+        die(`init --migrate-from: could not derive the new project name — pass --project <name> explicitly`);
+    }
+    if (newName === oldName) {
+        die(`init --migrate-from: "${oldName}" already matches the resolved new name "${newName}" — nothing to rename`);
+    }
+    // Lazy-import the client so a `--help` invocation doesn't open the UDS.
+    const { AiballClient } = await import("../client.js");
+    const client = new AiballClient();
+    try {
+        const result = await client.renameProject(oldName, newName);
+        const cascadeBits = [
+            `tickets:${result.tickets}`,
+            `subs:${result.subscriptions}`,
+            `rules:${result.rules + result.automation_rules}`,
+            `work_filters:${result.work_filters}`,
+            `consumers:${result.consumers}`,
+            `from_project:${result.tickets_from_project}`,
+            `config_overrides:${result.config_overrides}`,
+            `token_usage:${result.project_token_usage}`,
+        ].join(" ");
+        process.stdout.write(
+            `renamed project "${result.old_name}" → "${result.new_name}" (${cascadeBits})\n`,
+        );
+    } catch (e) {
+        const msg = (e as Error).message ?? String(e);
+        die(`init --migrate-from: rename failed — ${msg}`);
+    }
+}
+
 async function mcpInitAction(force: boolean): Promise<void> {
     const path = join(userCwd(), ".mcp.json");
     type McpFile = { mcpServers?: Record<string, unknown> };
@@ -108,8 +166,19 @@ export async function bootstrapInit(opts: {
      *  When undefined, the existing field is left untouched (init respecte
      *  les param déjà posés sauf si dans la ligne de flag). */
     noClaim?: boolean;
+    /** #701 (david) : rename the project from this name to the new project
+     *  name BEFORE the rest of the init runs. The new name is resolved from
+     *  `--project` if passed, else from an existing `.aiball.yaml`'s
+     *  consumer.project, else from `basename(userCwd())`. Typo-recovery in
+     *  one shot — calls the same `POST /api/projects/:name/rename` the
+     *  `aiball project rename` CLI uses, so the cascade across tickets /
+     *  subs / rules / etc. lands inside the daemon's transaction. */
+    migrateFrom?: string;
 }): Promise<void> {
     const force = opts.force === true;
+    if (opts.migrateFrom) {
+        await runMigrateFrom(opts.migrateFrom, opts.project);
+    }
     await mcpInitAction(force);
     // Inline minimal .aiball.yaml — the verbose annotated template lives at
     // .aiball.yaml.example; the bootstrap stays tight.
@@ -526,7 +595,8 @@ export function registerBootstrapCommands(program: Command): void {
         .option("--consumer <id>", "#603: alias for --agent (the consumer_id IS the loop identity).")
         .option("--project <name>", "#603: seed `consumer.project` in .aiball.yaml (default project for this checkout).")
         .option("--no-claim", "#612: seed `consumer.no_claim: true` in .aiball.yaml (assignment-only agent — no claimable pool).")
-        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; agent?: string; consumer?: string; project?: string; claim?: boolean }) => {
+        .option("--migrate-from <name>", "#701: rename the project from <name> to the new project name (resolved from --project / .aiball.yaml / basename cwd) BEFORE the init body runs. Typo-recovery in one shot.")
+        .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; agent?: string; consumer?: string; project?: string; claim?: boolean; migrateFrom?: string }) => {
             // #612 — commander's `--no-X` sets `opts.X = false` when passed,
             // defaults to `true` otherwise. We want a tri-state for the
             // yaml patcher (undefined → leave existing field alone, david's
@@ -537,6 +607,7 @@ export function registerBootstrapCommands(program: Command): void {
                 ...opts,
                 consumer: opts.consumer ?? opts.agent,
                 noClaim,
+                migrateFrom: opts.migrateFrom,
             });
         });
 

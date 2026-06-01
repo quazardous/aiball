@@ -23,6 +23,21 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.20.1] — 2026-06-01
+
+### Added
+
+- `claude-loop init --migrate-from <name>` (and the equivalent
+  `aiball init --migrate-from <name>`) renames the project from
+  `<name>` to whatever the new project name resolves to
+  (`--project` flag → existing `.aiball.yaml` → basename of cwd)
+  before the rest of the init runs. Typo-recovery in one shot :
+  `cd ~/dev/projects/pisynth && claude-loop init --migrate-from pisynt`
+  flips the DB pointer + writes the new `.aiball.yaml` without a
+  manual `aiball project rename` step. Prints the cascade row
+  counts (tickets, subs, rules, …) so the operator can sanity-check
+  the migration before continuing.
+
 ## [0.20.0] — 2026-06-01
 
 ### Added
