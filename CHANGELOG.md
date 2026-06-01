@@ -23,6 +23,20 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.20.2] — 2026-06-01
+
+### Added
+
+- The web UI attach button now accepts the same allow-list the server
+  already enforced (#694 Phase A backend was widened in v0.17.0, but
+  the picker had stayed image-only — caught by david `h9nbpv`). You
+  can now upload text files, code, json/yaml/toml configs, patches,
+  archives (tar/gz/zip) and PDFs through the same button that handled
+  images. The rendered markdown adapts to the type : image inline,
+  text / code as a link, archive / binary as a `📎 [name](url)`
+  download link. Clipboard paste stays image-only by design — non-image
+  blobs rarely live in the clipboard.
+
 ## [0.20.1] — 2026-06-01
 
 ### Added

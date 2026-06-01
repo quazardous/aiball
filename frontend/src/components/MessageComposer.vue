@@ -12,7 +12,7 @@ import { api, INTENTS, PRIORITIES, type Intent, type Priority } from "../lib/api
 import { bus, useBus } from "../lib/bus";
 import { attachPasteImage } from "../lib/pasteImage";
 import { SCOPES, scopeIcon, scopeTitle, type Scope } from "../lib/scope";
-import { uploadImage } from "../lib/upload";
+import { uploadFile, renderUploadSnippet, UPLOAD_ACCEPT } from "../lib/upload";
 
 type Mode = "ticket" | "comment";
 
@@ -558,9 +558,9 @@ function selectMention(s: MentionSuggestion) {
     }, 0);
 }
 
-// Attach button (per #B.76 follow-up). Same upload path as paste, but
-// surfaces an explicit file picker so the user doesn't have to put the
-// image in the clipboard first.
+// Attach button (per #B.76 follow-up, #694 widened to text/code/binary).
+// Picker accepts the same allow-list the server enforces ; the rendered
+// markdown snippet adapts to the type (inline image / link / 📎 binary).
 const attachInputRef = ref<HTMLInputElement | null>(null);
 const attaching = ref(false);
 
@@ -576,18 +576,18 @@ async function onAttachPicked(ev: Event) {
     if (!file) return;
     attaching.value = true;
     try {
-        const { url } = await uploadImage(file);
+        const { url, content_type } = await uploadFile(file);
         // Append at the end of the current body with a newline. The
         // attach button isn't position-aware (no textarea caret in
         // scope), and "append at the end" matches what GitHub does.
-        const snippet = `![${file.name}](${url})`;
+        const snippet = renderUploadSnippet(file.name, url, content_type);
         body.value = body.value
             ? `${body.value.replace(/\s+$/, "")}\n\n${snippet}\n`
             : `${snippet}\n`;
     } catch (e) {
         toast.add({
             severity: "error",
-            summary: "Image upload failed",
+            summary: "Upload failed",
             detail: (e as Error).message,
             life: 5000,
         });
@@ -834,7 +834,7 @@ async function onAttachPicked(ev: Event) {
             <input
                 ref="attachInputRef"
                 type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
+                :accept="UPLOAD_ACCEPT"
                 style="display: none"
                 @change="onAttachPicked"
             />
