@@ -47,6 +47,43 @@ function shQuote(s: string): string {
     return "'" + s.replace(/'/g, `'\\''`) + "'";
 }
 
+const ENV_VAR_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
+
+/**
+ * #684 — patch `<state_dir>/env` with `KEY=VAL` pairs from `--set` BEFORE
+ * the timer respawn. Each pair :
+ *  - KEY validated against `^[A-Z_][A-Z0-9_]*$` (env-var name grammar). An
+ *    invalid name dies — prevents quote-bypass via `KEY="oops"=foo` etc.
+ *  - VAL empty string = drop every `export KEY=...` line (= unset).
+ *  - VAL non-empty = drop existing lines for that KEY, append a single
+ *    `export KEY=<shQuote(VAL)>` at the bottom (idempotent on re-runs).
+ *  - Same KEY appearing multiple times in `set[]` : last wins (we apply
+ *    each in order, and each apply normalises duplicates to one line).
+ */
+function patchEnvSet(envFilePath: string, kvList: string[]): void {
+    let lines = readFileSync(envFilePath, "utf8").split("\n");
+    for (const kv of kvList) {
+        const eq = kv.indexOf("=");
+        if (eq <= 0) die(`--set: expected KEY=VAL (got '${kv}')`);
+        const key = kv.slice(0, eq);
+        const val = kv.slice(eq + 1);
+        if (!ENV_VAR_NAME_RE.test(key)) die(`--set: invalid env var name '${key}' (must match [A-Z_][A-Z0-9_]*)`);
+        const exportLine = new RegExp(`^export ${key}=`);
+        const had = lines.some((l) => exportLine.test(l));
+        lines = lines.filter((l) => !exportLine.test(l));
+        if (val === "") {
+            process.stdout.write(`${envFilePath}: unset ${key}${had ? "" : " (was already absent)"}\n`);
+        } else {
+            // Strip trailing empty lines so the append lands tight, then
+            // re-add one trailing newline at the end.
+            while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+            lines.push(`export ${key}=${shQuote(val)}`);
+            process.stdout.write(`${envFilePath}: patched ${key}=${val}${had ? " (replaced)" : ""}\n`);
+        }
+    }
+    writeFileSync(envFilePath, lines.join("\n") + "\n");
+}
+
 export function cmdRm(name: string, force: boolean): void {
     const sd = stateDirFor(name);
     spawnSync(MUX_CMD, ["kill-session", "-t", tmuxName(name)], { stdio: "ignore" });
@@ -113,13 +150,24 @@ export function cmdWake(name: string): void {
  * fresh one using the same env file the loop was started with, so the
  * tmux session + claude pane stay intact.
  */
-export function cmdReload(name: string): void {
+export function cmdReload(name: string, opts?: { set?: string[] }): void {
     if (!tmuxAlive(name)) {
         die(`loop '${name}' not alive (use 'start' to spawn a fresh one)`);
     }
     const sd = stateDirFor(name);
     if (!existsSync(platePath(sd))) die(`no state dir at ${sd}`);
     if (!existsSync(envPath(sd))) die(`no env file at ${envPath(sd)} — loop is broken, use rm + start`);
+
+    // #684 david `feb5b4`/`dy54ks` (catchphrase y8rynp) — D1 : `--set KEY=VAL`
+    // patches the env file BEFORE respawning the timer, so the fresh process
+    // sources the new value. Multiple `--set` allowed (last wins per KEY).
+    // VAL="" drops the export line entirely (cohérent avec `unset`). The
+    // intended target is the debug-only flags (CL_PANE_CAPTURE_LOG,
+    // CL_BAR_PAINT_LOG, CL_PROXY_LOG) that have no yaml backing — pas de
+    // restriction sur KEY, mais on valide la grammaire d'un nom d'env var.
+    if (opts?.set && opts.set.length > 0) {
+        patchEnvSet(envPath(sd), opts.set);
+    }
 
     let oldPid: number | null = null;
     if (existsSync(timerPidPath(sd))) {

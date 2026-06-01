@@ -1854,7 +1854,8 @@ async function main(): Promise<void> {
         .action(cmdWake);
     program.command("reload [name]")
         .description("Respawn the detached timer process without killing claude (picks up edited timer.ts / state.ts since tsx doesn't hot-reload). Also the SIGUSR2 action: `kill -USR2 <timer.pid>` reloads (#407 — unified with the daemon: HUP=restart, USR2=reload). Name optional — defaults to the loop registered for the current cwd.")
-        .action((name: string | undefined) => cmdReload(name ?? resolveCurrentLoopName()));
+        .option("--set <kv...>", "#684: patch <state_dir>/env with KEY=VAL before the respawn. Repeatable (`--set A=1 --set B=2`). VAL='' drops the export (= unset). Typical use : flip a debug log opt-in (e.g. CL_PANE_CAPTURE_LOG=1) without editing the file by hand.")
+        .action((name: string | undefined, opts: { set?: string[] }) => cmdReload(name ?? resolveCurrentLoopName(), opts));
     program.command("restart [name]")
         .description("HARD restart (#388): kill claude + the loop entirely, then relaunch fresh with the same start config (from the plate). Unlike `reload` (timer-only), this stops + starts. Detached + no-attach — reconnect with `attach`. Also the SIGHUP action: `kill -HUP <timer.pid>` self-restarts. Name optional — defaults to the current-cwd loop.")
         .action((name: string | undefined) => cmdRestart(name ?? resolveCurrentLoopName()));

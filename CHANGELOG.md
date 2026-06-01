@@ -23,6 +23,16 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-06-01
+
+### Added
+
+- `claude-loop reload --set KEY=VAL` patches the loop's env file
+  before the timer respawn, so flipping a debug log (e.g.
+  `CL_PANE_CAPTURE_LOG=1`) is now a one-liner instead of edit-then-
+  reload. Repeatable (`--set A=1 --set B=2`); empty value drops the
+  export (= unset); KEY must match a standard env-var name.
+
 ## [0.13.1] — 2026-06-01
 
 ### Fixed
