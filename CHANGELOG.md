@@ -23,6 +23,19 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-06-01
+
+### Added
+
+- `claude-loop start` now propagates any `CL_*` env var from the
+  invoker's shell into the loop's compiled env file. Setting
+  `CL_PANE_CAPTURE_LOG=1 claude-loop start <name>` enables that
+  debug log for the whole chain (timer + every hook) without
+  editing config. Identity vars (loop name, state dir, tmux,
+  pings path) are exempt — they belong to the start invocation.
+  A one-line `shell-overridden :` summary prints to stdout when
+  any override applied, so the effect is never silent.
+
 ## [0.14.0] — 2026-06-01
 
 ### Added

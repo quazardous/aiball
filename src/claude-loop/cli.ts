@@ -123,6 +123,51 @@ function shQuote(s: string): string {
     return "'" + s.replace(/'/g, `'\\''`) + "'";
 }
 
+// #689 david `4hp9j6` — identity vars derived from the start invocation
+// (loop name, state dir, tmux session, pings path). Excluded from shell-env
+// override since accepting a stale `CL_NAME=...` from the caller's shell
+// would silently point the loop at the wrong state dir.
+const IDENTITY_ENV_KEYS = new Set<string>([
+    CL_ENV.NAME,
+    CL_ENV.STATE_DIR,
+    CL_ENV.TMUX,
+    CL_ENV.PINGS,
+]);
+
+/**
+ * #689 — at `claude-loop start`, for every CL_X in the registry that's
+ * defined in the invoker's shell env, override the corresponding
+ * `export CL_X=...` line in the freshly-built envLines (or append it if
+ * absent). Identity keys are exempt — they belong to the start logic.
+ * Logs `shell-overridden : K=V, K=V` to stdout so the effect is visible
+ * (no silent override — the failure mode we called out when killing D2
+ * on #684).
+ */
+function applyShellOverrides(envLines: string[]): string[] {
+    const out = [...envLines];
+    const overridden: string[] = [];
+    for (const key of Object.values(CL_ENV)) {
+        if (IDENTITY_ENV_KEYS.has(key)) continue;
+        const shellVal = process.env[key];
+        if (shellVal === undefined) continue;
+        const newLine = `export ${key}=${shQuote(shellVal)}`;
+        const exportLine = new RegExp(`^export ${key}=`);
+        const idx = out.findIndex((l) => exportLine.test(l));
+        if (idx >= 0) {
+            out[idx] = newLine;
+        } else {
+            // Append before the trailing empty line if any (cosmetic).
+            if (out[out.length - 1] === "") out.splice(out.length - 1, 0, newLine);
+            else out.push(newLine);
+        }
+        overridden.push(`${key}=${shellVal}`);
+    }
+    if (overridden.length > 0) {
+        process.stdout.write(`shell-overridden : ${overridden.join(", ")}\n`);
+    }
+    return out;
+}
+
 function tmuxAlive(name: string): boolean {
     const r = spawnSync(MUX_CMD, ["has-session", "-t", tmuxName(name)], { stdio: "ignore" });
     return r.status === 0;
@@ -631,13 +676,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // #412: PSR-style log-level threshold for the timer + hooks (src/log.ts).
         // Below it → dropped. From `.aiball.yaml claude_loop.log_level` (default info).
         `export ${CL_ENV.LOG_LEVEL}=${shQuote(ctx.claude_loop.log_level)}`,
-        // #381c: opt-in diag capture. Export CL_PROXY_LOG=<file> before
-        // `claude-loop start` → the PTY proxy appends one NDJSON line per
-        // keystroke read (raw bytes + timestamp). Re-run it through
-        // `pty-proxy.py --replay-log <file>` to replay the REAL byte stream
-        // (coalescing/key-repeat included) — the faithful test the idealized
-        // `--replay` tokens couldn't be. Absent = no capture (zero overhead).
-        ...(process.env[CL_ENV.PROXY_LOG] ? [`export ${CL_ENV.PROXY_LOG}=${shQuote(process.env[CL_ENV.PROXY_LOG]!)}`] : []),
+        // #381c CL_PROXY_LOG, #629 CL_BAR_PAINT_LOG, #678 CL_PANE_CAPTURE_LOG :
+        // opt-in debug logs are picked up generically by `applyShellOverrides`
+        // below when set in the invoker's shell — no per-var conditional needed.
         // #B.154: resume picker auto-dismiss mode. Read by the
         // SessionStart hook when source=resume.
         `export ${CL_ENV.RESUME_MODE}=${shQuote(opts.resumeMode ?? "as-is")}`,
@@ -678,11 +719,17 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export MUX_CMD=${shQuote(MUX_CMD)}`,
         "",
     ];
+    // #689 david `4hp9j6` — shell-env override transparent au start :
+    // `CL_FOO=bar claude-loop start <name>` injecte la valeur du shell dans
+    // le env file. Précédence : shell > yaml/flag/default. Identité (NAME /
+    // STATE_DIR / TMUX / PINGS) exclue — c'est le start qui les calcule,
+    // un override shell les casserait silencieusement.
+    const overriddenEnvLines = applyShellOverrides(envLines);
     // #390: 0600 when the env file carries a bearer token — it's a secret
     // at rest. (Default perms otherwise, unchanged for local loops.)
     writeFileSync(
         envPath(sd),
-        envLines.join("\n"),
+        overriddenEnvLines.join("\n"),
         opts.aiballToken ? { mode: 0o600 } : undefined,
     );
 
