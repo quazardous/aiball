@@ -213,15 +213,17 @@ export class AiballClient {
     }
 
     /**
-     * Upload raw image bytes to /api/uploads (#387). Content-addressable: the
+     * Upload raw file bytes to /api/uploads (#387, generalised #694 for
+     * text/code/binary in addition to images). Content-addressable: the
      * daemon dedupes by sha256 and returns `{ url, sha256, bytes, content_type }`.
      * Goes over the SAME transport as every other call — UDS (token-less
      * local-trust) when `socketPath` is set, else TCP+token. `name` is an
      * optional original filename (stored as upload metadata). Distinct from
-     * `http()` because the body is raw bytes with an image content-type, not
-     * JSON. Roomier timeout than the 2 s probe budget (a 10 MB write can outlast it).
+     * `http()` because the body is raw bytes with an arbitrary content-type,
+     * not JSON. Roomier timeout than the 2 s probe budget (a 10 MB write
+     * can outlast it).
      */
-    uploadImage(
+    uploadFile(
         bytes: Buffer,
         contentType: string,
         name?: string,

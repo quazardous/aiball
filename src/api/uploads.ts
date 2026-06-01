@@ -33,15 +33,48 @@ import { badRequest, consumerOf } from "./_helpers.js";
 export const uploadsRouter = Router();
 
 /**
- * Allowed MIME → file extension. Only types we trust to render
- * inline in an <img> through marked + DOMPurify. JPEG covers JPG.
- * SVG is intentionally OUT — it can carry script.
+ * Allowed MIME → file extension (#694). Allow-list, explicit deny by absence.
+ * The map drives BOTH the content-type whitelist on upload AND the on-disk
+ * filename extension. Categories :
+ *   - Images : inline-rendered through marked + DOMPurify (`<img>`). SVG is
+ *     intentionally OUT (carries script via `<script>`/`<foreignObject>`).
+ *   - Text / source : rendered as code-links `[name.ext](url)` in markdown.
+ *     `text/html` is intentionally OUT (would execute its own script when
+ *     rendered).
+ *   - Application / structured + binaries : download-link references. No
+ *     inline render. Executable formats (x-executable, x-mach-binary, PE)
+ *     are intentionally OUT.
  */
 const UPLOAD_MIME_TO_EXT: Record<string, string> = {
+    // Images (inline-render via <img>). `image/svg+xml` deliberately excluded.
     "image/png": "png",
     "image/jpeg": "jpg",
     "image/gif": "gif",
     "image/webp": "webp",
+    // Text / source-readable. `text/html` deliberately excluded (XSS).
+    "text/plain": "txt",
+    "text/markdown": "md",
+    "text/csv": "csv",
+    "text/yaml": "yaml",
+    "text/x-python": "py",
+    "text/x-typescript": "ts",
+    "text/javascript": "js",
+    "text/x-c": "c",
+    "text/x-c++": "cpp",
+    "text/x-shellscript": "sh",
+    "text/x-diff": "diff",
+    "text/x-patch": "patch",
+    // Application — structured data + binaries opaques. Executables excluded.
+    "application/json": "json",
+    "application/x-yaml": "yaml",
+    "application/x-toml": "toml",
+    "application/x-shellscript": "sh",
+    "application/x-patch": "patch",
+    "application/x-tar": "tar",
+    "application/gzip": "gz",
+    "application/zip": "zip",
+    "application/pdf": "pdf",
+    "application/octet-stream": "bin",
 };
 
 /**

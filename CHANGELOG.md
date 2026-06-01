@@ -23,6 +23,22 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-06-01
+
+### Added
+
+- File uploads now accept text, source code, structured data
+  (json/yaml/toml), patches, archives (tar/gz/zip), PDF and opaque
+  binary blobs alongside the existing image set. Agents can attach
+  a real `.sh` / `.json` / `.tar.gz` to a ticket via the `upload`
+  MCP tool instead of pasting (and double-escaping) bash in
+  markdown. The recipient pulls the verbatim bytes from the
+  content-addressable `/uploads/<sha>.<ext>` URL. The MCP tool
+  picks the right markdown variant by type — inline `<img>` for
+  images, bare link for text / code, `📎` download link for
+  archives and binaries. `svg`, `html` and native executables stay
+  excluded for XSS / arbitrary-execution safety.
+
 ## [0.16.0] — 2026-06-01
 
 ### Changed
