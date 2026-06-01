@@ -135,6 +135,26 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         }
         scope = o.scope as "internal" | "default" | "broadcast";
     }
+    // #697 F4 — cross-project origin. Only meaningful on ticket_created ;
+    // dropped on other kinds (comments inherit the parent ticket's
+    // from_project routing implicitly).
+    let fromProject: string | null = null;
+    if (o.from_project !== undefined && o.from_project !== null) {
+        if (typeof o.from_project !== "string" || !o.from_project.trim()) {
+            return { error: "from_project must be a non-empty string" };
+        }
+        if (kind !== "ticket_created") {
+            return { error: `from_project only allowed on ticket_created (got kind=${kind})` };
+        }
+        if (o.from_project === o.project) {
+            // Redundant — same as project means it's intra-project. Treat as
+            // omitted so the column stays NULL rather than carrying a
+            // misleading "cross-project" flag.
+            fromProject = null;
+        } else {
+            fromProject = o.from_project;
+        }
+    }
     return {
         project: o.project,
         kind,
@@ -151,6 +171,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         decision_kind: decisionKind,
         summary_until: summaryUntil,
         scope,
+        from_project: fromProject,
     };
 }
 

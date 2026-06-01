@@ -23,6 +23,22 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-06-01
+
+### Added
+
+- Cross-project tickets are now first-class. `ticket_new` accepts an
+  optional `from_project` argument so an agent in project A filing a
+  ticket in project B can mark the origin explicitly (e.g.
+  `kodi_sauvagge-claude` opening a ticket in `pisynth` to ask how
+  pisynth handles deploy / probe). The field surfaces on
+  `ticket_get` and any future `ticket_list` lens that wants to
+  split "addressed to me by a neighbour" from "in-project ticket".
+  Migration 0048 adds the column ; existing tickets stay
+  intra-project (NULL = same project as `project`). Empty or
+  self-referencing values are coerced to NULL so the field never
+  carries a misleading flag.
+
 ## [0.18.0] — 2026-06-01
 
 ### Added

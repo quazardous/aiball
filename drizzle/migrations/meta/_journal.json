@@ -337,6 +337,13 @@
       "when": 1782300000000,
       "tag": "0047_pings_unique_recipient_target",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1782400000000,
+      "tag": "0048_tickets_from_project",
+      "breakpoints": true
     }
   ]
 }

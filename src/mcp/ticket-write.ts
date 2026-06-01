@@ -100,9 +100,15 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "Optional tag names to apply to the new ticket. Resolved server-side (case-sensitive match on name). Unknown tag names fail the request — pre-create the tag via the tags settings panel first.",
                     ),
+                from_project: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "#697 F4 — origin project for cross-project tickets. Set when this agent (living in `from_project`) files a ticket in `project` on behalf of `project`'s agents (e.g. `kodi_sauvagge-claude` opening a ticket in `pisynth` to ask how pisynth handles deploy/probe). Surfaced on `ticket_get` and renderable as a 'from X' badge so the recipient distinguishes a cross-project ask from an in-project ticket. Omit for intra-project tickets — the common case.",
+                    ),
             },
         },
-        async ({ project, title, summary, body, intent, priority, scope, by_agent, parent_id, tags }) => {
+        async ({ project, title, summary, body, intent, priority, scope, by_agent, parent_id, tags, from_project }) => {
             const proj = client.resolveProject(project);
             const res = (await client.postMessage({
                 project: proj,
@@ -115,6 +121,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 by_agent: effectiveBy(by_agent),
                 parent_id,
                 scope,
+                from_project,
             })) as { id?: number };
             markActiveTicket(res?.id); // #404: focus = the new ticket (token attribution)
             if (tags && tags.length > 0 && typeof res?.id === "number") {

@@ -142,6 +142,13 @@ export interface Message {
      */
     parent_ticket_id?: number | null;
     /**
+     * #697 F4 — origin project for cross-project tickets. NULL = filed in
+     * the same project as `project` (the common case). Non-null = the agent
+     * who filed this ticket lives in `from_project` and is reaching out to
+     * `project`'s agents. NULL on non-ticket rows.
+     */
+    from_project?: string | null;
+    /**
      * Set on `ticket_sub_added` and `ticket_referenced` pseudo-comments:
      * points at the source ticket that triggered the relation (the child
      * for sub_added; the mentioning ticket for referenced). NULL on any
@@ -225,6 +232,11 @@ export interface NewMessage {
      *  same way comments do). When absent the column default
      *  `'default'` applies. */
     scope?: "internal" | "default" | "broadcast";
+    /** #697 F4 — origin project for cross-project tickets. Only honoured
+     *  on `kind === "ticket_created"`. When set, marks the ticket as
+     *  filed in `project` (the target) on behalf of an agent that lives
+     *  in `from_project`. NULL = intra-project (the common case). */
+    from_project?: string | null;
 }
 
 export interface NewRule {
@@ -491,6 +503,7 @@ export function ticketRowToMessage(t: schema.Ticket): Message {
         hashid: null,
         postponed_until: t.postponedUntil ?? null,
         parent_ticket_id: t.parentTicketId ?? null,
+        from_project: t.fromProject ?? null,
         source_ticket_id: null,
         meta: t.meta ?? null,
         assignee: t.assignee ?? null,

@@ -99,6 +99,14 @@ export const tickets = sqliteTable("tickets", {
      */
     scope: text("scope").notNull().default("default"),
     /**
+     * #697 F4 — origin project for cross-project tickets. NULL = filed
+     * in the same project as the recipient (the common case). Non-null
+     * = an agent in project X opened this ticket in project Y on Y's
+     * agents' behalf ; the recipient agent can lens "addressed to me by
+     * a neighbour" via `ticket_list({from_project_not_null: true})`.
+     */
+    fromProject: text("from_project"),
+    /**
      * Snooze / postpone (per #B.329). When set to an ISO8601 timestamp in
      * the future, the ticket is hidden from the open-inbox view (treated
      * as closed). At that timestamp, the daemon's reveal cron clears the

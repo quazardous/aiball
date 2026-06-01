@@ -97,6 +97,8 @@ export function insertMessage(m: NewMessage): Message {
                 // #B.245 tristate. Omit when caller didn't specify so
                 // the column default ('default') applies.
                 ...(m.scope ? { scope: m.scope } : {}),
+                // #697 F4 — explicit cross-project origin (NULL = intra-project).
+                fromProject: m.from_project ?? null,
             }).returning().get();
             return ticketRowToMessage(inserted);
         }
