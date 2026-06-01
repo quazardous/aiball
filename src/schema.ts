@@ -1,4 +1,5 @@
 import { sqliteTable, integer, text, primaryKey, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 /**
  * Drizzle schema for aiball. Matches the physical SQLite schema 1:1 — names,
@@ -436,6 +437,16 @@ export const pings = sqliteTable("pings", {
     seenAt: text("seen_at"),
 }, (t) => [
     index("idx_pings_recipient_unread").on(t.recipient),
+    // #697 F2 — dedupe insertPings via ON CONFLICT DO NOTHING. SQLite treats
+    // NULL as DISTINCT in unique constraints, so we COALESCE both target
+    // columns to 0 ; the existing CHECK guarantees exactly one is non-null,
+    // so (recipient, ticket_id, 0) and (recipient, 0, comment_id) never
+    // collide. Migration 0047 dedupes existing duplicates first.
+    uniqueIndex("idx_pings_recipient_target_unique").on(
+        t.recipient,
+        sql`COALESCE(${t.ticketId}, 0)`,
+        sql`COALESCE(${t.commentId}, 0)`,
+    ),
 ]);
 
 export const settings = sqliteTable("settings", {

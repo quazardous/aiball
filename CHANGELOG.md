@@ -23,6 +23,21 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.17.2] — 2026-06-01
+
+### Fixed
+
+- Notifications that the agent had already acknowledged no longer
+  resurface at the next wake. Migration 0007 had silently dropped
+  the unique constraint on the `pings` table, so every fan-out call
+  (insertion + auto-approval + mentions + decision-notify) inserted
+  a fresh row for the same recipient + target ; the
+  `ON CONFLICT DO NOTHING` clause in `insertPing` had nothing to
+  conflict on, so the dedup was a no-op. Migration 0047 dedupes
+  existing rows and restores the unique index, so each
+  (recipient, ticket-or-comment) gets exactly one ping row across
+  all the fan-out paths.
+
 ## [0.17.1] — 2026-06-01
 
 ### Fixed
