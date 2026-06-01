@@ -16,6 +16,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import { captureTokenUsage, projectTranscriptDir } from "../claude-loop/token-capture.js";
+import { CL_ENV } from "../claude-loop/env-vars.js";
 
 export const client = new AiballClient();
 
@@ -35,7 +36,7 @@ export const client = new AiballClient();
  * share `token-push-last-id`). A read/POST error never disturbs the tool call.
  */
 export function markActiveTicket(ticketId: number | null | undefined): void {
-    const sd = process.env.CL_STATE_DIR;
+    const sd = process.env[CL_ENV.STATE_DIR];
     if (!sd || !ticketId || ticketId <= 0) return;
     try {
         const cwd = process.env.AIBALL_CWD ?? process.cwd();

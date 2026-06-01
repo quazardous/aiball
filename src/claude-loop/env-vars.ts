@@ -12,6 +12,8 @@ export const CL_ENV = {
     // Loop identity + state
     STATE_DIR: "CL_STATE_DIR",
     NAME: "CL_NAME",
+    TMUX: "CL_TMUX",
+    PINGS: "CL_PINGS",
     LOG_LEVEL: "CL_LOG_LEVEL",
 
     // Wake / startup behavior
@@ -23,7 +25,14 @@ export const CL_ENV = {
     RESUME_PICK: "CL_RESUME_PICK",
     CLAUDE_CMD: "CL_CLAUDE_CMD",
     DRAINED_STRATEGY: "CL_DRAINED_STRATEGY",
-    PROXY_LOG: "CL_PROXY_LOG",
+    ESC_TAKEOVER: "CL_ESC_TAKEOVER",
+
+    // AFK detection (PTY proxy driven)
+    AFK_SPEC: "CL_AFK_SPEC",
+    AFK_WINDOW_MS: "CL_AFK_WINDOW_MS",
+    AFK_KEY_DISP: "CL_AFK_KEY_DISP",
+    AFK_LABEL_FG_DIM: "CL_AFK_LABEL_FG_DIM",
+    AFK_LABEL_FG_LIT: "CL_AFK_LABEL_FG_LIT",
 
     // Grace periods (seconds)
     USER_GRACE_SEC: "CL_USER_GRACE_SEC",
@@ -44,6 +53,13 @@ export const CL_ENV = {
     ERROR_BACKOFF_BASE_MS: "CL_ERROR_BACKOFF_BASE_MS",
     ERROR_BACKOFF_FACTOR: "CL_ERROR_BACKOFF_FACTOR",
     ERROR_BACKOFF_CAP_MS: "CL_ERROR_BACKOFF_CAP_MS",
+
+    // Debug-only opt-in logs (no yaml backing — set via shell env at start
+    // or `claude-loop reload --set …`). Reads are gated on `=== "1"`.
+    PROXY_LOG: "CL_PROXY_LOG",
+    PROXY_DEBUG_TTY: "CL_PROXY_DEBUG_TTY",
+    BAR_PAINT_LOG: "CL_BAR_PAINT_LOG",
+    PANE_CAPTURE_LOG: "CL_PANE_CAPTURE_LOG",
 } as const;
 
 export type ClEnvName = typeof CL_ENV[keyof typeof CL_ENV];

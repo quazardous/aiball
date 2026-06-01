@@ -236,7 +236,7 @@ export function setResumePicker(sd: string, active: boolean): void {
 // outside (`tail -f`) lets the user (david) trace the flicker order.
 export function barPaintLogPath(sd: string): string { return join(sd, "bar-paint.log"); }
 
-const BAR_PAINT_LOG_ENABLED = process.env.CL_BAR_PAINT_LOG === "1";
+const BAR_PAINT_LOG_ENABLED = process.env[CL_ENV.BAR_PAINT_LOG] === "1";
 const BAR_PAINT_LOG_T0 = Date.now();
 
 export function logBarPaint(sd: string | undefined, writer: string, value: string): void {
@@ -257,7 +257,7 @@ export function logBarPaint(sd: string | undefined, writer: string, value: strin
 // the `classifyPaneSpecial` regex/live-signal once and for all.
 export function paneCaptureDir(sd: string): string { return join(sd, "pane-captures"); }
 
-const PANE_CAPTURE_LOG_ENABLED = process.env.CL_PANE_CAPTURE_LOG === "1";
+const PANE_CAPTURE_LOG_ENABLED = process.env[CL_ENV.PANE_CAPTURE_LOG] === "1";
 let lastPaneCaptureWritten: string | null = null;
 
 export function logPaneCapture(sd: string | undefined, text: string): void {

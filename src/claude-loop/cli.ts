@@ -586,51 +586,51 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `# Do not edit by hand. To change a value mid-life :`,
         `#   claude-loop reload <name> --set CL_FOO=bar`,
         "",
-        `export CL_NAME=${shQuote(name)}`,
-        `export CL_STATE_DIR=${shQuote(sd)}`,
-        `export CL_INTERVAL=${String(interval)}`,
-        `export CL_CHECK_CMD=${shQuote(opts.checkCmd)}`,
-        `export CL_PINGS=${shQuote(pingsPath(sd))}`,
+        `export ${CL_ENV.NAME}=${shQuote(name)}`,
+        `export ${CL_ENV.STATE_DIR}=${shQuote(sd)}`,
+        `export ${CL_ENV.INTERVAL}=${String(interval)}`,
+        `export ${CL_ENV.CHECK_CMD}=${shQuote(opts.checkCmd)}`,
+        `export ${CL_ENV.PINGS}=${shQuote(pingsPath(sd))}`,
         // Read by the SessionStart hook to decide whether to ping at
         // boot. Empty / unset = ping (per default). "1" = stay silent.
-        `export CL_NO_STARTUP_PING=${shQuote(opts.noStartupPing ? "1" : "")}`,
+        `export ${CL_ENV.NO_STARTUP_PING}=${shQuote(opts.noStartupPing ? "1" : "")}`,
         // #636 david — pytest harness flag, exits the timer after 1 cycle.
-        `export CL_RUN_ONCE=${shQuote(opts.runOnce ? "1" : "")}`,
-        // #302/#343: CL_WAIT="1" ONLY when --wait is explicitly passed.
+        `export ${CL_ENV.RUN_ONCE}=${shQuote(opts.runOnce ? "1" : "")}`,
+        // #302/#343: WAIT="1" ONLY when --wait is explicitly passed.
         // Default (and explicit --no-wait) → "0": no human at the terminal,
         // eager boot drain, no boot-grace deferral. Read by the timer
         // (boot-grace gate) + the SessionStart hook (eager-inject gate).
-        `export CL_WAIT=${shQuote(wait ? "1" : "0")}`,
+        `export ${CL_ENV.WAIT}=${shQuote(wait ? "1" : "0")}`,
         // Seconds the timer stays out of the way after the human
         // submits a prompt (UserPromptSubmit hook refreshes the
         // user-took-over marker). 0 disables the grace.
-        `export CL_USER_GRACE_SEC=${shQuote(String(userGraceSec))}`,
+        `export ${CL_ENV.USER_GRACE_SEC}=${shQuote(String(userGraceSec))}`,
         // #B.180: boot-grace + wake-in-flight TTL, yaml-only knobs.
-        `export CL_BOOT_GRACE_SEC=${shQuote(String(bootGraceSec))}`,
+        `export ${CL_ENV.BOOT_GRACE_SEC}=${shQuote(String(bootGraceSec))}`,
         // #629 david `2hwuan` : floor inviolable (default 30 s).
-        `export CL_BOOT_MIN_SEC=${shQuote(String(bootMinSec))}`,
+        `export ${CL_ENV.BOOT_MIN_SEC}=${shQuote(String(bootMinSec))}`,
         // #639 david `uqdava` : auto-cross resume picker (1=on, default).
-        `export CL_AUTO_RESUME=${shQuote(autoResume ? "1" : "0")}`,
-        `export CL_WAKE_IN_FLIGHT_TTL_MS=${shQuote(String(wakeInFlightTtlMs))}`,
+        `export ${CL_ENV.AUTO_RESUME}=${shQuote(autoResume ? "1" : "0")}`,
+        `export ${CL_ENV.WAKE_IN_FLIGHT_TTL_MS}=${shQuote(String(wakeInFlightTtlMs))}`,
         // #345: bare ESC in the pane = human takeover (PTY proxy arms user-grace).
-        `export CL_ESC_TAKEOVER=${shQuote(escTakeover ? "1" : "0")}`,
+        `export ${CL_ENV.ESC_TAKEOVER}=${shQuote(escTakeover ? "1" : "0")}`,
         // #351: ask-grace gates AskUserQuestion (PreToolUse hook); the afk
         // spec + window drive the PTY proxy's AFK detection → `afk` marker.
-        `export CL_ASK_GRACE_SEC=${shQuote(String(askGraceSec))}`,
-        `export CL_AFK_SPEC=${shQuote(afkSpecJson)}`,
-        `export CL_AFK_WINDOW_MS=${shQuote(String(ctx.claude_loop.afk_window_ms))}`,
+        `export ${CL_ENV.ASK_GRACE_SEC}=${shQuote(String(askGraceSec))}`,
+        `export ${CL_ENV.AFK_SPEC}=${shQuote(afkSpecJson)}`,
+        `export ${CL_ENV.AFK_WINDOW_MS}=${shQuote(String(ctx.claude_loop.afk_window_ms))}`,
         // #619 jjfdea : passed to the proxy so it can render the full
         // `<prefix> AFK:<key>` label with on/off colour toggling.
-        `export CL_AFK_KEY_DISP=${shQuote(ctx.claude_loop.afk_key.trim().toUpperCase())}`,
-        `export CL_AFK_LABEL_FG_DIM=${shQuote(ctx.colors.afk_label_fg)}`,
-        `export CL_AFK_LABEL_FG_LIT=${shQuote(ctx.colors.bar_fg)}`,
+        `export ${CL_ENV.AFK_KEY_DISP}=${shQuote(ctx.claude_loop.afk_key.trim().toUpperCase())}`,
+        `export ${CL_ENV.AFK_LABEL_FG_DIM}=${shQuote(ctx.colors.afk_label_fg)}`,
+        `export ${CL_ENV.AFK_LABEL_FG_LIT}=${shQuote(ctx.colors.bar_fg)}`,
         // #379: drained-backlog reminder strategy, read by the timer's heartbeat
         // (parseDrainedStrategy). Default "once" (david krwnqu) → one reminder
         // when the pool first drains, then quiet until the landscape moves.
-        `export CL_DRAINED_STRATEGY=${shQuote(ctx.claude_loop.drained_strategy)}`,
+        `export ${CL_ENV.DRAINED_STRATEGY}=${shQuote(ctx.claude_loop.drained_strategy)}`,
         // #412: PSR-style log-level threshold for the timer + hooks (src/log.ts).
         // Below it → dropped. From `.aiball.yaml claude_loop.log_level` (default info).
-        `export CL_LOG_LEVEL=${shQuote(ctx.claude_loop.log_level)}`,
+        `export ${CL_ENV.LOG_LEVEL}=${shQuote(ctx.claude_loop.log_level)}`,
         // #381c: opt-in diag capture. Export CL_PROXY_LOG=<file> before
         // `claude-loop start` → the PTY proxy appends one NDJSON line per
         // keystroke read (raw bytes + timestamp). Re-run it through
@@ -640,7 +640,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         ...(process.env[CL_ENV.PROXY_LOG] ? [`export ${CL_ENV.PROXY_LOG}=${shQuote(process.env[CL_ENV.PROXY_LOG]!)}`] : []),
         // #B.154: resume picker auto-dismiss mode. Read by the
         // SessionStart hook when source=resume.
-        `export CL_RESUME_MODE=${shQuote(opts.resumeMode ?? "as-is")}`,
+        `export ${CL_ENV.RESUME_MODE}=${shQuote(opts.resumeMode ?? "as-is")}`,
         // #B.154: persist the resolved aiball identity (from ctx) so
         // every hook fire and the timer process see the SAME
         // consumer as the spawn-time .mcp.json resolution. Without
@@ -674,7 +674,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // tmux bar directly (instant on keystroke). It needs the session
         // target + the tmux binary to call `set-option @cl_human` /
         // `refresh-client`. Harmless when no proxy runs (degraded mode).
-        `export CL_TMUX=${shQuote(tmuxName(name))}`,
+        `export ${CL_ENV.TMUX}=${shQuote(tmuxName(name))}`,
         `export MUX_CMD=${shQuote(MUX_CMD)}`,
         "",
     ];
@@ -1569,14 +1569,14 @@ async function cmdDebugProxyTty(): Promise<void> {
     const capture = join(tmp, "capture.ndjson");
     const env = {
         ...process.env,
-        CL_STATE_DIR: tmp,
-        CL_AFK_SPEC: afkSpecJson,
-        CL_AFK_WINDOW_MS: String(ctx.claude_loop.afk_window_ms),
-        CL_ESC_TAKEOVER: ctx.claude_loop.esc_takeover ? "1" : "0",
-        CL_USER_GRACE_SEC: String(ctx.claude_loop.user_grace_seconds),
-        CL_WAIT: "0",
-        CL_PROXY_LOG: capture,
-        CL_PROXY_DEBUG_TTY: "1",
+        [CL_ENV.STATE_DIR]: tmp,
+        [CL_ENV.AFK_SPEC]: afkSpecJson,
+        [CL_ENV.AFK_WINDOW_MS]: String(ctx.claude_loop.afk_window_ms),
+        [CL_ENV.ESC_TAKEOVER]: ctx.claude_loop.esc_takeover ? "1" : "0",
+        [CL_ENV.USER_GRACE_SEC]: String(ctx.claude_loop.user_grace_seconds),
+        [CL_ENV.WAIT]: "0",
+        [CL_ENV.PROXY_LOG]: capture,
+        [CL_ENV.PROXY_DEBUG_TTY]: "1",
         // No CL_TMUX → the proxy's bar painting is a silent no-op here.
     };
     process.stdout.write([
