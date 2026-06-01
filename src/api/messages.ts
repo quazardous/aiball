@@ -29,6 +29,7 @@ import {
     getMessage,
     isHuman,
     listMessages,
+    listPendingDecisionsForReporter,
     markQuestionAnswered,
     noteMessage,
     promoteMessageToDecision,
@@ -100,6 +101,18 @@ messagesRouter.get("/messages/:id", (req, res) => {
     const m = getMessage(Number(req.params.id));
     if (!m) return notFound(res);
     res.json(withTagsOne(m));
+});
+
+/**
+ * #697 F5 (pisynth-claude #692) — "ball in MY court" lens. Lists every
+ * pending plan / resolution decision on OPEN tickets the caller reports,
+ * so the agent can see the arbitrage queue at a glance instead of
+ * walking each thread.
+ */
+messagesRouter.get("/decisions/mine", (req: Request, res: Response) => {
+    const consumer = consumerOf(req);
+    const decisions = listPendingDecisionsForReporter(consumer);
+    res.json({ decisions });
 });
 
 function decide(

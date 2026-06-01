@@ -854,6 +854,27 @@ export class AiballClient {
             `/api/my-pending/count?by_agent=${encodeURIComponent(this.agentId)}`,
         );
     }
+    /**
+     * #697 F5 — pending plan / resolution decisions on tickets THIS agent
+     * reports, waiting for accept / reject. Distinct from `myPendingTickets`,
+     * which surfaces drafts of THIS agent's still in moderation (waiting on a
+     * moderator). `myArbitrage` is the inverse : work waiting on THIS agent.
+     */
+    myArbitrage() {
+        return this.http<{
+            decisions: Array<{
+                comment_id: number;
+                comment_hashid: string | null;
+                ticket_id: number;
+                ticket_title: string;
+                ticket_project: string;
+                decision_kind: "plan" | "resolution";
+                proposed_by: string | null;
+                created_at: string;
+                summary_until: string | null;
+            }>;
+        }>("GET", `/api/decisions/mine`);
+    }
 
     // ---- admin / decisions ------------------------------------------------
 

@@ -133,6 +133,20 @@ export function registerInboxTools(server: McpServer): void {
     );
 
     server.registerTool(
+        "arbitrage",
+        {
+            description:
+                "#697 F5 — list the pending plan / resolution decisions on tickets THIS agent reports, waiting for accept / reject. The 'ball in MY court' lens : distinct from `my_pending_tickets` (= your drafts waiting on a human moderator) — `arbitrage` is the inverse, work waiting on YOU. Each entry returns `{comment_id, comment_hashid, ticket_id, ticket_title, ticket_project, decision_kind ('plan'|'resolution'), proposed_by, created_at, summary_until}` so the agent can triage without re-fetching every thread. Sorted most-recent-first.",
+            inputSchema: {},
+        },
+        async () => {
+            const r = await client.myArbitrage();
+            const decisions = (r as { decisions?: unknown }).decisions ?? [];
+            return asText({ kind: "arbitrage", decisions });
+        },
+    );
+
+    server.registerTool(
         "poll",
         {
             description:

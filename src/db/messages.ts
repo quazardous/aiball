@@ -1191,6 +1191,87 @@ export function removeMessageDecision(messageId: number): Message | null {
 }
 
 /**
+ * #697 F5 (pisynth-claude #692) — "ball in MY court" lens. Lists every
+ * pending decision (plan or resolution) waiting on the given consumer
+ * for accept / reject. Defined as : approved `comment_added` rows on
+ * OPEN tickets the consumer reports, whose `meta.decision.status` is
+ * "pending". Returns one row per decision with the bits the agent needs
+ * to triage : the comment's id + hashid + author + summary_until, plus
+ * the parent ticket's id + title + project.
+ *
+ * Sorted by created_at descending (most recent first) so the freshest
+ * proposals surface at the top — agents triage what just landed before
+ * trawling older drafts.
+ */
+export interface PendingDecisionEntry {
+    comment_id: number;
+    comment_hashid: string | null;
+    ticket_id: number;
+    ticket_title: string;
+    ticket_project: string;
+    decision_kind: "plan" | "resolution";
+    proposed_by: string | null;
+    created_at: string;
+    summary_until: string | null;
+}
+
+export function listPendingDecisionsForReporter(
+    consumerId: string,
+): PendingDecisionEntry[] {
+    const db = getDb();
+    const myTickets = db.select({
+        id: schema.tickets.id,
+        title: schema.tickets.title,
+        project: schema.tickets.project,
+    })
+        .from(schema.tickets)
+        .where(eq(schema.tickets.byAgent, consumerId))
+        .all();
+    // Closed-ticket pending decisions get auto-handled by
+    // `autoApproveStaleDecisionsOnClose` (api/messages.ts) at close time,
+    // so no extra filter is needed — anything still pending here is on
+    // an actively-open thread.
+    if (myTickets.length === 0) return [];
+    const ticketIndex = new Map(myTickets.map((t) => [t.id, t]));
+    const ticketIds = myTickets.map((t) => t.id);
+    const candidates = db.select().from(schema.messages)
+        .where(and(
+            inArray(schema.messages.ticketId, ticketIds),
+            eq(schema.messages.kind, "comment_added"),
+            eq(schema.messages.status, "approved"),
+        ))
+        .all();
+    const out: PendingDecisionEntry[] = [];
+    for (const r of candidates) {
+        if (!r.meta) continue;
+        try {
+            const m = JSON.parse(r.meta) as {
+                decision?: { kind?: string; status?: string };
+                summary_until?: string;
+            };
+            const kind = m.decision?.kind;
+            if ((kind === "plan" || kind === "resolution")
+                && m.decision?.status === "pending") {
+                const t = ticketIndex.get(r.ticketId)!;
+                out.push({
+                    comment_id: r.id,
+                    comment_hashid: r.hashid ?? null,
+                    ticket_id: r.ticketId,
+                    ticket_title: t.title,
+                    ticket_project: t.project,
+                    decision_kind: kind,
+                    proposed_by: r.byAgent ?? null,
+                    created_at: r.createdAt,
+                    summary_until: m.summary_until ?? null,
+                });
+            }
+        } catch { /* malformed meta, skip */ }
+    }
+    out.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return out;
+}
+
+/**
  * Find all approved comments on a ticket that carry a pending
  * `meta.decision.kind=="resolution"` block. Used when the ticket
  * closes to auto-accept the proposals (mirror of the legacy

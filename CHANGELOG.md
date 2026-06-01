@@ -23,6 +23,21 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-06-01
+
+### Added
+
+- New `arbitrage` MCP tool surfaces the pending plan / resolution
+  decisions on tickets the calling agent reports, waiting for
+  accept / reject. The "ball in MY court" lens : distinct from
+  `my_pending_tickets` (drafts of yours waiting on a human
+  moderator) — `arbitrage` is the inverse, work waiting on you.
+  Each entry returns the comment id + hashid + author +
+  `summary_until` plus the parent ticket id + title + project,
+  sorted most-recent-first, so the agent can triage without
+  re-fetching every thread. Backed by
+  `GET /api/decisions/mine`.
+
 ## [0.17.3] — 2026-06-01
 
 ### Changed
