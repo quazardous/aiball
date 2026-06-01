@@ -427,12 +427,15 @@ export function submitMessage(input: NewMessage): Message {
     if (input.by_agent) ensureConsumer(input.by_agent);
     let msg = insertMessage(input);
     autoSubscribeAuthor(msg);
-    // Fan out delivery pings at INSERTION (not just at approval): subscribers
-    // need to know "new activity landed on my ticket" even before the
-    // moderator decides. `insertPing` is idempotent (onConflictDoNothing on
-    // the (recipient, message_id) primary key), so the later approval-time
-    // fan-out is a safe no-op. Pings on rejected messages are cleaned up by
-    // the moderation handler (api.ts decide()).
+    // Fan out delivery pings at INSERTION. Since #697 F3 (david `hwct2h`),
+    // `fanOutPings` itself gates the subscriber / owner / follower paths
+    // on `status === 'approved'`: at insertion of a pending message only
+    // moderators (humans) get pinged, and the approval-time re-run (in
+    // `decide` here when auto-approved, or in `api/messages.ts` when a
+    // human moderates) is what wakes subscribers. `insertPing` is
+    // idempotent (onConflictDoNothing on (recipient, message_id)), so the
+    // double call across the pending → approved transition is a safe
+    // no-op for the human pings.
     //
     // #B.245: internal-scoped messages bail out inside fanOutPings —
     // only @mentions (via fanOutMentions below) reach them.

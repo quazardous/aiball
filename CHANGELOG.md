@@ -23,6 +23,19 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.17.1] — 2026-06-01
+
+### Fixed
+
+- Agents no longer get notified about tickets / comments still in
+  moderation. The notification fan-out now only delivers to
+  subscribers, owners and followers once the message status flips
+  to `approved`; pending messages reach human moderators only.
+  Previously the "don't act on a pending ticket" rule was
+  discipline-only — agents got pinged anyway, then had to remember
+  not to engage. The approval-time re-run of the fan-out wakes the
+  right consumers at the right moment.
+
 ## [0.17.0] — 2026-06-01
 
 ### Added

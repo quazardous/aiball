@@ -86,47 +86,58 @@ export function fanOutPings(msg: Message): void {
 
     const recipients = new Set<string>();
 
-    // Ticket subscribers: explicit thread follow always wins regardless of
-    // event scope (above the per-event broadcast gate). Skip on
-    // ticket_created since there's no thread yet (the creator is
-    // auto-subbed to their own ticket and self-filtered).
-    if (msg.kind !== "ticket_created" && msg.ticket_id !== null) {
-        for (const sub of listTicketSubscribers(msg.ticket_id)) {
+    // #697 F3 (pisynth-claude #692 + david `hwct2h`) — subscribers /
+    // owners / followers only get pings when the message is APPROVED.
+    // While pending, the message reaches moderators (humans) only — the
+    // approval-time fan-out (`api/messages.ts:decide` + the auto-approve
+    // path in `messages.ts`) re-runs this function once the status flips,
+    // at which point the subscriber / owner / follower pings land
+    // normally (insertPing is idempotent on (recipient, message_id)).
+    // Pre-#697 the at-insertion fan-out woke agents on tickets still in
+    // moderation, which left "ne pas coder un pending" as discipline-only.
+    if (msg.status === "approved") {
+        // Ticket subscribers: explicit thread follow always wins regardless of
+        // event scope (above the per-event broadcast gate). Skip on
+        // ticket_created since there's no thread yet (the creator is
+        // auto-subbed to their own ticket and self-filtered).
+        if (msg.kind !== "ticket_created" && msg.ticket_id !== null) {
+            for (const sub of listTicketSubscribers(msg.ticket_id)) {
+                recipients.add(sub);
+            }
+        }
+
+        // Project owners always see `default` and `broadcast` events.
+        for (const sub of listProjectSubscribers(msg.project, { roles: ["owner"] })) {
             recipients.add(sub);
+        }
+
+        // Project followers only see `broadcast`-scoped events — per-event
+        // decision now (post-#B.245), no longer derived from the ticket-wide
+        // flag. The previous ticket-level `broadcast` boolean was unified
+        // into this same tristate; each event decides its own follower reach.
+        //
+        // #516 (david `r59bkm` plan E) — un consumer no_claim n'a pas à recevoir
+        // les broadcasts projet par défaut. `effectiveNotifyProjectBroadcasts`
+        // résout la tri-state `notify_project_broadcasts` :
+        //   - explicit (true/false) wins
+        //   - null (auto) → suit can_claim
+        // Donc un no_claim sans override sort du recipient set, un claim-able
+        // garde le comportement antérieur, override explicit fonctionne dans
+        // les deux sens.
+        if (msg.scope === "broadcast") {
+            for (const sub of listProjectSubscribers(msg.project, { roles: ["follower"] })) {
+                const c = getConsumer(sub);
+                if (c && !effectiveNotifyProjectBroadcasts(c)) continue;
+                recipients.add(sub);
+            }
         }
     }
 
-    // Project owners always see `default` and `broadcast` events.
-    for (const sub of listProjectSubscribers(msg.project, { roles: ["owner"] })) {
-        recipients.add(sub);
-    }
-
-    // Project followers only see `broadcast`-scoped events — per-event
-    // decision now (post-#B.245), no longer derived from the ticket-wide
-    // flag. The previous ticket-level `broadcast` boolean was unified
-    // into this same tristate; each event decides its own follower reach.
-    //
-    // #516 (david `r59bkm` plan E) — un consumer no_claim n'a pas à recevoir
-    // les broadcasts projet par défaut. `effectiveNotifyProjectBroadcasts`
-    // résout la tri-state `notify_project_broadcasts` :
-    //   - explicit (true/false) wins
-    //   - null (auto) → suit can_claim
-    // Donc un no_claim sans override sort du recipient set, un claim-able
-    // garde le comportement antérieur, override explicit fonctionne dans
-    // les deux sens.
-    if (msg.scope === "broadcast") {
-        for (const sub of listProjectSubscribers(msg.project, { roles: ["follower"] })) {
-            const c = getConsumer(sub);
-            if (c && !effectiveNotifyProjectBroadcasts(c)) continue;
-            recipients.add(sub);
-        }
-    }
-
-    // Pending messages also ping every registered human moderator (#B.79)
+    // Pending messages ping every registered human moderator (#B.79)
     // so they show up as unread in the moderation queue even when not
     // subscribed to the project. Approved messages don't need this —
-    // the regular subscriber fan-out already covers what humans care
-    // about.
+    // the subscriber / owner / follower fan-out above already covers
+    // what humans care about.
     if (msg.status === "pending") {
         for (const h of listHumans()) recipients.add(h);
     }
