@@ -23,6 +23,21 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-06-01
+
+### Fixed
+
+- `claude-loop init --private` was silently ignored when
+  `.aiball.yaml` already existed — only the fresh-create path
+  honored it. Now `--private` patches `project_type: private` in
+  place on re-runs, mirroring how `--consumer` / `--project` /
+  `--no-claim` already patched.
+- `claude-loop status` reported `project cwd: <install root>`
+  instead of the user's actual invocation directory on installs
+  where the `bin/aiball` wrapper chdirs into the install dir before
+  exec'ing tsx. The fallback now honors the wrapper's preserved
+  `AIBALL_CWD` env, matching what the rest of the CLI already does.
+
 ## [0.13.0] — 2026-06-01
 
 ### Added

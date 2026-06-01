@@ -1185,7 +1185,14 @@ export function projectCwdInfo(): ProjectCwdInfo {
             }
         } catch { /* missing/corrupt plate — fall through */ }
     }
-    return { cwd: process.cwd(), source: "cwd" };
+    // #685 — `bin/aiball` wrapper chdirs into the install root before
+    // exec'ing tsx (so `process.cwd()` returns the dev checkout, not the
+    // user's invocation dir). The wrapper preserves the original PWD in
+    // `AIBALL_CWD` ; honor it so `claude-loop status` reports the user's
+    // actual cwd instead of the misleading install root. Same env that
+    // `cli/_helpers.ts:userCwd()` uses, just inlined here to avoid the
+    // cli → state import cycle.
+    return { cwd: process.env.AIBALL_CWD ?? process.cwd(), source: "cwd" };
 }
 
 let PROJECT_CWD_CACHED: string | null = null;

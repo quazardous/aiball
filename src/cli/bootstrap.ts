@@ -116,6 +116,7 @@ export async function bootstrapInit(opts: {
     const yamlPath = join(userCwd(), ".aiball.yaml");
     const yamlExists = existsSync(yamlPath);
     const hasIdentity = !!opts.consumer || !!opts.project || opts.noClaim !== undefined;
+    const hasProjectType = opts.private === true;
     if (yamlExists && !force) {
         // #603 (4dzxp2) + #612 : even when the yaml exists, patch in
         // --consumer / --project / --no-claim so subsequent inits actually
@@ -124,7 +125,15 @@ export async function bootstrapInit(opts: {
         // dans la ligne de flag` — david #612).
         if (hasIdentity) {
             patchIdentity(yamlPath, opts.consumer, opts.project, opts.noClaim);
-        } else {
+        }
+        // #685 — `--private` was silently ignored on existing yaml (only the
+        // FRESH-create branch honored it). Mirror patchIdentity : patch
+        // `project_type: private` in place. Without this, `claude-loop init
+        // --private` is a no-op after the first init.
+        if (hasProjectType) {
+            patchProjectType(yamlPath, "private");
+        }
+        if (!hasIdentity && !hasProjectType) {
             process.stdout.write(`${yamlPath}: already exists — re-run with --force to overwrite\n`);
         }
     } else {
@@ -176,6 +185,29 @@ export async function bootstrapInit(opts: {
  * whatever was there) — `init est respectueux des param déjà posés sauf si
  * dans la ligne de flag` (david #612).
  */
+/**
+ * #685 — set top-level `project_type:` on an existing `.aiball.yaml`,
+ * preserving comments + unrelated keys via the Document API. Same
+ * preservation contract as `patchIdentity`. Idempotent : no rewrite if
+ * the value is already the requested one.
+ */
+function patchProjectType(path: string, value: string): void {
+    let doc;
+    try {
+        doc = parseDocument(readFileSync(path, "utf8"));
+    } catch {
+        die(`init: ${path} exists but isn't valid YAML — fix or remove it first`);
+    }
+    const prev = doc.get("project_type");
+    if (prev === value) {
+        process.stdout.write(`${path}: project_type already '${value}' (no change)\n`);
+        return;
+    }
+    doc.set("project_type", value);
+    writeFileSync(path, String(doc));
+    process.stdout.write(`${path}: patched project_type='${value}'${prev ? ` (was '${prev}')` : ""}\n`);
+}
+
 function patchIdentity(path: string, agent: string | undefined, project: string | undefined, noClaim: boolean | undefined): void {
     let doc;
     try {
