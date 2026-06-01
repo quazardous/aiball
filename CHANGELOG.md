@@ -23,6 +23,25 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.17.3] — 2026-06-01
+
+### Changed
+
+- The default `ping_messages` pool no longer overlaps with the
+  catchphrase signals an agent treats as deliberate "execute the
+  default I proposed" greenlights ("Engage", "Allons-y", "Make it
+  so", "Geronimo", "Yabba dabba doo", "Pop quiz hotshot",
+  "It's alive", "Excellent"), idle-ping standby markers
+  ("Beep boop", "Hodor", "*tap tap*", "Ping?") or imperative
+  drain / process directives ("Resistance is futile (drain the
+  backlog)", "Live long and process tickets"). When `{culture}` was
+  random-picked from those phrases the agent couldn't tell a
+  deliberate human signal from a wake-template flavor. The default
+  pool is now ambient phrases only; the documented signals always
+  mean what they say. Applies to fresh `claude-loop start` runs ;
+  existing loops keep their copied `pings.yaml` until next start
+  or manual edit.
+
 ## [0.17.2] — 2026-06-01
 
 ### Fixed

@@ -2,26 +2,31 @@
 # `claude-loop start --pings /path/to/custom.yaml`. Picked at random
 # on each wake-up — the message itself is purely cosmetic; the only
 # functional effect is to trigger a new claude turn.
+#
+# #697 F1 (pisynth-claude #692) — purged of phrases that overlap with
+# the catchphrase signals the agent's classifier reads as deliberate
+# greenlights or idle pings. When `{culture}` was random-picked from
+# the old pool, the agent couldn't tell "the human deliberately typed
+# 'Engage'" from "the wake template happened to land on the word".
+# The remaining phrases are intentionally ambient — no verbs that
+# carry an action signal, no in-skill catchphrases.
+#
+# DO NOT add these back to the pool — they're documented signals the
+# agent treats as machine-readable when they appear in the prompt :
+#   Greenlights ("execute the default I proposed and move on") :
+#     Engage / Make it so / Allons-y / Geronimo / Yabba dabba doo /
+#     Pop quiz hotshot / It's alive / Excellent
+#   Idle pings ("standby, no specific action") :
+#     Beep boop / Hodor / *tap tap* / Ping?
+#   Imperative drain / process directives :
+#     Resistance is futile (drain the backlog) / Live long and process tickets
+# A human who types one of these now ALWAYS means it.
 ping_messages:
   - "What's up, Doc?"
   - "Wake up, Neo."
   - "Hello, Dave."
-  - "Make it so."
-  - "Allons-y!"
-  - "Geronimo!"
-  - "It's alive!"
   - "Anybody out there?"
-  - "Beep boop."
-  - "Yabba dabba doo!"
-  - "*tap tap* this thing on?"
-  - "Pop quiz, hotshot."
   - "I'll be in your tmux."
-  - "Ping?"
-  - "Resistance is futile (drain the backlog)."
-  - "Live long and process tickets."
-  - "Hodor."
-  - "Excellent."
-  - "Engage."
   - "Houston, we have an idle session."
 
 # Wake phrases used when the SSE ping carries a concrete artifact
