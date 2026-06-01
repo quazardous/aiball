@@ -21,6 +21,7 @@ import { AiballClient } from "../client.js";
 import type { Intent } from "../domain.js";
 import type { DrainedState } from "./drained-strategy.js";
 import { CL_ENV } from "./env-vars.js";
+import { loopConfig } from "./loop-config.js";
 import { canFlipBgFromBoot, computeLoopView } from "./loop-state.js";
 import { parseGates, runGates } from "./gates.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
@@ -377,9 +378,8 @@ export function wakeInFlightPath(sd: string): string { return join(sd, "wake-in-
 /** Wake-in-flight markers older than this many ms are stale and
  *  ignored — covers race where the user types BEFORE claude-loop's
  *  wake reaches the hook (unlikely but possible). #B.180:
- *  yaml-configurable via `.aiball.yaml claude_loop.wake_in_flight_ttl_ms`,
- *  exposed to child processes via CL_WAKE_IN_FLIGHT_TTL_MS env. */
-export const WAKE_IN_FLIGHT_TTL_MS = Math.max(0, Number(process.env[CL_ENV.WAKE_IN_FLIGHT_TTL_MS] ?? 2000));
+ *  yaml-configurable via `.aiball.yaml claude_loop.wake_in_flight_ttl_ms`. */
+export const WAKE_IN_FLIGHT_TTL_MS = Math.max(0, loopConfig().claude_loop.wake_in_flight_ttl_ms);
 
 /**
  * Touched by ANY wake path (Stop hook chain-fire AND timer's
@@ -993,10 +993,10 @@ export function readLoopStateInput(
     // authoritative end-of-boot is `bootComplete` (set via
     // `setResumePicker(sd, false)` by session-start-hook). Bumped to
     // 5 min so a slow resume picker never trips it.
-    const bootGraceMs = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 300)) * 1000;
-    // #629 david `2hwuan` : floor INVIOLABLE 30 s par défaut. cli.ts exporte
-    // le yaml `claude_loop.boot_min_seconds` via cette env var.
-    const bootMinMs = Math.max(0, Number(process.env[CL_ENV.BOOT_MIN_SEC] ?? 30)) * 1000;
+    const cfg = loopConfig().claude_loop;
+    const bootGraceMs = Math.max(0, cfg.boot_grace_seconds) * 1000;
+    // #629 david `2hwuan` : floor INVIOLABLE 30 s par défaut.
+    const bootMinMs = Math.max(0, cfg.boot_min_seconds) * 1000;
     // #647 Slice 2 : resumePickerActive = OR des deux nouveaux markers.
     // Conserve la sémantique "any resume picker is up" pour les consommateurs
     // existants ; la distinction session vs mode est exposable via les
@@ -1005,15 +1005,15 @@ export function readLoopStateInput(
     const resumePickerActive = existsSync(resumeSessionPickerActivePath(sd))
         || existsSync(resumeModePickerActivePath(sd));
     const bootComplete = existsSync(bootCompletePath(sd));
-    const noWait = process.env[CL_ENV.WAIT] === "0";
+    const noWait = !cfg.wait;
     // user-grace window = max(user, ask) for back-compat with projects
     // that still set ask_grace_seconds in .aiball.yaml (#619 collapse).
     const userGraceSec = Math.max(
-        Number(process.env[CL_ENV.USER_GRACE_SEC] ?? DEFAULT_USER_GRACE_SEC),
-        Number(process.env[CL_ENV.ASK_GRACE_SEC] ?? DEFAULT_ASK_GRACE_SEC),
+        cfg.user_grace_seconds,
+        cfg.ask_grace_seconds,
         0,
     );
-    const wakeInFlightTtlMs = Math.max(0, Number(process.env[CL_ENV.WAKE_IN_FLIGHT_TTL_MS] ?? 2000));
+    const wakeInFlightTtlMs = Math.max(0, cfg.wake_in_flight_ttl_ms);
 
     function safeMtime(p: string): number | null {
         try { return existsSync(p) ? statSync(p).mtimeMs : null; } catch { return null; }
@@ -1364,7 +1364,7 @@ export function setTmuxStatus(
     // from the markers — skipped when the proxy is alive so the two never
     // fight over it.
     if (!proxyAlive) {
-        const graceSec = Math.max(0, Number(process.env[CL_ENV.USER_GRACE_SEC] ?? DEFAULT_USER_GRACE_SEC));
+        const graceSec = Math.max(0, loopConfig().claude_loop.user_grace_seconds);
         const word = humanBarWord(sd, graceSec);
         setOpt("@cl_human", word);
         logBarPaint(sd, `state.ts:setTmuxStatus(${status})`, word);

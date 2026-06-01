@@ -40,8 +40,6 @@ import { AiballClient } from "../client.js";
 import { createLogger } from "../log.js";
 import {
     isInternalCheckCmd,
-    DEFAULT_ASK_GRACE_SEC,
-    DEFAULT_USER_GRACE_SEC,
     LOOP_STATUS,
     bootCompletePath,
     createProxyEventsServer,
@@ -102,6 +100,7 @@ import {
     type WakeHint,
 } from "./state.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
+import { loopConfig } from "./loop-config.js";
 import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
 import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
 import { paneMarkerBarInfo } from "./pane-service.js";
@@ -121,7 +120,7 @@ const loopCwd = (() => { try { return sd ? readPlate(sd).cwd : undefined; } catc
 // #393 (Option A): the loop's project (from the env the loop exports) — pushed
 // with each heartbeat so the daemon attributes the root to EXACTLY this project.
 const loopProject = process.env.AIBALL_PROJECT || undefined;
-const intervalRaw = process.env[CL_ENV.INTERVAL];
+const cfg = loopConfig().claude_loop;
 const checkCmd = process.env[CL_ENV.CHECK_CMD] ?? "true";
 // #619 collapse (david `e54hx2`) — the historical 2-window distinction
 // (user-grace 60s for wakes vs ask-grace 600s for AskUserQuestion) was
@@ -129,16 +128,12 @@ const checkCmd = process.env[CL_ENV.CHECK_CMD] ?? "true";
 // back-compat with projects that still set `ask_grace_seconds` in
 // .aiball.yaml, take the MAX of the two : a longer ask_grace widens
 // the deferential window, never shrinks it. Default 600s.
-const userGraceSec = Math.max(
-    Number(process.env[CL_ENV.USER_GRACE_SEC] ?? DEFAULT_USER_GRACE_SEC),
-    Number(process.env[CL_ENV.ASK_GRACE_SEC] ?? DEFAULT_ASK_GRACE_SEC),
-    0,
-);
-if (!sd || !name || !intervalRaw) {
+const userGraceSec = Math.max(cfg.user_grace_seconds, cfg.ask_grace_seconds, 0);
+if (!sd || !name) {
     process.stderr.write("[claude-loop:timer] missing CL_* env vars\n");
     process.exit(1);
 }
-const interval = Math.max(1, Number(intervalRaw));
+const interval = Math.max(1, cfg.interval_seconds);
 const tname = tmuxName(name);
 
 /**
@@ -200,7 +195,7 @@ try { writeFileSync(timerPidPath(sd!), `${process.pid}\n`); } catch { /* best ef
 // #624 david `8pwvm3` : safety cap for settleBoot only (the
 // `boot-complete` marker is the authoritative end-of-boot signal).
 // Bumped from 60s → 300s so a slow resume picker never trips it.
-const BOOT_GRACE_MS = Math.max(0, Number(process.env[CL_ENV.BOOT_GRACE_SEC] ?? 300)) * 1000;
+const BOOT_GRACE_MS = Math.max(0, cfg.boot_grace_seconds) * 1000;
 // #627 — BOOT_TIME used to feed the inline boot-grace if/else trees ;
 // the LoopState service now reads `loop-start-ts` from the state-dir
 // (shared marker, same as the hooks). Kept the constant declaration
@@ -715,7 +710,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             // open>0) and the configured strategy says so. Default `silent` →
             // never fires (zero regression). State is persisted on EVERY drained
             // tick so backoff/stale/once track when the landscape appeared.
-            const strat = parseDrainedStrategy(process.env[CL_ENV.DRAINED_STRATEGY]);
+            const strat = parseDrainedStrategy(cfg.drained_strategy);
             const drainable = strat.kind !== "silent"
                 && gate.openCount === 0
                 && gate.totalOpenCount > 0
@@ -889,7 +884,7 @@ async function mainSse(): Promise<void> {
         // branch above. The bus path is the normal exit ; this safety cap
         // fires only when the bus didn't (paneReady never became true).
         // Keep the two paths consistent for the AFK arm.
-        if (process.env[CL_ENV.WAIT] === "1") {
+        if (cfg.wait) {
             armAfkViaService(sd!);
             log("settleBoot: --wait → armed NOT AFK 10m (via service)");
         }
@@ -987,7 +982,7 @@ async function mainSse(): Promise<void> {
         // boot exit so the bar reads `wait` yellow with a countdown : the
         // documented "managed mode" contract. `--no-wait` (CL_WAIT=0)
         // leaves AFK off — bar reads `loop` and auto-pings resume.
-        const isWaitMode = process.env[CL_ENV.WAIT] === "1";
+        const isWaitMode = cfg.wait;
         if (isWaitMode) {
             armAfkViaService(sd!);
             log("state-bus: boot phase ended — --wait → armed NOT AFK 10m (via service)");

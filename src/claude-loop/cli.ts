@@ -573,18 +573,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // default). loadConfig defaults are 60/60/300/2000 — see config.ts.
     const interval = opts.interval ?? ctx.claude_loop.interval_seconds;
     const userGraceSec = opts.userGraceSec ?? ctx.claude_loop.user_grace_seconds;
-    const bootGraceSec = ctx.claude_loop.boot_grace_seconds; // no CLI flag yet — yaml-only
-    const bootMinSec = ctx.claude_loop.boot_min_seconds; // #629 — yaml-only floor
-    // #639 (david `uqdava`) — `--resume` / `--no-resume` CLI flags override
-    // BOTH `claude_loop.auto_resume` (loop auto-crosses picker) AND
-    // `claude.always_resume` (binary --resume injection). Precedence : flag
-    // wins, fallback to yaml config defaults.
-    const autoResume = opts.forceResume ? true
-        : opts.noResume ? false
-        : ctx.claude_loop.auto_resume;
-    const wakeInFlightTtlMs = ctx.claude_loop.wake_in_flight_ttl_ms; // yaml-only
-    const escTakeover = ctx.claude_loop.esc_takeover; // #345, yaml-only
-    const askGraceSec = ctx.claude_loop.ask_grace_seconds; // #351, yaml-only
+    const bootGraceSec = ctx.claude_loop.boot_grace_seconds; // PTY-proxy bridge
+    const escTakeover = ctx.claude_loop.esc_takeover; // PTY-proxy bridge
+    const askGraceSec = ctx.claude_loop.ask_grace_seconds; // PTY-proxy bridge
     // #305 (option a): explicit --wait/--no-wait wins; else the per-project
     // `.aiball.yaml claude_loop.wait` default (global CLI default stays no-wait #343).
     const wait = opts.wait !== undefined ? opts.wait : ctx.claude_loop.wait;
@@ -631,32 +622,29 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `# Do not edit by hand. To change a value mid-life :`,
         `#   claude-loop reload <name> --set CL_FOO=bar`,
         "",
+        // Identity (start-invocation only, never override) :
         `export ${CL_ENV.NAME}=${shQuote(name)}`,
         `export ${CL_ENV.STATE_DIR}=${shQuote(sd)}`,
-        `export ${CL_ENV.INTERVAL}=${String(interval)}`,
-        `export ${CL_ENV.CHECK_CMD}=${shQuote(opts.checkCmd)}`,
         `export ${CL_ENV.PINGS}=${shQuote(pingsPath(sd))}`,
+        // CLI-only flags (no yaml backing, no shell override) :
         // Read by the SessionStart hook to decide whether to ping at
         // boot. Empty / unset = ping (per default). "1" = stay silent.
         `export ${CL_ENV.NO_STARTUP_PING}=${shQuote(opts.noStartupPing ? "1" : "")}`,
         // #636 david — pytest harness flag, exits the timer after 1 cycle.
         `export ${CL_ENV.RUN_ONCE}=${shQuote(opts.runOnce ? "1" : "")}`,
-        // #302/#343: WAIT="1" ONLY when --wait is explicitly passed.
-        // Default (and explicit --no-wait) → "0": no human at the terminal,
-        // eager boot drain, no boot-grace deferral. Read by the timer
-        // (boot-grace gate) + the SessionStart hook (eager-inject gate).
+        // #B.154: resume picker auto-dismiss mode. Read by the
+        // SessionStart hook when source=resume.
+        `export ${CL_ENV.RESUME_MODE}=${shQuote(opts.resumeMode ?? "as-is")}`,
+        `export ${CL_ENV.CHECK_CMD}=${shQuote(opts.checkCmd)}`,
+        // PTY-proxy bridge : pty-proxy.py is Python, can't call `loopConfig()` ;
+        // these stay in the env file as a python-side mirror of the yaml. The
+        // TS callers all read via `loopConfig().claude_loop.X` directly.
+        // #302/#343: WAIT — Python proxy reads CL_WAIT for boot-grace gate.
         `export ${CL_ENV.WAIT}=${shQuote(wait ? "1" : "0")}`,
-        // Seconds the timer stays out of the way after the human
-        // submits a prompt (UserPromptSubmit hook refreshes the
-        // user-took-over marker). 0 disables the grace.
+        // Seconds the proxy waits before re-arming wakes after a takeover.
         `export ${CL_ENV.USER_GRACE_SEC}=${shQuote(String(userGraceSec))}`,
-        // #B.180: boot-grace + wake-in-flight TTL, yaml-only knobs.
+        // #B.180 boot-grace : the proxy needs it to count remaining grace.
         `export ${CL_ENV.BOOT_GRACE_SEC}=${shQuote(String(bootGraceSec))}`,
-        // #629 david `2hwuan` : floor inviolable (default 30 s).
-        `export ${CL_ENV.BOOT_MIN_SEC}=${shQuote(String(bootMinSec))}`,
-        // #639 david `uqdava` : auto-cross resume picker (1=on, default).
-        `export ${CL_ENV.AUTO_RESUME}=${shQuote(autoResume ? "1" : "0")}`,
-        `export ${CL_ENV.WAKE_IN_FLIGHT_TTL_MS}=${shQuote(String(wakeInFlightTtlMs))}`,
         // #345: bare ESC in the pane = human takeover (PTY proxy arms user-grace).
         `export ${CL_ENV.ESC_TAKEOVER}=${shQuote(escTakeover ? "1" : "0")}`,
         // #351: ask-grace gates AskUserQuestion (PreToolUse hook); the afk
@@ -669,19 +657,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export ${CL_ENV.AFK_KEY_DISP}=${shQuote(ctx.claude_loop.afk_key.trim().toUpperCase())}`,
         `export ${CL_ENV.AFK_LABEL_FG_DIM}=${shQuote(ctx.colors.afk_label_fg)}`,
         `export ${CL_ENV.AFK_LABEL_FG_LIT}=${shQuote(ctx.colors.bar_fg)}`,
-        // #379: drained-backlog reminder strategy, read by the timer's heartbeat
-        // (parseDrainedStrategy). Default "once" (david krwnqu) → one reminder
-        // when the pool first drains, then quiet until the landscape moves.
-        `export ${CL_ENV.DRAINED_STRATEGY}=${shQuote(ctx.claude_loop.drained_strategy)}`,
-        // #412: PSR-style log-level threshold for the timer + hooks (src/log.ts).
-        // Below it → dropped. From `.aiball.yaml claude_loop.log_level` (default info).
-        `export ${CL_ENV.LOG_LEVEL}=${shQuote(ctx.claude_loop.log_level)}`,
         // #381c CL_PROXY_LOG, #629 CL_BAR_PAINT_LOG, #678 CL_PANE_CAPTURE_LOG :
         // opt-in debug logs are picked up generically by `applyShellOverrides`
         // below when set in the invoker's shell — no per-var conditional needed.
-        // #B.154: resume picker auto-dismiss mode. Read by the
-        // SessionStart hook when source=resume.
-        `export ${CL_ENV.RESUME_MODE}=${shQuote(opts.resumeMode ?? "as-is")}`,
         // #B.154: persist the resolved aiball identity (from ctx) so
         // every hook fire and the timer process see the SAME
         // consumer as the spawn-time .mcp.json resolution. Without

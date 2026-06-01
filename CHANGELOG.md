@@ -23,6 +23,21 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-06-01
+
+### Changed
+
+- The loop's TypeScript runtime (timer + hooks + logger) now reads
+  yaml-backed knobs (interval, grace windows, log level, drained
+  strategy, etc.) directly from the resolved `.aiball.yaml` via a
+  new `loopConfig()` snapshot instead of routing each knob through
+  a separate `CL_*` env var. Adding a new knob is now a single
+  change in the yaml schema. Shell-env overrides at start
+  (`CL_LOG_LEVEL=debug claude-loop start <name>`) still work — the
+  overrides apply on top of the yaml inside `loopConfig`. The PTY
+  proxy (Python) still reads its own subset of `CL_*` vars from
+  the env file as before.
+
 ## [0.15.0] — 2026-06-01
 
 ### Added

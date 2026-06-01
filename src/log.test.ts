@@ -2,10 +2,12 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createLogger, parseLevel, isEnabled, setLevel, currentLevel, DEFAULT_LOG_LEVEL } from "./log.js";
+import { _resetLoopConfigCacheForTests } from "./claude-loop/loop-config.js";
 
 afterEach(() => {
     setLevel(null); // reset override
     delete process.env.CL_LOG_LEVEL;
+    _resetLoopConfigCacheForTests(); // #689 — loopConfig now caches per-process
 });
 
 function capture() {

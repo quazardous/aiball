@@ -10,7 +10,7 @@
 // stop-hook.log (no tag, file append). Roll-your-own (no dep) — the surface is
 // tiny and the format is ours; swap for a lib later if it ever needs more.
 
-import { CL_ENV } from "./claude-loop/env-vars.js";
+import { loopConfig } from "./claude-loop/loop-config.js";
 
 export const LEVELS = [
     "debug", "info", "notice", "warning", "error", "critical", "alert", "emergency",
@@ -41,7 +41,7 @@ export function setLevel(level: LogLevel | string | null): void {
 
 /** The effective minimum level right now. */
 export function currentLevel(): LogLevel {
-    return override ?? parseLevel(process.env[CL_ENV.LOG_LEVEL]) ?? DEFAULT_LOG_LEVEL;
+    return override ?? parseLevel(loopConfig().claude_loop.log_level) ?? DEFAULT_LOG_LEVEL;
 }
 
 /** Would a message at `level` be emitted under the current threshold? Use to
