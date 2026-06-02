@@ -1071,6 +1071,35 @@ async function mainSse(): Promise<void> {
     loopBus.on("busy", (next, prev) => {
         log(`state-bus: busy ${prev}→${next}`);
     });
+    // #714 david `gftprc` — bar (status-bg + suffix paneInfo) was repainted
+    // only at the 30s heartbeat. So even with the 1s refresh keeping
+    // pane-busy / pane-compacting fresh, the user saw `[busy:compacting]`
+    // appear up to 30s after typing /compact. Paint immediately on bus
+    // transitions, memoized so we don't repaint when nothing changed.
+    // `setTmuxStatus` spawns tmux set-option (~3ms), kept cheap via the
+    // memo + transition-only firing.
+    let lastPaintedPostBoot: string | null = null;
+    loopBus.on("transition", (_prev, next) => {
+        if (next.inBootGrace) return; // fast-probe + settleBoot own boot paint
+        try {
+            const paneInfo = paneMarkerBarInfo();
+            // Build a memo key that captures phase + paneInfo + grace state.
+            // Count refresh stays heartbeat-driven (don't repaint on every
+            // marker change just for that — it'd repaint on every typing).
+            const userGrace = next.phase === "idle" && userIsTakingOver(sd!, userGraceSec);
+            const memoKey = `${next.phase}|${paneInfo ?? "-"}|${userGrace ? "user" : "-"}`;
+            if (memoKey === lastPaintedPostBoot) return;
+            if (paneInfo) {
+                setTmuxStatus(name!, next.phase, paneInfo);
+            } else if (userGrace) {
+                setTmuxStatus(name!, next.phase, "user");
+            }
+            // No-info path : let heartbeat repaint with fresh unread count.
+            // Otherwise we'd race the count refresh + lose it.
+            else { return; /* skip memo update so heartbeat re-paints with count */ }
+            lastPaintedPostBoot = memoKey;
+        } catch { /* best-effort */ }
+    });
     const pushViewIfChanged = (): void => {
         try {
             loopBus.update(readLoopStateInput(sd!));
