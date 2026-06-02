@@ -1057,29 +1057,29 @@ async function mainSse(): Promise<void> {
     loopBus.on("afkCleared", () => log("state-bus: AFK cleared"));
     loopBus.on("pickerOpened", () => log("state-bus: resume picker opened"));
     loopBus.on("pickerClosed", () => log("state-bus: resume picker closed"));
-    // #714 — pane-probe cadence driven by the SM. While claude is busy
-    // (`isReallyBusy(input) === true` via pane-busy or pane-compacting),
-    // refresh the pane markers every second so transient compact frames
-    // are caught quickly and the bar suffix (`[busy:compacting]`) tracks
-    // reality. When claude returns idle, disarm — the heartbeat (30s)
-    // does a single refresh per tick that catches the next idle→busy
-    // transition. Replaces the inline pane probe (lines ~1190-1236) +
-    // the gated refresh inside `tryWake` that was the #678 root cause.
-    let paneProbeTimer: NodeJS.Timeout | null = null;
-    loopBus.on("busy", (next) => {
-        if (next && !paneProbeTimer) {
-            paneProbeTimer = setInterval(() => {
-                try { refreshPaneMarkers(); } catch { /* best-effort */ }
-            }, 1000);
-            log("pane-probe: armed (1s cadence, claude busy)");
-        } else if (!next && paneProbeTimer) {
-            clearInterval(paneProbeTimer);
-            paneProbeTimer = null;
-            log("pane-probe: disarmed (claude idle)");
-        }
+    // #714 david `fu9mh7` — bus event `busy(next, prev)` reste publié
+    // pour les consumers (logs ici + futurs render/decoration). La cadence
+    // de refresh, elle, est PIGGYBACKÉE sur `pushViewIfChanged` qui tourne
+    // déjà à 1s post-boot (cf. setInterval line ~1097). Un refresh
+    // busy-gated chez nous était trop fragile : pour qu'il s'arme, il
+    // fallait que le bus émette `busy(true)`, mais pour que le bus émette
+    // `busy(true)`, il fallait que pane-busy soit fresh — chicken-and-egg.
+    // david repro : `/compact` typed → `[busy:compacting]` n'apparaissait
+    // qu'au prochain heartbeat (30s). Now refresh runs every 1s in BOTH
+    // states ; cost ~5ms/s (1 tmux capture + 4-5 file syscalls). The bus
+    // event still fires correctly on the transition and logs it.
+    loopBus.on("busy", (next, prev) => {
+        log(`state-bus: busy ${prev}→${next}`);
     });
-    process.on("exit", () => { if (paneProbeTimer) { clearInterval(paneProbeTimer); paneProbeTimer = null; } });
     const pushViewIfChanged = (): void => {
+        try {
+            // #714 david `fu9mh7` — refresh pane markers BEFORE the bus
+            // update so `paneBusy`/`paneCompacting` reflect the current
+            // pane content. Without this, the bus reads stale markers
+            // and the `busy` event fires up to 30s late (= the old
+            // heartbeat-only bootstrap cadence david caught).
+            refreshPaneMarkers();
+        } catch { /* best-effort — bus.update still runs on last-known markers */ }
         try {
             loopBus.update(readLoopStateInput(sd!));
         } catch { /* swallow — next tick retries */ }
@@ -1163,19 +1163,12 @@ async function mainSse(): Promise<void> {
             // Exits the process on reload, so it must come last here.
             selfReloadIfStale();
         }
-        // #714 — heartbeat pane refresh (replaces the old inline probe
-        // at lines ~1190-1236). One unconditional `refreshPaneMarkers`
-        // call per heartbeat tick : catches the idle→busy transition
-        // when the pane-probe interval isn't armed yet (e.g. /compact
-        // started since the last refresh). Once `pane-busy` or
-        // `pane-compacting` flips true, `pushViewIfChanged` (1s) sees
-        // the new input, the bus emits `busy(true)`, and the 1s probe
-        // takes over for the rest of the busy window. The bar BG flips
-        // are now bus-driven (subscribers on `phaseChanged` / the count
-        // refresh below reads `loopBus.current()?.phase`) — no more
-        // `settledStatus` local var racing the file marker (bug A on
-        // #712), no more inline write of `idle-marker` (bug B on #712).
-        try { refreshPaneMarkers(); } catch { /* best-effort */ }
+        // #714 — bar phase = `loopBus.current()?.phase`. The pane markers
+        // are refreshed every 1s by `pushViewIfChanged` (not here), so by
+        // the time we hit this heartbeat tick the view is already at most
+        // ~1s stale. No more `settledStatus` local var racing the file
+        // marker (bug A on #712), no more inline write of `idle-marker`
+        // by an inline probe (bug B on #712).
         const phase = loopBus.current()?.phase ?? "boot";
         // Refresh the bar with the current unread count (#B.149
         // david: "dans la barre mux on peut afficher le nombre de
