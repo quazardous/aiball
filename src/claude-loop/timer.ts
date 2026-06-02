@@ -74,7 +74,6 @@ import {
     isLoopStale,
     isDuplicateWakeHint,
     lastWakeAtPath,
-    paneFooterShowsBusy,
     pingsPath,
     readBusyDefer,
     recordOpenWakeCount,
@@ -106,7 +105,7 @@ import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
 import { paneMarkerBarInfo } from "./pane-service.js";
 import { armAfkViaService, watchAfkMarker } from "./afk-service-sync.js";
 import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
-import { canFlipBgFromBoot, computeLoopView, LoopStateBus } from "./loop-state.js";
+import { computeLoopView, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
 import { CL_ENV } from "./env-vars.js";
@@ -846,10 +845,11 @@ async function mainSse(): Promise<void> {
     let bootSettled = false;
     const settleBoot = async () => {
         if (bootSettled) {
-            // #B.228: surface the skip so we know the pane probe
-            // already flipped bootSettled — otherwise the log goes
-            // dark at T+60s and it looks like settleBoot vanished.
-            log("settleBoot skipped — bootSettled already true (probe flipped earlier)");
+            // #B.228: defensive — settleBoot is only invoked once via
+            // `setTimeout(BOOT_GRACE_MS)`, but log the re-entry guard
+            // just in case a future caller adds another trigger.
+            // (#714 retired the inline probe that used to flip this.)
+            log("settleBoot skipped — bootSettled already true");
             return;
         }
         bootSettled = true;
@@ -1057,6 +1057,28 @@ async function mainSse(): Promise<void> {
     loopBus.on("afkCleared", () => log("state-bus: AFK cleared"));
     loopBus.on("pickerOpened", () => log("state-bus: resume picker opened"));
     loopBus.on("pickerClosed", () => log("state-bus: resume picker closed"));
+    // #714 — pane-probe cadence driven by the SM. While claude is busy
+    // (`isReallyBusy(input) === true` via pane-busy or pane-compacting),
+    // refresh the pane markers every second so transient compact frames
+    // are caught quickly and the bar suffix (`[busy:compacting]`) tracks
+    // reality. When claude returns idle, disarm — the heartbeat (30s)
+    // does a single refresh per tick that catches the next idle→busy
+    // transition. Replaces the inline pane probe (lines ~1190-1236) +
+    // the gated refresh inside `tryWake` that was the #678 root cause.
+    let paneProbeTimer: NodeJS.Timeout | null = null;
+    loopBus.on("busy", (next) => {
+        if (next && !paneProbeTimer) {
+            paneProbeTimer = setInterval(() => {
+                try { refreshPaneMarkers(); } catch { /* best-effort */ }
+            }, 1000);
+            log("pane-probe: armed (1s cadence, claude busy)");
+        } else if (!next && paneProbeTimer) {
+            clearInterval(paneProbeTimer);
+            paneProbeTimer = null;
+            log("pane-probe: disarmed (claude idle)");
+        }
+    });
+    process.on("exit", () => { if (paneProbeTimer) { clearInterval(paneProbeTimer); paneProbeTimer = null; } });
     const pushViewIfChanged = (): void => {
         try {
             loopBus.update(readLoopStateInput(sd!));
@@ -1098,13 +1120,11 @@ async function mainSse(): Promise<void> {
     // Send the initial view ASAP so the proxy paints from it instead of
     // its local bootstrap. The pusher queues until the socket is up.
     pushViewIfChanged();
-    // #B.149: track the "settled" status so the count-refresh below
-    // doesn't reset bar to idle while claude is busy. tryWake flips
-    // to busy on wake; we mirror that. Boot stays until settleBoot.
-    // #B.173 (david skybot bug): heartbeat pane-probe flips between
-    // `busy` and `idle` based on `esc to interrupt`, covering slash
-    // commands (/compact, /clear) that don't fire Stop hook.
-    let settledStatus: "boot" | "idle" | "busy" = "boot";
+    // #714 — `settledStatus` local var retired. The bar BG phase is now
+    // read from `loopBus.current()?.phase` (single source : the state
+    // machine, fed by `pushViewIfChanged` every second + on every marker
+    // change). Before, two parallel signals could diverge during /compact
+    // (settledStatus said busy, computePhase said idle — bug A on #712).
     while (tmuxAlive()) {
         // #B.205: when busy-defer is armed, cap the heartbeat sleep at
         // the defer deadline so the post-defer work-check happens
@@ -1129,20 +1149,12 @@ async function mainSse(): Promise<void> {
         // even when SSE silent.
         if (existsSync(wakeRequestedPath(sd!))) {
             await tryWake("manual", true);
-            settledStatus = "busy";
             continue;
         }
         // SSE-drop safety net: re-check the gate ourselves.
         if (!wakeBus.isConnected()) wakeBus.connect();
         const woke = await tryWake("heartbeat");
-        if (woke) {
-            if (settledStatus !== "busy") log(`heartbeat: woke=true settledStatus=${settledStatus}→busy`);
-            settledStatus = "busy";
-        } else if (existsSync(idleMarkerPath(sd!))) {
-            // #B.228: trace the boot→idle flip driven by the
-            // idle-marker (set by settleBoot or session-start-hook).
-            if (settledStatus !== "idle") log(`heartbeat: woke=false idle-marker present → settledStatus=${settledStatus}→idle`);
-            settledStatus = "idle";
+        if (!woke && existsSync(idleMarkerPath(sd!))) {
             // #251: idle + nothing to wake on = the safe lull to pick up
             // new code. Re-execs the timer in place if the source SHA
             // moved since boot (claude pane untouched). Never mid-turn
@@ -1151,95 +1163,26 @@ async function mainSse(): Promise<void> {
             // Exits the process on reload, so it must come last here.
             selfReloadIfStale();
         }
-        // Pane-probe (#B.173, refined #B.154 davids). `esc to
-        // interrupt` is THE authoritative claude-busy signal
-        // ("seul le esc to interrupt est vraiment crucial dans le
-        // workflow"). Heartbeat flips the bar between `busy` and
-        // `idle` independently of hook events, covering slash
-        // commands (/compact, /clear) that don't fire Stop hook.
-        //
-        // Runs from the FIRST heartbeat (no boot gate). The prompt-
-        // signature check ("Claude Code v" header or "❯"/"> ") guards
-        // against flipping to idle while claude is still spawning the
-        // splash — without it, an early empty pane would seed
-        // idle-since and the next tick would ping over a still-
-        // loading claude. When the pane settles, the probe overrides
-        // boot grace so we don't wait BOOT_GRACE_MS for nothing.
-        //
-        // For "state pas claire" (pane empty, garbled, no prompt
-        // signature, no esc-to-interrupt): stay last-state.
-        // Conservative — pinging into uncertainty is the costly
-        // mistake; over-displaying busy is the cheap one.
-        //
-        // Alternatives considered and DISCARDED (#B.172, david's hint
-        // "le reste devrait servir à décorer (hint)") — kept here as
-        // a written record so a future reader doesn't re-litigate:
-        //   - Re-arm differé après transient state (detect compacting/
-        //     rate-limit/api-error cleared after T+30s): decoration,
-        //     not workflow-critical.
-        //   - Read claude-code's JSONL transcript at ~/.claude/
-        //     projects/<hash>/<id>.jsonl for authoritative turn
-        //     boundaries: heavier, and `esc to interrupt` covers the
-        //     only critical case.
-        //   - PostToolUse / PreToolUse hooks to differentiate
-        //     busy:tool-use vs busy:thinking: pure decoration.
-        //   - tmux pane-title / cursor-position events: claimed less
-        //     fragile but requires custom tmux pipe-pane wiring; no
-        //     concrete payoff over capture-pane regex.
-        // If a future need shows real value, open a fresh ticket.
-        const paneText = capturePane();
-        if (paneText) {
-            const claudeWorking = paneFooterShowsBusy(paneText);
-            const claudeReady = /Claude Code v|❯ |^> /m.test(paneText);
-            // #624 + #627 : pendant boot-grace, le bar BG reste `[boot]`
-            // jaune dans les DEUX modes. Le service LoopState owns this
-            // rule via `canFlipBgFromBoot(input)` — false en boot-grace,
-            // true après. settleBoot reste l'autorité unique pour la
-            // transition.
-            const inBootGrace = !canFlipBgFromBoot(readLoopStateInput(sd!));
-            if (inBootGrace) {
-                // Skip — settleBoot fera la transition propre à T+grace.
-            } else if (claudeWorking && settledStatus !== "busy") {
-                // #B.228: trace probe-driven state flips so a
-                // "barre reste jaune" repro shows whether the
-                // probe ever fired and what it saw.
-                log(`probe: claudeWorking=true settledStatus=${settledStatus}→busy (bootSettled=true)`);
-                settledStatus = "busy";
-                bootSettled = true; // probe overrides boot grace
-            } else if (claudeReady && !claudeWorking && settledStatus !== "idle") {
-                // Claude is at the prompt. Seed idle-since so the
-                // next tryWake has a clean gate and flip the bar.
-                log(`probe: claudeReady=true settledStatus=${settledStatus}→idle (bootSettled=true, writing idle-marker)`);
-                settledStatus = "idle";
-                bootSettled = true;
-                try {
-                    const { writeFileSync } = await import("node:fs");
-                    writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-                } catch { /* ignore */ }
-            } else if (!claudeWorking && !claudeReady && settledStatus === "boot") {
-                // #B.228: ambiguous pane during boot — log once-ish
-                // so the repro shows the probe IS firing but the
-                // regex isn't matching. Cheap enough to log every
-                // tick during boot; goes quiet after settledStatus
-                // leaves "boot".
-                log(`probe: pane ambiguous (claudeReady=false claudeWorking=false) — settledStatus stays "boot"`);
-            }
-            // Else: pane present but ambiguous AND settledStatus
-            // already left "boot" → keep settledStatus (no log).
-        } else {
-            // #B.228: empty pane capture. capturePane() returns ""
-            // on failure — possibly tmux gone or capture errored.
-            // Useful signal for the "barre reste jaune" repro.
-            if (settledStatus === "boot") {
-                log(`probe: empty pane capture (capturePane failed) — settledStatus stays "boot"`);
-            }
-        }
+        // #714 — heartbeat pane refresh (replaces the old inline probe
+        // at lines ~1190-1236). One unconditional `refreshPaneMarkers`
+        // call per heartbeat tick : catches the idle→busy transition
+        // when the pane-probe interval isn't armed yet (e.g. /compact
+        // started since the last refresh). Once `pane-busy` or
+        // `pane-compacting` flips true, `pushViewIfChanged` (1s) sees
+        // the new input, the bus emits `busy(true)`, and the 1s probe
+        // takes over for the rest of the busy window. The bar BG flips
+        // are now bus-driven (subscribers on `phaseChanged` / the count
+        // refresh below reads `loopBus.current()?.phase`) — no more
+        // `settledStatus` local var racing the file marker (bug A on
+        // #712), no more inline write of `idle-marker` (bug B on #712).
+        try { refreshPaneMarkers(); } catch { /* best-effort */ }
+        const phase = loopBus.current()?.phase ?? "boot";
         // Refresh the bar with the current unread count (#B.149
         // david: "dans la barre mux on peut afficher le nombre de
         // read / ticket meme en idle ?"). Skipped while booting —
         // count is meaningless until settleBoot or the probe
         // detected claude is ready (whichever comes first).
-        if (settledStatus !== "boot") {
+        if (phase !== "boot") {
             try {
                 const r = await client().pingsCount() as { unread?: number };
                 // #B.198: during user-grace, the third arg is the
@@ -1262,11 +1205,11 @@ async function mainSse(): Promise<void> {
                 // marker is salient, falling back to the existing logic.
                 const paneInfo = paneMarkerBarInfo();
                 if (paneInfo) {
-                    setTmuxStatus(name!, settledStatus, paneInfo);
-                } else if (settledStatus === "idle" && userIsTakingOver(sd!, userGraceSec)) {
-                    setTmuxStatus(name!, settledStatus, "user");
+                    setTmuxStatus(name!, phase, paneInfo);
+                } else if (phase === "idle" && userIsTakingOver(sd!, userGraceSec)) {
+                    setTmuxStatus(name!, phase, "user");
                 } else {
-                    setTmuxStatus(name!, settledStatus, r.unread ?? 0);
+                    setTmuxStatus(name!, phase, r.unread ?? 0);
                 }
             } catch { /* swallow — bar stays as-is */ }
         }
@@ -1285,7 +1228,7 @@ async function mainSse(): Promise<void> {
             // #310: also push the 3-state presence word (stop/wait/loop) so the
             // consumers page mirrors the tmux bar, not just the binary human flag.
             const humanWord = humanPresenceWord(sd, userGraceSec);
-            await client().pushState(settledStatus, human, humanWord, loopCwd, loopProject);
+            await client().pushState(phase, human, humanWord, loopCwd, loopProject);
         } catch { /* daemon down or transient — next tick retries */ }
         // #636 david — pytest harnesses spawn the loop with CL_RUN_ONCE=1, wait
         // for the inspect JSON to settle, then exit. Break after the first full

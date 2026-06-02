@@ -374,6 +374,19 @@ export function isBootPhase(view: LoopStateView): boolean {
     return view.phase === "boot";
 }
 
+/** True iff claude is REALLY busy : footer `esc to interrupt` visible
+ *  OR `/compact` running. Canonical source for "claude is working" —
+ *  consumed by the pane-probe (busy-gated 1s refresh) and any other
+ *  subscriber that needs to know whether claude is mid-turn (#714).
+ *
+ *  Plain disjonction of the two pane-derived file markers for V1. The
+ *  nuanced cases (typing in a picker / AskUserQuestion doesn't break
+ *  busy) are deferred to V3 (#716) where this helper grows additional
+ *  guards. */
+export function isReallyBusy(input: LoopStateInput): boolean {
+    return input.paneBusy || input.paneCompacting;
+}
+
 // ---------------------------------------------------------------------------
 //  #630 david `e4ejra` — LoopStateBus
 //
@@ -393,6 +406,13 @@ export type LoopStateEvents = {
     barWordChanged: (prev: BarWord, next: BarWord) => void;
     /** Bar BG phase transitioned (boot / idle / busy). */
     phaseChanged: (prev: Phase, next: Phase) => void;
+    /** #714 — `isReallyBusy(input)` flipped. `next=true` means claude
+     *  just entered a busy turn (mid-turn footer or /compact) ; `next=false`
+     *  means claude just returned to idle. Subscribers arm/disarm work
+     *  off this single signal (pane-probe cadence, future bar-render
+     *  paints, etc.). Aligned with `phaseChanged` / `barWordChanged`
+     *  pattern : verb + (next, prev). */
+    busy: (next: boolean, prev: boolean) => void;
     /** boot grace just ended (in→out of boot). */
     bootEnded: (next: LoopStateView) => void;
     /** boot grace re-entered (rare — typically on reload). */
@@ -439,11 +459,22 @@ export class LoopStateBus {
     }
 
     /** Recompute the view from `input`, diff against the last, emit
-     *  events for every transition. Returns the new view. */
+     *  events for every transition. Returns the new view.
+     *
+     *  #714 — first-update behaviour : when there is no previous view yet,
+     *  the historical contract was « stay silent ». That left the `busy`
+     *  consumer (pane-probe cadence) stuck if the very first input was
+     *  already busy (paneBusy/paneCompacting set at boot end). We now emit
+     *  the `busy` event on the first update IF `isReallyBusy(input)===true`,
+     *  treating the missing prior state as « not busy » — the consumer
+     *  arms correctly. Other diffs stay silent on first update (no real
+     *  transition information). */
     update(input: LoopStateInput): LoopStateView {
         const next = computeLoopView(input);
         if (this.lastView !== null && this.lastInput !== null) {
             this.emitDiffs(this.lastView, next, this.lastInput, input);
+        } else if (isReallyBusy(input)) {
+            this.emit("busy", true, false);
         }
         this.lastView = next;
         this.lastInput = input;
@@ -455,6 +486,13 @@ export class LoopStateBus {
         if (changed) this.emit("transition", prev, next);
         if (prev.barWord !== next.barWord) this.emit("barWordChanged", prev.barWord, next.barWord);
         if (prev.phase !== next.phase) this.emit("phaseChanged", prev.phase, next.phase);
+        // #714 — busy transition driven by `isReallyBusy(input)` (the
+        // semantic helper), not by `view.phase` which can stay `busy`
+        // across compacting↔mid-turn. The disjunction in `isReallyBusy`
+        // means both pane-busy and pane-compacting feed into one signal.
+        const prevBusy = isReallyBusy(prevInput);
+        const nextBusy = isReallyBusy(nextInput);
+        if (prevBusy !== nextBusy) this.emit("busy", nextBusy, prevBusy);
         if (prev.inBootGrace && !next.inBootGrace) this.emit("bootEnded", next);
         if (!prev.inBootGrace && next.inBootGrace) this.emit("bootStarted", next);
         // AFK transitions — driven by the underlying file mode, not the

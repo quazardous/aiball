@@ -23,7 +23,27 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
-## [0.21.0] — 2026-06-02
+## [0.22.0] — 2026-06-02
+
+### Fixed
+
+- Compacting detection on the tmux bar is now reliable through the whole
+  `/compact` run — before this change, the suffix `[busy:compacting]`
+  rarely surfaced once the loop was past its boot grace, because the
+  pane-marker refresh was gated behind the "claude is idle" check and
+  could never fire during a busy turn. The refresh now runs on a
+  busy-driven cadence (1s while claude is mid-turn, off when idle) so
+  state changes during `/compact`, tool runs, and other busy windows
+  are tracked promptly.
+
+### Changed
+
+- The bar background phase (`[idle]` / `[busy]` / `[boot]`) is now read
+  from one single source — the loop state machine — instead of a
+  parallel locally-tracked status. Removes a class of races where the
+  status word and the underlying file marker could disagree during
+  `/compact`. No user-visible behaviour change apart from those races
+  going away.
 
 ### Changed
 

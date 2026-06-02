@@ -15,6 +15,7 @@ import {
     isAfkHeld,
     isAutonomous,
     isBootPhase,
+    isReallyBusy,
     LoopStateBus,
     shouldArmAfk10mOnSettleBoot,
     type LoopStateInput,
@@ -997,4 +998,83 @@ test("pane busy=false, compacting=false → wake allowed when nothing else gates
         idleSinceMs: now,
     }));
     assert.equal(v.wakeAllowed, true);
+});
+
+// #714 — `isReallyBusy(input)` semantic helper. Canonical answer to
+// "is claude really busy ?" via simple disjunction of the two pane-
+// derived file markers. Nuances (typing-in-picker, AskUserQuestion,
+// etc.) come in V3 (#716).
+
+test("isReallyBusy : false when both pane-busy and pane-compacting are false", () => {
+    assert.equal(isReallyBusy(baseInput({ paneBusy: false, paneCompacting: false })), false);
+});
+
+test("isReallyBusy : true when only pane-busy is set", () => {
+    assert.equal(isReallyBusy(baseInput({ paneBusy: true, paneCompacting: false })), true);
+});
+
+test("isReallyBusy : true when only pane-compacting is set", () => {
+    assert.equal(isReallyBusy(baseInput({ paneBusy: false, paneCompacting: true })), true);
+});
+
+test("isReallyBusy : true when both are set", () => {
+    assert.equal(isReallyBusy(baseInput({ paneBusy: true, paneCompacting: true })), true);
+});
+
+// #714 — `busy` bus event. Single signal with `(next, prev)` aligned
+// with `phaseChanged`/`barWordChanged`. Subscribers (pane-probe cadence
+// in timer.ts) arm/disarm work off the boolean.
+
+test("LoopStateBus.busy : idle → busy emits busy(true, false)", () => {
+    const bus = new LoopStateBus();
+    const calls: Array<[boolean, boolean]> = [];
+    bus.on("busy", (next, prev) => { calls.push([next, prev]); });
+    bus.update(baseInput({ paneBusy: false, paneCompacting: false }));
+    bus.update(baseInput({ paneBusy: true, paneCompacting: false }));
+    assert.deepEqual(calls, [[true, false]]);
+});
+
+test("LoopStateBus.busy : busy → idle emits busy(false, true)", () => {
+    // First update with busy=true also fires busy(true, false) via the
+    // first-update chicken-and-egg fix ; the test starts from a fresh
+    // idle baseline to isolate the transition.
+    const bus = new LoopStateBus();
+    bus.update(baseInput({ paneBusy: false, paneCompacting: false }));
+    const calls: Array<[boolean, boolean]> = [];
+    bus.on("busy", (next, prev) => { calls.push([next, prev]); });
+    bus.update(baseInput({ paneBusy: true, paneCompacting: false }));
+    bus.update(baseInput({ paneBusy: false, paneCompacting: false }));
+    assert.deepEqual(calls, [[true, false], [false, true]]);
+});
+
+test("LoopStateBus.busy : busy → busy (no transition) emits nothing", () => {
+    // Seed with the first busy update (subscribe AFTER) so only the
+    // intra-busy stability is observed.
+    const bus = new LoopStateBus();
+    bus.update(baseInput({ paneBusy: true, paneCompacting: false }));
+    const calls: Array<[boolean, boolean]> = [];
+    bus.on("busy", (next, prev) => { calls.push([next, prev]); });
+    bus.update(baseInput({ paneBusy: true, paneCompacting: false }));
+    bus.update(baseInput({ paneBusy: false, paneCompacting: true })); // still busy via compacting
+    assert.deepEqual(calls, []);
+});
+
+test("LoopStateBus.busy : first update with busy input emits busy(true, false)", () => {
+    // Chicken-and-egg : if claude is already busy at the very first
+    // bus.update(), the consumer needs the event to arm the probe.
+    // Without this, the probe would never fire because the first
+    // bus.update() historically emitted no events (no prior view).
+    const bus = new LoopStateBus();
+    const calls: Array<[boolean, boolean]> = [];
+    bus.on("busy", (next, prev) => { calls.push([next, prev]); });
+    bus.update(baseInput({ paneBusy: true, paneCompacting: false }));
+    assert.deepEqual(calls, [[true, false]]);
+});
+
+test("LoopStateBus.busy : first update with idle input emits nothing", () => {
+    const bus = new LoopStateBus();
+    const calls: Array<[boolean, boolean]> = [];
+    bus.on("busy", (next, prev) => { calls.push([next, prev]); });
+    bus.update(baseInput({ paneBusy: false, paneCompacting: false }));
+    assert.deepEqual(calls, []);
 });
