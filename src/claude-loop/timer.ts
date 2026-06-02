@@ -1138,16 +1138,33 @@ async function mainSse(): Promise<void> {
     // marker change ; push once a second so the AFK chunk reflects it.
     // Also acts as a safety net if fs.watch missed an event.
     setInterval(pushViewIfChanged, 1000);
-    // #714 david — DEDICATED pane-marker refresh tick at 1s, decoupled from
-    // `pushViewIfChanged` (which fires up to ~20×/s via the typing fs.watch
-    // → schedulePush → each call used to spawn a tmux capture-pane). Capping
-    // refresh to a flat 1s keeps cost bounded (~5ms/s constant, regardless
-    // of typing rate). The bus view that `pushViewIfChanged` computes still
-    // reads the latest pane-* markers — just up to 1s stale on the tail,
-    // which is the same cadence as the `busy` event we publish anyway.
-    setInterval(() => {
-        try { refreshPaneMarkers(); } catch { /* best-effort */ }
-    }, 1000);
+    // #722 david — 2-rate pane-probe driven by `shouldPollFast(input)` via
+    // the bus `pollFast` event. Default cadence is SLOW (~1s) ; when ANY
+    // of {boot, busy, input-hot} flips true the probe re-arms to FAST
+    // (~200ms) so transitions catch fast (sub-second `[busy:compacting]`
+    // post-`/compact`, post-keystroke detection). Back to slow on exit.
+    // Cost while slow ≈ 5 ms/s constant ; while fast ≈ 25 ms/s, bounded
+    // by the gate semantics.
+    const FAST_MS = Math.max(1, cfg.pane_probe_fast_ms);
+    const SLOW_MS = Math.max(1, cfg.pane_probe_slow_ms);
+    let paneProbeTimer: NodeJS.Timeout | null = null;
+    let paneProbeRateMs = SLOW_MS;
+    const armPaneProbe = (ms: number): void => {
+        if (paneProbeTimer) clearInterval(paneProbeTimer);
+        paneProbeTimer = setInterval(() => {
+            try { refreshPaneMarkers(); } catch { /* best-effort */ }
+        }, ms);
+        paneProbeRateMs = ms;
+    };
+    armPaneProbe(SLOW_MS);
+    loopBus.on("pollFast", (next) => {
+        const target = next ? FAST_MS : SLOW_MS;
+        if (target === paneProbeRateMs) return;
+        const old = paneProbeRateMs;
+        armPaneProbe(target);
+        log(`pane-probe: rate ${old}→${target}ms (${next ? "fast" : "slow"})`);
+    });
+    process.on("exit", () => { if (paneProbeTimer) { clearInterval(paneProbeTimer); paneProbeTimer = null; } });
     // Send the initial view ASAP so the proxy paints from it instead of
     // its local bootstrap. The pusher queues until the socket is up.
     pushViewIfChanged();

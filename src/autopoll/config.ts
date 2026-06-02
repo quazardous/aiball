@@ -144,6 +144,16 @@ export interface AiballConfig {
         user_grace_seconds: number;
         /** Wake-in-flight marker TTL (#B.180). CL_WAKE_IN_FLIGHT_TTL_MS. */
         wake_in_flight_ttl_ms: number;
+        /** #722 — TTL window for `isInputHot`. After this many ms with no
+         *  keystroke, the input-hot signal goes false. Drives pane-probe
+         *  cadence + future consumers. CL_INPUT_HOT_TTL_MS. */
+        input_hot_ttl_ms: number;
+        /** #722 — pane-probe interval when `shouldPollFast(input)` is true
+         *  (boot / busy / input-hot). CL_PANE_PROBE_FAST_MS. */
+        pane_probe_fast_ms: number;
+        /** #722 — pane-probe interval when `shouldPollFast(input)` is false
+         *  (idle, no recent input). CL_PANE_PROBE_SLOW_MS. */
+        pane_probe_slow_ms: number;
         /** #345: treat a bare ESC in the pane as a human takeover (arms the
          *  user-grace so the loop yields). PTY-proxy only. CL_ESC_TAKEOVER. */
         esc_takeover: boolean;
@@ -292,6 +302,10 @@ const DEFAULTS: AiballConfig = {
         auto_resume: true,
         user_grace_seconds: 60,
         wake_in_flight_ttl_ms: 2000,
+        // #722 — input-hot + 2-rate pane probe defaults.
+        input_hot_ttl_ms: 3000,
+        pane_probe_fast_ms: 200,
+        pane_probe_slow_ms: 1000,
         esc_takeover: true,
         // #351 / #381: 10-min ask-grace. AFK = a single ATOMIC combo that
         // TOGGLES away/back — #381 (david s4r9n8) dropped the 2-press timing
@@ -570,6 +584,16 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             }
             if (typeof cl.wake_in_flight_ttl_ms === "number" && cl.wake_in_flight_ttl_ms > 0) {
                 cfg.claude_loop.wake_in_flight_ttl_ms = cl.wake_in_flight_ttl_ms;
+            }
+            // #722 — input-hot + 2-rate pane probe.
+            if (typeof cl.input_hot_ttl_ms === "number" && cl.input_hot_ttl_ms > 0) {
+                cfg.claude_loop.input_hot_ttl_ms = cl.input_hot_ttl_ms;
+            }
+            if (typeof cl.pane_probe_fast_ms === "number" && cl.pane_probe_fast_ms > 0) {
+                cfg.claude_loop.pane_probe_fast_ms = cl.pane_probe_fast_ms;
+            }
+            if (typeof cl.pane_probe_slow_ms === "number" && cl.pane_probe_slow_ms > 0) {
+                cfg.claude_loop.pane_probe_slow_ms = cl.pane_probe_slow_ms;
             }
             if (typeof cl.esc_takeover === "boolean") {
                 cfg.claude_loop.esc_takeover = cl.esc_takeover;

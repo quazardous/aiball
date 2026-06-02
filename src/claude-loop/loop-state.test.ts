@@ -12,12 +12,15 @@ import {
     canFlipBgFromBoot,
     canPaintStopOnTyping,
     computeLoopView,
+    inputHotAgeMs,
     isAfkHeld,
     isAutonomous,
     isBootPhase,
+    isInputHot,
     isReallyBusy,
     LoopStateBus,
     shouldArmAfk10mOnSettleBoot,
+    shouldPollFast,
     type LoopStateInput,
 } from "./loop-state.js";
 
@@ -57,6 +60,8 @@ function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
         wakeInFlightAtMs: null,
         wakeInFlightTtlMs: 2 * SEC,
         busyDeferUntilMs: null,
+        // #722 — input-hot TTL (3s default in autopoll/config).
+        inputHotTtlMs: 3 * SEC,
         manualWake: false,
         ...overrides,
     };
@@ -1077,4 +1082,131 @@ test("LoopStateBus.busy : first update with idle input emits nothing", () => {
     bus.on("busy", (next, prev) => { calls.push([next, prev]); });
     bus.update(baseInput({ paneBusy: false, paneCompacting: false }));
     assert.deepEqual(calls, []);
+});
+
+// #722 — `inputHotAgeMs(input)` + `isInputHot(input)` semantic helpers.
+// Pure observable derived from `humanTypingAtMs` + `inputHotTtlMs`.
+
+test("inputHotAgeMs : null when no keystroke observed", () => {
+    assert.equal(inputHotAgeMs(baseInput({ humanTypingAtMs: null })), null);
+});
+
+test("inputHotAgeMs : delta from now", () => {
+    const now = T0 + 10 * SEC;
+    assert.equal(inputHotAgeMs(baseInput({ nowMs: now, humanTypingAtMs: now - 500 })), 500);
+});
+
+test("isInputHot : false when no keystroke observed", () => {
+    assert.equal(isInputHot(baseInput({ humanTypingAtMs: null })), false);
+});
+
+test("isInputHot : true inside the TTL window", () => {
+    const now = T0 + 10 * SEC;
+    assert.equal(isInputHot(baseInput({
+        nowMs: now,
+        humanTypingAtMs: now - 1000, // 1s ago < 3s TTL
+        inputHotTtlMs: 3 * SEC,
+    })), true);
+});
+
+test("isInputHot : false past the TTL window", () => {
+    const now = T0 + 10 * SEC;
+    assert.equal(isInputHot(baseInput({
+        nowMs: now,
+        humanTypingAtMs: now - 5 * SEC, // 5s ago > 3s TTL
+        inputHotTtlMs: 3 * SEC,
+    })), false);
+});
+
+test("LoopStateBus.inputHot : cold → hot emits inputHot(true, false)", () => {
+    const bus = new LoopStateBus();
+    const now = T0 + 10 * SEC;
+    bus.update(baseInput({ nowMs: now, humanTypingAtMs: null }));
+    const calls: Array<[boolean, boolean]> = [];
+    bus.on("inputHot", (next, prev) => { calls.push([next, prev]); });
+    bus.update(baseInput({ nowMs: now + 100, humanTypingAtMs: now + 50 }));
+    assert.deepEqual(calls, [[true, false]]);
+});
+
+test("LoopStateBus.inputHot : hot → cold emits inputHot(false, true) when TTL expires", () => {
+    const bus = new LoopStateBus();
+    const t0 = T0 + 10 * SEC;
+    bus.update(baseInput({ nowMs: t0, humanTypingAtMs: t0 - 100, inputHotTtlMs: 3 * SEC }));
+    const calls: Array<[boolean, boolean]> = [];
+    bus.on("inputHot", (next, prev) => { calls.push([next, prev]); });
+    // Same humanTypingAtMs ; nowMs advances past TTL → hot becomes cold.
+    bus.update(baseInput({ nowMs: t0 + 5 * SEC, humanTypingAtMs: t0 - 100, inputHotTtlMs: 3 * SEC }));
+    assert.deepEqual(calls, [[false, true]]);
+});
+
+test("LoopStateBus.inputHot : first update with hot input emits inputHot(true, false)", () => {
+    const bus = new LoopStateBus();
+    const calls: Array<[boolean, boolean]> = [];
+    bus.on("inputHot", (next, prev) => { calls.push([next, prev]); });
+    const now = T0 + 10 * SEC;
+    bus.update(baseInput({ nowMs: now, humanTypingAtMs: now - 100 }));
+    assert.deepEqual(calls, [[true, false]]);
+});
+
+// #722 — `shouldPollFast(input)` aggregator + `pollFast` bus event.
+// OR of {boot, busy, input-hot}.
+
+test("shouldPollFast : false when idle / post-boot / no input", () => {
+    // Past bootMinMs (30s floor) so isInBootGrace = false.
+    assert.equal(shouldPollFast(baseInput({
+        nowMs: T0 + 5 * MIN,
+        loopStartMs: T0,
+    })), false);
+});
+
+test("shouldPollFast : true in boot phase", () => {
+    // Boot-floor (within bootMinMs of loopStartMs) — guaranteed boot.
+    assert.equal(shouldPollFast(baseInput({
+        nowMs: T0 + 1 * SEC,
+        loopStartMs: T0,
+    })), true);
+});
+
+test("shouldPollFast : true when busy (paneBusy)", () => {
+    assert.equal(shouldPollFast(baseInput({
+        nowMs: T0 + 5 * MIN, loopStartMs: T0, paneBusy: true,
+    })), true);
+});
+
+test("shouldPollFast : true when compacting", () => {
+    assert.equal(shouldPollFast(baseInput({
+        nowMs: T0 + 5 * MIN, loopStartMs: T0, paneCompacting: true,
+    })), true);
+});
+
+test("shouldPollFast : true when input-hot", () => {
+    const now = T0 + 5 * MIN;
+    assert.equal(shouldPollFast(baseInput({
+        nowMs: now,
+        loopStartMs: T0,
+        humanTypingAtMs: now - 500,
+    })), true);
+});
+
+test("LoopStateBus.pollFast : transitions on input-hot toggle (post-boot, idle)", () => {
+    const bus = new LoopStateBus();
+    const t0 = T0 + 5 * MIN; // past bootMinMs (30s)
+    // Idle baseline post-boot.
+    bus.update(baseInput({ nowMs: t0, loopStartMs: T0, humanTypingAtMs: null }));
+    const calls: Array<[boolean, boolean]> = [];
+    bus.on("pollFast", (next, prev) => { calls.push([next, prev]); });
+    // Keystroke → input-hot → poll-fast true.
+    bus.update(baseInput({ nowMs: t0 + 100, loopStartMs: T0, humanTypingAtMs: t0 + 50 }));
+    // TTL expires → poll-fast false.
+    bus.update(baseInput({ nowMs: t0 + 5 * SEC, loopStartMs: T0, humanTypingAtMs: t0 + 50, inputHotTtlMs: 3 * SEC }));
+    assert.deepEqual(calls, [[true, false], [false, true]]);
+});
+
+test("LoopStateBus.pollFast : first update emits pollFast(true, false) when fast at boot", () => {
+    const bus = new LoopStateBus();
+    const calls: Array<[boolean, boolean]> = [];
+    bus.on("pollFast", (next, prev) => { calls.push([next, prev]); });
+    // Boot phase first input → shouldPollFast true → emits.
+    bus.update(baseInput({ nowMs: T0 + 1 * SEC, loopStartMs: T0 }));
+    assert.deepEqual(calls, [[true, false]]);
 });

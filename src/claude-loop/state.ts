@@ -1014,6 +1014,7 @@ export function readLoopStateInput(
         0,
     );
     const wakeInFlightTtlMs = Math.max(0, cfg.wake_in_flight_ttl_ms);
+    const inputHotTtlMs = Math.max(0, cfg.input_hot_ttl_ms);
 
     function safeMtime(p: string): number | null {
         try { return existsSync(p) ? statSync(p).mtimeMs : null; } catch { return null; }
@@ -1049,6 +1050,7 @@ export function readLoopStateInput(
         wakeInFlightAtMs: safeMtime(wakeInFlightPath(sd)),
         wakeInFlightTtlMs,
         busyDeferUntilMs: safeIsoMs(busyDeferUntilPath(sd)),
+        inputHotTtlMs,
         manualWake: opts.manualWake ?? false,
     };
 }

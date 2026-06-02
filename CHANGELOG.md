@@ -23,6 +23,20 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-06-02
+
+### Changed
+
+- The pane-marker probe now runs at two rates instead of a flat 1s tick:
+  it speeds up to ~200ms whenever any of {boot phase, claude busy,
+  recent keystroke} is true, and falls back to ~1s when none of those
+  apply. Detection of `/compact` and other slash-command transitions
+  now happens sub-second instead of taking up to a heartbeat, while
+  idle cost stays at the previous constant. Two new config knobs
+  (`claude_loop.pane_probe_fast_ms` default 200, `pane_probe_slow_ms`
+  default 1000) plus an input-hot TTL (`input_hot_ttl_ms` default 3000)
+  let you tune the cadence per project ; env overrides also available.
+
 ## [0.22.0] — 2026-06-02
 
 ### Fixed

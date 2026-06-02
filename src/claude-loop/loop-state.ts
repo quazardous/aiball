@@ -92,6 +92,11 @@ export interface LoopStateInput {
     paneCompacting: boolean;
     paneInterrupted: boolean;
 
+    /** #722 — TTL for the input-hot observable. A keystroke is « hot »
+     *  if it landed within this window (typically 3_000ms). Drives the
+     *  pane-probe cadence via `shouldPollFast`. */
+    inputHotTtlMs: number;
+
     /** True when this tryWake invocation was manually requested (file
      *  marker bypass) — skips most gates (boot, user-grace, AFK, defer). */
     manualWake?: boolean;
@@ -387,6 +392,41 @@ export function isReallyBusy(input: LoopStateInput): boolean {
     return input.paneBusy || input.paneCompacting;
 }
 
+/** #722 — Time elapsed (ms) since the last detected keystroke ; null
+ *  if none has been observed yet. Pure « age » helper — consumers
+ *  decide what to do with the number (compare to a threshold, log a
+ *  debug line, drive a cadence, etc.). */
+export function inputHotAgeMs(input: LoopStateInput): number | null {
+    if (input.humanTypingAtMs === null) return null;
+    return input.nowMs - input.humanTypingAtMs;
+}
+
+/** #722 — True iff a keystroke landed within the configured
+ *  `inputHotTtlMs` window. Pure observable — orthogonal to phase /
+ *  AFK / busy. Consumers pick it up via the SM bus and decide what it
+ *  means (e.g. faster pane poll cadence, future input-vs-takeover
+ *  nuances on V3 #716). */
+export function isInputHot(input: LoopStateInput): boolean {
+    const age = inputHotAgeMs(input);
+    if (age === null) return false;
+    return age < input.inputHotTtlMs;
+}
+
+/** #722 — Should the pane-probe run at FAST rate (vs SLOW)?
+ *  Aggregates the business signals that justify a tighter poll:
+ *  - boot phase (catch picker / resume transitions quickly)
+ *  - claude busy (mid-turn state changes more often)
+ *  - input-hot (recent keystroke → claude may react)
+ *  OR semantics : any one says fast. Single composition site so a
+ *  future gate (e.g. error backoff transient) just adds one branch
+ *  without rewiring every consumer. */
+export function shouldPollFast(input: LoopStateInput): boolean {
+    if (isInBootGrace(input)) return true;
+    if (isReallyBusy(input)) return true;
+    if (isInputHot(input)) return true;
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 //  #630 david `e4ejra` — LoopStateBus
 //
@@ -413,6 +453,15 @@ export type LoopStateEvents = {
      *  paints, etc.). Aligned with `phaseChanged` / `barWordChanged`
      *  pattern : verb + (next, prev). */
     busy: (next: boolean, prev: boolean) => void;
+    /** #722 — `isInputHot(input)` flipped. `next=true` = a recent
+     *  keystroke landed in the TTL window ; `next=false` = the window
+     *  expired. Pure observable, consumers free. */
+    inputHot: (next: boolean, prev: boolean) => void;
+    /** #722 — `shouldPollFast(input)` flipped. `next=true` = at least
+     *  one of boot / busy / input-hot is true ; pane-probe should run
+     *  at `pane_probe_fast_ms`. `next=false` = back to slow. Timer's
+     *  pane-probe subscribes here to re-arm its setInterval. */
+    pollFast: (next: boolean, prev: boolean) => void;
     /** boot grace just ended (in→out of boot). */
     bootEnded: (next: LoopStateView) => void;
     /** boot grace re-entered (rare — typically on reload). */
@@ -473,8 +522,13 @@ export class LoopStateBus {
         const next = computeLoopView(input);
         if (this.lastView !== null && this.lastInput !== null) {
             this.emitDiffs(this.lastView, next, this.lastInput, input);
-        } else if (isReallyBusy(input)) {
-            this.emit("busy", true, false);
+        } else {
+            // First update : treat the missing prior state as "all false"
+            // for the boolean axes so consumers wake correctly if claude
+            // is already busy / input-hot / poll-fast on boot.
+            if (isReallyBusy(input)) this.emit("busy", true, false);
+            if (isInputHot(input)) this.emit("inputHot", true, false);
+            if (shouldPollFast(input)) this.emit("pollFast", true, false);
         }
         this.lastView = next;
         this.lastInput = input;
@@ -493,6 +547,17 @@ export class LoopStateBus {
         const prevBusy = isReallyBusy(prevInput);
         const nextBusy = isReallyBusy(nextInput);
         if (prevBusy !== nextBusy) this.emit("busy", nextBusy, prevBusy);
+        // #722 — input-hot transition (recent keystroke ↔ window expired).
+        // Pure observable ; consumers may compose it (see shouldPollFast).
+        const prevInputHot = isInputHot(prevInput);
+        const nextInputHot = isInputHot(nextInput);
+        if (prevInputHot !== nextInputHot) this.emit("inputHot", nextInputHot, prevInputHot);
+        // #722 — aggregated poll-rate decision (boot / busy / input-hot).
+        // Subscribers (timer.ts pane-probe) re-arm their setInterval to
+        // the fast vs slow ms on transition.
+        const prevFast = shouldPollFast(prevInput);
+        const nextFast = shouldPollFast(nextInput);
+        if (prevFast !== nextFast) this.emit("pollFast", nextFast, prevFast);
         if (prev.inBootGrace && !next.inBootGrace) this.emit("bootEnded", next);
         if (!prev.inBootGrace && next.inBootGrace) this.emit("bootStarted", next);
         // AFK transitions — driven by the underlying file mode, not the

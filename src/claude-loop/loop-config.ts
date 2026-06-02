@@ -68,6 +68,10 @@ function applyEnvOverrides(cfg: AiballConfig): void {
     if ((ov = bool(CL_ENV.ESC_TAKEOVER)) !== undefined) cl.esc_takeover = ov;
     if ((ov = str(CL_ENV.DRAINED_STRATEGY)) !== undefined) cl.drained_strategy = ov;
     if ((ov = str(CL_ENV.LOG_LEVEL)) !== undefined) cl.log_level = ov;
+    // #722 — input-hot + 2-rate pane probe env overrides.
+    if ((ov = num(CL_ENV.INPUT_HOT_TTL_MS)) !== undefined) cl.input_hot_ttl_ms = ov;
+    if ((ov = num(CL_ENV.PANE_PROBE_FAST_MS)) !== undefined) cl.pane_probe_fast_ms = ov;
+    if ((ov = num(CL_ENV.PANE_PROBE_SLOW_MS)) !== undefined) cl.pane_probe_slow_ms = ov;
 }
 
 /** For tests — clear the cache so a fresh loadConfig runs on next call. */
