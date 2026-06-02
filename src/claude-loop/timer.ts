@@ -1235,6 +1235,13 @@ async function mainSse(): Promise<void> {
     }
     log("tmux session gone — timer exiting");
     wakeBus.close();
+    // #714 — explicit process.exit so pending handles (setInterval, fs.watch,
+    // UDS servers, hook subscribers, boot-grace setTimeout) don't keep the
+    // dying timer alive. Without this, an orphan timer survives the tmux
+    // teardown and its 60s boot-grace setTimeout later injects a phantom
+    // `boot-settle` wake into whatever new tmux session bears the same
+    // name — david's "ça bug sans arret" + repeated auto-kill.
+    process.exit(0);
 }
 
 /**
@@ -1265,6 +1272,9 @@ async function mainPoll(): Promise<void> {
         if (!woke && existsSync(idleMarkerPath(sd!))) selfReloadIfStale();
     }
     log("tmux session gone — timer exiting");
+    // #714 — same explicit exit as mainSse (handles pinned by signals,
+    // fs.watch, etc. would otherwise keep this dead process alive).
+    process.exit(0);
 }
 
 async function main(): Promise<void> {
