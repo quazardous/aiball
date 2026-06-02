@@ -172,7 +172,7 @@ export const tickets = sqliteTable("tickets", {
      * claimable work-order (#436 decision 4).
      *
      * CLAIM — `claimant` / `claimedAt`: the FOCUS an agent *self-declares* ("I'm on
-     * this now"), via ticket_engage / a self ticket_assign. TRANSIENT: the live
+     * this now"), via ticket_claim. TRANSIENT: the live
      * window is DERIVED (`now − claimedAt < assign_window_sec`, same pattern as
      * hot) and one-focus (engage releases the prior uncommented claim). Drives the
      * work-order tiebreak (#430) + token attribution (#434).
@@ -606,7 +606,7 @@ export const consumers = sqliteTable("consumers", {
     lastSeenIp: text("last_seen_ip"),
     /**
      * #508 david `xc967a` — global per-consumer flag : 1 (défaut) = peut
-     * claim normalement via `ticket_engage` / le pool claimable. 0 = consumer
+     * claim normalement via `ticket_claim` / le pool claimable. 0 = consumer
      * spécialiste (assignment-only) : engage skip le pool global et ne
      * retourne QUE les tickets explicitement assignés à ce consumer. Peut
      * toujours recevoir un push d'assignement, commenter, resolved/close,

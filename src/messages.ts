@@ -193,7 +193,7 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
  * An unknown consumer (never seen before — possible during the very
  * first comment_added before `ensureConsumer` lands the row) is
  * treated as "no rights" — the auto-claim is skipped, the explicit
- * `ticket_engage` path is the path forward for them.
+ * `ticket_claim` path is the path forward for them.
  */
 function canAutoClaim(author: string, ticketProject: string): boolean {
     const c = getConsumer(author);

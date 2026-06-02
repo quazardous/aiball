@@ -96,7 +96,7 @@ export interface AiballConfig {
         project_source: ConsumerSource | null;
         /**
          * #508 phase A2 (david `qmwp66`) — when true, this project's agent is
-         * declared "no-claim" : `ticket_engage` skips the global claimable pool
+         * declared "no-claim" : `ticket_claim` skips the global claimable pool
          * and only surfaces tickets explicitly assigned. claude-loop exports
          * `AIBALL_NO_CLAIM=1` when set, and the client lib injects
          * `x-aiball-no-claim: 1` on every API request → upstream's auth picks

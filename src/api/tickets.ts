@@ -138,7 +138,7 @@ ticketsRouter.post("/tickets/:id/assign", (req: Request, res: Response) => {
     // un moderator peut claim pendant la review (focus de modération).
     // Push-assign (isClaim=false) reste discretionnel : moderator peut
     // pré-déléguer un pending à un agent, qui sera notifié à l'approve.
-    // Couvre aussi MCP `ticket_engage` qui delegate via
+    // Couvre aussi MCP `ticket_claim` qui delegate via
     // `client.assignTicket(head.id)` (cf. src/mcp/ticket-write.ts).
     if (isClaim && t.status !== "approved" && !isHuman(caller)) {
         return res.status(409).json({
@@ -701,14 +701,14 @@ ticketsRouter.get("/tickets", (req, res) => {
     // still actionable/visible); claimable = actionable ∩ {projects where THIS
     // consumer is an `owner`}. Claiming commits you to the work, which belongs
     // to that project's owners — so a project you only `follow` is actionable
-    // but not claimable. `ticket_engage` + the wake-CTA head use this set.
+    // but not claimable. `ticket_claim` + the wake-CTA head use this set.
     const onlyClaimable = req.query.claimable === "1";
     // #461 — predict the POST-DRAIN work-order head. With `assume_drained=1`,
     // the work-order sort treats every currently-unread ticket as if its ping
     // had already been ack'd: the `unread` tier is suppressed, all rows
     // collapse into the `actionable` tier and re-sort by priority/age. The
     // wake builder uses this when it instructs the agent to "drain pings,
-    // THEN engage" so the named #X matches what `ticket_engage` will actually
+    // THEN claim" so the named #X matches what `ticket_claim` will actually
     // claim after the drain (without this flag, the wake names the pre-drain
     // unread-tier head and the agent's drain demotes it before engage runs,
     // surfacing a different ticket — the friction david pointed at). Affects
@@ -934,7 +934,7 @@ ticketsRouter.get("/tickets", (req, res) => {
         result = result.filter((t) => actionableIds.has(t.id));
     }
     if (onlyClaimable) {
-        // #432: actionable ∩ owned-project. The narrower set ticket_engage
+        // #432: actionable ∩ owned-project. The narrower set ticket_claim
         // claims from, so a cross-project follower-broadcast is never claimed.
         result = result.filter((t) => isClaimable(t.id, t.project, t.assignee ?? null));
     }
@@ -975,7 +975,7 @@ ticketsRouter.get("/tickets", (req, res) => {
             tierOf: (id) =>
                 // #461 — `assume_drained` flag skips the unread-tier check so
                 // unread tickets fall into actionable-tier alongside the rest
-                // and the head matches what `ticket_engage` returns AFTER the
+                // and the head matches what `ticket_claim` returns AFTER the
                 // agent drains its pings.
                 (!assumeDrained && unreadMap.get(id)) ? 0 : actionableIds.has(id) ? 1 : openIds.has(id) ? 2 : 3,
             priorityWeight: (p) => PRIORITY_WEIGHT[p ?? "normal"] ?? 2,

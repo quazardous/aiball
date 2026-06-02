@@ -68,7 +68,7 @@ async function main(): Promise<void> {
     ok(`#${id} close auto-released the assignment → shared pool on reopen`);
 
     // auto-claim (discipline A): an agent's first comment on an unheld ticket
-    // claims it for that agent — no explicit ticket_assign needed.
+    // claims it for that agent — no explicit ticket_claim needed.
     const t2 = await post(tokDavid, { project, kind: "ticket_created", title: "auto-claim e2e", by_agent: "david" });
     const id2 = (t2.ticket_id ?? t2.id) as number;
     if (!(await isActionable(tokB, id2))) fail(`fresh #${id2} should be in agent-b's pool`);

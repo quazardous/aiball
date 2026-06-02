@@ -23,6 +23,28 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-06-02
+
+### Changed
+
+- The agent-side pickup tool is now `ticket_claim` (unified). Zero-arg
+  picks the head of your claimable work-order and self-claims it in one
+  step (replaces the former `ticket_engage()`). Pass `ticket_id` to
+  self-claim a specific ticket. The wake CTA was reworded from
+  *"engage #N first"* to *"claim #N first"* so the verb in the prompt
+  matches the tool name and no longer collides with the human-typed
+  catchphrase greenlight *"Engage!"* (which keeps its existing meaning
+  of "execute the proposal I just made").
+
+### Removed
+
+- The MCP tools `ticket_engage` and `ticket_assign` are gone — both
+  replaced by `ticket_claim`. Pushing an assignment **onto another
+  agent** stays available, but it's UI-only now (the moderator endpoint
+  still exists). Agents that called `ticket_engage()` need to call
+  `ticket_claim()`; agents that called `ticket_assign({assignee: own_id})`
+  for self-claim need to call `ticket_claim({ticket_id})`.
+
 ## [0.20.2] — 2026-06-01
 
 ### Added

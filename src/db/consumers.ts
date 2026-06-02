@@ -62,7 +62,7 @@ export interface Consumer {
     /** #422: derived — is this consumer remote (node-relayed, or TCP from a
      *  non-loopback peer)? Convenience for the UI; computed from via + ip. */
     remote?: boolean;
-    /** #508 — true (défaut) = peut claim normalement via `ticket_engage` /
+    /** #508 — true (défaut) = peut claim normalement via `ticket_claim` /
      *  pool claimable. false = consumer "spécialiste" : engage skip le pool
      *  global et ne retourne QUE les tickets explicitement assignés. Peut
      *  toujours recevoir push d'assignement, commenter, resolved, etc. */

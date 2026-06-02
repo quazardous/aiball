@@ -29,7 +29,7 @@ export function registerTicketReadTools(server: McpServer): void {
                 claimable: z
                     .boolean()
                     .optional()
-                    .describe("If true, only tickets you can CLAIM: `actionable` AND in a project you OWN (role=owner). Narrower than `actionable` — a follower-broadcast from a project you only follow is actionable/visible but NOT claimable (the work belongs to that project's owners). This is the exact set `ticket_engage` claims from. Every row also carries a per-consumer `claimable` boolean so you can slice the list yourself."),
+                    .describe("If true, only tickets you can CLAIM: `actionable` AND in a project you OWN (role=owner). Narrower than `actionable` — a follower-broadcast from a project you only follow is actionable/visible but NOT claimable (the work belongs to that project's owners). This is the exact set a bare `ticket_claim()` picks from. Every row also carries a per-consumer `claimable` boolean so you can slice the list yourself."),
                 include_snoozed: z
                     .boolean()
                     .optional()

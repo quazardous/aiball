@@ -142,10 +142,11 @@ cases):
 Two distinct holds, both anti-collision, split from one fused field:
 
 - **Assignment** (`assignee` / `assigned_by` / `assigned_at`) — a *responsibility*
-  a human/moderator **pushes** onto a consumer. **Persistent** (no expiry). An
-  agent can only self-claim; pushing onto a third party is moderator-only.
+  a human/moderator **pushes** onto a consumer via the web UI. **Persistent**
+  (no expiry). Human-only — agents have no MCP path to assign to a third party.
 - **Claim** (`claimant` / `claimed_at`) — a *focus* an agent **self-declares**
-  ("I'm on this now"), via `ticket_engage` or a self `ticket_assign`.
+  ("I'm on this now"), via `ticket_claim` (zero-arg picks the work-order head;
+  with `ticket_id` claims that specific ticket).
   **Transient**: the live window is derived (`now − claimed_at < assign_window_sec`).
 
 A ticket can be **both** at once. The **hold gate** (`isHeldByOther`,
@@ -156,15 +157,15 @@ no assignment → not gated (falls through to `last_actor`). Both holds clear on
 close/resolve (`releaseTicketHold`).
 
 - **One focus at a time (#439).** A self-claim auto-releases C's *other* **live**
-  claims that are *bare pickups* — engage/assign claims C never commented on (zero
-  work lost). Claims C actually worked survive: posting an approved comment
-  **auto-claims** the ticket (#418), so a worked ticket's `claimed_at` *equals* C's
-  latest comment (`lastMs >= claimedMs`), whereas a bare engage-claim's
-  `claimed_at` is strictly after any earlier comment → released. The ticket being
-  engaged is never dropped (re-engage stays idempotent). Stops an agent stacking
-  locks that each drop a ticket from every other agent's pool. (`claimsToAutoRelease`,
-  pure + tested; wired in `POST /tickets/:id/assign`, surfaced as `released_claims`,
-  relayed by `ticket_engage`.)
+  claims that are *bare pickups* — claims C never commented on (zero work lost).
+  Claims C actually worked survive: posting an approved comment **auto-claims**
+  the ticket (#418), so a worked ticket's `claimed_at` *equals* C's latest comment
+  (`lastMs >= claimedMs`), whereas a bare pickup-claim's `claimed_at` is strictly
+  after any earlier comment → released. The ticket just claimed is never dropped
+  (re-claim stays idempotent). Stops an agent stacking locks that each drop a
+  ticket from every other agent's pool. (`claimsToAutoRelease`, pure + tested;
+  wired in `POST /tickets/:id/assign`, surfaced as `released_claims`, relayed by
+  `ticket_claim`.)
 - **Token attribution (#439).** A turn's token-usage is attributed to C's
   **most-recently-claimed live** claim (the durable focus), falling back to the
   volatile `active-ticket` marker only when C holds no live claim — so an

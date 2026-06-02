@@ -64,7 +64,7 @@ export function isHeldByOther(
 }
 
 /**
- * #439 one-focus — when a consumer self-claims (engage / self ticket_assign)
+ * #439 one-focus — when a consumer self-claims (self-claim)
  * ticket `keepId`, decide which of their OTHER live claims to AUTO-RELEASE so an
  * agent holds ONE focus at a time instead of accumulating locks (each live claim
  * drops a ticket from every other agent's pool + boosts it in the holder's own

@@ -296,7 +296,7 @@ export function setTicketAssignment(
 
 /**
  * #436: CLAIM — an agent self-declares FOCUS ("I'm on this now"), via
- * ticket_engage or a self ticket_assign. Transient: the live window is derived
+ * ticket_claim. Transient: the live window is derived
  * (`now − claimedAt < assign_window_sec`) and one-focus. Drives the work-order
  * tiebreak (#430) + token attribution (#434). Independent of any assignment.
  */

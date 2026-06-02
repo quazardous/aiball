@@ -357,29 +357,6 @@ export function registerTicketWriteTools(server: McpServer): void {
         },
     );
 
-    // #418: ticket → agent assignment for the multi-agent anti-collision gate.
-    server.registerTool(
-        "ticket_assign",
-        {
-            description:
-                "Assign or claim a ticket so multiple agents on one project don't double-work it. Omit `assignee` (or pass your own consumer id) to CLAIM it for yourself: a live claim drops the ticket out of every OTHER agent's actionable pool while you work it. Pass another consumer's id to PUSH the assignment onto them — moderator/human only (an agent can only claim for itself; pushing to a third party is rejected). The hold is time-boxed: it lapses after the configured assign window (default 4h) so an abandoned claim returns to the shared pool, and it auto-releases when the ticket closes. Hand it back early with ticket_release.",
-            inputSchema: {
-                ticket_id: z.number().int().describe("Ticket id (the integer in #<id>)."),
-                assignee: z
-                    .string()
-                    .optional()
-                    .describe(
-                        "Consumer id to assign to. Omit (or pass your own id) to claim it for yourself; assigning a different consumer is moderator-only.",
-                    ),
-            },
-        },
-        async ({ ticket_id, assignee }) => {
-            markActiveTicket(ticket_id); // #404: focus = this ticket (token attribution)
-            const res = await client.assignTicket(ticket_id, assignee);
-            return asText(res);
-        },
-    );
-
     server.registerTool(
         "ticket_release",
         {
@@ -396,47 +373,47 @@ export function registerTicketWriteTools(server: McpServer): void {
         },
     );
 
-    // #423: the WORK tool, distinct from ticket_list (the EXPLORATION tool).
-    // david: « ticket_list = outil d'exploration ; scinder l'outil de travail ».
-    // engage = fetch the head of YOUR actionable work-order AND claim it in one
-    // step, so the claim lands BEFORE the first comment (closes the
-    // pickup→first-comment window of #418's auto-claim A). Reuses the exact
-    // ticket_list({actionable}) path → same head as the wake-CTA names; the
-    // claim reuses #418 self-assign. Read-only browse stays on ticket_list.
+    // The unified pickup tool (#706). Replaces the former ticket_engage (zero-arg
+    // = head pick + claim) and the agent-side self-claim path of ticket_assign
+    // (which is gone from the MCP surface — assignment-to-another is UI-only).
+    // Zero-arg → fetch the head of YOUR claimable work-order and claim it in
+    // one step. With ticket_id → self-claim that specific ticket.
     server.registerTool(
-        "ticket_engage",
+        "ticket_claim",
         {
             description:
-                "Take charge of your NEXT ticket: returns the head of YOUR CLAIMABLE work-order (same gate + order as `ticket_list({claimable: true})` — priority desc, then hot, then oldest) AND claims it for you in one step. Claimable = actionable AND in a project you OWN, so engage never claims a follower-broadcast from a project you only follow (that work belongs to that project's owners, #432). A live claim drops the ticket out of every OTHER agent's actionable pool while you work it (anti-collision, #418), and the claim lands BEFORE your first comment so your intent shows immediately. Use THIS — not `ticket_list` — when you're actually picking up work: `ticket_list` is the EXPLORATION/backlog tool (read-only, never claims). **Engaging is NOT an authorization to implement.** It commits you to read / triage / answer / propose a plan. For `intent: \"feature\"` work or an umbrella ticket with sub-tickets, code only after a formal `then: \"plan\"` is accepted by the human ; engaging a parent never cascades the go to its children (#669). Returns `{ engaged: null }` when your queue is empty (nothing claimed). Idempotent: re-engaging the head you already hold just refreshes the claim window.",
+                "Self-claim a ticket so other agents on the same project don't double-work it. Zero-arg = pick the head of YOUR CLAIMABLE work-order (same gate + order as `ticket_list({claimable: true})` — priority desc, then hot, then oldest) AND claim it in one step. Pass `ticket_id` to self-claim that specific ticket instead. Claimable = actionable AND in a project you OWN, so a bare `ticket_claim()` never claims a follower-broadcast from a project you only follow (that work belongs to that project's owners, #432). A live claim drops the ticket out of every OTHER agent's actionable pool while you work it (anti-collision, #418), and the claim lands BEFORE your first comment so your intent shows immediately. Use THIS — not `ticket_list` — when you actually pick up work: `ticket_list` is the EXPLORATION/backlog tool (read-only, never claims). **Claiming is NOT an authorization to implement.** It commits you to read / triage / answer / propose a plan. For `intent: \"feature\"` work or an umbrella ticket with sub-tickets, code only after a formal `then: \"plan\"` is accepted by the human ; claiming a parent never cascades the go to its children (#669). Zero-arg returns `{ claimed: null }` when your queue is empty. Idempotent: re-claiming the head you already hold just refreshes the claim window. Assigning a ticket TO another agent is human-only via the web UI — agents can only self-claim.",
             inputSchema: {
+                ticket_id: z
+                    .number()
+                    .int()
+                    .optional()
+                    .describe(
+                        "Specific ticket id (the integer in #<id>) to self-claim. Omit to pick the head of your claimable work-order automatically.",
+                    ),
                 project: z
                     .string()
                     .optional()
-                    .describe("Restrict the work-order to one project. Defaults to $AIBALL_PROJECT if set."),
+                    .describe(
+                        "Zero-arg mode only: restrict the work-order to one project. Defaults to $AIBALL_PROJECT if set. Ignored when `ticket_id` is provided.",
+                    ),
             },
         },
-        async ({ project }) => {
-            // Head of MY actionable work-order — same endpoint/params as
-            // ticket_list({actionable:true}), so the head is identical to the
-            // one the wake-CTA names. limit:1 → just the top row. The daemon
-            // returns a bare array (the {_status,result} envelope is added
-            // MCP-side by asText, not by the client).
-            //
-            // #432: apply the AIBALL_PROJECT default softly (like line ~311 /
-            // the wake-CTA). Without it, a bare engage() passed project=undefined
-            // straight through → the daemon ran cross-project → returned the
-            // globally-oldest actionable, which can be a FOLLOWER-broadcast from
-            // a DIFFERENT project (e.g. a qdadm migration notice claimed by an
-            // aiball agent). An explicit project still wins; a genuinely unset
-            // default stays cross-project (matches "Defaults to $AIBALL_PROJECT
-            // if set").
+        async ({ ticket_id, project }) => {
+            // Specific-ticket mode: just self-claim that one.
+            if (ticket_id !== undefined) {
+                markActiveTicket(ticket_id); // #404: focus = this ticket
+                const claim = await client.assignTicket(ticket_id); // no assignee → self-claim (#418)
+                const ticket = await client.getTicket(ticket_id, { brief: true });
+                return asText({ claimed: ticket_id, claim, ticket });
+            }
+            // Zero-arg mode: pick the head of MY claimable work-order — same
+            // endpoint/params as ticket_list({claimable:true}), so the head is
+            // identical to the one the wake-CTA names. #432: default to
+            // AIBALL_PROJECT softly so a bare ticket_claim() doesn't return a
+            // follower-broadcast from a different project the agent only
+            // follows.
             const proj = project ?? client.defaultProject ?? undefined;
-            // #432: engage the head of the CLAIMABLE set (actionable ∩ projects
-            // I own), not just actionable. So even cross-project (project unset)
-            // engage never claims a follower-broadcast from a project I only
-            // follow — that work belongs to that project's owners. The #432
-            // project-default above stays (orthogonal: it scopes the common
-            // single-project case); claimable is the conceptual backstop.
             const rows = (await client.listTickets({
                 project: proj,
                 claimable: "1",
@@ -444,12 +421,12 @@ export function registerTicketWriteTools(server: McpServer): void {
             })) as Array<{ id: number }>;
             const head = Array.isArray(rows) ? rows[0] : undefined;
             if (!head) {
-                return asText({ engaged: null, reason: "no actionable ticket — your queue is empty" });
+                return asText({ claimed: null, reason: "no actionable ticket — your queue is empty" });
             }
-            markActiveTicket(head.id); // #404: focus = this ticket (token attribution)
+            markActiveTicket(head.id); // #404: focus = this ticket
             const claim = await client.assignTicket(head.id); // no assignee → self-claim (#418)
             const ticket = await client.getTicket(head.id, { brief: true });
-            return asText({ engaged: head.id, claim, ticket });
+            return asText({ claimed: head.id, claim, ticket });
         },
     );
 

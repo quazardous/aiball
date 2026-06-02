@@ -1557,18 +1557,18 @@ export async function buildContextPhrase(
                 actionable_count?: number;
             }>>,
             // #371: head of the work-order so the wake NAMES the ticket to
-            // engage instead of a bare count — kills the recency bias toward
+            // claim instead of a bare count — kills the recency bias toward
             // the newest.
             // #432: name the CLAIMABLE head (actionable ∩ owned-project), since
-            // the directive points at `ticket_engage` which only claims that
+            // the directive points at `ticket_claim` which only claims that
             // set. `claimable: "1"` (the API gate matches `=== "1"`, so this
             // actually filters, not just leans on the tiering). The counts below
             // stay actionable/open-inclusive — only the named head narrows.
             // #461: `assume_drained: "1"` predicts the POST-DRAIN head, so the
-            // named #X matches what `ticket_engage` returns AFTER the agent
+            // named #X matches what `ticket_claim` returns AFTER the agent
             // drains its pings (the wake CTA always instructs drain BEFORE
-            // engage). Without this, the wake's named head is the pre-drain
-            // unread-tier top, but the agent's drain demotes it and engage
+            // claim). Without this, the wake's named head is the pre-drain
+            // unread-tier top, but the agent's drain demotes it and claim
             // returns a different ticket — the misalignment david flagged.
             // Server-side flag (not client-side sim) so the prediction has
             // access to all ranking signals (priority + own-claim + hot +
@@ -1677,7 +1677,7 @@ export async function buildContextPhrase(
             lead: renderSlot(promptMap, "wake_lead", {}, "fyi:", tone),
             ping_count: pingCount || "",
             open_count: openCount || "",
-            // #428: a blocking gate hides the engage directive ("don't take new work").
+            // #428: a blocking gate hides the claim directive ("don't take new work").
             // #516 : aussi caché quand pas de head claimable post-drain.
             actionable_count: (blocking || !hasClaimableHead) ? "" : (actionableCount || ""),
             head_id: head?.id ?? "",
@@ -1694,7 +1694,7 @@ export async function buildContextPhrase(
             vars,
             "{culture} {lead}"
             + "{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}"
-            + "{actionable_count:+ engage #{head_id} first — top of the work order — via `ticket_engage()`.}"
+            + "{actionable_count:+ claim #{head_id} first — top of the work order — via `ticket_claim()`.}"
             + "{open_count:+{actionable_count:+ }[{open_count} open]}",
             tone,
         );
