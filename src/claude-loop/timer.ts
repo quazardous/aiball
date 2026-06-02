@@ -1073,14 +1073,6 @@ async function mainSse(): Promise<void> {
     });
     const pushViewIfChanged = (): void => {
         try {
-            // #714 david `fu9mh7` — refresh pane markers BEFORE the bus
-            // update so `paneBusy`/`paneCompacting` reflect the current
-            // pane content. Without this, the bus reads stale markers
-            // and the `busy` event fires up to 30s late (= the old
-            // heartbeat-only bootstrap cadence david caught).
-            refreshPaneMarkers();
-        } catch { /* best-effort — bus.update still runs on last-known markers */ }
-        try {
             loopBus.update(readLoopStateInput(sd!));
         } catch { /* swallow — next tick retries */ }
     };
@@ -1117,6 +1109,16 @@ async function mainSse(): Promise<void> {
     // marker change ; push once a second so the AFK chunk reflects it.
     // Also acts as a safety net if fs.watch missed an event.
     setInterval(pushViewIfChanged, 1000);
+    // #714 david — DEDICATED pane-marker refresh tick at 1s, decoupled from
+    // `pushViewIfChanged` (which fires up to ~20×/s via the typing fs.watch
+    // → schedulePush → each call used to spawn a tmux capture-pane). Capping
+    // refresh to a flat 1s keeps cost bounded (~5ms/s constant, regardless
+    // of typing rate). The bus view that `pushViewIfChanged` computes still
+    // reads the latest pane-* markers — just up to 1s stale on the tail,
+    // which is the same cadence as the `busy` event we publish anyway.
+    setInterval(() => {
+        try { refreshPaneMarkers(); } catch { /* best-effort */ }
+    }, 1000);
     // Send the initial view ASAP so the proxy paints from it instead of
     // its local bootstrap. The pusher queues until the socket is up.
     pushViewIfChanged();
