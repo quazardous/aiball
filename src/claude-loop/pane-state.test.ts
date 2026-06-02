@@ -74,11 +74,45 @@ test("classifyPaneSpecial: format minimal (texte + progress bar seule, pas de %)
     assert.equal(classifyPaneSpecial(initial), "compacting");
 });
 
-test("classifyPaneSpecial: 'Compacting' + esc to interrupt (sans progress/%) → 'compacting'", () => {
-    // Format legacy / variante rare : pas de progress visible mais turn
-    // toujours interruptible. Live signal via esc-to-interrupt.
-    const legacy = "● earlier output\n✶ Compacting conversation… (12s)\n  esc to interrupt";
-    assert.equal(classifyPaneSpecial(legacy), "compacting");
+test("classifyPaneSpecial: 'Compacting' + esc to interrupt seul (sans progress/%) → null", () => {
+    // #678 david `y3s6a8` : `esc to interrupt` retiré du live signal car
+    // c'est le marqueur busy-générique (présent au footer de TOUTE turn
+    // normale via `⏵⏵ auto mode on … · esc to interrupt`). Pairé à un
+    // `Compacting` traînant dans le scrollback, ça mis-classifierait chaque
+    // turn normale post-/compact. Seul progress bar (`▰▱`) ou `NN%`
+    // discriminent le live compact. Ce format legacy isolé (sans progress
+    // ni %) n'est plus détecté — acceptable, pas observé dans le UI claude
+    // actuel.
+    const legacyIsolated = "● earlier output\n✶ Compacting conversation… (12s)\n  esc to interrupt";
+    assert.equal(classifyPaneSpecial(legacyIsolated), null);
+});
+
+test("classifyPaneSpecial: format réel #678 — Compacting hors footer-5, progress bar dedans → 'compacting'", () => {
+    // #678 david `y3s6a8` : capture réelle d'un /compact actif où la boîte
+    // de séparateurs autour du prompt + la ligne auto-mode aval poussent le
+    // texte "Compacting conversation" au-delà du footer-5 lignes. Le live
+    // signal (progress bar `▰▱` + percentage `28%`) reste juste au footer.
+    // Le détecteur DOIT trouver le texte sur le pane complet et le live
+    // signal au footer.
+    const realCapture = [
+        "● Nettoyé (hack retiré du repo + de la box).",
+        "",
+        "  Petit point à vérifier toi-même : ...",
+        "",
+        "✻ Crunched for 9s",
+        "",
+        "❯ /compact",
+        "",
+        "✢ Compacting conversation… (29s)",
+        "  ▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 28%",
+        "",
+        "─".repeat(80),
+        "❯ ",
+        "─".repeat(80),
+        "",
+        "  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt",
+    ].join("\n");
+    assert.equal(classifyPaneSpecial(realCapture), "compacting");
 });
 
 test("classifyPaneSpecial: % et 'Compacting' sur lignes différentes → 'compacting'", () => {
@@ -128,11 +162,19 @@ test("snapshotPane: live compacting (esc to interrupt + Compacting NN% au footer
     assert.equal(snap.special, "compacting");
 });
 
-test("snapshotPane: live compacting au format (12s) actuel → busy:true special:'compacting'", () => {
-    // #650 — l'UI Claude Code récente n'affiche plus le `NN%` mais
-    // `(12s · ↓ tokens · esc to interrupt)`. Le fix doit le détecter.
+test("snapshotPane: format (12s) sans progress bar — busy:true mais special:null (#678 trade-off)", () => {
+    // #650 documenta une variante "(12s · ↓ tokens · esc to interrupt)" sans
+    // progress bar. La capture #678 david `y3s6a8` montre le format ACTUEL
+    // (avec `▰▱` + `%`). Le fix #678 retire `esc to interrupt` du live signal
+    // pour ne pas mis-classifier les turns normales post-/compact (stale
+    // Compacting en scrollback + esc-to-interrupt du footer auto-mode =
+    // faux positif persistant). La variante sans-progress n'est donc plus
+    // détectée — busy reste true (esc-to-interrupt fait toujours
+    // paneFooterShowsBusy), seul le tag compacting tombe. Si cette variante
+    // refait surface en pratique, on rajoutera un discriminant strict
+    // (e.g. esc-to-interrupt ON THE SAME LINE que Compacting).
     const live = "● earlier\n✶ Compacting conversation… (12s · ↓ 1.2k tokens)\n  ⏵⏵ auto mode on · esc to interrupt";
     const snap = snapshotPane(live);
     assert.equal(snap.busy, true);
-    assert.equal(snap.special, "compacting");
+    assert.equal(snap.special, null);
 });

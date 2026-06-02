@@ -1456,12 +1456,27 @@ export interface PaneSnapshot {
  * be poked". Returns null when nothing special — caller falls through
  * to the regular busy/idle decision.
  *
- * Footer-scoped (default 5 lines) — same fix as #B.185 for
- * `paneFooterShowsBusy`. Without this, stale `✶ Compacting
- * conversation… (42s)` lines left in scrollback after `/compact`
- * finishes keep matching forever and block every wake until the
- * scrollback rolls past them. Live compacting still pins the marker
- * at the bottom of the pane, so footer-scope catches it.
+ * Split scope (#678 david `y3s6a8` capture confirmed) :
+ * - TEXT anchor (`Compacting conversation` / `Summarizing the conversation`)
+ *   scanned on the WHOLE pane. The actual UI layout pushes the
+ *   `✢ Compacting conversation… (29s)` line 6+ lines above the bottom
+ *   (separator box around the prompt + auto-mode help footer eats 5
+ *   non-empty lines on its own), so a footer-scoped text search misses
+ *   even an active /compact.
+ * - LIVE signal (`▰▱` Unicode progress bar OR `NN%`) MUST stay in the
+ *   bottom `footerLines` non-empty lines. That's what discriminates a
+ *   live compact (progress bar pinned at the bottom) from the stale
+ *   `✶ Compacting conversation… (42s)` line left in scrollback after
+ *   `/compact` finishes — same #B.185 problem the old footer-scoped
+ *   text addressed, now shifted to the live-signal side.
+ *
+ * `esc to interrupt` is NOT a live signal here — it's the generic
+ * busy-turn marker, present on EVERY normal turn's footer (`⏵⏵ auto
+ * mode on … · esc to interrupt`). Pairing it with a stale `Compacting`
+ * in scrollback would mis-classify every busy turn following a successful
+ * /compact as still-compacting. The `▰▱`/`%` markers are specific to
+ * the compact progress bar (no other tool draws those at the bottom of
+ * the pane), so they're the only reliable live discriminant.
  */
 export function classifyPaneSpecial(text: string, footerLines = 5): PaneSpecial | null {
     const footer = text
@@ -1470,21 +1485,10 @@ export function classifyPaneSpecial(text: string, footerLines = 5): PaneSpecial 
         .filter((l) => l.length > 0)
         .slice(-footerLines)
         .join("\n");
-    // #650 david `tjab9e` (revised) — discriminant live vs stale. Capture
-    // réelle du UI Claude actuel :
-    //   `✽ Compacting conversation… (1m 12s)`
-    //   `  ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 55%`
-    // ⇒ pas de `esc to interrupt` (premier essai cassé) — la barre de
-    // progression Unicode ▰/▱ OU le percentage `NN%` sont les vrais
-    // marqueurs uniques-au-live. Le stale `✶ Compacting conversation…
-    // (42s)` n'en a aucun (texte seul, progress effacé quand /compact se
-    // termine). On garde `esc to interrupt` en 3e OR pour le rare format
-    // sans progress mais avec turn live (legacy / variant rare).
-    const hasCompactingText = /Compacting conversation|Summarizing the conversation/i.test(footer);
+    const hasCompactingText = /Compacting conversation|Summarizing the conversation/i.test(text);
     const hasProgressBar = /[▰▱]/.test(footer);
     const hasPercent = /\d+\s?%/.test(footer);
-    const hasEscInterrupt = /esc to interrupt/i.test(footer);
-    const hasLiveSignal = hasProgressBar || hasPercent || hasEscInterrupt;
+    const hasLiveSignal = hasProgressBar || hasPercent;
     if (hasCompactingText && hasLiveSignal) return "compacting";
     // rate-limit / api-error / overloaded are handled by error-backoff.ts
     // (#332) — they're errors, not internal busy states.
