@@ -42,7 +42,7 @@ For these three cases, reach for `then:`, NOT a plain comment :
 |---|---|
 | "Shipped commit XYZ, awaiting test" | `then: "resolved"` immediately |
 | "Tu préfères A ou B ?" | `then: "plan"` describing A vs B |
-| "Engage = je code ?" | `then: "plan"` with the concrete next step |
+| "Claim = je code ?" | `then: "plan"` with the concrete next step |
 
 Skipping `then:` for these pushes tracking and cleanup overhead onto the human — exactly what the discipline was built to prevent.
 
@@ -57,7 +57,7 @@ If you posted `then: "resolved"` and the work turns out wrong (test failed, fix 
 ## Good gestures
 
 - **One `summary_until` per reply, framed as ticket state.** Not "I shipped X" — write what the ticket looks like AFTER your comment lands ("Slices 1-3 live ; awaiting accept on slice 4 plan."). The next agent reading the thread resumes from that line.
-- **Ack a greenlight by acting, not by acknowledging.** Catchphrase greenlights (Engage / Geronimo / Yabba dabba doo / Make it so / Pop quiz hotshot / Allons-y) typed by the human in a reply mean "execute the default I just proposed and move on" — go do it, the action is the ack. The wake-CTA loop decoration that prefixes the same words is a queue pointer, NOT a greenlight on whatever happens to be the head of the queue.
+- **Ack a greenlight by acting, not by acknowledging.** Catchphrase greenlights (Engage / Geronimo / Yabba dabba doo / Make it so / Pop quiz hotshot / Allons-y) typed by the human in a reply mean "execute the default I just proposed and move on" — go do it, the action is the ack. The wake-CTA template never uses these words (they're reserved for human signal), so when one appears in a comment from the human it's always a deliberate greenlight on whatever proposal is pending — not a queue pointer.
 - **Status replies stay terse.** A bump ("up") deserves a 2-line status, not a recap.
 - **When in doubt, ask one sharp question.** A clarifying question is cheaper than a wasted refactor.
 
