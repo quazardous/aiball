@@ -12,7 +12,12 @@
 import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
 import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
-import { getIpcState } from "./ipc-state.js";
+import {
+    getIpcState,
+    setIpcDrainedState,
+    setIpcLastOpenWakeHash,
+    setIpcLastWakeHint,
+} from "./ipc-state.js";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -409,7 +414,6 @@ export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env[CL_ENV.WAK
  * on merge au moment des event dans / hook"). mtime is the "at" so
  * the JSON body stays free of timestamps.
  */
-export function lastWakeHintPath(sd: string): string { return join(sd, "last-wake-hint"); }
 
 /**
  * #409 — single-chokepoint wake-injection dedup. The wake sites (timer
@@ -518,82 +522,59 @@ export function recordOpenWakeCount(sd: string, count: number): void {
  * genuine change re-wakes. Falls back to the count path when the daemon doesn't
  * supply a hash (old version). Lifetime = the state dir (same as the count).
  */
-export function lastOpenWakeHashPath(sd: string): string {
-    return join(sd, "last-open-wake-hash");
-}
+/**
+ * V4 Phase 1 — `last-open-wake-hash`, `drained-state`, `last-wake-hint`
+ * are pure timer-only state (no cross-process writers) and now live in
+ * the in-memory `IpcState` instead of marker files. The `sd` parameter
+ * is kept on each helper for API stability but ignored. Restart-loss
+ * is the documented trade-off : a fresh timer respawn resets the
+ * watermarks, which can let one stale wake fire ; cheap vs the marker
+ * complexity it replaces.
+ */
 
 /** Read the last landscape hash we woke on; "" when missing (→ first wake). */
-export function readLastOpenWakeHash(sd: string): string {
-    try {
-        return readFileSync(lastOpenWakeHashPath(sd), "utf8").trim();
-    } catch {
-        return "";
-    }
+export function readLastOpenWakeHash(_sd: string): string {
+    return getIpcState().lastOpenWakeHash ?? "";
 }
 
-/** Persist the landscape hash after a successful wake. Best-effort. */
-export function recordOpenWakeHash(sd: string, hash: string): void {
-    try {
-        writeFileSync(lastOpenWakeHashPath(sd), `${hash}\n`);
-    } catch { /* gate fails-open next tick, not fatal */ }
+/** Persist the landscape hash after a successful wake. */
+export function recordOpenWakeHash(_sd: string, hash: string): void {
+    setIpcLastOpenWakeHash(hash);
 }
 
-/**
- * #379: persistent state of the drained-strategy (marker `drained-state`). The
- * timer is the SOLE writer (heartbeat-owned) — hooks fire on activity, not on
- * idle backlog, so they never touch it (no cross-process race). Persisted on
- * EVERY drained tick so `backoff`/`stale`/`once` can track when the landscape
- * appeared and whether they already fired. See drained-strategy.ts.
- */
-export function drainedStatePath(sd: string): string { return join(sd, "drained-state"); }
-
-/** Read the drained-strategy state, or null (missing / unparseable → fresh). */
-export function readDrainedState(sd: string): DrainedState | null {
-    try {
-        const o = JSON.parse(readFileSync(drainedStatePath(sd), "utf8")) as DrainedState;
-        if (o && typeof o.hash === "string") return o;
-        return null;
-    } catch {
-        return null;
-    }
+/** Read the drained-strategy state, or null when fresh / restart. */
+export function readDrainedState(_sd: string): DrainedState | null {
+    return getIpcState().drainedState;
 }
 
-/** Persist the drained-strategy state. Best-effort. */
-export function writeDrainedState(sd: string, state: DrainedState): void {
-    try {
-        writeFileSync(drainedStatePath(sd), JSON.stringify(state) + "\n");
-    } catch { /* next tick recomputes from scratch (re-arms), not fatal */ }
+/** Persist the drained-strategy state in-memory. */
+export function writeDrainedState(_sd: string, value: DrainedState): void {
+    setIpcDrainedState(value);
 }
 
 /** Persist the hint that just triggered a wake. Pass `undefined` to
  *  no-op (we only want hinted wakes in the dedup ledger; un-hinted
  *  pop-culture wakes coalesce via `lastWakeAtPath` already). */
-export function recordWakeHint(sd: string, hint: WakeHint | undefined): void {
+export function recordWakeHint(_sd: string, hint: WakeHint | undefined): void {
     if (!hint || hint.ticket_id === undefined) return;
-    try {
-        writeFileSync(lastWakeHintPath(sd), JSON.stringify({
-            ticket_id: hint.ticket_id,
-            comment_hashid: hint.comment_hashid ?? null,
-        }) + "\n");
-    } catch { /* coalesce will just fail open on next event */ }
+    setIpcLastWakeHint({
+        ticket_id: hint.ticket_id,
+        comment_hashid: hint.comment_hashid,
+        at_ms: Date.now(),
+    });
 }
 
-/** True iff `hint` matches the last recorded wake hint AND the marker
- *  is fresher than `windowMs`. Use to drop duplicate SSE pings before
- *  invoking the wake path. Returns false on missing marker / parse
- *  error / no ticket id — fail-open so a corrupt ledger never silences
- *  a real ping. */
-export function isDuplicateWakeHint(sd: string, hint: WakeHint | undefined, windowMs: number): boolean {
+/** True iff `hint` matches the last recorded wake hint AND it was
+ *  recorded within `windowMs`. Use to drop duplicate SSE pings before
+ *  invoking the wake path. Fail-open : no recorded hint / no ticket
+ *  id → false (let the wake fire). */
+export function isDuplicateWakeHint(_sd: string, hint: WakeHint | undefined, windowMs: number): boolean {
     if (!hint || hint.ticket_id === undefined) return false;
-    const p = lastWakeHintPath(sd);
-    if (!existsSync(p)) return false;
-    try {
-        const age = Date.now() - statSync(p).mtimeMs;
-        if (age > windowMs) return false;
-        const prev = JSON.parse(readFileSync(p, "utf8")) as { ticket_id?: number; comment_hashid?: string | null };
-        return prev.ticket_id === hint.ticket_id
-            && (prev.comment_hashid ?? null) === (hint.comment_hashid ?? null);
-    } catch { return false; }
+    const prev = getIpcState().lastWakeHint;
+    if (!prev) return false;
+    if (Date.now() - prev.at_ms > windowMs) return false;
+    return prev.ticket_id === hint.ticket_id
+        && (prev.comment_hashid ?? null) === (hint.comment_hashid ?? null);
 }
 
 /** #B.198 — defer (not gate) the next wake when the Stop-hook fire-time

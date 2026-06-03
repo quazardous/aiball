@@ -53,6 +53,12 @@ export interface IpcState {
      *  gate. `null` = no signal yet. */
     resumeSessionPickerActive: boolean | null;
     resumeModePickerActive: boolean | null;
+    /** V4 Phase 1 — timer-local wake bookkeeping. Pure in-memory ;
+     *  restart-loss is acceptable (a rare double-wake right after a
+     *  timer respawn beats the file-marker complexity). */
+    lastOpenWakeHash: string | null;
+    drainedState: import("./drained-strategy.js").DrainedState | null;
+    lastWakeHint: { ticket_id?: number; comment_hashid?: string; at_ms: number } | null;
 }
 
 const state: IpcState = {
@@ -62,6 +68,9 @@ const state: IpcState = {
     busyDeferUntilMs: null,
     resumeSessionPickerActive: null,
     resumeModePickerActive: null,
+    lastOpenWakeHash: null,
+    drainedState: null,
+    lastWakeHint: null,
 };
 
 /** Read-only view of the current state. Callers should not mutate. */
@@ -99,6 +108,23 @@ export function setIpcResumeModePicker(active: boolean | null): void {
     state.resumeModePickerActive = active;
 }
 
+/** V4 Phase 1 — timer-only wake bookkeeping setters. Pure in-memory ;
+ *  callers used to round-trip through the `last-open-wake-hash` /
+ *  `drained-state` / `last-wake-hint` marker files. */
+export function setIpcLastOpenWakeHash(hash: string | null): void {
+    state.lastOpenWakeHash = hash;
+}
+
+export function setIpcDrainedState(value: import("./drained-strategy.js").DrainedState | null): void {
+    state.drainedState = value;
+}
+
+export function setIpcLastWakeHint(
+    hint: { ticket_id?: number; comment_hashid?: string; at_ms: number } | null,
+): void {
+    state.lastWakeHint = hint;
+}
+
 /** Reset every field to the as-launched defaults. Tests only. */
 export function resetIpcStateForTests(): void {
     state.bootComplete = null;
@@ -107,4 +133,7 @@ export function resetIpcStateForTests(): void {
     state.busyDeferUntilMs = null;
     state.resumeSessionPickerActive = null;
     state.resumeModePickerActive = null;
+    state.lastOpenWakeHash = null;
+    state.drainedState = null;
+    state.lastWakeHint = null;
 }
