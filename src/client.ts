@@ -521,6 +521,24 @@ export class AiballClient {
         );
     }
     /**
+     * #749 Phase A — mark every unread ping the consumer has on `ticket_id`
+     * (and its comments) as seen. Mirrors POST `/api/tickets/:id/mark-read`
+     * (#B.191). Wraps the existing dwell-timer ack the web UI fires, so
+     * the agent path stays symmetric : an MCP `ticket_get(X)` consumes the
+     * pings for X just like the human opening the thread in the browser.
+     * Optional `upToId` bounds the ack (don't flip pings for comments that
+     * landed AFTER the consult).
+     */
+    markTicketRead(ticket_id: number, opts?: { upToId?: number }) {
+        const body: { up_to_id?: number } = {};
+        if (opts?.upToId) body.up_to_id = opts.upToId;
+        return this.http<{ ticket_id: number; up_to_id?: number; updated: number }>(
+            "POST",
+            `/api/tickets/${ticket_id}/mark-read`,
+            body,
+        );
+    }
+    /**
      * Create or change a typed relation (#275) from `ticket_id` → `target`.
      * Append-only: posting the same active kind is a server-side no-op;
      * `kind="ignored"` removes the edge (tombstone). Mirrors

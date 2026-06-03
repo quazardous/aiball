@@ -226,18 +226,26 @@ export function registerTicketReadTools(server: McpServer): void {
             const DEFAULT_FULL_LIMIT = 20;
             const effLimit = isPureFull && limit === undefined ? DEFAULT_FULL_LIMIT : limit;
             const effOrder = isPureFull && limit === undefined && order === undefined ? "desc" : order;
-            return asText(
-                await client.getTicket(ticket_id, {
-                    summary: full !== true && brief !== true && digest !== true,
-                    brief: brief === true,
-                    tail,
-                    digest: digest === true,
-                    digest_limit,
-                    offset,
-                    limit: effLimit,
-                    order: effOrder,
-                }),
-            );
+            const payload = await client.getTicket(ticket_id, {
+                summary: full !== true && brief !== true && digest !== true,
+                brief: brief === true,
+                tail,
+                digest: digest === true,
+                digest_limit,
+                offset,
+                limit: effLimit,
+                order: effOrder,
+            });
+            // #749 Phase A — prune-on-consult. Reading a ticket via MCP is
+            // an explicit "I am consulting this thread" signal ; mark every
+            // unread ping on it as seen so the wake FIFO doesn't keep
+            // pointing back here. Mirrors the web UI's dwell-timer ack
+            // (#B.191). Best-effort : a mark-read failure must not break
+            // the read response — the caller already has the data they
+            // asked for.
+            try { await client.markTicketRead(ticket_id); }
+            catch { /* best-effort */ }
+            return asText(payload);
         },
     );
 }
