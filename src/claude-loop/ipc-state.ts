@@ -42,12 +42,26 @@ export interface IpcState {
      *  distinguish "no signal yet, read the file" from "human typed,
      *  override the file mtime with null". */
     idleSinceCleared: boolean;
+    /** Slice B-2 : in-memory busy-defer expiry (ms epoch). Set by the
+     *  Stop hook when claude returns but the pane is still busy ; the
+     *  gate refuses wakes until `nowMs >= busyDeferUntilMs`. `null` =
+     *  no signal yet (fall back to the busy-defer-until file). */
+    busyDeferUntilMs: number | null;
+    /** Slice B-2 : in-memory picker state. SessionStart hook detects
+     *  the resume picker on first paint + emits the flags ; the timer
+     *  uses them as a `boot-stretched-by-picker` signal in the wake
+     *  gate. `null` = no signal yet. */
+    resumeSessionPickerActive: boolean | null;
+    resumeModePickerActive: boolean | null;
 }
 
 const state: IpcState = {
     bootComplete: null,
     idleSinceMs: null,
     idleSinceCleared: false,
+    busyDeferUntilMs: null,
+    resumeSessionPickerActive: null,
+    resumeModePickerActive: null,
 };
 
 /** Read-only view of the current state. Callers should not mutate. */
@@ -68,9 +82,29 @@ export function setIpcIdleSince(atMs: number | null): void {
     state.idleSinceCleared = atMs === null;
 }
 
+/** Slice B-2 : in-memory busy-defer expiry. Set by the Stop hook event
+ *  when the pane is busy at turn end. `null` clears the override (gate
+ *  falls back to the file). */
+export function setIpcBusyDeferUntil(atMs: number | null): void {
+    state.busyDeferUntilMs = atMs;
+}
+
+/** Slice B-2 : in-memory picker flags. SessionStart hook reports each
+ *  flag independently. `null` = no signal yet (file fallback). */
+export function setIpcResumeSessionPicker(active: boolean | null): void {
+    state.resumeSessionPickerActive = active;
+}
+
+export function setIpcResumeModePicker(active: boolean | null): void {
+    state.resumeModePickerActive = active;
+}
+
 /** Reset every field to the as-launched defaults. Tests only. */
 export function resetIpcStateForTests(): void {
     state.bootComplete = null;
     state.idleSinceMs = null;
     state.idleSinceCleared = false;
+    state.busyDeferUntilMs = null;
+    state.resumeSessionPickerActive = null;
+    state.resumeModePickerActive = null;
 }

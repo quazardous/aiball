@@ -101,7 +101,13 @@ import { paneMarkerBarInfo } from "./pane-service.js";
 import { armAfkViaService, watchAfkMarker } from "./afk-service-sync.js";
 import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
 import { getHookService } from "./hook-service.js";
-import { setIpcBootComplete, setIpcIdleSince } from "./ipc-state.js";
+import {
+    setIpcBootComplete,
+    setIpcBusyDeferUntil,
+    setIpcIdleSince,
+    setIpcResumeModePicker,
+    setIpcResumeSessionPicker,
+} from "./ipc-state.js";
 import { computeLoopView, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
@@ -967,13 +973,21 @@ async function mainSse(): Promise<void> {
         if (ev.kind === "SessionStart") {
             setIpcBootComplete(true);
             setIpcIdleSince(ev.at_ms);
+            // Slice B-2 — propagate picker context if the hook detected it.
+            if (typeof ev.picker_session === "boolean") setIpcResumeSessionPicker(ev.picker_session);
+            if (typeof ev.picker_mode === "boolean") setIpcResumeModePicker(ev.picker_mode);
             return;
         }
         if (ev.kind === "Stop") {
+            // Slice B-2 — busy-defer expiry pinned in-memory when the
+            // hook ships it (pane busy at turn end). Either an absolute
+            // timestamp = defer the gate ; explicit null = clear defer.
             // The Stop hook only emits when claude reached the prompt —
-            // the busy-defer path returns early before the emit call
-            // (see stop-hook.ts). So a Stop event = idle confirmed.
+            // a Stop event implies idle confirmed.
             setIpcIdleSince(ev.at_ms);
+            if (ev.busy_defer_until_ms !== undefined) {
+                setIpcBusyDeferUntil(ev.busy_defer_until_ms);
+            }
             return;
         }
         if (ev.kind === "UserPromptSubmit" && !ev.from_auto_wake) {

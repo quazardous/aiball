@@ -36,8 +36,27 @@ export type SessionStartSource = "startup" | "resume" | "compact" | "clear";
  * verdict context on `PreToolUse`).
  */
 export type HookEvent =
-    | { kind: "SessionStart"; source: SessionStartSource; at_ms: number }
-    | { kind: "Stop"; at_ms: number }
+    | {
+          kind: "SessionStart";
+          source: SessionStartSource;
+          at_ms: number;
+          /** #727 V1 Slice B-2 : the session-start hook detected the
+           *  resume session picker on the first paint. Drives the
+           *  in-memory `resumeSessionPickerActive` flag. Absent on
+           *  startups where the picker doesn't apply. */
+          picker_session?: boolean;
+          /** Same as `picker_session` for the mode picker. */
+          picker_mode?: boolean;
+      }
+    | {
+          kind: "Stop";
+          at_ms: number;
+          /** #727 V1 Slice B-2 : when the pane is busy at turn end, the
+           *  Stop hook arms a defer + ships the absolute expiry timestamp
+           *  here. Drives the in-memory `busyDeferUntilMs` ; the wake
+           *  gate refuses wakes until `nowMs >= busyDeferUntilMs`. */
+          busy_defer_until_ms?: number | null;
+      }
     | { kind: "PreToolUse"; tool_name: string; at_ms: number }
     /**
      * #652 Slice 6 — the user (or auto-wake) submitted a prompt ; claude

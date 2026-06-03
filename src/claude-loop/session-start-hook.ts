@@ -149,6 +149,17 @@ if (source === "resume") {
                     // #647 Slice 2 david `sr9kqw` : marker spécifique
                     // session-picker (1er écran resume). #624 originel.
                     setResumeSessionPicker(sd!, true);
+                    // #727 V1 Slice B-2 — also push the picker state to
+                    // the timer's in-memory IpcState via a fresh
+                    // SessionStart event carrying the flag. Subscriber
+                    // pins it on `IpcState.resumeSessionPickerActive`.
+                    void emitHookEventToTimer(sd!, {
+                        event: "hook",
+                        kind: "SessionStart",
+                        source,
+                        at_ms: Date.now(),
+                        picker_session: true,
+                    });
                     // #652 Slice 3 — bar paint dropped, timer fast-probe
                     // owns it (see paneMarkerBarInfo).
                     sendKey("Enter");
@@ -189,6 +200,14 @@ if (source === "resume") {
                     // #647 Slice 2 david `sr9kqw` : marker spécifique
                     // mode-picker (2e écran resume : summary vs as-is).
                     setResumeModePicker(sd!, true);
+                    // #727 V1 Slice B-2 — mirror to timer's IpcState.
+                    void emitHookEventToTimer(sd!, {
+                        event: "hook",
+                        kind: "SessionStart",
+                        source,
+                        at_ms: Date.now(),
+                        picker_mode: true,
+                    });
                     // #652 Slice 3 — bar paint dropped (timer fast-probe owns it).
                     if (mode === "as-is") sendKey("Down");
                     sendKey("Enter");
@@ -240,6 +259,18 @@ try {
     const safeToSignal = source !== "resume" || sessionPicked || sessionPickerAborted;
     if (safeToSignal) {
         clearResumePickers(sd!);
+        // #727 V1 Slice B-2 — also clear the in-memory picker flags so
+        // the wake gate doesn't see a stale "still in resume picker"
+        // state after the timer's HookService subscriber pushed `true`
+        // earlier in this hook.
+        void emitHookEventToTimer(sd!, {
+            event: "hook",
+            kind: "SessionStart",
+            source,
+            at_ms: Date.now(),
+            picker_session: false,
+            picker_mode: false,
+        });
         // #652 Slice 3 — bar IDLE paint dropped. The timer's
         // bus.bootEnded handler in timer.ts already calls
         // setTmuxStatus(IDLE) when boot phase settles, so the hook's

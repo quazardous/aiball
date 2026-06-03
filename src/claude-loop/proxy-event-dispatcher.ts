@@ -119,12 +119,33 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                     ? rawSource
                     : null;
                 if (!source) return { kind: "unknown", raw: `hook:SessionStart (bad source ${String(rawSource)})` };
-                const hookEvent: HookEvent = { kind: "SessionStart", source, at_ms: atMs };
+                // #727 V1 Slice B-2 — propagate picker context if the hook
+                // reported it. Absent fields fall through ; the subscriber
+                // doesn't mutate the in-memory picker flags when undefined.
+                const hookEvent: HookEvent = {
+                    kind: "SessionStart",
+                    source,
+                    at_ms: atMs,
+                    ...(typeof event.picker_session === "boolean" ? { picker_session: event.picker_session } : {}),
+                    ...(typeof event.picker_mode === "boolean" ? { picker_mode: event.picker_mode } : {}),
+                };
                 getHookService().emit(hookEvent);
                 return { kind: "hook-event", hookEvent };
             }
             if (hookKind === "Stop") {
-                const hookEvent: HookEvent = { kind: "Stop", at_ms: atMs };
+                // #727 V1 Slice B-2 — Stop ships busy-defer expiry when the
+                // hook arms a defer (pane busy at turn end). Undefined when
+                // the pane is idle — no defer needed.
+                const busyDeferUntilMs = typeof event.busy_defer_until_ms === "number"
+                    ? event.busy_defer_until_ms
+                    : event.busy_defer_until_ms === null
+                        ? null
+                        : undefined;
+                const hookEvent: HookEvent = {
+                    kind: "Stop",
+                    at_ms: atMs,
+                    ...(busyDeferUntilMs !== undefined ? { busy_defer_until_ms: busyDeferUntilMs } : {}),
+                };
                 getHookService().emit(hookEvent);
                 return { kind: "hook-event", hookEvent };
             }

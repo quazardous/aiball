@@ -952,14 +952,21 @@ export function readLoopStateInput(
     // existants ; la distinction session vs mode est exposable via les
     // chemins dédiés (resumeSessionPickerActivePath / resumeModePickerActivePath)
     // pour les futurs consommateurs (bar slice 4).
-    const resumePickerActive = existsSync(resumeSessionPickerActivePath(sd))
-        || existsSync(resumeModePickerActivePath(sd));
     // #727 V1 Slice B — in-memory signal wins when the timer's HookService
     // subscriber has flipped bootComplete via a SessionStart event ; we
     // fall back to the file marker when no signal landed yet (timer
     // freshly restarted, or the hook fell back to file write because the
     // ws emit failed).
     const ipc = getIpcState();
+    const ipcSessionPicker = ipc.resumeSessionPickerActive;
+    const ipcModePicker = ipc.resumeModePickerActive;
+    const sessionPickerActive = ipcSessionPicker !== null
+        ? ipcSessionPicker
+        : existsSync(resumeSessionPickerActivePath(sd));
+    const modePickerActive = ipcModePicker !== null
+        ? ipcModePicker
+        : existsSync(resumeModePickerActivePath(sd));
+    const resumePickerActive = sessionPickerActive || modePickerActive;
     const bootComplete = ipc.bootComplete ?? existsSync(bootCompletePath(sd));
     const noWait = !cfg.wait;
     const wakeInFlightTtlMs = Math.max(0, cfg.wake_in_flight_ttl_ms);
@@ -1003,7 +1010,11 @@ export function readLoopStateInput(
             : (ipc.idleSinceMs ?? safeMtime(idleMarkerPath(sd))),
         wakeInFlightAtMs: safeMtime(wakeInFlightPath(sd)),
         wakeInFlightTtlMs,
-        busyDeferUntilMs: safeIsoMs(busyDeferUntilPath(sd)),
+        // #727 V1 Slice B-2 — busy-defer expiry mirrored in-memory by
+        // the Stop hook event (carries the absolute expiry ms). When the
+        // subscriber set it, it wins ; otherwise fall back to the file
+        // content (back-compat / degraded mode).
+        busyDeferUntilMs: ipc.busyDeferUntilMs ?? safeIsoMs(busyDeferUntilPath(sd)),
         inputHotTtlMs,
         manualWake: opts.manualWake ?? false,
     };

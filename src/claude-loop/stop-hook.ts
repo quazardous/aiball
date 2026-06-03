@@ -218,6 +218,19 @@ function readPane(): string {
         if (pane.busy && PANE_BUSY_DELAY_MS > 0) {
             const until = armBusyDefer(sd!, PANE_BUSY_DELAY_MS);
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            // #727 V1 Slice B-2 — also push the busy-defer expiry into
+            // the timer's in-memory state via a second Stop event. The
+            // dispatcher's HookService subscriber pins it on `IpcState`
+            // so the wake gate consults it without re-reading the file.
+            const untilMs = new Date(until).getTime();
+            if (!Number.isNaN(untilMs)) {
+                await emitHookEventToTimer(sd!, {
+                    event: "hook",
+                    kind: "Stop",
+                    at_ms: Date.now(),
+                    busy_defer_until_ms: untilMs,
+                });
+            }
             setTmuxStatus(name!, LOOP_STATUS.IDLE, "wait");
             log(`  → BUSY-DEFER armed until=${until} became=idle:wait`);
             emit();
