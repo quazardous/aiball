@@ -65,7 +65,6 @@ import {
     userTookOverPath,
     humanIsTyping,
     humanPresent,
-    injectSockPath,
     installRoot,
     installRootSha,
     STATE_ROOT,
@@ -578,7 +577,9 @@ function detectHumanTyping(): void {
         // wrong here (it would flag socket-injected wakes as human typing,
         // since recentlySentKeys only tracks tmux send-keys). The proxy owns
         // the marker; skip. Pane-diff stays the fallback for non-proxy loops.
-        if (existsSync(injectSockPath(sd!))) return;
+        // #730 step 3 — gate on `loop.sock` instead of the legacy
+        // `inject.sock` (folded into loop.sock).
+        if (existsSync(loopSockPath(sd!))) return;
         if (!existsSync(idleMarkerPath(sd!))) {
             // Mid-turn / streaming → reset baseline so the post-busy
             // prompt isn't diffed against a stale pre-busy capture.

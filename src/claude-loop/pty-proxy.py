@@ -67,11 +67,6 @@ def _marker_path():
     return os.path.join(sd, "human-typing") if sd else ""
 
 
-def _inject_sock_path():
-    sd = _state_dir()
-    return os.path.join(sd, "inject.sock") if sd else ""
-
-
 def _loop_sock_path():
     """#730 step 1 — single per-loop IPC socket. Timer is the SERVER
     (#729 inversion), proxy + hooks are clients. Today carries only
@@ -501,17 +496,19 @@ class _ProxyEventEmitter:
 _proxy_events = _ProxyEventEmitter()
 
 
-# #729 phase 2 — view-push client. Direction inversion validated by
+# #729 phase 2 — loop.sock ws client. Direction inversion validated by
 # david (8yg34n, go C) : the timer is now SERVER, the proxy connects in
-# as CLIENT. Frames `{kind: "view", data: <view>}` arrive in a daemon
-# thread (`websocket-client` is blocking) which pushes every parsed view
-# into a queue. The thread writes a byte to a self-pipe to wake up the
-# main `select()` loop, which then drains the queue and calls
-# `_apply_pushed_view`.
+# as CLIENT. #730 step 3 — the client dispatches on `kind` and now
+# also handles `inject` frames (wake phrase bytes to write to the PTY),
+# folding the former `inject.sock` raw server onto the same channel.
+# Frames arrive in a daemon thread (`websocket-client` is blocking) and
+# go into per-kind thread-safe queues. The thread writes a byte to a
+# self-pipe to wake up the main `select()` loop, which drains both
+# queues and applies each item.
 class _ViewPushClient:
-    """Background ws client that pulls view frames from the timer and
-    posts them into a thread-safe queue. The main select loop registers
-    the wakeup-pipe read end and drains via `drain()`.
+    """Background ws client connected to `loop.sock`. Two inbound kinds:
+    `view` → queue drained as view dicts (paint bar/AFK) ;
+    `inject` → queue drained as raw text fragments (write to master_fd).
 
     Best-effort reconnect with fixed 1s backoff. A missing timer (boot
     race, timer crashed) is silent — the proxy paints from rules-locales
@@ -520,7 +517,8 @@ class _ViewPushClient:
     def __init__(self, sock_path, wakeup_w):
         self._sock_path = sock_path
         self._wakeup_w = wakeup_w
-        self._queue = queue.Queue()
+        self._view_queue = queue.Queue()
+        self._inject_queue = queue.Queue()
         self._thread = None
         self._stopped = False
 
@@ -528,11 +526,17 @@ class _ViewPushClient:
         if not self._sock_path or self._thread is not None:
             return
         if not _HAS_WEBSOCKET:
-            return  # degraded mode (replay, missing dep) — no view-push
+            return  # degraded mode (replay, missing dep) — no IPC
         self._thread = threading.Thread(
-            target=self._run, name="view-push-client", daemon=True,
+            target=self._run, name="loop-sock-client", daemon=True,
         )
         self._thread.start()
+
+    def _wake_main(self):
+        try:
+            os.write(self._wakeup_w, b"v")
+        except OSError:
+            pass
 
     def _run(self):
         while not self._stopped:
@@ -561,16 +565,17 @@ class _ViewPushClient:
                         continue
                     if not isinstance(frame, dict):
                         continue
-                    if frame.get("kind") != "view":
-                        continue
+                    kind = frame.get("kind")
                     data = frame.get("data")
-                    if not isinstance(data, dict):
-                        continue
-                    self._queue.put(data)
-                    try:
-                        os.write(self._wakeup_w, b"v")
-                    except OSError:
-                        pass
+                    if kind == "view" and isinstance(data, dict):
+                        self._view_queue.put(data)
+                        self._wake_main()
+                    elif kind == "inject" and isinstance(data, dict):
+                        text_val = data.get("text")
+                        if isinstance(text_val, str):
+                            self._inject_queue.put(text_val)
+                            self._wake_main()
+                    # Unknown kinds dropped silently — forward-compat.
             except (OSError, Exception):
                 pass
             finally:
@@ -581,13 +586,25 @@ class _ViewPushClient:
                 break
             time.sleep(1.0)  # reconnect backoff
 
-    def drain(self):
+    def drain_views(self):
         """Pop every pending view from the queue, in arrival order.
         Called by the main select loop after a wakeup byte fires."""
         out = []
         while True:
             try:
-                out.append(self._queue.get_nowait())
+                out.append(self._view_queue.get_nowait())
+            except queue.Empty:
+                break
+        return out
+
+    def drain_injects(self):
+        """Pop every pending inject text fragment, in arrival order.
+        Called by the main select loop, which writes each fragment to
+        the PTY master_fd."""
+        out = []
+        while True:
+            try:
+                out.append(self._inject_queue.get_nowait())
             except queue.Empty:
                 break
         return out
@@ -1444,33 +1461,20 @@ def main(argv):
     except (ValueError, OSError):
         pass
 
-    # Socket de contrôle pour l'injection wake (remplace send-keys).
-    inject_srv = None
-    sock_path = _inject_sock_path()
-    if sock_path:
-        try:
-            if os.path.exists(sock_path):
-                os.unlink(sock_path)
-            inject_srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            inject_srv.bind(sock_path)
-            inject_srv.listen(8)
-            inject_srv.setblocking(False)
-        except OSError:
-            inject_srv = None  # injection retombera sur send-keys côté TS
-
-    # #627 + #729 phase 2 — view-push from the timer. Direction inverted :
-    # the timer is the SERVER, we connect in as CLIENT via `_ViewPushClient`
-    # (daemon thread + queue + self-pipe for the select wakeup). The bar
-    # word + AFK chunk are painted from the view received ; the local
-    # rules (_rest_word / _format_afk_state) remain as a bootstrap
-    # fallback until the timer pushes its first view.
+    # #627 + #729 phase 2 + #730 step 3 — single ws client connected to
+    # the shared `loop.sock`. Receives view-push frames (timer broadcast)
+    # AND inject frames (rebroadcast by the timer on behalf of hooks or
+    # the timer's own wakes). Per-kind queues are drained by the main
+    # select loop after the self-pipe wakeup byte fires. The bar word
+    # + AFK chunk are painted from the view received ; the local rules
+    # (_rest_word / _format_afk_state) remain as a bootstrap fallback
+    # until the timer pushes its first view.
     view_push_pipe_r, view_push_pipe_w = os.pipe()
     fcntl.fcntl(view_push_pipe_r, fcntl.F_SETFL,
                 fcntl.fcntl(view_push_pipe_r, fcntl.F_GETFL) | os.O_NONBLOCK)
     view_push_client = _ViewPushClient(_loop_sock_path(), view_push_pipe_w)
     view_push_client.start()
 
-    inject_conns = []
     stdin_open = True
 
     # #274/#302 état du segment human : on ne repeint QUE sur transition.
@@ -1510,17 +1514,9 @@ def main(argv):
                 os.unlink(pap)
             except OSError:
                 pass
-        if inject_srv is not None:
-            try:
-                inject_srv.close()
-            except OSError:
-                pass
-            try:
-                os.unlink(sock_path)
-            except OSError:
-                pass
-        # #729 phase 2 — view-push : stop the daemon thread + close the pipe.
-        # The timer (server) cleans up its own socket on its side.
+        # #729 phase 2 + #730 step 3 — loop.sock client : stop the daemon
+        # thread + close the wakeup pipe. The timer (server) cleans up
+        # its own socket on its side.
         view_push_client.stop()
         for fd in (view_push_pipe_r, view_push_pipe_w):
             try:
@@ -1591,18 +1587,41 @@ def main(argv):
             except OSError:
                 pass
 
-    def _drain_view_push_queue():
-        """#729 phase 2 — called when the self-pipe has a byte ready.
-        Drains the queue fed by the daemon thread `_ViewPushClient` and
-        applies each view. Also drains the pipe (best-effort) to disarm
+    def _drain_loop_sock_queue():
+        """#729 phase 2 + #730 step 3 — called when the self-pipe has a
+        byte ready. Drains the per-kind queues fed by the daemon thread
+        `_ViewPushClient` and applies each : view dicts go through
+        `_apply_pushed_view` (bar/AFK paint) ; inject text fragments are
+        written to the PTY master_fd (same side-effects as the legacy
+        inject.sock raw bytes branch — note_wake_injected + force `loop`
+        word + emit log). Also drains the pipe (best-effort) to disarm
         the wakeup until the next push."""
+        nonlocal current_word
         try:
             while True:
                 os.read(view_push_pipe_r, 4096)
         except (BlockingIOError, OSError):
             pass
-        for view in view_push_client.drain():
+        for view in view_push_client.drain_views():
             _apply_pushed_view(view)
+        for chunk_str in view_push_client.drain_injects():
+            try:
+                os.write(master_fd, chunk_str.encode("utf-8"))
+            except OSError:
+                continue
+            # #305 (david j8xhrh): an injected wake = proof the gate is
+            # open → the bar follows the wake decision, not its own
+            # latch. Force `loop` and drop the wait reasons (boot /
+            # user-grace) so the next round doesn't repaint `wait`.
+            _note_wake_injected()
+            if current_word != _HUMAN_LOOP:
+                _paint_word(_HUMAN_LOOP)
+                current_word = _HUMAN_LOOP
+            _emit_log({"event": "inject",
+                       "now": datetime.datetime.now().timestamp(),
+                       "raw": chunk_str.encode("utf-8"),
+                       "forward": chunk_str.encode("utf-8"),
+                       "markers": ["note_wake_injected"], "word": "loop"})
 
     def apply_decision(dec):
         """#360 : exécute les EFFETS d'une Decision (markers afk/présence,
@@ -1667,11 +1686,9 @@ def main(argv):
             rfds = [master_fd]
             if stdin_open:
                 rfds.append(stdin_fd)
-            if inject_srv is not None:
-                rfds.append(inject_srv)
-            rfds.extend(inject_conns)
-            # #729 phase 2 — the self-pipe fed by the daemon thread
-            # `_ViewPushClient` wakes up select() whenever a view arrives.
+            # #729 phase 2 + #730 step 3 — the self-pipe fed by the
+            # daemon `_ViewPushClient` wakes up select() whenever a
+            # view or inject frame arrives on loop.sock.
             rfds.append(view_push_pipe_r)
             # Timeout = prochain changement de mot : d'abord l'expiration
             # de la frappe (5s → ré-évalue stop→rest), puis la plus proche
@@ -1761,49 +1778,15 @@ def main(argv):
                     break
                 os.write(sys.stdout.fileno(), out)
 
-            # 3) Nouvelle connexion d'injection.
-            if inject_srv is not None and inject_srv in ready:
-                try:
-                    conn, _ = inject_srv.accept()
-                    conn.setblocking(False)
-                    inject_conns.append(conn)
-                except OSError:
-                    pass
-
-            # 4) Octets injectés (wake) → claude, SANS toucher le marqueur.
-            for conn in list(inject_conns):
-                if conn in ready:
-                    try:
-                        chunk = conn.recv(65536)
-                    except OSError:
-                        chunk = b""
-                    if chunk:
-                        os.write(master_fd, chunk)
-                        # #305 (david j8xhrh): un wake injecté = preuve que le
-                        # gate est ouvert → la barre suit la décision du wake,
-                        # pas son propre latch. On force `loop` et on largue les
-                        # raisons d'attente (boot/user-grace) pour que le tour
-                        # suivant ne repeigne pas `wait`.
-                        _note_wake_injected()
-                        if current_word != _HUMAN_LOOP:
-                            _paint_word(_HUMAN_LOOP)
-                            current_word = _HUMAN_LOOP
-                        _emit_log({"event": "inject",
-                                   "now": datetime.datetime.now().timestamp(),
-                                   "raw": chunk, "forward": chunk,
-                                   "markers": ["note_wake_injected"], "word": "loop"})
-                    else:
-                        inject_conns.remove(conn)
-                        try:
-                            conn.close()
-                        except OSError:
-                            pass
-
-            # 5) #729 phase 2 — view-push : self-pipe wakeup fed by the
-            # daemon thread `_ViewPushClient`. Drain the queue and apply
-            # each view via `_apply_pushed_view`.
+            # 3) #729 phase 2 + #730 step 3 — loop.sock self-pipe
+            # wakeup. Drains both queues : view frames (paint bar/AFK)
+            # and inject frames (write to master_fd + wake markers). The
+            # former wake injection path through `inject_srv` (raw bytes
+            # on a dedicated `inject.sock`) is gone — wakes now ride the
+            # shared loop.sock as `{kind:"inject"}` frames rebroadcast
+            # by the timer.
             if view_push_pipe_r in ready:
-                _drain_view_push_queue()
+                _drain_loop_sock_queue()
     finally:
         cleanup()
 

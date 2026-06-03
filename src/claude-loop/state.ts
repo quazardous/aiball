@@ -11,7 +11,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
-import { listenEvents, type EventServer } from "./ipc-events.js";
+import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -337,16 +337,12 @@ export function afkPath(sd: string): string { return join(sd, "afk"); }
 // at-prompt; read by setTmuxStatus to paint the bicolor human chip and
 // usable as a finer human-present signal than the submit-time user-took-over.
 export function humanTypingPath(sd: string): string { return join(sd, "human-typing"); }
-// #269: UDS control socket the PTY proxy listens on for wake injection.
-// Present ⇒ the pane runs under the proxy (injection goes here instead of
-// tmux send-keys; the proxy owns the human-typing marker).
-export function injectSockPath(sd: string): string { return join(sd, "inject.sock"); }
-/** #730 step 1 — single per-loop IPC socket. Today carries only view-push
- *  frames (`{kind:"view"}`) ; subsequent steps fold proxy-events
- *  (`{kind:"proxyEvent"}`) and inject (`{kind:"inject"}`) onto the same
- *  socket so we end up with one `loop.sock` per loop instead of three.
- *  Timer is the SERVER (per #729 inversion) ; proxy + hooks are clients.
- *  Previously named `view-push.sock` (#627). */
+/** #730 — single per-loop IPC socket. Carries every direction of the
+ *  proxy ↔ timer ↔ hooks IPC: view broadcasts (`{kind:"view"}`),
+ *  proxy → timer events (`{kind:"proxyEvent"}`), and wake injects
+ *  (`{kind:"inject"}`). Timer is the SERVER (per #729 inversion) ;
+ *  proxy + hooks are clients. Previously three sockets per loop
+ *  (`view-push.sock` + `proxy-events.sock` + `inject.sock`). */
 export function loopSockPath(sd: string): string { return join(sd, "loop.sock"); }
 // #281 (strategy B): Windows has no AF_UNIX file sockets, so the Rust
 // ConPTY proxy listens on a NAMED PIPE instead. Both sides derive the
@@ -1751,16 +1747,23 @@ export async function injectWakePhrase(paneTarget: string, phrase: string): Prom
     if (sd && skipDuplicateWakeInjection(sd, phrase)) return;
     if (sd) {
         if (process.platform === "win32") {
-            // #281 strategy B: Windows uses a named pipe. It can't be
-            // stat'd, so gate on the proxy-alive PID marker instead of
-            // existsSync(); a dead/absent proxy → fall through to send-keys.
+            // #281 strategy B: Windows uses a named pipe with raw bytes.
+            // It can't be stat'd, so gate on the proxy-alive PID marker
+            // instead of existsSync(); a dead/absent proxy → fall through
+            // to send-keys.
             if (proxyIsAlive(sd)) {
                 const pipe = injectPipeName(sd);
-                if (await injectViaSocket(pipe, phrase)) return;
+                if (await injectViaWinPipe(pipe, phrase)) return;
             }
         } else {
-            const sock = injectSockPath(sd);
-            if (existsSync(sock) && await injectViaSocket(sock, phrase)) return;
+            // #730 step 3 — wake injection rides the shared loop.sock
+            // as a `{kind:"inject"}` ws frame. The timer's server
+            // rebroadcasts to the proxy which writes the bytes to its
+            // PTY. Two frames (phrase, then `\r`) with a 200ms gap so
+            // the TUI processes the phrase before Enter, same dance as
+            // the legacy raw inject.sock path.
+            const sock = loopSockPath(sd);
+            if (existsSync(sock) && await injectViaLoopSocket(sock, phrase)) return;
         }
     }
     const bufName = `wake_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
@@ -1775,21 +1778,25 @@ export async function injectWakePhrase(paneTarget: string, phrase: string): Prom
 }
 
 /**
- * #730 step 2 — unified per-loop IPC server. Folds the former
- * `createViewPusher` (broadcast of `{kind:"view"}`) and
- * `createProxyEventsServer` (dispatch of `{kind:"proxyEvent"}`) into a
- * single `listenEvents` server bound to `loopSockPath(sd)`. The proxy
- * keeps one ws connection per concern (one receives view frames, one
- * sends event frames) — both hit the same `loop.sock` path.
+ * #730 — unified per-loop IPC server bound to `loopSockPath(sd)`. The
+ * single `listenEvents` instance handles every frame kind exchanged with
+ * the proxy + hooks:
  *
- * Direction (#729 inversion): timer = SERVER ; proxy = CLIENT.
- * Step 3 will add a `{kind:"inject"}` broadcast path so the legacy raw
- * `inject.sock` can be dropped too — at which point only `loop.sock`
- * remains.
+ *  - `{kind:"view"}`        — timer broadcast → proxy paints the bar
+ *  - `{kind:"proxyEvent"}`  — proxy → timer (typing, AFK key, markers, hooks)
+ *  - `{kind:"inject"}`      — wake phrase bytes to write to the PTY ;
+ *    inbound (from a hook spawned out-of-process) is rebroadcast so the
+ *    proxy receives it. The timer's own injects go through `injectText`
+ *    which broadcasts directly.
+ *
+ * Direction (#729 inversion): timer = SERVER ; proxy + hooks = CLIENTS.
  */
 export interface LoopServer {
     /** Broadcast a view frame to every connected client. No-op if none. */
     pushView(view: import("./loop-state.js").LoopStateView): void;
+    /** Broadcast a wake-inject text frame. The proxy writes the bytes
+     *  straight to claude's PTY (bypasses tmux send-keys). */
+    injectText(text: string): void;
     /** Stop accepting connections + unlink the socket file. Idempotent. */
     close(): void;
 }
@@ -1811,11 +1818,26 @@ export function createLoopServer(
             } catch { /* dispatcher already swallows — defense in depth */ }
             return;
         }
+        if (ev.kind === "inject") {
+            // Inbound inject from an out-of-process hook (stop-hook,
+            // session-start-hook). Rebroadcast so the proxy (which is
+            // also a client of this server) receives the bytes and
+            // writes them to its PTY. The sender doesn't subscribe to
+            // inbound frames so it's a no-op for them.
+            const text = typeof (ev.data as { text?: unknown } | null | undefined)?.text === "string"
+                ? (ev.data as { text: string }).text
+                : null;
+            if (text) server.broadcast({ kind: "inject", data: { text } });
+            return;
+        }
         // Unknown kinds dropped silently — forward-compat.
     });
     return {
         pushView(view) {
             server.broadcast({ kind: "view", data: view });
+        },
+        injectText(text) {
+            server.broadcast({ kind: "inject", data: { text } });
         },
         close() {
             server.close();
@@ -1824,12 +1846,14 @@ export function createLoopServer(
 }
 
 /**
- * #269: write a wake phrase to the PTY proxy's UDS injection socket.
- * Mirrors the tmux dance — phrase, a brief pause for the TUI to settle,
- * then a carriage return to submit. Resolves `false` on any error (so the
- * caller falls back to the tmux path) and never throws.
+ * #281 strategy B (Windows ConPTY) — raw-bytes write to the proxy's
+ * named pipe. Mirrors the tmux dance: phrase, a brief pause for the
+ * TUI to settle, then a carriage return to submit. Resolves `false`
+ * on any error (caller falls back to send-keys) and never throws.
+ *
+ * Unix uses `injectViaLoopSocket` below (ws over UDS, #730 step 3).
  */
-function injectViaSocket(sockPath: string, phrase: string): Promise<boolean> {
+function injectViaWinPipe(pipePath: string, phrase: string): Promise<boolean> {
     return new Promise((resolve) => {
         let settled = false;
         let sock: ReturnType<typeof netConnect>;
@@ -1840,7 +1864,7 @@ function injectViaSocket(sockPath: string, phrase: string): Promise<boolean> {
             resolve(ok);
         };
         try {
-            sock = netConnect(sockPath);
+            sock = netConnect(pipePath);
         } catch {
             resolve(false);
             return;
@@ -1861,6 +1885,32 @@ function injectViaSocket(sockPath: string, phrase: string): Promise<boolean> {
             }
         });
     });
+}
+
+/**
+ * #730 step 3 — unix wake injection over the shared `loop.sock` ws
+ * server. Sends two `{kind:"inject"}` frames (phrase, then `\r`)
+ * separated by the TUI-settle delay. The timer's server rebroadcasts
+ * each to its other connected clients ; the proxy listens, writes the
+ * bytes straight to claude's PTY. Resolves `false` on any failure so
+ * the caller falls back to the tmux paste/send-keys path.
+ */
+async function injectViaLoopSocket(sockPath: string, phrase: string): Promise<boolean> {
+    const r1 = await sendEventOnce(sockPath, { kind: "inject", data: { text: phrase } }, { timeoutMs: 2000 });
+    // sendEventOnce resolves `undefined` on failure (connect error / timeout).
+    // It also resolves `undefined` on success when we don't await a reply —
+    // we treat that as success here. To distinguish, the only failure path
+    // matters in practice: if the SECOND send doesn't reach the proxy the
+    // wake never submits. Errors surface as the second sendEventOnce
+    // timing out → we report false and let the caller fall back.
+    void r1;
+    await new Promise<void>((r) => setTimeout(r, 200));
+    try {
+        await sendEventOnce(sockPath, { kind: "inject", data: { text: "\r" } }, { timeoutMs: 2000, throwOnError: true });
+    } catch {
+        return false;
+    }
+    return true;
 }
 
 /**

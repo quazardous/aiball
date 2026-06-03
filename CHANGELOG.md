@@ -23,6 +23,18 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-06-03
+
+### Changed
+
+- Per-loop IPC consolidation step 3 of 3 — `inject.sock` is gone. Wake
+  injection now rides the shared `loop.sock` as `{kind:"inject"}` ws
+  frames: external clients (hooks) send them in, the timer rebroadcasts
+  to the proxy which writes the bytes to claude's PTY. End state: a
+  single `loop.sock` per loop carries every IPC channel (view, proxy
+  event, inject) instead of three separate UDS files. Windows ConPTY
+  named-pipe path unchanged.
+
 ## [0.26.0] — 2026-06-03
 
 ### Changed
