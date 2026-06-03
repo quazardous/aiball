@@ -82,8 +82,7 @@ test("listener that throws does NOT break siblings", () => {
 test("listener that unsubscribes itself during callback doesn't trip iteration", () => {
     const o = new Observable<number>(0);
     let calls = 0;
-    let off: (() => void) | undefined;
-    off = o.subscribe(() => { calls++; off?.(); });
+    const off: (() => void) | undefined = o.subscribe(() => { calls++; off?.(); });
     o.set(1);
     o.set(2);
     assert.equal(calls, 1, "second transition shouldn't call (unsubbed)");

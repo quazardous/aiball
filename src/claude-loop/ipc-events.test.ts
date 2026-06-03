@@ -9,6 +9,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listenEvents, openEventChannel, sendEventOnce, type Event } from "./ipc-events.js";
 
+// #729/#730 — these exercise a real AF_UNIX round-trip. Windows has no
+// filesystem domain sockets (the win32 transport wrap — named pipe /
+// loopback — is still pending), so the `ws+unix://` client + `listen({path})`
+// server can't connect there. Skip the whole file on win32 rather than
+// report false failures; re-enable per-case as the transport lands.
+const t = process.platform === "win32" ? test.skip : test;
+
 function withTmpSocketPath<T>(fn: (path: string) => Promise<T>): Promise<T> {
     const dir = mkdtempSync(join(tmpdir(), "ipc-events-test-"));
     const sockPath = join(dir, "test.sock");
@@ -21,7 +28,7 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-test("listenEvents + sendEventOnce : single event delivery", async () => {
+t("listenEvents + sendEventOnce : single event delivery", async () => {
     await withTmpSocketPath(async (sockPath) => {
         const received: Event[] = [];
         const server = listenEvents(sockPath, (ev) => { received.push(ev); });
@@ -37,7 +44,7 @@ test("listenEvents + sendEventOnce : single event delivery", async () => {
     });
 });
 
-test("listenEvents + sendEventOnce : awaitReply round-trip", async () => {
+t("listenEvents + sendEventOnce : awaitReply round-trip", async () => {
     await withTmpSocketPath(async (sockPath) => {
         const server = listenEvents(sockPath, (ev, { reply }) => {
             if (ev.kind === "ask") reply({ kind: "answer", data: { result: 42 } });
@@ -51,7 +58,7 @@ test("listenEvents + sendEventOnce : awaitReply round-trip", async () => {
     });
 });
 
-test("listenEvents : malformed JSON is silently dropped", async () => {
+t("listenEvents : malformed JSON is silently dropped", async () => {
     await withTmpSocketPath(async (sockPath) => {
         const received: Event[] = [];
         const server = listenEvents(sockPath, (ev) => { received.push(ev); });
@@ -68,7 +75,7 @@ test("listenEvents : malformed JSON is silently dropped", async () => {
     });
 });
 
-test("openEventChannel : long-lived send + receive", async () => {
+t("openEventChannel : long-lived send + receive", async () => {
     await withTmpSocketPath(async (sockPath) => {
         const serverReceived: Event[] = [];
         const server = listenEvents(sockPath, (ev) => { serverReceived.push(ev); });
@@ -87,7 +94,7 @@ test("openEventChannel : long-lived send + receive", async () => {
     });
 });
 
-test("openEventChannel : request/reply round-trip", async () => {
+t("openEventChannel : request/reply round-trip", async () => {
     await withTmpSocketPath(async (sockPath) => {
         const server = listenEvents(sockPath, (ev, { reply }) => {
             if (ev.kind === "echo") reply({ kind: "echoed", data: ev.data });
@@ -106,7 +113,7 @@ test("openEventChannel : request/reply round-trip", async () => {
     });
 });
 
-test("openEventChannel : onEvent push from server", async () => {
+t("openEventChannel : onEvent push from server", async () => {
     await withTmpSocketPath(async (sockPath) => {
         const server = listenEvents(sockPath, (ev, { reply }) => {
             if (ev.kind === "subscribe") {
@@ -139,7 +146,7 @@ test("openEventChannel : onEvent push from server", async () => {
     });
 });
 
-test("sendEventOnce : resolves undefined on connect failure (no throw by default)", async () => {
+t("sendEventOnce : resolves undefined on connect failure (no throw by default)", async () => {
     // Socket path that doesn't exist — sendEventOnce should fail silently.
     const noSock = join(tmpdir(), "ipc-events-no-such-sock-" + Date.now() + ".sock");
     assert.equal(existsSync(noSock), false);
@@ -147,14 +154,14 @@ test("sendEventOnce : resolves undefined on connect failure (no throw by default
     assert.equal(result, undefined);
 });
 
-test("sendEventOnce : rejects on connect failure when throwOnError=true", async () => {
+t("sendEventOnce : rejects on connect failure when throwOnError=true", async () => {
     const noSock = join(tmpdir(), "ipc-events-no-such-sock-throw-" + Date.now() + ".sock");
     await assert.rejects(
         () => sendEventOnce(noSock, { kind: "x" }, { timeoutMs: 200, throwOnError: true }),
     );
 });
 
-test("listenEvents : close unlinks the socket file", async () => {
+t("listenEvents : close unlinks the socket file", async () => {
     await withTmpSocketPath(async (sockPath) => {
         const server = listenEvents(sockPath, () => {});
         await sleep(50);
@@ -165,7 +172,7 @@ test("listenEvents : close unlinks the socket file", async () => {
     });
 });
 
-test("listenEvents : second listen on same path overwrites first (orphan socket cleanup)", async () => {
+t("listenEvents : second listen on same path overwrites first (orphan socket cleanup)", async () => {
     await withTmpSocketPath(async (sockPath) => {
         const s1 = listenEvents(sockPath, () => {});
         await sleep(50);
