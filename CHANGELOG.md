@@ -23,6 +23,23 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-06-03
+
+### Changed
+
+- IPC between the PTY proxy and the timer now flows over a shared
+  WebSocket-over-UDS layer instead of two ad-hoc newline-delimited
+  socket protocols. The view-push direction also flips: the timer is
+  now the server, the proxy connects in as a client, aligned with the
+  state-machine-as-source-of-truth direction.
+
+### Added
+
+- New Python runtime requirement: `websocket-client`
+  (`sudo dnf install python3-websocket-client` on Fedora,
+  `pip install --user websocket-client` elsewhere). Required for live
+  loops; replay/test modes don't need it.
+
 ## [0.23.0] — 2026-06-02
 
 ### Changed

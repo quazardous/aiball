@@ -36,6 +36,15 @@ export interface Event {
  *  unlink the socket file and stop accepting connections. Idempotent. */
 export interface EventServer {
     close(): void;
+    /** Push an event to every currently-connected client. Best-effort :
+     *  sends on each open WebSocket and swallows per-client failures
+     *  (a dead client doesn't block delivery to live ones). No-op if no
+     *  client is connected — the event is dropped (caller doesn't need
+     *  to track connection state). */
+    broadcast(ev: Event): void;
+    /** Count of currently-open client connections. Useful for tests +
+     *  diagnostics (\"is the proxy actually connected ?\"). */
+    clientCount(): number;
 }
 
 /** Per-event reply hook handed to the server handler. Send a single
@@ -117,6 +126,18 @@ export function listenEvents(socketPath: string, onEvent: EventHandler): EventSe
             try { wss.close(); } catch { /* ignore */ }
             try { http.close(); } catch { /* ignore */ }
             try { if (existsSync(socketPath)) unlinkSync(socketPath); } catch { /* ignore */ }
+        },
+        broadcast(ev) {
+            const payload = JSON.stringify(ev);
+            for (const client of wss.clients) {
+                if (client.readyState !== WebSocket.OPEN) continue;
+                try { client.send(payload); } catch { /* dead client — skip, swallow */ }
+            }
+        },
+        clientCount() {
+            let n = 0;
+            for (const client of wss.clients) if (client.readyState === WebSocket.OPEN) n++;
+            return n;
         },
     };
 }

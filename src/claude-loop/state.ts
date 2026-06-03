@@ -10,7 +10,8 @@
  * - `timer.log`   — stdout/stderr of the timer
  */
 import { spawnSync } from "node:child_process";
-import { connect as netConnect, createServer as netCreateServer } from "node:net";
+import { connect as netConnect } from "node:net";
+import { listenEvents, type EventServer } from "./ipc-events.js";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -1777,13 +1778,19 @@ export async function injectWakePhrase(paneTarget: string, phrase: string): Prom
 }
 
 /**
- * #627 — persistent UDS connection from the timer to the PTY proxy's
- * view-push socket. The timer holds one connection open ; each call to
- * `push(view)` sends a newline-delimited JSON line. On any error
- * (proxy gone, socket dropped) we close, mark the connection dead, and
- * the next `push()` will reconnect. Pure best-effort : no view loss is
- * fatal (the proxy keeps the last pushed view + falls back to its
- * local rules until the next push lands).
+ * #627 — view-push backchannel. #729 phase 2 (david `8yg34n` go C) :
+ * direction inverted — the **timer is now the SERVER** and the proxy
+ * connects in as a client. Aligns with the #726 SSOT (timer = source
+ * of truth, consumers read from it) and resolves the Python sync
+ * asymmetry (a single `websocket-client` lib on the Python side covers
+ * both sockets).
+ *
+ * The timer binds a `listenEvents` server on `viewPushSockPath(sd)` and
+ * `push(view)` broadcasts `{kind: "view", data: view}` to every connected
+ * client (in practice : one proxy per loop). If no client is connected,
+ * the push is dropped — that's fine : the proxy paints from the last
+ * view it received + falls back to its local rules until the next push
+ * arrives, exactly like before the inversion.
  */
 export interface ViewPusher {
     push(view: import("./loop-state.js").LoopStateView): void;
@@ -1791,66 +1798,31 @@ export interface ViewPusher {
 }
 
 export function createViewPusher(sockPath: string): ViewPusher {
-    let sock: ReturnType<typeof netConnect> | null = null;
-    let connecting = false;
-    let queued: string[] = [];
-
-    const connect = (): void => {
-        if (sock || connecting) return;
-        connecting = true;
-        try {
-            const s = netConnect(sockPath);
-            s.on("error", () => {
-                try { s.end(); } catch { /* ignore */ }
-                if (sock === s) sock = null;
-                connecting = false;
-            });
-            s.on("close", () => {
-                if (sock === s) sock = null;
-                connecting = false;
-            });
-            s.on("connect", () => {
-                sock = s;
-                connecting = false;
-                // Flush any queued payloads accumulated while we were
-                // reconnecting (typically the very first call from
-                // settleBoot before the timer's view-watcher started).
-                for (const line of queued) {
-                    try { s.write(line); } catch { /* ignore */ }
-                }
-                queued = [];
-            });
-        } catch {
-            connecting = false;
-        }
-    };
-
+    // The timer doesn't react to any inbound event on view-push (push-only).
+    // We still pass a no-op `onEvent` to listenEvents — the API requires
+    // one, but no frame should ever arrive in this direction.
+    const server: EventServer = listenEvents(sockPath, () => { /* push-only socket */ });
     return {
         push(view) {
-            const line = JSON.stringify(view) + "\n";
-            if (sock && !sock.destroyed) {
-                try { sock.write(line); return; } catch { /* fall through */ }
-            }
-            // Queue the FIRST few pushes while we (re)connect ; drop
-            // anything beyond a cap so a dead proxy doesn't leak memory.
-            if (queued.length < 4) queued.push(line);
-            connect();
+            server.broadcast({ kind: "view", data: view });
         },
         close() {
-            try { sock?.end(); } catch { /* ignore */ }
-            sock = null;
-            queued = [];
+            server.close();
         },
     };
 }
 
 /**
- * #633 (Slice A) — server side of the proxy→timer back-channel. The
- * timer binds the UDS at `proxyEventsSockPath(sd)`, accepts one or more
- * proxy connections, parses newline-delimited JSON events, and invokes
- * `onEvent` for each. Errors are swallowed (best-effort) — a dead
- * proxy or malformed line never crashes the timer. The bound server
- * socket is cleaned up on returned `close()`.
+ * #633 (Slice A) — server side of the proxy→timer back-channel.
+ * #729 phase 2 — re-wired on top of `ipc-events` (ws over UDS). The
+ * timer listens on `proxyEventsSockPath(sd)` ; the proxy connects in
+ * as a client and emits frames `{kind: "proxyEvent", data: <legacyEvent>}`.
+ * The dispatcher `proxy-event-dispatcher.ts` still sees the legacy
+ * event shape intact (`{event: "keystroke"|"marker"|"hook", kind: ...,
+ * ...}`) — we just unwrap the envelope before passing to `onEvent`.
+ *
+ * Direction (proxy = CLIENT, timer = SERVER) is unchanged ; only the
+ * transport layer switches to ws.
  */
 export interface ProxyEventsServer {
     close(): void;
@@ -1860,33 +1832,22 @@ export function createProxyEventsServer(
     sockPath: string,
     onEvent: (event: Record<string, unknown>) => void,
 ): ProxyEventsServer {
-    try { if (existsSync(sockPath)) unlinkSync(sockPath); } catch { /* race */ }
-    const server = netCreateServer((conn) => {
-        let buf = "";
-        conn.on("data", (chunk) => {
-            buf += chunk.toString("utf8");
-            let nl: number;
-            while ((nl = buf.indexOf("\n")) >= 0) {
-                const line = buf.slice(0, nl).trim();
-                buf = buf.slice(nl + 1);
-                if (!line) continue;
-                try {
-                    const parsed = JSON.parse(line) as unknown;
-                    if (parsed && typeof parsed === "object") {
-                        onEvent(parsed as Record<string, unknown>);
-                    }
-                } catch { /* malformed — skip silently */ }
-            }
-        });
-        conn.on("error", () => { try { conn.end(); } catch { /* ignore */ } });
-        conn.on("close", () => { /* connection gone — server stays open */ });
+    const server: EventServer = listenEvents(sockPath, (ev) => {
+        // Compat-wrap : legacy events are sent as
+        // `{kind: "proxyEvent", data: {event: "...", kind: "...", ...}}`
+        // so they fit the `Event {kind, data}` shape of the ipc-events
+        // layer. The dispatcher expects the legacy object intact —
+        // unwrap data here.
+        if (ev.kind !== "proxyEvent") return; // forward-compat : unknown kind = ignore
+        const inner = ev.data;
+        if (!inner || typeof inner !== "object") return;
+        try {
+            onEvent(inner as Record<string, unknown>);
+        } catch { /* dispatcher already swallows — defense in depth */ }
     });
-    try { server.listen(sockPath); } catch { /* bind failed — events lost, OK */ }
-    server.on("error", () => { /* keep listening on next reconnect attempt */ });
     return {
         close() {
-            try { server.close(); } catch { /* ignore */ }
-            try { if (existsSync(sockPath)) unlinkSync(sockPath); } catch { /* ignore */ }
+            server.close();
         },
     };
 }

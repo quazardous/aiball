@@ -27,6 +27,11 @@
 - **tmux** + **python3** for `claude-loop`. Python 3 enables the PTY
   proxy for live human-typing detection — see
   [`PTY-PROXY.md`](./PTY-PROXY.md). Both ship by default on most distros.
+- **`websocket-client`** Python package — used by the PTY proxy for the
+  ws-over-UDS IPC with the timer (view-push receive + proxy-events emit).
+  Install with `pip install --user websocket-client` (or your
+  distribution package, e.g. `dnf install python3-websocket-client` on
+  Fedora). Replay-mode subtests don't need it.
 
 ## Install
 

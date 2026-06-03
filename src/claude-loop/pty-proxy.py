@@ -41,6 +41,21 @@ import termios
 import fcntl
 import datetime
 import subprocess
+import threading
+import queue
+import time
+
+# #729 phase 2 — websocket-client over UDS for IPC with the timer
+# (proxy-events + view-push). Required in LIVE mode only ; `--replay`
+# and `--replay-log` short-circuit before any socket use, so they keep
+# working without the dep. The live `main()` path checks `_HAS_WEBSOCKET`
+# and fails fast with a clear hint if missing.
+try:
+    import websocket  # type: ignore
+    _HAS_WEBSOCKET = True
+except ImportError:
+    websocket = None  # type: ignore
+    _HAS_WEBSOCKET = False
 
 
 def _state_dir():
@@ -58,17 +73,20 @@ def _inject_sock_path():
 
 
 def _view_push_sock_path():
-    """#627 — UDS the proxy listens on for view-push from the timer.
-    Newline-delimited JSON ; timer connects once and holds the
-    connection open."""
+    """#627 — UDS for view-push from the timer.
+    #729 phase 2 (8yg34n, go C) : direction INVERTED — the proxy now
+    CONNECTS in as a client to this socket (the timer is the server,
+    aligned with the #726 SSOT). Transport : ws over UDS via
+    `websocket-client`."""
     sd = _state_dir()
     return os.path.join(sd, "view-push.sock") if sd else ""
 
 
 def _proxy_events_sock_path():
     """#633 Slice A — UDS the proxy CONNECTS TO to emit raw events
-    (typing, AFK key, lone-esc). Inverse direction of view-push.sock.
-    Newline-delimited JSON ; persistent connection, retry on fail."""
+    (typing, AFK key, lone-esc). #729 phase 2 : transport switches to
+    ws over UDS via `websocket-client` ; direction stays the same
+    (proxy = CLIENT, timer = SERVER)."""
     sd = _state_dir()
     return os.path.join(sd, "proxy-events.sock") if sd else ""
 
@@ -423,24 +441,36 @@ def arm_afk_10m():
 # to the timer's `proxy-events.sock`. Persistent connection, reconnect on
 # failure, silent no-op if the timer isn't there (degraded mode — the
 # caller falls back to local logic). Single instance lazily created.
+#
+# #729 phase 2 — transport switches to ws over UDS via `websocket-client`.
+# The legacy payload `{event, kind, now_ms, ...}` is WRAPPED in the shape
+# `{kind: "proxyEvent", data: <legacy>}` which the ipc-events server
+# unwraps on the JS side. Direction unchanged (proxy = CLIENT).
 class _ProxyEventEmitter:
     def __init__(self):
-        self._sock = None
+        self._ws = None
 
     def _ensure(self):
-        if self._sock is not None:
+        if not _HAS_WEBSOCKET:
+            return False  # degraded mode (replay, missing dep) — caller falls back
+        if self._ws is not None:
             return True
         path = _proxy_events_sock_path()
         if not path or not os.path.exists(path):
             return False
         try:
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.connect(path)
-            s.setblocking(False)
-            self._sock = s
+            unix = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            unix.connect(path)
+            # `websocket-client` doesn't support `ws+unix://` natively —
+            # we pass our already-connected socket via the `socket` param.
+            # The `ws://localhost/` URL is only used for the HTTP Upgrade
+            # handshake.
+            self._ws = websocket.create_connection(
+                "ws://localhost/", socket=unix, timeout=2,
+            )
             return True
-        except OSError:
-            self._sock = None
+        except Exception:
+            self._ws = None
             return False
 
     def emit(self, payload):
@@ -450,14 +480,14 @@ class _ProxyEventEmitter:
         if not self._ensure():
             return False
         try:
-            line = (_json.dumps(payload) + "\n").encode("utf-8")
-            self._sock.sendall(line)
+            wrapped = _json.dumps({"kind": "proxyEvent", "data": payload})
+            self._ws.send(wrapped)
             return True
-        except OSError:
+        except Exception:
             # Connection dropped — drop it, next call will retry.
-            try: self._sock.close()
-            except OSError: pass
-            self._sock = None
+            try: self._ws.close()
+            except Exception: pass
+            self._ws = None
             return False
 
     def emit_typing(self, now_ms):
@@ -474,6 +504,103 @@ class _ProxyEventEmitter:
 
 
 _proxy_events = _ProxyEventEmitter()
+
+
+# #729 phase 2 — view-push client. Direction inversion validated by
+# david (8yg34n, go C) : the timer is now SERVER, the proxy connects in
+# as CLIENT. Frames `{kind: "view", data: <view>}` arrive in a daemon
+# thread (`websocket-client` is blocking) which pushes every parsed view
+# into a queue. The thread writes a byte to a self-pipe to wake up the
+# main `select()` loop, which then drains the queue and calls
+# `_apply_pushed_view`.
+class _ViewPushClient:
+    """Background ws client that pulls view frames from the timer and
+    posts them into a thread-safe queue. The main select loop registers
+    the wakeup-pipe read end and drains via `drain()`.
+
+    Best-effort reconnect with fixed 1s backoff. A missing timer (boot
+    race, timer crashed) is silent — the proxy paints from rules-locales
+    until the next push lands, exactly like before the inversion."""
+
+    def __init__(self, sock_path, wakeup_w):
+        self._sock_path = sock_path
+        self._wakeup_w = wakeup_w
+        self._queue = queue.Queue()
+        self._thread = None
+        self._stopped = False
+
+    def start(self):
+        if not self._sock_path or self._thread is not None:
+            return
+        if not _HAS_WEBSOCKET:
+            return  # degraded mode (replay, missing dep) — no view-push
+        self._thread = threading.Thread(
+            target=self._run, name="view-push-client", daemon=True,
+        )
+        self._thread.start()
+
+    def _run(self):
+        while not self._stopped:
+            ws = None
+            try:
+                if not os.path.exists(self._sock_path):
+                    time.sleep(1.0)
+                    continue
+                unix = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                unix.connect(self._sock_path)
+                ws = websocket.create_connection(
+                    "ws://localhost/", socket=unix, timeout=5,
+                )
+                while not self._stopped:
+                    try:
+                        msg = ws.recv()
+                    except Exception:
+                        break
+                    if not msg:
+                        break
+                    text = msg if isinstance(msg, str) else \
+                        msg.decode("utf-8", errors="replace")
+                    try:
+                        frame = _json.loads(text)
+                    except (ValueError, UnicodeDecodeError):
+                        continue
+                    if not isinstance(frame, dict):
+                        continue
+                    if frame.get("kind") != "view":
+                        continue
+                    data = frame.get("data")
+                    if not isinstance(data, dict):
+                        continue
+                    self._queue.put(data)
+                    try:
+                        os.write(self._wakeup_w, b"v")
+                    except OSError:
+                        pass
+            except (OSError, Exception):
+                pass
+            finally:
+                if ws is not None:
+                    try: ws.close()
+                    except Exception: pass
+            if self._stopped:
+                break
+            time.sleep(1.0)  # reconnect backoff
+
+    def drain(self):
+        """Pop every pending view from the queue, in arrival order.
+        Called by the main select loop after a wakeup byte fires."""
+        out = []
+        while True:
+            try:
+                out.append(self._queue.get_nowait())
+            except queue.Empty:
+                break
+        return out
+
+    def stop(self):
+        self._stopped = True
+        # Don't join : the daemon thread might be stuck in ws.recv(),
+        # but it's daemonized so process exit will reap it.
 
 
 # Legacy cycle_afk alias kept for replay shim compatibility — old NDJSON
@@ -1258,6 +1385,17 @@ def main(argv):
         sys.stderr.write("pty-proxy: no command to run\n")
         return 2
 
+    # #729 phase 2 — live mode requires `websocket-client` for the IPC
+    # with the timer (proxy-events emit + view-push receive). Replay
+    # modes short-circuited above don't need it.
+    if not _HAS_WEBSOCKET:
+        sys.stderr.write(
+            "claude-loop: missing Python dep `websocket-client`.\n"
+            "  Install with: pip install --user websocket-client    (or your package manager)\n"
+            "  (see docs/INSTALL.md)\n"
+        )
+        return 2
+
     # Fork avec un PTY neuf : le child reçoit le slave comme tty de
     # contrôle (stdin/out/err), on garde le master côté parent.
     try:
@@ -1325,27 +1463,19 @@ def main(argv):
         except OSError:
             inject_srv = None  # injection retombera sur send-keys côté TS
 
-    # #627 — Socket pour le view-push depuis le timer. Newline-delimited JSON,
-    # connection persistante côté timer (auto-reconnect). On peint le bar
-    # word + AFK chunk depuis la view reçue ; les rules locales (_rest_word /
-    # _format_afk_state) restent en bootstrap fallback tant que le timer
-    # n'a pas pushé sa première view.
-    view_push_srv = None
-    view_push_sock_path = _view_push_sock_path()
-    if view_push_sock_path:
-        try:
-            if os.path.exists(view_push_sock_path):
-                os.unlink(view_push_sock_path)
-            view_push_srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            view_push_srv.bind(view_push_sock_path)
-            view_push_srv.listen(2)
-            view_push_srv.setblocking(False)
-        except OSError:
-            view_push_srv = None  # fallback : rules locales
+    # #627 + #729 phase 2 — view-push from the timer. Direction inverted :
+    # the timer is the SERVER, we connect in as CLIENT via `_ViewPushClient`
+    # (daemon thread + queue + self-pipe for the select wakeup). The bar
+    # word + AFK chunk are painted from the view received ; the local
+    # rules (_rest_word / _format_afk_state) remain as a bootstrap
+    # fallback until the timer pushes its first view.
+    view_push_pipe_r, view_push_pipe_w = os.pipe()
+    fcntl.fcntl(view_push_pipe_r, fcntl.F_SETFL,
+                fcntl.fcntl(view_push_pipe_r, fcntl.F_GETFL) | os.O_NONBLOCK)
+    view_push_client = _ViewPushClient(_view_push_sock_path(), view_push_pipe_w)
+    view_push_client.start()
 
     inject_conns = []
-    # Per-connection JSON line buffers for view-push.
-    view_push_conns = []   # list of (sock, recv_buffer:bytearray)
     stdin_open = True
 
     # #274/#302 état du segment human : on ne repeint QUE sur transition.
@@ -1394,13 +1524,12 @@ def main(argv):
                 os.unlink(sock_path)
             except OSError:
                 pass
-        if view_push_srv is not None:
+        # #729 phase 2 — view-push : stop the daemon thread + close the pipe.
+        # The timer (server) cleans up its own socket on its side.
+        view_push_client.stop()
+        for fd in (view_push_pipe_r, view_push_pipe_w):
             try:
-                view_push_srv.close()
-            except OSError:
-                pass
-            try:
-                os.unlink(view_push_sock_path)
+                os.close(fd)
             except OSError:
                 pass
 
@@ -1467,32 +1596,18 @@ def main(argv):
             except OSError:
                 pass
 
-    def _process_view_push_recv(conn, buf):
-        """#627 — drain a view-push connection. Parses every full
-        newline-terminated JSON line, applies each as a view. Leftover
-        bytes stay buffered for the next read."""
+    def _drain_view_push_queue():
+        """#729 phase 2 — called when the self-pipe has a byte ready.
+        Drains the queue fed by the daemon thread `_ViewPushClient` and
+        applies each view. Also drains the pipe (best-effort) to disarm
+        the wakeup until the next push."""
         try:
-            chunk = conn.recv(65536)
-        except OSError:
-            chunk = b""
-        if not chunk:
-            return False  # peer closed
-        buf.extend(chunk)
-        while True:
-            nl = buf.find(b"\n")
-            if nl < 0:
-                break
-            line = bytes(buf[:nl])
-            del buf[:nl + 1]
-            if not line.strip():
-                continue
-            try:
-                view = _json.loads(line.decode("utf-8", errors="replace"))
-            except (ValueError, UnicodeDecodeError):
-                continue  # malformed — skip
-            if isinstance(view, dict):
-                _apply_pushed_view(view)
-        return True  # still open
+            while True:
+                os.read(view_push_pipe_r, 4096)
+        except (BlockingIOError, OSError):
+            pass
+        for view in view_push_client.drain():
+            _apply_pushed_view(view)
 
     def apply_decision(dec):
         """#360 : exécute les EFFETS d'une Decision (markers afk/présence,
@@ -1560,9 +1675,9 @@ def main(argv):
             if inject_srv is not None:
                 rfds.append(inject_srv)
             rfds.extend(inject_conns)
-            if view_push_srv is not None:
-                rfds.append(view_push_srv)
-            rfds.extend(c for (c, _buf) in view_push_conns)
+            # #729 phase 2 — the self-pipe fed by the daemon thread
+            # `_ViewPushClient` wakes up select() whenever a view arrives.
+            rfds.append(view_push_pipe_r)
             # Timeout = prochain changement de mot : d'abord l'expiration
             # de la frappe (5s → ré-évalue stop→rest), puis la plus proche
             # des fins de boot-grace (#305 → bar word `boot`→`loop`/`wait`)
@@ -1689,25 +1804,11 @@ def main(argv):
                         except OSError:
                             pass
 
-            # 5) #627 — view-push : nouvelle connection du timer.
-            if view_push_srv is not None and view_push_srv in ready:
-                try:
-                    vp_conn, _ = view_push_srv.accept()
-                    vp_conn.setblocking(False)
-                    view_push_conns.append((vp_conn, bytearray()))
-                except OSError:
-                    pass
-
-            # 6) #627 — drain les view-push connections.
-            for entry in list(view_push_conns):
-                vp_conn, vp_buf = entry
-                if vp_conn in ready:
-                    if not _process_view_push_recv(vp_conn, vp_buf):
-                        view_push_conns.remove(entry)
-                        try:
-                            vp_conn.close()
-                        except OSError:
-                            pass
+            # 5) #729 phase 2 — view-push : self-pipe wakeup fed by the
+            # daemon thread `_ViewPushClient`. Drain the queue and apply
+            # each view via `_apply_pushed_view`.
+            if view_push_pipe_r in ready:
+                _drain_view_push_queue()
     finally:
         cleanup()
 
