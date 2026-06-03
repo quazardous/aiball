@@ -30,6 +30,7 @@ import { Command, Option } from "commander";
 import { AiballClient } from "../client.js";
 import { AIBALL_VERSION } from "../version.js";
 import { bootstrapInit, installSkill } from "../cli/bootstrap.js";
+import { applyBootstrapOptions } from "../cli/bootstrap-options.js";
 import { applyToProcessEnv, resolveProjectContext, warnIfDeprecated } from "./project-context.js";
 import { readLocalRemote, writeLocalRemote } from "./local-config.js";
 import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-key.js";
@@ -1911,19 +1912,13 @@ async function main(): Promise<void> {
     // .aiball.yaml) without leaving the claude-loop workflow. Shares the body.
     // #394 volet A: with --aiball-url, ALSO persist a REMOTE aiball connection
     // to .aiball.local.yaml so a plain `claude-loop start` slaves to it.
-    const initCmd = program.command("init")
-        .description("Bootstrap this project (.mcp.json + .aiball.yaml). With --aiball-url, also persist a REMOTE aiball connection (#394) so `start` slaves to it.")
-        .option("--force", "Overwrite existing entries")
-        .option("--stop-hook", "Also wire Claude Code's Stop hook into .claude/settings.json")
-        .option("--global", "With --stop-hook, write to ~/.claude/settings.json (every Claude Code session)")
-        .option("--private", "#593: seed .aiball.yaml with `project_type: private` (welcome serves the private kit)")
+    // #600 david `483um7` — shared option declarations live in
+    // `src/cli/bootstrap-options.ts`. Each surface adds its own remote-
+    // related flags on top (claude-loop only : --aiball-url/--aiball-token).
+    const initCmd = applyBootstrapOptions(program.command("init")
+        .description("Bootstrap this project (.mcp.json + .aiball.yaml). With --aiball-url, also persist a REMOTE aiball connection (#394) so `start` slaves to it."))
         .option("--aiball-url <url>", "#394: persist a REMOTE aiball URL (http[s]://host:port) so `start` (no flags) slaves to it")
         .option("--aiball-token <token>", "#394: bearer token for the remote (required with --aiball-url; mint with `aiball auth issue --consumer <id>`)")
-        .option("--consumer <id>", "#394/#603: loop identity = consumer_id. Persisted with the remote AND seeded into .aiball.yaml's `consumer.agent`.")
-        .option("--agent <id>", "#603: alias for --consumer (the loop's agent identity).")
-        .option("--project <name>", "#394/#603: project name. Persisted with the remote AND seeded into .aiball.yaml's `consumer.project`.")
-        .option("--no-claim", "#612: seed `consumer.no_claim: true` in .aiball.yaml (assignment-only agent).")
-        .option("--migrate-from <name>", "#701: rename the project from <name> to the new project name (resolved from --project / .aiball.yaml / basename cwd) BEFORE the init body runs. Typo-recovery in one shot: `claude-loop init --migrate-from pisynt` from `~/dev/projects/pisynth` flips the DB pointer + initialises the new yaml.")
         .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string; claim?: boolean; migrateFrom?: string }) => {
             // #603 david `4dzxp2` : --agent est un alias de --consumer (#420 le faisait
             // déjà sur `start`, on harmonise sur `init`).

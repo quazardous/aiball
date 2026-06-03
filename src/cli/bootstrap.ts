@@ -16,6 +16,7 @@ import { homedir } from "node:os";
 import type { Command } from "commander";
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
 import { die, userCwd, resolveInstallRoot } from "./_helpers.js";
+import { applyBootstrapOptions } from "./bootstrap-options.js";
 import { globalConfigPath } from "../autopoll/config.js";
 import { proxyTokensPath, type ProxyTokenEntry } from "../proxy.js";
 import { installRoot as aiballInstallRoot } from "../claude-loop/state.js";
@@ -561,17 +562,21 @@ function revokeProxyToken(needle: string): void {
 }
 
 export function registerBootstrapCommands(program: Command): void {
+    // #600 david `483um7` — `aiball mcp init` killed : `aiball init` (and
+    // `claude-loop init`) already write .mcp.json + .aiball.yaml together
+    // since #B.175. The standalone path was vestigial and the parent
+    // `mcp` namespace had no other subcommands. The action stub stays
+    // for one release so scripts that called it get a clear redirect.
     const mcp = program
         .command("mcp")
         .description("Manage the aiball entry in this project's .mcp.json");
 
     mcp
         .command("init")
-        .description("Add the aiball MCP server to .mcp.json at cwd (preserves any existing entries)")
-        .option("--force", "Overwrite an existing aiball entry (drops any legacy env block — #B.154)")
-        .action(async (opts: { force?: boolean }) => {
-            await mcpInitAction(opts.force === true);
-            process.stdout.write(`\n${await resolveIdentityHint()}\n`);
+        .description("(removed in 0.27) — use `aiball init` (combines mcp + autopoll setup)")
+        .allowExcessArguments(true)
+        .action(() => {
+            die("`aiball mcp init` was removed — use `aiball init` (it writes .mcp.json + .aiball.yaml in one shot). #600");
         });
 
     /**
@@ -584,18 +589,9 @@ export function registerBootstrapCommands(program: Command): void {
      * flip autopoll on. The verbose annotated template lives at
      * `.aiball.yaml.example` for users who want to tune knobs.
      */
-    const initCmd = program
+    const initCmd = applyBootstrapOptions(program
         .command("init")
-        .description("Bootstrap a project: write .mcp.json + .aiball.yaml (combines `mcp init` + `autopoll init`)")
-        .option("--force", "Overwrite existing entries (passes through to both subactions)")
-        .option("--stop-hook", "Also wire Claude Code's Stop hook into .claude/settings.json so this project's autopoll triggers")
-        .option("--global", "With --stop-hook, write to ~/.claude/settings.json instead of <PWD>/.claude/settings.json (fires in every Claude Code session)")
-        .option("--private", "Seed the .aiball.yaml with `project_type: private` so the welcome MCP serves the private kit (relaxed conventions). Default = public (welcome's fail-safe).")
-        .option("--agent <id>", "#603: seed `consumer.agent` in .aiball.yaml (loop identity). Patches an existing file in place.")
-        .option("--consumer <id>", "#603: alias for --agent (the consumer_id IS the loop identity).")
-        .option("--project <name>", "#603: seed `consumer.project` in .aiball.yaml (default project for this checkout).")
-        .option("--no-claim", "#612: seed `consumer.no_claim: true` in .aiball.yaml (assignment-only agent — no claimable pool).")
-        .option("--migrate-from <name>", "#701: rename the project from <name> to the new project name (resolved from --project / .aiball.yaml / basename cwd) BEFORE the init body runs. Typo-recovery in one shot.")
+        .description("Bootstrap a project: write .mcp.json + .aiball.yaml (combines mcp + autopoll setup)"))
         .action(async (opts: { force?: boolean; stopHook?: boolean; global?: boolean; private?: boolean; agent?: string; consumer?: string; project?: string; claim?: boolean; migrateFrom?: string }) => {
             // #612 — commander's `--no-X` sets `opts.X = false` when passed,
             // defaults to `true` otherwise. We want a tri-state for the
@@ -688,18 +684,17 @@ export function registerBootstrapCommands(program: Command): void {
         .description("Remove a mapping by local token (full or unique prefix) or by consumer")
         .action((needle: string) => revokeProxyToken(needle));
 
-    // `aiball stop-hook install [--global]` — standalone wiring command,
-    // shared between `aiball init --stop-hook` and install.ps1 -StopHook.
-    // Doesn't touch .mcp.json or .aiball.yaml — pure hook wiring. Suitable
-    // for global installs where you don't want the project-local artifacts
-    // to land in install.ps1's CWD.
-    const stopHook = program.command("stop-hook").description("Manage the Claude Code Stop hook (autopoll trigger)");
+    // #600 david `483um7` — `aiball stop-hook install` killed : `aiball
+    // init --stop-hook` (+ `--global`) covers the same wiring. The
+    // standalone variant predated the combined init and never carried a
+    // unique behaviour. Stub stays one release to redirect callers.
+    const stopHook = program.command("stop-hook").description("(removed in 0.27) — use `aiball init --stop-hook [--global]`");
     stopHook
         .command("install")
-        .description("Wire skill/hooks/aiball-autopoll-stop into .claude/settings.json")
-        .option("--global", "Write to ~/.claude/settings.json (every Claude Code session). Default: project-local <PWD>/.claude/settings.json")
-        .action((opts: { global?: boolean }) => {
-            wireStopHook({ global: opts.global === true });
+        .description("(removed in 0.27) — use `aiball init --stop-hook [--global]`")
+        .allowExcessArguments(true)
+        .action(() => {
+            die("`aiball stop-hook install` was removed — use `aiball init --stop-hook [--global]` instead. #600");
         });
 }
 

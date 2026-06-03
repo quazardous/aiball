@@ -8,7 +8,7 @@
  *
  * Exposed entry point: `registerAutopollCommands(program)`.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Command } from "commander";
 import {
@@ -16,7 +16,6 @@ import {
     fmtAutopollShow,
     gOpts,
     out,
-    resolveInstallRoot,
     userCwd,
 } from "./_helpers.js";
 
@@ -46,25 +45,16 @@ export function registerAutopollCommands(program: Command): void {
             "Manage the per-project autopoll hook (Stop → drain pings). Operates on the closest .aiball.yaml walking up from cwd.",
         );
 
+    // #600 david `483um7` — `aiball autopoll init` killed : `aiball init`
+    // (and `claude-loop init`, the daily-driver) already write the
+    // `.aiball.yaml` autopoll block. Autopoll est project-scope ; le
+    // standalone init faisait double emploi.
     autopoll
         .command("init")
-        .description("Write a starter .aiball.yaml at cwd if none is found up-tree")
-        .option("--force", "Overwrite an existing .aiball.yaml at cwd")
-        .action(async (opts: { force?: boolean }) => {
-            const { findConfigUpwards, CONFIG_FILENAME } = await import("../autopoll/config.js");
-            const existing = findConfigUpwards(userCwd());
-            const target = join(userCwd(), CONFIG_FILENAME);
-            if (existing && !opts.force) {
-                die(`already configured at ${existing} — re-run with --force to overwrite`);
-            }
-            // Resolve the install dir to find the example template.
-            const installRoot = resolveInstallRoot();
-            const example = join(installRoot, ".aiball.yaml.example");
-            if (!existsSync(example)) {
-                die(`example template missing at ${example}`);
-            }
-            writeFileSync(target, readFileSync(example, "utf8"));
-            process.stdout.write(`wrote ${target}\nedit it or pilot via 'aiball autopoll {enable|disable|tone|throttle}'\n`);
+        .description("(removed in 0.27) — use `claude-loop init` (or `aiball init`)")
+        .allowExcessArguments(true)
+        .action(() => {
+            die("`aiball autopoll init` was removed — use `claude-loop init` (or `aiball init`) ; both write .aiball.yaml with the autopoll block. #600");
         });
 
     autopoll
