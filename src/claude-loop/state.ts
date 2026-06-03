@@ -341,11 +341,13 @@ export function humanTypingPath(sd: string): string { return join(sd, "human-typ
 // Present ⇒ the pane runs under the proxy (injection goes here instead of
 // tmux send-keys; the proxy owns the human-typing marker).
 export function injectSockPath(sd: string): string { return join(sd, "inject.sock"); }
-/** #627 — UDS the proxy listens on for view-push messages from the timer.
- *  Separate from `inject.sock` (raw wake bytes) so the protocols stay
- *  isolated. Newline-delimited JSON, persistent connection from the
- *  timer side (auto-reconnect on drop). */
-export function viewPushSockPath(sd: string): string { return join(sd, "view-push.sock"); }
+/** #730 step 1 — single per-loop IPC socket. Today carries only view-push
+ *  frames (`{kind:"view"}`) ; subsequent steps fold proxy-events
+ *  (`{kind:"proxyEvent"}`) and inject (`{kind:"inject"}`) onto the same
+ *  socket so we end up with one `loop.sock` per loop instead of three.
+ *  Timer is the SERVER (per #729 inversion) ; proxy + hooks are clients.
+ *  Previously named `view-push.sock` (#627). */
+export function loopSockPath(sd: string): string { return join(sd, "loop.sock"); }
 // #281 (strategy B): Windows has no AF_UNIX file sockets, so the Rust
 // ConPTY proxy listens on a NAMED PIPE instead. Both sides derive the
 // name from the loop name (= basename of the state dir, == CL_NAME).
@@ -362,8 +364,8 @@ export function injectPipeName(sd: string): string {
 export function proxyAlivePath(sd: string): string { return join(sd, "proxy-alive"); }
 // #633 david `ecmrvn` (Slice A) — back-channel UDS the proxy connects to
 // at startup, emitting raw events (typing, AFK key, lone-esc) so the
-// timer's state machine decides what to do (arm AFK, toggle, …). Inverse
-// direction of view-push.sock (timer→proxy). Newline-delimited JSON.
+// timer's state machine decides what to do (arm AFK, toggle, …). Will
+// fold onto `loop.sock` at #730 step 2 (`{kind:"proxyEvent"}`).
 export function proxyEventsSockPath(sd: string): string { return join(sd, "proxy-events.sock"); }
 export function timerPidPath(sd: string): string { return join(sd, "timer.pid"); }
 export function timerLogPath(sd: string): string { return join(sd, "timer.log"); }
@@ -1785,7 +1787,7 @@ export async function injectWakePhrase(paneTarget: string, phrase: string): Prom
  * asymmetry (a single `websocket-client` lib on the Python side covers
  * both sockets).
  *
- * The timer binds a `listenEvents` server on `viewPushSockPath(sd)` and
+ * The timer binds a `listenEvents` server on `loopSockPath(sd)` and
  * `push(view)` broadcasts `{kind: "view", data: view}` to every connected
  * client (in practice : one proxy per loop). If no client is connected,
  * the push is dropped — that's fine : the proxy paints from the last

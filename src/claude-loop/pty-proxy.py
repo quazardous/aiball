@@ -72,14 +72,15 @@ def _inject_sock_path():
     return os.path.join(sd, "inject.sock") if sd else ""
 
 
-def _view_push_sock_path():
-    """#627 — UDS for view-push from the timer.
-    #729 phase 2 (8yg34n, go C) : direction INVERTED — the proxy now
-    CONNECTS in as a client to this socket (the timer is the server,
-    aligned with the #726 SSOT). Transport : ws over UDS via
-    `websocket-client`."""
+def _loop_sock_path():
+    """#730 step 1 — single per-loop IPC socket. Timer is the SERVER
+    (#729 inversion), proxy + hooks are clients. Today carries only
+    view-push frames (`{kind:"view"}`) ; upcoming steps fold proxy-events
+    and inject onto the same socket. Transport : ws over UDS via
+    `websocket-client` on the Python side. Previously named
+    `view-push.sock` (#627)."""
     sd = _state_dir()
-    return os.path.join(sd, "view-push.sock") if sd else ""
+    return os.path.join(sd, "loop.sock") if sd else ""
 
 
 def _proxy_events_sock_path():
@@ -1472,7 +1473,7 @@ def main(argv):
     view_push_pipe_r, view_push_pipe_w = os.pipe()
     fcntl.fcntl(view_push_pipe_r, fcntl.F_SETFL,
                 fcntl.fcntl(view_push_pipe_r, fcntl.F_GETFL) | os.O_NONBLOCK)
-    view_push_client = _ViewPushClient(_view_push_sock_path(), view_push_pipe_w)
+    view_push_client = _ViewPushClient(_loop_sock_path(), view_push_pipe_w)
     view_push_client.start()
 
     inject_conns = []

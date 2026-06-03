@@ -44,8 +44,8 @@ import {
     bootCompletePath,
     createProxyEventsServer,
     createViewPusher,
+    loopSockPath,
     proxyEventsSockPath,
-    viewPushSockPath,
     paneShowsInterrupted,
     readLoopStateInput,
     clearResumePickers,
@@ -920,16 +920,18 @@ async function mainSse(): Promise<void> {
     // view ; its local rules are bootstrap fallback only.
     //
     // Architecture (david `fdzg4e`) : timer ↔ proxy IPC via a
-    // dedicated UDS (`view-push.sock`), persistent connection,
-    // newline-delimited JSON. The pusher reconnects transparently
-    // if the socket drops (proxy reload, etc.).
+    // dedicated UDS, persistent connection, newline-delimited JSON.
+    // The pusher reconnects transparently if the socket drops
+    // (proxy reload, etc.). #730 step 1 : the path is now the shared
+    // `loop.sock` (the timer ws server multiplexes future kinds on
+    // the same socket — view today, proxyEvent + inject upcoming).
     // #630 david `d59zge` : LoopStateBus owns the prev-view + emits
     // typed events on transitions. The push-to-proxy hook listens to
     // `transition` (any change) and forwards via the existing pusher.
     // Other consumers can subscribe to specific events (bootEnded,
     // afkArmed10m, …) for log decoration or future reactive painters
     // without re-implementing the diff.
-    const viewPusher = createViewPusher(viewPushSockPath(sd!));
+    const viewPusher = createViewPusher(loopSockPath(sd!));
     // #633 Slice A (david `ecmrvn`) — back-channel server : the proxy
     // connects + emits raw events (typing, AFK key, lone-esc). The state
     // machine here decides what to do based on the AUTHORITATIVE view
