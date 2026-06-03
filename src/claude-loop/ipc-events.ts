@@ -119,6 +119,18 @@ export function listenEvents(socketPath: string, onEvent: EventHandler): EventSe
         ws.on("error", () => { /* swallow socket-level errors */ });
     });
 
+    // A bind failure surfaces as an async 'error' EVENT, not a throw — the
+    // try/catch below only catches synchronous errors. Without a handler the
+    // event is unhandled and crashes the whole process. This bites on win32
+    // especially: `http.listen({ path })` treats a filesystem path as a
+    // named-pipe name, so a `C:\…\loop.sock` path fails with EACCES and took
+    // the claude-loop timer down on every start. Swallow it — the server
+    // degrades to "not listening" (callers already tolerate a missing socket)
+    // rather than crashing. Also covers EADDRINUSE on any platform. The error
+    // re-emits on the WebSocketServer too, so guard both.
+    http.on("error", () => { /* bind/listen failed — degrade, don't crash */ });
+    wss.on("error", () => { /* server-level ws error — swallow */ });
+
     try { http.listen({ path: socketPath }); } catch { /* bind failed — caller observes via missing socket file */ }
 
     return {
