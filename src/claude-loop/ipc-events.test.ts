@@ -9,12 +9,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listenEvents, openEventChannel, sendEventOnce, type Event } from "./ipc-events.js";
 
-// #729/#730 — these exercise a real AF_UNIX round-trip. Windows has no
-// filesystem domain sockets (the win32 transport wrap — named pipe /
-// loopback — is still pending), so the `ws+unix://` client + `listen({path})`
-// server can't connect there. Skip the whole file on win32 rather than
-// report false failures; re-enable per-case as the transport lands.
-const t = process.platform === "win32" ? test.skip : test;
+// #739 — the win32 loopback transport landed, so these now run on EVERY
+// platform via the platform-default transport (UDS on Unix, loopback TCP
+// on win32). `unixOnly` gates the few cases asserting the UDS-specific
+// filesystem artifact (the socket file), which has no equivalent on the
+// loopback path (it publishes a `.addr` marker instead — covered by the
+// transport-contract test).
+const t = test;
+const unixOnly = process.platform === "win32" ? test.skip : test;
 
 function withTmpSocketPath<T>(fn: (path: string) => Promise<T>): Promise<T> {
     const dir = mkdtempSync(join(tmpdir(), "ipc-events-test-"));
@@ -161,7 +163,7 @@ t("sendEventOnce : rejects on connect failure when throwOnError=true", async () 
     );
 });
 
-t("listenEvents : close unlinks the socket file", async () => {
+unixOnly("listenEvents : close unlinks the socket file", async () => {
     await withTmpSocketPath(async (sockPath) => {
         const server = listenEvents(sockPath, () => {});
         await sleep(50);
