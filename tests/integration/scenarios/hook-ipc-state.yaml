@@ -1,0 +1,77 @@
+# #727 V1 Slice B-4 — user stories for the in-memory IPC state pushed
+# by hook events (SessionStart / Stop / UserPromptSubmit). The unit
+# block exercises `readLoopStateInput` through the in-memory override
+# path : we mutate `getIpcState()` directly (the same mutators the
+# HookService subscriber calls in `timer.ts`), then call
+# `readLoopStateInput` against an EMPTY state-dir (no marker files
+# present) and assert the input reflects the in-memory truth.
+#
+# These scenarios pin Slice B-1 / B-2 / B-3 against regression : every
+# future marker-cleanup PR must keep them green or explicitly update
+# them with a documented user-facing reason.
+scenario: hook-ipc-state
+description: |
+  The timer's in-memory IpcState (idleSinceMs, bootComplete,
+  busyDeferUntilMs, resumeSessionPickerActive, resumeModePickerActive)
+  is the authoritative source for the wake gate post-#727. The file
+  markers are now a back-compat fallback for cross-process readers ;
+  the gate consults them only when no hook event has landed yet.
+
+unit:
+  - name: "SessionStart event → in-memory bootComplete + idleSince override the empty state-dir"
+    call: { module: "./yaml-scenarios-helpers.js", fn: "readLoopStateWithIpc" }
+    args:
+      - sd: "TMPDIR"
+        ipc:
+          bootComplete: true
+          idleSinceMs: 1748534400000
+    expect:
+      "bootComplete": true
+      "idleSinceMs": 1748534400000
+
+  - name: "UserPromptSubmit clears idleSinceMs even when the file marker exists"
+    call: { module: "./yaml-scenarios-helpers.js", fn: "readLoopStateWithIpc" }
+    args:
+      - sd: "TMPDIR"
+        files:
+          "idle-since": "FRESH_ISO"   # file claims claude is idle
+        ipc:
+          idleSinceMs: null            # subscriber cleared on UserPromptSubmit
+          idleSinceCleared: true
+    expect:
+      "idleSinceMs": null
+
+  - name: "Stop event pins busyDeferUntilMs in-memory over the file"
+    call: { module: "./yaml-scenarios-helpers.js", fn: "readLoopStateWithIpc" }
+    args:
+      - sd: "TMPDIR"
+        ipc:
+          bootComplete: true
+          idleSinceMs: 1748534400000
+          busyDeferUntilMs: 1748534403000
+    expect:
+      "busyDeferUntilMs": 1748534403000
+
+  - name: "SessionStart event with picker_session=true → resumePickerActive=true"
+    call: { module: "./yaml-scenarios-helpers.js", fn: "readLoopStateWithIpc" }
+    args:
+      - sd: "TMPDIR"
+        ipc:
+          bootComplete: false
+          resumeSessionPickerActive: true
+    expect:
+      "resumePickerActive": true
+
+  - name: "Picker clear event (false) hides the picker even if a stale file is present"
+    call: { module: "./yaml-scenarios-helpers.js", fn: "readLoopStateWithIpc" }
+    args:
+      - sd: "TMPDIR"
+        files:
+          "resume-session-picker-active": "x\n"
+          "boot-complete": "BOOT_ISO"
+        ipc:
+          resumeSessionPickerActive: false
+          resumeModePickerActive: false
+          bootComplete: true
+    expect:
+      "resumePickerActive": false
