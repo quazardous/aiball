@@ -221,11 +221,6 @@ interface StartOpts {
     /** #302: false = `--no-wait` (no human at the terminal → eager boot
      *  drain, no boot-grace deferral). Default/undefined = `--wait`. */
     wait?: boolean;
-    /**
-     * User-grace seconds. null = use the resolved
-     * `.aiball.yaml claude_loop.user_grace_seconds` default (#B.180).
-     */
-    userGraceSec?: number | null;
     /** Bypass the live-loop conflict check (#B.154). */
     force?: boolean;
     /** Resume-picker auto-dismiss (#B.154): summary | as-is | abort. */
@@ -572,10 +567,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // #B.180 david: resolve timeouts (CLI flag > .aiball.yaml > built-in
     // default). loadConfig defaults are 60/60/300/2000 — see config.ts.
     const interval = opts.interval ?? ctx.claude_loop.interval_seconds;
-    const userGraceSec = opts.userGraceSec ?? ctx.claude_loop.user_grace_seconds;
     const bootGraceSec = ctx.claude_loop.boot_grace_seconds; // PTY-proxy bridge
     const escTakeover = ctx.claude_loop.esc_takeover; // PTY-proxy bridge
-    const askGraceSec = ctx.claude_loop.ask_grace_seconds; // PTY-proxy bridge
     // #305 (option a): explicit --wait/--no-wait wins; else the per-project
     // `.aiball.yaml claude_loop.wait` default (global CLI default stays no-wait #343).
     const wait = opts.wait !== undefined ? opts.wait : ctx.claude_loop.wait;
@@ -641,15 +634,14 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // TS callers all read via `loopConfig().claude_loop.X` directly.
         // #302/#343: WAIT — Python proxy reads CL_WAIT for boot-grace gate.
         `export ${CL_ENV.WAIT}=${shQuote(wait ? "1" : "0")}`,
-        // Seconds the proxy waits before re-arming wakes after a takeover.
-        `export ${CL_ENV.USER_GRACE_SEC}=${shQuote(String(userGraceSec))}`,
         // #B.180 boot-grace : the proxy needs it to count remaining grace.
         `export ${CL_ENV.BOOT_GRACE_SEC}=${shQuote(String(bootGraceSec))}`,
-        // #345: bare ESC in the pane = human takeover (PTY proxy arms user-grace).
+        // #345: bare ESC in the pane forwarded to claude as an interrupt
+        // (PTY-proxy: CL_ESC_TAKEOVER). #745 phase B — the user-grace
+        // re-arm that used to gate on this is gone, AFK SM owns it.
         `export ${CL_ENV.ESC_TAKEOVER}=${shQuote(escTakeover ? "1" : "0")}`,
-        // #351: ask-grace gates AskUserQuestion (PreToolUse hook); the afk
-        // spec + window drive the PTY proxy's AFK detection → `afk` marker.
-        `export ${CL_ENV.ASK_GRACE_SEC}=${shQuote(String(askGraceSec))}`,
+        // #351: AFK key combo + post-fire debounce window drive the PTY
+        // proxy's AFK detection → `afk` marker.
         `export ${CL_ENV.AFK_SPEC}=${shQuote(afkSpecJson)}`,
         `export ${CL_ENV.AFK_WINDOW_MS}=${shQuote(String(ctx.claude_loop.afk_window_ms))}`,
         // #619 jjfdea : passed to the proxy so it can render the full
@@ -1598,7 +1590,6 @@ async function cmdDebugProxyTty(): Promise<void> {
         [CL_ENV.AFK_SPEC]: afkSpecJson,
         [CL_ENV.AFK_WINDOW_MS]: String(ctx.claude_loop.afk_window_ms),
         [CL_ENV.ESC_TAKEOVER]: ctx.claude_loop.esc_takeover ? "1" : "0",
-        [CL_ENV.USER_GRACE_SEC]: String(ctx.claude_loop.user_grace_seconds),
         [CL_ENV.WAIT]: "0",
         [CL_ENV.PROXY_LOG]: capture,
         [CL_ENV.PROXY_DEBUG_TTY]: "1",
@@ -1747,10 +1738,6 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             "--resume-mode <mode>",
             "How to auto-dismiss the claude --resume picker (summary | as-is | abort)",
         ).default("as-is").choices(["summary", "as-is", "abort"]))
-        .addOption(new Option(
-            "--user-grace <sec>",
-            "Seconds to stay out of the way after the human submits a prompt (default from .aiball.yaml `claude_loop.user_grace_seconds`, 60 if unset — #B.180, recalibrated #B.185)",
-        ))
         // #302/#343: --no-wait is now the DEFAULT (the loop is autonomous
         // far more often than human-driven). `--wait` (defined first so it
         // owns the falsy default) opts back into the boot-grace; `--no-wait`
@@ -1799,7 +1786,6 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 attach: opts.attach !== false,
                 noStartupPing: opts.startupPing === false,
                 runOnce: opts.once === true,
-                userGraceSec: opts.userGrace !== undefined ? Math.max(0, Number(opts.userGrace)) : null,
                 force: opts.force === true,
                 resumeMode: opts.resumeMode,
                 wait: waitExplicit ? opts.wait : undefined,

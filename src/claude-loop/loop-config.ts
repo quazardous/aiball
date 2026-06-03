@@ -59,8 +59,6 @@ function applyEnvOverrides(cfg: AiballConfig): void {
     if ((ov = num(CL_ENV.INTERVAL)) !== undefined) cl.interval_seconds = ov;
     if ((ov = num(CL_ENV.BOOT_GRACE_SEC)) !== undefined) cl.boot_grace_seconds = ov;
     if ((ov = num(CL_ENV.BOOT_MIN_SEC)) !== undefined) cl.boot_min_seconds = ov;
-    if ((ov = num(CL_ENV.USER_GRACE_SEC)) !== undefined) cl.user_grace_seconds = ov;
-    if ((ov = num(CL_ENV.ASK_GRACE_SEC)) !== undefined) cl.ask_grace_seconds = ov;
     if ((ov = num(CL_ENV.WAKE_IN_FLIGHT_TTL_MS)) !== undefined) cl.wake_in_flight_ttl_ms = ov;
     if ((ov = num(CL_ENV.AFK_WINDOW_MS)) !== undefined) cl.afk_window_ms = ov;
     if ((ov = bool(CL_ENV.WAIT)) !== undefined) cl.wait = ov;

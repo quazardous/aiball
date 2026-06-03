@@ -140,8 +140,6 @@ export interface AiballConfig {
          *  picker selection. The `--resume` / `--no-resume` CLI flags
          *  override both this AND `claude.always_resume`. CL_AUTO_RESUME. */
         auto_resume: boolean;
-        /** User-took-over grace window. CL_USER_GRACE_SEC. */
-        user_grace_seconds: number;
         /** Wake-in-flight marker TTL (#B.180). CL_WAKE_IN_FLIGHT_TTL_MS. */
         wake_in_flight_ttl_ms: number;
         /** #722 — TTL window for `isInputHot`. After this many ms with no
@@ -157,11 +155,6 @@ export interface AiballConfig {
         /** #345: treat a bare ESC in the pane as a human takeover (arms the
          *  user-grace so the loop yields). PTY-proxy only. CL_ESC_TAKEOVER. */
         esc_takeover: boolean;
-        /** #351: AskUserQuestion is allowed in-loop only if a human acted
-         *  within this window (else redirect-to-ticket). Longer than
-         *  user_grace — a stalled question is cheap vs a lost one.
-         *  CL_ASK_GRACE_SEC. */
-        ask_grace_seconds: number;
         /** #351: key/combo that flags the human AFK (→ immediate redirect).
          *  VS Code notation: `+` joins modifiers, a space = a 2-combo
          *  sequence (e.g. "esc esc", "ctrl+a"). CL_AFK_KEY. */
@@ -300,23 +293,21 @@ const DEFAULTS: AiballConfig = {
         boot_grace_seconds: 60,
         boot_min_seconds: 30,
         auto_resume: true,
-        user_grace_seconds: 60,
         wake_in_flight_ttl_ms: 2000,
         // #722 — input-hot + 2-rate pane probe defaults.
         input_hot_ttl_ms: 3000,
         pane_probe_fast_ms: 200,
         pane_probe_slow_ms: 1000,
         esc_takeover: true,
-        // #351 / #381: 10-min ask-grace. AFK = a single ATOMIC combo that
-        // TOGGLES away/back — #381 (david s4r9n8) dropped the 2-press timing
-        // sequence. Default `f9` (david 9garjb) — the previous `alt+esc` was
-        // confirmed SWALLOWED BY THE OS/window manager (GNOME) before it ever
-        // reached the proxy, and was also byte-ambiguous with a coalesced
-        // double-ESC. A function key has zero OS/tmux/claude conflict and emits
-        // distinct bytes (ESC [ 2 0 ~). Verify any candidate on your setup with
-        // `claude-loop debug-keys`. afk_window_ms is only a post-fire key-repeat
-        // debounce now.
-        ask_grace_seconds: 600,
+        // #351 / #381: AFK = a single ATOMIC combo that TOGGLES away/back —
+        // #381 (david s4r9n8) dropped the 2-press timing sequence. Default
+        // `f9` (david 9garjb) — the previous `alt+esc` was confirmed
+        // SWALLOWED BY THE OS/window manager (GNOME) before it ever reached
+        // the proxy, and was also byte-ambiguous with a coalesced double-ESC.
+        // A function key has zero OS/tmux/claude conflict and emits distinct
+        // bytes (ESC [ 2 0 ~). Verify any candidate on your setup with
+        // `claude-loop debug-keys`. afk_window_ms is only a post-fire
+        // key-repeat debounce now.
         afk_key: "f9",
         afk_window_ms: 400,
         // #305: no-wait by default (#343); a project flips it per-tree via
@@ -579,9 +570,6 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof cl.auto_resume === "boolean") {
                 cfg.claude_loop.auto_resume = cl.auto_resume;
             }
-            if (typeof cl.user_grace_seconds === "number" && cl.user_grace_seconds >= 0) {
-                cfg.claude_loop.user_grace_seconds = cl.user_grace_seconds;
-            }
             if (typeof cl.wake_in_flight_ttl_ms === "number" && cl.wake_in_flight_ttl_ms > 0) {
                 cfg.claude_loop.wake_in_flight_ttl_ms = cl.wake_in_flight_ttl_ms;
             }
@@ -598,10 +586,7 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             if (typeof cl.esc_takeover === "boolean") {
                 cfg.claude_loop.esc_takeover = cl.esc_takeover;
             }
-            // #351: ask-grace + AFK combo.
-            if (typeof cl.ask_grace_seconds === "number" && cl.ask_grace_seconds >= 0) {
-                cfg.claude_loop.ask_grace_seconds = cl.ask_grace_seconds;
-            }
+            // #351: AFK combo.
             if (typeof cl.afk_key === "string" && cl.afk_key.trim()) {
                 cfg.claude_loop.afk_key = cl.afk_key.trim();
             }

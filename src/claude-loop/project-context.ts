@@ -47,10 +47,8 @@ export interface ProjectContext {
         boot_grace_seconds: number;
         boot_min_seconds: number;
         auto_resume: boolean;
-        user_grace_seconds: number;
         wake_in_flight_ttl_ms: number;
         esc_takeover: boolean;
-        ask_grace_seconds: number;
         afk_key: string;
         afk_window_ms: number;
         /** #305 (option a): per-project boot-grace wait default (no-flag). */

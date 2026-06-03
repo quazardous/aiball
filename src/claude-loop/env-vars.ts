@@ -35,8 +35,6 @@ export const CL_ENV = {
     AFK_LABEL_FG_LIT: "CL_AFK_LABEL_FG_LIT",
 
     // Grace periods (seconds)
-    USER_GRACE_SEC: "CL_USER_GRACE_SEC",
-    ASK_GRACE_SEC: "CL_ASK_GRACE_SEC",
     BOOT_GRACE_SEC: "CL_BOOT_GRACE_SEC",
     BOOT_MIN_SEC: "CL_BOOT_MIN_SEC",
     // #636 — timer exits after 1 heartbeat tick. For pytest harnesses.
