@@ -152,8 +152,7 @@ test("listener that throws does not break sibling listeners", () => {
 test("listener that unsubscribes itself during callback doesn't trip iteration", () => {
     const svc = new PaneService();
     let calls = 0;
-    let off: (() => void) | undefined;
-    off = svc.subscribe(PaneMarker.Busy, () => { calls++; off?.(); });
+    const off: (() => void) | undefined = svc.subscribe(PaneMarker.Busy, () => { calls++; off?.(); });
     svc.set(PaneMarker.Busy, true);
     svc.set(PaneMarker.Busy, false);
     assert.equal(calls, 1, "second transition should NOT call (we unsubscribed)");

@@ -131,7 +131,7 @@ export interface DrainedDecision {
 export function decideDrainedWake(input: DrainedDecisionInput): DrainedDecision {
     const { strategy, hash, lastActivityMs, now, prev } = input;
     const changed = !prev || prev.hash !== hash;
-    let armedAt = changed ? now : prev!.armedAt;
+    const armedAt = changed ? now : prev!.armedAt;
     let wakeAt = changed ? null : prev!.wakeAt;
     let step = changed ? 0 : prev!.step;
     let wake = false;

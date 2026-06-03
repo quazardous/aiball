@@ -1,0 +1,77 @@
+name: CI
+
+# General CI for the TS codebase + frontend. The Windows ConPTY proxy (Rust)
+# has its own workflow (cl-pty-proxy-build.yml); Windows TS coverage lives in
+# ci-windows.yml. This is the Linux safety net that was missing — until now
+# lint / typecheck / test / frontend-build ran nowhere, so lint-broken code and
+# a missing runtime dep (`marked`) both merged to main unnoticed.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'welcome/**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'welcome/**'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      # A few unit tests shell out to tmux (the Linux mux). Install it so they
+      # don't fail on a bare runner.
+      - name: install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+      - run: npm ci
+      # Clean env: the suite resolves the cwd .aiball.yaml, so a configured box
+      # would flip the app into proxy mode and hit a real remote. A fresh CI
+      # checkout has no .aiball.yaml, so local mode is the default here.
+      - run: npm test
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      # `build` runs `vue-tsc --noEmit && vite build` — catches the frontend
+      # typecheck + build breakage that today only surfaces when run by hand.
+      - run: npm run build
+        working-directory: frontend

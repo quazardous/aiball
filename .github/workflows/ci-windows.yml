@@ -1,0 +1,42 @@
+name: CI (Windows)
+
+# Windows TS coverage. The Rust ConPTY proxy has its own workflow
+# (cl-pty-proxy-build.yml, cargo build+test on windows-latest). This lane
+# covers the TypeScript side on Windows — starting with typecheck, which is
+# cheap and catches win32-relevant type breakage (e.g. the named-pipe paths
+# in cli.ts / state.ts).
+#
+# Test execution on Windows is intentionally NOT run wholesale yet: parts of
+# the suite still assume Unix (AF_UNIX sockets, tmux). Those are being gated
+# per-file (see the `process.platform === "win32"` skip in ipc-events.test.ts)
+# and this lane will grow `npm test` coverage as the win32 transport wrap and
+# the remaining gating land. See aiball ticket(s) for the transport port.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - '.github/workflows/ci-windows.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - '.github/workflows/ci-windows.yml'
+
+jobs:
+  typecheck:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
