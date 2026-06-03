@@ -24,6 +24,8 @@ export interface CatalogTag {
     config_color?: string | null;
     /** Config tags only: true when a DB row overrides the config color. */
     color_overridden?: boolean;
+    /** #554 — `null` = global tag / config row ; project name = scoped to that project. */
+    project?: string | null;
 }
 
 // Business enums are centralised in `./domain.ts` (#B.122). Re-export
@@ -1040,7 +1042,7 @@ export const api = {
     // the config default.
     overrideTag: (body: { name: string; color?: string | null; position?: number }) =>
         req<Tag>("PUT", "/api/tags/override", body),
-    addTag: (body: { name: string; color?: string; note?: string; position?: number }) =>
+    addTag: (body: { name: string; color?: string; note?: string; position?: number; project?: string | null }) =>
         req<Tag>("POST", "/api/tags", body),
     updateTag: (
         id: number,

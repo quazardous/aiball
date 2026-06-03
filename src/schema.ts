@@ -372,13 +372,18 @@ export const configOverrides = sqliteTable("config_overrides", {
 
 export const tags = sqliteTable("tags", {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    name: text("name").notNull().unique(),
+    name: text("name").notNull(),
     color: text("color"),
     position: integer("position").notNull().default(0),
     note: text("note"),
     createdAt: text("created_at").notNull(),
+    // #554 david `crrdxb` — project-scope. NULL = global tag (the
+    // config-defaults catalog lives here too) ; a project name scopes
+    // the tag to that project only. Composite UNIQUE on (name, project).
+    project: text("project"),
 }, (t) => [
     index("idx_tags_position").on(t.position),
+    uniqueIndex("idx_tags_name_project").on(t.name, t.project),
 ]);
 
 export const ticketTags = sqliteTable("ticket_tags", {

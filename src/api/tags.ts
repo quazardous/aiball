@@ -56,11 +56,24 @@ interface CatalogTag {
     config_color?: string | null;
     /** Config tags only: true when a DB row overrides the config color. */
     color_overridden?: boolean;
+    /** #554 — `null` for global tags and config rows (config is
+     *  inherently cross-project) ; project name for scoped tags. */
+    project?: string | null;
 }
 
 export function tagCatalog(project: string | null): CatalogTag[] {
     const config = resolveConfigTags(project);
-    const dbByName = new Map(listTags().map((t) => [t.name, t] as const));
+    // #554 — fold global DB tags (project IS NULL) into the catalog
+    // always, AND any tag scoped to the requested project (when not
+    // global view). A tag with the same name in both buckets : the
+    // project-scoped row wins (more specific). The config-override
+    // matcher (DB row by NAME) consults the global bucket first since
+    // config tags themselves are cross-project.
+    const globalRows = listTags(null);
+    const projectRows = project !== null ? listTags(project) : [];
+    const dbByName = new Map<string, ReturnType<typeof listTags>[number]>();
+    for (const t of globalRows) dbByName.set(t.name, t);
+    for (const t of projectRows) dbByName.set(t.name, t);   // project wins
     const out: CatalogTag[] = config.map((t, i) => {
         const row = dbByName.get(t.name);
         return {
@@ -76,7 +89,7 @@ export function tagCatalog(project: string | null): CatalogTag[] {
         };
     });
     const configNames = new Set(config.map((t) => t.name));
-    for (const t of listTags()) {
+    for (const t of [...globalRows, ...projectRows]) {
         if (configNames.has(t.name)) continue;
         out.push({ ...t, source: "db" });
     }
@@ -98,21 +111,29 @@ tagsRouter.get("/tags", (req: Request, res: Response) => {
 });
 
 tagsRouter.post("/tags", (req: Request, res: Response) => {
-    const { name, color, note, position } = req.body ?? {};
+    const { name, color, note, position, project } = req.body ?? {};
     if (typeof name !== "string" || !name.trim()) {
         return badRequest(res, "name required");
     }
     if (configTagNames().has(name.trim())) {
         return conflict(res, `tag '${name}' is defined in config — edit the yaml, not the UI`);
     }
-    if (getTagByName(name.trim())) {
-        return badRequest(res, `tag '${name}' already exists`);
+    // #554 — accept `project` from the body. Empty string / "_global"
+    // / undefined → global tag (project=null). Otherwise scope to that
+    // project. The composite UNIQUE (name, project) ensures two projects
+    // can each have a `win` tag without clashing.
+    const projectScope = typeof project === "string" && project.trim() && project.trim() !== "_global"
+        ? project.trim()
+        : null;
+    if (getTagByName(name.trim(), projectScope)) {
+        return badRequest(res, `tag '${name}' already exists${projectScope ? ` in project '${projectScope}'` : " (global)"}`);
     }
     const t = insertTag({
         name: name.trim(),
         color: typeof color === "string" ? color : null,
         note: typeof note === "string" ? note : null,
         position: typeof position === "number" ? position : 0,
+        project: projectScope,
     });
     broadcast({ type: "tag_changed", data: t });
     res.status(201).json(t);

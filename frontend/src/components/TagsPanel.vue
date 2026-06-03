@@ -59,10 +59,14 @@ function onProjectChange(v: string) {
 async function add() {
     if (!newName.value.trim()) return;
     try {
+        // #554 — forward the project picker selection so the new tag
+        // lands in the right scope. The sentinel `_global` becomes a
+        // null project on the server side (global tag).
         await api.addTag({
             name: newName.value.trim(),
             color: newColor.value || undefined,
             note: newNote.value.trim() || undefined,
+            project: project.value === GLOBAL_SENTINEL ? null : project.value,
         });
         newName.value = "";
         newColor.value = "#3b82f6";

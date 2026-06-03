@@ -344,6 +344,13 @@
       "when": 1782400000000,
       "tag": "0048_tickets_from_project",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1782500000000,
+      "tag": "0049_tags_project",
+      "breakpoints": true
     }
   ]
 }

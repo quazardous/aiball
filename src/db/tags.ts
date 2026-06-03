@@ -5,7 +5,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A).
  */
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 
@@ -16,6 +16,10 @@ export interface Tag {
     position: number;
     note: string | null;
     created_at: string;
+    /** #554 — NULL = global tag (visible across projects) ; a project
+     *  name scopes the tag to that project. The catalog defaults from
+     *  `config/defaults/tags.yaml` live in the global pool. */
+    project: string | null;
 }
 
 export interface NewTag {
@@ -23,6 +27,7 @@ export interface NewTag {
     color?: string | null;
     note?: string | null;
     position?: number;
+    project?: string | null;
 }
 
 // The classic catalog (bug/feature/urgent/…) was moved to the shipped
@@ -37,12 +42,25 @@ function tagRowToTag(t: schema.Tag): Tag {
         position: t.position,
         note: t.note,
         created_at: t.createdAt,
+        project: t.project,
     };
 }
 
-export function listTags(): Tag[] {
-    return getDb().select().from(schema.tags)
-        .orderBy(asc(schema.tags.position), asc(schema.tags.id))
+/**
+ * #554 — list tags. `project=undefined` (no filter) → all rows. `null`
+ *  → global tags only (project IS NULL). A project name → tags scoped
+ *  to that project. The catalog endpoint folds global + per-project
+ *  via two calls when needed.
+ */
+export function listTags(project?: string | null): Tag[] {
+    const db = getDb();
+    let query = db.select().from(schema.tags).$dynamic();
+    if (project === null) {
+        query = query.where(isNull(schema.tags.project));
+    } else if (typeof project === "string") {
+        query = query.where(eq(schema.tags.project, project));
+    }
+    return query.orderBy(asc(schema.tags.position), asc(schema.tags.id))
         .all().map(tagRowToTag);
 }
 
@@ -51,8 +69,19 @@ export function getTag(id: number): Tag | null {
     return r ? tagRowToTag(r) : null;
 }
 
-export function getTagByName(name: string): Tag | null {
-    const r = getDb().select().from(schema.tags).where(eq(schema.tags.name, name)).get();
+/** #554 — name lookup is now project-scoped. `project=undefined` reads
+ *  any matching name (back-compat ; first row wins) ; `null` matches the
+ *  global tag ; a string matches the project-specific tag. */
+export function getTagByName(name: string, project?: string | null): Tag | null {
+    const db = getDb();
+    if (project === undefined) {
+        const r = db.select().from(schema.tags).where(eq(schema.tags.name, name)).get();
+        return r ? tagRowToTag(r) : null;
+    }
+    const conds = project === null
+        ? and(eq(schema.tags.name, name), isNull(schema.tags.project))
+        : and(eq(schema.tags.name, name), eq(schema.tags.project, project));
+    const r = db.select().from(schema.tags).where(conds).get();
     return r ? tagRowToTag(r) : null;
 }
 
@@ -63,6 +92,7 @@ export function insertTag(t: NewTag): Tag {
         position: t.position ?? 0,
         note: t.note ?? null,
         createdAt: nowIso(),
+        project: t.project ?? null,
     }).returning().get();
     return tagRowToTag(r);
 }
