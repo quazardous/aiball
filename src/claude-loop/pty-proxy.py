@@ -205,35 +205,11 @@ def touch_marker():
         pass  # le badge ne s'affichera juste pas — jamais bloquant
 
 
-def touch_user_grace():
-    """#315 : la frappe humaine ARME la fenêtre user-grace (marqueur
-    `user-took-over`). Sinon la barre faisait stop → loop directement à
-    l'expiration de la frappe (5 s) : le mot `wait` ne dépendait QUE du submit
-    (hook UserPromptSubmit), pas de la frappe. Taper = l'humain a pris la main
-    (même sans soumettre) → on arme la grâce pour faire stop → wait (≈60 s) →
-    loop, et le timer gèle aussi ses auto-pings pendant la fenêtre."""
-    sd = os.environ.get("CL_STATE_DIR") or ""
-    if not sd:
-        return
-    try:
-        with open(os.path.join(sd, "user-took-over"), "w") as f:
-            f.write(datetime.datetime.now().isoformat() + "\n")
-    except OSError:
-        pass
-
-
-def clear_user_grace():
-    """#351 (david #5pq7tb): drop the presence marker. Used when the AFK combo
-    fires — the successful combo is EXCLUDED from keystroke/presence detection,
-    so we also remove any user-grace its first keystroke (e.g. the 1st ESC of
-    `esc esc`) armed. Result: AFK = away, no lingering 'present'."""
-    sd = os.environ.get("CL_STATE_DIR") or ""
-    if not sd:
-        return
-    try:
-        os.remove(os.path.join(sd, "user-took-over"))
-    except OSError:
-        pass
+# #745 phase B — `touch_user_grace` / `clear_user_grace` Python helpers
+# removed. The TS-side dispatcher already accepts the marker events as
+# no-ops (forward-compat) ; the AFK SM (typing arms NOT AFK 10m via the
+# proxy_events emit_typing path) is now the single source of truth for
+# "human present." No marker file write, no in-process bookkeeping.
 
 
 # --- Peinture directe du segment human de la barre tmux (#274) ---
@@ -405,9 +381,10 @@ def toggle_afk():
         # NOT AFK 10m → NOT AFK ∞
         set_afk_infinite()
     else:  # mode == "inf" = NOT AFK ∞
-        # NOT AFK ∞ → AFK (explicit release of both holds)
+        # NOT AFK ∞ → AFK (#745 phase B : user-grace machinery dropped,
+        # AFK SM is the single source of truth ; clear_user_grace call
+        # removed alongside the helper definition).
         clear_afk()
-        clear_user_grace()
 
 
 def arm_afk_10m():
@@ -729,7 +706,10 @@ clear_afk()  # #351: drop any stale afk marker left by a previous run, on boot
 # bootait en `wait` et le timer gelait ses auto-pings. Au boot AUCUN humain
 # n'a (encore) pris la main pour CE run ; toute présence est stale → on la
 # largue, comme clear_afk. S'il est réellement là, sa 1re frappe/ESC ré-arme.
-clear_user_grace()  # #357: pas de présence stale héritée → boot en `loop`, pas `wait`
+# #745 phase B — l'appel `clear_user_grace()` ici (héritage #357) est
+# obsolete : le marker `user-took-over` ne pilote plus rien côté TS
+# (AFK SM = single source of truth). Le boot retombe en `loop` via
+# l'absence d'AFK hold sans avoir à nettoyer quoi que ce soit.
 
 # #305: début de la fenêtre boot-grace = import du proxy (≈ boot du loop).
 # Sans --no-wait, le timer gèle TOUS les auto-pings pendant les
@@ -750,7 +730,7 @@ def _note_wake_injected():
     prochaine VRAIE frappe humaine ré-armera la présence (→ stop/wait)."""
     global _BOOT_TS
     _BOOT_TS = 0.0          # boot-grace révolue par décision du wake-decider
-    clear_user_grace()     # user-grace stale → la barre ne doit plus lire `wait`
+    # #745 phase B — clear_user_grace removed (user-grace is dead).
 
 
 # === #360 : cœur de décision PUR + diag NDJSON + replay (tests hors tmux) ===
@@ -903,15 +883,15 @@ class _Decider:
             if not in_boot:
                 # #622 david `jzcgmh` : typing arms NOT AFK 10m (or refreshes
                 # an existing 10m countdown). In NOT AFK ∞ mode it's a no-op
-                # (only F9 can release the indefinite hold). Stays distinct
-                # from `touch_user_grace` for back-compat — both arm the
-                # same effective 10-min window but mean different things.
+                # (only F9 can release the indefinite hold).
                 # #629 david — under --no-wait the picker-typing window
                 # also triggers this branch (in_boot=False from T0). The
                 # apply_decision layer filters arm_afk_10m out when the
                 # bus says barWord=boot, so picker selection doesn't engage
                 # AFK while genuine post-boot typing still does.
-                d["markers"] += ["arm_afk_10m", "touch_marker", "touch_user_grace"]
+                # #745 phase B — `touch_user_grace` dropped from the
+                # marker list ; AFK SM = single source of truth.
+                d["markers"] += ["arm_afk_10m", "touch_marker"]
                 # Post-marker: AFK is always active after typing — either
                 # we just armed 10m (was OFF or refreshed), or we're in ∞
                 # (no-op, was already active).
@@ -930,7 +910,8 @@ class _Decider:
                 # AFK 10m (or refreshes), no-op in ∞. The "interrupt
                 # claude" payload still forwards below ; we just don't
                 # release the AFK hold the way the old `clear_afk` did.
-                d["markers"] += ["arm_afk_10m", "touch_user_grace"]
+                # #745 phase B — touch_user_grace dropped (user-grace dead).
+                d["markers"] += ["arm_afk_10m"]
                 self.afk_active = True
             d["word"] = "rest"
         d["forward"] += data
@@ -1658,14 +1639,12 @@ def main(argv):
                 now_ms = int(datetime.datetime.now().timestamp() * 1000)
                 if not _proxy_events.emit_marker("touch_marker", now_ms):
                     touch_marker()
-            elif m == "touch_user_grace":
-                now_ms = int(datetime.datetime.now().timestamp() * 1000)
-                if not _proxy_events.emit_marker("touch_user_grace", now_ms):
-                    touch_user_grace()
-            elif m == "clear_user_grace":
-                now_ms = int(datetime.datetime.now().timestamp() * 1000)
-                if not _proxy_events.emit_marker("clear_user_grace", now_ms):
-                    clear_user_grace()
+            elif m == "touch_user_grace" or m == "clear_user_grace":
+                # #745 phase B — user-grace machinery dropped TS-side ;
+                # the proxy stops emitting these markers (no fallback
+                # needed either : the AFK SM events that the Decider
+                # already emits cover the same case).
+                pass
         if dec.get("forward"):
             os.write(master_fd, dec["forward"])
         # #633 Slice B david `wb69mf` — paint authority migrée à la state

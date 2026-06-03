@@ -140,7 +140,9 @@ test("frappe texte ordinaire → typing, forward, mot stop", { skip: SKIP }, () 
     assert.equal(v[0].typing, true);
     assert.equal(v[0].forward, "61");
     assert.equal(v[0].word_resolved, "stop");
-    assert.ok(v[0].markers.includes("touch_user_grace"));
+    // #745 phase B — `touch_user_grace` dropped from the marker list ;
+    // the AFK SM (via `arm_afk_10m`) owns "human present" now.
+    assert.ok(v[0].markers.includes("arm_afk_10m"));
 });
 
 test("frappe ordinaire APRÈS afk ∞ → no-op (only F9 peut release l'∞)", { skip: SKIP }, () => {
