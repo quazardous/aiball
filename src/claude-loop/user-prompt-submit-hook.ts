@@ -2,35 +2,24 @@
 /**
  * claude-loop UserPromptSubmit hook (#B.145 v2.2). Fires whenever a
  * prompt is submitted in the claude-loop tmux pane — by the human OR
- * by claude-loop's own auto-wake send-keys. Two purposes:
+ * by claude-loop's own auto-wake send-keys. Purpose since #745
+ * phase B:
  *
- *   1. **user-took-over tracking** — refresh the `user-took-over`
- *      marker (mtime = now) when the prompt came from the HUMAN.
- *      The timer + Stop hook honor a grace window
- *      (CL_USER_GRACE_SEC, default 60s) and skip auto-pings while
- *      the human is recently active. Prevents the wrapper from
- *      `send-keys`-ing a wake-up over a prompt the human is mid-
- *      typing.
+ *   - **Distinguish human submission from auto-wake.** The timer
+ *     and Stop hook touch a `wake-in-flight` marker right before
+ *     their own send-keys. On fire, this hook reads the marker:
+ *     if fresh (mtime within WAKE_IN_FLIGHT_TTL_MS), the prompt is
+ *     ours → `from_auto_wake=true`. Otherwise it's a human
+ *     submission. The flag is emitted on the `UserPromptSubmit`
+ *     event so the timer can keep its in-memory `idleSinceMs`
+ *     for auto-wakes and clear it for human submissions.
  *
- *      **#B.180**: claude-loop's OWN wake-keys triggered this hook
- *      too, locking subsequent wakes for 5 min — a self-inflicted
- *      wound. Fix: timer/stop-hook touch a `wake-in-flight` marker
- *      before send-keys; this hook checks the marker on fire and
- *      skips the user-took-over touch when fresh (mtime within
- *      WAKE_IN_FLIGHT_TTL_MS). Marker then deleted.
- *
- *   2. **busy-state precision** — flip the tmux status to `[busy]`
- *      immediately (claude is about to process the prompt). Without
- *      this, the bar would lag until the next Stop hook flips it
- *      back.
- *
- *      **#652 Slice 6** — the direct `setTmuxStatus(BUSY)` call moved
- *      to a HookService subscriber on the timer side. This hook now
- *      emits a `UserPromptSubmit` event carrying `from_auto_wake`,
- *      and the subscriber (`hook-bar-subscriber.ts`) flips the bar.
- *      Best-effort emit : if the timer is down the bar lag returns,
- *      but the hook's other side-effects (user-took-over marker,
- *      idle-since cleanup) still run.
+ *   - **Busy-state precision** — emit the `UserPromptSubmit` event
+ *     so the HookService bar subscriber (`hook-bar-subscriber.ts`)
+ *     flips the tmux status to `[busy]` immediately. Without this
+ *     the bar would lag until the next Stop hook. Best-effort emit:
+ *     if the timer is down the bar lag returns, the idle-since
+ *     cleanup still runs.
  *
  * Always emits `{}` and exits 0 — never block claude's run.
  */

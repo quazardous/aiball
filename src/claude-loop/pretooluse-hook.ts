@@ -11,10 +11,12 @@
  *
  * #652 Slice 4 — refactored to use the slice 2 helpers :
  *   - `queryLoopState(sd)` returns a typed `LoopStateSnapshot` (extends
- *     LoopStateView with `humanPresent` + `afkHoldActive`).
+ *     LoopStateView with `afkHoldActive`, the sole human-present signal
+ *     since #745 phase B retired `humanPresent`).
  *   - `buildHookVerdict(state, context)` is the pure mapping that
- *     decides allow / deny. The deny semantics port verbatim from the
- *     pre-refactor hook (afk hold OR no human present → deny).
+ *     decides allow / deny. AskUserQuestion is denied when AFK is off
+ *     (autonomous loop, no human to click) and allowed when an AFK hold
+ *     is active (NOT AFK 10m / ∞ = human present).
  *
  * Fail-open by design : any error short-circuits to allow, and the
  * matcher already scopes us to AskUserQuestion. Always exits 0.

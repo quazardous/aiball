@@ -1221,7 +1221,7 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
         } else {
             const sd = stateDirFor(name);
             process.stdout.write(`  state dir: ${sd}\n`);
-            for (const f of ["plate.json", "env", "pings.yaml", "idle-since", "wake-requested", "user-took-over", "timer.pid", "timer.log"]) {
+            for (const f of ["plate.json", "env", "pings.yaml", "idle-since", "wake-requested", "timer.pid", "timer.log"]) {
                 const p = join(sd, f);
                 process.stdout.write(`    ${f.padEnd(18)}  ${existsSync(p) ? "✓" : "—"}\n`);
             }
@@ -1767,7 +1767,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .allowExcessArguments(false)
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
-            attach: boolean; startupPing: boolean; userGrace?: string; force?: boolean;
+            attach: boolean; startupPing: boolean; force?: boolean;
             resumeMode?: string; wait: boolean; resume: boolean;
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             cwd?: string;

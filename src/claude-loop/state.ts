@@ -361,7 +361,7 @@ export function afkPath(sd: string): string { return join(sd, "afk"); }
 // #264: near-live "a human is typing in the tmux pane" marker. Touched
 // by the timer's detection poll when the prompt area changes while
 // at-prompt; read by setTmuxStatus to paint the bicolor human chip and
-// usable as a finer human-present signal than the submit-time user-took-over.
+// the AFK SM (typing arms NOT AFK 10m).
 export function humanTypingPath(sd: string): string { return join(sd, "human-typing"); }
 /** #730 — single per-loop IPC socket. Carries every direction of the
  *  proxy ↔ timer ↔ hooks IPC: view broadcasts (`{kind:"view"}`),
@@ -388,11 +388,11 @@ export function timerPidPath(sd: string): string { return join(sd, "timer.pid");
 export function timerLogPath(sd: string): string { return join(sd, "timer.log"); }
 /**
  * Touched by the timer / stop-hook RIGHT BEFORE they `send-keys` an
- * auto-wake into the claude pane (#B.180 david: the wake itself
- * triggered UserPromptSubmit → user-took-over → tryWake locked for
- * 5 min). The UserPromptSubmit hook checks this marker on fire: if
- * present + mtime < ~2s, the prompt came from claude-loop itself,
- * skip the user-took-over touch. Marker then deleted by the hook.
+ * auto-wake into the claude pane. The UserPromptSubmit hook checks
+ * this marker on fire: if present + mtime < ~2s, the prompt came from
+ * claude-loop itself (auto-wake, not a human submission) → the hook
+ * propagates `from_auto_wake=true` so the timer doesn't flip its
+ * in-memory `idleSinceMs` to null. Marker then deleted by the hook.
  */
 export function wakeInFlightPath(sd: string): string { return join(sd, "wake-in-flight"); }
 /** Wake-in-flight markers older than this many ms are stale and
@@ -1037,7 +1037,8 @@ export function readLoopStateInput(
  * #264: short TTL for the near-live "human typing" chip. The detection
  * poll refreshes the marker while the human types; once they stop, the
  * chip lingers ~this long then clears. Kept short so the bar tracks
- * typing closely (vs the 60s submit-grace of user-took-over).
+ * typing closely; the AFK SM (typing arms NOT AFK 10m) carries any
+ * longer-lived "human present" signal.
  */
 export const HUMAN_TYPING_TTL_SEC = 5;
 
@@ -1207,9 +1208,9 @@ function loopStartMs(sd: string | undefined): number {
  * #302/#305: the 3-state human-presence WORD for the tmux bar (`@cl_human`),
  * symmetric with the gating semantics david asked to surface:
  *   - `stop` (red colour196)    — a human is typing NOW (human-typing < 5s)
- *   - `wait` (yellow colour178) — auto-pings FROZEN: either the boot-grace
- *                                 window at launch (#305) OR the user-grace
- *                                 window after a submit (user-took-over < graceSec)
+ *   - `wait` (yellow colour178) — auto-pings FROZEN: the boot-grace window
+ *                                 at launch (#305) or an AFK hold (NOT AFK
+ *                                 10m / ∞) where the human asked to hold
  *   - `loop` (green colour40)   — autonomous, gate open (managed mode)
  * fg-only (the bg comes from status-bg / the loop state). Mirrored in
  * pty-proxy.py, which OWNS this segment while the proxy is alive — keep the

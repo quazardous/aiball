@@ -159,8 +159,8 @@ const tname = tmuxName(name);
 function cleanShutdown(reason: string): void {
     log(`clean shutdown (${reason}) — stopping loop '${name}' (transient state swept; rm to delete)`);
     try { spawnSync(MUX_CMD, ["kill-session", "-t", tname], { stdio: "ignore" }); } catch { /* tmux already gone */ }
-    // #442 ménage — sweep the transient RUNTIME markers (stale `timer.pid`,
-    // `idle-since`, `wake-*`, `user-took-over`, `human-typing`, `busy-defer-until`,
+    // #442 sweep — drop the transient RUNTIME markers (stale `timer.pid`,
+    // `idle-since`, `wake-*`, `human-typing`, `busy-defer-until`,
     // `inject.sock`, …) so the dead loop reads cleanly in `claude-loop list` and a
     // later signal can't chase a recycled pid. KEEP the durable start config +
     // history (plate/env/pings/timer.log) so `restart` replays. (B): the state dir
@@ -541,10 +541,9 @@ function refreshPaneMarkers(): void {
 let lastSendAt = 0;
 async function sendKeys(phrase: string): Promise<void> {
     // #B.180: touch the wake-in-flight marker BEFORE send-keys so
-    // UserPromptSubmit hook sees it when claude processes the wake
-    // prompt and skips the user-took-over update. Without this, the
-    // auto-wake would trigger the user-grace and lock subsequent
-    // wakes for `CL_USER_GRACE_SEC` (default 300s).
+    // the UserPromptSubmit hook can flag from_auto_wake=true and
+    // the timer keeps idleSinceMs in-memory (the auto-wake doesn't
+    // count as a human submission).
     //
     // #732 hot-fix (orphan marker bug observed live on m2m loop) — the
     // wake-in-flight + last-wake-at writes used to happen unconditionally
@@ -582,8 +581,7 @@ function sleep(ms: number): Promise<void> {
 // present = not mid-turn, no output streaming), poll the bottom of the
 // pane; if it changes and the loop didn't just send-keys, a human is
 // typing → refresh the human-typing marker (drives the bicolor bar chip
-// in setTmuxStatus, and is a finer human-present signal than the
-// submit-time user-took-over). Fail-safe: never throws — it must not
+// in setTmuxStatus). Fail-safe: never throws — it must not
 // disturb the wake loop. NOTE: only reliable at the prompt; detecting
 // typing WHILE claude streams is out of scope for pane-diff.
 const HUMAN_POLL_MS = 1500;
@@ -859,9 +857,9 @@ async function mainSse(): Promise<void> {
     // (will wake if SSE has been silent but there's actually work).
     // David: "on passe en idle avec un timeout court (60 sec par
     // defaut), si le user fait pas de prompt on lance l'auto ping,
-    // si le user prompt on passe dasn la hook stop plus tard". User
-    // input within the window updates user-took-over → tryWake's
-    // user-grace gate skips the wake (the user is actively driving).
+    // si le user prompt on passe dasn la hook stop plus tard". A
+    // human typing in the boot window arms the AFK SM (NOT AFK 10m
+    // via the proxy) → the wake gate skips on `afkHoldActive`.
     // #B.180: yaml-configurable via `.aiball.yaml claude_loop.boot_grace_seconds`.
     // Env-var override read at boot (module-level `BOOT_GRACE_MS`); cli.ts
     // writes the resolved value.
@@ -890,11 +888,11 @@ async function mainSse(): Promise<void> {
         // Hook never fired (--resume aborted, picker stuck past 5 min,
         // hook crashed). Drive the transition ourselves : sign boot-complete
         // so the state machine flips out of boot, seed idle-since, try a
-        // wake. #629 david `y43etd` : DON'T auto-arm NOT AFK 10m anymore
-        // — user-grace silently gates wakes if user typed pendant le
-        // boot (typing → user-took-over → tryWake skip via user-grace).
-        // Forcer le bar `wait` jaune à T+grace était intrusif ; bar reste
-        // `loop` vert, user appuie F9 si besoin d'un hold visible.
+        // wake. #629 david `y43etd` : DON'T auto-arm NOT AFK 10m
+        // anymore here — the AFK SM already arms it when the human
+        // types via the proxy. Forcing the bar to yellow `wait` at
+        // T+grace was intrusive ; bar stays green `loop`, F9 if the
+        // human wants a visible hold.
         clearResumePickers(sd!);
         // #629 david `8wgq7f` — setResumePicker no longer seals bootComplete
         // (delegated to bus.on("bootEnded")). At the safety cap we WANT to
@@ -1082,16 +1080,16 @@ async function mainSse(): Promise<void> {
             // next probe cycle if claude is mid-turn.
             setTmuxStatus(name!, LOOP_STATUS.IDLE);
         } catch { /* best-effort */ }
-        // #629 david `7zqtgf` — drain stacked pings at boot exit. Pre-#745
-        // we also had to clear user-took-over here because picker keystrokes
-        // armed user-grace ; that path is gone now (AFK SM is the only
-        // hold). Just fire the wake.
+        // #629 david `7zqtgf` — drain stacked pings at boot exit.
+        // Pre-#745 we also had to clear user-took-over here because
+        // picker keystrokes armed the user-grace ; gone now, the AFK
+        // SM is the only hold. Just fire the wake.
         void tryWake("boot-ended-drain");
     });
-    // #629 david `7zqtgf` — same drain trigger when AFK is cleared (F9 from
-    // NOT AFK 10m/∞ back to AFK). The bar word goes wait→loop ; any ping
-    // that came while the hold was active should now fire. user-took-over
-    // is the AFK-orthogonal gate, so we leave it intact here.
+    // #629 david `7zqtgf` — same drain trigger when AFK is cleared
+    // (F9 from NOT AFK 10m/∞ back to AFK). The bar word goes
+    // wait→loop ; any ping that came while the hold was active
+    // should now fire.
     loopBus.on("afkCleared", () => {
         void tryWake("afk-cleared-drain");
     });

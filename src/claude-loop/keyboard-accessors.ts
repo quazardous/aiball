@@ -14,9 +14,9 @@
  *   - donner un accesseur lecture-seule à `pane-interrupted` (jusqu'ici
  *     seul `setInterrupted` existait, le bar lisait via `existsSync` direct).
  *
- * Les helpers booléens historiques de state.ts (`userIsTakingOver`,
- * `humanIsTyping`, `humanPresent`) restent — back-compat. Ces accesseurs
- * sont la API que les nouvelles intégrations devraient utiliser.
+ * The legacy boolean helpers in state.ts (`humanIsTyping`) stay for
+ * back-compat. These accessors are the API new integrations should
+ * use.
  *
  * Lecture mtime via `safeMtimeMs` → never throws (file absent / unreadable
  * = Infinity age = "jamais touché récemment").

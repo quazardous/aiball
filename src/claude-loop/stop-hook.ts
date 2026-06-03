@@ -76,12 +76,9 @@ function log(msg: string): void {
  *
  * By definition the Stop hook fires post-turn, so "was the loop
  * busy?" is always yes — useless. What david actually wants is "what
- * kind of turn was this": user-driven, auto-wake-driven, or
- * autonomous (claude continued on its own). Comparison of marker
- * ages gives a reliable signal:
- *   - whichever of user-took-over / last-wake is more recent wins
- *   - if both are stale (> userGraceSec), call it "autonomous"
- *   - if neither marker exists → "?" (first fire / pruned state)
+ * kind of turn was this": auto-wake-driven or unknown (#745 phase B
+ * dropped the user-driven branch — the AFK SM owns that signal now).
+ * The last-wake marker is the sole input.
  *
  * The trailing markers stay raw so the reader can sanity-check the
  * classification or spot edge cases (wake-in-flight still set = the
@@ -191,23 +188,17 @@ function readPane(): string {
             log(`  → SUPPRESS (pane=${pane.special}) became=busy:${pane.special}`);
             emit();
         }
-        // #B.195 — when the human typed within the user-grace window,
-        // suppress the auto-ping. Otherwise the Stop hook fires
-        // "Geronimo!" via send-keys right on top of the user's next
-        // keystrokes ("pop culture en boucle"). The timer keeps
-        // honoring user-took-over too, so nothing else wakes claude
-        // until grace lapses. We still write idle-since so the bar
-        // doesn't get stuck on busy when claude returns the prompt.
-        // #501 david `73af3e` : stop ⊂ wait — un user qui tape MAINTENANT
-        // (human-typing < 5s) est aussi "présent" et doit suppresser le wake,
-        // pas juste celui qui a soumis < 60s (user-took-over). Sans cette
-        // OR, le wake auto fire entre 2 frappes du user (entre submits) et
-        // clobber la frappe en cours.
-        // #745 phase B — the previous `humanPresent` check (typing OR
-        // user-grace fresh) collapses to AFK SM + typing-now. If the
-        // user is in NOT AFK 10m / ∞ or is actively typing, suppress
-        // the auto-wake the same way ; otherwise fall through to the
-        // regular gate handling.
+        // Suppress the auto-ping when a human is present. Otherwise
+        // the Stop hook fires "Geronimo!" via send-keys right on top
+        // of the user's next keystrokes ("pop culture en boucle").
+        // We still write idle-since so the bar doesn't get stuck on
+        // busy when claude returns the prompt.
+        //
+        // #745 phase B — "human present" = AFK SM hold active OR
+        // typing-now (human-typing < 5s). Either signal suppresses
+        // the auto-wake ; otherwise fall through to the regular gate.
+        // The AFK SM owns the longer-lived "human here" signal end-
+        // to-end (typing arms NOT AFK 10m via the proxy).
         if (humanIsTyping(sd!) || afkActive(sd!)) {
             if (!skipFileWrite()) writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
             const sub = interrupted ? "interrupted" : "user";
@@ -276,7 +267,8 @@ function readPane(): string {
                 pingsPath(sd!),
             );
             // #B.180: mark this send-keys as auto-wake so the
-            // UserPromptSubmit hook skips user-took-over.
+            // UserPromptSubmit hook can flag from_auto_wake=true
+            // and the timer keeps idleSinceMs (no human submission).
             try { writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
             // #B.198 fix A: also touch the coalesce marker so the
             // next Stop hook fire can detect "we just sent a wake".
