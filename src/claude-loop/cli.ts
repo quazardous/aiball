@@ -1874,10 +1874,10 @@ async function main(): Promise<void> {
             const resolved = name ?? resolveCurrentLoopName();
             await cmdTail(resolved, Number(opts.lines), which, opts.once !== true);
         });
-    program.command("rm <name>")
-        .description("Kill tmux + timer + remove state dir")
+    program.command("rm [name]")
+        .description("Kill tmux + timer + remove state dir. Name optional — defaults to the loop registered for the current cwd (mirrors reload/restart/stop).")
         .option("--force", "Silence error when state dir is missing")
-        .action((name: string, opts: { force?: boolean }) => cmdRm(name, opts.force === true));
+        .action((name: string | undefined, opts: { force?: boolean }) => cmdRm(name ?? resolveCurrentLoopName(), opts.force === true));
     program.command("wake <name>")
         .description("Force the next timer tick to fire immediately")
         .action(cmdWake);
