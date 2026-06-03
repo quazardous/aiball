@@ -1,0 +1,73 @@
+# #734 V3 Phase A + B — user stories for the AFK + human-typing fields of
+# the in-memory IpcState (`ipc-state.ts`). The Phase A migration mirrors
+# the Slice B-1 pattern (#727) : the dispatcher's `Afk*ViaService` helpers
+# update `setIpcAfk`, the timer reads from in-memory first, the file is
+# kept as a back-compat shadow for the win32 path (the Rust proxy writes
+# the file directly without dispatching proxyEvent so `ipcAfk` stays
+# null and the wake gate falls back to the file). Strict null-fallback
+# semantics — null is "no signal", never "AFK off" — per the `2a6eed8`
+# regression lesson.
+scenario: afk-ipc-state
+description: |
+  IpcState `afkMode` / `afkExpiryMs` (Phase A) and `humanTypingAtMs`
+  (Phase B) are the in-memory source of truth for the AFK + typing
+  signals consumed by `readLoopStateInput`. The file shadow remains
+  authoritative when no in-memory signal has landed yet (cold boot,
+  the win32 Rust-proxy path).
+
+unit:
+  - name: "Phase A — ipcAfk=null + AFK file present → file wins (win32 path)"
+    call: { module: "./yaml-scenarios-helpers.js", fn: "readLoopStateWithIpc" }
+    args:
+      - sd: "TMPDIR"
+        files:
+          "afk": "inf"     # Rust proxy on win32 wrote the file directly
+        # No ipc.afkMode override : it stays null (no proxyEvent
+        # landed). The read path MUST fall back to the file or the
+        # win32 wake gate breaks (cf. `2a6eed8`).
+        ipc:
+          bootComplete: true
+          idleSinceMs: 1748534400000
+    expect:
+      "afkMode": "wait_inf"
+
+  - name: "Phase A — ipcAfk wait_10m overrides an absent file"
+    call: { module: "./yaml-scenarios-helpers.js", fn: "readLoopStateWithIpc" }
+    args:
+      - sd: "TMPDIR"
+        ipc:
+          bootComplete: true
+          idleSinceMs: 1748534400000
+          afkMode: "wait_10m"
+          afkExpiryMs: 1748535000000
+    expect:
+      "afkMode": "wait_10m"
+      "afkExpiryMs": 1748535000000
+
+  - name: "Phase A — ipcAfk off overrides a stale AFK file"
+    call: { module: "./yaml-scenarios-helpers.js", fn: "readLoopStateWithIpc" }
+    args:
+      - sd: "TMPDIR"
+        files:
+          "afk": "inf"     # stale on-disk hold the agent should NOT see
+        ipc:
+          bootComplete: true
+          idleSinceMs: 1748534400000
+          afkMode: "off"   # explicit "AFK is off" event from the dispatcher
+          afkExpiryMs: null
+    expect:
+      "afkMode": "off"
+
+  - name: "Phase B — ipcHumanTypingAtMs overrides the file mtime"
+    call: { module: "./yaml-scenarios-helpers.js", fn: "readLoopStateWithIpc" }
+    args:
+      - sd: "TMPDIR"
+        files:
+          "human-typing": "BOOT_ISO"   # stale file (~10 min old)
+        ipc:
+          bootComplete: true
+          idleSinceMs: 1748534400000
+          humanTypingAtMs: 1748534400000
+    expect:
+      "humanTypingAtMs": 1748534400000
+

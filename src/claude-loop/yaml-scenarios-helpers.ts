@@ -20,8 +20,10 @@ import { join } from "node:path";
 import {
     getIpcState,
     resetIpcStateForTests,
+    setIpcAfk,
     setIpcBootComplete,
     setIpcBusyDeferUntil,
+    setIpcHumanTypingAtMs,
     setIpcIdleSince,
     setIpcResumeModePicker,
     setIpcResumeSessionPicker,
@@ -45,6 +47,9 @@ export interface ReadLoopStateWithIpcOpts {
         busyDeferUntilMs?: number | null;
         resumeSessionPickerActive?: boolean | null;
         resumeModePickerActive?: boolean | null;
+        afkMode?: "off" | "wait_10m" | "wait_inf" | null;
+        afkExpiryMs?: number | null;
+        humanTypingAtMs?: number | null;
     };
     /** Passed through to `readLoopStateInput`. `nowMs` is not part of
      *  the function signature — the scenarios that care about it use
@@ -84,6 +89,8 @@ export function readLoopStateWithIpc(opts: ReadLoopStateWithIpcOpts): ReturnType
         if (ipc.busyDeferUntilMs !== undefined) setIpcBusyDeferUntil(ipc.busyDeferUntilMs);
         if (ipc.resumeSessionPickerActive !== undefined) setIpcResumeSessionPicker(ipc.resumeSessionPickerActive);
         if (ipc.resumeModePickerActive !== undefined) setIpcResumeModePicker(ipc.resumeModePickerActive);
+        if (ipc.afkMode !== undefined) setIpcAfk(ipc.afkMode, ipc.afkExpiryMs ?? null);
+        if (ipc.humanTypingAtMs !== undefined) setIpcHumanTypingAtMs(ipc.humanTypingAtMs);
         return readLoopStateInput(sd, opts.readOpts ?? {});
     } finally {
         if (opts.sd === "TMPDIR") {

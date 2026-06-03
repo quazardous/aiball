@@ -19,6 +19,7 @@
 import { existsSync, unlinkSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { afkPath, readAfkState } from "./state.js";
 import { type AfkService, getAfkService } from "./afk-service.js";
+import { setIpcAfk } from "./ipc-state.js";
 
 /**
  * Read the afk marker file and reflect its state into the given
@@ -104,6 +105,12 @@ export function armAfkViaService(
     const s = svc ?? getAfkService();
     const expiry = Date.now() + seconds * 1000;
     s.set10m(expiry);
+    // #734 V3 Phase A — mirror to ipcState so `readLoopStateInput` reads
+    // in-memory first ; file stays as a cross-process shadow for hook
+    // subprocess reads + the win32 path (the Rust proxy writes the file
+    // directly without going through proxyEvent → ipcAfk stays null on
+    // win32, and the read path falls back to the file).
+    setIpcAfk("wait_10m", expiry);
     try {
         writeFileSync(afkPath(sd), new Date(expiry).toISOString() + "\n");
     } catch { /* best-effort — service still updated in-process */ }
@@ -113,12 +120,14 @@ export function armAfkViaService(
 export function setAfkInfViaService(sd: string, svc?: AfkService): void {
     const s = svc ?? getAfkService();
     s.setInf();
+    setIpcAfk("wait_inf", null);
     try { writeFileSync(afkPath(sd), "inf\n"); } catch { /* best-effort */ }
 }
 
 export function clearAfkViaService(sd: string, svc?: AfkService): void {
     const s = svc ?? getAfkService();
     s.setOff();
+    setIpcAfk("off", null);
     try {
         if (existsSync(afkPath(sd))) unlinkSync(afkPath(sd));
     } catch { /* race — file may have been cleared by another writer */ }

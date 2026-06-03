@@ -78,6 +78,20 @@ export interface IpcState {
      *  wake gate consults it as a check-cmd bypass + unlinks it on
      *  consume. `null` = no pending request. */
     wakeRequestedAtMs: number | null;
+    /** #734 V3 Phase A — AFK state in-memory. `null` mode = no in-memory
+     *  signal yet, fall back to the `afk` file (win32 path : the Rust
+     *  proxy writes the file directly without going through proxyEvent,
+     *  so ipcAfk stays null and the wake gate reads from disk). Set by
+     *  the `Afk*ViaService` helpers on every Unix-side mutation. The
+     *  fallback semantic mirrors `idleSinceMs` / `idleSinceCleared`
+     *  (#727 B-1) — strict null-means-fallback per the `2a6eed8`
+     *  regression lesson. */
+    afkMode: "off" | "wait_10m" | "wait_inf" | null;
+    afkExpiryMs: number | null;
+    /** #734 V3 Phase B — human-typing timestamp in-memory. `null` = no
+     *  in-memory signal, fall back to `human-typing` file mtime. Set by
+     *  the dispatcher on `keystroke:typing` events from the proxy. */
+    humanTypingAtMs: number | null;
 }
 
 const state: IpcState = {
@@ -94,6 +108,9 @@ const state: IpcState = {
     lastInjectedWake: null,
     lastWakeAtMs: null,
     wakeRequestedAtMs: null,
+    afkMode: null,
+    afkExpiryMs: null,
+    humanTypingAtMs: null,
 };
 
 /** Read-only view of the current state. Callers should not mutate. */
@@ -164,6 +181,27 @@ export function setIpcWakeRequested(atMs: number | null): void {
     state.wakeRequestedAtMs = atMs;
 }
 
+/** #734 V3 Phase A — set AFK in-memory state. Called by the
+ *  `Afk*ViaService` helpers right after they mutate the AfkService
+ *  observable. Pass `mode=null` to reset the in-memory signal (the
+ *  read path then falls back to the file ; do this only in tests).
+ *  Production code uses `setIpcAfk("off"|"wait_10m"|"wait_inf", …)`
+ *  to record an explicit AFK state. */
+export function setIpcAfk(
+    mode: "off" | "wait_10m" | "wait_inf" | null,
+    expiryMs: number | null,
+): void {
+    state.afkMode = mode;
+    state.afkExpiryMs = mode === "wait_10m" ? expiryMs : null;
+}
+
+/** #734 V3 Phase B — set last typing timestamp in-memory. Called by
+ *  the dispatcher on `keystroke:typing` events. `null` resets the
+ *  in-memory signal (read path falls back to the file mtime). */
+export function setIpcHumanTypingAtMs(atMs: number | null): void {
+    state.humanTypingAtMs = atMs;
+}
+
 /** Reset every field to the as-launched defaults. Tests only. */
 export function resetIpcStateForTests(): void {
     state.bootComplete = null;
@@ -179,4 +217,7 @@ export function resetIpcStateForTests(): void {
     state.lastInjectedWake = null;
     state.lastWakeAtMs = null;
     state.wakeRequestedAtMs = null;
+    state.afkMode = null;
+    state.afkExpiryMs = null;
+    state.humanTypingAtMs = null;
 }

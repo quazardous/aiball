@@ -15,6 +15,7 @@ import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
 import {
     getIpcState,
     setIpcDrainedState,
+    setIpcHumanTypingAtMs,
     setIpcLastInjectedWake,
     setIpcLastOpenWakeCount,
     setIpcLastOpenWakeHash,
@@ -899,11 +900,14 @@ export function clearAfk(sd: string): void {
     try { if (existsSync(afkPath(sd))) unlinkSync(afkPath(sd)); } catch { /* race */ }
 }
 
-/** #633 Slice D — touch the `human-typing` marker (writes mtime to now).
- *  The bus reads its mtime via `safeMtime` to compute `isTypingNow` →
- *  bar word "stop" during the 5s TTL. Mirror of the proxy's
- *  `touch_marker`. */
+/** #633 Slice D — touch the `human-typing` marker. #734 V3 Phase B —
+ *  also writes the in-memory `ipcHumanTypingAtMs` so `readLoopStateInput`
+ *  reads in-process state first ; file shadow is kept for cold-boot +
+ *  the win32 path where the Rust proxy doesn't dispatch proxyEvent.
+ *  Bus reads compute `isTypingNow` for the bar word "stop" during the
+ *  5s TTL. Mirror of the proxy's `touch_marker`. */
 export function touchHumanTyping(sd: string): void {
+    setIpcHumanTypingAtMs(Date.now());
     try { writeFileSync(humanTypingPath(sd), new Date().toISOString() + "\n"); } catch { /* best-effort */ }
 }
 
@@ -1001,7 +1005,17 @@ export function readLoopStateInput(
         } catch { return null; }
     }
 
-    const afk = readAfkState(sd);
+    // #734 V3 Phase A — AFK in-memory wins when set ; file is the
+    // fallback for the win32 path (Rust proxy writes the file directly
+    // without dispatching proxyEvent, so ipcAfk stays null) and for
+    // cold-boot before the first Afk*ViaService call. Strict null-fallback
+    // semantics per `2a6eed8` lesson : ipc.afkMode === null means "no
+    // signal", never "AFK off" (that's "off").
+    const afk = ipc.afkMode !== null
+        ? { mode: ipc.afkMode, expiryMs: ipc.afkExpiryMs }
+        : readAfkState(sd);
+    // #734 V3 Phase B — same semantics for human-typing.
+    const ipcHumanTypingAtMs = ipc.humanTypingAtMs;
     return {
         nowMs,
         loopStartMs: startMs,
@@ -1014,7 +1028,7 @@ export function readLoopStateInput(
         paneCompacting: existsSync(paneCompactingPath(sd)),
         paneInterrupted: existsSync(paneInterruptedPath(sd)),
         noWait,
-        humanTypingAtMs: safeMtime(humanTypingPath(sd)),
+        humanTypingAtMs: ipcHumanTypingAtMs ?? safeMtime(humanTypingPath(sd)),
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,
         afkMode: afk.mode,
         afkExpiryMs: afk.expiryMs,
