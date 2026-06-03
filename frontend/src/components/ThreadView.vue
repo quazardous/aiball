@@ -32,6 +32,12 @@ const data = ref<ThreadViewData | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const decideBusy = ref(false);
+// #740 david `a9rucr` — the composer hosts an assignee picker, but the
+// approve / reject buttons live in `ThreadActionsDock` and used to
+// ignore it (the composer only pushed the assignment on its own submit
+// path). Bind it as a v-model so `decide()` can push the assignment
+// right after the moderation action succeeds.
+const composerAssignee = ref("");
 
 // Per-thread relation flow (#B.196 Layer 3) — add form + per-chip
 // menu (popover ref / target / cached title) + add/change-kind/remove
@@ -136,6 +142,20 @@ async function decide(action: "approve" | "reject") {
         }
         if (action === "approve") await api.approve(tid);
         else await api.reject(tid);
+        // #740 — push the assignee picked in the composer best-effort
+        // after the moderation action lands. Mirrors MessageComposer's
+        // own post-submit assign at line ~285/320 (#514) so approving
+        // from the buttons (no composer submit fired) honours the same
+        // dropdown. Failure is non-fatal — the ticket is already
+        // approved/rejected ; the user can retry from the Manage panel.
+        if (composerAssignee.value.trim()) {
+            try {
+                await api.assignTicket(tid, composerAssignee.value.trim());
+            } catch (e) {
+                console.warn("[ThreadView] failed to assign on decide:", e);
+            }
+            composerAssignee.value = "";
+        }
         composerBody.value = "";
         broadcastRefresh(tid);
     } catch (e) {
@@ -519,6 +539,7 @@ async function copyTicketRef() {
 
             <MessageComposer
                 v-model:body="composerBody"
+                v-model:assignee="composerAssignee"
                 mode="comment"
                 :project="data.ticket.project"
                 :ticket-id="data.ticket.id"

@@ -83,13 +83,18 @@ const intent = ref<Intent>("request");
 const priority = ref<Priority>("normal");
 // #292: tags chosen for a NEW ticket (deferred — applied after create).
 const ticketTagIds = ref<number[]>([]);
-// #514 (david `nd967z`) : assignee picker au create. Empty = pas d'assign
-// (le ticket part non-assigné, comportement antérieur). Sinon, après le
-// POST /messages, on chain un POST /tickets/<id>/assign pour ne pas
-// dupliquer la logique côté backend. Tickets only (pas pour les
-// comments — l'assignee est ticket-level). Catalog des consumers chargé
-// au mount (réutilise le path que `mentionCatalog` fait déjà).
-const assignee = ref<string>("");
+// #514 (david `nd967z`) : assignee picker at create. Empty = no assign
+// (ticket starts unassigned, prior behaviour). Otherwise, after the POST
+// /messages, we chain a POST /tickets/<id>/assign to avoid duplicating
+// the logic on the backend. Tickets only (not comments — assignee is
+// ticket-level). The consumer catalog is loaded at mount (reuses the
+// path `mentionCatalog` already takes).
+//
+// #740 david `a9rucr`: exposed as a v-model so the parent (ThreadView)
+// can read it from its own `decide("approve" | "reject")` flow — the
+// approve button lives outside the composer and previously ignored
+// whatever the human had picked in this dropdown.
+const assignee = defineModel<string>("assignee", { default: "" });
 const consumerCatalog = ref<string[]>([]);
 const preview = ref(false);
 const sending = ref(false);
