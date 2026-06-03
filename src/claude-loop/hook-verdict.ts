@@ -18,56 +18,45 @@
  * the timer), a slice 2b can add an HTTP variant on top of the same
  * `LoopStateSnapshot` shape ; the verdict-builder stays unchanged.
  *
- * Slice 4 — extended the snapshot with the `humanPresent` / `afkHoldActive`
- * derived flags so the verdict builder can match the original
- * `pretooluse-hook` deny semantics (which used `afkActive` + `humanPresent`
- * directly — wider than `barWord === "stop"` because user-grace recency
- * also counts as present).
+ * #745 phase B (david `9aedjr` option b) — `humanPresent` was a derived
+ * flag combining typing + user-grace freshness, both of which the AFK
+ * state machine already covers (typing arms NOT AFK 10m). Removed. The
+ * verdict builder now reads `afkHoldActive` only, the AFK SM is the
+ * single source of truth for "is a human here."
  */
 import { readLoopStateInput, type HUMAN_TYPING_TTL_SEC } from "./state.js";
 import { computeLoopView, type LoopStateView } from "./loop-state.js";
 
 /**
  * Loop-state snapshot the hook reads at fire-time. Extends `LoopStateView`
- * (what the timer paints from) with two derived flags useful to hook
- * decision-makers : whether a human is currently present (typing now OR
- * within the user-grace window), and whether an AFK hold is active.
+ * (what the timer paints from) with one derived flag : whether an AFK
+ * hold is active (NOT AFK 10m or ∞). That single flag is enough for the
+ * verdict builder — it's the AFK SM's notion of "human present."
  */
 export type LoopStateSnapshot = LoopStateView & {
-    /** True iff there's a recent live signal of a human present : the
-     *  human is typing within the typing TTL (default 5s) OR submitted
-     *  a prompt within the user-grace window. Mirrors `humanPresent` in
-     *  state.ts (#585). */
-    humanPresent: boolean;
     /** True iff the AFK file represents an active hold (`wait_10m` with
      *  a future expiry, or `wait_inf`). Mirrors `afkActive` in state.ts
-     *  (#351). */
+     *  (#351). Drives the pretooluse-hook AskUserQuestion gate. */
     afkHoldActive: boolean;
 };
 
 /**
  * Sync read of the current loop state from the marker files under `sd`.
- * Builds the same view the timer's `tryWake` consults + the two derived
- * flags `humanPresent` / `afkHoldActive` consumed by the verdict builder.
- * Safe to call from a spawn-per-call hook subprocess — pure fs reads,
- * no fork, no socket. Throws if `sd` doesn't exist (the caller decides :
+ * Builds the same view the timer's `tryWake` consults + the
+ * `afkHoldActive` flag consumed by the verdict builder. Safe to call
+ * from a spawn-per-call hook subprocess — pure fs reads, no fork, no
+ * socket. Throws if `sd` doesn't exist (the caller decides :
  * default-allow on error is the historical pretooluse-hook fail-open
  * behavior).
  */
 export function queryLoopState(sd: string): LoopStateSnapshot {
     const input = readLoopStateInput(sd);
     const view = computeLoopView(input);
-    // humanPresent : typing within TTL OR user-grace within graceMs.
-    const typingNow = input.humanTypingAtMs !== null
-        && (input.nowMs - input.humanTypingAtMs) < input.humanTypingTtlMs;
-    const userGraceFresh = input.userTookOverAtMs !== null
-        && (input.nowMs - input.userTookOverAtMs) < input.userGraceMs;
-    const humanPresent = typingNow || userGraceFresh;
     // afkHoldActive : wait_inf, or wait_10m with future expiry.
     const afkHoldActive =
         input.afkMode === "wait_inf"
         || (input.afkMode === "wait_10m" && input.afkExpiryMs !== null && input.afkExpiryMs > input.nowMs);
-    return { ...view, humanPresent, afkHoldActive };
+    return { ...view, afkHoldActive };
 }
 
 // Re-export marker so an importer doesn't drag in a transitive type-only
@@ -118,18 +107,23 @@ const ASK_USER_QUESTION_REDIRECT =
  * the hooks used to inline ; each hook becomes a thin wrapper that just
  * feeds state in and prints the verdict out.
  *
- * AskUserQuestion deny rule (ported from `pretooluse-hook.ts:67-84`) :
- *   - afkHoldActive → deny (user explicitly said "wait for me" via F9 ;
- *     the dialog would stall their hold)
- *   - !humanPresent → deny (no one to click the dialog, autonomous loop)
- *   - else → allow (human is here, let the dialog through)
+ * AskUserQuestion rule (#746 david `9aedjr` option b) — gated on the AFK
+ * SM as the single source of truth for "is a human present" :
+ *   - `afkHoldActive` (NOT AFK 10m or ∞) → ALLOW : a human is here ; let
+ *     the dialog through, they can answer it.
+ *   - `!afkHoldActive` (AFK off, autonomous loop) → deny : no one to click.
+ *
+ * The previous rule also looked at a separate `humanPresent` (typing +
+ * user-grace) flag, which was a strict duplicate of the AFK SM (typing
+ * arms NOT AFK 10m). Removed in #745 phase B — the AFK SM owns the
+ * "human here" signal end-to-end (bar shows it live, F9 controls it).
  *
  * Returns `ALLOW` (= `{}`) for every case not explicitly denied —
  * fail-open by design, mirrors pretooluse-hook's catch-all.
  */
 export function buildHookVerdict(state: LoopStateSnapshot, context: HookContext): HookVerdict {
     if (context.kind === "PreToolUse" && context.tool_name === "AskUserQuestion") {
-        if (state.afkHoldActive || !state.humanPresent) {
+        if (!state.afkHoldActive) {
             return {
                 hookSpecificOutput: {
                     hookEventName: "PreToolUse",
