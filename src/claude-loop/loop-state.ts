@@ -201,14 +201,10 @@ function effectiveAfkMode(input: LoopStateInput): AfkMode {
     return input.afkMode;
 }
 
-/** Format the `NOT AFK 10m` countdown prefix : `Nm` when ≥60s, `Ns`
- *  otherwise, clamped to at least 1s so the bar never reads `0s`. */
+/** Format the `NOT AFK 10m` countdown prefix : always in seconds
+ *  (e.g. `260s`), clamped to at least 1s so the bar never reads `0s`. */
 function formatCountdown(remainingMs: number): string {
     const remSec = Math.max(1, Math.ceil(remainingMs / 1000));
-    if (remSec >= 60) {
-        const mins = Math.ceil(remSec / 60);
-        return `${mins}m`;
-    }
     return `${remSec}s`;
 }
 

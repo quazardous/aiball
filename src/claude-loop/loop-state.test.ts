@@ -349,7 +349,7 @@ test("post-boot --wait + NOT AFK 10m armed → wait jaune + wake skip", () => {
     assert.equal(v.barWord, "wait");
     assert.equal(v.afkChunk.label, "NOT AFK");
     assert.equal(v.afkChunk.color, "yellow");
-    assert.equal(v.afkChunk.prefix, "10m");
+    assert.equal(v.afkChunk.prefix, "600s");
     assert.equal(v.wakeAllowed, false);
     assert.match(v.wakeSkipReason ?? "", /NOT AFK/);
 });
@@ -422,7 +422,7 @@ test("F9 from NOT AFK ∞ → AFK → bar loop vert", () => {
 //  AFK 10m countdown semantics
 // ---------------------------------------------------------------------------
 
-test("AFK 10m countdown 9m left → `9m NOT AFK:F9`", () => {
+test("AFK 10m countdown 9m left → `540s NOT AFK:F9`", () => {
     const start = T0;
     const now = start + 2 * MIN;
     const v = computeLoopView(baseInput({
@@ -432,7 +432,7 @@ test("AFK 10m countdown 9m left → `9m NOT AFK:F9`", () => {
         afkExpiryMs: now + 9 * MIN,
         idleSinceMs: now,
     }));
-    assert.equal(v.afkChunk.prefix, "9m");
+    assert.equal(v.afkChunk.prefix, "540s");
 });
 
 test("AFK 10m countdown 30s left → `30s NOT AFK:F9`", () => {
