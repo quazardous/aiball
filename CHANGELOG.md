@@ -23,6 +23,18 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-06-03
+
+### Changed
+
+- The per-loop IPC socket file is renamed from `view-push.sock` to
+  `loop.sock` — first step of a 3-step consolidation that folds the
+  three current sockets (view-push, proxy-events, inject) into a single
+  multiplexed WebSocket. Today `loop.sock` still carries only view-push
+  frames ; the upcoming steps will add the proxy→timer event frames and
+  the wake-inject frames on the same connection. Visible only to
+  devs/debug inspecting `~/.claude-loop/<NAME>/`.
+
 ## [0.24.0] — 2026-06-03
 
 ### Changed
