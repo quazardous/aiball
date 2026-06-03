@@ -97,21 +97,12 @@ export interface LoopStateInput {
 }
 
 /** Bar BG state (drives `setTmuxStatus` color). */
-export type Phase = "boot" | "idle" | "busy";
-
-/** Bar word in the black island. */
-export type BarWord = "boot" | "stop" | "wait" | "loop";
-
-/** Status-right `AFK:F9` / `NOT AFK:F9` chunk descriptor. */
-export interface AfkChunk {
-    /** `AFK` (autonomous loop = human is away) vs `NOT AFK` (held). */
-    label: "AFK" | "NOT AFK";
-    /** Countdown prefix when held — `"9m"` / `"30s"` / `"∞"` / null. */
-    prefix: string | null;
-    /** Color for the prefix + label. `dim` = OFF, `yellow` = 10m,
-     *  `red` = ∞. The F9 key segment stays in bar_fg neutral. */
-    color: "dim" | "yellow" | "red";
-}
+// #715 V2 — bar rendering types live in `bar-render.ts` now ; re-exported
+// here for back-compat so external imports of `Phase` / `BarWord` /
+// `AfkChunk` from `loop-state.js` keep working without a churning diff.
+export type { Phase, BarWord, AfkChunk } from "./bar-render.js";
+import type { Phase, BarWord, AfkChunk } from "./bar-render.js";
+import { renderAfkChunk, renderBarBg, renderBarWord } from "./bar-render.js";
 
 /** Fully computed view of the loop. Every consumer paints / gates from this. */
 export interface LoopStateView {
@@ -135,7 +126,7 @@ export interface LoopStateView {
 //  Internal helpers — small, composable, testable.
 // ---------------------------------------------------------------------------
 
-function isInBootGrace(input: LoopStateInput): boolean {
+export function isInBootGrace(input: LoopStateInput): boolean {
     // #629 david `2hwuan` — modèle final floor + stretches + no-re-entry :
     //
     //   1. FLOOR INVIOLABLE : pendant `bootMinMs` (typ. 30 s), rien
@@ -162,7 +153,7 @@ function isInBootGrace(input: LoopStateInput): boolean {
     return false;
 }
 
-function isTypingNow(input: LoopStateInput): boolean {
+export function isTypingNow(input: LoopStateInput): boolean {
     if (input.humanTypingAtMs === null) return false;
     return (input.nowMs - input.humanTypingAtMs) < input.humanTypingTtlMs;
 }
@@ -179,7 +170,7 @@ function isBusyDeferActive(input: LoopStateInput): boolean {
 
 /** True iff the AFK file represents an active hold. `wait_10m` with an
  *  expiry past `now` counts as `off` (auto-expired). */
-function isAfkActive(input: LoopStateInput): boolean {
+export function isAfkActive(input: LoopStateInput): boolean {
     if (input.afkMode === "off") return false;
     if (input.afkMode === "wait_inf") return true;
     // wait_10m : honor the expiry timestamp.
@@ -187,49 +178,17 @@ function isAfkActive(input: LoopStateInput): boolean {
     return input.afkExpiryMs > input.nowMs;
 }
 
-/** Effective AFK mode after honoring the 10m auto-release. */
-function effectiveAfkMode(input: LoopStateInput): AfkMode {
+// #715 V2 — `computePhase` / `computeBarWord` / `computeAfkChunk` +
+// `formatCountdown` moved to `bar-render.ts`. `effectiveAfkMode` stays
+// here because the bus + the wake gate also consult it.
+
+/** Effective AFK mode after honoring the 10m auto-release. Re-used by
+ *  the bar-render layer (`bar-render.ts`). */
+export function effectiveAfkMode(input: LoopStateInput): AfkMode {
     if (input.afkMode === "wait_10m" && input.afkExpiryMs !== null && input.afkExpiryMs <= input.nowMs) {
         return "off";
     }
     return input.afkMode;
-}
-
-/** Format the `NOT AFK 10m` countdown prefix : always in seconds
- *  (e.g. `260s`), clamped to at least 1s so the bar never reads `0s`. */
-function formatCountdown(remainingMs: number): string {
-    const remSec = Math.max(1, Math.ceil(remainingMs / 1000));
-    return `${remSec}s`;
-}
-
-// ---------------------------------------------------------------------------
-//  The state machine — three parallel dimensions composed into one view.
-// ---------------------------------------------------------------------------
-
-function computePhase(input: LoopStateInput): Phase {
-    if (isInBootGrace(input)) return "boot";
-    if (input.paneBusy) return "busy";
-    return "idle";
-}
-
-function computeBarWord(input: LoopStateInput): BarWord {
-    // Priority: boot > stop (live typing) > AFK active → wait > loop.
-    if (isInBootGrace(input)) return "boot";
-    if (isTypingNow(input)) return "stop";
-    if (isAfkActive(input)) return "wait";
-    return "loop";
-}
-
-function computeAfkChunk(input: LoopStateInput): AfkChunk {
-    const mode = effectiveAfkMode(input);
-    if (mode === "wait_inf") {
-        return { label: "NOT AFK", prefix: "∞", color: "red" };
-    }
-    if (mode === "wait_10m" && input.afkExpiryMs !== null) {
-        const remMs = input.afkExpiryMs - input.nowMs;
-        return { label: "NOT AFK", prefix: formatCountdown(remMs), color: "yellow" };
-    }
-    return { label: "AFK", prefix: null, color: "dim" };
 }
 
 /** Gate the wake. Manual wakes skip almost every check (file-marker bypass).
@@ -292,9 +251,9 @@ function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: str
  * effects. Tests inject scenarios directly.
  */
 export function computeLoopView(input: LoopStateInput): LoopStateView {
-    const phase = computePhase(input);
-    const barWord = computeBarWord(input);
-    const afkChunk = computeAfkChunk(input);
+    const phase = renderBarBg(input);
+    const barWord = renderBarWord(input);
+    const afkChunk = renderAfkChunk(input);
     const gate = computeWakeGate(input);
     return {
         phase,
