@@ -15,6 +15,7 @@ import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
 import {
     getIpcState,
     setIpcDrainedState,
+    setIpcLastInjectedWake,
     setIpcLastOpenWakeCount,
     setIpcLastOpenWakeHash,
     setIpcLastWakeHint,
@@ -471,11 +472,21 @@ export function dedupeWakeInjection(
  * dropped wake is not.
  */
 function skipDuplicateWakeInjection(sd: string, phrase: string): boolean {
-    let prev: string | null = null;
-    try { prev = readFileSync(lastInjectedWakePath(sd), "utf8"); } catch { /* no marker yet */ }
+    // V4 Phase 3 — read the in-memory shadow first (timer-side, instant)
+    // and fall back to the file marker only when the in-memory value is
+    // null (subprocess that hasn't received any marker yet). Same back-
+    // compat write path so the stop-hook's separate read keeps working
+    // until V5 centralises wake dedup on the timer's loopServer.
+    let prev: string | null = getIpcState().lastInjectedWake;
+    if (prev === null) {
+        try { prev = readFileSync(lastInjectedWakePath(sd), "utf8"); } catch { /* no marker yet */ }
+    }
     const { skip, write } = dedupeWakeInjection(prev, phrase, Date.now(), WAKE_COALESCE_WINDOW_MS);
     if (skip) return true;
-    try { if (write !== null) writeFileSync(lastInjectedWakePath(sd), write); } catch { /* ignore — fail open */ }
+    if (write !== null) {
+        setIpcLastInjectedWake(write);
+        try { writeFileSync(lastInjectedWakePath(sd), write); } catch { /* ignore — fail open */ }
+    }
     return false;
 }
 

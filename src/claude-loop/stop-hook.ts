@@ -23,6 +23,8 @@ import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
 import { CL_ENV } from "./env-vars.js";
 import { createLogger } from "../log.js";
 import { emitHookEventToTimer } from "./hook-emit.js";
+import { sendEventOnce } from "./ipc-events.js";
+import { loopSockPath } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -278,7 +280,16 @@ function readPane(): string {
             try { writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
             // #B.198 fix A: also touch the coalesce marker so the
             // next Stop hook fire can detect "we just sent a wake".
-            try { writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
+            // V4 Phase 3 — emit a marker so the timer's in-memory
+            // shadow stays in sync, and keep the file write as the
+            // back-compat channel for the next subprocess read (until
+            // wake dedup centralises on the timer's loopServer in V5).
+            const wakeAtMs = Date.now();
+            void sendEventOnce(loopSockPath(sd!), {
+                kind: "proxyEvent",
+                data: { event: "marker", name: "set_last_wake_at", at_ms: wakeAtMs, now_ms: wakeAtMs },
+            }, { timeoutMs: 200 });
+            try { writeFileSync(lastWakeAtPath(sd!), new Date(wakeAtMs).toISOString() + "\n"); } catch { /* ignore */ }
             await injectWakePhrase(`${tmuxName(name!)}.0`, phrase);
             // #B.232 ch887f: bump open-tickets watermark post-wake.
             if (gate.openCount > 0) recordOpenWakeCount(sd!, gate.openCount);

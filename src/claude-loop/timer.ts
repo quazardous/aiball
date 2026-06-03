@@ -105,6 +105,7 @@ import {
     setIpcBootComplete,
     setIpcBusyDeferUntil,
     setIpcIdleSince,
+    setIpcLastWakeAtMs,
     setIpcResumeModePicker,
     setIpcResumeSessionPicker,
 } from "./ipc-state.js";
@@ -558,6 +559,10 @@ async function sendKeys(phrase: string): Promise<void> {
         // #B.198 fix A: shared coalesce marker — Stop hook reads it to
         // suppress chain-fire bursts. Touched here so timer-driven
         // wakes also count toward the coalesce window.
+        // V4 Phase 3 : mirror into the in-memory shadow for instant
+        // timer-side reads ; the file write stays as the cross-process
+        // channel the stop-hook subprocess still relies on.
+        setIpcLastWakeAtMs(Date.now());
         try {
             writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n");
         } catch { /* ignore — coalesce will just fail open */ }

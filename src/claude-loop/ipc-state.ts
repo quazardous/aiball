@@ -64,6 +64,15 @@ export interface IpcState {
      *  marker emit on `loop.sock` that the dispatcher routes back into
      *  this field). Read by the wake gate. */
     lastOpenWakeCount: number | null;
+    /** V4 Phase 3 — phrase dedup payload (`<iso>|<hash>` format from
+     *  `dedupeWakeInjection`). Shadow of `last-injected-wake` marker
+     *  for the timer's in-memory dedup check. The file marker is still
+     *  written (back-compat for stop-hook subprocess reads), V5 will
+     *  drop it when wake dedup centralises on the timer's loopServer. */
+    lastInjectedWake: string | null;
+    /** V4 Phase 3 — ms-since-epoch of the last wake injection. Mirror
+     *  of the `last-wake-at` marker for the timer's in-process reads. */
+    lastWakeAtMs: number | null;
 }
 
 const state: IpcState = {
@@ -77,6 +86,8 @@ const state: IpcState = {
     drainedState: null,
     lastWakeHint: null,
     lastOpenWakeCount: null,
+    lastInjectedWake: null,
+    lastWakeAtMs: null,
 };
 
 /** Read-only view of the current state. Callers should not mutate. */
@@ -135,6 +146,14 @@ export function setIpcLastOpenWakeCount(count: number | null): void {
     state.lastOpenWakeCount = count;
 }
 
+export function setIpcLastInjectedWake(value: string | null): void {
+    state.lastInjectedWake = value;
+}
+
+export function setIpcLastWakeAtMs(atMs: number | null): void {
+    state.lastWakeAtMs = atMs;
+}
+
 /** Reset every field to the as-launched defaults. Tests only. */
 export function resetIpcStateForTests(): void {
     state.bootComplete = null;
@@ -147,4 +166,6 @@ export function resetIpcStateForTests(): void {
     state.drainedState = null;
     state.lastWakeHint = null;
     state.lastOpenWakeCount = null;
+    state.lastInjectedWake = null;
+    state.lastWakeAtMs = null;
 }

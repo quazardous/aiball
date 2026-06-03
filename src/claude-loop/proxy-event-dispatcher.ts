@@ -25,7 +25,7 @@ import {
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
-import { setIpcLastOpenWakeCount } from "./ipc-state.js";
+import { setIpcLastOpenWakeCount, setIpcLastWakeAtMs } from "./ipc-state.js";
 import { getHookService, type HookEvent } from "./hook-service.js";
 
 /** Verdict surfaced for logging + tests. Caller logs the string ;
@@ -34,7 +34,7 @@ export type DispatchVerdict =
     | { kind: "typing-armed" }
     | { kind: "typing-skipped-boot" }
     | { kind: "afk-toggled"; nextMode: "off" | "wait_10m" | "wait_inf" }
-    | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" | "set_last_open_wake_count" }
+    | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" | "set_last_open_wake_count" | "set_last_wake_at" }
     | { kind: "afk-service-set"; mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null }
     | { kind: "hook-event"; hookEvent: HookEvent }
     | { kind: "unknown"; raw: string }
@@ -113,6 +113,16 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                     return { kind: "unknown", raw: `marker:set_last_open_wake_count (bad count ${String(event.count)})` };
                 }
                 setIpcLastOpenWakeCount(Math.max(0, Math.floor(count)));
+                return { kind: "marker-touched", name };
+            }
+            // V4 Phase 3 — wake-at timestamp pushed from the stop-hook
+            // subprocess so the timer's in-memory shadow stays current.
+            if (name === "set_last_wake_at") {
+                const at = typeof event.at_ms === "number" ? event.at_ms : NaN;
+                if (!Number.isFinite(at)) {
+                    return { kind: "unknown", raw: `marker:set_last_wake_at (bad at_ms ${String(event.at_ms)})` };
+                }
+                setIpcLastWakeAtMs(at);
                 return { kind: "marker-touched", name };
             }
             return { kind: "unknown", raw: `marker:${String(name)}` };
