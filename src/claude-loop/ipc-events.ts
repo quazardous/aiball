@@ -13,16 +13,21 @@
  *   sends one event, optionally awaits a reply, closes. For hooks (short-
  *   lived processes that fire one message and exit).
  *
- * Transport (today) : `ws` 8.x over a Unix Domain Socket. The server binds
- * `http.createServer().listen({path})` and attaches `WebSocketServer`. The
- * client connects via `ws+unix://path` — `ws` supports this URI scheme
- * natively for UDS targets. If we ever swap (zmq, grpc, etc.), the API
- * here stays identical ; only this file changes.
+ * Transport : `ws` 8.x over a swappable `Transport` (see `./transport/`).
+ * Unix uses a Unix Domain Socket (`ws+unix://`, file-perm gated) ; win32
+ * uses loopback TCP (`ws://127.0.0.1:<port>` + a per-server token), because
+ * `ws` can't address an AF_UNIX path or a named pipe on Windows. The seam
+ * is selected by `process.platform` (#739) ; the API below never changes —
+ * callsites pass a `socketPath` and the transport decides how to bind /
+ * address / clean it. Tests inject a specific `transport` via opts.
  */
 
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
-import { existsSync, unlinkSync } from "node:fs";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
+import { selectTransport, type Transport, type TransportServer } from "./transport/index.js";
+
+/** Platform default transport (UDS on Unix, loopback TCP on win32). */
+const defaultTransport = selectTransport();
 
 /** Event shape exchanged on every IPC channel. `kind` is the discriminator
  *  the consumer dispatches on ; `data` is the per-kind payload (free-form
@@ -78,29 +83,43 @@ const DEFAULT_RECONNECT_MS = 1_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_SEND_ONCE_TIMEOUT_MS = 2_000;
 
-/** Encode a UDS path as a `ws+unix://` URL the `ws` client accepts. */
-function udsUrl(socketPath: string): string {
-    // `ws+unix:` scheme : the socket path follows, terminated by a colon
-    // and the http path. `ws` parses this and uses the socket path for
-    // the underlying connect, the http path for the HTTP upgrade request.
-    return `ws+unix://${socketPath}:/`;
-}
-
 /**
- * Start listening for events on the given UDS path. Returns immediately ;
- * `close()` shuts down + unlinks the socket file. Best-effort : any
- * malformed frame is silently dropped (no crash propagates to the caller).
+ * Start listening for events on the given path. Returns immediately ;
+ * `close()` shuts down + removes the addressing artifact. Best-effort :
+ * any malformed frame is silently dropped (no crash propagates to the
+ * caller). `opts.transport` overrides the platform default (tests).
  */
-export function listenEvents(socketPath: string, onEvent: EventHandler): EventServer {
-    // Cleanup orphan socket file from a previous run. Race-safe : if
-    // unlink fails because the file vanished between exists & unlink,
-    // we ignore — `listen()` below will surface a real bind error.
-    try { if (existsSync(socketPath)) unlinkSync(socketPath); } catch { /* race */ }
-
+export function listenEvents(
+    socketPath: string,
+    onEvent: EventHandler,
+    opts: { transport?: Transport } = {},
+): EventServer {
+    const transport = opts.transport ?? defaultTransport;
     const http: HttpServer = createHttpServer();
     const wss = new WebSocketServer({ server: http });
 
-    wss.on("connection", (ws) => {
+    // A bind failure surfaces as an async 'error' EVENT, not a throw — the
+    // try/catch around listen only catches synchronous errors. Without a
+    // handler the event is unhandled and crashes the whole process. Attach
+    // BEFORE `transport.bind` (which calls `http.listen`). Also covers
+    // EADDRINUSE on any platform. The error re-emits on the
+    // WebSocketServer too, so guard both. (Pre-#739 this bit win32 hard:
+    // `http.listen({path})` → EACCES on a `loop.sock` path; the loopback
+    // transport removes that failure mode, but the guard stays.)
+    http.on("error", () => { /* bind/listen failed — degrade, don't crash */ });
+    wss.on("error", () => { /* server-level ws error — swallow */ });
+
+    // `bind` cleans any orphan artifact, binds `http`, publishes the
+    // address, and returns the per-server connection gate + cleanup.
+    let tServer: TransportServer;
+    try { tServer = transport.bind(http, socketPath); }
+    catch { /* bind failed synchronously — caller observes via no clients */
+        tServer = { accept: () => false, cleanup: () => {} };
+    }
+
+    wss.on("connection", (ws, req) => {
+        // Gate the upgrade (loopback token check ; UDS always accepts).
+        if (!tServer.accept(req.url)) { try { ws.close(); } catch { /* ignore */ } return; }
         ws.on("message", (raw: RawData) => {
             const text = raw.toString();
             let parsed: unknown;
@@ -119,25 +138,11 @@ export function listenEvents(socketPath: string, onEvent: EventHandler): EventSe
         ws.on("error", () => { /* swallow socket-level errors */ });
     });
 
-    // A bind failure surfaces as an async 'error' EVENT, not a throw — the
-    // try/catch below only catches synchronous errors. Without a handler the
-    // event is unhandled and crashes the whole process. This bites on win32
-    // especially: `http.listen({ path })` treats a filesystem path as a
-    // named-pipe name, so a `C:\…\loop.sock` path fails with EACCES and took
-    // the claude-loop timer down on every start. Swallow it — the server
-    // degrades to "not listening" (callers already tolerate a missing socket)
-    // rather than crashing. Also covers EADDRINUSE on any platform. The error
-    // re-emits on the WebSocketServer too, so guard both.
-    http.on("error", () => { /* bind/listen failed — degrade, don't crash */ });
-    wss.on("error", () => { /* server-level ws error — swallow */ });
-
-    try { http.listen({ path: socketPath }); } catch { /* bind failed — caller observes via missing socket file */ }
-
     return {
         close() {
             try { wss.close(); } catch { /* ignore */ }
             try { http.close(); } catch { /* ignore */ }
-            try { if (existsSync(socketPath)) unlinkSync(socketPath); } catch { /* ignore */ }
+            try { tServer.cleanup(); } catch { /* ignore */ }
         },
         broadcast(ev) {
             const payload = JSON.stringify(ev);
@@ -160,8 +165,9 @@ export function listenEvents(socketPath: string, onEvent: EventHandler): EventSe
  * `send()` while disconnected drops silently ; use `request()` for
  * round-trip semantics.
  */
-export function openEventChannel(socketPath: string, opts: { reconnectMs?: number } = {}): EventChannel {
+export function openEventChannel(socketPath: string, opts: { reconnectMs?: number; transport?: Transport } = {}): EventChannel {
     const reconnectMs = opts.reconnectMs ?? DEFAULT_RECONNECT_MS;
+    const transport = opts.transport ?? defaultTransport;
     let ws: WebSocket | null = null;
     let closed = false;
     let inboundHandler: ((ev: Event) => void) | null = null;
@@ -170,8 +176,12 @@ export function openEventChannel(socketPath: string, opts: { reconnectMs?: numbe
 
     function connect(): void {
         if (closed || ws) return;
+        // `null` = address not resolvable yet (server down / marker absent
+        // on win32) — retry on the same backoff as a refused connection.
+        const url = transport.clientUrl(socketPath);
+        if (url === null) { setTimeout(connect, reconnectMs); return; }
         let attempted: WebSocket;
-        try { attempted = new WebSocket(udsUrl(socketPath)); }
+        try { attempted = new WebSocket(url); }
         catch { setTimeout(connect, reconnectMs); return; }
         const fresh = attempted;
         fresh.on("open", () => { ws = fresh; });
@@ -270,9 +280,10 @@ export function openEventChannel(socketPath: string, opts: { reconnectMs?: numbe
 export async function sendEventOnce(
     socketPath: string,
     ev: Event,
-    opts: { awaitReply?: boolean; timeoutMs?: number; throwOnError?: boolean } = {},
+    opts: { awaitReply?: boolean; timeoutMs?: number; throwOnError?: boolean; transport?: Transport } = {},
 ): Promise<Event | undefined> {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_SEND_ONCE_TIMEOUT_MS;
+    const transport = opts.transport ?? defaultTransport;
     return new Promise<Event | undefined>((resolve, reject) => {
         let ws: WebSocket;
         let settled = false;
@@ -284,7 +295,15 @@ export async function sendEventOnce(
             else resolve(value);
         };
         const timer = setTimeout(() => finish(undefined, new Error(`ipc-events: sendEventOnce '${ev.kind}' timed out after ${timeoutMs}ms`)), timeoutMs);
-        try { ws = new WebSocket(udsUrl(socketPath)); }
+        // `null` = address not resolvable (server down / no marker) — same
+        // best-effort outcome as a refused connection.
+        const url = transport.clientUrl(socketPath);
+        if (url === null) {
+            clearTimeout(timer);
+            finish(undefined, new Error(`ipc-events: no address for '${socketPath}'`));
+            return;
+        }
+        try { ws = new WebSocket(url); }
         catch (e) {
             clearTimeout(timer);
             finish(undefined, e as Error);
