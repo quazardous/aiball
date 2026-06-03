@@ -173,11 +173,6 @@ function isTypingNow(input: LoopStateInput): boolean {
     return (input.nowMs - input.humanTypingAtMs) < input.humanTypingTtlMs;
 }
 
-function isUserGraceFresh(input: LoopStateInput): boolean {
-    if (input.userTookOverAtMs === null) return false;
-    return (input.nowMs - input.userTookOverAtMs) < input.userGraceMs;
-}
-
 function isWakeInFlight(input: LoopStateInput): boolean {
     if (input.wakeInFlightAtMs === null) return false;
     return (input.nowMs - input.wakeInFlightAtMs) < input.wakeInFlightTtlMs;
@@ -272,14 +267,14 @@ function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: str
         if (!input.paneReady)         return { allowed: false, reason: "boot — claude prompt not yet visible" };
         return { allowed: false, reason: "boot phase (safety cap)" };
     }
-    if (isUserGraceFresh(input)) {
-        const secs = Math.floor(input.userGraceMs / 1000);
-        return { allowed: false, reason: `user-grace active (human acted within ${secs}s, F9 to release)` };
-    }
     if (isTypingNow(input)) {
         return { allowed: false, reason: "human typing right now" };
     }
     if (isAfkActive(input)) {
+        // #745 phase A : the user-grace check that lived right above was
+        // a strict duplicate of this AFK check. Typing arms NOT AFK 10m
+        // via the proxy → AfkService → AFK SM, with the same 600s TTL
+        // as user-grace did. Removed — AFK is the single source of truth.
         return { allowed: false, reason: "NOT AFK hold active (10m countdown or ∞, F9 to release)" };
     }
     if (isBusyDeferActive(input)) {

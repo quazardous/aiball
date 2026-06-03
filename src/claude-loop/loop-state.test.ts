@@ -510,18 +510,11 @@ test("no idle marker → wake skipped (claude busy or pre-boot)", () => {
     assert.match(v.wakeSkipReason ?? "", /no idle marker/);
 });
 
-test("user-grace fresh → wake skipped", () => {
-    const start = T0;
-    const now = start + 5 * MIN;
-    const v = computeLoopView(baseInput({
-        nowMs: now,
-        loopStartMs: start,
-        userTookOverAtMs: now - 2 * MIN, // within 10min user-grace
-        idleSinceMs: now,
-    }));
-    assert.equal(v.wakeAllowed, false);
-    assert.match(v.wakeSkipReason ?? "", /user-grace/);
-});
+// #745 phase A — `user-grace fresh → wake skipped` test removed : the
+// gate was a duplicate of the AFK NOT-AFK-10m check (same 600s TTL,
+// same typing-driven arming). AFK is now the single source of truth ;
+// the test below ("NOT AFK active → wake skipped") covers the same
+// scenario from the AFK angle.
 
 test("wake-in-flight fresh → wake skipped (counter coalesce)", () => {
     const start = T0;
