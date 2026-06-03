@@ -76,15 +76,19 @@ try {
 // isn't up the emit silently no-ops and we fall through to the
 // existing fs.marker-based flow. Top-level await ; tsx + ES2022 + NodeNext
 // support it.
+// #727 V1 Slice B-3 — capture the verdict so the file writes further
+// down can be skipped when the timer already received the in-memory
+// signal (SessionStart → setIpcBootComplete + setIpcIdleSince).
+let sessionStartEmitOk = false;
 if (source === "startup" || source === "resume" || source === "compact" || source === "clear") {
     try {
-        const ok = await emitHookEventToTimer(sd!, {
+        sessionStartEmitOk = await emitHookEventToTimer(sd!, {
             event: "hook",
             kind: "SessionStart",
             source,
             at_ms: Date.now(),
         });
-        if (ok) log(`hook-emit: SessionStart source=${source} → HookService`);
+        if (sessionStartEmitOk) log(`hook-emit: SessionStart source=${source} → HookService`);
         else log(`hook-emit: SessionStart source=${source} → not reachable (timer down?)`);
     } catch (e) { log(`hook-emit: SessionStart error ${(e as Error).message ?? e}`); }
 }
@@ -237,7 +241,11 @@ if (source === "resume") {
 // `CL_NO_STARTUP_PING` is the same end-state (idle marker + bar), kept
 // as a separate flag for compatibility with `claude-loop --no-startup-ping`.
 try {
-    writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+    // #727 V1 Slice B-3 — skip the file write when the in-memory state
+    // already carries the signal (early SessionStart emit succeeded).
+    if (!sessionStartEmitOk) {
+        writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+    }
     // #629 david `y43etd` : ne write `boot-complete` QUE si on a vraiment
     // dismissé un picker (auto-pick a fire) OU si on est sous --resume
     // abort (= user demande pas d'aide). Sinon (probe picker n'a pas

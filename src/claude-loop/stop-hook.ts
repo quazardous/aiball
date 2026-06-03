@@ -39,9 +39,17 @@ if (!sd || !name) emit();
 // up the emit silently no-ops and the hook falls through to its
 // existing wake / idle decision logic. Top-level await ; tsx + ES2022
 // + NodeNext support it.
+// #727 V1 Slice B-3 — capture the early emit verdict ; if the timer
+// received it, the in-memory `IpcState.idleSinceMs` is already set by
+// the subscriber + the file write below becomes a back-compat shadow
+// the gate doesn't actually consult. Skip the writes in that case.
+let stopEmitOk = false;
 try {
-    await emitHookEventToTimer(sd, { event: "hook", kind: "Stop", at_ms: Date.now() });
+    stopEmitOk = await emitHookEventToTimer(sd, { event: "hook", kind: "Stop", at_ms: Date.now() });
 } catch { /* best-effort emit, never block the hook */ }
+/** True when the in-memory IPC state already carries this turn's
+ *  signal — the file-marker writes that follow are fallback only. */
+function skipFileWrite(): boolean { return stopEmitOk; }
 
 // #B.149: tail-friendly log of every Stop hook fire — so we can spot
 // from outside the session whether the hook actually ran, what branch
@@ -165,7 +173,7 @@ function readPane(): string {
             // Claude is back at the prompt after the crashed turn — seed
             // idle-since so the timer is allowed to re-ping once the
             // backoff window elapses (it gates on the idle marker).
-            writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            if (!skipFileWrite()) writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
             setTmuxStatus(name!, LOOP_STATUS.BUSY, `retry ${bo.attempts}`);
             log(`  → ERROR-BACKOFF '${errId}' ${bo.ms}ms (attempt ${bo.attempts}) until=${bo.untilIso} became=busy:retry ${bo.attempts}`);
             emit();
@@ -199,7 +207,7 @@ function readPane(): string {
         // the auto-wake the same way ; otherwise fall through to the
         // regular gate handling.
         if (humanIsTyping(sd!) || afkActive(sd!)) {
-            writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            if (!skipFileWrite()) writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
             const sub = interrupted ? "interrupted" : "user";
             setTmuxStatus(name!, LOOP_STATUS.IDLE, sub);
             log(`  → SUPPRESS (human-typing or AFK hold) became=idle:${sub}`);
@@ -217,7 +225,7 @@ function readPane(): string {
         // still silently gates wakes during the window.
         if (pane.busy && PANE_BUSY_DELAY_MS > 0) {
             const until = armBusyDefer(sd!, PANE_BUSY_DELAY_MS);
-            writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            if (!skipFileWrite()) writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
             // #727 V1 Slice B-2 — also push the busy-defer expiry into
             // the timer's in-memory state via a second Stop event. The
             // dispatcher's HookService subscriber pins it on `IpcState`
@@ -249,7 +257,7 @@ function readPane(): string {
             const lastWakeMs = existsSync(lastWakePath) ? statSync(lastWakePath).mtimeMs : 0;
             const sinceLastWakeMs = Date.now() - lastWakeMs;
             if (lastWakeMs > 0 && sinceLastWakeMs < WAKE_COALESCE_WINDOW_MS) {
-                writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+                if (!skipFileWrite()) writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
                 setTmuxStatus(name!, LOOP_STATUS.IDLE);
                 log(`  → COALESCE (last-wake=${sinceLastWakeMs}ms<${WAKE_COALESCE_WINDOW_MS}ms) became=idle`);
                 emit();
@@ -278,7 +286,7 @@ function readPane(): string {
             log(`  → WAKE '${phrase}' became=busy`);
         } else {
             // Nothing to do — mark idle so the timer can take over.
-            writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            if (!skipFileWrite()) writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
             // #345 B: garder le marqueur interrupted visible tant que le
             // pane le montre, même hors user-grace.
             setTmuxStatus(name!, LOOP_STATUS.IDLE, interrupted ? "interrupted" : undefined);

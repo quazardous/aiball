@@ -67,22 +67,19 @@ try {
         } catch { /* stat race — treat as human */ }
         try { unlinkSync(wifPath); } catch { /* race */ }
     }
-    // #745 phase B — user-took-over marker dropped (AFK SM owns the
-    // "human present" signal end-to-end now). `fromAutoWake` is still
-    // carried on the hook event below so the timer-side handler can
-    // distinguish auto-wake submissions from real human prompts.
-    if (existsSync(idleMarkerPath(sd!))) {
-        try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
-    }
-    // #652 Slice 6 — emit the event ; the timer-side subscriber paints
-    // the bar BUSY. Best-effort : silent no-op if the timer isn't up
-    // (the bar lags to the next heartbeat tick, acceptable degraded mode).
-    await emitHookEventToTimer(sd!, {
+    // #727 V1 Slice B-3 — try the ws emit first ; the timer-side
+    // subscriber clears the in-memory `idleSinceMs` (Slice B-1). The
+    // file unlink below is a degraded-mode fallback for when the timer
+    // is down + the ws emit failed.
+    const sent = await emitHookEventToTimer(sd!, {
         event: "hook",
         kind: "UserPromptSubmit",
         from_auto_wake: fromAutoWake,
         at_ms: Date.now(),
     });
+    if (!sent && existsSync(idleMarkerPath(sd!))) {
+        try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
+    }
 } catch {
     /* swallow — never block submit */
 }
