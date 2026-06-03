@@ -73,6 +73,11 @@ export interface IpcState {
     /** V4 Phase 3 — ms-since-epoch of the last wake injection. Mirror
      *  of the `last-wake-at` marker for the timer's in-process reads. */
     lastWakeAtMs: number | null;
+    /** V5 Phase A — `claude-loop wake <name>` toggled this flag (via
+     *  a `set_wake_requested` marker emit on `loop.sock`). The timer's
+     *  wake gate consults it as a check-cmd bypass + unlinks it on
+     *  consume. `null` = no pending request. */
+    wakeRequestedAtMs: number | null;
 }
 
 const state: IpcState = {
@@ -88,6 +93,7 @@ const state: IpcState = {
     lastOpenWakeCount: null,
     lastInjectedWake: null,
     lastWakeAtMs: null,
+    wakeRequestedAtMs: null,
 };
 
 /** Read-only view of the current state. Callers should not mutate. */
@@ -154,6 +160,10 @@ export function setIpcLastWakeAtMs(atMs: number | null): void {
     state.lastWakeAtMs = atMs;
 }
 
+export function setIpcWakeRequested(atMs: number | null): void {
+    state.wakeRequestedAtMs = atMs;
+}
+
 /** Reset every field to the as-launched defaults. Tests only. */
 export function resetIpcStateForTests(): void {
     state.bootComplete = null;
@@ -168,4 +178,5 @@ export function resetIpcStateForTests(): void {
     state.lastOpenWakeCount = null;
     state.lastInjectedWake = null;
     state.lastWakeAtMs = null;
+    state.wakeRequestedAtMs = null;
 }

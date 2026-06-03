@@ -25,7 +25,7 @@ import {
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
-import { setIpcLastOpenWakeCount, setIpcLastWakeAtMs } from "./ipc-state.js";
+import { setIpcLastOpenWakeCount, setIpcLastWakeAtMs, setIpcWakeRequested } from "./ipc-state.js";
 import { getHookService, type HookEvent } from "./hook-service.js";
 
 /** Verdict surfaced for logging + tests. Caller logs the string ;
@@ -34,7 +34,7 @@ export type DispatchVerdict =
     | { kind: "typing-armed" }
     | { kind: "typing-skipped-boot" }
     | { kind: "afk-toggled"; nextMode: "off" | "wait_10m" | "wait_inf" }
-    | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" | "set_last_open_wake_count" | "set_last_wake_at" }
+    | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" | "set_last_open_wake_count" | "set_last_wake_at" | "set_wake_requested" }
     | { kind: "afk-service-set"; mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null }
     | { kind: "hook-event"; hookEvent: HookEvent }
     | { kind: "unknown"; raw: string }
@@ -123,6 +123,16 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                     return { kind: "unknown", raw: `marker:set_last_wake_at (bad at_ms ${String(event.at_ms)})` };
                 }
                 setIpcLastWakeAtMs(at);
+                return { kind: "marker-touched", name };
+            }
+            // V5 Phase A — `claude-loop wake <name>` CLI subprocess pushes
+            // a wake-request flag via this marker. The timer's wake gate
+            // reads `IpcState.wakeRequestedAtMs` instead of the file
+            // marker (no fs round-trip + no degraded mode coupling on
+            // the CLI side).
+            if (name === "set_wake_requested") {
+                const at = typeof event.at_ms === "number" ? event.at_ms : Date.now();
+                setIpcWakeRequested(at);
                 return { kind: "marker-touched", name };
             }
             return { kind: "unknown", raw: `marker:${String(name)}` };

@@ -31,7 +31,9 @@ import {
     timerPidPath,
     tmuxName,
     wakeRequestedPath,
+    loopSockPath,
 } from "../state.js";
+import { sendEventOnce } from "../ipc-events.js";
 
 function die(msg: string): never {
     process.stderr.write(`claude-loop: ${msg}\n`);
@@ -133,7 +135,16 @@ export function cmdWake(name: string): void {
     // We only need wake-requested set; timer reads it as a check-cmd
     // bypass. If claude is mid-turn (no idle-since), wake is queued
     // until claude finishes and the Stop hook decides what to do.
-    writeFileSync(wakeRequestedPath(sd), new Date().toISOString());
+    //
+    // V5 Phase A : emit a `set_wake_requested` marker on `loop.sock`
+    // so the timer's `IpcState.wakeRequestedAtMs` is set immediately.
+    // The file write stays as the inspect/cli back-compat channel.
+    const atMs = Date.now();
+    void sendEventOnce(loopSockPath(sd), {
+        kind: "proxyEvent",
+        data: { event: "marker", name: "set_wake_requested", at_ms: atMs, now_ms: atMs },
+    }, { timeoutMs: 200 });
+    writeFileSync(wakeRequestedPath(sd), new Date(atMs).toISOString());
     const plate = (() => { try { return readPlate(sd); } catch { return null; } })();
     const interval = plate?.interval ?? 60;
     process.stdout.write(
