@@ -1,0 +1,117 @@
+# #748 POC — AFK state-machine user stories. ONE source of truth shared
+# between :
+#   - the integration runner (pytest + fake-claude under tests/integration/),
+#     reads the `steps:` block (today empty here — this scenario is
+#     unit-only ; the SM helpers don't need a live tmux to exercise)
+#   - the unit runner (src/claude-loop/yaml-scenarios.test.ts), reads
+#     the `unit:` block — pure-function assertions against the same SM
+#
+# See docs/SCENARIOS.md for the full schema.
+scenario: afk-sm-basics
+description: |
+  Anchor of the #745 / #726 refactor — the AFK state machine is the
+  single source of truth for "is a human here." These user stories pin
+  the canonical AFK SM outputs so the cleanup follow-ups can lean on
+  them without re-deriving the truth in each test file.
+
+unit:
+  - name: "AFK off + post-boot + idle → bar word `loop`, wake allowed"
+    call: { module: "./loop-state.js", fn: "computeLoopView" }
+    args:
+      - nowMs: 1748534400000           # T0 + 1h, clearly post-boot
+        loopStartMs: 1748530800000     # 1h ago — bootMinMs already elapsed
+        bootGraceMs: 60000
+        bootMinMs: 30000
+        resumePickerActive: false
+        bootComplete: true
+        paneBusy: false
+        paneReady: true
+        paneCompacting: false
+        paneInterrupted: false
+        noWait: false
+        humanTypingAtMs: null
+        humanTypingTtlMs: 5000
+        userTookOverAtMs: null
+        userGraceMs: 600000
+        afkMode: "off"
+        afkExpiryMs: null
+        idleSinceMs: 1748534399000     # idle-since just under 1s ago
+        wakeInFlightAtMs: null
+        wakeInFlightTtlMs: 2000
+        busyDeferUntilMs: null
+        inputHotTtlMs: 3000
+        manualWake: false
+    expect:
+      "barWord": "loop"
+      "wakeAllowed": true
+      "afkChunk.label": "AFK"
+      "afkChunk.color": "dim"
+      "phase": "idle"
+
+  - name: "AFK wait_10m with valid expiry → bar word `wait`, wake refused, countdown shows seconds"
+    call: { module: "./loop-state.js", fn: "computeLoopView" }
+    args:
+      - nowMs: 1748534400000
+        loopStartMs: 1748530800000
+        bootGraceMs: 60000
+        bootMinMs: 30000
+        resumePickerActive: false
+        bootComplete: true
+        paneBusy: false
+        paneReady: true
+        paneCompacting: false
+        paneInterrupted: false
+        noWait: false
+        humanTypingAtMs: null
+        humanTypingTtlMs: 5000
+        userTookOverAtMs: null
+        userGraceMs: 600000
+        afkMode: "wait_10m"
+        afkExpiryMs: 1748535000000     # +10 min = 600 000 ms = 600s
+        idleSinceMs: 1748534399000
+        wakeInFlightAtMs: null
+        wakeInFlightTtlMs: 2000
+        busyDeferUntilMs: null
+        inputHotTtlMs: 3000
+        manualWake: false
+    expect:
+      "barWord": "wait"
+      "wakeAllowed": false
+      "wakeSkipReason": "/NOT AFK hold active/"
+      "afkChunk.label": "NOT AFK"
+      "afkChunk.color": "yellow"
+      "afkChunk.prefix": "600s"
+
+  - name: "AFK wait_inf → bar word `wait`, wake refused, AFK chunk shows ∞"
+    call: { module: "./loop-state.js", fn: "computeLoopView" }
+    args:
+      - nowMs: 1748534400000
+        loopStartMs: 1748530800000
+        bootGraceMs: 60000
+        bootMinMs: 30000
+        resumePickerActive: false
+        bootComplete: true
+        paneBusy: false
+        paneReady: true
+        paneCompacting: false
+        paneInterrupted: false
+        noWait: false
+        humanTypingAtMs: null
+        humanTypingTtlMs: 5000
+        userTookOverAtMs: null
+        userGraceMs: 600000
+        afkMode: "wait_inf"
+        afkExpiryMs: null
+        idleSinceMs: 1748534399000
+        wakeInFlightAtMs: null
+        wakeInFlightTtlMs: 2000
+        busyDeferUntilMs: null
+        inputHotTtlMs: 3000
+        manualWake: false
+    expect:
+      "barWord": "wait"
+      "wakeAllowed": false
+      "wakeSkipReason": "/NOT AFK hold active/"
+      "afkChunk.label": "NOT AFK"
+      "afkChunk.color": "red"
+      "afkChunk.prefix": "∞"
