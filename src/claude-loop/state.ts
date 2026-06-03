@@ -1567,40 +1567,55 @@ export async function buildContextPhrase(
 ): Promise<string> {
     const culture = pickPingPhrase(pingsAbsPath);
     try {
-        const [pingsR, projects, headRows, consumerR] = await Promise.all([
+        // #749 Phase B — drain HEAD unitaire. The wake "head" used to come
+        // from `listTickets({claimable, assume_drained})` — the predicted
+        // POST-drain top of the work-order. That fan-outed every wake
+        // around the same actionable head even when N unread pings were
+        // stacked, making the FIFO of pings invisible at the prompt layer.
+        // New model : the head IS the oldest unread ping's ticket. One
+        // wake = one ping (per david's body : "on prend le premier et on
+        // dit comme le wake up en direct"). `client.unread(project, 1)`
+        // returns the FIFO head Message (ASC by id, see listUnread). For
+        // a ticket-pinger the message IS the ticket ; for a comment-pinger
+        // we use its `ticket_id` parent — the agent claims the parent.
+        // Pre-Phase-A the gate often resurfaced the same ticket post-drain
+        // (no prune-on-consult), so the claimable-head was a safer bet.
+        // With Phase A's prune, the unread FIFO drains naturally.
+        const [pingsR, projects, unreadR, consumerR] = await Promise.all([
             client.pingsCount() as Promise<{ unread?: number }>,
             client.listProjectsDetailed() as Promise<Array<{
                 name: string;
                 open_count?: number;
                 actionable_count?: number;
             }>>,
-            // #371: head of the work-order so the wake NAMES the ticket to
-            // claim instead of a bare count — kills the recency bias toward
-            // the newest.
-            // #432: name the CLAIMABLE head (actionable ∩ owned-project), since
-            // the directive points at `ticket_claim` which only claims that
-            // set. `claimable: "1"` (the API gate matches `=== "1"`, so this
-            // actually filters, not just leans on the tiering). The counts below
-            // stay actionable/open-inclusive — only the named head narrows.
-            // #461: `assume_drained: "1"` predicts the POST-DRAIN head, so the
-            // named #X matches what `ticket_claim` returns AFTER the agent
-            // drains its pings (the wake CTA always instructs drain BEFORE
-            // claim). Without this, the wake's named head is the pre-drain
-            // unread-tier top, but the agent's drain demotes it and claim
-            // returns a different ticket — the misalignment david flagged.
-            // Server-side flag (not client-side sim) so the prediction has
-            // access to all ranking signals (priority + own-claim + hot +
-            // assignment) and stays accurate as the rules evolve.
-            client.listTickets({
-                claimable: "1",
-                project: project ?? undefined,
-                limit: "1",
-                assume_drained: "1",
-            }) as Promise<Array<{ id: number; title?: string }>>,
+            project
+                ? (client.unread(project, 1) as Promise<{
+                    messages?: Array<{ id: number; kind?: string; ticket_id?: number | null; title?: string | null }>;
+                }>).catch(() => ({ messages: [] }))
+                : Promise.resolve({ messages: [] }),
             // #397: this loop's own consumer row → its micro_prompt, exposed as
             // the `{consumer_prompt}` placeholder. Best-effort (null on failure).
             client.getConsumer(client.agentId).catch(() => null) as Promise<{ micro_prompt?: string | null } | null>,
         ]);
+        // Resolve the head's ticket id : a `ticket_created` msg IS the
+        // ticket ; a `comment_added` / lifecycle msg points at it via
+        // ticket_id. Title only populated for ticket roots ; comment-led
+        // wakes show just #ID (the agent claims & reads the parent).
+        const unreadHead = Array.isArray(unreadR?.messages) ? unreadR.messages[0] : undefined;
+        const headRows: Array<{ id: number; title?: string }> = unreadHead
+            ? (() => {
+                const id = unreadHead.kind === "ticket_created"
+                    ? unreadHead.id
+                    : (unreadHead.ticket_id ?? 0);
+                if (!id) return [];
+                return [{
+                    id,
+                    title: unreadHead.kind === "ticket_created"
+                        ? (unreadHead.title ?? undefined)
+                        : undefined,
+                }];
+            })()
+            : [];
         const pingCount = typeof pingsR?.unread === "number" ? pingsR.unread : 0;
         // #397: per-consumer standing instruction. Empty when unset → the
         // `{consumer_prompt}` placeholder renders to nothing (opt-in; the
