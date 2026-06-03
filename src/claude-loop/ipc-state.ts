@@ -59,6 +59,11 @@ export interface IpcState {
     lastOpenWakeHash: string | null;
     drainedState: import("./drained-strategy.js").DrainedState | null;
     lastWakeHint: { ticket_id?: number; comment_hashid?: string; at_ms: number } | null;
+    /** V4 Phase 2 — landscape open-count dedup watermark (#B.232). Written
+     *  by the timer in-process and by the stop-hook subprocess (via a
+     *  marker emit on `loop.sock` that the dispatcher routes back into
+     *  this field). Read by the wake gate. */
+    lastOpenWakeCount: number | null;
 }
 
 const state: IpcState = {
@@ -71,6 +76,7 @@ const state: IpcState = {
     lastOpenWakeHash: null,
     drainedState: null,
     lastWakeHint: null,
+    lastOpenWakeCount: null,
 };
 
 /** Read-only view of the current state. Callers should not mutate. */
@@ -125,6 +131,10 @@ export function setIpcLastWakeHint(
     state.lastWakeHint = hint;
 }
 
+export function setIpcLastOpenWakeCount(count: number | null): void {
+    state.lastOpenWakeCount = count;
+}
+
 /** Reset every field to the as-launched defaults. Tests only. */
 export function resetIpcStateForTests(): void {
     state.bootComplete = null;
@@ -136,4 +146,5 @@ export function resetIpcStateForTests(): void {
     state.lastOpenWakeHash = null;
     state.drainedState = null;
     state.lastWakeHint = null;
+    state.lastOpenWakeCount = null;
 }

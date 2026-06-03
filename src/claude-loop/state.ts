@@ -15,6 +15,7 @@ import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
 import {
     getIpcState,
     setIpcDrainedState,
+    setIpcLastOpenWakeCount,
     setIpcLastOpenWakeHash,
     setIpcLastWakeHint,
 } from "./ipc-state.js";
@@ -492,24 +493,30 @@ function skipDuplicateWakeInjection(sd: string, phrase: string): boolean {
  * same loop name keeps it (which matches david's intent: if you saw
  * the same N tickets last session, don't re-fire on the next).
  */
-export function lastOpenWakeCountPath(sd: string): string {
-    return join(sd, "last-open-wake-count");
+/** V4 Phase 2 — read the watermark from the in-memory `IpcState`.
+ *  Returns 0 when no signal has landed yet (treat as "never woken"). */
+export function readLastOpenWakeCount(_sd: string): number {
+    return getIpcState().lastOpenWakeCount ?? 0;
 }
 
-/** Read the watermark; 0 when missing/unparseable (treat as "never woken"). */
-export function readLastOpenWakeCount(sd: string): number {
-    try {
-        const v = Number(readFileSync(lastOpenWakeCountPath(sd), "utf8").trim());
-        return Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
-    } catch {
-        return 0;
-    }
-}
-
-/** Persist the watermark after a successful wake. Best-effort. */
+/** V4 Phase 2 — persist the watermark. Mutates the local in-memory
+ *  state immediately AND emits a marker event on `loop.sock` so the
+ *  timer process picks it up when this helper runs in a hook
+ *  subprocess (the in-memory mutation is otherwise process-local).
+ *  The timer's own calls to this helper round-trip the emit through
+ *  the dispatcher — same `setIpcLastOpenWakeCount` happens twice,
+ *  idempotent. */
 export function recordOpenWakeCount(sd: string, count: number): void {
+    const clamped = Math.max(0, Math.floor(count));
+    setIpcLastOpenWakeCount(clamped);
+    void sendEventOnce(loopSockPath(sd), {
+        kind: "proxyEvent",
+        data: { event: "marker", name: "set_last_open_wake_count", count: clamped, now_ms: Date.now() },
+    }, { timeoutMs: 200 });
     try {
-        writeFileSync(lastOpenWakeCountPath(sd), `${Math.max(0, Math.floor(count))}\n`);
+        // Legacy back-compat write deferred to V5 (so `cli inspect` keeps
+        // showing the watermark today). Drop in V5.
+        writeFileSync(join(sd, "last-open-wake-count"), `${clamped}\n`);
     } catch { /* gate fails-open next tick, not fatal */ }
 }
 
