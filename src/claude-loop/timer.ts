@@ -100,6 +100,8 @@ import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
 import { paneMarkerBarInfo } from "./pane-service.js";
 import { armAfkViaService, watchAfkMarker } from "./afk-service-sync.js";
 import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
+import { getHookService } from "./hook-service.js";
+import { setIpcBootComplete, setIpcIdleSince } from "./ipc-state.js";
 import { computeLoopView, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
@@ -954,6 +956,36 @@ async function mainSse(): Promise<void> {
     // the existing hooks compute inline.
     const hookBarSub = installHookBarSubscriber(name!);
     process.on("exit", () => hookBarSub.close());
+    // #727 V1 Slice B — mirror hook events into the in-memory IPC state.
+    // The dispatcher already emits SessionStart / Stop / UserPromptSubmit
+    // on the HookService ; this subscriber translates them into the
+    // bootComplete / idleSince fields that `readLoopStateInput` checks
+    // first, ahead of the marker-file fallback. Files keep being written
+    // by the hooks for cross-process readers (cli inspect, fallback) —
+    // Slice B-3 stops the hook writes once we trust the in-memory side.
+    const ipcStateSub = getHookService().subscribe((ev) => {
+        if (ev.kind === "SessionStart") {
+            setIpcBootComplete(true);
+            setIpcIdleSince(ev.at_ms);
+            return;
+        }
+        if (ev.kind === "Stop") {
+            // The Stop hook only emits when claude reached the prompt —
+            // the busy-defer path returns early before the emit call
+            // (see stop-hook.ts). So a Stop event = idle confirmed.
+            setIpcIdleSince(ev.at_ms);
+            return;
+        }
+        if (ev.kind === "UserPromptSubmit" && !ev.from_auto_wake) {
+            // A real human submission flips claude back to busy ; an
+            // auto-wake submission is the loop talking to itself and
+            // already preceded by setIpcIdleSince via the Stop event
+            // that triggered the wake.
+            setIpcIdleSince(null);
+            return;
+        }
+    });
+    process.on("exit", () => ipcStateSub());
     // #649 Slice 4 — hydrate the in-process AfkService singleton from
     // the afk marker file + keep it in sync via fs.watch. The file
     // remains the cross-process source of truth (proxy F9, timer's own

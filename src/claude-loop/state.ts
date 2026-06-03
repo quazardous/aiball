@@ -12,6 +12,7 @@
 import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
 import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
+import { getIpcState } from "./ipc-state.js";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -953,7 +954,13 @@ export function readLoopStateInput(
     // pour les futurs consommateurs (bar slice 4).
     const resumePickerActive = existsSync(resumeSessionPickerActivePath(sd))
         || existsSync(resumeModePickerActivePath(sd));
-    const bootComplete = existsSync(bootCompletePath(sd));
+    // #727 V1 Slice B — in-memory signal wins when the timer's HookService
+    // subscriber has flipped bootComplete via a SessionStart event ; we
+    // fall back to the file marker when no signal landed yet (timer
+    // freshly restarted, or the hook fell back to file write because the
+    // ws emit failed).
+    const ipc = getIpcState();
+    const bootComplete = ipc.bootComplete ?? existsSync(bootCompletePath(sd));
     const noWait = !cfg.wait;
     const wakeInFlightTtlMs = Math.max(0, cfg.wake_in_flight_ttl_ms);
     const inputHotTtlMs = Math.max(0, cfg.input_hot_ttl_ms);
@@ -986,7 +993,14 @@ export function readLoopStateInput(
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,
         afkMode: afk.mode,
         afkExpiryMs: afk.expiryMs,
-        idleSinceMs: safeMtime(idleMarkerPath(sd)),
+        // #727 V1 Slice B — in-memory truth wins. `idleSinceCleared`
+        // = `null` override (UserPromptSubmit fired, claude is busy
+        // again) ; a non-null `idleSinceMs` = explicit timestamp from a
+        // Stop / SessionStart event. Otherwise fall back to the file
+        // mtime (which the hooks still write for cross-process readers).
+        idleSinceMs: ipc.idleSinceCleared
+            ? null
+            : (ipc.idleSinceMs ?? safeMtime(idleMarkerPath(sd))),
         wakeInFlightAtMs: safeMtime(wakeInFlightPath(sd)),
         wakeInFlightTtlMs,
         busyDeferUntilMs: safeIsoMs(busyDeferUntilPath(sd)),
