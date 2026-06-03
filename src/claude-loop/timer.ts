@@ -61,6 +61,7 @@ import {
     injectWakePhrase,
     checkHasWork,
     idleMarkerPath,
+    readIdleSinceMs,
     humanTypingPath,
     afkActive,
     humanIsTyping,
@@ -599,7 +600,7 @@ function detectHumanTyping(): void {
         // #730 step 3 — gate on `loop.sock` instead of the legacy
         // `inject.sock` (folded into loop.sock).
         if (existsSync(loopSockPath(sd!))) return;
-        if (!existsSync(idleMarkerPath(sd!))) {
+        if (readIdleSinceMs(sd!) === null) {
             // Mid-turn / streaming → reset baseline so the post-busy
             // prompt isn't diffed against a stale pre-busy capture.
             prevPaneTail = "";
@@ -672,12 +673,13 @@ async function tryWake(reason: string, manualWake = false, hint?: WakeHint): Pro
     return tryWakeInFlight;
 }
 async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint): Promise<boolean> {
-    // #B.211 david: previously these two gates returned silently. The
-    // log only showed `SSE ping received: ... → tryWake` and then
-    // nothing for the same reason — david couldn't tell if the wake
-    // was deferred, skipped, or actually fired. Log every skip with
-    // a short reason so the log is self-explaining.
-    if (!existsSync(idleMarkerPath(sd!))) {
+    // #727 V1 Slice B fix — the legacy idle-since pre-gate used
+    // `existsSync(idleMarkerPath)`, but Slice B-3 stops the hooks from
+    // writing that file when the ws emit succeeds. `readIdleSinceMs`
+    // checks the in-memory truth first (set by the HookService Stop
+    // subscriber) with the file mtime as fallback, matching what the
+    // central gate (`computeWakeGate`) sees.
+    if (readIdleSinceMs(sd!) === null) {
         log(`skip wake (${reason}) — no idle marker (claude is busy or boot grace not yet elapsed)`);
         return false;
     }
@@ -1255,7 +1257,7 @@ async function mainSse(): Promise<void> {
         // SSE-drop safety net: re-check the gate ourselves.
         if (!wakeBus.isConnected()) wakeBus.connect();
         const woke = await tryWake("heartbeat");
-        if (!woke && existsSync(idleMarkerPath(sd!))) {
+        if (!woke && readIdleSinceMs(sd!) !== null) {
             // #251: idle + nothing to wake on = the safe lull to pick up
             // new code. Re-execs the timer in place if the source SHA
             // moved since boot (claude pane untouched). Never mid-turn

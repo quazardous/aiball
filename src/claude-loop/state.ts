@@ -334,6 +334,25 @@ export function setInterrupted(sd: string, interrupted: boolean): void {
 }
 export function pingsPath(sd: string): string { return join(sd, "pings.yaml"); }
 export function idleMarkerPath(sd: string): string { return join(sd, "idle-since"); }
+/**
+ * #727 V1 Slice B — single source of truth for "is claude at the prompt"
+ * (idle-since timestamp). In-memory state (set by the HookService Stop
+ * subscriber) wins ; falls back to the `idle-since` file mtime for the
+ * cross-process readers and the fresh-restart path. `null` = no signal
+ * yet OR explicit clear (UserPromptSubmit fired). Used by both the central
+ * wake gate (loop-state.ts) and the legacy per-feature gates in timer.ts
+ * (selfReload, detectHumanTyping baseline reset) that pre-dated the
+ * central gate but still need the same idle truth.
+ */
+export function readIdleSinceMs(sd: string): number | null {
+    const ipc = getIpcState();
+    if (ipc.idleSinceCleared) return null;
+    if (ipc.idleSinceMs !== null) return ipc.idleSinceMs;
+    try {
+        const p = idleMarkerPath(sd);
+        return existsSync(p) ? statSync(p).mtimeMs : null;
+    } catch { return null; }
+}
 export function wakeRequestedPath(sd: string): string { return join(sd, "wake-requested"); }
 /** #351: AFK marker — the human flagged themselves absent via the afk_key
  *  combo. The PTY proxy writes it on the combo and deletes it on any other
@@ -999,14 +1018,9 @@ export function readLoopStateInput(
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,
         afkMode: afk.mode,
         afkExpiryMs: afk.expiryMs,
-        // #727 V1 Slice B — in-memory truth wins. `idleSinceCleared`
-        // = `null` override (UserPromptSubmit fired, claude is busy
-        // again) ; a non-null `idleSinceMs` = explicit timestamp from a
-        // Stop / SessionStart event. Otherwise fall back to the file
-        // mtime (which the hooks still write for cross-process readers).
-        idleSinceMs: ipc.idleSinceCleared
-            ? null
-            : (ipc.idleSinceMs ?? safeMtime(idleMarkerPath(sd))),
+        // #727 V1 Slice B — in-memory truth wins. Shared with the
+        // pre-gate paths in timer.ts via `readIdleSinceMs`.
+        idleSinceMs: readIdleSinceMs(sd),
         wakeInFlightAtMs: safeMtime(wakeInFlightPath(sd)),
         wakeInFlightTtlMs,
         // #727 V1 Slice B-2 — busy-defer expiry mirrored in-memory by
