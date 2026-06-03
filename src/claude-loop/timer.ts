@@ -113,7 +113,7 @@ import {
     setIpcResumeModePicker,
     setIpcResumeSessionPicker,
 } from "./ipc-state.js";
-import { computeLoopView, LoopStateBus } from "./loop-state.js";
+import { computeLoopView, isInputHot, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
 import { CL_ENV } from "./env-vars.js";
@@ -1090,7 +1090,42 @@ async function mainSse(): Promise<void> {
     // (F9 from NOT AFK 10m/∞ back to AFK). The bar word goes
     // wait→loop ; any ping that came while the hold was active
     // should now fire.
+    //
+    // #749 Phase C, david `ar4nce` trigger #3 — when input-hot is
+    // active at the moment of the toggle (the human just typed and
+    // claude is about to react), defer the wake until input-hot
+    // expires. Without this we'd inject the wake phrase right on top
+    // of a prompt the human is still mid-typing (the AFK toggle
+    // itself was a keystroke). One-shot : if AFK gets re-armed
+    // before input-hot expires, the unsubscribe cancels the pending
+    // wake (the human changed their mind).
     loopBus.on("afkCleared", () => {
+        const current = readLoopStateInput(sd!);
+        if (isInputHot(current)) {
+            log("state-bus: afkCleared — input-hot still active, deferring wake");
+            let unsubInputHot: (() => void) | null = null;
+            let unsubAfk: (() => void) | null = null;
+            const cleanup = () => {
+                if (unsubInputHot) unsubInputHot();
+                if (unsubAfk) unsubAfk();
+                unsubInputHot = null;
+                unsubAfk = null;
+            };
+            unsubInputHot = loopBus.on("inputHot", (next) => {
+                if (next === false) {
+                    cleanup();
+                    log("state-bus: input-hot expired post-afkCleared — firing deferred wake");
+                    void tryWake("afk-cleared-drain (input-hot expired)");
+                }
+            });
+            // If the user re-armed AFK before input-hot expired,
+            // cancel the pending wake — they changed their mind.
+            unsubAfk = loopBus.on("afkArmed10m", () => {
+                log("state-bus: AFK re-armed before input-hot expired, cancelling deferred wake");
+                cleanup();
+            });
+            return;
+        }
         void tryWake("afk-cleared-drain");
     });
     // #629 — fast probe 1s pendant boot. Arme au start (on est forcément
