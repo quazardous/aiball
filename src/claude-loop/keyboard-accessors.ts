@@ -26,7 +26,6 @@ import {
     HUMAN_TYPING_TTL_SEC,
     humanTypingPath,
     paneInterruptedPath,
-    userTookOverPath,
 } from "./state.js";
 
 /** Default human-typing TTL in milliseconds. Mirror of state.ts's
@@ -65,39 +64,6 @@ export function isHumanTypingRecent(
     nowMs: number = Date.now(),
 ): boolean {
     return humanTypingAgeMs(sd, nowMs) < ttlMs;
-}
-
-/** Age in ms since the `user-took-over` marker was last touched. Same
- *  semantics as humanTypingAgeMs but on a different file ; the marker
- *  is refreshed on every UserPromptSubmit hook fire. */
-export function userGraceAgeMs(sd: string, nowMs: number = Date.now()): number {
-    const m = safeMtimeMs(userTookOverPath(sd));
-    if (m === -Infinity) return Infinity;
-    return Math.max(0, nowMs - m);
-}
-
-/** True iff the user-took-over marker is fresh within `graceMs`. Mirror
- *  of `userIsTakingOver(sd, graceSec)` but unit is ms — let the caller
- *  multiply once at the config-read boundary instead of every call site. */
-export function userGraceActive(
-    sd: string,
-    graceMs: number,
-    nowMs: number = Date.now(),
-): boolean {
-    return userGraceAgeMs(sd, nowMs) < graceMs;
-}
-
-/** Remaining ms in the user-grace window (graceMs minus age, clamped to 0).
- *  Returns 0 when the marker is absent or grace has elapsed — never
- *  negative. Useful for the bar's "user grace expires in Ns" countdown. */
-export function userGraceRemainingMs(
-    sd: string,
-    graceMs: number,
-    nowMs: number = Date.now(),
-): number {
-    const age = userGraceAgeMs(sd, nowMs);
-    if (age === Infinity) return 0;
-    return Math.max(0, graceMs - age);
 }
 
 /** True iff the pane currently displays "interrupted by user" (set by

@@ -327,7 +327,6 @@ export function setInterrupted(sd: string, interrupted: boolean): void {
 export function pingsPath(sd: string): string { return join(sd, "pings.yaml"); }
 export function idleMarkerPath(sd: string): string { return join(sd, "idle-since"); }
 export function wakeRequestedPath(sd: string): string { return join(sd, "wake-requested"); }
-export function userTookOverPath(sd: string): string { return join(sd, "user-took-over"); }
 /** #351: AFK marker — the human flagged themselves absent via the afk_key
  *  combo. The PTY proxy writes it on the combo and deletes it on any other
  *  activity (and on boot), so its mere existence means "currently away". */
@@ -838,35 +837,6 @@ export function isInternalCheckCmd(checkCmd: string | null | undefined): boolean
  * still pop a dialog ; F9 (afk_key) lets you release earlier. Tunable
  * via `CL_USER_GRACE_SEC`.
  */
-export const DEFAULT_USER_GRACE_SEC = 600;
-
-/**
- * Is the human actively driving the session? True iff the
- * `user-took-over` marker exists AND its mtime is within the grace
- * window. The marker is refreshed on every UserPromptSubmit hook
- * fire (#B.145), so any prompt the human submits keeps the loop
- * deferential for `graceSec` more seconds.
- */
-export function userIsTakingOver(sd: string, graceSec: number): boolean {
-    const p = userTookOverPath(sd);
-    if (!existsSync(p)) return false;
-    try {
-        return (Date.now() - statSync(p).mtimeMs) < graceSec * 1000;
-    } catch {
-        return false;
-    }
-}
-
-/** #351 / #619 collapse — kept as an alias of `DEFAULT_USER_GRACE_SEC`
- *  for back-compat. The historical 2-window distinction (short user-grace
- *  for wakes vs long ask-grace for AskUserQuestion) was retired in #619 :
- *  both gates now share the single user-grace window. A project that
- *  still sets `ask_grace_seconds` in `.aiball.yaml` is honored at the
- *  config layer (treated as user_grace_seconds) ; setting both with
- *  different values is OK — the gate uses `max(user, ask)` so neither
- *  knob silently shrinks the deferential window. */
-export const DEFAULT_ASK_GRACE_SEC = DEFAULT_USER_GRACE_SEC;
-
 /** #351 + #619 david `f97nu6` : true when the human has flagged AFK
  *  (3-state cycle via the AFK key). File format :
  *    absent       → OFF
@@ -910,27 +880,12 @@ export function clearAfk(sd: string): void {
     try { if (existsSync(afkPath(sd))) unlinkSync(afkPath(sd)); } catch { /* race */ }
 }
 
-/** #633 Slice C — clear the user-took-over marker (release the silent
- *  user-grace wake gate). Companion to `clearAfk` in the toggle path
- *  NOT AFK ∞ → AFK (both holds released atomically). */
-export function clearUserGrace(sd: string): void {
-    try { if (existsSync(userTookOverPath(sd))) unlinkSync(userTookOverPath(sd)); } catch { /* race */ }
-}
-
 /** #633 Slice D — touch the `human-typing` marker (writes mtime to now).
  *  The bus reads its mtime via `safeMtime` to compute `isTypingNow` →
  *  bar word "stop" during the 5s TTL. Mirror of the proxy's
  *  `touch_marker`. */
 export function touchHumanTyping(sd: string): void {
     try { writeFileSync(humanTypingPath(sd), new Date().toISOString() + "\n"); } catch { /* best-effort */ }
-}
-
-/** #633 Slice D — touch the `user-took-over` marker (writes mtime to now).
- *  The bus reads its mtime to compute `isUserGraceFresh` → silently gates
- *  auto-wakes for the user-grace window. Mirror of the proxy's
- *  `touch_user_grace`. */
-export function touchUserGrace(sd: string): void {
-    try { writeFileSync(userTookOverPath(sd), new Date().toISOString() + "\n"); } catch { /* best-effort */ }
 }
 
 /** #633 Slice C — F9 toggle implemented on the TS side. Reads the
@@ -944,9 +899,9 @@ export function toggleAfk(sd: string, seconds = 600): void {
     } else if (cur.mode === "wait_10m") {
         setAfkInfinite(sd);
     } else {
-        // wait_inf → off (release both holds)
+        // wait_inf → off (#745 phase B : user-grace machinery dropped,
+        // AFK SM owns the "human present" signal end-to-end now).
         clearAfk(sd);
-        clearUserGrace(sd);
     }
 }
 
@@ -1000,13 +955,6 @@ export function readLoopStateInput(
         || existsSync(resumeModePickerActivePath(sd));
     const bootComplete = existsSync(bootCompletePath(sd));
     const noWait = !cfg.wait;
-    // user-grace window = max(user, ask) for back-compat with projects
-    // that still set ask_grace_seconds in .aiball.yaml (#619 collapse).
-    const userGraceSec = Math.max(
-        cfg.user_grace_seconds,
-        cfg.ask_grace_seconds,
-        0,
-    );
     const wakeInFlightTtlMs = Math.max(0, cfg.wake_in_flight_ttl_ms);
     const inputHotTtlMs = Math.max(0, cfg.input_hot_ttl_ms);
 
@@ -1036,8 +984,6 @@ export function readLoopStateInput(
         noWait,
         humanTypingAtMs: safeMtime(humanTypingPath(sd)),
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,
-        userTookOverAtMs: safeMtime(userTookOverPath(sd)),
-        userGraceMs: userGraceSec * 1000,
         afkMode: afk.mode,
         afkExpiryMs: afk.expiryMs,
         idleSinceMs: safeMtime(idleMarkerPath(sd)),
@@ -1096,13 +1042,6 @@ export function humanIsTyping(sd: string, ttlSec = HUMAN_TYPING_TTL_SEC): boolea
     } catch {
         return false;
     }
-}
-
-/** #585 — composite "human present right now" gate: recent user-grace activity
- *  OR keystrokes happening this very moment. Single source so the definition
- *  of presence stays in lock-step across timer/stop-hook/pretooluse-hook. */
-export function humanPresent(sd: string, graceSec: number): boolean {
-    return userIsTakingOver(sd, graceSec) || humanIsTyping(sd);
 }
 
 /**
@@ -1250,23 +1189,22 @@ function loopStartMs(sd: string | undefined): number {
  *              marker armed
  *   - `loop` — autonomous (managed mode), incl. --no-wait
  */
-export function humanPresenceWord(sd: string | undefined, _graceSec: number): "stop" | "wait" | "boot" | "loop" {
+export function humanPresenceWord(sd: string | undefined): "stop" | "wait" | "boot" | "loop" {
     // #627 — delegate to the central LoopState service so the bar word
     // computation matches the one used by every other consumer (timer,
-    // proxy mirror, hooks). The `graceSec` arg is preserved for API
-    // back-compat but unused here — the service reads user_grace from
-    // the env (CL_USER_GRACE_SEC + CL_ASK_GRACE_SEC max).
+    // proxy mirror, hooks). #745 phase B — the legacy `graceSec` arg
+    // is gone ; the AFK SM owns the "wait" path now (NOT AFK 10m / ∞).
     if (!sd) return "loop";
     return computeLoopView(readLoopStateInput(sd)).barWord;
 }
 
-export function humanBarWord(sd: string | undefined, graceSec: number): string {
+export function humanBarWord(sd: string | undefined): string {
     // #302 david: black bg (colour16) behind the word so it stays readable over
     // any bar state colour (busy blue / idle gray / boot yellow). fg encodes the
     // word: stop=red / wait=yellow / boot=yellow / loop=green. Logic lives in
     // humanPresenceWord. All four words are 4 chars so pad-to-4 keeps the bar
     // width constant by accident.
-    const word = humanPresenceWord(sd, graceSec);
+    const word = humanPresenceWord(sd);
     const fg = word === "stop" ? "colour196"
         : word === "wait" || word === "boot" ? "colour178"
         : "colour40";
@@ -1360,8 +1298,7 @@ export function setTmuxStatus(
     // from the markers — skipped when the proxy is alive so the two never
     // fight over it.
     if (!proxyAlive) {
-        const graceSec = Math.max(0, loopConfig().claude_loop.user_grace_seconds);
-        const word = humanBarWord(sd, graceSec);
+        const word = humanBarWord(sd);
         setOpt("@cl_human", word);
         logBarPaint(sd, `state.ts:setTmuxStatus(${status})`, word);
     }

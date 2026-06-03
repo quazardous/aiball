@@ -34,10 +34,9 @@
  *
  * Always emits `{}` and exits 0 — never block claude's run.
  */
-import { existsSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, statSync, unlinkSync } from "node:fs";
 import {
     idleMarkerPath,
-    userTookOverPath,
     wakeInFlightPath,
     WAKE_IN_FLIGHT_TTL_MS,
 } from "./state.js";
@@ -68,9 +67,10 @@ try {
         } catch { /* stat race — treat as human */ }
         try { unlinkSync(wifPath); } catch { /* race */ }
     }
-    if (!fromAutoWake) {
-        writeFileSync(userTookOverPath(sd!), new Date().toISOString() + "\n");
-    }
+    // #745 phase B — user-took-over marker dropped (AFK SM owns the
+    // "human present" signal end-to-end now). `fromAutoWake` is still
+    // carried on the hook event below so the timer-side handler can
+    // distinguish auto-wake submissions from real human prompts.
     if (existsSync(idleMarkerPath(sd!))) {
         try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
     }

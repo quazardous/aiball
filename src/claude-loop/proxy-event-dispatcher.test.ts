@@ -14,7 +14,6 @@ import {
     bootCompletePath,
     humanTypingPath,
     paneReadyPath,
-    userTookOverPath,
     loopStartTsPath,
 } from "./state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
@@ -81,17 +80,14 @@ test("#633F dispatch afk_key from wait_10m → wait_inf", () => {
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F dispatch afk_key from wait_inf → off (clears AFK + user-grace)", () => {
+test("#633F dispatch afk_key from wait_inf → off (clears AFK)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
         writeFileSync(afkPath(sd), "inf\n");
-        writeFileSync(userTookOverPath(sd), new Date().toISOString() + "\n");
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "off" });
         assert.equal(existsSync(afkPath(sd)), false);
-        // user-grace cleared alongside (atomic NOT AFK ∞ → AFK release).
-        assert.equal(existsSync(userTookOverPath(sd)), false);
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
@@ -106,24 +102,18 @@ test("#633F dispatch marker touch_marker → writes human-typing", () => {
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F dispatch marker touch_user_grace → writes user-took-over", () => {
+test("#633F + #745 dispatch touch_user_grace / clear_user_grace → marker-touched no-op", () => {
+    // #745 phase B : user-grace machinery dropped (AFK SM owns the
+    // "human present" signal). The dispatcher still accepts the marker
+    // names for forward-compat (the proxy may still emit them), but
+    // they're pure no-ops — no file is written/removed.
     const sd = tmp();
     try {
         seedPostBoot(sd);
-        const v = dispatchProxyEvent(sd, { event: "marker", name: "touch_user_grace", now_ms: Date.now() });
-        assert.deepEqual(v, { kind: "marker-touched", name: "touch_user_grace" });
-        assert.ok(existsSync(userTookOverPath(sd)));
-    } finally { rmSync(sd, { recursive: true, force: true }); }
-});
-
-test("#633F dispatch marker clear_user_grace → removes user-took-over", () => {
-    const sd = tmp();
-    try {
-        seedPostBoot(sd);
-        writeFileSync(userTookOverPath(sd), new Date().toISOString() + "\n");
-        const v = dispatchProxyEvent(sd, { event: "marker", name: "clear_user_grace", now_ms: Date.now() });
-        assert.deepEqual(v, { kind: "marker-touched", name: "clear_user_grace" });
-        assert.equal(existsSync(userTookOverPath(sd)), false);
+        const touch = dispatchProxyEvent(sd, { event: "marker", name: "touch_user_grace", now_ms: Date.now() });
+        assert.deepEqual(touch, { kind: "marker-touched", name: "touch_user_grace" });
+        const clear = dispatchProxyEvent(sd, { event: "marker", name: "clear_user_grace", now_ms: Date.now() });
+        assert.deepEqual(clear, { kind: "marker-touched", name: "clear_user_grace" });
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 

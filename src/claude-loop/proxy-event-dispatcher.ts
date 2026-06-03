@@ -19,11 +19,9 @@
  */
 import {
     armAfk10m,
-    clearUserGrace,
     readLoopStateInput,
     toggleAfk,
     touchHumanTyping,
-    touchUserGrace,
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
@@ -71,12 +69,12 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                 touchHumanTyping(sd);
                 return { kind: "marker-touched", name };
             }
-            if (name === "touch_user_grace") {
-                touchUserGrace(sd);
-                return { kind: "marker-touched", name };
-            }
-            if (name === "clear_user_grace") {
-                clearUserGrace(sd);
+            // #745 phase B — touch_user_grace / clear_user_grace events
+            // are no-ops on the dispatcher side now ; user-grace was a
+            // strict duplicate of the AFK SM (typing arms NOT AFK 10m,
+            // F9 cycles release it). The proxy may still emit them for
+            // a release ; we accept the kind silently for forward-compat.
+            if (name === "touch_user_grace" || name === "clear_user_grace") {
                 return { kind: "marker-touched", name };
             }
             // #653 step 2 — AFK mutations from the proxy. Dispatcher is

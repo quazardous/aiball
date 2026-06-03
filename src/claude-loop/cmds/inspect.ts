@@ -32,7 +32,6 @@ import {
     resumeModePickerActivePath,
     stateDirFor,
     timerPidPath,
-    userTookOverPath,
     wakeInFlightPath,
     wakeRequestedPath,
 } from "../state.js";
@@ -98,11 +97,6 @@ export function cmdInspect(name: string): void {
             expiry_ms: input.afkExpiryMs,
             expiry_iso: input.afkExpiryMs !== null ? new Date(input.afkExpiryMs).toISOString() : null,
         },
-        user_grace: {
-            took_over_at_ms: input.userTookOverAtMs,
-            took_over_at_iso: input.userTookOverAtMs !== null ? new Date(input.userTookOverAtMs).toISOString() : null,
-            window_ms: input.userGraceMs,
-        },
         wake: {
             in_flight_at_ms: input.wakeInFlightAtMs,
             in_flight_ttl_ms: input.wakeInFlightTtlMs,
@@ -117,7 +111,6 @@ export function cmdInspect(name: string): void {
         markers: {
             idle_since_iso: mtimeIso(idleMarkerPath(sd)),
             human_typing_iso: mtimeIso(humanTypingPath(sd)),
-            user_took_over_iso: mtimeIso(userTookOverPath(sd)),
             pane_busy_iso: mtimeIso(paneBusyPath(sd)),
             pane_ready_iso: mtimeIso(paneReadyPath(sd)),
             pane_compacting_iso: mtimeIso(paneCompactingPath(sd)),

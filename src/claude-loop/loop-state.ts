@@ -57,12 +57,6 @@ export interface LoopStateInput {
     /** TTL for the human-typing marker in ms (typically 5_000). */
     humanTypingTtlMs: number;
 
-    /** mtime of `user-took-over` marker (ms-since-epoch), or null.
-     *  Silent gate — still freezes the wake gate, never paints the bar. */
-    userTookOverAtMs: number | null;
-    /** user-grace window length in ms (typically 600_000). */
-    userGraceMs: number;
-
     /** AFK file mode + auto-release expiry. `expiryMs` is meaningful only
      *  in `wait_10m` ; ignored for `off` and `wait_inf`. */
     afkMode: AfkMode;

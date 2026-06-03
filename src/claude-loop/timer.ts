@@ -62,9 +62,8 @@ import {
     checkHasWork,
     idleMarkerPath,
     humanTypingPath,
-    userTookOverPath,
+    afkActive,
     humanIsTyping,
-    humanPresent,
     installRoot,
     installRootSha,
     STATE_ROOT,
@@ -84,7 +83,6 @@ import {
     humanPresenceWord,
     logBarPaint,
     logPaneCapture,
-    userIsTakingOver,
     wakeInFlightPath,
     wakeRequestedPath,
     readPlate,
@@ -122,9 +120,6 @@ const checkCmd = process.env[CL_ENV.CHECK_CMD] ?? "true";
 // (user-grace 60s for wakes vs ask-grace 600s for AskUserQuestion) was
 // retired. A single grace window now drives both gates. To stay
 // back-compat with projects that still set `ask_grace_seconds` in
-// .aiball.yaml, take the MAX of the two : a longer ask_grace widens
-// the deferential window, never shrinks it. Default 600s.
-const userGraceSec = Math.max(cfg.user_grace_seconds, cfg.ask_grace_seconds, 0);
 if (!sd || !name) {
     process.stderr.write("[claude-loop:timer] missing CL_* env vars\n");
     process.exit(1);
@@ -608,11 +603,11 @@ function detectHumanTyping(): void {
         if (prevPaneTail && tail !== prevPaneTail && !recentlySentKeys()) {
             try {
                 writeFileSync(humanTypingPath(sd!), new Date().toISOString() + "\n");
-                // #315/#345 A: typing also ARMS the user-grace (degraded-mode
-                // parity with the proxy's touch_user_grace) so the bar does
-                // stop → wait → loop. Armed even under --no-wait now: NO_WAIT
-                // only disables the boot-grace, not yielding to a present human.
-                writeFileSync(userTookOverPath(sd!), new Date().toISOString() + "\n");
+                // #745 phase B — user-took-over marker dropped (AFK SM
+                // owns the "human present" signal). The pane-diff
+                // fallback continues to refresh human-typing only ; the
+                // AFK SM will arm NOT AFK 10m on the next typing event
+                // dispatched through the proxy when it's connected.
             } catch { /* ignore — chip just won't show */ }
             log("human-typing detected (prompt area changed at idle)");
         }
@@ -1007,13 +1002,10 @@ async function mainSse(): Promise<void> {
             // next probe cycle if claude is mid-turn.
             setTmuxStatus(name!, LOOP_STATUS.IDLE);
         } catch { /* best-effort */ }
-        // #629 david `7zqtgf` — drain stacked pings at boot exit. SSE pings
-        // arriving during picker selection were silently skipped by user-grace
-        // (picker keystrokes set user-took-over → 600s lock). At boot end the
-        // user is implicitly done with the picker, so we clear user-took-over
-        // FIRST then fire a wake. Subsequent typing (real session, post-boot)
-        // re-arms user-grace as usual.
-        try { unlinkSync(userTookOverPath(sd!)); } catch { /* race */ }
+        // #629 david `7zqtgf` — drain stacked pings at boot exit. Pre-#745
+        // we also had to clear user-took-over here because picker keystrokes
+        // armed user-grace ; that path is gone now (AFK SM is the only
+        // hold). Just fire the wake.
         void tryWake("boot-ended-drain");
     });
     // #629 david `7zqtgf` — same drain trigger when AFK is cleared (F9 from
@@ -1095,13 +1087,14 @@ async function mainSse(): Promise<void> {
             // Build a memo key that captures phase + paneInfo + grace state.
             // Count refresh stays heartbeat-driven (don't repaint on every
             // marker change just for that — it'd repaint on every typing).
-            const userGrace = next.phase === "idle" && userIsTakingOver(sd!, userGraceSec);
-            const memoKey = `${next.phase}|${paneInfo ?? "-"}|${userGrace ? "user" : "-"}`;
+            // #745 phase B — the `user` chip used to fire when
+            // userIsTakingOver was fresh ; user-grace is dropped now,
+            // AFK SM owns the human-present signal (visible via the AFK
+            // chunk + countdown). Bar info falls through to count/recap.
+            const memoKey = `${next.phase}|${paneInfo ?? "-"}`;
             if (memoKey === lastPaintedPostBoot) return;
             if (paneInfo) {
                 setTmuxStatus(name!, next.phase, paneInfo);
-            } else if (userGrace) {
-                setTmuxStatus(name!, next.phase, "user");
             }
             // No-info path : let heartbeat repaint with fresh unread count.
             // Otherwise we'd race the count refresh + lose it.
@@ -1256,9 +1249,10 @@ async function mainSse(): Promise<void> {
                 const paneInfo = paneMarkerBarInfo();
                 if (paneInfo) {
                     setTmuxStatus(name!, phase, paneInfo);
-                } else if (phase === "idle" && userIsTakingOver(sd!, userGraceSec)) {
-                    setTmuxStatus(name!, phase, "user");
                 } else {
+                    // #745 phase B — the `user` chip used to fire here
+                    // when userIsTakingOver was fresh ; AFK SM now owns
+                    // the human-present signal (countdown chunk visible).
                     setTmuxStatus(name!, phase, r.unread ?? 0);
                 }
             } catch { /* swallow — bar stays as-is */ }
@@ -1269,15 +1263,13 @@ async function mainSse(): Promise<void> {
         // Fire on EVERY tick (not just transitions) — the daemon
         // updates `state_updated_at` always, freshness signal for
         // the UI's offline detector.
-        // #280: also push live human-presence so the panel can render
-        // `human` vs autonomous `loop` while the heartbeat is fresh —
-        // same signal the tmux bar uses for its loop/stop word (a human
-        // typing now, or within user-grace after a manual prompt).
+        // #280 + #745 phase B — push live human-presence so the panel can
+        // render `human` vs autonomous `loop` while the heartbeat is fresh.
+        // The signal is now derived from the AFK SM only (NOT AFK 10m/∞ =
+        // human present) instead of the deprecated user-grace.
         try {
-            const human = humanPresent(sd!, userGraceSec);
-            // #310: also push the 3-state presence word (stop/wait/loop) so the
-            // consumers page mirrors the tmux bar, not just the binary human flag.
-            const humanWord = humanPresenceWord(sd, userGraceSec);
+            const human = humanIsTyping(sd!) || afkActive(sd!);
+            const humanWord = humanPresenceWord(sd);
             await client().pushState(phase, human, humanWord, loopCwd, loopProject);
         } catch { /* daemon down or transient — next tick retries */ }
         // #636 david — pytest harnesses spawn the loop with CL_RUN_ONCE=1, wait

@@ -10,14 +10,10 @@ import {
     humanTypingAgeMs,
     isHumanTypingRecent,
     paneInterrupted,
-    userGraceActive,
-    userGraceAgeMs,
-    userGraceRemainingMs,
 } from "./keyboard-accessors.js";
 import {
     humanTypingPath,
     paneInterruptedPath,
-    userTookOverPath,
 } from "./state.js";
 
 function mkSd(): string {
@@ -84,55 +80,9 @@ test("isHumanTypingRecent: default ttlMs = HUMAN_TYPING_TTL_MS", () => {
     assert.equal(isHumanTypingRecent(sd, undefined, mtime + HUMAN_TYPING_TTL_MS), false);
 });
 
-test("userGraceAgeMs: file absent → Infinity", () => {
-    const sd = mkSd();
-    assert.equal(userGraceAgeMs(sd, Date.now()), Infinity);
-});
-
-test("userGraceAgeMs: returns now - mtime", () => {
-    const sd = mkSd();
-    const mtime = 2_000_000;
-    touchAt(userTookOverPath(sd), mtime);
-    assert.equal(userGraceAgeMs(sd, mtime + 30_000), 30_000);
-});
-
-test("userGraceActive: file absent → false", () => {
-    const sd = mkSd();
-    assert.equal(userGraceActive(sd, 600_000, Date.now()), false);
-});
-
-test("userGraceActive: within grace → true", () => {
-    const sd = mkSd();
-    const mtime = 2_000_000;
-    touchAt(userTookOverPath(sd), mtime);
-    assert.equal(userGraceActive(sd, 600_000, mtime + 100_000), true);
-});
-
-test("userGraceActive: past grace → false", () => {
-    const sd = mkSd();
-    const mtime = 2_000_000;
-    touchAt(userTookOverPath(sd), mtime);
-    assert.equal(userGraceActive(sd, 600_000, mtime + 600_001), false);
-});
-
-test("userGraceRemainingMs: file absent → 0", () => {
-    const sd = mkSd();
-    assert.equal(userGraceRemainingMs(sd, 600_000, Date.now()), 0);
-});
-
-test("userGraceRemainingMs: ongoing → grace - age", () => {
-    const sd = mkSd();
-    const mtime = 2_000_000;
-    touchAt(userTookOverPath(sd), mtime);
-    assert.equal(userGraceRemainingMs(sd, 600_000, mtime + 100_000), 500_000);
-});
-
-test("userGraceRemainingMs: past grace → 0 (clamped, not negative)", () => {
-    const sd = mkSd();
-    const mtime = 2_000_000;
-    touchAt(userTookOverPath(sd), mtime);
-    assert.equal(userGraceRemainingMs(sd, 600_000, mtime + 999_999), 0);
-});
+// #745 phase B — userGrace* helpers + tests dropped. AFK SM is the
+// single source of truth for "human present" now ; the helpers below
+// cover the only remaining presence signals (typing + pane state).
 
 test("paneInterrupted: file absent → false", () => {
     const sd = mkSd();

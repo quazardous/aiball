@@ -17,8 +17,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanPresent, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, userTookOverPath, wakeInFlightPath } from "./state.js";
-import { loopConfig } from "./loop-config.js";
+import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, WAKE_COALESCE_WINDOW_MS, afkActive, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, wakeInFlightPath } from "./state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
 import { CL_ENV } from "./env-vars.js";
@@ -33,7 +32,6 @@ function emit(): never {
 const sd = process.env[CL_ENV.STATE_DIR];
 const name = process.env[CL_ENV.NAME];
 const checkCmd = process.env[CL_ENV.CHECK_CMD] ?? "true";
-const userGraceSec = Math.max(0, loopConfig().claude_loop.user_grace_seconds);
 if (!sd || !name) emit();
 
 // #652 Slice 5 — emit the Stop event to the timer's HookService
@@ -88,18 +86,14 @@ function fmt(ms: number | null): string {
     return ms === null ? "-" : `${Math.round(ms / 1000)}s`;
 }
 function classifyTurn(): string {
+    // #745 phase B — user-took-over read dropped. AFK SM owns the
+    // "this turn was a human prompt" signal now (typing arms NOT AFK
+    // 10m via the proxy → AfkService). The audit string keeps the
+    // wake age + in-flight TTL for ops diagnostics.
     const wake = ageMs(lastWakeAtPath(sd!));
-    const user = ageMs(userTookOverPath(sd!));
     const inflight = ageMs(wakeInFlightPath(sd!));
-    // Whichever marker is more recent likely triggered THIS turn —
-    // no time cutoff (claude turns can legitimately run minutes on
-    // tool chains, so capping by user-grace mis-labeled long
-    // auto-wake replies as "autonomous").
-    let turn = "?";
-    if (wake === null && user === null) turn = "?";
-    else if (user !== null && (wake === null || user <= wake)) turn = "user";
-    else turn = "auto-wake";
-    return `turn=${turn} last-wake=${fmt(wake)} user-took-over=${fmt(user)} wake-in-flight=${fmt(inflight)}`;
+    const turn = wake !== null ? "auto-wake" : "?";
+    return `turn=${turn} last-wake=${fmt(wake)} wake-in-flight=${fmt(inflight)}`;
 }
 
 // #B.154 / #B.198: probe the visible pane via the shared
@@ -199,17 +193,16 @@ function readPane(): string {
         // pas juste celui qui a soumis < 60s (user-took-over). Sans cette
         // OR, le wake auto fire entre 2 frappes du user (entre submits) et
         // clobber la frappe en cours.
-        if (humanPresent(sd!, userGraceSec)) {
+        // #745 phase B — the previous `humanPresent` check (typing OR
+        // user-grace fresh) collapses to AFK SM + typing-now. If the
+        // user is in NOT AFK 10m / ∞ or is actively typing, suppress
+        // the auto-wake the same way ; otherwise fall through to the
+        // regular gate handling.
+        if (humanIsTyping(sd!) || afkActive(sd!)) {
             writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-            // David #B.198: plain `[idle]` here mis-signaled "ready
-            // for wakes" — we're actually deferring wakes. Surface
-            // the user-grace caveat in the bar so the human reads it
-            // as "claude IS at prompt, but we won't poke during grace".
-            // #345 B: si claude a été interrompu, le marquer prime sur
-            // `user` (plus spécifique que « grace humaine en cours »).
             const sub = interrupted ? "interrupted" : "user";
             setTmuxStatus(name!, LOOP_STATUS.IDLE, sub);
-            log(`  → SUPPRESS (user-grace<${userGraceSec}s or typing-now) became=idle:${sub}`);
+            log(`  → SUPPRESS (human-typing or AFK hold) became=idle:${sub}`);
             emit();
         }
         // #B.198 — arm the `busy-defer-until` marker (state-based, not
