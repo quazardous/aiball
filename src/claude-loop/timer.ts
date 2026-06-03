@@ -79,6 +79,8 @@ import {
     writeDrainedState,
     recordWakeHint,
     setTmuxStatus,
+    afkStateChunkStr,
+    setTmuxAfkState,
     snapshotPane,
     tmuxName,
     humanPresenceWord,
@@ -100,6 +102,7 @@ import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } 
 import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
 import { paneMarkerBarInfo } from "./pane-service.js";
 import { armAfkViaService, watchAfkMarker } from "./afk-service-sync.js";
+import { getAfkService } from "./afk-service.js";
 import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
 import { getHookService } from "./hook-service.js";
 import {
@@ -1015,6 +1018,30 @@ async function mainSse(): Promise<void> {
     // watcher does the initial hydrate itself.
     const unwatchAfk = watchAfkMarker(sd!);
     process.on("exit", () => unwatchAfk());
+    // #755 — WIN32 only: paint the `@cl_afk_state` chip from the timer.
+    // On Unix the Python proxy owns this segment ; the win32 Rust proxy
+    // only paints `@cl_human`, never `@cl_afk_state`, so the AFK/NOT AFK
+    // chip stayed frozen on its boot seed (F9 toggled the state + marker,
+    // and loop/stop honored it, but nothing repainted the display).
+    // Repaint instantly on AFK transitions (watchAfkMarker hydrates the
+    // AfkService → its Observable fires here) AND on a 1s tick for the
+    // NOT AFK 10m countdown. Diff-guarded so we only spend a tmux
+    // set-option when the rendered string actually changes.
+    if (process.platform === "win32") {
+        let lastAfkPaint: string | null = null;
+        const repaintAfkState = (): void => {
+            try {
+                const next = afkStateChunkStr(sd!);
+                if (next === lastAfkPaint) return;
+                lastAfkPaint = next;
+                setTmuxAfkState(name!, next);
+            } catch { /* best-effort — bar paint must never crash the timer */ }
+        };
+        repaintAfkState();
+        const afkSub = getAfkService().subscribe(() => repaintAfkState());
+        const afkPaintTimer = setInterval(repaintAfkState, 1000);
+        process.on("exit", () => { try { afkSub(); } catch { /* ignore */ } clearInterval(afkPaintTimer); });
+    }
     const loopBus = new LoopStateBus();
     loopBus.on("transition", (_prev, next) => {
         loopServer.pushView(next);

@@ -31,7 +31,7 @@ import type { Intent } from "../domain.js";
 import type { DrainedState } from "./drained-strategy.js";
 import { CL_ENV } from "./env-vars.js";
 import { loopConfig } from "./loop-config.js";
-import { canFlipBgFromBoot, computeLoopView } from "./loop-state.js";
+import { canFlipBgFromBoot, computeLoopView, type AfkChunk } from "./loop-state.js";
 import { parseGates, runGates } from "./gates.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
@@ -1340,6 +1340,48 @@ export function setTmuxStatus(
         setOpt("@cl_human", word);
         logBarPaint(sd, `state.ts:setTmuxStatus(${status})`, word);
     }
+}
+
+/** #755 — map an `AfkChunk` to the `@cl_afk_state` tmux format string.
+ *  Mirrors the Unix proxy's `_format_afk_state` (pty-proxy.py) but is
+ *  driven by the central `computeLoopView` chunk, so the countdown is in
+ *  seconds (loop-state.ts canonical) instead of the proxy's stale minutes.
+ *  Pure — colours/key are passed in so it stays trivially testable.
+ *
+ *  `dim` → OFF (label `AFK`, human away) ; `yellow` → NOT AFK 10m hold ;
+ *  `red` → NOT AFK ∞ hold. The key segment renders in the lit colour. */
+export function formatAfkStateChunk(
+    chunk: AfkChunk,
+    opts: { key: string; fgDim: string; fgLit: string },
+): string {
+    const fg = chunk.color === "red" ? "colour196"
+        : chunk.color === "yellow" ? "colour178"
+            : opts.fgDim;
+    const prefix = chunk.prefix ? `${chunk.prefix} ` : "";
+    return `#[fg=${fg}]${prefix}${chunk.label}:#[fg=${opts.fgLit}]${opts.key}`;
+}
+
+/** #755 — compute the current `@cl_afk_state` string from live markers.
+ *  Reads the same env the Unix proxy reads (CL_AFK_KEY_DISP / *_FG_DIM /
+ *  *_FG_LIT). Used by the win32 painter below ; returned so the caller can
+ *  diff-guard before spending a tmux set-option. */
+export function afkStateChunkStr(sd: string): string {
+    const chunk = computeLoopView(readLoopStateInput(sd)).afkChunk;
+    return formatAfkStateChunk(chunk, {
+        key: process.env.CL_AFK_KEY_DISP || "F9",
+        fgDim: process.env.CL_AFK_LABEL_FG_DIM || "colour238",
+        fgLit: process.env.CL_AFK_LABEL_FG_LIT || "colour16",
+    });
+}
+
+/** #755 — push `@cl_afk_state` to tmux + refresh. Best-effort (no-op /
+ *  swallow when there is no live target). On Unix the Python proxy owns
+ *  this segment ; this is the WIN32 path where the Rust proxy doesn't
+ *  paint it (the chip would otherwise stay frozen on its boot seed). */
+export function setTmuxAfkState(name: string, chunkStr: string): void {
+    const tn = tmuxName(name);
+    spawnSync(MUX_CMD, ["set-option", "-t", tn, "@cl_afk_state", chunkStr], { stdio: "ignore" });
+    spawnSync(MUX_CMD, ["refresh-client", "-S"], { stdio: "ignore" });
 }
 
 /**
