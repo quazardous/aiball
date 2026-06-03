@@ -18,7 +18,7 @@
  */
 import { createConnection } from "node:net";
 import { existsSync } from "node:fs";
-import { proxyEventsSockPath } from "./state.js";
+import { proxyEventsAddr } from "./state.js";
 
 /**
  * One-shot emit of a single event to the timer. Resolves true on
@@ -33,8 +33,12 @@ export function emitHookEventToTimer(
     event: Record<string, unknown>,
     timeoutMs = 300,
 ): Promise<boolean> {
-    const sockPath = proxyEventsSockPath(sd);
-    if (!existsSync(sockPath)) return Promise.resolve(false);
+    const sockPath = proxyEventsAddr(sd);
+    // The existsSync pre-check is an AF_UNIX optimisation (skip the connect
+    // attempt when the timer never bound the socket file). Named pipes
+    // (win32) can't be stat'd — same lesson as injectPipeName — so on
+    // win32 we skip the gate and let the connect attempt fail fast instead.
+    if (process.platform !== "win32" && !existsSync(sockPath)) return Promise.resolve(false);
     return new Promise<boolean>((resolve) => {
         let settled = false;
         const settle = (ok: boolean): void => {

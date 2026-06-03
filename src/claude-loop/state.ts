@@ -364,6 +364,29 @@ export function proxyAlivePath(sd: string): string { return join(sd, "proxy-aliv
 // timer's state machine decides what to do (arm AFK, toggle, …). Inverse
 // direction of view-push.sock (timer→proxy). Newline-delimited JSON.
 export function proxyEventsSockPath(sd: string): string { return join(sd, "proxy-events.sock"); }
+// #281 strategy B (win32) — the two new back-channels need named pipes
+// too, same reason as injectPipeName: Windows has no AF_UNIX file
+// sockets. Same derivation (basename of the state dir == CL_NAME) so the
+// Rust ConPTY proxy can compute the identical name. Like inject, these
+// can't be stat'd — callers must NOT existsSync()-gate them on win32.
+export function viewPushPipeName(sd: string): string {
+    return `\\\\.\\pipe\\cl-viewpush-${basename(sd)}`;
+}
+export function proxyEventsPipeName(sd: string): string {
+    return `\\\\.\\pipe\\cl-events-${basename(sd)}`;
+}
+/** Platform-correct address for the view-push channel (timer→proxy): a
+ *  named pipe on win32, the AF_UNIX file path elsewhere. Pass the result
+ *  straight to net.connect / net.createServer — Node maps a `\\.\pipe\…`
+ *  string to a named pipe transparently. */
+export function viewPushAddr(sd: string): string {
+    return process.platform === "win32" ? viewPushPipeName(sd) : viewPushSockPath(sd);
+}
+/** Platform-correct address for the proxy-events channel (proxy/hooks→
+ *  timer). See viewPushAddr. */
+export function proxyEventsAddr(sd: string): string {
+    return process.platform === "win32" ? proxyEventsPipeName(sd) : proxyEventsSockPath(sd);
+}
 export function timerPidPath(sd: string): string { return join(sd, "timer.pid"); }
 export function timerLogPath(sd: string): string { return join(sd, "timer.log"); }
 /**
@@ -1854,7 +1877,10 @@ export function createProxyEventsServer(
     sockPath: string,
     onEvent: (event: Record<string, unknown>) => void,
 ): ProxyEventsServer {
-    try { if (existsSync(sockPath)) unlinkSync(sockPath); } catch { /* race */ }
+    // Named pipes (win32) aren't filesystem entries — only the AF_UNIX
+    // file path needs the pre-bind unlink of a stale socket.
+    const isPipe = process.platform === "win32";
+    if (!isPipe) { try { if (existsSync(sockPath)) unlinkSync(sockPath); } catch { /* race */ } }
     const server = netCreateServer((conn) => {
         let buf = "";
         conn.on("data", (chunk) => {
@@ -1880,7 +1906,7 @@ export function createProxyEventsServer(
     return {
         close() {
             try { server.close(); } catch { /* ignore */ }
-            try { if (existsSync(sockPath)) unlinkSync(sockPath); } catch { /* ignore */ }
+            if (!isPipe) { try { if (existsSync(sockPath)) unlinkSync(sockPath); } catch { /* ignore */ } }
         },
     };
 }

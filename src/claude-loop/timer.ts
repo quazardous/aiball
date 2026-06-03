@@ -44,8 +44,8 @@ import {
     bootCompletePath,
     createProxyEventsServer,
     createViewPusher,
-    proxyEventsSockPath,
-    viewPushSockPath,
+    proxyEventsAddr,
+    viewPushAddr,
     paneShowsInterrupted,
     readLoopStateInput,
     clearResumePickers,
@@ -929,13 +929,13 @@ async function mainSse(): Promise<void> {
     // Other consumers can subscribe to specific events (bootEnded,
     // afkArmed10m, …) for log decoration or future reactive painters
     // without re-implementing the diff.
-    const viewPusher = createViewPusher(viewPushSockPath(sd!));
+    const viewPusher = createViewPusher(viewPushAddr(sd!));
     // #633 Slice A (david `ecmrvn`) — back-channel server : the proxy
     // connects + emits raw events (typing, AFK key, lone-esc). The state
     // machine here decides what to do based on the AUTHORITATIVE view
     // (incl. bootComplete marker), eliminating the layer-2 hacks where
     // the proxy guessed locally and the timer filtered post-fact.
-    const proxyEventsServer = createProxyEventsServer(proxyEventsSockPath(sd!), (event) => {
+    const proxyEventsServer = createProxyEventsServer(proxyEventsAddr(sd!), (event) => {
         // #633 Slice F (david `yau5jc`) — dispatcher logic lives in its
         // own module (`proxy-event-dispatcher.ts`), unit-testable with a
         // tmp state-dir. The timer here just bridges the UDS callback to
