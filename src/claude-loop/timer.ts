@@ -537,17 +537,28 @@ async function sendKeys(phrase: string): Promise<void> {
     // prompt and skips the user-took-over update. Without this, the
     // auto-wake would trigger the user-grace and lock subsequent
     // wakes for `CL_USER_GRACE_SEC` (default 300s).
-    try {
-        writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n");
-    } catch { /* ignore — UserPromptSubmit hook will fall through to user-grace path, suboptimal but safe */ }
-    // #B.198 fix A: shared coalesce marker — Stop hook reads it to
-    // suppress chain-fire bursts. Touched here so timer-driven
-    // wakes also count toward the coalesce window.
-    try {
-        writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n");
-    } catch { /* ignore — coalesce will just fail open */ }
+    //
+    // #732 hot-fix (orphan marker bug observed live on m2m loop) — the
+    // wake-in-flight + last-wake-at writes used to happen unconditionally
+    // BEFORE `injectWakePhrase`. If the inject was then coalesce-skipped
+    // (`skipDuplicateWakeInjection` inside injectWakePhrase) the markers
+    // stayed armed without an actual wake going out → blocked every
+    // subsequent wake attempt for ~TTL of `wake-in-flight`. Fix: pass the
+    // marker writes as an `onWillInject` callback that injectWakePhrase
+    // fires ONLY after the dedupe gate passes (and before the actual
+    // socket/tmux inject → timing preserved for the UserPromptSubmit hook).
     lastSendAt = Date.now();
-    await injectWakePhrase(`${tname}.0`, phrase);
+    await injectWakePhrase(`${tname}.0`, phrase, () => {
+        try {
+            writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n");
+        } catch { /* ignore — UserPromptSubmit hook will fall through to user-grace path, suboptimal but safe */ }
+        // #B.198 fix A: shared coalesce marker — Stop hook reads it to
+        // suppress chain-fire bursts. Touched here so timer-driven
+        // wakes also count toward the coalesce window.
+        try {
+            writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n");
+        } catch { /* ignore — coalesce will just fail open */ }
+    });
 }
 
 function sleep(ms: number): Promise<void> {

@@ -1733,7 +1733,11 @@ export async function buildContextPhrase(
  * wake, timer no-hint wake, and SSE-hinted wakes — short phrases pay
  * a ~200ms latency but consistency beats branching on length.
  */
-export async function injectWakePhrase(paneTarget: string, phrase: string): Promise<void> {
+export async function injectWakePhrase(
+    paneTarget: string,
+    phrase: string,
+    onWillInject?: () => void,
+): Promise<void> {
     // #269: when the pane runs under the PTY proxy, deliver the wake
     // straight to claude's PTY via the proxy's control channel — that
     // bypasses tmux/psmux stdin, so the proxy's human-typing detector
@@ -1745,6 +1749,14 @@ export async function injectWakePhrase(paneTarget: string, phrase: string): Prom
     // — any wake within WAKE_COALESCE_WINDOW_MS of a prior fire collapses
     // (david's "compteur, pas file" model). Marker written before inject.
     if (sd && skipDuplicateWakeInjection(sd, phrase)) return;
+    // #732 hot-fix : `onWillInject` fires only when the dedupe gate has
+    // passed → callers can safely arm orphan-prone markers like
+    // `wake-in-flight` here without risk of leaving them set when the
+    // wake collapses. Fires BEFORE the actual socket/tmux inject so the
+    // UserPromptSubmit hook reads the marker as soon as claude submits.
+    if (onWillInject) {
+        try { onWillInject(); } catch { /* swallow — caller hook is best-effort */ }
+    }
     if (sd) {
         if (process.platform === "win32") {
             // #281 strategy B: Windows uses a named pipe with raw bytes.
