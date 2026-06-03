@@ -362,11 +362,6 @@ export function injectPipeName(sd: string): string {
 // proxy self-falls-back to exec-claude if PTY init fails). Read by
 // setTmuxStatus to paint the discreet proxy glyph.
 export function proxyAlivePath(sd: string): string { return join(sd, "proxy-alive"); }
-// #633 david `ecmrvn` (Slice A) — back-channel UDS the proxy connects to
-// at startup, emitting raw events (typing, AFK key, lone-esc) so the
-// timer's state machine decides what to do (arm AFK, toggle, …). Will
-// fold onto `loop.sock` at #730 step 2 (`{kind:"proxyEvent"}`).
-export function proxyEventsSockPath(sd: string): string { return join(sd, "proxy-events.sock"); }
 export function timerPidPath(sd: string): string { return join(sd, "timer.pid"); }
 export function timerLogPath(sd: string): string { return join(sd, "timer.log"); }
 /**
@@ -1780,74 +1775,48 @@ export async function injectWakePhrase(paneTarget: string, phrase: string): Prom
 }
 
 /**
- * #627 — view-push backchannel. #729 phase 2 (david `8yg34n` go C) :
- * direction inverted — the **timer is now the SERVER** and the proxy
- * connects in as a client. Aligns with the #726 SSOT (timer = source
- * of truth, consumers read from it) and resolves the Python sync
- * asymmetry (a single `websocket-client` lib on the Python side covers
- * both sockets).
+ * #730 step 2 — unified per-loop IPC server. Folds the former
+ * `createViewPusher` (broadcast of `{kind:"view"}`) and
+ * `createProxyEventsServer` (dispatch of `{kind:"proxyEvent"}`) into a
+ * single `listenEvents` server bound to `loopSockPath(sd)`. The proxy
+ * keeps one ws connection per concern (one receives view frames, one
+ * sends event frames) — both hit the same `loop.sock` path.
  *
- * The timer binds a `listenEvents` server on `loopSockPath(sd)` and
- * `push(view)` broadcasts `{kind: "view", data: view}` to every connected
- * client (in practice : one proxy per loop). If no client is connected,
- * the push is dropped — that's fine : the proxy paints from the last
- * view it received + falls back to its local rules until the next push
- * arrives, exactly like before the inversion.
+ * Direction (#729 inversion): timer = SERVER ; proxy = CLIENT.
+ * Step 3 will add a `{kind:"inject"}` broadcast path so the legacy raw
+ * `inject.sock` can be dropped too — at which point only `loop.sock`
+ * remains.
  */
-export interface ViewPusher {
-    push(view: import("./loop-state.js").LoopStateView): void;
+export interface LoopServer {
+    /** Broadcast a view frame to every connected client. No-op if none. */
+    pushView(view: import("./loop-state.js").LoopStateView): void;
+    /** Stop accepting connections + unlink the socket file. Idempotent. */
     close(): void;
 }
 
-export function createViewPusher(sockPath: string): ViewPusher {
-    // The timer doesn't react to any inbound event on view-push (push-only).
-    // We still pass a no-op `onEvent` to listenEvents — the API requires
-    // one, but no frame should ever arrive in this direction.
-    const server: EventServer = listenEvents(sockPath, () => { /* push-only socket */ });
-    return {
-        push(view) {
-            server.broadcast({ kind: "view", data: view });
-        },
-        close() {
-            server.close();
-        },
-    };
-}
-
-/**
- * #633 (Slice A) — server side of the proxy→timer back-channel.
- * #729 phase 2 — re-wired on top of `ipc-events` (ws over UDS). The
- * timer listens on `proxyEventsSockPath(sd)` ; the proxy connects in
- * as a client and emits frames `{kind: "proxyEvent", data: <legacyEvent>}`.
- * The dispatcher `proxy-event-dispatcher.ts` still sees the legacy
- * event shape intact (`{event: "keystroke"|"marker"|"hook", kind: ...,
- * ...}`) — we just unwrap the envelope before passing to `onEvent`.
- *
- * Direction (proxy = CLIENT, timer = SERVER) is unchanged ; only the
- * transport layer switches to ws.
- */
-export interface ProxyEventsServer {
-    close(): void;
-}
-
-export function createProxyEventsServer(
+export function createLoopServer(
     sockPath: string,
-    onEvent: (event: Record<string, unknown>) => void,
-): ProxyEventsServer {
+    handlers: { onProxyEvent: (event: Record<string, unknown>) => void },
+): LoopServer {
     const server: EventServer = listenEvents(sockPath, (ev) => {
-        // Compat-wrap : legacy events are sent as
-        // `{kind: "proxyEvent", data: {event: "...", kind: "...", ...}}`
-        // so they fit the `Event {kind, data}` shape of the ipc-events
-        // layer. The dispatcher expects the legacy object intact —
-        // unwrap data here.
-        if (ev.kind !== "proxyEvent") return; // forward-compat : unknown kind = ignore
-        const inner = ev.data;
-        if (!inner || typeof inner !== "object") return;
-        try {
-            onEvent(inner as Record<string, unknown>);
-        } catch { /* dispatcher already swallows — defense in depth */ }
+        if (ev.kind === "proxyEvent") {
+            // Legacy event shape is wrapped as
+            // `{kind:"proxyEvent", data:{event:"...", kind:"...", ...}}`
+            // to fit the `Event {kind, data}` shape of ipc-events. The
+            // dispatcher expects the legacy object intact — unwrap.
+            const inner = ev.data;
+            if (!inner || typeof inner !== "object") return;
+            try {
+                handlers.onProxyEvent(inner as Record<string, unknown>);
+            } catch { /* dispatcher already swallows — defense in depth */ }
+            return;
+        }
+        // Unknown kinds dropped silently — forward-compat.
     });
     return {
+        pushView(view) {
+            server.broadcast({ kind: "view", data: view });
+        },
         close() {
             server.close();
         },

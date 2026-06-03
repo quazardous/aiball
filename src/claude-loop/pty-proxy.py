@@ -83,13 +83,6 @@ def _loop_sock_path():
     return os.path.join(sd, "loop.sock") if sd else ""
 
 
-def _proxy_events_sock_path():
-    """#633 Slice A — UDS the proxy CONNECTS TO to emit raw events
-    (typing, AFK key, lone-esc). #729 phase 2 : transport switches to
-    ws over UDS via `websocket-client` ; direction stays the same
-    (proxy = CLIENT, timer = SERVER)."""
-    sd = _state_dir()
-    return os.path.join(sd, "proxy-events.sock") if sd else ""
 
 
 def _proxy_alive_path():
@@ -439,12 +432,13 @@ def arm_afk_10m():
 
 
 # #633 Slice A david `ecmrvn` — back-channel client that emits raw events
-# to the timer's `proxy-events.sock`. Persistent connection, reconnect on
-# failure, silent no-op if the timer isn't there (degraded mode — the
-# caller falls back to local logic). Single instance lazily created.
+# to the timer's shared `loop.sock` (#730 step 2 ; was `proxy-events.sock`
+# before the consolidation). Persistent connection, reconnect on failure,
+# silent no-op if the timer isn't there (degraded mode — the caller falls
+# back to local logic). Single instance lazily created.
 #
-# #729 phase 2 — transport switches to ws over UDS via `websocket-client`.
-# The legacy payload `{event, kind, now_ms, ...}` is WRAPPED in the shape
+# #729 phase 2 — transport is ws over UDS via `websocket-client`. The
+# legacy payload `{event, kind, now_ms, ...}` is WRAPPED in the shape
 # `{kind: "proxyEvent", data: <legacy>}` which the ipc-events server
 # unwraps on the JS side. Direction unchanged (proxy = CLIENT).
 class _ProxyEventEmitter:
@@ -456,7 +450,7 @@ class _ProxyEventEmitter:
             return False  # degraded mode (replay, missing dep) — caller falls back
         if self._ws is not None:
             return True
-        path = _proxy_events_sock_path()
+        path = _loop_sock_path()
         if not path or not os.path.exists(path):
             return False
         try:

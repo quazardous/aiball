@@ -42,10 +42,8 @@ import {
     isInternalCheckCmd,
     LOOP_STATUS,
     bootCompletePath,
-    createProxyEventsServer,
-    createViewPusher,
+    createLoopServer,
     loopSockPath,
-    proxyEventsSockPath,
     paneShowsInterrupted,
     readLoopStateInput,
     clearResumePickers,
@@ -931,21 +929,18 @@ async function mainSse(): Promise<void> {
     // Other consumers can subscribe to specific events (bootEnded,
     // afkArmed10m, …) for log decoration or future reactive painters
     // without re-implementing the diff.
-    const viewPusher = createViewPusher(loopSockPath(sd!));
-    // #633 Slice A (david `ecmrvn`) — back-channel server : the proxy
-    // connects + emits raw events (typing, AFK key, lone-esc). The state
-    // machine here decides what to do based on the AUTHORITATIVE view
-    // (incl. bootComplete marker), eliminating the layer-2 hacks where
-    // the proxy guessed locally and the timer filtered post-fact.
-    const proxyEventsServer = createProxyEventsServer(proxyEventsSockPath(sd!), (event) => {
-        // #633 Slice F (david `yau5jc`) — dispatcher logic lives in its
-        // own module (`proxy-event-dispatcher.ts`), unit-testable with a
-        // tmp state-dir. The timer here just bridges the UDS callback to
-        // the dispatcher and logs the verdict.
-        const verdict = dispatchProxyEvent(sd!, event);
-        log(formatVerdictLogLine(verdict));
+    // #730 step 2 — single ws server on `loop.sock` handles both
+    // outbound view broadcasts (timer → proxy) and inbound proxyEvent
+    // dispatch (proxy → timer). The dispatcher (`proxy-event-dispatcher.ts`)
+    // is unchanged — it still sees the legacy event shape, the wrap is
+    // unwrapped at the server boundary.
+    const loopServer = createLoopServer(loopSockPath(sd!), {
+        onProxyEvent: (event) => {
+            const verdict = dispatchProxyEvent(sd!, event);
+            log(formatVerdictLogLine(verdict));
+        },
     });
-    process.on("exit", () => proxyEventsServer.close());
+    process.on("exit", () => loopServer.close());
     // #652 Slice 6 — wire the HookService → bar subscriber. Currently
     // only paints on UserPromptSubmit (→ BUSY) ; future slices can add
     // SessionStart / Stop paints once the events carry the substate
@@ -962,7 +957,7 @@ async function mainSse(): Promise<void> {
     process.on("exit", () => unwatchAfk());
     const loopBus = new LoopStateBus();
     loopBus.on("transition", (_prev, next) => {
-        viewPusher.push(next);
+        loopServer.pushView(next);
         // #629 (xyss9z) : trace which writer drove the @cl_human change.
         // The timer doesn't setOpt directly — the proxy does, after receiving
         // the pushed view — but the timer is the ORIGIN of the value.

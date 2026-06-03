@@ -23,6 +23,16 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-06-03
+
+### Changed
+
+- Per-loop IPC consolidation step 2 of 3: `proxy-events.sock` is gone.
+  The proxy → timer event channel (typing, AFK key, markers, hooks) now
+  shares the same `loop.sock` connection as the timer → proxy view-push.
+  Two sockets remain per loop (`loop.sock`, `inject.sock`) ; the third
+  fold lands next.
+
 ## [0.25.0] — 2026-06-03
 
 ### Changed
