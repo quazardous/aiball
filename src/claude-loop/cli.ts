@@ -62,6 +62,7 @@ import {
     tmuxName,
     writePlate,
     ensureDir,
+    zenPath,
     type Plate,
 } from "./state.js";
 import { cmdTail, type TailMode } from "./cmds/tail.js";
@@ -264,6 +265,10 @@ interface StartOpts {
      *  AND `claude_loop.auto_resume` to true for this invocation, regardless
      *  of `.aiball.yaml`. Mirror of `noResume` for the positive case. */
     forceResume?: boolean;
+    /** #749 david — start with the wake kill-switch ON. cmdStart touches the
+     *  `zen` marker right after the state-dir is created so the first
+     *  tryWake (boot drain) is already muted. */
+    zen?: boolean;
     claudeArgs: string[];
 }
 
@@ -564,6 +569,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // the bar word fallback (degraded mode) stayed `boot` forever.
     writeFileSync(loopStartTsPath(sd), String(Date.now()));
     copyFileSync(pingsSrc, pingsPath(sd));
+    // #749 david — `--zen` start opt-in : touch the kill-switch marker so
+    // the very first tryWake (boot drain) is already muted. The user opts
+    // back in via `claude-loop zen <name>` (toggle / --off).
+    if (opts.zen === true) {
+        writeFileSync(zenPath(sd), new Date().toISOString() + "\n");
+    }
 
     // #B.180 david: resolve timeouts (CLI flag > .aiball.yaml > built-in
     // default). loadConfig defaults are 60/60/300/2000 — see config.ts.
@@ -1773,6 +1784,11 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
         .option("--init-private", "#593: with --init, seed .aiball.yaml with `project_type: private` (welcome serves the private kit)")
         // #636: pytest harness mode — the timer exits after one heartbeat cycle.
         .option("--once", "#636: pytest harness flag — exit the timer after one full heartbeat cycle (boot probe + tick + wake check). claude + tmux stay alive ; the caller orchestrates cleanup. Use with `claude-loop inspect` to snapshot state.")
+        // #749 david — start with the wake kill-switch ON. Touches the
+        // state-dir's `zen` marker right after creation, so the very first
+        // tryWake (boot drain) is already muted. Toggle live afterwards via
+        // `claude-loop zen <name>`.
+        .option("--zen", "#749: start with all wakes muted (touches the `zen` marker). Toggle live with `claude-loop zen <name>`.")
         .allowExcessArguments(false)
         .action((nameArg: string | undefined, opts: {
             name?: string; interval?: string; checkCmd: string; pings?: string;
@@ -1781,7 +1797,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
             aiballUrl?: string; aiballToken?: string; consumer?: string; agent?: string; project?: string;
             cwd?: string;
             init?: boolean; initForce?: boolean; initStopHook?: boolean; initGlobal?: boolean;
-            once?: boolean;
+            once?: boolean; zen?: boolean;
         }, command: Command) => {
             // #305 (option a): only forward `wait` when --wait/--no-wait was
             // ACTUALLY passed. Otherwise leave it undefined so cmdStart falls
@@ -1812,6 +1828,7 @@ function buildStartCommand(invoke: (opts: StartOpts) => void): Command {
                 // #639 (david `uqdava`) — `--resume` explicitly true → force.
                 noResume: opts.resume === false,
                 forceResume: opts.resume === true && command.getOptionValueSource?.("resume") === "cli",
+                zen: opts.zen === true,
                 claudeArgs: [], // filled in by the dispatcher below
             });
         });
@@ -1840,7 +1857,7 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "debug-proxy-tty", "debug-keys", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "debug-proxy-tty", "debug-keys", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
