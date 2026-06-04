@@ -20,9 +20,9 @@
  * 502, and the local AiballClient spools the write for replay (#389: 5xx/
  * transport → spool, 4xx → surfaced).
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, watch, type FSWatcher } from "node:fs";
 import { hostname } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { parse as parseYaml } from "yaml";
@@ -60,6 +60,17 @@ export interface ProxyConfig {
      *       label: "my-laptop"     # overrides hostname()
      */
     nodeLabel?: string;
+    /**
+     * #775 — path to the project `.aiball.yaml` whose `consumer.no_claim` this
+     * node advertises to the upstream (post-`hello` `node_project_config_push`
+     * frame). Read at connect + on file change (fs.watch). Absent → no push (the
+     * node stays silent; the upstream falls back to the deprecated
+     * `x-aiball-no-claim` header). Phase 1 = single project; a list comes later.
+     *
+     *   proxy:
+     *     project_yaml: /path/to/project/.aiball.yaml
+     */
+    projectYaml?: string;
 }
 
 /** Read the `proxy:` block from the GLOBAL config. Null when absent → the
@@ -74,6 +85,7 @@ export function loadProxy(): ProxyConfig | null {
                 token?: unknown;
                 strict?: unknown;
                 node?: { label?: unknown };
+                project_yaml?: unknown;
             };
         };
         const px = raw.proxy;
@@ -88,7 +100,58 @@ export function loadProxy(): ProxyConfig | null {
         // without any extra config).
         const labelRaw = typeof px.node?.label === "string" ? px.node.label.trim() : "";
         const nodeLabel = labelRaw || hostname();
-        return { url, token, strict, nodeLabel };
+        const projectYaml = typeof px.project_yaml === "string" && px.project_yaml.trim()
+            ? px.project_yaml.trim()
+            : undefined;
+        return { url, token, strict, nodeLabel, projectYaml };
+    } catch {
+        return null;
+    }
+}
+
+/** #775 — flat config-push frame (aiball-win contract `tb7mmq`) the node sends
+ *  the upstream post-`hello`. `consumers[]` is an array from day one so a
+ *  multi-consumer node (phase 2) needs no wire change. */
+export interface NodeProjectConfigPushFrame {
+    kind: "node_project_config_push";
+    project: string;
+    consumers: Array<{ agent: string; no_claim?: boolean }>;
+}
+
+/**
+ * #775 — build the `node_project_config_push` frame from a project `.aiball.yaml`
+ * text. Reads `consumer.{agent, project, no_claim}`; `project` falls back to
+ * `fallbackProject` (the basename of the yaml's dir) when the consumer block
+ * omits it (graphite's `.aiball.yaml` does). Returns null when no agent is
+ * declared — nothing meaningful to advertise. `no_claim` is forwarded only as an
+ * explicit boolean; otherwise it's omitted and the upstream leaves `can_claim`
+ * untouched (additive, never an implicit reset).
+ */
+export function buildConfigPushFrame(yamlText: string, fallbackProject: string): NodeProjectConfigPushFrame | null {
+    let parsed: unknown;
+    try { parsed = parseYaml(yamlText); } catch { return null; }
+    const consumerBlock = parsed && typeof parsed === "object"
+        ? (parsed as { consumer?: unknown }).consumer
+        : null;
+    if (!consumerBlock || typeof consumerBlock !== "object") return null;
+    const c = consumerBlock as { agent?: unknown; project?: unknown; no_claim?: unknown };
+    const agent = typeof c.agent === "string" ? c.agent.trim() : "";
+    if (!agent) return null;
+    const projectRaw = typeof c.project === "string" ? c.project.trim() : "";
+    const project = projectRaw || fallbackProject;
+    if (!project) return null;
+    const consumer: { agent: string; no_claim?: boolean } = { agent };
+    if (typeof c.no_claim === "boolean") consumer.no_claim = c.no_claim;
+    return { kind: "node_project_config_push", project, consumers: [consumer] };
+}
+
+/** Read + build the config-push frame from a `.aiball.yaml` path (project =
+ *  basename of its dir when the consumer block omits it). Null on any read /
+ *  parse error or when the file declares no agent. */
+function readConfigPushFrame(path: string): NodeProjectConfigPushFrame | null {
+    try {
+        if (!existsSync(path)) return null;
+        return buildConfigPushFrame(readFileSync(path, "utf8"), basename(dirname(path)));
     } catch {
         return null;
     }
@@ -261,6 +324,8 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
     let ws: WebSocket | null = null;
     let reconnectTimer: NodeJS.Timeout | null = null;
     let attempt = 0;
+    let cfgWatcher: FSWatcher | null = null;
+    let cfgWatchDebounce: NodeJS.Timeout | null = null;
 
     const MIN_BACKOFF_MS = 1_000;
     const MAX_BACKOFF_MS = 60_000;
@@ -309,6 +374,11 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
                     display_host_provider: dh?.provider ?? null,
                 }));
             } catch { /* noop — le close handler reprendra */ }
+            // #775 — advertise this node's per-project consumer config
+            // (`no_claim` → `can_claim`) right after `hello`, so the upstream
+            // gates the owner fan-out (#752 B) without the deprecated
+            // `x-aiball-no-claim` header. Re-sent on every (re)connect.
+            pushConfigIfAny();
         });
         ws.on("unexpected-response", (_req, res) => {
             console.warn(`[proxy WS] handshake refused by upstream: HTTP ${res.statusCode} (check node token + that ${wsUrl} reaches a daemon on the new code)`);
@@ -344,6 +414,31 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
 
     function send(frame: Record<string, unknown>): void {
         try { ws?.send(JSON.stringify(frame)); } catch { /* socket dead, close reprendra */ }
+    }
+
+    // #775 — read the project `.aiball.yaml` and push its consumer config to the
+    // upstream (no-op when `projectYaml` is unset or the file declares no agent).
+    function pushConfigIfAny(): void {
+        if (!cfg.projectYaml) return;
+        const frame = readConfigPushFrame(cfg.projectYaml);
+        if (!frame) return;
+        try { ws?.send(JSON.stringify(frame)); } catch { /* socket dead — next reconnect re-pushes */ }
+    }
+
+    // #775 — re-push when the project `.aiball.yaml` changes, without waiting for
+    // a reconnect. Debounced (editors fire multiple events). Best-effort: if
+    // `fs.watch` is unsupported, the connect-time push still keeps it in sync.
+    function startConfigWatch(): void {
+        if (!cfg.projectYaml || cfgWatcher) return;
+        try {
+            cfgWatcher = watch(cfg.projectYaml, () => {
+                if (cfgWatchDebounce) clearTimeout(cfgWatchDebounce);
+                cfgWatchDebounce = setTimeout(() => {
+                    if (ws && ws.readyState === WebSocket.OPEN) pushConfigIfAny();
+                }, 200);
+                cfgWatchDebounce.unref?.();
+            });
+        } catch { /* watch unsupported / file missing — connect-time push covers it */ }
     }
 
     function startStream(requestId: string, cwd: string): void {
@@ -430,12 +525,15 @@ export function startProxyWsClient(cfg: ProxyConfig): ProxyWsClientHandle {
         reconnectTimer.unref();
     }
 
+    startConfigWatch();
     connect();
 
     return {
         close: () => {
             stopped = true;
             if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+            if (cfgWatchDebounce) { clearTimeout(cfgWatchDebounce); cfgWatchDebounce = null; }
+            if (cfgWatcher) { try { cfgWatcher.close(); } catch { /* noop */ } cfgWatcher = null; }
             if (ws) {
                 try { ws.close(1000, "shutdown"); } catch { /* noop */ }
             }
