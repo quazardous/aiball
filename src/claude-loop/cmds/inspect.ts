@@ -21,6 +21,7 @@ import {
     bootCompletePath,
     humanTypingPath,
     idleMarkerPath,
+    loopSockPath,
     proxyAlivePath,
     readLoopStateInput,
     resumeSessionPickerActivePath,
@@ -31,6 +32,57 @@ import {
     wakeRequestedPath,
 } from "../state.js";
 import { computeLoopView } from "../loop-state.js";
+import { openEventChannel } from "../ipc-events.js";
+
+/**
+ * #774 — pull the timer's live `ipcState` over `loop.sock`. The handler
+ * lives in `createLoopServer` (state.ts) ; this side opens a short-lived
+ * channel, fires one `queryLoopState` request, and closes. Returns null
+ * on any failure (timer down, ws drop, malformed reply) — the caller
+ * falls back to the subprocess-local zero values.
+ */
+interface LiveLoopState {
+    paneBusy: boolean;
+    paneReady: boolean;
+    paneCompacting: boolean;
+    paneResuming: boolean;
+    paneInterrupted: boolean;
+    afkMode: "off" | "wait_10m" | "wait_inf" | null;
+    afkExpiryMs: number | null;
+    humanTypingAtMs: number | null;
+    idleSinceMs: number | null;
+    bootComplete: boolean | null;
+    busyDeferUntilMs: number | null;
+}
+
+async function queryLoopState(sd: string, timeoutMs = 1000): Promise<LiveLoopState | null> {
+    const sock = loopSockPath(sd);
+    if (!existsSync(sock)) return null;
+    const ch = openEventChannel(sock, { reconnectMs: 100 });
+    try {
+        // openEventChannel reconnects forever ; race against a deadline
+        // for the FIRST successful connection so a dead timer doesn't
+        // hang the cli forever.
+        const connected = await Promise.race<boolean>([
+            new Promise<boolean>((resolve) => {
+                const start = Date.now();
+                const tick = (): void => {
+                    if (ch.isConnected()) { resolve(true); return; }
+                    if (Date.now() - start >= timeoutMs) { resolve(false); return; }
+                    setTimeout(tick, 25);
+                };
+                tick();
+            }),
+        ]);
+        if (!connected) return null;
+        const reply = await ch.request({ kind: "queryLoopState" }, timeoutMs);
+        return (reply.data as LiveLoopState | undefined) ?? null;
+    } catch {
+        return null;
+    } finally {
+        ch.close();
+    }
+}
 
 function pidAlive(pidPath: string): { pid: number | null; alive: boolean } {
     if (!existsSync(pidPath)) return { pid: null, alive: false };
@@ -47,7 +99,7 @@ function mtimeIso(path: string): string | null {
     catch { return null; }
 }
 
-export function cmdInspect(name: string): void {
+export async function cmdInspect(name: string): Promise<void> {
     const sd = stateDirFor(name);
     if (!existsSync(sd)) {
         process.stdout.write(JSON.stringify({ name, exists: false }, null, 2) + "\n");
@@ -55,6 +107,10 @@ export function cmdInspect(name: string): void {
     }
     const input = readLoopStateInput(sd);
     const view = computeLoopView(input);
+    // #774 — try to pull the timer's live ipcState. Falls back to the
+    // subprocess-local zero values when the timer is down or the query
+    // times out ; flag the source so consumers can tell the two apart.
+    const live = await queryLoopState(sd);
     const timer = pidAlive(timerPidPath(sd));
     const proxy = pidAlive(proxyAlivePath(sd));
     const dump = {
@@ -80,21 +136,25 @@ export function cmdInspect(name: string): void {
             resume_session_picker_active: existsSync(resumeSessionPickerActivePath(sd)),
             resume_mode_picker_active: existsSync(resumeModePickerActivePath(sd)),
         },
-        // #733 V2 — pane signals live in the timer's `ipcState` only ;
-        // a subprocess view (this command) sees `false` for everything
-        // unless/until a cross-process query path is added (#771).
+        // #774 — pane / afk / typing / boot signals come from the
+        // timer's live `ipcState` when `queryLoopState` succeeds. The
+        // subprocess-local fallback (zero values) kicks in only when
+        // the timer is down or the query times out — distinguishable
+        // via `_source`.
         pane: {
-            busy: input.paneBusy,
-            ready: input.paneReady,
-            compacting: input.paneCompacting,
-            resuming: false,
-            interrupted: input.paneInterrupted,
-            _from_subprocess: true,
+            busy: live?.paneBusy ?? input.paneBusy,
+            ready: live?.paneReady ?? input.paneReady,
+            compacting: live?.paneCompacting ?? input.paneCompacting,
+            resuming: live?.paneResuming ?? false,
+            interrupted: live?.paneInterrupted ?? input.paneInterrupted,
+            _source: live !== null ? "live" : "fallback",
         },
         afk: {
-            mode: input.afkMode,
-            expiry_ms: input.afkExpiryMs,
-            expiry_iso: input.afkExpiryMs !== null ? new Date(input.afkExpiryMs).toISOString() : null,
+            mode: live?.afkMode ?? input.afkMode,
+            expiry_ms: live?.afkExpiryMs ?? input.afkExpiryMs,
+            expiry_iso: (live?.afkExpiryMs ?? input.afkExpiryMs) !== null
+                ? new Date((live?.afkExpiryMs ?? input.afkExpiryMs) as number).toISOString()
+                : null,
         },
         wake: {
             in_flight_at_ms: input.wakeInFlightAtMs,

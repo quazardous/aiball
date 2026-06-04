@@ -1855,7 +1855,7 @@ export function createLoopServer(
     sockPath: string,
     handlers: { onProxyEvent: (event: Record<string, unknown>) => void },
 ): LoopServer {
-    const server: EventServer = listenEvents(sockPath, (ev) => {
+    const server: EventServer = listenEvents(sockPath, (ev, { reply }) => {
         if (ev.kind === "proxyEvent") {
             // Legacy event shape is wrapped as
             // `{kind:"proxyEvent", data:{event:"...", kind:"...", ...}}`
@@ -1878,6 +1878,33 @@ export function createLoopServer(
                 ? (ev.data as { text: string }).text
                 : null;
             if (text) server.broadcast({ kind: "inject", data: { text } });
+            return;
+        }
+        if (ev.kind === "queryLoopState") {
+            // #774 — subprocess (cli inspect) asks for a live `ipcState`
+            // snapshot. Reply rides the `request/reply` correlation : the
+            // client's `__req` id must be echoed in `data` for the channel
+            // to route the response back to the awaiting promise. Pull
+            // through every field the inspect dump cares about.
+            const reqId = (ev.data as { __req?: string } | null | undefined)?.__req;
+            const ipc = getIpcState();
+            reply({
+                kind: "queryLoopStateReply",
+                data: {
+                    __req: reqId,
+                    paneBusy: ipc.paneBusy ?? false,
+                    paneReady: ipc.paneReady ?? false,
+                    paneCompacting: ipc.paneCompacting ?? false,
+                    paneResuming: ipc.paneResuming ?? false,
+                    paneInterrupted: ipc.paneInterrupted ?? false,
+                    afkMode: ipc.afkMode,
+                    afkExpiryMs: ipc.afkExpiryMs,
+                    humanTypingAtMs: ipc.humanTypingAtMs,
+                    idleSinceMs: ipc.idleSinceMs,
+                    bootComplete: ipc.bootComplete,
+                    busyDeferUntilMs: ipc.busyDeferUntilMs,
+                },
+            });
             return;
         }
         // Unknown kinds dropped silently — forward-compat.
