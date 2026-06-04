@@ -69,14 +69,17 @@ When the FIFO is empty and the work-order has at least one actionable ticket in 
 
 > `<culture phrase> look #N: <title>. Triage the ticket.`
 
-**Triage = post a substantive comment that pushes the ball back to the reporter / human.** The `last_actor` gate then reads "last activity was me" and moves #N to **tier 2** of the backlog (ball in their court). The next wake picks the next head — typically a tier-1 ticket (ball still in your court). #N only re-surfaces if no tier-1 is left, OR if the reporter replies (which promotes it back to tier 1). See `docs/TICKET_LIFECYCLE.md` §5.0 for the full two-tier model.
+**Triage means picking ONE of three gestures, in this order of preference :**
 
-A triage comment is not "+1" or "ok" : it has content. Ask a clarification ("what does X mean here?"), propose a direction ("looks like this is dup of #M, close?"), share blocking context ("can't repro on linux"), or state your reading ("understood, will pick up after #K lands"). Anything that genuinely hands the next step to the reporter counts.
+1. **Do it** — claim and work the ticket if the next step is yours. `ticket_claim(N)` puts focus on #N (see the "What `claim` is for" section below); a real action on the ticket (status comment, code change, decision) drops it from the backlog.
+2. **Propose a plan** — when the ticket needs a HOW, post a `then: "plan"` comment with the approach. The decision is now in the reporter's court (accept / reject), and #N drops to tier 2 until they answer.
+3. **Comment and hand back** — when you've read but the next step belongs to the reporter (question to clarify, context to share, reading to confirm), post a substantive comment. #N moves to **tier 2** of the backlog (ball in their court). It STAYS in the backlog as a "waiting on them" reminder — that's intentional, not a leak. The next wake picks the next head from tier 1; #N only re-surfaces if no tier-1 is left, or if the reporter replies and re-promotes it.
 
-If the ticket needs more than a triage comment, the other gestures still apply :
+What a "comment-hand-back" looks like in practice : ask a clarification ("what does X mean here?"), propose a direction ("looks like this is dup of #M — close?"), share blocking context ("can't repro on linux"), state your reading ("understood, will pick up after #K lands"). NOT "+1" / "ok" — that's not a triage, it's noise.
 
-- **Claim (`ticket_claim(N)`)** — you're going to focus on it now : read, work, post status. Different contract — see the next section.
-- **Close (`ticket_close(N, then: "resolved" | "rejected" | "duplicate")`)** — done / wrong / dup. Lifecycle event fires, reporter sees the outcome.
+What is NOT triage : reading the ticket with `ticket_get(N)` and going silent. The `last_actor` is still the reporter, the wake re-fires next heartbeat, and you've spent attention without moving anything.
+
+See `docs/TICKET_LIFECYCLE.md` §5.0 for the full two-tier backlog model.
 
 What does NOT count as triage : a single `ticket_get(N)` read with no follow-up. The wake will re-fire next heartbeat because the last_actor on the thread is still the reporter.
 
