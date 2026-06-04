@@ -55,7 +55,7 @@ import {
     listTicketSubscriptionsForTicket,
     getConsumer,
 } from "../db.js";
-import { computeActionableTicketIds, lastActorExclusions, backlogCooldownExclusions } from "../db/projects.js";
+import { computeActionableTicketIds, lastActorExclusions, backlogCooldownExclusions, decisionGateByTicket } from "../db/projects.js";
 import { listSubscriptions } from "../db/subscriptions.js";
 import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
@@ -962,9 +962,18 @@ ticketsRouter.get("/tickets", (req, res) => {
         const cooled = cooldownSec > 0
             ? backlogCooldownExclusions(consumerId, cooldownSec)
             : null;
+        // #790 — tier 2 (lastActor=me) must ALSO exclude tickets with a
+        // pending decision (resolution or plan proposal awaiting validation).
+        // The actionable filter already drops those (decisionGate is folded
+        // into computeActionableTicketIds), but lastActorExclusions is just
+        // a last_actor lookup — a ticket where I posted then:resolved
+        // matches both "I'm last actor" AND "pending decision", and the
+        // pending one wins (the ball is with the reporter for accept/reject,
+        // not in my backlog).
+        const decisionGated = decisionGateByTicket();
         result = result.filter((t) =>
             !t.closed && (includePostponed || !t.postponed)
-            && (actionableIds.has(t.id) || lastByMe.has(t.id))
+            && (actionableIds.has(t.id) || (lastByMe.has(t.id) && !decisionGated.get(t.id)))
             && (cooled === null || !cooled.has(t.id)),
         );
     }
