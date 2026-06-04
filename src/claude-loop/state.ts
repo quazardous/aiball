@@ -1911,14 +1911,23 @@ export async function injectWakePhrase(
                 if (await injectViaWinPipe(pipe, phrase)) return;
             }
         } else {
-            // #730 step 3 — wake injection rides the shared loop.sock
-            // as a `{kind:"inject"}` ws frame. The timer's server
-            // rebroadcasts to the proxy which writes the bytes to its
-            // PTY. Two frames (phrase, then `\r`) with a 200ms gap so
-            // the TUI processes the phrase before Enter, same dance as
-            // the legacy raw inject.sock path.
+            // Unix wake injection rides the shared loop.sock as a
+            // `{kind:"inject"}` ws frame. The timer's server rebroadcasts
+            // to the proxy which writes the bytes to its PTY. Two frames
+            // (phrase, then `\r`) with a 200ms gap.
             const sock = loopSockPath(sd);
-            if (existsSync(sock) && await injectViaLoopSocket(sock, phrase)) return;
+            if (existsSync(sock)) {
+                const r = await injectViaLoopSocket(sock, phrase);
+                if (r.submitted) return;
+                if (r.phraseSent) {
+                    // Phrase made it to the PTY but the Enter frame failed.
+                    // DO NOT re-send the phrase via tmux — that double-types.
+                    // Submit with a stand-alone Enter and return.
+                    spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" });
+                    return;
+                }
+                // Phrase never made it — fall through to tmux paste.
+            }
         }
     }
     const bufName = `wake_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
@@ -2077,22 +2086,21 @@ function injectViaWinPipe(pipePath: string, phrase: string): Promise<boolean> {
  * bytes straight to claude's PTY. Resolves `false` on any failure so
  * the caller falls back to the tmux paste/send-keys path.
  */
-async function injectViaLoopSocket(sockPath: string, phrase: string): Promise<boolean> {
-    const r1 = await sendEventOnce(sockPath, { kind: "inject", data: { text: phrase } }, { timeoutMs: 2000 });
-    // sendEventOnce resolves `undefined` on failure (connect error / timeout).
-    // It also resolves `undefined` on success when we don't await a reply —
-    // we treat that as success here. To distinguish, the only failure path
-    // matters in practice: if the SECOND send doesn't reach the proxy the
-    // wake never submits. Errors surface as the second sendEventOnce
-    // timing out → we report false and let the caller fall back.
-    void r1;
+async function injectViaLoopSocket(sockPath: string, phrase: string): Promise<{ phraseSent: boolean; submitted: boolean }> {
+    let phraseSent = false;
+    try {
+        await sendEventOnce(sockPath, { kind: "inject", data: { text: phrase } }, { timeoutMs: 2000, throwOnError: true });
+        phraseSent = true;
+    } catch {
+        return { phraseSent: false, submitted: false };
+    }
     await new Promise<void>((r) => setTimeout(r, 200));
     try {
         await sendEventOnce(sockPath, { kind: "inject", data: { text: "\r" } }, { timeoutMs: 2000, throwOnError: true });
     } catch {
-        return false;
+        return { phraseSent, submitted: false };
     }
-    return true;
+    return { phraseSent, submitted: true };
 }
 
 /**
