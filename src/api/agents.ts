@@ -29,7 +29,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { MUX_CMD, tmuxName } from "../claude-loop/state.js";
+import { MUX_CMD, tmuxName, toggleAfk, readAfkState, armAfk10m, setAfkInfinite, clearAfk } from "../claude-loop/state.js";
 import { captureCursor } from "../pane.js";
 import { getConsumer } from "../db.js";
 import {
@@ -432,5 +432,73 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
                 detail: stderr.trim() || null,
             });
         }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// AFK toggle (#747) — direct AFK state-machine mutation from the web UI.
+// Mobile / touch clients have no F9 ; the TerminalView toolbar posts here
+// instead. Writes the `<sd>/afk` file directly ; claude-loop's heartbeat
+// picks the change within ~1s via `readAfkState` and `afk-service-sync`.
+//
+// Body : { action: "toggle" | "off" | "arm_10m" | "arm_inf", durationSec? }
+//   - "toggle"    : same 3-state cycle as physical F9 (off → 10m → inf → off)
+//   - "off"       : explicit clearAfk
+//   - "arm_10m"   : explicit armAfk10m(durationSec ?? 600)
+//   - "arm_inf"   : explicit setAfkInfinite
+//
+// Local-process only : the daemon writes the file ; no node-relayed
+// pathway for now (node-relayed AFK is a follow-up if needed).
+// ---------------------------------------------------------------------------
+agentsRouter.post("/agents/:name/afk", (req: Request, res: Response) => {
+    const rawName = req.params.name;
+    const consumerId = typeof rawName === "string" ? rawName : "";
+    if (!consumerId || consumerId.length > MAX_NAME_LEN || !/^[A-Za-z0-9._-]+$/.test(consumerId)) {
+        return res.status(400).json({ error: "bad consumer id" });
+    }
+    const body = (req.body ?? {}) as { action?: unknown; durationSec?: unknown };
+    const action = body.action;
+    if (action !== "toggle" && action !== "off" && action !== "arm_10m" && action !== "arm_inf") {
+        return res.status(400).json({
+            error: "action must be one of toggle / off / arm_10m / arm_inf",
+        });
+    }
+    const durationSec = typeof body.durationSec === "number" && Number.isFinite(body.durationSec)
+        ? Math.max(1, Math.floor(body.durationSec))
+        : undefined;
+    const consumer = getConsumer(consumerId);
+    if (!consumer || !consumer.cwd) {
+        return res.status(404).json({ error: `consumer not found / no cwd : ${consumerId}` });
+    }
+    if (consumer.last_seen_via === "node") {
+        return res.status(501).json({
+            error: "AFK toggle over node-relayed pane is not implemented yet",
+        });
+    }
+    const loopName = resolveLoopName(consumer.cwd);
+    if (!loopName) {
+        return res.status(404).json({ error: `no claude-loop dir matches cwd ${consumer.cwd}` });
+    }
+    const stateRoot = process.env.CLAUDE_LOOP_STATE_ROOT
+        ?? join(homedir(), ".claude-loop");
+    const sd = join(stateRoot, loopName);
+    if (!existsSync(sd)) {
+        return res.status(404).json({ error: `loop state dir missing : ${sd}` });
+    }
+    try {
+        if (action === "toggle") toggleAfk(sd, durationSec ?? 600);
+        else if (action === "off") clearAfk(sd);
+        else if (action === "arm_10m") armAfk10m(sd, durationSec ?? 600);
+        else if (action === "arm_inf") setAfkInfinite(sd);
+    } catch (e) {
+        return res.status(500).json({ error: `afk mutation failed : ${(e as Error).message}` });
+    }
+    // Echo back the resulting state so the caller doesn't have to poll.
+    const after = readAfkState(sd);
+    res.json({
+        consumer_id: consumerId,
+        loop: loopName,
+        mode: after.mode,
+        expiry_ms: after.expiryMs,
     });
 });

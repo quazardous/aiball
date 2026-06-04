@@ -194,6 +194,30 @@ async function postKeys(data: string) {
     }
 }
 
+// #747 — AFK toggle on the loop, bypassing the keystroke layer (F9
+// inaccessible on touch / mobile). POSTs to the daemon's dedicated
+// endpoint which writes <sd>/afk directly ; claude-loop picks it up
+// via heartbeat within ~1s.
+async function toggleAfkRemote() {
+    try {
+        const token = localStorage.getItem("aiball.token");
+        const headers: Record<string, string> = { "content-type": "application/json" };
+        if (token) headers.authorization = `Bearer ${token}`;
+        const res = await fetch(
+            `/api/agents/${encodeURIComponent(props.agentName)}/afk`,
+            { method: "POST", headers, body: JSON.stringify({ action: "toggle" }) },
+        );
+        if (!res.ok) {
+            const text = await res.text();
+            sendError.value = `afk ${res.status} : ${text}`;
+        } else {
+            sendError.value = null;
+        }
+    } catch (e) {
+        sendError.value = (e as Error).message;
+    }
+}
+
 function toggleReadWrite() {
     if (isReadWrite.value) {
         // Disabling : no confirm — going BACK to safe (read-only) is fine.
@@ -448,6 +472,21 @@ onBeforeUnmount(() => {
                     ? 'Read-write mode active — your keys reach the agent tmux pane. Click to lock back.'
                     : 'Read-only mode — click to unlock typing (confirm prompt)'"
                 @click="toggleReadWrite"
+            />
+            <!-- #747 — AFK toggle (replaces the physical F9 key on mobile / touch
+                 where no F9 exists). Hits the daemon `/api/agents/:name/afk`
+                 endpoint which writes the loop's afk file directly — same
+                 effect as pressing F9 in the pane, but bypassing the
+                 keystroke layer (which is missing on mobile). -->
+            <Button
+                icon="pi pi-pause"
+                label="AFK"
+                size="small"
+                severity="info"
+                :outlined="true"
+                aria-label="Toggle AFK (cycle off → 10m → ∞ → off, same as F9)"
+                title="Toggle AFK : cycle off → NOT AFK 10m → NOT AFK ∞ → off (same as pressing F9 in the pane)"
+                @click="toggleAfkRemote"
             />
             <Button
                 :icon="isFullscreen ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"
