@@ -410,74 +410,6 @@ async function fetchWakeContext(
     }
 }
 
-/**
- * Panic-interrupt path (#B.214). Triggered when an SSE ping arrives
- * with `intent === "panic"`. Unlike `tryWake`, this DOES NOT honor
- * any of the usual gates — busy-defer, capture-pane probe,
- * user-grace, and checkHasWork are all skipped. The human posted
- * a panic ticket precisely because they want claude interrupted
- * mid-turn, however busy claude appears to be.
- *
- * No rate-limit, no humans-only gate — david (#w47f9m):
- * "non (mais c'est pas un mécanisme qui doit etre plebicité)".
- * Moderation already gates message creation; double-gating here
- * would mostly trip legitimate cases. Comments on panic tickets
- * inherit the same path via SSE — there's no comment-level panic
- * because the UI doesn't surface it (david: "dans l'ui j'ai pas
- * le panic pour les commente . donc evoque le en commentaire dans
- * le code mais ticket only").
- *
- * Flow:
- *   1. Fetch the ticket body via the daemon — the SSE payload only
- *      carries ids, but the "complete message" david asked for is
- *      the body itself, formatted for visual urgency on the pane.
- *   2. Send double-Escape — Claude Code's interrupt-this-turn chord.
- *   3. Wait ~500ms for the prompt to repaint.
- *   4. Paste the wrapped body via a tmux paste-buffer (preserves
- *      newlines without the per-line Enter that `send-keys` would
- *      otherwise submit-on-first-newline). Fallback: single-line
- *      `send-keys` if `set-buffer` errored.
- *   5. Send Enter to submit.
- */
-async function tryPanic(reason: string, hint: WakeHint): Promise<boolean> {
-    if (!hint.ticket_id) {
-        log(`skip panic (${reason}) — no ticket_id in hint`);
-        return false;
-    }
-    let title = "";
-    let body = "";
-    let author = "(unknown)";
-    try {
-        const resp = await client().getTicket(hint.ticket_id, { summary: false }) as {
-            ticket?: { title?: string | null; body?: string | null; by_agent?: string | null };
-        };
-        title = resp?.ticket?.title ?? "";
-        body = resp?.ticket?.body ?? "";
-        author = resp?.ticket?.by_agent ?? "(unknown)";
-    } catch (e) {
-        const m = e instanceof Error ? e.message : String(e);
-        log(`panic (${reason}) — getTicket failed: ${m} — interrupting with ref only`);
-    }
-    const MAX_BODY = 4000;
-    const trunc = body.length > MAX_BODY ? body.slice(0, MAX_BODY) + "…[truncated]" : body;
-    const msg = `PANIC: ${author} interrupted you on ticket #${hint.ticket_id} "${title}"\n\n${trunc}\n\nPoll #${hint.ticket_id} for the full thread.`;
-    spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Escape", "Escape"], { stdio: "ignore" });
-    await sleep(500);
-    const bufName = `panic_${Date.now()}`;
-    const setBuf = spawnSync(MUX_CMD, ["set-buffer", "-b", bufName, msg], { stdio: "ignore" });
-    if (setBuf.status === 0) {
-        spawnSync(MUX_CMD, ["paste-buffer", "-b", bufName, "-d", "-t", `${tname}.0`], { stdio: "ignore" });
-    } else {
-        const oneLine = msg.replace(/\n+/g, " ");
-        spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, oneLine], { stdio: "ignore" });
-    }
-    await sleep(200);
-    spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
-    setTmuxStatus(name!, LOOP_STATUS.BUSY);
-    log(`panic (${reason}) → interrupted + injected body (${msg.length} chars) for ticket #${hint.ticket_id} by ${author}`);
-    return true;
-}
-
 // #264: timestamp of the loop's last send-keys, so the human-typing
 // detector can exclude the loop's own injected text from "a human typed".
 /** #624 david `62ys4g` + #629 `44ca88` + #611 `78seq9` — capture the pane
@@ -540,12 +472,20 @@ function refreshPaneMarkers(): void {
 }
 
 let lastSendAt = 0;
-async function sendKeys(phrase: string, headMessageId?: number | null): Promise<void> {
+async function sendKeys(phrase: string, headMessageId?: number | null, interruptFirst = false): Promise<void> {
     // Touch wake-in-flight BEFORE the actual send-keys so the
     // UserPromptSubmit hook can flag from_auto_wake=true (the marker
     // only flags the auto-wake, it's NOT a gate anymore — the post-wake
     // tempo via busy-defer is what spaces out wakes).
     lastSendAt = Date.now();
+    // Panic wakes interrupt claude mid-turn so the injected phrase
+    // actually reaches the prompt instead of queueing behind the
+    // current generation. Two Escapes mirror the user's own "abort"
+    // chord; a single Escape is sometimes consumed by claude's TUI.
+    if (interruptFirst) {
+        spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Escape", "Escape"], { stdio: "ignore" });
+        await sleep(500);
+    }
     await injectWakePhrase(`${tname}.0`, phrase, () => {
         try {
             writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n");
@@ -658,17 +598,22 @@ function client(): AiballClient {
 // phrases. Only the first wake proceeds; the Stop hook / next
 // heartbeat picks up what's still unread post-turn.
 let tryWakeInFlight: Promise<boolean> | null = null;
-async function tryWake(reason: string, manualWake = false, hint?: WakeHint): Promise<boolean> {
+async function tryWake(reason: string, manualWake = false, hint?: WakeHint, panicMode = false): Promise<boolean> {
     if (tryWakeInFlight) {
         log(`skip wake (${reason}) — coalesce: another wake in flight`);
         return false;
     }
-    tryWakeInFlight = tryWakeInner(reason, manualWake, hint).finally(() => {
+    tryWakeInFlight = tryWakeInner(reason, manualWake, hint, panicMode).finally(() => {
         tryWakeInFlight = null;
     });
     return tryWakeInFlight;
 }
-async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint): Promise<boolean> {
+// A panic wake bypasses ONLY the busy gates (busy-defer, pane shows
+// "esc to interrupt", pane shows /compact). AFK / zen / idle-marker
+// still apply — if the loop is told to shut up, panic respects that;
+// if claude was never seen idle the wake would be lost anyway.
+const PANIC_BYPASSABLE_REASONS = /busy-defer|esc to interrupt|\/compact/;
+async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint, panicMode = false): Promise<boolean> {
     // #749 david — `--zen` kill switch. Presence of `zen` marker mutes ALL
     // wake injections (including manualWake, including afk-cleared-drain).
     // Highest-priority gate — runs before every other check. Toggle via
@@ -699,8 +644,13 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         refreshPaneMarkers();
         const view = computeLoopView(readLoopStateInput(sd!));
         if (!view.wakeAllowed) {
-            log(`skip wake (${reason}) — ${view.wakeSkipReason}`);
-            return false;
+            const skipReason = view.wakeSkipReason ?? "";
+            if (panicMode && PANIC_BYPASSABLE_REASONS.test(skipReason)) {
+                log(`panic (${reason}) — bypassing busy gate (${skipReason})`);
+            } else {
+                log(`skip wake (${reason}) — ${skipReason}`);
+                return false;
+            }
         }
     }
     let gateOpenCount = 0;
@@ -762,7 +712,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
     const { phrase, headMessageId } = await pickPhrase(hint);
-    await sendKeys(phrase, headMessageId);
+    await sendKeys(phrase, headMessageId, panicMode);
     // Landscape hash watermark — same set doesn't re-fire the actionable
     // leg (set-aware dedup, replaces the count watermark). Fall back to
     // the count watermark when the daemon supplied no hash; manual /
@@ -812,17 +762,12 @@ async function mainSse(): Promise<void> {
         else log(`SSE control ignored (unknown action): ${JSON.stringify(c)}`);
     });
     wakeBus.on("ping", (p) => {
-        // #B.214: panic intent → interrupt-this-turn path, bypasses every
-        // gate. Routed FIRST so the dup-hint coalesce below doesn't
-        // swallow a panic that happens to share a (ticket, comment) tuple
-        // with a recent normal wake. Rate-limit lives inside tryPanic
-        // itself (1/min floor).
-        if (p.intent === "panic") {
-            log(`SSE ping received: ${JSON.stringify(p)} → tryPanic`);
-            void tryPanic("sse:ping:panic", p);
+        const panic = p.intent === "panic";
+        log(`SSE ping received: ${JSON.stringify(p)} → tryWake${panic ? " (panic)" : ""}`);
+        if (panic) {
+            void tryWake("sse:ping:panic", false, p, true);
             return;
         }
-        log(`SSE ping received: ${JSON.stringify(p)} → tryWake`);
         // #B.198 : pass the SSE payload as a hint so the wake phrase
         // names the concrete artifact (`Poll ticket #X — new comment #Y.`)
         // instead of a random pop-culture line.
