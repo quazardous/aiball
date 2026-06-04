@@ -113,7 +113,7 @@ import {
     setIpcResumeModePicker,
     setIpcResumeSessionPicker,
 } from "./ipc-state.js";
-import { computeLoopView, isInputHot, LoopStateBus } from "./loop-state.js";
+import { computeLoopView, isAfkActive, isInputHot, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
 import { CL_ENV } from "./env-vars.js";
@@ -1114,6 +1114,15 @@ async function mainSse(): Promise<void> {
             unsubInputHot = loopBus.on("inputHot", (next) => {
                 if (next === false) {
                     cleanup();
+                    // #749 david — re-check AFK at fire time : the user may
+                    // have re-armed it between afkCleared and now (e.g. a
+                    // keystroke in the input-hot window). Don't fire over
+                    // a NOT AFK hold the user actively wants.
+                    const at = readLoopStateInput(sd!);
+                    if (isAfkActive(at)) {
+                        log("state-bus: input-hot expired post-afkCleared but AFK was re-armed — skipping deferred wake");
+                        return;
+                    }
                     log("state-bus: input-hot expired post-afkCleared — firing deferred wake");
                     void tryWake("afk-cleared-drain (input-hot expired)");
                 }
@@ -1124,6 +1133,14 @@ async function mainSse(): Promise<void> {
                 log("state-bus: AFK re-armed before input-hot expired, cancelling deferred wake");
                 cleanup();
             });
+            return;
+        }
+        // #749 david — same sanity re-check on the immediate path : between
+        // the bus emit and our handler running, the user may have re-typed
+        // and re-armed AFK. Don't fire while the bar shows NOT AFK.
+        const afterEmit = readLoopStateInput(sd!);
+        if (isAfkActive(afterEmit)) {
+            log("state-bus: afkCleared but AFK was re-armed before tryWake — skipping");
             return;
         }
         void tryWake("afk-cleared-drain");
