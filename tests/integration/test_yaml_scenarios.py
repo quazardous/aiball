@@ -111,6 +111,16 @@ def test_yaml_scenario(scenario: Scenario, loop_runner):
                 continue
             if actual != expected:
                 failures.append(f"  - {path}: expected {expected!r}, got {actual!r}")
+        for path, should_exist in step.existence.items():
+            try:
+                get_inspect_path(state, path)
+                exists = True
+            except KeyError:
+                exists = False
+            if exists is not should_exist:
+                want = "present" if should_exist else "absent"
+                got = "present" if exists else "absent"
+                failures.append(f"  - {path}: expected {want}, got {got}")
         if failures:
             pytest.fail(
                 f"{scenario.path} expect@t={step.at_seconds}s :\n" + "\n".join(failures)

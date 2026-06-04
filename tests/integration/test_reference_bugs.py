@@ -83,13 +83,6 @@ def test_647_session_picker_visible_when_rendered(loop_runner):
     )
 
 
-def test_inspect_returns_complete_snapshot(loop_runner):
-    """The inspect JSON has the documented top-level sections — when
-    a future change accidentally drops one, tests asserting on
-    `state["pane"]["..."]` would fail with KeyError instead of a
-    clean diagnostic. This test makes the wiring contract explicit."""
-    handle = loop_runner(scenario="prompt-ready")
-    state = handle.inspect()
-    expected_sections = {"name", "view", "boot", "pane", "afk", "user_grace", "wake", "typing", "markers", "runtime"}
-    missing = expected_sections - set(state)
-    assert not missing, f"inspect snapshot missing sections: {missing} ; got keys: {sorted(state)}"
+# #760 — `test_inspect_returns_complete_snapshot` moved to
+# `scenarios/inspect-snapshot.yaml` (now that the yaml runner supports
+# value-less presence checks via `present:`/`exists:`).

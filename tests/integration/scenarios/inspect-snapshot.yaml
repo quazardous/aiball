@@ -1,0 +1,23 @@
+# #760 — yaml port of the former test_inspect_returns_complete_snapshot.
+# Locks the inspect() snapshot contract : if a future change drops one of
+# the top-level sections, dependent tests crash with KeyError instead of
+# a clean diagnostic. Two forms exercise the new value-less assertion
+# support (`present`/`exists`) added in #760.
+scenario: inspect-snapshot-sections
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at_seconds: 2
+    expect:
+      # Per-key form — explicit, reads well alongside equality checks.
+      name: { present: true }
+      view: { present: true }
+      boot: { present: true }
+      pane: { present: true }
+      # Batch form — same semantics, terser when several siblings all
+      # need a presence check.
+      exists:
+        - afk
+        - wake
+        - typing
+        - markers
+        - runtime

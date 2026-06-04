@@ -67,10 +67,16 @@ class DriveStep:
 @dataclass(frozen=True)
 class ExpectStep:
     """The `expect` step. `at_seconds` is the wall-clock offset.
-    `assertions` is a dict mapping inspect-JSON-path → expected value.
+
+    Two assertion families coexist on the same step :
+      - `assertions` : dotted-path → expected value (equality check).
+      - `existence`  : dotted-path → bool. True = path MUST exist (any
+        value), False = path must NOT exist. Used for value-less presence
+        checks (`pane: { present: true }` or top-level `exists: [...]`).
     Path syntax is dotted : `pane.compacting`, `view.bar_word`."""
     at_seconds: float
     assertions: dict
+    existence: dict = field(default_factory=dict)
 
 
 Step = SpawnStep | DriveStep | ExpectStep
@@ -161,7 +167,32 @@ def _parse_step(path: Path, idx: int, raw: dict) -> Step:
         expect = raw["expect"]
         if not isinstance(expect, dict) or not expect:
             raise ScenarioError(f"{path} step[{idx}].expect: must be a non-empty mapping")
-        return ExpectStep(at_seconds=float(at), assertions=dict(expect))
+        # Split equality assertions from existence assertions :
+        #  - `key: {present: bool}` → existence[key] = bool
+        #  - top-level `exists: [path, ...]` → each entry → existence[entry] = True
+        #  - everything else → equality assertion (value-compared)
+        assertions: dict = {}
+        existence: dict = {}
+        for k, v in expect.items():
+            if k == "exists":
+                if not isinstance(v, list) or not all(isinstance(item, str) for item in v):
+                    raise ScenarioError(
+                        f"{path} step[{idx}].expect.exists: must be a list of dotted-path strings, got {v!r}"
+                    )
+                for entry in v:
+                    existence[entry] = True
+                continue
+            if isinstance(v, dict) and set(v.keys()) == {"present"}:
+                if not isinstance(v["present"], bool):
+                    raise ScenarioError(
+                        f"{path} step[{idx}].expect.{k}.present: must be a bool, got {type(v['present']).__name__}"
+                    )
+                existence[k] = v["present"]
+                continue
+            assertions[k] = v
+        if not assertions and not existence:
+            raise ScenarioError(f"{path} step[{idx}].expect: must declare at least one assertion")
+        return ExpectStep(at_seconds=float(at), assertions=assertions, existence=existence)
     raise ScenarioError(
         f"{path} step[{idx}]: must declare one of 'spawn' / 'drive' / 'expect' "
         f"(got keys: {sorted(keys)})"
@@ -172,11 +203,24 @@ def load_scenarios_from_dir(dir_path: Path) -> list[Scenario]:
     """Convenience for the pytest runner : load every `*.yaml` under
     `dir_path`, return the list sorted by scenario name (stable
     ordering across runs). Errors short-circuit — one bad file fails
-    the whole load, with the offending path in the message."""
+    the whole load, with the offending path in the message.
+
+    Files whose top-level mapping declares `unit:` (TS unit-from-yaml
+    runner per #748) instead of `steps:` are silently skipped — they
+    belong to a different runner that shares the same directory."""
     if not dir_path.is_dir():
         raise ScenarioError(f"{dir_path}: not a directory")
     files = sorted(dir_path.glob("*.yaml"))
-    return [parse_scenario(p) for p in files]
+    out: list[Scenario] = []
+    for p in files:
+        try:
+            doc = yaml.safe_load(p.read_text())
+        except yaml.YAMLError as e:
+            raise ScenarioError(f"{p}: invalid YAML: {e}") from e
+        if isinstance(doc, dict) and "unit" in doc and "steps" not in doc:
+            continue
+        out.append(parse_scenario(p))
+    return out
 
 
 def get_inspect_path(snapshot: dict, dotted: str) -> Any:
