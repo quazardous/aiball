@@ -243,8 +243,30 @@ export function registerTicketReadTools(server: McpServer): void {
             // (#B.191). Best-effort : a mark-read failure must not break
             // the read response — the caller already has the data they
             // asked for.
-            try { await client.markTicketRead(ticket_id); }
-            catch { /* best-effort */ }
+            //
+            // #749 david (post-Phase 1) — bound the ack by `upToId` = the
+            // highest message id IN THIS RESPONSE. Events that arrive AFTER
+            // the read snapshot (id > upToId) keep their unseen ping so a
+            // racing comment lands as a fresh wake instead of being
+            // silently flagged as already-consulted.
+            const snapshot = payload as {
+                ticket?: { id?: number };
+                comments?: Array<{ id?: number }>;
+            };
+            const ids: number[] = [];
+            if (typeof snapshot.ticket?.id === "number") ids.push(snapshot.ticket.id);
+            if (Array.isArray(snapshot.comments)) {
+                for (const c of snapshot.comments) {
+                    if (typeof c?.id === "number") ids.push(c.id);
+                }
+            }
+            const upToId = ids.length > 0 ? Math.max(...ids) : undefined;
+            try {
+                await client.markTicketRead(
+                    ticket_id,
+                    upToId !== undefined ? { upToId } : undefined,
+                );
+            } catch { /* best-effort */ }
             return asText(payload);
         },
     );
