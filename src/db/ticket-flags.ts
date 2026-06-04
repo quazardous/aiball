@@ -140,8 +140,14 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
     const last_actor = lastActorRow?.actor ?? null;
     const last_actor_at = lastActorRow?.at ?? null;
 
+    // #791 wahxsj — a ticket explicitly assigned to another agent is
+    // out of MY backlog regardless of last-actor history. The assigned
+    // agent sees it via their own actionable pool; if I'm subscribed I
+    // still get the notifications. The backlog wake is for tickets I
+    // could pick up, not for ones already owned.
+    const assignedToOther = t.assignee != null && t.assignee !== ctx.consumerId;
     let backlog_tier: 0 | 1 | 2 = 0;
-    if (!closed && !postponed) {
+    if (!closed && !postponed && !assignedToOther) {
         if (actionable) {
             // Tier 1 — ball in my court. Actionable already folds in
             // the decision-gate via computeActionableTicketIds, so no

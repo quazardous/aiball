@@ -212,6 +212,36 @@ test("last_actor — null when not in lastActorByTicket", () => {
     assert.equal(flags.last_actor_at, null);
 });
 
+test("tier 0 — ticket assigned to another agent (Q1 #wahxsj)", () => {
+    // Even if I'm the last actor AND the ticket is open, an explicit
+    // assignment to someone else removes it from my backlog. The
+    // assigned agent sees it via their own actionable pool.
+    const flags = computeTicketFlags(
+        buildRow({ assignee: "other-agent" }),
+        buildCtx({
+            actionableIds: new Set([1]),
+            lastActorMeIds: new Set([1]),
+        }),
+    );
+    assert.equal(flags.backlog_tier, 0);
+});
+
+test("tier 1 — ticket assigned to me stays in backlog", () => {
+    const flags = computeTicketFlags(
+        buildRow({ assignee: "me" }),
+        buildCtx({ actionableIds: new Set([1]) }),
+    );
+    assert.equal(flags.backlog_tier, 1);
+});
+
+test("tier 1 — unassigned ticket stays in backlog", () => {
+    const flags = computeTicketFlags(
+        buildRow({ assignee: null }),
+        buildCtx({ actionableIds: new Set([1]) }),
+    );
+    assert.equal(flags.backlog_tier, 1);
+});
+
 test("actionable wins over lastActorMe for tier (impossible state, but checked)", () => {
     // In practice the daemon guarantees these sets are disjoint, but the
     // pure fn doesn't assume it. Tier 1 wins (actionable is the stricter
