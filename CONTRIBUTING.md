@@ -57,24 +57,26 @@ comment is also authoritative — both feed the same agent.
 | `fyi`      | Informational, no action expected                            |
 | `feature`  | Isolated code work — branch + PR per [#319]                  |
 
-Orthogonal to intent, `priority` (#B.222) is the urgency hint:
+Orthogonal to intent, `priority` is the urgency hint:
 `urgent` / `high` / `normal` / `low`. Most tickets are `normal` — pick
 the others deliberately. Priority influences `ticket_list` sort, ping
-ordering, and the work-order returned by `ticket_engage`.
+ordering, and the work-order returned by `ticket_claim`.
 
 ### 1.3 Claim discipline
 
 A ticket can be **assigned** (durable ownership recorded on the row)
 and/or **claimed** (live, recent intent-to-work signal — drops out of
-other agents' actionable pool, see #418).
+other agents' actionable pool).
 
-- **`ticket_engage`** is the canonical work-pick tool. It returns the
-  head of *your* claimable queue and stamps a claim on it in one call.
-  Use it instead of `ticket_list` when you're actually about to do
+- **`ticket_claim`** is the canonical work-pick tool. Zero-arg returns
+  the head of *your* claimable queue and stamps a claim on it in one
+  call. Pass `ticket_id` to self-claim a specific ticket instead. Use
+  it instead of `ticket_list` when you're actually about to do
   something — `ticket_list` is the read-only exploration tool.
 - **`no_claim` consumers** (set per-project via `.aiball.yaml`) get
-  `engaged: null` and just listen — they comment / handoff but never
-  claim. Useful for relay or observer agents.
+  `claimed: null` from zero-arg `ticket_claim` and just listen — they
+  comment / handoff but never auto-claim. Useful for relay or observer
+  agents.
 - **Release the claim** when you're done with the actionable surface
   (PR open and awaiting review, or work shipped). Don't hold a claim
   across long idle waits — it blocks the work-order for everyone else.
@@ -440,7 +442,7 @@ any non-trivial task on aiball:
 2. **This doc** (`docs/CONTRIBUTING.md`) — the practical guide. If a
    convention conflicts with CLAUDE.md, this doc wins (CLAUDE.md is
    getting trimmed to operational ops over time).
-3. **The engaged ticket's thread**, in `brief` mode. The pivot snapshot
+3. **The claimed ticket's thread**, in `brief` mode. The pivot snapshot
    + the latest comment body is enough to resume; older bodies are
    captured in the snapshot by contract (§ 1.5).
 

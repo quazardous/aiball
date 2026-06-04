@@ -355,13 +355,14 @@ overridable per project via the `prompts:` block (slot `gate_<type>`, e.g.
 | `idle-since`      | Stop / SessionStart sleep branch | claude is at prompt since X |
 | `wake-requested`  | `claude-loop wake` | one-shot trigger for the next tick    |
 | `user-took-over`  | UserPromptSubmit hook | last HUMAN submit (user-grace gate)    |
-| `wake-in-flight`  | timer / Stop before send-keys | "this wake is ours" (≤2s) |
+| `wake-in-flight`  | timer / Stop before send-keys | flags the UserPromptSubmit hook so it doesn't treat the next submit as a human prompt (`from_auto_wake=true`). Not a wake-gate anymore. |
 | `human-typing`    | PTY proxy / timer poll | a human is typing now (TTL 5s)        |
-| `inject.sock`     | PTY proxy       | UDS the proxy listens on for wake injection |
 | `proxy-alive`     | PTY proxy       | proxy is really fronting claude (PID-stamped) |
-| `busy-defer-until`| Stop hook       | absolute time the wake-defer gate reopens |
-| `last-wake-at`    | any wake path   | wake-coalesce window                      |
-| `last-wake-hint`  | any wake path   | dedup identical SSE pings                 |
+| `busy-defer-until`| Stop hook + inject site | absolute time the wake-defer gate reopens. Also armed for `WAKE_COALESCE_WINDOW_MS` (default 5s) at every successful inject — the "post-wake tempo" that prevents the next wake from firing too close behind. |
+| `last-wake-at`    | any wake path   | timestamp of the last fired wake (informational) |
+| `last-injected-wake` | inject site  | last phrase actually delivered to the PTY (cross-process dedup ledger) |
+| `kill-on-exit.sh` | cli on start    | bash trap script sourced in the tmux pane wrapper — SIGKILLs timer + proxy when claude exits |
+| `satellites/` | post-#787      | (planned) per-role pid lockfiles for cross-platform orphan sweep |
 | `last-open-wake-count` | wake path  | open-ticket count watermark — fallback    |
 | `last-open-wake-hash`  | wake path  | landscape signature watermark — set-aware dedup |
 | `drained-state`   | timer only      | drained-strategy state `{hash,armedAt,wakeAt,step}` |
