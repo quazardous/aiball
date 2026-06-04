@@ -132,11 +132,16 @@ export function listenEvents(
         // window. This catches half-closed sockets (peer process gone
         // but the OS hasn't sent FIN yet) and surfaces the close on the
         // client side via a fresh socket error — clients reconnect.
-        // Without this a respawned timer keeps a stale client around
-        // until the next emit-on-dead-socket throws, which can take
-        // arbitrary time if the client's send buffer accepts silently.
+        //
+        // #788 — `isAlive` resets on ANY frame the client sends, not just
+        // pong. Some clients are write-only (e.g. the proxy emitter on
+        // pre-`9052280` code that runs without a reader thread → never
+        // auto-pongs). Treating any inbound traffic as proof-of-life
+        // keeps them connected until they go genuinely silent for the
+        // full 30s window, then we terminate as usual.
         let isAlive = true;
         ws.on("pong", () => { isAlive = true; });
+        ws.on("ping", () => { isAlive = true; });
         const pingInterval = setInterval(() => {
             if (!isAlive) {
                 try { ws.terminate(); } catch { /* ignore */ }
@@ -148,6 +153,7 @@ export function listenEvents(
         }, HEARTBEAT_PING_MS);
         ws.on("close", () => clearInterval(pingInterval));
         ws.on("message", (raw: RawData) => {
+            isAlive = true;
             const text = raw.toString();
             let parsed: unknown;
             try { parsed = JSON.parse(text); } catch { return; /* drop malformed */ }
