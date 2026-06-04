@@ -37,6 +37,7 @@ import type { Intent } from "../domain.js";
 import type { DrainedState } from "./drained-strategy.js";
 import { CL_ENV } from "./env-vars.js";
 import { loopConfig } from "./loop-config.js";
+import { stripMarkdown } from "./markdown-strip.js";
 import { canFlipBgFromBoot, computeLoopView, type AfkChunk } from "./loop-state.js";
 import { parseGates, runGates } from "./gates.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
@@ -1595,7 +1596,15 @@ export async function buildContextPhrase(
             }>>,
             project
                 ? (client.unread(project, 1) as Promise<{
-                    messages?: Array<{ id: number; kind?: string; ticket_id?: number | null; title?: string | null }>;
+                    messages?: Array<{
+                        id: number;
+                        kind?: string;
+                        ticket_id?: number | null;
+                        title?: string | null;
+                        hashid?: string | null;
+                        body?: string | null;
+                        intent?: Intent | null;
+                    }>;
                 }>).catch(() => ({ messages: [] }))
                 : Promise.resolve({ messages: [] }),
             // #397: this loop's own consumer row → its micro_prompt, exposed as
@@ -1694,11 +1703,45 @@ export async function buildContextPhrase(
         // variety). All vars are exposed so the yaml `wake_master` is fully
         // overridable per project (#371/#374 wording lives in the template).
         let head = Array.isArray(headRows) ? headRows[0] : undefined;
-        // #749 david `5qrrsd` — when no unread ping but the agent still has
-        // actionable backlog, fetch the top-priority claimable ticket so the
-        // wake names the head with title+id instead of just "[N open]". This
-        // is the "puis ensuite on bascule sur le backlog ticket par prio"
-        // branch — distinct from the unread-event branch above.
+        // #749 david `d4dakz` — when an unread ping drives the wake, render
+        // the head as the wake_phrases.with_comment sentence ("Handle aiball
+        // ticket #X — new comment #HASH."). Reuses `buildWakePhrase` so the
+        // per-intent + body templates configured in `wake_phrases:` apply
+        // verbatim. We need the parent ticket's intent (for the per-intent
+        // template) + title (for the engage-only paths), so we fetch it once
+        // when the head isn't already a ticket root.
+        let wakePhraseHead = "";
+        if (unreadHead && head?.id) {
+            const isTicketRoot = unreadHead.kind === "ticket_created";
+            let ticketIntent: Intent | undefined;
+            let ticketTitle: string | undefined;
+            if (isTicketRoot) {
+                ticketIntent = (unreadHead.intent as Intent | null | undefined) ?? undefined;
+                ticketTitle = unreadHead.title ?? undefined;
+            } else {
+                try {
+                    const t = await client.getTicket(head.id, { summary: true }) as {
+                        ticket?: { title?: string | null; intent?: string | null };
+                    };
+                    const ti = (t.ticket?.intent ?? null) as Intent | null;
+                    ticketIntent = ti ?? undefined;
+                    ticketTitle = t.ticket?.title ?? undefined;
+                } catch { /* best-effort */ }
+            }
+            if (ticketTitle && !head.title) head = { ...head, title: ticketTitle };
+            const hint: WakeHint = {
+                ticket_id: head.id,
+                comment_hashid: !isTicketRoot && typeof unreadHead.hashid === "string"
+                    ? unreadHead.hashid : undefined,
+                intent: ticketIntent,
+                comment_body: !isTicketRoot && typeof unreadHead.body === "string"
+                    ? stripMarkdown(unreadHead.body) : undefined,
+            };
+            wakePhraseHead = buildWakePhrase(hint, pingsAbsPath);
+        }
+        // #749 david `5qrrsd` — when no unread ping but actionable backlog
+        // remains, fall back to the top-priority claimable ticket so the
+        // wake names the head with title+id instead of just "[N open]".
         if (!head && pingCount === 0 && actionableCount > 0) {
             try {
                 const list = await client.listTickets({
@@ -1713,9 +1756,9 @@ export async function buildContextPhrase(
                 }
             } catch { /* fail-open : no head, template drops the engage leg */ }
         }
-        // #749 david `5qrrsd` — when the head is a comment ping (no title in
-        // the unread msg row) OR a backlog row without title, resolve via a
-        // single getTicket so the wake can render "engage #X 'TITLE'".
+        // Backlog fallback head may also be missing its title (older daemons,
+        // or stripped projection). One small getTicket fills it in so the
+        // engage leg can render `#X "TITLE"`.
         if (head?.id && !head.title) {
             try {
                 const t = await client.getTicket(head.id, { summary: true }) as { ticket?: { title?: string | null } };
@@ -1749,8 +1792,9 @@ export async function buildContextPhrase(
         const hasClaimableHead = !!(head?.id);
         // #749 david `5qrrsd` — when no unread ping but actionable backlog
         // remains, we drain by priority head (set `backlog_mode`). When
-        // unread pings drive the wake, we surface the event kind instead.
-        // The two modes are mutually exclusive — pings-first wins.
+        // unread pings drive the wake, `wake_phrase_head` carries the
+        // wake_phrases.with_comment-style sentence ; the two are mutually
+        // exclusive (pings-first wins).
         const backlogMode = (pingCount === 0 && actionableCount > 0 && hasClaimableHead && !blocking)
             ? "1" : "";
         const vars = {
@@ -1769,6 +1813,12 @@ export async function buildContextPhrase(
             // the plain backlog "engage #X 'TITLE'".
             head_kind: head?.kind ?? "",
             backlog_mode: backlogMode,
+            // #749 david `d4dakz` — pre-rendered wake_phrases.with_comment-style
+            // sentence for the unread head (e.g. "Handle aiball ticket #769 —
+            // new comment #d4dakz."). Empty in backlog mode. Lets the
+            // wake_master template drop the "drain X pings" boilerplate and
+            // POP the oldest event by name, mirroring the SSE wake format.
+            wake_phrase_head: wakePhraseHead,
             project_scope: scope,
             // #397: {consumer_prompt} = this consumer's micro-prompt (opt-in;
             // empty → renders to nothing). David puts the placeholder in his
@@ -1780,8 +1830,8 @@ export async function buildContextPhrase(
             "wake_master",
             vars,
             "{culture} {lead}"
-            + "{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}"
-            + "{head_kind:+ first up: {head_kind} on #{head_id}{head_title:+ \"{head_title}\"} — `ticket_claim()` then `ticket_get`.}"
+            + "{wake_phrase_head:+ {wake_phrase_head}}"
+            + "{ping_count:+{wake_phrase_head:+ }({ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`).}"
             + "{backlog_mode:+ engage #{head_id}{head_title:+ \"{head_title}\"} — top of the backlog by priority — via `ticket_claim()`.}"
             + "{open_count:+ [{open_count} open]}",
             tone,
