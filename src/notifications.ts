@@ -106,8 +106,16 @@ export function fanOutPings(msg: Message): void {
             }
         }
 
-        // Project owners always see `default` and `broadcast` events.
+        // Project owners see `default` and `broadcast` events — but a
+        // `no_claim` owner (consumers.can_claim=false OR explicit
+        // `notify_project_broadcasts=false`) drops out of the fan-out
+        // (#752). Mirrors the follower gate below : `no_claim` is now
+        // honoured symmetrically on both axes (#508/#516). The previous
+        // owner-firehose hit accessory relay nodes (graphite/aiball-win)
+        // that legitimately own the project but don't want every event.
         for (const sub of listProjectSubscribers(msg.project, { roles: ["owner"] })) {
+            const c = getConsumer(sub);
+            if (c && !effectiveNotifyProjectBroadcasts(c)) continue;
             recipients.add(sub);
         }
 
