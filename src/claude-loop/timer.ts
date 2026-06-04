@@ -822,14 +822,20 @@ async function mainSse(): Promise<void> {
         // Fire-and-forget : counter sync isn't on the critical path.
         void (async () => {
             try {
+                // #818 y5ggkh : open + backlog scopés au projet du loop ;
+                // events restent cross-project.
+                const backlogQuery: Record<string, string | undefined> = { backlog: "1", limit: "500" };
+                if (loopProject) backlogQuery.project = loopProject;
                 const [pingsR, projectsR, backlogR] = await Promise.allSettled([
                     client().pingsCount() as Promise<{ unread?: number }>,
-                    client().listProjectsDetailed() as Promise<Array<{ open_count?: number }>>,
-                    client().listTickets({ backlog: "1", limit: "500" }) as Promise<unknown[]>,
+                    client().listProjectsDetailed() as Promise<Array<{ name: string; open_count?: number }>>,
+                    client().listTickets(backlogQuery) as Promise<unknown[]>,
                 ]);
                 const events = pingsR.status === "fulfilled" ? (pingsR.value?.unread ?? 0) : null;
                 const open = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
-                    ? projectsR.value.reduce((acc, pr) => acc + (pr.open_count ?? 0), 0)
+                    ? (loopProject
+                        ? (projectsR.value.find((pr) => pr.name === loopProject)?.open_count ?? 0)
+                        : projectsR.value.reduce((acc, pr) => acc + (pr.open_count ?? 0), 0))
                     : null;
                 const backlog = backlogR.status === "fulfilled" && Array.isArray(backlogR.value)
                     ? backlogR.value.length
@@ -1391,14 +1397,21 @@ async function mainSse(): Promise<void> {
         // null (= absent from the bar segment).
         try {
             pushViewIfChanged();
+            // #818 david `y5ggkh` : open + backlog scopés au projet du loop
+            // (le loop est attaché à UN projet via AIBALL_PROJECT), events
+            // restent cross-project (FIFO unread = agent scope, #800).
+            const backlogQuery: Record<string, string | undefined> = { backlog: "1", limit: "500" };
+            if (loopProject) backlogQuery.project = loopProject;
             const [pingsR, projectsR, backlogR] = await Promise.allSettled([
                 client().pingsCount() as Promise<{ unread?: number }>,
-                client().listProjectsDetailed() as Promise<Array<{ open_count?: number }>>,
-                client().listTickets({ backlog: "1", limit: "500" }) as Promise<unknown[]>,
+                client().listProjectsDetailed() as Promise<Array<{ name: string; open_count?: number }>>,
+                client().listTickets(backlogQuery) as Promise<unknown[]>,
             ]);
             const events = pingsR.status === "fulfilled" ? (pingsR.value?.unread ?? 0) : null;
             const open = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
-                ? projectsR.value.reduce((acc, p) => acc + (p.open_count ?? 0), 0)
+                ? (loopProject
+                    ? (projectsR.value.find((p) => p.name === loopProject)?.open_count ?? 0)
+                    : projectsR.value.reduce((acc, p) => acc + (p.open_count ?? 0), 0))
                 : null;
             const backlog = backlogR.status === "fulfilled"
                 ? (Array.isArray(backlogR.value) ? backlogR.value.length : null)
