@@ -1077,9 +1077,12 @@ ticketsRouter.post("/tickets/:id/postpone", (req: Request, res: Response) => {
     const t = getMessage(id);
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
     const caller = consumerOf(req);
-    if (!isHuman(caller) && t.by_agent !== caller) {
+    // #784 david : snooze is a human-only concern (organisational hide-
+    // for-later). An agent should never be aware of "snooze" — even on
+    // its own ticket. Only registered humans can postpone.
+    if (!isHuman(caller)) {
         return res.status(403).json({
-            error: `only the ticket reporter (${t.by_agent}) or a registered human moderator can snooze this ticket`,
+            error: "only a registered human moderator can snooze a ticket",
         });
     }
     const { until } = (req.body ?? {}) as { until?: unknown };
@@ -1106,9 +1109,11 @@ ticketsRouter.post("/tickets/:id/unsnooze", (req: Request, res: Response) => {
     const t = getMessage(id);
     if (!t || t.kind !== "ticket_created") return notFound(res, "ticket not found");
     const caller = consumerOf(req);
-    if (!isHuman(caller) && t.by_agent !== caller) {
+    // #784 david : same human-only rule as /postpone — snooze is a
+    // human-only concern, and unsnooze is its reverse.
+    if (!isHuman(caller)) {
         return res.status(403).json({
-            error: `only the ticket reporter (${t.by_agent}) or a registered human moderator can unsnooze this ticket`,
+            error: "only a registered human moderator can unsnooze a ticket",
         });
     }
     setTicketPostpone(id, null);
