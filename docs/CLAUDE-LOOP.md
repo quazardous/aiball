@@ -373,6 +373,140 @@ The hooks and the timer all read the same `env` file so they share
 `CL_NAME`, `CL_STATE_DIR`, `CL_INTERVAL`, `CL_CHECK_CMD`, `CL_PINGS`,
 `CL_NO_STARTUP_PING`.
 
+### Satellite lifecycle — kill-on-exit, watchdog, orphan sweep
+
+`claude-loop` spawns two background processes per loop alongside the
+foreground `claude` binary: the **timer** (Node, runs the wake gate +
+SSE subscriber) and the **PTY proxy** (Python, fronts claude to intercept
+typing and inject wakes). David's directive (#783): when `claude` exits,
+these satellites must die — leftover timers and proxies bind to the same
+state-dir as the next start and cause divergent behaviour (stale code
+running, stale F9 events, double SSE subscriptions).
+
+Four mechanisms together enforce "no orphan satellites":
+
+1. **Bash trap EXIT in the pane wrapper.** The cli writes
+   `kill-on-exit.sh` under the state-dir at start time and the tmux
+   inner command sources it before launching the proxy/claude chain.
+   When claude exits (Ctrl-D, `/exit`, crash), bash hits the EXIT trap
+   and SIGKILLs `timer.pid` + `proxy-alive`'s pid, then sweeps the
+   transient markers (`wake-in-flight`, `busy-defer-until`,
+   `last-injected-wake`, `last-wake-at`, `human-typing`). The bash
+   process stays alive as the pane parent precisely so the trap can
+   fire — switching the launch from `exec proxy` to plain `proxy` adds
+   one bash process per pane (negligible) but is what lets EXIT
+   actually trigger.
+
+2. **`tmuxAlive` watchdog at 2s in the timer.** The timer's heartbeat
+   already calls `tmuxAlive()` every interval (default 30s); a faster
+   `setInterval(2000)` in `mainSse` collapses an orphan within seconds
+   when the bash trap couldn't run — e.g. `tmux kill-session` blasted
+   the pane outright, the wrapper got `kill -9`, the OS reaped the
+   pane on user logout. The probe runs `tmux has-session -t <name>`,
+   exits via `cleanShutdown` if gone. Cheap (one subprocess every 2s).
+
+3. **SHA-mismatch self-respawn.** Same 2s watchdog reads the
+   install-root SHA from `installRootSha()` and compares it to the
+   plate-recorded boot SHA. On mismatch the timer respawns itself via
+   the existing `selfReloadIfStale` path. This catches cases where
+   tsx-watch held a stale module cache (tryPanic re-firing after the
+   delete commit, observed live on aiball-dev 2026-06-04) — the
+   process restart bypasses any in-memory leftover.
+
+4. **Orphan sweep at `claude-loop start`.** Before spawning a fresh
+   timer/proxy pair, `sweepOrphans(sd)` scans `/proc/*/environ` on
+   Linux for any process whose `CL_STATE_DIR` matches the target
+   state-dir and SIGKILLs them. Defends against orphans accumulated
+   under pre-fix code (seen live: 14 zombie tsx processes from earlier
+   in the day). `cmdReload` and `cmdRestart` invoke the same sweep
+   after killing the named timer pid.
+
+`cmdReload` uses **SIGKILL** for the old timer pid, not the default
+SIGTERM (fix for #780). The timer's SIGTERM handler runs
+`cleanShutdown` which also kills the tmux session — exactly what
+reload-not-restart is supposed to avoid. SIGKILL skips the handler,
+the new timer rebinds `timer.pid` + `loop.sock` cleanly, the watchdog
+on the new process reaps any stale marker on the next 2s tick.
+
+The orphan-sweep code is Linux-only (`/proc` reader). Mac/Windows
+ports tracked as a follow-up — `kill -0` based lockfiles look like
+the right cross-platform path.
+
+### WebSocket heartbeat on `loop.sock`
+
+The timer is the SSOT for the loop's state and owns `loop.sock` (UDS
+WebSocket). Three clients connect to it in steady state: the PTY
+proxy's view-push reader, the PTY proxy's event emitter, and the
+hook subprocesses (Stop, SessionStart, UserPromptSubmit) that POST
+events one-shot per fire. Without a liveness probe a connection can
+linger half-open for arbitrarily long when one side dies — the
+in-kernel TCP stack on UDS won't send FIN until the next write
+fails. Symptoms observed live (#788): F9 worked once per ~30s on
+aiball-dev because the proxy emitter never noticed the server-side
+socket was dead, kept silent-writing into the void until the next
+emit triggered EPIPE.
+
+Server side (`src/claude-loop/ipc-events.ts:listenEvents`):
+- `setInterval(15s)` per connection: marks `isAlive=false`, sends
+  `ws.ping()`. If the next tick finds `isAlive` still false, the
+  server calls `ws.terminate()` and clears the interval.
+- `isAlive` resets on ANY inbound frame — `pong`, `ping`, or
+  `message`. The "any frame" leniency (#788) keeps connections
+  alive for write-only clients (e.g. the legacy `_ProxyEventEmitter`
+  that didn't read pongs); a client actively sending events is
+  demonstrably alive even when its read buffer is empty.
+
+Client side (Python proxy):
+- `_ViewPushClient` runs a recv loop in a background thread. The
+  `websocket-client` lib auto-pongs incoming pings as part of
+  `recv()` processing, so the reader handles liveness for free.
+- `_ProxyEventEmitter` no longer holds its own socket. It calls
+  `_view_push_client.send(payload)` on the shared connection
+  (`9052280`). When the recv loop detects close + reconnects, the
+  emitter's next send goes through the new socket.
+
+Constants live in `src/claude-loop/ipc-events.ts`:
+`HEARTBEAT_PING_MS = 15_000`. A dead client is reaped within 30s
+max (one ping + one tick).
+
+### FIFO mark-seen-at-inject
+
+When a wake fires on a FIFO event (an unread comment / lifecycle /
+ticket-created head), the head's `message_id` is marked seen the
+moment the inject crosses the dedup gate, not at agent-side
+`ticket_get`. David's framing (#749): "un ping envoyé est forcément
+seen" — a delivered wake IS the agent's read of the event, no
+separate ack needed.
+
+Flow:
+1. `buildContextPhrase` (`src/claude-loop/state.ts`) pops the oldest
+   unread row via `client.unread(project, 1)`. The row's `id`
+   (= the `_messages.id` for comments, the `tickets.id` for
+   ticket_created heads) is returned alongside the phrase as
+   `ContextPhraseResult.headMessageId`.
+2. `sendKeys` (`src/claude-loop/timer.ts`) plumbs it into
+   `injectWakePhrase`'s `onWillInject` callback.
+3. `onWillInject` fires ONLY after the dedup gate passes (the wake
+   is actually going out). It calls
+   `client.markMessageSeen(headMessageId)` fire-and-forget — the
+   ping leaves the unread queue immediately, the next wake fetches
+   a different head.
+
+Agent-side `ticket_get(N)` still has a role: it marks ALL the
+ticket's other pending events seen at read time (via the existing
+`markTicketRead` path) using the snapshot `upToId` so events that
+landed AFTER the read aren't accidentally swept. So the head fires
+at inject (one event = one wake), the rest of the thread is pruned
+on consult.
+
+Two consequences:
+- A wake that's dedup-skipped doesn't prune (the `onWillInject`
+  fires only on real inject) — the head stays available for the
+  next attempt.
+- A backlog wake (no FIFO head, fired via `?backlog=1`) sets
+  `headMessageId=null` and records `recordBacklogWake(ticket_id)`
+  instead — that's the cooldown clock for #786.
+
 ### One live loop per (cwd, agent)
 
 Two `claude-loop start` for the **same agent in the same directory** is
