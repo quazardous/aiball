@@ -63,7 +63,17 @@ export interface TicketFlags {
     claimable: boolean;
     is_claim: boolean;
     hot: boolean;
-    backlog_tier: 0 | 1 | 2;
+    /** #791 wahxsj — tier in the backlog, lower number = higher focus:
+     *   - 0 = HOT focus (overrides everything; cross-agent activity within
+     *         the hot window)
+     *   - 1 = actionable (ball in my court; same set the wake-CTA points
+     *         at by default)
+     *   - 2 = waiting on them (I was the last actor, no decision pending)
+     *   - null = not in this consumer's backlog
+     * Sorts naturally with numeric asc (hot first, then actionable, then
+     * waiting); the route filter `?backlog=1` keeps every row whose
+     * `backlog_tier !== null`. */
+    backlog_tier: 0 | 1 | 2 | null;
     backlog_cooled_until: string | null;
     gated_by_decision: boolean;
     last_actor: string | null;
@@ -146,9 +156,20 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
     // still get the notifications. The backlog wake is for tickets I
     // could pick up, not for ones already owned.
     const assignedToOther = t.assignee != null && t.assignee !== ctx.consumerId;
-    let backlog_tier: 0 | 1 | 2 = 0;
+    let backlog_tier: 0 | 1 | 2 | null = null;
     if (!closed && !postponed && !assignedToOther) {
-        if (actionable) {
+        // Hot is the focus tier — a ticket with cross-agent activity
+        // inside the hot window wins over the actionable / waiting set.
+        // david wahxsj: "le hot devrait etre un tiers 0 dans la fifo et
+        // dans le backlog (question de focus)". Still requires the
+        // ticket to be otherwise in the consumer's pool — either
+        // actionable or last-actor-me-and-not-gated — so a hot ticket
+        // that's none of those (e.g. another team's broadcast) doesn't
+        // hijack my backlog.
+        const inPool = actionable || (ctx.lastActorMeIds.has(t.id) && !gated_by_decision);
+        if (hot && inPool) {
+            backlog_tier = 0;
+        } else if (actionable) {
             // Tier 1 — ball in my court. Actionable already folds in
             // the decision-gate via computeActionableTicketIds, so no
             // need to re-check `gated_by_decision` here.
@@ -161,7 +182,7 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
     }
 
     let backlog_cooled_until: string | null = null;
-    if (backlog_tier > 0 && ctx.cooldownSec > 0) {
+    if (backlog_tier !== null && ctx.cooldownSec > 0) {
         const wakeAt = ctx.cooledWakeAt.get(t.id);
         if (wakeAt) {
             const wakeAtMs = Date.parse(wakeAt);

@@ -976,7 +976,7 @@ ticketsRouter.get("/tickets", (req, res) => {
         // in (a) actionable as tier 1, (b) lastActor=me ∩ !decision_gate as
         // tier 2, (c) the #786 cooldown into `backlog_cooled_until`. The
         // route just filters on the result.
-        result = result.filter((t) => t.backlog_tier > 0 && !t.backlog_cooled_until);
+        result = result.filter((t) => t.backlog_tier !== null && !t.backlog_cooled_until);
     }
     if (tagsFilter && tagsFilter.length > 0) {
         const requiredSet = new Set(tagsFilter.map((s) => s.toLowerCase()));
@@ -1023,7 +1023,21 @@ ticketsRouter.get("/tickets", (req, res) => {
             isOwnClaim: (id) => ownClaimIds.has(id), // #430: own live claim sorts above hot
             isAssignedToMe: (id) => assignedToMeIds.has(id), // #436(4): handed to me → below claim, above hot
         };
-        result.sort((a, b) => compareWorkOrder(a, b, ctx));
+        if (onlyBacklog) {
+            // #791 wahxsj (Q2) — when the caller asked for the backlog,
+            // sort by `backlog_tier` first: hot (0) > actionable (1) >
+            // waiting (2). Within each backlog tier, fall back to the
+            // standard work-order tiebreaks (priority desc, claim,
+            // assignment, intra-tier hot, id asc).
+            result.sort((a, b) => {
+                const ta = a.backlog_tier ?? 99;
+                const tb = b.backlog_tier ?? 99;
+                if (ta !== tb) return ta - tb;
+                return compareWorkOrder(a, b, ctx);
+            });
+        } else {
+            result.sort((a, b) => compareWorkOrder(a, b, ctx));
+        }
     }
     if (limit !== undefined) result = result.slice(0, limit);
     res.json(result);

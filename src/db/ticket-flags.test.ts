@@ -53,7 +53,7 @@ test("tier 2 — last actor=me, no decision, ball in their court", () => {
     assert.equal(flags.actionable, false);
 });
 
-test("tier 0 — last actor=me but pending decision", () => {
+test("tier null — last actor=me but pending decision", () => {
     const flags = computeTicketFlags(
         buildRow(),
         buildCtx({
@@ -61,11 +61,11 @@ test("tier 0 — last actor=me but pending decision", () => {
             decisionGated: new Map([[1, true]]),
         }),
     );
-    assert.equal(flags.backlog_tier, 0);
+    assert.equal(flags.backlog_tier, null);
     assert.equal(flags.gated_by_decision, true);
 });
 
-test("tier 0 — closed", () => {
+test("tier null — closed", () => {
     const flags = computeTicketFlags(
         buildRow(),
         buildCtx({
@@ -73,15 +73,15 @@ test("tier 0 — closed", () => {
             closedSet: new Set([1]),
         }),
     );
-    assert.equal(flags.backlog_tier, 0);
+    assert.equal(flags.backlog_tier, null);
 });
 
-test("tier 0 — snoozed (postponed_until in the future)", () => {
+test("tier null — snoozed (postponed_until in the future)", () => {
     const flags = computeTicketFlags(
         buildRow({ postponed_until: new Date(NOW_MS + 86_400_000).toISOString() }),
         buildCtx({ actionableIds: new Set([1]) }),
     );
-    assert.equal(flags.backlog_tier, 0);
+    assert.equal(flags.backlog_tier, null);
 });
 
 test("tier 1 — postponed_until in the past doesn't snooze", () => {
@@ -92,9 +92,9 @@ test("tier 1 — postponed_until in the past doesn't snooze", () => {
     assert.equal(flags.backlog_tier, 1);
 });
 
-test("tier 0 — neither actionable nor last actor=me", () => {
+test("tier null — neither actionable nor last actor=me", () => {
     const flags = computeTicketFlags(buildRow(), buildCtx());
-    assert.equal(flags.backlog_tier, 0);
+    assert.equal(flags.backlog_tier, null);
     assert.equal(flags.actionable, false);
     assert.equal(flags.gated_by_decision, false);
 });
@@ -140,7 +140,7 @@ test("cooldown — null when cooldownSec is 0 (disabled)", () => {
     assert.equal(flags.backlog_cooled_until, null);
 });
 
-test("cooldown — null on tier 0 (no point surfacing if not in backlog)", () => {
+test("cooldown — null on tier null (no point surfacing if not in backlog)", () => {
     const wakeAt = new Date(NOW_MS - 600_000).toISOString();
     const flags = computeTicketFlags(
         buildRow(),
@@ -149,7 +149,7 @@ test("cooldown — null on tier 0 (no point surfacing if not in backlog)", () =>
             cooledWakeAt: new Map([[1, wakeAt]]),
         }),
     );
-    assert.equal(flags.backlog_tier, 0);
+    assert.equal(flags.backlog_tier, null);
     assert.equal(flags.backlog_cooled_until, null);
 });
 
@@ -212,7 +212,7 @@ test("last_actor — null when not in lastActorByTicket", () => {
     assert.equal(flags.last_actor_at, null);
 });
 
-test("tier 0 — ticket assigned to another agent (Q1 #wahxsj)", () => {
+test("tier null — ticket assigned to another agent (Q1 #wahxsj)", () => {
     // Even if I'm the last actor AND the ticket is open, an explicit
     // assignment to someone else removes it from my backlog. The
     // assigned agent sees it via their own actionable pool.
@@ -223,7 +223,44 @@ test("tier 0 — ticket assigned to another agent (Q1 #wahxsj)", () => {
             lastActorMeIds: new Set([1]),
         }),
     );
+    assert.equal(flags.backlog_tier, null);
+});
+
+test("tier 0 hot — actionable + crossAgentHot promotes to focus", () => {
+    // Q2 #wahxsj: hot beats actionable. The pool requirement still
+    // applies — a hot ticket I'm not involved in (someone else's) doesn't
+    // hijack my backlog.
+    const flags = computeTicketFlags(
+        buildRow(),
+        buildCtx({
+            actionableIds: new Set([1]),
+            crossAgentHot: new Set([1]),
+        }),
+    );
     assert.equal(flags.backlog_tier, 0);
+    assert.equal(flags.hot, true);
+});
+
+test("tier 0 hot — waiting-on-them + hot also promotes", () => {
+    const flags = computeTicketFlags(
+        buildRow(),
+        buildCtx({
+            lastActorMeIds: new Set([1]),
+            crossAgentHot: new Set([1]),
+        }),
+    );
+    assert.equal(flags.backlog_tier, 0);
+});
+
+test("tier null — hot alone doesn't hijack if I'm not in the pool", () => {
+    // A hot ticket where I'm neither actionable nor last-actor-me
+    // (e.g. another team's broadcast) stays out of my backlog.
+    const flags = computeTicketFlags(
+        buildRow(),
+        buildCtx({ crossAgentHot: new Set([1]) }),
+    );
+    assert.equal(flags.backlog_tier, null);
+    assert.equal(flags.hot, true);
 });
 
 test("tier 1 — ticket assigned to me stays in backlog", () => {

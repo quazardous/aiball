@@ -257,7 +257,7 @@ boolean checks on the result.
 | `claimable` | bool | `actionable` AND (in a project I own OR explicitly assigned to me on a no-claim consumer). |
 | `is_claim` | bool | I hold a live claim on this ticket (claimant=me, within window). |
 | `hot` | bool | Cross-agent visibility flag — at least one agent has been active on this thread recently. |
-| `backlog_tier` | 0\|1\|2 | 0 = not in this consumer's backlog. 1 = ball in my court (= actionable). 2 = ball in theirs (I was the last actor, no decision pending). |
+| `backlog_tier` | 0\|1\|2\|null | Lower = higher focus. 0 = **hot** (cross-agent activity within the hot window — overrides actionable/waiting); 1 = actionable (ball in my court); 2 = waiting on them (I was the last actor, no decision pending); null = not in my backlog (closed / snoozed / decision-gated / **assigned to another agent**). |
 | `backlog_cooled_until` | string\|null | When the loop just woke on this ticket and the cooldown is still open, the ISO timestamp when the row will resurface. Always null when `cooldown_sec` query param is 0 or unset. |
 | `gated_by_decision` | bool | A `then:plan` or `then:resolved` proposal is sitting unresolved on the thread — the ticket is in awaiting-validation state. |
 | `last_actor` | string\|null | The consumer who last acted on the thread (denormalised). |
