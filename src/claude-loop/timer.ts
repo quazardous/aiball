@@ -710,13 +710,13 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         }
     }
     const { phrase, headMessageId, hasContent } = await pickPhrase(hint);
-    // Drain-style reasons (afk-cleared-drain, boot-ended-drain) fire
-    // tryWake speculatively when the human disarms AFK or boot ends.
-    // If the FIFO + backlog are empty at that moment, the wake would
-    // render the idle culture+lead ("What's up, Doc? quick note:") and
-    // waste a turn on nothing. Skip cleanly.
-    if (!hasContent && !manualWake && !panicMode && reason.includes("drain")) {
-        log(`skip wake (${reason}) — nothing to drain (idle phrase only)`);
+    // If there's nothing actionable to surface (no FIFO head, no backlog,
+    // no triggered gate), don't fire — david: "si y a rien on dit rien".
+    // Manual wakes and panic still go through; their content is the
+    // signal, not the phrase. The bypass for triggered gates lives
+    // inside ContextPhraseResult.hasContent.
+    if (!hasContent && !manualWake && !panicMode) {
+        log(`skip wake (${reason}) — nothing actionable (idle phrase suppressed)`);
         return false;
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
