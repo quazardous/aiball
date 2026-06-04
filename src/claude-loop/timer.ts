@@ -886,6 +886,26 @@ async function mainSse(): Promise<void> {
     // Independent of the wake heartbeat — fast cadence so the chip
     // tracks typing closely. Fail-safe (detectHumanTyping never throws).
     setInterval(detectHumanTyping, HUMAN_POLL_MS);
+    // #783 phase 3 + 5 — fast watchdog at 2s. Two responsibilities:
+    //   - tmux liveness: orphaned timer collapses within seconds of
+    //     pane death (covers the case where the bash trap didn't run —
+    //     pane killed externally, OS reaping on user logout, kill -9 of
+    //     the wrapper). Calls cleanShutdown for the state-dir sweep.
+    //   - SHA mismatch: tsx-watch may hold cached modules even after a
+    //     code change (today's tryPanic-still-firing repro). The
+    //     existing `selfReloadIfStale()` runs only post-heartbeat and
+    //     only when claude is idle; if a stale wake keeps claude busy
+    //     it's never reached. Running the SHA check on the watchdog
+    //     cadence forces a full process respawn within 2s of any
+    //     install-root SHA change, regardless of claude state.
+    const watchdog = setInterval(() => {
+        if (!tmuxAlive()) {
+            clearInterval(watchdog);
+            cleanShutdown("watchdog:tmux-gone");
+            return;
+        }
+        selfReloadIfStale();
+    }, 2000);
 
     // #627 — view-push loop. The timer owns the LoopState rules ;
     // here we watch the state-dir markers and push the recomputed
