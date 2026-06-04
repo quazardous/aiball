@@ -34,6 +34,8 @@ import { getDb } from "./db/connection.js";
 import * as schema from "./schema.js";
 import { eq } from "drizzle-orm";
 import { AIBALL_VERSION, AIBALL_COMMIT } from "./version.js";
+import { upsertNodeProjectConfig, type NodeProjectConfigConsumer } from "./db/node-project-config.js";
+import { upsertConsumer, updateConsumer } from "./db/consumers.js";
 
 /** Path WS dédié au canal node↔upstream (distinct du `/ws` browser). */
 export const PROXY_WS_PATH = "/ws/proxy-node";
@@ -292,6 +294,47 @@ export function attachProxyWs(server: Server): void {
                 conn.node_version = nodeVer;
                 conn.node_commit = nodeCommit;
                 setTokenDisplayHost(token, dh, dhProv);
+            }
+            // #775 — proxy node pushes a per-(node, project) config subset
+            // post-hello (flat shape per aiball-win `tb7mmq`). We persist
+            // the payload in `node_project_config` for audit, then derive
+            // `consumers.can_claim` for each declared agent so the fan-out
+            // gate (#516/#752 B) sees the right value without consulting
+            // the deprecated `x-aiball-no-claim` header.
+            if (frame.kind === "node_project_config_push") {
+                const raw = frame as unknown as Record<string, unknown>;
+                const project = typeof raw.project === "string" ? raw.project : null;
+                const consumersRaw = raw.consumers;
+                if (!project) {
+                    console.warn(`[proxy WS] node_project_config_push from id=${nid}: missing project, dropped`);
+                } else if (!Array.isArray(consumersRaw)) {
+                    console.warn(`[proxy WS] node_project_config_push from id=${nid}: consumers not an array, dropped`);
+                } else {
+                    const consumers: NodeProjectConfigConsumer[] = [];
+                    for (const entry of consumersRaw) {
+                        if (!entry || typeof entry !== "object") continue;
+                        const obj = entry as Record<string, unknown>;
+                        const agent = obj.agent;
+                        if (typeof agent !== "string" || !agent) continue;
+                        const no_claim = obj.no_claim;
+                        consumers.push({
+                            agent,
+                            no_claim: typeof no_claim === "boolean" ? no_claim : undefined,
+                        });
+                    }
+                    upsertNodeProjectConfig(token, project, { consumers });
+                    // Derive `consumers.can_claim` from each entry's `no_claim`.
+                    // upsertConsumer is idempotent — pre-declares the agent
+                    // when papy never saw it before, so updateConsumer can
+                    // flip `can_claim` immediately. Unknown `no_claim`
+                    // leaves the col untouched (no implicit reset).
+                    for (const c of consumers) {
+                        if (c.no_claim === undefined) continue;
+                        upsertConsumer({ consumer_id: c.agent, kind: "agent" });
+                        updateConsumer(c.agent, { can_claim: !c.no_claim });
+                    }
+                    console.log(`[proxy WS] node_project_config_push from id=${nid}: project=${project} consumers=${consumers.length}`);
+                }
             }
             if (typeof frame.request_id === "string") {
                 const handler = responseHandlers.get(frame.request_id);

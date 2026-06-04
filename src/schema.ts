@@ -667,6 +667,26 @@ export const tokens = sqliteTable("tokens", {
 ]);
 
 /**
+ * #775 — per-(node, project) config the proxy node pushes via the WS
+ * reverse channel (frame `node_project_config_push`, post-hello). The
+ * payload is a subset of `.aiball.yaml` (today: `consumers[]` with
+ * `agent` + `no_claim` ; extensible). Stored verbatim as JSON for audit
+ * + forward-compat ; the daemon derives `consumers.can_claim` from it.
+ *
+ * `node_token` = `tokens.token` of the connected node. Two-column PK so
+ * a single node can push configs for multiple projects (Phase 2).
+ */
+export const nodeProjectConfig = sqliteTable("node_project_config", {
+    nodeToken: text("node_token").notNull(),
+    project: text("project").notNull(),
+    configJson: text("config_json").notNull(),
+    updatedAt: text("updated_at").notNull(),
+}, (t) => [
+    primaryKey({ columns: [t.nodeToken, t.project] }),
+    index("idx_npc_token").on(t.nodeToken),
+]);
+
+/**
  * #404 — per-ticket token-effort tally. The claude-loop Stop-hook reads each
  * turn's `usage` from the Claude session transcript and pushes the delta,
  * attributed to the active ticket (last ticket-scoped MCP call). Raw counts

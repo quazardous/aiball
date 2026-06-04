@@ -256,10 +256,23 @@ export function bearerAuth(req: Request, res: Response, next: NextFunction): voi
  * known. Re-applied also on the UDS local-trust path (humans driving a loop
  * over UDS with AIBALL_NO_CLAIM set in their env).
  */
+/** [deprecated #775] — fallback once the proxy node ships `no_claim` via
+ *  the WS `node_project_config_push` frame, papy reads `consumers.can_claim`
+ *  directly and this header becomes dead weight. Kept for UDS direct calls
+ *  + MCP local + tests for 1-2 versions, then dropped. */
+let _noClaimDeprecationWarned = false;
 function readNoClaimHint(req: Request, ar: AuthenticatedRequest): void {
     const v = req.header("x-aiball-no-claim");
     if (typeof v === "string" && (v === "1" || v.toLowerCase() === "true")) {
         ar.no_claim_hint = true;
+        if (!_noClaimDeprecationWarned) {
+            _noClaimDeprecationWarned = true;
+            console.warn(
+                "[auth] x-aiball-no-claim header consumed — DEPRECATED #775 : "
+                + "proxy node should push `no_claim` via the WS `node_project_config_push` "
+                + "frame instead. This header will be removed after 1-2 versions.",
+            );
+        }
     }
 }
 
