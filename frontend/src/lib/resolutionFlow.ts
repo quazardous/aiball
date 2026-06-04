@@ -234,7 +234,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
     // but it's really just a plan, accept it as a plan". When `asKind`
     // is passed AND differs from the original kind, the close side-
     // effect of resolution-accept is suppressed (we want plan ergonomics).
-    async function acceptActiveDecision(asKind?: "plan" | "resolution") {
+    async function acceptActiveDecision(asKind?: "plan" | "resolution" | "wontfix") {
         const active = activeDecision.value;
         if (!active || !data.value) return;
         const tid = data.value.ticket.id;
@@ -248,13 +248,18 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
             // comment. David #B.140: previously both branches fired,
             // duplicating the body (one comment_added + one ticket_closed
             // both carrying the same text). One source of truth per accept.
-            if (composerBody.value.trim() && effectiveKind !== "resolution") {
+            // #817 : wontfix-accept also auto-closes (handled server-side
+            // by the /decide handler, see #802) so we suppress the body
+            // here too (the post-decide refresh re-renders the comment).
+            if (composerBody.value.trim() && effectiveKind !== "resolution" && effectiveKind !== "wontfix") {
                 await postBodyAs("comment_added");
             }
             await api.decide(active.message.id, "accepted", asKind);
             if (effectiveKind === "resolution") {
                 await postBodyAs("ticket_closed");
             }
+            // wontfix : the server-side /decide handler auto-posts the
+            // ticket_closed (per #802), no extra round-trip needed here.
             composerBody.value = "";
             broadcastRefresh(tid);
         } catch (e) {
@@ -264,7 +269,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
         }
     }
 
-    async function reclassifyActiveDecision(newKind: "plan" | "resolution") {
+    async function reclassifyActiveDecision(newKind: "plan" | "resolution" | "wontfix") {
         const active = activeDecision.value;
         if (!active || !data.value) return;
         const tid = data.value.ticket.id;
@@ -399,9 +404,19 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
                 command: () => { void acceptActiveDecision("plan"); },
             });
             items.push({
+                label: "accept as wontfix → close without resolution",
+                icon: "pi pi-ban",
+                command: () => { void acceptActiveDecision("wontfix"); },
+            });
+            items.push({
                 label: "reclassify as plan → still pending",
                 icon: "pi pi-pencil",
                 command: () => { void reclassifyActiveDecision("plan"); },
+            });
+            items.push({
+                label: "reclassify as wontfix → still pending",
+                icon: "pi pi-pencil",
+                command: () => { void reclassifyActiveDecision("wontfix"); },
             });
         } else if (active.decision.kind === "plan") {
             items.push({
@@ -415,9 +430,46 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
                 command: () => { void acceptActiveDecision("resolution"); },
             });
             items.push({
+                label: "accept as wontfix → close without resolution",
+                icon: "pi pi-ban",
+                command: () => { void acceptActiveDecision("wontfix"); },
+            });
+            items.push({
                 label: "reclassify as resolution → still pending",
                 icon: "pi pi-pencil",
                 command: () => { void reclassifyActiveDecision("resolution"); },
+            });
+            items.push({
+                label: "reclassify as wontfix → still pending",
+                icon: "pi pi-pencil",
+                command: () => { void reclassifyActiveDecision("wontfix"); },
+            });
+        } else if (active.decision.kind === "wontfix") {
+            // #817 : symmetric menu for the wontfix kind.
+            items.push({
+                label: "accept wontfix → close without resolution",
+                icon: "pi pi-check-circle",
+                command: () => { void acceptActiveDecision(); },
+            });
+            items.push({
+                label: "accept as resolution → close (with resolved flip)",
+                icon: "pi pi-verified",
+                command: () => { void acceptActiveDecision("resolution"); },
+            });
+            items.push({
+                label: "accept as plan → keep the ticket open",
+                icon: "pi pi-compass",
+                command: () => { void acceptActiveDecision("plan"); },
+            });
+            items.push({
+                label: "reclassify as resolution → still pending",
+                icon: "pi pi-pencil",
+                command: () => { void reclassifyActiveDecision("resolution"); },
+            });
+            items.push({
+                label: "reclassify as plan → still pending",
+                icon: "pi pi-pencil",
+                command: () => { void reclassifyActiveDecision("plan"); },
             });
         }
         return items;
@@ -429,19 +481,26 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
     const rejectMenu: ComputedRef<MenuItem[]> = computed(() => {
         const active = activeDecision.value;
         if (!active) return [];
-        const other: "plan" | "resolution" = active.decision.kind === "resolution" ? "plan" : "resolution";
-        return [
+        // #817 : the kind set is now {resolution, plan, wontfix}. List
+        // every OTHER kind as a reclassify option (= "actually this is
+        // not a $current, it's a $other, leave it pending").
+        const allKinds: Array<"plan" | "resolution" | "wontfix"> = ["resolution", "plan", "wontfix"];
+        const others = allKinds.filter((k) => k !== active.decision.kind);
+        const items: MenuItem[] = [
             {
                 label: `reject ${active.decision.kind}`,
                 icon: "pi pi-times",
                 command: () => { void rejectActiveDecision(); },
             },
-            {
+        ];
+        for (const other of others) {
+            items.push({
                 label: `reclassify as ${other} → still pending`,
                 icon: "pi pi-pencil",
                 command: () => { void reclassifyActiveDecision(other); },
-            },
-        ];
+            });
+        }
+        return items;
     });
 
     // #B.129 — author decision splitbutton: primary action = mark

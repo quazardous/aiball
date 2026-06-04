@@ -893,13 +893,13 @@ export const api = {
     decide: (
         id: number,
         status: "accepted" | "rejected",
-        new_kind?: "plan" | "resolution",
+        new_kind?: "plan" | "resolution" | "wontfix",
     ) =>
         req<Message>("POST", `/api/messages/${id}/decide`, { status, new_kind }),
     /** Reclassify a pending decision's kind without changing its
      *  status (#B.129 follow-up). 409 when the decision is missing
      *  or already terminal. */
-    reclassify: (id: number, new_kind: "plan" | "resolution") =>
+    reclassify: (id: number, new_kind: "plan" | "resolution" | "wontfix") =>
         req<Message>("POST", `/api/messages/${id}/reclassify`, { new_kind }),
     /** Promote an undecorated comment to a decision (#B.256).
      *  `status` omitted → tag as pending. `status` set → tag +
