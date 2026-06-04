@@ -414,48 +414,28 @@ def arm_afk_10m():
 # `{kind: "proxyEvent", data: <legacy>}` which the ipc-events server
 # unwraps on the JS side. Direction unchanged (proxy = CLIENT).
 class _ProxyEventEmitter:
-    def __init__(self):
-        self._ws = None
+    """#769 Phase 1 — writes on the shared connection owned by the
+    `_ViewPushClient`. The view-push thread reads frames (auto-ponging
+    server heartbeat pings) and detects close events, so the emitter
+    inherits liveness detection without running its own thread. When
+    the shared connection is down, `emit` returns False and the caller
+    falls back to local logic."""
 
-    def _ensure(self):
-        if not _HAS_WEBSOCKET:
-            return False  # degraded mode (replay, missing dep) — caller falls back
-        if self._ws is not None:
-            return True
-        path = _loop_sock_path()
-        if not path or not os.path.exists(path):
-            return False
-        try:
-            unix = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            unix.connect(path)
-            # `websocket-client` doesn't support `ws+unix://` natively —
-            # we pass our already-connected socket via the `socket` param.
-            # The `ws://localhost/` URL is only used for the HTTP Upgrade
-            # handshake.
-            self._ws = websocket.create_connection(
-                "ws://localhost/", socket=unix, timeout=2,
-            )
-            return True
-        except Exception:
-            self._ws = None
-            return False
+    def __init__(self):
+        self._channel = None  # set by attach()
+
+    def attach(self, channel):
+        """Bind to the _ViewPushClient that owns the shared ws."""
+        self._channel = channel
 
     def emit(self, payload):
         """Best-effort fire-and-forget. Returns True if the event was
         handed to the kernel send buffer, False if no timer is reachable
         (caller falls back to local logic)."""
-        if not self._ensure():
+        if not _HAS_WEBSOCKET or self._channel is None:
             return False
-        try:
-            wrapped = _json.dumps({"kind": "proxyEvent", "data": payload})
-            self._ws.send(wrapped)
-            return True
-        except Exception:
-            # Connection dropped — drop it, next call will retry.
-            try: self._ws.close()
-            except Exception: pass
-            self._ws = None
-            return False
+        wrapped = _json.dumps({"kind": "proxyEvent", "data": payload})
+        return self._channel.send(wrapped)
 
     def emit_typing(self, now_ms):
         return self.emit({"event": "keystroke", "kind": "typing", "now_ms": now_ms})
@@ -489,7 +469,14 @@ class _ViewPushClient:
 
     Best-effort reconnect with fixed 1s backoff. A missing timer (boot
     race, timer crashed) is silent — the proxy paints from rules-locales
-    until the next push lands, exactly like before the inversion."""
+    until the next push lands, exactly like before the inversion.
+
+    #769 Phase 1 — also acts as the SHARED connection for outbound
+    proxy events. The recv loop here auto-pongs server-side heartbeat
+    pings; `send(payload)` lets the emitter write on the same socket
+    so it benefits from the same liveness detection. When recv breaks,
+    we reset `self._ws` and the next `send` returns False — the caller
+    falls back to local logic until the reconnect cycle completes."""
 
     def __init__(self, sock_path, wakeup_w):
         self._sock_path = sock_path
@@ -498,6 +485,26 @@ class _ViewPushClient:
         self._inject_queue = queue.Queue()
         self._thread = None
         self._stopped = False
+        self._ws = None
+        self._ws_lock = threading.Lock()
+
+    def send(self, payload):
+        """#769 Phase 1 — write a frame on the shared connection.
+        Returns True on success, False if the connection is down (the
+        caller falls back to local logic in degraded mode). The recv
+        loop owns the lifecycle; we just lock around the write."""
+        with self._ws_lock:
+            ws = self._ws
+            if ws is None:
+                return False
+            try:
+                ws.send(payload)
+                return True
+            except Exception:
+                # Connection dead — drop it; the recv thread (or the
+                # next loop iteration) will reconnect. We don't reset
+                # self._ws here to avoid racing the reader.
+                return False
 
     def start(self):
         if not self._sock_path or self._thread is not None:
@@ -527,6 +534,9 @@ class _ViewPushClient:
                 ws = websocket.create_connection(
                     "ws://localhost/", socket=unix, timeout=5,
                 )
+                # #769 — publish the connection so the emitter can write on it.
+                with self._ws_lock:
+                    self._ws = ws
                 while not self._stopped:
                     try:
                         msg = ws.recv()
@@ -556,6 +566,10 @@ class _ViewPushClient:
             except (OSError, Exception):
                 pass
             finally:
+                # #769 — drop the shared handle BEFORE closing so the
+                # emitter sees None instead of a half-closed socket.
+                with self._ws_lock:
+                    self._ws = None
                 if ws is not None:
                     try: ws.close()
                     except Exception: pass
@@ -1454,6 +1468,10 @@ def main(argv):
     fcntl.fcntl(view_push_pipe_r, fcntl.F_SETFL,
                 fcntl.fcntl(view_push_pipe_r, fcntl.F_GETFL) | os.O_NONBLOCK)
     view_push_client = _ViewPushClient(_loop_sock_path(), view_push_pipe_w)
+    # #769 Phase 1 — wire the emitter to the shared connection BEFORE
+    # starting the client thread, so the first attempted emit (proxy
+    # bootstrap order: hooks may emit during init) has a channel to ask.
+    _proxy_events.attach(view_push_client)
     view_push_client.start()
 
     stdin_open = True
