@@ -1528,12 +1528,18 @@ export function pickPingPhrase(pingsAbsPath: string): string {
  */
 export interface ContextPhraseResult {
     phrase: string;
-    /** #749 — the message_id of the unread FIFO head that fed the
-     *  phrase, when one exists. The wake injection site marks it seen
-     *  the moment the inject crosses the dedup gate (= the ping has
-     *  been delivered to the agent's pane). Null for backlog-head
-     *  wakes and for idle/no-head culture pings. */
+    /** The message_id of the unread FIFO head that fed the phrase, when
+     *  one exists. The wake injection site marks it seen the moment the
+     *  inject crosses the gate (a delivered wake = the agent has read
+     *  the event). Null for backlog-head wakes and for idle / no-head
+     *  culture pings. */
     headMessageId: number | null;
+    /** True iff the phrase carries actionable content (FIFO head,
+     *  ticket_created head, lifecycle head, or backlog head). False
+     *  when the phrase is just the idle culture+lead. Drain-style
+     *  callers (afk-cleared-drain, boot-ended-drain) skip on false so
+     *  claude isn't woken to read "Houston, we have an idle session". */
+    hasContent: boolean;
 }
 
 export async function buildContextPhrase(
@@ -1625,7 +1631,7 @@ export async function buildContextPhrase(
                 : 0;
         const actionableCount = sumBy("actionable_count");
         const openCount = sumBy("open_count");
-        if (pingCount === 0 && openCount === 0) return { phrase: culture, headMessageId: null };
+        if (pingCount === 0 && openCount === 0) return { phrase: culture, headMessageId: null, hasContent: false };
 
         // #B.232: when BOTH pings and open tickets are pending, chain
         // both directives so the agent doesn't drain pings and stop —
@@ -1838,20 +1844,27 @@ export async function buildContextPhrase(
         // their prompt slot (per-project overridable + tone-aware + {vars});
         // custom gates use their literal message / cmd stdout. Template-agnostic
         // (works even when a custom wake_master has no {gates} placeholder).
-        // #749 — head message id for the inject-time prune. Only the
-        // FIFO-driven branch carries a real id ; backlog / no-head paths
-        // emit null so the inject site doesn't try to prune nothing.
+        // headMessageId carries the inject-time prune target. Only the
+        // FIFO-driven branch has a real id; backlog and idle paths set
+        // null so the inject site doesn't try to prune nothing.
         const headMessageId = unreadHead?.id ?? null;
-        if (gateResults.length === 0) return { phrase: cta, headMessageId };
+        // hasContent flags whether one of the actionable branches fired
+        // (FIFO comment, lifecycle, new ticket, or backlog). When false
+        // the phrase is just the idle culture+lead — drain-style wake
+        // reasons skip on it.
+        const hasContent = !!(headCommentHashid || headLifecycleVerb || head?.kind === "new ticket" || backlogMode);
+        if (gateResults.length === 0) return { phrase: cta, headMessageId, hasContent };
         const banner = gateResults
             .map((g) => (g.slot ? renderSlot(promptMap, g.slot, g.vars, g.message, tone) : g.message))
             .join("  ");
         return {
             phrase: `${blocking ? "🛑 " : ""}${banner}  ${cta}`,
             headMessageId,
+            // A triggered gate counts as content even if the FIFO is empty.
+            hasContent: hasContent || gateResults.length > 0,
         };
     } catch {
-        return { phrase: culture, headMessageId: null };
+        return { phrase: culture, headMessageId: null, hasContent: false };
     }
 }
 

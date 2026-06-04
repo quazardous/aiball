@@ -333,7 +333,7 @@ function selfReloadIfStale(): void {
 // pas le sien). Filtre agent-side car la même SSE peut servir plusieurs
 // usages (UI notifs vs wake) ; la décision "wake me?" est privée à
 // l'agent.
-async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessageId: number | null }> {
+async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessageId: number | null; hasContent: boolean }> {
     // #749 — every wake path (SSE direct, AFK-clear-drain, stop-hook
     // post-turn, heartbeat) routes through `buildContextPhrase` so the
     // content is uniform: pop the oldest unread FIFO event, fall back
@@ -709,9 +709,18 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             }
         }
     }
+    const { phrase, headMessageId, hasContent } = await pickPhrase(hint);
+    // Drain-style reasons (afk-cleared-drain, boot-ended-drain) fire
+    // tryWake speculatively when the human disarms AFK or boot ends.
+    // If the FIFO + backlog are empty at that moment, the wake would
+    // render the idle culture+lead ("What's up, Doc? quick note:") and
+    // waste a turn on nothing. Skip cleanly.
+    if (!hasContent && !manualWake && !panicMode && reason.includes("drain")) {
+        log(`skip wake (${reason}) — nothing to drain (idle phrase only)`);
+        return false;
+    }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
-    const { phrase, headMessageId } = await pickPhrase(hint);
     await sendKeys(phrase, headMessageId, panicMode);
     // Landscape hash watermark — same set doesn't re-fire the actionable
     // leg (set-aware dedup, replaces the count watermark). Fall back to
@@ -764,14 +773,23 @@ async function mainSse(): Promise<void> {
     wakeBus.on("ping", (p) => {
         const panic = p.intent === "panic";
         log(`SSE ping received: ${JSON.stringify(p)} → tryWake${panic ? " (panic)" : ""}`);
-        if (panic) {
-            void tryWake("sse:ping:panic", false, p, true);
-            return;
-        }
-        // #B.198 : pass the SSE payload as a hint so the wake phrase
-        // names the concrete artifact (`Poll ticket #X — new comment #Y.`)
-        // instead of a random pop-culture line.
-        void tryWake("sse:ping", false, p);
+        // Pass the SSE payload as a hint so the wake phrase can name
+        // the concrete artifact instead of a random pop-culture line.
+        const tag = panic ? "sse:ping:panic" : "sse:ping";
+        void tryWake(tag, false, p, panic).then((fired) => {
+            if (fired) return;
+            // If the wake skipped while busy-defer is active, the
+            // heartbeat may already be mid-sleep and won't re-check at
+            // expiry (its cap is computed only on sleep entry). Schedule
+            // a one-shot retry so the SSE event lands as soon as the
+            // tempo opens up, not at the next 30s heartbeat tick.
+            const defer = readBusyDefer(sd!);
+            if (defer && defer.activeMs > 0) {
+                setTimeout(() => {
+                    void tryWake(panic ? "sse:retry:panic" : "sse:retry", false, p, panic);
+                }, defer.activeMs + 100);
+            }
+        });
     });
     wakeBus.on("error", (e) => {
         log(`SSE error: ${e.message ?? String(e)} — will reconnect on next heartbeat`);
