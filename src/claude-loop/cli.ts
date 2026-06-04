@@ -67,7 +67,7 @@ import {
     type Plate,
 } from "./state.js";
 import { cmdTail, type TailMode } from "./cmds/tail.js";
-import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake, cmdZen } from "./cmds/manage.js";
+import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake, cmdZen, sweepOrphans } from "./cmds/manage.js";
 import { cmdInspect } from "./cmds/inspect.js";
 import { CL_ENV } from "./env-vars.js";
 
@@ -561,6 +561,15 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     }
     const pingsSrc = opts.pings ?? defaultPingsPath();
     if (!existsSync(pingsSrc)) die(`pings file not found: ${pingsSrc}`);
+
+    // #783 — kill any orphan timer / proxy still bound to this state-dir
+    // BEFORE the new spawn. Defends against leftovers from a crashed
+    // wrapper, kill -9 of the bash before the trap fired, or pre-fix
+    // installs that lacked the kill-on-exit machinery entirely.
+    const swept = sweepOrphans(sd);
+    if (swept.killed.length > 0) {
+        process.stdout.write(`claude-loop: swept ${swept.killed.length} orphan process(es) bound to '${sd}' before spawn\n`);
+    }
 
     ensureDir(sd);
     // #622 — write the loop session start once at launch so short-lived

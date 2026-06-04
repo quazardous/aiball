@@ -46,6 +46,39 @@ function tmuxAlive(name: string): boolean {
     return r.status === 0;
 }
 
+/**
+ * #783 — scan running processes for any timer / proxy / hook still bound to
+ * `<sd>` via the `CL_STATE_DIR` env var, SIGKILL them. Catches orphans the
+ * watchdog or bash trap couldn't reap (pre-fix code, kill -9 of bash before
+ * the trap had wired up, etc.). Linux-only: reads /proc/<pid>/environ. On
+ * other platforms the function is a silent no-op — the 2s watchdog covers
+ * orphans spawned by post-fix code, and an installed-base sweep needs
+ * platform-specific plumbing (mac libproc / windows WMI) we haven't built.
+ */
+export function sweepOrphans(sd: string): { killed: number[] } {
+    if (process.platform !== "linux") return { killed: [] };
+    const killed: number[] = [];
+    const marker = `CL_STATE_DIR=${sd}`;
+    let entries: string[];
+    try { entries = readdirSync("/proc"); }
+    catch { return { killed: [] }; }
+    for (const entry of entries) {
+        const pid = Number(entry);
+        if (!Number.isFinite(pid) || pid <= 1 || pid === process.pid) continue;
+        let env: string;
+        try { env = readFileSync(`/proc/${pid}/environ`, "utf8"); }
+        catch { continue; } // process died, or no permission
+        // /proc/<pid>/environ is NUL-separated KEY=VAL entries. The match
+        // needs to be exact-key, not substring (e.g. CL_STATE_DIR_BACKUP
+        // shouldn't false-match), so anchor on `\0KEY=VAL\0` or at the
+        // start of the buffer.
+        if (!env.includes(`\0${marker}\0`) && !env.startsWith(`${marker}\0`)) continue;
+        try { process.kill(pid, "SIGKILL"); killed.push(pid); }
+        catch { /* race : process already dead */ }
+    }
+    return { killed };
+}
+
 function shQuote(s: string): string {
     return "'" + s.replace(/'/g, `'\\''`) + "'";
 }
@@ -220,7 +253,21 @@ export function cmdReload(name: string, opts?: { set?: string[] }): void {
         if (Number.isFinite(raw) && raw > 0) oldPid = raw;
     }
     if (oldPid !== null) {
-        try { process.kill(oldPid); } catch { /* already dead */ }
+        // #780 — SIGKILL not SIGTERM. The SIGTERM handler in timer.ts runs
+        // `cleanShutdown` which also kills the tmux session — we DON'T want
+        // that during a reload (the whole point of reload vs restart is to
+        // keep claude alive). SIGKILL skips the handler; the new timer's
+        // boot rewrites timer.pid + reattaches loop.sock; the post-#783
+        // watchdog on the new process means stale markers are reaped
+        // naturally on the next 2s tick.
+        try { process.kill(oldPid, "SIGKILL"); } catch { /* already dead */ }
+    }
+    // #783 — sweep any other orphan tied to this state-dir (extra timer
+    // forks left by tsx-watch reload races, half-dead proxy from a previous
+    // crash). No-op on platforms without /proc.
+    const swept = sweepOrphans(sd);
+    if (swept.killed.length > 0) {
+        process.stdout.write(`claude-loop: swept ${swept.killed.length} orphan process(es) bound to '${sd}' before reload\n`);
     }
 
     // #251: re-stamp the plate's source SHA so a reloaded loop drops the
