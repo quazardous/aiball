@@ -1824,6 +1824,12 @@ export async function buildContextPhrase(
             // branch already wins via `head_comment_hashid`). Backlog mode
             // and the comment case → "" → ticket branch drops out.
             head_kind: head?.kind === "new ticket" && !headCommentHashid ? head.kind : "",
+            // #749 david — `no_head` var = "1" when none of the three head
+            // branches fire (no comment, no new ticket, no backlog claim).
+            // Lets the template emit the culture+lead+open_count fallback
+            // ONLY in that case (the grammar lacks a built-in if-empty-
+            // render-text-else-nothing, so we invert the condition here).
+            no_head: (!headCommentHashid && head?.kind !== "new ticket" && !backlogMode) ? "1" : "",
             backlog_mode: backlogMode,
             // #749 david — discrete head pieces for the FIFO-pop template.
             // `head_comment_hashid` / `head_body` are empty in backlog mode
@@ -1853,11 +1859,15 @@ export async function buildContextPhrase(
             //    backlog at consult time.
             // No "first in queue", no "Handle ...", no "drain via unread()"
             // — the wake IS the drain (ticket_get prunes via markTicketSeen).
-            "{culture} {lead}"
-            + "{head_comment_hashid:+ aiball #{head_id} / #{head_comment_hashid}{head_body:+ — {head_body}}}"
-            + "{head_kind:+ new ticket #{head_id}{head_title:+: {head_title}}}"
-            + "{backlog_mode:+ aiball #{head_id}{head_title:+: {head_title}}}"
-            + "{open_count:+ ({open_count} open in {project_scope})}",
+            // david: comment / new ticket / backlog branches each emit
+            // ONLY the ref + decoration ; no culture/lead/open_count to
+            // keep them tight. The no-head fallback (= nothing in queue,
+            // no actionable backlog) is the only branch that keeps the
+            // culture + open_count framing — that's the "idle ping" path.
+            "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}"
+            + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
+            + "{backlog_mode:+aiball #{head_id}{head_title:+: {head_title}}}"
+            + "{no_head:+{culture} {lead}}",
             tone,
         );
         // #428: prepend the triggered-gate banner. Built-in messages render via
