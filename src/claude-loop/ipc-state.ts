@@ -92,6 +92,19 @@ export interface IpcState {
      *  in-memory signal, fall back to `human-typing` file mtime. Set by
      *  the dispatcher on `keystroke:typing` events from the proxy. */
     humanTypingAtMs: number | null;
+    /** #733 V2 — pane state in-memory, mirrored by every `setPane*`
+     *  setter. `null` = no in-memory signal yet → reader falls back to
+     *  the file (cold boot before `refreshPaneMarkers` runs, or a stale
+     *  cli inspect from another process). Strict null-fallback per the
+     *  `2a6eed8` lesson : a `false` is an EXPLICIT "pane signal NOT set",
+     *  never confused with "no signal". The file is kept as a shadow for
+     *  out-of-process readers (cli inspect, hook tests) until a follow-up
+     *  drops it. */
+    paneBusy: boolean | null;
+    paneReady: boolean | null;
+    paneCompacting: boolean | null;
+    paneInterrupted: boolean | null;
+    paneResuming: boolean | null;
 }
 
 const state: IpcState = {
@@ -111,6 +124,11 @@ const state: IpcState = {
     afkMode: null,
     afkExpiryMs: null,
     humanTypingAtMs: null,
+    paneBusy: null,
+    paneReady: null,
+    paneCompacting: null,
+    paneInterrupted: null,
+    paneResuming: null,
 };
 
 /** Read-only view of the current state. Callers should not mutate. */
@@ -202,6 +220,26 @@ export function setIpcHumanTypingAtMs(atMs: number | null): void {
     state.humanTypingAtMs = atMs;
 }
 
+/** #733 V2 — pane state setters, called by the matching `setPane*` in
+ *  `state.ts` right before the file write. The reader (`readLoopStateInput`,
+ *  `paneInterrupted`) consults these first ; `null` (default) means
+ *  "no in-memory signal yet" and triggers the file fallback. */
+export function setIpcPaneBusy(value: boolean | null): void {
+    state.paneBusy = value;
+}
+export function setIpcPaneReady(value: boolean | null): void {
+    state.paneReady = value;
+}
+export function setIpcPaneCompacting(value: boolean | null): void {
+    state.paneCompacting = value;
+}
+export function setIpcPaneInterrupted(value: boolean | null): void {
+    state.paneInterrupted = value;
+}
+export function setIpcPaneResuming(value: boolean | null): void {
+    state.paneResuming = value;
+}
+
 /** Reset every field to the as-launched defaults. Tests only. */
 export function resetIpcStateForTests(): void {
     state.bootComplete = null;
@@ -220,4 +258,9 @@ export function resetIpcStateForTests(): void {
     state.afkMode = null;
     state.afkExpiryMs = null;
     state.humanTypingAtMs = null;
+    state.paneBusy = null;
+    state.paneReady = null;
+    state.paneCompacting = null;
+    state.paneInterrupted = null;
+    state.paneResuming = null;
 }

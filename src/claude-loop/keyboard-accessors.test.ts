@@ -2,7 +2,7 @@
 // Run: `npx tsx --test src/claude-loop/keyboard-accessors.test.ts`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, utimesSync, unlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,10 +11,8 @@ import {
     isHumanTypingRecent,
     paneInterrupted,
 } from "./keyboard-accessors.js";
-import {
-    humanTypingPath,
-    paneInterruptedPath,
-} from "./state.js";
+import { humanTypingPath } from "./state.js";
+import { setIpcPaneInterrupted, resetIpcStateForTests } from "./ipc-state.js";
 
 function mkSd(): string {
     return mkdtempSync(join(tmpdir(), "kbdacc-"));
@@ -84,22 +82,26 @@ test("isHumanTypingRecent: default ttlMs = HUMAN_TYPING_TTL_MS", () => {
 // single source of truth for "human present" now ; the helpers below
 // cover the only remaining presence signals (typing + pane state).
 
-test("paneInterrupted: file absent → false", () => {
+// #733 V2 — `paneInterrupted` now reads `ipcState.paneInterrupted` only ;
+// no file fallback. Each test resets the singleton first to avoid leak.
+test("paneInterrupted: ipcState null → false", () => {
+    resetIpcStateForTests();
     const sd = mkSd();
     assert.equal(paneInterrupted(sd), false);
 });
 
-test("paneInterrupted: file present → true", () => {
+test("paneInterrupted: ipcState true → true", () => {
+    resetIpcStateForTests();
     const sd = mkSd();
-    writeFileSync(paneInterruptedPath(sd), "x\n");
+    setIpcPaneInterrupted(true);
     assert.equal(paneInterrupted(sd), true);
 });
 
-test("paneInterrupted: file removed → false again", () => {
+test("paneInterrupted: ipcState cleared back → false", () => {
+    resetIpcStateForTests();
     const sd = mkSd();
-    const p = paneInterruptedPath(sd);
-    writeFileSync(p, "x\n");
+    setIpcPaneInterrupted(true);
     assert.equal(paneInterrupted(sd), true);
-    unlinkSync(p);
+    setIpcPaneInterrupted(false);
     assert.equal(paneInterrupted(sd), false);
 });

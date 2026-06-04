@@ -13,12 +13,15 @@ import {
     afkPath,
     bootCompletePath,
     humanTypingPath,
-    paneReadyPath,
     loopStartTsPath,
 } from "./state.js";
+import { setIpcPaneReady, resetIpcStateForTests } from "./ipc-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 
+// #733 V2 — also resets `ipcState` so `setIpcPaneReady` from a previous
+// `seedPostBoot` doesn't leak into the next test.
 function tmp(): string {
+    resetIpcStateForTests();
     return mkdtempSync(join(tmpdir(), "proxy-event-test-"));
 }
 
@@ -27,7 +30,7 @@ function seedPostBoot(sd: string): void {
     // loopStartTs far enough in the past that the 30s floor is over.
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
-    writeFileSync(paneReadyPath(sd), new Date().toISOString() + "\n");
+    setIpcPaneReady(true);
 }
 
 test("#633F dispatch typing post-boot → arms NOT AFK 10m", () => {

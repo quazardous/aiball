@@ -21,11 +21,6 @@ import {
     bootCompletePath,
     humanTypingPath,
     idleMarkerPath,
-    paneBusyPath,
-    paneCompactingPath,
-    paneInterruptedPath,
-    paneReadyPath,
-    paneResumingPath,
     proxyAlivePath,
     readLoopStateInput,
     resumeSessionPickerActivePath,
@@ -85,12 +80,16 @@ export function cmdInspect(name: string): void {
             resume_session_picker_active: existsSync(resumeSessionPickerActivePath(sd)),
             resume_mode_picker_active: existsSync(resumeModePickerActivePath(sd)),
         },
+        // #733 V2 — pane signals live in the timer's `ipcState` only ;
+        // a subprocess view (this command) sees `false` for everything
+        // unless/until a cross-process query path is added (#771).
         pane: {
             busy: input.paneBusy,
             ready: input.paneReady,
             compacting: input.paneCompacting,
-            resuming: existsSync(paneResumingPath(sd)),
+            resuming: false,
             interrupted: input.paneInterrupted,
+            _from_subprocess: true,
         },
         afk: {
             mode: input.afkMode,
@@ -111,10 +110,6 @@ export function cmdInspect(name: string): void {
         markers: {
             idle_since_iso: mtimeIso(idleMarkerPath(sd)),
             human_typing_iso: mtimeIso(humanTypingPath(sd)),
-            pane_busy_iso: mtimeIso(paneBusyPath(sd)),
-            pane_ready_iso: mtimeIso(paneReadyPath(sd)),
-            pane_compacting_iso: mtimeIso(paneCompactingPath(sd)),
-            pane_interrupted_iso: mtimeIso(paneInterruptedPath(sd)),
             wake_in_flight_iso: mtimeIso(wakeInFlightPath(sd)),
         },
         runtime: {

@@ -11,8 +11,8 @@ import {
     bootCompletePath,
     humanTypingPath,
     loopStartTsPath,
-    paneReadyPath,
 } from "./state.js";
+import { setIpcPaneReady, resetIpcStateForTests } from "./ipc-state.js";
 
 /** Minimal LoopStateSnapshot fixture. #745 phase B : the verdict builder
  *  reads `afkHoldActive` only (AFK SM is the single source of truth) ;
@@ -30,7 +30,10 @@ function snap(overrides: Partial<LoopStateSnapshot> = {}): LoopStateSnapshot {
     } as LoopStateSnapshot;
 }
 
+// #733 V2 — also resets `ipcState` so a previous test's `setIpcPaneReady`
+// doesn't bleed into the next one (singleton module-level state).
 function tmp(): string {
+    resetIpcStateForTests();
     return mkdtempSync(join(tmpdir(), "hook-verdict-test-"));
 }
 
@@ -73,7 +76,7 @@ test("queryLoopState: reads marker files from sd and returns a snapshot", () => 
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
-    writeFileSync(paneReadyPath(sd), new Date().toISOString() + "\n");
+    setIpcPaneReady(true);
     const state = queryLoopState(sd);
     assert.ok(typeof state.barWord === "string", "snapshot carries barWord");
     assert.ok(typeof state.phase === "string", "snapshot carries phase");
@@ -92,7 +95,7 @@ test("queryLoopState: afk file 'inf' → afkHoldActive=true", () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
-    writeFileSync(paneReadyPath(sd), new Date().toISOString() + "\n");
+    setIpcPaneReady(true);
     writeFileSync(afkPath(sd), "inf\n");
     const state = queryLoopState(sd);
     assert.equal(state.afkHoldActive, true);
@@ -102,7 +105,7 @@ test("queryLoopState: afk file with future expiry → afkHoldActive=true", () =>
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
-    writeFileSync(paneReadyPath(sd), new Date().toISOString() + "\n");
+    setIpcPaneReady(true);
     writeFileSync(afkPath(sd), new Date(Date.now() + 600_000).toISOString() + "\n");
     const state = queryLoopState(sd);
     assert.equal(state.afkHoldActive, true);
@@ -112,7 +115,7 @@ test("queryLoopState: afk file with past expiry → afkHoldActive=false (expired
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
-    writeFileSync(paneReadyPath(sd), new Date().toISOString() + "\n");
+    setIpcPaneReady(true);
     writeFileSync(afkPath(sd), new Date(Date.now() - 60_000).toISOString() + "\n");
     const state = queryLoopState(sd);
     assert.equal(state.afkHoldActive, false, "expired wait_10m doesn't count as hold");
@@ -122,7 +125,7 @@ test("queryLoopState + buildHookVerdict integration: post-boot autonomous loop d
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
-    writeFileSync(paneReadyPath(sd), new Date().toISOString() + "\n");
+    setIpcPaneReady(true);
     const state = queryLoopState(sd);
     assert.equal(state.afkHoldActive, false);
     const v = buildHookVerdict(state, { kind: "PreToolUse", tool_name: "AskUserQuestion" });
@@ -133,7 +136,7 @@ test("queryLoopState + buildHookVerdict integration: AFK hold ∞ → ALLOW (hum
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
-    writeFileSync(paneReadyPath(sd), new Date().toISOString() + "\n");
+    setIpcPaneReady(true);
     writeFileSync(humanTypingPath(sd), new Date().toISOString() + "\n");
     writeFileSync(afkPath(sd), "inf\n");
     const state = queryLoopState(sd);

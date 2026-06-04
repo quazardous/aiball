@@ -20,6 +20,11 @@ import {
     setIpcLastOpenWakeCount,
     setIpcLastOpenWakeHash,
     setIpcLastWakeHint,
+    setIpcPaneBusy,
+    setIpcPaneCompacting,
+    setIpcPaneInterrupted,
+    setIpcPaneReady,
+    setIpcPaneResuming,
 } from "./ipc-state.js";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -283,55 +288,34 @@ export function logPaneCapture(sd: string | undefined, text: string): void {
     } catch { /* best-effort */ }
 }
 
-// #624 david `62ys4g` : "le pane est pas contrôlable donc reste externe go".
-// Pane-* signals are external (claude TUI drives them) — same setter pattern
-// as `setResumePicker`. Each writes/removes a marker file ; the state machine
-// reads them via `readLoopStateInput`. The TIMER's pane probe (mainSse) is
-// the canonical caller, but stop-hook also writes some of them on its own
-// snapshot.
-export function paneBusyPath(sd: string): string { return join(sd, "pane-busy"); }
-export function paneReadyPath(sd: string): string { return join(sd, "pane-ready"); }
-export function paneCompactingPath(sd: string): string { return join(sd, "pane-compacting"); }
-/** #647 david `4h75nk` : marker pour l'écran "Resuming conversation…"
- *  qui apparaît après l'auto-pick du picker session, avant que claude
- *  affiche le prompt. Transitoire (1-3s sur sessions courtes, plus sur
- *  grosses) mais visible à l'écran → mérite sa propre catégorie. Membre
- *  du SCREEN_TAKEOVER_GROUP (exclusif des pickers et Compacting). */
-export function paneResumingPath(sd: string): string { return join(sd, "pane-resuming"); }
-export function paneInterruptedPath(sd: string): string { return join(sd, "pane-interrupted"); }
-
-function writeOrUnlink(p: string, set: boolean): void {
-    if (set) {
-        try { writeFileSync(p, new Date().toISOString() + "\n"); } catch { /* best-effort */ }
-    } else {
-        try { if (existsSync(p)) unlinkSync(p); } catch { /* race */ }
-    }
+// #733 V2 — pane signals are timer-only and now live exclusively in
+// `ipcState`. The legacy filesystem markers (`pane-busy`, `pane-ready`,
+// `pane-compacting`, `pane-resuming`, `pane-interrupted`) are gone : no
+// writer, no reader, no shadow. Cross-process diagnostics (cli inspect)
+// drop those fields entirely. The `sd` parameter stays on every setter
+// for callsite-shape stability — it's unused.
+//
+// Persistence across a timer reload is out of scope here (see #771 —
+// micro-db option study).
+/** Pane probe: claude pane shows `esc to interrupt` in its footer. */
+export function setPaneBusy(_sd: string, busy: boolean): void {
+    setIpcPaneBusy(busy);
 }
-
-/** #624 david `62ys4g` : claude pane shows `esc to interrupt` in its
- *  footer. Setter called by the pane probe (timer / stop-hook). */
-export function setPaneBusy(sd: string, busy: boolean): void {
-    writeOrUnlink(paneBusyPath(sd), busy);
+/** Pane probe: prompt signature (`Claude Code v`, `❯ `, …) visible. */
+export function setPaneReady(_sd: string, ready: boolean): void {
+    setIpcPaneReady(ready);
 }
-/** #624 david `62ys4g` : claude pane shows the prompt signature
- *  (`Claude Code v`, `❯ `, …). Setter called by the pane probe. */
-export function setPaneReady(sd: string, ready: boolean): void {
-    writeOrUnlink(paneReadyPath(sd), ready);
+/** Pane probe: `/compact` (manual or auto) in flight — wake gate skips. */
+export function setCompacting(_sd: string, compacting: boolean): void {
+    setIpcPaneCompacting(compacting);
 }
-/** #624 david `62ys4g` : claude is mid-compact (`/compact` or auto-compact).
- *  Wake gate skips while this is on. */
-export function setCompacting(sd: string, compacting: boolean): void {
-    writeOrUnlink(paneCompactingPath(sd), compacting);
+/** Pane probe: "Resuming conversation…" — post-picker, pre-prompt. */
+export function setResuming(_sd: string, resuming: boolean): void {
+    setIpcPaneResuming(resuming);
 }
-/** #647 david `4h75nk` : claude pane shows "Resuming conversation…" —
- *  post-picker, pre-prompt. */
-export function setResuming(sd: string, resuming: boolean): void {
-    writeOrUnlink(paneResumingPath(sd), resuming);
-}
-/** #624 david `62ys4g` : claude pane shows `interrupted by user`. Decorates
- *  the bar tag `[idle:interrupted]` ; not a wake gate. */
-export function setInterrupted(sd: string, interrupted: boolean): void {
-    writeOrUnlink(paneInterruptedPath(sd), interrupted);
+/** Pane probe: "interrupted by user" — decoration only, not a wake gate. */
+export function setInterrupted(_sd: string, interrupted: boolean): void {
+    setIpcPaneInterrupted(interrupted);
 }
 export function pingsPath(sd: string): string { return join(sd, "pings.yaml"); }
 export function idleMarkerPath(sd: string): string { return join(sd, "idle-since"); }
@@ -1023,10 +1007,17 @@ export function readLoopStateInput(
         bootMinMs,
         resumePickerActive,
         bootComplete,
-        paneBusy: existsSync(paneBusyPath(sd)),
-        paneReady: existsSync(paneReadyPath(sd)),
-        paneCompacting: existsSync(paneCompactingPath(sd)),
-        paneInterrupted: existsSync(paneInterruptedPath(sd)),
+        // #733 V2 — pane signals live exclusively in `ipcState`. No file
+        // fallback : a subprocess (hook, cli inspect) reading via
+        // `readLoopStateInput` gets `false` for every pane field. The hook
+        // verdict doesn't depend on pane signals (only `afkHoldActive`) ;
+        // cli inspect's pane block now reflects the subprocess view (always
+        // false from outside the timer process). #771 covers the future
+        // persistence-across-reload option.
+        paneBusy: ipc.paneBusy ?? false,
+        paneReady: ipc.paneReady ?? false,
+        paneCompacting: ipc.paneCompacting ?? false,
+        paneInterrupted: ipc.paneInterrupted ?? false,
         noWait,
         humanTypingAtMs: ipcHumanTypingAtMs ?? safeMtime(humanTypingPath(sd)),
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,

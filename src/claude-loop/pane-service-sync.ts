@@ -18,14 +18,10 @@
  */
 import { existsSync } from "node:fs";
 import {
-    paneBusyPath,
-    paneCompactingPath,
-    paneInterruptedPath,
-    paneReadyPath,
-    paneResumingPath,
     resumeModePickerActivePath,
     resumeSessionPickerActivePath,
 } from "./state.js";
+import { getIpcState } from "./ipc-state.js";
 import {
     ERROR_GROUP,
     PaneMarker,
@@ -59,23 +55,29 @@ export function syncPaneServiceFromMarkers(
     opts: { errId?: string | null } = {},
 ): PaneService {
     const svc = getPaneService();
-    // Boolean state markers — direct file → bool mapping.
-    svc.set(PaneMarker.Busy, existsSync(paneBusyPath(sd)));
-    svc.set(PaneMarker.Ready, existsSync(paneReadyPath(sd)));
+    const ipc = getIpcState();
+    // #733 V2 — boolean pane signals come straight from `ipcState`. Same
+    // process as `refreshPaneMarkers`, so the values are fresh by the time
+    // we read them. `null` (cold boot, before the first probe) is treated
+    // as `false`.
+    const busy = ipc.paneBusy ?? false;
+    const ready = ipc.paneReady ?? false;
+    const resuming = ipc.paneResuming ?? false;
+    const compacting = ipc.paneCompacting ?? false;
+    svc.set(PaneMarker.Busy, busy);
+    svc.set(PaneMarker.Ready, ready);
     // PaneReady doubles as the ready marker today (no separate probe-
-    // initial file) ; track Ready and PaneReady the same until slice 5
-    // introduces a distinct "first-probe-completed" marker.
-    svc.set(PaneMarker.PaneReady, existsSync(paneReadyPath(sd)));
+    // initial signal) ; track Ready and PaneReady the same.
+    svc.set(PaneMarker.PaneReady, ready);
 
-    // Screen-takeover group — pick the one whose file exists ; the
-    // emitter (session-start-hook + refreshPaneMarkers) guarantees only
-    // one is set at a time, but defensively we pick first-match order
+    // Screen-takeover group — picker files still live (V1 hooks write
+    // them), pane resuming/compacting come from ipcState. The emitter
+    // (session-start-hook + refreshPaneMarkers) guarantees only one is
+    // set at a time, but defensively we pick first-match order
     // session > mode > resuming > compacting and clear the rest via
     // setExclusive.
     const session = existsSync(resumeSessionPickerActivePath(sd));
     const mode = existsSync(resumeModePickerActivePath(sd));
-    const resuming = existsSync(paneResumingPath(sd));
-    const compacting = existsSync(paneCompactingPath(sd));
     let takeover: PaneMarker | null = null;
     if (session) takeover = PaneMarker.ResumeSessionPicker;
     else if (mode) takeover = PaneMarker.ResumeModePicker;
@@ -90,11 +92,6 @@ export function syncPaneServiceFromMarkers(
         const errMarker = errorIdToMarker(opts.errId);
         svc.setExclusive(ERROR_GROUP, errMarker);
     }
-
-    // `paneInterrupted` is borderline pane-derived (it's the ESC echo
-    // visible in the pane) but david `2cpcaq` ruled keyboard out — keep
-    // it as state.ts-only for now. Slice 5/6 can revisit.
-    void paneInterruptedPath;
 
     return svc;
 }

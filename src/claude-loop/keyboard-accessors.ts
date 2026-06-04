@@ -25,8 +25,8 @@ import { existsSync, statSync } from "node:fs";
 import {
     HUMAN_TYPING_TTL_SEC,
     humanTypingPath,
-    paneInterruptedPath,
 } from "./state.js";
+import { getIpcState } from "./ipc-state.js";
 
 /** Default human-typing TTL in milliseconds. Mirror of state.ts's
  *  HUMAN_TYPING_TTL_SEC, exposed here in ms for symmetry with the rest of
@@ -68,9 +68,9 @@ export function isHumanTypingRecent(
 
 /** True iff the pane currently displays "interrupted by user" (set by
  *  the pane probe via `setInterrupted`). Decorative only — does not
- *  gate wakes ; bar may render `[idle:interrupted]` on it. Lecture
- *  mtime ignorée — la présence du fichier suffit (le `setInterrupted`
- *  unlink quand l'état clear). */
-export function paneInterrupted(sd: string): boolean {
-    return existsSync(paneInterruptedPath(sd));
+ *  gate wakes ; bar may render `[idle:interrupted]` on it.
+ *  #733 V2 : `ipcState.paneInterrupted` is the sole source ; null = no
+ *  signal yet (cold boot, subprocess view) → `false`. */
+export function paneInterrupted(_sd: string): boolean {
+    return getIpcState().paneInterrupted ?? false;
 }
