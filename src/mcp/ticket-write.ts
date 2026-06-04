@@ -12,38 +12,6 @@ import { z } from "zod";
 import { MESSAGE_SCOPES } from "../domain.js";
 import { asText, client, effectiveBy, markActiveTicket } from "./_helpers.js";
 
-/**
- * Snooze a ticket until a future timestamp (per #B.329). Accepts either
- * an absolute ISO8601 date OR a relative shorthand:
- *   "+30m" / "+2h" / "+3d" / "+1w" / "+1mo" (mo = ~30 days for simplicity).
- * The ticket is hidden from the open inbox until the deadline. At that
- * point, the daemon's reveal cron pops it back in.
- */
-function resolveUntil(input: string): string {
-    const m = /^\+(\d+)(min|m|h|d|w|mo)$/.exec(input.trim());
-    if (m) {
-        const n = Number(m[1]);
-        const unit = m[2];
-        const ms = (() => {
-            switch (unit) {
-                case "min":
-                case "m": return n * 60_000;
-                case "h": return n * 3_600_000;
-                case "d": return n * 86_400_000;
-                case "w": return n * 7 * 86_400_000;
-                case "mo": return n * 30 * 86_400_000;
-                default: return 0;
-            }
-        })();
-        if (ms <= 0) throw new Error(`invalid relative until "${input}"`);
-        return new Date(Date.now() + ms).toISOString();
-    }
-    const ts = Date.parse(input);
-    if (!Number.isFinite(ts)) throw new Error(`invalid until "${input}" — expected ISO8601 or +<N><unit>`);
-    if (ts <= Date.now()) throw new Error(`until must be in the future`);
-    return new Date(ts).toISOString();
-}
-
 export function registerTicketWriteTools(server: McpServer): void {
     server.registerTool(
         "ticket_new",
@@ -160,13 +128,6 @@ export function registerTicketWriteTools(server: McpServer): void {
             return asText(decorated);
         },
     );
-
-    // `ticket_broadcast` and `ticket_postpone` were merged into `ticket_update`
-    // per #B.76 — they were both setters on persistent ticket fields, so
-    // they naturally fold into a single patch-style tool (along with the
-    // edit verb that was on the MCP roadmap). The dedicated tools are
-    // removed. (Surface later grew to 14 with ticket_relate/ticket_unrelate,
-    // #275 — see src/mcp/ticket-relations.ts.)
 
     server.registerTool(
         "ticket_reply",
@@ -431,29 +392,16 @@ export function registerTicketWriteTools(server: McpServer): void {
     );
 
     /**
-     * Patch a ticket's persistent fields (per #B.76). Replaces the dedicated
-     * `ticket_postpone`, `ticket_broadcast`, and the planned `ticket_edit`
-     * tools — they were all setters on the same row, so one patch verb is
-     * the natural shape.
-     *
-     * Each field has its own permission check enforced by the daemon:
-     *  - title / body / intent → owner-bypass (author only) or human.
-     *  - broadcast             → owner-bypass.
-     *  - postponed_until       → reporter or human.
-     *
-     * Pass `null` to clear a value (e.g. `postponed_until: null` un-snoozes;
-     * `title: null` would normally be invalid since a ticket needs a title,
-     * so the daemon rejects that one).
-     *
-     * Multiple fields can be patched in one call. Each maps to its own
-     * existing HTTP endpoint under the hood (edit / postpone / broadcast),
-     * so this is a thin orchestrator MCP-side.
+     * Patch a ticket's persistent fields. Each field has its own permission
+     * check enforced by the daemon (owner-bypass on every field). Pass `null`
+     * on clearable fields (`body`, `intent`) to wipe them; `title` must
+     * remain non-empty. Multiple fields can be patched in one call.
      */
     server.registerTool(
         "ticket_update",
         {
             description:
-                "Patch a ticket's persistent fields in one call. Pass only the fields you want to change. Each field has its own permission check enforced by the daemon — owner-bypass for edit (title/body/summary/intent/priority), reporter-or-human for snooze. Event `scope` is set at creation (or via `ticket_reply` on subsequent events) and isn't flipped retroactively here (#B.245).\n\n`postponed_until` accepts either an ISO8601 timestamp (e.g. `2026-05-18T09:00:00Z`) or a relative shorthand (`+30m`, `+2h`, `+3d`, `+1w`, `+1mo`). Pass `null` to clear (un-snooze). Other clearable fields (`body`, `intent`) accept `null` the same way; `title` must remain non-empty.",
+                "Patch a ticket's persistent fields in one call. Pass only the fields you want to change. Each field has its own permission check enforced by the daemon — owner-bypass for edit (title/body/summary/intent/priority). Event `scope` is set at creation (or via `ticket_reply` on subsequent events) and isn't flipped retroactively here. Clearable fields (`body`, `intent`) accept `null`; `title` must remain non-empty.",
             inputSchema: {
                 ticket_id: z
                     .number()
@@ -488,21 +436,11 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "New urgency hint (#B.222, owner-bypass). low / normal / high / urgent. Pass null to reset to 'normal'.",
                     ),
-                postponed_until: z
-                    .string()
-                    .nullable()
-                    .optional()
-                    .describe(
-                        "Snooze the ticket until this deadline. ISO8601 or relative shorthand (+30m / +2h / +3d / +1w / +1mo). Pass null (or empty string) to un-snooze. Reporter-or-human only.",
-                    ),
             },
         },
-        async ({ ticket_id, title, summary, body, intent, priority, postponed_until }) => {
-            markActiveTicket(ticket_id); // #404: focus = this ticket (token attribution)
+        async ({ ticket_id, title, summary, body, intent, priority }) => {
+            markActiveTicket(ticket_id); // focus = this ticket (token attribution)
             const results: Record<string, unknown> = { ticket_id };
-            // Each field maps to its own HTTP endpoint. Apply in this
-            // order: edit fields first (they may change the title/body
-            // the following flips display), then postpone.
             if (
                 title !== undefined ||
                 body !== undefined ||
@@ -512,16 +450,8 @@ export function registerTicketWriteTools(server: McpServer): void {
             ) {
                 results.edit = await client.edit(ticket_id, { title, summary, body, intent, priority });
             }
-            if (postponed_until !== undefined) {
-                if (postponed_until === null || !postponed_until.trim()) {
-                    results.postponed_until = await client.unsnoozeTicket(ticket_id);
-                } else {
-                    const iso = resolveUntil(postponed_until);
-                    results.postponed_until = await client.postponeTicket(ticket_id, iso);
-                }
-            }
             if (Object.keys(results).length === 1) {
-                throw new Error("ticket_update needs at least one field — pass title/body/intent/priority/postponed_until");
+                throw new Error("ticket_update needs at least one field — pass title/body/intent/priority");
             }
             return asText(results);
         },

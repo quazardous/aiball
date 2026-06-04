@@ -15,7 +15,7 @@ export function registerTicketReadTools(server: McpServer): void {
         "ticket_list",
         {
             description:
-                "List tickets, optionally filtered by project, tags, author, status, title substring, or `since` (created_at >= ISO8601). Snoozed tickets excluded by default when `open: true` — pass `include_snoozed: true` to surface them. **`actionable: true`** (#B.232 #234) is stricter than `open`: also excludes tickets with a pending resolution proposal, blocked tickets, and tickets gated by an open dependency — i.e. the candidate pool the wake-CTA points at. Tag filter is AND-semantic. **Default: header-only rows** (id, title, summary, status, parent, sub_count, tags, plus per-consumer `unread` + `actionable` + `claimable` booleans) — no bodies. Pass `full: true` to include `body` per row. Use ticket_get for one full thread.\n\n**Order (#371)**: results come back as a WORK LANDSCAPE — tiered, then work-ordered within each tier. Tiers (greedy: each ticket appears once, in the highest tier it qualifies for): `unread` → `actionable` (¬unread) → other open → the rest (closed/snoozed, at the bottom). Within a tier: priority desc (urgent → low), then oldest-first as a tiebreak. Every row carries `unread` (≥1 unseen ping for you) and `actionable` (in your court) so you can slice the single list yourself — the sets are **nested: unread ⊂ actionable ⊂ open**. `open: true` / `actionable: true` just SUBSET the rows to that set; the tiering still applies. Take the first row to work the top of your queue (explicit priority still wins within a tier; \"FIFO\" was a misnomer — it's the GET's work order).",
+                "List tickets, optionally filtered by project, tags, author, status, title substring, or `since` (created_at >= ISO8601). **`actionable: true`** is stricter than `open`: also excludes tickets with a pending resolution proposal, blocked tickets, and tickets gated by an open dependency — i.e. the candidate pool the wake-CTA points at. Tag filter is AND-semantic. **Default: header-only rows** (id, title, summary, status, parent, sub_count, tags, plus per-consumer `unread` + `actionable` + `claimable` booleans) — no bodies. Pass `full: true` to include `body` per row. Use ticket_get for one full thread.\n\n**Order**: results come back as a WORK LANDSCAPE — tiered, then work-ordered within each tier. Tiers (greedy: each ticket appears once, in the highest tier it qualifies for): `unread` → `actionable` (¬unread) → other open → closed-at-bottom. Within a tier: priority desc (urgent → low), then oldest-first as a tiebreak. Every row carries `unread` (≥1 unseen ping for you) and `actionable` (in your court) so you can slice the single list yourself — the sets are **nested: unread ⊂ actionable ⊂ open**. `open: true` / `actionable: true` just SUBSET the rows to that set; the tiering still applies. Take the first row to work the top of your queue (explicit priority still wins within a tier).",
             inputSchema: {
                 project: z.string().optional(),
                 open: z
@@ -25,15 +25,11 @@ export function registerTicketReadTools(server: McpServer): void {
                 actionable: z
                     .boolean()
                     .optional()
-                    .describe("If true, only tickets where the agent actually has work to do: not closed, not snoozed, NOT in awaiting-validation state (no pending resolution/plan proposal), not blocked, not gated by an open dependency. Strictly tighter than `open: true`. Matches the actionable_count surfaced on the sidebar."),
+                    .describe("If true, only tickets where the agent actually has work to do: not closed, NOT in awaiting-validation state (no pending resolution/plan proposal), not blocked, not gated by an open dependency. Strictly tighter than `open: true`. Matches the actionable_count surfaced on the sidebar."),
                 claimable: z
                     .boolean()
                     .optional()
                     .describe("If true, only tickets you can CLAIM: `actionable` AND in a project you OWN (role=owner). Narrower than `actionable` — a follower-broadcast from a project you only follow is actionable/visible but NOT claimable (the work belongs to that project's owners). This is the exact set a bare `ticket_claim()` picks from. Every row also carries a per-consumer `claimable` boolean so you can slice the list yourself."),
-                include_snoozed: z
-                    .boolean()
-                    .optional()
-                    .describe("If true (and open=true), include tickets currently snoozed in the result. Default false."),
                 tags: z
                     .array(z.string())
                     .optional()
@@ -84,7 +80,6 @@ export function registerTicketReadTools(server: McpServer): void {
             open,
             actionable,
             claimable,
-            include_snoozed,
             tags,
             full,
             since,
@@ -98,7 +93,6 @@ export function registerTicketReadTools(server: McpServer): void {
                 open: open ? "1" : undefined,
                 actionable: actionable ? "1" : undefined,
                 claimable: claimable ? "1" : undefined,
-                include_postponed: include_snoozed ? "1" : undefined,
                 tags: tags && tags.length > 0 ? tags.join(",") : undefined,
                 // Default (no flag) → summary mode on the API side. `full: true`
                 // explicitly opts back into bodies.
@@ -117,15 +111,11 @@ export function registerTicketReadTools(server: McpServer): void {
         "search",
         {
             description:
-                "Full-text search over ticket titles, ticket bodies, and comment / lifecycle bodies. Backed by SQLite FTS5 with a **trigram tokenizer** (#285): case-insensitive, accent-insensitive, and **substring / fragment matching** — `broad` finds `broadcast`, and `cast` finds `broadcast` too (no longer whole-word only). Whitespace-separated tokens are AND-ed (so `search('hashid broadcast')` finds rows containing both); each token ≥3 chars is matched as a substring, 1-2 char tokens fall back to a LIKE filter. Returns at most `limit` hits sorted by FTS5 relevance (more relevant first). Each hit carries a `snippet` with `<mark>…</mark>` around the match, plus enough context (project, by_agent, created_at, kind=ticket|comment, hashid for comments) to render without an extra round-trip. Snoozed parent tickets are filtered out by default — pass `include_snoozed: true` to surface their hits. Use this instead of scrolling `ticket_list` when you remember a keyword but not a number.",
+                "Full-text search over ticket titles, ticket bodies, and comment / lifecycle bodies. Backed by SQLite FTS5 with a trigram tokenizer: case-insensitive, accent-insensitive, and substring / fragment matching — `broad` finds `broadcast`, and `cast` finds `broadcast` too. Whitespace-separated tokens are AND-ed (so `search('hashid broadcast')` finds rows containing both); each token ≥3 chars is matched as a substring, 1-2 char tokens fall back to a LIKE filter. Returns at most `limit` hits sorted by FTS5 relevance (more relevant first). Each hit carries a `snippet` with `<mark>…</mark>` around the match, plus enough context (project, by_agent, created_at, kind=ticket|comment, hashid for comments) to render without an extra round-trip. Use this instead of scrolling `ticket_list` when you remember a keyword but not a number.",
             inputSchema: {
                 query: z.string().describe("Free-form text to look up. Special FTS5 syntax characters are stripped — pass plain words."),
                 project: z.string().optional().describe("Scope to one project (default: all projects the consumer can see)."),
                 open: z.boolean().optional().describe("If true, exclude rejected tickets from the hit list."),
-                include_snoozed: z
-                    .boolean()
-                    .optional()
-                    .describe("If true, include hits whose parent ticket is currently snoozed. Default false."),
                 intent: z
                     .enum(["panic", "request", "question", "fyi", "feature"])
                     .optional()
@@ -133,14 +123,13 @@ export function registerTicketReadTools(server: McpServer): void {
                 limit: z.number().int().min(1).max(200).optional().describe("Max hits to return. Default 50, hard cap 200."),
             },
         },
-        async ({ query, project, open, intent, limit, include_snoozed }) => {
+        async ({ query, project, open, intent, limit }) => {
             const hits = await client.search({
                 query,
                 project,
                 open,
                 intent,
                 limit,
-                include_postponed: include_snoozed,
             });
             return asText(hits);
         },

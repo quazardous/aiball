@@ -76,7 +76,6 @@ A triage comment is not "+1" or "ok" : it has content. Ask a clarification ("wha
 If the ticket needs more than a triage comment, the other gestures still apply :
 
 - **Claim (`ticket_claim(N)`)** — you're going to focus on it now : read, work, post status. Different contract — see the next section.
-- **Postpone (`ticket_update(N, {postpone_until: "<ISO>"})`)** — real work but blocked / not now. Drops from the backlog until the date.
 - **Close (`ticket_close(N, then: "resolved" | "rejected" | "duplicate")`)** — done / wrong / dup. Lifecycle event fires, reporter sees the outcome.
 
 What does NOT count as triage : a single `ticket_get(N)` read with no follow-up. The wake will re-fire next heartbeat because the last_actor on the thread is still the reporter.

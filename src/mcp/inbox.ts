@@ -164,12 +164,6 @@ export function registerInboxTools(server: McpServer): void {
                     .describe(
                         "If true, include `known_projects[]` (the bare list of project names). Default false — the open_tickets map already encodes the project set.",
                     ),
-                include_snoozed: z
-                    .boolean()
-                    .optional()
-                    .describe(
-                        "If true, snoozed tickets count toward the bookends (first/last). Default false — snoozed tickets are explicitly set aside, they shouldn't surface at the edges of a 'what's active' view.",
-                    ),
                 all_projects: z
                     .boolean()
                     .optional()
@@ -187,13 +181,11 @@ export function registerInboxTools(server: McpServer): void {
         async ({
             include_subscriptions,
             include_projects,
-            include_snoozed,
             all_projects,
             full_pending,
         }) => {
             const wantSubs = include_subscriptions === true;
             const wantProjects = include_projects === true;
-            const wantSnoozed = include_snoozed === true;
             const allProjects = all_projects === true;
             const scopeProject =
                 !allProjects && client.defaultProject ? client.defaultProject : null;
@@ -221,10 +213,7 @@ export function registerInboxTools(server: McpServer): void {
                 client.myPendingComments().catch(() => []),
                 client.pingsCount().catch(() => ({ unread: 0 })),
                 client
-                    .bookends({
-                        includeSnoozed: wantSnoozed,
-                        project: scopeProject ?? undefined,
-                    })
+                    .bookends({ project: scopeProject ?? undefined })
                     .catch(() => ({ first: null, last: null })),
             ]);
             const rawStats = Array.isArray(projectStats) ? projectStats : [];
@@ -232,16 +221,11 @@ export function registerInboxTools(server: McpServer): void {
                 ? rawStats.filter((p) => p.name === scopeProject)
                 : rawStats;
             const openTickets: Record<string, number> = {};
-            const snoozedTickets: Record<string, number> = {};
             let openTicketsTotal = 0;
-            let snoozedTicketsTotal = 0;
             for (const p of stats) {
                 const n = typeof p.open_count === "number" ? p.open_count : 0;
-                const s = typeof p.snoozed_count === "number" ? p.snoozed_count : 0;
                 openTickets[p.name] = n;
-                snoozedTickets[p.name] = s;
                 openTicketsTotal += n;
-                snoozedTicketsTotal += s;
             }
             // Project-scope my_pending_* if AIBALL_PROJECT is set and we're
             // not in all_projects mode. Default summary projection drops the
@@ -277,17 +261,11 @@ export function registerInboxTools(server: McpServer): void {
                 scope: scopeProject ?? "all_projects",
                 daemon,
                 /** Per-project count of approved, currently-open tickets
-                 *  (i.e. not closed, not rejected, not snoozed). */
+                 *  (not closed, not rejected). */
                 open_tickets: openTickets,
                 open_tickets_total: openTicketsTotal,
-                /** Per-project count of tickets currently snoozed
-                 *  (postponed_until > now). Hidden from `open_tickets`.
-                 *  Use `ticket_list({include_snoozed: true})` to retrieve. */
-                snoozed_tickets: snoozedTickets,
-                snoozed_tickets_total: snoozedTicketsTotal,
                 /** Bookend tickets in scope — first (oldest) and last
-                 *  (most recent). Cross-project, ordered by id. Snoozed
-                 *  tickets are excluded unless `include_snoozed=true`. */
+                 *  (most recent). Cross-project, ordered by id. */
                 first_ticket: (bookends as { first?: unknown }).first ?? null,
                 last_ticket: (bookends as { last?: unknown }).last ?? null,
                 my_pending_tickets: myPendingOut,
