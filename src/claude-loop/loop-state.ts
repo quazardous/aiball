@@ -158,11 +158,6 @@ export function isTypingNow(input: LoopStateInput): boolean {
     return (input.nowMs - input.humanTypingAtMs) < input.humanTypingTtlMs;
 }
 
-function isWakeInFlight(input: LoopStateInput): boolean {
-    if (input.wakeInFlightAtMs === null) return false;
-    return (input.nowMs - input.wakeInFlightAtMs) < input.wakeInFlightTtlMs;
-}
-
 function isBusyDeferActive(input: LoopStateInput): boolean {
     if (input.busyDeferUntilMs === null) return false;
     return input.busyDeferUntilMs > input.nowMs;
@@ -229,9 +224,6 @@ function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: str
     if (isBusyDeferActive(input)) {
         const remMs = (input.busyDeferUntilMs ?? input.nowMs) - input.nowMs;
         return { allowed: false, reason: `busy-defer ${remMs}ms remaining` };
-    }
-    if (isWakeInFlight(input)) {
-        return { allowed: false, reason: "wake already in flight" };
     }
     if (input.paneBusy) {
         return { allowed: false, reason: "pane footer shows `esc to interrupt`" };

@@ -39,6 +39,8 @@ import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import { createLogger } from "../log.js";
 import {
+    armBusyDefer,
+    WAKE_COALESCE_WINDOW_MS,
     isInternalCheckCmd,
     LOOP_STATUS,
     bootCompletePath,
@@ -55,7 +57,6 @@ import {
     setResumeSessionPicker,
     setResuming,
     MUX_CMD,
-    WAKE_COALESCE_WINDOW_MS,
     buildContextPhrase,
     injectWakePhrase,
     checkHasWork,
@@ -68,7 +69,6 @@ import {
     installRootSha,
     STATE_ROOT,
     isLoopStale,
-    isDuplicateWakeHint,
     lastWakeAtPath,
     pingsPath,
     readBusyDefer,
@@ -76,7 +76,6 @@ import {
     recordOpenWakeHash,
     readDrainedState,
     writeDrainedState,
-    recordWakeHint,
     setTmuxStatus,
     afkStateChunkStr,
     setTmuxAfkState,
@@ -542,36 +541,23 @@ function refreshPaneMarkers(): void {
 
 let lastSendAt = 0;
 async function sendKeys(phrase: string, headMessageId?: number | null): Promise<void> {
-    // #B.180: touch the wake-in-flight marker BEFORE send-keys so
-    // the UserPromptSubmit hook can flag from_auto_wake=true and
-    // the timer keeps idleSinceMs in-memory (the auto-wake doesn't
-    // count as a human submission).
-    //
-    // #732 hot-fix (orphan marker bug observed live on m2m loop) — the
-    // wake-in-flight + last-wake-at writes used to happen unconditionally
-    // BEFORE `injectWakePhrase`. If the inject was then coalesce-skipped
-    // (`skipDuplicateWakeInjection` inside injectWakePhrase) the markers
-    // stayed armed without an actual wake going out → blocked every
-    // subsequent wake attempt for ~TTL of `wake-in-flight`. Fix: pass the
-    // marker writes as an `onWillInject` callback that injectWakePhrase
-    // fires ONLY after the dedupe gate passes (and before the actual
-    // socket/tmux inject → timing preserved for the UserPromptSubmit hook).
+    // Touch wake-in-flight BEFORE the actual send-keys so the
+    // UserPromptSubmit hook can flag from_auto_wake=true (the marker
+    // only flags the auto-wake, it's NOT a gate anymore — the post-wake
+    // tempo via busy-defer is what spaces out wakes).
     lastSendAt = Date.now();
     await injectWakePhrase(`${tname}.0`, phrase, () => {
         try {
             writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n");
         } catch { /* ignore — UserPromptSubmit hook will fall through to user-grace path, suboptimal but safe */ }
-        // #B.198 fix A: shared coalesce marker — Stop hook reads it to
-        // suppress chain-fire bursts. Touched here so timer-driven
-        // wakes also count toward the coalesce window.
-        // V4 Phase 3 : mirror into the in-memory shadow for instant
-        // timer-side reads ; the file write stays as the cross-process
-        // channel the stop-hook subprocess still relies on.
         setIpcLastWakeAtMs(Date.now());
-        // #749 — mark the FIFO-head ping as seen the moment the inject
-        // crosses the dedup gate. A delivered wake is the agent's read
-        // of the event. Fire-and-forget; a markMessageSeen failure
-        // shouldn't block the wake.
+        // Post-wake tempo: arm the defer gate so any wake landing in the
+        // next WAKE_COALESCE_WINDOW_MS is held (not dropped) — the FIFO
+        // head stays available and fires at the deadline.
+        armBusyDefer(sd!, WAKE_COALESCE_WINDOW_MS);
+        // Mark the FIFO-head ping as seen the moment the inject crosses
+        // the gate. A delivered wake is the agent's read of the event.
+        // Fire-and-forget; a markMessageSeen failure shouldn't block.
         if (headMessageId) {
             void client().markMessageSeen(headMessageId).catch(() => {});
         }
@@ -777,15 +763,10 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
     const { phrase, headMessageId } = await pickPhrase(hint);
     await sendKeys(phrase, headMessageId);
-    // #B.198 david: "on cumule pas les event identique on les merge".
-    // Persist the just-fired hint so subsequent SSE pings about the
-    // same (ticket, comment) within `WAKE_COALESCE_WINDOW_MS` get
-    // dropped at `onPing` (event-layer merge, no DB write).
-    recordWakeHint(sd!, hint);
-    // #379: record the landscape hash so the same set doesn't re-fire the
-    // actionable leg (set-aware dedup, replaces the count watermark). Fall back
-    // to the count watermark when the daemon supplied no hash (old version);
-    // manual/legacy wakes leave both empty, which is fine.
+    // Landscape hash watermark — same set doesn't re-fire the actionable
+    // leg (set-aware dedup, replaces the count watermark). Fall back to
+    // the count watermark when the daemon supplied no hash; manual /
+    // legacy wakes leave both empty.
     if (gateHash !== undefined) recordOpenWakeHash(sd!, gateHash);
     else if (gateOpenCount > 0) recordOpenWakeCount(sd!, gateOpenCount);
     setTmuxStatus(name!, LOOP_STATUS.BUSY);
@@ -839,14 +820,6 @@ async function mainSse(): Promise<void> {
         if (p.intent === "panic") {
             log(`SSE ping received: ${JSON.stringify(p)} → tryPanic`);
             void tryPanic("sse:ping:panic", p);
-            return;
-        }
-        // #B.198 david: "on cumule pas les event identique on les merge".
-        // When N SSE pings about the same (ticket, comment) arrive in a
-        // burst, only the first gets a wake ; the rest are dropped here
-        // at the event boundary. Hook layer only — model is untouched.
-        if (isDuplicateWakeHint(sd!, p, WAKE_COALESCE_WINDOW_MS)) {
-            log(`SSE ping coalesced (dup hint <${WAKE_COALESCE_WINDOW_MS}ms): ${JSON.stringify(p)}`);
             return;
         }
         log(`SSE ping received: ${JSON.stringify(p)} → tryWake`);

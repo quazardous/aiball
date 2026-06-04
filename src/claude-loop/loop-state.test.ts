@@ -514,18 +514,10 @@ test("no idle marker → wake skipped (claude busy or pre-boot)", () => {
 // the test below ("NOT AFK active → wake skipped") covers the same
 // scenario from the AFK angle.
 
-test("wake-in-flight fresh → wake skipped (counter coalesce)", () => {
-    const start = T0;
-    const now = start + 5 * MIN;
-    const v = computeLoopView(baseInput({
-        nowMs: now,
-        loopStartMs: start,
-        wakeInFlightAtMs: now - SEC,
-        idleSinceMs: now,
-    }));
-    assert.equal(v.wakeAllowed, false);
-    assert.match(v.wakeSkipReason ?? "", /wake already in flight/);
-});
+// wake-in-flight is no longer a gate — the post-wake tempo is handled
+// by busy-defer (armed for WAKE_COALESCE_WINDOW_MS inside the inject
+// callback). The marker still exists for the UserPromptSubmit hook
+// (from_auto_wake flag), but it doesn't block tryWake.
 
 test("busy-defer active → wake skipped", () => {
     const start = T0;
@@ -662,18 +654,6 @@ test("countdown never reads `0s` (clamped to 1s)", () => {
         idleSinceMs: now,
     }));
     assert.equal(v.afkChunk.prefix, "1s");
-});
-
-test("wake-in-flight stale (>TTL) → no longer gates", () => {
-    const start = T0;
-    const now = start + 5 * MIN;
-    const v = computeLoopView(baseInput({
-        nowMs: now,
-        loopStartMs: start,
-        wakeInFlightAtMs: now - 10 * SEC, // way past 2s TTL
-        idleSinceMs: now,
-    }));
-    assert.equal(v.wakeAllowed, true);
 });
 
 test("busy-defer with deadline in the past → no longer gates", () => {

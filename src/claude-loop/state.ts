@@ -16,7 +16,6 @@ import {
     getIpcState,
     setIpcDrainedState,
     setIpcHumanTypingAtMs,
-    setIpcLastInjectedWake,
     setIpcLastOpenWakeCount,
     setIpcLastOpenWakeHash,
     setIpcLastWakeHint,
@@ -445,31 +444,6 @@ export function dedupeWakeInjection(
         }
     }
     return { skip: false, write: new Date(nowMs).toISOString() + "\n" + phrase };
-}
-
-/**
- * #409 — fs side of the injection dedup: read the marker, decide via
- * `dedupeWakeInjection`, persist when injecting. Returns true to SKIP.
- * Fails open (inject) on any fs error — a missed dedup is harmless, a
- * dropped wake is not.
- */
-function skipDuplicateWakeInjection(sd: string, phrase: string): boolean {
-    // V4 Phase 3 — read the in-memory shadow first (timer-side, instant)
-    // and fall back to the file marker only when the in-memory value is
-    // null (subprocess that hasn't received any marker yet). Same back-
-    // compat write path so the stop-hook's separate read keeps working
-    // until V5 centralises wake dedup on the timer's loopServer.
-    let prev: string | null = getIpcState().lastInjectedWake;
-    if (prev === null) {
-        try { prev = readFileSync(lastInjectedWakePath(sd), "utf8"); } catch { /* no marker yet */ }
-    }
-    const { skip, write } = dedupeWakeInjection(prev, phrase, Date.now(), WAKE_COALESCE_WINDOW_MS);
-    if (skip) return true;
-    if (write !== null) {
-        setIpcLastInjectedWake(write);
-        try { writeFileSync(lastInjectedWakePath(sd), write); } catch { /* ignore — fail open */ }
-    }
-    return false;
 }
 
 /**
@@ -1920,15 +1894,9 @@ export async function injectWakePhrase(
     // Fall back to the tmux paste/send-keys path for loops not under the
     // proxy or if the write fails.
     const sd = process.env[CL_ENV.STATE_DIR];
-    // #409/#623 : cross-process counter at the single injection chokepoint
-    // — any wake within WAKE_COALESCE_WINDOW_MS of a prior fire collapses
-    // (david's "compteur, pas file" model). Marker written before inject.
-    if (sd && skipDuplicateWakeInjection(sd, phrase)) return;
-    // #732 hot-fix : `onWillInject` fires only when the dedupe gate has
-    // passed → callers can safely arm orphan-prone markers like
-    // `wake-in-flight` here without risk of leaving them set when the
-    // wake collapses. Fires BEFORE the actual socket/tmux inject so the
-    // UserPromptSubmit hook reads the marker as soon as claude submits.
+    // `onWillInject` arms markers (wake-in-flight, last-wake-at,
+    // busy-defer tempo) right before the actual socket/tmux write so the
+    // UserPromptSubmit hook can read them as soon as claude submits.
     if (onWillInject) {
         try { onWillInject(); } catch { /* swallow — caller hook is best-effort */ }
     }
