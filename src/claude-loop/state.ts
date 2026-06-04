@@ -750,22 +750,20 @@ export async function checkHasWork(
             }
             const base = { pingsCount, openCount: actionableCount, totalOpenCount, landscapeHash, lastActivityMs };
             if (pingsCount > 0) return { has: true, ...base };
-            // #379 actionable leg — set-aware hash dedup (Q2): re-wake only when
-            // the landscape moved since the last wake (catches swaps the count
-            // watermark missed). Fall back to the count watermark when the
-            // daemon supplied no hash (zero regression on old versions).
-            if (sd && landscapeHash !== undefined) {
-                const seen = readLastOpenWakeHash(sd);
-                return { has: actionableCount > 0 && landscapeHash !== seen, ...base };
-            }
-            if (sd) {
-                const watermark = readLastOpenWakeCount(sd);
-                if (actionableCount < watermark) {
-                    recordOpenWakeCount(sd, actionableCount);
-                    return { has: false, ...base };
-                }
-                return { has: actionableCount > watermark, ...base };
-            }
+            // #813 qzrj42 — drop the #379 landscape-hash watermark and the
+            // legacy count watermark. The backlog cooldown #786 (per-consumer,
+            // per-ticket, 1h) already handles the "don't re-wake the same
+            // ticket forever" concern : each wake on a backlog ticket arms
+            // the cooldown, the next heartbeat picks the next non-cooled
+            // ticket, and after all are cooled the loop goes silent until
+            // the 1h window expires and a ticket re-surfaces. The watermark
+            // was BLOCKING that rotation (`landscapeHash === seen` →
+            // has:false even with 24 actionable tickets ready to fire) ; the
+            // cooldown gives us the same "no spam" property without the
+            // false-negative on a stable landscape. `sd` arg + landscapeHash
+            // field kept for back-compat ; readLastOpenWakeHash /
+            // readLastOpenWakeCount become dead-code candidates (separate
+            // cleanup).
             return { has: actionableCount > 0, ...base };
         } catch {
             return emptyWork();
