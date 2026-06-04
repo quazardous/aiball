@@ -1618,6 +1618,7 @@ export async function buildContextPhrase(
                         hashid?: string | null;
                         body?: string | null;
                         intent?: Intent | null;
+                        meta?: string | null;
                     }>;
                 }>).catch(() => ({ messages: [] }))
                 : Promise.resolve({ messages: [] }),
@@ -1728,6 +1729,21 @@ export async function buildContextPhrase(
         // queue" framing — see wake_master in config/defaults/.
         let headCommentHashid = "";
         let headBody = "";
+        // #749 david — "comment vide ça doit pas arriver. si ç porte pas
+        // une pending accept/reject ou quoi on le skip" : if the FIFO head
+        // is a comment with no body AND no pending decision in meta, drop
+        // the head entirely so the wake falls through to the no_head idle
+        // branch instead of emitting a meaningless "(#X / #Y)".
+        if (unreadHead && unreadHead.kind === "comment_added") {
+            const meta = typeof unreadHead.meta === "string"
+                ? (() => { try { return JSON.parse(unreadHead.meta as string); } catch { return null; } })()
+                : null;
+            const hasPendingDecision = meta?.decision?.status === "pending";
+            const hasBody = typeof unreadHead.body === "string" && unreadHead.body.trim().length > 0;
+            if (!hasBody && !hasPendingDecision) {
+                head = undefined;
+            }
+        }
         if (unreadHead && head?.id) {
             const isTicketRoot = unreadHead.kind === "ticket_created";
             if (!isTicketRoot && typeof unreadHead.hashid === "string") {
@@ -1750,14 +1766,16 @@ export async function buildContextPhrase(
                 head = { ...head, title: unreadHead.title };
             }
         }
-        // #749 david `5qrrsd` — when no unread ping but actionable backlog
-        // remains, fall back to the top-priority claimable ticket so the
-        // wake names the head with title+id instead of just "[N open]".
-        if (!head && pingCount === 0 && actionableCount > 0) {
+        // #749 david — when no unread ping, fall back to the top OPEN
+        // ticket by priority (not filtered by claimable, the agent uses
+        // its discipline skill to decide what to do — "look #X: title").
+        // Drops the old `(N open in scope)` tail in favor of an explicit
+        // pointer at the head.
+        if (!head && pingCount === 0 && openCount > 0) {
             try {
                 const list = await client.listTickets({
                     ...(project ? { project } : {}),
-                    claimable: "true",
+                    open: "true",
                     limit: "1",
                 }) as { tickets?: Array<{ id: number; title?: string | null }>; rows?: Array<{ id: number; title?: string | null }> };
                 const rows = list.tickets ?? list.rows ?? [];
@@ -1765,7 +1783,7 @@ export async function buildContextPhrase(
                 if (top && Number.isFinite(top.id)) {
                     head = { id: top.id, title: top.title ?? undefined, kind: undefined };
                 }
-            } catch { /* fail-open : no head, template drops the engage leg */ }
+            } catch { /* fail-open : no head, template drops the look leg */ }
         }
         // Backlog fallback head may also be missing its title (older daemons,
         // or stripped projection). One small getTicket fills it in so the
@@ -1801,12 +1819,11 @@ export async function buildContextPhrase(
         // ci-dessous. Empty head → fallback texte qui rappelle juste
         // les unread pings.
         const hasClaimableHead = !!(head?.id);
-        // #749 david `5qrrsd` — when no unread ping but actionable backlog
-        // remains, we drain by priority head (set `backlog_mode`). When
-        // unread pings drive the wake, `wake_phrase_head` carries the
-        // wake_phrases.with_comment-style sentence ; the two are mutually
-        // exclusive (pings-first wins).
-        const backlogMode = (pingCount === 0 && actionableCount > 0 && hasClaimableHead && !blocking)
+        // #749 david — backlog branch fires when we have a head fetched
+        // from the OPEN backlog (FIFO empty, but at least one open
+        // ticket exists). Wording is "look #X: title" — the agent's
+        // discipline skill decides whether to claim or just triage.
+        const backlogMode = (pingCount === 0 && hasClaimableHead && !blocking)
             ? "1" : "";
         const vars = {
             culture,
@@ -1864,9 +1881,15 @@ export async function buildContextPhrase(
             // keep them tight. The no-head fallback (= nothing in queue,
             // no actionable backlog) is the only branch that keeps the
             // culture + open_count framing — that's the "idle ping" path.
+            // david — final shape per his iterations :
+            //  - comment : body + refs only, no culture/lead
+            //  - new ticket : just the "new ticket #X: title" label
+            //  - backlog : culture phrase + "look #X: title" (the agent's
+            //    skill decides whether to claim or just triage)
+            //  - no head (idle ping) : culture + lead only
             "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}"
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
-            + "{backlog_mode:+aiball #{head_id}{head_title:+: {head_title}}}"
+            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}"
             + "{no_head:+{culture} {lead}}",
             tone,
         );

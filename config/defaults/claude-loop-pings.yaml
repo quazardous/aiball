@@ -133,11 +133,11 @@ prompts:
   # the wake template. The verb matches the tool name `ticket_claim()`.
   wake_master:
     directive:
-      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+aiball #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
+      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
     hint:
-      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+aiball #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
+      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
     imperative:
-      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+aiball #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
+      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
 
   # #428: built-in gate messages. Rendered (tone-aware) when the gate triggers;
   # the detector fills placeholders like {count}. The triggered message is
