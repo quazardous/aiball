@@ -334,17 +334,13 @@ function selfReloadIfStale(): void {
 // pas le sien). Filtre agent-side car la même SSE peut servir plusieurs
 // usages (UI notifs vs wake) ; la décision "wake me?" est privée à
 // l'agent.
-async function pickPhrase(hint?: WakeHint): Promise<string> {
-    // #749 david — "tout le monde doit avoir le meme type de ping cad
-    // priorité aux event en fifo (on lance le premier event)". Every
-    // wake path — SSE direct ping, AFK-clear-drain, stop-hook post-turn,
-    // heartbeat — goes through `buildContextPhrase` so the content is
-    // uniform : pop the oldest unread FIFO event, fall back to the
-    // backlog head when empty. The legacy SSE-direct shortcut to
-    // `buildWakePhrase` ("X just arrived" framing) misled the agent when
-    // the actual trigger was an AFK resume, not the named event.
-    // Stakeholder filter on the hint stays useful for logging only ; the
-    // gate (computeWakeGate) decides whether the wake fires at all.
+async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessageId: number | null }> {
+    // #749 — every wake path (SSE direct, AFK-clear-drain, stop-hook
+    // post-turn, heartbeat) routes through `buildContextPhrase` so the
+    // content is uniform: pop the oldest unread FIFO event, fall back
+    // to the backlog head when empty. Returns the head's message id so
+    // the inject site can mark it seen (a delivered wake = the agent
+    // has read the event).
     if (hint?.ticket_id) {
         const me = process.env.AIBALL_AGENT;
         const ctx = await fetchWakeContext(hint, me);
@@ -545,7 +541,7 @@ function refreshPaneMarkers(): void {
 }
 
 let lastSendAt = 0;
-async function sendKeys(phrase: string): Promise<void> {
+async function sendKeys(phrase: string, headMessageId?: number | null): Promise<void> {
     // #B.180: touch the wake-in-flight marker BEFORE send-keys so
     // the UserPromptSubmit hook can flag from_auto_wake=true and
     // the timer keeps idleSinceMs in-memory (the auto-wake doesn't
@@ -572,6 +568,13 @@ async function sendKeys(phrase: string): Promise<void> {
         // timer-side reads ; the file write stays as the cross-process
         // channel the stop-hook subprocess still relies on.
         setIpcLastWakeAtMs(Date.now());
+        // #749 — mark the FIFO-head ping as seen the moment the inject
+        // crosses the dedup gate. A delivered wake is the agent's read
+        // of the event. Fire-and-forget; a markMessageSeen failure
+        // shouldn't block the wake.
+        if (headMessageId) {
+            void client().markMessageSeen(headMessageId).catch(() => {});
+        }
         try {
             writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n");
         } catch { /* ignore — coalesce will just fail open */ }
@@ -772,8 +775,8 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
-    const phrase = await pickPhrase(hint);
-    await sendKeys(phrase);
+    const { phrase, headMessageId } = await pickPhrase(hint);
+    await sendKeys(phrase, headMessageId);
     // #B.198 david: "on cumule pas les event identique on les merge".
     // Persist the just-fired hint so subsequent SSE pings about the
     // same (ticket, comment) within `WAKE_COALESCE_WINDOW_MS` get

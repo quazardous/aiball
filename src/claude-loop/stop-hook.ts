@@ -261,8 +261,9 @@ function readPane(): string {
             // the boot ping (counts + drain directive). Without this
             // the wake fires a bare "Excellent." and claude greets
             // back with no awareness of pending pings.
-            const phrase = await buildContextPhrase(
-                new AiballClient(),
+            const phraseClient = new AiballClient();
+            const { phrase, headMessageId } = await buildContextPhrase(
+                phraseClient,
                 process.env.AIBALL_PROJECT ?? null,
                 pingsPath(sd!),
             );
@@ -282,7 +283,11 @@ function readPane(): string {
                 data: { event: "marker", name: "set_last_wake_at", at_ms: wakeAtMs, now_ms: wakeAtMs },
             }, { timeoutMs: 200 });
             try { writeFileSync(lastWakeAtPath(sd!), new Date(wakeAtMs).toISOString() + "\n"); } catch { /* ignore */ }
-            await injectWakePhrase(`${tmuxName(name!)}.0`, phrase);
+            await injectWakePhrase(`${tmuxName(name!)}.0`, phrase, () => {
+                if (headMessageId) {
+                    void phraseClient.markMessageSeen(headMessageId).catch(() => {});
+                }
+            });
             // #B.232 ch887f: bump open-tickets watermark post-wake.
             if (gate.openCount > 0) recordOpenWakeCount(sd!, gate.openCount);
             setTmuxStatus(name!, LOOP_STATUS.BUSY);

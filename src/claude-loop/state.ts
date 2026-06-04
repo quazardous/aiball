@@ -1580,11 +1580,21 @@ export function pickPingPhrase(pingsAbsPath: string): string {
  * or both counts come back zero — never blocks the wake on a missing
  * daemon, and never invents a directive when there's nothing to do.
  */
+export interface ContextPhraseResult {
+    phrase: string;
+    /** #749 — the message_id of the unread FIFO head that fed the
+     *  phrase, when one exists. The wake injection site marks it seen
+     *  the moment the inject crosses the dedup gate (= the ping has
+     *  been delivered to the agent's pane). Null for backlog-head
+     *  wakes and for idle/no-head culture pings. */
+    headMessageId: number | null;
+}
+
 export async function buildContextPhrase(
     client: AiballClient,
     project: string | null,
     pingsAbsPath: string,
-): Promise<string> {
+): Promise<ContextPhraseResult> {
     const culture = pickPingPhrase(pingsAbsPath);
     try {
         // #749 Phase B — drain HEAD unitaire. The wake "head" used to come
@@ -1669,7 +1679,7 @@ export async function buildContextPhrase(
                 : 0;
         const actionableCount = sumBy("actionable_count");
         const openCount = sumBy("open_count");
-        if (pingCount === 0 && openCount === 0) return culture;
+        if (pingCount === 0 && openCount === 0) return { phrase: culture, headMessageId: null };
 
         // #B.232: when BOTH pings and open tickets are pending, chain
         // both directives so the agent doesn't drain pings and stop —
@@ -1718,22 +1728,17 @@ export async function buildContextPhrase(
         // variety). All vars are exposed so the yaml `wake_master` is fully
         // overridable per project (#371/#374 wording lives in the template).
         let head = Array.isArray(headRows) ? headRows[0] : undefined;
-        // #749 david (post-d4dakz) — expose the unread head's discrete
-        // pieces as template vars. We deliberately do NOT reuse
-        // `buildWakePhrase` here : that's the SSE-driven "X just arrived"
-        // format ; the FIFO-pop wake is a queue-head pointer, not an event
-        // notification. david : "tout le monde doit avoir le meme type de
-        // ping cad priorité aux event en fifo (on lance le premier
-        // event). si fifo vide on lance le premier ticket du baclog". The
-        // template composes the sentence itself with explicit "first in
-        // queue" framing — see wake_master in config/defaults/.
+        // #749 — expose the unread head's discrete pieces as template
+        // vars. We do NOT reuse `buildWakePhrase` here (that's the
+        // SSE-driven "X just arrived" format) — the FIFO-pop wake is a
+        // queue-head pointer, not an event notification.
         let headCommentHashid = "";
         let headBody = "";
-        // #749 david — "comment vide ça doit pas arriver. si ç porte pas
-        // une pending accept/reject ou quoi on le skip" : if the FIFO head
-        // is a comment with no body AND no pending decision in meta, drop
-        // the head entirely so the wake falls through to the no_head idle
-        // branch instead of emitting a meaningless "(#X / #Y)".
+        // #749 — drop empty comments without pending decision. The FIFO
+        // head must carry actionable content (body or a then:plan /
+        // then:resolved proposal) ; otherwise treat as missing so the
+        // wake falls through to the no_head idle branch instead of
+        // emitting a meaningless "(#X / #Y)".
         if (unreadHead && unreadHead.kind === "comment_added") {
             const meta = typeof unreadHead.meta === "string"
                 ? (() => { try { return JSON.parse(unreadHead.meta as string); } catch { return null; } })()
@@ -1766,11 +1771,9 @@ export async function buildContextPhrase(
                 head = { ...head, title: unreadHead.title };
             }
         }
-        // #749 david — when no unread ping, fall back to the top OPEN
-        // ticket by priority (not filtered by claimable, the agent uses
-        // its discipline skill to decide what to do — "look #X: title").
-        // Drops the old `(N open in scope)` tail in favor of an explicit
-        // pointer at the head.
+        // #749 — when no unread ping, fall back to the top OPEN ticket
+        // by priority (no claimable filter). The agent's discipline skill
+        // decides what to do — wake reads "look #X: title".
         if (!head && pingCount === 0 && openCount > 0) {
             try {
                 const list = await client.listTickets({
@@ -1819,10 +1822,9 @@ export async function buildContextPhrase(
         // ci-dessous. Empty head → fallback texte qui rappelle juste
         // les unread pings.
         const hasClaimableHead = !!(head?.id);
-        // #749 david — backlog branch fires when we have a head fetched
-        // from the OPEN backlog (FIFO empty, but at least one open
-        // ticket exists). Wording is "look #X: title" — the agent's
-        // discipline skill decides whether to claim or just triage.
+        // #749 — backlog branch fires when an open head is available
+        // (FIFO empty, at least one open ticket). The agent's discipline
+        // skill decides whether to claim or just triage.
         const backlogMode = (pingCount === 0 && hasClaimableHead && !blocking)
             ? "1" : "";
         const vars = {
@@ -1881,12 +1883,11 @@ export async function buildContextPhrase(
             // keep them tight. The no-head fallback (= nothing in queue,
             // no actionable backlog) is the only branch that keeps the
             // culture + open_count framing — that's the "idle ping" path.
-            // david — final shape per his iterations :
-            //  - comment : body + refs only, no culture/lead
-            //  - new ticket : just the "new ticket #X: title" label
-            //  - backlog : culture phrase + "look #X: title" (the agent's
-            //    skill decides whether to claim or just triage)
-            //  - no head (idle ping) : culture + lead only
+            // #749 — final wake shape (four mutually exclusive branches):
+            //   comment    →  body + refs only
+            //   new ticket →  "new ticket #ID: TITLE"
+            //   backlog    →  culture + "look #ID: TITLE"
+            //   idle       →  culture + lead
             "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}"
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
             + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}"
@@ -1897,13 +1898,20 @@ export async function buildContextPhrase(
         // their prompt slot (per-project overridable + tone-aware + {vars});
         // custom gates use their literal message / cmd stdout. Template-agnostic
         // (works even when a custom wake_master has no {gates} placeholder).
-        if (gateResults.length === 0) return cta;
+        // #749 — head message id for the inject-time prune. Only the
+        // FIFO-driven branch carries a real id ; backlog / no-head paths
+        // emit null so the inject site doesn't try to prune nothing.
+        const headMessageId = unreadHead?.id ?? null;
+        if (gateResults.length === 0) return { phrase: cta, headMessageId };
         const banner = gateResults
             .map((g) => (g.slot ? renderSlot(promptMap, g.slot, g.vars, g.message, tone) : g.message))
             .join("  ");
-        return `${blocking ? "🛑 " : ""}${banner}  ${cta}`;
+        return {
+            phrase: `${blocking ? "🛑 " : ""}${banner}  ${cta}`,
+            headMessageId,
+        };
     } catch {
-        return culture;
+        return { phrase: culture, headMessageId: null };
     }
 }
 
