@@ -168,9 +168,13 @@ def _parse_step(path: Path, idx: int, raw: dict) -> Step:
         if not isinstance(expect, dict) or not expect:
             raise ScenarioError(f"{path} step[{idx}].expect: must be a non-empty mapping")
         # Split equality assertions from existence assertions :
-        #  - `key: {present: bool}` → existence[key] = bool
+        #  - `key: {type: equal|present, value: ...}` → explicit form (#773)
+        #  - `key: {present: bool}` → short existence form
         #  - top-level `exists: [path, ...]` → each entry → existence[entry] = True
         #  - everything else → equality assertion (value-compared)
+        # The explicit form disambiguates the corner case where a field's
+        # expected value is literally a dict with key `present:bool` — under
+        # the short form the parser would interpret it as existence.
         assertions: dict = {}
         existence: dict = {}
         for k, v in expect.items():
@@ -182,6 +186,32 @@ def _parse_step(path: Path, idx: int, raw: dict) -> Step:
                 for entry in v:
                     existence[entry] = True
                 continue
+            if isinstance(v, dict) and "type" in v:
+                t = v.get("type")
+                if set(v.keys()) - {"type", "value"}:
+                    raise ScenarioError(
+                        f"{path} step[{idx}].expect.{k}: unexpected keys "
+                        f"{sorted(set(v.keys()) - {'type', 'value'})!r} "
+                        f"(explicit form takes only `type` and `value`)"
+                    )
+                if "value" not in v:
+                    raise ScenarioError(
+                        f"{path} step[{idx}].expect.{k}: `type: {t!r}` requires a `value` key"
+                    )
+                val = v["value"]
+                if t == "equal":
+                    assertions[k] = val
+                    continue
+                if t == "present":
+                    if not isinstance(val, bool):
+                        raise ScenarioError(
+                            f"{path} step[{idx}].expect.{k}.value: `type: present` requires bool, got {type(val).__name__}"
+                        )
+                    existence[k] = val
+                    continue
+                raise ScenarioError(
+                    f"{path} step[{idx}].expect.{k}.type: must be 'equal' or 'present', got {t!r}"
+                )
             if isinstance(v, dict) and set(v.keys()) == {"present"}:
                 if not isinstance(v["present"], bool):
                     raise ScenarioError(

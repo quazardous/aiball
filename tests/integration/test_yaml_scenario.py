@@ -272,3 +272,170 @@ def test_get_inspect_path_parent_not_mapping_raises():
     snap = {"pane": "scalar"}
     with pytest.raises(KeyError, match="parent is not a mapping"):
         get_inspect_path(snap, "pane.x")
+
+
+# ---------------------------------------------------------------------
+# #760 / #773 — present / exists / explicit type grammar
+# ---------------------------------------------------------------------
+
+def test_expect_short_present_form(tmp_path: Path):
+    """`key: {present: true}` → existence[key] = True."""
+    p = write(tmp_path, "p.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at_seconds: 1
+    expect:
+      pane: { present: true }
+      view: { present: false }
+""")
+    sc = parse_scenario(p)
+    step = sc.steps[1]
+    assert isinstance(step, ExpectStep)
+    assert step.assertions == {}
+    assert step.existence == {"pane": True, "view": False}
+
+
+def test_expect_exists_batch_form(tmp_path: Path):
+    """Top-level `exists: [a, b]` → existence[a]=existence[b]=True."""
+    p = write(tmp_path, "e.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at_seconds: 1
+    expect:
+      exists: [boot, runtime, markers]
+""")
+    sc = parse_scenario(p)
+    step = sc.steps[1]
+    assert isinstance(step, ExpectStep)
+    assert step.assertions == {}
+    assert step.existence == {"boot": True, "runtime": True, "markers": True}
+
+
+def test_expect_explicit_type_present(tmp_path: Path):
+    """`key: {type: present, value: bool}` → existence[key] = bool."""
+    p = write(tmp_path, "tp.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at_seconds: 1
+    expect:
+      pane: { type: present, value: true }
+      stale: { type: present, value: false }
+""")
+    sc = parse_scenario(p)
+    step = sc.steps[1]
+    assert isinstance(step, ExpectStep)
+    assert step.existence == {"pane": True, "stale": False}
+
+
+def test_expect_explicit_type_equal_disambiguates_present_literal(tmp_path: Path):
+    """`{type: equal, value: {present: true}}` → equality against the literal
+    dict — disambiguates the short-form ambiguity (#773 motivation)."""
+    p = write(tmp_path, "te.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at_seconds: 1
+    expect:
+      some.field:
+        type: equal
+        value: { present: true }
+""")
+    sc = parse_scenario(p)
+    step = sc.steps[1]
+    assert isinstance(step, ExpectStep)
+    assert step.existence == {}
+    assert step.assertions == {"some.field": {"present": True}}
+
+
+def test_expect_explicit_type_equal_scalar(tmp_path: Path):
+    """`type: equal` form also works with scalar values."""
+    p = write(tmp_path, "ts.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at_seconds: 1
+    expect:
+      view.bar_word: { type: equal, value: boot }
+""")
+    sc = parse_scenario(p)
+    step = sc.steps[1]
+    assert step.assertions == {"view.bar_word": "boot"}
+    assert step.existence == {}
+
+
+def test_expect_explicit_unknown_type_raises(tmp_path: Path):
+    p = write(tmp_path, "tu.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at_seconds: 1
+    expect:
+      pane: { type: maybe, value: true }
+""")
+    with pytest.raises(ScenarioError, match="must be 'equal' or 'present'"):
+        parse_scenario(p)
+
+
+def test_expect_explicit_missing_value_raises(tmp_path: Path):
+    p = write(tmp_path, "tmv.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at_seconds: 1
+    expect:
+      pane: { type: present }
+""")
+    with pytest.raises(ScenarioError, match="requires a `value` key"):
+        parse_scenario(p)
+
+
+def test_expect_explicit_extra_keys_raises(tmp_path: Path):
+    """The explicit form takes exactly `type` and `value` — extra keys are
+    rejected to keep the contract narrow."""
+    p = write(tmp_path, "tek.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at_seconds: 1
+    expect:
+      pane: { type: present, value: true, extra: 1 }
+""")
+    with pytest.raises(ScenarioError, match="unexpected keys"):
+        parse_scenario(p)
+
+
+def test_expect_explicit_present_non_bool_raises(tmp_path: Path):
+    p = write(tmp_path, "tnb.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at_seconds: 1
+    expect:
+      pane: { type: present, value: 42 }
+""")
+    with pytest.raises(ScenarioError, match="`type: present` requires bool"):
+        parse_scenario(p)
+
+
+def test_expect_mixed_forms_in_one_step(tmp_path: Path):
+    """All four forms (scalar / short-present / exists / explicit) coexist
+    in the same `expect:` block."""
+    p = write(tmp_path, "mix.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at_seconds: 1
+    expect:
+      view.bar_word: boot
+      pane: { present: true }
+      exists: [runtime, markers]
+      some.field: { type: equal, value: { present: true } }
+""")
+    sc = parse_scenario(p)
+    step = sc.steps[1]
+    assert isinstance(step, ExpectStep)
+    assert step.assertions == {"view.bar_word": "boot", "some.field": {"present": True}}
+    assert step.existence == {"pane": True, "runtime": True, "markers": True}
