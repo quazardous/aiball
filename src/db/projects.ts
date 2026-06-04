@@ -5,7 +5,7 @@
  *
  * Extracted from db.ts (#B.332 Phase A.2).
  */
-import { and, asc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { getDb, nowIso } from "./connection.js";
 import { isForeignActor, eventHasForeignActor, isExcludedForConsumer } from "./last-actor-gate.js";
@@ -860,6 +860,8 @@ export function purgeOldClosedTickets(
         if (messageIds.length) {
             tx.delete(schema.pings).where(inArray(schema.pings.commentId, messageIds)).run();
         }
+        // #786 — satellite tables keyed on ticket_id must drop their rows too.
+        tx.delete(schema.backlogWakeLog).where(inArray(schema.backlogWakeLog.ticketId, purgeIds)).run();
         tx.delete(schema.tickets).where(inArray(schema.tickets.id, purgeIds)).run();
         return { purged_tickets: purgeIds.length, purged_messages: messageIds.length };
     });
@@ -1011,16 +1013,80 @@ export function deleteProject(name: string): { deleted_messages: number } {
         }
         if (ticketIds.length) {
             tx.delete(schema.pings).where(inArray(schema.pings.ticketId, ticketIds)).run();
+            // #786 — satellite tables keyed on ticket_id (drop alongside pings).
+            tx.delete(schema.backlogWakeLog).where(inArray(schema.backlogWakeLog.ticketId, ticketIds)).run();
         }
         if (messageIds.length) {
             tx.delete(schema.pings).where(inArray(schema.pings.commentId, messageIds)).run();
         }
         tx.delete(schema.tickets).where(eq(schema.tickets.project, name)).run();
         tx.delete(schema.subscriptions).where(eq(schema.subscriptions.project, name)).run();
-        // La ligne registre : sinon le projet (0 ticket) reste listé.
+        // Project registry row — without this the project (0 tickets) is still listed.
         tx.delete(schema.projects).where(eq(schema.projects.name, name)).run();
         return { deleted_messages: ticketIds.length + messageIds.length };
     });
+}
+
+/**
+ * #786 — record that this consumer's backlog wake just named the given
+ * ticket. Updates the (consumer, ticket) row (upsert), so a fresh wake
+ * resets the cooldown clock.
+ */
+export function recordBacklogWake(consumerId: string, ticketId: number): void {
+    const db = getDb();
+    const nowIso = new Date().toISOString();
+    db.insert(schema.backlogWakeLog).values({
+        consumerId,
+        ticketId,
+        wakeAt: nowIso,
+    }).onConflictDoUpdate({
+        target: [schema.backlogWakeLog.consumerId, schema.backlogWakeLog.ticketId],
+        set: { wakeAt: nowIso },
+    }).run();
+}
+
+/**
+ * #786 — return the set of ticket IDs this consumer should NOT see in the
+ * backlog wake right now : a wake fired on the ticket within the cooldown
+ * window AND nothing has happened on the thread since (last_actor_at
+ * still at-or-before the wake_at). When the reporter replies (= last_actor
+ * advances past wake_at) the ticket re-enters the backlog immediately.
+ */
+export function backlogCooldownExclusions(
+    consumerId: string,
+    cooldownSec: number,
+): Set<number> {
+    const db = getDb();
+    if (cooldownSec <= 0) return new Set();
+    const cutoffIso = new Date(Date.now() - cooldownSec * 1000).toISOString();
+    const rows = db.select({
+        ticketId: schema.backlogWakeLog.ticketId,
+        wakeAt: schema.backlogWakeLog.wakeAt,
+    }).from(schema.backlogWakeLog)
+        .where(and(
+            eq(schema.backlogWakeLog.consumerId, consumerId),
+            gt(schema.backlogWakeLog.wakeAt, cutoffIso),
+        ))
+        .all();
+    if (rows.length === 0) return new Set();
+    const ticketIds = rows.map((r) => r.ticketId);
+    const tickets = db.select({
+        id: schema.tickets.id,
+        lastActorAt: schema.tickets.lastActorAt,
+    }).from(schema.tickets)
+        .where(inArray(schema.tickets.id, ticketIds))
+        .all();
+    const lastActorByTicket = new Map(tickets.map((t) => [t.id, t.lastActorAt]));
+    const out = new Set<number>();
+    for (const r of rows) {
+        const lastActorAt = lastActorByTicket.get(r.ticketId);
+        // Exclude when the thread hasn't moved since the wake. A null
+        // last_actor_at (= no activity yet) also counts as "not moved".
+        if (lastActorAt === undefined || lastActorAt === null || lastActorAt <= r.wakeAt) {
+            out.add(r.ticketId);
+        }
+    }
+    return out;
 }
 
 /**

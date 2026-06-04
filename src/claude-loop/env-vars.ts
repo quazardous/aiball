@@ -46,6 +46,11 @@ export const CL_ENV = {
     PANE_BUSY_DELAY_MS: "CL_PANE_BUSY_DELAY_MS",
     WAKE_IN_FLIGHT_TTL_MS: "CL_WAKE_IN_FLIGHT_TTL_MS",
     WAKE_COALESCE_WINDOW_MS: "CL_WAKE_COALESCE_WINDOW_MS",
+    // #786 — backlog wake cooldown (seconds). The loop sends this to the
+    // daemon's ?backlog=1 filter; a ticket the loop just named won't
+    // surface again until the cooldown elapses OR someone replies on it.
+    // Default 3600 (1h).
+    BACKLOG_COOLDOWN_SEC: "CL_BACKLOG_COOLDOWN_SEC",
 
     // #722 — input-hot probe + pane-probe cadence (2 rates: fast/slow)
     INPUT_HOT_TTL_MS: "CL_INPUT_HOT_TTL_MS",

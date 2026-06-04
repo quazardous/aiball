@@ -55,7 +55,7 @@ import {
     listTicketSubscriptionsForTicket,
     getConsumer,
 } from "../db.js";
-import { computeActionableTicketIds, lastActorExclusions } from "../db/projects.js";
+import { computeActionableTicketIds, lastActorExclusions, backlogCooldownExclusions } from "../db/projects.js";
 import { listSubscriptions } from "../db/subscriptions.js";
 import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
@@ -950,9 +950,22 @@ ticketsRouter.get("/tickets", (req, res) => {
         // which puts actionable first. Tickets neither in tier 1 nor tier 2
         // (= other people's open work) are dropped.
         const lastByMe = lastActorExclusions(consumerId);
+        // #786 — cooldown filter: skip tickets the loop just named in a
+        // backlog wake until either the cooldown elapses or the thread
+        // moves (someone replies → last_actor_at advances past wake_at).
+        // The query carries `cooldown_sec` so each loop can override the
+        // default — 0 / missing disables the filter.
+        const cooldownSec = typeof req.query.cooldown_sec === "string"
+            && Number.isFinite(Number(req.query.cooldown_sec))
+            ? Math.max(0, Number(req.query.cooldown_sec))
+            : 0;
+        const cooled = cooldownSec > 0
+            ? backlogCooldownExclusions(consumerId, cooldownSec)
+            : null;
         result = result.filter((t) =>
             !t.closed && (includePostponed || !t.postponed)
-            && (actionableIds.has(t.id) || lastByMe.has(t.id)),
+            && (actionableIds.has(t.id) || lastByMe.has(t.id))
+            && (cooled === null || !cooled.has(t.id)),
         );
     }
     if (tagsFilter && tagsFilter.length > 0) {

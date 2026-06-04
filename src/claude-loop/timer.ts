@@ -333,7 +333,7 @@ function selfReloadIfStale(): void {
 // pas le sien). Filtre agent-side car la même SSE peut servir plusieurs
 // usages (UI notifs vs wake) ; la décision "wake me?" est privée à
 // l'agent.
-async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessageId: number | null; hasContent: boolean }> {
+async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessageId: number | null; hasContent: boolean; backlogTicketId: number | null }> {
     // #749 — every wake path (SSE direct, AFK-clear-drain, stop-hook
     // post-turn, heartbeat) routes through `buildContextPhrase` so the
     // content is uniform: pop the oldest unread FIFO event, fall back
@@ -472,7 +472,7 @@ function refreshPaneMarkers(): void {
 }
 
 let lastSendAt = 0;
-async function sendKeys(phrase: string, headMessageId?: number | null, interruptFirst = false): Promise<void> {
+async function sendKeys(phrase: string, headMessageId?: number | null, interruptFirst = false, backlogTicketId?: number | null): Promise<void> {
     // Touch wake-in-flight BEFORE the actual send-keys so the
     // UserPromptSubmit hook can flag from_auto_wake=true (the marker
     // only flags the auto-wake, it's NOT a gate anymore — the post-wake
@@ -500,6 +500,11 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
         // Fire-and-forget; a markMessageSeen failure shouldn't block.
         if (headMessageId) {
             void client().markMessageSeen(headMessageId).catch(() => {});
+        }
+        // #786 — backlog branch fired: start the per-consumer cooldown
+        // clock for this ticket. Fire-and-forget on the same channel.
+        if (backlogTicketId) {
+            void client().recordBacklogWake(backlogTicketId).catch(() => {});
         }
         try {
             writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n");
@@ -709,7 +714,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             }
         }
     }
-    const { phrase, headMessageId, hasContent } = await pickPhrase(hint);
+    const { phrase, headMessageId, hasContent, backlogTicketId } = await pickPhrase(hint);
     // If there's nothing actionable to surface (no FIFO head, no backlog,
     // no triggered gate), don't fire — david: "si y a rien on dit rien".
     // Manual wakes and panic still go through; their content is the
@@ -721,7 +726,7 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
-    await sendKeys(phrase, headMessageId, panicMode);
+    await sendKeys(phrase, headMessageId, panicMode, backlogTicketId);
     // Landscape hash watermark — same set doesn't re-fire the actionable
     // leg (set-aware dedup, replaces the count watermark). Fall back to
     // the count watermark when the daemon supplied no hash; manual /

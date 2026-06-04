@@ -1540,6 +1540,11 @@ export interface ContextPhraseResult {
      *  callers (afk-cleared-drain, boot-ended-drain) skip on false so
      *  claude isn't woken to read "Houston, we have an idle session". */
     hasContent: boolean;
+    /** #786 — id of the BACKLOG-branch ticket head, when the backlog
+     *  branch fired. Used by the inject site to call recordBacklogWake
+     *  so the per-consumer cooldown clock starts. Null when the wake
+     *  fired a FIFO event, a lifecycle event, or the idle phrase. */
+    backlogTicketId: number | null;
 }
 
 export async function buildContextPhrase(
@@ -1631,7 +1636,7 @@ export async function buildContextPhrase(
                 : 0;
         const actionableCount = sumBy("actionable_count");
         const openCount = sumBy("open_count");
-        if (pingCount === 0 && openCount === 0) return { phrase: culture, headMessageId: null, hasContent: false };
+        if (pingCount === 0 && openCount === 0) return { phrase: culture, headMessageId: null, hasContent: false, backlogTicketId: null };
 
         // #B.232: when BOTH pings and open tickets are pending, chain
         // both directives so the agent doesn't drain pings and stop —
@@ -1753,10 +1758,14 @@ export async function buildContextPhrase(
                 // tier 1 nor tier 2 are dropped server-side. Gate on the
                 // broader openCount so tier-2 reminders still surface
                 // when actionable_count is zero.
+                // #786 — pass the per-loop cooldown so the daemon excludes
+                // tickets we just named and that haven't moved since.
+                const cooldownSec = Math.max(0, Number(process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? 3600));
                 const raw = await client.listTickets({
                     ...(project ? { project } : {}),
                     backlog: "1",
                     limit: "1",
+                    cooldown_sec: cooldownSec > 0 ? String(cooldownSec) : undefined,
                 });
                 const rows = Array.isArray(raw)
                     ? (raw as Array<{ id: number; title?: string | null }>)
@@ -1869,7 +1878,11 @@ export async function buildContextPhrase(
         // the phrase is just the idle culture+lead — drain-style wake
         // reasons skip on it.
         const hasContent = !!(headCommentHashid || headLifecycleVerb || head?.kind === "new ticket" || backlogMode);
-        if (gateResults.length === 0) return { phrase: cta, headMessageId, hasContent };
+        // #786 — surface the backlog-branch ticket id so the inject site
+        // can start the per-consumer cooldown clock. Only when the
+        // backlog branch actually fired (not on FIFO / lifecycle).
+        const backlogTicketId = (backlogMode && head?.id) ? head.id : null;
+        if (gateResults.length === 0) return { phrase: cta, headMessageId, hasContent, backlogTicketId };
         const banner = gateResults
             .map((g) => (g.slot ? renderSlot(promptMap, g.slot, g.vars, g.message, tone) : g.message))
             .join("  ");
@@ -1878,9 +1891,10 @@ export async function buildContextPhrase(
             headMessageId,
             // A triggered gate counts as content even if the FIFO is empty.
             hasContent: hasContent || gateResults.length > 0,
+            backlogTicketId,
         };
     } catch {
-        return { phrase: culture, headMessageId: null, hasContent: false };
+        return { phrase: culture, headMessageId: null, hasContent: false, backlogTicketId: null };
     }
 }
 

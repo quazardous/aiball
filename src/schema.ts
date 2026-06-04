@@ -687,6 +687,27 @@ export const nodeProjectConfig = sqliteTable("node_project_config", {
 ]);
 
 /**
+ * #786 — per-consumer backlog wake cooldown. Each row records the last time
+ * the backlog branch of `buildContextPhrase` named a ticket for that
+ * consumer. The `?backlog=1` ticket filter excludes a ticket while
+ *   wake_at + COOLDOWN > now  AND  ticket.last_actor_at <= wake_at
+ * (= we waked on it, nothing has moved since). Updates overwrite the
+ * previous row for (consumer, ticket); a fresh wake resets the clock.
+ *
+ * Default cooldown 1h, env-tunable via CL_BACKLOG_COOLDOWN_SEC on the
+ * loop side (the daemon reads the query param `cooldown_sec` from the
+ * request so each loop can override).
+ */
+export const backlogWakeLog = sqliteTable("backlog_wake_log", {
+    consumerId: text("consumer_id").notNull(),
+    ticketId: integer("ticket_id").notNull(),
+    wakeAt: text("wake_at").notNull(),
+}, (t) => [
+    primaryKey({ columns: [t.consumerId, t.ticketId] }),
+    index("idx_bwl_wake_at").on(t.wakeAt),
+]);
+
+/**
  * #404 — per-ticket token-effort tally. The claude-loop Stop-hook reads each
  * turn's `usage` from the Claude session transcript and pushes the delta,
  * attributed to the active ticket (last ticket-scoped MCP call). Raw counts

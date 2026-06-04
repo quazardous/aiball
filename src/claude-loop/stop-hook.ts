@@ -253,7 +253,7 @@ function readPane(): string {
         log(`  checkHasWork=${gate.has} (pings=${gate.pingsCount} open=${gate.openCount})`);
         if (gate.has) {
             const phraseClient = new AiballClient();
-            const { phrase, headMessageId } = await buildContextPhrase(
+            const { phrase, headMessageId, backlogTicketId } = await buildContextPhrase(
                 phraseClient,
                 process.env.AIBALL_PROJECT ?? null,
                 pingsPath(sd!),
@@ -279,6 +279,10 @@ function readPane(): string {
                 armBusyDefer(sd!, WAKE_COALESCE_WINDOW_MS);
                 if (headMessageId) {
                     void phraseClient.markMessageSeen(headMessageId).catch(() => {});
+                }
+                // #786 — backlog cooldown clock (see timer.ts sendKeys).
+                if (backlogTicketId) {
+                    void phraseClient.recordBacklogWake(backlogTicketId).catch(() => {});
                 }
             });
             // #B.232 ch887f: bump open-tickets watermark post-wake.

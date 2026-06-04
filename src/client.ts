@@ -638,6 +638,15 @@ export class AiballClient {
         });
     }
 
+    /** #786 — record that the loop just named this ticket in a backlog
+     *  wake. Drives the per-consumer cooldown filter on `?backlog=1`. */
+    recordBacklogWake(ticket_id: number) {
+        return this.http("POST", "/api/backlog-wake", {
+            consumer_id: this.agentId,
+            ticket_id,
+        });
+    }
+
     // ---- ticket subscriptions + pings ------------------------------------
 
     subscribeTicket(ticket_id: number) {

@@ -15,6 +15,7 @@ import {
     markMessageSeen,
     markSeenUpToForProject,
     pendingTicketsByAuthor,
+    recordBacklogWake,
     unreadCount,
 } from "../db.js";
 import { badRequest, withTags } from "./_helpers.js";
@@ -83,4 +84,22 @@ readTrackingRouter.post("/mark-read", (req: Request, res: Response) => {
         res,
         "provide message_id (single ack), up_to_id with project (bulk ack up to id), or all:true with project (ack everything delivered)",
     );
+});
+
+/**
+ * #786 — record that a backlog wake just named the given ticket for this
+ * consumer. Upsert; a fresh wake on the same (consumer, ticket) resets
+ * the cooldown clock. Called from the loop's inject site only when the
+ * fired branch was backlog_mode (= FIFO empty, ticket pulled from open).
+ */
+readTrackingRouter.post("/backlog-wake", (req: Request, res: Response) => {
+    const { consumer_id, ticket_id } = req.body ?? {};
+    if (typeof consumer_id !== "string") {
+        return badRequest(res, "consumer_id required");
+    }
+    if (typeof ticket_id !== "number") {
+        return badRequest(res, "ticket_id required");
+    }
+    recordBacklogWake(consumer_id, ticket_id);
+    return res.json({ consumer_id, ticket_id, recorded: true });
 });

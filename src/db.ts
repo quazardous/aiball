@@ -121,6 +121,8 @@ export {
     isRootActive,
     purgeOldClosedTickets,
     getGlobalCounts,
+    recordBacklogWake,
+    backlogCooldownExclusions,
 } from "./db/projects.js";
 
 export {
