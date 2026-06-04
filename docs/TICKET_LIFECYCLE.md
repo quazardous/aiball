@@ -219,12 +219,12 @@ A triage comment (§ in `skill/SKILL.md` → "`look #N: TITLE. Triage the ticket
 moves the ticket **from tier 1 to tier 2** within the same backlog — the agent
 becomes the last actor, so the wake stops pointing at it as long as a tier-1
 ticket exists. Concrete tickets only drop OUT of the backlog on a lifecycle
-decision (`ticket_close` / `ticket_update postpone_until=…`) or when the
-reporter replies (which re-promotes the ticket to tier 1 because they're now
-the last actor → next wake names it again).
+decision (close by the agent via `ticket_close`, snooze by the human via the
+web UI) or when the reporter replies (which re-promotes the ticket to tier 1
+because they're now the last actor → next wake names it again).
 
 This formalises the soft rotation david called out: a simple comment doesn't
-"remove" a ticket from the backlog (closing / postponing does), but it pushes
+"remove" a ticket from the backlog (close or snooze does), but it pushes
 the ticket to the end so the next wake picks the next head.
 
 **Why two tiers, not "drop tier 2 entirely":** a ball-in-their-court ticket
