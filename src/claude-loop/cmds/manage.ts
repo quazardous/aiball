@@ -32,6 +32,7 @@ import {
     tmuxName,
     wakeRequestedPath,
     loopSockPath,
+    zenPath,
 } from "../state.js";
 import { sendEventOnce } from "../ipc-events.js";
 
@@ -161,6 +162,31 @@ export function cmdWake(name: string): void {
  * fresh one using the same env file the loop was started with, so the
  * tmux session + claude pane stay intact.
  */
+/**
+ * #749 david — `claude-loop zen <name>` toggle the wake kill-switch.
+ * Touches / removes a marker file the timer checks at the top of every
+ * `tryWake`. State-dir scoped (not global), survives `reload`. With
+ * `--on` / `--off` to be explicit ; bare = toggle. Verbose enough to
+ * see the new state at a glance.
+ */
+export function cmdZen(name: string, opts?: { on?: boolean; off?: boolean }): void {
+    const sd = stateDirFor(name);
+    if (!existsSync(sd)) die(`no state dir at ${sd}`);
+    const marker = zenPath(sd);
+    const isOn = existsSync(marker);
+    const explicit = opts?.on === true ? true : (opts?.off === true ? false : null);
+    const next = explicit !== null ? explicit : !isOn;
+    if (next && !isOn) {
+        writeFileSync(marker, new Date().toISOString() + "\n");
+        process.stdout.write(`zen ON for '${name}' — all wakes muted (timer reads ${marker} live, no restart needed)\n`);
+    } else if (!next && isOn) {
+        try { rmSync(marker); } catch { /* ignore */ }
+        process.stdout.write(`zen OFF for '${name}' — wakes re-enabled\n`);
+    } else {
+        process.stdout.write(`zen already ${isOn ? "ON" : "OFF"} for '${name}' — no change\n`);
+    }
+}
+
 export function cmdReload(name: string, opts?: { set?: string[] }): void {
     if (!tmuxAlive(name)) {
         die(`loop '${name}' not alive (use 'start' to spawn a fresh one)`);

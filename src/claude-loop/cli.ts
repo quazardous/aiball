@@ -65,7 +65,7 @@ import {
     type Plate,
 } from "./state.js";
 import { cmdTail, type TailMode } from "./cmds/tail.js";
-import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake } from "./cmds/manage.js";
+import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake, cmdZen } from "./cmds/manage.js";
 import { cmdInspect } from "./cmds/inspect.js";
 import { CL_ENV } from "./env-vars.js";
 
@@ -1876,6 +1876,12 @@ async function main(): Promise<void> {
     program.command("wake <name>")
         .description("Force the next timer tick to fire immediately")
         .action(cmdWake);
+    // #749 david — `claude-loop zen <name>` kill-switch for all wakes.
+    program.command("zen [name]")
+        .description("Toggle the wake kill-switch for a loop. Touches a `zen` marker file the timer reads at the top of every `tryWake` ; mutes ALL injections (including afk-cleared-drain). Live — no reload needed. Bare = toggle ; `--on` / `--off` = explicit. Name optional — defaults to the current-cwd loop.")
+        .option("--on", "force mute ON")
+        .option("--off", "force mute OFF")
+        .action((name: string | undefined, opts: { on?: boolean; off?: boolean }) => cmdZen(name ?? resolveCurrentLoopName(), opts));
     program.command("reload [name]")
         .description("Respawn the detached timer process without killing claude (picks up edited timer.ts / state.ts since tsx doesn't hot-reload). Also the SIGUSR2 action: `kill -USR2 <timer.pid>` reloads (#407 — unified with the daemon: HUP=restart, USR2=reload). Name optional — defaults to the loop registered for the current cwd.")
         .option("--set <kv...>", "#684: patch <state_dir>/env with KEY=VAL before the respawn. Repeatable (`--set A=1 --set B=2`). VAL='' drops the export (= unset). Typical use : flip a debug log opt-in (e.g. CL_PANE_CAPTURE_LOG=1) without editing the file by hand.")

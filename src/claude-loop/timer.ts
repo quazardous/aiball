@@ -88,6 +88,7 @@ import {
     logPaneCapture,
     wakeInFlightPath,
     wakeRequestedPath,
+    zenPath,
     readPlate,
     writePlate,
     envPath,
@@ -674,6 +675,14 @@ async function tryWake(reason: string, manualWake = false, hint?: WakeHint): Pro
     return tryWakeInFlight;
 }
 async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint): Promise<boolean> {
+    // #749 david — `--zen` kill switch. Presence of `zen` marker mutes ALL
+    // wake injections (including manualWake, including afk-cleared-drain).
+    // Highest-priority gate — runs before every other check. Toggle via
+    // `claude-loop zen <name>` or `claude-loop --zen` at start.
+    if (existsSync(zenPath(sd!))) {
+        log(`skip wake (${reason}) — zen mode (touch ${zenPath(sd!)} to mute, remove to unmute)`);
+        return false;
+    }
     // #727 V1 Slice B fix — the legacy idle-since pre-gate used
     // `existsSync(idleMarkerPath)`, but Slice B-3 stops the hooks from
     // writing that file when the ws emit succeeds. `readIdleSinceMs`

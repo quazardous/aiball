@@ -175,6 +175,11 @@ export function isLoopStale(plate: Plate): boolean {
 
 export function platePath(sd: string): string { return join(sd, "plate.json"); }
 export function envPath(sd: string): string { return join(sd, "env"); }
+/** #749 david — `claude-loop --zen` / `claude-loop zen <name>` kill switch :
+ *  presence of this file mutes ALL wake injections for the loop. Read at the
+ *  top of `tryWake`. Persists across restarts (file-based) so a `claude-loop
+ *  reload` doesn't reset the user's "leave me alone" intent. */
+export function zenPath(sd: string): string { return join(sd, "zen"); }
 /** #622 — loop session start timestamp (ms-since-epoch), written ONCE by
  *  `cli.ts` at launch. Both the long-lived timer and the short-lived hooks
  *  derive the boot-grace window from this single source — without it the
