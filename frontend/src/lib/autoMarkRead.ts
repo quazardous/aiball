@@ -36,6 +36,19 @@ export function useAutoMarkRead({ data, ticketId }: UseAutoMarkReadArgs): UseAut
     let timer: ReturnType<typeof setTimeout> | null = null;
     const markingRead = ref(false);
     let scheduledForId: number | null = null;
+    // #770 — highest comment id we've already confirmed mark-read for on
+    // this ticket. A new comment arriving via SSE / bus refresh that
+    // overshoots this watermark re-arms the dwell (envelope blink again),
+    // so a user dwelling on an open thread still gets a fresh
+    // notification-then-mark cycle. `null` = nothing confirmed yet.
+    let readUpToId: number | null = null;
+
+    function highestId(snapshot: ThreadViewData): number {
+        return Math.max(
+            snapshot.ticket.id,
+            ...snapshot.comments.map((c) => c.id),
+        );
+    }
 
     function cancel() {
         if (timer) {
@@ -44,28 +57,39 @@ export function useAutoMarkRead({ data, ticketId }: UseAutoMarkReadArgs): UseAut
         }
         markingRead.value = false;
         scheduledForId = null;
+        readUpToId = null;
     }
 
-    // Schedule fires only when `data` has loaded for the current ticketId
-    // — so we read the FRESH per-consumer unread flag, not the previous
-    // ticket's. #596 david `sa44wy` : pas de flicker sur un ticket déjà
-    // lu (la chip reste grise statique).
+    // Schedule fires when `data` has loaded for the current ticketId. We
+    // also re-fire when a fresh refresh exposes a comment id higher than
+    // the last confirmed mark-read watermark (#770) — that's the "a new
+    // comment arrived while I was reading" path. #596 david `sa44wy` :
+    // pas de flicker sur un ticket déjà lu sans nouveau contenu (la chip
+    // reste grise statique).
     function maybeSchedule() {
         const id = ticketId();
         const snapshot = data.value;
         if (!snapshot || snapshot.ticket?.id !== id) return;
-        if (scheduledForId === id) return;
+        const top = highestId(snapshot);
+        if (scheduledForId === id) {
+            // Already scheduled / completed for this ticket. Skip unless
+            // a NEW comment has landed past our last mark-read.
+            if (readUpToId === null || top <= readUpToId) return;
+            // New content arrived — cancel any in-flight dwell and re-arm.
+            if (timer) {
+                clearTimeout(timer);
+                timer = null;
+            }
+        }
         scheduledForId = id;
         markingRead.value = snapshot.ticket.unread === true;
         timer = setTimeout(() => {
             const lastSeenId = data.value && data.value.ticket?.id === id
-                ? Math.max(
-                    data.value.ticket.id,
-                    ...data.value.comments.map((c) => c.id),
-                  )
+                ? highestId(data.value)
                 : undefined;
             api.markTicketRead(id, lastSeenId)
                 .then(() => {
+                    if (lastSeenId !== undefined) readUpToId = lastSeenId;
                     // Read state is per-consumer, so the server doesn't
                     // broadcast it on WS. Push it onto the bus so the
                     // sidebar/list badges follow.
