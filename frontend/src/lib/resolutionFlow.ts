@@ -65,7 +65,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
             .sort((a, b) => b.id - a.id);
         const legacyTop = pending[0] ?? null;
         if (!legacyTop) return null;
-        const newer = findActiveDecision(data.value.comments);
+        const newer = findActiveDecision(data.value.ticket, data.value.comments);
         if (newer && newer.message.id > legacyTop.id) return null;
         return legacyTop;
     });
@@ -79,7 +79,9 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
     const activeDecision: ComputedRef<{ message: Message; decision: CommentDecision } | null> =
         computed(() => {
             if (!data.value || data.value.ticket.closed) return null;
-            return findActiveDecision(data.value.comments);
+            // #803 — pass ticket so a decision attached on ticket_created
+            // (via ticket_new({then:"plan"})) surfaces in the dock.
+            return findActiveDecision(data.value.ticket, data.value.comments);
         });
 
     const hasBody = computed(() => composerBody.value.trim().length > 0);

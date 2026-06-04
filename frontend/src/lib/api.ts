@@ -335,6 +335,16 @@ export interface TicketSummary {
      *  requesting consumer. Lets the UI skip the "marking-as-read"
      *  pulse when landing on an already-read ticket. */
     unread?: boolean;
+    /** #803 — sidecar JSON metadata (same shape as Message.meta). Today
+     *  carries the `decision` block when the ticket was created via
+     *  `ticket_new({then:"plan"})`. Stringified JSON, parsed via
+     *  `readDecision(ticket)` like a decision-bearing comment. */
+    meta?: string | null;
+    /** #803 — per-consumer flag : true iff this ticket has a pending
+     *  plan/resolution decision currently gating it out of the actionable
+     *  backlog. */
+    decision_proposable?: boolean;
+    gated_by_decision?: boolean;
 }
 
 /** #404: per-ticket token-effort tally (raw counts from the Claude transcript). */

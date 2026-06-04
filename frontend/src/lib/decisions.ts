@@ -10,7 +10,15 @@
  *     only while that latest one is still pending)
  */
 
-import type { Message } from "./api";
+import type { Message, TicketSummary } from "./api";
+
+// #803 — `findActiveDecision` accepts both Message (comments) and
+// TicketSummary (the ticket itself, when ticket_new({then:"plan"}) attached
+// a decision to its meta). Both shapes carry the fields we need (id +
+// status + meta). The accept/reject call sites only use `.id`, so we cast
+// the TicketSummary to Message at the seed site rather than fragmenting
+// the consumer typing.
+type DecisionBearing = Pick<Message, "id" | "status" | "meta">;
 
 export type DecisionKind = "plan" | "resolution";
 export type DecisionStatus = "pending" | "accepted" | "rejected";
@@ -24,7 +32,7 @@ export interface CommentDecision {
 
 /** Extract the decision block from a message's `meta` JSON. Returns
  *  null when meta is empty, malformed, or has no decision key. */
-export function readDecision(m: Message): CommentDecision | null {
+export function readDecision(m: DecisionBearing): CommentDecision | null {
     if (!m.meta) return null;
     try {
         const parsed = JSON.parse(m.meta) as { decision?: CommentDecision };
@@ -51,11 +59,24 @@ export function readDecision(m: Message): CommentDecision | null {
  *  pending decision and the composer never cleared (david #zmbyks: "ticket
  *  accepté mais bouton inchangé" — two pending plans on the same ticket,
  *  the latest accepted, the buttons stuck on the older one). */
-export function findActiveDecision(comments: Message[]): {
+export function findActiveDecision(
+    ticket: TicketSummary | null,
+    comments: Message[],
+): {
     message: Message;
     decision: CommentDecision;
 } | null {
     let latest: { message: Message; decision: CommentDecision } | null = null;
+    // #803 — `ticket_new({then:"plan"})` attaches a decision DIRECTLY on
+    // the ticket_created event itself ; the UI must surface it like a
+    // decision-bearing comment. Seed `latest` from the ticket's meta so a
+    // later approved comment with a fresher decision still wins (latest-id).
+    // The consumer (decide/reject handlers) only reads `.id` so the cast
+    // is safe ; the ticket id and ticket_created.id are the SAME number.
+    if (ticket && ticket.status === "approved") {
+        const d = readDecision(ticket);
+        if (d) latest = { message: ticket as unknown as Message, decision: d };
+    }
     for (const m of comments) {
         if (m.kind !== "comment_added") continue;
         if (m.status !== "approved") continue;
