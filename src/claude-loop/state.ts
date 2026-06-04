@@ -323,25 +323,25 @@ export function setInterrupted(_sd: string, interrupted: boolean): void {
     setIpcPaneInterrupted(interrupted);
 }
 export function pingsPath(sd: string): string { return join(sd, "pings.yaml"); }
-export function idleMarkerPath(sd: string): string { return join(sd, "idle-since"); }
+// #793 — `idleMarkerPath` removed. The idle-since signal lives in the
+// LoopStateBus (set via UDS events from Stop/SessionStart/UserPromptSubmit
+// hooks + seeded by the boot pane probe). Callers that need the
+// timestamp read `readIdleSinceMs(sd)`; CLI inspection queries the
+// timer's loop-server, no file to stat anymore.
 /**
- * #727 V1 Slice B — single source of truth for "is claude at the prompt"
- * (idle-since timestamp). In-memory state (set by the HookService Stop
- * subscriber) wins ; falls back to the `idle-since` file mtime for the
- * cross-process readers and the fresh-restart path. `null` = no signal
- * yet OR explicit clear (UserPromptSubmit fired). Used by both the central
- * wake gate (loop-state.ts) and the legacy per-feature gates in timer.ts
- * (selfReload, detectHumanTyping baseline reset) that pre-dated the
- * central gate but still need the same idle truth.
+ * #793 — single source of truth for "is claude at the prompt"
+ * (idle-since timestamp). Pure in-memory now: the bus value, set by
+ * the HookService subscribers (Stop / SessionStart / UserPromptSubmit)
+ * and seeded at timer boot by a pane probe (`refreshPaneMarkers` →
+ * `setIpcIdleSince(now)` if at-prompt). `null` = no signal yet OR
+ * explicit clear (UserPromptSubmit fired). The legacy `idle-since`
+ * file is gone — david's directive on #793 was "pas de fallback rien
+ * du tout vire moi tous ces markers".
  */
-export function readIdleSinceMs(sd: string): number | null {
+export function readIdleSinceMs(_sd: string): number | null {
     const ipc = getIpcState();
     if (ipc.idleSinceCleared) return null;
-    if (ipc.idleSinceMs !== null) return ipc.idleSinceMs;
-    try {
-        const p = idleMarkerPath(sd);
-        return existsSync(p) ? statSync(p).mtimeMs : null;
-    } catch { return null; }
+    return ipc.idleSinceMs;
 }
 export function wakeRequestedPath(sd: string): string { return join(sd, "wake-requested"); }
 /** #351: AFK marker — the human flagged themselves absent via the afk_key

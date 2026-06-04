@@ -22,9 +22,9 @@
  * now means "skip the human-takeover grace", NOT "fire immediately".
  */
 import { spawnSync } from "node:child_process";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MUX_CMD, clearResumePickers, idleMarkerPath, setResumeModePicker, setResumeSessionPicker, tmuxName } from "./state.js";
+import { MUX_CMD, clearResumePickers, setResumeModePicker, setResumeSessionPicker, tmuxName } from "./state.js";
 import { CL_ENV } from "./env-vars.js";
 import { emitHookEventToTimer } from "./hook-emit.js";
 
@@ -241,11 +241,10 @@ if (source === "resume") {
 // `CL_NO_STARTUP_PING` is the same end-state (idle marker + bar), kept
 // as a separate flag for compatibility with `claude-loop --no-startup-ping`.
 try {
-    // #727 V1 Slice B-3 — skip the file write when the in-memory state
-    // already carries the signal (early SessionStart emit succeeded).
-    if (!sessionStartEmitOk) {
-        writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-    }
+    // #793 — idle-since lives in the bus. The early SessionStart
+    // emitHookEventToTimer above already seeded it via the HookService
+    // subscriber; the file is gone. If the emit failed, the bar simply
+    // shows boot until the next pane-probe → claude-at-prompt detection.
     // #629 david `y43etd` : ne write `boot-complete` QUE si on a vraiment
     // dismissé un picker (auto-pick a fire) OU si on est sous --resume
     // abort (= user demande pas d'aide). Sinon (probe picker n'a pas

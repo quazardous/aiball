@@ -17,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, readBusyDefer, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, wakeInFlightPath, WAKE_COALESCE_WINDOW_MS } from "./state.js";
+import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, lastWakeAtPath, pingsPath, readBusyDefer, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, wakeInFlightPath, WAKE_COALESCE_WINDOW_MS } from "./state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
 import { CL_ENV } from "./env-vars.js";
@@ -41,17 +41,11 @@ if (!sd || !name) emit();
 // up the emit silently no-ops and the hook falls through to its
 // existing wake / idle decision logic. Top-level await ; tsx + ES2022
 // + NodeNext support it.
-// #727 V1 Slice B-3 — capture the early emit verdict ; if the timer
-// received it, the in-memory `IpcState.idleSinceMs` is already set by
-// the subscriber + the file write below becomes a back-compat shadow
-// the gate doesn't actually consult. Skip the writes in that case.
-let stopEmitOk = false;
+// #793 — emit the Stop event to the timer's loop-sock subscriber so
+// the in-memory `IpcState.idleSinceMs` is set. No file fallback.
 try {
-    stopEmitOk = await emitHookEventToTimer(sd, { event: "hook", kind: "Stop", at_ms: Date.now() });
+    await emitHookEventToTimer(sd, { event: "hook", kind: "Stop", at_ms: Date.now() });
 } catch { /* best-effort emit, never block the hook */ }
-/** True when the in-memory IPC state already carries this turn's
- *  signal — the file-marker writes that follow are fallback only. */
-function skipFileWrite(): boolean { return stopEmitOk; }
 
 // #B.149: tail-friendly log of every Stop hook fire — so we can spot
 // from outside the session whether the hook actually ran, what branch
@@ -172,7 +166,8 @@ function readPane(): string {
             // Claude is back at the prompt after the crashed turn — seed
             // idle-since so the timer is allowed to re-ping once the
             // backoff window elapses (it gates on the idle marker).
-            if (!skipFileWrite()) writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            // #793 — idle-since lives in the bus (set via the Stop event
+            // emitted to the timer below). No file marker anymore.
             setTmuxStatus(name!, LOOP_STATUS.BUSY, `retry ${bo.attempts}`);
             log(`  → ERROR-BACKOFF '${errId}' ${bo.ms}ms (attempt ${bo.attempts}) until=${bo.untilIso} became=busy:retry ${bo.attempts}`);
             emit();
@@ -200,7 +195,8 @@ function readPane(): string {
         // The AFK SM owns the longer-lived "human here" signal end-
         // to-end (typing arms NOT AFK 10m via the proxy).
         if (humanIsTyping(sd!) || afkActive(sd!)) {
-            if (!skipFileWrite()) writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            // #793 — idle-since lives in the bus (set via the Stop event
+            // emitted to the timer below). No file marker anymore.
             const sub = interrupted ? "interrupted" : "user";
             setTmuxStatus(name!, LOOP_STATUS.IDLE, sub);
             log(`  → SUPPRESS (human-typing or AFK hold) became=idle:${sub}`);
@@ -218,7 +214,8 @@ function readPane(): string {
         // still silently gates wakes during the window.
         if (pane.busy && PANE_BUSY_DELAY_MS > 0) {
             const until = armBusyDefer(sd!, PANE_BUSY_DELAY_MS);
-            if (!skipFileWrite()) writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            // #793 — idle-since lives in the bus (set via the Stop event
+            // emitted to the timer below). No file marker anymore.
             // #727 V1 Slice B-2 — also push the busy-defer expiry into
             // the timer's in-memory state via a second Stop event. The
             // dispatcher's HookService subscriber pins it on `IpcState`
@@ -244,7 +241,8 @@ function readPane(): string {
         // sent to the agent twice.
         const defer = readBusyDefer(sd!);
         if (defer && defer.activeMs > 0) {
-            if (!skipFileWrite()) writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            // #793 — idle-since lives in the bus (set via the Stop event
+            // emitted to the timer below). No file marker anymore.
             setTmuxStatus(name!, LOOP_STATUS.IDLE, "wait");
             log(`  → SKIP (busy-defer ${defer.activeMs}ms remaining) became=idle:wait`);
             emit();
@@ -291,7 +289,8 @@ function readPane(): string {
             log(`  → WAKE '${phrase}' became=busy`);
         } else {
             // Nothing to do — mark idle so the timer can take over.
-            if (!skipFileWrite()) writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            // #793 — idle-since lives in the bus (set via the Stop event
+            // emitted to the timer below). No file marker anymore.
             // #345 B: garder le marqueur interrupted visible tant que le
             // pane le montre, même hors user-grace.
             setTmuxStatus(name!, LOOP_STATUS.IDLE, interrupted ? "interrupted" : undefined);

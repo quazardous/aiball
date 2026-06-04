@@ -60,7 +60,6 @@ import {
     buildContextPhrase,
     injectWakePhrase,
     checkHasWork,
-    idleMarkerPath,
     readIdleSinceMs,
     humanTypingPath,
     afkActive,
@@ -105,6 +104,7 @@ import { getAfkService } from "./afk-service.js";
 import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
 import { getHookService } from "./hook-service.js";
 import {
+    getIpcState,
     setIpcBootComplete,
     setIpcBusyDeferUntil,
     setIpcIdleSince,
@@ -725,7 +725,9 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         return false;
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
-    try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
+    // #793 — clear in-memory idle-since: the wake is about to flip claude
+    // back to busy. The Stop hook will re-seed it when claude returns.
+    setIpcIdleSince(null);
     await sendKeys(phrase, headMessageId, panicMode, backlogTicketId);
     // Landscape hash watermark — same set doesn't re-fire the actionable
     // leg (set-aware dedup, replaces the count watermark). Fall back to
@@ -756,6 +758,23 @@ async function mainSse(): Promise<void> {
     // this against the live HEAD to flag a ghost daemon.
     const bootSha = installRootSha();
     if (bootSha) log(`timer source: install-root SHA ${bootSha.slice(0, 7)}`);
+    // #793 — seed the idle-since bus value at boot from a pane probe.
+    // The SHA-mismatch self-respawn watchdog (#72c604e) spawns a fresh
+    // timer with an empty `LoopStateBus`; the legacy `idle-since` file
+    // is usually absent on first run, so `readIdleSinceMs` returns null
+    // and every wake skips with "no idle marker" until a Stop hook
+    // happens to fire — but no Stop hook can fire because no wake ever
+    // landed. Chicken-and-egg, observed live on runic (#793 body).
+    //
+    // Fix: probe the pane right here. If the prompt is visible AND no
+    // picker/transient is up, claude is at the prompt → seed idle-since
+    // to now. The bus is the SSOT (`readIdleSinceMs` checks it first);
+    // the wake gate unblocks on the next tick.
+    refreshPaneMarkers();
+    if (sd && readIdleSinceMs(sd) === null && getIpcState().paneReady === true) {
+        setIpcIdleSince(Date.now());
+        log("boot: pane is at prompt → seeded idle-since (bus)");
+    }
     // #628 david `mquuep` — WakeBus : façade typed sur le canal SSE
     // daemon→loop. Le timer souscrit aux events ; le bus gère le
     // throttle reconnect (5s) en interne. Future consumers (hooks,
@@ -867,23 +886,17 @@ async function mainSse(): Promise<void> {
             armAfkViaService(sd!);
             log("settleBoot: --wait → armed NOT AFK 10m (via service)");
         }
-        // Seed idle-since so tryWake's gate passes; tryWake will
-        // flip to busy if there's work or stay idle otherwise.
-        try {
-            const { writeFileSync } = await import("node:fs");
-            writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
-        } catch { /* ignore */ }
+        // #793 — seed idle-since on the bus (no file). tryWake's gate
+        // passes; tryWake flips to busy on wake or leaves it on idle.
+        setIpcIdleSince(Date.now());
         await tryWake("boot-settle");
-        // tryWake removes idle-since on wake; if it didn't fire,
-        // we still want the bar to read [idle] not [boot].
-        if (existsSync(idleMarkerPath(sd!))) {
-            // #B.228: log the bar flip so "barre reste jaune" repros
-            // surface either this line (it WAS flipped) or its
-            // absence (settleBoot didn't reach the idle-marker check).
-            log("settleBoot: idle-marker present → setTmuxStatus(idle)");
+        // If tryWake didn't fire (no work), the bus still carries
+        // idle-since → bar reads [idle], not [boot].
+        if (readIdleSinceMs(sd!) !== null) {
+            log("settleBoot: idle-since present → setTmuxStatus(idle)");
             setTmuxStatus(name!, LOOP_STATUS.IDLE);
         } else {
-            log("settleBoot: idle-marker missing after tryWake (wake fired?) — bar stays as set by wake path");
+            log("settleBoot: idle-since cleared after tryWake (wake fired?) — bar stays as set by wake path");
         }
     };
     setTimeout(() => { void settleBoot(); }, BOOT_GRACE_MS);
@@ -1424,7 +1437,7 @@ async function mainPoll(): Promise<void> {
         const woke = await tryWake(manualWake ? "manual" : "check-cmd hit", manualWake);
         // #251: same idle-gated self-reload as mainSse — pick up moved
         // source only in the lull (no wake fired AND claude is idle).
-        if (!woke && existsSync(idleMarkerPath(sd!))) selfReloadIfStale();
+        if (!woke && readIdleSinceMs(sd!) !== null) selfReloadIfStale();
     }
     log("tmux session gone — timer exiting");
     // #714 — same explicit exit as mainSse (handles pinned by signals,

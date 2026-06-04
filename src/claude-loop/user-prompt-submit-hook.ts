@@ -25,7 +25,6 @@
  */
 import { existsSync, statSync, unlinkSync } from "node:fs";
 import {
-    idleMarkerPath,
     wakeInFlightPath,
     WAKE_IN_FLIGHT_TTL_MS,
 } from "./state.js";
@@ -57,18 +56,14 @@ try {
         try { unlinkSync(wifPath); } catch { /* race */ }
     }
     // #727 V1 Slice B-3 — try the ws emit first ; the timer-side
-    // subscriber clears the in-memory `idleSinceMs` (Slice B-1). The
-    // file unlink below is a degraded-mode fallback for when the timer
-    // is down + the ws emit failed.
-    const sent = await emitHookEventToTimer(sd!, {
+    // subscriber clears the in-memory `idleSinceMs` (Slice B-1). #793 —
+    // no file fallback; the bus is the single source of truth.
+    await emitHookEventToTimer(sd!, {
         event: "hook",
         kind: "UserPromptSubmit",
         from_auto_wake: fromAutoWake,
         at_ms: Date.now(),
     });
-    if (!sent && existsSync(idleMarkerPath(sd!))) {
-        try { unlinkSync(idleMarkerPath(sd!)); } catch { /* race */ }
-    }
 } catch {
     /* swallow — never block submit */
 }

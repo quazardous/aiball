@@ -45,7 +45,6 @@ import {
     defaultPingsPath,
     envPath,
     humanTypingPath,
-    idleMarkerPath,
     installRootSha,
     isLoopStale,
     logBarPaint,
@@ -918,7 +917,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const trapPath = join(sd, "kill-on-exit.sh");
     const sweepPaths = [
         "wake-in-flight", "busy-defer-until", "last-injected-wake",
-        "last-wake-at", "idle-since", "human-typing",
+        "last-wake-at", "human-typing",
     ].map((f) => shQuote(join(sd, f))).join(" ");
     const trapScript = [
         "#!/usr/bin/env bash",
@@ -1148,9 +1147,11 @@ function cmdList(): void {
         try { plate = readPlate(sd); } catch { continue; }
         const alive = tmuxAlive(name);
         const aliveStr = alive ? "alive" : "dead";
-        const idle = existsSync(idleMarkerPath(sd))
-            ? `idle since ${readFileSync(idleMarkerPath(sd), "utf8").trim()}`
-            : "—";
+        // #793 — idle-since file removed. The bus value lives in the
+        // timer process; this CLI subprocess can't read it without a
+        // loop.sock query. Show alive / dead / stale here and route
+        // detail to `claude-loop inspect <name>`.
+        const idle = "—";
         // Stale only matters for alive loops — a dead loop's timer is
         // gone, restart picks up current source by definition.
         const stale = alive && isLoopStale(plate);
@@ -1289,7 +1290,7 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
         } else {
             const sd = stateDirFor(name);
             process.stdout.write(`  state dir: ${sd}\n`);
-            for (const f of ["plate.json", "env", "pings.yaml", "idle-since", "wake-requested", "timer.pid", "timer.log"]) {
+            for (const f of ["plate.json", "env", "pings.yaml", "wake-requested", "timer.pid", "timer.log"]) {
                 const p = join(sd, f);
                 process.stdout.write(`    ${f.padEnd(18)}  ${existsSync(p) ? "✓" : "—"}\n`);
             }

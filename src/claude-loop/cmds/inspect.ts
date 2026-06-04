@@ -20,7 +20,6 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import {
     bootCompletePath,
     humanTypingPath,
-    idleMarkerPath,
     loopSockPath,
     proxyAlivePath,
     readLoopStateInput,
@@ -168,7 +167,10 @@ export async function cmdInspect(name: string): Promise<void> {
             ttl_ms: input.humanTypingTtlMs,
         },
         markers: {
-            idle_since_iso: mtimeIso(idleMarkerPath(sd)),
+            // #793 — idle-since file removed; bus is the SSOT. The
+            // inspect CLI subprocess can't read the timer's in-memory
+            // value without a loop.sock query — to be added if needed.
+            idle_since_iso: null,
             human_typing_iso: mtimeIso(humanTypingPath(sd)),
             wake_in_flight_iso: mtimeIso(wakeInFlightPath(sd)),
         },
