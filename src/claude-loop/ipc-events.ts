@@ -82,6 +82,13 @@ export interface EventChannel {
 const DEFAULT_RECONNECT_MS = 1_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_SEND_ONCE_TIMEOUT_MS = 2_000;
+// #769 Phase 1 — heartbeat ping/pong constants. Server pings every
+// HEARTBEAT_PING_MS; if no pong returns by the next tick, the connection
+// is treated as dead and terminated. 15s/30s is conservative — fast
+// enough that a stale client is reaped within ~30s of the timer dying,
+// slow enough that bursts of legitimate traffic don't compete for the
+// socket with control frames.
+const HEARTBEAT_PING_MS = 15_000;
 
 /**
  * Start listening for events on the given path. Returns immediately ;
@@ -120,6 +127,26 @@ export function listenEvents(
     wss.on("connection", (ws, req) => {
         // Gate the upgrade (loopback token check ; UDS always accepts).
         if (!tServer.accept(req.url)) { try { ws.close(); } catch { /* ignore */ } return; }
+        // #769 Phase 1 — heartbeat 15s/30s. The server pings every 15s
+        // and terminates the connection if no pong returned in the next
+        // window. This catches half-closed sockets (peer process gone
+        // but the OS hasn't sent FIN yet) and surfaces the close on the
+        // client side via a fresh socket error — clients reconnect.
+        // Without this a respawned timer keeps a stale client around
+        // until the next emit-on-dead-socket throws, which can take
+        // arbitrary time if the client's send buffer accepts silently.
+        let isAlive = true;
+        ws.on("pong", () => { isAlive = true; });
+        const pingInterval = setInterval(() => {
+            if (!isAlive) {
+                try { ws.terminate(); } catch { /* ignore */ }
+                clearInterval(pingInterval);
+                return;
+            }
+            isAlive = false;
+            try { ws.ping(); } catch { /* ignore — socket already dead */ }
+        }, HEARTBEAT_PING_MS);
+        ws.on("close", () => clearInterval(pingInterval));
         ws.on("message", (raw: RawData) => {
             const text = raw.toString();
             let parsed: unknown;
