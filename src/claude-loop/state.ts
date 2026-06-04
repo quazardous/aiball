@@ -1607,7 +1607,7 @@ export async function buildContextPhrase(
         // ticket_id. Title only populated for ticket roots ; comment-led
         // wakes show just #ID (the agent claims & reads the parent).
         const unreadHead = Array.isArray(unreadR?.messages) ? unreadR.messages[0] : undefined;
-        const headRows: Array<{ id: number; title?: string }> = unreadHead
+        const headRows: Array<{ id: number; title?: string; kind?: "comment" | "new ticket" }> = unreadHead
             ? (() => {
                 const id = unreadHead.kind === "ticket_created"
                     ? unreadHead.id
@@ -1618,6 +1618,12 @@ export async function buildContextPhrase(
                     title: unreadHead.kind === "ticket_created"
                         ? (unreadHead.title ?? undefined)
                         : undefined,
+                    // #749 david `5qrrsd` : surface the event kind so the wake
+                    // can say "comment on #X" / "new ticket #X" instead of a
+                    // bare id. Lifecycle events (close/resolve/reopen) fall
+                    // through to "comment" — close enough for the agent (the
+                    // ping is still a thread update worth reading).
+                    kind: unreadHead.kind === "ticket_created" ? "new ticket" : "comment",
                 }];
             })()
             : [];
@@ -1687,7 +1693,38 @@ export async function buildContextPhrase(
         // {count:+…} block drops out. `lead` is its own slot (random pick for
         // variety). All vars are exposed so the yaml `wake_master` is fully
         // overridable per project (#371/#374 wording lives in the template).
-        const head = Array.isArray(headRows) ? headRows[0] : undefined;
+        let head = Array.isArray(headRows) ? headRows[0] : undefined;
+        // #749 david `5qrrsd` — when no unread ping but the agent still has
+        // actionable backlog, fetch the top-priority claimable ticket so the
+        // wake names the head with title+id instead of just "[N open]". This
+        // is the "puis ensuite on bascule sur le backlog ticket par prio"
+        // branch — distinct from the unread-event branch above.
+        if (!head && pingCount === 0 && actionableCount > 0) {
+            try {
+                const list = await client.listTickets({
+                    ...(project ? { project } : {}),
+                    claimable: "true",
+                    limit: "1",
+                }) as { tickets?: Array<{ id: number; title?: string | null }>; rows?: Array<{ id: number; title?: string | null }> };
+                const rows = list.tickets ?? list.rows ?? [];
+                const top = rows[0];
+                if (top && Number.isFinite(top.id)) {
+                    head = { id: top.id, title: top.title ?? undefined, kind: undefined };
+                }
+            } catch { /* fail-open : no head, template drops the engage leg */ }
+        }
+        // #749 david `5qrrsd` — when the head is a comment ping (no title in
+        // the unread msg row) OR a backlog row without title, resolve via a
+        // single getTicket so the wake can render "engage #X 'TITLE'".
+        if (head?.id && !head.title) {
+            try {
+                const t = await client.getTicket(head.id, { summary: true }) as { ticket?: { title?: string | null } };
+                const title = t.ticket?.title;
+                if (typeof title === "string" && title) {
+                    head = { ...head, title };
+                }
+            } catch { /* best-effort */ }
+        }
         const scope = project ? `\`${project}\`` : "your scope";
         // #428: run the configured custom gates (built-in `type` or custom
         // `cmd`). Triggered gates surface their message in the wake; a `blocks`
@@ -1710,6 +1747,12 @@ export async function buildContextPhrase(
         // ci-dessous. Empty head → fallback texte qui rappelle juste
         // les unread pings.
         const hasClaimableHead = !!(head?.id);
+        // #749 david `5qrrsd` — when no unread ping but actionable backlog
+        // remains, we drain by priority head (set `backlog_mode`). When
+        // unread pings drive the wake, we surface the event kind instead.
+        // The two modes are mutually exclusive — pings-first wins.
+        const backlogMode = (pingCount === 0 && actionableCount > 0 && hasClaimableHead && !blocking)
+            ? "1" : "";
         const vars = {
             culture,
             lead: renderSlot(promptMap, "wake_lead", {}, "fyi:", tone),
@@ -1720,6 +1763,12 @@ export async function buildContextPhrase(
             actionable_count: (blocking || !hasClaimableHead) ? "" : (actionableCount || ""),
             head_id: head?.id ?? "",
             head_title: head?.title ?? "",
+            // #749 david `5qrrsd` — head_kind = "comment" / "new ticket" when
+            // draining unread pings, "" when in backlog mode. The template
+            // uses it to differentiate "first up: comment on #X 'TITLE'" vs
+            // the plain backlog "engage #X 'TITLE'".
+            head_kind: head?.kind ?? "",
+            backlog_mode: backlogMode,
             project_scope: scope,
             // #397: {consumer_prompt} = this consumer's micro-prompt (opt-in;
             // empty → renders to nothing). David puts the placeholder in his
@@ -1732,8 +1781,9 @@ export async function buildContextPhrase(
             vars,
             "{culture} {lead}"
             + "{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}"
-            + "{actionable_count:+ claim #{head_id} first — top of the work order — via `ticket_claim()`.}"
-            + "{open_count:+{actionable_count:+ }[{open_count} open]}",
+            + "{head_kind:+ first up: {head_kind} on #{head_id}{head_title:+ \"{head_title}\"} — `ticket_claim()` then `ticket_get`.}"
+            + "{backlog_mode:+ engage #{head_id}{head_title:+ \"{head_title}\"} — top of the backlog by priority — via `ticket_claim()`.}"
+            + "{open_count:+ [{open_count} open]}",
             tone,
         );
         // #428: prepend the triggered-gate banner. Built-in messages render via

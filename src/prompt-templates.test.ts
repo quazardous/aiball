@@ -114,3 +114,66 @@ test("#400 recadré loadPromptsFromYamlBlock: accepts the tone-bucket shape", ()
     assert.equal(map.plain, "kept");
     assert.equal("bad" in map, false);
 });
+
+// #749 david `5qrrsd` — wake_master differentiates ping-event drain vs
+// backlog-by-priority drain via the `head_kind` / `backlog_mode` vars.
+const WAKE_TEMPLATE =
+    "{ping_count:+ {ping_count} unread ping(s) — drain via `unread()`.}"
+    + "{head_kind:+ first up: {head_kind} on #{head_id}{head_title:+ \"{head_title}\"} — `ticket_claim()`.}"
+    + "{backlog_mode:+ engage #{head_id}{head_title:+ \"{head_title}\"} — top of the backlog by priority — via `ticket_claim()`.}"
+    + "{open_count:+ ({open_count} open)}";
+
+test("#749 wake_master: pings>0 + comment head → 'first up' line, no backlog line", () => {
+    const out = render(WAKE_TEMPLATE, {
+        ping_count: 3,
+        head_kind: "comment",
+        head_id: 769,
+        head_title: "no_claim ...",
+        backlog_mode: "",
+        open_count: 41,
+    });
+    assert.match(out, /3 unread ping\(s\)/);
+    assert.match(out, /first up: comment on #769 "no_claim \.\.\."/);
+    assert.doesNotMatch(out, /engage #769 .* top of the backlog/);
+    assert.match(out, /\(41 open\)/);
+});
+
+test("#749 wake_master: pings>0 + new ticket head → kind label says 'new ticket'", () => {
+    const out = render(WAKE_TEMPLATE, {
+        ping_count: 1,
+        head_kind: "new ticket",
+        head_id: 775,
+        head_title: "Proxy node : push de la conf …",
+        backlog_mode: "",
+        open_count: 41,
+    });
+    assert.match(out, /first up: new ticket on #775 "Proxy node : push de la conf …"/);
+});
+
+test("#749 wake_master: pings=0 + backlog mode → 'engage … backlog by priority'", () => {
+    const out = render(WAKE_TEMPLATE, {
+        ping_count: "",
+        head_kind: "",
+        head_id: 752,
+        head_title: "firehose",
+        backlog_mode: "1",
+        open_count: 41,
+    });
+    assert.doesNotMatch(out, /unread ping/);
+    assert.doesNotMatch(out, /first up:/);
+    assert.match(out, /engage #752 "firehose" — top of the backlog by priority/);
+    assert.match(out, /\(41 open\)/);
+});
+
+test("#749 wake_master: head without title still renders id only (no stray quotes)", () => {
+    const out = render(WAKE_TEMPLATE, {
+        ping_count: 1,
+        head_kind: "comment",
+        head_id: 770,
+        head_title: "",
+        backlog_mode: "",
+        open_count: 1,
+    });
+    assert.match(out, /first up: comment on #770 — `ticket_claim\(\)`/);
+    assert.doesNotMatch(out, /#770 ""/);
+});

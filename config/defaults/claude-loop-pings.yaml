@@ -95,6 +95,12 @@ wake_phrases:
 #   {open_count}       open ticket count
 #   {actionable_count} tickets in your court (#374)
 #   {head_id} {head_title}  the work-order head (#371: priority desc, then oldest)
+#   {head_kind}        #749: "comment" / "new ticket" when waking on a ping
+#                      event, "" when in backlog mode (= pings=0+actionable>0).
+#                      Used to differentiate "first up: comment on #X" from
+#                      the plain backlog "engage #X 'TITLE'".
+#   {backlog_mode}     #749: "1" when no ping but actionable backlog exists,
+#                      "" otherwise. Mutually exclusive with head_kind.
 #   {project_scope}    "`<project>`" or "your scope"
 prompts:
   # Conversational lead — per-tone buckets, round-robin within each.
@@ -121,11 +127,11 @@ prompts:
   # the wake template. The verb matches the tool name `ticket_claim()`.
   wake_master:
     directive:
-      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}{actionable_count:+ claim #{head_id} first — top of the work order — via `ticket_claim()`.}{open_count:+ ({open_count} open in {project_scope})}"
+      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}{head_kind:+ first up: {head_kind} on #{head_id}{head_title:+ \"{head_title}\"} — `ticket_claim()` then `ticket_get`.}{backlog_mode:+ engage #{head_id}{head_title:+ \"{head_title}\"} — top of the backlog by priority — via `ticket_claim()`.}{open_count:+ ({open_count} open in {project_scope})}"
     hint:
-      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) (clear with `unread({pings: true, mark_read: true})`).}{actionable_count:+ #{head_id} is top of the work order if you want to pick it up (`ticket_claim()`).}{open_count:+ ({open_count} open in {project_scope})}"
+      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) (clear with `unread({pings: true, mark_read: true})`).}{head_kind:+ first up is a {head_kind} on #{head_id}{head_title:+ \"{head_title}\"} if you want to pick it up.}{backlog_mode:+ #{head_id}{head_title:+ \"{head_title}\"} is top of the backlog by priority if you want to pick it up.}{open_count:+ ({open_count} open in {project_scope})}"
     imperative:
-      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — DRAIN now via `unread({pings: true, mark_read: true})`.}{actionable_count:+ CLAIM #{head_id} first — top of the work order — via `ticket_claim()`.}{open_count:+ ({open_count} open in {project_scope})}"
+      - "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — DRAIN now via `unread({pings: true, mark_read: true})`.}{head_kind:+ FIRST: {head_kind} on #{head_id}{head_title:+ \"{head_title}\"} — `ticket_claim()` then `ticket_get`.}{backlog_mode:+ ENGAGE #{head_id}{head_title:+ \"{head_title}\"} — top of the backlog by priority — via `ticket_claim()`.}{open_count:+ ({open_count} open in {project_scope})}"
 
   # #428: built-in gate messages. Rendered (tone-aware) when the gate triggers;
   # the detector fills placeholders like {count}. The triggered message is
