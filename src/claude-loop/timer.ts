@@ -815,6 +815,28 @@ async function mainSse(): Promise<void> {
     wakeBus.on("ping", (p) => {
         const panic = p.intent === "panic";
         log(`SSE ping received: ${JSON.stringify(p)} → tryWake${panic ? " (panic)" : ""}`);
+        // #816 david — instant counter refresh on SSE ping. The bar's
+        // `e:N` count was only repainted every 30s by the heartbeat,
+        // so a fresh comment surfaced as a wake (<1s) but the counter
+        // lagged. Refetch the 3 counts immediately and repaint @cl_counts.
+        // Fire-and-forget : counter sync isn't on the critical path.
+        void (async () => {
+            try {
+                const [pingsR, projectsR, backlogR] = await Promise.allSettled([
+                    client().pingsCount() as Promise<{ unread?: number }>,
+                    client().listProjectsDetailed() as Promise<Array<{ open_count?: number }>>,
+                    client().listTickets({ backlog: "1", limit: "500" }) as Promise<unknown[]>,
+                ]);
+                const events = pingsR.status === "fulfilled" ? (pingsR.value?.unread ?? 0) : null;
+                const open = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
+                    ? projectsR.value.reduce((acc, pr) => acc + (pr.open_count ?? 0), 0)
+                    : null;
+                const backlog = backlogR.status === "fulfilled" && Array.isArray(backlogR.value)
+                    ? backlogR.value.length
+                    : null;
+                setTmuxCounters(name!, { open, backlog, events });
+            } catch { /* counter sync best-effort */ }
+        })();
         // Pass the SSE payload as a hint so the wake phrase can name
         // the concrete artifact instead of a random pop-culture line.
         const tag = panic ? "sse:ping:panic" : "sse:ping";
