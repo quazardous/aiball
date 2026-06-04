@@ -392,6 +392,9 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
         const active = activeDecision.value;
         if (!active) return [];
         const items: MenuItem[] = [];
+        // #817 736u8h david : `reclassify as X` items live in the REJECT
+        // dropdown only — accept dropdown stays focused on accept paths
+        // (the default kind's accept + the cross-kind accept-as variants).
         if (active.decision.kind === "resolution") {
             items.push({
                 label: "accept resolution → close the ticket",
@@ -407,16 +410,6 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
                 label: "accept as wontfix → close without resolution",
                 icon: "pi pi-ban",
                 command: () => { void acceptActiveDecision("wontfix"); },
-            });
-            items.push({
-                label: "reclassify as plan → still pending",
-                icon: "pi pi-pencil",
-                command: () => { void reclassifyActiveDecision("plan"); },
-            });
-            items.push({
-                label: "reclassify as wontfix → still pending",
-                icon: "pi pi-pencil",
-                command: () => { void reclassifyActiveDecision("wontfix"); },
             });
         } else if (active.decision.kind === "plan") {
             items.push({
@@ -434,18 +427,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
                 icon: "pi pi-ban",
                 command: () => { void acceptActiveDecision("wontfix"); },
             });
-            items.push({
-                label: "reclassify as resolution → still pending",
-                icon: "pi pi-pencil",
-                command: () => { void reclassifyActiveDecision("resolution"); },
-            });
-            items.push({
-                label: "reclassify as wontfix → still pending",
-                icon: "pi pi-pencil",
-                command: () => { void reclassifyActiveDecision("wontfix"); },
-            });
         } else if (active.decision.kind === "wontfix") {
-            // #817 : symmetric menu for the wontfix kind.
             items.push({
                 label: "accept wontfix → close without resolution",
                 icon: "pi pi-check-circle",
@@ -460,16 +442,6 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
                 label: "accept as plan → keep the ticket open",
                 icon: "pi pi-compass",
                 command: () => { void acceptActiveDecision("plan"); },
-            });
-            items.push({
-                label: "reclassify as resolution → still pending",
-                icon: "pi pi-pencil",
-                command: () => { void reclassifyActiveDecision("resolution"); },
-            });
-            items.push({
-                label: "reclassify as plan → still pending",
-                icon: "pi pi-pencil",
-                command: () => { void reclassifyActiveDecision("plan"); },
             });
         }
         return items;
