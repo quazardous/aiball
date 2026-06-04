@@ -904,25 +904,27 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     } else {
         launch = claudeCmd;
     }
+    // Trap stored in a file under the state-dir, sourced from innerCmd —
+    // keeps the tmux command line short and dodges multi-line quoting.
+    const trapPath = join(sd, "kill-on-exit.sh");
     const sweepPaths = [
         "wake-in-flight", "busy-defer-until", "last-injected-wake",
         "last-wake-at", "idle-since", "human-typing",
     ].map((f) => shQuote(join(sd, f))).join(" ");
-    const trapCmd = [
+    const trapScript = [
+        "#!/usr/bin/env bash",
         "_aiball_kill_satellites() {",
-        `  if [ -f ${shQuote(timerPidPath(sd))} ]; then`,
-        `    local _tp; _tp="$(cat ${shQuote(timerPidPath(sd))} 2>/dev/null)";`,
-        `    [ -n "$_tp" ] && kill -KILL "$_tp" 2>/dev/null;`,
-        "  fi;",
-        `  if [ -f ${shQuote(proxyAlivePath(sd))} ]; then`,
-        `    local _pp; _pp="$(cat ${shQuote(proxyAlivePath(sd))} 2>/dev/null)";`,
-        `    [ -n "$_pp" ] && kill -KILL "$_pp" 2>/dev/null;`,
-        "  fi;",
-        `  rm -f ${sweepPaths} 2>/dev/null || true;`,
+        `  pid="$(cat ${shQuote(timerPidPath(sd))} 2>/dev/null || true)"`,
+        `  [ -n "$pid" ] && kill -KILL "$pid" 2>/dev/null || true`,
+        `  pid="$(cat ${shQuote(proxyAlivePath(sd))} 2>/dev/null || true)"`,
+        `  [ -n "$pid" ] && kill -KILL "$pid" 2>/dev/null || true`,
+        `  rm -f ${sweepPaths} 2>/dev/null || true`,
         "}",
-        "trap _aiball_kill_satellites EXIT;",
-    ].join(" ");
-    const innerCmd = `source ${shQuote(envPath(sd))}; ${trapCmd} ${launch}`;
+        "trap _aiball_kill_satellites EXIT",
+        "",
+    ].join("\n");
+    writeFileSync(trapPath, trapScript);
+    const innerCmd = `source ${shQuote(envPath(sd))}; source ${shQuote(trapPath)}; ${launch}`;
 
     const tname = tmuxName(name);
     // Resolve bash via absolute path on Windows. The user's PATH is
