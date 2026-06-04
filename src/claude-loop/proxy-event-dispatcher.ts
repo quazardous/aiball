@@ -25,7 +25,8 @@ import {
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
-import { setIpcLastOpenWakeCount, setIpcLastWakeAtMs, setIpcWakeRequested } from "./ipc-state.js";
+import { getIpcState, setIpcLastOpenWakeCount, setIpcLastWakeAtMs, setIpcWakeRequested } from "./ipc-state.js";
+import { WAKE_IN_FLIGHT_TTL_MS } from "./state.js";
 import { getHookService, type HookEvent } from "./hook-service.js";
 
 /** Verdict surfaced for logging + tests. Caller logs the string ;
@@ -190,7 +191,21 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                 return { kind: "hook-event", hookEvent };
             }
             if (hookKind === "UserPromptSubmit") {
-                const fromAutoWake = event.from_auto_wake === true;
+                // #778 david `3p3tp5` : derive from_auto_wake from IPC state
+                // instead of the wake-in-flight file marker. The hook
+                // subprocess just sends `at_ms` ; here we compare with the
+                // timer's `ipcState.lastWakeAtMs` (set by sendKeys + stop-
+                // hook on every send-keys). Within WAKE_IN_FLIGHT_TTL_MS,
+                // the prompt is our own auto-wake. Fallback : if the hook
+                // legacy sent `from_auto_wake` explicitly (e.g. file-marker
+                // path during transition), honor it.
+                let fromAutoWake = event.from_auto_wake === true;
+                if (!fromAutoWake) {
+                    const lastWake = getIpcState().lastWakeAtMs;
+                    if (lastWake !== null && (atMs - lastWake) < WAKE_IN_FLIGHT_TTL_MS) {
+                        fromAutoWake = true;
+                    }
+                }
                 const hookEvent: HookEvent = { kind: "UserPromptSubmit", from_auto_wake: fromAutoWake, at_ms: atMs };
                 getHookService().emit(hookEvent);
                 return { kind: "hook-event", hookEvent };
