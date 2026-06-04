@@ -34,6 +34,7 @@ dates are YYYY-MM-DD.
 ### Added
 
 - Lineage relation chips (`child of` / `parent of` on sub-tickets) now expose the change-kind / remove menu (the kebab `▾` button). The kind picker offers all relation kinds including lineage, so a sub-ticket can be re-parented or demoted to a soft `relates_to` from the chip itself. The add-relation form still defaults to non-lineage kinds.
+- `claude-loop backlog` — show the backlog of the current loop's project + agent (resolved from `.aiball.yaml` / plate), tiered hot → actionable → waiting. `--events` switches to the FIFO unread events (what the wake / MCP `unread()` would drain). `--json` for raw output, `--limit N` to cap rows.
 
 
 ## [0.27.0] — 2026-06-03
