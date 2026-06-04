@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { RELATION_LABELS, isLineageRelationKind, type RelationKind } from "../lib/relations";
+import { RELATION_LABELS, type RelationKind } from "../lib/relations";
 import { formatTicketRef } from "../lib/formatting";
 import type { TicketRelation } from "../lib/api";
 
@@ -8,12 +8,12 @@ const props = defineProps<{
     relation: TicketRelation;
 }>();
 
-// #271: structural lineage (child_of / parent_of) is auto-managed on
-// sub-ticket creation — it has no change-kind / remove menu (you change
-// it by re-parenting the sub-ticket, not by editing a chip).
-const editable = computed(
-    () => !props.relation.reciprocal && !isLineageRelationKind(props.relation.kind),
-);
+// Reciprocal chips are owned by the other side — edit from the source
+// ticket. Lineage (child_of / parent_of) is editable from its own side
+// (#794) : the user can re-parent, demote to relates_to, or remove via
+// the standard chip menu ; the backend (lineageWouldCycle) enforces the
+// DAG invariant.
+const editable = computed(() => !props.relation.reciprocal);
 
 const emit = defineEmits<{
     (e: "open-menu", payload: { event: Event; relation: { target_ticket_id: number; kind: RelationKind } }): void;

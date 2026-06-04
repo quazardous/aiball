@@ -11,7 +11,7 @@
  *   - !== null → opened from an existing chip's menu, "change kind" or
  *               "remove" the relation.
  */
-import { RELATION_KINDS, RELATION_LABELS, isLineageRelationKind, type RelationKind } from "../lib/relations";
+import { RELATION_KINDS, RELATION_LABELS, type RelationKind } from "../lib/relations";
 import { formatTicketRef } from "../lib/formatting";
 
 defineProps<{
@@ -25,11 +25,12 @@ const emit = defineEmits<{
     (e: "remove"): void;
 }>();
 
-// `ignored` is the tombstone (handled by the remove button), and the
-// lineage kinds (#271) are auto-managed — neither is manually pickable.
-const pickableKinds = RELATION_KINDS.filter(
-    (x) => x !== "ignored" && !isLineageRelationKind(x),
-);
+// `ignored` is the tombstone (handled by the remove button). Lineage
+// (#271 child_of / parent_of) IS pickable — change-kind covers
+// re-parenting, demoting to relates_to, etc. The add-form picker
+// (threadRelations.ts) still hides lineage so the default add stays
+// soft. Backend enforces DAG via lineageWouldCycle.
+const pickableKinds = RELATION_KINDS.filter((x) => x !== "ignored");
 </script>
 
 <template>
