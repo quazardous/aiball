@@ -1575,20 +1575,24 @@ export async function buildContextPhrase(
                 open_count?: number;
                 actionable_count?: number;
             }>>,
-            project
-                ? (client.unread(project, 1) as Promise<{
-                    messages?: Array<{
-                        id: number;
-                        kind?: string;
-                        ticket_id?: number | null;
-                        title?: string | null;
-                        hashid?: string | null;
-                        body?: string | null;
-                        intent?: Intent | null;
-                        meta?: string | null;
-                    }>;
-                }>).catch(() => ({ messages: [] }))
-                : Promise.resolve({ messages: [] }),
+            // #800 david `unyzvx` : drop the project scoping. The wake FIFO
+            // is consumer-scoped (cross-project) so a fan-out from another
+            // project surfaces here. `project` arg dropped (passing null
+            // = cross-project). When the head IS on another project, the
+            // wake phrase template renders the bare ref without a project
+            // prefix today — a future tweak can surface the project name.
+            (client.unread(null, 1) as Promise<{
+                messages?: Array<{
+                    id: number;
+                    kind?: string;
+                    ticket_id?: number | null;
+                    title?: string | null;
+                    hashid?: string | null;
+                    body?: string | null;
+                    intent?: Intent | null;
+                    meta?: string | null;
+                }>;
+            }>).catch(() => ({ messages: [] })),
             // #397: this loop's own consumer row → its micro_prompt, exposed as
             // the `{consumer_prompt}` placeholder. Best-effort (null on failure).
             client.getConsumer(client.agentId).catch(() => null) as Promise<{ micro_prompt?: string | null } | null>,

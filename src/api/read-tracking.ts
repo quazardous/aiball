@@ -24,11 +24,14 @@ export const readTrackingRouter = Router();
 
 readTrackingRouter.get("/unread", (req: Request, res: Response) => {
     const consumer_id = req.query.consumer_id as string | undefined;
-    const project = req.query.project as string | undefined;
+    const project = (req.query.project as string | undefined) || null;
     const limit = req.query.limit ? Number(req.query.limit) : 100;
-    if (!consumer_id || !project) {
-        return badRequest(res, "consumer_id and project required");
+    if (!consumer_id) {
+        return badRequest(res, "consumer_id required");
     }
+    // #800 david `unyzvx` : project is optional. Omitted = cross-project
+    // consumer-scoped FIFO (the design truth — a fan-out from another
+    // project must reach this consumer's queue).
     const messages = listUnread(consumer_id, project, limit);
     res.json({
         consumer_id,
@@ -40,9 +43,9 @@ readTrackingRouter.get("/unread", (req: Request, res: Response) => {
 
 readTrackingRouter.get("/unread/count", (req, res) => {
     const consumer_id = req.query.consumer_id as string | undefined;
-    const project = req.query.project as string | undefined;
-    if (!consumer_id || !project) {
-        return badRequest(res, "consumer_id and project required");
+    const project = (req.query.project as string | undefined) || null;
+    if (!consumer_id) {
+        return badRequest(res, "consumer_id required");
     }
     res.json({
         consumer_id,

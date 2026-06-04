@@ -17,7 +17,7 @@ export function registerInboxTools(server: McpServer): void {
         "unread",
         {
             description:
-                "Pull approved messages this agent hasn't seen yet. Default mode is the project feed (set with project, or $AIBALL_PROJECT). Pass pings=true to read personal pings (lineage-based notifications across every ticket you participated in or explicitly follow). Set mark_read=true to ack in the same call — only the messages returned in this very response are acked, never anything the agent didn't see. Pass count_only=true to just receive the unread count without any payload. Pass mark_all=true to ack EVERYTHING (no slice returned, just the count of what was acked) — useful for cleanup. peek=true forces read-only inspection (overrides both mark_read and mark_all). Self-pings are filtered out.",
+                "Pull approved messages this agent hasn't seen yet. Default mode is the consumer FIFO — CROSS-PROJECT (a legit fan-out from a ticket in another project lands here too, #800). Pass an explicit `project` to narrow to that project's feed only. Pass `pings=true` for personal pings (lineage-based notifications). Set `mark_read=true` to ack in the same call — only the messages returned in this very response are acked. Pass `count_only=true` for just the unread count. Pass `mark_all=true` to ack EVERYTHING without payload (cleanup). `peek=true` forces read-only inspection (overrides mark_read and mark_all). Self-pings filtered out.",
             inputSchema: {
                 project: z.string().optional(),
                 pings: z
@@ -88,7 +88,12 @@ export function registerInboxTools(server: McpServer): void {
                 return asText({ kind: "pings", peek: isPeek, ...((data as object) ?? {}) });
             }
 
-            const proj = client.resolveProject(project);
+            // #800 david `unyzvx` : FIFO est consumer-scoped (cross-project)
+            // by default. Explicit `project` arg narrows ; otherwise we pass
+            // null and get the full consumer FIFO. The previous
+            // `resolveProject(project)` defaulted to $AIBALL_PROJECT which
+            // contradicted the design (cross-project fan-outs invisible).
+            const proj = project ? client.resolveProject(project) : null;
             if (wantCountOnly && !wantMarkAll) {
                 const r = (await client.unreadCount(proj)) as { count?: number };
                 return asText({ kind: "project", project: proj, count: r.count ?? 0 });

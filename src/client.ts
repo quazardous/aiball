@@ -625,10 +625,12 @@ export class AiballClient {
             `/api/subscriptions?consumer_id=${encodeURIComponent(this.agentId)}`,
         );
     }
-    unread(project: string, limit = 100) {
+    /** #800 — project is OPTIONAL. Omitted/empty = cross-project FIFO. */
+    unread(project: string | null | undefined, limit = 100) {
+        const projParam = project ? `&project=${encodeURIComponent(project)}` : "";
         return this.http(
             "GET",
-            `/api/unread?consumer_id=${encodeURIComponent(this.agentId)}&project=${encodeURIComponent(project)}&limit=${limit}`,
+            `/api/unread?consumer_id=${encodeURIComponent(this.agentId)}${projParam}&limit=${limit}`,
         );
     }
     markMessageSeen(message_id: number) {
@@ -836,10 +838,12 @@ export class AiballClient {
             try { req.destroy(); } catch { /* already torn */ }
         };
     }
-    unreadCount(project: string) {
+    /** #800 — project optional. Omitted = cross-project consumer-scoped count. */
+    unreadCount(project: string | null | undefined) {
+        const projParam = project ? `&project=${encodeURIComponent(project)}` : "";
         return this.http<{ count: number }>(
             "GET",
-            `/api/unread/count?consumer_id=${encodeURIComponent(this.agentId)}&project=${encodeURIComponent(project)}`,
+            `/api/unread/count?consumer_id=${encodeURIComponent(this.agentId)}${projParam}`,
         );
     }
     myPendingTickets() {

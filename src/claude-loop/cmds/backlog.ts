@@ -29,6 +29,7 @@ interface TicketRow {
 interface UnreadMessage {
     id?: number;
     kind?: string;
+    project?: string | null;
     ticket_id?: number | null;
     title?: string | null;
     by_agent?: string | null;
@@ -42,13 +43,15 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
     const client = new AiballClient({ agentId: ctx.agent });
 
     if (opts.events) {
-        const r = await client.unread(ctx.project, limit) as { messages?: UnreadMessage[]; count?: number };
+        // #800 david `unyzvx` : FIFO consumer-scoped (cross-project). Pass
+        // null to get every unread ping for this agent regardless of project.
+        const r = await client.unread(null, limit) as { messages?: UnreadMessage[]; count?: number };
         if (opts.json) {
             process.stdout.write(`${JSON.stringify(r, null, 2)}\n`);
             return;
         }
         const messages = r.messages ?? [];
-        process.stdout.write(`# unread events on ${ctx.project} (consumer: ${ctx.agent}, ${messages.length}/${r.count ?? "?"})\n`);
+        process.stdout.write(`# unread events (consumer: ${ctx.agent}, cross-project, ${messages.length}/${r.count ?? "?"})\n`);
         if (messages.length === 0) {
             process.stdout.write(`(FIFO empty)\n`);
             return;
@@ -60,7 +63,8 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
             const excerpt = m.body ? ` — ${m.body.split("\n")[0].slice(0, 50)}` : "";
             const by = m.by_agent ? ` by ${m.by_agent}` : "";
             const hashid = m.hashid ? ` #${m.hashid}` : "";
-            process.stdout.write(`${kind.padEnd(3)} #${String(tid).padEnd(4)}${hashid.padEnd(8)} ${title}${by}${excerpt}\n`);
+            const projPrefix = m.project && m.project !== ctx.project ? `[${m.project}] ` : "";
+            process.stdout.write(`${kind.padEnd(3)} ${projPrefix}#${String(tid).padEnd(4)}${hashid.padEnd(8)} ${title}${by}${excerpt}\n`);
         }
         return;
     }

@@ -360,41 +360,49 @@ export function markPingsRead(opts: {
  */
 export function listUnread(
     consumer_id: string,
-    project: string,
+    project: string | null | undefined,
     limit = 100,
 ): Message[] {
     const db = getDb();
     const isActionable = actionableTicketGate();
+    // #800 david `unyzvx` : the FIFO is consumer-scoped, NOT project-scoped.
+    // A legitimate cross-project fan-out (e.g. the agent is subscribed to a
+    // ticket living in another project) must land in the consumer's FIFO so
+    // the wake / MCP drain see it. When project is null/undefined, no filter.
+    // Callers that explicitly want a project-scoped slice still pass it.
+    const projectFilter = project ?? null;
     // Ticket-pings: join pings.ticket_id → tickets.id.
+    const ticketWhere = [
+        eq(schema.pings.recipient, consumer_id),
+        isNull(schema.pings.seenAt),
+        or(
+            isNull(schema.pings.actor),
+            ne(schema.pings.actor, consumer_id),
+        ),
+    ];
+    if (projectFilter) ticketWhere.push(eq(schema.tickets.project, projectFilter));
     const ticketHits = db.select({ t: schema.tickets, ping: schema.pings })
         .from(schema.pings)
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
-        .where(and(
-            eq(schema.pings.recipient, consumer_id),
-            isNull(schema.pings.seenAt),
-            eq(schema.tickets.project, project),
-            or(
-                isNull(schema.pings.actor),
-                ne(schema.pings.actor, consumer_id),
-            ),
-        ))
+        .where(and(...ticketWhere))
         .all()
         .filter((r) => isActionable(r.t.id));
 
     // Comment-pings: join pings.comment_id → _messages.id, then tickets for project filter.
+    const messageWhere = [
+        eq(schema.pings.recipient, consumer_id),
+        isNull(schema.pings.seenAt),
+        or(
+            isNull(schema.pings.actor),
+            ne(schema.pings.actor, consumer_id),
+        ),
+    ];
+    if (projectFilter) messageWhere.push(eq(schema.tickets.project, projectFilter));
     const messageHits = db.select({ m: schema.messages, project: schema.tickets.project, ticketId: schema.tickets.id })
         .from(schema.pings)
         .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
-        .where(and(
-            eq(schema.pings.recipient, consumer_id),
-            isNull(schema.pings.seenAt),
-            eq(schema.tickets.project, project),
-            or(
-                isNull(schema.pings.actor),
-                ne(schema.pings.actor, consumer_id),
-            ),
-        ))
+        .where(and(...messageWhere))
         .all()
         .filter((r) => isActionable(r.ticketId));
 
@@ -457,34 +465,39 @@ export function pendingTicketsByAuthor(by_agent: string): number {
     }).length;
 }
 
-export function unreadCount(consumer_id: string, project: string): number {
+export function unreadCount(consumer_id: string, project: string | null | undefined): number {
     const db = getDb();
     const isActionable = actionableTicketGate();
+    // #800 david `unyzvx` : aligned with listUnread — project is optional
+    // (null/undefined = cross-project consumer-scoped count, the FIFO truth).
+    const projectFilter = project ?? null;
+    const ticketWhere = [
+        eq(schema.pings.recipient, consumer_id),
+        isNull(schema.pings.seenAt),
+        or(
+            isNull(schema.pings.actor),
+            ne(schema.pings.actor, consumer_id),
+        ),
+    ];
+    if (projectFilter) ticketWhere.push(eq(schema.tickets.project, projectFilter));
     const ticketHits = db.select({ ticketId: schema.tickets.id })
         .from(schema.pings)
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
-        .where(and(
-            eq(schema.pings.recipient, consumer_id),
-            isNull(schema.pings.seenAt),
-            eq(schema.tickets.project, project),
-            or(
-                isNull(schema.pings.actor),
-                ne(schema.pings.actor, consumer_id),
-            ),
-        )).all();
+        .where(and(...ticketWhere)).all();
+    const messageWhere = [
+        eq(schema.pings.recipient, consumer_id),
+        isNull(schema.pings.seenAt),
+        or(
+            isNull(schema.pings.actor),
+            ne(schema.pings.actor, consumer_id),
+        ),
+    ];
+    if (projectFilter) messageWhere.push(eq(schema.tickets.project, projectFilter));
     const messageHits = db.select({ ticketId: schema.tickets.id })
         .from(schema.pings)
         .innerJoin(schema.messages, eq(schema.messages.id, schema.pings.commentId))
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.messages.ticketId))
-        .where(and(
-            eq(schema.pings.recipient, consumer_id),
-            isNull(schema.pings.seenAt),
-            eq(schema.tickets.project, project),
-            or(
-                isNull(schema.pings.actor),
-                ne(schema.pings.actor, consumer_id),
-            ),
-        )).all();
+        .where(and(...messageWhere)).all();
     let n = 0;
     for (const r of ticketHits) if (isActionable(r.ticketId)) n++;
     for (const r of messageHits) if (isActionable(r.ticketId)) n++;

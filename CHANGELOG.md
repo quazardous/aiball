@@ -26,6 +26,7 @@ dates are YYYY-MM-DD.
 ### Changed (breaking)
 
 - `aiball init --stop-hook` and `install.sh --stop-hook` / `--remove-stop-hook` removed entirely. The persistent `.claude/settings.json` wiring path is gone; `claude-loop` CLI-injects all hooks per session via `claude --settings`, which is the canonical (and only) integration path now. Direct `claude` users no longer get aiball hooks. Legacy `aiball-autopoll-stop.sh` / `.cmd` wrapper scripts removed from the install layout.
+- The FIFO of unread events (`unread()` / `/api/unread`) is now consumer-scoped (cross-project) by default. A legit fan-out from a ticket in another project lands in this consumer's queue, matching the bar-count semantics. Callers that want a project-scoped slice still pass an explicit `project=`. The MCP `unread` tool no longer falls back to `$AIBALL_PROJECT` automatically — pass `project` explicitly to narrow.
 
 ### Fixed
 
