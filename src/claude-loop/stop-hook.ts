@@ -17,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, wakeInFlightPath, WAKE_COALESCE_WINDOW_MS } from "./state.js";
+import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, idleMarkerPath, injectWakePhrase, lastWakeAtPath, pingsPath, readBusyDefer, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, wakeInFlightPath, WAKE_COALESCE_WINDOW_MS } from "./state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
 import { CL_ENV } from "./env-vars.js";
@@ -236,13 +236,22 @@ function readPane(): string {
             log(`  → BUSY-DEFER armed until=${until} became=idle:wait`);
             emit();
         }
+        // Respect the post-wake tempo: if a wake already fired in the
+        // last WAKE_COALESCE_WINDOW_MS the inject site has armed
+        // busy-defer. A second Stop arriving inside that window (claude
+        // emits multiple Stop events per turn for tool-then-text bursts)
+        // must NOT inject again — that's how a single FIFO event ends up
+        // sent to the agent twice.
+        const defer = readBusyDefer(sd!);
+        if (defer && defer.activeMs > 0) {
+            if (!skipFileWrite()) writeFileSync(idleMarkerPath(sd!), new Date().toISOString() + "\n");
+            setTmuxStatus(name!, LOOP_STATUS.IDLE, "wait");
+            log(`  → SKIP (busy-defer ${defer.activeMs}ms remaining) became=idle:wait`);
+            emit();
+        }
         const gate = await checkHasWork(checkCmd, undefined, process.env.AIBALL_PROJECT ?? null, sd!);
         log(`  checkHasWork=${gate.has} (pings=${gate.pingsCount} open=${gate.openCount})`);
         if (gate.has) {
-            // Post-wake tempo is now armed by the inject site (busy-defer
-            // for WAKE_COALESCE_WINDOW_MS), so the stop hook doesn't need
-            // its own coalesce check. Wake content carries the same
-            // operational context as the boot ping (FIFO head + lead).
             const phraseClient = new AiballClient();
             const { phrase, headMessageId } = await buildContextPhrase(
                 phraseClient,
