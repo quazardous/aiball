@@ -1736,14 +1736,15 @@ export async function buildContextPhrase(
                 head = { ...head, title: unreadHead.title };
             }
         }
-        // #749 — when no unread ping, fall back to the top OPEN ticket
-        // by priority (no claimable filter). The agent's discipline skill
-        // decides what to do — wake reads "look #X: title".
-        if (!head && pingCount === 0 && openCount > 0) {
+        // When the FIFO is empty, fall back to the top ACTIONABLE ticket
+        // by priority. The daemon's ?open=… and ?actionable=… filters
+        // both accept "1" — "true" is silently ignored, which left the
+        // fallback returning closed tickets.
+        if (!head && pingCount === 0 && actionableCount > 0) {
             try {
                 const list = await client.listTickets({
                     ...(project ? { project } : {}),
-                    open: "true",
+                    actionable: "1",
                     limit: "1",
                 }) as { tickets?: Array<{ id: number; title?: string | null }>; rows?: Array<{ id: number; title?: string | null }> };
                 const rows = list.tickets ?? list.rows ?? [];
