@@ -404,51 +404,23 @@ export const WAKE_IN_FLIGHT_TTL_MS = Math.max(0, loopConfig().claude_loop.wake_i
  * arrival or heartbeat tick.
  */
 export function lastWakeAtPath(sd: string): string { return join(sd, "last-wake-at"); }
-/** Wake-coalesce window — Stop hook skips its chain-fire if the
- *  prior wake was sent within this many ms ago. Default 3s covers
- *  the typical short pop-phrase turn (1-5s) that produced the
- *  "wake-on-busy" perception in #B.198. */
-// #623 david `7fh9rk` : default bumped 3s → 30s because the counter
-// model collapses ANY wake within the window, not just same-phrase.
-// 30s is roughly one heartbeat tick, so a burst of triggers between
-// two heartbeats becomes a single fire. Env-tunable via
-// CL_WAKE_COALESCE_WINDOW_MS.
-export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env[CL_ENV.WAKE_COALESCE_WINDOW_MS] ?? 30000));
 
-/**
- * Last successful wake's hint, written as JSON `{ticket_id,
- * comment_hashid}` right after `send-keys`. Read by the SSE consumer
- * to coalesce IDENTICAL events (#B.198 david: "on cumule pas les
- * event identique on les merge"). When N SSE pings about the same
- * (ticket, comment) arrive in a burst, only the first triggers a
- * wake; subsequent dups within `WAKE_COALESCE_WINDOW_MS` are dropped
- * at the hook layer — no DB / model change ("on touche pas au model,
- * on merge au moment des event dans / hook"). mtime is the "at" so
- * the JSON body stays free of timestamps.
- */
+/** Wake-coalesce window — minimum spacing between two wake injections.
+ *  Anti-burst only: each FIFO event is a discrete wake, but a string of
+ *  triggers landing inside this window collapses to one fire. Default 5s
+ *  covers SSE bursts, AFK-clear-drain, stop-hook chain, heartbeat ticks
+ *  that fire back-to-back. Env-tunable via CL_WAKE_COALESCE_WINDOW_MS. */
+export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env[CL_ENV.WAKE_COALESCE_WINDOW_MS] ?? 5000));
 
-/**
- * #409 — single-chokepoint wake-injection dedup. The wake sites (timer
- * SSE-wake, Stop-hook post-turn wake, session-start) run as SEPARATE
- * processes and every one funnels through `injectWakePhrase`. The
- * upstream coalesces (`lastWakeHint` at the SSE consumer, `lastWakeAt`
- * at the Stop hook) are per-decider — they don't see a sibling site
- * about to fire, so two sites could each inject the SAME rendered CTA
- * within a beat (david: « le wakeup a été envoyé 3 fois »). This marker
- * is the cross-process catch-all: the last phrase actually injected +
- * when. Format: ISO-timestamp + "\n" + phrase (the phrase may itself
- * contain newlines — everything after the first "\n" is the phrase).
- */
+/** Cross-process marker — the last wake's timestamp + phrase, used as
+ *  the dedup ledger by every wake site (timer, stop-hook, session-start)
+ *  through `skipDuplicateWakeInjection`. Format: ISO + "\n" + phrase. */
 export function lastInjectedWakePath(sd: string): string { return join(sd, "last-injected-wake"); }
 
 /**
- * #409 — pure dedup decision for the injection chokepoint. Given the
- * previous marker content (or null), the phrase about to be injected,
- * the current time, and the coalesce window: SKIP if the SAME phrase was
- * injected less than `windowMs` ago (a sibling site already fired it);
- * otherwise inject and return the marker string to persist. Keyed on
- * phrase-identity (not just "any wake") so distinct legitimate wakes are
- * never dropped. `windowMs <= 0` disables the dedup (always inject).
+ * Pure dedup decision. SKIP if any wake was injected less than `windowMs`
+ * ago (anti-burst: collapses a fast string of triggers to one fire);
+ * otherwise return the new marker to persist. `windowMs <= 0` disables.
  */
 export function dedupeWakeInjection(
     prevMarker: string | null,
