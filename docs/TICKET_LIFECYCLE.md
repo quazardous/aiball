@@ -201,6 +201,47 @@ GET's work order.) It also **always states the open count** (per the §1
 invariant) — even when `actionable` is empty — so a gated backlog is never
 silent.
 
+### 5.0 The backlog wake — two tiers of triage
+
+When the unread FIFO is empty but there is at least one ticket worth surfacing,
+the loop fires a **backlog wake** (`look #N: TITLE. Triage the ticket.`). The
+ticket #N is the head of the backlog set, **split in two tiers**:
+
+1. **Tier 1 — ball in my court.** Tickets where the last actor on the thread is
+   someone other than me (reporter / counterpart / human). These match the
+   `actionable` lens of §4.1: the wake fires on them first because the next move
+   is mine.
+2. **Tier 2 — ball already in their court.** Tickets where I was the last actor.
+   I commented, the ball is with the reporter, and the thread is waiting on
+   them. These stay in the backlog as a soft reminder set, sorted **below** tier 1.
+
+A triage comment (§ in `skill/SKILL.md` → "`look #N: TITLE. Triage the ticket.`")
+moves the ticket **from tier 1 to tier 2** within the same backlog — the agent
+becomes the last actor, so the wake stops pointing at it as long as a tier-1
+ticket exists. Concrete tickets only drop OUT of the backlog on a lifecycle
+decision (`ticket_close` / `ticket_update postpone_until=…`) or when the
+reporter replies (which re-promotes the ticket to tier 1 because they're now
+the last actor → next wake names it again).
+
+This formalises the soft rotation david called out: a simple comment doesn't
+"remove" a ticket from the backlog (closing / postponing does), but it pushes
+the ticket to the end so the next wake picks the next head.
+
+**Why two tiers, not "drop tier 2 entirely":** a ball-in-their-court ticket
+isn't done — it's waiting on a human/reporter who may go silent. Surfacing it
+in the wake (lower priority than tier 1) keeps it visible to the agent: a
+periodic "look #N — still waiting on them" reminder, useful for nudging the
+reporter or for the agent to decide it's stale enough to close itself.
+
+**Within a tier**, the work-order keys from §5 apply: priority desc → own
+claim → assignment → hot → id asc.
+
+> Implementation status (`current`): the loop's backlog fetch in
+> `buildContextPhrase` is **tier-1 only** (`?actionable=1`). The tier-2 path
+> needs either a broader `?open=1` filter (with a no-claim guard, per §4.5) or
+> a dedicated daemon-side `?backlog=1` filter that wraps both tiers in the
+> same call. Tracked as a follow-up.
+
 ### 5.1 The hot-zone
 
 The hot-zone keeps the wake on **the conversation the agent is actively

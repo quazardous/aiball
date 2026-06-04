@@ -69,7 +69,7 @@ When the FIFO is empty and the work-order has at least one actionable ticket in 
 
 > `<culture phrase> look #N: <title>. Triage the ticket.`
 
-**Triage = post a substantive comment that pushes the ball back to the reporter / human.** The actionable gate (`last_actor`) reads "last activity was me" and drops #N from your actionable pool next tick — the wake stops surfacing it. One reply, ticket triaged.
+**Triage = post a substantive comment that pushes the ball back to the reporter / human.** The `last_actor` gate then reads "last activity was me" and moves #N to **tier 2** of the backlog (ball in their court). The next wake picks the next head — typically a tier-1 ticket (ball still in your court). #N only re-surfaces if no tier-1 is left, OR if the reporter replies (which promotes it back to tier 1). See `docs/TICKET_LIFECYCLE.md` §5.0 for the full two-tier model.
 
 A triage comment is not "+1" or "ok" : it has content. Ask a clarification ("what does X mean here?"), propose a direction ("looks like this is dup of #M, close?"), share blocking context ("can't repro on linux"), or state your reading ("understood, will pick up after #K lands"). Anything that genuinely hands the next step to the reporter counts.
 
