@@ -959,6 +959,14 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // WINDOW option, so scope to the loop window (-t tname targets it).
     spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "window-status-format", ""], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "window-status-current-format", ""], { stdio: "ignore" });
+    // #776 david : on win32 the running binary is `cl-pty-proxy.exe` and
+    // tmux's auto-rename leaks `0:cl-pty-proxy` into the bar despite the
+    // empty window-status-format (terminal-emulator title bars + edge
+    // tmux renderers ignore the suppression). Defense in depth : pin
+    // the window name to empty + disable auto-rename so neither the
+    // status format nor a terminal title can fall back to the binary.
+    spawnSync(MUX_CMD, ["set-window-option", "-t", tname, "automatic-rename", "off"], { stdio: "ignore" });
+    spawnSync(MUX_CMD, ["rename-window", "-t", tname, ""], { stdio: "ignore" });
     // #274 + #619 : seed the per-owner status segments so the static format
     // never renders an unset `#{@cl_*}` (empty is fine; unset shows literally
     // on some tmux). The proxy and setTmuxStatus take ownership from here.
