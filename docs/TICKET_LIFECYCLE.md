@@ -241,6 +241,35 @@ Tickets neither in tier 1 nor in tier 2 (= other people's open work) are
 filtered out server-side; the work-order tiering keeps tier 1 first. The
 loop's `buildContextPhrase` uses this filter for the FIFO-empty fallback.
 
+### 5.0.1 Per-row flags exposed by `/api/tickets`
+
+Every row returned by `GET /api/tickets` carries a per-consumer flag bag
+computed centrally by `computeTicketFlags` in `src/db/ticket-flags.ts`
+(pure function — same inputs, same outputs, easy to test). The route
+handler builds the context once per request and runs the pure fn for
+every row; filters (`?actionable=1`, `?backlog=1`, …) become row-level
+boolean checks on the result.
+
+| field | type | meaning |
+|---|---|---|
+| `unread` | bool | ≥1 unseen ping for this consumer. |
+| `actionable` | bool | In the actionable pool: open + not snoozed + not in awaiting-validation + counterpart exists or sole-participant. |
+| `claimable` | bool | `actionable` AND (in a project I own OR explicitly assigned to me on a no-claim consumer). |
+| `is_claim` | bool | I hold a live claim on this ticket (claimant=me, within window). |
+| `hot` | bool | Cross-agent visibility flag — at least one agent has been active on this thread recently. |
+| `backlog_tier` | 0\|1\|2 | 0 = not in this consumer's backlog. 1 = ball in my court (= actionable). 2 = ball in theirs (I was the last actor, no decision pending). |
+| `backlog_cooled_until` | string\|null | When the loop just woke on this ticket and the cooldown is still open, the ISO timestamp when the row will resurface. Always null when `cooldown_sec` query param is 0 or unset. |
+| `gated_by_decision` | bool | A `then:plan` or `then:resolved` proposal is sitting unresolved on the thread — the ticket is in awaiting-validation state. |
+| `last_actor` | string\|null | The consumer who last acted on the thread (denormalised). |
+| `last_actor_at` | string\|null | ISO timestamp of the last action. |
+
+**Why the flags are on the row**: adding a new backlog condition used
+to mean wiring a new Set + a new AND/OR clause in the route handler
+(every consumer rebuilt the same logic). Now every consumer (UI, MCP,
+claude-loop) sees the same flag bag on the wire and filters locally.
+A bug in tier 2 (#790) becomes a single-function fix instead of a
+distributed audit.
+
 ### 5.1 The hot-zone
 
 The hot-zone keeps the wake on **the conversation the agent is actively

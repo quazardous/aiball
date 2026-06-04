@@ -55,7 +55,8 @@ import {
     listTicketSubscriptionsForTicket,
     getConsumer,
 } from "../db.js";
-import { computeActionableTicketIds, lastActorExclusions, backlogCooldownExclusions, decisionGateByTicket } from "../db/projects.js";
+import { computeActionableTicketIds } from "../db/projects.js";
+import { computeTicketFlags, buildTicketFlagsContext } from "../db/ticket-flags.js";
 import { listSubscriptions } from "../db/subscriptions.js";
 import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
@@ -882,9 +883,32 @@ ticketsRouter.get("/tickets", (req, res) => {
             Date.now(),
             hotWinMs,
         );
+    // #791 — centralised flag computation. The route used to build
+    // 5-6 independent Sets and combine them inline; the route now
+    // delegates to `computeTicketFlags(row, ctx)`. Adding a new
+    // condition means editing the pure fn, not the route.
+    const cooldownSec = typeof req.query.cooldown_sec === "string"
+        && Number.isFinite(Number(req.query.cooldown_sec))
+        ? Math.max(0, Number(req.query.cooldown_sec))
+        : 0;
+    const flagsCtx = buildTicketFlagsContext({
+        consumerId,
+        ticketIds: createdIds,
+        nowMs: Date.now(),
+        cooldownSec,
+        closedSet,
+        isClaimable,
+        ownClaimIds,
+        assignedToMeIds,
+        crossAgentHot: crossAgentHotFocus,
+    });
     const tickets = created.map((m) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;
+        const flags = computeTicketFlags(
+            { id: m.id, project: m.project, assignee: m.assignee ?? null, postponed_until: postponedUntil },
+            flagsCtx,
+        );
         const base = {
             id: m.id,
             project: m.project,
@@ -903,27 +927,31 @@ ticketsRouter.get("/tickets", (req, res) => {
             priority: m.priority ?? "normal",
             parent_ticket_id: m.parent_ticket_id ?? null,
             sub_ticket_count: childCounts.get(m.id) ?? 0,
-            // #371: per-consumer landscape flags (nested: unread ⊂ actionable
-            // ⊂ open). Let the caller slice the one list itself.
-            unread: unreadMap.get(m.id) ?? false,
-            actionable: actionableIds.has(m.id),
-            // #432: actionable AND in a project I own → safe for me to claim.
-            claimable: isClaimable(m.id, m.project, m.assignee ?? null),
+            // #371 + #791: per-consumer flags. `unread / actionable /
+            // claimable / is_claim / hot` keep their wire names for
+            // back-compat; new fields (`backlog_tier`, `gated_by_decision`,
+            // `backlog_cooled_until`, `last_actor`, `last_actor_at`)
+            // surface via the flag bag.
+            unread: flags.unread,
+            actionable: flags.actionable,
+            claimable: flags.claimable,
+            backlog_tier: flags.backlog_tier,
+            backlog_cooled_until: flags.backlog_cooled_until,
+            gated_by_decision: flags.gated_by_decision,
+            last_actor: flags.last_actor,
+            last_actor_at: flags.last_actor_at,
             tags: tagsMap.get(m.id) ?? [],
             // #404: accumulated token-effort tally (null until any usage pushed).
             token_usage: tokenUsageMap.get(m.id) ?? null,
-            // #405/#532 (sfbsdy + s2sjxz) : visibility cross-agent —
-            // recency only, pas le claim (stale claim ≠ hot, david `s2sjxz`).
-            hot: crossAgentHotFocus.has(m.id),
-            // #418/#436: assignment (responsibility, persistent) + claim (focus,
-            // transient) are now distinct fields. `is_claim` kept for back-compat
-            // (true when claimed), derived from `claimant`.
+            hot: flags.hot,
+            // #418/#436: assignment (responsibility, persistent) + claim
+            // (focus, transient) are distinct fields.
             assignee: m.assignee ?? null,
             assigned_by: m.assigned_by ?? null,
             assigned_at: m.assigned_at ?? null,
             claimant: m.claimant ?? null,
             claimed_at: m.claimed_at ?? null,
-            is_claim: m.claimant != null,
+            is_claim: flags.is_claim,
         };
         if (summary) return base;
         return { ...base, body: m.edited_body ?? m.body };
@@ -934,48 +962,21 @@ ticketsRouter.get("/tickets", (req, res) => {
         result = result.filter((t) => !t.closed && (includePostponed || !t.postponed));
     }
     if (onlyActionable) {
-        // #265: scope the actionable gate to the requesting consumer (the
-        // `actionableIds` set computed once above). A ticket where they
-        // authored the latest content (awaiting someone else) drops out.
-        result = result.filter((t) => actionableIds.has(t.id));
+        // #265 + #791: actionable lives on the row now. The actionable gate
+        // scopes to the requesting consumer and folds in the decision gate.
+        result = result.filter((t) => t.actionable);
     }
     if (onlyClaimable) {
-        // #432: actionable ∩ owned-project. The narrower set ticket_claim
-        // claims from, so a cross-project follower-broadcast is never claimed.
-        result = result.filter((t) => isClaimable(t.id, t.project, t.assignee ?? null));
+        // #432 + #791: claimable = actionable ∩ owned-project, surfaced
+        // on the row.
+        result = result.filter((t) => t.claimable);
     }
     if (onlyBacklog) {
-        // Tier 1 = actionable (already computed). Tier 2 = open AND I was
-        // the last actor. Both are sorted by the work-order tiering below,
-        // which puts actionable first. Tickets neither in tier 1 nor tier 2
-        // (= other people's open work) are dropped.
-        const lastByMe = lastActorExclusions(consumerId);
-        // #786 — cooldown filter: skip tickets the loop just named in a
-        // backlog wake until either the cooldown elapses or the thread
-        // moves (someone replies → last_actor_at advances past wake_at).
-        // The query carries `cooldown_sec` so each loop can override the
-        // default — 0 / missing disables the filter.
-        const cooldownSec = typeof req.query.cooldown_sec === "string"
-            && Number.isFinite(Number(req.query.cooldown_sec))
-            ? Math.max(0, Number(req.query.cooldown_sec))
-            : 0;
-        const cooled = cooldownSec > 0
-            ? backlogCooldownExclusions(consumerId, cooldownSec)
-            : null;
-        // #790 — tier 2 (lastActor=me) must ALSO exclude tickets with a
-        // pending decision (resolution or plan proposal awaiting validation).
-        // The actionable filter already drops those (decisionGate is folded
-        // into computeActionableTicketIds), but lastActorExclusions is just
-        // a last_actor lookup — a ticket where I posted then:resolved
-        // matches both "I'm last actor" AND "pending decision", and the
-        // pending one wins (the ball is with the reporter for accept/reject,
-        // not in my backlog).
-        const decisionGated = decisionGateByTicket();
-        result = result.filter((t) =>
-            !t.closed && (includePostponed || !t.postponed)
-            && (actionableIds.has(t.id) || (lastByMe.has(t.id) && !decisionGated.get(t.id)))
-            && (cooled === null || !cooled.has(t.id)),
-        );
+        // #791: backlog membership is a row-level fact. The flag fn folds
+        // in (a) actionable as tier 1, (b) lastActor=me ∩ !decision_gate as
+        // tier 2, (c) the #786 cooldown into `backlog_cooled_until`. The
+        // route just filters on the result.
+        result = result.filter((t) => t.backlog_tier > 0 && !t.backlog_cooled_until);
     }
     if (tagsFilter && tagsFilter.length > 0) {
         const requiredSet = new Set(tagsFilter.map((s) => s.toLowerCase()));
