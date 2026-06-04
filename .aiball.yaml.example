@@ -203,7 +203,7 @@ project_type: public
 #     hint:      ["btw,", "fyi,"]
 #     imperative: ["**heads up**:", "**ACTION**:"]
 #   wake_master:
-#     directive: "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
+#     directive: "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture} {lead}}"
 
 # --- ticket-text linkifier patterns -------------------------------------------
 # Merge by `id` (3 layers, ADDITIVE: shipped defaults always run; entries

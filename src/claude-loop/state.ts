@@ -1841,12 +1841,12 @@ export async function buildContextPhrase(
             //   comment    →  body + refs only
             //   new ticket →  "new ticket #ID: TITLE"
             //   lifecycle  →  "#ID VERB: TITLE"   (closed / resolved / reopened)
-            //   backlog    →  culture + "look #ID: TITLE"
+            //   backlog    →  culture + "look #ID: TITLE. Triage the ticket."
             //   idle       →  culture + lead
             "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}"
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}"
-            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}"
+            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}"
             + "{no_head:+{culture} {lead}}",
             tone,
         );

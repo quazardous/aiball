@@ -63,6 +63,26 @@ If you posted `then: "resolved"` and the work turns out wrong (test failed, fix 
 
 ---
 
+## `look #N: TITLE. Triage the ticket.` — getting a ticket out of the backlog
+
+When the FIFO is empty and the work-order has at least one actionable ticket in your court, the wake reads:
+
+> `<culture phrase> look #N: <title>. Triage the ticket.`
+
+**Triage = post a substantive comment that pushes the ball back to the reporter / human.** The actionable gate (`last_actor`) reads "last activity was me" and drops #N from your actionable pool next tick — the wake stops surfacing it. One reply, ticket triaged.
+
+A triage comment is not "+1" or "ok" : it has content. Ask a clarification ("what does X mean here?"), propose a direction ("looks like this is dup of #M, close?"), share blocking context ("can't repro on linux"), or state your reading ("understood, will pick up after #K lands"). Anything that genuinely hands the next step to the reporter counts.
+
+If the ticket needs more than a triage comment, the other gestures still apply :
+
+- **Claim (`ticket_claim(N)`)** — you're going to focus on it now : read, work, post status. Different contract — see the next section.
+- **Postpone (`ticket_update(N, {postpone_until: "<ISO>"})`)** — real work but blocked / not now. Drops from the backlog until the date.
+- **Close (`ticket_close(N, then: "resolved" | "rejected" | "duplicate")`)** — done / wrong / dup. Lifecycle event fires, reporter sees the outcome.
+
+What does NOT count as triage : a single `ticket_get(N)` read with no follow-up. The wake will re-fire next heartbeat because the last_actor on the thread is still the reporter.
+
+---
+
 ## What `claim` is for — and what it isn't
 
 `claim #N` (the wake CTA or `ticket_claim()`) is a GO for **#N itself** : take focus on it, read the thread, triage, post a status / propose a plan / answer the open question. That's the contract.
