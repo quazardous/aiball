@@ -1471,7 +1471,16 @@ export function lastActorExclusions(consumerId: string): Set<number> {
  */
 export function decisionGateByTicket(): Map<number, boolean> {
     const db = getDb();
+    // #803 — also consult `ticket_created` events. A `ticket_new({then:"plan"})`
+    // ships a pending plan decision in the meta of the ticket_created itself,
+    // so the gate must replay those to recognise ticket-level proposals.
+    // computeDecisionGate reads meta agnostically — no special-case needed.
+    // Note: row.ticketId is null for ticket_created (the ticket is the row
+    // itself), so computeDecisionGate skips it (ticketId == null guard).
+    // We compensate below by re-mapping ticket_created rows to use their own
+    // id as the ticketId before passing to computeDecisionGate.
     const rows = db.select({
+        id: schema.messages.id,
         ticketId: schema.messages.ticketId,
         kind: schema.messages.kind,
         status: schema.messages.status,
@@ -1479,14 +1488,21 @@ export function decisionGateByTicket(): Map<number, boolean> {
         byAgent: schema.messages.byAgent,
     })
         .from(schema.messages)
-        .where(inArray(schema.messages.kind, ["ticket_resolved", "ticket_reopened", "comment_added"]))
+        .where(inArray(schema.messages.kind, ["ticket_resolved", "ticket_reopened", "comment_added", "ticket_created"]))
         .orderBy(asc(schema.messages.id))
         .all();
+    const normalized = rows.map((r) => ({
+        ticketId: r.kind === "ticket_created" ? r.id : r.ticketId,
+        kind: r.kind,
+        status: r.status,
+        meta: r.meta,
+        byAgent: r.byAgent,
+    }));
     // #358 : la logique de rejeu vit dans decision-gate.ts (pure, testée). On
     // bâtit le set humain une fois pour que le yield-sur-commentaire ne tape
     // pas la table consumers à chaque ligne.
     const humans = new Set(listHumans());
-    return computeDecisionGate(rows, (id) => humans.has(id));
+    return computeDecisionGate(normalized, (id) => humans.has(id));
 }
 
 export function computeActionableTicketIds(consumerId?: string): ActionableTicketSet {

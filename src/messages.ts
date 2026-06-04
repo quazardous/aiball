@@ -78,8 +78,12 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
     // "un message doit de toute façon etre approuvé". Moderation is
     // the gate; restricting at the validator would double-gate and
     // also block legitimate agent-to-agent cases.
-    // #B.129 decision-on-comment: validate optional `decision_kind`.
-    // Only meaningful on comment_added today; other kinds drop it.
+    // #B.129 decision-on-comment + #803 decision-on-ticket : validate
+    // optional `decision_kind`. Allowed on `comment_added` (original)
+    // and on `ticket_created` (#803 — `ticket_new({then:"plan"})` ships
+    // the plan proposal at creation time). For ticket_created only `plan`
+    // makes sense — resolution/wontfix on a brand-new ticket is a smell
+    // (why create then immediately propose to close?). Other kinds drop it.
     let decisionKind: string | null = null;
     if (o.decision_kind !== undefined && o.decision_kind !== null) {
         if (typeof o.decision_kind !== "string") {
@@ -88,8 +92,11 @@ export function validateNewMessage(input: unknown): ValidationError | NewMessage
         if (!isDecisionKind(o.decision_kind)) {
             return { error: `decision_kind must be one of ${DECISION_KINDS.join(", ")}` };
         }
-        if (kind !== "comment_added") {
-            return { error: `decision_kind only allowed on comment_added (got kind=${kind})` };
+        if (kind !== "comment_added" && kind !== "ticket_created") {
+            return { error: `decision_kind only allowed on comment_added or ticket_created (got kind=${kind})` };
+        }
+        if (kind === "ticket_created" && o.decision_kind !== "plan") {
+            return { error: `decision_kind on ticket_created must be "plan" (got "${o.decision_kind}")` };
         }
         decisionKind = o.decision_kind;
     }

@@ -74,9 +74,15 @@ export function registerTicketWriteTools(server: McpServer): void {
                     .describe(
                         "#697 F4 — origin project for cross-project tickets. Set when this agent (living in `from_project`) files a ticket in `project` on behalf of `project`'s agents (e.g. `kodi_sauvagge-claude` opening a ticket in `pisynth` to ask how pisynth handles deploy/probe). Surfaced on `ticket_get` and renderable as a 'from X' badge so the recipient distinguishes a cross-project ask from an in-project ticket. Omit for intra-project tickets — the common case.",
                     ),
+                then: z
+                    .enum(["plan"])
+                    .optional()
+                    .describe(
+                        "#803 — attach a pending decision DIRECTLY on the ticket_created so the reporter validates the approach in one step (instead of `ticket_new` then `ticket_reply({then:'plan'})`). Today only `plan` is supported : the ticket carries `meta.decision={kind:'plan',status:'pending'}` and is gated out of the actionable backlog until the reporter accepts (go-signal to execute) or rejects (re-plan). Use when you already have a HOW in mind at creation time — typical for feature requests an agent files with a proposed approach.",
+                    ),
             },
         },
-        async ({ project, title, summary, body, intent, priority, scope, by_agent, parent_id, tags, from_project }) => {
+        async ({ project, title, summary, body, intent, priority, scope, by_agent, parent_id, tags, from_project, then }) => {
             const proj = client.resolveProject(project);
             const res = (await client.postMessage({
                 project: proj,
@@ -90,6 +96,10 @@ export function registerTicketWriteTools(server: McpServer): void {
                 parent_id,
                 scope,
                 from_project,
+                // #803 — `then:"plan"` rides on the existing `decision_kind`
+                // pipeline (validator extends to allow it on ticket_created ;
+                // db/messages stamps meta.decision={kind,status:"pending"}).
+                decision_kind: then === "plan" ? "plan" : undefined,
             })) as { id?: number };
             markActiveTicket(res?.id); // #404: focus = the new ticket (token attribution)
             if (tags && tags.length > 0 && typeof res?.id === "number") {

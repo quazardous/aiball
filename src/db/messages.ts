@@ -79,6 +79,13 @@ export function insertMessage(m: NewMessage): Message {
             // falling back to 'normal'. First real consumer of the config schema.
             const defaultPriority =
                 (getConfig("tickets.default_priority", m.project) as Priority | undefined) ?? "normal";
+            // #803 — `ticket_new({then:"plan"})` ships a pending plan
+            // decision in the meta of the ticket_created itself. Only `plan`
+            // is allowed (validator enforces). decisionGateByTicket replays
+            // it like a comment_added with a pending plan.
+            const ticketMeta = m.decision_kind
+                ? JSON.stringify({ decision: { kind: m.decision_kind, status: "pending" } })
+                : null;
             const inserted = tx.insert(schema.tickets).values({
                 id,
                 project: m.project,
@@ -91,6 +98,7 @@ export function insertMessage(m: NewMessage): Message {
                 priority: m.priority ?? defaultPriority,
                 createdAt,
                 parentTicketId: m.parent_id ?? null,
+                meta: ticketMeta,
                 // #374: the creator is the first "last actor" on the ticket.
                 lastActor: m.by_agent ?? null,
                 lastActorAt: createdAt,
@@ -119,13 +127,15 @@ export function insertMessage(m: NewMessage): Message {
                 ? m.parent_id
                 : null;
         const hashid = pickFreshHashid(tx);
-        // #B.129 + #B.130: stamp meta from optional post-time inputs.
-        // decision_kind → meta.decision (decision-on-comment, #B.129)
-        // summary_until → meta.summary_until (rolling TLDR, #B.130).
+        // #B.129 + #B.130 + #803 : stamp meta from optional post-time inputs.
+        // decision_kind → meta.decision (#B.129 comment_added, #803 also on
+        //                ticket_created with kind="plan" for ticket_new({then:"plan"}))
+        // summary_until → meta.summary_until (rolling TLDR, #B.130, comment-only).
         //                Conceptually summarizes the thread state up to
         //                AND including this comment — not just this
         //                comment's body in isolation.
-        // Both gated on kind===comment_added by the validator.
+        // Both gated on kind===comment_added by the validator (ticket_created
+        // path stamps its own meta in the tickets-insert branch above).
         let metaInit: string | null = null;
         if (m.kind === "comment_added" && (m.decision_kind || m.summary_until)) {
             const meta: Record<string, unknown> = {};

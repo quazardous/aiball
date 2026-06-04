@@ -119,6 +119,29 @@ test("décision pending non-approuvée (modération en attente) → ignorée", (
     assert.equal(g.get(1), undefined);
 });
 
+test("#803: ticket_created avec plan pending → gaté", () => {
+    const g = gate([
+        ev({ kind: "ticket_created", meta: decision("plan", "pending") }),
+    ]);
+    assert.equal(g.get(1), true);
+});
+
+test("#803: ticket_created avec plan accepté → dé-gaté (go-signal)", () => {
+    const g = gate([
+        ev({ kind: "ticket_created", meta: decision("plan", "pending") }),
+        ev({ kind: "comment_added", meta: decision("plan", "accepted") }),
+    ]);
+    assert.equal(g.get(1), false);
+});
+
+test("#803: ticket_created avec plan rejeté → dé-gaté (re-plan)", () => {
+    const g = gate([
+        ev({ kind: "ticket_created", meta: decision("plan", "pending") }),
+        ev({ kind: "comment_added", meta: decision("plan", "rejected") }),
+    ]);
+    assert.equal(g.get(1), false);
+});
+
 test("tickets indépendants ne se mélangent pas", () => {
     const g = gate([
         ev({ ticketId: 1, kind: "comment_added", meta: decision("plan", "pending") }),

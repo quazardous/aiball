@@ -53,7 +53,11 @@ export function computeDecisionGate(
             continue;
         }
 
-        if (ev.kind !== "comment_added" || ev.status !== "approved") continue;
+        // #803 — `ticket_created` with a pending plan decision in its meta
+        // joins the same replay (decisionGateByTicket re-maps the row's id
+        // to ticketId for ticket_created events).
+        const isDecisionBearing = ev.kind === "comment_added" || ev.kind === "ticket_created";
+        if (!isDecisionBearing || ev.status !== "approved") continue;
 
         const decision = parseDecision(ev.meta);
         if (decision) {
