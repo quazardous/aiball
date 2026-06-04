@@ -186,10 +186,10 @@ export function registerTicketWriteTools(server: McpServer): void {
                         ].join("\n"),
                     ),
                 then: z
-                    .enum(["resolved", "plan", "close", "reopen"])
+                    .enum(["resolved", "plan", "wontfix", "close", "reopen"])
                     .optional()
                     .describe(
-                        "Optional intent on the comment. `resolved` (#B.129) = tag the comment as a resolution decision (`meta.decision={kind:\"resolution\",status:\"pending\"}`); the reporter accept/reject — no separate ticket_resolved row anymore, the comment IS the proposal and the audit lives on it. `plan` (#B.243) = symmetric to `resolved` for plan proposals (`meta.decision={kind:\"plan\",status:\"pending\"}`): use it when the comment body describes HOW you intend to tackle the ticket and you want the reporter to validate the approach before you execute. Accepted plan = go-signal (the agent re-enters actionable to execute); pending plan gates actionable identically to pending resolution. `close` = close the ticket (reporter-only). `reopen` = bring a closed ticket back. `close`/`reopen` are still emitted as distinct lifecycle event rows; `resolved` and `plan` are comment+decision sidecars. There is no agent→human `blocked` option — post a plain comment with your question if you need info before proceeding.",
+                        "Optional intent on the comment. `resolved` (#B.129) = tag the comment as a resolution decision (`meta.decision={kind:\"resolution\",status:\"pending\"}`); the reporter accept/reject — no separate ticket_resolved row anymore, the comment IS the proposal and the audit lives on it. `plan` (#B.243) = symmetric to `resolved` for plan proposals (`meta.decision={kind:\"plan\",status:\"pending\"}`): use it when the comment body describes HOW you intend to tackle the ticket and you want the reporter to validate the approach before you execute. Accepted plan = go-signal (the agent re-enters actionable to execute); pending plan gates actionable identically to pending resolution. `wontfix` (#802) = propose closing the ticket WITHOUT resolution — for junk / test / out-of-scope / non-reproducible tickets an agent triages without delivering work (`meta.decision={kind:\"wontfix\",status:\"pending\"}`). The reporter accepting auto-closes the ticket WITHOUT flipping `resolved`. Different from `close` (reporter-only, direct) : `wontfix` is the proposal path any agent can use to triage someone else's ticket. `close` = close the ticket (reporter-only, direct). `reopen` = bring a closed ticket back. `close`/`reopen` are still emitted as distinct lifecycle event rows; `resolved`/`plan`/`wontfix` are comment+decision sidecars. There is no agent→human `blocked` option — post a plain comment with your question if you need info before proceeding.",
                     ),
                 scope: z
                     .enum(MESSAGE_SCOPES)
@@ -237,13 +237,16 @@ export function registerTicketWriteTools(server: McpServer): void {
             // question — the conversational thread covers it naturally.
             const kind: string = !then
                 ? "comment_added"
-                : then === "resolved" || then === "plan"
+                : then === "resolved" || then === "plan" || then === "wontfix"
                   ? "comment_added"
                   : then === "close"
                     ? "ticket_closed"
                     : "ticket_reopened";
             const decision_kind =
-                then === "resolved" ? "resolution" : then === "plan" ? "plan" : undefined;
+                then === "resolved" ? "resolution"
+                : then === "plan" ? "plan"
+                : then === "wontfix" ? "wontfix"
+                : undefined;
             const proj = project ?? target.project;
             const res = await client.postMessage({
                 project: proj,

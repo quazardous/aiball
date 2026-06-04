@@ -415,6 +415,34 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
         // reject/reclassify) → emit so #322's rules can react (e.g. re-attribute
         // when a plan is accepted). The `meta.decision` carries the new state.
         emitLifecycle({ op: "decided", message: decorated });
+        // #802 — `wontfix` accepted auto-closes the ticket WITHOUT flipping
+        // resolved (junk/test/out-of-scope triage). The author of the
+        // wontfix comment cannot close (they're typically a non-reporter
+        // agent triaging) ; this acceptance IS the close authorization
+        // from the reporter. Best-effort : a failure here surfaces as a
+        // server log but doesn't fail the decide (the meta is already
+        // flipped to accepted, the user can close manually if needed).
+        if (
+            body.status === "accepted"
+            && updated.meta
+            && updated.ticket_id != null
+        ) {
+            try {
+                const m = JSON.parse(updated.meta) as { decision?: { kind?: string } };
+                if (m.decision?.kind === "wontfix") {
+                    submitMessage({
+                        project: updated.project,
+                        kind: "ticket_closed",
+                        ticket_id: updated.ticket_id,
+                        parent_id: updated.ticket_id,
+                        body: `(auto-close from accepted wontfix #${updated.hashid ?? id})`,
+                        by_agent: by,
+                    });
+                }
+            } catch {
+                /* malformed meta or close failed — don't fail the decide */
+            }
+        }
         res.json(decorated);
     } catch (e) {
         // Domain-level conflict (no decision present, or already
