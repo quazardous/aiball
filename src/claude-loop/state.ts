@@ -406,10 +406,12 @@ export function lastWakeAtPath(sd: string): string { return join(sd, "last-wake-
 
 /** Wake-coalesce window — minimum spacing between two wake injections.
  *  Anti-burst only: each FIFO event is a discrete wake, but a string of
- *  triggers landing inside this window collapses to one fire. Default 5s
- *  covers SSE bursts, AFK-clear-drain, stop-hook chain, heartbeat ticks
- *  that fire back-to-back. Env-tunable via CL_WAKE_COALESCE_WINDOW_MS. */
-export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env[CL_ENV.WAKE_COALESCE_WINDOW_MS] ?? 5000));
+ *  triggers landing inside this window collapses to one fire. Default 10s
+ *  (bumped from 5s in #807 c8dxpm — stop-hook + afkCleared transitions can
+ *  telescope past a tighter window). Covers SSE bursts, AFK-clear-drain,
+ *  stop-hook chain, heartbeat ticks that fire back-to-back. Env-tunable
+ *  via CL_WAKE_COALESCE_WINDOW_MS. */
+export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env[CL_ENV.WAKE_COALESCE_WINDOW_MS] ?? 10000));
 
 /** Cross-process marker — the last wake's timestamp + phrase, used as
  *  the dedup ledger by every wake site (timer, stop-hook, session-start)
