@@ -58,6 +58,7 @@ import {
     setTmuxStatus,
     stateDirFor,
     timerLogPath,
+    proxyAlivePath,
     timerPidPath,
     tmuxName,
     writePlate,
@@ -888,15 +889,40 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // the pane is never bricked. Missing proxy → launch claude directly.
     const pyProxy = join(root, "src/claude-loop/pty-proxy.py");
     const winProxyExe = join(root, "windows", "cl-pty-proxy", "target", "release", "cl-pty-proxy.exe");
+    // #783 — kill-on-exit. Drop the `exec` prefix so bash stays alive as the
+    // parent of the proxy/claude chain, then run a trap on bash EXIT that
+    // SIGKILLs the timer + proxy and sweeps the transient state markers.
+    // When claude exits (Ctrl-D, /exit, crash) the proxy exits, then bash
+    // hits EXIT and tears the satellites down before tmux reaps the session.
+    // No `exec` means one extra bash process per pane (cheap; same model the
+    // shell uses for any login session).
     let launch: string;
     if (process.platform === "win32" && existsSync(winProxyExe)) {
-        launch = `exec ${hookPath(winProxyExe)} -- ${claudeCmd}`;
+        launch = `${hookPath(winProxyExe)} -- ${claudeCmd}`;
     } else if (process.platform !== "win32" && has("python3") && existsSync(pyProxy)) {
-        launch = `exec python3 -B ${shQuote(pyProxy)} -- ${claudeCmd}`;
+        launch = `python3 -B ${shQuote(pyProxy)} -- ${claudeCmd}`;
     } else {
-        launch = `exec ${claudeCmd}`;
+        launch = claudeCmd;
     }
-    const innerCmd = `source ${shQuote(envPath(sd))}; ${launch}`;
+    const sweepPaths = [
+        "wake-in-flight", "busy-defer-until", "last-injected-wake",
+        "last-wake-at", "idle-since", "human-typing",
+    ].map((f) => shQuote(join(sd, f))).join(" ");
+    const trapCmd = [
+        "_aiball_kill_satellites() {",
+        `  if [ -f ${shQuote(timerPidPath(sd))} ]; then`,
+        `    local _tp; _tp="$(cat ${shQuote(timerPidPath(sd))} 2>/dev/null)";`,
+        `    [ -n "$_tp" ] && kill -KILL "$_tp" 2>/dev/null;`,
+        "  fi;",
+        `  if [ -f ${shQuote(proxyAlivePath(sd))} ]; then`,
+        `    local _pp; _pp="$(cat ${shQuote(proxyAlivePath(sd))} 2>/dev/null)";`,
+        `    [ -n "$_pp" ] && kill -KILL "$_pp" 2>/dev/null;`,
+        "  fi;",
+        `  rm -f ${sweepPaths} 2>/dev/null || true;`,
+        "}",
+        "trap _aiball_kill_satellites EXIT;",
+    ].join(" ");
+    const innerCmd = `source ${shQuote(envPath(sd))}; ${trapCmd} ${launch}`;
 
     const tname = tmuxName(name);
     // Resolve bash via absolute path on Windows. The user's PATH is
