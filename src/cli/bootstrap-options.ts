@@ -45,16 +45,6 @@ export const BOOTSTRAP_OPTIONS: ReadonlyArray<BootstrapOption> = [
         forwardKey: "force",
     },
     {
-        flag: "--stop-hook",
-        description: "Also wire Claude Code's Stop hook into .claude/settings.json so this project's autopoll triggers",
-        forwardKey: "stopHook",
-    },
-    {
-        flag: "--global",
-        description: "With --stop-hook, write to ~/.claude/settings.json instead of <PWD>/.claude/settings.json (fires in every Claude Code session)",
-        forwardKey: "global",
-    },
-    {
         flag: "--private",
         description: "#593: seed .aiball.yaml with `project_type: private` so the welcome MCP serves the private kit",
         forwardKey: "private",

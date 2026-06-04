@@ -10,7 +10,7 @@
 import { existsSync, statSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { Command } from "commander";
 import { AiballClient } from "./client.js";
 import { AIBALL_VERSION } from "./version.js";
@@ -196,28 +196,6 @@ program
         const agentSource = cfg.consumer.agent_source;
         const projectSource = cfg.consumer.project_source;
 
-        // Stop hook wiring check.
-        const settingsPath = join(homedir(), ".claude", "settings.json");
-        let stopHookWired = false;
-        let stopHookCommand: string | null = null;
-        if (existsSync(settingsPath)) {
-            try {
-                const s = JSON.parse(readFileSync(settingsPath, "utf8")) as {
-                    hooks?: { Stop?: Array<{ hooks?: Array<{ command?: string }> }> };
-                };
-                for (const entry of s.hooks?.Stop ?? []) {
-                    for (const h of entry.hooks ?? []) {
-                        if (h.command && /aiball-autopoll-stop\.(sh|cmd)$/.test(h.command)) {
-                            stopHookWired = true;
-                            stopHookCommand = h.command;
-                        }
-                    }
-                }
-            } catch {
-                /* ignore */
-            }
-        }
-
         // Daemon reachability.
         let daemonUp = false;
         try {
@@ -264,11 +242,6 @@ program
                 agent_source: agentSource,
                 project: cfg.consumer.project,
                 project_source: projectSource,
-            },
-            stop_hook: {
-                wired: stopHookWired,
-                command: stopHookCommand,
-                settings_path: settingsPath,
             },
             daemon: {
                 up: daemonUp,
@@ -318,12 +291,6 @@ program
         process.stdout.write(`\nconsumer\n`);
         process.stdout.write(`  ${ok(!!payload.consumer.agent)} agent:   ${payload.consumer.agent ?? "(unresolved)"} ${payload.consumer.agent_source ? `[from ${payload.consumer.agent_source}]` : ""}\n`);
         process.stdout.write(`  ${ok(!!payload.consumer.project)} project: ${payload.consumer.project ?? "(unresolved)"} ${payload.consumer.project_source ? `[from ${payload.consumer.project_source}]` : ""}\n`);
-        process.stdout.write(`\nstop hook (~/.claude/settings.json)\n`);
-        process.stdout.write(`  ${ok(payload.stop_hook.wired)} wired: ${payload.stop_hook.wired ? payload.stop_hook.command : "no aiball-autopoll-stop entry"}\n`);
-        if (!payload.stop_hook.wired) {
-            process.stdout.write(`     enable with: aiball init --stop-hook            (project-local)\n`);
-            process.stdout.write(`                   aiball init --stop-hook --global   (every Claude Code session)\n`);
-        }
         process.stdout.write(`\ndaemon\n`);
         process.stdout.write(`  ${ok(payload.daemon.up)} reachable\n`);
         if (payload.daemon.up && payload.consumer.agent) {

@@ -23,6 +23,19 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- `aiball init --stop-hook` and `install.sh --stop-hook` / `--remove-stop-hook` removed entirely. The persistent `.claude/settings.json` wiring path is gone; `claude-loop` CLI-injects all hooks per session via `claude --settings`, which is the canonical (and only) integration path now. Direct `claude` users no longer get aiball hooks. Legacy `aiball-autopoll-stop.sh` / `.cmd` wrapper scripts removed from the install layout.
+
+### Fixed
+
+- Backlog wake no longer fires on tickets that have a pending `then:resolved` / `then:plan` decision. A plain comment after a pending proposal used to flip the gate open ("the human commented → ball back to agent"); the gate now stays closed until the proposition is explicitly accepted or rejected. The comment still surfaces via the FIFO unread wake, so the agent sees the signal without the ticket re-entering the backlog. Fixes the "wake fires twice on the same pending ticket" symptom.
+
+### Added
+
+- Lineage relation chips (`child of` / `parent of` on sub-tickets) now expose the change-kind / remove menu (the kebab `▾` button). The kind picker offers all relation kinds including lineage, so a sub-ticket can be re-parented or demoted to a soft `relates_to` from the chip itself. The add-relation form still defaults to non-lineage kinds.
+
+
 ## [0.27.0] — 2026-06-03
 
 ### Changed

@@ -431,8 +431,6 @@ async function cmdStart(opts: StartOpts): Promise<void> {
             });
             await bootstrapInit({
                 force: opts.initForce === true,
-                stopHook: opts.initStopHook === true,
-                global: opts.initGlobal === true,
                 private: opts.initPrivate === true,
                 // #603 (4dzxp2) : forward identity to bootstrap so `start --init`
                 // matches `init` behavior (consumer + project also seeded

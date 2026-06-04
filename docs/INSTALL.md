@@ -20,8 +20,6 @@
   - macOS: `brew install node`.
 - **npm** (bundled with node).
 - **rsync** (used by the hard-install path to deploy the source tree).
-- **jq** (optional, only needed for `--stop-hook` and uninstall to edit
-  `~/.claude/settings.json`).
 - **systemd** (Linux only, for the user-service path; skip with
   `--no-systemd` on macOS or hosts without a user session).
 - **tmux** + **python3** for `claude-loop`. Python 3 enables the PTY
@@ -142,13 +140,10 @@ install, run `./install.sh --uninstall` first.
 | `--port 7878` | override the listen port (writes a systemd drop-in; default `7777`) |
 | `--host 0.0.0.0` | override the listen host (default `127.0.0.1`; use with care) |
 | `--no-systemd` | skip the user unit (macOS, headless boxes — start `aiball-daemon` manually) |
-| `--stop-hook` | wire the interactive autopoll Stop hook into `<PWD>/.claude/settings.json` (project-local) |
-| `--global` | with `--stop-hook`, write to `~/.claude/settings.json` (fires in every Claude Code session) |
 | `--proxy-url URL` | proxy-node mode — run this daemon as a transparent relay to a remote aiball (see [`REMOTE.md`](./REMOTE.md)) |
 | `--proxy-token TOK` | with `--proxy-url`, the node token minted on the remote (`aiball auth issue --node`) |
 | `--auth-init` | mint a one-shot setup token + auto-open the setup URL after install |
-| `--remove-stop-hook` | remove ONLY the Stop hook (global + project-local), leaving everything else installed |
-| `--uninstall` | remove the install (code, bins, systemd unit, Stop hook); data dir preserved |
+| `--uninstall` | remove the install (code, bins, systemd unit); data dir preserved |
 
 Re-running with new `--port` / `--host` overwrites only the bind drop-in.
 Existing data, tokens and accounts are preserved.
@@ -275,12 +270,6 @@ surgically removed from `~/.claude/settings.json` and project-local
 (`$AIBALL_HOME` = `~/.local/share/aiball`) is **preserved** — wipe it
 manually if you want a clean slate.
 
-To remove ONLY the Stop hook without uninstalling:
-
-```bash
-./install.sh --remove-stop-hook
-```
-
 ## Troubleshooting
 
 - **`aiball: command not found` after install** → `~/.local/bin` isn't
@@ -302,8 +291,6 @@ To remove ONLY the Stop hook without uninstalling:
   run at daemon boot. Hard restart with `aiball restart` (or
   `systemctl --user restart aiball`). A tsx-watch reload alone does
   NOT re-run migrations.
-- **`--stop-hook` says jq is required** → `sudo apt install jq` (or
-  `brew install jq`), then re-run `./install.sh --stop-hook`.
 - **MCP can't reach the daemon** → check the socket path matches: the
   `bin/` wrappers default to `$AIBALL_HOME/sock`. If you set
   `AIBALL_HOME` to a custom location, propagate it to whatever process

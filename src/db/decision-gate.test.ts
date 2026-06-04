@@ -29,15 +29,15 @@ test("plan pending → gaté", () => {
     assert.equal(g.get(1), true);
 });
 
-test("#358: plan pending + commentaire HUMAIN postérieur → dé-gaté", () => {
+test("#600 v7z5u6: plan pending + commentaire HUMAIN postérieur → reste gaté", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("plan", "pending") }),
         ev({ kind: "comment_added", byAgent: "david" }), // plain human
     ]);
-    assert.equal(g.get(1), false);
+    assert.equal(g.get(1), true);
 });
 
-test("#358: plan pending + commentaire AGENT postérieur → reste gaté", () => {
+test("#600 v7z5u6: plan pending + commentaire AGENT postérieur → reste gaté", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("plan", "pending") }),
         ev({ kind: "comment_added", byAgent: "claude-aiball-dev" }), // agent plain
@@ -45,7 +45,7 @@ test("#358: plan pending + commentaire AGENT postérieur → reste gaté", () =>
     assert.equal(g.get(1), true);
 });
 
-test("#358: agent summary_until (meta sans decision) après pending → reste gaté", () => {
+test("#600 v7z5u6: agent summary_until (meta sans decision) après pending → reste gaté", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("resolution", "pending") }),
         ev({ kind: "comment_added", byAgent: "claude-aiball-dev", meta: JSON.stringify({ summary_until: "x" }) }),
@@ -53,12 +53,12 @@ test("#358: agent summary_until (meta sans decision) après pending → reste ga
     assert.equal(g.get(1), true);
 });
 
-test("resolution pending + commentaire humain postérieur → dé-gaté", () => {
+test("#600 v7z5u6: resolution pending + commentaire humain postérieur → reste gaté", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("resolution", "pending") }),
         ev({ kind: "comment_added", byAgent: "david" }),
     ]);
-    assert.equal(g.get(1), false);
+    assert.equal(g.get(1), true);
 });
 
 test("resolution ACCEPTED + commentaire humain postérieur → reste gaté (settled, pas de reopen implicite)", () => {
@@ -79,12 +79,12 @@ test("plan / resolution rejeté → dé-gaté", () => {
     assert.equal(gate([ev({ kind: "comment_added", meta: decision("resolution", "rejected") })]).get(1), false);
 });
 
-test("legacy ticket_resolved pending + commentaire humain → dé-gaté ; approved → reste gaté", () => {
+test("#600 v7z5u6: legacy ticket_resolved (pending OU approved) + commentaire humain → reste gaté", () => {
     const pending = gate([
         ev({ kind: "ticket_resolved", status: "pending" }),
         ev({ kind: "comment_added", byAgent: "david" }),
     ]);
-    assert.equal(pending.get(1), false);
+    assert.equal(pending.get(1), true);
     const approved = gate([
         ev({ kind: "ticket_resolved", status: "approved" }),
         ev({ kind: "comment_added", byAgent: "david" }),
@@ -100,10 +100,10 @@ test("ticket_reopened (approved) dé-gate même après une résolution", () => {
     assert.equal(g.get(1), false);
 });
 
-test("dernier-signal-gagne : pending → humain (ouvre) → nouvelle proposition pending (re-gate)", () => {
+test("#600 v7z5u6: dernier-signal-gagne : pending → reject (dé-gate) → nouvelle proposition pending (re-gate)", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("plan", "pending") }),
-        ev({ kind: "comment_added", byAgent: "david" }),
+        ev({ kind: "comment_added", meta: decision("plan", "rejected") }),
         ev({ kind: "comment_added", meta: decision("plan", "pending") }),
     ]);
     assert.equal(g.get(1), true);
@@ -123,7 +123,7 @@ test("tickets indépendants ne se mélangent pas", () => {
     const g = gate([
         ev({ ticketId: 1, kind: "comment_added", meta: decision("plan", "pending") }),
         ev({ ticketId: 2, kind: "comment_added", meta: decision("plan", "pending") }),
-        ev({ ticketId: 2, kind: "comment_added", byAgent: "david" }), // ouvre seulement #2
+        ev({ ticketId: 2, kind: "comment_added", meta: decision("plan", "accepted") }), // dé-gate seulement #2
     ]);
     assert.equal(g.get(1), true);
     assert.equal(g.get(2), false);

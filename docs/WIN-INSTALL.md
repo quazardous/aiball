@@ -129,15 +129,13 @@ What it does:
 9. With `-AuthInit`: starts the task, waits up to 15s for `/api/health`,
    then runs `aiball auth init` and prints the setup URL.
 
-> **Claude Code hooks are loop-only.** The Windows installer does **not** wire
-> any aiball hook into `%USERPROFILE%\.claude\settings.json` — so plain `claude`
-> runs with no aiball hooks. `claude-loop` injects its hooks **per-session** via
-> `claude --settings <state-dir>\claude-settings.json` (same mechanism as Linux),
-> so loop sessions are fully hooked and direct sessions are untouched. If you
-> *manually* added the interactive autopoll Stop hook, remove it by deleting the
-> `.hooks.Stop` entry whose `command` ends in `aiball-autopoll-stop.sh` from
-> `%USERPROFILE%\.claude\settings.json` (the Linux helper is
-> `install.sh --remove-stop-hook`).
+> **Claude Code hooks are loop-only.** Neither Windows nor Linux wires any
+> aiball hook into `%USERPROFILE%\.claude\settings.json` (or `~/.claude/settings.json`) —
+> plain `claude` runs with no aiball hooks. `claude-loop` CLI-injects its hooks
+> **per-session** via `claude --settings <state-dir>\claude-settings.json`, so loop
+> sessions are fully hooked and direct sessions are untouched. If a legacy
+> `aiball-autopoll-stop.sh` entry is still present from an older install, delete the
+> matching `.hooks.Stop` entry from `%USERPROFILE%\.claude\settings.json` by hand.
 
 ### Path 4: Service install (Windows Service via NSSM)
 

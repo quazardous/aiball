@@ -5,12 +5,11 @@
 // qu'une décision est en cours / le ticket est résolu). La règle historique
 // est « dernier signal gagne » en rejouant les events dans l'ordre d'id.
 //
-// #358 ajoute la **récence** : une décision **pending** (proposition en
-// attente de l'humain) cède à un `comment_added` HUMAIN postérieur — l'humain a
-// répondu, la balle revient à l'agent, le ticket doit redevenir actionable.
-// Les gates « settled » (résolution acceptée, ticket_resolved approuvé) ne
-// cèdent PAS sur un simple commentaire : rouvrir un ticket résolu est un reopen
-// explicite, pas un effet de bord d'un commentaire.
+// #600 v7z5u6 — un commentaire humain (ou agent) plain ne lève PAS le gate
+// pending : tant que la décision n'est pas explicitement accept/reject, le
+// ticket reste hors du backlog wake. Le commentaire fire de toute façon son
+// propre wake (FIFO unread) → l'agent voit le signal sans que la balle revienne
+// au backlog. Réouvrir le ticket = accept ou reject la proposition pending.
 
 /** Un event pertinent pour le gate, fourni dans l'ordre d'insertion (id asc). */
 export interface DecisionGateEvent {
@@ -23,20 +22,17 @@ export interface DecisionGateEvent {
 
 interface TicketGateState {
     gated: boolean;
-    // La proposition courante est-elle « pending » (donc cédable à un
-    // commentaire humain) ? false pour les gates settled (accepted/approved).
-    pendingProposal: boolean;
 }
 
 /**
  * Rejoue `events` (ordre id asc) et renvoie, par ticket, true s'il est gaté.
- * `isHuman(byAgent)` distingue un commentaire humain d'un commentaire d'agent :
- * un commentaire de l'agent après sa propre proposition n'ouvre PAS le gate
- * (il attend toujours l'humain).
+ * `isHuman` est conservé pour back-compat de signature ; il n'est plus consulté
+ * depuis #600 v7z5u6 (un commentaire plain ne lève plus une décision pending).
  */
 export function computeDecisionGate(
     events: Iterable<DecisionGateEvent>,
-    isHuman: (consumerId: string) => boolean,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _isHuman: (consumerId: string) => boolean,
 ): Map<number, boolean> {
     const state = new Map<number, TicketGateState>();
     for (const ev of events) {
@@ -44,17 +40,15 @@ export function computeDecisionGate(
 
         if (ev.kind === "ticket_reopened") {
             if (ev.status === "approved") {
-                state.set(ev.ticketId, { gated: false, pendingProposal: false });
+                state.set(ev.ticketId, { gated: false });
             }
             continue;
         }
 
         if (ev.kind === "ticket_resolved") {
-            // legacy : pending = proposition cédable ; approved = résolu (settled).
-            if (ev.status === "pending") {
-                state.set(ev.ticketId, { gated: true, pendingProposal: true });
-            } else if (ev.status === "approved") {
-                state.set(ev.ticketId, { gated: true, pendingProposal: false });
+            // legacy : pending OU approved = ticket gaté (proposition ou settled).
+            if (ev.status === "pending" || ev.status === "approved") {
+                state.set(ev.ticketId, { gated: true });
             }
             continue;
         }
@@ -64,15 +58,10 @@ export function computeDecisionGate(
         const decision = parseDecision(ev.meta);
         if (decision) {
             applyDecisionSignal(state, ev.ticketId, decision);
-            continue;
         }
-
-        // Commentaire plain (sans décision) : #358 — un commentaire HUMAIN
-        // postérieur à une proposition pending ouvre le gate.
-        const cur = state.get(ev.ticketId);
-        if (cur?.gated && cur.pendingProposal && ev.byAgent != null && isHuman(ev.byAgent)) {
-            state.set(ev.ticketId, { gated: false, pendingProposal: false });
-        }
+        // Plain comment (no decision meta) = no-op on the gate. The comment
+        // still fires a FIFO unread wake so the agent sees the human reply ;
+        // resolving the gate requires accept/reject on the pending proposal.
     }
 
     const gated = new Map<number, boolean>();
@@ -86,20 +75,18 @@ function applyDecisionSignal(
     decision: { kind?: string; status?: string },
 ): void {
     if (decision.kind === "resolution") {
-        if (decision.status === "pending") {
-            state.set(ticketId, { gated: true, pendingProposal: true });
-        } else if (decision.status === "accepted") {
-            state.set(ticketId, { gated: true, pendingProposal: false });
+        if (decision.status === "pending" || decision.status === "accepted") {
+            state.set(ticketId, { gated: true });
         } else if (decision.status === "rejected") {
-            state.set(ticketId, { gated: false, pendingProposal: false });
+            state.set(ticketId, { gated: false });
         }
     } else if (decision.kind === "plan") {
         // Plan accepté = go-signal → dé-gaté (le ticket re-rentre dans
         // l'actionable pour être exécuté). Plan rejeté = dé-gaté aussi.
         if (decision.status === "pending") {
-            state.set(ticketId, { gated: true, pendingProposal: true });
+            state.set(ticketId, { gated: true });
         } else if (decision.status === "accepted" || decision.status === "rejected") {
-            state.set(ticketId, { gated: false, pendingProposal: false });
+            state.set(ticketId, { gated: false });
         }
     }
 }
