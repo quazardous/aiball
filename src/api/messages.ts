@@ -19,6 +19,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { ERROR_CODES, MESSAGE_SCOPES } from "../domain.js";
+import { insertPing } from "../db/pings.js";
 import {
     INTENTS,
     PRIORITIES,
@@ -477,6 +478,15 @@ messagesRouter.post("/messages/:id/vote", (req: Request, res: Response) => {
         // Broadcast pour live update — chaque viewer recompute son `mine` côté
         // client à partir de meta.votes (qui IS dans le payload broadcasté).
         broadcast({ type: "message_edited", data: decorated });
+        // #749 david `wfhw74` — un thumb-up landé sur un commentaire pingue
+        // son author (= surface dans la wake-FIFO via la voie standard). Pas
+        // de ping sur -1 (thumb down) ni 0 (retract) — david a explicitement
+        // dit "thumb up". `insertPing` dedup via son unique (recipient,
+        // ticket, comment), donc multi-voters sur le même commentaire ne
+        // spamment pas l'author (un seul ping consolidé).
+        if (body.value === 1 && updated.by_agent && updated.by_agent !== voter) {
+            insertPing(updated.by_agent, updated, voter);
+        }
         res.json(decorated);
     } catch (e) {
         return res.status(409).json({ error: (e as Error).message });
