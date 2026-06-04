@@ -371,7 +371,13 @@ export function listUnread(
     // the wake / MCP drain see it. When project is null/undefined, no filter.
     // Callers that explicitly want a project-scoped slice still pass it.
     const projectFilter = project ?? null;
-    // Ticket-pings: join pings.ticket_id → tickets.id.
+    // #800 david — self-wake bug confirmed cross-project : the `_pings.actor`
+    // field is unreliable (some rows carry actor=<someone-else> for a comment
+    // authored by this consumer, depending on the fan-out path). Filter on the
+    // underlying MESSAGE author instead — that's the source of truth for "did
+    // I write this". `tickets.by_agent` for ticket pings, `messages.by_agent`
+    // for comment pings. The `actor != consumer_id` clause stays as belt &
+    // braces (fast-path SQL exclusion) but the by_agent check closes the gap.
     const ticketWhere = [
         eq(schema.pings.recipient, consumer_id),
         isNull(schema.pings.seenAt),
@@ -379,6 +385,7 @@ export function listUnread(
             isNull(schema.pings.actor),
             ne(schema.pings.actor, consumer_id),
         ),
+        ne(schema.tickets.byAgent, consumer_id),
     ];
     if (projectFilter) ticketWhere.push(eq(schema.tickets.project, projectFilter));
     const ticketHits = db.select({ t: schema.tickets, ping: schema.pings })
@@ -396,6 +403,7 @@ export function listUnread(
             isNull(schema.pings.actor),
             ne(schema.pings.actor, consumer_id),
         ),
+        ne(schema.messages.byAgent, consumer_id),
     ];
     if (projectFilter) messageWhere.push(eq(schema.tickets.project, projectFilter));
     const messageHits = db.select({ m: schema.messages, project: schema.tickets.project, ticketId: schema.tickets.id })
@@ -471,6 +479,8 @@ export function unreadCount(consumer_id: string, project: string | null | undefi
     // #800 david `unyzvx` : aligned with listUnread — project is optional
     // (null/undefined = cross-project consumer-scoped count, the FIFO truth).
     const projectFilter = project ?? null;
+    // #800 — mirror listUnread : self-author exclusion via by_agent (the
+    // actor field is unreliable across fan-out paths).
     const ticketWhere = [
         eq(schema.pings.recipient, consumer_id),
         isNull(schema.pings.seenAt),
@@ -478,6 +488,7 @@ export function unreadCount(consumer_id: string, project: string | null | undefi
             isNull(schema.pings.actor),
             ne(schema.pings.actor, consumer_id),
         ),
+        ne(schema.tickets.byAgent, consumer_id),
     ];
     if (projectFilter) ticketWhere.push(eq(schema.tickets.project, projectFilter));
     const ticketHits = db.select({ ticketId: schema.tickets.id })
@@ -491,6 +502,7 @@ export function unreadCount(consumer_id: string, project: string | null | undefi
             isNull(schema.pings.actor),
             ne(schema.pings.actor, consumer_id),
         ),
+        ne(schema.messages.byAgent, consumer_id),
     ];
     if (projectFilter) messageWhere.push(eq(schema.tickets.project, projectFilter));
     const messageHits = db.select({ ticketId: schema.tickets.id })
@@ -655,6 +667,8 @@ export function listPings(opts: {
 export function unreadPingCount(recipient: string): number {
     const db = getDb();
     const isActionable = actionableTicketGate();
+    // #800 — mirror listUnread/unreadCount : self-author exclusion via
+    // tickets.byAgent / messages.byAgent (actor field is unreliable).
     const ticketHits = db.select({ ticketId: schema.tickets.id })
         .from(schema.pings)
         .innerJoin(schema.tickets, eq(schema.tickets.id, schema.pings.ticketId))
@@ -665,6 +679,7 @@ export function unreadPingCount(recipient: string): number {
                 isNull(schema.pings.actor),
                 ne(schema.pings.actor, recipient),
             ),
+            ne(schema.tickets.byAgent, recipient),
         )).all();
     // #643 : side-fix — l'ancienne version manquait le join _messages → tickets
     // côté comment-pings (juste pings → messages), donc impossible de filtrer
@@ -681,6 +696,7 @@ export function unreadPingCount(recipient: string): number {
                 isNull(schema.pings.actor),
                 ne(schema.pings.actor, recipient),
             ),
+            ne(schema.messages.byAgent, recipient),
         )).all();
     let n = 0;
     for (const r of ticketHits) if (isActionable(r.ticketId)) n++;

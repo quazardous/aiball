@@ -30,6 +30,7 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- Self-wakes / self-pings : the consumer's own posts (ticket_created or comment_added) no longer land in their own FIFO / unread count / `[busy N]` bar. The `_pings.actor` field was unreliable across fan-out paths (some rows carried a third-party actor for a message authored by this consumer) ; `listUnread` / `unreadCount` / `unreadPingCount` now also exclude rows where the underlying `tickets.by_agent` or `messages.by_agent` matches the recipient. Cross-project, confirmed by david. Fixes the "I see my own comment in my events feed" bug.
 - Backlog wake no longer fires on tickets that have a pending `then:resolved` / `then:plan` decision. A plain comment after a pending proposal used to flip the gate open ("the human commented → ball back to agent"); the gate now stays closed until the proposition is explicitly accepted or rejected. The comment still surfaces via the FIFO unread wake, so the agent sees the signal without the ticket re-entering the backlog. Fixes the "wake fires twice on the same pending ticket" symptom.
 
 ### Added
