@@ -78,7 +78,11 @@ function applyDecisionSignal(
     ticketId: number,
     decision: { kind?: string; status?: string },
 ): void {
-    if (decision.kind === "resolution") {
+    if (decision.kind === "resolution" || decision.kind === "wontfix") {
+        // #802 — wontfix shares resolution's gate semantics : pending OR
+        // accepted = ticket gated. Difference is in the side-effect
+        // (acceptance auto-closes the ticket, see api/messages.ts decide
+        // handler) ; the gate replay treats them identically.
         if (decision.status === "pending" || decision.status === "accepted") {
             state.set(ticketId, { gated: true });
         } else if (decision.status === "rejected") {

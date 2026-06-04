@@ -92,6 +92,28 @@ test("#600 v7z5u6: legacy ticket_resolved (pending OU approved) + commentaire hu
     assert.equal(approved.get(1), true);
 });
 
+test("#802: wontfix pending → gaté (symétrique resolution)", () => {
+    const g = gate([
+        ev({ kind: "comment_added", meta: decision("wontfix", "pending") }),
+    ]);
+    assert.equal(g.get(1), true);
+});
+
+test("#802: wontfix accepté → reste gaté (le ticket est fermé en parallèle, pas dans le gate)", () => {
+    const g = gate([
+        ev({ kind: "comment_added", meta: decision("wontfix", "accepted") }),
+    ]);
+    assert.equal(g.get(1), true);
+});
+
+test("#802: wontfix rejeté → dé-gaté (reporter dit non, le ticket reste ouvert)", () => {
+    const g = gate([
+        ev({ kind: "comment_added", meta: decision("wontfix", "pending") }),
+        ev({ kind: "comment_added", meta: decision("wontfix", "rejected") }),
+    ]);
+    assert.equal(g.get(1), false);
+});
+
 test("ticket_reopened (approved) dé-gate même après une résolution", () => {
     const g = gate([
         ev({ kind: "comment_added", meta: decision("resolution", "accepted") }),

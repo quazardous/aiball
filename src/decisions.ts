@@ -19,7 +19,14 @@
  *              separate lifecycle event (it's a signal, not a vote).
  */
 
-export const DECISION_KINDS = ["plan", "resolution"] as const;
+// #802 — `wontfix` joined the set : an agent triaging a junk / out-of-scope /
+// non-reproducible ticket can propose closure WITHOUT resolution via
+// `ticket_reply({then:"wontfix"})`. Symmetric to `resolution` (pending = gated,
+// reporter accept/reject) but accepting it ALSO auto-closes the ticket without
+// flipping `resolved` — the ticket lands in `closed` state with no
+// `resolved_by` / `resolved_at`. The acceptance side-effect lives in the
+// api/messages.ts decide handler, NOT in this pure module.
+export const DECISION_KINDS = ["plan", "resolution", "wontfix"] as const;
 export type DecisionKind = typeof DECISION_KINDS[number];
 
 export const DECISION_STATUSES = ["pending", "accepted", "rejected"] as const;
