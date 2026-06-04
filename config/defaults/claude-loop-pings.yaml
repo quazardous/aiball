@@ -95,18 +95,19 @@ wake_phrases:
 #   {open_count}       open ticket count
 #   {actionable_count} tickets in your court (#374)
 #   {head_id} {head_title}  the work-order head (#371: priority desc, then oldest)
-#   {head_kind}        #749: "new ticket" when the FIFO head is a
-#                      ticket_created event ; "" otherwise (comment heads
-#                      use {head_comment_hashid} ; backlog mode uses
-#                      {backlog_mode}). Three branches are mutually
-#                      exclusive — exactly one fires per wake.
-#   {head_comment_hashid} #749: comment hashid (e.g. "qctwhw") when the
-#                      FIFO head is a comment_added / lifecycle event ;
-#                      "" for ticket_created heads and in backlog mode.
-#   {head_body}        #749: markdown-stripped excerpt of the comment
-#                      body (240 chars max). Empty for non-comment heads.
-#   {backlog_mode}     #749: "1" when FIFO empty but actionable backlog
-#                      exists ; "" otherwise. Drives the "claim" directive.
+#   {head_kind}        "new ticket" when the FIFO head is a
+#                      ticket_created event; "" otherwise.
+#   {head_lifecycle}   "closed" / "resolved" / "reopened" when the FIFO
+#                      head is the matching lifecycle event; "" otherwise.
+#   {head_comment_hashid} comment hashid (e.g. "qctwhw") when the FIFO
+#                      head is a comment_added with body / pending decision;
+#                      "" for non-comment heads.
+#   {head_body}        markdown-stripped excerpt of the comment body
+#                      (240 chars max). Empty for non-comment heads.
+#   {backlog_mode}     "1" when FIFO empty but actionable backlog exists;
+#                      "" otherwise. The lead branch invites a look-only
+#                      triage; the agent's discipline skill decides
+#                      whether to claim.
 #   {project_scope}    "`<project>`" or "your scope"
 prompts:
   # Conversational lead — per-tone buckets, round-robin within each.
@@ -133,11 +134,11 @@ prompts:
   # the wake template. The verb matches the tool name `ticket_claim()`.
   wake_master:
     directive:
-      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
+      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
     hint:
-      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
+      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
     imperative:
-      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
+      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}{no_head:+{culture} {lead}}"
 
   # #428: built-in gate messages. Rendered (tone-aware) when the gate triggers;
   # the detector fills placeholders like {count}. The triggered message is

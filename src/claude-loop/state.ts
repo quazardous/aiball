@@ -1680,11 +1680,11 @@ export async function buildContextPhrase(
         // queue-head pointer, not an event notification.
         let headCommentHashid = "";
         let headBody = "";
-        // #749 — drop empty comments without pending decision. The FIFO
-        // head must carry actionable content (body or a then:plan /
-        // then:resolved proposal) ; otherwise treat as missing so the
-        // wake falls through to the no_head idle branch instead of
-        // emitting a meaningless "(#X / #Y)".
+        let headLifecycleVerb = "";
+        // Drop empty comments without a pending decision. The FIFO head
+        // must carry actionable content (body, or a pending decision
+        // proposal); otherwise treat as missing so the wake falls
+        // through to the idle branch instead of emitting "(#X / #Y)".
         if (unreadHead && unreadHead.kind === "comment_added") {
             const meta = typeof unreadHead.meta === "string"
                 ? (() => { try { return JSON.parse(unreadHead.meta as string); } catch { return null; } })()
@@ -1695,12 +1695,25 @@ export async function buildContextPhrase(
                 head = undefined;
             }
         }
+        // Lifecycle heads (close / reopen / resolve) emit their own verb.
+        // The agent's discipline skill decides what to do with a closed
+        // ticket; the wake just announces the state change with the ref.
+        const LIFECYCLE_VERBS: Record<string, string> = {
+            ticket_closed: "closed",
+            ticket_resolved: "resolved",
+            ticket_reopened: "reopened",
+        };
+        const unreadKind = unreadHead?.kind ?? "";
+        if (unreadKind && LIFECYCLE_VERBS[unreadKind]) {
+            headLifecycleVerb = LIFECYCLE_VERBS[unreadKind];
+        }
         if (unreadHead && head?.id) {
-            const isTicketRoot = unreadHead.kind === "ticket_created";
-            if (!isTicketRoot && typeof unreadHead.hashid === "string") {
+            const isTicketRoot = unreadKind === "ticket_created";
+            const isLifecycle = !!LIFECYCLE_VERBS[unreadKind];
+            if (!isTicketRoot && !isLifecycle && typeof unreadHead.hashid === "string") {
                 headCommentHashid = unreadHead.hashid;
             }
-            if (!isTicketRoot && typeof unreadHead.body === "string" && unreadHead.body) {
+            if (!isTicketRoot && !isLifecycle && typeof unreadHead.body === "string" && unreadHead.body) {
                 headBody = stripMarkdown(unreadHead.body);
             }
             // Title lookup for comment heads (the unread row doesn't carry
@@ -1783,24 +1796,19 @@ export async function buildContextPhrase(
             actionable_count: (blocking || !hasClaimableHead) ? "" : (actionableCount || ""),
             head_id: head?.id ?? "",
             head_title: head?.title ?? "",
-            // #749 david — `head_kind` is set ONLY for the ticket_created
-            // case (= "new ticket"), so the ticket-led template branch
-            // doesn't double-fire when the head is a comment (the comment
-            // branch already wins via `head_comment_hashid`). Backlog mode
-            // and the comment case → "" → ticket branch drops out.
-            head_kind: head?.kind === "new ticket" && !headCommentHashid ? head.kind : "",
-            // #749 david — `no_head` var = "1" when none of the three head
-            // branches fire (no comment, no new ticket, no backlog claim).
-            // Lets the template emit the culture+lead+open_count fallback
-            // ONLY in that case (the grammar lacks a built-in if-empty-
-            // render-text-else-nothing, so we invert the condition here).
-            no_head: (!headCommentHashid && head?.kind !== "new ticket" && !backlogMode) ? "1" : "",
+            // head_kind fires only for the ticket_created case so the
+            // ticket-led template branch doesn't double-fire when the head
+            // is a comment or a lifecycle event.
+            head_kind: head?.kind === "new ticket" && !headCommentHashid && !headLifecycleVerb ? head.kind : "",
+            // head_lifecycle = the verb (closed / resolved / reopened)
+            // when the FIFO head is a lifecycle event; "" otherwise.
+            head_lifecycle: headLifecycleVerb,
+            // no_head = "1" when none of the four head branches fire
+            // (comment, new ticket, lifecycle, backlog). The template
+            // grammar lacks an else-empty operator so the inversion lives
+            // here.
+            no_head: (!headCommentHashid && head?.kind !== "new ticket" && !headLifecycleVerb && !backlogMode) ? "1" : "",
             backlog_mode: backlogMode,
-            // #749 david — discrete head pieces for the FIFO-pop template.
-            // `head_comment_hashid` / `head_body` are empty in backlog mode
-            // OR when the head is a ticket_created (no parent comment).
-            // Templates compose their own "first in queue" sentence ; this
-            // is NOT the SSE wake_phrases.with_comment format.
             head_comment_hashid: headCommentHashid,
             head_body: headBody,
             project_scope: scope,
@@ -1813,29 +1821,15 @@ export async function buildContextPhrase(
             promptMap,
             "wake_master",
             vars,
-            // #749 david — unified FIFO-pop wake, minimal shape. Just the
-            // event + ticket ref ; the agent's `aiball` discipline skill
-            // owns the "what do I do with it" glue. Three mutually
-            // exclusive branches :
-            //  - comment head : `aiball #{ticket} / #{comment} — {body}`
-            //  - ticket_created head : `aiball ticket #{ticket} "{title}"`
-            //  - backlog head (FIFO empty + actionable) : same as above ;
-            //    the skill differentiates engage-on-comment vs claim-from-
-            //    backlog at consult time.
-            // No "first in queue", no "Handle ...", no "drain via unread()"
-            // — the wake IS the drain (ticket_get prunes via markTicketSeen).
-            // david: comment / new ticket / backlog branches each emit
-            // ONLY the ref + decoration ; no culture/lead/open_count to
-            // keep them tight. The no-head fallback (= nothing in queue,
-            // no actionable backlog) is the only branch that keeps the
-            // culture + open_count framing — that's the "idle ping" path.
-            // #749 — final wake shape (four mutually exclusive branches):
+            // Unified FIFO-pop wake. Five mutually exclusive branches:
             //   comment    →  body + refs only
             //   new ticket →  "new ticket #ID: TITLE"
+            //   lifecycle  →  "#ID VERB: TITLE"   (closed / resolved / reopened)
             //   backlog    →  culture + "look #ID: TITLE"
             //   idle       →  culture + lead
             "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}"
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
+            + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}"
             + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}}"
             + "{no_head:+{culture} {lead}}",
             tone,
