@@ -19,7 +19,7 @@ function ev(e: Ev): DecisionGateEvent {
         byAgent: e.byAgent ?? "claude-aiball-dev",
     };
 }
-function decision(kind: "plan" | "resolution", status: string): string {
+function decision(kind: "plan" | "resolution" | "wontfix", status: string): string {
     return JSON.stringify({ decision: { kind, status } });
 }
 const gate = (events: DecisionGateEvent[]) => computeDecisionGate(events, isHuman);
