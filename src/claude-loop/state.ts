@@ -1746,12 +1746,17 @@ export async function buildContextPhrase(
         // a no_claim agent never surfaces a pool ticket — by design.
         if (!head && pingCount === 0 && actionableCount > 0) {
             try {
-                const list = await client.listTickets({
+                // /api/tickets returns a raw JSON array, not an envelope.
+                const raw = await client.listTickets({
                     ...(project ? { project } : {}),
                     actionable: "1",
                     limit: "1",
-                }) as { tickets?: Array<{ id: number; title?: string | null }>; rows?: Array<{ id: number; title?: string | null }> };
-                const rows = list.tickets ?? list.rows ?? [];
+                });
+                const rows = Array.isArray(raw)
+                    ? (raw as Array<{ id: number; title?: string | null }>)
+                    : ((raw as { tickets?: Array<{ id: number; title?: string | null }>; rows?: Array<{ id: number; title?: string | null }> })?.tickets
+                        ?? (raw as { rows?: Array<{ id: number; title?: string | null }> })?.rows
+                        ?? []);
                 const top = rows[0];
                 if (top && Number.isFinite(top.id)) {
                     head = { id: top.id, title: top.title ?? undefined, kind: undefined };
