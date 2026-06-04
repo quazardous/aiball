@@ -1736,20 +1736,26 @@ export async function buildContextPhrase(
                 head = { ...head, title: unreadHead.title };
             }
         }
-        // When the FIFO is empty, fall back to the top ACTIONABLE ticket
-        // by priority. The daemon's ?open=… and ?actionable=… filters
-        // both accept "1" — "true" is silently ignored.
-        // `actionable` excludes closed (lifecycle replay), snoozed
-        // (postponed_until > now), and respects no-claim: a consumer
-        // with consumer.can_claim=false only sees tickets explicitly
-        // assigned to them. That last point means the backlog wake on
-        // a no_claim agent never surfaces a pool ticket — by design.
-        if (!head && pingCount === 0 && actionableCount > 0) {
+        // When the FIFO is empty, fall back to the top backlog ticket.
+        // ?backlog=1 returns the two-tier set: actionable first (ball in
+        // my court), then open AND I-was-last-actor (ball in theirs).
+        // The work-order tiering puts tier 1 first; limit:1 picks the
+        // first of either tier. Respects no-claim semantics: a consumer
+        // with consumer.can_claim=false has an empty actionable tier and
+        // only surfaces tier-2 reminders where they were last actor.
+        if (!head && pingCount === 0 && openCount > 0) {
             try {
                 // /api/tickets returns a raw JSON array, not an envelope.
+                // backlog=1 returns the two-tier set documented in
+                // docs/TICKET_LIFECYCLE.md §5.0 — tier 1 (actionable / ball
+                // in my court) sorted first, then tier 2 (open AND I was
+                // the last actor / ball in theirs). Tickets neither in
+                // tier 1 nor tier 2 are dropped server-side. Gate on the
+                // broader openCount so tier-2 reminders still surface
+                // when actionable_count is zero.
                 const raw = await client.listTickets({
                     ...(project ? { project } : {}),
-                    actionable: "1",
+                    backlog: "1",
                     limit: "1",
                 });
                 const rows = Array.isArray(raw)

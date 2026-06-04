@@ -236,11 +236,10 @@ reporter or for the agent to decide it's stale enough to close itself.
 **Within a tier**, the work-order keys from §5 apply: priority desc → own
 claim → assignment → hot → id asc.
 
-> Implementation status (`current`): the loop's backlog fetch in
-> `buildContextPhrase` is **tier-1 only** (`?actionable=1`). The tier-2 path
-> needs either a broader `?open=1` filter (with a no-claim guard, per §4.5) or
-> a dedicated daemon-side `?backlog=1` filter that wraps both tiers in the
-> same call. Tracked as a follow-up.
+**API**: the daemon exposes the two-tier set via `GET /api/tickets?backlog=1`.
+Tickets neither in tier 1 nor in tier 2 (= other people's open work) are
+filtered out server-side; the work-order tiering keeps tier 1 first. The
+loop's `buildContextPhrase` uses this filter for the FIFO-empty fallback.
 
 ### 5.1 The hot-zone
 

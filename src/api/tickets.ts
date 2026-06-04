@@ -55,7 +55,7 @@ import {
     listTicketSubscriptionsForTicket,
     getConsumer,
 } from "../db.js";
-import { computeActionableTicketIds } from "../db/projects.js";
+import { computeActionableTicketIds, lastActorExclusions } from "../db/projects.js";
 import { listSubscriptions } from "../db/subscriptions.js";
 import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
@@ -703,6 +703,12 @@ ticketsRouter.get("/tickets", (req, res) => {
     // to that project's owners — so a project you only `follow` is actionable
     // but not claimable. `ticket_claim` + the wake-CTA head use this set.
     const onlyClaimable = req.query.claimable === "1";
+    // The backlog wake set: actionable tickets (ball in my court) UNION
+    // open tickets where I was the last actor (ball in their court). Tier
+    // 1 sorts first via the existing work-order tiering — actionable
+    // collapses into its tier, the others land in "other open".
+    // See docs/TICKET_LIFECYCLE.md §5.0.
+    const onlyBacklog = req.query.backlog === "1";
     // #461 — predict the POST-DRAIN work-order head. With `assume_drained=1`,
     // the work-order sort treats every currently-unread ticket as if its ping
     // had already been ack'd: the `unread` tier is suppressed, all rows
@@ -937,6 +943,17 @@ ticketsRouter.get("/tickets", (req, res) => {
         // #432: actionable ∩ owned-project. The narrower set ticket_claim
         // claims from, so a cross-project follower-broadcast is never claimed.
         result = result.filter((t) => isClaimable(t.id, t.project, t.assignee ?? null));
+    }
+    if (onlyBacklog) {
+        // Tier 1 = actionable (already computed). Tier 2 = open AND I was
+        // the last actor. Both are sorted by the work-order tiering below,
+        // which puts actionable first. Tickets neither in tier 1 nor tier 2
+        // (= other people's open work) are dropped.
+        const lastByMe = lastActorExclusions(consumerId);
+        result = result.filter((t) =>
+            !t.closed && (includePostponed || !t.postponed)
+            && (actionableIds.has(t.id) || lastByMe.has(t.id)),
+        );
     }
     if (tagsFilter && tagsFilter.length > 0) {
         const requiredSet = new Set(tagsFilter.map((s) => s.toLowerCase()));
