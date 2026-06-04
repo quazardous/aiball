@@ -1296,6 +1296,15 @@ export function setTmuxStatus(
     }
     const setOpt = (opt: string, val: string) =>
         spawnSync(MUX_CMD, ["set-option", "-t", tn, opt, val], { stdio: "ignore" });
+    // #749 — refresh the zen chip on every status paint. The marker may
+    // have been touched/removed manually (touch / rm), so we re-read it
+    // here rather than relying on cmdZen as the sole writer.
+    if (sd) {
+        const zenChunk = existsSync(zenPath(sd))
+            ? `#[fg=colour16,bg=colour208,bold] ZEN #[default] `
+            : "";
+        setOpt("@cl_zen", zenChunk);
+    }
 
     // #274: `status-left` is a STATIC format that references per-owner tmux
     // user-options. The PTY proxy repaints `@cl_human` INSTANTLY on the

@@ -959,7 +959,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const afkInitialOff = afkSpecJson
         ? `#[fg=${ctx.colors.afk_label_fg}]AFK:#[fg=${ctx.colors.bar_fg}]${afkKeyDisp}`
         : `#[fg=${ctx.colors.afk_label_fg}]AFK:OFF`;
-    const keysHint = `#{@cl_afk_state} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
+    // #749 david — `#{@cl_zen}` segment surface the wake kill-switch in
+    // the bar. Empty when off (no visual noise) ; bright "ZEN" chip when
+    // on. Painted by `cmdZen` (instant on toggle) and refreshed by
+    // `setTmuxStatus` (heartbeat resilience, in case the marker was
+    // touched manually outside the CLI).
+    const keysHint = `#{@cl_zen}#{@cl_afk_state} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", keysHint], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right-length", "60"], { stdio: "ignore" });
     // #619 david `ge2emb` : suppress the tmux window-status list (the
@@ -984,7 +989,13 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // #619 `zm2ehq` : seed @cl_human to `boot` (jaune) — the session opens
     // in boot phase and the proxy/timer will repaint to wait/loop on their
     // first tick. Avoids a flash of `loop` (vert) over the jaune boot bar.
-    for (const [opt, val] of [["@cl_human", "#[fg=colour178,bg=colour16]boot"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_afk_state", afkInitialOff]]) {
+    // #749 — seed @cl_zen from the marker file ; the option is read live
+    // at every tmux paint, so a manual `touch zen` updates the bar at
+    // most one heartbeat later (setTmuxStatus also refreshes it).
+    const zenInitial = existsSync(zenPath(sd))
+        ? `#[fg=colour16,bg=colour208,bold] ZEN #[default] `
+        : "";
+    for (const [opt, val] of [["@cl_human", "#[fg=colour178,bg=colour16]boot"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_afk_state", afkInitialOff], ["@cl_zen", zenInitial]]) {
         spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
         if (opt === "@cl_human") logBarPaint(sd, "cli.ts:seed", val);
     }

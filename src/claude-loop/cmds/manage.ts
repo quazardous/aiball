@@ -176,6 +176,14 @@ export function cmdZen(name: string, opts?: { on?: boolean; off?: boolean }): vo
     const isOn = existsSync(marker);
     const explicit = opts?.on === true ? true : (opts?.off === true ? false : null);
     const next = explicit !== null ? explicit : !isOn;
+    // #749 — instant bar paint. The chip surfaces in status-right via the
+    // `#{@cl_zen}` segment seeded in cli.ts ; setTmuxStatus refreshes it
+    // on every heartbeat too, but writing here is what makes the toggle
+    // feel snappy from the user's POV.
+    const zenChunk = next
+        ? `#[fg=colour16,bg=colour208,bold] ZEN #[default] `
+        : "";
+    spawnSync(MUX_CMD, ["set-option", "-t", tmuxName(name), "@cl_zen", zenChunk], { stdio: "ignore" });
     if (next && !isOn) {
         writeFileSync(marker, new Date().toISOString() + "\n");
         process.stdout.write(`zen ON for '${name}' — all wakes muted (timer reads ${marker} live, no restart needed)\n`);
