@@ -1738,8 +1738,12 @@ export async function buildContextPhrase(
         }
         // When the FIFO is empty, fall back to the top ACTIONABLE ticket
         // by priority. The daemon's ?open=… and ?actionable=… filters
-        // both accept "1" — "true" is silently ignored, which left the
-        // fallback returning closed tickets.
+        // both accept "1" — "true" is silently ignored.
+        // `actionable` excludes closed (lifecycle replay), snoozed
+        // (postponed_until > now), and respects no-claim: a consumer
+        // with consumer.can_claim=false only sees tickets explicitly
+        // assigned to them. That last point means the backlog wake on
+        // a no_claim agent never surfaces a pool ticket — by design.
         if (!head && pingCount === 0 && actionableCount > 0) {
             try {
                 const list = await client.listTickets({
