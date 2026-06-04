@@ -203,7 +203,7 @@ project_type: public
 #     hint:      ["btw,", "fyi,"]
 #     imperative: ["**heads up**:", "**ACTION**:"]
 #   wake_master:
-#     directive: "{culture} {lead}{ping_count:+ {ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`.}{head_kind:+ first up: {head_kind} on #{head_id}{head_title:+ \"{head_title}\"} — `ticket_claim()` then `ticket_get`.}{backlog_mode:+ engage #{head_id}{head_title:+ \"{head_title}\"} — top of the backlog by priority — via `ticket_claim()`.}{open_count:+ ({open_count} open in {project_scope})}"
+#     directive: "{culture} {lead}{head_comment_hashid:+ aiball #{head_id} / #{head_comment_hashid}{head_body:+ — {head_body}}}{head_kind:+ new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+ aiball #{head_id}{head_title:+: {head_title}}}{open_count:+ ({open_count} open in {project_scope})}"
 
 # --- ticket-text linkifier patterns -------------------------------------------
 # Merge by `id` (3 layers, ADDITIVE: shipped defaults always run; entries

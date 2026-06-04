@@ -57,7 +57,6 @@ import {
     MUX_CMD,
     WAKE_COALESCE_WINDOW_MS,
     buildContextPhrase,
-    buildWakePhrase,
     injectWakePhrase,
     checkHasWork,
     idleMarkerPath,
@@ -336,16 +335,22 @@ function selfReloadIfStale(): void {
 // usages (UI notifs vs wake) ; la décision "wake me?" est privée à
 // l'agent.
 async function pickPhrase(hint?: WakeHint): Promise<string> {
+    // #749 david — "tout le monde doit avoir le meme type de ping cad
+    // priorité aux event en fifo (on lance le premier event)". Every
+    // wake path — SSE direct ping, AFK-clear-drain, stop-hook post-turn,
+    // heartbeat — goes through `buildContextPhrase` so the content is
+    // uniform : pop the oldest unread FIFO event, fall back to the
+    // backlog head when empty. The legacy SSE-direct shortcut to
+    // `buildWakePhrase` ("X just arrived" framing) misled the agent when
+    // the actual trigger was an AFK resume, not the named event.
+    // Stakeholder filter on the hint stays useful for logging only ; the
+    // gate (computeWakeGate) decides whether the wake fires at all.
     if (hint?.ticket_id) {
         const me = process.env.AIBALL_AGENT;
         const ctx = await fetchWakeContext(hint, me);
-        if (ctx.stakeholder) {
-            const enriched: WakeHint = ctx.commentBody
-                ? { ...hint, comment_body: ctx.commentBody }
-                : hint;
-            return buildWakePhrase(enriched, pingsPath(sd!));
+        if (!ctx.stakeholder) {
+            log(`wake-hint #${hint.ticket_id}${hint.comment_hashid ? ` (comment #${hint.comment_hashid})` : ""} not for me (${me}) — generic FIFO-pop phrase`);
         }
-        log(`wake-hint #${hint.ticket_id}${hint.comment_hashid ? ` (comment #${hint.comment_hashid})` : ""} not for me (${me}) — falling back to generic context phrase`);
     }
     return buildContextPhrase(
         client(),

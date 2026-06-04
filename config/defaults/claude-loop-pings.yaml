@@ -95,17 +95,18 @@ wake_phrases:
 #   {open_count}       open ticket count
 #   {actionable_count} tickets in your court (#374)
 #   {head_id} {head_title}  the work-order head (#371: priority desc, then oldest)
-#   {head_kind}        #749: "comment" / "new ticket" when waking on a ping
-#                      event, "" when in backlog mode (= pings=0+actionable>0).
-#                      Used to differentiate "first up: comment on #X" from
-#                      the plain backlog "engage #X 'TITLE'".
-#   {backlog_mode}     #749: "1" when no ping but actionable backlog exists,
-#                      "" otherwise. Mutually exclusive with head_kind.
-#   {wake_phrase_head} #749 (`d4dakz`): pre-rendered wake_phrases.with_comment-
-#                      style sentence for the oldest unread (e.g. "Handle
-#                      aiball ticket #769 — new comment #d4dakz."). Reuses
-#                      `buildWakePhrase` so the per-intent wake_phrases:
-#                      templates apply verbatim. Empty in backlog mode.
+#   {head_kind}        #749: "new ticket" when the FIFO head is a
+#                      ticket_created event ; "" otherwise (comment heads
+#                      use {head_comment_hashid} ; backlog mode uses
+#                      {backlog_mode}). Three branches are mutually
+#                      exclusive — exactly one fires per wake.
+#   {head_comment_hashid} #749: comment hashid (e.g. "qctwhw") when the
+#                      FIFO head is a comment_added / lifecycle event ;
+#                      "" for ticket_created heads and in backlog mode.
+#   {head_body}        #749: markdown-stripped excerpt of the comment
+#                      body (240 chars max). Empty for non-comment heads.
+#   {backlog_mode}     #749: "1" when FIFO empty but actionable backlog
+#                      exists ; "" otherwise. Drives the "claim" directive.
 #   {project_scope}    "`<project>`" or "your scope"
 prompts:
   # Conversational lead — per-tone buckets, round-robin within each.
@@ -132,11 +133,11 @@ prompts:
   # the wake template. The verb matches the tool name `ticket_claim()`.
   wake_master:
     directive:
-      - "{culture} {lead}{wake_phrase_head:+ {wake_phrase_head}}{ping_count:+{wake_phrase_head:+ }({ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`).}{backlog_mode:+ engage #{head_id}{head_title:+ \"{head_title}\"} — top of the backlog by priority — via `ticket_claim()`.}{open_count:+ ({open_count} open in {project_scope})}"
+      - "{culture} {lead}{head_comment_hashid:+ aiball #{head_id} / #{head_comment_hashid}{head_body:+ — {head_body}}}{head_kind:+ new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+ aiball #{head_id}{head_title:+: {head_title}}}{open_count:+ ({open_count} open in {project_scope})}"
     hint:
-      - "{culture} {lead}{wake_phrase_head:+ {wake_phrase_head}}{ping_count:+{wake_phrase_head:+ }({ping_count} unread aiball ping(s) — clear with `unread({pings: true, mark_read: true})`).}{backlog_mode:+ #{head_id}{head_title:+ \"{head_title}\"} is top of the backlog by priority if you want to pick it up.}{open_count:+ ({open_count} open in {project_scope})}"
+      - "{culture} {lead}{head_comment_hashid:+ aiball #{head_id} / #{head_comment_hashid}{head_body:+ — {head_body}}}{head_kind:+ new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+ aiball #{head_id}{head_title:+: {head_title}}}{open_count:+ ({open_count} open in {project_scope})}"
     imperative:
-      - "{culture} {lead}{wake_phrase_head:+ {wake_phrase_head}}{ping_count:+{wake_phrase_head:+ }({ping_count} unread aiball ping(s) — DRAIN now via `unread({pings: true, mark_read: true})`).}{backlog_mode:+ ENGAGE #{head_id}{head_title:+ \"{head_title}\"} — top of the backlog by priority — via `ticket_claim()`.}{open_count:+ ({open_count} open in {project_scope})}"
+      - "{culture} {lead}{head_comment_hashid:+ aiball #{head_id} / #{head_comment_hashid}{head_body:+ — {head_body}}}{head_kind:+ new ticket #{head_id}{head_title:+: {head_title}}}{backlog_mode:+ aiball #{head_id}{head_title:+: {head_title}}}{open_count:+ ({open_count} open in {project_scope})}"
 
   # #428: built-in gate messages. Rendered (tone-aware) when the gate triggers;
   # the detector fills placeholders like {count}. The triggered message is

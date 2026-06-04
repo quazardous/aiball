@@ -1717,41 +1717,38 @@ export async function buildContextPhrase(
         // variety). All vars are exposed so the yaml `wake_master` is fully
         // overridable per project (#371/#374 wording lives in the template).
         let head = Array.isArray(headRows) ? headRows[0] : undefined;
-        // #749 david `d4dakz` — when an unread ping drives the wake, render
-        // the head as the wake_phrases.with_comment sentence ("Handle aiball
-        // ticket #X — new comment #HASH."). Reuses `buildWakePhrase` so the
-        // per-intent + body templates configured in `wake_phrases:` apply
-        // verbatim. We need the parent ticket's intent (for the per-intent
-        // template) + title (for the engage-only paths), so we fetch it once
-        // when the head isn't already a ticket root.
-        let wakePhraseHead = "";
+        // #749 david (post-d4dakz) — expose the unread head's discrete
+        // pieces as template vars. We deliberately do NOT reuse
+        // `buildWakePhrase` here : that's the SSE-driven "X just arrived"
+        // format ; the FIFO-pop wake is a queue-head pointer, not an event
+        // notification. david : "tout le monde doit avoir le meme type de
+        // ping cad priorité aux event en fifo (on lance le premier
+        // event). si fifo vide on lance le premier ticket du baclog". The
+        // template composes the sentence itself with explicit "first in
+        // queue" framing — see wake_master in config/defaults/.
+        let headCommentHashid = "";
+        let headBody = "";
         if (unreadHead && head?.id) {
             const isTicketRoot = unreadHead.kind === "ticket_created";
-            let ticketIntent: Intent | undefined;
-            let ticketTitle: string | undefined;
-            if (isTicketRoot) {
-                ticketIntent = (unreadHead.intent as Intent | null | undefined) ?? undefined;
-                ticketTitle = unreadHead.title ?? undefined;
-            } else {
+            if (!isTicketRoot && typeof unreadHead.hashid === "string") {
+                headCommentHashid = unreadHead.hashid;
+            }
+            if (!isTicketRoot && typeof unreadHead.body === "string" && unreadHead.body) {
+                headBody = stripMarkdown(unreadHead.body);
+            }
+            // Title lookup for comment heads (the unread row doesn't carry
+            // the parent ticket's title). Best-effort getTicket.
+            if (!head.title && !isTicketRoot) {
                 try {
                     const t = await client.getTicket(head.id, { summary: true }) as {
-                        ticket?: { title?: string | null; intent?: string | null };
+                        ticket?: { title?: string | null };
                     };
-                    const ti = (t.ticket?.intent ?? null) as Intent | null;
-                    ticketIntent = ti ?? undefined;
-                    ticketTitle = t.ticket?.title ?? undefined;
+                    const title = t.ticket?.title;
+                    if (typeof title === "string" && title) head = { ...head, title };
                 } catch { /* best-effort */ }
+            } else if (isTicketRoot && !head.title && unreadHead.title) {
+                head = { ...head, title: unreadHead.title };
             }
-            if (ticketTitle && !head.title) head = { ...head, title: ticketTitle };
-            const hint: WakeHint = {
-                ticket_id: head.id,
-                comment_hashid: !isTicketRoot && typeof unreadHead.hashid === "string"
-                    ? unreadHead.hashid : undefined,
-                intent: ticketIntent,
-                comment_body: !isTicketRoot && typeof unreadHead.body === "string"
-                    ? stripMarkdown(unreadHead.body) : undefined,
-            };
-            wakePhraseHead = buildWakePhrase(hint, pingsAbsPath);
         }
         // #749 david `5qrrsd` — when no unread ping but actionable backlog
         // remains, fall back to the top-priority claimable ticket so the
@@ -1821,18 +1818,20 @@ export async function buildContextPhrase(
             actionable_count: (blocking || !hasClaimableHead) ? "" : (actionableCount || ""),
             head_id: head?.id ?? "",
             head_title: head?.title ?? "",
-            // #749 david `5qrrsd` — head_kind = "comment" / "new ticket" when
-            // draining unread pings, "" when in backlog mode. The template
-            // uses it to differentiate "first up: comment on #X 'TITLE'" vs
-            // the plain backlog "engage #X 'TITLE'".
-            head_kind: head?.kind ?? "",
+            // #749 david — `head_kind` is set ONLY for the ticket_created
+            // case (= "new ticket"), so the ticket-led template branch
+            // doesn't double-fire when the head is a comment (the comment
+            // branch already wins via `head_comment_hashid`). Backlog mode
+            // and the comment case → "" → ticket branch drops out.
+            head_kind: head?.kind === "new ticket" && !headCommentHashid ? head.kind : "",
             backlog_mode: backlogMode,
-            // #749 david `d4dakz` — pre-rendered wake_phrases.with_comment-style
-            // sentence for the unread head (e.g. "Handle aiball ticket #769 —
-            // new comment #d4dakz."). Empty in backlog mode. Lets the
-            // wake_master template drop the "drain X pings" boilerplate and
-            // POP the oldest event by name, mirroring the SSE wake format.
-            wake_phrase_head: wakePhraseHead,
+            // #749 david — discrete head pieces for the FIFO-pop template.
+            // `head_comment_hashid` / `head_body` are empty in backlog mode
+            // OR when the head is a ticket_created (no parent comment).
+            // Templates compose their own "first in queue" sentence ; this
+            // is NOT the SSE wake_phrases.with_comment format.
+            head_comment_hashid: headCommentHashid,
+            head_body: headBody,
             project_scope: scope,
             // #397: {consumer_prompt} = this consumer's micro-prompt (opt-in;
             // empty → renders to nothing). David puts the placeholder in his
@@ -1843,11 +1842,22 @@ export async function buildContextPhrase(
             promptMap,
             "wake_master",
             vars,
+            // #749 david — unified FIFO-pop wake, minimal shape. Just the
+            // event + ticket ref ; the agent's `aiball` discipline skill
+            // owns the "what do I do with it" glue. Three mutually
+            // exclusive branches :
+            //  - comment head : `aiball #{ticket} / #{comment} — {body}`
+            //  - ticket_created head : `aiball ticket #{ticket} "{title}"`
+            //  - backlog head (FIFO empty + actionable) : same as above ;
+            //    the skill differentiates engage-on-comment vs claim-from-
+            //    backlog at consult time.
+            // No "first in queue", no "Handle ...", no "drain via unread()"
+            // — the wake IS the drain (ticket_get prunes via markTicketSeen).
             "{culture} {lead}"
-            + "{wake_phrase_head:+ {wake_phrase_head}}"
-            + "{ping_count:+{wake_phrase_head:+ }({ping_count} unread aiball ping(s) — drain via `unread({pings: true, mark_read: true})`).}"
-            + "{backlog_mode:+ engage #{head_id}{head_title:+ \"{head_title}\"} — top of the backlog by priority — via `ticket_claim()`.}"
-            + "{open_count:+ [{open_count} open]}",
+            + "{head_comment_hashid:+ aiball #{head_id} / #{head_comment_hashid}{head_body:+ — {head_body}}}"
+            + "{head_kind:+ new ticket #{head_id}{head_title:+: {head_title}}}"
+            + "{backlog_mode:+ aiball #{head_id}{head_title:+: {head_title}}}"
+            + "{open_count:+ ({open_count} open in {project_scope})}",
             tone,
         );
         // #428: prepend the triggered-gate banner. Built-in messages render via
