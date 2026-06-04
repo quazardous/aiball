@@ -35,6 +35,7 @@ dates are YYYY-MM-DD.
 
 ### Added
 
+- tmux bar counters segment (`o:M b:B e:N` — open tickets / backlog tickets / unread events) painted after the `[state]` tag in every state (idle / boot / busy). Refreshed on the heartbeat alongside the state paint. ASCII default, single space between tokens. The legacy `[idle N]` count inside the brackets is gone — counters live in their own bar segment so they survive every state and don't shift the tag width.
 - Lineage relation chips (`child of` / `parent of` on sub-tickets) now expose the change-kind / remove menu (the kebab `▾` button). The kind picker offers all relation kinds including lineage, so a sub-ticket can be re-parented or demoted to a soft `relates_to` from the chip itself. The add-relation form still defaults to non-lineage kinds.
 - `claude-loop backlog` — show the backlog of the current loop's project + agent (resolved from `.aiball.yaml` / plate), tiered hot → actionable → waiting. `--events` switches to the FIFO unread events (what the wake / MCP `unread()` would drain). `--json` for raw output, `--limit N` to cap rows.
 

@@ -76,6 +76,7 @@ import {
     readDrainedState,
     writeDrainedState,
     setTmuxStatus,
+    setTmuxCounters,
     afkStateChunkStr,
     setTmuxAfkState,
     snapshotPane,
@@ -1341,27 +1342,32 @@ async function mainSse(): Promise<void> {
         // marker (bug A on #712), no more inline write of `idle-marker`
         // by an inline probe (bug B on #712).
         const phase = loopBus.current()?.phase ?? "boot";
-        // Refresh the bar with the current unread count (#B.149
-        // david: "dans la barre mux on peut afficher le nombre de
-        // read / ticket meme en idle ?"). Skipped while booting —
-        // count is meaningless until settleBoot or the probe
-        // detected claude is ready (whichever comes first).
+        // #800 9sy4t3 — refresh both the bar tag (state + optional phase
+        // suffix like `[busy:compacting]`) and the COUNTERS segment
+        // (`o:M b:B e:N`) on every heartbeat, in every state (incl boot).
+        // david wants the 3 counts visible across [idle]/[boot]/[busy].
+        // Counts fetched in parallel : events (pingsCount, cross-project),
+        // open + backlog (one listProjectsDetailed call + one listTickets
+        // count). Fail-open : individual fetch errors leave that counter
+        // null (= absent from the bar segment).
+        try {
+            pushViewIfChanged();
+            const [pingsR, projectsR, backlogR] = await Promise.allSettled([
+                client().pingsCount() as Promise<{ unread?: number }>,
+                client().listProjectsDetailed() as Promise<Array<{ open_count?: number }>>,
+                client().listTickets({ backlog: "1", limit: "500" }) as Promise<unknown[]>,
+            ]);
+            const events = pingsR.status === "fulfilled" ? (pingsR.value?.unread ?? 0) : null;
+            const open = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
+                ? projectsR.value.reduce((acc, p) => acc + (p.open_count ?? 0), 0)
+                : null;
+            const backlog = backlogR.status === "fulfilled"
+                ? (Array.isArray(backlogR.value) ? backlogR.value.length : null)
+                : null;
+            setTmuxCounters(name!, { open, backlog, events });
+        } catch { /* counters segment stays as-is */ }
         if (phase !== "boot") {
             try {
-                const r = await client().pingsCount() as { unread?: number };
-                // #B.198: during user-grace, the third arg is the
-                // grace label ("user") instead of the unread count —
-                // matches the Stop hook's `[idle:user]` rendering so
-                // the bar stays consistent across the whole window.
-                // Count comes back once grace lapses.
-                // #629 david `8wgq7f` (Bug 3) — flush the bus before flipping
-                // status-bg. The bus's transition listener pushes the new
-                // view to the proxy synchronously (UDS write), so the proxy
-                // can repaint @cl_human BEFORE the tmux status-bg flips here.
-                // Without this, status-bg gray lands first and the word
-                // `boot` lingers ~50ms (watch debounce) before the proxy
-                // catches up — visible race at boot exit.
-                pushViewIfChanged();
                 // #647 Slice 4 : pane-derived markers (screen-takeover or
                 // error) trump count/user as bar info — david `sr9kqw`
                 // wants `[busy:compacting]` / `[boot:picker:mode]` etc.
@@ -1374,7 +1380,8 @@ async function mainSse(): Promise<void> {
                     // #745 phase B — the `user` chip used to fire here
                     // when userIsTakingOver was fresh ; AFK SM now owns
                     // the human-present signal (countdown chunk visible).
-                    setTmuxStatus(name!, phase, r.unread ?? 0);
+                    // #800 9sy4t3 — count moved to @cl_counts (above).
+                    setTmuxStatus(name!, phase);
                 }
             } catch { /* swallow — bar stays as-is */ }
         }

@@ -1207,17 +1207,54 @@ export function humanBarWord(sd: string | undefined): string {
     return `#[fg=${fg},bg=colour16]${word.padEnd(4)}`;
 }
 
+/**
+ * #800 9sy4t3 — paint the counters segment of the tmux bar. Sits in its own
+ * `@cl_counts` tmux user option so state repaints (transitions, hooks) don't
+ * clobber a fresher counter snapshot, and counters survive across every
+ * state (idle / boot / busy) as david asked.
+ *
+ * Layout : ` o:M b:B e:N` (ASCII default, single leading space — the format
+ * concatenates straight after `@cl_state`). Zero counters render as `o:0`
+ * etc. so the segment is always the same width and the absence is explicit.
+ *
+ * Pass `null` / `undefined` counters to clear the segment.
+ * No-op when tmux is gone (loop was just rm'd) — never throws.
+ */
+export function setTmuxCounters(
+    name: string,
+    counters: { open?: number | null; backlog?: number | null; events?: number | null } | null,
+): void {
+    const tn = tmuxName(name);
+    const setOpt = (opt: string, val: string) =>
+        spawnSync(MUX_CMD, ["set-option", "-t", tn, opt, val], { stdio: "ignore" });
+    if (!counters) {
+        setOpt("@cl_counts", "");
+        return;
+    }
+    const parts: string[] = [];
+    if (typeof counters.open === "number") parts.push(`o:${counters.open}`);
+    if (typeof counters.backlog === "number") parts.push(`b:${counters.backlog}`);
+    if (typeof counters.events === "number") parts.push(`e:${counters.events}`);
+    if (parts.length === 0) {
+        setOpt("@cl_counts", "");
+        return;
+    }
+    const col = barColors();
+    setOpt("@cl_counts", `#[fg=${col.bar_fg}] ${parts.join(" ")}`);
+}
+
 export function setTmuxStatus(
     name: string,
     status: LoopStatus,
     countOrInfo?: number | string,
 ): void {
-    // #B.149/#B.154: optional unread-ping count OR free-form phase
-    // info appended to the status label. count → `[idle 3]`. info
-    // → `[boot:picker?]`. Lets the bar carry transient diagnostic
-    // state without inventing new colors per phase. David: "la
-    // barre tmux peut etre utilisé pour afficher le mode (dialogue
-    // detecté etc)".
+    // #B.149/#B.154: optional free-form phase info appended to the status
+    // label. info string → `[boot:picker?]` / `[busy:compacting]`. Lets the
+    // bar carry transient diagnostic state without inventing new colors per
+    // phase. The legacy `count` form (`[idle 3]`) is superseded by the
+    // separate counters segment (@cl_counts, set via setTmuxCounters) so the
+    // tag stays focused on state+phase ; #800 9sy4t3 david wants counters
+    // visible in ALL states (idle/boot/busy) without bloating the tag.
     let tag = `[${status}]`;
     if (typeof countOrInfo === "number" && countOrInfo > 0) {
         tag = `[${status} ${countOrInfo}]`;
@@ -1287,12 +1324,20 @@ export function setTmuxStatus(
         // The status-left format below no longer carries `@cl_keys`; a leftover
         // @cl_keys on a session started before this change is simply never
         // referenced now (harmless — no literal renders).
-        `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour40#,bg=colour16]loop} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}] ${name} #{@cl_state} `,
+        // `#{@cl_counts}` is the optional ` o:M b:B e:N` segment painted by
+        // setTmuxCounters (#800 9sy4t3) — visible across all states so david
+        // can see open / backlog / events without waiting for [busy].
+        `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour40#,bg=colour16]loop} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}] ${name} #{@cl_state}#{@cl_counts} `,
     );
     setOpt("status-bg", bg);
     setOpt("status-fg", col.bar_fg);
     // Loop-state tag (#B.149/#B.154): `[idle 3]` / `[boot:resume?]` etc.
     setOpt("@cl_state", `#[fg=${col.bar_fg}]${tag}`);
+    // #800 9sy4t3 — `@cl_counts` is set separately via setTmuxCounters and
+    // referenced by the status-left format below. We don't touch it here so
+    // a state repaint (e.g. an idle tick) doesn't clobber a fresher counter
+    // snapshot. Empty default = no counters visible until the first
+    // setTmuxCounters call lands.
     // #269 (tcn5ej): discreet ⇄ when the pane really runs under the proxy
     // (ground truth = proxy-alive marker). Absent ⇒ direct-launch fallback.
     setOpt("@cl_proxy", proxyAlive ? `#[fg=colour250] ⇄` : "");
