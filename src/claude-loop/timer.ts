@@ -73,6 +73,7 @@ import {
     readBusyDefer,
     recordOpenWakeCount,
     recordOpenWakeHash,
+    readLastOpenWakeHash,
     readDrainedState,
     writeDrainedState,
     setTmuxStatus,
@@ -722,8 +723,24 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // signal, not the phrase. The bypass for triggered gates lives
     // inside ContextPhraseResult.hasContent.
     if (!hasContent && !manualWake && !panicMode) {
-        log(`skip wake (${reason}) — nothing actionable (idle phrase suppressed)`);
-        return false;
+        // #813 2nnuq6 david — "fin de ligne" : tout backlog cooled + FIFO
+        // vide. Au lieu de skip silencieux, fire un wake culturel SI le
+        // landscape STRUCTURAL a bougé depuis la dernière fois (= un ticket
+        // a opened/closed/reopened, vraie info à signaler). Le hash est
+        // structural-only (#813 cq4vvx) donc il ne bouge que sur structure.
+        if (sd && gateHash !== undefined) {
+            const seen = readLastOpenWakeHash(sd);
+            if (gateHash === seen) {
+                log(`skip wake (${reason}) — fin de ligne (no content + landscape stable since ${seen.slice(0, 7)})`);
+                return false;
+            }
+            log(`wake (${reason}) — fin de ligne but landscape moved (${seen ? seen.slice(0, 7) : "none"} → ${gateHash.slice(0, 7)}) → cultural ping`);
+            // Fall through : fire the cultural wake. recordOpenWakeHash
+            // below stamps the new hash so we don't re-fire next tick.
+        } else {
+            log(`skip wake (${reason}) — nothing actionable (idle phrase suppressed)`);
+            return false;
+        }
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     // #793 — clear in-memory idle-since: the wake is about to flip claude
