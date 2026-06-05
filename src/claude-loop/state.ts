@@ -15,6 +15,7 @@ import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
 import {
     getIpcDispAfk,
     getIpcState,
+    isStrictIpcRead,
     setIpcDispAfk,
     setIpcDrainedState,
     setIpcHumanTypingAtMs,
@@ -936,16 +937,24 @@ export function readLoopStateInput(
     // freshly restarted, or the hook fell back to file write because the
     // ws emit failed).
     const ipc = getIpcState();
+    // #838 Phase A — `isStrictIpcRead()` is set by the timer process at
+    // boot. When TRUE (= timer-process context), drop the `?? existsSync`
+    // fallbacks : ipcState is hydrated by bus events (proxy → dispatcher,
+    // hooks → HookService) bien avant les premiers reads, fallback inutile.
+    // When FALSE (= hook subprocess, cli inspect, tests with fresh module),
+    // keep the file shadow fallbacks. Phases B/C of #766 migrate those
+    // readers to UDS and drop the shadows altogether.
+    const strict = isStrictIpcRead();
     const ipcSessionPicker = ipc.resumeSessionPickerActive;
     const ipcModePicker = ipc.resumeModePickerActive;
     const sessionPickerActive = ipcSessionPicker !== null
         ? ipcSessionPicker
-        : existsSync(resumeSessionPickerActivePath(sd));
+        : (strict ? false : existsSync(resumeSessionPickerActivePath(sd)));
     const modePickerActive = ipcModePicker !== null
         ? ipcModePicker
-        : existsSync(resumeModePickerActivePath(sd));
+        : (strict ? false : existsSync(resumeModePickerActivePath(sd)));
     const resumePickerActive = sessionPickerActive || modePickerActive;
-    const bootComplete = ipc.bootComplete ?? existsSync(bootCompletePath(sd));
+    const bootComplete = ipc.bootComplete ?? (strict ? false : existsSync(bootCompletePath(sd)));
     const noWait = !cfg.wait;
     const wakeInFlightTtlMs = Math.max(0, cfg.wake_in_flight_ttl_ms);
     const inputHotTtlMs = Math.max(0, cfg.input_hot_ttl_ms);
@@ -961,15 +970,12 @@ export function readLoopStateInput(
         } catch { return null; }
     }
 
-    // #734 V3 Phase A — AFK in-memory wins when set ; file is the
-    // fallback for the win32 path (Rust proxy writes the file directly
-    // without dispatching proxyEvent, so ipcAfk stays null) and for
-    // cold-boot before the first Afk*ViaService call. Strict null-fallback
-    // semantics per `2a6eed8` lesson : ipc.afkMode === null means "no
-    // signal", never "AFK off" (that's "off").
+    // #838 Phase A — strict mode (timer process) skips the file fallback.
+    // Hook subprocess / cli inspect keep reading the shadow until phases
+    // B/C of #766 migrate them to UDS round-trip.
     const afk = ipc.afkMode !== null
         ? { mode: ipc.afkMode, expiryMs: ipc.afkExpiryMs }
-        : readAfkState(sd);
+        : (strict ? { mode: "off" as const, expiryMs: null } : readAfkState(sd));
     // #734 V3 Phase B — same semantics for human-typing.
     const ipcHumanTypingAtMs = ipc.humanTypingAtMs;
     return {
@@ -991,7 +997,9 @@ export function readLoopStateInput(
         paneCompacting: ipc.paneCompacting ?? false,
         paneInterrupted: ipc.paneInterrupted ?? false,
         noWait,
-        humanTypingAtMs: ipcHumanTypingAtMs ?? safeMtime(humanTypingPath(sd)),
+        // #838 Phase A — strict mode skips the safeMtime fallback ; hooks
+        // still read the file shadow until #766 phases B/C.
+        humanTypingAtMs: ipcHumanTypingAtMs ?? (strict ? null : safeMtime(humanTypingPath(sd))),
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,
         afkMode: afk.mode,
         afkExpiryMs: afk.expiryMs,
@@ -1007,11 +1015,8 @@ export function readLoopStateInput(
         idleSinceMs: readIdleSinceMs(sd),
         wakeInFlightAtMs: safeMtime(wakeInFlightPath(sd)),
         wakeInFlightTtlMs,
-        // #727 V1 Slice B-2 — busy-defer expiry mirrored in-memory by
-        // the Stop hook event (carries the absolute expiry ms). When the
-        // subscriber set it, it wins ; otherwise fall back to the file
-        // content (back-compat / degraded mode).
-        busyDeferUntilMs: ipc.busyDeferUntilMs ?? safeIsoMs(busyDeferUntilPath(sd)),
+        // #838 Phase A — strict mode skips the file fallback ; hooks keep it.
+        busyDeferUntilMs: ipc.busyDeferUntilMs ?? (strict ? null : safeIsoMs(busyDeferUntilPath(sd))),
         inputHotTtlMs,
         manualWake: opts.manualWake ?? false,
     };

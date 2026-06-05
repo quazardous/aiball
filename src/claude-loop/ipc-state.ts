@@ -154,6 +154,16 @@ export function getIpcState(): Readonly<IpcState> {
     return state;
 }
 
+/** #838 — flag set by the timer process at boot. `readLoopStateInput`
+ *  goes IPC-strict when true (= no `?? readFromFile` fallbacks). Hook
+ *  subprocesses + cli inspect leave this false → they keep the file
+ *  shadow fallbacks so they can read state across processes (timer
+ *  remains the canonical writer ; phases B/C of #766 will switch
+ *  hooks/proxy to UDS read and finally drop the shadows). */
+let _strictIpcRead = false;
+export function setStrictIpcRead(value: boolean): void { _strictIpcRead = value; }
+export function isStrictIpcRead(): boolean { return _strictIpcRead; }
+
 /** Mark the loop as past the boot phase. Called on SessionStart event. */
 export function setIpcBootComplete(value: boolean): void {
     state.bootComplete = value;

@@ -111,6 +111,7 @@ import {
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
     setIpcResumeSessionPicker,
+    setStrictIpcRead,
 } from "./ipc-state.js";
 import { computeLoopView, isAfkActive, isInputHot, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
@@ -136,6 +137,11 @@ if (!sd || !name) {
     process.stderr.write("[claude-loop:timer] missing CL_* env vars\n");
     process.exit(1);
 }
+// #838 Phase A — timer process is IPC-strict : drop the `?? readFromFile`
+// fallbacks in readLoopStateInput. Hook subprocesses + cli inspect still
+// keep them (= file shadows stay alive for cross-process reads until
+// #766 phases B/C migrate them to UDS).
+setStrictIpcRead(true);
 const interval = Math.max(1, cfg.interval_seconds);
 const tname = tmuxName(name);
 
