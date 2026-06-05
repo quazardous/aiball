@@ -2,6 +2,7 @@ import {
     getMessage,
     getProject,
     insertMessage,
+    markTicketSeen,
     moveTicket,
     insertRelationEvent,
     insertTypedRelation,
@@ -605,6 +606,16 @@ export function submitMessage(input: NewMessage): Message {
     // (ticket_created / comment_added / ticket_closed / decision …). Additive —
     // alongside the inline fanOutPings/broadcast above; #322 will subscribe.
     emitLifecycle({ op: "created", message: msg });
+    // #837 — auto-prune unread on the author : an agent who POSTS on a ticket
+    // has by definition read the prior context, so their own unread pings on
+    // that ticket are stale by construction. `markTicketSeen` is consumer-
+    // scoped — other recipients keep their unread. Without this guard, david's
+    // wake-stuck unblock-cascade (#751-followups, e1660f8) replayed every
+    // historical comment on tickets where I'd already replied N times.
+    if (msg.by_agent && msg.ticket_id != null) {
+        try { markTicketSeen(msg.by_agent, msg.ticket_id); }
+        catch { /* best-effort — pings table errors must not fail the message insert */ }
+    }
     return msg;
 }
 
