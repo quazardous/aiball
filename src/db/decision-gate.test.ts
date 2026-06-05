@@ -19,7 +19,7 @@ function ev(e: Ev): DecisionGateEvent {
         byAgent: e.byAgent ?? "claude-aiball-dev",
     };
 }
-function decision(kind: "plan" | "resolution" | "wontfix", status: string): string {
+function decision(kind: "plan" | "resolution" | "wontfix" | "escalation", status: string): string {
     return JSON.stringify({ decision: { kind, status } });
 }
 const gate = (events: DecisionGateEvent[]) => computeDecisionGate(events, isHuman);
@@ -110,6 +110,29 @@ test("#802: wontfix rejeté → dé-gaté (reporter dit non, le ticket reste ouv
     const g = gate([
         ev({ kind: "comment_added", meta: decision("wontfix", "pending") }),
         ev({ kind: "comment_added", meta: decision("wontfix", "rejected") }),
+    ]);
+    assert.equal(g.get(1), false);
+});
+
+test("#737: escalation pending → gaté (agent attend l'action humaine)", () => {
+    const g = gate([
+        ev({ kind: "comment_added", meta: decision("escalation", "pending") }),
+    ]);
+    assert.equal(g.get(1), true);
+});
+
+test("#737: escalation accepté = humain a fait l'action → dé-gaté (pas d'auto-close, l'agent peut continuer)", () => {
+    const g = gate([
+        ev({ kind: "comment_added", meta: decision("escalation", "pending") }),
+        ev({ kind: "comment_added", meta: decision("escalation", "accepted") }),
+    ]);
+    assert.equal(g.get(1), false);
+});
+
+test("#737: escalation rejeté = pas une escalation → dé-gaté (agent peut re-classifier)", () => {
+    const g = gate([
+        ev({ kind: "comment_added", meta: decision("escalation", "pending") }),
+        ev({ kind: "comment_added", meta: decision("escalation", "rejected") }),
     ]);
     assert.equal(g.get(1), false);
 });

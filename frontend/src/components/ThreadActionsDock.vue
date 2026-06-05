@@ -110,7 +110,11 @@ const emit = defineEmits<{
             @click="emit('reject-active')"
         />
         <SplitButton
-            :label="activeDecision.decision.kind === 'resolution' ? 'accept resolution → close' : `accept ${activeDecision.decision.kind} → keep open`"
+            :label="activeDecision.decision.kind === 'resolution'
+                ? 'accept resolution → close'
+                : activeDecision.decision.kind === 'escalation'
+                    ? 'accept escalation → action done'
+                    : `accept ${activeDecision.decision.kind} → keep open`"
             icon="pi pi-verified"
             severity="success"
             size="small"

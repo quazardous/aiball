@@ -139,7 +139,14 @@ const decision = computed(() => readDecision(props.msg));
 const decisionChipLabel = computed(() => {
     const d = decision.value;
     if (!d) return "";
-    if (d.status === "pending") return `pending ${d.kind}`;
+    if (d.status === "pending") {
+        // #737 — pending escalation reads as the standalone "ESCALATED"
+        // banner per david's plan : it's not "pending escalation" as if
+        // we're waiting on the kind to be decided ; it's a flag that
+        // human action is required. Plan/resolution/wontfix keep the
+        // "pending $kind" framing (= proposal awaiting reporter accept).
+        return d.kind === "escalation" ? "ESCALATED" : `pending ${d.kind}`;
+    }
     const prefix = d.status === "accepted" ? "✓ accepted" : "✗ rejected";
     const by = d.decided_by ? ` by ${d.decided_by}` : "";
     return `${prefix} ${d.kind}${by}`;
@@ -149,7 +156,12 @@ const decisionChipSeverity = computed(() => {
     if (!d) return "secondary";
     if (d.status === "accepted") return "success";
     if (d.status === "rejected") return "danger";
-    return "warn"; // pending
+    // #737 — pending escalation = visually arresting red ("I need a human
+    // NOW") rather than the neutral warn yellow used for plan/resolution/
+    // wontfix. The kind tells the human what's pending ; the color tells
+    // them the urgency.
+    if (d.kind === "escalation") return "danger";
+    return "warn"; // pending plan/resolution/wontfix
 });
 
 // #B.256: post-hoc "classify" affordance — transform a plain comment

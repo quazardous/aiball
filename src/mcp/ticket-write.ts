@@ -186,10 +186,10 @@ export function registerTicketWriteTools(server: McpServer): void {
                         ].join("\n"),
                     ),
                 then: z
-                    .enum(["resolved", "plan", "wontfix", "close", "reopen"])
+                    .enum(["resolved", "plan", "wontfix", "escalate", "close", "reopen"])
                     .optional()
                     .describe(
-                        "Optional intent on the comment. `resolved` (#B.129) = tag the comment as a resolution decision (`meta.decision={kind:\"resolution\",status:\"pending\"}`); the reporter accept/reject — no separate ticket_resolved row anymore, the comment IS the proposal and the audit lives on it. `plan` (#B.243) = symmetric to `resolved` for plan proposals (`meta.decision={kind:\"plan\",status:\"pending\"}`): use it when the comment body describes HOW you intend to tackle the ticket and you want the reporter to validate the approach before you execute. Accepted plan = go-signal (the agent re-enters actionable to execute); pending plan gates actionable identically to pending resolution. `wontfix` (#802) = propose closing the ticket WITHOUT resolution — for junk / test / out-of-scope / non-reproducible tickets an agent triages without delivering work (`meta.decision={kind:\"wontfix\",status:\"pending\"}`). The reporter accepting auto-closes the ticket WITHOUT flipping `resolved`. Different from `close` (reporter-only, direct) : `wontfix` is the proposal path any agent can use to triage someone else's ticket. `close` = close the ticket (reporter-only, direct). `reopen` = bring a closed ticket back. `close`/`reopen` are still emitted as distinct lifecycle event rows; `resolved`/`plan`/`wontfix` are comment+decision sidecars. There is no agent→human `blocked` option — post a plain comment with your question if you need info before proceeding.",
+                        "Optional intent on the comment. `resolved` (#B.129) = tag the comment as a resolution decision (`meta.decision={kind:\"resolution\",status:\"pending\"}`); the reporter accept/reject — no separate ticket_resolved row anymore, the comment IS the proposal and the audit lives on it. `plan` (#B.243) = symmetric to `resolved` for plan proposals (`meta.decision={kind:\"plan\",status:\"pending\"}`): use it when the comment body describes HOW you intend to tackle the ticket and you want the reporter to validate the approach before you execute. Accepted plan = go-signal (the agent re-enters actionable to execute); pending plan gates actionable identically to pending resolution. `wontfix` (#802) = propose closing the ticket WITHOUT resolution — for junk / test / out-of-scope / non-reproducible tickets an agent triages without delivering work (`meta.decision={kind:\"wontfix\",status:\"pending\"}`). The reporter accepting auto-closes the ticket WITHOUT flipping `resolved`. Different from `close` (reporter-only, direct) : `wontfix` is the proposal path any agent can use to triage someone else's ticket. `escalate` (#737) = flag a blocker requiring a HUMAN action the agent can't perform (repo admin, infra change, policy call) — `meta.decision={kind:\"escalation\",status:\"pending\"}`. Bumps the parent ticket's priority one notch (low/normal→high, high→urgent) AND broadcasts (scope=broadcast, all followers pinged) so the human sees it immediately. Accept = the human did the action (ticket re-enters actionable, NO auto-close — the agent can continue any remaining work) ; reject = \"not an escalation\" (re-enters actionable, agent can re-classify). Use when the work CAN'T move without a human ; use `plan` instead when you want the human to validate your HOW. `close` = close the ticket (reporter-only, direct). `reopen` = bring a closed ticket back. `close`/`reopen` are still emitted as distinct lifecycle event rows; `resolved`/`plan`/`wontfix`/`escalate` are comment+decision sidecars. There is no agent→human `blocked` option — post a plain comment with your question if you need info before proceeding.",
                     ),
                 scope: z
                     .enum(MESSAGE_SCOPES)
@@ -237,7 +237,7 @@ export function registerTicketWriteTools(server: McpServer): void {
             // question — the conversational thread covers it naturally.
             const kind: string = !then
                 ? "comment_added"
-                : then === "resolved" || then === "plan" || then === "wontfix"
+                : then === "resolved" || then === "plan" || then === "wontfix" || then === "escalate"
                   ? "comment_added"
                   : then === "close"
                     ? "ticket_closed"
@@ -246,6 +246,7 @@ export function registerTicketWriteTools(server: McpServer): void {
                 then === "resolved" ? "resolution"
                 : then === "plan" ? "plan"
                 : then === "wontfix" ? "wontfix"
+                : then === "escalate" ? "escalation"
                 : undefined;
             const proj = project ?? target.project;
             const res = await client.postMessage({
@@ -265,7 +266,11 @@ export function registerTicketWriteTools(server: McpServer): void {
                 // ny8m8a directive for `'internal'`-by-default; replies
                 // should fan out to subscribers like a normal post,
                 // explicit `scope` to narrow or broaden).
-                scope: scope ?? "default",
+                // #737 — escalation always broadcasts : the agent is
+                // asking for human attention, the comment must reach
+                // every follower (not just subscribers/owners) regardless
+                // of the agent's default scope preference.
+                scope: then === "escalate" ? "broadcast" : (scope ?? "default"),
             });
             markActiveTicket(ticketId); // #404: focus = this ticket (token attribution)
             return asText(res);

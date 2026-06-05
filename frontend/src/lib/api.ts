@@ -422,6 +422,11 @@ export interface InboxRow {
      *  accept/reject. Surfaced so the inbox row can flag pending
      *  plans the same way it flags pending resolutions. */
     pending_plan?: boolean;
+    /** #737: an agent flagged this ticket for human action it can't
+     *  perform (repo admin / infra / policy decision). Surfaced so the
+     *  inbox row paints a red ESCALATED badge. Cleared once the ticket
+     *  is closed/rejected. */
+    pending_escalation?: boolean;
     /** #656 david `2c9qm4`: true iff a pending decision exists AND
      *  the decision-bearing comment IS the latest comment on the
      *  thread (no newer activity past it). UI uses this to keep
@@ -893,13 +898,13 @@ export const api = {
     decide: (
         id: number,
         status: "accepted" | "rejected",
-        new_kind?: "plan" | "resolution" | "wontfix",
+        new_kind?: "plan" | "resolution" | "wontfix" | "escalation",
     ) =>
         req<Message>("POST", `/api/messages/${id}/decide`, { status, new_kind }),
     /** Reclassify a pending decision's kind without changing its
      *  status (#B.129 follow-up). 409 when the decision is missing
      *  or already terminal. */
-    reclassify: (id: number, new_kind: "plan" | "resolution" | "wontfix") =>
+    reclassify: (id: number, new_kind: "plan" | "resolution" | "wontfix" | "escalation") =>
         req<Message>("POST", `/api/messages/${id}/reclassify`, { new_kind }),
     /** Promote an undecorated comment to a decision (#B.256).
      *  `status` omitted → tag as pending. `status` set → tag +

@@ -88,9 +88,14 @@ function applyDecisionSignal(
         } else if (decision.status === "rejected") {
             state.set(ticketId, { gated: false });
         }
-    } else if (decision.kind === "plan") {
+    } else if (decision.kind === "plan" || decision.kind === "escalation") {
         // Plan accepté = go-signal → dé-gaté (le ticket re-rentre dans
         // l'actionable pour être exécuté). Plan rejeté = dé-gaté aussi.
+        // #737 — escalation partage les mêmes sémantiques de gate :
+        // pending = gated (l'agent attend l'action humaine), accept = the
+        // human did the action → dé-gaté (l'agent re-rentre dans l'actionable
+        // pour suite éventuelle, PAS d'auto-close), reject = "not an
+        // escalation" → dé-gaté aussi (l'agent peut re-classifier).
         if (decision.status === "pending") {
             state.set(ticketId, { gated: true });
         } else if (decision.status === "accepted" || decision.status === "rejected") {

@@ -20,7 +20,7 @@ import type { Message, TicketSummary } from "./api";
 // the consumer typing.
 type DecisionBearing = Pick<Message, "id" | "status" | "meta">;
 
-export type DecisionKind = "plan" | "resolution";
+export type DecisionKind = "plan" | "resolution" | "wontfix" | "escalation";
 export type DecisionStatus = "pending" | "accepted" | "rejected";
 
 export interface CommentDecision {

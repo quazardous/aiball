@@ -57,6 +57,16 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         color: "--p-amber-500",
         title: "an agent proposed resolution — accept (close) or reject to bring it back",
     },
+    "pending-escalation": {
+        // #737 — modern formal escalation : the agent posted
+        // `then:"escalate"` and the human action is still pending.
+        // Red + bell so the eye catches it at the top of the inbox,
+        // distinct from amber pending-resolution/plan (which are
+        // softer "agent proposed, your call to validate").
+        icon: "pi pi-bell",
+        color: "--p-red-500",
+        title: "ESCALATED — an agent flagged this for human action (admin / infra / policy); accept once you've done the thing or reject to de-escalate",
+    },
     "pending-plan": {
         // #656 david: symmetric to pending-resolved but for plan
         // decisions (HOW choice awaiting reporter validation). Same
