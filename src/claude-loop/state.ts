@@ -1973,28 +1973,37 @@ export async function buildContextPhrase(
             // wake_master override where he wants it.
             consumer_prompt: consumerPrompt,
         };
-        const cta = renderSlot(
-            promptMap,
-            "wake_master",
-            vars,
-            // Unified FIFO-pop wake. Five mutually exclusive branches:
-            //   comment    →  body + refs only
-            //   new ticket →  "new ticket #ID: TITLE"
-            //   lifecycle  →  "#ID VERB: TITLE"   (closed / resolved / reopened)
-            //   decision   →  "Your <kind> was <verb> on #ID: TITLE by X (#hashid)"
-            //                  (#830 david `a7pn65` — 8 kinds, plan/resolution/
-            //                  wontfix/escalation × accepted/rejected)
-            //   backlog    →  culture + "look #ID: TITLE. Triage the ticket."
-            // #825 david `b63ez5` : drop the `no_head` cultural ping
-            // entirely. Strict binary rule on the wake firing side
-            // (timer.ts:tryWake) — fire ONLY on event OR backlog.
+        // Unified FIFO-pop wake. Five mutually exclusive branches:
+        //   comment    →  body + refs only
+        //   new ticket →  "new ticket #ID: TITLE"
+        //   lifecycle  →  "#ID VERB: TITLE"   (closed / resolved / reopened)
+        //   decision   →  "Your <kind> was <verb> on #ID: TITLE by X (#hashid)"
+        //                  (#830 david `a7pn65` — 8 kinds, plan/resolution/
+        //                  wontfix/escalation × accepted/rejected)
+        //   backlog    →  culture + "look #ID: TITLE. Triage the ticket."
+        // #825 david `b63ez5` : drop the `no_head` cultural ping entirely.
+        // Strict binary rule on the wake firing side (timer.ts:tryWake) —
+        // fire ONLY on event OR backlog.
+        const wakeMasterDefault =
             "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}"
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}"
             + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}}"
-            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}",
-            tone,
-        );
+            + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}";
+        let cta = renderSlot(promptMap, "wake_master", vars, wakeMasterDefault, tone);
+        // #751-followup (urgent fix : david's stale `wake_master` override
+        // missed the `head_decision_event` branch added by #830 and produced
+        // empty phrases for plan_accepted / resolution_rejected / etc. events,
+        // stuck-state cascading via the empty-phrase guard in timer.ts).
+        // Safety net : if a user template returned EMPTY but a head branch is
+        // actually active, re-render with the in-code default which is guaranteed
+        // to cover all 5 branches. The user template still WINS when it produces
+        // non-empty output ; only the missing-branch case falls back.
+        const hasHead = !!(headCommentHashid || headLifecycleVerb || headDecisionEvent
+            || head?.kind === "new ticket" || backlogMode);
+        if (!cta && hasHead) {
+            cta = renderSlot({}, "wake_master", vars, wakeMasterDefault, tone);
+        }
         // #428: prepend the triggered-gate banner. Built-in messages render via
         // their prompt slot (per-project overridable + tone-aware + {vars});
         // custom gates use their literal message / cmd stdout. Template-agnostic
