@@ -100,7 +100,7 @@ import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { loopConfig } from "./loop-config.js";
 import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
 import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
-import { getPaneService, paneMarkerBarInfo } from "./pane-service.js";
+import { paneMarkerBarInfo } from "./pane-service.js";
 import { armAfkViaService, watchAfkMarker } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
 import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
@@ -1262,27 +1262,24 @@ async function mainSse(): Promise<void> {
     // `setTmuxStatus` spawns tmux set-option (~3ms), kept cheap via the
     // memo + transition-only firing.
     let lastPaintedPostBoot: string | null = null;
-    // #821 david — `[busy:compacting]` was only painted on a `loopBus`
-    // transition, but `paneCompacting` does NOT flip any LoopStateView
-    // field (renderBarBg looks at `paneBusy` only), so the transition
-    // never fired on a /compact start/end. Wiring the repaint to BOTH
-    // `loopBus.transition` AND `PaneService.subscribeAny` catches the
-    // compacting flip (plus pickers, resuming, error markers) the moment
-    // it lands — instead of waiting for the 30s heartbeat or a piggyback
-    // transition (typing, busy flip, etc.). `subscribeAny` fires on every
-    // marker change, so the memo below filters the repaint cost.
+    // #821 david `8r6nr2` — single-source repaint en fond de panier : un
+    // setInterval(1000) qui appelle paneMarkerBarInfo() + setTmuxStatus
+    // si le memo `phase|paneInfo` change. Remplace le double-wiring
+    // précédent (`loopBus.transition` + `PaneService.subscribeAny`) qui
+    // était fragile (transitions ratées si LoopStateView ne change pas —
+    // cas de paneCompacting qui ne flippe aucun champ de view). Memo
+    // garantit qu'on ne fait qu'1 spawn tmux par changement réel ;
+    // paneMarkerBarInfo() est un snapshot mémoire (~µs). Latence max
+    // 1s sur un flip vs quasi-instantané avant ; trade accepté pour la
+    // robustesse + simplicité.
     const repaintPaneInfo = (): void => {
         const view = loopBus.current();
         if (!view || view.inBootGrace) return;
         try {
             const paneInfo = paneMarkerBarInfo();
-            // Build a memo key that captures phase + paneInfo + grace state.
-            // Count refresh stays heartbeat-driven (don't repaint on every
-            // marker change just for that — it'd repaint on every typing).
-            // #745 phase B — the `user` chip used to fire when
-            // userIsTakingOver was fresh ; user-grace is dropped now,
-            // AFK SM owns the human-present signal (visible via the AFK
-            // chunk + countdown). Bar info falls through to count/recap.
+            // Memo key captures phase + paneInfo. Count refresh stays
+            // heartbeat-driven (don't repaint on every tick just for that
+            // — heartbeat owns the @cl_counts segment).
             const memoKey = `${view.phase}|${paneInfo ?? "-"}`;
             if (memoKey === lastPaintedPostBoot) return;
             if (paneInfo) {
@@ -1294,8 +1291,7 @@ async function mainSse(): Promise<void> {
             lastPaintedPostBoot = memoKey;
         } catch { /* best-effort */ }
     };
-    loopBus.on("transition", repaintPaneInfo);
-    getPaneService().subscribeAny(repaintPaneInfo);
+    setInterval(repaintPaneInfo, 1000);
     const pushViewIfChanged = (): void => {
         try {
             loopBus.update(readLoopStateInput(sd!));
