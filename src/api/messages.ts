@@ -45,7 +45,7 @@ import {
     type Priority,
 } from "../db.js";
 import { isDecisionKind, type DecisionKind } from "../decisions.js";
-import { submitMessage, validateNewMessage } from "../messages.js";
+import { isDecisionEventKind, submitMessage, validateNewMessage } from "../messages.js";
 import { fanOutPings, notifyDecision } from "../notifications.js";
 import { deliverToOutbox } from "../outbox.js";
 import { broadcast } from "../ws.js";
@@ -57,6 +57,14 @@ export const messagesRouter = Router();
 messagesRouter.post("/messages", (req: Request, res: Response) => {
     const v = validateNewMessage(req.body);
     if ("error" in v) return badRequest(res, v.error);
+    // #830 — decision-event kinds (plan_accepted / plan_rejected / …) are
+    // emitted server-side by the /decide handler ONLY. External callers
+    // can't fabricate them: a real accept/reject must flow through the
+    // decision validation pipeline (gates by-status, applies the meta
+    // flip atomically). Reject any direct POST with one of these kinds.
+    if (isDecisionEventKind(v.kind)) {
+        return badRequest(res, `kind ${v.kind} is server-emitted only — use POST /messages/:id/decide to accept/reject a decision`);
+    }
     // #595 — auto-fill by_agent from the auth context when the caller omits
     // it. The bulk-close UI in App.vue calls POST /messages without by_agent
     // and `submitMessage` then can't run `assertCloseAuthority` properly
@@ -415,6 +423,45 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
         // reject/reclassify) → emit so #322's rules can react (e.g. re-attribute
         // when a plan is accepted). The `meta.decision` carries the new state.
         emitLifecycle({ op: "decided", message: decorated });
+        // #830 david `a7pn65` — emit a dedicated decision-event message so
+        // the wake-injection pipeline can route it through its own template
+        // branch (= the agent receives "Your plan on #X was accepted by Y"
+        // verbatim instead of re-pulling the original proposal body with no
+        // verbal hint). The new event is a sibling of the original comment
+        // (parent_id = original.id) carrying its hashid in meta.decision_ref.
+        // Best-effort : a failure here surfaces as a server log but doesn't
+        // fail the decide — the meta flip already landed, the rest is just
+        // narration.
+        if (updated.meta && updated.ticket_id != null) {
+            try {
+                const m = JSON.parse(updated.meta) as { decision?: { kind?: string } };
+                const decisionKind = m.decision?.kind;
+                const eventKindStr = decisionKind && (body.status === "accepted" || body.status === "rejected")
+                    ? `${decisionKind}_${body.status}`
+                    : "";
+                if (eventKindStr && isDecisionEventKind(eventKindStr)) {
+                    // parent_id = the original proposal's message id ;
+                    // the wake builder + UI resolve the backlink (e.g.
+                    // hashid display) via getMessage(parent_id) — no
+                    // need to duplicate the ref in meta here.
+                    // Cast safe : isDecisionEventKind narrowing isn't a
+                    // type guard on the string union ; the runtime check
+                    // makes the cast sound.
+                    submitMessage({
+                        project: updated.project,
+                        kind: eventKindStr as MessageKind,
+                        ticket_id: updated.ticket_id,
+                        parent_id: updated.id,
+                        body: null,
+                        by_agent: by,
+                    });
+                }
+            } catch {
+                /* malformed meta or decision-event insert failed — don't
+                   fail the decide ; the proposal status flip is the
+                   authoritative signal, the event is decoration. */
+            }
+        }
         // #802 — `wontfix` accepted auto-closes the ticket WITHOUT flipping
         // resolved (junk/test/out-of-scope triage). The author of the
         // wontfix comment cannot close (they're typically a non-reporter

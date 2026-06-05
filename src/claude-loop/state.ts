@@ -1595,6 +1595,12 @@ export async function buildContextPhrase(
                     body?: string | null;
                     intent?: Intent | null;
                     meta?: string | null;
+                    // #830 — narrowed shape carries by_agent + parent_message_id
+                    // so the wake builder can route decision-event heads to
+                    // their dedicated template branch (by_agent = decider,
+                    // parent_message_id = original proposal id → hashid).
+                    by_agent?: string | null;
+                    parent_message_id?: number | null;
                 }>;
             }>).catch(() => ({ messages: [] })),
             // #397: this loop's own consumer row → its micro_prompt, exposed as
@@ -1722,17 +1728,54 @@ export async function buildContextPhrase(
             ticket_resolved: "resolved",
             ticket_reopened: "reopened",
         };
+        // #830 david `a7pn65` — decision events get their own wake branch
+        // so the agent's prompt explicitly carries "Your plan on #X was
+        // accepted by david" instead of re-pulling the original proposal
+        // body unchanged. Each kind maps to a dedicated phrase prefix ;
+        // the wake template's `head_decision_event` branch renders the
+        // full sentence around it.
+        const DECISION_EVENT_VERBS: Record<string, string> = {
+            plan_accepted: "Your plan was ACCEPTED",
+            plan_rejected: "Your plan was REJECTED",
+            resolution_accepted: "Your resolution was ACCEPTED",
+            resolution_rejected: "Your resolution was REJECTED",
+            wontfix_accepted: "Your wontfix was ACCEPTED",
+            wontfix_rejected: "Your wontfix was REJECTED",
+            escalation_accepted: "Your escalation was ACCEPTED",
+            escalation_rejected: "Your escalation was REJECTED",
+        };
         const unreadKind = unreadHead?.kind ?? "";
         if (unreadKind && LIFECYCLE_VERBS[unreadKind]) {
             headLifecycleVerb = LIFECYCLE_VERBS[unreadKind];
         }
+        // Resolve the decision-event phrase + decider when the unread
+        // head is one of the 8 new kinds. Empty string when not.
+        let headDecisionEvent = "";
+        let headDecisionDecider = "";
+        let headDecisionRefHashid = "";
+        if (unreadKind && DECISION_EVENT_VERBS[unreadKind]) {
+            headDecisionEvent = DECISION_EVENT_VERBS[unreadKind];
+            headDecisionDecider = unreadHead?.by_agent ?? "";
+            // Look up the original proposal hashid via the parent_id link
+            // so the agent can navigate back to its own comment.
+            const parentId = unreadHead?.parent_message_id ?? null;
+            if (parentId && typeof parentId === "number") {
+                try {
+                    const parent = await client.getMessage(parentId) as { hashid?: string | null };
+                    if (typeof parent.hashid === "string" && parent.hashid) {
+                        headDecisionRefHashid = parent.hashid;
+                    }
+                } catch { /* best-effort */ }
+            }
+        }
         if (unreadHead && head?.id) {
             const isTicketRoot = unreadKind === "ticket_created";
             const isLifecycle = !!LIFECYCLE_VERBS[unreadKind];
-            if (!isTicketRoot && !isLifecycle && typeof unreadHead.hashid === "string") {
+            const isDecisionEvent = !!DECISION_EVENT_VERBS[unreadKind];
+            if (!isTicketRoot && !isLifecycle && !isDecisionEvent && typeof unreadHead.hashid === "string") {
                 headCommentHashid = unreadHead.hashid;
             }
-            if (!isTicketRoot && !isLifecycle && typeof unreadHead.body === "string" && unreadHead.body) {
+            if (!isTicketRoot && !isLifecycle && !isDecisionEvent && typeof unreadHead.body === "string" && unreadHead.body) {
                 headBody = stripMarkdown(unreadHead.body);
             }
             // Title lookup for comment heads (the unread row doesn't carry
@@ -1841,14 +1884,21 @@ export async function buildContextPhrase(
             // head_lifecycle = the verb (closed / resolved / reopened)
             // when the FIFO head is a lifecycle event; "" otherwise.
             head_lifecycle: headLifecycleVerb,
-            // no_head = "1" when none of the four head branches fire
-            // (comment, new ticket, lifecycle, backlog). The template
-            // grammar lacks an else-empty operator so the inversion lives
-            // here.
-            no_head: (!headCommentHashid && head?.kind !== "new ticket" && !headLifecycleVerb && !backlogMode) ? "1" : "",
+            // no_head = "1" when none of the five head branches fire
+            // (comment, new ticket, lifecycle, decision-event, backlog).
+            // The template grammar lacks an else-empty operator so the
+            // inversion lives here.
+            no_head: (!headCommentHashid && head?.kind !== "new ticket" && !headLifecycleVerb && !headDecisionEvent && !backlogMode) ? "1" : "",
             backlog_mode: backlogMode,
             head_comment_hashid: headCommentHashid,
             head_body: headBody,
+            // #830 — decision event branch vars. head_decision_event is the
+            // pre-formatted phrase ("Your plan was ACCEPTED" etc.) ; the
+            // wake template wraps it with the ticket ref + decider + the
+            // original proposal hashid for navigation.
+            head_decision_event: headDecisionEvent,
+            head_decision_decider: headDecisionDecider,
+            head_decision_ref_hashid: headDecisionRefHashid,
             project_scope: scope,
             // #397: {consumer_prompt} = this consumer's micro-prompt (opt-in;
             // empty → renders to nothing). David puts the placeholder in his
@@ -1859,10 +1909,13 @@ export async function buildContextPhrase(
             promptMap,
             "wake_master",
             vars,
-            // Unified FIFO-pop wake. Five mutually exclusive branches:
+            // Unified FIFO-pop wake. Six mutually exclusive branches:
             //   comment    →  body + refs only
             //   new ticket →  "new ticket #ID: TITLE"
             //   lifecycle  →  "#ID VERB: TITLE"   (closed / resolved / reopened)
+            //   decision   →  "Your <kind> was <verb> on #ID: TITLE by X (#hashid)"
+            //                  (#830 david `a7pn65` — 8 kinds, plan/resolution/
+            //                  wontfix/escalation × accepted/rejected)
             //   backlog    →  culture + "look #ID: TITLE. Triage the ticket."
             //   idle       →  culture  (#825 david : `{lead}` retiré — il
             //                  rendait "Wake up, Neo. quick note:" avec
@@ -1871,6 +1924,7 @@ export async function buildContextPhrase(
             "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}"
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}"
+            + "{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}}"
             + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}"
             + "{no_head:+{culture}}",
             tone,
@@ -1887,7 +1941,7 @@ export async function buildContextPhrase(
         // (FIFO comment, lifecycle, new ticket, or backlog). When false
         // the phrase is just the idle culture+lead — drain-style wake
         // reasons skip on it.
-        const hasContent = !!(headCommentHashid || headLifecycleVerb || head?.kind === "new ticket" || backlogMode);
+        const hasContent = !!(headCommentHashid || headLifecycleVerb || headDecisionEvent || head?.kind === "new ticket" || backlogMode);
         // #786 — surface the backlog-branch ticket id so the inject site
         // can start the per-consumer cooldown clock. Only when the
         // backlog branch actually fired (not on FIFO / lifecycle).

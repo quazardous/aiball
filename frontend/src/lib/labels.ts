@@ -169,6 +169,16 @@ export const KIND_LABELS: Record<MessageKind, string> = {
     ticket_sub_added: "sub-ticket",
     ticket_referenced: "reference",
     ticket_relation: "relation",
+    // #830 — decision-event kinds (8). Renderer treats them as
+    // lifecycle-style chips (no body, just the verb).
+    plan_accepted: "plan accepted",
+    plan_rejected: "plan rejected",
+    resolution_accepted: "resolution accepted",
+    resolution_rejected: "resolution rejected",
+    wontfix_accepted: "wontfix accepted",
+    wontfix_rejected: "wontfix rejected",
+    escalation_accepted: "escalation accepted",
+    escalation_rejected: "escalation rejected",
 };
 
 export const KIND_ICONS: Record<MessageKind, string> = {
@@ -181,6 +191,16 @@ export const KIND_ICONS: Record<MessageKind, string> = {
     ticket_sub_added: "pi pi-sitemap",
     ticket_referenced: "pi pi-link",
     ticket_relation: "pi pi-share-alt",
+    // #830 — accepted = check, rejected = times. Kind family read via
+    // the label (plan / resolution / wontfix / escalation).
+    plan_accepted: "pi pi-check",
+    plan_rejected: "pi pi-times",
+    resolution_accepted: "pi pi-check",
+    resolution_rejected: "pi pi-times",
+    wontfix_accepted: "pi pi-check",
+    wontfix_rejected: "pi pi-times",
+    escalation_accepted: "pi pi-check",
+    escalation_rejected: "pi pi-times",
 };
 
 export const INTENT_SEVERITY: Record<Intent, Severity> = {

@@ -234,7 +234,7 @@ async function copyRef() {
 interface LifecycleLabel {
     icon: string;
     verb: string;
-    severity: "success" | "warn" | "info" | "secondary";
+    severity: "success" | "warn" | "info" | "secondary" | "danger";
     /** When set, render the `source_ticket_id` of the message as a
      *  clickable ref after the verb. */
     showSource?: boolean;
@@ -247,6 +247,17 @@ const LIFECYCLE_LABELS: Record<string, LifecycleLabel> = {
     ticket_blocked: { icon: "pi pi-ban", verb: "flagged this ticket TBD (handing back to a human)", severity: "warn" },
     ticket_sub_added: { icon: "pi pi-sitemap", verb: "added sub-ticket", severity: "info", showSource: true },
     ticket_referenced: { icon: "pi pi-link", verb: "referenced this ticket from", severity: "secondary", showSource: true },
+    // #830 — decision events render as lifecycle-style chips (no body).
+    // Verb names the action ("accepted X's plan") so the thread audit
+    // reads naturally without re-fetching the original proposal.
+    plan_accepted: { icon: "pi pi-check", verb: "accepted the plan", severity: "success" },
+    plan_rejected: { icon: "pi pi-times", verb: "rejected the plan", severity: "danger" },
+    resolution_accepted: { icon: "pi pi-check", verb: "accepted the resolution", severity: "success" },
+    resolution_rejected: { icon: "pi pi-times", verb: "rejected the resolution", severity: "danger" },
+    wontfix_accepted: { icon: "pi pi-check", verb: "accepted the wontfix", severity: "success" },
+    wontfix_rejected: { icon: "pi pi-times", verb: "rejected the wontfix", severity: "danger" },
+    escalation_accepted: { icon: "pi pi-check", verb: "accepted the escalation (action done)", severity: "success" },
+    escalation_rejected: { icon: "pi pi-times", verb: "rejected the escalation", severity: "danger" },
 };
 
 // Body edit (per #B.94). Toggle reveals a textarea seeded with the

@@ -29,6 +29,22 @@ export const MESSAGE_KINDS = [
     // in meta.relation.kind). Lifecycle replay treats these as N-N graph
     // edges, NOT as comments — see src/relations.ts.
     "ticket_relation",
+    // #830 david `a7pn65` — dedicated event kinds for the 4 decision verbs
+    // (plan / resolution / wontfix / escalation) × the 2 terminal transitions
+    // (accepted / rejected). Replaces the previous "no dedicated event" path
+    // where the reporter's accept/reject only flipped meta.decision.status on
+    // the original comment, leaving the agent's wake injecting the unchanged
+    // proposal body with no verbal hint of the transition. Each event is
+    // inserted by the /decide handler AFTER applyDecision succeeds; meta
+    // carries `decision_ref: <original.hashid>` so the wake/UI can backlink.
+    "plan_accepted",
+    "plan_rejected",
+    "resolution_accepted",
+    "resolution_rejected",
+    "wontfix_accepted",
+    "wontfix_rejected",
+    "escalation_accepted",
+    "escalation_rejected",
 ] as const;
 export type MessageKind = typeof MESSAGE_KINDS[number];
 

@@ -120,13 +120,17 @@ prompts:
   # #825 david — `wake_lead` retired : it only fed the no_head branch which
   # rendered "Wake up, Neo. quick note:" with a dangling colon. The no_head
   # cultural ping now uses `{culture}` alone (one of ping_messages above).
+  # #830 david — added `{head_decision_event}` branch for the 8 decision
+  # event kinds (plan/resolution/wontfix/escalation × accepted/rejected) ;
+  # the agent's wake now says "Your plan was ACCEPTED on #X: TITLE by Y
+  # (#hashid)" instead of re-pulling the unchanged original proposal body.
   wake_master:
     directive:
-      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture}}"
+      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture}}"
     hint:
-      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture}}"
+      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture}}"
     imperative:
-      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture}}"
+      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{head_decision_event:+{head_decision_event} on #{head_id}{head_title:+: {head_title}}{head_decision_decider:+ by {head_decision_decider}}{head_decision_ref_hashid:+ (#{head_decision_ref_hashid})}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture}}"
 
   # #428: built-in gate messages. Rendered (tone-aware) when the gate triggers;
   # the detector fills placeholders like {count}. The triggered message is

@@ -17,6 +17,16 @@ export const MESSAGE_KINDS = [
     "ticket_sub_added",
     "ticket_referenced",
     "ticket_relation",
+    // #830 — dedicated event kinds for decision verbs (kept in sync
+    // with src/domain.ts). Server-emitted by /decide handler.
+    "plan_accepted",
+    "plan_rejected",
+    "resolution_accepted",
+    "resolution_rejected",
+    "wontfix_accepted",
+    "wontfix_rejected",
+    "escalation_accepted",
+    "escalation_rejected",
 ] as const;
 export type MessageKind = typeof MESSAGE_KINDS[number];
 
