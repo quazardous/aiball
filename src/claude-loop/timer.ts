@@ -907,6 +907,21 @@ async function mainSse(): Promise<void> {
             log("settleBoot skipped — boot-complete already signalled by session-start-hook");
             return;
         }
+        // #822 david — when the safety cap fires while a legitimate boot
+        // stretch is still up (picker session/mode, resuming transient, or
+        // first /compact mid-resume), DON'T force-exit : the user is just
+        // reading the picker / waiting for the compact. Defer the cap by
+        // another BOOT_GRACE_MS and let the stretch clear on its own. The
+        // cap remains a real safety net for the degenerate cases (claude
+        // hung mid-boot, hook crashed, etc.) — those have no stretch
+        // pending so the existing force-exit path runs.
+        const cur = readLoopStateInput(sd!);
+        if (cur.resumePickerActive || cur.paneCompacting || !cur.paneReady) {
+            log(`settleBoot deferred — stretch active (picker=${cur.resumePickerActive}, compacting=${cur.paneCompacting}, !paneReady=${!cur.paneReady})`);
+            bootSettled = false; // re-arm so the next tick can fire properly
+            setTimeout(() => { void settleBoot(); }, BOOT_GRACE_MS);
+            return;
+        }
         log("boot grace elapsed (safety cap) — settling to idle/busy via check");
         // Hook never fired (--resume aborted, picker stuck past 5 min,
         // hook crashed). Drive the transition ourselves : sign boot-complete
