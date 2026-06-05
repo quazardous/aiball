@@ -72,7 +72,6 @@ import {
     pingsPath,
     readBusyDefer,
     recordOpenWakeHash,
-    readLastOpenWakeHash,
     readDrainedState,
     writeDrainedState,
     setTmuxStatus,
@@ -729,24 +728,18 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // signal, not the phrase. The bypass for triggered gates lives
     // inside ContextPhraseResult.hasContent.
     if (!hasContent && !manualWake && !panicMode) {
-        // #813 2nnuq6 david — "fin de ligne" : tout backlog cooled + FIFO
-        // vide. Au lieu de skip silencieux, fire un wake culturel SI le
-        // landscape STRUCTURAL a bougé depuis la dernière fois (= un ticket
-        // a opened/closed/reopened, vraie info à signaler). Le hash est
-        // structural-only (#813 cq4vvx) donc il ne bouge que sur structure.
-        if (sd && gateHash !== undefined) {
-            const seen = readLastOpenWakeHash(sd);
-            if (gateHash === seen) {
-                log(`skip wake (${reason}) — fin de ligne (no content + landscape stable since ${seen.slice(0, 7)})`);
-                return false;
-            }
-            log(`wake (${reason}) — fin de ligne but landscape moved (${seen ? seen.slice(0, 7) : "none"} → ${gateHash.slice(0, 7)}) → cultural ping`);
-            // Fall through : fire the cultural wake. recordOpenWakeHash
-            // below stamps the new hash so we don't re-fire next tick.
-        } else {
-            log(`skip wake (${reason}) — nothing actionable (idle phrase suppressed)`);
-            return false;
-        }
+        // #825 david `b63ez5` — strict binary rule : a wake fires ONLY
+        // when there's a FIFO event (comment / lifecycle / new ticket /
+        // decision event) OR a backlog tier-2 ticket. No "cultural ping"
+        // fall-through anymore — the pre-fix landscape-moved branch
+        // ("Anybody out there?") inflated the wake stream with useless
+        // pings that david called out as noise ("on a toujours ce genre
+        // de message complètement inutile. soit on a un event soit un
+        // ticket de backlog soit on skip"). #813 (the structural landscape
+        // hash that drove the cultural ping) is now only used as a dedup
+        // guard for the actionable legs, not as a wake trigger.
+        log(`skip wake (${reason}) — nothing actionable (no FIFO event, no backlog)`);
+        return false;
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
     // #831-followup — defensive : if the assembled phrase is empty for
