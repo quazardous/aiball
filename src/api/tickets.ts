@@ -57,7 +57,7 @@ import {
 } from "../db.js";
 import { computeActionableTicketIds } from "../db/projects.js";
 import { computeTicketFlags, buildTicketFlagsContext } from "../db/ticket-flags.js";
-import { listSubscriptions } from "../db/subscriptions.js";
+import { listProjectSubscribers, listSubscriptions } from "../db/subscriptions.js";
 import { isAssignmentLive, claimsToAutoRelease, pickFocusClaim } from "../db/assignment-gate.js";
 import { compareWorkOrder, computeHotFocus, type WorkOrderCtx } from "../db/work-order.js";
 import { globalConfigPath, assignWindowSec } from "../autopoll/config.js";
@@ -1221,13 +1221,22 @@ ticketsRouter.post("/tickets/:id/relations", (req: Request, res: Response) => {
     // other (e.g. file your own ticket as child_of someone else's). Human
     // moderators bypass entirely; the UI is human-driven, so this doesn't
     // change its behaviour.
+    // #820 david `39nh52` : project-owner of EITHER project also passes.
+    // Le owner d'un projet voit tout, doit pouvoir lier ses tickets aux
+    // tickets cross-projet sans demander à david de poser à la main.
+    // Relation reste informative ; abus → l'autre end peut delete via la
+    // route DELETE existante.
+    const callerIsProjectOwner =
+        listProjectSubscribers(t.project, { roles: ["owner"] }).includes(caller)
+        || listProjectSubscribers(targetTicket.project, { roles: ["owner"] }).includes(caller);
     if (
         !isHuman(caller) &&
         t.by_agent !== caller &&
-        targetTicket.by_agent !== caller
+        targetTicket.by_agent !== caller &&
+        !callerIsProjectOwner
     ) {
         return res.status(403).json({
-            error: `only a registered human moderator or the reporter of #${id} (${t.by_agent}) / #${target} (${targetTicket.by_agent}) can relate them`,
+            error: `only a registered human moderator, the reporter of #${id} (${t.by_agent}) / #${target} (${targetTicket.by_agent}), or a project-owner of either project can relate them`,
         });
     }
     // Anti-cycle (#275): lineage (child_of/parent_of) must stay a DAG.
