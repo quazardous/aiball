@@ -466,7 +466,16 @@ async function doDelete() {
                 @click="resurfaceMessage"
                 @keydown.enter.prevent="resurfaceMessage"
                 @keydown.space.prevent="resurfaceMessage"
-            >{{ resurfaceDone ? '✓' : '🛎️' }}</span>
+            >
+                <span
+                    v-if="resurfaceDone"
+                    class="comment-resurface-done"
+                >✓</span>
+                <span
+                    v-else
+                    class="material-symbols-outlined"
+                >room_service</span>
+            </span>
             <span
                 class="comment-date-copy"
                 role="button"

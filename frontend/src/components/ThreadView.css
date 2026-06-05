@@ -359,25 +359,36 @@
 .comment-date-copy-icon {
     color: var(--p-green-500);
 }
-/* #827 — resurface bell ; discreet by default (low opacity) so it
-   doesn't compete with the date copy, full opacity on hover. */
+/* #827 — resurface bell (Google Material Symbol `room_service` per
+   david `p7gx6h`) ; discreet by default (low opacity), full on hover. */
 .comment-resurface {
     cursor: pointer;
     user-select: none;
     border-radius: 0.25rem;
-    padding: 0.1rem 0.35rem;
+    padding: 0.1rem 0.3rem;
     margin-right: 0.2rem;
     opacity: 0.45;
     transition: opacity 0.1s ease, background 0.1s ease;
     display: inline-flex;
     align-items: center;
-    font-size: 0.95em;
     line-height: 1;
 }
 .comment-resurface:hover,
 .comment-resurface:focus-visible {
     opacity: 1;
     background: var(--p-surface-100);
+}
+/* Material Symbol sizing inside the resurface chip — slightly larger
+   than the surrounding text so the bell reads at a glance, but tuned
+   down from the default 24px Material grid. */
+.comment-resurface .material-symbols-outlined {
+    font-size: 1.05rem;
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 20;
+}
+.comment-resurface-done {
+    color: var(--p-green-500);
+    font-weight: 600;
+    font-size: 0.95rem;
 }
 .pending-marker {
     color: var(--p-orange-500);
