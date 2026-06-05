@@ -103,13 +103,15 @@ test("#400 partials: partials may nest, and a cycle renders \"\" (no hang)", () 
 
 test("#400 recadré loadPromptsFromYamlBlock: accepts the tone-bucket shape", () => {
     const block = {
-        wake_lead: { directive: ["fyi:"], hint: ["btw,"] },
+        // Sample tone-bucket slot (any slot name works ; the loader is
+        // shape-agnostic). Was `wake_lead` until #825 retired that slot.
+        sample_bucket: { directive: ["fyi:"], hint: ["btw,"] },
         wake_master: { directive: "{culture}" },
         bad: { directive: 42 }, // non-string value → whole slot dropped
         plain: "kept",
     };
     const map = loadPromptsFromYamlBlock(block);
-    assert.deepEqual(map.wake_lead, { directive: ["fyi:"], hint: ["btw,"] });
+    assert.deepEqual(map.sample_bucket, { directive: ["fyi:"], hint: ["btw,"] });
     assert.deepEqual(map.wake_master, { directive: "{culture}" });
     assert.equal(map.plain, "kept");
     assert.equal("bad" in map, false);

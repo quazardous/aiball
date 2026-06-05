@@ -1827,7 +1827,6 @@ export async function buildContextPhrase(
             ? "1" : "";
         const vars = {
             culture,
-            lead: renderSlot(promptMap, "wake_lead", {}, "fyi:", tone),
             ping_count: pingCount || "",
             open_count: openCount || "",
             // #428: a blocking gate hides the claim directive ("don't take new work").
@@ -1865,12 +1864,15 @@ export async function buildContextPhrase(
             //   new ticket →  "new ticket #ID: TITLE"
             //   lifecycle  →  "#ID VERB: TITLE"   (closed / resolved / reopened)
             //   backlog    →  culture + "look #ID: TITLE. Triage the ticket."
-            //   idle       →  culture + lead
+            //   idle       →  culture  (#825 david : `{lead}` retiré — il
+            //                  rendait "Wake up, Neo. quick note:" avec
+            //                  un `:` orphelin. Le culture suffit pour le
+            //                  fin-de-ligne cultural ping.)
             "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}"
             + "{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}"
             + "{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}"
             + "{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}"
-            + "{no_head:+{culture} {lead}}",
+            + "{no_head:+{culture}}",
             tone,
         );
         // #428: prepend the triggered-gate banner. Built-in messages render via

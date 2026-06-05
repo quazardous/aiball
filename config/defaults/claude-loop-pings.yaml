@@ -90,7 +90,6 @@ wake_phrases:
 #
 # Vars exposed to `wake_master` (counts are "" when zero, so {count:+…} drops):
 #   {culture}          random phrase from ping_messages above
-#   {lead}             rendered wake_lead (for the chosen tone)
 #   {ping_count}       unread aiball ping count
 #   {open_count}       open ticket count
 #   {actionable_count} tickets in your court (#374)
@@ -110,20 +109,6 @@ wake_phrases:
 #                      whether to claim.
 #   {project_scope}    "`<project>`" or "your scope"
 prompts:
-  # Conversational lead — per-tone buckets, round-robin within each.
-  wake_lead:
-    directive:
-      - "fyi:"
-      - "heads up —"
-      - "quick note:"
-    hint:
-      - "btw,"
-      - "fyi,"
-      - "just so you know,"
-    imperative:
-      - "**heads up**:"
-      - "**ACTION**:"
-
   # The whole wake-CTA in one template. Each {x:+…} block renders only when x
   # is set — so pings/engage/open appear exactly when relevant, no branching in
   # code. #371: the engage block NAMES the work-order head (#{head_id}). Per-tone
@@ -132,13 +117,16 @@ prompts:
   # "engage". "Engage!" stays exclusively a human-typed greenlight catchphrase
   # ("execute the proposal pending"), unambiguous because it never appears in
   # the wake template. The verb matches the tool name `ticket_claim()`.
+  # #825 david — `wake_lead` retired : it only fed the no_head branch which
+  # rendered "Wake up, Neo. quick note:" with a dangling colon. The no_head
+  # cultural ping now uses `{culture}` alone (one of ping_messages above).
   wake_master:
     directive:
-      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture} {lead}}"
+      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture}}"
     hint:
-      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture} {lead}}"
+      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture}}"
     imperative:
-      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture} {lead}}"
+      - "{head_comment_hashid:+{head_body:+{head_body} }(#{head_id} / #{head_comment_hashid})}{head_kind:+new ticket #{head_id}{head_title:+: {head_title}}}{head_lifecycle:+#{head_id} {head_lifecycle}{head_title:+: {head_title}}}{backlog_mode:+{culture} look #{head_id}{head_title:+: {head_title}}. Triage the ticket.}{no_head:+{culture}}"
 
   # #428: built-in gate messages. Rendered (tone-aware) when the gate triggers;
   # the detector fills placeholders like {count}. The triggered message is
