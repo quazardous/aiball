@@ -5,6 +5,7 @@ import { promoteTrigger } from "../lib/prefs";
 import { extractQuestions } from "../lib/questions";
 import { markedInstance } from "../lib/formatting";
 import { BUILT_IN_BODY_DECORATORS, renderBody } from "../lib/body-decorators";
+import { wireAttachmentCards } from "../lib/attachment-card";
 
 /**
  * `messageId` + `questionsClickable` opt the body into the #B.104
@@ -256,6 +257,17 @@ async function onCopyClick(ev: Event) {
     }, 1500);
 }
 
+// #723 — after every render, walk the DOM for `/uploads/…` links and
+// swap each one for an AttachmentCard (DL button + collapsible inline
+// preview when previewable). Same post-render style as wireCopyButtons.
+function wireAttachments() {
+    const root = rootRef.value;
+    if (!root) return;
+    wireAttachmentCards(root, {
+        renderMarkdown: (md) => markedInstance.value.parse(md, { async: false }) as string,
+    });
+}
+
 // `immediate: true` so the very first render also wires clicks —
 // `watch` without it only fires on subsequent changes, which means a
 // freshly mounted MarkdownView would leave its checkboxes inert until
@@ -263,6 +275,7 @@ async function onCopyClick(ev: Event) {
 watch(html, () => {
     void wireQuestionClicks();
     void wireCopyButtons();
+    wireAttachments();
 }, { flush: "post", immediate: true });
 </script>
 
@@ -433,5 +446,70 @@ watch(html, () => {
 .md-body .upstream-ref--github {
     background: color-mix(in srgb, #6e7681 18%, transparent);
     color: #1f2328;
+}
+/* #723 — AttachmentCard : compact row (icon + name + size + DL +
+   optional preview toggle) with a collapsible preview body below for
+   text/code/markdown uploads. DL-only for binaries. */
+.md-body .aiball-attachment {
+    display: block;
+    margin: 0.6em 0;
+    padding: 0.45em 0.7em;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.35rem;
+    background: var(--p-surface-50, color-mix(in srgb, var(--p-surface-100) 50%, transparent));
+    font-size: 0.92em;
+}
+.md-body .aiball-attachment__row {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    flex-wrap: wrap;
+}
+.md-body .aiball-attachment__icon { flex: 0 0 auto; opacity: 0.7; }
+.md-body .aiball-attachment__name {
+    font-weight: 500;
+    word-break: break-all;
+}
+.md-body .aiball-attachment__size {
+    color: var(--p-text-muted-color);
+    font-size: 0.85em;
+}
+.md-body .aiball-attachment__dl,
+.md-body .aiball-attachment__toggle {
+    margin-left: auto;
+    padding: 0.15em 0.55em;
+    font: inherit;
+    font-size: 0.85em;
+    line-height: 1.2;
+    background: var(--p-surface-0, #fff);
+    color: var(--p-text-color);
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.25rem;
+    cursor: pointer;
+    text-decoration: none;
+}
+.md-body .aiball-attachment__dl + .aiball-attachment__toggle { margin-left: 0; }
+.md-body .aiball-attachment__dl:hover,
+.md-body .aiball-attachment__toggle:hover,
+.md-body .aiball-attachment__toggle:focus-visible {
+    color: var(--p-primary-color);
+    border-color: var(--p-primary-color);
+}
+.md-body .aiball-attachment__preview {
+    margin-top: 0.5em;
+    padding-top: 0.45em;
+    border-top: 1px dashed var(--p-content-border-color);
+}
+.md-body .aiball-attachment__code {
+    margin: 0;
+    max-height: 24em;
+    overflow: auto;
+}
+.md-body .aiball-attachment__md > :first-child { margin-top: 0; }
+.md-body .aiball-attachment__truncated {
+    margin-top: 0.3em;
+    color: var(--p-text-muted-color);
+    font-size: 0.82em;
+    font-style: italic;
 }
 </style>
