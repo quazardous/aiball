@@ -57,10 +57,24 @@ export interface LoopStateInput {
     /** TTL for the human-typing marker in ms (typically 5_000). */
     humanTypingTtlMs: number;
 
-    /** AFK file mode + auto-release expiry. `expiryMs` is meaningful only
-     *  in `wait_10m` ; ignored for `off` and `wait_inf`. */
+    /** AFK file mode + auto-release expiry — COMMITTED value only (= the
+     *  state-machine truth). `expiryMs` is meaningful only in `wait_10m` ;
+     *  ignored for `off` and `wait_inf`. Bar word, AFK SM, wake gate and
+     *  countdown all consume these two — they stay stable during the 3s
+     *  debounce window so an F9 cycle under 3s is a no-op for the SM. */
     afkMode: AfkMode;
     afkExpiryMs: number | null;
+    /** #751 7zqhr5 — display-only AFK state for the bar's right-side chip
+     *  (`5m NOT AFK` / `∞ NOT AFK` / `AFK`). Mirrors `afkMode`/`afkExpiryMs`
+     *  EXCEPT during the 3s debounce window where it reflects the pending
+     *  toggle so the user gets instant visual feedback while the SM stays
+     *  on the committed value. Only `bar-render.ts:renderAfkChunk` is
+     *  allowed to consume these — gating code MUST use `afkMode`.
+     *  Optional : callers that hand-craft a LoopStateInput (yaml-scenarios
+     *  fixtures, older tests) can leave these unset ; `renderAfkChunk`
+     *  falls back to `afkMode`/`afkExpiryMs` in that case. */
+    afkModeDisplay?: AfkMode;
+    afkExpiryMsDisplay?: number | null;
 
     /** mtime of `idle-since` marker (ms-since-epoch), or null. */
     idleSinceMs: number | null;

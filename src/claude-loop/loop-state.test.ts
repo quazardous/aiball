@@ -62,6 +62,15 @@ function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
         inputHotTtlMs: 3 * SEC,
         manualWake: false,
         ...overrides,
+        // #751 7zqhr5 — auto-mirror : when a test sets afkMode in
+        // overrides without afkModeDisplay, surface the same value on the
+        // display side so renderAfkChunk paints what the test expects.
+        // Same for the expiry. Optional display fields, so tests can also
+        // leave them undefined and the renderer falls back to committed.
+        afkModeDisplay: overrides.afkModeDisplay ?? overrides.afkMode ?? "off",
+        afkExpiryMsDisplay: overrides.afkExpiryMsDisplay !== undefined
+            ? overrides.afkExpiryMsDisplay
+            : (overrides.afkExpiryMs !== undefined ? overrides.afkExpiryMs : null),
     };
 }
 
