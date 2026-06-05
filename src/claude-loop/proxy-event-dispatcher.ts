@@ -25,7 +25,7 @@ import {
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
-import { getIpcState, setIpcLastOpenWakeCount, setIpcLastWakeAtMs, setIpcWakeRequested } from "./ipc-state.js";
+import { getIpcState, setIpcLastWakeAtMs, setIpcWakeRequested } from "./ipc-state.js";
 import { WAKE_IN_FLIGHT_TTL_MS } from "./state.js";
 import { getHookService, type HookEvent } from "./hook-service.js";
 
@@ -35,7 +35,7 @@ export type DispatchVerdict =
     | { kind: "typing-armed" }
     | { kind: "typing-skipped-boot" }
     | { kind: "afk-toggled"; nextMode: "off" | "wait_10m" | "wait_inf" }
-    | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" | "set_last_open_wake_count" | "set_last_wake_at" | "set_wake_requested" }
+    | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" | "set_last_wake_at" | "set_wake_requested" }
     | { kind: "afk-service-set"; mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null }
     | { kind: "hook-event"; hookEvent: HookEvent }
     | { kind: "unknown"; raw: string }
@@ -103,18 +103,6 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             if (name === "clear_afk") {
                 clearAfkViaService(sd);
                 return { kind: "afk-service-set", mode: "off", expiryMs: null };
-            }
-            // V4 Phase 2 — the stop-hook subprocess pushes the new
-            // `last-open-wake-count` watermark via this marker so the
-            // timer's in-memory IpcState reflects the cross-process
-            // update without ever round-tripping through a file.
-            if (name === "set_last_open_wake_count") {
-                const count = typeof event.count === "number" ? event.count : NaN;
-                if (!Number.isFinite(count) || count < 0) {
-                    return { kind: "unknown", raw: `marker:set_last_open_wake_count (bad count ${String(event.count)})` };
-                }
-                setIpcLastOpenWakeCount(Math.max(0, Math.floor(count)));
-                return { kind: "marker-touched", name };
             }
             // V4 Phase 3 — wake-at timestamp pushed from the stop-hook
             // subprocess so the timer's in-memory shadow stays current.

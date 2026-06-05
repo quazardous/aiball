@@ -16,7 +16,6 @@ import {
     getIpcState,
     setIpcDrainedState,
     setIpcHumanTypingAtMs,
-    setIpcLastOpenWakeCount,
     setIpcLastOpenWakeHash,
     setIpcLastWakeHint,
     setIpcPaneBusy,
@@ -449,63 +448,23 @@ export function dedupeWakeInjection(
 }
 
 /**
- * Session-volatile watermark for the open-tickets wake gate (#B.232
- * david ch887f: "il faut un mécanisme pour les ack et qu'ils ne
- * reviennent plus pour cette session si c'est du bruit, mémoire
- * volatile au daemon par exemple"). Stores the open-ticket count that
- * was already mentioned in a wake CTA in this loop session. The gate
- * fires on open tickets only when the current count EXCEEDS this
- * watermark (i.e. a NEW ticket landed since the last time claude was
- * pinged about open work) — drained pings still wake unconditionally.
+ * #379 / #813 — set-aware dedup watermark for the actionable wake leg.
+ * The legacy count watermark (`last-open-wake-count` + `recordOpenWakeCount`
+ * + `readLastOpenWakeCount`) was retired in #814 (spinoff of #813) : the
+ * landscape hash is the sole survivor and its only remaining job is the
+ * fin-de-ligne cultural-wake suppression in `timer.ts:tryWake` (#813
+ * `2nnuq6`). The count missed SWAPS (a ticket leaves my court while another
+ * enters → count constant → no re-wake → the new actionable ticket never
+ * surfaced) ; the hash changes on any set churn, so the same N idle tickets
+ * stay deduped but a genuine change re-wakes.
  *
- * Lifetime = the state dir. `claude-loop rm` wipes it; restart of the
- * same loop name keeps it (which matches david's intent: if you saw
- * the same N tickets last session, don't re-fire on the next).
- */
-/** V4 Phase 2 — read the watermark from the in-memory `IpcState`.
- *  Returns 0 when no signal has landed yet (treat as "never woken"). */
-export function readLastOpenWakeCount(_sd: string): number {
-    return getIpcState().lastOpenWakeCount ?? 0;
-}
-
-/** V4 Phase 2 — persist the watermark. Mutates the local in-memory
- *  state immediately AND emits a marker event on `loop.sock` so the
- *  timer process picks it up when this helper runs in a hook
- *  subprocess (the in-memory mutation is otherwise process-local).
- *  The timer's own calls to this helper round-trip the emit through
- *  the dispatcher — same `setIpcLastOpenWakeCount` happens twice,
- *  idempotent. */
-export function recordOpenWakeCount(sd: string, count: number): void {
-    const clamped = Math.max(0, Math.floor(count));
-    setIpcLastOpenWakeCount(clamped);
-    void sendEventOnce(loopSockPath(sd), {
-        kind: "proxyEvent",
-        data: { event: "marker", name: "set_last_open_wake_count", count: clamped, now_ms: Date.now() },
-    }, { timeoutMs: 200 });
-    try {
-        // Legacy back-compat write deferred to V5 (so `cli inspect` keeps
-        // showing the watermark today). Drop in V5.
-        writeFileSync(join(sd, "last-open-wake-count"), `${clamped}\n`);
-    } catch { /* gate fails-open next tick, not fatal */ }
-}
-
-/**
- * #379: set-aware dedup watermark for the actionable wake leg. Replaces the
- * count watermark (`last-open-wake-count`) with the `landscape_hash` — the
- * count missed SWAPS (a ticket leaves my court while another enters → count
- * constant → no re-wake → the new actionable ticket never surfaced). The hash
- * changes on any set churn, so the same N idle tickets stay deduped but a
- * genuine change re-wakes. Falls back to the count path when the daemon doesn't
- * supply a hash (old version). Lifetime = the state dir (same as the count).
- */
-/**
  * V4 Phase 1 — `last-open-wake-hash`, `drained-state`, `last-wake-hint`
- * are pure timer-only state (no cross-process writers) and now live in
- * the in-memory `IpcState` instead of marker files. The `sd` parameter
- * is kept on each helper for API stability but ignored. Restart-loss
- * is the documented trade-off : a fresh timer respawn resets the
- * watermarks, which can let one stale wake fire ; cheap vs the marker
- * complexity it replaces.
+ * are pure timer-only state (no cross-process writers) and live in the
+ * in-memory `IpcState` instead of marker files. The `sd` parameter is
+ * kept on each helper for API stability but ignored. Restart-loss is
+ * the documented trade-off : a fresh timer respawn resets the watermarks,
+ * which can let one stale wake fire ; cheap vs the marker complexity it
+ * replaces.
  */
 
 /** Read the last landscape hash we woke on; "" when missing (→ first wake). */

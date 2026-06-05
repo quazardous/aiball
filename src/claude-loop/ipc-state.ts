@@ -59,11 +59,6 @@ export interface IpcState {
     lastOpenWakeHash: string | null;
     drainedState: import("./drained-strategy.js").DrainedState | null;
     lastWakeHint: { ticket_id?: number; comment_hashid?: string; at_ms: number } | null;
-    /** V4 Phase 2 — landscape open-count dedup watermark (#B.232). Written
-     *  by the timer in-process and by the stop-hook subprocess (via a
-     *  marker emit on `loop.sock` that the dispatcher routes back into
-     *  this field). Read by the wake gate. */
-    lastOpenWakeCount: number | null;
     /** V4 Phase 3 — phrase dedup payload (`<iso>|<hash>` format from
      *  `dedupeWakeInjection`). Shadow of `last-injected-wake` marker
      *  for the timer's in-memory dedup check. The file marker is still
@@ -117,7 +112,6 @@ const state: IpcState = {
     lastOpenWakeHash: null,
     drainedState: null,
     lastWakeHint: null,
-    lastOpenWakeCount: null,
     lastInjectedWake: null,
     lastWakeAtMs: null,
     wakeRequestedAtMs: null,
@@ -181,10 +175,6 @@ export function setIpcLastWakeHint(
     hint: { ticket_id?: number; comment_hashid?: string; at_ms: number } | null,
 ): void {
     state.lastWakeHint = hint;
-}
-
-export function setIpcLastOpenWakeCount(count: number | null): void {
-    state.lastOpenWakeCount = count;
 }
 
 export function setIpcLastInjectedWake(value: string | null): void {
@@ -251,7 +241,6 @@ export function resetIpcStateForTests(): void {
     state.lastOpenWakeHash = null;
     state.drainedState = null;
     state.lastWakeHint = null;
-    state.lastOpenWakeCount = null;
     state.lastInjectedWake = null;
     state.lastWakeAtMs = null;
     state.wakeRequestedAtMs = null;

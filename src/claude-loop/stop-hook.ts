@@ -17,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, lastWakeAtPath, pingsPath, readBusyDefer, recordOpenWakeCount, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, wakeInFlightPath, WAKE_COALESCE_WINDOW_MS } from "./state.js";
+import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, lastWakeAtPath, pingsPath, readBusyDefer, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, wakeInFlightPath, WAKE_COALESCE_WINDOW_MS } from "./state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
 import { CL_ENV } from "./env-vars.js";
@@ -283,8 +283,6 @@ function readPane(): string {
                     void phraseClient.recordBacklogWake(backlogTicketId).catch(() => {});
                 }
             });
-            // #B.232 ch887f: bump open-tickets watermark post-wake.
-            if (gate.openCount > 0) recordOpenWakeCount(sd!, gate.openCount);
             setTmuxStatus(name!, LOOP_STATUS.BUSY);
             log(`  → WAKE '${phrase}' became=busy`);
         } else {

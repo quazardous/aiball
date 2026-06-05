@@ -71,7 +71,6 @@ import {
     lastWakeAtPath,
     pingsPath,
     readBusyDefer,
-    recordOpenWakeCount,
     recordOpenWakeHash,
     readLastOpenWakeHash,
     readDrainedState,
@@ -669,7 +668,6 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             }
         }
     }
-    let gateOpenCount = 0;
     let gateHash: string | undefined;
     if (!manualWake) {
         const gate = await checkHasWork(
@@ -678,7 +676,6 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
             process.env.AIBALL_PROJECT ?? null,
             sd!,
         );
-        gateOpenCount = gate.openCount;
         gateHash = gate.landscapeHash;
         // #516 (david `r59bkm` plan B) — un consumer no_claim ne peut pas
         // prendre de tickets de la pool générale. Pour lui, l'activité ne
@@ -757,11 +754,9 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     setIpcIdleSince(null);
     await sendKeys(phrase, headMessageId, panicMode, backlogTicketId);
     // Landscape hash watermark — same set doesn't re-fire the actionable
-    // leg (set-aware dedup, replaces the count watermark). Fall back to
-    // the count watermark when the daemon supplied no hash; manual /
-    // legacy wakes leave both empty.
+    // leg (set-aware dedup). The legacy count watermark fallback was
+    // dropped in #814 — its only writer wrote a file no one read.
     if (gateHash !== undefined) recordOpenWakeHash(sd!, gateHash);
-    else if (gateOpenCount > 0) recordOpenWakeCount(sd!, gateOpenCount);
     setTmuxStatus(name!, LOOP_STATUS.BUSY);
     log(`wake (${reason}) → '${phrase}'`);
     return true;
