@@ -57,6 +57,34 @@ function bumpLastActor(
         .run();
 }
 
+/**
+ * #737 — bump a ticket's priority one notch on escalation. Idempotent at
+ * the top (urgent stays urgent). Doesn't downgrade : a ticket already at
+ * `high` or `urgent` keeps that level. Lives here (insert chokepoint) so
+ * the bump fires regardless of post-time path (MCP/UI/API) and stays in
+ * the same transaction as the comment insert.
+ *
+ *   low    → high
+ *   normal → high
+ *   high   → urgent
+ *   urgent → urgent (no-op)
+ */
+function bumpPriorityForEscalation(
+    tx: BaseSQLiteDatabase<"sync", any, typeof schema>,
+    ticketId: number,
+): void {
+    const row = tx.select({ priority: schema.tickets.priority })
+        .from(schema.tickets).where(eq(schema.tickets.id, ticketId)).get();
+    if (!row) return;
+    const cur = (row.priority ?? "normal") as Priority;
+    const next: Priority = cur === "urgent" ? "urgent" : cur === "high" ? "urgent" : "high";
+    if (next === cur) return;
+    tx.update(schema.tickets)
+        .set({ priority: next })
+        .where(eq(schema.tickets.id, ticketId))
+        .run();
+}
+
 export function insertMessage(m: NewMessage): Message {
     const db = getDb();
     return db.transaction((tx) => {
@@ -169,6 +197,15 @@ export function insertMessage(m: NewMessage): Message {
         // ticket's last actor. (Relation/sub/referenced/move events take other
         // insert paths and are structural, not actions — see TICKET_LIFECYCLE.)
         bumpLastActor(tx, m.ticket_id, m.by_agent ?? null, createdAt);
+        // #737 — escalation comment bumps the parent ticket's priority one
+        // notch (low/normal→high, high→urgent, urgent stays) so the human
+        // sees it at the top of their inbox. Idempotent if already urgent.
+        // Fires even on still-pending messages : moderation may take time,
+        // but the priority of the underlying ticket should reflect that
+        // a human action was demanded as soon as the demand was posted.
+        if (m.decision_kind === "escalation") {
+            bumpPriorityForEscalation(tx, m.ticket_id);
+        }
         // Resolve project via parent ticket for the legacy shape.
         const parent = tx.select({ project: schema.tickets.project })
             .from(schema.tickets).where(eq(schema.tickets.id, m.ticket_id)).get();

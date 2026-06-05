@@ -26,7 +26,19 @@
 // flipping `resolved` — the ticket lands in `closed` state with no
 // `resolved_by` / `resolved_at`. The acceptance side-effect lives in the
 // api/messages.ts decide handler, NOT in this pure module.
-export const DECISION_KINDS = ["plan", "resolution", "wontfix"] as const;
+// #737 — `escalation` joined the set : an agent that hits a blocker
+// requiring human action (repo admin, infra, policy decision) posts
+// `ticket_reply({then:"escalate"})`. Pending = ticket gated (the agent
+// waits) ; accept = the human did the action (ticket re-enters actionable
+// so the agent can continue any remaining work — NO auto-close, the ticket
+// is not "done", just unblocked) ; reject = the human says "not an
+// escalation" (ticket re-enters actionable, agent can re-classify).
+// Gate semantics mirror `plan` (also a "waiting on someone" signal). At-
+// insert side-effect : bumps the parent ticket's priority one notch
+// (low→high, normal→high, high→urgent, urgent stays) so the human sees
+// it at the top of their inbox. The bump lives in db/messages.ts insert
+// path, NOT in this pure module.
+export const DECISION_KINDS = ["plan", "resolution", "wontfix", "escalation"] as const;
 export type DecisionKind = typeof DECISION_KINDS[number];
 
 export const DECISION_STATUSES = ["pending", "accepted", "rejected"] as const;

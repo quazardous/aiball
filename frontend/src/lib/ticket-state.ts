@@ -64,6 +64,7 @@ export type LifecycleStage =
     | "closed-resolved"
     | "closed"
     | "resolved"
+    | "pending-escalation"
     | "pending-resolved"
     | "pending-plan"
     | "rejected-resolved"
@@ -77,6 +78,11 @@ export function lifecycleStage(r: InboxRow): LifecycleStage {
     if (isClosed(r) && isResolved(r)) return "closed-resolved";
     if (isClosed(r)) return "closed";
     if (isResolved(r)) return "resolved";
+    // #737 — pending escalation outranks resolution/plan : the agent is
+    // explicitly demanding human action, surface it FIRST so the badge
+    // wins over softer "awaiting your accept" framing. Modern, formal
+    // path that supersedes the legacy `blocked` lifecycle event.
+    if (r.pending_escalation) return "pending-escalation";
     // An agent proposed resolution but the reporter hasn't approved it
     // yet. Visually distinct from final-resolved so the reporter sees
     // there's a pending decision (#B.120).

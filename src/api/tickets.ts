@@ -371,6 +371,11 @@ ticketsRouter.get("/inbox", (req, res) => {
         // row can flag "you have a plan to accept/reject" same way it
         // flags pending resolutions. Latest-wins (matches latestPlanId).
         pendingPlan: boolean;
+        // #737 — same mechanic for ESCALATION decisions. Surfaces so the
+        // inbox row can paint a red `ESCALATED` badge demanding human
+        // attention. Latest-wins.
+        latestEscalationId: number;
+        pendingEscalation: boolean;
         // #B.132: who spoke last on this thread. Tracks the by_agent
         // of the most recent non-rejected approved comment_added.
         // Falls back to the ticket creator if no comments yet.
@@ -398,6 +403,8 @@ ticketsRouter.get("/inbox", (req, res) => {
                 latestPlanId: 0,
                 latestPlanRejected: false,
                 pendingPlan: false,
+                latestEscalationId: 0,
+                pendingEscalation: false,
                 lastSpeaker: null,
                 lastSpeakerId: 0,
             } as Agg);
@@ -468,6 +475,17 @@ ticketsRouter.get("/inbox", (req, res) => {
                     cur.latestPlanId = m.id;
                     cur.latestPlanRejected = d.status === "rejected";
                     cur.pendingPlan = d.status === "pending";
+                }
+            }
+            // #737 — escalation latest-wins, mirror of plan. No
+            // synthetic lifecycle event : accepting an escalation
+            // doesn't close (the human just acknowledges the action
+            // they performed). The inbox row's `pending_escalation`
+            // flag drives the red ESCALATED chip in the frontend.
+            if (d?.kind === "escalation") {
+                if (cur.latestEscalationId === 0 || m.id > cur.latestEscalationId) {
+                    cur.latestEscalationId = m.id;
+                    cur.pendingEscalation = d.status === "pending";
                 }
             }
         }
@@ -543,6 +561,8 @@ ticketsRouter.get("/inbox", (req, res) => {
                 latestPlanId: 0,
                 latestPlanRejected: false,
                 pendingPlan: false,
+                latestEscalationId: 0,
+                pendingEscalation: false,
                 lastSpeaker: null,
                 lastSpeakerId: 0,
             } as Agg);
@@ -591,6 +611,10 @@ ticketsRouter.get("/inbox", (req, res) => {
                 it shows pending resolutions. Cleared once the ticket
                 is closed/rejected. */
             pending_plan: agg.pendingPlan && !(agg.closed || t.status === "rejected"),
+            /** #737 — pending ESCALATION flag. Symmetric to pending_plan.
+                Drives the red ESCALATED badge on the inbox row. Cleared
+                once the ticket is closed/rejected. */
+            pending_escalation: agg.pendingEscalation && !(agg.closed || t.status === "rejected"),
             /** #656 david `2c9qm4`: true iff a pending decision exists
                 AND the decision-bearing comment IS the latest comment
                 on the thread (no newer activity past the proposal).
@@ -600,7 +624,8 @@ ticketsRouter.get("/inbox", (req, res) => {
                 decision. */
             pending_decision_is_latest: ((): boolean => {
                 if (agg.closed || t.status === "rejected") return false;
-                const pendingId = agg.pendingPlan ? agg.latestPlanId
+                const pendingId = agg.pendingEscalation ? agg.latestEscalationId
+                    : agg.pendingPlan ? agg.latestPlanId
                     : agg.pendingResolution ? agg.latestResolutionId
                     : 0;
                 return pendingId > 0 && pendingId === agg.lastSpeakerId;

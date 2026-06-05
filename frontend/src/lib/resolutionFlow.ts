@@ -234,7 +234,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
     // but it's really just a plan, accept it as a plan". When `asKind`
     // is passed AND differs from the original kind, the close side-
     // effect of resolution-accept is suppressed (we want plan ergonomics).
-    async function acceptActiveDecision(asKind?: "plan" | "resolution" | "wontfix") {
+    async function acceptActiveDecision(asKind?: "plan" | "resolution" | "wontfix" | "escalation") {
         const active = activeDecision.value;
         if (!active || !data.value) return;
         const tid = data.value.ticket.id;
@@ -269,7 +269,7 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
         }
     }
 
-    async function reclassifyActiveDecision(newKind: "plan" | "resolution" | "wontfix") {
+    async function reclassifyActiveDecision(newKind: "plan" | "resolution" | "wontfix" | "escalation") {
         const active = activeDecision.value;
         if (!active || !data.value) return;
         const tid = data.value.ticket.id;
@@ -443,6 +443,34 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
                 icon: "pi pi-compass",
                 command: () => { void acceptActiveDecision("plan"); },
             });
+        } else if (active.decision.kind === "escalation") {
+            // #737 — accepting an escalation = "I (the human) did the
+            // action you needed". Ungates the ticket so the agent can
+            // continue ; explicitly NOT a close — the ticket isn't
+            // "done", it's just unblocked. Cross-kind accepts are
+            // listed too in case the reporter wants to fold the
+            // ack into a final state (close-as-resolved, close-as-
+            // wontfix, or downgrade to plan if the ack was misframed).
+            items.push({
+                label: "accept escalation → action done, ticket continues",
+                icon: "pi pi-check-circle",
+                command: () => { void acceptActiveDecision(); },
+            });
+            items.push({
+                label: "accept as resolution → close the ticket",
+                icon: "pi pi-verified",
+                command: () => { void acceptActiveDecision("resolution"); },
+            });
+            items.push({
+                label: "accept as plan → keep the ticket open",
+                icon: "pi pi-compass",
+                command: () => { void acceptActiveDecision("plan"); },
+            });
+            items.push({
+                label: "accept as wontfix → close without resolution",
+                icon: "pi pi-ban",
+                command: () => { void acceptActiveDecision("wontfix"); },
+            });
         }
         return items;
     });
@@ -453,10 +481,11 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
     const rejectMenu: ComputedRef<MenuItem[]> = computed(() => {
         const active = activeDecision.value;
         if (!active) return [];
-        // #817 : the kind set is now {resolution, plan, wontfix}. List
-        // every OTHER kind as a reclassify option (= "actually this is
-        // not a $current, it's a $other, leave it pending").
-        const allKinds: Array<"plan" | "resolution" | "wontfix"> = ["resolution", "plan", "wontfix"];
+        // #817 : the kind set is now {resolution, plan, wontfix}. #737
+        // adds escalation. List every OTHER kind as a reclassify option
+        // (= "actually this is not a $current, it's a $other, leave it
+        // pending").
+        const allKinds: Array<"plan" | "resolution" | "wontfix" | "escalation"> = ["resolution", "plan", "wontfix", "escalation"];
         const others = allKinds.filter((k) => k !== active.decision.kind);
         const items: MenuItem[] = [
             {
