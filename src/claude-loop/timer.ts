@@ -834,18 +834,25 @@ async function mainSse(): Promise<void> {
             try {
                 // #818 y5ggkh : open + backlog scopés au projet du loop ;
                 // events restent cross-project.
+                // #800 zq4tsf+bgvd3w : `e:` est désormais la sum des
+                // `comment_count` cross-project (activity depth stable)
+                // au lieu de pingsCount().unread (qui drop à 0 au drain).
                 const backlogQuery: Record<string, string | undefined> = { backlog: "1", limit: "500" };
                 if (loopProject) backlogQuery.project = loopProject;
-                const [pingsR, projectsR, backlogR] = await Promise.allSettled([
-                    client().pingsCount() as Promise<{ unread?: number }>,
-                    client().listProjectsDetailed() as Promise<Array<{ name: string; open_count?: number }>>,
+                const [projectsR, backlogR] = await Promise.allSettled([
+                    client().listProjectsDetailed() as Promise<Array<{ name: string; open_count?: number; comment_count?: number }>>,
                     client().listTickets(backlogQuery) as Promise<unknown[]>,
                 ]);
-                const events = pingsR.status === "fulfilled" ? (pingsR.value?.unread ?? 0) : null;
-                const open = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
+                const projects = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
+                    ? projectsR.value
+                    : null;
+                const events = projects
+                    ? projects.reduce((acc, pr) => acc + (pr.comment_count ?? 0), 0)
+                    : null;
+                const open = projects
                     ? (loopProject
-                        ? (projectsR.value.find((pr) => pr.name === loopProject)?.open_count ?? 0)
-                        : projectsR.value.reduce((acc, pr) => acc + (pr.open_count ?? 0), 0))
+                        ? (projects.find((pr) => pr.name === loopProject)?.open_count ?? 0)
+                        : projects.reduce((acc, pr) => acc + (pr.open_count ?? 0), 0))
                     : null;
                 const backlog = backlogR.status === "fulfilled" && Array.isArray(backlogR.value)
                     ? backlogR.value.length
@@ -1449,27 +1456,32 @@ async function mainSse(): Promise<void> {
         // suffix like `[busy:compacting]`) and the COUNTERS segment
         // (`o:M b:B e:N`) on every heartbeat, in every state (incl boot).
         // david wants the 3 counts visible across [idle]/[boot]/[busy].
-        // Counts fetched in parallel : events (pingsCount, cross-project),
-        // open + backlog (one listProjectsDetailed call + one listTickets
-        // count). Fail-open : individual fetch errors leave that counter
-        // null (= absent from the bar segment).
+        // #800 zq4tsf+bgvd3w — `e:` is now the sum of `comment_count`
+        // cross-project (stable "activity depth") instead of the FIFO
+        // unread count (which dropped to 0 on drain and was misleading).
+        // Fail-open : individual fetch errors leave that counter null
+        // (= absent from the bar segment).
         try {
             pushViewIfChanged();
             // #818 david `y5ggkh` : open + backlog scopés au projet du loop
             // (le loop est attaché à UN projet via AIBALL_PROJECT), events
-            // restent cross-project (FIFO unread = agent scope, #800).
+            // restent cross-project (= activity-depth cross-project, #800).
             const backlogQuery: Record<string, string | undefined> = { backlog: "1", limit: "500" };
             if (loopProject) backlogQuery.project = loopProject;
-            const [pingsR, projectsR, backlogR] = await Promise.allSettled([
-                client().pingsCount() as Promise<{ unread?: number }>,
-                client().listProjectsDetailed() as Promise<Array<{ name: string; open_count?: number }>>,
+            const [projectsR, backlogR] = await Promise.allSettled([
+                client().listProjectsDetailed() as Promise<Array<{ name: string; open_count?: number; comment_count?: number }>>,
                 client().listTickets(backlogQuery) as Promise<unknown[]>,
             ]);
-            const events = pingsR.status === "fulfilled" ? (pingsR.value?.unread ?? 0) : null;
-            const open = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
+            const projects = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
+                ? projectsR.value
+                : null;
+            const events = projects
+                ? projects.reduce((acc, p) => acc + (p.comment_count ?? 0), 0)
+                : null;
+            const open = projects
                 ? (loopProject
-                    ? (projectsR.value.find((p) => p.name === loopProject)?.open_count ?? 0)
-                    : projectsR.value.reduce((acc, p) => acc + (p.open_count ?? 0), 0))
+                    ? (projects.find((p) => p.name === loopProject)?.open_count ?? 0)
+                    : projects.reduce((acc, p) => acc + (p.open_count ?? 0), 0))
                 : null;
             const backlog = backlogR.status === "fulfilled"
                 ? (Array.isArray(backlogR.value) ? backlogR.value.length : null)
