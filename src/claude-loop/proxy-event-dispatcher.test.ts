@@ -11,9 +11,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
     afkPath,
+    afkPendingPath,
     bootCompletePath,
+    commitAfkPendingIfDue,
     humanTypingPath,
     loopStartTsPath,
+    readAfkPending,
 } from "./state.js";
 import { setIpcPaneReady, resetIpcStateForTests } from "./ipc-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
@@ -60,36 +63,58 @@ test("#633F dispatch typing during boot → no arm (state.inBootGrace)", () => {
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F dispatch afk_key from off → wait_10m (toggle cycle)", () => {
+test("#633F + #751 s4grb2 dispatch afk_key from off → wait_10m (pending, then committed)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "wait_10m" });
-        // AFK file now has a 10m expiry.
+        // Debounce : the AFK file is NOT yet written ; the pending file is.
+        assert.equal(existsSync(afkPath(sd)), false, "afk file unchanged during debounce window");
+        const pending = readAfkPending(sd);
+        assert.ok(pending, "afk-pending file written");
+        assert.equal(pending!.kind, "wait_10m");
+        assert.ok(pending!.commit_at_ms > Date.now(), "commit_at_ms in the future");
+        // Backdate commit_at_ms so commit fires immediately.
+        writeFileSync(afkPendingPath(sd), JSON.stringify({ ...pending!, commit_at_ms: Date.now() - 1 }));
+        const did = commitAfkPendingIfDue(sd);
+        assert.equal(did, true);
         const content = readFileSync(afkPath(sd), "utf8").trim();
-        assert.ok(!Number.isNaN(new Date(content).getTime()));
+        assert.ok(!Number.isNaN(new Date(content).getTime()), "afk file now has a 10m expiry");
+        assert.equal(existsSync(afkPendingPath(sd)), false, "pending cleared after commit");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F dispatch afk_key from wait_10m → wait_inf", () => {
+test("#633F + #751 s4grb2 dispatch afk_key from wait_10m → wait_inf (pending, then committed)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
         writeFileSync(afkPath(sd), new Date(Date.now() + 600_000).toISOString() + "\n");
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "wait_inf" });
+        const pending = readAfkPending(sd);
+        assert.ok(pending);
+        assert.equal(pending!.kind, "wait_inf");
+        writeFileSync(afkPendingPath(sd), JSON.stringify({ ...pending!, commit_at_ms: Date.now() - 1 }));
+        commitAfkPendingIfDue(sd);
         assert.equal(readFileSync(afkPath(sd), "utf8").trim(), "inf");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F dispatch afk_key from wait_inf → off (clears AFK)", () => {
+test("#633F + #751 s4grb2 dispatch afk_key from wait_inf → off (pending, then committed, clears AFK)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
         writeFileSync(afkPath(sd), "inf\n");
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "off" });
+        // Pre-commit : `afk` still says "inf" (the debounce hasn't fired yet).
+        assert.equal(readFileSync(afkPath(sd), "utf8").trim(), "inf");
+        const pending = readAfkPending(sd);
+        assert.ok(pending);
+        assert.equal(pending!.kind, "off");
+        writeFileSync(afkPendingPath(sd), JSON.stringify({ ...pending!, commit_at_ms: Date.now() - 1 }));
+        commitAfkPendingIfDue(sd);
         assert.equal(existsSync(afkPath(sd)), false);
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
