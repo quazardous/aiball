@@ -18,7 +18,6 @@
  * proxy emitting a new kind doesn't crash an old timer).
  */
 import {
-    armAfk10m,
     readLoopStateInput,
     toggleAfk,
     touchHumanTyping,
@@ -64,7 +63,17 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             // ∞ choice. Preserve wait_inf untouched ; only arm 10m when
             // the current mode is off / wait_10m.
             if (input.afkMode === "wait_inf") return { kind: "typing-skipped-inf" };
-            armAfk10m(sd);
+            // #751 4asyze + cma67g — typing arms wait_10m via the SERVICE
+            // helper (= file + AfkService observable + ipc.afkMode), NOT
+            // the raw `armAfk10m` file-only path. Without the AfkService
+            // update the bar chip painter (timer.ts:afkSub) never fires
+            // and the "NOT AFK 10m" chip stays stuck on its previous value
+            // until the next 1s safety tick. The SERVICE helper also
+            // unifies the "arm" semantic across F9 commit (via toggle) and
+            // direct keystroke (this path) — both reach the SM the same
+            // way. No debounce on typing : david "frappe direct doit
+            // directement passer en NOT AFK 10m (autre logique)".
+            armAfkViaService(sd, 600);
             return { kind: "typing-armed" };
         }
         if (kind === "keystroke" && eventKind === "afk_key") {
