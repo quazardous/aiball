@@ -15,7 +15,7 @@
  * For inserts the caller must say which kind it is (we wrap that in
  * `insertPing(recipient, msg)` where msg.kind decides the column).
  */
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, ne, or } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import * as schema from "../schema.js";
 import { emitPing } from "../event-bus.js";
 import {
@@ -202,6 +202,29 @@ export function markMessageSeen(
             isNull(schema.pings.seenAt),
         )).run();
     return { updated: r.changes };
+}
+
+/**
+ * #827 — resurface a message : clear `seen_at` on EVERY ping row pointing
+ * at this message, regardless of recipient. The human-driven UI button
+ * uses this to re-queue a message the recipients drained-but-didn't-act
+ * on, so the next wake re-surfaces it. Returns the count of pings cleared.
+ *
+ * Distinct from `markMessageSeen` (which is the consumer's own ack-side
+ * mutation, per-recipient) : `clearSeenForMessage` is fan-out wide and
+ * is gated to humans at the route layer (a normal agent posting from
+ * MCP can't fabricate it).
+ */
+export function clearSeenForMessage(message_id: number): { resurfaced: number } {
+    const r = getDb().update(schema.pings)
+        .set({ seenAt: null })
+        .where(and(
+            targetMatches(message_id),
+            // Only flip rows that were ack'd ; an already-unread ping
+            // doesn't count as a re-surface (would inflate the metric).
+            sql`${schema.pings.seenAt} IS NOT NULL`,
+        )).run();
+    return { resurfaced: r.changes };
 }
 
 export function markAllSeenForProject(

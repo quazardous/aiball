@@ -231,6 +231,21 @@ async function copyRef() {
     }
 }
 
+// #827 — resurface flash state. After a successful POST, swap the 🛎️
+// for a ✓ for ~1.5s + show the resurfaced count in the tooltip.
+const resurfaceDone = ref(false);
+const resurfaceCount = ref(0);
+async function resurfaceMessage() {
+    try {
+        const r = await api.resurface(props.msg.id);
+        resurfaceCount.value = r.resurfaced;
+        resurfaceDone.value = true;
+        setTimeout(() => { resurfaceDone.value = false; }, 1500);
+    } catch {
+        /* 403 (non-human) / network — silent ; tooltip stays on the bell */
+    }
+}
+
 interface LifecycleLabel {
     icon: string;
     verb: string;
@@ -436,6 +451,22 @@ async function doDelete() {
                  with tooltip — david: "au lieu d'un popup ce bouton
                  devrait afficher un cadre dans le commentaire". -->
             <span class="spacer" />
+            <!-- #827 david `n4ejhf` / `3eh5sy` — resurface button (🛎️
+                 cloche service hôtel). Always visible (visibility A).
+                 Click clears `seen_at` on every ping for this message,
+                 so recipients re-see it at their next wake. Useful
+                 when an agent drained-but-never-acted on a comment. -->
+            <span
+                class="comment-resurface"
+                role="button"
+                tabindex="0"
+                :title="resurfaceDone
+                    ? `re-surfaced ${resurfaceCount} ping${resurfaceCount === 1 ? '' : 's'}`
+                    : 'Re-mettre ce message en non-lu (les recipients le re-verront au prochain wake)'"
+                @click="resurfaceMessage"
+                @keydown.enter.prevent="resurfaceMessage"
+                @keydown.space.prevent="resurfaceMessage"
+            >{{ resurfaceDone ? '✓' : '🛎️' }}</span>
             <span
                 class="comment-date-copy"
                 role="button"

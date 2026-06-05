@@ -19,7 +19,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { ERROR_CODES, MESSAGE_SCOPES } from "../domain.js";
-import { insertPing } from "../db/pings.js";
+import { clearSeenForMessage, insertPing } from "../db/pings.js";
 import {
     INTENTS,
     PRIORITIES,
@@ -496,6 +496,34 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
         // terminal) — surface as 409 so the UI can show the reason.
         return res.status(409).json({ error: (e as Error).message });
     }
+});
+
+/**
+ * #827 david `n4ejhf` / `bur6be` — resurface a message : reset `seen_at`
+ * on every ping row pointing at it, so recipients re-see it at their
+ * next wake. Use case : a comment the recipients drained-but-never-acted
+ * on (the skybot bug pattern from #823) — the human can re-queue it
+ * without re-posting noise. Human-only convention — agents must NOT be
+ * able to fabricate "re-unread" from MCP.
+ *
+ *   POST /api/messages/:id/resurface
+ *   → { resurfaced: N }   (count of pings that flipped from seen → unseen)
+ */
+messagesRouter.post("/messages/:id/resurface", (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return badRequest(res, "invalid message id");
+    const existing = getMessage(id);
+    if (!existing) return notFound(res);
+    const caller = consumerOf(req);
+    if (!isHuman(caller)) {
+        return res.status(403).json({
+            error: "only a registered human moderator can resurface a message",
+        });
+    }
+    const { resurfaced } = clearSeenForMessage(id);
+    // Broadcast so subscribers (UI list rows) refresh their unread chip.
+    broadcast({ type: "message_edited", data: withTagsOne(existing) });
+    res.json({ resurfaced });
 });
 
 /**

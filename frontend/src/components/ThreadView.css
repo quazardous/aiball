@@ -359,6 +359,26 @@
 .comment-date-copy-icon {
     color: var(--p-green-500);
 }
+/* #827 — resurface bell ; discreet by default (low opacity) so it
+   doesn't compete with the date copy, full opacity on hover. */
+.comment-resurface {
+    cursor: pointer;
+    user-select: none;
+    border-radius: 0.25rem;
+    padding: 0.1rem 0.35rem;
+    margin-right: 0.2rem;
+    opacity: 0.45;
+    transition: opacity 0.1s ease, background 0.1s ease;
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.95em;
+    line-height: 1;
+}
+.comment-resurface:hover,
+.comment-resurface:focus-visible {
+    opacity: 1;
+    background: var(--p-surface-100);
+}
 .pending-marker {
     color: var(--p-orange-500);
     font-weight: 700;

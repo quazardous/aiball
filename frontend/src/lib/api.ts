@@ -857,6 +857,11 @@ export const api = {
      *  comment becomes a tombstone in the UI, invisible to agents/MCP). */
     deleteComment: (id: number) =>
         req<Message>("POST", `/api/messages/${id}/delete`, {}),
+    /** Resurface a message (#827) — clear `seen_at` on every ping row
+     *  pointing at it, so recipients re-see it at their next wake.
+     *  Human-only. Returns `{ resurfaced: N }` (count flipped). */
+    resurface: (id: number) =>
+        req<{ resurfaced: number }>("POST", `/api/messages/${id}/resurface`, {}),
     postMessage: (body: PostMessageInput) =>
         req<Message>("POST", "/api/messages", body),
     /** Add (or supersede) a typed inter-ticket relation (#B.123 phase B).
