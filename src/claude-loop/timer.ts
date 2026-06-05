@@ -858,7 +858,17 @@ async function mainSse(): Promise<void> {
                 const backlog = backlogR.status === "fulfilled" && Array.isArray(backlogR.value)
                     ? backlogR.value.length
                     : null;
-                setTmuxCounters(name!, { open, backlog, events });
+                // #835 david — when ALL three fetches fail simultaneously
+                // (high HTTP load during busy phases, daemon hiccup, …),
+                // every counter goes null → setTmuxCounters would clear
+                // `@cl_counts` entirely and the bar's `o:N b:N e:N` segment
+                // would disappear for the next ~5s until the next SSE/
+                // heartbeat tick refetches. Skip the paint in that case
+                // to preserve the last-known good snapshot — a stale
+                // count is less confusing than a missing segment.
+                if (events !== null || open !== null || backlog !== null) {
+                    setTmuxCounters(name!, { open, backlog, events });
+                }
             } catch { /* counter sync best-effort */ }
         })();
         // Pass the SSE payload as a hint so the wake phrase can name
@@ -1504,7 +1514,13 @@ async function mainSse(): Promise<void> {
             const backlog = backlogR.status === "fulfilled"
                 ? (Array.isArray(backlogR.value) ? backlogR.value.length : null)
                 : null;
-            setTmuxCounters(name!, { open, backlog, events });
+            // #835 david — preserve the last-known segment when all 3 fetches
+            // fail (same rationale as the SSE-refresh path above). Without
+            // this guard the segment cleared for ~5s whenever a busy phase
+            // starved the HTTP client.
+            if (events !== null || open !== null || backlog !== null) {
+                setTmuxCounters(name!, { open, backlog, events });
+            }
         } catch { /* counters segment stays as-is */ }
         if (phase !== "boot") {
             try {
