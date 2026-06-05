@@ -59,6 +59,16 @@ async function onClick(ev: MouseEvent) {
     if (!target) return;
     const href = target.getAttribute("href");
     if (!href || !href.startsWith("/")) return;
+    // #723 david `vf7drp` — `/uploads/*` links are CONTENT-ADDRESSABLE file
+    // downloads (PDFs, attachments). They MUST do a full page nav so the
+    // browser triggers its PDF viewer / download dialog, NOT the SPA
+    // history.pushState which would land on the SPA shell rendering the
+    // tickets list at /uploads/... (= david's "elle affiche la liste de
+    // tickets"). Pre-fix the interceptor caught EVERY `/`-prefixed href ;
+    // the bare `<a href="/uploads/...">` from marked rendering inherited
+    // the SPA-nav path. Bail explicitly so the browser's default click
+    // behaviour fires.
+    if (href.startsWith("/uploads/")) return;
     ev.preventDefault();
 
     // #361 : sur tactile, le tap émule un mouseover qui arme le timer
