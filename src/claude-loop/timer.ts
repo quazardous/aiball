@@ -749,6 +749,22 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         }
     }
     try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
+    // #831-followup — defensive : if the assembled phrase is empty for
+    // any reason (own-comment ping where the builder filtered the head
+    // and somehow didn't synth a culture ; future bug), DON'T proceed
+    // with the side-effects. The pre-fix path called setIpcIdleSince(null)
+    // + sendKeys("") (= tmux no-op send-keys) + recorded the landscape
+    // hash. The cleared idle-since then stayed null FOREVER because no
+    // UserPromptSubmit fired (nothing was actually injected) and no Stop
+    // followed — so every subsequent heartbeat/SSE was skipped with "no
+    // idle marker", and unread events piled up in the bar (e:2) with
+    // zero wakes firing. The bug surfaced live during david's session ;
+    // this guard makes the empty-phrase case a hard skip so the state
+    // can't go silent.
+    if (!phrase) {
+        log(`skip wake (${reason}) — empty phrase (own-comment filter or builder no-op)`);
+        return false;
+    }
     // #793 — clear in-memory idle-since: the wake is about to flip claude
     // back to busy. The Stop hook will re-seed it when claude returns.
     setIpcIdleSince(null);
