@@ -347,15 +347,6 @@ export function wakeRequestedPath(sd: string): string { return join(sd, "wake-re
  *  combo. The PTY proxy writes it on the combo and deletes it on any other
  *  activity (and on boot), so its mere existence means "currently away". */
 export function afkPath(sd: string): string { return join(sd, "afk"); }
-// #751 s4grb2 — pending AFK state for the debounce window. JSON :
-//   { kind: "off"|"wait_10m"|"wait_inf", commit_at_ms: number,
-//     stash_remaining_ms?: number }
-// `toggleAfk` writes here instead of `afkPath` directly ; a heartbeat
-// tick (`commitAfkPendingIfDue`) flushes it to `afkPath` once
-// `commit_at_ms <= Date.now()`. Fast multi-press inside the 3s window
-// re-writes `commit_at_ms` so the visual cycle is instant but the AFK
-// state-machine only sees the final intent.
-export function afkPendingPath(sd: string): string { return join(sd, "afk-pending"); }
 // #264: near-live "a human is typing in the tmux pane" marker. Touched
 // by the timer's detection poll when the prompt area changes while
 // at-prompt; read by setTmuxStatus to paint the bicolor human chip and
@@ -815,96 +806,21 @@ export function touchHumanTyping(sd: string): void {
     try { writeFileSync(humanTypingPath(sd), new Date().toISOString() + "\n"); } catch { /* best-effort */ }
 }
 
-/** #751 s4grb2 — debounce window before a toggle commits to `afkPath`.
- *  Fast multi-press cycles the bar visually but the AFK SM only sees
- *  the final intent after the window settles. */
-export const AFK_DEBOUNCE_MS = 3000;
-
-interface AfkPending {
-    kind: "off" | "wait_10m" | "wait_inf";
-    commit_at_ms: number;
-    /** When transitioning OFF a committed/pending wait_10m via toggle,
-     *  the remaining time is stashed here so the cycle-back to wait_10m
-     *  restores it instead of resetting to the default 600s. Carried
-     *  across the wait_inf and off legs within the same cycle. */
-    stash_remaining_ms?: number;
-}
-
-export function readAfkPending(sd: string): AfkPending | null {
-    const p = afkPendingPath(sd);
-    if (!existsSync(p)) return null;
-    try {
-        const raw = readFileSync(p, "utf8");
-        const parsed = JSON.parse(raw) as Partial<AfkPending>;
-        if (!parsed || typeof parsed.kind !== "string" || typeof parsed.commit_at_ms !== "number") return null;
-        if (parsed.kind !== "off" && parsed.kind !== "wait_10m" && parsed.kind !== "wait_inf") return null;
-        return {
-            kind: parsed.kind,
-            commit_at_ms: parsed.commit_at_ms,
-            stash_remaining_ms: typeof parsed.stash_remaining_ms === "number" ? parsed.stash_remaining_ms : undefined,
-        };
-    } catch {
-        return null;
-    }
-}
-
-function writeAfkPending(sd: string, state: AfkPending): void {
-    try { writeFileSync(afkPendingPath(sd), JSON.stringify(state) + "\n"); } catch { /* best-effort */ }
-}
-
-function clearAfkPending(sd: string): void {
-    try { if (existsSync(afkPendingPath(sd))) unlinkSync(afkPendingPath(sd)); } catch { /* race */ }
-}
-
-/** Apply a due pending state to the AFK file. Called by the heartbeat
- *  tick. No-op when no pending or commit_at_ms is still in the future.
- *  Returns true when a commit happened (for log purposes). */
-export function commitAfkPendingIfDue(sd: string): boolean {
-    const p = readAfkPending(sd);
-    if (!p) return false;
-    if (p.commit_at_ms > Date.now()) return false;
-    if (p.kind === "off") clearAfk(sd);
-    else if (p.kind === "wait_inf") setAfkInfinite(sd);
-    else {
-        const seconds = p.stash_remaining_ms !== undefined
-            ? Math.max(0, Math.round(p.stash_remaining_ms / 1000))
-            : 600;
-        armAfk10m(sd, seconds);
-    }
-    clearAfkPending(sd);
-    return true;
-}
-
-/** #633 Slice C + #751 s4grb2 — F9 toggle. Reads the current AFK mode
- *  and cycles to the next : off → wait_10m → wait_inf → off. The write
- *  goes through the pending file (debounce window). Stash carries
- *  remaining wait_10m time across the cycle (4yb8yz). */
+/** #633 Slice C — F9 toggle implemented on the TS side. Reads the
+ *  current AFK mode and cycles to the next : off → wait_10m → wait_inf
+ *  → off. The ∞ → off branch also clears user-grace (atomic release
+ *  of both holds — matches the proxy's `toggle_afk`). */
 export function toggleAfk(sd: string, seconds = 600): void {
-    void seconds; // legacy arg kept for back-compat ; seconds is now derived
     const cur = readAfkState(sd);
-    const prevPending = readAfkPending(sd);
-    let nextKind: "off" | "wait_10m" | "wait_inf";
-    let stash = prevPending?.stash_remaining_ms;
     if (cur.mode === "off") {
-        nextKind = "wait_10m";
-        // Cycle-back : if a stash was carried from a prior cycle in this
-        // same debounce window, use it. Otherwise default fresh 600s.
+        armAfk10m(sd, seconds);
     } else if (cur.mode === "wait_10m") {
-        nextKind = "wait_inf";
-        // Stash the remaining time so a cycle-back restores it.
-        if (cur.expiryMs !== null && cur.expiryMs > Date.now()) {
-            stash = cur.expiryMs - Date.now();
-        }
+        setAfkInfinite(sd);
     } else {
         // wait_inf → off (#745 phase B : user-grace machinery dropped,
         // AFK SM owns the "human present" signal end-to-end now).
-        nextKind = "off";
+        clearAfk(sd);
     }
-    writeAfkPending(sd, {
-        kind: nextKind,
-        commit_at_ms: Date.now() + AFK_DEBOUNCE_MS,
-        stash_remaining_ms: stash,
-    });
 }
 
 /** #627 — read the AFK file and derive {mode, expiryMs} for the LoopState
@@ -917,19 +833,6 @@ export function toggleAfk(sd: string, seconds = 600): void {
  *  Note: a missing file is "off". An empty file is unusual — the proxy
  *  clears it on read (#622). Here we treat empty as off to align. */
 export function readAfkState(sd: string): { mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null } {
-    // #751 s4grb2 — when a pending toggle hasn't committed yet (still in
-    // the 3s debounce window), the BAR reflects the pending intent
-    // immediately. The AFK state-machine downstream of readAfkState
-    // therefore sees the user's choice without waiting for the commit
-    // tick. The actual `afkPath` write happens at commit time.
-    const pending = readAfkPending(sd);
-    if (pending && pending.commit_at_ms > Date.now()) {
-        if (pending.kind === "off") return { mode: "off", expiryMs: null };
-        if (pending.kind === "wait_inf") return { mode: "wait_inf", expiryMs: null };
-        // wait_10m : use stash if present, else default 600s.
-        const remainingMs = pending.stash_remaining_ms !== undefined ? pending.stash_remaining_ms : 600 * 1000;
-        return { mode: "wait_10m", expiryMs: Date.now() + remainingMs };
-    }
     const p = afkPath(sd);
     if (!existsSync(p)) return { mode: "off", expiryMs: null };
     let content = "";

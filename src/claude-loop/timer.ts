@@ -58,7 +58,6 @@ import {
     setResuming,
     MUX_CMD,
     buildContextPhrase,
-    commitAfkPendingIfDue,
     injectWakePhrase,
     checkHasWork,
     readIdleSinceMs,
@@ -1403,11 +1402,6 @@ async function mainSse(): Promise<void> {
     // marker change ; push once a second so the AFK chunk reflects it.
     // Also acts as a safety net if fs.watch missed an event.
     setInterval(pushViewIfChanged, 1000);
-    // #751 s4grb2 — commit any debounced AFK toggle once the 3s window
-    // has elapsed. Tick at 1s so the late-commit delay never exceeds 1s.
-    setInterval(() => {
-        try { commitAfkPendingIfDue(sd!); } catch { /* best-effort */ }
-    }, 1000);
     // #722 david — 2-rate pane-probe driven by `shouldPollFast(input)` via
     // the bus `pollFast` event. Default cadence is SLOW (~1s) ; when ANY
     // of {boot, busy, input-hot} flips true the probe re-arms to FAST
