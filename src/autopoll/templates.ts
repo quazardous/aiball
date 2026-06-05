@@ -64,20 +64,25 @@ export function formatReason(tone: AutopollTone, payload: AutopollPayload): stri
     const n = payload.pings;
     const s = n === 1 ? "" : "s";
 
+    // #826 david `74x46c` — `mark_read` was removed from MCP. The agent
+    // reads via `unread({pings: true})` (read-only) and engages each
+    // ticket via `ticket_get` / `ticket_reply` ; engagement auto-acks the
+    // pings on that ticket (#749 Phase A prune-on-consult). No more
+    // "drain via mark_read" — the templates here mirror that flow.
     switch (tone) {
         case "hint":
             return (ticketList
-                ? `You have ${n} unread aiball ping${s}:\n${ticketList}\n\nConsider calling \`unread({pings: true, mark_read: true})\` to drain them.`
-                : `You have ${n} unread aiball ping${s}. Consider calling \`unread({pings: true, mark_read: true})\`.`) + backlog;
+                ? `You have ${n} unread aiball ping${s}:\n${ticketList}\n\nList them via \`unread({pings: true})\` ; reading each ticket via \`ticket_get\` auto-acks its pings.`
+                : `You have ${n} unread aiball ping${s}. List via \`unread({pings: true})\` ; engagement auto-acks.`) + backlog;
 
         case "directive":
             return (ticketList
-                ? `You have ${n} unread aiball ping${s}:\n${ticketList}\n\nDrain them via \`unread({pings: true, mark_read: true})\`, then react (reply / close / open follow-up). Do not stop to ask the human first.`
-                : `You have ${n} unread aiball ping${s}. Drain them via \`unread({pings: true, mark_read: true})\`, then react.`) + backlog;
+                ? `You have ${n} unread aiball ping${s}:\n${ticketList}\n\nList via \`unread({pings: true})\`, then react on each ticket (reply / close / open follow-up) — \`ticket_get\` / \`ticket_reply\` auto-ack the pings on that ticket. Do not stop to ask the human first.`
+                : `You have ${n} unread aiball ping${s}. List via \`unread({pings: true})\`, react on each ticket, engagement auto-acks.`) + backlog;
 
         case "imperative":
             return (ticketList
-                ? `**YOU MUST** drain ${n} unread aiball ping${s} BEFORE doing anything else:\n${ticketList}\n\nCall \`unread({pings: true, mark_read: true})\` NOW. Then react (reply / close / open follow-up). DO NOT ask the human — the human is the moderator, not the operator.`
-                : `**YOU MUST** call \`unread({pings: true, mark_read: true})\` NOW. ${n} ping${s} pending. DO NOT ask permission.`) + backlog;
+                ? `**YOU MUST** handle ${n} unread aiball ping${s} BEFORE doing anything else:\n${ticketList}\n\nList via \`unread({pings: true})\` NOW, then engage each ticket (\`ticket_get\` / \`ticket_reply\`) — engagement auto-acks. DO NOT ask the human — the human is the moderator, not the operator.`
+                : `**YOU MUST** call \`unread({pings: true})\` and engage NOW. ${n} ping${s} pending. DO NOT ask permission.`) + backlog;
     }
 }

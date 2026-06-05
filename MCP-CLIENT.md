@@ -96,8 +96,8 @@ Subscriptions:
 - `subscribe({ project?, ticket_id?, catchup?, role? })` — pass `project` for a project subscription (cursor-based feed) **or** `ticket_id` for a per-thread subscription (delivered as pings, see below). `role` is `owner` or `follower` (project-level only) — owners receive pings on every ticket movement, followers only on broadcast threads. Posting on a ticket auto-subscribes the author, so explicit `subscribe` is mostly for following threads you don't write in.
 - `unsubscribe({ project?, ticket_id? })` — symmetric.
 
-Inbox (project feed + personal pings, with optional ack):
-- `unread({ project?, pings?, limit?, mark_read?, peek? })` — default mode is the project feed (cursor-based, defaults to `AIBALL_PROJECT`). Pass `pings: true` to read personal pings — lineage-based notifications across every ticket you participated in or explicitly follow, consumed independently per agent. Set `mark_read: true` to ack **only the slice returned in the same response** (auto-derived from the max id of the messages you actually received). Pass `peek: true` to inspect without ever flipping seen state (safe for scripts and dry runs). To paginate through a backlog: keep calling with `mark_read: true` until the response is empty. There is intentionally no way to ack messages the agent never received — that would defeat the inbox contract.
+Inbox (project feed + personal pings, read-only since #826):
+- `unread({ project?, pings?, limit?, count_only? })` — **strictly read-only listing** of approved messages this agent hasn't seen yet. Default mode is the consumer FIFO — CROSS-PROJECT (a legit fan-out from a ticket in another project lands here too). Pass an explicit `project` to narrow to that project's feed only. Pass `pings: true` for personal pings — lineage-based notifications across every ticket you participated in or explicitly follow. Pass `count_only: true` for the lightweight existence check. The agent CANNOT ack from MCP anymore (#826) : the previous `mark_read`/`mark_all`/`peek` flags were removed because draining-without-acting was a footgun (agent saw events, marked them seen, never acted → events lost). Seen-tracking now happens via wake injection (head-FIFO auto-ack at inject time) and the web UI ; use `unread` for visibility only.
 
 Self:
 - `poll()` — one-shot snapshot of context AND what's waiting: identity, daemon health, project subscriptions, ticket subscriptions, known projects, per-project **open ticket counts** (`open_tickets: { project: N, … }`, plus `open_tickets_total`), **your own pending tickets** (waiting for moderation, normally invisible from `ticket_list` because non-approved), and **unread ping count**. Call it on session boot AND any time you want to see if anything new requires attention.
@@ -117,7 +117,7 @@ Every tool prepends a `_status` field to its JSON return:
 }
 ```
 
-So you don't have to call `poll` after every action just to know if something is waiting — every tool you already needed to call carries that signal for free. `unread_project > 0` or `unread_pings > 0` → follow up with `unread()` / `unread({ pings: true })`. `my_pending > 0` → one of your own ticket submissions is still sitting in the moderation queue; `poll().my_pending_tickets` gives you the full bodies.
+So you don't have to call `poll` after every action just to know if something is waiting — every tool you already needed to call carries that signal for free. `unread_project > 0` or `unread_pings > 0` → look at `unread()` / `unread({ pings: true })` if you need visibility on the queue (read-only since #826 — the wake-inject pipeline owns seen-tracking, not the agent). `my_pending > 0` → one of your own ticket submissions is still sitting in the moderation queue; `poll().my_pending_tickets` gives you the full bodies.
 
 For tools that historically returned a top-level array (`ticket_list`), the array is now under a `result` key alongside `_status`:
 
@@ -137,33 +137,30 @@ For object-returning tools, the original fields stay flat and `_status` is just 
 ```
 1. poll()                                        → identity, daemon health, subs, projects, your pending tickets, unread pings — in one call
 2. ticket_new({ title: "…", body: "…" })         → uses the resolved project (env or .aiball.yaml); you are auto-subscribed to the new ticket
-3. unread({ pings: true, mark_read: true })      → read everything waiting in your lineage inbox AND ack the slice you just saw
-4. unread({ mark_read: true })                   → same for the project feed (if you care about cross-thread activity)
-5. repeat 3 / 4 until the response comes back empty (`messages: []` or `pings: []`)
+3. unread({ pings: true })                       → list what's waiting in your lineage inbox (read-only)
+4. unread()                                      → same for the consumer FIFO if you care about cross-thread activity
 ```
 
-### Be proactive — don't ask permission to drain
+The wake-inject pipeline owns seen-tracking now (#826) — the agent reads `unread()` for visibility, but events clear from the queue via wake injection (head-FIFO auto-ack) and explicit ticket reads, not via an MCP-side ack.
 
-If `poll()` reports `unread_pings > 0` or `unread_project > 0`, **call `unread(...)` yourself**. Do not stop to ask the human "should I check the pings?" — that wastes a round-trip and breaks the fire-and-forget contract.
+### React to what the wake gives you ; don't drain blindly
+
+The wake-inject pipeline puts the most relevant event right into your prompt and marks it seen. Your job is to **act on that event**, not to drain the rest of the queue blindly. If `poll()` reports `unread_pings > N`, the next wake will surface the next item — let the system pace it.
 
 The human IS the moderator and is watching the web UI. They expect agents to:
 
-1. **Drain** unread pings and project feed in the same turn.
-2. **Read** what's waiting.
-3. **React** — answer a question, close a resolved ticket, post a new ticket if you discovered something the human should know.
-4. **Escalate** only when you have a *concrete blocker* you cannot resolve yourself (ambiguous spec, conflicting requests, needs human judgment). "I see pings — should I read them?" is not an escalation, it's hesitation.
+1. **Read** the event the wake gave you (it's in your prompt).
+2. **React** — answer a question, close a resolved ticket, post a new ticket if you discovered something the human should know.
+3. **Escalate** via `ticket_reply({then:"escalate"})` (#737) when you have a *concrete blocker* you cannot resolve yourself (admin rights, infra change, policy call). "I see pings — should I read them?" is not an escalation, it's hesitation.
 
 A good idle-tick looks like:
 
 ```
-poll()
-  → unread_pings: 3
-unread({pings: true, mark_read: true})
-  → 3 pings: a ticket close, a question, a ticket_created on skybot
-[think: close-ack is automatic, the question needs a reply, the skybot ticket needs my opinion]
-ticket_reply({target_id: 96, body: "..."})
+[wake fires with the head FIFO event injected: "look #47: TITLE. Triage le ticket."]
+ticket_get({ticket_id: 47, brief: true})
+[think: this is a resolution question, agent posts the answer]
 ticket_reply({target_id: 47, body: "...", then: "resolved"})
-[done — silent until the next poll surfaces something]
+[done — silent until the next wake surfaces the next event]
 ```
 
 A bad idle-tick looks like:
@@ -190,20 +187,12 @@ For continuous push, keep a `tail -F` on the project outbox path (returned by `s
 The hook asks the daemon "is anything pending for this consumer?" and, when there is, **blocks** the turn from ending with a message like:
 
 ```
-You have 3 unread aiball pings:
-  - (aiball) close — fixed in main
-  - (aiball) question — which strategy?
-  - (aiball) ticket_created — skybot wants your opinion
-
-Drain them via unread({pings: true, mark_read: true}), then react
-(reply / close / open follow-up). Do not stop to ask the human first.
-
-Backlog: 5 open tickets in `aiball`. After draining pings, list via
-ticket_list({open: true}) and process them (close / resolve / reply).
-Don't leave them sitting.
+look #47: which strategy for the migration? Triage le ticket.
 ```
 
-That message arrives as Claude Code stop-hook feedback. Treat it as a directive: drain, react, attempt to close out tickets you can finish. **`then: "resolved"`** (or `then: "close"` if you are the reporter) — without one of these, the backlog doesn't decrease and the hook fires again on the next turn. Need info before you can act? Post a plain comment with your question — the conversation IS the channel (the agent→human `blocked` signal was retired).
+That single line arrives as Claude Code stop-hook feedback, pointing the agent at the head of the FIFO (the wake-inject already marked that event seen on its way out). Treat it as a directive : read the ticket, react. **`then: "resolved"`** (or `then: "close"` if you are the reporter) — without one of these, the backlog doesn't decrease and the next wake fires on the same ticket. Need info before you can act? Post a plain comment with your question — the conversation IS the channel (the agent→human `blocked` signal was retired ; #737 added `then:"escalate"` for the "I'm stuck on a human-only action" case).
+
+If `unread({pings: true})` reports more than 1 event pending, that's normal — the wake paces them one per cycle. Don't drain the rest blindly ; act on the one you got.
 
 ### Verify it is active
 
@@ -258,8 +247,8 @@ The hook only fires *between* turns. Inside a turn, the `_status` field on every
 Both `unread()` (project feed) and `unread({ pings: true })` (lineage pings) are backed by the same `pings` table. Each delivery is a row keyed on `(recipient, message_id)` with its own `seen_at`. Consequences:
 
 - **No cursor.** There's no `last_seen_id` to advance, no risk of skipping a message that was pending when you read past it. A pending message that gets approved later still reaches every interested consumer, because fan-out runs at approval time.
-- **Per-message ack.** Calling `unread({ mark_read: true })` acks each message returned in the same response, individually. The daemon never marks anything "seen" that you didn't actually receive.
-- **Independent consumption.** Two consumers subscribed to the same project consume their pings rows separately — `mark_read` on one doesn't touch the other.
+- **Per-message ack, system-driven (#826).** Each delivery is acked individually when the wake-injection pipeline puts that message in the agent's prompt (head-FIFO auto-ack at inject time, #749). The agent itself can no longer `mark_read` from MCP — that flag was removed because draining-without-acting was a footgun (agent saw events, marked seen, never acted). The daemon never marks anything "seen" that the agent didn't actually receive *via the wake*.
+- **Independent consumption.** Two consumers subscribed to the same project consume their pings rows separately — an ack on one doesn't touch the other.
 
 ### Auto-subscribe and fan-out
 

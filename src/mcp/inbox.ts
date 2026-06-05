@@ -17,7 +17,7 @@ export function registerInboxTools(server: McpServer): void {
         "unread",
         {
             description:
-                "Pull approved messages this agent hasn't seen yet. Default mode is the consumer FIFO — CROSS-PROJECT (a legit fan-out from a ticket in another project lands here too, #800). Pass an explicit `project` to narrow to that project's feed only. Pass `pings=true` for personal pings (lineage-based notifications). Set `mark_read=true` to ack in the same call — only the messages returned in this very response are acked. Pass `count_only=true` for just the unread count. Pass `mark_all=true` to ack EVERYTHING without payload (cleanup). `peek=true` forces read-only inspection (overrides mark_read and mark_all). Self-pings filtered out.",
+                "Read-only listing of approved messages this agent hasn't seen yet (#826 david `74x46c`). Default mode is the consumer FIFO — CROSS-PROJECT (a legit fan-out from a ticket in another project lands here too, #800). Pass an explicit `project` to narrow to that project's feed only. Pass `pings=true` for personal pings (lineage-based notifications). Pass `count_only=true` for just the unread count. Self-pings filtered out.\n\n**The agent CANNOT ack messages from MCP anymore** (#826) — the previous `mark_read`/`mark_all`/`peek` flags were removed because draining-without-acting was a footgun (agent saw events, marked them seen, never acted → events lost). Seen-tracking is now exclusively driven by the wake injection (head-FIFO auto-ack at inject time, #749 `fd8f8d6`) and the web UI (humans clicking through). Read this tool for visibility ; act on the wake / explicit ticket reads to clear the queue.",
             inputSchema: {
                 project: z.string().optional(),
                 pings: z
@@ -27,65 +27,27 @@ export function registerInboxTools(server: McpServer): void {
                         "If true, return personal pings instead of the project feed. Project arg is ignored.",
                     ),
                 limit: z.number().int().min(1).max(500).optional(),
-                mark_read: z
-                    .boolean()
-                    .optional()
-                    .describe(
-                        "If true, mark the returned messages as read in the same call (= ack the slice you just received, derived from the max id in the response). Calling this with no messages returned is a no-op. Suppressed when peek=true.",
-                    ),
-                peek: z
-                    .boolean()
-                    .optional()
-                    .describe(
-                        "Read-only inspection. Forces no state mutation regardless of mark_read / mark_all. Useful for dry runs, scripts that snapshot state, or debugging the inbox.",
-                    ),
                 count_only: z
                     .boolean()
                     .optional()
                     .describe(
                         "If true, skip the payload and return just the unread count. Lightest call for 'do I have anything ?'.",
                     ),
-                mark_all: z
-                    .boolean()
-                    .optional()
-                    .describe(
-                        "If true, ack EVERYTHING currently unread without sending the payload back. Returns { marked_all: true, count: N }. Suppressed when peek=true.",
-                    ),
             },
         },
-        async ({ project, pings, limit, mark_read, peek, count_only, mark_all }) => {
-            const isPeek = peek === true;
-            const shouldAck = mark_read === true && !isPeek;
+        async ({ project, pings, limit, count_only }) => {
             const wantCountOnly = count_only === true;
-            const wantMarkAll = mark_all === true && !isPeek;
 
             if (pings === true) {
-                if (wantCountOnly && !wantMarkAll) {
+                if (wantCountOnly) {
                     const r = (await client.pingsCount()) as { unread?: number };
                     return asText({ kind: "pings", count: r.unread ?? 0 });
-                }
-                if (wantMarkAll) {
-                    const before = (await client.pingsCount()) as { unread?: number };
-                    await client.markPingsRead({ all: true });
-                    return asText({
-                        kind: "pings",
-                        marked_all: true,
-                        count: before.unread ?? 0,
-                    });
                 }
                 const data = (await client.listPings({
                     unreadOnly: true,
                     limit: limit ?? 100,
                 })) as { pings?: Array<{ message_id: number }> } | undefined;
-                if (shouldAck) {
-                    // Per-message ack: only the rows we actually returned to the
-                    // agent are marked seen. No way to skip-ahead past unseen
-                    // content.
-                    for (const p of data?.pings ?? []) {
-                        await client.markPingsRead({ upToId: p.message_id });
-                    }
-                }
-                return asText({ kind: "pings", peek: isPeek, ...((data as object) ?? {}) });
+                return asText({ kind: "pings", ...((data as object) ?? {}) });
             }
 
             // #800 david `unyzvx` : FIFO est consumer-scoped (cross-project)
@@ -94,46 +56,14 @@ export function registerInboxTools(server: McpServer): void {
             // `resolveProject(project)` defaulted to $AIBALL_PROJECT which
             // contradicted the design (cross-project fan-outs invisible).
             const proj = project ? client.resolveProject(project) : null;
-            if (wantCountOnly && !wantMarkAll) {
+            if (wantCountOnly) {
                 const r = (await client.unreadCount(proj)) as { count?: number };
                 return asText({ kind: "project", project: proj, count: r.count ?? 0 });
-            }
-            if (wantMarkAll) {
-                // Walk through the entire unread set in pages and ack each id.
-                // mark_read on the project feed is per-message, no bulk endpoint
-                // exists. Loop until empty.
-                let total = 0;
-                while (true) {
-                    const page = (await client.unread(proj, 500)) as
-                        | { messages?: Array<{ id: number }> }
-                        | undefined;
-                    const msgs = page?.messages ?? [];
-                    if (msgs.length === 0) break;
-                    for (const m of msgs) {
-                        await client.markMessageSeen(m.id);
-                        total++;
-                    }
-                }
-                return asText({
-                    kind: "project",
-                    project: proj,
-                    marked_all: true,
-                    count: total,
-                });
             }
             const data = (await client.unread(proj, limit ?? 100)) as
                 | { messages?: Array<{ id: number }> }
                 | undefined;
-            if (shouldAck) {
-                // Per-message ack: each id received is marked seen on its own
-                // row in the pings table. Pending-then-approved messages still
-                // reach this agent on a later call because pings are inserted at
-                // approval time, not at submission.
-                for (const m of data?.messages ?? []) {
-                    await client.markMessageSeen(m.id);
-                }
-            }
-            return asText({ kind: "project", peek: isPeek, ...((data as object) ?? {}) });
+            return asText({ kind: "project", ...((data as object) ?? {}) });
         },
     );
 
@@ -155,7 +85,7 @@ export function registerInboxTools(server: McpServer): void {
         "poll",
         {
             description:
-                "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Default scope is slim AND project-scoped when AIBALL_PROJECT is set (only the relevant project's counters and pending lists are returned). Pass `all_projects: true` for the cross-project view. My_pending_tickets / my_pending_comments are returned in summary mode (header only, no body) by default — pass `full_pending: true` if you need bodies.\n\nProactive flow expectation: if the response shows `unread_pings > 0` or `unread_project > 0`, call `unread({pings: true, mark_read: true})` (or `unread({mark_read: true})` for the project feed) yourself — do NOT ask the human first. The human IS watching this via the web UI; you're expected to drain, read, react, and only escalate when you have a concrete question or blocker. Stopping at 'should I check the pings?' wastes a round-trip.",
+                "Snapshot of the agent's context AND what's waiting for them. Call this on session boot AND any time you want to see if anything new requires attention. Default scope is slim AND project-scoped when AIBALL_PROJECT is set (only the relevant project's counters and pending lists are returned). Pass `all_projects: true` for the cross-project view. My_pending_tickets / my_pending_comments are returned in summary mode (header only, no body) by default — pass `full_pending: true` if you need bodies.\n\n`unread_pings` and `unread_project` are informational — the wake-injection pipeline owns seen-tracking now (#826 david `74x46c`). Do NOT call `unread({mark_read: true})` to drain : that flag was removed because draining-without-acting was a footgun (agent marked events seen and never acted → events lost). Read `unread({pings: true})` or `unread({...})` if you want to SEE what's queued, but the queue clears via wake-inject (head-FIFO auto-ack) and explicit ticket reads, not via an MCP-side ack call.",
             inputSchema: {
                 include_subscriptions: z
                     .boolean()

@@ -12,7 +12,10 @@
  *      most recent ticket titles.
  *   5. If pings > 0: emit `{decision: "block", reason: "..."}` with the
  *      tone-aware reason. The agent gets the reason as a synthetic
- *      turn and is expected to drain via `unread({pings: true, mark_read: true})`.
+ *      turn and is expected to list pending via `unread({pings: true})`
+ *      then engage each ticket — `ticket_get`/`ticket_reply` auto-ack
+ *      the pings on that ticket (#749 prune-on-consult). The agent no
+ *      longer marks pings seen from MCP directly (#826).
  *   6. Bump the throttle file.
  *
  * Any error / unreachable daemon → emit `{}` and exit 0. We NEVER

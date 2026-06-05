@@ -25,10 +25,10 @@ test("#400 render: {var:+text} includes text only when var is non-empty", () => 
 });
 
 test("#400 render: literal braces inside a :+ body survive (tool-call syntax)", () => {
-    const tpl = "{pings:+ drain via `unread({pings: true, mark_read: true})`}";
+    const tpl = "{pings:+ list via `unread({pings: true})`}";
     assert.equal(
         render(tpl, { pings: 2 }),
-        " drain via `unread({pings: true, mark_read: true})`",
+        " list via `unread({pings: true})`",
     );
     assert.equal(render(tpl, { pings: "" }), ""); // caller passes "" for zero
 });
