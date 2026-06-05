@@ -34,6 +34,7 @@ import { getHookService, type HookEvent } from "./hook-service.js";
 export type DispatchVerdict =
     | { kind: "typing-armed" }
     | { kind: "typing-skipped-boot" }
+    | { kind: "typing-skipped-inf" }
     | { kind: "afk-toggled"; nextMode: "off" | "wait_10m" | "wait_inf" }
     | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" | "set_last_wake_at" | "set_wake_requested" }
     | { kind: "afk-service-set"; mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null }
@@ -53,8 +54,16 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             // (bootComplete marker exists OR equivalent state). The bus's
             // pushed view doesn't gate here — readLoopStateInput +
             // computeLoopView consult bootComplete directly.
-            const view = computeLoopView(readLoopStateInput(sd));
+            const input = readLoopStateInput(sd);
+            const view = computeLoopView(input);
             if (view.inBootGrace) return { kind: "typing-skipped-boot" };
+            // #834 david — NOT AFK ∞ is an explicit human commitment ("je
+            // suis là sur la durée"). Typing within that mode is expected,
+            // NOT a fresh signal to re-bound the window. Pre-fix, every
+            // keystroke re-armed wait_10m, silently downgrading the user's
+            // ∞ choice. Preserve wait_inf untouched ; only arm 10m when
+            // the current mode is off / wait_10m.
+            if (input.afkMode === "wait_inf") return { kind: "typing-skipped-inf" };
             armAfk10m(sd);
             return { kind: "typing-armed" };
         }
@@ -211,6 +220,7 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
 export function formatVerdictLogLine(v: DispatchVerdict): string {
     switch (v.kind) {
         case "typing-armed":         return "proxy-event: typing → armed NOT AFK 10m";
+        case "typing-skipped-inf":   return "proxy-event: typing → skipped (NOT AFK ∞ preserved)";
         case "typing-skipped-boot":  return "proxy-event: typing during boot → no arm (state.inBootGrace)";
         case "afk-toggled":          return `proxy-event: afk_key → toggled to ${v.nextMode}`;
         case "marker-touched":       return `proxy-event: marker '${v.name}' applied`;
