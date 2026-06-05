@@ -85,6 +85,22 @@ What does NOT count as triage : a single `ticket_get(N)` read with no follow-up.
 
 ---
 
+## How unread events reach you — don't drain blindly
+
+The wake-injection pipeline is the **single source of truth** for "you should look at X" : it picks the head of your FIFO, puts the event reference in your prompt, and marks just that one event seen. Pacing is built in — one event per cycle.
+
+Your job is to **engage with the event the wake gave you**, not to drain the rest of the queue. Engagement is what marks a ping seen :
+
+- `ticket_get(N)` auto-acks every unread ping on ticket #N (prune-on-consult).
+- `ticket_reply` does the same for its target's thread.
+- The wake-injection itself acks the head it put in your prompt.
+
+`unread({pings: true})` is **read-only** : you can list what's queued (visibility), but the tool can't mark seen anymore. The `mark_read` / `mark_all` flags were removed in #826 because draining-without-acting was a footgun — events were silently "consumed" and never actioned (the skybot bug). If `poll()` reports `unread_pings > 5`, that's normal queue depth — let the wake pace them ; don't bulk-clear.
+
+If you're an autopoll-direct session (no `claude-loop` wrapping you) the same rule holds : `unread({pings: true})` to see what's pending, then act on each ticket one at a time.
+
+---
+
 ## What `claim` is for — and what it isn't
 
 `claim #N` (the wake CTA or `ticket_claim()`) is a GO for **#N itself** : take focus on it, read the thread, triage, post a status / propose a plan / answer the open question. That's the contract.
