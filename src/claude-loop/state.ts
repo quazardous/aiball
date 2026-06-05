@@ -818,50 +818,50 @@ export function touchHumanTyping(sd: string): void {
 export const AFK_DEBOUNCE_MS = 3000;
 
 export function toggleAfk(sd: string, _seconds = 600): void {
-    void _seconds; // legacy arg kept ; seconds is derived from stash + default
+    void _seconds; // legacy arg kept ; commit uses default 600
     void sd; // sd not needed — all state lives in ipcState now
-    // #751 htwguc — toggle cycle reads the CURRENT VISIBLE state (= dispAfk
-    // if a pending is in flight, else committed afk). Computes the next
-    // kind, captures the stash if we leave a wait_10m, and writes
-    // `dispAfk` (pure in-memory, no file). The commit tick will flush
-    // via the *ViaService helpers after AFK_DEBOUNCE_MS.
+    // #751 htwguc qb7zs6 — toggle cycle reads the CURRENT VISIBLE state
+    // (= dispAfk if a pending is in flight, else committed afkMode).
+    // Computes the next kind, writes `dispAfk` (pure in-memory).
+    // No stash : qb7zs6 semantic is that a cycle ending on the SAME kind
+    // as committed is a true noop at commit time (= the running timer
+    // is preserved naturally because we never re-arm). Cycle ending on
+    // a DIFFERENT kind = fresh state with default 10min for wait_10m.
     const ipc = getIpcState();
     const pending = getIpcDispAfk();
     const curMode: "off" | "wait_10m" | "wait_inf" = pending
         ? pending.mode
         : (ipc.afkMode ?? "off");
-    const curExpiryMs: number | null = pending
-        ? pending.expiryMs
-        : ipc.afkExpiryMs;
     let nextMode: "off" | "wait_10m" | "wait_inf";
-    let stashMs: number | null = pending?.stashMs ?? null;
-    if (curMode === "off") {
-        nextMode = "wait_10m";
-        // Cycle-back uses the stash if present (4yb8yz).
-    } else if (curMode === "wait_10m") {
-        nextMode = "wait_inf";
-        // Capture remaining time so the cycle-back restores it.
-        if (curExpiryMs !== null && curExpiryMs > Date.now()) {
-            stashMs = curExpiryMs - Date.now();
-        }
-    } else {
-        nextMode = "off";
-        // Stash propagates through wait_inf and off legs untouched.
-    }
+    if (curMode === "off") nextMode = "wait_10m";
+    else if (curMode === "wait_10m") nextMode = "wait_inf";
+    else nextMode = "off";
+    // For the chip display countdown : if the cycle returns to the
+    // committed wait_10m kind, mirror the committed expiry so the chip
+    // shows the running timer (5m - elapsed). If the cycle picks a
+    // different kind, show the would-be-fresh wait_10m expiry (10min)
+    // — but the commit may still no-op if final equals committed.
     const nextExpiryMs = nextMode === "wait_10m"
-        ? Date.now() + (stashMs ?? 600_000)
+        ? (ipc.afkMode === "wait_10m" && ipc.afkExpiryMs !== null
+            ? ipc.afkExpiryMs                            // mirror running timer
+            : Date.now() + 600_000)                      // fresh 10 min
         : null;
     setIpcDispAfk({
         mode: nextMode,
         expiryMs: nextExpiryMs,
         commitAtMs: Date.now() + AFK_DEBOUNCE_MS,
-        stashMs,
     });
 }
 
-/** #751 htwguc — flush `dispAfk` into `afk` via the *ViaService helpers
- *  once `commitAtMs <= now`. Called by the timer's 1s tick. Returns
- *  true when a commit happened (for log purposes).
+/** #751 htwguc qb7zs6 — flush `dispAfk` into `afk` via the *ViaService
+ *  helpers once `commitAtMs <= now`. Called by the timer's 1s tick.
+ *  Returns true when the dispAfk slot was consumed (committed OR noop'd).
+ *
+ *  qb7zs6 NOOP semantic : if the final pending kind equals the committed
+ *  afkMode, DO NOT re-arm — the running timer (wait_10m countdown) keeps
+ *  going on its original course. Just clear dispAfk. This is the "vrai
+ *  noop" : F9 × 3 sous 3s sur un wait_10m → cycle visible, ipc.afkExpiryMs
+ *  intact (= countdown poursuit sa course initiale).
  *
  *  Dynamic-imports the helpers to side-step the state.ts ↔
  *  afk-service-sync.ts circular dep without bypassing AfkService. */
@@ -869,15 +869,17 @@ export async function commitDispAfkIfDue(sd: string): Promise<boolean> {
     const pending = getIpcDispAfk();
     if (!pending) return false;
     if (pending.commitAtMs > Date.now()) return false;
+    const ipc = getIpcState();
+    const committed = ipc.afkMode ?? "off";
+    if (pending.mode === committed) {
+        // Vrai noop : cycle revenu au même kind, timer interne intact.
+        setIpcDispAfk(null);
+        return true;
+    }
     const { armAfkViaService, setAfkInfViaService, clearAfkViaService } = await import("./afk-service-sync.js");
     if (pending.mode === "off") clearAfkViaService(sd);
     else if (pending.mode === "wait_inf") setAfkInfViaService(sd);
-    else {
-        const seconds = pending.stashMs !== null
-            ? Math.max(1, Math.round(pending.stashMs / 1000))
-            : 600;
-        armAfkViaService(sd, seconds);
-    }
+    else armAfkViaService(sd, 600);
     setIpcDispAfk(null);
     return true;
 }

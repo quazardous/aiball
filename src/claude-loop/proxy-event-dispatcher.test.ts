@@ -94,8 +94,6 @@ test("#633F + #751 htwguc dispatch afk_key from wait_10m → wait_inf (pending i
         const pending = getIpcDispAfk();
         assert.ok(pending);
         assert.equal(pending!.mode, "wait_inf");
-        // Stash captured for cycle-back.
-        assert.ok(pending!.stashMs !== null, "stash captured from wait_10m remaining");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 

@@ -83,26 +83,27 @@ export interface IpcState {
      *  regression lesson. */
     afkMode: "off" | "wait_10m" | "wait_inf" | null;
     afkExpiryMs: number | null;
-    /** #751 jk5ngg htwguc — `dispAfk` : la valeur AFK à afficher (chip
-     *  visuel droite). Diverge de `afkMode` pendant la fenêtre debounce
-     *  3s d'un toggle F9 (= cycle visible instant, SM stable). Quand
-     *  null, le chip rend `afkMode` (= state converged). Le couple
-     *  (dispAfkMode, dispAfkExpiryMs, dispAfkCommitAtMs, dispAfkStashMs)
-     *  est muté par `setIpcDispAfk` et observé via `LoopStateBus`
-     *  event `dispAfkChanged`. Au commit (dispAfkCommitAtMs <= now), le
-     *  timer's heartbeat appelle les `*ViaService` helpers qui updatent
-     *  `afkMode` (= la voie committed) + AfkService observable + le
-     *  fichier `afk` (= toujours là, kill prévu en #766). Ensuite
-     *  setIpcDispAfk(null) → convergence. */
+    /** #751 jk5ngg htwguc qb7zs6 — `dispAfk` : la valeur AFK à afficher
+     *  (chip visuel droite). Diverge de `afkMode` pendant la fenêtre
+     *  debounce 3s d'un toggle F9 (= cycle visible instant, SM stable).
+     *  Quand null, le chip rend `afkMode` (= state converged). Le couple
+     *  (dispAfkMode, dispAfkExpiryMs, dispAfkCommitAtMs) est muté par
+     *  `setIpcDispAfk` et observé via `LoopStateBus` event
+     *  `dispAfkChanged`. Au commit (dispAfkCommitAtMs <= now) :
+     *  - si `dispAfkMode === afkMode` (= le cycle revient au même kind),
+     *    NOOP commit (clear juste dispAfk), le timer interne wait_10m
+     *    reste sur sa course initiale (= vrai noop sur le SM, david
+     *    `qb7zs6` "reste tant que l'état réel est pas changé") ;
+     *  - sinon le timer's heartbeat appelle les `*ViaService` helpers
+     *    qui updatent `afkMode` + AfkService observable + le fichier
+     *    `afk` (= toujours là, kill prévu en #766) ; pas de stash
+     *    artificiel (= david "le timer interne dois pas etre du tout
+     *    sauver"). */
     dispAfkMode: "off" | "wait_10m" | "wait_inf" | null;
     dispAfkExpiryMs: number | null;
     /** ms-since-epoch quand le pending convergera vers `afk`. Un nouveau
      *  toggle dans la fenêtre RESET cette valeur (= push de 3s). */
     dispAfkCommitAtMs: number | null;
-    /** 4yb8yz — remaining ms à appliquer si le commit final est wait_10m.
-     *  Capturé quand le cycle quitte un wait_10m (committed OU pending)
-     *  pour qu'un cycle-back restore le countdown (vs défaut 600s). */
-    dispAfkStashMs: number | null;
     /** #734 V3 Phase B — human-typing timestamp in-memory. `null` = no
      *  in-memory signal, fall back to `human-typing` file mtime. Set by
      *  the dispatcher on `keystroke:typing` events from the proxy. */
@@ -140,7 +141,6 @@ const state: IpcState = {
     dispAfkMode: null,
     dispAfkExpiryMs: null,
     dispAfkCommitAtMs: null,
-    dispAfkStashMs: null,
     humanTypingAtMs: null,
     paneBusy: null,
     paneReady: null,
@@ -227,30 +227,29 @@ export function setIpcAfk(
     state.afkExpiryMs = mode === "wait_10m" ? expiryMs : null;
 }
 
-/** #751 htwguc — set `dispAfk` (la valeur AFK à afficher pendant la
- *  fenêtre debounce du toggle F9). Pass `null` to clear and converge
+/** #751 htwguc qb7zs6 — set `dispAfk` (la valeur AFK à afficher pendant
+ *  la fenêtre debounce du toggle F9). Pass `null` to clear and converge
  *  back to `afk`. The bus emits `dispAfkChanged` when this couple
  *  changes between two consecutive `readLoopStateInput` calls — the
- *  chip painter subscribes for an instant repaint. */
+ *  chip painter subscribes for an instant repaint.
+ *  No stash field — the `qb7zs6` semantic is that a cycle ending on the
+ *  same kind as committed is a true noop (= timer stays). */
 export function setIpcDispAfk(
     pending: {
         mode: "off" | "wait_10m" | "wait_inf";
         expiryMs: number | null;
         commitAtMs: number;
-        stashMs?: number | null;
     } | null,
 ): void {
     if (pending === null) {
         state.dispAfkMode = null;
         state.dispAfkExpiryMs = null;
         state.dispAfkCommitAtMs = null;
-        state.dispAfkStashMs = null;
         return;
     }
     state.dispAfkMode = pending.mode;
     state.dispAfkExpiryMs = pending.expiryMs;
     state.dispAfkCommitAtMs = pending.commitAtMs;
-    state.dispAfkStashMs = pending.stashMs ?? null;
 }
 
 /** Convenience read of the dispAfk couple. Returns null when no pending
@@ -259,14 +258,12 @@ export function getIpcDispAfk(): {
     mode: "off" | "wait_10m" | "wait_inf";
     expiryMs: number | null;
     commitAtMs: number;
-    stashMs: number | null;
 } | null {
     if (state.dispAfkMode === null || state.dispAfkCommitAtMs === null) return null;
     return {
         mode: state.dispAfkMode,
         expiryMs: state.dispAfkExpiryMs,
         commitAtMs: state.dispAfkCommitAtMs,
-        stashMs: state.dispAfkStashMs,
     };
 }
 
@@ -316,7 +313,6 @@ export function resetIpcStateForTests(): void {
     state.dispAfkMode = null;
     state.dispAfkExpiryMs = null;
     state.dispAfkCommitAtMs = null;
-    state.dispAfkStashMs = null;
     state.humanTypingAtMs = null;
     state.paneBusy = null;
     state.paneReady = null;
