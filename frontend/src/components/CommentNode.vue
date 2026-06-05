@@ -592,31 +592,6 @@ async function doDelete() {
                 :loading="classifyBusy"
                 @click="classifyActions[0].command()"
             />
-            <!-- #827 david `d8jxw9` — resurface bell (Material Symbol
-                 `room_service`) à côté des thumbs up/down. Toujours visible,
-                 opacity 0.45 default + 1 au hover. Click reset `seen_at`
-                 sur tous les pings du message → recipients re-voient au
-                 prochain wake. Le post-click ✓ flash 1.5s. -->
-            <span
-                class="comment-resurface"
-                role="button"
-                tabindex="0"
-                :title="resurfaceDone
-                    ? `re-surfaced ${resurfaceCount} ping${resurfaceCount === 1 ? '' : 's'}`
-                    : 'Re-mettre ce message en non-lu (les recipients le re-verront au prochain wake)'"
-                @click="resurfaceMessage"
-                @keydown.enter.prevent="resurfaceMessage"
-                @keydown.space.prevent="resurfaceMessage"
-            >
-                <span
-                    v-if="resurfaceDone"
-                    class="comment-resurface-done"
-                >✓</span>
-                <span
-                    v-else
-                    class="material-symbols-outlined"
-                >room_service</span>
-            </span>
             <!-- #518 (david `uzwfc3` option A + `7b3jc7` style update) —
                  votes binaires +1/-1. Pas de border button, juste l'icône
                  en couleur (muted par défaut, accent green/red quand voté).
@@ -644,6 +619,32 @@ async function doDelete() {
                     <i class="pi pi-thumbs-down" />
                     <span v-if="votesSummary.down > 0" class="comment-vote-count">{{ votesSummary.down }}</span>
                 </button>
+            </span>
+            <!-- #827 david `d8jxw9`+`hvdvkn` — resurface bell (Material Symbol
+                 `room_service`) tout à droite après les thumbs up/down (= dernière
+                 chip de la ligne d'action). Toujours visible, opacity 0.45
+                 default + 1 au hover. Click reset `seen_at` sur tous les pings
+                 du message → recipients re-voient au prochain wake. Le post-click
+                 ✓ flash 1.5s. -->
+            <span
+                class="comment-resurface"
+                role="button"
+                tabindex="0"
+                :title="resurfaceDone
+                    ? `re-surfaced ${resurfaceCount} ping${resurfaceCount === 1 ? '' : 's'}`
+                    : 'Re-mettre ce message en non-lu (les recipients le re-verront au prochain wake)'"
+                @click="resurfaceMessage"
+                @keydown.enter.prevent="resurfaceMessage"
+                @keydown.space.prevent="resurfaceMessage"
+            >
+                <span
+                    v-if="resurfaceDone"
+                    class="comment-resurface-done"
+                >✓</span>
+                <span
+                    v-else
+                    class="material-symbols-outlined"
+                >room_service</span>
             </span>
         </div>
     </div>
