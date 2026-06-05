@@ -16,7 +16,7 @@
  * `LoopStateInput` and read the typed return.
  */
 import type { LoopStateInput } from "./loop-state.js";
-import { isAfkActive, isInBootGrace, isTypingNow } from "./loop-state.js";
+import { effectiveAfkMode, isAfkActive, isInBootGrace, isTypingNow } from "./loop-state.js";
 
 /** Bar background phase. */
 export type Phase = "boot" | "idle" | "busy";
@@ -58,29 +58,14 @@ export function renderBarWord(input: LoopStateInput): BarWord {
     return "loop";
 }
 
-/** Status-right AFK chunk. #751 7zqhr5 — reads the DISPLAY fields so
- *  the chip shows the pending toggle instantly during the 3s debounce
- *  window (visual feedback for the F9 cycle). Gating code keeps reading
- *  the committed `afkMode` via `effectiveAfkMode` so a sub-3s cycle is
- *  a noop for the SM. Falls back to committed fields when display
- *  ones aren't populated (= hand-crafted test inputs / older callers). */
+/** Status-right AFK chunk. */
 export function renderAfkChunk(input: LoopStateInput): AfkChunk {
-    const displayMode = input.afkModeDisplay ?? input.afkMode;
-    const displayExpiry = input.afkExpiryMsDisplay !== undefined
-        ? input.afkExpiryMsDisplay
-        : input.afkExpiryMs;
-    // Apply the 10m auto-release on the DISPLAY value (consistent with
-    // effectiveAfkMode but on the display side).
-    const mode = (displayMode === "wait_10m"
-        && displayExpiry !== null
-        && displayExpiry <= input.nowMs)
-        ? "off"
-        : displayMode;
+    const mode = effectiveAfkMode(input);
     if (mode === "wait_inf") {
         return { label: "NOT AFK", prefix: "∞", color: "red" };
     }
-    if (mode === "wait_10m" && displayExpiry !== null) {
-        const remMs = displayExpiry - input.nowMs;
+    if (mode === "wait_10m" && input.afkExpiryMs !== null) {
+        const remMs = input.afkExpiryMs - input.nowMs;
         return { label: "NOT AFK", prefix: formatCountdown(remMs), color: "yellow" };
     }
     return { label: "AFK", prefix: null, color: "dim" };

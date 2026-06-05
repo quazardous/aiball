@@ -917,13 +917,19 @@ export function toggleAfk(sd: string, seconds = 600): void {
  *  Note: a missing file is "off". An empty file is unusual — the proxy
  *  clears it on read (#622). Here we treat empty as off to align. */
 export function readAfkState(sd: string): { mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null } {
-    // #751 7zqhr5 david : `readAfkState` retourne EXCLUSIVEMENT la valeur
-    // committed (= ce qui est dans le fichier `afk`). Consommé par : bar
-    // word (loop/wait/stop), AFK state-machine, wake gate, countdown ;
-    // ces gates doivent rester stables pendant le cycle F9 < 3s. Un tour
-    // complet sous 3s n'a aucun effet ici — c'est ce que david appelle
-    // le "vrai noop". Le pending est uniquement lu par `readAfkStateDisplay`
-    // pour le feedback visuel instant du chip droite.
+    // #751 s4grb2 — when a pending toggle hasn't committed yet (still in
+    // the 3s debounce window), the BAR reflects the pending intent
+    // immediately. The AFK state-machine downstream of readAfkState
+    // therefore sees the user's choice without waiting for the commit
+    // tick. The actual `afkPath` write happens at commit time.
+    const pending = readAfkPending(sd);
+    if (pending && pending.commit_at_ms > Date.now()) {
+        if (pending.kind === "off") return { mode: "off", expiryMs: null };
+        if (pending.kind === "wait_inf") return { mode: "wait_inf", expiryMs: null };
+        // wait_10m : use stash if present, else default 600s.
+        const remainingMs = pending.stash_remaining_ms !== undefined ? pending.stash_remaining_ms : 600 * 1000;
+        return { mode: "wait_10m", expiryMs: Date.now() + remainingMs };
+    }
     const p = afkPath(sd);
     if (!existsSync(p)) return { mode: "off", expiryMs: null };
     let content = "";
@@ -934,24 +940,6 @@ export function readAfkState(sd: string): { mode: "off" | "wait_10m" | "wait_inf
     if (Number.isNaN(until)) return { mode: "wait_inf", expiryMs: null };
     if (until <= Date.now()) return { mode: "off", expiryMs: null };
     return { mode: "wait_10m", expiryMs: until };
-}
-
-/** #751 7zqhr5 — display-only read for the AFK chip on the bar right
- *  side. Returns the pending kind if a toggle is in flight (= visual
- *  feedback instant), else falls back to the committed value. The
- *  pending stash_remaining_ms is reflected so the chip's countdown is
- *  consistent during the cycle. DO NOT call from gate / SM / wake code
- *  paths — those must see the committed value to enforce the "F9 cycle
- *  under 3s is a noop" semantic. */
-export function readAfkStateDisplay(sd: string): { mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null } {
-    const pending = readAfkPending(sd);
-    if (pending && pending.commit_at_ms > Date.now()) {
-        if (pending.kind === "off") return { mode: "off", expiryMs: null };
-        if (pending.kind === "wait_inf") return { mode: "wait_inf", expiryMs: null };
-        const remainingMs = pending.stash_remaining_ms !== undefined ? pending.stash_remaining_ms : 600 * 1000;
-        return { mode: "wait_10m", expiryMs: Date.now() + remainingMs };
-    }
-    return readAfkState(sd);
 }
 
 /** #627 — read every state-dir marker + env knob into a `LoopStateInput`
@@ -1018,18 +1006,6 @@ export function readLoopStateInput(
     const afk = ipc.afkMode !== null
         ? { mode: ipc.afkMode, expiryMs: ipc.afkExpiryMs }
         : readAfkState(sd);
-    // #751 7zqhr5 — display variant : pending toggle (still in 3s window)
-    // overrides what the chip shows. The in-memory ipc.afkMode tracks the
-    // committed state only, so we re-read pending here and synth a
-    // display-state for the bar chip without disturbing gate code.
-    const pending = readAfkPending(sd);
-    const afkDisplay = (pending && pending.commit_at_ms > nowMs)
-        ? (pending.kind === "off"
-            ? { mode: "off" as const, expiryMs: null }
-            : pending.kind === "wait_inf"
-                ? { mode: "wait_inf" as const, expiryMs: null }
-                : { mode: "wait_10m" as const, expiryMs: nowMs + (pending.stash_remaining_ms ?? 600 * 1000) })
-        : afk;
     // #734 V3 Phase B — same semantics for human-typing.
     const ipcHumanTypingAtMs = ipc.humanTypingAtMs;
     return {
@@ -1055,8 +1031,6 @@ export function readLoopStateInput(
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,
         afkMode: afk.mode,
         afkExpiryMs: afk.expiryMs,
-        afkModeDisplay: afkDisplay.mode,
-        afkExpiryMsDisplay: afkDisplay.expiryMs,
         // #727 V1 Slice B — in-memory truth wins. Shared with the
         // pre-gate paths in timer.ts via `readIdleSinceMs`.
         idleSinceMs: readIdleSinceMs(sd),
