@@ -360,23 +360,22 @@
     color: var(--p-green-500);
 }
 /* #827 — resurface bell (Google Material Symbol `room_service` per
-   david `p7gx6h`) ; discreet by default (low opacity), full on hover. */
+   david `p7gx6h`). #833 david `q5cfrq` : style aligné sur les thumbs
+   (.comment-vote-btn) — couleur muted par défaut, couleur de texte
+   au hover. Pas de background change, pas de padding, pas d'opacity. */
 .comment-resurface {
     cursor: pointer;
     user-select: none;
-    border-radius: 0.25rem;
-    padding: 0.1rem 0.3rem;
-    margin-right: 0.2rem;
-    opacity: 0.45;
-    transition: opacity 0.1s ease, background 0.1s ease;
+    margin-left: 0.4rem;
+    color: var(--p-text-muted-color);
+    transition: color 120ms;
     display: inline-flex;
     align-items: center;
     line-height: 1;
 }
 .comment-resurface:hover,
 .comment-resurface:focus-visible {
-    opacity: 1;
-    background: var(--p-surface-100);
+    color: var(--p-text-color);
 }
 /* Material Symbol sizing inside the resurface chip — slightly larger
    than the surrounding text so the bell reads at a glance, but tuned
