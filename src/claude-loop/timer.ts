@@ -107,7 +107,6 @@ import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
 import { getHookService } from "./hook-service.js";
 import {
     getIpcState,
-    setIpcBootComplete,
     setIpcBusyDeferUntil,
     setIpcIdleSince,
     setIpcLastWakeAtMs,
@@ -1048,7 +1047,17 @@ async function mainSse(): Promise<void> {
     // Slice B-3 stops the hook writes once we trust the in-memory side.
     const ipcStateSub = getHookService().subscribe((ev) => {
         if (ev.kind === "SessionStart") {
-            setIpcBootComplete(true);
+            // #822 david `etned7` (combined fix with Plan B in loop-state.ts) —
+            // do NOT eagerly set bootComplete on every SessionStart event.
+            // The hook fires the moment claude boots, regardless of whether
+            // a picker / resuming / first-compacting is still up ; setting
+            // bootComplete here sealed the boot phase prematurely and
+            // bypassed the `bus.bootEnded` handler where the tail-grace
+            // (#9252736) + safety-cap (#586c875) live. The bus emits
+            // `bootEnded` only when ALL stretches have cleared — that's
+            // the right single source of truth for sealing bootComplete.
+            // The pickers + idleSince still propagate here so the wake
+            // gate sees fresh per-hook input.
             setIpcIdleSince(ev.at_ms);
             // Slice B-2 — propagate picker context if the hook detected it.
             if (typeof ev.picker_session === "boolean") setIpcResumeSessionPicker(ev.picker_session);

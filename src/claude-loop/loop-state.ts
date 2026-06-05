@@ -136,8 +136,10 @@ export function isInBootGrace(input: LoopStateInput): boolean {
     //   2. `bootComplete` marker = boot a SETTLED une fois ; on n'y
     //      retourne JAMAIS. Garantit que /compact mid-session ne
     //      ré-affiche pas le bar `[boot]` (option B strict de
-    //      `rjd3x4`). Écrit par session-start-hook avec confiance
-    //      ET par `bootEnded` event handler dans timer.ts.
+    //      `rjd3x4`). Écrit par `bus.bootEnded` handler dans timer.ts
+    //      (#822 — seal différé via tail-grace pour absorber les
+    //      glitches transients ; depuis #822 le hook subscriber ne
+    //      seal PLUS éagerly, le bus est la single source of truth).
     //   3. Pré-settle, STRETCHES : tant que le picker est on screen,
     //      tant que compacting est observé (post-resume), tant que le
     //      prompt n'est pas visible → on reste en boot.
