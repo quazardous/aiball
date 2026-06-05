@@ -37,6 +37,11 @@ export const CL_ENV = {
     // Grace periods (seconds)
     BOOT_GRACE_SEC: "CL_BOOT_GRACE_SEC",
     BOOT_MIN_SEC: "CL_BOOT_MIN_SEC",
+    // #822 — extra grace window in ms AFTER bootEnded before we actually
+    // seal bootComplete + flip the bar out of [boot]. Lets a transient
+    // glitch (paneReady flipping true between picker → resuming) get
+    // cancelled by the next stretch instead of sealing prematurely.
+    BOOT_GRACE_TAIL_MS: "CL_BOOT_GRACE_TAIL_MS",
     // #636 — timer exits after 1 heartbeat tick. For pytest harnesses.
     RUN_ONCE: "CL_RUN_ONCE",
     // #639 — auto-cross the resume picker (press Enter on highlighted session).

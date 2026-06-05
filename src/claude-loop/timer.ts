@@ -201,6 +201,16 @@ try { writeFileSync(timerPidPath(sd!), `${process.pid}\n`); } catch { /* best ef
 // `boot-complete` marker is the authoritative end-of-boot signal).
 // Bumped from 60s → 300s so a slow resume picker never trips it.
 const BOOT_GRACE_MS = Math.max(0, cfg.boot_grace_seconds) * 1000;
+// #822 — extra grace window AFTER bootEnded before bootCompletePath is
+// actually sealed (and the bar flips to idle/busy). If a stretch
+// (resumePicker / paneCompacting / !paneReady) re-emerges during this
+// window, the tail timer is cancelled and we stay in boot. Default 10s
+// per david `dz8v9z`. Set to 0 to restore pre-#822 immediate-seal.
+const BOOT_GRACE_TAIL_MS = (() => {
+    const raw = process.env[CL_ENV.BOOT_GRACE_TAIL_MS];
+    const n = raw === undefined || raw === "" ? NaN : Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : 10_000;
+})();
 // #627 — BOOT_TIME used to feed the inline boot-grace if/else trees ;
 // the LoopState service now reads `loop-start-ts` from the state-dir
 // (shared marker, same as the hooks). Kept the constant declaration
@@ -1107,8 +1117,17 @@ async function mainSse(): Promise<void> {
     // mid-session ne peuvent pas ré-entrer en boot. L'event ne fire QUE
     // quand toutes les conditions ont vraiment dit not-in-boot (post-floor,
     // paneReady, no picker, no compacting) — c'est THE moment où on scelle.
-    loopBus.on("bootEnded", () => {
-        log("state-bus: boot phase ended — sealing bootComplete marker");
+    // #822 — defer the seal-and-exit chain by BOOT_GRACE_TAIL_MS so a
+    // transient paneReady=true glitch (typical between picker selection
+    // and "Resuming conversation…" appearing) doesn't lock bootComplete
+    // prematurely. The tail timer is cancelled on bootStarted (= the
+    // bus re-detected boot via a fresh stretch), letting the boot phase
+    // continue without a flicker. With tail=0 (env override), behaviour
+    // collapses back to the original immediate-seal.
+    let bootSealTimer: NodeJS.Timeout | null = null;
+    const performBootSeal = (): void => {
+        bootSealTimer = null;
+        log("state-bus: boot phase ended (tail elapsed) — sealing bootComplete marker");
         try {
             writeFileSync(bootCompletePath(sd!), new Date().toISOString() + "\n");
         } catch { /* best-effort */ }
@@ -1137,6 +1156,22 @@ async function mainSse(): Promise<void> {
         // picker keystrokes armed the user-grace ; gone now, the AFK
         // SM is the only hold. Just fire the wake.
         void tryWake("boot-ended-drain");
+    };
+    loopBus.on("bootEnded", () => {
+        if (bootSealTimer) return; // already scheduled, don't restack
+        if (BOOT_GRACE_TAIL_MS <= 0) {
+            // Knob override : pre-#822 immediate-seal behaviour.
+            performBootSeal();
+            return;
+        }
+        log(`state-bus: boot phase ended — sealing deferred ${BOOT_GRACE_TAIL_MS}ms (tail grace, will cancel on bootStarted)`);
+        bootSealTimer = setTimeout(performBootSeal, BOOT_GRACE_TAIL_MS);
+    });
+    loopBus.on("bootStarted", () => {
+        if (!bootSealTimer) return;
+        clearTimeout(bootSealTimer);
+        bootSealTimer = null;
+        log("state-bus: bootStarted within tail window — cancelled pending bootComplete seal (a stretch re-emerged)");
     });
     // #629 david `7zqtgf` — same drain trigger when AFK is cleared
     // (F9 from NOT AFK 10m/∞ back to AFK). The bar word goes
