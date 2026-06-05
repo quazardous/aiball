@@ -100,7 +100,7 @@ import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { loopConfig } from "./loop-config.js";
 import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
 import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
-import { paneMarkerBarInfo } from "./pane-service.js";
+import { getPaneService, paneMarkerBarInfo } from "./pane-service.js";
 import { armAfkViaService, watchAfkMarker } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
 import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
@@ -1247,8 +1247,18 @@ async function mainSse(): Promise<void> {
     // `setTmuxStatus` spawns tmux set-option (~3ms), kept cheap via the
     // memo + transition-only firing.
     let lastPaintedPostBoot: string | null = null;
-    loopBus.on("transition", (_prev, next) => {
-        if (next.inBootGrace) return; // fast-probe + settleBoot own boot paint
+    // #821 david — `[busy:compacting]` was only painted on a `loopBus`
+    // transition, but `paneCompacting` does NOT flip any LoopStateView
+    // field (renderBarBg looks at `paneBusy` only), so the transition
+    // never fired on a /compact start/end. Wiring the repaint to BOTH
+    // `loopBus.transition` AND `PaneService.subscribeAny` catches the
+    // compacting flip (plus pickers, resuming, error markers) the moment
+    // it lands — instead of waiting for the 30s heartbeat or a piggyback
+    // transition (typing, busy flip, etc.). `subscribeAny` fires on every
+    // marker change, so the memo below filters the repaint cost.
+    const repaintPaneInfo = (): void => {
+        const view = loopBus.current();
+        if (!view || view.inBootGrace) return;
         try {
             const paneInfo = paneMarkerBarInfo();
             // Build a memo key that captures phase + paneInfo + grace state.
@@ -1258,17 +1268,19 @@ async function mainSse(): Promise<void> {
             // userIsTakingOver was fresh ; user-grace is dropped now,
             // AFK SM owns the human-present signal (visible via the AFK
             // chunk + countdown). Bar info falls through to count/recap.
-            const memoKey = `${next.phase}|${paneInfo ?? "-"}`;
+            const memoKey = `${view.phase}|${paneInfo ?? "-"}`;
             if (memoKey === lastPaintedPostBoot) return;
             if (paneInfo) {
-                setTmuxStatus(name!, next.phase, paneInfo);
+                setTmuxStatus(name!, view.phase, paneInfo);
             }
             // No-info path : let heartbeat repaint with fresh unread count.
             // Otherwise we'd race the count refresh + lose it.
             else { return; /* skip memo update so heartbeat re-paints with count */ }
             lastPaintedPostBoot = memoKey;
         } catch { /* best-effort */ }
-    });
+    };
+    loopBus.on("transition", repaintPaneInfo);
+    getPaneService().subscribeAny(repaintPaneInfo);
     const pushViewIfChanged = (): void => {
         try {
             loopBus.update(readLoopStateInput(sd!));
