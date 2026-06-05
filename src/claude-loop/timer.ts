@@ -1278,8 +1278,17 @@ async function mainSse(): Promise<void> {
             // only repaint when info changes (transitions only).
             try {
                 const info = paneMarkerBarInfo();
-                if (info && info !== lastPaintedBootInfo) {
-                    setTmuxStatus(name!, LOOP_STATUS.BOOT, info);
+                if (info !== lastPaintedBootInfo) {
+                    // #822 david `2y5fah` — paint on EVERY transition, including
+                    // `info → null` (= the resume/picker/compact transient ended).
+                    // Pre-fix the condition required `info` non-null, so once
+                    // we'd painted `[boot:resuming]` we'd never repaint until
+                    // settleBoot's BOOT_GRACE_TAIL_MS (10s) elapsed and flipped
+                    // the bar to IDLE — the bar stayed stuck on `[boot:resuming]`
+                    // for 10s after Resuming actually left the pane. Repaint
+                    // without the info suffix when info is null so the bar
+                    // shows bare `[boot]` during the tail.
+                    setTmuxStatus(name!, LOOP_STATUS.BOOT, info ?? undefined);
                     lastPaintedBootInfo = info;
                 }
             } catch { /* best-effort */ }
