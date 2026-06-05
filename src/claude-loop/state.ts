@@ -13,7 +13,9 @@ import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
 import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
 import {
+    getIpcDispAfk,
     getIpcState,
+    setIpcDispAfk,
     setIpcDrainedState,
     setIpcHumanTypingAtMs,
     setIpcLastOpenWakeHash,
@@ -810,17 +812,74 @@ export function touchHumanTyping(sd: string): void {
  *  current AFK mode and cycles to the next : off → wait_10m → wait_inf
  *  → off. The ∞ → off branch also clears user-grace (atomic release
  *  of both holds — matches the proxy's `toggle_afk`). */
-export function toggleAfk(sd: string, seconds = 600): void {
-    const cur = readAfkState(sd);
-    if (cur.mode === "off") {
-        armAfk10m(sd, seconds);
-    } else if (cur.mode === "wait_10m") {
-        setAfkInfinite(sd);
+/** #751 htwguc — debounce window before a F9 toggle commits to `afk`.
+ *  Fast multi-press cycles `dispAfk` visually but the SM only sees
+ *  the final intent after the window settles. */
+export const AFK_DEBOUNCE_MS = 3000;
+
+export function toggleAfk(sd: string, _seconds = 600): void {
+    void _seconds; // legacy arg kept ; seconds is derived from stash + default
+    void sd; // sd not needed — all state lives in ipcState now
+    // #751 htwguc — toggle cycle reads the CURRENT VISIBLE state (= dispAfk
+    // if a pending is in flight, else committed afk). Computes the next
+    // kind, captures the stash if we leave a wait_10m, and writes
+    // `dispAfk` (pure in-memory, no file). The commit tick will flush
+    // via the *ViaService helpers after AFK_DEBOUNCE_MS.
+    const ipc = getIpcState();
+    const pending = getIpcDispAfk();
+    const curMode: "off" | "wait_10m" | "wait_inf" = pending
+        ? pending.mode
+        : (ipc.afkMode ?? "off");
+    const curExpiryMs: number | null = pending
+        ? pending.expiryMs
+        : ipc.afkExpiryMs;
+    let nextMode: "off" | "wait_10m" | "wait_inf";
+    let stashMs: number | null = pending?.stashMs ?? null;
+    if (curMode === "off") {
+        nextMode = "wait_10m";
+        // Cycle-back uses the stash if present (4yb8yz).
+    } else if (curMode === "wait_10m") {
+        nextMode = "wait_inf";
+        // Capture remaining time so the cycle-back restores it.
+        if (curExpiryMs !== null && curExpiryMs > Date.now()) {
+            stashMs = curExpiryMs - Date.now();
+        }
     } else {
-        // wait_inf → off (#745 phase B : user-grace machinery dropped,
-        // AFK SM owns the "human present" signal end-to-end now).
-        clearAfk(sd);
+        nextMode = "off";
+        // Stash propagates through wait_inf and off legs untouched.
     }
+    const nextExpiryMs = nextMode === "wait_10m"
+        ? Date.now() + (stashMs ?? 600_000)
+        : null;
+    setIpcDispAfk({
+        mode: nextMode,
+        expiryMs: nextExpiryMs,
+        commitAtMs: Date.now() + AFK_DEBOUNCE_MS,
+        stashMs,
+    });
+}
+
+/** #751 htwguc — flush `dispAfk` into `afk` via the *ViaService helpers
+ *  once `commitAtMs <= now`. Called by the timer's 1s tick. Returns
+ *  true when a commit happened (for log purposes).
+ *
+ *  Dynamic-imports the helpers to side-step the state.ts ↔
+ *  afk-service-sync.ts circular dep without bypassing AfkService. */
+export async function commitDispAfkIfDue(sd: string): Promise<boolean> {
+    const pending = getIpcDispAfk();
+    if (!pending) return false;
+    if (pending.commitAtMs > Date.now()) return false;
+    const { armAfkViaService, setAfkInfViaService, clearAfkViaService } = await import("./afk-service-sync.js");
+    if (pending.mode === "off") clearAfkViaService(sd);
+    else if (pending.mode === "wait_inf") setAfkInfViaService(sd);
+    else {
+        const seconds = pending.stashMs !== null
+            ? Math.max(1, Math.round(pending.stashMs / 1000))
+            : 600;
+        armAfkViaService(sd, seconds);
+    }
+    setIpcDispAfk(null);
+    return true;
 }
 
 /** #627 — read the AFK file and derive {mode, expiryMs} for the LoopState
@@ -934,6 +993,13 @@ export function readLoopStateInput(
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,
         afkMode: afk.mode,
         afkExpiryMs: afk.expiryMs,
+        // #751 htwguc — `dispAfk` lit purement ipcState. Aucun fichier
+        // marker. Null = pas de toggle pending → renderAfkChunk converge
+        // sur `afkMode`. Le commit (timer tick) consomme ce couple via
+        // les *ViaService helpers + clear le dispAfk → convergence.
+        dispAfkMode: ipc.dispAfkMode,
+        dispAfkExpiryMs: ipc.dispAfkExpiryMs,
+        dispAfkCommitAtMs: ipc.dispAfkCommitAtMs,
         // #727 V1 Slice B — in-memory truth wins. Shared with the
         // pre-gate paths in timer.ts via `readIdleSinceMs`.
         idleSinceMs: readIdleSinceMs(sd),

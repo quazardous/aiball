@@ -70,8 +70,14 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
         if (kind === "keystroke" && eventKind === "afk_key") {
             // F9 cycles 3 states (off → 10m → ∞ → off). No boot guard :
             // the user explicitly pressed F9.
+            // #751 htwguc — toggleAfk now writes `dispAfk` (in-memory pending) ;
+            // committed `afkMode` won't reflect the new intent for 3s.
+            // The verdict.nextMode should name the USER'S CHOICE (= the
+            // pending kind), so we read `dispAfkMode` and fall back to
+            // committed when no toggle is in flight (= no pending).
             toggleAfk(sd);
-            const nextMode = readLoopStateInput(sd).afkMode;
+            const input = readLoopStateInput(sd);
+            const nextMode = (input.dispAfkMode ?? input.afkMode) as "off" | "wait_10m" | "wait_inf";
             return { kind: "afk-toggled", nextMode };
         }
         if (kind === "marker") {

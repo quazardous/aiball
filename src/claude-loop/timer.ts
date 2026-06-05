@@ -58,6 +58,7 @@ import {
     setResuming,
     MUX_CMD,
     buildContextPhrase,
+    commitDispAfkIfDue,
     injectWakePhrase,
     checkHasWork,
     readIdleSinceMs,
@@ -1106,31 +1107,34 @@ async function mainSse(): Promise<void> {
     // watcher does the initial hydrate itself.
     const unwatchAfk = watchAfkMarker(sd!);
     process.on("exit", () => unwatchAfk());
-    // #755 — WIN32 only: paint the `@cl_afk_state` chip from the timer.
-    // On Unix the Python proxy owns this segment ; the win32 Rust proxy
-    // only paints `@cl_human`, never `@cl_afk_state`, so the AFK/NOT AFK
-    // chip stayed frozen on its boot seed (F9 toggled the state + marker,
-    // and loop/stop honored it, but nothing repainted the display).
-    // Repaint instantly on AFK transitions (watchAfkMarker hydrates the
-    // AfkService → its Observable fires here) AND on a 1s tick for the
-    // NOT AFK 10m countdown. Diff-guarded so we only spend a tmux
-    // set-option when the rendered string actually changes.
-    if (process.platform === "win32") {
-        let lastAfkPaint: string | null = null;
-        const repaintAfkState = (): void => {
-            try {
-                const next = afkStateChunkStr(sd!);
-                if (next === lastAfkPaint) return;
-                lastAfkPaint = next;
-                setTmuxAfkState(name!, next);
-            } catch { /* best-effort — bar paint must never crash the timer */ }
-        };
-        repaintAfkState();
-        const afkSub = getAfkService().subscribe(() => repaintAfkState());
-        const afkPaintTimer = setInterval(repaintAfkState, 1000);
-        process.on("exit", () => { try { afkSub(); } catch { /* ignore */ } clearInterval(afkPaintTimer); });
-    }
+    // #755 + #751 htwguc — paint the `@cl_afk_state` chip from the timer
+    // ON EVERY PLATFORM. Pre-fix this block was gated to win32 because the
+    // Unix Python proxy was supposed to own the chip ; but the proxy only
+    // reads the committed `afk` file and is blind to `dispAfk` (in-memory
+    // ipcState pending toggle, #751). On Linux that meant the F9 toggle
+    // was invisible until commit. The timer paints with the DISPLAY value
+    // (via `afkStateChunkStr` → `renderAfkChunk` → `dispAfk` fallback to
+    // `afk`), the proxy paints from the committed file ; both write the
+    // same option and converge. Repaint triggers : (a) `dispAfkChanged`
+    // bus event (toggle / commit), (b) AfkService observable (commit
+    // through *ViaService helpers), (c) 1s safety tick for the wait_10m
+    // countdown. Diff-guarded so we only spend a tmux set-option when the
+    // rendered string actually changes.
+    let lastAfkPaint: string | null = null;
+    const repaintAfkState = (): void => {
+        try {
+            const next = afkStateChunkStr(sd!);
+            if (next === lastAfkPaint) return;
+            lastAfkPaint = next;
+            setTmuxAfkState(name!, next);
+        } catch { /* best-effort — bar paint must never crash the timer */ }
+    };
+    repaintAfkState();
+    const afkSub = getAfkService().subscribe(() => repaintAfkState());
+    const afkPaintTimer = setInterval(repaintAfkState, 1000);
+    process.on("exit", () => { try { afkSub(); } catch { /* ignore */ } clearInterval(afkPaintTimer); });
     const loopBus = new LoopStateBus();
+    loopBus.on("dispAfkChanged", () => repaintAfkState());
     loopBus.on("transition", (_prev, next) => {
         loopServer.pushView(next);
         // #629 (xyss9z) : trace which writer drove the @cl_human change.
@@ -1402,6 +1406,13 @@ async function mainSse(): Promise<void> {
     // marker change ; push once a second so the AFK chunk reflects it.
     // Also acts as a safety net if fs.watch missed an event.
     setInterval(pushViewIfChanged, 1000);
+    // #751 htwguc — flush a debounced `dispAfk` toggle into `afk` via
+    // the *ViaService helpers once the 3s window elapses. Tick at 1s
+    // so the late-commit delay never exceeds 1s. The helpers update
+    // AfkService observable → fires the chip painter via `afkSub`.
+    setInterval(() => {
+        commitDispAfkIfDue(sd!).catch(() => { /* best-effort */ });
+    }, 1000);
     // #722 david — 2-rate pane-probe driven by `shouldPollFast(input)` via
     // the bus `pollFast` event. Default cadence is SLOW (~1s) ; when ANY
     // of {boot, busy, input-hot} flips true the probe re-arms to FAST

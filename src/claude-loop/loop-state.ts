@@ -57,10 +57,27 @@ export interface LoopStateInput {
     /** TTL for the human-typing marker in ms (typically 5_000). */
     humanTypingTtlMs: number;
 
-    /** AFK file mode + auto-release expiry. `expiryMs` is meaningful only
-     *  in `wait_10m` ; ignored for `off` and `wait_inf`. */
+    /** AFK file mode + auto-release expiry — COMMITTED value (= the
+     *  gate-logic truth). `expiryMs` is meaningful only in `wait_10m` ;
+     *  ignored for `off` and `wait_inf`. Bar word, AFK SM, wake gate
+     *  and countdown all consume these — they stay stable during the
+     *  3s debounce window so an F9 cycle under 3s is a noop for the SM. */
     afkMode: AfkMode;
     afkExpiryMs: number | null;
+    /** #751 htwguc — `dispAfk` : display-only AFK state for the bar's
+     *  right-side chip. Diverges from `afkMode` during the 3s debounce
+     *  window of a toggle (= visual feedback instant), converges back
+     *  after the commit. `null` when no pending is in flight (= chip
+     *  renders `afkMode` directly). The bus emits `dispAfkChanged` when
+     *  this couple changes ; the chip painter subscribes for an
+     *  instant repaint. Optional so older / hand-crafted inputs default
+     *  to converged. ONLY `renderAfkChunk` is allowed to consume these. */
+    dispAfkMode?: AfkMode | null;
+    dispAfkExpiryMs?: number | null;
+    /** ms-since-epoch when the pending will converge to `afk`. Read by
+     *  the timer's commit tick to decide when to flush via the *ViaService
+     *  helpers. */
+    dispAfkCommitAtMs?: number | null;
 
     /** mtime of `idle-since` marker (ms-since-epoch), or null. */
     idleSinceMs: number | null;
@@ -410,6 +427,10 @@ export type LoopStateEvents = {
     afkArmedInf: () => void;
     /** AFK cleared (any → off). */
     afkCleared: () => void;
+    /** #751 htwguc — `dispAfk` couple changed between two consecutive
+     *  inputs (toggle F9, commit, or convergence to null). The chip
+     *  painter subscribes for an instant repaint. */
+    dispAfkChanged: (next: { mode: AfkMode | null; expiryMs: number | null; commitAtMs: number | null }) => void;
     /** Wake gate flipped from closed to open. */
     wakeBecameAllowed: (next: LoopStateView) => void;
     /** Wake gate flipped from open to closed. */
@@ -514,6 +535,19 @@ export class LoopStateBus {
         if (prev.wakeAllowed && !next.wakeAllowed) this.emit("wakeBecameBlocked", next.wakeSkipReason ?? "unknown");
         if (!prevInput.resumePickerActive && nextInput.resumePickerActive) this.emit("pickerOpened");
         if (prevInput.resumePickerActive && !nextInput.resumePickerActive) this.emit("pickerClosed");
+        // #751 htwguc — emit `dispAfkChanged` on any diff of the display
+        // couple. Painters subscribe for an instant chip repaint.
+        const prevDisp = prevInput.dispAfkMode ?? null;
+        const nextDisp = nextInput.dispAfkMode ?? null;
+        const prevDispExp = prevInput.dispAfkExpiryMs ?? null;
+        const nextDispExp = nextInput.dispAfkExpiryMs ?? null;
+        if (prevDisp !== nextDisp || prevDispExp !== nextDispExp) {
+            this.emit("dispAfkChanged", {
+                mode: nextDisp,
+                expiryMs: nextDispExp,
+                commitAtMs: nextInput.dispAfkCommitAtMs ?? null,
+            });
+        }
     }
 
     private emit<K extends keyof LoopStateEvents>(event: K, ...args: Parameters<LoopStateEvents[K]>): void {

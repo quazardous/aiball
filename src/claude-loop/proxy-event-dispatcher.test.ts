@@ -15,6 +15,7 @@ import {
     humanTypingPath,
     loopStartTsPath,
 } from "./state.js";
+import { getIpcDispAfk, setIpcAfk } from "./ipc-state.js";
 import { setIpcPaneReady, resetIpcStateForTests } from "./ipc-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 
@@ -60,37 +61,57 @@ test("#633F dispatch typing during boot → no arm (state.inBootGrace)", () => {
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F dispatch afk_key from off → wait_10m (toggle cycle)", () => {
+test("#633F + #751 htwguc dispatch afk_key from off → wait_10m (pending in dispAfk, afk file untouched)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "wait_10m" });
-        // AFK file now has a 10m expiry.
-        const content = readFileSync(afkPath(sd), "utf8").trim();
-        assert.ok(!Number.isNaN(new Date(content).getTime()));
+        // #751 — committed afk file UNTOUCHED during the debounce window.
+        assert.equal(existsSync(afkPath(sd)), false, "afk file unchanged during debounce");
+        // dispAfk reflects the user's pending choice.
+        const pending = getIpcDispAfk();
+        assert.ok(pending, "dispAfk is set");
+        assert.equal(pending!.mode, "wait_10m");
+        assert.ok(pending!.commitAtMs > Date.now(), "commitAtMs in the future");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F dispatch afk_key from wait_10m → wait_inf", () => {
+test("#633F + #751 htwguc dispatch afk_key from wait_10m → wait_inf (pending in dispAfk, afk file unchanged)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
-        writeFileSync(afkPath(sd), new Date(Date.now() + 600_000).toISOString() + "\n");
+        // Seed committed wait_10m via in-memory ipc (mirrors what the
+        // *ViaService helpers would do in production).
+        const expiryMs = Date.now() + 600_000;
+        setIpcAfk("wait_10m", expiryMs);
+        writeFileSync(afkPath(sd), new Date(expiryMs).toISOString() + "\n");
+        const beforeContent = readFileSync(afkPath(sd), "utf8");
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "wait_inf" });
-        assert.equal(readFileSync(afkPath(sd), "utf8").trim(), "inf");
+        // afk file unchanged (committed wait_10m still there).
+        assert.equal(readFileSync(afkPath(sd), "utf8"), beforeContent);
+        const pending = getIpcDispAfk();
+        assert.ok(pending);
+        assert.equal(pending!.mode, "wait_inf");
+        // Stash captured for cycle-back.
+        assert.ok(pending!.stashMs !== null, "stash captured from wait_10m remaining");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F dispatch afk_key from wait_inf → off (clears AFK)", () => {
+test("#633F + #751 htwguc dispatch afk_key from wait_inf → off (pending in dispAfk, afk file unchanged)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
+        setIpcAfk("wait_inf", null);
         writeFileSync(afkPath(sd), "inf\n");
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "off" });
-        assert.equal(existsSync(afkPath(sd)), false);
+        // afk file still says "inf" — commit hasn't fired yet.
+        assert.equal(readFileSync(afkPath(sd), "utf8").trim(), "inf");
+        const pending = getIpcDispAfk();
+        assert.ok(pending);
+        assert.equal(pending!.mode, "off");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 

@@ -16,7 +16,7 @@
  * `LoopStateInput` and read the typed return.
  */
 import type { LoopStateInput } from "./loop-state.js";
-import { effectiveAfkMode, isAfkActive, isInBootGrace, isTypingNow } from "./loop-state.js";
+import { effectiveAfkMode, isAfkActive, isInBootGrace, isTypingNow, type AfkMode } from "./loop-state.js";
 
 /** Bar background phase. */
 export type Phase = "boot" | "idle" | "busy";
@@ -58,14 +58,25 @@ export function renderBarWord(input: LoopStateInput): BarWord {
     return "loop";
 }
 
-/** Status-right AFK chunk. */
+/** Status-right AFK chunk. #751 htwguc — reads `dispAfk` if a toggle
+ *  is pending (= visual feedback instant for the F9 cycle), else
+ *  converges on the committed `afkMode`. Gating code (bar word, AFK
+ *  SM, wake gate, countdown) keeps reading the committed value via
+ *  `effectiveAfkMode` so a cycle under AFK_DEBOUNCE_MS is a noop. */
 export function renderAfkChunk(input: LoopStateInput): AfkChunk {
-    const mode = effectiveAfkMode(input);
+    const hasDisp = input.dispAfkMode !== null && input.dispAfkMode !== undefined;
+    const rawMode = hasDisp ? (input.dispAfkMode as AfkMode) : effectiveAfkMode(input);
+    const expiryMs = hasDisp ? (input.dispAfkExpiryMs ?? null) : input.afkExpiryMs;
+    // 10m auto-release : a wait_10m with an expiry past `now` collapses
+    // to off (mirrors effectiveAfkMode's gate but on whichever side we read).
+    const mode = (rawMode === "wait_10m" && expiryMs !== null && expiryMs <= input.nowMs)
+        ? "off"
+        : rawMode;
     if (mode === "wait_inf") {
         return { label: "NOT AFK", prefix: "∞", color: "red" };
     }
-    if (mode === "wait_10m" && input.afkExpiryMs !== null) {
-        const remMs = input.afkExpiryMs - input.nowMs;
+    if (mode === "wait_10m" && expiryMs !== null) {
+        const remMs = expiryMs - input.nowMs;
         return { label: "NOT AFK", prefix: formatCountdown(remMs), color: "yellow" };
     }
     return { label: "AFK", prefix: null, color: "dim" };
