@@ -75,9 +75,12 @@ export const ticketsRouter = Router();
 
 /** #402 levier 1 — hot-window (seconds) read from the global config yaml
  *  (`~/.config/aiball/config.yaml` → `hot_window_sec:`, david `xkehmv` D2).
- *  Default 600s. Read once per ticket_list (the sort), not per row, so the
- *  yaml parse is cheap. Falls back to the default on any read/parse error. */
-const DEFAULT_HOT_WINDOW_SEC = 600;
+ *  Default 1200s (#829 david `egz5b5` : "passe le hot à 20 minutes,
+ *  rearmable" — la fenêtre est rearmée naturellement par chaque activité
+ *  via `last_actor_at`, donc 20 min sliding suffit). Read once per
+ *  ticket_list (the sort), not per row, so the yaml parse is cheap.
+ *  Falls back to the default on any read/parse error. */
+const DEFAULT_HOT_WINDOW_SEC = 1200;
 function hotWindowSec(): number {
     try {
         const raw = parseYaml(readFileSync(globalConfigPath(), "utf8")) as { hot_window_sec?: unknown };

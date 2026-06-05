@@ -182,18 +182,14 @@ function onRowClick(r: InboxRow) {
              pour 0 valeur quotidienne — c'est de l'info au repos, pas le
              principal). -->
         <template #title>
-            <!-- #657 david `4vtj93` : fusion claim+hot. Le 🔥 ne s'affiche
-                 QUE quand il n'y a pas de claim (hot purement cross-agent
-                 activity sans claimant). Quand un claim existe, l'état
-                 hot est porté par la couleur de la chip bookmark dans le
-                 #meta slot (verte si hot, muted sinon). Évite la
-                 redondance 🔥 + bookmark côte à côte. -->
-            <span
-                v-if="r.hot && !r.claimant"
-                class="list-hot-focus"
-                title="An agent has recent activity on this ticket (within the hot window)."
-                style="margin-right: 0.3rem"
-            >🔥</span>
+            <!-- #829 david `hhg8qz` — 🔥 déplacé dans #meta slot (à côté
+                 de la bookmark à droite, voir plus bas). Pré-#829 le
+                 design #657 mettait l'icône sur la title-line gauche
+                 ET conditionnait à `!r.claimant` (mutex avec la coloration
+                 verte du bookmark). David trouvait la double-signalisation
+                 confuse → orthogonalisation : 🔥 = "activité récente"
+                 toujours visible si hot, bookmark = "claim" toujours
+                 muted. Les 2 cohabitent naturellement quand hot+claim. -->
             <!-- #560 david : en multi-projet (`!project`), le nom du projet va
                  sur la title-line AVANT le #N, pas dans un badge. Texte plain
                  (pas un Tag PrimeVue), couleur muted pour rester discret. -->
@@ -257,21 +253,28 @@ function onRowClick(r: InboxRow) {
             >{{ r.by_agent }}</span>
         </template>
         <template #meta>
+            <!-- #829 david `hhg8qz` : 🔥 ici (à côté du bookmark) — orthogonal
+                 du claim. Toujours visible si hot, indépendamment de la
+                 présence d'un claim. Pré-#829 le 🔥 était sur la title-line
+                 gauche et gated sur `!claimant`, ce qui forçait la chip
+                 bookmark à porter la sémantique "hot" via une coloration
+                 verte (#657). Orthogonalisation : 🔥 = "activité récente",
+                 bookmark = "claim", chacun son icône. -->
+            <span
+                v-if="r.hot"
+                class="list-row__hot"
+                title="An agent has recent activity on this ticket (within the hot window)."
+            >🔥</span>
             <!-- #429: who currently holds this ticket — compact icon + tooltip
                  naming the holder (the tooltip carries the assignee/claimant,
                  per david). Claim (focus) and assignment (responsibility) are
                  distinct (#436); a row can show both. Role-specific glyph,
                  same as the thread header (bookmark-fill = self-claim,
                  user-plus = pushed assignment). -->
-            <!-- #657 david `4vtj93` : claim chip absorbe l état hot.
-                 Vert quand hot (claim récent OU activité cross-agent
-                 dans le hot_window) ; muted/default sinon (claim sans
-                 activité récente — "présent mais stale"). -->
             <span
                 v-if="r.claimant"
                 class="list-row__hold"
-                :class="{ 'list-row__hold--hot': r.hot }"
-                :title="`Claimed by ${r.claimant}${r.claimed_at ? ' · ' + new Date(r.claimed_at).toLocaleString() : ''}${r.hot ? ' · hot (recent claim or activity)' : ''}`"
+                :title="`Claimed by ${r.claimant}${r.claimed_at ? ' · ' + new Date(r.claimed_at).toLocaleString() : ''}`"
             >
                 <i class="pi pi-bookmark-fill" />
             </span>
@@ -341,14 +344,16 @@ function onRowClick(r: InboxRow) {
     font-size: 0.78rem;
     opacity: 0.75;
 }
-/* #657 david `4vtj93` : claim hot = bookmark vert + full opacity.
-   Marque visuellement « ce claim est actif » (recent claim ou recent
-   activity dans hot_window_sec) vs un claim stale (muted/default). */
-.list-row__hold--hot {
-    color: var(--p-green-500);
-}
-.list-row__hold--hot .pi {
-    opacity: 1;
+/* #829 david `hhg8qz` : 🔥 hot indicator dans le #meta slot — orthogonal
+   du claim (= la chip bookmark, voisine). Pré-#829 la coloration verte
+   du bookmark portait la sémantique hot (mutex avec 🔥) ; retiré en faveur
+   d'une icône dédiée toujours visible si hot. */
+.list-row__hot {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.78rem;
+    line-height: 1;
+    margin-right: 0.15rem;
 }
 .ticket-id {
     color: var(--p-text-muted-color);
