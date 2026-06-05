@@ -43,7 +43,39 @@ export const VALID_KINDS = [
     "ticket_closed",
     "ticket_reopened",
     "ticket_resolved",
+    // #830 — dedicated event kinds for decision transitions. Emitted
+    // server-side by the /decide handler after applyDecision flips the
+    // proposal's status ; agents cannot post these directly (their kind
+    // is server-derived from the underlying decision). Listed here so
+    // validateNewMessage accepts them on the internal submitMessage call
+    // path the decide handler takes — direct API POSTs are still blocked
+    // by `assertDecisionEventInternal` below.
+    "plan_accepted",
+    "plan_rejected",
+    "resolution_accepted",
+    "resolution_rejected",
+    "wontfix_accepted",
+    "wontfix_rejected",
+    "escalation_accepted",
+    "escalation_rejected",
 ] as const satisfies readonly MessageKind[];
+
+// #830 — server-derived decision event kinds. Posts from external API
+// callers MUST NOT carry these directly (only the /decide handler can
+// emit them once the underlying meta.decision.status has flipped).
+export const DECISION_EVENT_KINDS = [
+    "plan_accepted",
+    "plan_rejected",
+    "resolution_accepted",
+    "resolution_rejected",
+    "wontfix_accepted",
+    "wontfix_rejected",
+    "escalation_accepted",
+    "escalation_rejected",
+] as const satisfies readonly MessageKind[];
+export function isDecisionEventKind(s: string): boolean {
+    return (DECISION_EVENT_KINDS as readonly string[]).includes(s);
+}
 
 export interface ValidationError {
     error: string;
