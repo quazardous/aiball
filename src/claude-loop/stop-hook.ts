@@ -25,6 +25,7 @@ import { createLogger } from "../log.js";
 import { emitHookEventToTimer } from "./hook-emit.js";
 import { sendEventOnce } from "./ipc-events.js";
 import { loopSockPath } from "./state.js";
+import { queryLoopState } from "./hook-verdict.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -46,6 +47,13 @@ if (!sd || !name) emit();
 try {
     await emitHookEventToTimer(sd, { event: "hook", kind: "Stop", at_ms: Date.now() });
 } catch { /* best-effort emit, never block the hook */ }
+
+// #840 Slice C1 (#766) — prime ipcState from the timer's live snapshot
+// before any of the hook's marker reads (humanIsTyping, afkActive,
+// readBusyDefer). When the timer is up, this turns those calls into
+// in-memory reads ; when it's down (cold boot, dead loop), strict-IPC
+// mode stays off and the helpers fall back to their file shadows.
+try { await queryLoopState(sd); } catch { /* fail-open */ }
 
 // #B.149: tail-friendly log of every Stop hook fire — so we can spot
 // from outside the session whether the hook actually ran, what branch

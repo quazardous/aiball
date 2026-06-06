@@ -571,8 +571,19 @@ export function armBusyDefer(sd: string, ms: number): string {
 /** Read the defer marker. Returns `{ activeMs }` with the remaining
  *  defer window in ms, or `null` if the gate is open (no marker, parse
  *  failure, or target already past). Side effect: deletes the marker
- *  when the gate has opened, so subsequent calls return null cleanly. */
+ *  when the gate has opened, so subsequent calls return null cleanly.
+ *  #840 Slice C1 — when strict-IPC-read is on (= a UDS queryLoopState
+ *  populated ipcState already), the in-memory busy-defer timestamp
+ *  takes precedence over the file shadow. The file delete-on-expiry
+ *  side effect is kept only for the file path. */
 export function readBusyDefer(sd: string): { activeMs: number; until: Date } | null {
+    if (isStrictIpcRead()) {
+        const ms = getIpcState().busyDeferUntilMs;
+        if (ms === null) return null;
+        const activeMs = ms - Date.now();
+        if (!Number.isFinite(activeMs) || activeMs <= 0) return null;
+        return { activeMs, until: new Date(ms) };
+    }
     const p = busyDeferUntilPath(sd);
     if (!existsSync(p)) return null;
     try {
@@ -770,6 +781,16 @@ export function isInternalCheckCmd(checkCmd: string | null | undefined): boolean
  *    "<iso-ts>"   → AFK auto-release at that timestamp
  *  Returns true for any active mode (`inf` or `until > now`). */
 export function afkActive(sd: string): boolean {
+    // #840 Slice C1 — in strict-IPC mode the UDS query already mirrored
+    // the AFK state into ipcState ; trust it and skip the file read.
+    if (isStrictIpcRead()) {
+        const ipc = getIpcState();
+        if (ipc.afkMode === "wait_inf") return true;
+        if (ipc.afkMode === "wait_10m" && ipc.afkExpiryMs !== null) {
+            return ipc.afkExpiryMs > Date.now();
+        }
+        return false;
+    }
     const p = afkPath(sd);
     if (!existsSync(p)) return false;
     try {
@@ -1073,8 +1094,15 @@ export function proxyIsAlive(sd: string): boolean {
     }
 }
 
-/** Is a human typing in the pane right now (within the TTL)? (#264) */
+/** Is a human typing in the pane right now (within the TTL)? (#264)
+ *  #840 Slice C1 — in strict-IPC mode (UDS-populated ipcState) the
+ *  in-memory typing timestamp wins ; file mtime is the cold-boot fallback. */
 export function humanIsTyping(sd: string, ttlSec = HUMAN_TYPING_TTL_SEC): boolean {
+    if (isStrictIpcRead()) {
+        const ts = getIpcState().humanTypingAtMs;
+        if (ts === null) return false;
+        return (Date.now() - ts) < ttlSec * 1000;
+    }
     const p = humanTypingPath(sd);
     if (!existsSync(p)) return false;
     try {
