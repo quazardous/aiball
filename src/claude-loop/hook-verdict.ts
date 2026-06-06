@@ -24,8 +24,23 @@
  * verdict builder now reads `afkHoldActive` only, the AFK SM is the
  * single source of truth for "is a human here."
  */
-import { readLoopStateInput, type HUMAN_TYPING_TTL_SEC } from "./state.js";
+import { existsSync } from "node:fs";
+import { readLoopStateInput, type HUMAN_TYPING_TTL_SEC, loopSockPath } from "./state.js";
 import { computeLoopView, type LoopStateView } from "./loop-state.js";
+import { openEventChannel } from "./ipc-events.js";
+import {
+    setIpcAfk,
+    setIpcBootComplete,
+    setIpcBusyDeferUntil,
+    setIpcHumanTypingAtMs,
+    setIpcIdleSince,
+    setIpcPaneBusy,
+    setIpcPaneCompacting,
+    setIpcPaneInterrupted,
+    setIpcPaneReady,
+    setIpcPaneResuming,
+    setStrictIpcRead,
+} from "./ipc-state.js";
 
 /**
  * Loop-state snapshot the hook reads at fire-time. Extends `LoopStateView`
@@ -40,19 +55,87 @@ export type LoopStateSnapshot = LoopStateView & {
     afkHoldActive: boolean;
 };
 
+/** #840 Slice B — fields the timer hands back when a hook subprocess
+ *  asks for live loop state over loop.sock. Mirrors `IpcState` for the
+ *  fields the verdict builder actually consumes. */
+interface LiveLoopStateUds {
+    paneBusy: boolean;
+    paneReady: boolean;
+    paneCompacting: boolean;
+    paneResuming: boolean;
+    paneInterrupted: boolean;
+    afkMode: "off" | "wait_10m" | "wait_inf" | null;
+    afkExpiryMs: number | null;
+    humanTypingAtMs: number | null;
+    idleSinceMs: number | null;
+    bootComplete: boolean | null;
+    busyDeferUntilMs: number | null;
+}
+
+/** #840 Slice B — short-lived UDS round-trip to the timer's loop.sock
+ *  for a live `ipcState` snapshot. Returns null on any failure (timer
+ *  down, socket missing, ws drop, malformed reply) — the caller falls
+ *  back to local file reads, preserving the historical fail-open
+ *  semantic. Mirrors the pattern from `cmds/inspect.ts:queryLoopState`. */
+async function fetchLiveLoopStateUds(sd: string, timeoutMs: number): Promise<LiveLoopStateUds | null> {
+    const sock = loopSockPath(sd);
+    if (!existsSync(sock)) return null;
+    const ch = openEventChannel(sock, { reconnectMs: 100 });
+    try {
+        // openEventChannel reconnects forever ; race against a deadline so
+        // a dead timer doesn't hang the hook subprocess forever.
+        const connected = await new Promise<boolean>((resolve) => {
+            const start = Date.now();
+            const tick = (): void => {
+                if (ch.isConnected()) { resolve(true); return; }
+                if (Date.now() - start >= timeoutMs) { resolve(false); return; }
+                setTimeout(tick, 25);
+            };
+            tick();
+        });
+        if (!connected) return null;
+        const reply = await ch.request({ kind: "queryLoopState" }, timeoutMs);
+        return (reply.data as LiveLoopStateUds | undefined) ?? null;
+    } catch {
+        return null;
+    } finally {
+        ch.close();
+    }
+}
+
 /**
- * Sync read of the current loop state from the marker files under `sd`.
- * Builds the same view the timer's `tryWake` consults + the
- * `afkHoldActive` flag consumed by the verdict builder. Safe to call
- * from a spawn-per-call hook subprocess — pure fs reads, no fork, no
- * socket. Throws if `sd` doesn't exist (the caller decides :
- * default-allow on error is the historical pretooluse-hook fail-open
- * behavior).
+ * #840 Slice B — async query of the current loop state. Path A : asks
+ * the timer's loop.sock for a live `ipcState` snapshot, then builds the
+ * view via `readLoopStateInput` (in strict-IPC mode so no file
+ * fallback fires for the markers we just received). Path B (fail-open) :
+ * if the UDS query fails (timer down, no socket, timeout), drop back to
+ * the legacy direct-file path. Safe to call from a spawn-per-call hook
+ * subprocess.
+ *
+ * Pre-#840 the function was sync : it read `readLoopStateInput(sd)`
+ * straight off the marker files. The UDS path eliminates the
+ * `fs.read` round-trip when the timer is up, which is the common case ;
+ * the file fallback is now only the cold-boot / degraded path.
  */
-export function queryLoopState(sd: string): LoopStateSnapshot {
+export async function queryLoopState(sd: string, timeoutMs = 500): Promise<LoopStateSnapshot> {
+    const live = await fetchLiveLoopStateUds(sd, timeoutMs);
+    if (live) {
+        // Mirror the live snapshot into the subprocess's local ipcState
+        // so `readLoopStateInput` reads memory instead of the file shadows.
+        setIpcPaneBusy(live.paneBusy);
+        setIpcPaneReady(live.paneReady);
+        setIpcPaneCompacting(live.paneCompacting);
+        setIpcPaneResuming(live.paneResuming);
+        setIpcPaneInterrupted(live.paneInterrupted);
+        setIpcAfk(live.afkMode, live.afkExpiryMs);
+        setIpcHumanTypingAtMs(live.humanTypingAtMs);
+        setIpcIdleSince(live.idleSinceMs);
+        if (live.bootComplete !== null) setIpcBootComplete(live.bootComplete);
+        setIpcBusyDeferUntil(live.busyDeferUntilMs);
+        setStrictIpcRead(true);
+    }
     const input = readLoopStateInput(sd);
     const view = computeLoopView(input);
-    // afkHoldActive : wait_inf, or wait_10m with future expiry.
     const afkHoldActive =
         input.afkMode === "wait_inf"
         || (input.afkMode === "wait_10m" && input.afkExpiryMs !== null && input.afkExpiryMs > input.nowMs);

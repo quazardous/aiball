@@ -72,74 +72,74 @@ test("ALLOW serializes as `{}` (Claude Code's default-allow output shape)", () =
     assert.equal(JSON.stringify(ALLOW), "{}");
 });
 
-test("queryLoopState: reads marker files from sd and returns a snapshot", () => {
+test("queryLoopState: reads marker files from sd and returns a snapshot", async () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
     setIpcPaneReady(true);
-    const state = queryLoopState(sd);
+    const state = await queryLoopState(sd);
     assert.ok(typeof state.barWord === "string", "snapshot carries barWord");
     assert.ok(typeof state.phase === "string", "snapshot carries phase");
     assert.equal(state.inBootGrace, false, "post-boot, not in grace");
     assert.equal(state.afkHoldActive, false, "no afk file → no hold");
 });
 
-test("queryLoopState: empty sd → inBootGrace=true (the boot floor applies)", () => {
+test("queryLoopState: empty sd → inBootGrace=true (the boot floor applies)", async () => {
     const sd = tmp();
-    const state = queryLoopState(sd);
+    const state = await queryLoopState(sd);
     assert.equal(state.inBootGrace, true);
     assert.equal(state.barWord, "boot");
 });
 
-test("queryLoopState: afk file 'inf' → afkHoldActive=true", () => {
+test("queryLoopState: afk file 'inf' → afkHoldActive=true", async () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
     setIpcPaneReady(true);
     writeFileSync(afkPath(sd), "inf\n");
-    const state = queryLoopState(sd);
+    const state = await queryLoopState(sd);
     assert.equal(state.afkHoldActive, true);
 });
 
-test("queryLoopState: afk file with future expiry → afkHoldActive=true", () => {
+test("queryLoopState: afk file with future expiry → afkHoldActive=true", async () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
     setIpcPaneReady(true);
     writeFileSync(afkPath(sd), new Date(Date.now() + 600_000).toISOString() + "\n");
-    const state = queryLoopState(sd);
+    const state = await queryLoopState(sd);
     assert.equal(state.afkHoldActive, true);
 });
 
-test("queryLoopState: afk file with past expiry → afkHoldActive=false (expired hold)", () => {
+test("queryLoopState: afk file with past expiry → afkHoldActive=false (expired hold)", async () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
     setIpcPaneReady(true);
     writeFileSync(afkPath(sd), new Date(Date.now() - 60_000).toISOString() + "\n");
-    const state = queryLoopState(sd);
+    const state = await queryLoopState(sd);
     assert.equal(state.afkHoldActive, false, "expired wait_10m doesn't count as hold");
 });
 
-test("queryLoopState + buildHookVerdict integration: post-boot autonomous loop denies AskUserQuestion", () => {
+test("queryLoopState + buildHookVerdict integration: post-boot autonomous loop denies AskUserQuestion", async () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
     setIpcPaneReady(true);
-    const state = queryLoopState(sd);
+    const state = await queryLoopState(sd);
     assert.equal(state.afkHoldActive, false);
     const v = buildHookVerdict(state, { kind: "PreToolUse", tool_name: "AskUserQuestion" });
     assert.equal(v.hookSpecificOutput?.permissionDecision, "deny");
 });
 
-test("queryLoopState + buildHookVerdict integration: AFK hold ∞ → ALLOW (human is here per AFK SM)", () => {
+test("queryLoopState + buildHookVerdict integration: AFK hold ∞ → ALLOW (human is here per AFK SM)", async () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
     writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
     setIpcPaneReady(true);
     writeFileSync(humanTypingPath(sd), new Date().toISOString() + "\n");
     writeFileSync(afkPath(sd), "inf\n");
-    const state = queryLoopState(sd);
+    const state = await queryLoopState(sd);
     assert.equal(state.afkHoldActive, true);
     const v = buildHookVerdict(state, { kind: "PreToolUse", tool_name: "AskUserQuestion" });
     assert.deepEqual(v, ALLOW, "AFK SM hold = human present → dialog allowed");

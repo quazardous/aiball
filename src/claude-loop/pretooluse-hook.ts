@@ -44,7 +44,7 @@ try {
     // Not inside a loop → interactive session, a human can answer. Allow.
     if (!sd) allow();
 
-    const state = queryLoopState(sd);
+    const state = await queryLoopState(sd);
     const verdict = buildHookVerdict(state, { kind: "PreToolUse", tool_name: "AskUserQuestion" });
     process.stdout.write(JSON.stringify(verdict) + "\n");
     process.exit(0);
