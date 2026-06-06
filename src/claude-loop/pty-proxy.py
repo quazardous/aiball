@@ -1232,7 +1232,14 @@ def _rest_word():
     mais le bar word reflète l'état AFK UNIQUEMENT, sinon une frappe
     récente laisse un `wait` jaune même après F9 clear AFK. La
     décomposition fine AFK (countdown / ∞ / couleur) vit à côté du
-    hint AFK:F9 dans le status-right — voir `_format_afk_state`."""
+    hint AFK:F9 dans le status-right — voir `_format_afk_state`.
+    #853 david `w7t4pt` : par définition on commence en boot. Tant
+    qu'aucune push timer n'est arrivée (`_pushed_view_cache["view"]
+    is None`), le bootstrap source = BOOT (pas le LOOP fallback qui
+    sortait du fallthrough quand `_boot_grace_remaining()=0` au tout
+    début du proxy)."""
+    if _pushed_view_cache.get("view") is None:
+        return _HUMAN_BOOT
     if _boot_grace_remaining() > 0.0:
         return _HUMAN_BOOT
     if _afk_mode() is not None:
