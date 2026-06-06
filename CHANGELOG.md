@@ -31,6 +31,7 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- MCP `client.ts` calls to the daemon now retry transparently on transient failures (`ECONNREFUSED` / `ENOENT` / `ECONNRESET` / `socket hang up` / HTTP 502-504) with a 300ms / 1s / 3s backoff (up to 4 attempts, ~4.3s worst-case). An `aiball restart` or `tsx watch` reload no longer kills in-flight tool calls in cascade ; the agent's call just pauses briefly and succeeds once the daemon is back. 4xx errors (deterministic) propagate immediately as before.
 - tmux bar word at proxy startup now reads `claude-boot` (not `claude-loop`). The proxy's rest-word cascade used to fall through to `loop` when no push from the timer had arrived yet ; the bootstrap default is now `boot` by construction.
 - tmux bar `open` and `backlog` counters are now scoped to the loop's project (#818 david `y5ggkh`). The bar previously summed `open_count` across all projects (e.g. 81 total when the loop's aiball project had 41 open), which diverged from the UI's per-project view. `events` stays cross-project (= agent-scope FIFO, #800). The loop's project = `AIBALL_PROJECT` env ; when unset, the bar falls back to the cross-project sum.
 - tmux bar counters refresh on every SSE ping (#816). Previously the `e:N` count only repainted on the 30s heartbeat ; a fresh comment surfaced as a wake within seconds but the counter lagged up to 30s behind. The SSE ping handler now refetches the 3 counts and repaints `@cl_counts` instantly so realtime and poll-ish paths agree.

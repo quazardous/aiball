@@ -102,10 +102,19 @@ export class AiballClient {
             headers["x-aiball-no-claim"] = "1";
         }
         const payload = body ? JSON.stringify(body) : undefined;
-        if (this.socketPath) {
-            return this.httpUds<T>(method, path, headers, payload);
-        }
-        return this.httpTcp<T>(method, path, headers, payload);
+        // #855 — retry-with-backoff on transient daemon-down errors so
+        // an `aiball restart` (or tsx-watch reload) doesn't kill in-flight
+        // tool calls in cascade. Retriable = the request never reached or
+        // wasn't processed by the daemon (ECONNREFUSED / ENOENT / 502-504
+        // / pre-response socket hang up). NOT retried : 4xx (deterministic),
+        // 5xx ≠ 502-504 (logic error), or timeout once bytes have flown
+        // (risk of double-write on POST).
+        return withRetry(() => {
+            if (this.socketPath) {
+                return this.httpUds<T>(method, path, headers, payload);
+            }
+            return this.httpTcp<T>(method, path, headers, payload);
+        });
     }
 
     private async httpTcp<T>(
@@ -1036,6 +1045,61 @@ export class AiballClient {
     node() {
         return this.http<{ ok: boolean; proxy: boolean; upstream: string | null }>("GET", "/api/node");
     }
+}
+
+/**
+ * #855 — decide whether a thrown error from a daemon HTTP call is
+ * retriable transparently (= daemon mid-restart / transient). Retriable :
+ *   - `ECONNREFUSED` / `ENOENT` (UDS path absent during a daemon restart
+ *      window) — the request never reached the daemon, so a retry is safe
+ *      even for POSTs (no double-write risk).
+ *   - `ECONNRESET` / `socket hang up` thrown BEFORE the daemon flushed
+ *      any response bytes — same reasoning : nothing landed yet.
+ *   - HTTP 502 / 503 / 504 — daemon up but transient (reverse proxy
+ *     between us and daemon could be mid-restart on managed deploys).
+ * NOT retriable :
+ *   - 4xx — deterministic client error, retrying will fail identically.
+ *   - 5xx ≠ 502/503/504 — server logic error, retrying won't help.
+ *   - Timeout once the request was sent — a POST may have side-effected
+ *     the server even if we never saw the response ; replaying would
+ *     double-write.
+ */
+/** #855 retry policy. Exported for unit tests. */
+export const RETRY_BACKOFF_MS = [300, 1000, 3000];
+
+/** #855 — retry-with-backoff wrapper. Attempt up to (1 + RETRY_BACKOFF_MS.length)
+ *  times with the configured delays. Only retriable errors trigger a retry ;
+ *  everything else propagates immediately. Exported for unit tests. */
+export async function withRetry<T>(
+    fn: () => Promise<T>,
+    delays: readonly number[] = RETRY_BACKOFF_MS,
+): Promise<T> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= delays.length; attempt++) {
+        try {
+            return await fn();
+        } catch (e) {
+            lastErr = e;
+            if (!isRetriableHttpError(e)) throw e;
+            if (attempt === delays.length) break;
+            await new Promise<void>((res) => setTimeout(res, delays[attempt]));
+        }
+    }
+    throw lastErr;
+}
+
+export function isRetriableHttpError(e: unknown): boolean {
+    if (e === null || typeof e !== "object") return false;
+    const err = e as { code?: string; status?: number; message?: string };
+    if (err.code === "ECONNREFUSED" || err.code === "ENOENT") return true;
+    if (typeof err.status === "number" && (err.status === 502 || err.status === 503 || err.status === 504)) {
+        return true;
+    }
+    // node http "socket hang up" lands with code=ECONNRESET on some node
+    // versions and no code on others — match by message too.
+    if (err.code === "ECONNRESET") return true;
+    if (typeof err.message === "string" && /socket hang up/i.test(err.message)) return true;
+    return false;
 }
 
 /**
