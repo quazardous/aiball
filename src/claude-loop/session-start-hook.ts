@@ -24,7 +24,7 @@
 import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { MUX_CMD, clearResumePickers, setResumeModePicker, setResumeSessionPicker, tmuxName } from "./state.js";
+import { MUX_CMD, tmuxName } from "./state.js";
 import { CL_ENV } from "./env-vars.js";
 import { emitHookEventToTimer } from "./hook-emit.js";
 
@@ -150,13 +150,9 @@ if (source === "resume") {
                 if (/Resume session\b/i.test(text) && /Space to preview/i.test(text)) {
                     matched = true;
                     log(`session-picker: matched at ${elapsed + probeStepMs}ms (paneLen=${text.length}) → pick:${pickMode} (Enter)`);
-                    // #647 Slice 2 david `sr9kqw` : marker spécifique
-                    // session-picker (1er écran resume). #624 originel.
-                    setResumeSessionPicker(sd!, true);
-                    // #727 V1 Slice B-2 — also push the picker state to
-                    // the timer's in-memory IpcState via a fresh
-                    // SessionStart event carrying the flag. Subscriber
-                    // pins it on `IpcState.resumeSessionPickerActive`.
+                    // #839 Slice 3 (#766) — single writer. Hook only emits ;
+                    // the timer subscriber writes the picker shadow file
+                    // alongside the IPC update.
                     void emitHookEventToTimer(sd!, {
                         event: "hook",
                         kind: "SessionStart",
@@ -201,10 +197,8 @@ if (source === "resume") {
                 if (summaryRegex.test(capturePane())) {
                     matched = true;
                     log(`summary-picker: matched at ${elapsed + probeStepMs}ms → pick→${mode}`);
-                    // #647 Slice 2 david `sr9kqw` : marker spécifique
-                    // mode-picker (2e écran resume : summary vs as-is).
-                    setResumeModePicker(sd!, true);
-                    // #727 V1 Slice B-2 — mirror to timer's IpcState.
+                    // #839 Slice 3 (#766) — single writer. Hook only emits ;
+                    // the timer subscriber writes the shadow file.
                     void emitHookEventToTimer(sd!, {
                         event: "hook",
                         kind: "SessionStart",
@@ -265,11 +259,11 @@ try {
     const sessionPickerAborted = (process.env[CL_ENV.RESUME_PICK] ?? "latest") === "abort";
     const safeToSignal = source !== "resume" || sessionPicked || sessionPickerAborted;
     if (safeToSignal) {
-        clearResumePickers(sd!);
-        // #727 V1 Slice B-2 — also clear the in-memory picker flags so
-        // the wake gate doesn't see a stale "still in resume picker"
-        // state after the timer's HookService subscriber pushed `true`
-        // earlier in this hook.
+        // #839 Slice 3 (#766) — single writer. The emit below carries
+        // picker_session=false + picker_mode=false ; the timer subscriber
+        // calls setResumeSessionPicker / setResumeModePicker locally
+        // which unlink the shadow files. No more clearResumePickers call
+        // here.
         void emitHookEventToTimer(sd!, {
             event: "hook",
             kind: "SessionStart",

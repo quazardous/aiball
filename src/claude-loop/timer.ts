@@ -1141,8 +1141,18 @@ async function mainSse(): Promise<void> {
             // gate sees fresh per-hook input.
             setIpcIdleSince(ev.at_ms);
             // Slice B-2 — propagate picker context if the hook detected it.
-            if (typeof ev.picker_session === "boolean") setIpcResumeSessionPicker(ev.picker_session);
-            if (typeof ev.picker_mode === "boolean") setIpcResumeModePicker(ev.picker_mode);
+            // #839 Slice 3 (#766) — the timer (= single writer) ALSO writes
+            // the picker shadow files. session-start-hook used to call
+            // setResumeSessionPicker / setResumeModePicker / clearResumePickers
+            // locally ; now it only emits, and we materialize the file here.
+            if (typeof ev.picker_session === "boolean") {
+                setIpcResumeSessionPicker(ev.picker_session);
+                if (sd) setResumeSessionPicker(sd, ev.picker_session);
+            }
+            if (typeof ev.picker_mode === "boolean") {
+                setIpcResumeModePicker(ev.picker_mode);
+                if (sd) setResumeModePicker(sd, ev.picker_mode);
+            }
             return;
         }
         if (ev.kind === "Stop") {
