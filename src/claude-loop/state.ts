@@ -570,34 +570,18 @@ export function armBusyDefer(sd: string, ms: number): string {
 
 /** Read the defer marker. Returns `{ activeMs }` with the remaining
  *  defer window in ms, or `null` if the gate is open (no marker, parse
- *  failure, or target already past). Side effect: deletes the marker
- *  when the gate has opened, so subsequent calls return null cleanly.
- *  #840 Slice C1 — when strict-IPC-read is on (= a UDS queryLoopState
- *  populated ipcState already), the in-memory busy-defer timestamp
- *  takes precedence over the file shadow. The file delete-on-expiry
- *  side effect is kept only for the file path. */
-export function readBusyDefer(sd: string): { activeMs: number; until: Date } | null {
-    if (isStrictIpcRead()) {
-        const ms = getIpcState().busyDeferUntilMs;
-        if (ms === null) return null;
-        const activeMs = ms - Date.now();
-        if (!Number.isFinite(activeMs) || activeMs <= 0) return null;
-        return { activeMs, until: new Date(ms) };
-    }
-    const p = busyDeferUntilPath(sd);
-    if (!existsSync(p)) return null;
-    try {
-        const until = new Date(readFileSync(p, "utf8").trim());
-        const activeMs = until.getTime() - Date.now();
-        if (!Number.isFinite(activeMs) || activeMs <= 0) {
-            try { unlinkSync(p); } catch { /* race */ }
-            return null;
-        }
-        return { activeMs, until };
-    } catch {
-        try { unlinkSync(p); } catch { /* race */ }
-        return null;
-    }
+ *  failure, or target already past).
+ *  #840 (david `n2xbe9` "zero file fallback") — ipc-only read. Hooks
+ *  prime ipcState via `queryLoopState` (UDS) before calling ; a dead
+ *  timer leaves ipcState empty → returns null → fail-open by the
+ *  safe default, not by re-reading a file shadow. `sd` is kept in the
+ *  signature for source compatibility but unused. */
+export function readBusyDefer(_sd: string): { activeMs: number; until: Date } | null {
+    const ms = getIpcState().busyDeferUntilMs;
+    if (ms === null) return null;
+    const activeMs = ms - Date.now();
+    if (!Number.isFinite(activeMs) || activeMs <= 0) return null;
+    return { activeMs, until: new Date(ms) };
 }
 
 export function readPlate(sd: string): Plate {
@@ -780,28 +764,14 @@ export function isInternalCheckCmd(checkCmd: string | null | undefined): boolean
  *    "inf"        → AFK ∞ (held)
  *    "<iso-ts>"   → AFK auto-release at that timestamp
  *  Returns true for any active mode (`inf` or `until > now`). */
-export function afkActive(sd: string): boolean {
-    // #840 Slice C1 — in strict-IPC mode the UDS query already mirrored
-    // the AFK state into ipcState ; trust it and skip the file read.
-    if (isStrictIpcRead()) {
-        const ipc = getIpcState();
-        if (ipc.afkMode === "wait_inf") return true;
-        if (ipc.afkMode === "wait_10m" && ipc.afkExpiryMs !== null) {
-            return ipc.afkExpiryMs > Date.now();
-        }
-        return false;
+export function afkActive(_sd: string): boolean {
+    // #840 (david `n2xbe9` "zero file fallback") — ipc-only.
+    const ipc = getIpcState();
+    if (ipc.afkMode === "wait_inf") return true;
+    if (ipc.afkMode === "wait_10m" && ipc.afkExpiryMs !== null) {
+        return ipc.afkExpiryMs > Date.now();
     }
-    const p = afkPath(sd);
-    if (!existsSync(p)) return false;
-    try {
-        const content = readFileSync(p, "utf8").trim();
-        if (!content || content === "inf") return true;
-        const until = new Date(content).getTime();
-        if (Number.isNaN(until)) return true; // unparseable → degrade to ∞
-        return until > Date.now();
-    } catch {
-        return false;
-    }
+    return false;
 }
 
 /** #624 david `e3a6nn` : arm a NOT AFK 10m hold from the TS side
@@ -1095,21 +1065,11 @@ export function proxyIsAlive(sd: string): boolean {
 }
 
 /** Is a human typing in the pane right now (within the TTL)? (#264)
- *  #840 Slice C1 — in strict-IPC mode (UDS-populated ipcState) the
- *  in-memory typing timestamp wins ; file mtime is the cold-boot fallback. */
-export function humanIsTyping(sd: string, ttlSec = HUMAN_TYPING_TTL_SEC): boolean {
-    if (isStrictIpcRead()) {
-        const ts = getIpcState().humanTypingAtMs;
-        if (ts === null) return false;
-        return (Date.now() - ts) < ttlSec * 1000;
-    }
-    const p = humanTypingPath(sd);
-    if (!existsSync(p)) return false;
-    try {
-        return (Date.now() - statSync(p).mtimeMs) < ttlSec * 1000;
-    } catch {
-        return false;
-    }
+ *  #840 (david `n2xbe9` "zero file fallback") — ipc-only. */
+export function humanIsTyping(_sd: string, ttlSec = HUMAN_TYPING_TTL_SEC): boolean {
+    const ts = getIpcState().humanTypingAtMs;
+    if (ts === null) return false;
+    return (Date.now() - ts) < ttlSec * 1000;
 }
 
 /**
