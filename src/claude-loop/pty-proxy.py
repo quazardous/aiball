@@ -1781,9 +1781,20 @@ def main(argv):
             if master_fd in ready:
                 try:
                     out = os.read(master_fd, 65536)
-                except OSError:
+                    _read_err = None
+                except OSError as _e:
                     out = b""   # slave fermé = claude a quitté
+                    _read_err = repr(_e)
                 if not out:
+                    # #858 debug — log POURQUOI la main loop sort.
+                    _sd_dbg = os.environ.get("CL_STATE_DIR") or ""
+                    if _sd_dbg:
+                        try:
+                            with open(os.path.join(_sd_dbg, "esc-debug.log"), "a") as _f:
+                                _ts = datetime.datetime.now().isoformat(timespec="milliseconds")
+                                _f.write(f"{_ts}  proxy main-loop break  read_err={_read_err}  master_fd={master_fd} pid={pid}\n")
+                        except OSError:
+                            pass
                     break
                 os.write(sys.stdout.fileno(), out)
 
@@ -1802,8 +1813,30 @@ def main(argv):
     # Récupère le code de sortie de claude et le propage.
     try:
         _, status = os.waitpid(pid, 0)
-    except OSError:
+    except OSError as _e:
+        # #858 debug — log la sortie claude.
+        _sd_dbg = os.environ.get("CL_STATE_DIR") or ""
+        if _sd_dbg:
+            try:
+                with open(os.path.join(_sd_dbg, "esc-debug.log"), "a") as _f:
+                    _ts = datetime.datetime.now().isoformat(timespec="milliseconds")
+                    _f.write(f"{_ts}  proxy waitpid err  err={repr(_e)}\n")
+            except OSError:
+                pass
         return 0
+    # #858 debug — log claude exit status.
+    _sd_dbg = os.environ.get("CL_STATE_DIR") or ""
+    if _sd_dbg:
+        try:
+            with open(os.path.join(_sd_dbg, "esc-debug.log"), "a") as _f:
+                _ts = datetime.datetime.now().isoformat(timespec="milliseconds")
+                _exited = os.WIFEXITED(status)
+                _signaled = os.WIFSIGNALED(status)
+                _code = os.WEXITSTATUS(status) if _exited else None
+                _sig = os.WTERMSIG(status) if _signaled else None
+                _f.write(f"{_ts}  proxy claude exit  exited={_exited} code={_code} signaled={_signaled} sig={_sig} status_raw={status}\n")
+        except OSError:
+            pass
     if os.WIFEXITED(status):
         return os.WEXITSTATUS(status)
     if os.WIFSIGNALED(status):
