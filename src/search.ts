@@ -31,7 +31,10 @@ export interface SearchHit {
      *  thread without having to second-guess `kind`. */
     ticket_id: number;
     project: string;
-    /** Ticket title (only set for kind=ticket; null for kind=comment). */
+    /** Ticket title. For kind=ticket this is the matched ticket itself; for
+     *  kind=comment this is the PARENT ticket's title (#842) so the result
+     *  row carries the thread context. Nullable only when the underlying
+     *  ticket has no title set. */
     title: string | null;
     /** A short hashid we can show for comment hits, mirroring `#C.<hashid>`
      *  in the UI. Null for ticket hits. */
@@ -128,6 +131,9 @@ interface MessageHitRow {
     status: string;
     project: string;
     ticket_status: string;
+    /** Parent ticket title — so a comment hit can show the thread it belongs
+     *  to, not just `#C.<hashid>` + fragment (#842 david `<hashid>`). */
+    ticket_title: string | null;
     snippet: string;
     rank: number;
 }
@@ -228,6 +234,7 @@ export function searchMessages(
             m.status            AS status,
             t.project           AS project,
             t.status            AS ticket_status,
+            t.title             AS ticket_title,
             ${fts ? "snippet(messages_fts, -1, '<mark>', '</mark>', '…', 24)" : "substr(COALESCE(m.body, ''), 1, 120)"} AS snippet,
             ${fts ? "messages_fts.rank" : "0"} AS rank
         ${fts ? "FROM messages_fts JOIN _messages m ON m.id = messages_fts.rowid JOIN tickets t ON t.id = m.ticket_id" : "FROM _messages m JOIN tickets t ON t.id = m.ticket_id"}
@@ -299,7 +306,10 @@ export function searchMessages(
             id: r.id,
             ticket_id: r.ticket_id,
             project: r.project,
-            title: null,
+            // #842: surface the parent ticket title on comment hits so the
+            // result row reads as "#C.<hashid> – <ticket title> – <snippet>"
+            // instead of just "<hashid> – <snippet>" with no thread context.
+            title: r.ticket_title,
             hashid: r.hashid,
             by_agent: r.by_agent,
             created_at: r.created_at,
