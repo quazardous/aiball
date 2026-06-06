@@ -925,17 +925,17 @@ class _Decider:
                 d["markers"] += ["arm_afk_10m"]
                 self.afk_active = True
             d["word"] = "rest"
-            # #858 — claude-code (auto mode) traite une ESC nue au prompt
-            # idle comme "exit" → claude quitte → tmux pane meurt →
-            # kill-on-exit cascade SIGKILL le timer + tout le loop. On
-            # forward la nue ESC à claude UNIQUEMENT quand phase=busy
-            # (préserve l'« esc to interrupt » officiel mid-turn). Au
-            # idle (ou view pas encore reçue : boot race), on avale la
-            # ESC : l'AFK est armée localement, claude ne voit rien.
-            view = _pushed_view_cache.get("view")
-            phase = view.get("phase") if isinstance(view, dict) else None
-            if phase != "busy":
-                return d
+            # #858 — claude-code (auto mode) traite ESC nue (idle OU busy
+            # post-turn) comme "exit" → claude quitte → tmux pane meurt →
+            # kill-on-exit cascade SIGKILL le timer + tout le loop. On ne
+            # forward JAMAIS l'ESC à claude : l'AFK est armée localement,
+            # claude ne reçoit rien. Trade-off : pour interrompre claude
+            # mid-turn, taper Ctrl-C (pas ESC). Un premier essai phase-
+            # gated (forward si "busy") a re-crashé en pratique — soit la
+            # phase était transient-busy après un drained-wake, soit
+            # claude-code exit aussi sur "esc to interrupt". Garder
+            # l'ESC interne entièrement résout les deux cas d'un coup.
+            return d
         d["forward"] += data
         return d
 
