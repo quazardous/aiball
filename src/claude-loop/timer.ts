@@ -33,7 +33,7 @@
  * per-menu settings flags. Interim: user runs `claude` once to clear
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
-import { appendFileSync, existsSync, openSync, readdirSync, unlinkSync, watch, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, openSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
@@ -115,6 +115,7 @@ import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
 import { getHookService } from "./hook-service.js";
 import {
     getIpcState,
+    onIpcChanged,
     setIpcBusyDeferUntil,
     setIpcBootComplete,
     setIpcIdleSince,
@@ -1526,28 +1527,18 @@ async function mainSse(): Promise<void> {
             pushViewIfChanged();
         }, 50);
     };
-    // Watch the state-dir for ANY marker change → schedule a push.
-    try {
-        watch(sd!, { persistent: false }, (_evt, name) => {
-            if (!name) return;
-            // Only react to the markers the LoopState service actually reads.
-            if (name === "afk" || name === "user-took-over" || name === "human-typing"
-                || name === "idle-since" || name === "wake-in-flight"
-                || name === "busy-defer-until" || name === "loop-start-ts"
-                // #647 Slice 2 follow-up — watch the new split picker files
-                // (the legacy single `resume-picker-active` no longer exists).
-                || name === "resume-session-picker-active"
-                || name === "resume-mode-picker-active"
-                || name === "boot-complete") {
-                schedulePush();
-            }
-        });
-    } catch (e) {
-        log(`view-push: fs.watch on state-dir failed (${(e as Error).message ?? e}) — relying on periodic tick only`);
-    }
+    // #856 Phase 1 — subscribe to the IPC bus so every `setIpc*` schedules
+    // a push automatically. Replaces the legacy `fs.watch` on the state-dir
+    // (the timer was watching its own writes post-#839, plus the watch had
+    // race windows that left the bar word stuck on a stale state — #846).
+    // The push is debounced 50ms ; a burst of setIpc* calls (proxy typing
+    // branch hits 3 in a row) coalesces into one push.
+    const unsubIpcChanged = onIpcChanged(schedulePush);
+    process.on("exit", () => unsubIpcChanged());
     // Periodic tick : countdown ticks down second-by-second even with no
     // marker change ; push once a second so the AFK chunk reflects it.
-    // Also acts as a safety net if fs.watch missed an event.
+    // Also acts as a safety net for any external write that bypassed the
+    // ipc bus (= file shadow written outside the timer process, rare).
     setInterval(pushViewIfChanged, 1000);
     // #751 htwguc — flush a debounced `dispAfk` toggle into `afk` via
     // the *ViaService helpers once the 3s window elapses. Tick at 1s

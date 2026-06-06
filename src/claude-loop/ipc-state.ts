@@ -164,9 +164,35 @@ let _strictIpcRead = false;
 export function setStrictIpcRead(value: boolean): void { _strictIpcRead = value; }
 export function isStrictIpcRead(): boolean { return _strictIpcRead; }
 
+// #856 Phase 1 — in-process pub/sub on the ipcState. Each `setIpc*` calls
+// `notifyIpcChanged()` after the mutation ; consumers (timer.ts subscribes
+// from `schedulePush`) react in 50ms (debounced) and push the new view to
+// the proxy. Replaces the `fs.watch` on the state-dir (timer.ts:1531) :
+// the timer is the single writer of every marker shadow post-#839, so a
+// watch firing on its own writes was wasted overhead + a race source.
+// Tests stay green : `pushViewIfChanged`'s periodic 1s tick is the safety
+// net, this just makes the push deterministic at the moment of the write.
+const _ipcSubscribers = new Set<() => void>();
+export function onIpcChanged(cb: () => void): () => void {
+    _ipcSubscribers.add(cb);
+    return () => { _ipcSubscribers.delete(cb); };
+}
+function notifyIpcChanged(): void {
+    for (const cb of _ipcSubscribers) {
+        try { cb(); } catch { /* a buggy subscriber shouldn't block others */ }
+    }
+}
+/** Test helper : drop every subscriber. Useful when a test installs a
+ *  subscriber then re-uses the singleton in another test (cross-test
+ *  bleed). Production code never calls this — it's idempotent + cheap. */
+export function _resetIpcSubscribersForTests(): void {
+    _ipcSubscribers.clear();
+}
+
 /** Mark the loop as past the boot phase. Called on SessionStart event. */
 export function setIpcBootComplete(value: boolean): void {
     state.bootComplete = value;
+    notifyIpcChanged();
 }
 
 /** Record that claude returned to the prompt. Called on Stop event when
@@ -175,6 +201,7 @@ export function setIpcBootComplete(value: boolean): void {
 export function setIpcIdleSince(atMs: number | null): void {
     state.idleSinceMs = atMs;
     state.idleSinceCleared = atMs === null;
+    notifyIpcChanged();
 }
 
 /** Slice B-2 : in-memory busy-defer expiry. Set by the Stop hook event
@@ -182,16 +209,19 @@ export function setIpcIdleSince(atMs: number | null): void {
  *  falls back to the file). */
 export function setIpcBusyDeferUntil(atMs: number | null): void {
     state.busyDeferUntilMs = atMs;
+    notifyIpcChanged();
 }
 
 /** Slice B-2 : in-memory picker flags. SessionStart hook reports each
  *  flag independently. `null` = no signal yet (file fallback). */
 export function setIpcResumeSessionPicker(active: boolean | null): void {
     state.resumeSessionPickerActive = active;
+    notifyIpcChanged();
 }
 
 export function setIpcResumeModePicker(active: boolean | null): void {
     state.resumeModePickerActive = active;
+    notifyIpcChanged();
 }
 
 /** V4 Phase 1 — timer-only wake bookkeeping setters. Pure in-memory ;
@@ -199,28 +229,34 @@ export function setIpcResumeModePicker(active: boolean | null): void {
  *  `drained-state` / `last-wake-hint` marker files. */
 export function setIpcLastOpenWakeHash(hash: string | null): void {
     state.lastOpenWakeHash = hash;
+    notifyIpcChanged();
 }
 
 export function setIpcDrainedState(value: import("./drained-strategy.js").DrainedState | null): void {
     state.drainedState = value;
+    notifyIpcChanged();
 }
 
 export function setIpcLastWakeHint(
     hint: { ticket_id?: number; comment_hashid?: string; at_ms: number } | null,
 ): void {
     state.lastWakeHint = hint;
+    notifyIpcChanged();
 }
 
 export function setIpcLastInjectedWake(value: string | null): void {
     state.lastInjectedWake = value;
+    notifyIpcChanged();
 }
 
 export function setIpcLastWakeAtMs(atMs: number | null): void {
     state.lastWakeAtMs = atMs;
+    notifyIpcChanged();
 }
 
 export function setIpcWakeRequested(atMs: number | null): void {
     state.wakeRequestedAtMs = atMs;
+    notifyIpcChanged();
 }
 
 /** #734 V3 Phase A — set AFK in-memory state. Called by the
@@ -235,6 +271,7 @@ export function setIpcAfk(
 ): void {
     state.afkMode = mode;
     state.afkExpiryMs = mode === "wait_10m" ? expiryMs : null;
+    notifyIpcChanged();
 }
 
 /** #751 htwguc qb7zs6 — set `dispAfk` (la valeur AFK à afficher pendant
@@ -255,11 +292,13 @@ export function setIpcDispAfk(
         state.dispAfkMode = null;
         state.dispAfkExpiryMs = null;
         state.dispAfkCommitAtMs = null;
+        notifyIpcChanged();
         return;
     }
     state.dispAfkMode = pending.mode;
     state.dispAfkExpiryMs = pending.expiryMs;
     state.dispAfkCommitAtMs = pending.commitAtMs;
+    notifyIpcChanged();
 }
 
 /** Convenience read of the dispAfk couple. Returns null when no pending
@@ -282,6 +321,7 @@ export function getIpcDispAfk(): {
  *  in-memory signal (read path falls back to the file mtime). */
 export function setIpcHumanTypingAtMs(atMs: number | null): void {
     state.humanTypingAtMs = atMs;
+    notifyIpcChanged();
 }
 
 /** #733 V2 — pane state setters, called by the matching `setPane*` in
@@ -290,18 +330,23 @@ export function setIpcHumanTypingAtMs(atMs: number | null): void {
  *  "no in-memory signal yet" and triggers the file fallback. */
 export function setIpcPaneBusy(value: boolean | null): void {
     state.paneBusy = value;
+    notifyIpcChanged();
 }
 export function setIpcPaneReady(value: boolean | null): void {
     state.paneReady = value;
+    notifyIpcChanged();
 }
 export function setIpcPaneCompacting(value: boolean | null): void {
     state.paneCompacting = value;
+    notifyIpcChanged();
 }
 export function setIpcPaneInterrupted(value: boolean | null): void {
     state.paneInterrupted = value;
+    notifyIpcChanged();
 }
 export function setIpcPaneResuming(value: boolean | null): void {
     state.paneResuming = value;
+    notifyIpcChanged();
 }
 
 /** Reset every field to the as-launched defaults. Tests only. */
