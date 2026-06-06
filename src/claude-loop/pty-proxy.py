@@ -1845,4 +1845,22 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    # #858 debug — catch toute exception non-attrapée pour qu'on voie d'où
+    # elle vient (un traceback dans le tmux pane est souvent invisible :
+    # pane meurt avec le proxy).
+    def _excepthook(exc_type, exc_value, exc_tb):
+        import traceback as _tb
+        sd_dbg = os.environ.get("CL_STATE_DIR") or ""
+        if sd_dbg:
+            try:
+                with open(os.path.join(sd_dbg, "esc-debug.log"), "a") as _f:
+                    ts = datetime.datetime.now().isoformat(timespec="milliseconds")
+                    _f.write(f"{ts}  proxy UNCAUGHT  type={exc_type.__name__}\n")
+                    _tb.print_exception(exc_type, exc_value, exc_tb, file=_f)
+                    _f.write("\n")
+            except OSError:
+                pass
+        # Continue avec le hook par défaut pour que stderr garde le traceback.
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+    sys.excepthook = _excepthook
     sys.exit(main(sys.argv))
