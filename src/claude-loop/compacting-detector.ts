@@ -47,6 +47,8 @@
  *     IPC `paneCompacting` flag absorbs the flicker.
  */
 
+import type { PaneScanCtx, PaneWatcher, PaneWatcherEvents } from "./pane-watchers/types.js";
+
 export interface CompactingDetectorCtx {
     /** True iff the caller is in boot phase. Detection widens the footer
      *  scope (`bootFooterLines`) because the initial resume-compact has
@@ -111,38 +113,122 @@ export function classifyCompacting(
 }
 
 /**
- * Stateful detector with a latch. `detect()` returns the LATCHED state:
- * once a positive sighting lands, subsequent calls keep returning true
- * for `latchGraceMs` even if the raw classifier flips to false (frame
- * race, redraw, transient layout). Resets the latch on the next positive
- * sighting (so the grace clock starts from the LAST positive, not from
- * boot start).
+ * Compacting state surfaced by the watcher. `active=true` while the
+ * latch holds (during a real compact + the grace window after the raw
+ * signal disappears). Future revisions can add a `percent` field when
+ * we want to expose the progress to subscribers — for now the shape is
+ * minimal.
  */
-export class CompactingDetector {
+export interface CompactingState {
+    active: boolean;
+}
+
+/**
+ * Stateful detector with a latch + `PaneWatcher<CompactingState>`
+ * surface (#845). `detect()` (legacy) returns the LATCHED boolean ;
+ * `observe()` returns the typed `CompactingState` and emits
+ * `change/begin/end` events on transitions. Both share the same internal
+ * latch so the orchestrator can consume EITHER surface without
+ * double-stateful weirdness.
+ *
+ * Latch contract : once a positive sighting lands, subsequent calls keep
+ * returning `active=true` for `latchGraceMs` even if the raw classifier
+ * flips to false (frame race, redraw, transient layout). The grace clock
+ * resets on each new positive (= continuous compact extends the hold
+ * naturally).
+ */
+export class CompactingDetector implements PaneWatcher<CompactingState> {
+    readonly name = "compacting";
     private lastPositiveMs: number | null = null;
+    private state: CompactingState = { active: false };
+    private listeners: {
+        change: Array<(next: CompactingState, prev: CompactingState | null) => void>;
+        begin: Array<(s: CompactingState) => void>;
+        end: Array<(s: CompactingState) => void>;
+        progress: Array<(s: CompactingState) => void>;
+    } = { change: [], begin: [], end: [], progress: [] };
     private readonly opts: Required<CompactingDetectorOptions>;
 
     constructor(opts: CompactingDetectorOptions = {}) {
         this.opts = { ...DEFAULT_OPTS, ...opts };
     }
 
+    /** Legacy boolean surface — kept so existing callers (timer.ts
+     *  refreshPaneMarkers) keep working until they migrate to `observe`
+     *  + subscriptions. Calls into the same latch state as `observe`. */
     detect(paneText: string, ctx: CompactingDetectorCtx = {}): boolean {
-        const now = ctx.nowMs ?? Date.now();
-        const raw = classifyCompacting(paneText, ctx, this.opts);
-        if (raw) {
-            this.lastPositiveMs = now;
-            return true;
-        }
-        if (this.lastPositiveMs !== null && (now - this.lastPositiveMs) < this.opts.latchGraceMs) {
-            return true;
-        }
-        return false;
+        return this.observe(paneText, { nowMs: ctx.nowMs ?? Date.now() }, ctx).active;
     }
 
-    /** Reset the latch — tests, or explicit out-of-band knowledge that
-     *  the compact really ended (e.g. a user-typed turn after compact). */
+    /** PaneWatcher contract : pure transform pane → state, with event
+     *  emission on transitions. `observeCtx` carries `nowMs` ; the
+     *  optional second argument carries the compacting-specific
+     *  `isBoot` (widens the footer scope). */
+    observe(
+        paneText: string,
+        ctx: PaneScanCtx,
+        compactingCtx: CompactingDetectorCtx = {},
+    ): CompactingState {
+        const now = ctx.nowMs;
+        const raw = classifyCompacting(paneText, { isBoot: compactingCtx.isBoot, nowMs: now }, this.opts);
+        let nextActive: boolean;
+        if (raw) {
+            this.lastPositiveMs = now;
+            nextActive = true;
+        } else {
+            nextActive =
+                this.lastPositiveMs !== null
+                && (now - this.lastPositiveMs) < this.opts.latchGraceMs;
+        }
+        const prev = this.state;
+        const next: CompactingState = { active: nextActive };
+        if (prev.active === next.active) return next; // no transition
+        this.state = next;
+        this.emitChange(next, prev);
+        if (!prev.active && next.active) this.emitBegin(next);
+        if (prev.active && !next.active) this.emitEnd(next);
+        return next;
+    }
+
+    snapshot(): CompactingState {
+        return this.state;
+    }
+
+    on<E extends keyof PaneWatcherEvents<CompactingState>>(
+        event: E,
+        cb: NonNullable<PaneWatcherEvents<CompactingState>[E]>,
+    ): () => void {
+        const list = this.listeners[event as keyof typeof this.listeners];
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (list as Array<any>).push(cb);
+        return () => {
+            const idx = list.indexOf(cb as never);
+            if (idx >= 0) list.splice(idx, 1);
+        };
+    }
+
+    /** Drop the latch + listeners. Used at boot for a clean slate, or
+     *  on explicit out-of-band knowledge that the compact really ended. */
     reset(): void {
         this.lastPositiveMs = null;
+        this.state = { active: false };
+        this.listeners = { change: [], begin: [], end: [], progress: [] };
+    }
+
+    private emitChange(next: CompactingState, prev: CompactingState): void {
+        for (const cb of this.listeners.change) {
+            try { cb(next, prev); } catch { /* listener isolation */ }
+        }
+    }
+    private emitBegin(s: CompactingState): void {
+        for (const cb of this.listeners.begin) {
+            try { cb(s); } catch { /* listener isolation */ }
+        }
+    }
+    private emitEnd(s: CompactingState): void {
+        for (const cb of this.listeners.end) {
+            try { cb(s); } catch { /* listener isolation */ }
+        }
     }
 }
 

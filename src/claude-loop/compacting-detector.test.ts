@@ -137,6 +137,87 @@ test("CompactingDetector: reset() drops the latch immediately", () => {
 });
 
 // ---------------------------------------------------------------------------
+//  PaneWatcher surface — observe / snapshot / on (#845)
+// ---------------------------------------------------------------------------
+
+test("PaneWatcher: observe returns the same latched state as detect", () => {
+    const det = new CompactingDetector({ latchGraceMs: 10_000 });
+    const s1 = det.observe(liveCompactCapture, { nowMs: 1_000 });
+    assert.deepEqual(s1, { active: true });
+    const s2 = det.observe("idle pane", { nowMs: 5_000 });
+    assert.deepEqual(s2, { active: true });
+    const s3 = det.observe("idle pane", { nowMs: 20_000 });
+    assert.deepEqual(s3, { active: false });
+});
+
+test("PaneWatcher: snapshot exposes the current state without re-observing", () => {
+    const det = new CompactingDetector();
+    assert.deepEqual(det.snapshot(), { active: false });
+    det.observe(liveCompactCapture, { nowMs: 1_000 });
+    assert.deepEqual(det.snapshot(), { active: true });
+});
+
+test("PaneWatcher: begin fires once on the false→true transition", () => {
+    const det = new CompactingDetector({ latchGraceMs: 10_000 });
+    let beginCount = 0;
+    det.on("begin", () => { beginCount++; });
+    det.observe("idle", { nowMs: 1_000 });   // false→false : no event
+    det.observe(liveCompactCapture, { nowMs: 2_000 });  // false→true : begin
+    det.observe(liveCompactCapture, { nowMs: 3_000 });  // true→true : no event
+    assert.equal(beginCount, 1);
+});
+
+test("PaneWatcher: end fires once on the true→false transition", () => {
+    const det = new CompactingDetector({ latchGraceMs: 5_000 });
+    let endCount = 0;
+    det.on("end", () => { endCount++; });
+    det.observe(liveCompactCapture, { nowMs: 1_000 });  // false→true : begin
+    det.observe("idle", { nowMs: 2_000 });              // latched → still true
+    det.observe("idle", { nowMs: 10_000 });             // grace elapsed : end
+    assert.equal(endCount, 1);
+});
+
+test("PaneWatcher: change fires on every transition with (next, prev)", () => {
+    const det = new CompactingDetector({ latchGraceMs: 5_000 });
+    const changes: Array<{ next: boolean; prev: boolean | null }> = [];
+    det.on("change", (next, prev) => {
+        changes.push({ next: next.active, prev: prev ? prev.active : null });
+    });
+    det.observe(liveCompactCapture, { nowMs: 1_000 });  // false→true
+    det.observe("idle", { nowMs: 10_000 });             // true→false (grace elapsed)
+    assert.deepEqual(changes, [
+        { next: true, prev: false },
+        { next: false, prev: true },
+    ]);
+});
+
+test("PaneWatcher: on returns an unsubscribe closure", () => {
+    const det = new CompactingDetector();
+    let count = 0;
+    const unsub = det.on("change", () => { count++; });
+    det.observe(liveCompactCapture, { nowMs: 1_000 });
+    unsub();
+    det.observe("idle", { nowMs: 20_000 });
+    assert.equal(count, 1);
+});
+
+test("PaneWatcher: reset clears listeners and state", () => {
+    const det = new CompactingDetector();
+    let count = 0;
+    det.on("change", () => { count++; });
+    det.observe(liveCompactCapture, { nowMs: 1_000 });
+    det.reset();
+    det.observe(liveCompactCapture, { nowMs: 2_000 });   // re-fires change
+    // count = 1 from BEFORE reset, listener after reset is gone
+    assert.equal(count, 1);
+    assert.deepEqual(det.snapshot(), { active: true });  // re-observed positive
+});
+
+test("PaneWatcher: name is 'compacting'", () => {
+    assert.equal(new CompactingDetector().name, "compacting");
+});
+
+// ---------------------------------------------------------------------------
 //  Compact y/N confirmation screen
 // ---------------------------------------------------------------------------
 
