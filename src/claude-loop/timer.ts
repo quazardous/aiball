@@ -100,6 +100,7 @@ import { loopConfig } from "./loop-config.js";
 import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
 import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
 import { paneMarkerBarInfo } from "./pane-service.js";
+import { getCompactingDetector, isCompactConfirmPrompt } from "./compacting-detector.js";
 import { armAfkViaService, watchAfkMarker } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
 import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
@@ -464,11 +465,26 @@ function refreshPaneMarkers(): void {
     setResumeSessionPicker(sd, sessionPickerVisible);
     setResumeModePicker(sd, modePickerVisible);
     setResuming(sd, resumingVisible);
+    // #843 — `paneCompacting` is now produced by the unified, latched
+    // detector (compacting-detector.ts) — single source of truth, absorbs
+    // the frame-race flicker that used to drop `[boot:compacting]` →
+    // `[boot]` mid-compact. Pass `isBoot` so the boot-phase footer scope
+    // is wider (initial resume-compact has a slightly different render).
+    const ipcView = getIpcState();
+    const isBoot = ipcView.bootComplete !== true;
+    const compactingNow = getCompactingDetector().detect(paneText, { isBoot });
+    setCompacting(sd, compactingNow);
+    // pickerOrTransient previously had a SECOND, GLOBAL `Compacting
+    // conversation` regex (footer-unaware). That kept `paneReady=false`
+    // for ever when stale text lingered in scrollback (#843 bug 1). With
+    // the latched detector above, `compactingNow` is the SSOT — reuse it.
+    // The `Compact this conversation?` y/N prompt is still detected
+    // footer-scoped (Claude renders it at the bottom of the screen).
+    const compactPromptVisible = isCompactConfirmPrompt(paneText);
     const pickerOrTransient = sessionPickerVisible || modePickerVisible || resumingVisible
-        || /Compact this conversation|Compacting conversation/i.test(paneText);
+        || compactingNow || compactPromptVisible;
     const promptVisible = /Claude Code v|❯ |^> /m.test(paneText);
     setPaneReady(sd, promptVisible && !pickerOrTransient);
-    setCompacting(sd, snap.special === "compacting");
     setInterrupted(sd, paneShowsInterrupted(paneText));
     // #611 — error detection in heartbeat probe (parallel to stop-hook).
     const errId = matchPaneError(paneText);

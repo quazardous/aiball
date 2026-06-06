@@ -40,6 +40,7 @@ import { CL_ENV } from "./env-vars.js";
 import { loopConfig } from "./loop-config.js";
 import { stripMarkdown } from "./markdown-strip.js";
 import { canFlipBgFromBoot, computeLoopView, type AfkChunk } from "./loop-state.js";
+import { classifyCompacting as classifyCompactingRaw } from "./compacting-detector.js";
 import { parseGates, runGates } from "./gates.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
@@ -1506,50 +1507,26 @@ export interface PaneSnapshot {
 
 /**
  * Classify the internal special state (compacting) visible in the
- * captured pane text. Centralized here (#B.198 david:
- * "fait un etat/funcion/serrvice global qui sert aussi pour le
- * business") so the Stop hook, the timer, and the autopoll hook all
- * agree on what counts as "claude is internally busy and shouldn't
- * be poked". Returns null when nothing special — caller falls through
- * to the regular busy/idle decision.
+ * captured pane text. Thin wrapper around the unified module
+ * `compacting-detector.ts` (#843) so the Stop hook, the timer, and
+ * the autopoll hook all agree. Caller is responsible for the latch:
+ * this entry point is PURE/raw. The timer uses the stateful
+ * `CompactingDetector` singleton (latch absorbs frame-race flicker).
  *
- * Split scope (#678 david `y3s6a8` capture confirmed) :
- * - TEXT anchor (`Compacting conversation` / `Summarizing the conversation`)
- *   scanned on the WHOLE pane. The actual UI layout pushes the
- *   `✢ Compacting conversation… (29s)` line 6+ lines above the bottom
- *   (separator box around the prompt + auto-mode help footer eats 5
- *   non-empty lines on its own), so a footer-scoped text search misses
- *   even an active /compact.
- * - LIVE signal (`▰▱` Unicode progress bar OR `NN%`) MUST stay in the
- *   bottom `footerLines` non-empty lines. That's what discriminates a
- *   live compact (progress bar pinned at the bottom) from the stale
- *   `✶ Compacting conversation… (42s)` line left in scrollback after
- *   `/compact` finishes — same #B.185 problem the old footer-scoped
- *   text addressed, now shifted to the live-signal side.
- *
- * `esc to interrupt` is NOT a live signal here — it's the generic
- * busy-turn marker, present on EVERY normal turn's footer (`⏵⏵ auto
- * mode on … · esc to interrupt`). Pairing it with a stale `Compacting`
- * in scrollback would mis-classify every busy turn following a successful
- * /compact as still-compacting. The `▰▱`/`%` markers are specific to
- * the compact progress bar (no other tool draws those at the bottom of
- * the pane), so they're the only reliable live discriminant.
+ * `footerLines` kept as a legacy parameter for older call sites &
+ * tests; passed through to the detector's `footerLines` option. Pass
+ * an explicit context with `{ isBoot: true }` when the caller knows
+ * boot phase is active (widens the footer scope to absorb a slightly
+ * different render).
  */
-export function classifyPaneSpecial(text: string, footerLines = 5): PaneSpecial | null {
-    const footer = text
-        .split("\n")
-        .map((l) => l.trimEnd())
-        .filter((l) => l.length > 0)
-        .slice(-footerLines)
-        .join("\n");
-    const hasCompactingText = /Compacting conversation|Summarizing the conversation/i.test(text);
-    const hasProgressBar = /[▰▱]/.test(footer);
-    const hasPercent = /\d+\s?%/.test(footer);
-    const hasLiveSignal = hasProgressBar || hasPercent;
-    if (hasCompactingText && hasLiveSignal) return "compacting";
-    // rate-limit / api-error / overloaded are handled by error-backoff.ts
-    // (#332) — they're errors, not internal busy states.
-    return null;
+export function classifyPaneSpecial(
+    text: string,
+    footerLines = 12,
+    ctx: { isBoot?: boolean } = {},
+): PaneSpecial | null {
+    return classifyCompactingRaw(text, ctx, { footerLines, bootFooterLines: footerLines + 6 })
+        ? "compacting"
+        : null;
 }
 
 /**
