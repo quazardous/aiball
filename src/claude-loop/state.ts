@@ -1360,7 +1360,11 @@ export function setTmuxStatus(
         // `#{@cl_counts}` is the optional ` o:M b:B e:N` segment painted by
         // setTmuxCounters (#800 9sy4t3) — visible across all states so david
         // can see open / backlog / events without waiting for [busy].
-        `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour40#,bg=colour16]loop} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}] ${name} #{@cl_state}#{@cl_counts} `,
+        // #853 david : tmux template fallback when @cl_human is UNSET reads
+        // `boot` (jaune) by construction — par définition on commence en boot.
+        // Was `loop` (vert) before, which flashed briefly between tmux first
+        // render and cli.ts seed of @cl_human=boot.
+        `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour178#,bg=colour16]boot} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}] ${name} #{@cl_state}#{@cl_counts} `,
     );
     setOpt("status-bg", bg);
     setOpt("status-fg", col.bar_fg);
