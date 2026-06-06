@@ -925,6 +925,17 @@ class _Decider:
                 d["markers"] += ["arm_afk_10m"]
                 self.afk_active = True
             d["word"] = "rest"
+            # #858 — claude-code (auto mode) traite une ESC nue au prompt
+            # idle comme "exit" → claude quitte → tmux pane meurt →
+            # kill-on-exit cascade SIGKILL le timer + tout le loop. On
+            # forward la nue ESC à claude UNIQUEMENT quand phase=busy
+            # (préserve l'« esc to interrupt » officiel mid-turn). Au
+            # idle (ou view pas encore reçue : boot race), on avale la
+            # ESC : l'AFK est armée localement, claude ne voit rien.
+            view = _pushed_view_cache.get("view")
+            phase = view.get("phase") if isinstance(view, dict) else None
+            if phase != "busy":
+                return d
         d["forward"] += data
         return d
 
