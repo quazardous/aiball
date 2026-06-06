@@ -456,16 +456,21 @@ async function fetchWakeContext(
  *  `armErrorBackoff` writes `busy-defer-until` which the state machine
  *  already gates against — no new plumbing needed. */
 
-// #845 Phase B — pane-watchers + zones. Each inline regex from the
-// pre-Phase-B refreshPaneMarkers is now a dedicated watcher under
-// src/claude-loop/pane-watchers/. The orchestrator (`paneObs`) holds
-// two zones — `boot` (pickers + resuming + compactConfirm) and
-// `runtime` (prompt + busy + interrupted + error + compacting). The
-// SM wiring in `mainSse` enters both at startup and leaves/enters
-// `boot` on bus.bootEnded / bootStarted. refreshPaneMarkers degenerates
-// to `paneObs.tick(paneText, ctx)` plus the legacy setter calls (read
-// from each watcher's snapshot) for back-compat with the rest of the
-// codebase that still polls `ipcState` instead of subscribing.
+// #845 Phase B+C — pane-watchers + zones + event-driven ipcState writes.
+// Each inline regex from the pre-refactor `refreshPaneMarkers` is now a
+// dedicated watcher under `src/claude-loop/pane-watchers/`. The
+// orchestrator (`paneObs`) holds two zones — `boot` (pickers + resuming
+// + compactConfirm) and `runtime` (prompt + busy + interrupted + error
+// + compacting). The SM wiring in `mainSse` enters both at startup and
+// leaves/enters `boot` on bus.bootEnded / bootStarted.
+//
+// Phase C : the legacy `setIpc*` calls used to fire every tick from
+// `refreshPaneMarkers`'s body, regardless of whether anything changed.
+// Now each watcher's `change` event drives the corresponding setter —
+// `refreshPaneMarkers` shrinks to a pane capture + `paneObs.tick()` +
+// the pane-service-sync bridge + the error backoff escalation (which
+// stays poll-driven because each tick with errId set increments the
+// backoff attempts counter — by design).
 const pickerSessionW = new PickerSessionWatcher();
 const pickerModeW = new PickerModeWatcher();
 const resumingW = new ResumingWatcher();
@@ -484,36 +489,47 @@ paneObs.registerZone(new Zone("runtime", [
 paneObs.enter("runtime");
 paneObs.enter("boot");
 
+// `paneReady` is composed : prompt visible AND no picker/transient on
+// screen. Any watcher that contributes to the disjunction needs to
+// trigger a recompute on its change.
+const refreshPaneReady = (): void => {
+    if (!sd) return;
+    const promptVisible = promptW.snapshot().visible;
+    const pickerOrTransient = pickerSessionW.snapshot().visible
+        || pickerModeW.snapshot().visible
+        || resumingW.snapshot().visible
+        || compactConfirmW.snapshot().visible
+        || getCompactingDetector().snapshot().active;
+    setPaneReady(sd, promptVisible && !pickerOrTransient);
+};
+
+// Wire watcher events → ipcState side-effects once at module init. The
+// `change` event fires only on transitions, so each setter call below
+// is a real value flip (no wasted no-op writes per tick).
+if (sd) {
+    pickerSessionW.on("change", (s) => { setResumeSessionPicker(sd, s.visible); refreshPaneReady(); });
+    pickerModeW.on("change", (s) => { setResumeModePicker(sd, s.visible); refreshPaneReady(); });
+    resumingW.on("change", (s) => { setResuming(sd, s.visible); refreshPaneReady(); });
+    compactConfirmW.on("change", () => refreshPaneReady());
+    promptW.on("change", () => refreshPaneReady());
+    busyW.on("change", (s) => setPaneBusy(sd, s.visible));
+    interruptedW.on("change", (s) => setInterrupted(sd, s.visible));
+    getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
+}
+
 function refreshPaneMarkers(): void {
     if (!sd) return;
     const paneText = capturePane();
     if (!paneText) return;
-    const ipcView = getIpcState();
-    const isBoot = ipcView.bootComplete !== true;
-    // Single scan, all active watchers observe. The compacting watcher
-    // reads ctx.isBoot to widen its footer scope (cf. #843).
+    const isBoot = getIpcState().bootComplete !== true;
+    // Single scan : watchers observe + emit events ; the subscribers
+    // above call the legacy ipcState setters on every transition.
     paneObs.tick(paneText, { nowMs: Date.now(), isBoot });
-    // Bridge each watcher snapshot to the legacy ipcState setters so
-    // every existing consumer (pane-service-sync, queryLoopState, etc.)
-    // keeps working unchanged. Phase C will replace these with direct
-    // subscriptions from the consumers to the watcher events.
-    setPaneBusy(sd, busyW.snapshot().visible);
-    const sessionPickerVisible = pickerSessionW.snapshot().visible;
-    const modePickerVisible = pickerModeW.snapshot().visible;
-    const resumingVisible = resumingW.snapshot().visible;
-    setResumeSessionPicker(sd, sessionPickerVisible);
-    setResumeModePicker(sd, modePickerVisible);
-    setResuming(sd, resumingVisible);
-    const compactingNow = getCompactingDetector().snapshot().active;
-    setCompacting(sd, compactingNow);
-    const compactPromptVisible = compactConfirmW.snapshot().visible;
-    const pickerOrTransient = sessionPickerVisible || modePickerVisible || resumingVisible
-        || compactingNow || compactPromptVisible;
-    setPaneReady(sd, promptW.snapshot().visible && !pickerOrTransient);
-    setInterrupted(sd, interruptedW.snapshot().visible);
-    // #611 — error backoff plumbing stays wired to the timer for now ;
-    // the watcher reports the id, the existing arm/reset helpers handle
-    // the backoff state machine.
+    // #611 — error backoff escalation : each tick with errId !== null
+    // increments the backoff attempts counter (= the next retry pushes
+    // further into the future). Event-only wiring would only arm once
+    // per begin transition and silently cap the backoff at attempt=1.
+    // So we keep this branch poll-driven, reading the watcher snapshot.
     const errId = errorW.snapshot().errorId;
     if (errId) {
         const bo = armErrorBackoff(sd, errId);
