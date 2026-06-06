@@ -16,11 +16,6 @@
  * and to keep the dependency direction clean : pane-service-sync depends
  * on both state and pane-service, never the reverse.
  */
-import { existsSync } from "node:fs";
-import {
-    resumeModePickerActivePath,
-    resumeSessionPickerActivePath,
-} from "./state.js";
 import { getIpcState } from "./ipc-state.js";
 import {
     ERROR_GROUP,
@@ -70,14 +65,15 @@ export function syncPaneServiceFromMarkers(
     // initial signal) ; track Ready and PaneReady the same.
     svc.set(PaneMarker.PaneReady, ready);
 
-    // Screen-takeover group — picker files still live (V1 hooks write
-    // them), pane resuming/compacting come from ipcState. The emitter
-    // (session-start-hook + refreshPaneMarkers) guarantees only one is
-    // set at a time, but defensively we pick first-match order
-    // session > mode > resuming > compacting and clear the rest via
-    // setExclusive.
-    const session = existsSync(resumeSessionPickerActivePath(sd));
-    const mode = existsSync(resumeModePickerActivePath(sd));
+    // Screen-takeover group — pickers + resuming/compacting now all
+    // sourced from ipcState (#856 Phase 3). The emitter (session-start
+    // hook + refreshPaneMarkers) guarantees only one is set at a time,
+    // but defensively we pick first-match order session > mode >
+    // resuming > compacting and clear the rest via setExclusive. File
+    // shadows are unused here but stay for hook subprocess reads until
+    // #840 Slice B/C move them onto UDS.
+    const session = ipc.resumeSessionPickerActive ?? false;
+    const mode = ipc.resumeModePickerActive ?? false;
     let takeover: PaneMarker | null = null;
     if (session) takeover = PaneMarker.ResumeSessionPicker;
     else if (mode) takeover = PaneMarker.ResumeModePicker;

@@ -1187,25 +1187,11 @@ def _grace_seconds():
     return max(u, a, 0.0)
 
 
-def _user_grace_remaining():
-    """#302 + #619 collapse : secondes de grace restantes (marqueur
-    `user-took-over` < max(CL_USER_GRACE_SEC, CL_ASK_GRACE_SEC), default
-    600s), 0.0 hors-grâce. Permet au proxy de peindre `wait` (jaune)
-    tant que la fenêtre tient, puis `loop` (vert) une fois expirée."""
-    sd = os.environ.get("CL_STATE_DIR") or ""
-    if not sd:
-        return 0.0
-    try:
-        mtime = os.stat(os.path.join(sd, "user-took-over")).st_mtime
-    except OSError:
-        return 0.0
-    rem = _grace_seconds() - (datetime.datetime.now().timestamp() - mtime)
-    return rem if rem > 0.0 else 0.0
-
-
-# #619 collapse — _ask_grace_remaining et le bar word `ask` retirés.
-# La fenêtre unique `_user_grace_remaining` (max user/ask, default 600s)
-# couvre maintenant les deux usages historiques.
+# #856 Phase 2 — `_user_grace_remaining` retiré : la fonction lisait
+# `user-took-over` (marker retiré dans #745 phase B au profit du seul
+# AFK SM). Plus aucun call site Python ; le timer TS ne fait plus
+# écrire le marker. Comments orphelins ci-dessus + #619 collapse note
+# conservés pour l'historique.
 
 
 def _boot_grace_remaining():

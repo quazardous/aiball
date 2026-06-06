@@ -24,7 +24,7 @@ import {
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
-import { getIpcState, setIpcLastWakeAtMs, setIpcWakeRequested } from "./ipc-state.js";
+import { getIpcState, setIpcLastWakeAtMs, setIpcWakeInFlightAtMs, setIpcWakeRequested } from "./ipc-state.js";
 import { WAKE_IN_FLIGHT_TTL_MS, lastWakeAtPath, wakeInFlightPath } from "./state.js";
 import { writeFileSync } from "node:fs";
 import { getHookService, type HookEvent } from "./hook-service.js";
@@ -161,6 +161,9 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             // diagnostics keeps working unchanged.
             if (name === "set_wake_in_flight") {
                 const at = typeof event.at_ms === "number" ? event.at_ms : Date.now();
+                // #856 Phase 3 — ipc-first ; the file shadow stays for
+                // hook subprocess reads until #840 Slice B/C migrate them.
+                setIpcWakeInFlightAtMs(at);
                 try {
                     writeFileSync(wakeInFlightPath(sd), new Date(at).toISOString() + "\n");
                 } catch { /* best-effort — diagnostic only */ }

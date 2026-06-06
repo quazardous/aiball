@@ -68,6 +68,12 @@ export interface IpcState {
     /** V4 Phase 3 — ms-since-epoch of the last wake injection. Mirror
      *  of the `last-wake-at` marker for the timer's in-process reads. */
     lastWakeAtMs: number | null;
+    /** #856 Phase 3 — ms-since-epoch the most recent wake injection
+     *  was armed. Mirror of the `wake-in-flight` marker for the timer's
+     *  in-process reads. The marker has its own TTL (`WAKE_IN_FLIGHT_TTL_MS`)
+     *  which `readLoopStateInput` enforces ; the field here is just the
+     *  raw stamp. */
+    wakeInFlightAtMs: number | null;
     /** V5 Phase A — `claude-loop wake <name>` toggled this flag (via
      *  a `set_wake_requested` marker emit on `loop.sock`). The timer's
      *  wake gate consults it as a check-cmd bypass + unlinks it on
@@ -135,6 +141,7 @@ const state: IpcState = {
     lastWakeHint: null,
     lastInjectedWake: null,
     lastWakeAtMs: null,
+    wakeInFlightAtMs: null,
     wakeRequestedAtMs: null,
     afkMode: null,
     afkExpiryMs: null,
@@ -254,6 +261,15 @@ export function setIpcLastWakeAtMs(atMs: number | null): void {
     notifyIpcChanged();
 }
 
+/** #856 Phase 3 — set the in-memory `wake-in-flight` stamp. Mirrors the
+ *  `wake-in-flight` file marker so the timer's `readLoopStateInput`
+ *  consults memory before the disk. `null` resets the in-memory signal
+ *  (read path falls back to the file mtime). */
+export function setIpcWakeInFlightAtMs(atMs: number | null): void {
+    state.wakeInFlightAtMs = atMs;
+    notifyIpcChanged();
+}
+
 export function setIpcWakeRequested(atMs: number | null): void {
     state.wakeRequestedAtMs = atMs;
     notifyIpcChanged();
@@ -362,6 +378,7 @@ export function resetIpcStateForTests(): void {
     state.lastWakeHint = null;
     state.lastInjectedWake = null;
     state.lastWakeAtMs = null;
+    state.wakeInFlightAtMs = null;
     state.wakeRequestedAtMs = null;
     state.afkMode = null;
     state.afkExpiryMs = null;

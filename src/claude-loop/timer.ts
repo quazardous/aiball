@@ -122,6 +122,7 @@ import {
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
     setIpcResumeSessionPicker,
+    setIpcWakeInFlightAtMs,
     setStrictIpcRead,
 } from "./ipc-state.js";
 import { computeLoopView, isAfkActive, isInputHot, LoopStateBus } from "./loop-state.js";
@@ -574,10 +575,15 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
         await sleep(500);
     }
     await injectWakePhrase(`${tname}.0`, phrase, () => {
+        const nowMs = Date.now();
+        // #856 Phase 3 — mirror to the in-memory ipcState first so the
+        // gate sees it instantly ; the file write stays for hook
+        // subprocesses until #840 Slice B/C move them onto UDS too.
+        setIpcWakeInFlightAtMs(nowMs);
         try {
-            writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n");
+            writeFileSync(wakeInFlightPath(sd!), new Date(nowMs).toISOString() + "\n");
         } catch { /* ignore — UserPromptSubmit hook will fall through to user-grace path, suboptimal but safe */ }
-        setIpcLastWakeAtMs(Date.now());
+        setIpcLastWakeAtMs(nowMs);
         // Post-wake tempo: arm the defer gate so any wake landing in the
         // next WAKE_COALESCE_WINDOW_MS is held (not dropped) — the FIFO
         // head stays available and fires at the deadline.

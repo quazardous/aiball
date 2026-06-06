@@ -26,6 +26,8 @@ import {
     setIpcPaneInterrupted,
     setIpcPaneReady,
     setIpcPaneResuming,
+    setIpcResumeModePicker,
+    setIpcResumeSessionPicker,
 } from "./ipc-state.js";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -230,10 +232,15 @@ function _writePickerMarker(sd: string, p: string, active: boolean): void {
 
 export function setResumeSessionPicker(sd: string, active: boolean): void {
     _writePickerMarker(sd, resumeSessionPickerActivePath(sd), active);
+    // #856 Phase 3 — mirror to ipcState so the reader (pane-service-sync,
+    // readLoopStateInput) doesn't have to re-check the file shadow. The
+    // file write stays for hook subprocess reads until #840 Slice B/C.
+    setIpcResumeSessionPicker(active);
 }
 
 export function setResumeModePicker(sd: string, active: boolean): void {
     _writePickerMarker(sd, resumeModePickerActivePath(sd), active);
+    setIpcResumeModePicker(active);
 }
 
 /** Clear both resume picker markers. Called when the hook is past the
@@ -1014,7 +1021,11 @@ export function readLoopStateInput(
         // #727 V1 Slice B — in-memory truth wins. Shared with the
         // pre-gate paths in timer.ts via `readIdleSinceMs`.
         idleSinceMs: readIdleSinceMs(sd),
-        wakeInFlightAtMs: safeMtime(wakeInFlightPath(sd)),
+        // #856 Phase 3 — ipc-first read, fall back to the file shadow
+        // only in non-strict mode (hook subprocesses). The timer keeps
+        // an in-memory mirror via `setIpcWakeInFlightAtMs` on every
+        // arm/clear path so the gate sees it instantly.
+        wakeInFlightAtMs: ipc.wakeInFlightAtMs ?? (strict ? null : safeMtime(wakeInFlightPath(sd))),
         wakeInFlightTtlMs,
         // #838 Phase A — strict mode skips the file fallback ; hooks keep it.
         busyDeferUntilMs: ipc.busyDeferUntilMs ?? (strict ? null : safeIsoMs(busyDeferUntilPath(sd))),
