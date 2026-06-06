@@ -300,9 +300,14 @@ def _afk_mode():
         if mode == "wait_inf":
             return "inf"
         if mode == "wait_10m" and isinstance(expiry, (int, float)) and expiry > 0:
-            until = datetime.datetime.fromtimestamp(expiry / 1000.0)
-            if until.timestamp() <= datetime.datetime.now().timestamp():
+            until = expiry / 1000.0  # ms-since-epoch → seconds (float ts)
+            if until <= datetime.datetime.now().timestamp():
                 return None
+            # #858 — return shape MUST match the file path below : ("until",
+            # <float-ts>). Pré-fix la branche IPC retournait un datetime,
+            # ce qui faisait crasher `mode[1] - now_ts` (float) au prochain
+            # tour de la main loop dès qu'AFK 10m était armé. RC du crash
+            # observé sur pisynth après ESC → typing → AFK arm.
             return ("until", until)
         # mode == "off" or unknown → None
         return None
