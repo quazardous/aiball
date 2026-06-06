@@ -1223,7 +1223,10 @@ export function humanPresenceWord(sd: string | undefined): "stop" | "wait" | "bo
     // computation matches the one used by every other consumer (timer,
     // proxy mirror, hooks). #745 phase B — the legacy `graceSec` arg
     // is gone ; the AFK SM owns the "wait" path now (NOT AFK 10m / ∞).
-    if (!sd) return "loop";
+    // #853 david : sd-less fallback was `loop` historically ; bascule à
+    // `boot` par construction. Cohérent avec le fix proxy `_rest_word` +
+    // template fallback (70cd3f4). Couvre le _rest_word bootstrap = BOOT
+    if (!sd) return "boot";
     return computeLoopView(readLoopStateInput(sd)).barWord;
 }
 
