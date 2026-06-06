@@ -26,6 +26,11 @@
 export interface PaneScanCtx {
     /** Wall-clock now-ms for time-sensitive watchers (latches, debounces). */
     nowMs: number;
+    /** True iff the loop is still in the boot phase (the SM hasn't sealed
+     *  bootComplete yet). Watchers may use it to widen footer scopes or
+     *  adapt thresholds — purely advisory, no activation logic depends on
+     *  it (that's the orchestrator's zone job). */
+    isBoot?: boolean;
 }
 
 export interface PaneWatcherEvents<TState> {

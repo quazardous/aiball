@@ -1,0 +1,95 @@
+// #845 Phase B — runtime-zone watcher tests.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { BusyWatcher, InterruptedWatcher, PromptWatcher } from "./runtime-watchers.js";
+import { ErrorWatcher } from "./error-watcher.js";
+
+const CTX = { nowMs: 0 };
+
+test("PromptWatcher: matches `Claude Code v` splash", () => {
+    const w = new PromptWatcher();
+    assert.equal(w.observe("Welcome to Claude Code v1.2.3", CTX).visible, true);
+});
+
+test("PromptWatcher: matches `❯ ` chevron prompt", () => {
+    const w = new PromptWatcher();
+    assert.equal(w.observe("output above\n❯ ", CTX).visible, true);
+});
+
+test("PromptWatcher: matches `> ` at line start", () => {
+    const w = new PromptWatcher();
+    assert.equal(w.observe("> something", CTX).visible, true);
+});
+
+test("PromptWatcher: rejects pane without prompt markers", () => {
+    const w = new PromptWatcher();
+    assert.equal(w.observe("✻ Working…", CTX).visible, false);
+});
+
+test("BusyWatcher: matches `esc to interrupt` in footer", () => {
+    const w = new BusyWatcher();
+    assert.equal(
+        w.observe("✻ Crunching…\n  ⏵⏵ auto mode on · esc to interrupt", CTX).visible,
+        true,
+    );
+});
+
+test("BusyWatcher: rejects idle pane", () => {
+    const w = new BusyWatcher();
+    assert.equal(w.observe("❯ \n  ⏵⏵ auto mode on", CTX).visible, false);
+});
+
+test("InterruptedWatcher: matches the `interrupted by user` near-prompt marker", () => {
+    const w = new InterruptedWatcher();
+    const pane = "● doing stuff\n  ⎿ Interrupted by user\n────\n❯ \n  ⏵⏵ auto mode on";
+    assert.equal(w.observe(pane, CTX).visible, true);
+});
+
+test("InterruptedWatcher: false on a normal idle pane", () => {
+    const w = new InterruptedWatcher();
+    assert.equal(w.observe("❯ \n  ⏵⏵ auto mode on", CTX).visible, false);
+});
+
+// ---------------------------------------------------------------------------
+//  ErrorWatcher — id-typed state
+// ---------------------------------------------------------------------------
+
+test("ErrorWatcher: clean pane → null", () => {
+    const w = new ErrorWatcher();
+    assert.equal(w.observe("normal idle pane", CTX).errorId, null);
+});
+
+test("ErrorWatcher: begin fires on null → error", () => {
+    const w = new ErrorWatcher();
+    let beginCount = 0;
+    w.on("begin", () => { beginCount++; });
+    w.observe("normal idle pane", CTX);
+    // `Rate limited` is one of error-backoff.ts's pinned patterns.
+    w.observe("Rate limited — retrying", CTX);
+    assert.equal(w.snapshot().errorId, "rate-limit");
+    assert.equal(beginCount, 1);
+});
+
+test("ErrorWatcher: end fires when error clears", () => {
+    const w = new ErrorWatcher();
+    let endCount = 0;
+    w.on("end", () => { endCount++; });
+    w.observe("Rate limited — retrying", CTX);
+    w.observe("normal idle pane", CTX);
+    assert.equal(w.snapshot().errorId, null);
+    assert.equal(endCount, 1);
+});
+
+test("ErrorWatcher: id-to-id transition fires change only, not begin/end", () => {
+    const w = new ErrorWatcher();
+    let beginCount = 0; let endCount = 0; let changeCount = 0;
+    w.on("begin", () => { beginCount++; });
+    w.on("end", () => { endCount++; });
+    w.on("change", () => { changeCount++; });
+    w.observe("Rate limited", CTX);
+    w.observe("overloaded_error in response", CTX);
+    assert.equal(w.snapshot().errorId, "overloaded");
+    assert.equal(beginCount, 1);   // only initial null → rate-limit
+    assert.equal(endCount, 0);     // never went back to null
+    assert.equal(changeCount, 2);  // 2 transitions (null→rate-limit, rate-limit→overloaded)
+});

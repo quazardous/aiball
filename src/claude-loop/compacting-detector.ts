@@ -157,20 +157,15 @@ export class CompactingDetector implements PaneWatcher<CompactingState> {
      *  refreshPaneMarkers) keep working until they migrate to `observe`
      *  + subscriptions. Calls into the same latch state as `observe`. */
     detect(paneText: string, ctx: CompactingDetectorCtx = {}): boolean {
-        return this.observe(paneText, { nowMs: ctx.nowMs ?? Date.now() }, ctx).active;
+        return this.observe(paneText, { nowMs: ctx.nowMs ?? Date.now(), isBoot: ctx.isBoot }).active;
     }
 
     /** PaneWatcher contract : pure transform pane → state, with event
-     *  emission on transitions. `observeCtx` carries `nowMs` ; the
-     *  optional second argument carries the compacting-specific
-     *  `isBoot` (widens the footer scope). */
-    observe(
-        paneText: string,
-        ctx: PaneScanCtx,
-        compactingCtx: CompactingDetectorCtx = {},
-    ): CompactingState {
+     *  emission on transitions. `ctx.isBoot` (carried on PaneScanCtx)
+     *  widens the footer scope during boot. */
+    observe(paneText: string, ctx: PaneScanCtx): CompactingState {
         const now = ctx.nowMs;
-        const raw = classifyCompacting(paneText, { isBoot: compactingCtx.isBoot, nowMs: now }, this.opts);
+        const raw = classifyCompacting(paneText, { isBoot: ctx.isBoot, nowMs: now }, this.opts);
         let nextActive: boolean;
         if (raw) {
             this.lastPositiveMs = now;

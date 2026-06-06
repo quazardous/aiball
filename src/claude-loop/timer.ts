@@ -46,7 +46,6 @@ import {
     bootCompletePath,
     createLoopServer,
     loopSockPath,
-    paneShowsInterrupted,
     readLoopStateInput,
     clearResumePickers,
     setCompacting,
@@ -79,7 +78,6 @@ import {
     setTmuxCounters,
     afkStateChunkStr,
     setTmuxAfkState,
-    snapshotPane,
     tmuxName,
     humanPresenceWord,
     logBarPaint,
@@ -97,10 +95,20 @@ import {
 } from "./state.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { loopConfig } from "./loop-config.js";
-import { armErrorBackoff, matchPaneError, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
+import { armErrorBackoff, readErrorBackoff, resetErrorBackoff } from "./error-backoff.js";
 import { syncPaneServiceFromMarkers } from "./pane-service-sync.js";
 import { paneMarkerBarInfo } from "./pane-service.js";
-import { getCompactingDetector, isCompactConfirmPrompt } from "./compacting-detector.js";
+import { getCompactingDetector } from "./compacting-detector.js";
+import { PaneObserver } from "./pane-watchers/observer.js";
+import { Zone } from "./pane-watchers/zone.js";
+import {
+    PickerSessionWatcher,
+    PickerModeWatcher,
+    ResumingWatcher,
+    CompactConfirmWatcher,
+} from "./pane-watchers/boot-watchers.js";
+import { PromptWatcher, BusyWatcher, InterruptedWatcher } from "./pane-watchers/runtime-watchers.js";
+import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService, watchAfkMarker } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
 import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
@@ -447,48 +455,66 @@ async function fetchWakeContext(
  *  catches errors that crashed claude mid-turn (no Stop hook fires).
  *  `armErrorBackoff` writes `busy-defer-until` which the state machine
  *  already gates against — no new plumbing needed. */
+
+// #845 Phase B — pane-watchers + zones. Each inline regex from the
+// pre-Phase-B refreshPaneMarkers is now a dedicated watcher under
+// src/claude-loop/pane-watchers/. The orchestrator (`paneObs`) holds
+// two zones — `boot` (pickers + resuming + compactConfirm) and
+// `runtime` (prompt + busy + interrupted + error + compacting). The
+// SM wiring in `mainSse` enters both at startup and leaves/enters
+// `boot` on bus.bootEnded / bootStarted. refreshPaneMarkers degenerates
+// to `paneObs.tick(paneText, ctx)` plus the legacy setter calls (read
+// from each watcher's snapshot) for back-compat with the rest of the
+// codebase that still polls `ipcState` instead of subscribing.
+const pickerSessionW = new PickerSessionWatcher();
+const pickerModeW = new PickerModeWatcher();
+const resumingW = new ResumingWatcher();
+const compactConfirmW = new CompactConfirmWatcher();
+const promptW = new PromptWatcher();
+const busyW = new BusyWatcher();
+const interruptedW = new InterruptedWatcher();
+const errorW = new ErrorWatcher();
+const paneObs = new PaneObserver();
+paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
+paneObs.registerZone(new Zone("runtime", [
+    promptW, busyW, interruptedW, errorW, getCompactingDetector(),
+]));
+// Both zones entered at startup ; the SM (mainSse below) wires the
+// boot leave/re-enter on bus events.
+paneObs.enter("runtime");
+paneObs.enter("boot");
+
 function refreshPaneMarkers(): void {
     if (!sd) return;
     const paneText = capturePane();
     if (!paneText) return;
-    const snap = snapshotPane(paneText);
-    setPaneBusy(sd, snap.busy);
-    // #647 david `6e2uzf` : le timer DOIT aussi détecter les pickers
-    // (avant : seul le hook les détectait, et si hook rate/skip, fast-probe
-    // n'avait rien à pousser → bar restait `[boot:session?]`). Mêmes regex
-    // que session-start-hook.ts. Idempotent — setters no-op si état stable.
-    const sessionPickerVisible = /Resume session\b/i.test(paneText) && /Space to preview/i.test(paneText);
-    const modePickerVisible = /Resume from summary|Resume full session as-is|Don't ask me again/.test(paneText);
-    // #647 david `4h75nk` : Resuming = post-picker, pre-prompt. Mutually
-    // exclusive avec pickers (= already past them).
-    const resumingVisible = /Resuming conversation/i.test(paneText)
-        && !sessionPickerVisible && !modePickerVisible;
+    const ipcView = getIpcState();
+    const isBoot = ipcView.bootComplete !== true;
+    // Single scan, all active watchers observe. The compacting watcher
+    // reads ctx.isBoot to widen its footer scope (cf. #843).
+    paneObs.tick(paneText, { nowMs: Date.now(), isBoot });
+    // Bridge each watcher snapshot to the legacy ipcState setters so
+    // every existing consumer (pane-service-sync, queryLoopState, etc.)
+    // keeps working unchanged. Phase C will replace these with direct
+    // subscriptions from the consumers to the watcher events.
+    setPaneBusy(sd, busyW.snapshot().visible);
+    const sessionPickerVisible = pickerSessionW.snapshot().visible;
+    const modePickerVisible = pickerModeW.snapshot().visible;
+    const resumingVisible = resumingW.snapshot().visible;
     setResumeSessionPicker(sd, sessionPickerVisible);
     setResumeModePicker(sd, modePickerVisible);
     setResuming(sd, resumingVisible);
-    // #843 — `paneCompacting` is now produced by the unified, latched
-    // detector (compacting-detector.ts) — single source of truth, absorbs
-    // the frame-race flicker that used to drop `[boot:compacting]` →
-    // `[boot]` mid-compact. Pass `isBoot` so the boot-phase footer scope
-    // is wider (initial resume-compact has a slightly different render).
-    const ipcView = getIpcState();
-    const isBoot = ipcView.bootComplete !== true;
-    const compactingNow = getCompactingDetector().detect(paneText, { isBoot });
+    const compactingNow = getCompactingDetector().snapshot().active;
     setCompacting(sd, compactingNow);
-    // pickerOrTransient previously had a SECOND, GLOBAL `Compacting
-    // conversation` regex (footer-unaware). That kept `paneReady=false`
-    // for ever when stale text lingered in scrollback (#843 bug 1). With
-    // the latched detector above, `compactingNow` is the SSOT — reuse it.
-    // The `Compact this conversation?` y/N prompt is still detected
-    // footer-scoped (Claude renders it at the bottom of the screen).
-    const compactPromptVisible = isCompactConfirmPrompt(paneText);
+    const compactPromptVisible = compactConfirmW.snapshot().visible;
     const pickerOrTransient = sessionPickerVisible || modePickerVisible || resumingVisible
         || compactingNow || compactPromptVisible;
-    const promptVisible = /Claude Code v|❯ |^> /m.test(paneText);
-    setPaneReady(sd, promptVisible && !pickerOrTransient);
-    setInterrupted(sd, paneShowsInterrupted(paneText));
-    // #611 — error detection in heartbeat probe (parallel to stop-hook).
-    const errId = matchPaneError(paneText);
+    setPaneReady(sd, promptW.snapshot().visible && !pickerOrTransient);
+    setInterrupted(sd, interruptedW.snapshot().visible);
+    // #611 — error backoff plumbing stays wired to the timer for now ;
+    // the watcher reports the id, the existing arm/reset helpers handle
+    // the backoff state machine.
+    const errId = errorW.snapshot().errorId;
     if (errId) {
         const bo = armErrorBackoff(sd, errId);
         log(`probe: api error '${errId}' detected → backoff ${bo.ms}ms (attempt ${bo.attempts}, until=${bo.untilIso})`);
@@ -1344,6 +1370,12 @@ async function mainSse(): Promise<void> {
     armFastProbe();
     loopBus.on("bootEnded", disarmFastProbe);
     loopBus.on("bootStarted", armFastProbe);
+    // #845 Phase B — the SM drives the orchestrator's `boot` zone here :
+    // bootEnded leaves it (picker / resuming / compactConfirm watchers
+    // stop running) ; bootStarted re-enters it on a stretch re-emergence.
+    // The `runtime` zone stays active across the whole loop lifetime.
+    loopBus.on("bootEnded", () => paneObs.leave("boot"));
+    loopBus.on("bootStarted", () => paneObs.enter("boot"));
     loopBus.on("afkArmed10m", (expiry) => log(`state-bus: AFK 10m armed (expires ${new Date(expiry).toISOString()})`));
     loopBus.on("afkArmedInf", () => log("state-bus: AFK ∞ armed"));
     loopBus.on("afkCleared", () => log("state-bus: AFK cleared"));
