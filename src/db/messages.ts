@@ -1365,30 +1365,56 @@ export function applyMessageDecision(
     const db = getDb();
     return db.transaction((tx) => {
         const m = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
-        if (!m) return null;
-        const meta = parseMeta(m.meta ?? null);
+        if (m) {
+            const meta = parseMeta(m.meta ?? null);
+            const decidedAt = new Date().toISOString();
+            const r = applyDecision(meta.decision, status, decidedBy, decidedAt, newKind);
+            if (!r.changed) {
+                // idempotent re-decide — return current row unchanged
+                const parent = tx.select({ project: schema.tickets.project })
+                    .from(schema.tickets).where(eq(schema.tickets.id, m.ticketId)).get();
+                return messageRowToMessage(m, parent?.project ?? "");
+            }
+            meta.decision = r.decision;
+            tx.update(schema.messages)
+                .set({ meta: serializeMeta(meta) })
+                .where(eq(schema.messages.id, messageId))
+                .run();
+            // #374: accepting/rejecting a decision is an ACTION by the decider —
+            // they're now the ticket's last actor (this is what makes a reopened
+            // bug / accepted plan return to the agent's court). `auto` deciders
+            // (e.g. dangling-resolution auto-accept on close) are skipped.
+            bumpLastActor(tx, m.ticketId, decidedBy, decidedAt);
+            const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+            if (!fresh) return null;
+            const parent = tx.select({ project: schema.tickets.project })
+                .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
+            return messageRowToMessage(fresh, parent?.project ?? "");
+        }
+        // #803 fix : ticket_created events do NOT live in `_messages` (see schema
+        // comment "no ticket_created here"). When `ticket_new({then:"plan"})`
+        // attaches a pending decision, it lands on `tickets.meta`. The frontend
+        // still POSTs /api/messages/<ticketId>/decide because the
+        // ticket id IS the ticket_created event id by convention. Fall back to
+        // the tickets table when `_messages` doesn't have the id ; apply the
+        // decision on the ticket row and return the synthesized ticket_created
+        // Message so the response shape matches the comment-decide path.
+        const t = tx.select().from(schema.tickets).where(eq(schema.tickets.id, messageId)).get();
+        if (!t) return null;
+        const meta = parseMeta(t.meta ?? null);
         const decidedAt = new Date().toISOString();
         const r = applyDecision(meta.decision, status, decidedBy, decidedAt, newKind);
         if (!r.changed) {
-            // idempotent re-decide — return current row unchanged
-            const parent = tx.select({ project: schema.tickets.project })
-                .from(schema.tickets).where(eq(schema.tickets.id, m.ticketId)).get();
-            return messageRowToMessage(m, parent?.project ?? "");
+            return ticketRowToMessage(t);
         }
         meta.decision = r.decision;
-        tx.update(schema.messages)
+        tx.update(schema.tickets)
             .set({ meta: serializeMeta(meta) })
-            .where(eq(schema.messages.id, messageId))
+            .where(eq(schema.tickets.id, messageId))
             .run();
-        // #374: accepting/rejecting a decision is an ACTION by the decider —
-        // they're now the ticket's last actor (this is what makes a reopened
-        // bug / accepted plan return to the agent's court). `auto` deciders
-        // (e.g. dangling-resolution auto-accept on close) are skipped.
-        bumpLastActor(tx, m.ticketId, decidedBy, decidedAt);
-        const fresh = tx.select().from(schema.messages).where(eq(schema.messages.id, messageId)).get();
+        bumpLastActor(tx, t.id, decidedBy, decidedAt);
+        const fresh = tx.select().from(schema.tickets).where(eq(schema.tickets.id, messageId)).get();
         if (!fresh) return null;
-        const parent = tx.select({ project: schema.tickets.project })
-            .from(schema.tickets).where(eq(schema.tickets.id, fresh.ticketId)).get();
-        return messageRowToMessage(fresh, parent?.project ?? "");
+        return ticketRowToMessage(fresh);
     });
 }
