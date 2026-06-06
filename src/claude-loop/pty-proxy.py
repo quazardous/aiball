@@ -935,6 +935,14 @@ class _Decider:
             # phase était transient-busy après un drained-wake, soit
             # claude-code exit aussi sur "esc to interrupt". Garder
             # l'ESC interne entièrement résout les deux cas d'un coup.
+            # Debug : log la trace pour vérifier que ce path s'exécute (#858 followup).
+            sd_dbg = os.environ.get("CL_STATE_DIR") or ""
+            if sd_dbg:
+                try:
+                    with open(os.path.join(sd_dbg, "esc-debug.log"), "a") as _f:
+                        _f.write(f"{datetime.datetime.now().isoformat(timespec='milliseconds')}  lone_esc swallowed  in_boot={in_boot}  data={data.hex()}\n")
+                except OSError:
+                    pass
             return d
         d["forward"] += data
         return d
