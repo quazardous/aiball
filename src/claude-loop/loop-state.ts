@@ -137,6 +137,20 @@ export interface LoopStateView {
      *  at the prompt yet). Consumers use this to skip bar BG flips,
      *  AFK arming on typing, and probe overrides. */
     inBootGrace: boolean;
+    // #840 Slice A (#766) — raw state surfaced on the pushed view so
+    // out-of-process consumers (proxy via WS push, hooks via UDS query)
+    // can decide without reading shadow files. Phase C drops the shadow
+    // files once these fields are everywhere.
+    /** Committed AFK mode. `dispAfkMode` is intentionally NOT pushed —
+     *  the pending state is a local pre-commit UI detail of the timer. */
+    afkMode: AfkMode;
+    /** Absolute expiry ms-since-epoch for `wait_10m`, null otherwise. */
+    afkExpiryMs: number | null;
+    /** True once the timer has sealed the boot phase. */
+    bootComplete: boolean;
+    /** Absolute deadline (ms-since-epoch) of an active busy-defer ; null
+     *  if none. Past-now is treated as null by consumers. */
+    busyDeferUntilMs: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -273,6 +287,11 @@ export function computeLoopView(input: LoopStateInput): LoopStateView {
         wakeAllowed: gate.allowed,
         wakeSkipReason: gate.reason,
         inBootGrace: isInBootGrace(input),
+        // #840 Slice A — raw state for out-of-process consumers.
+        afkMode: input.afkMode,
+        afkExpiryMs: input.afkExpiryMs,
+        bootComplete: input.bootComplete,
+        busyDeferUntilMs: input.busyDeferUntilMs,
     };
 }
 

@@ -272,13 +272,40 @@ def _afk_path():
     return os.path.join(sd, "afk") if sd else ""
 
 
+# #840 Slice A (#766) — module-level cache of the last pushed_view from
+# the timer, populated by `_apply_pushed_view`. Read-only consumers (e.g.
+# `_afk_mode`) consult it instead of reading the `afk` shadow file. Falls
+# back to the file when the cache is empty (cold-boot before first push).
+_pushed_view_cache = {"view": None}
+
+
 def _afk_mode():
     """#619 david `3ezsk5` : AFK is now a 3-state. File content :
        absent      → OFF
        "inf"       → AFK ∞ (held indefinitely)
        "<iso-ts>"  → AFK auto-release at that timestamp (or OFF if past)
     Returns None / "inf" / ("until", expiry_ts) — None for both
-    "file missing" and "file present but timestamp past"."""
+    "file missing" and "file present but timestamp past".
+
+    #840 Slice A (#766 path) — prefers the cached pushed_view (= the
+    timer's authoritative IPC state, broadcast via WS push). Falls back
+    to the file ONLY before the first view-push arrives (cold-boot
+    bootstrap) or if the cached view doesn't carry the field for some
+    reason. Phase C target : drop the file read entirely once the
+    bootstrap is wired through the sync UDS endpoint."""
+    cached = _pushed_view_cache.get("view")
+    if cached is not None and "afkMode" in cached:
+        mode = cached.get("afkMode")
+        expiry = cached.get("afkExpiryMs")
+        if mode == "wait_inf":
+            return "inf"
+        if mode == "wait_10m" and isinstance(expiry, (int, float)) and expiry > 0:
+            until = datetime.datetime.fromtimestamp(expiry / 1000.0)
+            if until.timestamp() <= datetime.datetime.now().timestamp():
+                return None
+            return ("until", until)
+        # mode == "off" or unknown → None
+        return None
     p = _afk_path()
     if not p or not os.path.exists(p):
         return None
@@ -1507,6 +1534,9 @@ def main(argv):
         We use barWord + afkChunk here ; phase/wake are timer-internal."""
         nonlocal current_word
         pushed_view["value"] = view
+        # #840 Slice A — mirror to the module-level cache so module-scope
+        # helpers (`_afk_mode`) read the same authoritative state.
+        _pushed_view_cache["view"] = view
         # Bar word: convert "boot"/"stop"/"wait"/"loop" to the right
         # _HUMAN_* token. Skip if the proxy is currently in a typing-stop
         # paint (let it finish its 5s flash naturally).
