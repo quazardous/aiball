@@ -195,14 +195,13 @@ def split_keystrokes(data: bytes, combos=None):
 
 
 def touch_marker():
-    p = _marker_path()
-    if not p:
-        return
-    try:
-        with open(p, "w") as f:
-            f.write(datetime.datetime.now().isoformat() + "\n")
-    except OSError:
-        pass  # le badge ne s'affichera juste pas — jamais bloquant
+    """#839 Slice 1 — local file fallback dropped (no-op). The
+    `human-typing` marker is set EXCLUSIVELY via the timer's dispatcher
+    (`emit_marker("touch_marker")` → `touchHumanTyping(sd)` on the TS
+    side). If the emit fails (timer not reachable), the proxy skips
+    silently rather than writing the file locally — single-writer
+    discipline (#766 / #844 race fix)."""
+    return
 
 
 # #745 phase B — `touch_user_grace` / `clear_user_grace` Python helpers
@@ -314,56 +313,27 @@ def _afk_mode():
 def set_afk_until(seconds):
     """#619 : AFK auto-release after `seconds` (10min state in the F9 cycle).
 
-    #653 step 2 — emit `marker:set_afk_10m` over proxy-events.sock as the
-    PRIMARY path : the dispatcher writes the file via `armAfkViaService`.
-    Falls back to a direct file write ONLY in degraded mode (no timer
-    connected) so debug-proxy-tty + unit-test paths still persist state."""
-    p = _afk_path()
-    if not p:
-        return
+    #839 Slice 1 (#766 path) — emit-only. The proxy NEVER writes the
+    `afk` file directly anymore ; the timer's dispatcher is the single
+    writer (`armAfkViaService` on receipt of `marker:set_afk_10m`). If
+    the emit fails (timer not reachable / cold-boot race), the AFK
+    mutation is dropped silently — fail-safe instead of leaking a
+    file-write past the timer's boot guard (= #844 root cause)."""
     expiry = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
     expiry_ms = int(expiry.timestamp() * 1000)
-    emitted = _proxy_events.emit({"event": "marker", "name": "set_afk_10m", "expiry_ms": expiry_ms, "now_ms": int(datetime.datetime.now().timestamp() * 1000)})
-    if emitted:
-        return  # dispatcher will write the file via armAfkViaService
-    try:
-        with open(p, "w") as f:
-            f.write(expiry.isoformat() + "\n")
-    except OSError:
-        pass
+    _proxy_events.emit({"event": "marker", "name": "set_afk_10m", "expiry_ms": expiry_ms, "now_ms": int(datetime.datetime.now().timestamp() * 1000)})
 
 
 def set_afk_infinite():
     """#619 : AFK held indefinitely (∞ state in the F9 cycle).
 
-    #653 step 2 — emit-first, file-fallback on degraded mode (see
-    set_afk_until)."""
-    p = _afk_path()
-    if not p:
-        return
-    emitted = _proxy_events.emit({"event": "marker", "name": "set_afk_inf", "now_ms": int(datetime.datetime.now().timestamp() * 1000)})
-    if emitted:
-        return
-    try:
-        with open(p, "w") as f:
-            f.write("inf\n")
-    except OSError:
-        pass
+    #839 Slice 1 — emit-only. See `set_afk_until`."""
+    _proxy_events.emit({"event": "marker", "name": "set_afk_inf", "now_ms": int(datetime.datetime.now().timestamp() * 1000)})
 
 
 def clear_afk():
-    """#653 step 2 — emit-first, file-fallback on degraded mode (see
-    set_afk_until)."""
-    p = _afk_path()
-    if not p:
-        return
-    emitted = _proxy_events.emit({"event": "marker", "name": "clear_afk", "now_ms": int(datetime.datetime.now().timestamp() * 1000)})
-    if emitted:
-        return
-    try:
-        os.remove(p)
-    except OSError:
-        pass
+    """#839 Slice 1 — emit-only. See `set_afk_until`."""
+    _proxy_events.emit({"event": "marker", "name": "clear_afk", "now_ms": int(datetime.datetime.now().timestamp() * 1000)})
 
 
 def toggle_afk():
