@@ -25,7 +25,8 @@ import {
 import { computeLoopView } from "./loop-state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
 import { getIpcState, setIpcLastWakeAtMs, setIpcWakeRequested } from "./ipc-state.js";
-import { WAKE_IN_FLIGHT_TTL_MS } from "./state.js";
+import { WAKE_IN_FLIGHT_TTL_MS, lastWakeAtPath, wakeInFlightPath } from "./state.js";
+import { writeFileSync } from "node:fs";
 import { getHookService, type HookEvent } from "./hook-service.js";
 
 /** Verdict surfaced for logging + tests. Caller logs the string ;
@@ -35,7 +36,7 @@ export type DispatchVerdict =
     | { kind: "typing-skipped-boot" }
     | { kind: "typing-skipped-inf" }
     | { kind: "afk-toggled"; nextMode: "off" | "wait_10m" | "wait_inf" }
-    | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" | "set_last_wake_at" | "set_wake_requested" }
+    | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" | "set_last_wake_at" | "set_wake_requested" | "set_wake_in_flight" }
     | { kind: "afk-service-set"; mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null }
     | { kind: "hook-event"; hookEvent: HookEvent }
     | { kind: "unknown"; raw: string }
@@ -130,12 +131,17 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             }
             // V4 Phase 3 — wake-at timestamp pushed from the stop-hook
             // subprocess so the timer's in-memory shadow stays current.
+            // #839 Slice 2 (#766) — also materializes the file here, so
+            // the hook can drop its local writeFileSync (single-writer).
             if (name === "set_last_wake_at") {
                 const at = typeof event.at_ms === "number" ? event.at_ms : NaN;
                 if (!Number.isFinite(at)) {
                     return { kind: "unknown", raw: `marker:set_last_wake_at (bad at_ms ${String(event.at_ms)})` };
                 }
                 setIpcLastWakeAtMs(at);
+                try {
+                    writeFileSync(lastWakeAtPath(sd), new Date(at).toISOString() + "\n");
+                } catch { /* best-effort — diagnostic only */ }
                 return { kind: "marker-touched", name };
             }
             // V5 Phase A — `claude-loop wake <name>` CLI subprocess pushes
@@ -146,6 +152,18 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             if (name === "set_wake_requested") {
                 const at = typeof event.at_ms === "number" ? event.at_ms : Date.now();
                 setIpcWakeRequested(at);
+                return { kind: "marker-touched", name };
+            }
+            // #839 Slice 2 (#766 path) — stop-hook used to write the
+            // `wake-in-flight` shadow file directly. Now it emits this
+            // marker ; the timer (= single writer per #766) materializes
+            // the file. The mtime-based read by loop-state.ts +
+            // diagnostics keeps working unchanged.
+            if (name === "set_wake_in_flight") {
+                const at = typeof event.at_ms === "number" ? event.at_ms : Date.now();
+                try {
+                    writeFileSync(wakeInFlightPath(sd), new Date(at).toISOString() + "\n");
+                } catch { /* best-effort — diagnostic only */ }
                 return { kind: "marker-touched", name };
             }
             return { kind: "unknown", raw: `marker:${String(name)}` };

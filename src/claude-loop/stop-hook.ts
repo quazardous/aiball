@@ -14,10 +14,10 @@
  * Always emits `{}` and exits 0 — never block claude's stop.
  */
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, armBusyDefer, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, lastWakeAtPath, pingsPath, readBusyDefer, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, wakeInFlightPath, WAKE_COALESCE_WINDOW_MS } from "./state.js";
+import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, lastWakeAtPath, pingsPath, readBusyDefer, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, wakeInFlightPath, WAKE_COALESCE_WINDOW_MS } from "./state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
 import { CL_ENV } from "./env-vars.js";
@@ -213,24 +213,20 @@ function readPane(): string {
         // refresh) treat claude as at the prompt. The defer marker
         // still silently gates wakes during the window.
         if (pane.busy && PANE_BUSY_DELAY_MS > 0) {
-            const until = armBusyDefer(sd!, PANE_BUSY_DELAY_MS);
-            // #793 — idle-since lives in the bus (set via the Stop event
-            // emitted to the timer below). No file marker anymore.
-            // #727 V1 Slice B-2 — also push the busy-defer expiry into
-            // the timer's in-memory state via a second Stop event. The
-            // dispatcher's HookService subscriber pins it on `IpcState`
-            // so the wake gate consults it without re-reading the file.
-            const untilMs = new Date(until).getTime();
-            if (!Number.isNaN(untilMs)) {
-                await emitHookEventToTimer(sd!, {
-                    event: "hook",
-                    kind: "Stop",
-                    at_ms: Date.now(),
-                    busy_defer_until_ms: untilMs,
-                });
-            }
+            // #839 Slice 2 (#766) — hook emits the busy-defer expiry to
+            // the timer ; the timer's HookService subscriber writes both
+            // the IPC field AND the `busy-defer-until` shadow file (via
+            // armBusyDefer reused inside the subscriber). No local file
+            // write here anymore — the timer is the single writer.
+            const untilMs = Date.now() + PANE_BUSY_DELAY_MS;
+            await emitHookEventToTimer(sd!, {
+                event: "hook",
+                kind: "Stop",
+                at_ms: Date.now(),
+                busy_defer_until_ms: untilMs,
+            });
             setTmuxStatus(name!, LOOP_STATUS.IDLE, "wait");
-            log(`  → BUSY-DEFER armed until=${until} became=idle:wait`);
+            log(`  → BUSY-DEFER armed until=${new Date(untilMs).toISOString()} became=idle:wait`);
             emit();
         }
         // Respect the post-wake tempo: if a wake already fired in the
@@ -259,22 +255,32 @@ function readPane(): string {
             // #B.180: mark this send-keys as auto-wake so the
             // UserPromptSubmit hook can flag from_auto_wake=true
             // and the timer keeps idleSinceMs (no human submission).
-            try { writeFileSync(wakeInFlightPath(sd!), new Date().toISOString() + "\n"); } catch { /* ignore */ }
-            // #B.198 fix A: also touch the coalesce marker so the
-            // next Stop hook fire can detect "we just sent a wake".
-            // V4 Phase 3 — emit a marker so the timer's in-memory
-            // shadow stays in sync, and keep the file write as the
-            // back-compat channel for the next subprocess read (until
-            // wake dedup centralises on the timer's loopServer in V5).
+            // #839 Slice 2 (#766) — the wake-in-flight + last-wake-at
+            // shadow files are now written EXCLUSIVELY by the timer's
+            // dispatcher on receipt of the markers below. The hook just
+            // emits ; no more local writeFileSync.
             const wakeAtMs = Date.now();
+            void sendEventOnce(loopSockPath(sd!), {
+                kind: "proxyEvent",
+                data: { event: "marker", name: "set_wake_in_flight", at_ms: wakeAtMs, now_ms: wakeAtMs },
+            }, { timeoutMs: 200 });
             void sendEventOnce(loopSockPath(sd!), {
                 kind: "proxyEvent",
                 data: { event: "marker", name: "set_last_wake_at", at_ms: wakeAtMs, now_ms: wakeAtMs },
             }, { timeoutMs: 200 });
-            try { writeFileSync(lastWakeAtPath(sd!), new Date(wakeAtMs).toISOString() + "\n"); } catch { /* ignore */ }
             await injectWakePhrase(`${tmuxName(name!)}.0`, phrase, () => {
-                // Post-wake tempo — see sendKeys in timer.ts.
-                armBusyDefer(sd!, WAKE_COALESCE_WINDOW_MS);
+                // Post-wake tempo — emit busy_defer_until via a Stop event
+                // (= same channel the pane-busy branch above uses). The
+                // dispatcher's HookService subscriber materializes the
+                // `busy-defer-until` shadow file from this signal (#839
+                // Slice 2). No local armBusyDefer call.
+                const tempoUntilMs = Date.now() + WAKE_COALESCE_WINDOW_MS;
+                void emitHookEventToTimer(sd!, {
+                    event: "hook",
+                    kind: "Stop",
+                    at_ms: Date.now(),
+                    busy_defer_until_ms: tempoUntilMs,
+                });
                 if (headMessageId) {
                     void phraseClient.markMessageSeen(headMessageId).catch(() => {});
                 }

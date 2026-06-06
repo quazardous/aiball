@@ -1154,6 +1154,15 @@ async function mainSse(): Promise<void> {
             setIpcIdleSince(ev.at_ms);
             if (ev.busy_defer_until_ms !== undefined) {
                 setIpcBusyDeferUntil(ev.busy_defer_until_ms);
+                // #839 Slice 2 (#766 path) — timer is now the single writer
+                // of the `busy-defer-until` shadow file. The hook used to
+                // call armBusyDefer locally AND emit ; it now only emits,
+                // and we materialize the file here. armBusyDefer preserves
+                // the longest pending defer (= idempotent on retries).
+                if (sd && ev.busy_defer_until_ms !== null) {
+                    const delta = ev.busy_defer_until_ms - Date.now();
+                    if (delta > 0) armBusyDefer(sd, delta);
+                }
             }
             return;
         }
