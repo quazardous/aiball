@@ -146,6 +146,12 @@ prompts:
     hint: "btw, {count} open PR(s) still un-merged."
     imperative: "**STOP**: {count} open PR(s) not merged — resolve before new work."
 
+  # #848 — one-shot prompt fired at boot exit (after the tail-grace seal).
+  # Prepended to the boot-ended-drain wake so the agent gets a single combined
+  # prompt instead of two send-keys back-to-back. Empty string → no injection
+  # (opt-out). Set to a custom reminder per-project via `.aiball.yaml`.
+  post_boot_skill_reminder: "Use the /aiball skill to triage your queue. Check `unread` and `actionable` first — handle pending pings before moving on."
+
 # Ticket-text formatting patterns (#B.235). Linkifies refs like #B.123,
 # #C.<hashid>, @mention in ticket bodies and comments. Lives in the same
 # 3-layer override chain as `prompts:` (shipped defaults → ~/.config →

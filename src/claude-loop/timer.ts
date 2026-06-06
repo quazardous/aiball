@@ -128,6 +128,7 @@ import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatch
 import { WakeBus } from "./wake-bus.js";
 import { CL_ENV } from "./env-vars.js";
 import { stripMarkdown } from "./markdown-strip.js";
+import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
 
 const sd = process.env[CL_ENV.STATE_DIR];
 const name = process.env[CL_ENV.NAME];
@@ -373,11 +374,21 @@ async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessag
             log(`wake-hint #${hint.ticket_id}${hint.comment_hashid ? ` (comment #${hint.comment_hashid})` : ""} not for me (${me}) — generic FIFO-pop phrase`);
         }
     }
-    return buildContextPhrase(
+    const result = await buildContextPhrase(
         client(),
         process.env.AIBALL_PROJECT ?? null,
         pingsPath(sd!),
     );
+    // #848 — prepend the one-shot post-boot reminder armed by
+    // `performBootSeal`. The reminder rides on the boot-ended-drain wake
+    // (= the next wake after the seal), not a separate send-keys, to
+    // avoid back-to-back prompts confusing the agent.
+    if (pendingBootPromptPrefix !== null) {
+        result.phrase = `${pendingBootPromptPrefix} ${result.phrase}`;
+        log(`pickPhrase: prepended post-boot reminder (${pendingBootPromptPrefix.length} chars)`);
+        pendingBootPromptPrefix = null;
+    }
+    return result;
 }
 
 /**
@@ -678,6 +689,16 @@ function client(): AiballClient {
 // phrases. Only the first wake proceeds; the Stop hook / next
 // heartbeat picks up what's still unread post-turn.
 let tryWakeInFlight: Promise<boolean> | null = null;
+
+// #848 — post-boot prompt prefix. `performBootSeal` renders the
+// `post_boot_skill_reminder` slot once per session and stashes the
+// result here ; `pickPhrase` prepends it to the next wake phrase
+// (which is the boot-ended-drain by construction, since perform-
+// BootSeal fires tryWake immediately after stashing) and clears.
+// `postBootRemindersSent` enforces the one-shot — a compact or a
+// re-emergence stretch won't re-fire the reminder.
+let pendingBootPromptPrefix: string | null = null;
+let postBootRemindersSent = false;
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint, panicMode = false): Promise<boolean> {
     if (tryWakeInFlight) {
         log(`skip wake (${reason}) — coalesce: another wake in flight`);
@@ -1277,6 +1298,28 @@ async function mainSse(): Promise<void> {
             // next probe cycle if claude is mid-turn.
             setTmuxStatus(name!, LOOP_STATUS.IDLE);
         } catch { /* best-effort */ }
+        // #848 — arm the one-shot post-boot reminder (per .aiball.yaml
+        // `prompts.post_boot_skill_reminder`). The string is prepended
+        // to the boot-ended-drain wake's phrase by `pickPhrase` rather
+        // than fired as a separate send-keys (which would interrupt
+        // the agent mid-response). Empty slot → no-op. Set-and-forget
+        // for the session (compact/resume won't re-fire).
+        if (!postBootRemindersSent) {
+            postBootRemindersSent = true;
+            try {
+                const promptMap = mergePrompts(
+                    loadPromptsFromYaml(pingsPath(sd!)),
+                    {}, // per-project overrides are merged at pings.yaml load
+                );
+                const reminder = renderSlot(promptMap, "post_boot_skill_reminder", {}, "");
+                if (reminder.length > 0) {
+                    pendingBootPromptPrefix = reminder;
+                    log(`post-boot reminder armed (${reminder.length} chars) — will prepend to drain wake`);
+                }
+            } catch (e) {
+                log(`post-boot reminder load failed (ignored): ${String(e)}`);
+            }
+        }
         // #629 david `7zqtgf` — drain stacked pings at boot exit.
         // Pre-#745 we also had to clear user-took-over here because
         // picker keystrokes armed the user-grace ; gone now, the AFK
