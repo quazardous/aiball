@@ -108,6 +108,7 @@ import { getHookService } from "./hook-service.js";
 import {
     getIpcState,
     setIpcBusyDeferUntil,
+    setIpcBootComplete,
     setIpcIdleSince,
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
@@ -987,6 +988,9 @@ async function mainSse(): Promise<void> {
         // (delegated to bus.on("bootEnded")). At the safety cap we WANT to
         // force the exit regardless of pending stretches (Resuming…, etc.)
         // because we've already burned bootGraceMs. Write it explicitly.
+        // #838 regression hotfix : also set the IPC (strict-mode reader skips
+        // the file fallback ; see performBootSeal).
+        setIpcBootComplete(true);
         try {
             writeFileSync(bootCompletePath(sd!), new Date().toISOString() + "\n");
         } catch { /* best-effort */ }
@@ -1182,6 +1186,13 @@ async function mainSse(): Promise<void> {
     const performBootSeal = (): void => {
         bootSealTimer = null;
         log("state-bus: boot phase ended (tail elapsed) — sealing bootComplete marker");
+        // #838 regression hotfix : strict-IPC mode (set at boot via
+        // setStrictIpcRead) skips the file fallback in readLoopStateInput,
+        // so writing ONLY the file leaves `ipc.bootComplete=null` → the
+        // timer's isInBootGrace re-flips to true the moment paneReady
+        // momentarily flips false (busy turn) → barWord=boot repainted in
+        // a loop post-boot. Always set the IPC alongside the file write.
+        setIpcBootComplete(true);
         try {
             writeFileSync(bootCompletePath(sd!), new Date().toISOString() + "\n");
         } catch { /* best-effort */ }
