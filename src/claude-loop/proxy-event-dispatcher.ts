@@ -25,8 +25,7 @@ import {
 import { computeLoopView } from "./loop-state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
 import { getIpcState, setIpcLastWakeAtMs, setIpcWakeInFlightAtMs, setIpcWakeRequested } from "./ipc-state.js";
-import { WAKE_IN_FLIGHT_TTL_MS, lastWakeAtPath, wakeInFlightPath } from "./state.js";
-import { writeFileSync } from "node:fs";
+import { WAKE_IN_FLIGHT_TTL_MS } from "./state.js";
 import { getHookService, type HookEvent } from "./hook-service.js";
 
 /** Verdict surfaced for logging + tests. Caller logs the string ;
@@ -131,17 +130,13 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             }
             // V4 Phase 3 — wake-at timestamp pushed from the stop-hook
             // subprocess so the timer's in-memory shadow stays current.
-            // #839 Slice 2 (#766) — also materializes the file here, so
-            // the hook can drop its local writeFileSync (single-writer).
+            // #840 `4z59jt` — IPC seul.
             if (name === "set_last_wake_at") {
                 const at = typeof event.at_ms === "number" ? event.at_ms : NaN;
                 if (!Number.isFinite(at)) {
                     return { kind: "unknown", raw: `marker:set_last_wake_at (bad at_ms ${String(event.at_ms)})` };
                 }
                 setIpcLastWakeAtMs(at);
-                try {
-                    writeFileSync(lastWakeAtPath(sd), new Date(at).toISOString() + "\n");
-                } catch { /* best-effort — diagnostic only */ }
                 return { kind: "marker-touched", name };
             }
             // V5 Phase A — `claude-loop wake <name>` CLI subprocess pushes
@@ -154,19 +149,12 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                 setIpcWakeRequested(at);
                 return { kind: "marker-touched", name };
             }
-            // #839 Slice 2 (#766 path) — stop-hook used to write the
-            // `wake-in-flight` shadow file directly. Now it emits this
-            // marker ; the timer (= single writer per #766) materializes
-            // the file. The mtime-based read by loop-state.ts +
-            // diagnostics keeps working unchanged.
+            // #840 `4z59jt` — IPC seul. Le stop-hook subprocess émet ce
+            // marker ; le timer le matérialise en ipcState. Les hooks lisent
+            // via UDS queryLoopState (= récupèrent cet ipc).
             if (name === "set_wake_in_flight") {
                 const at = typeof event.at_ms === "number" ? event.at_ms : Date.now();
-                // #856 Phase 3 — ipc-first ; the file shadow stays for
-                // hook subprocess reads until #840 Slice B/C migrate them.
                 setIpcWakeInFlightAtMs(at);
-                try {
-                    writeFileSync(wakeInFlightPath(sd), new Date(at).toISOString() + "\n");
-                } catch { /* best-effort — diagnostic only */ }
                 return { kind: "marker-touched", name };
             }
             return { kind: "unknown", raw: `marker:${String(name)}` };

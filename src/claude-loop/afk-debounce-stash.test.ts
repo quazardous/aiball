@@ -15,7 +15,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -86,7 +86,7 @@ test("#751 commitDispAfkIfDue is a no-op when commitAtMs still in future", async
     } finally { rmSync(sd, { recursive: true, force: true }); resetIpcStateForTests(); }
 });
 
-test("#751 commitDispAfkIfDue flushes dispAfk → afk + clears pending once due (different kind)", async () => {
+test("#751 commitDispAfkIfDue flushes dispAfk → ipc + clears pending once due (different kind)", async () => {
     const sd = tmp();
     try {
         // Seed committed off. Toggle → pending wait_10m. Commit fires.
@@ -95,7 +95,6 @@ test("#751 commitDispAfkIfDue flushes dispAfk → afk + clears pending once due 
         setIpcDispAfk({ ...pending, commitAtMs: Date.now() - 1 });
         const did = await commitDispAfkIfDue(sd);
         assert.equal(did, true);
-        assert.ok(existsSync(afkPath(sd)), "afk file written");
         assert.equal(getIpcDispAfk(), null, "dispAfk cleared");
         assert.equal(getIpcState().afkMode, "wait_10m");
     } finally { rmSync(sd, { recursive: true, force: true }); resetIpcStateForTests(); }
@@ -150,9 +149,8 @@ test("#751 commit to different kind (off → wait_10m) uses default 600s, no sta
         const pending = getIpcDispAfk()!;
         setIpcDispAfk({ ...pending, commitAtMs: Date.now() - 1 });
         await commitDispAfkIfDue(sd);
-        // Fresh 10min wait_10m.
-        const content = readFileSync(afkPath(sd), "utf8").trim();
-        const expiryMs = new Date(content).getTime();
+        // Fresh 10min wait_10m in IPC (#840 — no file).
+        const expiryMs = getIpcState().afkExpiryMs!;
         const remainingMs = expiryMs - Date.now();
         assert.ok(remainingMs > 9 * 60 * 1000, "fresh 10min, not stash");
         assert.ok(remainingMs <= 10 * 60 * 1000 + 1000);

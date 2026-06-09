@@ -43,7 +43,6 @@ import {
     WAKE_COALESCE_WINDOW_MS,
     isInternalCheckCmd,
     LOOP_STATUS,
-    bootCompletePath,
     createLoopServer,
     loopSockPath,
     readLoopStateInput,
@@ -61,18 +60,17 @@ import {
     injectWakePhrase,
     checkHasWork,
     readIdleSinceMs,
-    humanTypingPath,
     afkActive,
     humanIsTyping,
     installRoot,
     installRootSha,
     STATE_ROOT,
     isLoopStale,
-    lastWakeAtPath,
     pingsPath,
     readBusyDefer,
     recordOpenWakeHash,
     readDrainedState,
+    touchHumanTyping,
     writeDrainedState,
     setTmuxStatus,
     setTmuxCounters,
@@ -82,7 +80,6 @@ import {
     humanPresenceWord,
     logBarPaint,
     logPaneCapture,
-    wakeInFlightPath,
     wakeRequestedPath,
     zenPath,
     readPlate,
@@ -109,7 +106,7 @@ import {
 } from "./pane-watchers/boot-watchers.js";
 import { PromptWatcher, BusyWatcher, InterruptedWatcher } from "./pane-watchers/runtime-watchers.js";
 import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
-import { armAfkViaService, watchAfkMarker } from "./afk-service-sync.js";
+import { armAfkViaService } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
 import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
 import { getHookService } from "./hook-service.js";
@@ -570,13 +567,9 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
     }
     await injectWakePhrase(`${tname}.0`, phrase, () => {
         const nowMs = Date.now();
-        // #856 Phase 3 — mirror to the in-memory ipcState first so the
-        // gate sees it instantly ; the file write stays for hook
-        // subprocesses until #840 Slice B/C move them onto UDS too.
+        // #840 `4z59jt` — IPC seul. Les hook subprocesses lisent via UDS
+        // (queryLoopState), plus de shadow file.
         setIpcWakeInFlightAtMs(nowMs);
-        try {
-            writeFileSync(wakeInFlightPath(sd!), new Date(nowMs).toISOString() + "\n");
-        } catch { /* ignore — UserPromptSubmit hook will fall through to user-grace path, suboptimal but safe */ }
         setIpcLastWakeAtMs(nowMs);
         // Post-wake tempo: arm the defer gate so any wake landing in the
         // next WAKE_COALESCE_WINDOW_MS is held (not dropped) — the FIFO
@@ -593,9 +586,6 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
         if (backlogTicketId) {
             void client().recordBacklogWake(backlogTicketId).catch(() => {});
         }
-        try {
-            writeFileSync(lastWakeAtPath(sd!), new Date().toISOString() + "\n");
-        } catch { /* ignore — coalesce will just fail open */ }
     });
 }
 
@@ -643,14 +633,12 @@ function detectHumanTyping(): void {
             .slice(-4)
             .join("\n");
         if (prevPaneTail && tail !== prevPaneTail && !recentlySentKeys()) {
-            try {
-                writeFileSync(humanTypingPath(sd!), new Date().toISOString() + "\n");
-                // #745 phase B — user-took-over marker dropped (AFK SM
-                // owns the "human present" signal). The pane-diff
-                // fallback continues to refresh human-typing only ; the
-                // AFK SM will arm NOT AFK 10m on the next typing event
-                // dispatched through the proxy when it's connected.
-            } catch { /* ignore — chip just won't show */ }
+            // #840 `4z59jt` — IPC seul. setIpcHumanTypingAtMs ← touchHumanTyping.
+            touchHumanTyping(sd!);
+            // #745 phase B — user-took-over marker dropped (AFK SM owns
+            // the "human present" signal). La pane-diff fallback ne
+            // refresh que humanTyping ; l'AFK SM armera NOT AFK 10m sur
+            // le prochain typing event dispatché par le proxy.
             log("human-typing detected (prompt area changed at idle)");
         }
         prevPaneTail = tail;
@@ -1014,12 +1002,12 @@ async function mainSse(): Promise<void> {
         }
         bootSettled = true;
         // #624 david `8pwvm3` : settleBoot is now the SAFETY path. If the
-        // session-start-hook already signalled `setResumePicker(false)`,
-        // boot-complete exists on disk → hook drove the transition (arm,
-        // setTmuxStatus, …). settleBoot becomes a no-op so we don't
-        // double-arm AFK at T+300s when the user has been working for
-        // 5 min.
-        if (existsSync(bootCompletePath(sd!))) {
+        // session-start-hook already signalled `setResumePicker(false)`
+        // → hook drove the transition (arm, setTmuxStatus, …). settleBoot
+        // becomes a no-op so we don't double-arm AFK at T+300s when the
+        // user has been working for 5 min.
+        // #840 `4z59jt` — IPC seul.
+        if (getIpcState().bootComplete) {
             log("settleBoot skipped — boot-complete already signalled by session-start-hook");
             return;
         }
@@ -1051,13 +1039,8 @@ async function mainSse(): Promise<void> {
         // #629 david `8wgq7f` — setResumePicker no longer seals bootComplete
         // (delegated to bus.on("bootEnded")). At the safety cap we WANT to
         // force the exit regardless of pending stretches (Resuming…, etc.)
-        // because we've already burned bootGraceMs. Write it explicitly.
-        // #838 regression hotfix : also set the IPC (strict-mode reader skips
-        // the file fallback ; see performBootSeal).
+        // because we've already burned bootGraceMs. #840 `4z59jt` — IPC seul.
         setIpcBootComplete(true);
-        try {
-            writeFileSync(bootCompletePath(sd!), new Date().toISOString() + "\n");
-        } catch { /* best-effort */ }
         // #639 david `pn97zf` — same wait-mode contract as the bus.on("bootEnded")
         // branch above. The bus path is the normal exit ; this safety cap
         // fires only when the bus didn't (paneReady never became true).
@@ -1185,15 +1168,16 @@ async function mainSse(): Promise<void> {
             // a Stop event implies idle confirmed.
             setIpcIdleSince(ev.at_ms);
             if (ev.busy_defer_until_ms !== undefined) {
-                setIpcBusyDeferUntil(ev.busy_defer_until_ms);
-                // #839 Slice 2 (#766 path) — timer is now the single writer
-                // of the `busy-defer-until` shadow file. The hook used to
-                // call armBusyDefer locally AND emit ; it now only emits,
-                // and we materialize the file here. armBusyDefer preserves
-                // the longest pending defer (= idempotent on retries).
-                if (sd && ev.busy_defer_until_ms !== null) {
+                // #840 `4z59jt` — IPC seul. armBusyDefer (state.ts) écrit
+                // `setIpcBusyDeferUntil` derrière (idempotent preserve-max).
+                if (ev.busy_defer_until_ms === null) {
+                    setIpcBusyDeferUntil(null);
+                } else if (sd) {
                     const delta = ev.busy_defer_until_ms - Date.now();
                     if (delta > 0) armBusyDefer(sd, delta);
+                    else setIpcBusyDeferUntil(ev.busy_defer_until_ms);
+                } else {
+                    setIpcBusyDeferUntil(ev.busy_defer_until_ms);
                 }
             }
             return;
@@ -1208,14 +1192,9 @@ async function mainSse(): Promise<void> {
         }
     });
     process.on("exit", () => ipcStateSub());
-    // #649 Slice 4 — hydrate the in-process AfkService singleton from
-    // the afk marker file + keep it in sync via fs.watch. The file
-    // remains the cross-process source of truth (proxy F9, timer's own
-    // armAfk10m paths) ; AfkService is the typed observable façade for
-    // in-process subscribers (future bar countdown + wake gate). The
-    // watcher does the initial hydrate itself.
-    const unwatchAfk = watchAfkMarker(sd!);
-    process.on("exit", () => unwatchAfk());
+    // #840 `4z59jt` — plus de fichier `afk`. AfkService est piloté
+    // exclusivement via les helpers *ViaService (state.ts armAfk*),
+    // toujours en mémoire. Pas de watcher à armer.
     // #755 + #751 htwguc — paint the `@cl_afk_state` chip from the timer
     // ON EVERY PLATFORM. Pre-fix this block was gated to win32 because the
     // Unix Python proxy was supposed to own the chip ; but the proxy only

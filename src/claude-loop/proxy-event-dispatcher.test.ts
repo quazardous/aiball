@@ -6,17 +6,18 @@
  */
 import { test } from "node:test";
 import assert from "node:assert";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loopStartTsPath } from "./state.js";
 import {
-    afkPath,
-    bootCompletePath,
-    humanTypingPath,
-    loopStartTsPath,
-} from "./state.js";
-import { getIpcDispAfk, setIpcAfk } from "./ipc-state.js";
-import { setIpcPaneReady, resetIpcStateForTests } from "./ipc-state.js";
+    getIpcDispAfk,
+    getIpcState,
+    setIpcAfk,
+    setIpcBootComplete,
+    setIpcPaneReady,
+    resetIpcStateForTests,
+} from "./ipc-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 
 // #733 V2 — also resets `ipcState` so `setIpcPaneReady` from a previous
@@ -26,25 +27,25 @@ function tmp(): string {
     return mkdtempSync(join(tmpdir(), "proxy-event-test-"));
 }
 
-/** Mark boot as settled : floor elapsed + paneReady + bootComplete sealed. */
+/** Mark boot as settled : floor elapsed + paneReady + bootComplete sealed.
+ *  #840 `4z59jt` — IPC seul. */
 function seedPostBoot(sd: string): void {
     // loopStartTs far enough in the past that the 30s floor is over.
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
-    writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
+    setIpcBootComplete(true);
     setIpcPaneReady(true);
 }
 
-test("#633F dispatch typing post-boot → arms NOT AFK 10m", () => {
+test("#633F dispatch typing post-boot → arms NOT AFK 10m (ipc)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "typing", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "typing-armed" });
-        // AFK file now has a parseable ISO expiry ~10 min ahead.
-        const content = readFileSync(afkPath(sd), "utf8").trim();
-        const expiry = new Date(content).getTime();
-        assert.ok(Number.isFinite(expiry));
-        const delta = expiry - Date.now();
+        // #840 — AFK is IPC-only ; expect a fresh wait_10m expiry ~10 min ahead.
+        const ipc = getIpcState();
+        assert.equal(ipc.afkMode, "wait_10m");
+        const delta = (ipc.afkExpiryMs ?? 0) - Date.now();
         assert.ok(delta > 595_000 && delta < 605_000, `expiry delta ${delta}ms out of ±5s of 600s`);
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
@@ -56,8 +57,8 @@ test("#633F dispatch typing during boot → no arm (state.inBootGrace)", () => {
         writeFileSync(loopStartTsPath(sd), String(Date.now()));
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "typing", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "typing-skipped-boot" });
-        // AFK file untouched.
-        assert.equal(existsSync(afkPath(sd)), false);
+        // IPC untouched.
+        assert.equal(getIpcState().afkMode, null);
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
@@ -67,8 +68,8 @@ test("#633F + #751 htwguc dispatch afk_key from off → wait_10m (pending in dis
         seedPostBoot(sd);
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "wait_10m" });
-        // #751 — committed afk file UNTOUCHED during the debounce window.
-        assert.equal(existsSync(afkPath(sd)), false, "afk file unchanged during debounce");
+        // #751 — committed afkMode UNTOUCHED during the debounce window.
+        assert.equal(getIpcState().afkMode, null, "committed afkMode unchanged during debounce");
         // dispAfk reflects the user's pending choice.
         const pending = getIpcDispAfk();
         assert.ok(pending, "dispAfk is set");
@@ -77,50 +78,47 @@ test("#633F + #751 htwguc dispatch afk_key from off → wait_10m (pending in dis
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F + #751 htwguc dispatch afk_key from wait_10m → wait_inf (pending in dispAfk, afk file unchanged)", () => {
+test("#633F + #751 htwguc dispatch afk_key from wait_10m → wait_inf (pending in dispAfk, committed unchanged)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
-        // Seed committed wait_10m via in-memory ipc (mirrors what the
-        // *ViaService helpers would do in production).
         const expiryMs = Date.now() + 600_000;
         setIpcAfk("wait_10m", expiryMs);
-        writeFileSync(afkPath(sd), new Date(expiryMs).toISOString() + "\n");
-        const beforeContent = readFileSync(afkPath(sd), "utf8");
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "wait_inf" });
-        // afk file unchanged (committed wait_10m still there).
-        assert.equal(readFileSync(afkPath(sd), "utf8"), beforeContent);
+        // committed unchanged
+        const ipc = getIpcState();
+        assert.equal(ipc.afkMode, "wait_10m");
+        assert.equal(ipc.afkExpiryMs, expiryMs);
         const pending = getIpcDispAfk();
         assert.ok(pending);
         assert.equal(pending!.mode, "wait_inf");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F + #751 htwguc dispatch afk_key from wait_inf → off (pending in dispAfk, afk file unchanged)", () => {
+test("#633F + #751 htwguc dispatch afk_key from wait_inf → off (pending in dispAfk, committed unchanged)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
         setIpcAfk("wait_inf", null);
-        writeFileSync(afkPath(sd), "inf\n");
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "off" });
-        // afk file still says "inf" — commit hasn't fired yet.
-        assert.equal(readFileSync(afkPath(sd), "utf8").trim(), "inf");
+        assert.equal(getIpcState().afkMode, "wait_inf");
         const pending = getIpcDispAfk();
         assert.ok(pending);
         assert.equal(pending!.mode, "off");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F dispatch marker touch_marker → writes human-typing", () => {
+test("#633F dispatch marker touch_marker → stamps humanTypingAtMs in ipc", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
         const before = Date.now();
         const v = dispatchProxyEvent(sd, { event: "marker", name: "touch_marker", now_ms: before });
         assert.deepEqual(v, { kind: "marker-touched", name: "touch_marker" });
-        assert.ok(existsSync(humanTypingPath(sd)));
+        const ts = getIpcState().humanTypingAtMs;
+        assert.ok(ts !== null && ts >= before - 1, "humanTypingAtMs stamped");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
@@ -139,14 +137,13 @@ test("#633F + #745 dispatch touch_user_grace / clear_user_grace → marker-touch
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F dispatch unknown event kind → returns unknown verdict, no fs touch", () => {
+test("#633F dispatch unknown event kind → returns unknown verdict, ipc untouched", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "unknown_future_kind", now_ms: 0 });
         assert.equal(v.kind, "unknown");
-        // AFK file should not have been created.
-        assert.equal(existsSync(afkPath(sd)), false);
+        assert.equal(getIpcState().afkMode, null);
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
@@ -215,37 +212,37 @@ test("#653 dispatch clear_afk → AfkService.setOff, returns afk-service-set", (
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#653 step 2 — dispatcher WRITES the afk file (single-writer contract)", () => {
+test("#840 — dispatcher stamps ipc afkMode on set_afk_10m (no file)", () => {
     const sd = tmp();
     try {
         resetAfkServiceForTests();
+        resetIpcStateForTests();
         const exp = Date.now() + 600_000;
         dispatchProxyEvent(sd, { event: "marker", name: "set_afk_10m", expiry_ms: exp, now_ms: Date.now() });
-        // Step 2 flip : the dispatcher's via-service helper now writes
-        // the file (replacing the proxy's earlier write). Cross-process
-        // readers (hooks, state.ts readAfkState) keep seeing the file.
-        assert.equal(existsSync(afkPath(sd)), true, "file written by dispatcher via armAfkViaService");
-        const content = readFileSync(afkPath(sd), "utf8").trim();
-        assert.match(content, /^\d{4}-\d{2}-\d{2}T/, "ISO timestamp persisted");
+        const ipc = getIpcState();
+        assert.equal(ipc.afkMode, "wait_10m");
+        assert.ok(ipc.afkExpiryMs !== null && Math.abs(ipc.afkExpiryMs - exp) < 2_000);
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#653 step 2 — clear_afk removes the file", () => {
+test("#840 — clear_afk stamps ipc afkMode off (no file)", () => {
     const sd = tmp();
     try {
         resetAfkServiceForTests();
-        writeFileSync(afkPath(sd), "inf\n");
+        resetIpcStateForTests();
+        setIpcAfk("wait_inf", null);
         dispatchProxyEvent(sd, { event: "marker", name: "clear_afk", now_ms: Date.now() });
-        assert.equal(existsSync(afkPath(sd)), false, "file removed by dispatcher via clearAfkViaService");
+        assert.equal(getIpcState().afkMode, "off");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#653 step 2 — set_afk_inf writes 'inf' content", () => {
+test("#840 — set_afk_inf stamps ipc afkMode wait_inf (no file)", () => {
     const sd = tmp();
     try {
         resetAfkServiceForTests();
+        resetIpcStateForTests();
         dispatchProxyEvent(sd, { event: "marker", name: "set_afk_inf", now_ms: Date.now() });
-        assert.equal(readFileSync(afkPath(sd), "utf8").trim(), "inf");
+        assert.equal(getIpcState().afkMode, "wait_inf");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 

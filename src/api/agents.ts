@@ -26,10 +26,11 @@
  */
 import { Router, type Request, type Response } from "express";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { MUX_CMD, tmuxName, toggleAfk, readAfkState, armAfk10m, setAfkInfinite, clearAfk } from "../claude-loop/state.js";
+import { MUX_CMD, tmuxName, toggleAfk, readAfkState, armAfk10m, setAfkInfinite, clearAfk, loopSockPath } from "../claude-loop/state.js";
+import { sendEventOnce } from "../claude-loop/ipc-events.js";
 import { captureCursor } from "../pane.js";
 import { getConsumer } from "../db.js";
 import {
@@ -397,17 +398,19 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
 
     // david `xwmrhv` — claude-loop integration. `tmux send-keys` bypasses
     // the PTY proxy (it's a tmux IPC, not stdin through the proxy), so the
-    // `human-typing` marker that the PTY proxy normally touches on each
-    // human keystroke is never set on this code path. claude-loop's wake
-    // gate reads this marker via `humanIsTyping` to know "a human is at
-    // the keyboard, don't inject wake phrases". Without this touch the
-    // timer can race the browser-typed input. Best-effort — a write
-    // failure just means the badge stays cold, never blocks the send.
+    // human-typing IPC stamp the proxy normally writes on each human
+    // keystroke is never set on this code path. Le wake gate du timer lit
+    // `ipc.humanTypingAtMs` ; sans cet event le timer pourrait courir
+    // contre l'input web. #840 `4z59jt` — on émet le marker via UDS au
+    // timer (= il met à jour ipc) plutôt qu'écrire un fichier. Best-effort.
     const stateRoot = process.env.CLAUDE_LOOP_STATE_ROOT
         ?? join(homedir(), ".claude-loop");
     const sd = join(stateRoot, loopName);
-    const nowIso = new Date().toISOString() + "\n";
-    try { writeFileSync(join(sd, "human-typing"), nowIso); } catch { /* best-effort */ }
+    const nowMs = Date.now();
+    void sendEventOnce(loopSockPath(sd), {
+        kind: "proxyEvent",
+        data: { event: "marker", name: "touch_marker", now_ms: nowMs },
+    }, { timeoutMs: 200 });
 
     // `-l` keeps every byte literal — no Enter/BSpace/etc. name parsing on
     // the tmux side, so xterm's raw escape sequences round-trip cleanly.

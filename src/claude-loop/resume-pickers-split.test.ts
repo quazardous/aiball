@@ -3,14 +3,11 @@
 // `setResumePicker(sd, true)` ne disait pas lequel était à l'écran — un
 // boot bloqué ne révélait pas la cause via les markers.
 //
-// Pinned : (a) deux setters distincts écrivent deux marker files
-// distincts ; (b) `clearResumePickers` les efface tous deux ;
-// (c) `readLoopStateInput.resumePickerActive` est OR(session, mode)
-// pour back-compat avec les consommateurs existants ; (d) la dépréciée
-// alias `setResumePicker` continue de fonctionner.
+// #840 `4z59jt` — david "vire tout marker fichier". Les pickers sont IPC
+// seul ; on assert sur ipcState au lieu de existsSync(...path).
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -21,44 +18,50 @@ const {
     setResumeModePicker,
     clearResumePickers,
     setResumePicker,
-    resumeSessionPickerActivePath,
-    resumeModePickerActivePath,
     readLoopStateInput,
 } = await import("./state.js");
+const { getIpcState, resetIpcStateForTests } = await import("./ipc-state.js");
 
-test("setResumeSessionPicker writes/removes its own file only", () => {
+function reset(): void { resetIpcStateForTests(); }
+
+test("setResumeSessionPicker mutates the session ipc flag only", () => {
+    reset();
     setResumeSessionPicker(dir, true);
-    assert.ok(existsSync(resumeSessionPickerActivePath(dir)), "session file present");
-    assert.ok(!existsSync(resumeModePickerActivePath(dir)), "mode file absent");
+    assert.equal(getIpcState().resumeSessionPickerActive, true);
+    assert.notEqual(getIpcState().resumeModePickerActive, true);
     setResumeSessionPicker(dir, false);
-    assert.ok(!existsSync(resumeSessionPickerActivePath(dir)));
+    assert.equal(getIpcState().resumeSessionPickerActive, false);
 });
 
-test("setResumeModePicker writes/removes its own file only", () => {
+test("setResumeModePicker mutates the mode ipc flag only", () => {
+    reset();
     setResumeModePicker(dir, true);
-    assert.ok(existsSync(resumeModePickerActivePath(dir)));
-    assert.ok(!existsSync(resumeSessionPickerActivePath(dir)));
+    assert.equal(getIpcState().resumeModePickerActive, true);
+    assert.notEqual(getIpcState().resumeSessionPickerActive, true);
     setResumeModePicker(dir, false);
-    assert.ok(!existsSync(resumeModePickerActivePath(dir)));
+    assert.equal(getIpcState().resumeModePickerActive, false);
 });
 
 test("the two pickers can be active independently", () => {
+    reset();
     setResumeSessionPicker(dir, true);
     setResumeModePicker(dir, true);
-    assert.ok(existsSync(resumeSessionPickerActivePath(dir)));
-    assert.ok(existsSync(resumeModePickerActivePath(dir)));
+    assert.equal(getIpcState().resumeSessionPickerActive, true);
+    assert.equal(getIpcState().resumeModePickerActive, true);
     clearResumePickers(dir);
 });
 
-test("clearResumePickers erases BOTH files", () => {
+test("clearResumePickers clears BOTH ipc flags", () => {
+    reset();
     setResumeSessionPicker(dir, true);
     setResumeModePicker(dir, true);
     clearResumePickers(dir);
-    assert.ok(!existsSync(resumeSessionPickerActivePath(dir)));
-    assert.ok(!existsSync(resumeModePickerActivePath(dir)));
+    assert.equal(getIpcState().resumeSessionPickerActive, false);
+    assert.equal(getIpcState().resumeModePickerActive, false);
 });
 
 test("readLoopStateInput.resumePickerActive = OR(session, mode)", () => {
+    reset();
     clearResumePickers(dir);
     assert.equal(readLoopStateInput(dir).resumePickerActive, false);
     setResumeSessionPicker(dir, true);
@@ -71,18 +74,19 @@ test("readLoopStateInput.resumePickerActive = OR(session, mode)", () => {
 });
 
 test("deprecated setResumePicker(sd, true) maps to session picker (legacy default)", () => {
-    clearResumePickers(dir);
+    reset();
     setResumePicker(dir, true);
-    assert.ok(existsSync(resumeSessionPickerActivePath(dir)));
-    assert.ok(!existsSync(resumeModePickerActivePath(dir)));
+    assert.equal(getIpcState().resumeSessionPickerActive, true);
+    assert.notEqual(getIpcState().resumeModePickerActive, true);
 });
 
 test("deprecated setResumePicker(sd, false) clears BOTH (back-compat)", () => {
+    reset();
     setResumeSessionPicker(dir, true);
     setResumeModePicker(dir, true);
     setResumePicker(dir, false);
-    assert.ok(!existsSync(resumeSessionPickerActivePath(dir)));
-    assert.ok(!existsSync(resumeModePickerActivePath(dir)));
+    assert.equal(getIpcState().resumeSessionPickerActive, false);
+    assert.equal(getIpcState().resumeModePickerActive, false);
 });
 
 after(() => {

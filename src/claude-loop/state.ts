@@ -15,6 +15,8 @@ import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
 import {
     getIpcDispAfk,
     getIpcState,
+    setIpcAfk,
+    setIpcBusyDeferUntil,
     setIpcDispAfk,
     setIpcDrainedState,
     setIpcHumanTypingAtMs,
@@ -28,7 +30,7 @@ import {
     setIpcResumeModePicker,
     setIpcResumeSessionPicker,
 } from "./ipc-state.js";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -220,25 +222,15 @@ export function bootCompletePath(sd: string): string { return join(sd, "boot-com
  *    - `clearResumePickers(sd)`            après dismiss des deux
  *
  *  bootComplete reste séparé (sealing via bus.on("bootEnded") + settleBoot).
+ *
+ *  #840 `4z59jt` — IPC seul. Plus de marker fichier.
  */
-function _writePickerMarker(sd: string, p: string, active: boolean): void {
-    if (active) {
-        try { writeFileSync(p, new Date().toISOString() + "\n"); } catch { /* best-effort */ }
-        return;
-    }
-    try { if (existsSync(p)) unlinkSync(p); } catch { /* race */ }
-}
 
-export function setResumeSessionPicker(sd: string, active: boolean): void {
-    _writePickerMarker(sd, resumeSessionPickerActivePath(sd), active);
-    // #856 Phase 3 — mirror to ipcState so the reader (pane-service-sync,
-    // readLoopStateInput) doesn't have to re-check the file shadow. The
-    // file write stays for hook subprocess reads until #840 Slice B/C.
+export function setResumeSessionPicker(_sd: string, active: boolean): void {
     setIpcResumeSessionPicker(active);
 }
 
-export function setResumeModePicker(sd: string, active: boolean): void {
-    _writePickerMarker(sd, resumeModePickerActivePath(sd), active);
+export function setResumeModePicker(_sd: string, active: boolean): void {
     setIpcResumeModePicker(active);
 }
 
@@ -546,25 +538,21 @@ export const PANE_BUSY_DELAY_MS = Math.max(0, Number(process.env[CL_ENV.PANE_BUS
 export function busyDeferUntilPath(sd: string): string { return join(sd, "busy-defer-until"); }
 
 /** Arm the defer gate so the next wake is blocked until `now + ms`.
- *  Writes the absolute target as ISO. Idempotent: pushes the existing
- *  gate forward if the new target is later, never shortens an existing
- *  defer (a fresh busy snapshot mid-defer extends the wait, doesn't
- *  cut it). */
-export function armBusyDefer(sd: string, ms: number): string {
+ *  Idempotent : pushes the existing gate forward if the new target is
+ *  later, never shortens an existing defer (a fresh busy snapshot
+ *  mid-defer extends the wait, doesn't cut it).
+ *  #840 `4z59jt` — IPC seul. `setIpcBusyDeferUntil` est l'unique write
+ *  (lu par `readBusyDefer` + diffusé aux hook subprocesses via le UDS
+ *  `queryLoopState`). */
+export function armBusyDefer(_sd: string, ms: number): string {
     if (ms <= 0) return "";
-    const target = new Date(Date.now() + ms);
-    const p = busyDeferUntilPath(sd);
-    if (existsSync(p)) {
-        try {
-            const prev = new Date(readFileSync(p, "utf8").trim());
-            if (!Number.isNaN(prev.getTime()) && prev.getTime() > target.getTime()) {
-                return prev.toISOString();
-            }
-        } catch { /* fall through and overwrite */ }
+    const target = Date.now() + ms;
+    const prev = getIpcState().busyDeferUntilMs;
+    if (prev !== null && prev > target) {
+        return new Date(prev).toISOString();
     }
-    const iso = target.toISOString();
-    try { writeFileSync(p, iso + "\n"); } catch { /* fail open */ }
-    return iso;
+    setIpcBusyDeferUntil(target);
+    return new Date(target).toISOString();
 }
 
 /** Read the defer marker. Returns `{ activeMs }` with the remaining
@@ -774,37 +762,27 @@ export function afkActive(_sd: string): boolean {
 }
 
 /** #624 david `e3a6nn` : arm a NOT AFK 10m hold from the TS side
- *  (settleBoot's `--wait` path). Writes an ISO expiry timestamp,
- *  mirror of the proxy's `set_afk_until`. No-op on fs error — the
- *  bar just stays at whatever the natural state computes to. */
-export function armAfk10m(sd: string, seconds = 600): void {
-    try {
-        const expiry = new Date(Date.now() + seconds * 1000);
-        writeFileSync(afkPath(sd), expiry.toISOString() + "\n");
-    } catch { /* best-effort */ }
+ *  (settleBoot's `--wait` path). #840 `4z59jt` — IPC seul. */
+export function armAfk10m(_sd: string, seconds = 600): void {
+    const expiry = Date.now() + seconds * 1000;
+    setIpcAfk("wait_10m", expiry);
 }
 
-/** #633 Slice C — mirror of the proxy's `set_afk_infinite` : write the
- *  AFK file with content `inf` (NOT AFK ∞ hold, released only by F9). */
-export function setAfkInfinite(sd: string): void {
-    try { writeFileSync(afkPath(sd), "inf\n"); } catch { /* best-effort */ }
+/** #633 Slice C — NOT AFK ∞ hold (released only by F9). IPC seul. */
+export function setAfkInfinite(_sd: string): void {
+    setIpcAfk("wait_inf", null);
 }
 
-/** #633 Slice C — mirror of the proxy's `clear_afk` : remove the AFK
- *  marker file → bar returns to AFK (autonomous loop, no hold). */
-export function clearAfk(sd: string): void {
-    try { if (existsSync(afkPath(sd))) unlinkSync(afkPath(sd)); } catch { /* race */ }
+/** #633 Slice C — return to AFK (autonomous loop, no hold). IPC seul. */
+export function clearAfk(_sd: string): void {
+    setIpcAfk("off", null);
 }
 
-/** #633 Slice D — touch the `human-typing` marker. #734 V3 Phase B —
- *  also writes the in-memory `ipcHumanTypingAtMs` so `readLoopStateInput`
- *  reads in-process state first ; file shadow is kept for cold-boot +
- *  the win32 path where the Rust proxy doesn't dispatch proxyEvent.
- *  Bus reads compute `isTypingNow` for the bar word "stop" during the
- *  5s TTL. Mirror of the proxy's `touch_marker`. */
-export function touchHumanTyping(sd: string): void {
+/** #633 Slice D — touch the `human-typing` IPC stamp. #840 `4z59jt` —
+ *  IPC seul. Le bar word "stop" et la chip typing lisent
+ *  `ipc.humanTypingAtMs` via le bus. */
+export function touchHumanTyping(_sd: string): void {
     setIpcHumanTypingAtMs(Date.now());
-    try { writeFileSync(humanTypingPath(sd), new Date().toISOString() + "\n"); } catch { /* best-effort */ }
 }
 
 /** #633 Slice C — F9 toggle implemented on the TS side. Reads the
