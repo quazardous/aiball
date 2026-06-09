@@ -855,7 +855,7 @@ class _Decider:
         # peut taper pour choisir une discussion --resume sans armer
         # NOT AFK 10m et sans flicker le bar entre stop/wait. Les
         # bytes restent forwardés à claude.
-        in_boot = _boot_grace_remaining() > 0.0
+        in_boot = _in_boot_phase()
         if is_typing_keystroke(data):
             d["typing"] = True
             if not in_boot:
@@ -1181,10 +1181,10 @@ def _grace_seconds():
 
 
 def _boot_grace_remaining():
-    """#305 : secondes de boot-grace restantes (CL_BOOT_GRACE_SEC depuis le
-    démarrage du proxy), 0.0 hors-fenêtre ou sous --no-wait. Symétrique de
-    _user_grace_remaining : la barre peint `wait` tant qu'il reste du temps,
-    puis `loop` une fois la fenêtre écoulée."""
+    """#305 : bootstrap fallback time-based — secondes de boot-grace
+    restantes (CL_BOOT_GRACE_SEC depuis le spawn proxy), 0.0 hors-fenêtre
+    ou sous --no-wait. Utilisé UNIQUEMENT via `_in_boot_phase()` quand
+    aucune push timer n'est arrivée (= cold boot du proxy)."""
     if _NO_WAIT:
         return 0.0
     try:
@@ -1193,6 +1193,29 @@ def _boot_grace_remaining():
         grace = 60.0
     rem = grace - (datetime.datetime.now().timestamp() - _BOOT_TS)
     return rem if rem > 0.0 else 0.0
+
+
+def _in_boot_phase():
+    """Source de vérité du booléen "on est en boot phase" pour le proxy.
+
+    Consulte d'abord le pushed view du timer (= autorité : barWord/`inBootGrace`),
+    fallback time-based (`_boot_grace_remaining()`) UNIQUEMENT avant la
+    1ère push (cold boot).
+
+    Fix observé david : le proxy gardait sa propre boot-grace 60s
+    désynchronisée du sealing IPC. Quand le timer sealed `bootComplete`
+    à ~T+50s, le proxy continuait à peindre `_HUMAN_BOOT` (jaune) jusqu'à
+    T+60s → bar mismatch : bg busy + word claude-boot."""
+    cached = _pushed_view_cache.get("view")
+    if cached is None:
+        # Cold boot — pas encore de push reçue, on tient avec le timer
+        # bootstrap pour ne pas afficher "loop" sur un fond yellow.
+        return _boot_grace_remaining() > 0.0
+    if cached.get("inBootGrace") is True:
+        return True
+    if cached.get("barWord") == "boot":
+        return True
+    return False
 
 
 def _rest_word():
@@ -1210,9 +1233,7 @@ def _rest_word():
     is None`), le bootstrap source = BOOT (pas le LOOP fallback qui
     sortait du fallthrough quand `_boot_grace_remaining()=0` au tout
     début du proxy)."""
-    if _pushed_view_cache.get("view") is None:
-        return _HUMAN_BOOT
-    if _boot_grace_remaining() > 0.0:
+    if _in_boot_phase():
         return _HUMAN_BOOT
     if _afk_mode() is not None:
         return _HUMAN_WAIT
