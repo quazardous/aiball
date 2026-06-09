@@ -17,7 +17,9 @@ import {
     getIpcState,
     setIpcAfk,
     setIpcBusyDeferUntil,
+    setIpcCounters,
     setIpcDispAfk,
+    setIpcStateTagInfo,
     setIpcDrainedState,
     setIpcHumanTypingAtMs,
     setIpcLastOpenWakeHash,
@@ -42,7 +44,7 @@ import type { DrainedState } from "./drained-strategy.js";
 import { CL_ENV } from "./env-vars.js";
 import { loopConfig } from "./loop-config.js";
 import { stripMarkdown } from "./markdown-strip.js";
-import { canFlipBgFromBoot, computeLoopView, type AfkChunk } from "./loop-state.js";
+import { computeLoopView, type AfkChunk } from "./loop-state.js";
 import { classifyCompacting as classifyCompactingRaw } from "./compacting-detector.js";
 import { parseGates, runGates } from "./gates.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
@@ -1065,13 +1067,13 @@ function projectCwd(): string {
 }
 
 let BAR_COLORS: AiballConfig["colors"] | null = null;
-function barColors(): AiballConfig["colors"] {
+export function barColors(): AiballConfig["colors"] {
     // #480 / #481 : cwd projet via plate.json (source unique) avec
     // override env `AIBALL_PROJECT_CWD` et fallback `process.cwd()`.
     if (!BAR_COLORS) BAR_COLORS = loadConfig(projectCwd()).colors;
     return BAR_COLORS;
 }
-const stateBg = (col: AiballConfig["colors"], s: LoopStatus): string =>
+export const stateBg = (col: AiballConfig["colors"], s: LoopStatus): string =>
     s === "busy" ? col.busy_bg : s === "boot" ? col.boot_bg : col.idle_bg;
 
 // #305 + #622 : loop session start in ms-since-epoch. Hooks live for ~ms,
@@ -1155,141 +1157,36 @@ export function humanBarWord(sd: string | undefined): string {
  * No-op when tmux is gone (loop was just rm'd) — never throws.
  */
 export function setTmuxCounters(
-    name: string,
+    _name: string,
     counters: { open?: number | null; backlog?: number | null; events?: number | null } | null,
 ): void {
-    const tn = tmuxName(name);
-    const setOpt = (opt: string, val: string) =>
-        spawnSync(MUX_CMD, ["set-option", "-t", tn, opt, val], { stdio: "ignore" });
-    if (!counters) {
-        setOpt("@cl_counts", "");
-        return;
-    }
-    const parts: string[] = [];
-    if (typeof counters.open === "number") parts.push(`o:${counters.open}`);
-    if (typeof counters.backlog === "number") parts.push(`b:${counters.backlog}`);
-    if (typeof counters.events === "number") parts.push(`e:${counters.events}`);
-    if (parts.length === 0) {
-        setOpt("@cl_counts", "");
-        return;
-    }
-    const col = barColors();
-    setOpt("@cl_counts", `#[fg=${col.bar_fg}] ${parts.join(" ")}`);
+    // #862 Slice 3 — neutralisé. Mirror direct vers ipcState ; le
+    // BarRenderer peint `@cl_counts` au prochain tick. Slice 5 retirera
+    // ce wrapper + ses call sites.
+    setIpcCounters(counters);
 }
 
 export function setTmuxStatus(
-    name: string,
-    status: LoopStatus,
+    _name: string,
+    _status: LoopStatus,
     countOrInfo?: number | string,
 ): void {
-    // #B.149/#B.154: optional free-form phase info appended to the status
-    // label. info string → `[boot:picker?]` / `[busy:compacting]`. Lets the
-    // bar carry transient diagnostic state without inventing new colors per
-    // phase. The legacy `count` form (`[idle 3]`) is superseded by the
-    // separate counters segment (@cl_counts, set via setTmuxCounters) so the
-    // tag stays focused on state+phase ; #800 9sy4t3 david wants counters
-    // visible in ALL states (idle/boot/busy) without bloating the tag.
-    let tag = `[${status}]`;
-    if (typeof countOrInfo === "number" && countOrInfo > 0) {
-        tag = `[${status} ${countOrInfo}]`;
-    } else if (typeof countOrInfo === "string" && countOrInfo) {
-        tag = `[${status}:${countOrInfo}]`;
-    }
-    const tn = tmuxName(name);
-    const col = barColors();
-    const bg = stateBg(col, status);
-    const sd = process.env[CL_ENV.STATE_DIR];
-    const proxyAlive = !!sd && proxyIsAlive(sd);
-    // #627 + #624 david `knb52u` : pendant la fenêtre boot-grace, le BG
-    // reste `[boot]` jaune. Les hooks (stop / user-prompt-submit) qui
-    // appellent `setTmuxStatus(IDLE, "user")` ou `setTmuxStatus(BUSY)`
-    // au milieu du resume picker créaient le mismatch BG gris/blue +
-    // word `boot`. settleBoot du timer est la seule autorité pour
-    // sortir du BG `[boot]`. `BOOT` lui-même reste toujours peignable
-    // (seed cli.ts, settleBoot's own paint, hooks BOOT info update).
-    if (sd && status !== "boot" && !canFlipBgFromBoot(readLoopStateInput(sd))) {
-        // Skip silencieux — settleBoot fera la transition propre.
-        return;
-    }
-    const setOpt = (opt: string, val: string) =>
-        spawnSync(MUX_CMD, ["set-option", "-t", tn, opt, val], { stdio: "ignore" });
-    // #749 — refresh the zen chip on every status paint. The marker may
-    // have been touched/removed manually (touch / rm), so we re-read it
-    // here rather than relying on cmdZen as the sole writer.
-    if (sd) {
-        const zenChunk = existsSync(zenPath(sd))
-            ? `#[fg=colour16,bg=colour208,bold] ZEN #[default] `
-            : "";
-        setOpt("@cl_zen", zenChunk);
-    }
-
-    // #274: `status-left` is a STATIC format that references per-owner tmux
-    // user-options. The PTY proxy repaints `@cl_human` INSTANTLY on the
-    // first keystroke (it owns that segment while alive — see pty-proxy.py);
-    // TS owns the rest. The bar's bg comes from `status-bg` (set per state
-    // below), so the proxy's fg-only `@cl_human` renders on the current
-    // state colour without the proxy ever knowing it. The fg is reset to
-    // `bar_fg` (#385 colour profile, black by default) after the human/proxy
-    // segments so `name [state]` reads on the coloured bar.
-    // `#{@cl_human}` carries the human-presence WORD (loop/stop, painted by
-    // the proxy live or by the degraded-mode block below). It can be empty
-    // for a beat — proxy forked but hasn't painted yet, CL_TMUX unset so the
-    // proxy's paint no-ops, or a state race — and an empty option rendered a
-    // bare `claude-` (#278). Default it to the autonomous `loop` word at the
-    // FORMAT level so the bar always reads at least `claude-loop`; a real
-    // painted value (loop/stop) still wins via the conditional.
+    // #862 Slice 3 — setTmuxStatus est devenu un thin wrapper : seule la
+    // substate info (`wait`/`compacting`/`retry N`) est passée au
+    // BarRenderer via `setIpcStateTagInfo`. Le `status` arg lui-même est
+    // ignoré ici : le BarRenderer dérive le loopStatus canonique depuis
+    // `paneBusy`/`bootComplete` via `computeLoopView`. Toute la mécanique
+    // de paint tmux (status-bg, status-left, @cl_state, @cl_zen, @cl_proxy,
+    // @cl_human en degraded) est maintenant exécutée par BarRenderer.tick()
+    // depuis le timer process, diff-guardée + auto-coherente avec ipcState.
     //
-    // #302 (gmwffh) layout: the bar OPENS in the active state colour, a
-    // shade-block GRADIENT fades active→black (`▓▒░`), then a black `island`
-    // holds ` claude-WORD `, then a gradient fades black→active (`░▒▓`), then
-    // the rest of the bar resumes in the state colour. No more ` · ` separator.
-    // david (gmwffh) wanted a "bande sportive / dégradé" feel, not the sharp
-    // half-block edge. Shade blocks (Block Elements, U+2591/2/3) over powerline
-    // PUA glyphs so the gradient renders without a Nerd-patched font: each cell
-    // is fg=active over bg=black, ▓=75% / ▒=50% / ░=25% active → smooth fade.
-    setOpt(
-        "status-left",
-        // #302: commas inside the false-branch `#[…]` MUST be escaped `#,` —
-        // tmux splits `#{?cond,then,else}` on commas, so an unescaped one broke
-        // the `loop` fallback entirely (the #278 bare-`claude-` guard never
-        // actually fired). Escaped, the fallback renders when @cl_human is unset.
-        // #381 → #385 (david qyqwnw): the control-key hint moved OFF the left
-        // island to `status-right` (seeded in cli.ts: `AFK:<KEY> · DETACH:<prefix> d`).
-        // The status-left format below no longer carries `@cl_keys`; a leftover
-        // @cl_keys on a session started before this change is simply never
-        // referenced now (harmless — no literal renders).
-        // `#{@cl_counts}` is the optional ` o:M b:B e:N` segment painted by
-        // setTmuxCounters (#800 9sy4t3) — visible across all states so david
-        // can see open / backlog / events without waiting for [busy].
-        // #853 david : tmux template fallback when @cl_human is UNSET reads
-        // `boot` (jaune) by construction — par définition on commence en boot.
-        // Was `loop` (vert) before, which flashed briefly between tmux first
-        // render and cli.ts seed of @cl_human=boot.
-        `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour178#,bg=colour16]boot} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}] ${name} #{@cl_state}#{@cl_counts} `,
-    );
-    setOpt("status-bg", bg);
-    setOpt("status-fg", col.bar_fg);
-    // Loop-state tag (#B.149/#B.154): `[idle 3]` / `[boot:resume?]` etc.
-    setOpt("@cl_state", `#[fg=${col.bar_fg}]${tag}`);
-    // #800 9sy4t3 — `@cl_counts` is set separately via setTmuxCounters and
-    // referenced by the status-left format below. We don't touch it here so
-    // a state repaint (e.g. an idle tick) doesn't clobber a fresher counter
-    // snapshot. Empty default = no counters visible until the first
-    // setTmuxCounters call lands.
-    // #269 (tcn5ej): discreet ⇄ when the pane really runs under the proxy
-    // (ground truth = proxy-alive marker). Absent ⇒ direct-launch fallback.
-    setOpt("@cl_proxy", proxyAlive ? `#[fg=colour250] ⇄` : "");
-    // #264/#302 human-presence WORD (3 états): `stop` (red) human typing /
-    // `wait` (yellow) user-grace window, auto-pings frozen / `loop` (green)
-    // autonomous gate-open. The proxy owns this segment live when present
-    // (instant, busy included); in DEGRADED mode (no proxy) TS paints it
-    // from the markers — skipped when the proxy is alive so the two never
-    // fight over it.
-    if (!proxyAlive) {
-        const word = humanBarWord(sd);
-        setOpt("@cl_human", word);
-        logBarPaint(sd, `state.ts:setTmuxStatus(${status})`, word);
-    }
+    // Slice 5 retirera complètement ce wrapper + ses call sites.
+    const info = typeof countOrInfo === "string" && countOrInfo
+        ? countOrInfo
+        : typeof countOrInfo === "number" && countOrInfo > 0
+            ? String(countOrInfo)
+            : null;
+    setIpcStateTagInfo(info);
 }
 
 /** #755 — map an `AfkChunk` to the `@cl_afk_state` tmux format string.
@@ -1328,10 +1225,11 @@ export function afkStateChunkStr(sd: string): string {
  *  swallow when there is no live target). On Unix the Python proxy owns
  *  this segment ; this is the WIN32 path where the Rust proxy doesn't
  *  paint it (the chip would otherwise stay frozen on its boot seed). */
-export function setTmuxAfkState(name: string, chunkStr: string): void {
-    const tn = tmuxName(name);
-    spawnSync(MUX_CMD, ["set-option", "-t", tn, "@cl_afk_state", chunkStr], { stdio: "ignore" });
-    spawnSync(MUX_CMD, ["refresh-client", "-S"], { stdio: "ignore" });
+export function setTmuxAfkState(_name: string, _chunkStr: string): void {
+    // #862 Slice 3 — neutralisé. Le BarRenderer dérive `afkChipStr` via
+    // `afkStateChunkStr(sd)` (canonical via computeLoopView) dans
+    // computeBarSnapshot et peint `@cl_afk_state` au prochain tick.
+    // Slice 5 retirera ce wrapper + ses call sites.
 }
 
 /**

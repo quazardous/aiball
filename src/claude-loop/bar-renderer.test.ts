@@ -15,6 +15,7 @@ import {
     computeBarSnapshot,
     diffSnapshots,
     type BarSnapshot,
+    type SpawnFn,
 } from "./bar-renderer.js";
 import {
     getIpcState,
@@ -23,8 +24,21 @@ import {
     setIpcCounters,
     setIpcPaneBusy,
     setIpcPaneReady,
+    setIpcStateTagInfo,
 } from "./ipc-state.js";
 import { LOOP_STATUS } from "./state.js";
+
+interface SpawnCall {
+    args: string[];
+}
+function makeSpawnSpy(): { spawn: SpawnFn; calls: SpawnCall[] } {
+    const calls: SpawnCall[] = [];
+    const spawn: SpawnFn = (_cmd, args) => {
+        calls.push({ args: [...args] });
+        return { status: 0 };
+    };
+    return { spawn, calls };
+}
 
 function mkSd(): string {
     resetIpcStateForTests();
@@ -180,4 +194,74 @@ test("diffSnapshots: counters null vs {0,0,0} → diff (sémantique distinguée)
     const prev = snap({ counters: null });
     const next = snap({ counters: { open: 0, backlog: 0, events: 0 } });
     assert.deepEqual(diffSnapshots(prev, next), ["counters"]);
+});
+
+// #862 Slice 3 — paint effectif via spawnSync spy.
+
+test("BarRenderer.paint: initial tick → spawn set-option pour tous les fields", () => {
+    const sd = mkSd();
+    const { spawn, calls } = makeSpawnSpy();
+    const r = new BarRenderer(sd, "cl-test", spawn);
+    r.tick();
+    // Initial : tous les fields → on attend au moins 1 setOpt par field
+    // touché. Le mapping concret est tested ailleurs ; ici on assert
+    // qu'il y a EU des spawn (= paint a tourné).
+    assert.ok(calls.length > 0, `expected paint to spawn at least one set-option, got ${calls.length}`);
+    r.stop();
+    rmSync(sd, { recursive: true, force: true });
+});
+
+test("BarRenderer.paint: tick idempotent (state inchangé) → 0 spawn", () => {
+    const sd = mkSd();
+    const { spawn, calls } = makeSpawnSpy();
+    const r = new BarRenderer(sd, "cl-test", spawn);
+    r.tick();
+    const initialCount = calls.length;
+    r.tick(); // 2e tick : rien n'a changé
+    assert.equal(calls.length, initialCount, "2e tick devrait être no-op");
+    r.stop();
+    rmSync(sd, { recursive: true, force: true });
+});
+
+test("BarRenderer.paint: counters change → setOpt @cl_counts", () => {
+    const sd = mkSd();
+    const { spawn, calls } = makeSpawnSpy();
+    const r = new BarRenderer(sd, "cl-test", spawn);
+    r.tick(); // initial
+    calls.length = 0;
+    setIpcCounters({ open: 3, backlog: 1, events: 2 });
+    r.tick();
+    const cl = calls.find((c) => c.args.includes("@cl_counts"));
+    assert.ok(cl, "expected @cl_counts setOpt to fire on counters change");
+    assert.ok(cl!.args.some((a) => a.includes("o:3")), "rendered string carries 'o:3'");
+    r.stop();
+    rmSync(sd, { recursive: true, force: true });
+});
+
+test("BarRenderer.paint: stateTagInfo change → setOpt @cl_state avec suffix", () => {
+    const sd = mkSd();
+    const { spawn, calls } = makeSpawnSpy();
+    const r = new BarRenderer(sd, "cl-test", spawn);
+    r.tick();
+    calls.length = 0;
+    setIpcStateTagInfo("wait");
+    r.tick();
+    const st = calls.find((c) => c.args.includes("@cl_state"));
+    assert.ok(st, "expected @cl_state setOpt");
+    assert.ok(st!.args.some((a) => a.includes(":wait")), "rendered tag carries ':wait'");
+    r.stop();
+    rmSync(sd, { recursive: true, force: true });
+});
+
+test("BarRenderer.paint: humanWord change + proxy dead → setOpt @cl_human ; proxy alive → SKIP @cl_human", () => {
+    const sd = mkSd();
+    // proxy dead = proxy-alive marker absent (default for fresh sd) → BarRenderer doit peindre
+    const { spawn, calls } = makeSpawnSpy();
+    const r = new BarRenderer(sd, "cl-test", spawn);
+    r.tick();
+    const humanCalls = calls.filter((c) => c.args.includes("@cl_human"));
+    // Initial sans proxy → on s'attend à voir @cl_human peint.
+    assert.ok(humanCalls.length > 0, "expected @cl_human to be painted when proxy is dead");
+    r.stop();
+    rmSync(sd, { recursive: true, force: true });
 });

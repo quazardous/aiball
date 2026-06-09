@@ -139,6 +139,12 @@ export interface IpcState {
      *  timer's count-refresh tick. Read by `BarRenderer` to compose the
      *  segment string. */
     counters: { open: number | null; backlog: number | null; events: number | null } | null;
+    /** #862 Slice 3 — substate hint that decorates the `@cl_state` tag
+     *  (`[idle:wait]`, `[busy:compacting]`, `[busy:retry 3]`). Mutée par
+     *  les call sites legacy `setTmuxStatus(name, status, info)` ;
+     *  consumée par `BarRenderer.computeBarSnapshot`. `null` = pas de
+     *  suffix → tag plein `[<status>]`. */
+    stateTagInfo: string | null;
 }
 
 const state: IpcState = {
@@ -168,6 +174,7 @@ const state: IpcState = {
     paneResuming: null,
     lastViewPushAtMs: null,
     counters: null,
+    stateTagInfo: null,
 };
 
 /** Read-only view of the current state. Callers should not mutate. */
@@ -292,6 +299,15 @@ export function setIpcWakeRequested(atMs: number | null): void {
  *  Pure write ; read via `getIpcState().lastViewPushAtMs`. */
 export function setIpcLastViewPushAtMs(atMs: number | null): void {
     state.lastViewPushAtMs = atMs;
+}
+
+/** #862 Slice 3 — substate hint that decorates `@cl_state` tag
+ *  (`wait` / `compacting` / `retry 3` / `interrupted`). Set par les
+ *  callers legacy `setTmuxStatus(name, status, info)` (= maintenant
+ *  wrappers thin sur ce setter). Empty string normalisé à null. */
+export function setIpcStateTagInfo(info: string | null): void {
+    state.stateTagInfo = info && info.length > 0 ? info : null;
+    notifyIpcChanged();
 }
 
 /** #862 Slice 2 — store the `@cl_counts` ground truth in ipcState so
@@ -430,4 +446,5 @@ export function resetIpcStateForTests(): void {
     state.paneResuming = null;
     state.lastViewPushAtMs = null;
     state.counters = null;
+    state.stateTagInfo = null;
 }

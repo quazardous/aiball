@@ -25,10 +25,12 @@ import { getIpcState, onIpcChanged } from "./ipc-state.js";
 import {
     MUX_CMD,
     afkStateChunkStr,
+    barColors,
     humanBarWord,
     logBarPaint,
     proxyIsAlive,
     readLoopStateInput,
+    stateBg,
     tmuxName,
     zenPath,
     LOOP_STATUS,
@@ -71,15 +73,17 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
     const view = computeLoopView(input);
     const proxyAlive = proxyIsAlive(sd);
     const humanWord = humanBarWord(sd);
-    // Map view.phase → LoopStatus (= bar bg color + tag).
     const loopStatus: LoopStatus = view.phase === "boot"
         ? LOOP_STATUS.BOOT
         : view.phase === "busy"
             ? LOOP_STATUS.BUSY
             : LOOP_STATUS.IDLE;
-    // Le state tag est `[<status>]` + suffix info. Pour Slice 1 on
-    // garde la version basique ; Slice 3 ajoutera le suffix `:info`.
-    const stateTag = `[${loopStatus}]`;
+    // #862 Slice 3 — state tag = `[<status>]` ou `[<status>:<info>]` quand
+    // un caller a set `setIpcStateTagInfo("wait"|"compacting"|...)`. La
+    // forme `[<status> <count>]` (= `setTmuxStatus(IDLE, 3)` legacy) est
+    // normalisée à string par le wrapper.
+    const info = getIpcState().stateTagInfo;
+    const stateTag = info ? `[${loopStatus}:${info}]` : `[${loopStatus}]`;
     const zenActive = existsSync(zenPath(sd));
     const counters = getIpcState().counters;
     const afkChipStr = afkStateChunkStr(sd);
@@ -110,10 +114,14 @@ function countersEqual(
     return a.open === b.open && a.backlog === b.backlog && a.events === b.events;
 }
 
+/** Spawn-tmux callable injection — vrai `spawnSync` en prod, mock dans
+ *  les tests. */
+export type SpawnFn = (cmd: string, args: string[], opts: { stdio: "ignore" }) => unknown;
+
 /**
- * BarRenderer = pur observer de `ipcState` qui debounce + diff + log.
- * **Slice 1 ne paint PAS encore tmux** ; le flip writer-effectif arrive
- * en Slice 3.
+ * BarRenderer = pur observer de `ipcState` qui debounce + diff + paint
+ * tmux. Slice 3 a flippé le writer-effectif ; les paints legacy
+ * (`setTmuxStatus`/`setTmuxCounters`/`setTmuxAfkState`) sont neutralisés.
  */
 export class BarRenderer {
     private sd: string;
@@ -121,17 +129,18 @@ export class BarRenderer {
     private lastSnapshot: BarSnapshot | null = null;
     private debounceTimer: NodeJS.Timeout | null = null;
     private unsubIpc: (() => void) | null = null;
+    private spawn: SpawnFn;
     /** Debounce window (ms) — aligné sur `schedulePush` du timer. */
     private static readonly DEBOUNCE_MS = 50;
 
-    constructor(sd: string, name: string) {
+    constructor(sd: string, name: string, spawn: SpawnFn = spawnSync as SpawnFn) {
         this.sd = sd;
         this.name = name;
+        this.spawn = spawn;
     }
 
     /** Démarre l'observer : initial paint + subscribe à onIpcChanged. */
     start(): void {
-        // Initial paint = compute + log tout au moins une fois.
         this.tick();
         this.unsubIpc = onIpcChanged(() => this.schedule());
     }
@@ -158,36 +167,86 @@ export class BarRenderer {
         }, BarRenderer.DEBOUNCE_MS);
     }
 
-    /** Compute le snapshot, diff, log les changes (Slice 1 = pas de
-     *  spawnSync tmux). Exposé pour test. */
+    /** Compute le snapshot, diff, paint les changes. Exposé pour test. */
     tick(): void {
         try {
             const next = computeBarSnapshot(this.sd);
             const changed = diffSnapshots(this.lastSnapshot, next);
-            if (changed.length === 0) return; // no-op
+            if (changed.length === 0) return;
             for (const field of changed) {
                 const val = next[field];
                 const str = typeof val === "object" && val !== null
                     ? JSON.stringify(val)
                     : String(val);
-                logBarPaint(this.sd, `observer:${field}`, str);
+                logBarPaint(this.sd, `barrender:${field}`, str);
             }
+            this.paint(next, changed);
             this.lastSnapshot = next;
-            // Slice 3+ : flusher ici un set-option batched. Pour l'instant
-            // on s'autocensure pour que le legacy painter reste autoritaire.
-            void _flushUnusedSlice1(this.name);
         } catch {
-            // Swallow — next tick retries. Sweep ne doit pas casser le bus.
+            // Swallow — next tick retries. Le bus ne doit pas crash.
         }
     }
-}
 
-/** Slice 1 placeholder : on ne paint pas encore. La fonction existe
- *  pour bloquer le typecheck sur un MUX_CMD inutilisé et préparer le
- *  scaffold de la slice 3 (où on va batched-set-option ici). */
-function _flushUnusedSlice1(_name: string): void {
-    // intentionnellement vide en Slice 1
-    void MUX_CMD;
-    void spawnSync;
-    void tmuxName;
+    /** Peint les options tmux qui ont changé. Pure (depends seulement
+     *  du snapshot + this.spawn) → testable. */
+    private paint(next: BarSnapshot, changed: (keyof BarSnapshot)[]): void {
+        const tn = tmuxName(this.name);
+        const setOpt = (opt: string, val: string): void => {
+            this.spawn(MUX_CMD, ["set-option", "-t", tn, opt, val], { stdio: "ignore" });
+        };
+        const changedSet = new Set(changed);
+        // loopStatus change → status-bg + status-left template (le bg
+        // est inline dans la format string) + status-fg + @cl_state.
+        if (changedSet.has("loopStatus") || changedSet.has("stateTag")) {
+            const col = barColors();
+            const bg = stateBg(col, next.loopStatus);
+            setOpt("status-bg", bg);
+            setOpt("status-fg", col.bar_fg);
+            setOpt("@cl_state", `#[fg=${col.bar_fg}]${next.stateTag}`);
+            // status-left embarque bg + name. Repaint quand le bg change.
+            setOpt(
+                "status-left",
+                `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour178#,bg=colour16]boot} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}] ${this.name} #{@cl_state}#{@cl_counts} `,
+            );
+        }
+        if (changedSet.has("zenActive")) {
+            setOpt(
+                "@cl_zen",
+                next.zenActive
+                    ? `#[fg=colour16,bg=colour208,bold] ZEN #[default] `
+                    : "",
+            );
+        }
+        if (changedSet.has("proxyAlive")) {
+            setOpt("@cl_proxy", next.proxyAlive ? `#[fg=colour250] ⇄` : "");
+        }
+        // En degraded mode (= proxy mort), c'est le TS qui peint @cl_human.
+        // Le proxy vivant l'écrase live à chaque keystroke (cf. pty-proxy.py
+        // _paint_word) — donc on n'overwrite pas s'il est alive (sinon
+        // races avec le proxy). Slice 4 dégagera _paint_word côté proxy.
+        if (changedSet.has("humanWord") && !next.proxyAlive) {
+            setOpt("@cl_human", next.humanWord);
+        }
+        if (changedSet.has("counters")) {
+            const c = next.counters;
+            if (c === null) {
+                setOpt("@cl_counts", "");
+            } else {
+                const parts: string[] = [];
+                if (c.open !== null) parts.push(`o:${c.open}`);
+                if (c.backlog !== null) parts.push(`b:${c.backlog}`);
+                if (c.events !== null) parts.push(`e:${c.events}`);
+                if (parts.length === 0) {
+                    setOpt("@cl_counts", "");
+                } else {
+                    const col = barColors();
+                    setOpt("@cl_counts", `#[fg=${col.bar_fg}] ${parts.join(" ")}`);
+                }
+            }
+        }
+        if (changedSet.has("afkChipStr")) {
+            setOpt("@cl_afk_state", next.afkChipStr);
+            this.spawn(MUX_CMD, ["refresh-client", "-S"], { stdio: "ignore" });
+        }
+    }
 }
