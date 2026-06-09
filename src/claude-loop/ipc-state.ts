@@ -127,6 +127,12 @@ export interface IpcState {
     paneCompacting: boolean | null;
     paneInterrupted: boolean | null;
     paneResuming: boolean | null;
+    /** #860 — timestamp of the last `pushViewIfChanged` tick from the
+     *  timer. Stamped via `setIpcLastViewPushAtMs` on every push. Reads
+     *  via `queryLoopState` carry this so `claude-loop health` can flag
+     *  a stale ipc (= timer alive but its bus loop has frozen). `null`
+     *  pre-1st-push (cold boot). */
+    lastViewPushAtMs: number | null;
 }
 
 const state: IpcState = {
@@ -154,6 +160,7 @@ const state: IpcState = {
     paneCompacting: null,
     paneInterrupted: null,
     paneResuming: null,
+    lastViewPushAtMs: null,
 };
 
 /** Read-only view of the current state. Callers should not mutate. */
@@ -273,6 +280,13 @@ export function setIpcWakeRequested(atMs: number | null): void {
     notifyIpcChanged();
 }
 
+/** #860 — stamp the last `pushViewIfChanged` tick. NOT pubsub-notified
+ *  (would recurse via schedulePush → pushView → setIpcLastViewPushAtMs).
+ *  Pure write ; read via `getIpcState().lastViewPushAtMs`. */
+export function setIpcLastViewPushAtMs(atMs: number | null): void {
+    state.lastViewPushAtMs = atMs;
+}
+
 /** #734 V3 Phase A — set AFK in-memory state. Called by the
  *  `Afk*ViaService` helpers right after they mutate the AfkService
  *  observable. Pass `mode=null` to reset the in-memory signal (the
@@ -389,4 +403,5 @@ export function resetIpcStateForTests(): void {
     state.paneCompacting = null;
     state.paneInterrupted = null;
     state.paneResuming = null;
+    state.lastViewPushAtMs = null;
 }

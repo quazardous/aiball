@@ -118,6 +118,7 @@ import {
     setIpcIdleSince,
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
+    setIpcLastViewPushAtMs,
     setIpcResumeSessionPicker,
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
@@ -1507,6 +1508,9 @@ async function mainSse(): Promise<void> {
     const pushViewIfChanged = (): void => {
         try {
             loopBus.update(readLoopStateInput(sd!));
+            // #860 — stamp post-push so `claude-loop health` can flag
+            // a stale ipc (timer alive but its bus loop has frozen).
+            setIpcLastViewPushAtMs(Date.now());
         } catch { /* swallow — next tick retries */ }
     };
     // Debounced trigger : coalesce a burst of marker writes into a single

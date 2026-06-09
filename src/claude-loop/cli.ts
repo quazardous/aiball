@@ -67,6 +67,7 @@ import {
 import { cmdTail, type TailMode } from "./cmds/tail.js";
 import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake, cmdZen, sweepOrphans } from "./cmds/manage.js";
 import { cmdInspect } from "./cmds/inspect.js";
+import { cmdHealth } from "./cmds/health.js";
 import { cmdBacklog } from "./cmds/backlog.js";
 import { CL_ENV } from "./env-vars.js";
 
@@ -1901,7 +1902,7 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "backlog", "debug-proxy-tty", "debug-keys", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "backlog", "debug-proxy-tty", "debug-keys", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -1972,6 +1973,10 @@ async function main(): Promise<void> {
     program.command("inspect [name]")
         .description("#613 — JSON dump of a loop's full state (view + markers + runtime). Pure read, no side-effects. Pytest harnesses spawn the loop, wait a tick, then `inspect` to assert behaviour. Exits 1 if the state dir doesn't exist. Name optional — defaults to the current-cwd loop.")
         .action((name: string | undefined) => cmdInspect(name ?? resolveCurrentLoopName()));
+    program.command("health [name]")
+        .description("#860 — plomberie diagnostic : timer/proxy/tmux/UDS/daemon/SSE checks par loop. Exit 0 OK, 1 fail, 2 warn. Name optional — sans arg, vérifie tous les loops.")
+        .option("--json", "Machine-readable JSON output instead of icon table")
+        .action((name: string | undefined, opts: { json?: boolean }) => cmdHealth(name, opts));
     program.command("backlog")
         .description("Show the backlog of this loop's project + agent (resolved from .aiball.yaml / plate). Default = ticket backlog tiered hot → actionable → waiting (#791). `--events` = FIFO unread events (what the wake / MCP `unread()` would drain).")
         .option("--events", "Show the FIFO unread events instead of the ticket backlog")

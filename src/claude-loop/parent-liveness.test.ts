@@ -6,7 +6,7 @@ import type { SpawnSyncReturns } from "node:child_process";
 import { probeParentTmuxAtBoot, type SpawnSyncFn } from "./parent-liveness.js";
 
 function mockSpawn(out: Partial<SpawnSyncReturns<Buffer>>): SpawnSyncFn {
-    return (() => ({
+    return ((() => ({
         pid: 0,
         output: [],
         stdout: Buffer.alloc(0),
@@ -14,7 +14,7 @@ function mockSpawn(out: Partial<SpawnSyncReturns<Buffer>>): SpawnSyncFn {
         status: 0,
         signal: null,
         ...out,
-    })) as SpawnSyncFn;
+    })) as unknown) as SpawnSyncFn;
 }
 
 test("alive session (status 0) → probe returns false (no exit)", () => {
@@ -41,10 +41,10 @@ test("any non-zero status without spawn error → gone (returns true)", () => {
 
 test("passes muxCmd + session name to the spawner", () => {
     let captured: { cmd?: string; args?: ReadonlyArray<string> } = {};
-    const spawn = ((cmd: string, args: ReadonlyArray<string>) => {
+    const spawn = (((cmd: string, args: ReadonlyArray<string>) => {
         captured = { cmd, args: [...args] };
         return mockSpawn({ status: 0 })(cmd, args);
-    }) as SpawnSyncFn;
+    }) as unknown) as SpawnSyncFn;
     probeParentTmuxAtBoot("psmux", "cl-pisynth", spawn);
     assert.equal(captured.cmd, "psmux");
     assert.deepEqual(captured.args, ["has-session", "-t", "cl-pisynth"]);

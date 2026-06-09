@@ -2080,6 +2080,7 @@ export function createLoopServer(
                     idleSinceMs: ipc.idleSinceMs,
                     bootComplete: ipc.bootComplete,
                     busyDeferUntilMs: ipc.busyDeferUntilMs,
+                    lastViewPushAtMs: ipc.lastViewPushAtMs,
                 },
             });
             return;
