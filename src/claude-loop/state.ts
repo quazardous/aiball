@@ -1864,17 +1864,32 @@ export async function injectWakePhrase(
     spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" });
 }
 
+/** #866 Slice 2 — typed enum for the `loop.sock` event kinds. Replace
+ *  the bare magic strings (`"view"`, `"proxyEvent"`, etc.) so a typo is
+ *  caught at compile time + the surface stays discoverable. */
+export const LOOP_SOCK_KIND = {
+    VIEW: "view",
+    PROXY_EVENT: "proxyEvent",
+    INJECT: "inject",
+    QUERY_LOOP_STATE: "queryLoopState",
+    QUERY_LOOP_STATE_REPLY: "queryLoopStateReply",
+    SHUTDOWN: "shutdown",
+} as const;
+export type LoopSockKind = (typeof LOOP_SOCK_KIND)[keyof typeof LOOP_SOCK_KIND];
+
 /**
  * #730 — unified per-loop IPC server bound to `loopSockPath(sd)`. The
  * single `listenEvents` instance handles every frame kind exchanged with
  * the proxy + hooks:
  *
- *  - `{kind:"view"}`        — timer broadcast → proxy paints the bar
- *  - `{kind:"proxyEvent"}`  — proxy → timer (typing, AFK key, markers, hooks)
- *  - `{kind:"inject"}`      — wake phrase bytes to write to the PTY ;
+ *  - `LOOP_SOCK_KIND.VIEW`        — timer broadcast → proxy paints the bar
+ *  - `LOOP_SOCK_KIND.PROXY_EVENT` — proxy → timer (typing, AFK key, markers, hooks)
+ *  - `LOOP_SOCK_KIND.INJECT`      — wake phrase bytes to write to the PTY ;
  *    inbound (from a hook spawned out-of-process) is rebroadcast so the
  *    proxy receives it. The timer's own injects go through `injectText`
  *    which broadcasts directly.
+ *  - `LOOP_SOCK_KIND.SHUTDOWN`    — cooperative kill (#866) ; the timer
+ *    closes its server + `process.exit(0)`.
  *
  * Direction (#729 inversion): timer = SERVER ; proxy + hooks = CLIENTS.
  */
@@ -1888,12 +1903,33 @@ export interface LoopServer {
     close(): void;
 }
 
+/** #866 Slice 2 — send a `{kind:"shutdown"}` frame to the timer over
+ *  `loop.sock`. Fire-and-forget : the timer reacts by closing its
+ *  server + `process.exit(0)`. Returns the void promise without
+ *  awaiting reply (the timer exits before any ack would land). Resolves
+ *  even when the timer is already dead (= no socket → connection
+ *  refused → silent no-op). Used by `cmdReload` / `cmdRm` as a
+ *  cooperative kill BEFORE falling back to SIGKILL on the (possibly
+ *  wrong) wrapper pid. */
+export async function sendShutdownToTimer(sd: string, timeoutMs = 500): Promise<void> {
+    const sockPath = loopSockPath(sd);
+    try {
+        await import("./ipc-events.js").then(m => m.sendEventOnce(sockPath, { kind: LOOP_SOCK_KIND.SHUTDOWN }, { timeoutMs, throwOnError: false }));
+    } catch { /* best-effort */ }
+}
+
 export function createLoopServer(
     sockPath: string,
-    handlers: { onProxyEvent: (event: Record<string, unknown>) => void },
+    handlers: {
+        onProxyEvent: (event: Record<string, unknown>) => void;
+        /** #866 Slice 2 — invoked when a `LOOP_SOCK_KIND.SHUTDOWN` frame
+         *  lands. Defaults to `process.exit(0)` (after `server.close()`).
+         *  Tests inject a spy to avoid killing the test process. */
+        onShutdownRequest?: () => void;
+    },
 ): LoopServer {
     const server: EventServer = listenEvents(sockPath, (ev, { reply }) => {
-        if (ev.kind === "proxyEvent") {
+        if (ev.kind === LOOP_SOCK_KIND.PROXY_EVENT) {
             // Legacy event shape is wrapped as
             // `{kind:"proxyEvent", data:{event:"...", kind:"...", ...}}`
             // to fit the `Event {kind, data}` shape of ipc-events. The
@@ -1905,7 +1941,7 @@ export function createLoopServer(
             } catch { /* dispatcher already swallows — defense in depth */ }
             return;
         }
-        if (ev.kind === "inject") {
+        if (ev.kind === LOOP_SOCK_KIND.INJECT) {
             // Inbound inject from an out-of-process hook (stop-hook,
             // session-start-hook). Rebroadcast so the proxy (which is
             // also a client of this server) receives the bytes and
@@ -1914,10 +1950,10 @@ export function createLoopServer(
             const text = typeof (ev.data as { text?: unknown } | null | undefined)?.text === "string"
                 ? (ev.data as { text: string }).text
                 : null;
-            if (text) server.broadcast({ kind: "inject", data: { text } });
+            if (text) server.broadcast({ kind: LOOP_SOCK_KIND.INJECT, data: { text } });
             return;
         }
-        if (ev.kind === "queryLoopState") {
+        if (ev.kind === LOOP_SOCK_KIND.QUERY_LOOP_STATE) {
             // #774 — subprocess (cli inspect) asks for a live `ipcState`
             // snapshot. Reply rides the `request/reply` correlation : the
             // client's `__req` id must be echoed in `data` for the channel
@@ -1926,7 +1962,7 @@ export function createLoopServer(
             const reqId = (ev.data as { __req?: string } | null | undefined)?.__req;
             const ipc = getIpcState();
             reply({
-                kind: "queryLoopStateReply",
+                kind: LOOP_SOCK_KIND.QUERY_LOOP_STATE_REPLY,
                 data: {
                     __req: reqId,
                     paneBusy: ipc.paneBusy ?? false,
@@ -1945,14 +1981,30 @@ export function createLoopServer(
             });
             return;
         }
+        if (ev.kind === LOOP_SOCK_KIND.SHUTDOWN) {
+            // #866 Slice 2 — graceful shutdown request from the parent
+            // claude-loop (when it receives SIGTERM/SIGINT/SIGHUP) or
+            // from any explicit `claude-loop reload`/`stop`/`rm` flow.
+            // The timer closes its loop server, then invokes the
+            // injectable `onShutdownRequest` hook (defaults to
+            // `process.exit(0)` via nextTick so the reply can flush).
+            // The runtime watchdog (#866 Slice 1) is the safety net for
+            // cases where this message never lands (parent kill -9,
+            // network split, etc.).
+            try { server.close(); } catch { /* ignore */ }
+            const onShutdown = handlers.onShutdownRequest
+                ?? (() => process.exit(0));
+            process.nextTick(onShutdown);
+            return;
+        }
         // Unknown kinds dropped silently — forward-compat.
     });
     return {
         pushView(view) {
-            server.broadcast({ kind: "view", data: view });
+            server.broadcast({ kind: LOOP_SOCK_KIND.VIEW, data: view });
         },
         injectText(text) {
-            server.broadcast({ kind: "inject", data: { text } });
+            server.broadcast({ kind: LOOP_SOCK_KIND.INJECT, data: { text } });
         },
         close() {
             server.close();

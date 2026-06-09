@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createLoopServer } from "./state.js";
+import { createLoopServer, LOOP_SOCK_KIND, sendShutdownToTimer } from "./state.js";
 import { openEventChannel } from "./ipc-events.js";
 import {
     resetIpcStateForTests,
@@ -93,4 +93,44 @@ test("queryLoopState: reflects ipcState reset (null mode, false panes)", async (
         server.close();
         try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
     }
+});
+
+// #866 Slice 2 — shutdown handler round-trip via the injectable
+// `onShutdownRequest` hook (= test-safe, doesn't kill the harness).
+
+test("LOOP_SOCK_KIND.SHUTDOWN: handler fires onShutdownRequest once", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "loop-shutdown-test-"));
+    const sock = join(dir, "loop.sock");
+    let shutdownCalls = 0;
+    const server = createLoopServer(sock, {
+        onProxyEvent: () => {},
+        onShutdownRequest: () => { shutdownCalls++; },
+    });
+    try {
+        await sleep(60);
+        await sendShutdownToTimer(dir, 300);
+        // server.close() est fire-and-forget côté send. Laisse passer
+        // le nextTick + le serveur traiter le frame.
+        await sleep(150);
+        assert.equal(shutdownCalls, 1);
+    } finally {
+        try { server.close(); } catch { /* ignore */ }
+        try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+});
+
+test("LOOP_SOCK_KIND enum: kinds canoniques", () => {
+    assert.equal(LOOP_SOCK_KIND.VIEW, "view");
+    assert.equal(LOOP_SOCK_KIND.PROXY_EVENT, "proxyEvent");
+    assert.equal(LOOP_SOCK_KIND.INJECT, "inject");
+    assert.equal(LOOP_SOCK_KIND.QUERY_LOOP_STATE, "queryLoopState");
+    assert.equal(LOOP_SOCK_KIND.QUERY_LOOP_STATE_REPLY, "queryLoopStateReply");
+    assert.equal(LOOP_SOCK_KIND.SHUTDOWN, "shutdown");
+});
+
+test("sendShutdownToTimer: socket absent → no-op silencieux", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "loop-shutdown-noop-"));
+    // No server bound → sendShutdownToTimer doit résoudre sans throw.
+    await sendShutdownToTimer(dir, 200);
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
 });

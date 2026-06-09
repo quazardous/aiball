@@ -31,6 +31,7 @@ import {
     timerPidPath,
     tmuxName,
     loopSockPath,
+    sendShutdownToTimer,
     zenPath,
 } from "../state.js";
 import { sendEventOnce } from "../ipc-events.js";
@@ -121,6 +122,10 @@ function patchEnvSet(envFilePath: string, kvList: string[]): void {
 
 export function cmdRm(name: string, force: boolean): void {
     const sd = stateDirFor(name);
+    // #866 Slice 2 — cooperative shutdown via loop.sock avant tout.
+    // Au cas où le wrapper-pid #413 ne pointe pas vers le vrai timer,
+    // le timer écoute son socket et se kill proprement à réception.
+    void sendShutdownToTimer(sd);
     spawnSync(MUX_CMD, ["kill-session", "-t", tmuxName(name)], { stdio: "ignore" });
     if (existsSync(timerPidPath(sd))) {
         try {
@@ -151,6 +156,9 @@ export function cmdStop(name: string): void {
         if (Number.isFinite(raw) && raw > 0) pid = raw;
     } catch { /* unreadable */ }
     if (pid === null) die(`no timer pid recorded for '${name}'`);
+    // #866 Slice 2 — cooperative shutdown via loop.sock avant le SIGTERM
+    // pid-based (qui peut viser le wrapper tsx au lieu du vrai timer #413).
+    void sendShutdownToTimer(sd);
     try {
         process.kill(pid, "SIGTERM");
     } catch {
@@ -249,6 +257,13 @@ export function cmdReload(name: string, opts?: { set?: string[] }): void {
         const raw = Number(readFileSync(timerPidPath(sd), "utf8").trim());
         if (Number.isFinite(raw) && raw > 0) oldPid = raw;
     }
+    // #866 Slice 2 — cooperative shutdown via loop.sock BEFORE the SIGKILL
+    // fallback. Le timer cible (le VRAI process timer.ts, pas le wrapper
+    // tsx zombie #413) écoute son propre socket et se kill proprement à
+    // réception du frame. Fire-and-forget : on n'attend pas la mort, on
+    // continue avec SIGKILL au cas où le timer ignore le shutdown frame
+    // (vieux timer pré-#866, socket déjà fermé, etc.).
+    void sendShutdownToTimer(sd);
     if (oldPid !== null) {
         // #780 — SIGKILL not SIGTERM. The SIGTERM handler in timer.ts runs
         // `cleanShutdown` which also kills the tmux session — we DON'T want
