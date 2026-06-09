@@ -198,14 +198,14 @@ async function postKeys(data: string) {
 // inaccessible on touch / mobile). POSTs to the daemon's dedicated
 // endpoint which writes <sd>/afk directly ; claude-loop picks it up
 // via heartbeat within ~1s.
-async function toggleAfkRemote() {
+async function postAfkAction(action: "toggle" | "off" | "arm_10m" | "arm_inf") {
     try {
         const token = localStorage.getItem("aiball.token");
         const headers: Record<string, string> = { "content-type": "application/json" };
         if (token) headers.authorization = `Bearer ${token}`;
         const res = await fetch(
             `/api/agents/${encodeURIComponent(props.agentName)}/afk`,
-            { method: "POST", headers, body: JSON.stringify({ action: "toggle" }) },
+            { method: "POST", headers, body: JSON.stringify({ action }) },
         );
         if (!res.ok) {
             const text = await res.text();
@@ -217,6 +217,14 @@ async function toggleAfkRemote() {
         sendError.value = (e as Error).message;
     }
 }
+
+// #747 — AFK cycle (off → 10m → ∞ → off, equivalent F9 in the pane).
+async function toggleAfkRemote() { await postAfkAction("toggle"); }
+
+// #871 — direct Reset AFK : force back to AFK ON (= autonomous mode)
+// regardless of current state. Avoids the 2-click cycle from wait_10m
+// → wait_inf → off when you just want to release the hold.
+async function resetAfkRemote() { await postAfkAction("off"); }
 
 function toggleReadWrite() {
     if (isReadWrite.value) {
@@ -461,32 +469,41 @@ onBeforeUnmount(() => {
                  on the first activation per mount. Subsequent flips bypass
                  the confirm (it's a safety net for the deliberate unlock,
                  not a per-click prompt). -->
+            <!-- #871 — icon-only toolbar (drop labels). Tooltips + aria-label keep
+                 the discoverability story for new users / screen readers. -->
             <Button
                 :icon="isReadWrite ? 'pi pi-pencil' : 'pi pi-lock'"
-                :label="isReadWrite ? 'Disable typing' : 'Enable typing'"
                 :severity="isReadWrite ? 'success' : 'secondary'"
                 size="small"
-                :outlined="!isReadWrite"
+                text
+                rounded
                 :aria-label="isReadWrite ? 'Disable typing into the pane (back to read-only)' : 'Enable typing into the pane (read-write)'"
                 :title="isReadWrite
                     ? 'Read-write mode active — your keys reach the agent tmux pane. Click to lock back.'
                     : 'Read-only mode — click to unlock typing (confirm prompt)'"
                 @click="toggleReadWrite"
             />
-            <!-- #747 — AFK toggle (replaces the physical F9 key on mobile / touch
-                 where no F9 exists). Hits the daemon `/api/agents/:name/afk`
-                 endpoint which writes the loop's afk file directly — same
-                 effect as pressing F9 in the pane, but bypassing the
-                 keystroke layer (which is missing on mobile). -->
+            <!-- #747 — AFK cycle (off → 10m → ∞ → off, equivalent F9). -->
             <Button
                 icon="pi pi-pause"
-                label="AFK"
                 size="small"
                 severity="info"
-                :outlined="true"
+                text
+                rounded
                 aria-label="Toggle AFK (cycle off → 10m → ∞ → off, same as F9)"
                 title="Toggle AFK : cycle off → NOT AFK 10m → NOT AFK ∞ → off (same as pressing F9 in the pane)"
                 @click="toggleAfkRemote"
+            />
+            <!-- #871 — direct Reset AFK : force AFK ON (autonomous) without cycling. -->
+            <Button
+                icon="pi pi-undo"
+                size="small"
+                severity="secondary"
+                text
+                rounded
+                aria-label="Reset AFK to ON (= autonomous mode, claude runs alone)"
+                title="Reset AFK ON — force claude back to autonomous, regardless of current 10m/∞ hold (1 click from any state)"
+                @click="resetAfkRemote"
             />
             <Button
                 :icon="isFullscreen ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"
