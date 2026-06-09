@@ -29,7 +29,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { MUX_CMD, tmuxName, toggleAfk, readAfkState, armAfk10m, setAfkInfinite, clearAfk, loopSockPath } from "../claude-loop/state.js";
+import { MUX_CMD, tmuxName, loopSockPath } from "../claude-loop/state.js";
 import { sendEventOnce } from "../claude-loop/ipc-events.js";
 import { captureCursor } from "../pane.js";
 import { getConsumer } from "../db.js";
@@ -441,17 +441,18 @@ agentsRouter.post("/agents/:name/pane/keys", async (req: Request, res: Response)
 // ---------------------------------------------------------------------------
 // AFK toggle (#747) — direct AFK state-machine mutation from the web UI.
 // Mobile / touch clients have no F9 ; the TerminalView toolbar posts here
-// instead. Writes the `<sd>/afk` file directly ; claude-loop's heartbeat
-// picks the change within ~1s via `readAfkState` and `afk-service-sync`.
+// instead.
+//
+// #840 `4z59jt` — IPC seul. La daemon (un autre process que le timer)
+// ne peut plus écrire un fichier shadow ; elle émet un event UDS au
+// `loop.sock` du timer concerné. Le timer's dispatcher applique :
+// `afk_key` keystroke → `toggleAfk` ; les markers `set_afk_*` / `clear_afk`
+// → *ViaService helpers. Le timer relaie ensuite l'état au proxy + bar.
 //
 // Body : { action: "toggle" | "off" | "arm_10m" | "arm_inf", durationSec? }
-//   - "toggle"    : same 3-state cycle as physical F9 (off → 10m → inf → off)
-//   - "off"       : explicit clearAfk
-//   - "arm_10m"   : explicit armAfk10m(durationSec ?? 600)
-//   - "arm_inf"   : explicit setAfkInfinite
 //
-// Local-process only : the daemon writes the file ; no node-relayed
-// pathway for now (node-relayed AFK is a follow-up if needed).
+// Local-process only : the daemon emits on the local UDS ; no
+// node-relayed pathway for now.
 // ---------------------------------------------------------------------------
 agentsRouter.post("/agents/:name/afk", (req: Request, res: Response) => {
     const rawName = req.params.name;
@@ -468,7 +469,7 @@ agentsRouter.post("/agents/:name/afk", (req: Request, res: Response) => {
     }
     const durationSec = typeof body.durationSec === "number" && Number.isFinite(body.durationSec)
         ? Math.max(1, Math.floor(body.durationSec))
-        : undefined;
+        : 600;
     const consumer = getConsumer(consumerId);
     if (!consumer || !consumer.cwd) {
         return res.status(404).json({ error: `consumer not found / no cwd : ${consumerId}` });
@@ -488,20 +489,23 @@ agentsRouter.post("/agents/:name/afk", (req: Request, res: Response) => {
     if (!existsSync(sd)) {
         return res.status(404).json({ error: `loop state dir missing : ${sd}` });
     }
-    try {
-        if (action === "toggle") toggleAfk(sd, durationSec ?? 600);
-        else if (action === "off") clearAfk(sd);
-        else if (action === "arm_10m") armAfk10m(sd, durationSec ?? 600);
-        else if (action === "arm_inf") setAfkInfinite(sd);
-    } catch (e) {
-        return res.status(500).json({ error: `afk mutation failed : ${(e as Error).message}` });
+    const nowMs = Date.now();
+    const sock = loopSockPath(sd);
+    let payload: Record<string, unknown>;
+    if (action === "toggle") {
+        payload = { event: "keystroke", kind: "afk_key", now_ms: nowMs };
+    } else if (action === "off") {
+        payload = { event: "marker", name: "clear_afk", now_ms: nowMs };
+    } else if (action === "arm_10m") {
+        payload = { event: "marker", name: "set_afk_10m", expiry_ms: nowMs + durationSec * 1000, now_ms: nowMs };
+    } else {
+        payload = { event: "marker", name: "set_afk_inf", now_ms: nowMs };
     }
-    // Echo back the resulting state so the caller doesn't have to poll.
-    const after = readAfkState(sd);
-    res.json({
+    void sendEventOnce(sock, { kind: "proxyEvent", data: payload }, { timeoutMs: 500 });
+    res.status(202).json({
         consumer_id: consumerId,
         loop: loopName,
-        mode: after.mode,
-        expiry_ms: after.expiryMs,
+        action,
+        queued: true,
     });
 });

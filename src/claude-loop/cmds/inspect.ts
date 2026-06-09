@@ -16,19 +16,13 @@
  * runs except for the timestamps. Pytest can pick exact keys to assert
  * (`d["boot"]["in_grace"]`) without depending on serialization quirks.
  */
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
-    bootCompletePath,
-    humanTypingPath,
     loopSockPath,
     proxyAlivePath,
     readLoopStateInput,
-    resumeSessionPickerActivePath,
-    resumeModePickerActivePath,
     stateDirFor,
     timerPidPath,
-    wakeInFlightPath,
-    wakeRequestedPath,
 } from "../state.js";
 import { computeLoopView } from "../loop-state.js";
 import { openEventChannel } from "../ipc-events.js";
@@ -93,11 +87,6 @@ function pidAlive(pidPath: string): { pid: number | null; alive: boolean } {
     } catch { return { pid: null, alive: false }; }
 }
 
-function mtimeIso(path: string): string | null {
-    try { return existsSync(path) ? new Date(statSync(path).mtimeMs).toISOString() : null; }
-    catch { return null; }
-}
-
 export async function cmdInspect(name: string): Promise<void> {
     const sd = stateDirFor(name);
     if (!existsSync(sd)) {
@@ -131,9 +120,8 @@ export async function cmdInspect(name: string): Promise<void> {
             min_ms: input.bootMinMs,
             grace_ms: input.bootGraceMs,
             elapsed_ms: input.nowMs - input.loopStartMs,
-            complete_marker: existsSync(bootCompletePath(sd)),
-            resume_session_picker_active: existsSync(resumeSessionPickerActivePath(sd)),
-            resume_mode_picker_active: existsSync(resumeModePickerActivePath(sd)),
+            complete: input.bootComplete,
+            resume_picker_active: input.resumePickerActive,
         },
         // #774 — pane / afk / typing / boot signals come from the
         // timer's live `ipcState` when `queryLoopState` succeeds. The
@@ -159,7 +147,6 @@ export async function cmdInspect(name: string): Promise<void> {
             in_flight_at_ms: input.wakeInFlightAtMs,
             in_flight_ttl_ms: input.wakeInFlightTtlMs,
             busy_defer_until_ms: input.busyDeferUntilMs,
-            requested_marker: existsSync(wakeRequestedPath(sd)),
         },
         typing: {
             at_ms: input.humanTypingAtMs,
@@ -167,12 +154,11 @@ export async function cmdInspect(name: string): Promise<void> {
             ttl_ms: input.humanTypingTtlMs,
         },
         markers: {
-            // #793 — idle-since file removed; bus is the SSOT. The
-            // inspect CLI subprocess can't read the timer's in-memory
-            // value without a loop.sock query — to be added if needed.
-            idle_since_iso: null,
-            human_typing_iso: mtimeIso(humanTypingPath(sd)),
-            wake_in_flight_iso: mtimeIso(wakeInFlightPath(sd)),
+            // #840 — all markers are IPC ; `live` carries the timer's
+            // canonical state, `input` is the subprocess-local snapshot.
+            idle_since_ms: input.idleSinceMs,
+            human_typing_at_iso: input.humanTypingAtMs !== null ? new Date(input.humanTypingAtMs).toISOString() : null,
+            wake_in_flight_at_iso: input.wakeInFlightAtMs !== null ? new Date(input.wakeInFlightAtMs).toISOString() : null,
         },
         runtime: {
             timer: timer,

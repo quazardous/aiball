@@ -80,7 +80,6 @@ import {
     humanPresenceWord,
     logBarPaint,
     logPaneCapture,
-    wakeRequestedPath,
     zenPath,
     readPlate,
     writePlate,
@@ -120,6 +119,7 @@ import {
     setIpcResumeModePicker,
     setIpcResumeSessionPicker,
     setIpcWakeInFlightAtMs,
+    setIpcWakeRequested,
 } from "./ipc-state.js";
 import { computeLoopView, isAfkActive, isInputHot, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
@@ -817,7 +817,8 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         log(`skip wake (${reason}) — nothing actionable (no FIFO event, no backlog)`);
         return false;
     }
-    try { unlinkSync(wakeRequestedPath(sd!)); } catch { /* race */ }
+    // #840 — wakeRequested is IPC seul (manage.ts émet via UDS). Clear le slot.
+    setIpcWakeRequested(null);
     // #831-followup — defensive : if the assembled phrase is empty for
     // any reason (own-comment ping where the builder filtered the head
     // and somehow didn't synth a culture ; future bug), DON'T proceed
@@ -1574,9 +1575,9 @@ async function mainSse(): Promise<void> {
         if (sleptToDeferDeadline) {
             log(`busy-defer window expired (slept ${sleepMs}ms) — checking work`);
         }
-        // Manual wake (claude-loop wake NAME): file marker, fires
-        // even when SSE silent.
-        if (existsSync(wakeRequestedPath(sd!))) {
+        // Manual wake (claude-loop wake NAME): IPC slot via UDS marker,
+        // fires même quand SSE silent.
+        if (getIpcState().wakeRequestedAtMs !== null) {
             await tryWake("manual", true);
             continue;
         }
@@ -1713,7 +1714,7 @@ async function mainPoll(): Promise<void> {
         if (sleptToDeferDeadline) {
             log(`busy-defer window expired (slept ${sleepMs}ms) — checking work`);
         }
-        const manualWake = existsSync(wakeRequestedPath(sd!));
+        const manualWake = getIpcState().wakeRequestedAtMs !== null;
         const woke = await tryWake(manualWake ? "manual" : "check-cmd hit", manualWake);
         // #251: same idle-gated self-reload as mainSse — pick up moved
         // source only in the lull (no wake fired AND claude is idle).

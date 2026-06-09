@@ -30,7 +30,6 @@ import {
     timerLogPath,
     timerPidPath,
     tmuxName,
-    wakeRequestedPath,
     loopSockPath,
     zenPath,
 } from "../state.js";
@@ -170,15 +169,13 @@ export function cmdWake(name: string): void {
     // bypass. If claude is mid-turn (no idle-since), wake is queued
     // until claude finishes and the Stop hook decides what to do.
     //
-    // V5 Phase A : emit a `set_wake_requested` marker on `loop.sock`
-    // so the timer's `IpcState.wakeRequestedAtMs` is set immediately.
-    // The file write stays as the inspect/cli back-compat channel.
+    // #840 `4z59jt` — IPC seul. La CLI émet un marker `set_wake_requested`
+    // sur `loop.sock` ; le timer's dispatcher pose `ipc.wakeRequestedAtMs`.
     const atMs = Date.now();
     void sendEventOnce(loopSockPath(sd), {
         kind: "proxyEvent",
         data: { event: "marker", name: "set_wake_requested", at_ms: atMs, now_ms: atMs },
     }, { timeoutMs: 200 });
-    writeFileSync(wakeRequestedPath(sd), new Date(atMs).toISOString());
     const plate = (() => { try { return readPlate(sd); } catch { return null; } })();
     const interval = plate?.interval ?? 60;
     process.stdout.write(

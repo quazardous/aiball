@@ -44,7 +44,6 @@ import {
     STATE_ROOT,
     defaultPingsPath,
     envPath,
-    humanTypingPath,
     installRootSha,
     isLoopStale,
     logBarPaint,
@@ -1035,13 +1034,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         if (opt === "@cl_human") logBarPaint(sd, "cli.ts:seed", val);
     }
     // #281 strategy A: tell psmux to touch the human-typing marker natively
-    // on real client keystrokes (busy included), via the same file
-    // `humanIsTyping` reads. psmux >= the @human-input-marker feature acts on
-    // it (psmux/psmux#309); older psmux + tmux just store the unknown option
-    // and ignore it, so the pane-diff fallback still applies — no regression.
-    // This is the no-nested-PTY path; complements the ConPTY proxy (strategy
-    // B). See docs/PTY-PROXY-WINDOWS.md.
-    spawnSync(MUX_CMD, ["set-option", "-t", tname, "@human-input-marker", humanTypingPath(sd)], { stdio: "ignore" });
+    // on real client keystrokes. #840 `4z59jt` — IPC seul, le marker fichier
+    // n'existe plus. Le PTY proxy + le pane-diff fallback (timer.detectHumanTyping)
+    // restent les deux sources de signalement. Cette option psmux est désactivée
+    // pour ne pas inviter une écriture fichier orpheline. Voir docs/PTY-PROXY-WINDOWS.md.
     // #B.176 (david): mouse mode ON for the session so the scroll
     // wheel actually scrolls the pane buffer instead of being
     // translated to Up/Down arrow keys. Scoped per-session — we

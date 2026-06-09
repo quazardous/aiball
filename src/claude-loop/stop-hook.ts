@@ -14,10 +14,11 @@
  * Always emits `{}` and exits 0 — never block claude's stop.
  */
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, statSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, lastWakeAtPath, pingsPath, readBusyDefer, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, wakeInFlightPath, WAKE_COALESCE_WINDOW_MS } from "./state.js";
+import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, pingsPath, readBusyDefer, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
+import { getIpcState } from "./ipc-state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
 import { CL_ENV } from "./env-vars.js";
@@ -82,25 +83,23 @@ function log(msg: string): void {
  * dropped the user-driven branch — the AFK SM owns that signal now).
  * The last-wake marker is the sole input.
  *
- * The trailing markers stay raw so the reader can sanity-check the
- * classification or spot edge cases (wake-in-flight still set = the
- * UserPromptSubmit hook didn't get a chance to clean up).
+ * #840 `4z59jt` — IPC seul. Le stop-hook subprocess prime l'ipcState
+ * via `queryLoopState` (UDS round-trip) avant cet appel, donc on a déjà
+ * `lastWakeAtMs` / `wakeInFlightAtMs` en mémoire.
  */
-function ageMs(p: string): number | null {
-    if (!existsSync(p)) return null;
-    try { return Date.now() - statSync(p).mtimeMs; }
-    catch { return null; }
-}
 function fmt(ms: number | null): string {
     return ms === null ? "-" : `${Math.round(ms / 1000)}s`;
 }
+function ageFromIpc(tsMs: number | null): number | null {
+    if (tsMs === null) return null;
+    return Math.max(0, Date.now() - tsMs);
+}
 function classifyTurn(): string {
     // #745 phase B — user-took-over read dropped. AFK SM owns the
-    // "this turn was a human prompt" signal now (typing arms NOT AFK
-    // 10m via the proxy → AfkService). The audit string keeps the
-    // wake age + in-flight TTL for ops diagnostics.
-    const wake = ageMs(lastWakeAtPath(sd!));
-    const inflight = ageMs(wakeInFlightPath(sd!));
+    // "this turn was a human prompt" signal now.
+    const ipc = getIpcState();
+    const wake = ageFromIpc(ipc.lastWakeAtMs);
+    const inflight = ageFromIpc(ipc.wakeInFlightAtMs);
     const turn = wake !== null ? "auto-wake" : "?";
     return `turn=${turn} last-wake=${fmt(wake)} wake-in-flight=${fmt(inflight)}`;
 }

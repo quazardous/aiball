@@ -15,12 +15,11 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
     AFK_DEBOUNCE_MS,
-    afkPath,
     commitDispAfkIfDue,
     toggleAfk,
 } from "./state.js";
@@ -31,11 +30,11 @@ function tmp(): string {
     return mkdtempSync(join(tmpdir(), "afk-debounce-test-"));
 }
 
-test("#751 toggleAfk writes dispAfk in ipcState — afk file untouched", () => {
+test("#751 toggleAfk writes dispAfk in ipcState — committed afkMode untouched", () => {
     const sd = tmp();
     try {
         toggleAfk(sd);
-        assert.equal(existsSync(afkPath(sd)), false, "afk file untouched");
+        assert.equal(getIpcState().afkMode, null, "committed afkMode untouched");
         const pending = getIpcDispAfk();
         assert.ok(pending, "dispAfk in ipcState");
         assert.equal(pending!.mode, "wait_10m", "cycle off → wait_10m");
@@ -82,7 +81,7 @@ test("#751 commitDispAfkIfDue is a no-op when commitAtMs still in future", async
         const did = await commitDispAfkIfDue(sd);
         assert.equal(did, false, "no commit before window elapses");
         assert.ok(getIpcDispAfk(), "dispAfk still in place");
-        assert.equal(existsSync(afkPath(sd)), false);
+        assert.equal(getIpcState().afkMode, null);
     } finally { rmSync(sd, { recursive: true, force: true }); resetIpcStateForTests(); }
 });
 
@@ -116,9 +115,7 @@ test("#751 qb7zs6 NOOP commit : final pending kind === committed → no re-arm, 
         setIpcDispAfk({ ...pending, commitAtMs: Date.now() - 1 });
         const did = await commitDispAfkIfDue(sd);
         assert.equal(did, true, "consumed dispAfk slot");
-        // afk file UNCHANGED — no re-arm fired.
-        assert.equal(existsSync(afkPath(sd)), false, "no *ViaService call → no file write");
-        // ipc.afkExpiryMs intact = timer interne intact.
+        // ipc.afkExpiryMs intact = timer interne intact (NOOP semantics).
         const ipc = getIpcState();
         assert.equal(ipc.afkMode, "wait_10m");
         assert.equal(ipc.afkExpiryMs, originalExpiry, "committed expiry untouched");

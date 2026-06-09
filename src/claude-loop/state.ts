@@ -202,17 +202,9 @@ export function loopStartTsPath(sd: string): string { return join(sd, "loop-star
  *    "Resume full session as-is" / "Don't ask me again" — choix du mode
  *    de reprise.
  *
- *  Le legacy `resume-picker-active` (single file) n'existe plus, mais
- *  `readLoopStateInput.resumePickerActive` reste un OR des deux pour
- *  les consommateurs de l'API LoopStateInput. */
-export function resumeSessionPickerActivePath(sd: string): string { return join(sd, "resume-session-picker-active"); }
-export function resumeModePickerActivePath(sd: string): string { return join(sd, "resume-mode-picker-active"); }
-/** #624 david `8pwvm3` : written ONCE when the session-start-hook completes
- *  (claude is past whatever pickers / loading were needed). The LoopState
- *  service ends the boot phase the moment this marker appears — the
- *  time-based cap (`bootGraceMs`) becomes a fail-safe for hooks that
- *  crash or never run. */
-export function bootCompletePath(sd: string): string { return join(sd, "boot-complete"); }
+ *  #840 `4z59jt` — les markers sont IPC seul ; les helpers `*Path` ont
+ *  été retirés. Reste `resumeSessionPickerActive` / `resumeModePickerActive`
+ *  / `bootComplete` sur ipcState. */
 
 /** #647 Slice 2 david `sr9kqw` : setters explicites pour chaque picker
  *  resume distinct (vs l'ancien `setResumePicker` qui ne disait pas
@@ -344,16 +336,11 @@ export function readIdleSinceMs(_sd: string): number | null {
     if (ipc.idleSinceCleared) return null;
     return ipc.idleSinceMs;
 }
-export function wakeRequestedPath(sd: string): string { return join(sd, "wake-requested"); }
-/** #351: AFK marker — the human flagged themselves absent via the afk_key
- *  combo. The PTY proxy writes it on the combo and deletes it on any other
- *  activity (and on boot), so its mere existence means "currently away". */
-export function afkPath(sd: string): string { return join(sd, "afk"); }
-// #264: near-live "a human is typing in the tmux pane" marker. Touched
-// by the timer's detection poll when the prompt area changes while
-// at-prompt; read by setTmuxStatus to paint the bicolor human chip and
-// the AFK SM (typing arms NOT AFK 10m).
-export function humanTypingPath(sd: string): string { return join(sd, "human-typing"); }
+// #840 `4z59jt` — TOUS les markers fichiers (afk / human-typing /
+// boot-complete / busy-defer-until / wake-in-flight / last-wake-at /
+// wake-requested / resume-{session,mode}-picker-active) sont retirés.
+// L'état vit dans ipcState ; le proxy reçoit le push WS du timer ; les
+// hook subprocesses primement via `queryLoopState` (UDS round-trip).
 /** #730 — single per-loop IPC socket. Carries every direction of the
  *  proxy ↔ timer ↔ hooks IPC: view broadcasts (`{kind:"view"}`),
  *  proxy → timer events (`{kind:"proxyEvent"}`), and wake injects
@@ -385,7 +372,7 @@ export function timerLogPath(sd: string): string { return join(sd, "timer.log");
  * propagates `from_auto_wake=true` so the timer doesn't flip its
  * in-memory `idleSinceMs` to null. Marker then deleted by the hook.
  */
-export function wakeInFlightPath(sd: string): string { return join(sd, "wake-in-flight"); }
+// #840 — `wakeInFlightPath` retiré, IPC seul (`ipc.wakeInFlightAtMs`).
 /** Wake-in-flight markers older than this many ms are stale and
  *  ignored — covers race where the user types BEFORE claude-loop's
  *  wake reaches the hook (unlikely but possible). #B.180:
@@ -403,7 +390,7 @@ export const WAKE_IN_FLIGHT_TTL_MS = Math.max(0, loopConfig().claude_loop.wake_i
  * leaving the timer/SSE path to wake again on the next genuine event
  * arrival or heartbeat tick.
  */
-export function lastWakeAtPath(sd: string): string { return join(sd, "last-wake-at"); }
+// #840 — `lastWakeAtPath` retiré, IPC seul (`ipc.lastWakeAtMs`).
 
 /** Wake-coalesce window — minimum spacing between two wake injections.
  *  Anti-burst only: each FIFO event is a discrete wake, but a string of
@@ -520,22 +507,9 @@ export function isDuplicateWakeHint(_sd: string, hint: WakeHint | undefined, win
  *  hook process exiting. */
 export const PANE_BUSY_DELAY_MS = Math.max(0, Number(process.env[CL_ENV.PANE_BUSY_DELAY_MS] ?? 5000));
 
-/**
- * Wake-defer gate. File content is the ISO target time at which the
- * gate opens again. Written by the Stop hook when it sees pane.busy;
- * read by the timer's `tryWake` to short-circuit a wake during the
- * window. Persistent so:
- *   - the gate survives if the Stop hook process dies before the
- *     window elapses ("staker oublié c plus facile" — david's reason
- *     for moving away from the in-hook `await sleep`);
- *   - `cat busy-defer-until` shows the next-allowed wake time at a
- *     glance for debugging.
- *
- * No mtime arithmetic on purpose — the absolute target is the source
- * of truth, and a manual `touch` won't accidentally extend / shorten
- * the gate.
- */
-export function busyDeferUntilPath(sd: string): string { return join(sd, "busy-defer-until"); }
+// #840 `4z59jt` — `busyDeferUntilPath` retiré. Le gate vit dans
+// `ipc.busyDeferUntilMs` ; les hook subprocesses primement via UDS
+// (queryLoopState).
 
 /** Arm the defer gate so the next wake is blocked until `now + ms`.
  *  Idempotent : pushes the existing gate forward if the new target is
@@ -859,28 +833,6 @@ export async function commitDispAfkIfDue(sd: string): Promise<boolean> {
     else armAfkViaService(sd, 600);
     setIpcDispAfk(null);
     return true;
-}
-
-/** #627 — read the AFK file and derive {mode, expiryMs} for the LoopState
- *  service. File format mirrors the proxy's `_afk_mode` :
- *    absent / empty / "inf" → mode "wait_inf" if "inf", "off" if absent
- *    parseable ISO ts > now → ("wait_10m", expiry)
- *    parseable ISO ts ≤ now → "off" (auto-expired)
- *    unparseable content    → "wait_inf" (degrade to held rather than
- *                              clear silently)
- *  Note: a missing file is "off". An empty file is unusual — the proxy
- *  clears it on read (#622). Here we treat empty as off to align. */
-export function readAfkState(sd: string): { mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null } {
-    const p = afkPath(sd);
-    if (!existsSync(p)) return { mode: "off", expiryMs: null };
-    let content = "";
-    try { content = readFileSync(p, "utf8").trim(); } catch { return { mode: "off", expiryMs: null }; }
-    if (content === "") return { mode: "off", expiryMs: null };
-    if (content === "inf") return { mode: "wait_inf", expiryMs: null };
-    const until = new Date(content).getTime();
-    if (Number.isNaN(until)) return { mode: "wait_inf", expiryMs: null };
-    if (until <= Date.now()) return { mode: "off", expiryMs: null };
-    return { mode: "wait_10m", expiryMs: until };
 }
 
 /** #627 — read every state-dir marker + env knob into a `LoopStateInput`
