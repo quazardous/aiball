@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SpawnSyncReturns } from "node:child_process";
-import { probeParentTmuxAtBoot, type SpawnSyncFn } from "./parent-liveness.js";
+import { probeParentTmuxAtBoot, installParentTmuxWatchdog, type SpawnSyncFn } from "./parent-liveness.js";
 
 function mockSpawn(out: Partial<SpawnSyncReturns<Buffer>>): SpawnSyncFn {
     return ((() => ({
@@ -48,4 +48,108 @@ test("passes muxCmd + session name to the spawner", () => {
     probeParentTmuxAtBoot("psmux", "cl-pisynth", spawn);
     assert.equal(captured.cmd, "psmux");
     assert.deepEqual(captured.args, ["has-session", "-t", "cl-pisynth"]);
+});
+
+// #866 Slice 1 — runtime watchdog tests.
+
+interface FakeTimer { cb: () => void; ms: number; cleared: boolean }
+
+function fakeSchedulers(): {
+    setIntervalFn: typeof setInterval;
+    clearIntervalFn: typeof clearInterval;
+    timers: FakeTimer[];
+} {
+    const timers: FakeTimer[] = [];
+    const setIntervalFn = ((cb: () => void, ms: number) => {
+        const t: FakeTimer = { cb, ms, cleared: false };
+        timers.push(t);
+        return t as unknown as NodeJS.Timeout;
+    }) as unknown as typeof setInterval;
+    const clearIntervalFn = ((handle: unknown) => {
+        const t = handle as FakeTimer;
+        t.cleared = true;
+    }) as unknown as typeof clearInterval;
+    return { setIntervalFn, clearIntervalFn, timers };
+}
+
+test("watchdog: alive session → onDead PAS appelé sur tick", () => {
+    const { setIntervalFn, clearIntervalFn, timers } = fakeSchedulers();
+    const spawn = mockSpawn({ status: 0 });
+    let deadCalls = 0;
+    installParentTmuxWatchdog({
+        muxCmd: "tmux",
+        sessionName: "cl-test",
+        intervalMs: 5000,
+        onDead: () => { deadCalls++; },
+        spawnFn: spawn,
+        setIntervalFn,
+        clearIntervalFn,
+    });
+    timers[0].cb(); // simulate tick
+    assert.equal(deadCalls, 0);
+});
+
+test("watchdog: dead session → onDead appelé une seule fois (latch)", () => {
+    const { setIntervalFn, clearIntervalFn, timers } = fakeSchedulers();
+    const spawn = mockSpawn({ status: 1 });
+    let deadCalls = 0;
+    installParentTmuxWatchdog({
+        muxCmd: "tmux",
+        sessionName: "cl-test",
+        intervalMs: 5000,
+        onDead: () => { deadCalls++; },
+        spawnFn: spawn,
+        setIntervalFn,
+        clearIntervalFn,
+    });
+    timers[0].cb();
+    timers[0].cb(); // 2nd tick should be no-op (latched)
+    timers[0].cb();
+    assert.equal(deadCalls, 1);
+});
+
+test("watchdog: spawn error → assume-alive (pas d'onDead)", () => {
+    const { setIntervalFn, clearIntervalFn, timers } = fakeSchedulers();
+    const spawn = mockSpawn({ error: new Error("ENOENT"), status: null });
+    let deadCalls = 0;
+    installParentTmuxWatchdog({
+        muxCmd: "tmux",
+        sessionName: "cl-test",
+        intervalMs: 5000,
+        onDead: () => { deadCalls++; },
+        spawnFn: spawn,
+        setIntervalFn,
+        clearIntervalFn,
+    });
+    timers[0].cb();
+    assert.equal(deadCalls, 0);
+});
+
+test("watchdog.stop(): clearInterval idempotent", () => {
+    const { setIntervalFn, clearIntervalFn, timers } = fakeSchedulers();
+    const spawn = mockSpawn({ status: 0 });
+    const w = installParentTmuxWatchdog({
+        muxCmd: "tmux",
+        sessionName: "cl-test",
+        onDead: () => {},
+        spawnFn: spawn,
+        setIntervalFn,
+        clearIntervalFn,
+    });
+    w.stop();
+    w.stop(); // 2nd stop should not throw
+    assert.equal(timers[0].cleared, true);
+});
+
+test("watchdog: default intervalMs = 5000", () => {
+    const { setIntervalFn, clearIntervalFn, timers } = fakeSchedulers();
+    installParentTmuxWatchdog({
+        muxCmd: "tmux",
+        sessionName: "cl-test",
+        onDead: () => {},
+        spawnFn: mockSpawn({ status: 0 }),
+        setIntervalFn,
+        clearIntervalFn,
+    });
+    assert.equal(timers[0].ms, 5000);
 });

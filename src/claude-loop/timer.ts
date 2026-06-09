@@ -101,7 +101,7 @@ import {
 import { PromptWatcher, BusyWatcher, InterruptedWatcher } from "./pane-watchers/runtime-watchers.js";
 import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
-import { probeParentTmuxAtBoot } from "./parent-liveness.js";
+import { probeParentTmuxAtBoot, installParentTmuxWatchdog } from "./parent-liveness.js";
 import { getHookService } from "./hook-service.js";
 import {
     getIpcState,
@@ -1244,6 +1244,22 @@ async function mainSse(): Promise<void> {
     const barRenderer = new BarRenderer(sd!, name!);
     barRenderer.start();
     process.on("exit", () => barRenderer.stop());
+    // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
+    // toutes les 5s via la même fonction pure que la garde boot-time
+    // (#859). Quand le parent est mort (loop killé, pane fermé, etc.),
+    // le timer self-exit → plus de timer-survivant qui roule du vieux
+    // code après un reload non-propre. Pisynth-aiball desync de ce
+    // matin = cause directe (cf. #862 thread).
+    const parentWatchdog = installParentTmuxWatchdog({
+        muxCmd: MUX_CMD,
+        sessionName: tname,
+        intervalMs: 5000,
+        onDead: () => {
+            log(`runtime watchdog: tmux session '${tname}' is gone — timer self-exiting`);
+            process.exit(0);
+        },
+    });
+    process.on("exit", () => parentWatchdog.stop());
     const loopBus = new LoopStateBus();
     // #862 Slice 5 — `repaintAfkState` retiré ; BarRenderer reads
     // `afkStateChunkStr` chaque tick (1s safety + onIpcChanged events).
