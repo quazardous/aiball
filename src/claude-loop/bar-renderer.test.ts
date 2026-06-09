@@ -95,7 +95,7 @@ test("computeBarSnapshot: cold boot (ipc vide) → status=boot", () => {
     const sd = mkSd();
     const s = computeBarSnapshot(sd);
     assert.equal(s.loopStatus, LOOP_STATUS.BOOT);
-    assert.equal(s.stateTag, "[boot]");
+    assert.match(s.stateTag, /^\[boot\] \d+s$/);
     rmSync(sd, { recursive: true, force: true });
 });
 

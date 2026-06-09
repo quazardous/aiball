@@ -79,11 +79,15 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
             ? LOOP_STATUS.BUSY
             : LOOP_STATUS.IDLE;
     // #862 Slice 3 — state tag = `[<status>]` ou `[<status>:<info>]` quand
-    // un caller a set `setIpcStateTagInfo("wait"|"compacting"|...)`. La
-    // forme `[<status> <count>]` (= `setTmuxStatus(IDLE, 3)` legacy) est
-    // normalisée à string par le wrapper.
+    // un caller a set `setIpcStateTagInfo("wait"|"compacting"|...)`.
+    // David `<chat>` : pendant la phase boot, suffixer la durée elapsed
+    // (`[boot] 12s`) pour visualiser combien de temps on attend.
     const info = getIpcState().stateTagInfo;
-    const stateTag = info ? `[${loopStatus}:${info}]` : `[${loopStatus}]`;
+    let stateTag = info ? `[${loopStatus}:${info}]` : `[${loopStatus}]`;
+    if (loopStatus === LOOP_STATUS.BOOT) {
+        const elapsedSec = Math.max(0, Math.floor((input.nowMs - input.loopStartMs) / 1000));
+        stateTag = `${stateTag} ${elapsedSec}s`;
+    }
     const zenActive = existsSync(zenPath(sd));
     const counters = getIpcState().counters;
     const afkChipStr = afkStateChunkStr(sd);
