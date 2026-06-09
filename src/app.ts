@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { api } from "./api.js";
-import { UPLOADS_DIR } from "./paths.js";
+import { serveUpload } from "./api/uploads.js";
 import { loadProxy, proxyMiddleware, proxyLandingHtml } from "./proxy.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -64,11 +64,11 @@ export function createApp(): express.Express {
     app.get("/api/node", (_req, res) => res.json({ ok: true, proxy: false, upstream: null }));
     app.use("/api", api);
 
-    // User-uploaded images (#B.76). Content-addressed → safe long max-age.
-    app.use(
-        "/uploads",
-        express.static(UPLOADS_DIR, { maxAge: 86_400_000, immutable: true }),
-    );
+    // #841 — was `express.static(UPLOADS_DIR, ...)`. Custom handler so
+    // the response carries the preserved original filename + an
+    // inline/attachment disposition derived from the stored MIME.
+    app.get(/^\/uploads\/[0-9a-f]{64}\.[A-Za-z0-9]+$/, serveUpload);
+    app.head(/^\/uploads\/[0-9a-f]{64}\.[A-Za-z0-9]+$/, serveUpload);
 
     const dist = frontendDistDir();
     if (dist) {

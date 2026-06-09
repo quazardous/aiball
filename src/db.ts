@@ -56,6 +56,7 @@ export {
     uploadStats,
     listOrphanUploads,
     deleteUploadRow,
+    getUploadBySha,
     getUploadsByShas,
     resolveAttachments,
 } from "./db/uploads.js";

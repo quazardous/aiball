@@ -159,6 +159,24 @@ export function deleteUploadRow(sha: string): void {
     getDb().delete(schema.uploads).where(eq(schema.uploads.sha, sha)).run();
 }
 
+/** Single-row metadata lookup by content hash. Returns null when no row
+ *  exists (= /uploads/<sha>.<ext> is a 404). Used by the egress handler
+ *  (#841) to derive `original_name` + `content_type` for headers. */
+export function getUploadBySha(sha: string): UploadRow | null {
+    const r = getDb().select().from(schema.uploads)
+        .where(eq(schema.uploads.sha, sha)).get();
+    if (!r) return null;
+    return {
+        sha: r.sha,
+        ext: r.ext,
+        content_type: r.contentType,
+        bytes: r.bytes,
+        by_agent: r.byAgent,
+        original_name: r.originalName,
+        created_at: r.createdAt,
+    };
+}
+
 /** Batch metadata lookup by content hash. Used to enrich the attachments
  *  surfaced on a ticket read (#283). Missing shas are simply absent from
  *  the map — the caller still emits the attachment from the URL alone. */

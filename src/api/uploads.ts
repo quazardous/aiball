@@ -14,13 +14,14 @@
  */
 import { Router, type Request, type Response } from "express";
 import express from "express";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { createHash } from "node:crypto";
 import {
     DEFAULT_UPLOAD_MAX_BYTES,
     UPLOAD_HARD_CAP_BYTES,
     deleteUploadRow,
+    getUploadBySha,
     getUploadMaxBytes,
     insertUpload,
     listOrphanUploads,
@@ -148,6 +149,93 @@ uploadsRouter.post(
         });
     },
 );
+
+/**
+ * #841 (apzdv8) — egress for `/uploads/<sha>.<ext>`.
+ *
+ * Replaces `express.static(UPLOADS_DIR)` so the response carries :
+ *   - `Content-Disposition` with the **original filename** the uploader
+ *     posted via `x-aiball-upload-name` (preserved server-side since
+ *     #B.76 ; previously dropped on download because static didn't read
+ *     the metadata).
+ *   - inline vs attachment chosen by MIME (image/pdf/text/json → inline,
+ *     everything else → attachment), overridable via `?dl=1`.
+ *
+ * Same caching contract as the prior `express.static` mount (content-
+ * addressed → safe `immutable, max-age=86400`).
+ */
+const INLINE_MIMES = new Set<string>([
+    "application/pdf",
+    "application/json", // david's call : inline cohérent avec text/*
+]);
+function pickDisposition(contentType: string, query: unknown): "inline" | "attachment" {
+    if ((query as Record<string, unknown>)?.dl === "1") return "attachment";
+    if (contentType.startsWith("image/")) return "inline";
+    if (contentType.startsWith("text/")) return "inline";
+    if (INLINE_MIMES.has(contentType)) return "inline";
+    return "attachment";
+}
+
+/** Strip path separators + control chars; cap at 200 to mirror the
+ *  column width chosen at insert-time. */
+function sanitizeFilename(name: string, fallback: string): string {
+    const cleaned = name
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\x00-\x1f\x7f]/g, "")
+        .replace(/[/\\]/g, "_")
+        .trim();
+    if (cleaned.length === 0) return fallback;
+    return cleaned.slice(0, 200);
+}
+
+/** Build a Content-Disposition header that's safe with non-ASCII names
+ *  via RFC 5987 `filename*=UTF-8''…`. The legacy `filename="…"` is kept
+ *  as a fallback for old clients and uses an ASCII-only sanitized name. */
+function buildContentDisposition(kind: "inline" | "attachment", name: string): string {
+    const asciiSafe = name.replace(/[^\x20-\x7e]/g, "_").replace(/"/g, "\\\"");
+    return `${kind}; filename="${asciiSafe}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
+/**
+ * GET handler for `/uploads/<sha>.<ext>` — mounted by `createApp()` at the
+ * root path (the frontend writes `/uploads/<sha>.<ext>` URLs directly,
+ * unprefixed by `/api`). Pure function so it can be tested against an
+ * in-process express app without the surrounding daemon.
+ */
+export function serveUpload(req: Request, res: Response): void {
+    const m = /^\/uploads\/([0-9a-f]{64})\.([A-Za-z0-9]+)$/.exec(req.path);
+    if (!m) {
+        res.status(404).type("text/plain").send("not found");
+        return;
+    }
+    const sha = m[1];
+    const ext = m[2];
+    const row = getUploadBySha(sha);
+    if (!row || row.ext !== ext) {
+        res.status(404).type("text/plain").send("not found");
+        return;
+    }
+    const path = joinPath(UPLOADS_DIR, `${sha}.${ext}`);
+    if (!existsSync(path)) {
+        res.status(404).type("text/plain").send("not found");
+        return;
+    }
+    const stat = statSync(path);
+    const disposition = pickDisposition(row.content_type, req.query);
+    const fallbackName = `${sha}.${ext}`;
+    const displayName = row.original_name
+        ? sanitizeFilename(row.original_name, fallbackName)
+        : fallbackName;
+    res.setHeader("Content-Type", row.content_type);
+    res.setHeader("Content-Length", String(stat.size));
+    res.setHeader("Content-Disposition", buildContentDisposition(disposition, displayName));
+    res.setHeader("Cache-Control", "public, max-age=86400, immutable");
+    if (req.method === "HEAD") {
+        res.end();
+        return;
+    }
+    createReadStream(path).pipe(res);
+}
 
 uploadsRouter.get("/uploads/stats", (_req, res) => {
     res.json(uploadStats());
