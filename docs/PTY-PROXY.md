@@ -64,33 +64,34 @@ origin — busy or idle — which `capture-pane` could never do.
 
 | Channel | Source → sink | Side effect |
 |---|---|---|
-| **Human keystrokes** | proxy stdin (from tmux) → claude PTY | touch the `human-typing` marker (if it's real text), then forward |
+| **Human keystrokes** | proxy stdin (from tmux) → claude PTY | emit `touch_marker` event over `loop.sock` (if real text), then forward |
 | **claude output** | claude PTY master → proxy stdout (to tmux) | forwarded raw |
-| **Wake injection** | UDS socket `$CL_STATE_DIR/inject.sock` → claude PTY | forwarded, **marker untouched** |
+| **Wake injection** | `loop.sock` inject frame → claude PTY | forwarded, **no human-typing event** |
 
-### Why injection moved off `send-keys` (the #efuuau key)
+### Why injection moved off `send-keys`
 
 If the loop kept injecting wake phrases via `tmux send-keys`, those
 bytes would arrive on the proxy's **stdin** — indistinguishable from a
-human typing. So injection is moved to a dedicated **control socket**:
-the loop writes the wake phrase to `$CL_STATE_DIR/inject.sock`, the proxy
-relays it straight to claude's PTY and does **not** touch the marker.
+human typing. So injection rides a dedicated WebSocket frame on
+`loop.sock` (kind `inject`) ; the proxy receives the frame, writes the
+bytes straight to claude's PTY, and emits **no** human-typing event.
 
 Result: the **only** thing arriving on the proxy's stdin is the human.
-Channel separation is now *physical*, not heuristic — `lastSendAt` /
-`recentlySentKeys` become obsolete.
+Channel separation is now *physical*, not heuristic.
 
-## The human-typing marker
+## The human-typing IPC stamp
 
-The proxy writes a timestamp to `$CL_STATE_DIR/human-typing` on every
-real keystroke. It's read by `state.ts::humanIsTyping` (mtime within
-`HUMAN_TYPING_TTL_SEC`, 5 s) and drives the human-presence word in
-`setTmuxStatus` (`stop` red while fresh; `wait`/`loop` otherwise).
+On every real keystroke the proxy emits a `touch_marker` event over
+`loop.sock`. The timer's state-machine receives it and stamps
+`ipc.humanTypingAtMs = Date.now()`. The bar word (`stop` red while
+fresh ; `wait`/`loop` otherwise, TTL 5s) and the wake gate read this
+in-memory value via `getIpcState().humanTypingAtMs`. There is no
+human-typing marker file — the stamp lives only in the timer process.
 
-Only **text** keystrokes flip it: the filter `is_typing_keystroke`
-skips ESC / control bytes (`< 0x20`, includes arrows, Ctrl-combos, Tab,
-Enter) / DEL, so navigating the pane doesn't paint `stop`. (The filter
-heuristic is borrowed from
+Only **text** keystrokes count : `is_typing_keystroke` whitelists
+printable ASCII plus TAB / ENTER / BACKSPACE (= autocomplete, submit,
+correction — all signals of active human presence), and skips ESC
+sequences + Ctrl-combos. (The filter heuristic is loosely inspired by
 [`martinambrus/claude_timings_wrapper`](https://github.com/martinambrus/claude_timings_wrapper),
 MIT.)
 

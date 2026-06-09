@@ -54,7 +54,7 @@ config.)
                            ┌─────────────────────────────┐
        boot ──► SessionStart hook ──► check-cmd ?        │
                               │       ├─ exit 0 → send-keys phrase
-                              │       └─ non-0  → write idle-since
+                              │       └─ non-0  → stamp idle-since (ipc)
                               ▼
                     ┌────────────────────────┐
                     │  claude waits at prompt │ ◄─────┐
@@ -193,27 +193,29 @@ active session stays wake-free until you've been quiet for a minute.
 The catch: the loop's *own* wake also triggers
 `UserPromptSubmit`, which would stamp `user-took-over` and freeze the
 next wake for a full grace window — self-inflicted. Fix: every wake path
-touches a `wake-in-flight` marker right before injecting; the hook sees
-it (TTL `CL_WAKE_IN_FLIGHT_TTL_MS`, default 2s), recognizes the prompt as
-the loop's own, and skips the `user-took-over` stamp.
+stamps `ipc.wakeInFlightAtMs` right before injecting ; the hook sees
+the in-memory latch (TTL `CL_WAKE_IN_FLIGHT_TTL_MS`, default 2s),
+recognizes the prompt as the loop's own, and skips the `user-took-over`
+stamp.
 
-### 2. Live keystroke detection (`human-typing`)
+### 2. Live keystroke detection
 
 User-grace only updates at *submit* time. To know a human is typing
-**right now** — before they hit Enter, even mid-turn — the loop keeps a
-near-live `human-typing` marker (TTL `HUMAN_TYPING_TTL_SEC`, 5s). Two
-feeders, best-to-worst:
+**right now** — before they hit Enter, even mid-turn — the loop reads
+`ipc.humanTypingAtMs` (TTL `HUMAN_TYPING_TTL_SEC`, 5s). Two feeders,
+best-to-worst :
 
 - **PTY proxy (preferred).** When the pane runs under the PTY proxy,
-  every real text keystroke is detected at the terminal layer and stamps
-  the marker — works even while claude is streaming, and the proxy's own
-  socket-injected wakes never trip it. Full mechanism in
+  every real text keystroke is detected at the terminal layer and emits
+  a `touch_marker` event over `loop.sock` ; the timer stamps
+  `ipc.humanTypingAtMs`. Works even while claude is streaming, and the
+  proxy's own socket-injected wakes never trip it. Full mechanism in
   [`PTY-PROXY.md`](./PTY-PROXY.md).
 - **Degraded pane-diff (fallback).** With no proxy, the timer's
-  `detectHumanTyping` poll captures the pane every ~1.5s and stamps the
-  marker when the prompt area changes at idle. Idle-only, and can't
-  separate your keystrokes from the loop's own injection as cleanly —
-  exactly the blind spot the proxy was built to close.
+  `detectHumanTyping` poll captures the pane every ~1.5s and stamps
+  `ipc.humanTypingAtMs` when the prompt area changes at idle. Idle-only,
+  and can't separate your keystrokes from the loop's own injection as
+  cleanly — exactly the blind spot the proxy was built to close.
 
 ### 3. The tmux bar word — `stop` / `boot` / `wait` / `loop`
 
@@ -223,13 +225,16 @@ paint a colour here. F9 is the single visible control.
 
 | Word   | Colour | Meaning                                                       |
 |--------|--------|--------------------------------------------------------------|
-| `stop` | red    | a human is typing **now** (`human-typing` < 5s)              |
+| `stop` | red    | a human is typing **now** (`ipc.humanTypingAtMs` < 5s)       |
 | `boot` | yellow | the launch-grace window — claude is still loading            |
 | `wait` | yellow | F9-armed hold (10-min auto-release or indefinite)             |
 | `loop` | green  | autonomous, gate open (managed mode / `--no-wait`)           |
 
-When the proxy is alive it paints this segment live (instant on the
-first keystroke); otherwise the timer paints it from the markers.
+The timer's `BarRenderer` is the single writer of every tmux bar
+option (`@cl_human`, `@cl_state`, `status-bg`, `@cl_afk_state`, etc.).
+It subscribes to `ipcState` changes and repaints diff-guardedly, so the
+bar is always coherent with the in-memory truth — no race between proxy
+and timer like the older two-writer setup had.
 
 The status-right segment shows the AFK chunk in matching colours :
 
@@ -313,14 +318,13 @@ F9 on the `∞ → AFK` leg also clears `user-took-over` so the wake
 gate frees up alongside the visible release. The 10-minute timer is
 absolute (stored as expiry timestamp), so re-paints reflect the
 real remaining time and the toggle never accidentally resets an
-in-flight countdown. A corrupt AFK file (empty or unparseable
-content) is auto-cleared on next read so the cycle never stalls.
+in-flight countdown.
 
 (Orthogonal third gate : the Stop hook / timer also read `esc to
-interrupt` in the pane footer and arm a `busy-defer-until` window so
-a wake isn't fired while claude is visibly mid-turn. That's
-claude-busy, not human-present, but it's the other reason a tick
-may skip.)
+interrupt` in the pane footer and arm a `busy-defer-until` window via
+`ipc.busyDeferUntilMs` so a wake isn't fired while claude is visibly
+mid-turn. That's claude-busy, not human-present, but it's the other
+reason a tick may skip.)
 
 ---
 
@@ -347,25 +351,24 @@ overridable per project via the `prompts:` block (slot `gate_<type>`, e.g.
 
 `~/.claude-loop/<NAME>/` (override via `CLAUDE_LOOP_STATE_ROOT`):
 
+All runtime state — pane-busy, idle-since, AFK mode, human-typing
+timestamps, wake-in-flight latch, busy-defer expiry, boot-complete seal,
+etc. — lives in the timer's **in-memory `ipcState`**. Hook subprocesses
+and the PTY proxy read it via `loop.sock` (UDS `queryLoopState` request)
+or receive it pushed via WebSocket. No marker files, no `existsSync`
+fallback : the timer is the single authoritative writer.
+
+Files that DO live on disk are config (set once at start) or
+liveness markers (PID-stamped) :
+
 | File              | Writer          | Purpose                                   |
 |-------------------|-----------------|-------------------------------------------|
 | `plate.json`      | cli on start    | structured config (interval, check_cmd…)  |
 | `env`             | cli on start    | bash-sourceable CL_* env vars             |
 | `pings.yaml`      | cli on start    | copy of the wake-phrase pool              |
-| `idle-since`      | Stop / SessionStart sleep branch | claude is at prompt since X |
-| `wake-requested`  | `claude-loop wake` | one-shot trigger for the next tick    |
-| `user-took-over`  | UserPromptSubmit hook | last HUMAN submit (user-grace gate)    |
-| `wake-in-flight`  | timer / Stop before send-keys | flags the UserPromptSubmit hook so it doesn't treat the next submit as a human prompt (`from_auto_wake=true`). Not a wake-gate anymore. |
-| `human-typing`    | PTY proxy / timer poll | a human is typing now (TTL 5s)        |
 | `proxy-alive`     | PTY proxy       | proxy is really fronting claude (PID-stamped) |
-| `busy-defer-until`| Stop hook + inject site | absolute time the wake-defer gate reopens. Also armed for `WAKE_COALESCE_WINDOW_MS` (default 5s) at every successful inject — the "post-wake tempo" that prevents the next wake from firing too close behind. |
-| `last-wake-at`    | any wake path   | timestamp of the last fired wake (informational) |
-| `last-injected-wake` | inject site  | last phrase actually delivered to the PTY (cross-process dedup ledger) |
 | `kill-on-exit.sh` | cli on start    | bash trap script sourced in the tmux pane wrapper — SIGKILLs timer + proxy when claude exits |
-| `satellites/` | post-#787      | (planned) per-role pid lockfiles for cross-platform orphan sweep |
-| `last-open-wake-count` | wake path  | open-ticket count watermark — fallback    |
-| `last-open-wake-hash`  | wake path  | landscape signature watermark — set-aware dedup |
-| `drained-state`   | timer only      | drained-strategy state `{hash,armedAt,wakeAt,step}` |
+| `zen`             | cli `zen` / `touch` | mute markers — keeps the wake gate closed (file-only by design : safety override that must survive process restarts) |
 | `timer.pid`       | cli on start    | pid of the detached timer (used by `rm`)  |
 | `timer.log`       | timer (stdout/err) | inspect via `tail --timer`             |
 
@@ -389,13 +392,15 @@ Four mechanisms together enforce "no orphan satellites":
    `kill-on-exit.sh` under the state-dir at start time and the tmux
    inner command sources it before launching the proxy/claude chain.
    When claude exits (Ctrl-D, `/exit`, crash), bash hits the EXIT trap
-   and SIGKILLs `timer.pid` + `proxy-alive`'s pid, then sweeps the
-   transient markers (`wake-in-flight`, `busy-defer-until`,
-   `last-injected-wake`, `last-wake-at`, `human-typing`). The bash
-   process stays alive as the pane parent precisely so the trap can
-   fire — switching the launch from `exec proxy` to plain `proxy` adds
-   one bash process per pane (negligible) but is what lets EXIT
-   actually trigger.
+   which first sends a cooperative `{kind:"shutdown"}` frame over
+   `loop.sock` (the timer self-exits cleanly on receipt), then SIGKILLs
+   `timer.pid` + `proxy-alive`'s pid as backstop. A legacy `rm -f` of
+   long-gone marker files is kept for defence-in-depth (no-op on fresh
+   installs — all transient state lives in the timer's in-memory
+   `ipcState` now). The bash process stays alive as the pane parent
+   precisely so the trap can fire — switching the launch from
+   `exec proxy` to plain `proxy` adds one bash process per pane
+   (negligible) but is what lets EXIT actually trigger.
 
 2. **`tmuxAlive` watchdog at 2s in the timer.** The timer's heartbeat
    already calls `tmuxAlive()` every interval (default 30s); a faster
@@ -646,7 +651,7 @@ Install symlinks `~/.local/bin/claude-loop` alongside `aiball` and
 ## See also
 
 - `docs/PTY-PROXY.md` — the pseudo-terminal proxy that powers live
-  keystroke detection (the `human-typing` marker), telling a human
+  keystroke detection (the `ipc.humanTypingAtMs` stamp), telling a human
   typing apart from claude's output and from the loop's own injection.
   `docs/PTY-PROXY-WINDOWS.md` covers the Rust ConPTY port.
 - `docs/SANDBOX.md` — `aiball sandbox`, the aiball-specific
