@@ -432,7 +432,16 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
         // Best-effort : a failure here surfaces as a server log but doesn't
         // fail the decide — the meta flip already landed, the rest is just
         // narration.
-        if (updated.meta && updated.ticket_id != null) {
+        // #863 — for a TICKET-level decision (`ticket_new({then:"plan"})`,
+        // #803 path), `applyMessageDecision` returns a synthesized
+        // `ticket_created` Message whose `ticket_id` is null BY CONVENTION
+        // (the message IS the ticket). The original guard `updated.ticket_id
+        // != null` skipped the plan_accepted emission for those cases →
+        // regression : ticket-level plan accept didn't wake. Fallback :
+        // when the synthesized message is `ticket_created`, the ticket id
+        // IS `updated.id`.
+        const eventTicketId = updated.kind === "ticket_created" ? updated.id : updated.ticket_id;
+        if (updated.meta && eventTicketId != null) {
             try {
                 const m = JSON.parse(updated.meta) as { decision?: { kind?: string } };
                 const decisionKind = m.decision?.kind;
@@ -450,7 +459,7 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
                     submitMessage({
                         project: updated.project,
                         kind: eventKindStr as MessageKind,
-                        ticket_id: updated.ticket_id,
+                        ticket_id: eventTicketId,
                         parent_id: updated.id,
                         body: null,
                         by_agent: by,
