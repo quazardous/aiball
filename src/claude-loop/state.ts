@@ -919,6 +919,7 @@ export function readLoopStateInput(
         wakeInFlightAtMs: ipc.wakeInFlightAtMs,
         wakeInFlightTtlMs,
         busyDeferUntilMs: ipc.busyDeferUntilMs,
+        bootDeadlineMs: ipc.bootDeadlineMs,
         inputHotTtlMs,
         manualWake: opts.manualWake ?? false,
     };

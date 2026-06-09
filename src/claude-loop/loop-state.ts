@@ -49,6 +49,11 @@ export interface LoopStateInput {
      *  `setResumePicker(false)` (claude is past the picker / loading).
      *  Authoritative end-of-boot signal. */
     bootComplete: boolean;
+    /** #872 / #870 — watcher-driven seal deadline (ms-since-epoch).
+     *  Pushed to `now + 10s` by each pane watcher tick observing a
+     *  "still booting" condition. `isInBootGrace` consults this directly :
+     *  active iff `nowMs < bootDeadlineMs`. Null pre-actor-init. */
+    bootDeadlineMs: number | null;
     /** True when launched with `--no-wait` (eager drain). */
     noWait: boolean;
 
@@ -166,17 +171,16 @@ export function isInBootGrace(input: LoopStateInput): boolean {
     //      avant qu'il ait vraiment dessiné le prompt.
     //   2. `bootComplete` marker = boot a SETTLED une fois ; on n'y
     //      retourne JAMAIS. Garantit que /compact mid-session ne
-    //      ré-affiche pas le bar `[boot]` (option B strict de
-    //      `rjd3x4`). Écrit par `bus.bootEnded` handler dans timer.ts
-    //      (#822 — seal différé via tail-grace pour absorber les
-    //      glitches transients ; depuis #822 le hook subscriber ne
-    //      seal PLUS éagerly, le bus est la single source of truth).
+    //      ré-affiche pas le bar `[boot]`.
     //   3. Pré-settle, STRETCHES : tant que le picker est on screen,
     //      tant que compacting est observé (post-resume), tant que le
     //      prompt n'est pas visible → on reste en boot.
-    //   4. `bootGraceMs` SAFETY cap : settleBoot timeout dans timer.ts
-    //      forcera la sortie via setResumePicker(sd, false) qui écrit
-    //      bootComplete. La pure compute ici reste indépendante du cap.
+    //
+    // #872 / #870 Phase 1 : `bootDeadlineMs` est exposé pour le bar
+    // display + futur cleanup (Phase 2 — drop les stretches checks ici
+    // au profit du deadline). Pour l'instant cohabite avec les checks
+    // pour préserver les ~10 tests qui s'appuient sur la sémantique
+    // pre-actor (rewriting en bigger session).
     const elapsed = input.nowMs - input.loopStartMs;
     if (input.bootMinMs > 0 && elapsed < input.bootMinMs) return true;
     if (input.bootComplete) return false;

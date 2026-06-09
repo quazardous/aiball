@@ -43,6 +43,7 @@ function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
         loopStartMs: T0,
         bootGraceMs: 60 * SEC,
         bootMinMs: 30 * SEC,
+        bootDeadlineMs: null,
         resumePickerActive: false,
         bootComplete: true,
         paneBusy: false,
