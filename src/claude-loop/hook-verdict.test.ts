@@ -1,18 +1,24 @@
 // #652 Slice 2 + Slice 4 — hook-verdict unit tests.
 // Run: `npx tsx --test src/claude-loop/hook-verdict.test.ts`.
+//
+// #840 `4z59jt` — david "vire tout marker fichier". On simule l'état
+// loop côté IPC directement (setIpcAfk/setIpcBootComplete/...). UDS
+// down ⇒ queryLoopState retombe sur l'ipcState local (= ce qu'on a
+// posé). Plus de writeFileSync(afkPath/bootCompletePath/humanTypingPath).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ALLOW, buildHookVerdict, queryLoopState, type LoopStateSnapshot } from "./hook-verdict.js";
+import { loopStartTsPath } from "./state.js";
 import {
-    afkPath,
-    bootCompletePath,
-    humanTypingPath,
-    loopStartTsPath,
-} from "./state.js";
-import { setIpcPaneReady, resetIpcStateForTests } from "./ipc-state.js";
+    resetIpcStateForTests,
+    setIpcAfk,
+    setIpcBootComplete,
+    setIpcHumanTypingAtMs,
+    setIpcPaneReady,
+} from "./ipc-state.js";
 
 /** Minimal LoopStateSnapshot fixture. #745 phase B : the verdict builder
  *  reads `afkHoldActive` only (AFK SM is the single source of truth) ;
@@ -72,16 +78,16 @@ test("ALLOW serializes as `{}` (Claude Code's default-allow output shape)", () =
     assert.equal(JSON.stringify(ALLOW), "{}");
 });
 
-test("queryLoopState: reads marker files from sd and returns a snapshot", async () => {
+test("queryLoopState: ipc-only post-boot snapshot", async () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
-    writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
+    setIpcBootComplete(true);
     setIpcPaneReady(true);
     const state = await queryLoopState(sd);
     assert.ok(typeof state.barWord === "string", "snapshot carries barWord");
     assert.ok(typeof state.phase === "string", "snapshot carries phase");
     assert.equal(state.inBootGrace, false, "post-boot, not in grace");
-    assert.equal(state.afkHoldActive, false, "no afk file → no hold");
+    assert.equal(state.afkHoldActive, false, "no afk ipc → no hold");
 });
 
 test("queryLoopState: empty sd → inBootGrace=true (the boot floor applies)", async () => {
@@ -91,32 +97,32 @@ test("queryLoopState: empty sd → inBootGrace=true (the boot floor applies)", a
     assert.equal(state.barWord, "boot");
 });
 
-test("queryLoopState: afk file 'inf' → afkHoldActive=true", async () => {
+test("queryLoopState: afk ipc 'wait_inf' → afkHoldActive=true", async () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
-    writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
+    setIpcBootComplete(true);
     setIpcPaneReady(true);
-    writeFileSync(afkPath(sd), "inf\n");
+    setIpcAfk("wait_inf", null);
     const state = await queryLoopState(sd);
     assert.equal(state.afkHoldActive, true);
 });
 
-test("queryLoopState: afk file with future expiry → afkHoldActive=true", async () => {
+test("queryLoopState: afk ipc wait_10m future expiry → afkHoldActive=true", async () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
-    writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
+    setIpcBootComplete(true);
     setIpcPaneReady(true);
-    writeFileSync(afkPath(sd), new Date(Date.now() + 600_000).toISOString() + "\n");
+    setIpcAfk("wait_10m", Date.now() + 600_000);
     const state = await queryLoopState(sd);
     assert.equal(state.afkHoldActive, true);
 });
 
-test("queryLoopState: afk file with past expiry → afkHoldActive=false (expired hold)", async () => {
+test("queryLoopState: afk ipc wait_10m past expiry → afkHoldActive=false (expired hold)", async () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
-    writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
+    setIpcBootComplete(true);
     setIpcPaneReady(true);
-    writeFileSync(afkPath(sd), new Date(Date.now() - 60_000).toISOString() + "\n");
+    setIpcAfk("wait_10m", Date.now() - 60_000);
     const state = await queryLoopState(sd);
     assert.equal(state.afkHoldActive, false, "expired wait_10m doesn't count as hold");
 });
@@ -124,7 +130,7 @@ test("queryLoopState: afk file with past expiry → afkHoldActive=false (expired
 test("queryLoopState + buildHookVerdict integration: post-boot autonomous loop denies AskUserQuestion", async () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
-    writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
+    setIpcBootComplete(true);
     setIpcPaneReady(true);
     const state = await queryLoopState(sd);
     assert.equal(state.afkHoldActive, false);
@@ -135,10 +141,10 @@ test("queryLoopState + buildHookVerdict integration: post-boot autonomous loop d
 test("queryLoopState + buildHookVerdict integration: AFK hold ∞ → ALLOW (human is here per AFK SM)", async () => {
     const sd = tmp();
     writeFileSync(loopStartTsPath(sd), String(Date.now() - 60_000));
-    writeFileSync(bootCompletePath(sd), new Date().toISOString() + "\n");
+    setIpcBootComplete(true);
     setIpcPaneReady(true);
-    writeFileSync(humanTypingPath(sd), new Date().toISOString() + "\n");
-    writeFileSync(afkPath(sd), "inf\n");
+    setIpcHumanTypingAtMs(Date.now());
+    setIpcAfk("wait_inf", null);
     const state = await queryLoopState(sd);
     assert.equal(state.afkHoldActive, true);
     const v = buildHookVerdict(state, { kind: "PreToolUse", tool_name: "AskUserQuestion" });

@@ -123,7 +123,6 @@ import {
     setIpcResumeModePicker,
     setIpcResumeSessionPicker,
     setIpcWakeInFlightAtMs,
-    setStrictIpcRead,
 } from "./ipc-state.js";
 import { computeLoopView, isAfkActive, isInputHot, LoopStateBus } from "./loop-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
@@ -150,11 +149,6 @@ if (!sd || !name) {
     process.stderr.write("[claude-loop:timer] missing CL_* env vars\n");
     process.exit(1);
 }
-// #838 Phase A — timer process is IPC-strict : drop the `?? readFromFile`
-// fallbacks in readLoopStateInput. Hook subprocesses + cli inspect still
-// keep them (= file shadows stay alive for cross-process reads until
-// #766 phases B/C migrate them to UDS).
-setStrictIpcRead(true);
 const interval = Math.max(1, cfg.interval_seconds);
 const tname = tmuxName(name);
 
@@ -1274,17 +1268,10 @@ async function mainSse(): Promise<void> {
     let bootSealTimer: NodeJS.Timeout | null = null;
     const performBootSeal = (): void => {
         bootSealTimer = null;
-        log("state-bus: boot phase ended (tail elapsed) — sealing bootComplete marker");
-        // #838 regression hotfix : strict-IPC mode (set at boot via
-        // setStrictIpcRead) skips the file fallback in readLoopStateInput,
-        // so writing ONLY the file leaves `ipc.bootComplete=null` → the
-        // timer's isInBootGrace re-flips to true the moment paneReady
-        // momentarily flips false (busy turn) → barWord=boot repainted in
-        // a loop post-boot. Always set the IPC alongside the file write.
+        log("state-bus: boot phase ended (tail elapsed) — sealing bootComplete (ipc)");
+        // #840 `4z59jt` — IPC-only. Pas de fichier boot-complete (les
+        // hooks subprocess lisent via UDS queryLoopState).
         setIpcBootComplete(true);
-        try {
-            writeFileSync(bootCompletePath(sd!), new Date().toISOString() + "\n");
-        } catch { /* best-effort */ }
         // #639 david `pn97zf` — `--wait` (CL_WAIT=1) arms NOT AFK 10m at
         // boot exit so the bar reads `wait` yellow with a countdown : the
         // documented "managed mode" contract. `--no-wait` (CL_WAIT=0)

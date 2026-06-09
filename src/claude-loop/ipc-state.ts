@@ -161,15 +161,13 @@ export function getIpcState(): Readonly<IpcState> {
     return state;
 }
 
-/** #838 — flag set by the timer process at boot. `readLoopStateInput`
- *  goes IPC-strict when true (= no `?? readFromFile` fallbacks). Hook
- *  subprocesses + cli inspect leave this false → they keep the file
- *  shadow fallbacks so they can read state across processes (timer
- *  remains the canonical writer ; phases B/C of #766 will switch
- *  hooks/proxy to UDS read and finally drop the shadows). */
-let _strictIpcRead = false;
-export function setStrictIpcRead(value: boolean): void { _strictIpcRead = value; }
-export function isStrictIpcRead(): boolean { return _strictIpcRead; }
+/** #840 `4z59jt` — david "vire tout marker fichier". Le gate strict
+ *  est retiré : `readLoopStateInput` est TOUJOURS IPC-only (= safe
+ *  defaults quand ipcState n'a pas la valeur). Les hook subprocesses
+ *  primaient leur ipcState via `queryLoopState` (UDS round-trip vers
+ *  le timer). UDS down → safe defaults (= AFK off, no marker active,
+ *  boot grace floor). Pré-#840 ces paths retombaient sur readFromFile,
+ *  ce qui pinning les markers. */
 
 // #856 Phase 1 — in-process pub/sub on the ipcState. Each `setIpc*` calls
 // `notifyIpcChanged()` after the mutation ; consumers (timer.ts subscribes

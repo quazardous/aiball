@@ -39,7 +39,6 @@ import {
     setIpcPaneInterrupted,
     setIpcPaneReady,
     setIpcPaneResuming,
-    setStrictIpcRead,
 } from "./ipc-state.js";
 
 /**
@@ -120,8 +119,10 @@ async function fetchLiveLoopStateUds(sd: string, timeoutMs: number): Promise<Liv
 export async function queryLoopState(sd: string, timeoutMs = 500): Promise<LoopStateSnapshot> {
     const live = await fetchLiveLoopStateUds(sd, timeoutMs);
     if (live) {
-        // Mirror the live snapshot into the subprocess's local ipcState
-        // so `readLoopStateInput` reads memory instead of the file shadows.
+        // Mirror the live snapshot into the subprocess's local ipcState so
+        // `readLoopStateInput` returns the live values. #840 `4z59jt` :
+        // `readLoopStateInput` est maintenant strict IPC ; UDS down = safe
+        // defaults (= AFK off, boot grace floor, no markers active).
         setIpcPaneBusy(live.paneBusy);
         setIpcPaneReady(live.paneReady);
         setIpcPaneCompacting(live.paneCompacting);
@@ -132,7 +133,6 @@ export async function queryLoopState(sd: string, timeoutMs = 500): Promise<LoopS
         setIpcIdleSince(live.idleSinceMs);
         if (live.bootComplete !== null) setIpcBootComplete(live.bootComplete);
         setIpcBusyDeferUntil(live.busyDeferUntilMs);
-        setStrictIpcRead(true);
     }
     const input = readLoopStateInput(sd);
     const view = computeLoopView(input);

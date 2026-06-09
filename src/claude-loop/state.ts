@@ -15,7 +15,6 @@ import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
 import {
     getIpcDispAfk,
     getIpcState,
-    isStrictIpcRead,
     setIpcDispAfk,
     setIpcDrainedState,
     setIpcHumanTypingAtMs,
@@ -29,7 +28,7 @@ import {
     setIpcResumeModePicker,
     setIpcResumeSessionPicker,
 } from "./ipc-state.js";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -936,47 +935,24 @@ export function readLoopStateInput(
     // freshly restarted, or the hook fell back to file write because the
     // ws emit failed).
     const ipc = getIpcState();
-    // #838 Phase A — `isStrictIpcRead()` is set by the timer process at
-    // boot. When TRUE (= timer-process context), drop the `?? existsSync`
-    // fallbacks : ipcState is hydrated by bus events (proxy → dispatcher,
-    // hooks → HookService) bien avant les premiers reads, fallback inutile.
-    // When FALSE (= hook subprocess, cli inspect, tests with fresh module),
-    // keep the file shadow fallbacks. Phases B/C of #766 migrate those
-    // readers to UDS and drop the shadows altogether.
-    const strict = isStrictIpcRead();
-    const ipcSessionPicker = ipc.resumeSessionPickerActive;
-    const ipcModePicker = ipc.resumeModePickerActive;
-    const sessionPickerActive = ipcSessionPicker !== null
-        ? ipcSessionPicker
-        : (strict ? false : existsSync(resumeSessionPickerActivePath(sd)));
-    const modePickerActive = ipcModePicker !== null
-        ? ipcModePicker
-        : (strict ? false : existsSync(resumeModePickerActivePath(sd)));
+    // #840 `4z59jt` — david "vire tout marker fichier". Plus de gate
+    // strict ni de fallback fichier : `readLoopStateInput` est IPC-only.
+    // Les hook subprocesses primaient leur ipcState via `queryLoopState`
+    // (UDS round-trip vers le timer) avant ce read. UDS down → safe
+    // defaults ci-dessous (= AFK off, pas de marker actif, boot grace
+    // floor). Pré-#840 les fallbacks `?? safeMtime(...)`/`?? existsSync()`
+    // re-lisaient les shadows du timer ; ces shadows n'existent plus.
+    const sessionPickerActive = ipc.resumeSessionPickerActive ?? false;
+    const modePickerActive = ipc.resumeModePickerActive ?? false;
     const resumePickerActive = sessionPickerActive || modePickerActive;
-    const bootComplete = ipc.bootComplete ?? (strict ? false : existsSync(bootCompletePath(sd)));
+    const bootComplete = ipc.bootComplete ?? false;
     const noWait = !cfg.wait;
     const wakeInFlightTtlMs = Math.max(0, cfg.wake_in_flight_ttl_ms);
     const inputHotTtlMs = Math.max(0, cfg.input_hot_ttl_ms);
 
-    function safeMtime(p: string): number | null {
-        try { return existsSync(p) ? statSync(p).mtimeMs : null; } catch { return null; }
-    }
-    function safeIsoMs(p: string): number | null {
-        try {
-            if (!existsSync(p)) return null;
-            const v = new Date(readFileSync(p, "utf8").trim()).getTime();
-            return Number.isNaN(v) ? null : v;
-        } catch { return null; }
-    }
-
-    // #838 Phase A — strict mode (timer process) skips the file fallback.
-    // Hook subprocess / cli inspect keep reading the shadow until phases
-    // B/C of #766 migrate them to UDS round-trip.
-    const afk = ipc.afkMode !== null
+    const afk: { mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null } = ipc.afkMode !== null
         ? { mode: ipc.afkMode, expiryMs: ipc.afkExpiryMs }
-        : (strict ? { mode: "off" as const, expiryMs: null } : readAfkState(sd));
-    // #734 V3 Phase B — same semantics for human-typing.
-    const ipcHumanTypingAtMs = ipc.humanTypingAtMs;
+        : { mode: "off", expiryMs: null };
     return {
         nowMs,
         loopStartMs: startMs,
@@ -996,9 +972,7 @@ export function readLoopStateInput(
         paneCompacting: ipc.paneCompacting ?? false,
         paneInterrupted: ipc.paneInterrupted ?? false,
         noWait,
-        // #838 Phase A — strict mode skips the safeMtime fallback ; hooks
-        // still read the file shadow until #766 phases B/C.
-        humanTypingAtMs: ipcHumanTypingAtMs ?? (strict ? null : safeMtime(humanTypingPath(sd))),
+        humanTypingAtMs: ipc.humanTypingAtMs,
         humanTypingTtlMs: HUMAN_TYPING_TTL_SEC * 1000,
         afkMode: afk.mode,
         afkExpiryMs: afk.expiryMs,
@@ -1012,14 +986,9 @@ export function readLoopStateInput(
         // #727 V1 Slice B — in-memory truth wins. Shared with the
         // pre-gate paths in timer.ts via `readIdleSinceMs`.
         idleSinceMs: readIdleSinceMs(sd),
-        // #856 Phase 3 — ipc-first read, fall back to the file shadow
-        // only in non-strict mode (hook subprocesses). The timer keeps
-        // an in-memory mirror via `setIpcWakeInFlightAtMs` on every
-        // arm/clear path so the gate sees it instantly.
-        wakeInFlightAtMs: ipc.wakeInFlightAtMs ?? (strict ? null : safeMtime(wakeInFlightPath(sd))),
+        wakeInFlightAtMs: ipc.wakeInFlightAtMs,
         wakeInFlightTtlMs,
-        // #838 Phase A — strict mode skips the file fallback ; hooks keep it.
-        busyDeferUntilMs: ipc.busyDeferUntilMs ?? (strict ? null : safeIsoMs(busyDeferUntilPath(sd))),
+        busyDeferUntilMs: ipc.busyDeferUntilMs,
         inputHotTtlMs,
         manualWake: opts.manualWake ?? false,
     };

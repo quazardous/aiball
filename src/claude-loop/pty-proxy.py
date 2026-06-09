@@ -62,11 +62,6 @@ def _state_dir():
     return os.environ.get("CL_STATE_DIR") or ""
 
 
-def _marker_path():
-    sd = _state_dir()
-    return os.path.join(sd, "human-typing") if sd else ""
-
-
 def _loop_sock_path():
     """#730 step 1 — single per-loop IPC socket. Timer is the SERVER
     (#729 inversion), proxy + hooks are clients. Today carries only
@@ -267,79 +262,46 @@ except ValueError:
     _AFK_WINDOW_MS = 400
 
 
-def _afk_path():
-    sd = os.environ.get("CL_STATE_DIR") or ""
-    return os.path.join(sd, "afk") if sd else ""
-
-
 # #840 Slice A (#766) — module-level cache of the last pushed_view from
 # the timer, populated by `_apply_pushed_view`. Read-only consumers (e.g.
-# `_afk_mode`) consult it instead of reading the `afk` shadow file. Falls
-# back to the file when the cache is empty (cold-boot before first push).
+# `_afk_mode`) consult it instead of reading the `afk` shadow file.
+#
+# #840 `4z59jt` (Slice 2) — david "vire tout marker fichier" : on retire
+# le fallback fichier. Le cache est hydraté par le timer via WS push
+# (cf. `_apply_pushed_view`) dès la connexion établie. Tant que le cache
+# est cold (= avant le 1er push), _afk_mode retourne None (= OFF) — même
+# sémantique que "fichier absent" pré-migration. Pas de race significative :
+# la connexion ws + le 1er push interviennent en quelques ms après spawn,
+# et le proxy ne consulte pas l'AFK avant la 1ère décision stdin.
 _pushed_view_cache = {"view": None}
 
 
 def _afk_mode():
-    """#619 david `3ezsk5` : AFK is now a 3-state. File content :
-       absent      → OFF
-       "inf"       → AFK ∞ (held indefinitely)
-       "<iso-ts>"  → AFK auto-release at that timestamp (or OFF if past)
-    Returns None / "inf" / ("until", expiry_ts) — None for both
-    "file missing" and "file present but timestamp past".
+    """#619 david `3ezsk5` : AFK is now a 3-state. Returns :
+       None              → OFF (cache cold OR mode=off/missing)
+       "inf"             → AFK ∞ (held indefinitely)
+       ("until", <ts>)   → AFK auto-release at that float timestamp
 
-    #840 Slice A (#766 path) — prefers the cached pushed_view (= the
-    timer's authoritative IPC state, broadcast via WS push). Falls back
-    to the file ONLY before the first view-push arrives (cold-boot
-    bootstrap) or if the cached view doesn't carry the field for some
-    reason. Phase C target : drop the file read entirely once the
-    bootstrap is wired through the sync UDS endpoint."""
+    #840 `4z59jt` — IPC-only. Le cache `_pushed_view_cache` est hydraté
+    par le timer (WS push). Aucun fichier consulté."""
     cached = _pushed_view_cache.get("view")
-    if cached is not None and "afkMode" in cached:
-        mode = cached.get("afkMode")
-        expiry = cached.get("afkExpiryMs")
-        if mode == "wait_inf":
-            return "inf"
-        if mode == "wait_10m" and isinstance(expiry, (int, float)) and expiry > 0:
-            until = expiry / 1000.0  # ms-since-epoch → seconds (float ts)
-            if until <= datetime.datetime.now().timestamp():
-                return None
-            # #858 — return shape MUST match the file path below : ("until",
-            # <float-ts>). Pré-fix la branche IPC retournait un datetime,
-            # ce qui faisait crasher `mode[1] - now_ts` (float) au prochain
-            # tour de la main loop dès qu'AFK 10m était armé. RC du crash
-            # observé sur pisynth après ESC → typing → AFK arm.
-            return ("until", until)
-        # mode == "off" or unknown → None
+    if cached is None:
         return None
-    p = _afk_path()
-    if not p or not os.path.exists(p):
-        return None
-    try:
-        with open(p) as f:
-            content = f.read().strip()
-    except OSError:
-        return None
-    if content == "inf":
+    mode = cached.get("afkMode")
+    expiry = cached.get("afkExpiryMs")
+    if mode == "wait_inf":
         return "inf"
-    if not content:
-        # #622 — empty AFK file = corrupt write or pre-#619 legacy marker.
-        # Either way it's not a state the cycle can advance from cleanly
-        # (the OFF→10m→∞→OFF cycle needs the file to be either absent or
-        # carry a parseable expiry/inf). Clear it so the next F9 arms a
-        # fresh 10m.
-        clear_afk()
-        return None
-    # Treat as ISO expiry timestamp.
-    try:
-        until = datetime.datetime.fromisoformat(content).timestamp()
-    except ValueError:
-        # #622 — unparseable content is corrupt state, clear it. Was
-        # previously treated as ∞ which silently held the loop.
-        clear_afk()
-        return None
-    if until <= datetime.datetime.now().timestamp():
-        return None  # auto-expired
-    return ("until", until)
+    if mode == "wait_10m" and isinstance(expiry, (int, float)) and expiry > 0:
+        until = expiry / 1000.0  # ms-since-epoch → seconds (float ts)
+        if until <= datetime.datetime.now().timestamp():
+            return None
+        # #858 — return shape MUST match the legacy file path : ("until",
+        # <float-ts>). Pré-fix la branche IPC retournait un datetime,
+        # ce qui faisait crasher `mode[1] - now_ts` (float) au prochain
+        # tour de la main loop dès qu'AFK 10m était armé.
+        return ("until", until)
+    # mode == "off" or None → OFF
+    return None
 
 
 def set_afk_until(seconds):
