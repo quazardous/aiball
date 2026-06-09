@@ -881,25 +881,11 @@ class _Decider:
                 d["markers"] += ["arm_afk_10m"]
                 self.afk_active = True
             d["word"] = "rest"
-            # #858 — claude-code (auto mode) traite ESC nue (idle OU busy
-            # post-turn) comme "exit" → claude quitte → tmux pane meurt →
-            # kill-on-exit cascade SIGKILL le timer + tout le loop. On ne
-            # forward JAMAIS l'ESC à claude : l'AFK est armée localement,
-            # claude ne reçoit rien. Trade-off : pour interrompre claude
-            # mid-turn, taper Ctrl-C (pas ESC). Un premier essai phase-
-            # gated (forward si "busy") a re-crashé en pratique — soit la
-            # phase était transient-busy après un drained-wake, soit
-            # claude-code exit aussi sur "esc to interrupt". Garder
-            # l'ESC interne entièrement résout les deux cas d'un coup.
-            # Debug : log la trace pour vérifier que ce path s'exécute (#858 followup).
-            sd_dbg = os.environ.get("CL_STATE_DIR") or ""
-            if sd_dbg:
-                try:
-                    with open(os.path.join(sd_dbg, "esc-debug.log"), "a") as _f:
-                        _f.write(f"{datetime.datetime.now().isoformat(timespec='milliseconds')}  lone_esc swallowed  in_boot={in_boot}  data={data.hex()}\n")
-                except OSError:
-                    pass
-            return d
+            # David `<chat>` : le swallow systématique du #858 cassait
+            # l'interruption mid-turn. ESC est re-forwardé à claude
+            # comme avant. Side-effect possible : si claude-code en
+            # auto exit sur ESC nue, le loop crashera ; à régler côté
+            # hook si ça réémerge.
         d["forward"] += data
         return d
 
