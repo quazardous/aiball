@@ -102,6 +102,10 @@ import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
 import { probeParentTmuxAtBoot, installParentTmuxWatchdog, sweepSiblingTimers } from "./parent-liveness.js";
 import { buildRespawnEnv, parseRespawnState, RESPAWN_STATE_ENV_VAR } from "./respawn-state.js";
+import { createActor, type ActorRefFrom } from "xstate";
+import { bootMachine } from "./boot-machine.js";
+
+let bootActor: ActorRefFrom<typeof bootMachine> | null = null;
 import { getHookService } from "./hook-service.js";
 import {
     getIpcState,
@@ -607,14 +611,12 @@ function refreshPaneMarkers(): void {
     // compacting) push le `bootDeadlineMs` à `now + 10_000`. Quand
     // les conditions clear, plus de push → deadline expire +10s plus
     // tard → tick séparé fire `bus.bootEnded` → seal.
-    if (isBoot) {
+    if (isBoot && bootActor) {
         const stillBooting = !ipc.paneReady || ipc.paneCompacting || ipc.resumeSessionPickerActive || ipc.resumeModePickerActive;
         if (stillBooting) {
-            const now = Date.now();
-            const newDeadline = now + 10_000;
-            if (ipc.bootDeadlineMs === null || newDeadline > ipc.bootDeadlineMs) {
-                setIpcBootDeadlineMs(newDeadline);
-            }
+            // #872 Phase 1 — push deadline via l'acteur (= un seul
+            // chemin d'autorité au lieu du `setIpcBootDeadlineMs` direct).
+            bootActor.send({ type: "WATCHER_TICK", nowMs: Date.now() });
         }
     }
     // #611 — error backoff escalation : each tick with errId !== null
@@ -1251,23 +1253,41 @@ async function mainSse(): Promise<void> {
     // condition is observed (paneReady=false / picker / compacting).
     // When `now >= deadline` and !bootComplete, fire `bus.bootEnded`
     // via the heartbeat below → seal via existing tail-grace path.
+    // #872 / #870 Phase 1 — XState BootMachine acteur pilote.
+    // L'acteur owns le timing boot (deadline push + auto-seal + sealed
+    // terminal). Le subscriber bridge l'état actor → ipcState pour que
+    // les consumers downstream (bar-renderer, isInBootGrace, etc.) lisent
+    // un seul snapshot canonique. La machine elle-même reste pure et
+    // testable indépendamment (cf. boot-machine.test.ts).
     {
         const input0 = readLoopStateInput(sd!);
-        setIpcBootDeadlineMs(input0.loopStartMs + input0.bootMinMs);
+        bootActor = createActor(bootMachine, {
+            input: {
+                loopStartMs: input0.loopStartMs,
+                bootMinMs: input0.bootMinMs,
+            },
+        });
+        bootActor.subscribe((snap) => {
+            setIpcBootDeadlineMs(snap.context.deadlineMs);
+            if (snap.matches("sealed") && getIpcState().bootComplete !== true) {
+                log("bootMachine: sealed → setIpcBootComplete(true)");
+                setIpcBootComplete(true);
+            }
+        });
+        bootActor.start();
     }
+    // Pump DEADLINE_REACHED côté wall-clock — la machine reste pure (=
+    // pas de timer interne), le side-effect setInterval vit côté wrapper.
     const bootDeadlineTimer = setInterval(() => {
-        const ipc = getIpcState();
-        if (ipc.bootComplete === true) { clearInterval(bootDeadlineTimer); return; }
-        if (ipc.bootDeadlineMs === null) return;
-        if (Date.now() < ipc.bootDeadlineMs) return;
-        // Deadline expired without further watcher push → seal directly.
-        // Bypass the watcher-gate path (which would stay false on
-        // paneReady=false) ; the deadline IS the authority now.
-        log("boot deadline expired — sealing bootComplete directly");
-        setIpcBootComplete(true);
-        clearInterval(bootDeadlineTimer);
+        if (!bootActor) return;
+        const snap = bootActor.getSnapshot();
+        if (snap.matches("sealed")) { clearInterval(bootDeadlineTimer); return; }
+        if (Date.now() >= snap.context.deadlineMs) {
+            bootActor.send({ type: "DEADLINE_REACHED" });
+            clearInterval(bootDeadlineTimer);
+        }
     }, 1000);
-    process.on("exit", () => clearInterval(bootDeadlineTimer));
+    process.on("exit", () => { clearInterval(bootDeadlineTimer); bootActor?.stop(); });
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
     // toutes les 5s via la même fonction pure que la garde boot-time
     // (#859). Quand le parent est mort (loop killé, pane fermé, etc.),
