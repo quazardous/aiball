@@ -217,21 +217,8 @@ def touch_marker():
 # `@cl_human` via le pane-diff — ce code-ci ne tourne tout simplement pas.
 HUMAN_TTL_SEC = 5  # doit suivre HUMAN_TYPING_TTL_SEC côté TS
 
-# Mots fg-only (le bg = status-bg). Doivent rester alignés avec
-# setTmuxStatus / humanBarWord (state.ts) — #302 : stop=rouge, wait=jaune,
-# loop=vert ; #426 : ask=orange.
-_HUMAN_STOP = "#[fg=colour196,bg=colour16]stop"
-_HUMAN_WAIT = "#[fg=colour178,bg=colour16]wait"
-# #619 david `zm2ehq` : 4ème mot dédié `boot` (jaune) pendant la boot-grace.
-# Le bar BG passe aussi en jaune via [boot], mais l'ilot noir de claude-WORD
-# le laisse parfaitement lisible — donc le `boot` jaune sur ilot noir signale
-# clairement "en cours de lancement", distinct de `wait` (humain qui tient
-# activement le loop) et de `loop` (autonome).
-_HUMAN_BOOT = "#[fg=colour178,bg=colour16]boot"
-# #426 + #619 collapse : le mot `ask` (orange) a été retiré. La fenêtre
-# unique user-grace (max user/ask, default 600s) gate auto-wakes ET
-# AskUserQuestion, donc plus besoin d'un visuel distinct.
-_HUMAN_LOOP = "#[fg=colour40,bg=colour16]loop"
+# #862 Slice 4 — `_HUMAN_*` constants retirées. Le BarRenderer côté
+# timer (TS) est l'unique writer de `@cl_human` ; le proxy ne peint plus.
 # #302/#345: --no-wait (CL_WAIT=0) skips only the boot-grace; a present human
 # (live typing → `stop`, armed user-grace → `wait`) is still reflected, aligned
 # with humanPresenceWord (state.ts).
@@ -1218,120 +1205,12 @@ def _in_boot_phase():
     return False
 
 
-def _rest_word():
-    """Mot au repos (pas de frappe) : `boot` pendant la boot-grace
-    (#619 zm2ehq — mot dédié, jaune sur l'ilot noir), `wait` quand
-    l'AFK est armé (mode `inf` ou `until > now`), sinon `loop`.
-    #619 david `x4myqb` : user-grace ne peint plus `wait` — elle
-    continue de geler les auto-pings côté wake gate (silencieux),
-    mais le bar word reflète l'état AFK UNIQUEMENT, sinon une frappe
-    récente laisse un `wait` jaune même après F9 clear AFK. La
-    décomposition fine AFK (countdown / ∞ / couleur) vit à côté du
-    hint AFK:F9 dans le status-right — voir `_format_afk_state`.
-    #853 david `w7t4pt` : par définition on commence en boot. Tant
-    qu'aucune push timer n'est arrivée (`_pushed_view_cache["view"]
-    is None`), le bootstrap source = BOOT (pas le LOOP fallback qui
-    sortait du fallthrough quand `_boot_grace_remaining()=0` au tout
-    début du proxy)."""
-    if _in_boot_phase():
-        return _HUMAN_BOOT
-    if _afk_mode() is not None:
-        return _HUMAN_WAIT
-    return _HUMAN_LOOP
-
-
-def _mux_argv():
-    # MUX_CMD peut être un binaire ou "tmux -L sock" → on split sur l'espace.
-    return (os.environ.get("MUX_CMD") or "tmux").split()
-
-
-def _paint_word(word, writer="proxy:_paint_word"):
-    """Écrit `@cl_human = word` sur la session tmux + force un refresh.
-
-    No-op silencieux si la cible tmux est inconnue ou si tmux échoue — la
-    barre ne doit JAMAIS pouvoir casser le pont I/O de la session live."""
-    target = os.environ.get("CL_TMUX") or ""
-    if not target:
-        return
-    _log_bar_paint(writer, word)
-    mux = _mux_argv()
-    try:
-        subprocess.run(
-            mux + ["set-option", "-t", target, "@cl_human", word],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-        )
-        # -S = rafraîchit la ligne de statut des clients attachés.
-        subprocess.run(
-            mux + ["refresh-client", "-S"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-        )
-    except OSError:
-        pass
-
-
-# #619 david `jjfdea` + `33zghr` + `f97nu6` + `a2f2gk` + #622 : the AFK
-# chunk in status-right is painted by the proxy. David's mental model
-# inversion-clarification: `AFK` means "Away From Keyboard" → loop is
-# autonomous (the human IS away). The wait states are the OPPOSITE
-# semantic — human is present, holding the loop — so the label reads
-# `NOT AFK` there. Strict 3-state, AFK file only :
-#
-#   OFF / loop          : `AFK:F9`            (label dim ≈ noir — "you're AFK, claude runs")
-#   AFK-off 10min       : `9m NOT AFK:F9`     (label + countdown JAUNE — "you're here, 10m hold")
-#   AFK-off ∞           : `∞ NOT AFK:F9`      (label + ∞ ROUGE — "you're here, indefinite hold")
-#
-# The remaining-minutes prefix in 10min mode is computed from the file's
-# absolute expiry timestamp every tick (cheap diff repaint) — toggle never
-# resets an in-progress countdown ; only OFF→10m freshly arms a new
-# expiry, ∞→OFF clears, 10m→∞ replaces with an indefinite hold.
-# User-grace lives elsewhere (silently gates auto-pings via the wake
-# timer ; no longer paints any segment).
-def _format_afk_state():
-    key = os.environ.get("CL_AFK_KEY_DISP") or "F9"
-    fg_dim = os.environ.get("CL_AFK_LABEL_FG_DIM") or "colour238"
-    fg_lit = os.environ.get("CL_AFK_LABEL_FG_LIT") or "colour16"
-    mode = _afk_mode()
-    if mode == "inf":
-        # AFK ∞ hold — human is here, NOT AFK, label rouge.
-        return f"#[fg=colour196]∞ NOT AFK:#[fg={fg_lit}]{key}"
-    if isinstance(mode, tuple):  # ("until", expiry_ts)
-        rem = mode[1] - datetime.datetime.now().timestamp()
-        if rem >= 60:
-            mins = int(rem / 60) + (0 if rem % 60 == 0 else 1)
-            prefix = f"{mins}m"
-        else:
-            prefix = f"{max(1, int(rem))}s"
-        # AFK 10m hold — human is here, NOT AFK, label jaune.
-        return f"#[fg=colour178]{prefix} NOT AFK:#[fg={fg_lit}]{key}"
-    # OFF — human is away, AFK is "on" by default, label dim.
-    return f"#[fg={fg_dim}]AFK:#[fg={fg_lit}]{key}"
-
-
-def _paint_afk_state():
-    """Push `@cl_afk_state` to tmux (no-op if no live target)."""
-    target = os.environ.get("CL_TMUX") or ""
-    if not target:
-        return
-    mux = _mux_argv()
-    try:
-        subprocess.run(
-            mux + ["set-option", "-t", target, "@cl_afk_state", _format_afk_state()],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-        )
-        subprocess.run(
-            mux + ["refresh-client", "-S"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-        )
-    except OSError:
-        pass
-
-
-def paint_human(typing: bool):
-    """Compat (#302) : `stop` si frappe en cours, sinon le mot au repos
-    (`wait` pendant la user-grace, sinon `loop`). Appelé au démarrage et au
-    cleanup ; les transitions fines sont pilotées dans la boucle via
-    `_paint_word` + `current_word`."""
-    _paint_word(_HUMAN_STOP if typing else _rest_word())
+# #862 Slice 4 — `_rest_word`, `_paint_word`, `_format_afk_state`,
+# `_paint_afk_state`, `paint_human` SUPPRIMÉS. Le BarRenderer côté
+# timer (TS) est maintenant l'unique writer de `@cl_human` ET
+# `@cl_afk_state`. Le proxy émet uniquement les events (`touch_marker`,
+# `set_afk_*`, etc.) qui mutent ipcState ; BarRenderer pickup via
+# `onIpcChanged` + safety tick 1s.
 
 
 def drop_proxy_alive():
@@ -1473,18 +1352,9 @@ def main(argv):
 
     stdin_open = True
 
-    # #274/#302 état du segment human : on ne repeint QUE sur transition.
-    # `current_word` = dernier mot peint (stop/wait/loop). Le select se
-    # réveille à l'expiration de la frappe (5 s), de la boot-grace (#305) puis
-    # de la user-grace pour enchaîner stop→wait→loop sans round-trip par le TS.
-    # #629 david `8wgq7f` — on n'a PAS peint au startup (le seed cli.ts est
-    # `boot`), donc init `current_word` à None pour qu'un éventuel premier
-    # paint via _apply_pushed_view force l'écriture (None != n'importe quel
-    # mot ⇒ branche `word_token != current_word` passe).
-    current_word = None
-    # #631 david `zfj6s7` — pareil pour @cl_afk_state : init à None pour
-    # que la première view force le paint. Skip ensuite si chunk_str inchangé.
-    current_afk_chunk = None
+    # #862 Slice 4 — `current_word`/`current_afk_chunk` retirés. Le
+    # BarRenderer (côté timer TS) est le seul writer de `@cl_human` et
+    # `@cl_afk_state`, donc le proxy n'a plus rien à tracker.
     # #360 : la décision frappe→action vit désormais dans le cœur PUR `_Decider`
     # (mirror exact de l'ancienne boucle inline ; bufferisation #345 incluse —
     # la 1re combo d'un afk_key à 2 (ex. 1er ESC de `esc esc`) est gardée jusqu'à
@@ -1495,10 +1365,9 @@ def main(argv):
     decider = _Decider(_afk, _AFK_COMBOS, _ESC_TAKEOVER, _AFK_WINDOW_MS)
 
     def cleanup():
-        # Rends la main sur le segment human : `loop` au repos, sinon le mot
-        # `stop` resterait figé après la mort du proxy (le TS reprend la main
-        # via proxy-alive disparu).
-        paint_human(False)
+        # #862 Slice 4 — `paint_human(False)` retiré. Le BarRenderer côté
+        # timer continue à peindre @cl_human depuis ipcState après la mort
+        # du proxy (proxy-alive disparu, BarRenderer reste autoritaire).
         if old_termios is not None:
             try:
                 termios.tcsetattr(stdin_fd, termios.TCSAFLUSH, old_termios)
@@ -1527,75 +1396,18 @@ def main(argv):
     pushed_view = {"value": None}  # dict-wrap so nested fns can mutate
 
     def _apply_pushed_view(view):
-        """#627 — paint the bar word + AFK chunk from a view dict received
-        over view-push. Schema matches `LoopStateView` from loop-state.ts :
-        {barWord:"boot"|"stop"|"wait"|"loop", afkChunk:{label, prefix, color},
-         phase:..., wakeAllowed:..., wakeSkipReason:..., inBootGrace:...}.
-        We use barWord + afkChunk here ; phase/wake are timer-internal."""
-        nonlocal current_word
+        """#627 — receive a view dict pushed by the timer over loop.sock.
+        #862 Slice 4 : le proxy ne peint plus ; il met uniquement à jour
+        le cache pour que `_afk_mode` (côté Decider) ait l'autorité IPC."""
         pushed_view["value"] = view
-        # #840 Slice A — mirror to the module-level cache so module-scope
-        # helpers (`_afk_mode`) read the same authoritative state.
         _pushed_view_cache["view"] = view
-        # Bar word: convert "boot"/"stop"/"wait"/"loop" to the right
-        # _HUMAN_* token. Skip if the proxy is currently in a typing-stop
-        # paint (let it finish its 5s flash naturally).
-        word_token = {
-            "boot": _HUMAN_BOOT,
-            "stop": _HUMAN_STOP,
-            "wait": _HUMAN_WAIT,
-            "loop": _HUMAN_LOOP,
-        }.get(view.get("barWord", ""))
-        if word_token is not None and word_token != current_word:
-            _paint_word(word_token, writer="proxy:_apply_pushed_view")
-            current_word = word_token
-        # AFK chunk: convert the {label, prefix, color} dict to the tmux
-        # format string the proxy's _format_afk_state used to emit.
-        chunk = view.get("afkChunk") or {}
-        label = chunk.get("label") or "AFK"
-        prefix = chunk.get("prefix")
-        color = chunk.get("color") or "dim"
-        key = os.environ.get("CL_AFK_KEY_DISP") or "F9"
-        fg_dim = os.environ.get("CL_AFK_LABEL_FG_DIM") or "colour238"
-        fg_lit = os.environ.get("CL_AFK_LABEL_FG_LIT") or "colour16"
-        col_code = {"red": "colour196", "yellow": "colour178", "dim": fg_dim}.get(color, fg_dim)
-        if prefix:
-            chunk_str = f"#[fg={col_code}]{prefix} {label}:#[fg={fg_lit}]{key}"
-        else:
-            chunk_str = f"#[fg={col_code}]{label}:#[fg={fg_lit}]{key}"
-        # #631 david `zfj6s7` — event-driven : ne repeint @cl_afk_state
-        # QUE si le chunk_str change. Le timer push toutes les 1 s pour le
-        # countdown AFK 10m, mais en steady-state (AFK off, ou pendant la
-        # même minute affichée comme "9m"), chunk_str est stable → 0
-        # set-option / 0 refresh-client. Économise typiquement ~50 paints/min
-        # (1 push/s × 2 subprocess each) en idle.
-        nonlocal current_afk_chunk
-        target = os.environ.get("CL_TMUX") or ""
-        if target and chunk_str != current_afk_chunk:
-            current_afk_chunk = chunk_str
-            mux = _mux_argv()
-            try:
-                subprocess.run(
-                    mux + ["set-option", "-t", target, "@cl_afk_state", chunk_str],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-                )
-                subprocess.run(
-                    mux + ["refresh-client", "-S"],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-                )
-            except OSError:
-                pass
 
     def _drain_loop_sock_queue():
         """#729 phase 2 + #730 step 3 — called when the self-pipe has a
         byte ready. Drains the per-kind queues fed by the daemon thread
-        `_ViewPushClient` and applies each : view dicts go through
-        `_apply_pushed_view` (bar/AFK paint) ; inject text fragments are
-        written to the PTY master_fd (same side-effects as the legacy
-        inject.sock raw bytes branch — note_wake_injected + force `loop`
-        word + emit log). Also drains the pipe (best-effort) to disarm
-        the wakeup until the next push."""
-        nonlocal current_word
+        `_ViewPushClient` and applies each : view dicts mutent juste le
+        cache via `_apply_pushed_view` (#862 Slice 4 — plus de paint) ;
+        inject text fragments are written to the PTY master_fd."""
         try:
             while True:
                 os.read(view_push_pipe_r, 4096)
@@ -1608,14 +1420,9 @@ def main(argv):
                 os.write(master_fd, chunk_str.encode("utf-8"))
             except OSError:
                 continue
-            # #305 (david j8xhrh): an injected wake = proof the gate is
-            # open → the bar follows the wake decision, not its own
-            # latch. Force `loop` and drop the wait reasons (boot /
-            # user-grace) so the next round doesn't repaint `wait`.
+            # #305 — wake injected = proof the gate is open. Le timer mute
+            # ipcState côté TS, BarRenderer (= seul writer) sait quoi peindre.
             _note_wake_injected()
-            if current_word != _HUMAN_LOOP:
-                _paint_word(_HUMAN_LOOP)
-                current_word = _HUMAN_LOOP
             _emit_log({"event": "inject",
                        "now": datetime.datetime.now().timestamp(),
                        "raw": chunk_str.encode("utf-8"),
@@ -1635,7 +1442,6 @@ def main(argv):
         émis par le _Decider dans le path normal ; F9 utilise toggle_afk).
         Ils restent disponibles comme fonctions appellables si du code
         externe / un test en a besoin."""
-        nonlocal current_word
         for m in dec.get("markers", []):
             if m == "cycle_afk" or m == "toggle_afk":
                 # #633 Slice C : F9 toggle routed via back-channel ; the
@@ -1678,7 +1484,6 @@ def main(argv):
         _emit_log(dec)
 
     try:
-        last_afk_state = ""
         while True:
             rfds = [master_fd]
             if stdin_open:
@@ -1706,30 +1511,18 @@ def main(argv):
                     afk_rem = max(0.0, mode[1] - now_ts)
                 rems = [r for r in (_boot_grace_remaining(), afk_rem) if r > 0.0]
                 timeout = min(rems) if rems else None
-            in_wait = current_word == _HUMAN_WAIT
-            if in_wait:
-                timeout = min(timeout, 5.0) if timeout is not None else 5.0
+            # #862 Slice 4 — pas besoin de timeout court "wait" : le
+            # BarRenderer côté timer a son safety tick 1s qui catch le
+            # countdown AFK et le TTL typing → loop. Le proxy n'a plus
+            # rien à peindre.
             try:
                 ready, _, _ = select.select(rfds, [], [], timeout)
             except (InterruptedError, OSError):
                 continue  # SIGWINCH etc. interrompent select
 
-            # #627 — bootstrap fallback only. Once the timer has pushed
-            # its first view (`_apply_pushed_view`), all paints come
-            # from there ; the local rules below are only used during
-            # the brief window from proxy start to first push receive.
-            if pushed_view["value"] is None:
-                # 0) Hors-frappe (>HUMAN_TTL_SEC) → mot au repos (#302).
-                if (datetime.datetime.now().timestamp() - decider.last_keystroke) >= HUMAN_TTL_SEC:
-                    want = _rest_word()
-                    if want != current_word:
-                        _paint_word(want)
-                        current_word = want
-                # AFK chunk diff (#619 jjfdea).
-                afk_state = _format_afk_state()
-                if afk_state != last_afk_state:
-                    _paint_afk_state()
-                    last_afk_state = afk_state
+            # #862 Slice 4 — bootstrap fallback paint retiré. Le BarRenderer
+            # (côté timer) peint depuis ipcState dès son `start()` ; pas
+            # besoin de fallback côté proxy.
 
             # 1) Frappe humaine (tmux → nous → claude).
             if stdin_fd in ready:

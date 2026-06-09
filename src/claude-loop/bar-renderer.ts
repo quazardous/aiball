@@ -128,10 +128,14 @@ export class BarRenderer {
     private name: string;
     private lastSnapshot: BarSnapshot | null = null;
     private debounceTimer: NodeJS.Timeout | null = null;
+    private safetyTimer: NodeJS.Timeout | null = null;
     private unsubIpc: (() => void) | null = null;
     private spawn: SpawnFn;
     /** Debounce window (ms) — aligné sur `schedulePush` du timer. */
     private static readonly DEBOUNCE_MS = 50;
+    /** Safety tick — catch time-driven changes invisibles à onIpcChanged
+     *  (TTL expiry de `humanTypingAtMs`, countdown wait_10m de l'AFK chip). */
+    private static readonly SAFETY_TICK_MS = 1000;
 
     constructor(sd: string, name: string, spawn: SpawnFn = spawnSync as SpawnFn) {
         this.sd = sd;
@@ -139,17 +143,23 @@ export class BarRenderer {
         this.spawn = spawn;
     }
 
-    /** Démarre l'observer : initial paint + subscribe à onIpcChanged. */
+    /** Démarre l'observer : initial paint + subscribe à onIpcChanged
+     *  + safety tick 1s. */
     start(): void {
         this.tick();
         this.unsubIpc = onIpcChanged(() => this.schedule());
+        this.safetyTimer = setInterval(() => this.tick(), BarRenderer.SAFETY_TICK_MS);
     }
 
-    /** Arrête l'observer : unsubscribe + flush le debounce pending. */
+    /** Arrête l'observer : unsubscribe + flush le debounce/safety pending. */
     stop(): void {
         if (this.debounceTimer) {
             clearTimeout(this.debounceTimer);
             this.debounceTimer = null;
+        }
+        if (this.safetyTimer) {
+            clearInterval(this.safetyTimer);
+            this.safetyTimer = null;
         }
         if (this.unsubIpc) {
             this.unsubIpc();
@@ -220,11 +230,9 @@ export class BarRenderer {
         if (changedSet.has("proxyAlive")) {
             setOpt("@cl_proxy", next.proxyAlive ? `#[fg=colour250] ⇄` : "");
         }
-        // En degraded mode (= proxy mort), c'est le TS qui peint @cl_human.
-        // Le proxy vivant l'écrase live à chaque keystroke (cf. pty-proxy.py
-        // _paint_word) — donc on n'overwrite pas s'il est alive (sinon
-        // races avec le proxy). Slice 4 dégagera _paint_word côté proxy.
-        if (changedSet.has("humanWord") && !next.proxyAlive) {
+        // #862 Slice 4 — `_paint_word` côté proxy supprimé. Le BarRenderer
+        // est maintenant le SEUL writer de `@cl_human` (proxy alive ou mort).
+        if (changedSet.has("humanWord")) {
             setOpt("@cl_human", next.humanWord);
         }
         if (changedSet.has("counters")) {
