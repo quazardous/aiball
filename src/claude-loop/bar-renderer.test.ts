@@ -17,8 +17,10 @@ import {
     type BarSnapshot,
 } from "./bar-renderer.js";
 import {
+    getIpcState,
     resetIpcStateForTests,
     setIpcBootComplete,
+    setIpcCounters,
     setIpcPaneBusy,
     setIpcPaneReady,
 } from "./ipc-state.js";
@@ -41,6 +43,9 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
         loopStatus: LOOP_STATUS.IDLE,
         stateTag: "[idle]",
         proxyAlive: false,
+        zenActive: false,
+        counters: null,
+        afkChipStr: "",
         ...overrides,
     };
 }
@@ -48,7 +53,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
 test("diffSnapshots: prev=null → tous les champs marqués changed (initial)", () => {
     assert.deepEqual(
         diffSnapshots(null, snap()),
-        ["humanWord", "loopStatus", "stateTag", "proxyAlive"],
+        ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "afkChipStr"],
     );
 });
 
@@ -120,4 +125,59 @@ test("BarRenderer.tick: idempotent quand l'état ne change pas", () => {
     r.tick(); // 2e — no-op (rien changé)
     r.stop();
     rmSync(sd, { recursive: true, force: true });
+});
+
+// #862 Slice 2 — setIpcCounters + counters/zen/afkChipStr champs.
+
+test("setIpcCounters: stocke un object normalisé dans ipcState", () => {
+    resetIpcStateForTests();
+    setIpcCounters({ open: 3, backlog: 2, events: 0 });
+    assert.deepEqual(getIpcState().counters, { open: 3, backlog: 2, events: 0 });
+});
+
+test("setIpcCounters: champs absents → normalisés à null", () => {
+    resetIpcStateForTests();
+    setIpcCounters({ open: 5 });
+    assert.deepEqual(getIpcState().counters, { open: 5, backlog: null, events: null });
+});
+
+test("setIpcCounters(null): clear le segment", () => {
+    resetIpcStateForTests();
+    setIpcCounters({ open: 3 });
+    setIpcCounters(null);
+    assert.equal(getIpcState().counters, null);
+});
+
+test("computeBarSnapshot: lit ipc.counters", () => {
+    const sd = mkSd();
+    setIpcCounters({ open: 4, backlog: 1, events: 2 });
+    const s = computeBarSnapshot(sd);
+    assert.deepEqual(s.counters, { open: 4, backlog: 1, events: 2 });
+    rmSync(sd, { recursive: true, force: true });
+});
+
+test("computeBarSnapshot: zen file présent → zenActive=true", () => {
+    const sd = mkSd();
+    writeFileSync(join(sd, "zen"), "");
+    const s = computeBarSnapshot(sd);
+    assert.equal(s.zenActive, true);
+    rmSync(sd, { recursive: true, force: true });
+});
+
+test("diffSnapshots: counters diff via deep-equal (= changement réel)", () => {
+    const prev = snap({ counters: { open: 1, backlog: 0, events: 0 } });
+    const next = snap({ counters: { open: 2, backlog: 0, events: 0 } });
+    assert.deepEqual(diffSnapshots(prev, next), ["counters"]);
+});
+
+test("diffSnapshots: counters identiques (objects refs différentes) → no diff", () => {
+    const prev = snap({ counters: { open: 1, backlog: 0, events: 0 } });
+    const next = snap({ counters: { open: 1, backlog: 0, events: 0 } });
+    assert.deepEqual(diffSnapshots(prev, next), []);
+});
+
+test("diffSnapshots: counters null vs {0,0,0} → diff (sémantique distinguée)", () => {
+    const prev = snap({ counters: null });
+    const next = snap({ counters: { open: 0, backlog: 0, events: 0 } });
+    assert.deepEqual(diffSnapshots(prev, next), ["counters"]);
 });

@@ -115,6 +115,7 @@ import {
     onIpcChanged,
     setIpcBusyDeferUntil,
     setIpcBootComplete,
+    setIpcCounters,
     setIpcIdleSince,
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
@@ -966,6 +967,10 @@ async function mainSse(): Promise<void> {
                 // count is less confusing than a missing segment.
                 if (events !== null || open !== null || backlog !== null) {
                     setTmuxCounters(name!, { open, backlog, events });
+                    // #862 Slice 2 — mirror to ipcState so BarRenderer
+                    // observer pickup the same snapshot. Slice 3 fera le
+                    // flip writer-effectif (= setTmuxCounters dégagé).
+                    setIpcCounters({ open, backlog, events });
                 }
             } catch { /* counter sync best-effort */ }
         })();
@@ -1671,6 +1676,8 @@ async function mainSse(): Promise<void> {
             // starved the HTTP client.
             if (events !== null || open !== null || backlog !== null) {
                 setTmuxCounters(name!, { open, backlog, events });
+                // #862 Slice 2 — mirror to ipcState pour BarRenderer observer.
+                setIpcCounters({ open, backlog, events });
             }
         } catch { /* counters segment stays as-is */ }
         if (phase !== "boot") {

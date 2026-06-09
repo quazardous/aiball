@@ -20,14 +20,17 @@
  * legacy deviennent no-op). Slice 4 retire `_paint_word` côté proxy.
  */
 import { spawnSync } from "node:child_process";
-import { onIpcChanged } from "./ipc-state.js";
+import { existsSync } from "node:fs";
+import { getIpcState, onIpcChanged } from "./ipc-state.js";
 import {
     MUX_CMD,
+    afkStateChunkStr,
     humanBarWord,
     logBarPaint,
     proxyIsAlive,
     readLoopStateInput,
     tmuxName,
+    zenPath,
     LOOP_STATUS,
     type LoopStatus,
 } from "./state.js";
@@ -48,6 +51,17 @@ export interface BarSnapshot {
     stateTag: string;
     /** Proxy alive ? Drives `@cl_proxy` (⇄ / empty). */
     proxyAlive: boolean;
+    /** Zen mode actif ? (fichier `zen` présent — par décision de david
+     *  #856 zen reste fichier-based, exception au IPC-only #840). */
+    zenActive: boolean;
+    /** `@cl_counts` : counters ground truth depuis `ipc.counters`. Null
+     *  = segment vide. Slice 2 ajoute le mirroring `setIpcCounters`
+     *  côté timer ; Slice 3 fera du BarRenderer le SEUL writer. */
+    counters: { open: number | null; backlog: number | null; events: number | null } | null;
+    /** `@cl_afk_state` : AFK chip pré-rendered string (canonical via
+     *  `afkStateChunkStr`). Diff sur la string finale = plus simple que
+     *  diff sur chaque field interne de l'AfkChunk. */
+    afkChipStr: string;
 }
 
 /** Compute le snapshot canonique depuis ipcState + computeLoopView.
@@ -66,19 +80,34 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
     // Le state tag est `[<status>]` + suffix info. Pour Slice 1 on
     // garde la version basique ; Slice 3 ajoutera le suffix `:info`.
     const stateTag = `[${loopStatus}]`;
-    return { humanWord, loopStatus, stateTag, proxyAlive };
+    const zenActive = existsSync(zenPath(sd));
+    const counters = getIpcState().counters;
+    const afkChipStr = afkStateChunkStr(sd);
+    return { humanWord, loopStatus, stateTag, proxyAlive, zenActive, counters, afkChipStr };
 }
 
 /** Diff deux snapshots et retourne la liste des champs qui ont
  *  changé. Liste vide = no-op (rien à repaint). */
 export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (keyof BarSnapshot)[] {
-    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive"];
+    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "afkChipStr"];
     const changed: (keyof BarSnapshot)[] = [];
     if (prev.humanWord !== next.humanWord) changed.push("humanWord");
     if (prev.loopStatus !== next.loopStatus) changed.push("loopStatus");
     if (prev.stateTag !== next.stateTag) changed.push("stateTag");
     if (prev.proxyAlive !== next.proxyAlive) changed.push("proxyAlive");
+    if (prev.zenActive !== next.zenActive) changed.push("zenActive");
+    if (!countersEqual(prev.counters, next.counters)) changed.push("counters");
+    if (prev.afkChipStr !== next.afkChipStr) changed.push("afkChipStr");
     return changed;
+}
+
+function countersEqual(
+    a: BarSnapshot["counters"],
+    b: BarSnapshot["counters"],
+): boolean {
+    if (a === null && b === null) return true;
+    if (a === null || b === null) return false;
+    return a.open === b.open && a.backlog === b.backlog && a.events === b.events;
 }
 
 /**
@@ -137,11 +166,11 @@ export class BarRenderer {
             const changed = diffSnapshots(this.lastSnapshot, next);
             if (changed.length === 0) return; // no-op
             for (const field of changed) {
-                logBarPaint(
-                    this.sd,
-                    `observer:${field}`,
-                    String(next[field]),
-                );
+                const val = next[field];
+                const str = typeof val === "object" && val !== null
+                    ? JSON.stringify(val)
+                    : String(val);
+                logBarPaint(this.sd, `observer:${field}`, str);
             }
             this.lastSnapshot = next;
             // Slice 3+ : flusher ici un set-option batched. Pour l'instant

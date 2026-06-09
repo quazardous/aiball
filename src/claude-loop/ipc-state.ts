@@ -133,6 +133,12 @@ export interface IpcState {
      *  a stale ipc (= timer alive but its bus loop has frozen). `null`
      *  pre-1st-push (cold boot). */
     lastViewPushAtMs: number | null;
+    /** #862 — counters segment `@cl_counts` ground truth. Null = clear
+     *  the segment ; an object overrides each named counter (null inside
+     *  drops that specific counter). Mutated via `setIpcCounters` by the
+     *  timer's count-refresh tick. Read by `BarRenderer` to compose the
+     *  segment string. */
+    counters: { open: number | null; backlog: number | null; events: number | null } | null;
 }
 
 const state: IpcState = {
@@ -161,6 +167,7 @@ const state: IpcState = {
     paneInterrupted: null,
     paneResuming: null,
     lastViewPushAtMs: null,
+    counters: null,
 };
 
 /** Read-only view of the current state. Callers should not mutate. */
@@ -287,6 +294,24 @@ export function setIpcLastViewPushAtMs(atMs: number | null): void {
     state.lastViewPushAtMs = atMs;
 }
 
+/** #862 Slice 2 — store the `@cl_counts` ground truth in ipcState so
+ *  the BarRenderer observer can pickup. `null` = clear segment ;
+ *  named counters can be partially null (= absent from the segment). */
+export function setIpcCounters(
+    counters: { open?: number | null; backlog?: number | null; events?: number | null } | null,
+): void {
+    if (counters === null) {
+        state.counters = null;
+    } else {
+        state.counters = {
+            open: counters.open ?? null,
+            backlog: counters.backlog ?? null,
+            events: counters.events ?? null,
+        };
+    }
+    notifyIpcChanged();
+}
+
 /** #734 V3 Phase A — set AFK in-memory state. Called by the
  *  `Afk*ViaService` helpers right after they mutate the AfkService
  *  observable. Pass `mode=null` to reset the in-memory signal (the
@@ -404,4 +429,5 @@ export function resetIpcStateForTests(): void {
     state.paneInterrupted = null;
     state.paneResuming = null;
     state.lastViewPushAtMs = null;
+    state.counters = null;
 }
