@@ -158,24 +158,35 @@ test("checkSse: live=null → fail (no UDS reply)", () => {
     assert.equal(checkSse(null).status, "fail");
 });
 
-test("checkSse: lastSseEventAtMs=null → warn (still connecting)", () => {
-    const r = checkSse({ lastSseEventAtMs: null }, 1000);
+test("checkSse: sseConnected=null → warn (no connection state yet)", () => {
+    const r = checkSse({ sseConnected: null }, 1000);
     assert.equal(r.status, "warn");
-    assert.match(r.detail, /still connecting/);
 });
 
-test("checkSse: âge < TTL → ok", () => {
-    const now = 1_000_000;
-    const r = checkSse({ lastSseEventAtMs: now - 30_000 }, now);
-    assert.equal(r.status, "ok");
-    assert.match(r.detail, /live/);
-});
-
-test("checkSse: âge > TTL (5min) → fail stale", () => {
-    const now = 1_000_000;
-    const r = checkSse({ lastSseEventAtMs: now - 6 * 60_000 }, now);
+test("checkSse: sseConnected=false → fail (WakeBus error)", () => {
+    const r = checkSse({ sseConnected: false }, 1000);
     assert.equal(r.status, "fail");
-    assert.match(r.detail, /stale/);
+    assert.match(r.detail, /disconnected/);
+});
+
+test("checkSse: sseConnected=true → ok (connected)", () => {
+    const r = checkSse({ sseConnected: true }, 1000);
+    assert.equal(r.status, "ok");
+    assert.match(r.detail, /connected/);
+});
+
+test("checkSse: sseConnected=true + lastSseEventAtMs → age in detail", () => {
+    const now = 1_000_000;
+    const r = checkSse({ sseConnected: true, lastSseEventAtMs: now - 30_000 }, now);
+    assert.equal(r.status, "ok");
+    assert.match(r.detail, /last event 30s ago/);
+});
+
+test("checkSse: sseConnected=true + quiet 13min → still ok (was false-positive stale)", () => {
+    const now = 1_000_000;
+    // 793s = david's reported case in #869 (= 13min of silence on live connection)
+    const r = checkSse({ sseConnected: true, lastSseEventAtMs: now - 793_000 }, now);
+    assert.equal(r.status, "ok");
 });
 
 // Sanity check : runHealthChecks aggregates checks + counts.

@@ -139,6 +139,12 @@ export interface IpcState {
      *  timer's count-refresh tick. Read by `BarRenderer` to compose the
      *  segment string. */
     counters: { open: number | null; backlog: number | null; events: number | null } | null;
+    /** #869 — SSE connection state, flipped by `WakeBus` events. True
+     *  while subscription is live, false on `error`, null pre-connect.
+     *  Read by `claude-loop health.checkSse` — replaces the flaky
+     *  time-since-last-event TTL (SSE events are demand-driven, quiet
+     *  periods of 10+ min are normal). */
+    sseConnected: boolean | null;
     /** David `<chat>` : watcher-driven boot deadline. Pushed to `now+10s`
      *  each time a pane watcher tick observes a "still booting" condition
      *  (paneReady=false / picker actif / compacting). When the deadline
@@ -185,6 +191,7 @@ const state: IpcState = {
     paneResuming: null,
     lastViewPushAtMs: null,
     lastSseEventAtMs: null,
+    sseConnected: null,
     bootDeadlineMs: null,
     counters: null,
     stateTagInfo: null,
@@ -319,6 +326,12 @@ export function setIpcLastViewPushAtMs(atMs: number | null): void {
  *  `getIpcState().lastSseEventAtMs` puis surfacé par `queryLoopState`. */
 export function setIpcLastSseEventAtMs(atMs: number | null): void {
     state.lastSseEventAtMs = atMs;
+}
+
+/** #869 — flag SSE connection alive/down. Pas pubsub-notified (= les
+ *  consumers lisent à la demande via queryLoopState). */
+export function setIpcSseConnected(connected: boolean | null): void {
+    state.sseConnected = connected;
 }
 
 /** David `<chat>` : push le deadline boot (watcher-driven). Pas pubsub-
@@ -474,6 +487,7 @@ export function resetIpcStateForTests(): void {
     state.paneResuming = null;
     state.lastViewPushAtMs = null;
     state.lastSseEventAtMs = null;
+    state.sseConnected = null;
     state.bootDeadlineMs = null;
     state.counters = null;
     state.stateTagInfo = null;

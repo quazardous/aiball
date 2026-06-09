@@ -123,6 +123,7 @@ interface LiveLoopState {
     busyDeferUntilMs?: number | null;
     lastViewPushAtMs?: number | null;
     lastSseEventAtMs?: number | null;
+    sseConnected?: boolean | null;
 }
 async function queryUdsLoopState(sd: string, timeoutMs = 500): Promise<{ live: LiveLoopState | null; latencyMs: number; sockMissing: boolean }> {
     const sock = loopSockPath(sd);
@@ -251,22 +252,22 @@ export async function checkAiballDaemon(timeoutMs = 500): Promise<HealthCheck> {
     });
 }
 
-/** #867 — SSE channel check via `ipc.lastSseEventAtMs` (stampé par le
- *  timer's WakeBus à chaque hello/control/ping reçu). Stale threshold
- *  5min (= 10 heartbeats SSE manqués @30s default daemon push). */
-export const SSE_FRESH_TTL_MS = 5 * 60_000;
-
+/** #869 — SSE channel check via `ipc.sseConnected` (flipped by `WakeBus`
+ *  events). Replaces the flaky time-since-last-event TTL — SSE events
+ *  are demand-driven (hello/control/ping), so quiet periods of 10+ min
+ *  are normal even when the connection is alive. `lastSseEventAtMs` is
+ *  kept for informational age display. */
 export function checkSse(live: LiveLoopState | null, nowMs: number = Date.now()): HealthCheck {
     if (live === null) return { name: "SSE channel", status: "fail", detail: "no UDS reply (skipped)" };
+    if (live.sseConnected === false) {
+        return { name: "SSE channel", status: "fail", detail: "disconnected (WakeBus error — auto-reconnect on next heartbeat)" };
+    }
+    if (live.sseConnected === null) {
+        return { name: "SSE channel", status: "warn", detail: "no connection state yet (still connecting ?)" };
+    }
     const ts = live.lastSseEventAtMs ?? null;
-    if (ts === null) {
-        return { name: "SSE channel", status: "warn", detail: "no SSE event since boot (still connecting ?)" };
-    }
-    const ageMs = nowMs - ts;
-    if (ageMs > SSE_FRESH_TTL_MS) {
-        return { name: "SSE channel", status: "fail", detail: `stale ${(ageMs / 1000).toFixed(0)}s (> ${SSE_FRESH_TTL_MS / 1000}s — disconnected ?)` };
-    }
-    return { name: "SSE channel", status: "ok", detail: `live (last event ${(ageMs / 1000).toFixed(1)}s ago)` };
+    const ageStr = ts !== null ? `, last event ${((nowMs - ts) / 1000).toFixed(0)}s ago` : "";
+    return { name: "SSE channel", status: "ok", detail: `connected${ageStr}` };
 }
 
 // ---------------------------------------------------------------------------

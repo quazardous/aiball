@@ -113,6 +113,7 @@ import {
     setIpcCounters,
     setIpcIdleSince,
     setIpcLastSseEventAtMs,
+    setIpcSseConnected,
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
     setIpcLastViewPushAtMs,
@@ -982,10 +983,12 @@ async function mainSse(): Promise<void> {
     const wakeBus = new WakeBus(client());
     wakeBus.on("hello", (h) => {
         setIpcLastSseEventAtMs(Date.now());
+        setIpcSseConnected(true);
         log(`SSE hello: unread=${h.unread}`);
     });
     wakeBus.on("control", (c) => {
         setIpcLastSseEventAtMs(Date.now());
+        setIpcSseConnected(true);
         if (c.action === "kill") cleanShutdown("sse:control:kill");
         // #451: operator-supplied RAW prompt → inject it into the Claude
         // session exactly like a wake (sendKeys sets the wake-in-flight +
@@ -999,6 +1002,7 @@ async function mainSse(): Promise<void> {
     });
     wakeBus.on("ping", (p) => {
         setIpcLastSseEventAtMs(Date.now());
+        setIpcSseConnected(true);
         const panic = p.intent === "panic";
         log(`SSE ping received: ${JSON.stringify(p)} → tryWake${panic ? " (panic)" : ""}`);
         // #816 david — instant counter refresh on SSE ping. The bar's
@@ -1065,6 +1069,7 @@ async function mainSse(): Promise<void> {
         });
     });
     wakeBus.on("error", (e) => {
+        setIpcSseConnected(false);
         log(`SSE error: ${e.message ?? String(e)} — will reconnect on next heartbeat`);
     });
     wakeBus.connect();
