@@ -202,13 +202,18 @@ export function checkBootStatus(sd: string, live: LiveLoopState | null, nowMs: n
         const start = Number(startTs);
         if (Number.isFinite(start) && start > 0) elapsedMs = nowMs - start;
     } catch { /* unknown — assume just-started */ }
-    if (elapsedMs < 60_000) {
+    // #868 — settleBoot safety cap was dropped : the bus-driven seal can
+    // legitimately take 60-120s on a fresh `claude --resume` (picker
+    // window + first /compact + 10s tail grace). Reserve `fail` for the
+    // truly stuck (= >3min, watchers never fired bootEnded), keep `warn`
+    // up to 3min so the watcher path has room.
+    if (elapsedMs < 180_000) {
         return { name: "boot status", status: "warn", detail: `boot in progress (elapsed ${(elapsedMs / 1000).toFixed(0)}s)` };
     }
     return {
         name: "boot status",
         status: "fail",
-        detail: `stuck in boot ${(elapsedMs / 1000).toFixed(0)}s — pickers/compacting holding ?`,
+        detail: `stuck in boot ${(elapsedMs / 1000).toFixed(0)}s — watcher path never fired bootEnded ?`,
     };
 }
 
