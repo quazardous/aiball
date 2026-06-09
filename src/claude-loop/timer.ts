@@ -1826,6 +1826,10 @@ async function main(): Promise<void> {
     // The signal mirror of `claude-loop stop`; the remote SSE control:kill also
     // funnels into the same `cleanShutdown`.
     process.on("SIGTERM", () => cleanShutdown("SIGTERM"));
+    // #866 Slice 3 — SIGINT (= Ctrl-C, ou un parent qui propage via
+    // shell pgid) emprunte la même cleanShutdown que SIGTERM. Sans ça
+    // le default node handler tue le process sans sweep state.
+    process.on("SIGINT", () => cleanShutdown("SIGINT"));
     if (isInternalCheckCmd(checkCmd)) {
         await mainSse();
     } else {

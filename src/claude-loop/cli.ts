@@ -52,6 +52,7 @@ import {
     platePath,
     projectCwdInfo,
     readPlate,
+    sendShutdownToTimer,
     stateDirFor,
     timerLogPath,
     proxyAlivePath,
@@ -916,9 +917,16 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         "wake-in-flight", "busy-defer-until", "last-injected-wake",
         "last-wake-at", "human-typing",
     ].map((f) => shQuote(join(sd, f))).join(" ");
+    // #866 Slice 3 — coopératif AVANT le SIGKILL. Le timer écoute son
+    // loop.sock ; le frame {kind:"shutdown"} le kill proprement,
+    // bypass-ant le bug `timer.pid = wrapper tsx` (#413). SIGKILL pid
+    // reste backstop pour les anciens timers sans handler. Best-effort,
+    // ne bloque jamais le trap (le `|| true` couvre `claude-loop` absent
+    // ou bind manqué).
     const trapScript = [
         "#!/usr/bin/env bash",
         "_aiball_kill_satellites() {",
+        `  ${shQuote("claude-loop")} _shutdown-timer ${shQuote(name)} 2>/dev/null || true`,
         `  pid="$(cat ${shQuote(timerPidPath(sd))} 2>/dev/null || true)"`,
         `  [ -n "$pid" ] && kill -KILL "$pid" 2>/dev/null || true`,
         `  pid="$(cat ${shQuote(proxyAlivePath(sd))} 2>/dev/null || true)"`,
@@ -1903,7 +1911,7 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "backlog", "debug-proxy-tty", "debug-keys", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "backlog", "debug-proxy-tty", "debug-keys", "_shutdown-timer", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -1945,6 +1953,18 @@ async function main(): Promise<void> {
         .option("--on", "force mute ON")
         .option("--off", "force mute OFF")
         .action((name: string | undefined, opts: { on?: boolean; off?: boolean }) => cmdZen(name ?? resolveCurrentLoopName(), opts));
+    // #866 Slice 3 — hidden subcommand callable from `kill-on-exit.sh`
+    // (bash trap). Sends a cooperative shutdown frame over the timer's
+    // loop.sock. No-op silencieux si le socket est mort. Garde le SIGKILL
+    // pid en backstop côté trap. Préfixé `_` pour le distinguer des
+    // commandes user-facing dans `--help`.
+    program.command("_shutdown-timer <name>", { hidden: true })
+        .description("internal: send LOOP_SOCK_KIND.SHUTDOWN to a loop's timer (used by kill-on-exit.sh)")
+        .action(async (name: string) => {
+            const sd = stateDirFor(name);
+            await sendShutdownToTimer(sd, 300);
+            process.exit(0);
+        });
     program.command("reload [name]")
         .description("Respawn the detached timer process without killing claude (picks up edited timer.ts / state.ts since tsx doesn't hot-reload). Also the SIGUSR2 action: `kill -USR2 <timer.pid>` reloads (#407 — unified with the daemon: HUP=restart, USR2=reload). Name optional — defaults to the loop registered for the current cwd.")
         .option("--set <kv...>", "#684: patch <state_dir>/env with KEY=VAL before the respawn. Repeatable (`--set A=1 --set B=2`). VAL='' drops the export (= unset). Typical use : flip a debug log opt-in (e.g. CL_PANE_CAPTURE_LOG=1) without editing the file by hand.")
