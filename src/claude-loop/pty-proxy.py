@@ -103,21 +103,23 @@ def _log_bar_paint(writer, value):
 
 
 def is_typing_keystroke(data: bytes) -> bool:
-    """Vrai si `data` ressemble à de la frappe humaine de TEXTE.
+    """Vrai si `data` ressemble à de la frappe humaine — TEXTE ou édition.
 
-    On ignore les séquences de navigation/contrôle pour ne pas peindre
-    `stop` sur un simple Ctrl/flèche/Tab. Heuristique inspirée de
-    martinambrus/claude_timings_wrapper (MIT) : escape, contrôles <32,
-    DEL. (#269)
+    On ignore les séquences de navigation/contrôle PURE (flèches, F-keys,
+    Ctrl-combos). #865 david : TAB, ENTER, BACKSPACE comptent comme frappe
+    (= autocomplete, submit, correction = signaux de présence humaine
+    active). Heuristique : whitelist explicite des bytes d'édition + texte
+    visible (>= 0x20 hors DEL).
     """
     if not data:
         return False
     b0 = data[0]
-    if b0 == 0x1B:        # ESC / début de séquence CSI (flèches, F-keys…)
+    if b0 == 0x1B:        # ESC / début de séquence CSI (flèches, F-keys…) → exclu
         return False
-    if b0 < 0x20:         # autres contrôles (Ctrl-x, Tab=0x09, Enter=0x0d…)
-        return False
-    if b0 == 0x7F:        # DEL / backspace
+    # #865 — édition humaine : TAB autocomplete, ENTER submit, BACKSPACE correction.
+    if b0 in (0x09, 0x0D, 0x0A, 0x7F):
+        return True
+    if b0 < 0x20:         # autres contrôles (Ctrl-x, etc.) → exclu
         return False
     return True
 
