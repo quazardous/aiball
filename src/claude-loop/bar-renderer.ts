@@ -85,8 +85,18 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
     const info = getIpcState().stateTagInfo;
     let stateTag = info ? `[${loopStatus}:${info}]` : `[${loopStatus}]`;
     if (loopStatus === LOOP_STATUS.BOOT) {
-        const elapsedSec = Math.max(0, Math.floor((input.nowMs - input.loopStartMs) / 1000));
-        stateTag = `${stateTag} ${elapsedSec}s`;
+        const elapsedMs = input.nowMs - input.loopStartMs;
+        const elapsedSec = Math.max(0, Math.floor(elapsedMs / 1000));
+        // David `<chat>` : show remaining-time in parens. Currently the
+        // only deterministic deadline is the `bootMinMs` floor — display
+        // it while it counts down, hide once passed.
+        const remainingMs = input.bootMinMs - elapsedMs;
+        if (remainingMs > 0) {
+            const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+            stateTag = `${stateTag} ${elapsedSec}s (${remainingSec}s)`;
+        } else {
+            stateTag = `${stateTag} ${elapsedSec}s`;
+        }
     }
     const zenActive = existsSync(zenPath(sd));
     const counters = getIpcState().counters;
