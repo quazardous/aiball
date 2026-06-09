@@ -124,6 +124,7 @@ import {
     setIpcWakeRequested,
 } from "./ipc-state.js";
 import { computeLoopView, isAfkActive, isInputHot, LoopStateBus } from "./loop-state.js";
+import { BarRenderer } from "./bar-renderer.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
 import { CL_ENV } from "./env-vars.js";
@@ -1242,6 +1243,15 @@ async function mainSse(): Promise<void> {
     const afkSub = getAfkService().subscribe(() => repaintAfkState());
     const afkPaintTimer = setInterval(repaintAfkState, 1000);
     process.on("exit", () => { try { afkSub(); } catch { /* ignore */ } clearInterval(afkPaintTimer); });
+    // #862 Slice 1 — BarRenderer pur observer. Souscrit à `onIpcChanged`,
+    // debounce 50ms, diff vs son lastSnapshot interne. Slice 1 ne paint
+    // PAS tmux — il log les diffs via `logBarPaint` (writer=`observer:*`)
+    // pour valider que le snapshot computed matche les paints actuels.
+    // Slice 3 flippera en writer effectif (= les setTmuxStatus legacy
+    // deviennent no-op à ce moment).
+    const barRenderer = new BarRenderer(sd!, name!);
+    barRenderer.start();
+    process.on("exit", () => barRenderer.stop());
     const loopBus = new LoopStateBus();
     loopBus.on("dispAfkChanged", () => repaintAfkState());
     loopBus.on("transition", (_prev, next) => {
