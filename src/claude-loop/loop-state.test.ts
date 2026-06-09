@@ -43,7 +43,10 @@ function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
         loopStartMs: T0,
         bootGraceMs: 60 * SEC,
         bootMinMs: 30 * SEC,
-        bootDeadlineMs: null,
+        // #872 Phase 2 — default bootDeadlineMs = loopStartMs + bootMinMs
+        // so the deadline path matches the floor behavior by default.
+        // Tests simulating "still booting via watcher push" override this.
+        bootDeadlineMs: T0 + 30 * SEC,
         resumePickerActive: false,
         bootComplete: true,
         paneBusy: false,
@@ -102,6 +105,9 @@ test("boot phase under --no-wait + picker active → boot stretches (picker pre-
         paneReady: false,
         bootComplete: false,    // #629 — pre-settle
         resumePickerActive: true,
+        // #872 Phase 2 — watcher push deadline = nowMs+10s to simulate
+        // "still booting via watcher tick" (picker active = stretch).
+        bootDeadlineMs: T0 + 40 * SEC,
     }));
     assert.equal(v.phase, "boot");
     assert.equal(v.barWord, "boot");
@@ -136,6 +142,7 @@ test("LoopStateBus: bootEnded fires when inBootGrace flips true→false", () => 
     bus.update(baseInput({
         nowMs: T0 + 45 * SEC, loopStartMs: T0,
         bootComplete: false, paneReady: false,  // explicitly in boot
+        bootDeadlineMs: T0 + 55 * SEC,           // #872 — watcher push keeps boot alive
     }));
     let fired = false;
     bus.on("bootEnded", () => { fired = true; });
@@ -252,6 +259,7 @@ test("LoopStateBus: barWordChanged + phaseChanged fire independently", () => {
     bus.update(baseInput({
         nowMs: start + 45 * SEC, loopStartMs: start,
         bootComplete: false, paneReady: false,  // explicitly in boot
+        bootDeadlineMs: start + 55 * SEC,       // #872 — watcher push
     }));
     const words: [string, string][] = [];
     const phases: [string, string][] = [];
@@ -792,6 +800,8 @@ test("resume picker active 10 min in → still in boot (no time cap)", () => {
         bootComplete: false,  // #629 — pre-settle
         paneReady: false,
         resumePickerActive: true,
+        // #872 — watcher push keeps deadline +10s ahead of nowMs.
+        bootDeadlineMs: now + 10 * SEC,
     }));
     assert.equal(v.inBootGrace, true);
     assert.equal(v.barWord, "boot");
@@ -865,6 +875,7 @@ test("paneReady=false post-floor → still boot (claude not at prompt yet)", () 
         loopStartMs: start,
         bootComplete: false,    // #629 — pre-settle, no hook signal yet
         paneReady: false,
+        bootDeadlineMs: now + 10 * SEC,  // #872 — watcher push
     }));
     assert.equal(v.inBootGrace, true);
     assert.equal(v.barWord, "boot");
@@ -880,6 +891,7 @@ test("paneCompacting stretches boot only PRE-settle (post-resume compact)", () =
         paneCompacting: true,
         paneReady: false,
         bootComplete: false,
+        bootDeadlineMs: now + 10 * SEC,  // #872 — watcher push (compacting stretch)
     }));
     assert.equal(pre.inBootGrace, true);
     assert.equal(pre.barWord, "boot");

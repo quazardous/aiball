@@ -163,30 +163,24 @@ export interface LoopStateView {
 // ---------------------------------------------------------------------------
 
 export function isInBootGrace(input: LoopStateInput): boolean {
-    // #629 david `2hwuan` — modèle final floor + stretches + no-re-entry :
+    // #872 / #870 Phase 2 — modèle final unifié :
     //
     //   1. FLOOR INVIOLABLE : pendant `bootMinMs` (typ. 30 s), rien
-    //      n'autorise à quitter boot. Couvre le flicker au démarrage
-    //      où des hooks early peuvent prétendre que claude est ready
-    //      avant qu'il ait vraiment dessiné le prompt.
+    //      n'autorise à quitter boot — pas même `bootComplete` (couvre
+    //      le flicker des hooks early qui claim ready avant que le
+    //      prompt soit dessiné).
     //   2. `bootComplete` marker = boot a SETTLED une fois ; on n'y
-    //      retourne JAMAIS. Garantit que /compact mid-session ne
-    //      ré-affiche pas le bar `[boot]`.
-    //   3. Pré-settle, STRETCHES : tant que le picker est on screen,
-    //      tant que compacting est observé (post-resume), tant que le
-    //      prompt n'est pas visible → on reste en boot.
-    //
-    // #872 / #870 Phase 1 : `bootDeadlineMs` est exposé pour le bar
-    // display + futur cleanup (Phase 2 — drop les stretches checks ici
-    // au profit du deadline). Pour l'instant cohabite avec les checks
-    // pour préserver les ~10 tests qui s'appuient sur la sémantique
-    // pre-actor (rewriting en bigger session).
+    //      retourne JAMAIS post-floor.
+    //   3. `bootDeadlineMs` (watcher-driven deadline) = source d'autorité
+    //      principale post-floor. Les watchers pane (refreshPaneMarkers
+    //      → bootMachine actor → WATCHER_TICK) pushent à `now+10s` tant
+    //      qu'une condition de boot est observée.
+    //   4. Fallback : si `bootDeadlineMs` est null (actor pas encore
+    //      wired, tests pure), on retombe sur le simple `nowMs >= bootMinMs`.
     const elapsed = input.nowMs - input.loopStartMs;
     if (input.bootMinMs > 0 && elapsed < input.bootMinMs) return true;
     if (input.bootComplete) return false;
-    if (input.resumePickerActive) return true;
-    if (input.paneCompacting) return true;
-    if (!input.paneReady) return true;
+    if (input.bootDeadlineMs !== null) return input.nowMs < input.bootDeadlineMs;
     return false;
 }
 
