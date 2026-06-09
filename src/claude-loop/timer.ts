@@ -106,6 +106,7 @@ import {
 import { PromptWatcher, BusyWatcher, InterruptedWatcher } from "./pane-watchers/runtime-watchers.js";
 import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
+import { probeParentTmuxAtBoot } from "./parent-liveness.js";
 import { getAfkService } from "./afk-service.js";
 import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
 import { getHookService } from "./hook-service.js";
@@ -267,6 +268,21 @@ function tmuxAlive(): boolean {
     return r.status === 0;
 }
 
+// #859 plan B — early parent-liveness probe. Couvre la race
+// `selfReloadIfStale` : OLD timer spawn un NEW detached child + exit,
+// pendant la fenêtre de boot du NEW (~1-2s) la tmux session peut déjà
+// être morte (claude exit, bash trap fired, kill-session vide). Sans
+// ce check, le NEW timer reste vivant jusqu'à ce que le watchdog
+// main-loop s'arme (ligne ~1086) et tape sa 1ère probe — soit 2-5s
+// supplémentaires d'orphelin. Probe AVANT d'armer quoi que ce soit.
+// Logique pure dans `parent-liveness.ts` pour qu'on puisse la tester.
+if (probeParentTmuxAtBoot(MUX_CMD, tname)) {
+    log(`startup: tmux session '${tname}' already gone — exit immediately (orphan-prevent)`);
+    // No cleanShutdown : functions below not defined yet ; the prior
+    // timer already swept on its way out.
+    process.exit(0);
+}
+
 /**
  * Read the visible content of pane 0. Empty string on any failure
  * (tmux gone, capture errored) — callers fall back to last-known
@@ -325,13 +341,16 @@ function selfReloadIfStale(): void {
     const logFd = openSync(timerLogPath(sd!), "a");
     const timerScript = join(root, "src/claude-loop/timer.ts");
     const tsxBin = shQuote(join(root, "node_modules", ".bin", "tsx"));
-    const child = spawn("bash", [
+    // #859 plan A — NE PAS écrire `child.pid` ici : c'est le pid du wrapper
+    // bash → tsx (qui exec puis fork le vrai node timer.ts → zombie). C'est
+    // la régression #413 sur le chemin reload. Le NOUVEAU timer écrit son
+    // propre `process.pid` à boot (ligne 196). Fenêtre de race ~1s
+    // (spawn → tsx boot → write) acceptable, identique au boot initial.
+    spawn("bash", [
         "-lc",
         `source ${shQuote(envPath(sd!))} && exec ${tsxBin} ${shQuote(timerScript)}`,
-    ], { detached: true, stdio: ["ignore", logFd, logFd] });
-    child.unref();
-    writeFileSync(timerPidPath(sd!), String(child.pid) + "\n");
-    log(`timer respawned — new pid ${child.pid}, exiting old`);
+    ], { detached: true, stdio: ["ignore", logFd, logFd] }).unref();
+    log("timer respawned (detached) — new child will record its own pid at boot");
     process.exit(0);
 }
 
