@@ -139,6 +139,12 @@ export interface IpcState {
      *  timer's count-refresh tick. Read by `BarRenderer` to compose the
      *  segment string. */
     counters: { open: number | null; backlog: number | null; events: number | null } | null;
+    /** David `<chat>` : watcher-driven boot deadline. Pushed to `now+10s`
+     *  each time a pane watcher tick observes a "still booting" condition
+     *  (paneReady=false / picker actif / compacting). When the deadline
+     *  expires without further push, a separate tick fires `bus.bootEnded`
+     *  → seal. Initialized at `loopStartMs + bootMinMs` (= 30s floor). */
+    bootDeadlineMs: number | null;
     /** #867 — timestamp du dernier event SSE reçu du daemon (incluant
      *  les hints/pings). Read par `claude-loop health.checkSse` pour
      *  flag `stale SSE channel` quand le canal live a coupé. `null`
@@ -179,6 +185,7 @@ const state: IpcState = {
     paneResuming: null,
     lastViewPushAtMs: null,
     lastSseEventAtMs: null,
+    bootDeadlineMs: null,
     counters: null,
     stateTagInfo: null,
 };
@@ -312,6 +319,14 @@ export function setIpcLastViewPushAtMs(atMs: number | null): void {
  *  `getIpcState().lastSseEventAtMs` puis surfacé par `queryLoopState`. */
 export function setIpcLastSseEventAtMs(atMs: number | null): void {
     state.lastSseEventAtMs = atMs;
+}
+
+/** David `<chat>` : push le deadline boot (watcher-driven). Pas pubsub-
+ *  notified (= changement régulier toutes les ~1s pendant boot, on évite
+ *  d'inonder le bus). Le BarRenderer le lit via `getIpcState()` à chaque
+ *  safety tick 1s. */
+export function setIpcBootDeadlineMs(atMs: number | null): void {
+    state.bootDeadlineMs = atMs;
 }
 
 /** #862 Slice 3 — substate hint that decorates `@cl_state` tag
@@ -459,6 +474,7 @@ export function resetIpcStateForTests(): void {
     state.paneResuming = null;
     state.lastViewPushAtMs = null;
     state.lastSseEventAtMs = null;
+    state.bootDeadlineMs = null;
     state.counters = null;
     state.stateTagInfo = null;
 }

@@ -109,6 +109,7 @@ import {
     setIpcBusyDeferUntil,
     setIpcAfk,
     setIpcBootComplete,
+    setIpcBootDeadlineMs,
     setIpcCounters,
     setIpcIdleSince,
     setIpcLastSseEventAtMs,
@@ -595,10 +596,26 @@ function refreshPaneMarkers(): void {
     if (!sd) return;
     const paneText = capturePane();
     if (!paneText) return;
-    const isBoot = getIpcState().bootComplete !== true;
+    const ipc = getIpcState();
+    const isBoot = ipc.bootComplete !== true;
     // Single scan : watchers observe + emit events ; the subscribers
     // above call the legacy ipcState setters on every transition.
     paneObs.tick(paneText, { nowMs: Date.now(), isBoot });
+    // David `<chat>` : pendant le boot, chaque tick observant une
+    // condition "still booting" (paneReady=false / picker actif /
+    // compacting) push le `bootDeadlineMs` à `now + 10_000`. Quand
+    // les conditions clear, plus de push → deadline expire +10s plus
+    // tard → tick séparé fire `bus.bootEnded` → seal.
+    if (isBoot) {
+        const stillBooting = !ipc.paneReady || ipc.paneCompacting || ipc.resumeSessionPickerActive || ipc.resumeModePickerActive;
+        if (stillBooting) {
+            const now = Date.now();
+            const newDeadline = now + 10_000;
+            if (ipc.bootDeadlineMs === null || newDeadline > ipc.bootDeadlineMs) {
+                setIpcBootDeadlineMs(newDeadline);
+            }
+        }
+    }
     // #611 — error backoff escalation : each tick with errId !== null
     // increments the backoff attempts counter (= the next retry pushes
     // further into the future). Event-only wiring would only arm once
@@ -1223,6 +1240,29 @@ async function mainSse(): Promise<void> {
     const barRenderer = new BarRenderer(sd!, name!);
     barRenderer.start();
     process.on("exit", () => barRenderer.stop());
+    // David `<chat>` : watcher-driven boot deadline. Init at
+    // `loopStartMs + bootMinMs` (= 30s floor). `refreshPaneMarkers`
+    // pushes the deadline to `now+10s` each tick a "still booting"
+    // condition is observed (paneReady=false / picker / compacting).
+    // When `now >= deadline` and !bootComplete, fire `bus.bootEnded`
+    // via the heartbeat below → seal via existing tail-grace path.
+    {
+        const input0 = readLoopStateInput(sd!);
+        setIpcBootDeadlineMs(input0.loopStartMs + input0.bootMinMs);
+    }
+    const bootDeadlineTimer = setInterval(() => {
+        const ipc = getIpcState();
+        if (ipc.bootComplete === true) { clearInterval(bootDeadlineTimer); return; }
+        if (ipc.bootDeadlineMs === null) return;
+        if (Date.now() < ipc.bootDeadlineMs) return;
+        // Deadline expired without further watcher push → seal directly.
+        // Bypass the watcher-gate path (which would stay false on
+        // paneReady=false) ; the deadline IS the authority now.
+        log("boot deadline expired — sealing bootComplete directly");
+        setIpcBootComplete(true);
+        clearInterval(bootDeadlineTimer);
+    }, 1000);
+    process.on("exit", () => clearInterval(bootDeadlineTimer));
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
     // toutes les 5s via la même fonction pure que la garde boot-time
     // (#859). Quand le parent est mort (loop killé, pane fermé, etc.),
