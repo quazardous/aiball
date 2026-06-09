@@ -293,6 +293,30 @@ if (sd) {
     }
 }
 
+// #868 — respawn handoff : si le old timer a déposé `boot-sealed`,
+// on prime l'ipcState direct (skip les 30s floor + paneReady wait).
+// Évite que la bar repasse yellow [boot] à chaque deploy SHA bump
+// pendant qu'un loop idle. One-shot : unlink après lecture.
+if (sd) {
+    const sealedMarker = join(sd, "boot-sealed");
+    if (existsSync(sealedMarker)) {
+        try { unlinkSync(sealedMarker); } catch { /* race ok */ }
+        setIpcBootComplete(true);
+        // Seed idle-since pour que le wake gate s'arme direct (= claude
+        // est déjà au prompt, le old timer l'avait confirmé).
+        setIpcIdleSince(Date.now());
+        // bypass le bootMin floor (30s) : re-stamp loop-start-ts à
+        // "bootMinMs+1s dans le passé" pour que `isInBootGrace`'s floor
+        // check `elapsed < bootMinMs` retourne false direct → tombe sur
+        // le bootComplete=true → renvoie false → phase=idle.
+        try {
+            const fakeStart = Date.now() - (Number(process.env.CL_BOOT_MIN_SEC ?? 30) * 1000 + 1000);
+            writeFileSync(join(sd, "loop-start-ts"), String(fakeStart));
+        } catch { /* best-effort */ }
+        log("respawn handoff: boot-sealed consumed → primed bootComplete=true + idle-since + loop-start-ts bypass");
+    }
+}
+
 /**
  * Read the visible content of pane 0. Empty string on any failure
  * (tmux gone, capture errored) — callers fall back to last-known
@@ -346,6 +370,22 @@ function selfReloadIfStale(): void {
     if (sha) {
         plate.started_at_sha = sha;
         try { writePlate(sd!, plate); } catch { /* best effort — fresh timer would just reload once more */ }
+    }
+    // #868 — handoff one-shot : si bootComplete=true dans l'ipcState du
+    // VIEUX timer, on dépose un marker `boot-sealed` que le NEW timer
+    // lira au boot pour prime `setIpcBootComplete(true)` direct (skip
+    // les 30s floor + la wait paneReady). Sans ça la bar repasse yellow
+    // [boot] pendant ~2-3min à chaque deploy SHA bump, alors que claude
+    // tournait déjà au prompt — moche visuellement.
+    // Marker fichier (vs env var) parce que l'exec bash → tsx → node
+    // peut perdre l'env sur certaines plateformes. Contractuel : pas
+    // d'écriture si bootComplete!=true → un crash ou un old jamais sealed
+    // tombe sur la boot grace normale (= défensif désiré).
+    if (getIpcState().bootComplete === true) {
+        try {
+            writeFileSync(join(sd!, "boot-sealed"), "1");
+            log("boot-sealed marker written for respawn handoff");
+        } catch { /* best-effort */ }
     }
     const root = installRoot();
     const logFd = openSync(timerLogPath(sd!), "a");
