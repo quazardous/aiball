@@ -154,9 +154,28 @@ test("checkBootStatus: bootComplete=false, stale loop → fail (stuck)", () => {
     assert.match(c.detail, /stuck/);
 });
 
-test("checkSse: placeholder warn (daemon endpoint pending)", () => {
-    assert.equal(checkSse().status, "warn");
-    assert.match(checkSse().detail, /not implemented/);
+test("checkSse: live=null → fail (no UDS reply)", () => {
+    assert.equal(checkSse(null).status, "fail");
+});
+
+test("checkSse: lastSseEventAtMs=null → warn (still connecting)", () => {
+    const r = checkSse({ lastSseEventAtMs: null }, 1000);
+    assert.equal(r.status, "warn");
+    assert.match(r.detail, /still connecting/);
+});
+
+test("checkSse: âge < TTL → ok", () => {
+    const now = 1_000_000;
+    const r = checkSse({ lastSseEventAtMs: now - 30_000 }, now);
+    assert.equal(r.status, "ok");
+    assert.match(r.detail, /live/);
+});
+
+test("checkSse: âge > TTL (5min) → fail stale", () => {
+    const now = 1_000_000;
+    const r = checkSse({ lastSseEventAtMs: now - 6 * 60_000 }, now);
+    assert.equal(r.status, "fail");
+    assert.match(r.detail, /stale/);
 });
 
 // Sanity check : runHealthChecks aggregates checks + counts.

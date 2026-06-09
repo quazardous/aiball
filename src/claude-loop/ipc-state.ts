@@ -139,6 +139,11 @@ export interface IpcState {
      *  timer's count-refresh tick. Read by `BarRenderer` to compose the
      *  segment string. */
     counters: { open: number | null; backlog: number | null; events: number | null } | null;
+    /** #867 — timestamp du dernier event SSE reçu du daemon (incluant
+     *  les hints/pings). Read par `claude-loop health.checkSse` pour
+     *  flag `stale SSE channel` quand le canal live a coupé. `null`
+     *  pre-1st-event (cold boot, ou daemon down). */
+    lastSseEventAtMs: number | null;
     /** #862 Slice 3 — substate hint that decorates the `@cl_state` tag
      *  (`[idle:wait]`, `[busy:compacting]`, `[busy:retry 3]`). Mutée par
      *  les call sites legacy `setTmuxStatus(name, status, info)` ;
@@ -173,6 +178,7 @@ const state: IpcState = {
     paneInterrupted: null,
     paneResuming: null,
     lastViewPushAtMs: null,
+    lastSseEventAtMs: null,
     counters: null,
     stateTagInfo: null,
 };
@@ -299,6 +305,13 @@ export function setIpcWakeRequested(atMs: number | null): void {
  *  Pure write ; read via `getIpcState().lastViewPushAtMs`. */
 export function setIpcLastViewPushAtMs(atMs: number | null): void {
     state.lastViewPushAtMs = atMs;
+}
+
+/** #867 — stamp le moment du dernier event SSE reçu. Pas pubsub-notified
+ *  (= ne déclenche pas onIpcChanged, sinon ré-entrance bus). Lu via
+ *  `getIpcState().lastSseEventAtMs` puis surfacé par `queryLoopState`. */
+export function setIpcLastSseEventAtMs(atMs: number | null): void {
+    state.lastSseEventAtMs = atMs;
 }
 
 /** #862 Slice 3 — substate hint that decorates `@cl_state` tag
@@ -445,6 +458,7 @@ export function resetIpcStateForTests(): void {
     state.paneInterrupted = null;
     state.paneResuming = null;
     state.lastViewPushAtMs = null;
+    state.lastSseEventAtMs = null;
     state.counters = null;
     state.stateTagInfo = null;
 }

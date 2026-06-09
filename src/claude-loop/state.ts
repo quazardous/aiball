@@ -1977,6 +1977,7 @@ export function createLoopServer(
                     bootComplete: ipc.bootComplete,
                     busyDeferUntilMs: ipc.busyDeferUntilMs,
                     lastViewPushAtMs: ipc.lastViewPushAtMs,
+                    lastSseEventAtMs: ipc.lastSseEventAtMs,
                 },
             });
             return;

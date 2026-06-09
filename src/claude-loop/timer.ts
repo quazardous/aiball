@@ -110,6 +110,7 @@ import {
     setIpcBootComplete,
     setIpcCounters,
     setIpcIdleSince,
+    setIpcLastSseEventAtMs,
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
     setIpcLastViewPushAtMs,
@@ -921,8 +922,12 @@ async function mainSse(): Promise<void> {
     // MCP, fake-claude tests) peuvent subscribe via le même bus sans
     // re-créer un EventSource.
     const wakeBus = new WakeBus(client());
-    wakeBus.on("hello", (h) => log(`SSE hello: unread=${h.unread}`));
+    wakeBus.on("hello", (h) => {
+        setIpcLastSseEventAtMs(Date.now());
+        log(`SSE hello: unread=${h.unread}`);
+    });
     wakeBus.on("control", (c) => {
+        setIpcLastSseEventAtMs(Date.now());
         if (c.action === "kill") cleanShutdown("sse:control:kill");
         // #451: operator-supplied RAW prompt → inject it into the Claude
         // session exactly like a wake (sendKeys sets the wake-in-flight +
@@ -935,6 +940,7 @@ async function mainSse(): Promise<void> {
         else log(`SSE control ignored (unknown action): ${JSON.stringify(c)}`);
     });
     wakeBus.on("ping", (p) => {
+        setIpcLastSseEventAtMs(Date.now());
         const panic = p.intent === "panic";
         log(`SSE ping received: ${JSON.stringify(p)} → tryWake${panic ? " (panic)" : ""}`);
         // #816 david — instant counter refresh on SSE ping. The bar's

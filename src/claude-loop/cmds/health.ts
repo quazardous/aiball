@@ -122,6 +122,7 @@ interface LiveLoopState {
     bootComplete?: boolean | null;
     busyDeferUntilMs?: number | null;
     lastViewPushAtMs?: number | null;
+    lastSseEventAtMs?: number | null;
 }
 async function queryUdsLoopState(sd: string, timeoutMs = 500): Promise<{ live: LiveLoopState | null; latencyMs: number; sockMissing: boolean }> {
     const sock = loopSockPath(sd);
@@ -245,12 +246,22 @@ export async function checkAiballDaemon(timeoutMs = 500): Promise<HealthCheck> {
     });
 }
 
-/** SSE channel check — needs a daemon-side `/api/loops/<name>/presence`
- *  endpoint that doesn't exist yet. Deferred to a follow-up spinoff ;
- *  surfaced here as a `warn` placeholder so the check inventory is
- *  visible. */
-export function checkSse(): HealthCheck {
-    return { name: "SSE channel", status: "warn", detail: "not implemented (daemon presence endpoint pending)" };
+/** #867 — SSE channel check via `ipc.lastSseEventAtMs` (stampé par le
+ *  timer's WakeBus à chaque hello/control/ping reçu). Stale threshold
+ *  5min (= 10 heartbeats SSE manqués @30s default daemon push). */
+export const SSE_FRESH_TTL_MS = 5 * 60_000;
+
+export function checkSse(live: LiveLoopState | null, nowMs: number = Date.now()): HealthCheck {
+    if (live === null) return { name: "SSE channel", status: "fail", detail: "no UDS reply (skipped)" };
+    const ts = live.lastSseEventAtMs ?? null;
+    if (ts === null) {
+        return { name: "SSE channel", status: "warn", detail: "no SSE event since boot (still connecting ?)" };
+    }
+    const ageMs = nowMs - ts;
+    if (ageMs > SSE_FRESH_TTL_MS) {
+        return { name: "SSE channel", status: "fail", detail: `stale ${(ageMs / 1000).toFixed(0)}s (> ${SSE_FRESH_TTL_MS / 1000}s — disconnected ?)` };
+    }
+    return { name: "SSE channel", status: "ok", detail: `live (last event ${(ageMs / 1000).toFixed(1)}s ago)` };
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +289,7 @@ export async function runHealthChecks(name: string): Promise<HealthReport> {
     checks.push(checkIpcFreshness(live));
     checks.push(checkBootStatus(sd, live));
     checks.push(await checkAiballDaemon());
-    checks.push(checkSse());
+    checks.push(checkSse(live));
     const summary = { ok: 0, warn: 0, fail: 0 };
     for (const c of checks) summary[c.status] += 1;
     return { loop_name: name, state_dir: sd, exists: true, checks, summary };
