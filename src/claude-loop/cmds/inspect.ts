@@ -26,6 +26,18 @@ import {
 } from "../state.js";
 import { computeLoopView } from "../loop-state.js";
 import { openEventChannel } from "../ipc-events.js";
+import {
+    setIpcAfk,
+    setIpcBootComplete,
+    setIpcBusyDeferUntil,
+    setIpcHumanTypingAtMs,
+    setIpcIdleSince,
+    setIpcPaneBusy,
+    setIpcPaneCompacting,
+    setIpcPaneInterrupted,
+    setIpcPaneReady,
+    setIpcPaneResuming,
+} from "../ipc-state.js";
 
 /**
  * #774 — pull the timer's live `ipcState` over `loop.sock`. The handler
@@ -93,12 +105,28 @@ export async function cmdInspect(name: string): Promise<void> {
         process.stdout.write(JSON.stringify({ name, exists: false }, null, 2) + "\n");
         process.exit(1);
     }
-    const input = readLoopStateInput(sd);
-    const view = computeLoopView(input);
     // #774 — try to pull the timer's live ipcState. Falls back to the
     // subprocess-local zero values when the timer is down or the query
     // times out ; flag the source so consumers can tell the two apart.
+    // #860 follow-up — prime the subprocess ipc with the live snapshot
+    // BEFORE computing the view, so `readLoopStateInput` reads the live
+    // values (pré-fix elles étaient toujours nulles → bar_word="boot",
+    // complete=false, même quand le timer avait sealed depuis longtemps).
     const live = await queryLoopState(sd);
+    if (live) {
+        setIpcPaneBusy(live.paneBusy);
+        setIpcPaneReady(live.paneReady);
+        setIpcPaneCompacting(live.paneCompacting);
+        setIpcPaneResuming(live.paneResuming);
+        setIpcPaneInterrupted(live.paneInterrupted);
+        setIpcAfk(live.afkMode, live.afkExpiryMs);
+        setIpcHumanTypingAtMs(live.humanTypingAtMs);
+        setIpcIdleSince(live.idleSinceMs);
+        if (live.bootComplete !== null) setIpcBootComplete(live.bootComplete);
+        setIpcBusyDeferUntil(live.busyDeferUntilMs);
+    }
+    const input = readLoopStateInput(sd);
+    const view = computeLoopView(input);
     const timer = pidAlive(timerPidPath(sd));
     const proxy = pidAlive(proxyAlivePath(sd));
     const dump = {
