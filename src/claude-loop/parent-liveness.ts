@@ -25,6 +25,55 @@ export function probeParentTmuxAtBoot(
     return r.status !== 0;
 }
 
+/** #866 Slice 4 — at-boot sweep des sibling timers bound au même
+ *  CL_STATE_DIR. Catches les vieux timers fantômes (pre-#866 sans
+ *  watchdog, ou timers échappés à cmdReload+sweepOrphans). Linux-only :
+ *  scan /proc/<pid>/environ. Sur autres plateformes, no-op silencieux —
+ *  le watchdog runtime + le bash trap couvrent le worst case.
+ *
+ *  Appelé tôt dans le boot du timer, AVANT le bind loop.sock pour éviter
+ *  qu'un fantôme garde le socket. Le nouveau timer (= self) est exclu
+ *  par `process.pid` check. */
+export function sweepSiblingTimers(
+    stateDir: string,
+    selfPid: number = process.pid,
+    readdirImpl: (path: string) => string[] = (p) => readdirSyncImpl(p),
+    readEnvImpl: (pid: number) => string | null = readProcEnvironImpl,
+    killImpl: (pid: number) => void = (pid) => { process.kill(pid, "SIGKILL"); },
+): number[] {
+    if (process.platform !== "linux") return [];
+    const killed: number[] = [];
+    const marker = `CL_STATE_DIR=${stateDir}`;
+    let entries: string[];
+    try { entries = readdirImpl("/proc"); }
+    catch { return killed; }
+    for (const entry of entries) {
+        const pid = Number(entry);
+        if (!Number.isFinite(pid) || pid <= 1 || pid === selfPid) continue;
+        const env = readEnvImpl(pid);
+        if (env === null) continue;
+        if (!env.includes(`\0${marker}\0`) && !env.startsWith(`${marker}\0`)) continue;
+        try { killImpl(pid); killed.push(pid); }
+        catch { /* race : process already dead */ }
+    }
+    return killed;
+}
+
+// Real-impl indirections so tests can inject. Hoisted as separate funcs
+// so the import isn't loaded when caller passes overrides.
+function readdirSyncImpl(path: string): string[] {
+    // Lazy require to keep the bundle slim + avoid loading fs in tests
+    // that inject the readdir override.
+    const fs = require("node:fs") as typeof import("node:fs");
+    return fs.readdirSync(path);
+}
+function readProcEnvironImpl(pid: number): string | null {
+    try {
+        const fs = require("node:fs") as typeof import("node:fs");
+        return fs.readFileSync(`/proc/${pid}/environ`, "utf8");
+    } catch { return null; }
+}
+
 /** #866 — runtime parent watchdog. Periodically probes the tmux session
  *  via the same pure function used at boot. On dead-session detection,
  *  invokes `onDead()` once (= timer's graceful shutdown). Returns a

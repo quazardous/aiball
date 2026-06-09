@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SpawnSyncReturns } from "node:child_process";
-import { probeParentTmuxAtBoot, installParentTmuxWatchdog, type SpawnSyncFn } from "./parent-liveness.js";
+import { probeParentTmuxAtBoot, installParentTmuxWatchdog, sweepSiblingTimers, type SpawnSyncFn } from "./parent-liveness.js";
 
 function mockSpawn(out: Partial<SpawnSyncReturns<Buffer>>): SpawnSyncFn {
     return ((() => ({
@@ -139,6 +139,78 @@ test("watchdog.stop(): clearInterval idempotent", () => {
     w.stop();
     w.stop(); // 2nd stop should not throw
     assert.equal(timers[0].cleared, true);
+});
+
+// #866 Slice 4 — sibling timer sweep tests.
+
+test("sweepSiblingTimers: process avec CL_STATE_DIR matching → killed", () => {
+    if (process.platform !== "linux") return; // no-op on other platforms
+    const sd = "/home/david/.claude-loop/cl-test-fake";
+    const killed: number[] = [];
+    sweepSiblingTimers(
+        sd,
+        99999, // self pid
+        () => ["1234", "5678"],
+        (pid) => pid === 1234 ? `PATH=/bin\0CL_STATE_DIR=${sd}\0HOME=/h\0` : `PATH=/bin\0CL_STATE_DIR=/other\0`,
+        (pid) => { killed.push(pid); },
+    );
+    assert.deepEqual(killed, [1234]);
+});
+
+test("sweepSiblingTimers: self pid exclu", () => {
+    if (process.platform !== "linux") return;
+    const sd = "/sd";
+    const killed: number[] = [];
+    sweepSiblingTimers(
+        sd,
+        42,
+        () => ["42"],
+        () => `\0CL_STATE_DIR=${sd}\0`,
+        (pid) => { killed.push(pid); },
+    );
+    assert.deepEqual(killed, []);
+});
+
+test("sweepSiblingTimers: env non-readable (process disparu race) → skip", () => {
+    if (process.platform !== "linux") return;
+    const sd = "/sd";
+    const killed: number[] = [];
+    sweepSiblingTimers(
+        sd,
+        99999,
+        () => ["1234"],
+        () => null,
+        (pid) => { killed.push(pid); },
+    );
+    assert.deepEqual(killed, []);
+});
+
+test("sweepSiblingTimers: match au début du env buffer (sans \\0 leading)", () => {
+    if (process.platform !== "linux") return;
+    const sd = "/sd";
+    const killed: number[] = [];
+    sweepSiblingTimers(
+        sd,
+        99999,
+        () => ["1234"],
+        () => `CL_STATE_DIR=${sd}\0PATH=/bin\0`, // marker AT START
+        (pid) => { killed.push(pid); },
+    );
+    assert.deepEqual(killed, [1234]);
+});
+
+test("sweepSiblingTimers: substring match évité (CL_STATE_DIR_BACKUP → no kill)", () => {
+    if (process.platform !== "linux") return;
+    const sd = "/sd";
+    const killed: number[] = [];
+    sweepSiblingTimers(
+        sd,
+        99999,
+        () => ["1234"],
+        () => `\0CL_STATE_DIR_BACKUP=${sd}\0`, // similar key, NOT the one we look for
+        (pid) => { killed.push(pid); },
+    );
+    assert.deepEqual(killed, []);
 });
 
 test("watchdog: default intervalMs = 5000", () => {

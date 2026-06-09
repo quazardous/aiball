@@ -101,7 +101,7 @@ import {
 import { PromptWatcher, BusyWatcher, InterruptedWatcher } from "./pane-watchers/runtime-watchers.js";
 import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
-import { probeParentTmuxAtBoot, installParentTmuxWatchdog } from "./parent-liveness.js";
+import { probeParentTmuxAtBoot, installParentTmuxWatchdog, sweepSiblingTimers } from "./parent-liveness.js";
 import { getHookService } from "./hook-service.js";
 import {
     getIpcState,
@@ -278,6 +278,18 @@ if (probeParentTmuxAtBoot(MUX_CMD, tname)) {
     // No cleanShutdown : functions below not defined yet ; the prior
     // timer already swept on its way out.
     process.exit(0);
+}
+
+// #866 Slice 4 — sweep des sibling timer.ts processes bound au même
+// CL_STATE_DIR. Catches les vieux fantômes (pre-#866 sans watchdog,
+// timers échappés à cmdReload+sweepOrphans, selfReload coincé). Sans
+// ça plusieurs timers paint la bar en race + ipcState diverge.
+// AVANT le bind loop.sock (sinon le fantôme garde le socket → EADDRINUSE).
+if (sd) {
+    const killed = sweepSiblingTimers(sd);
+    if (killed.length > 0) {
+        log(`startup: swept ${killed.length} sibling timer(s) bound to '${sd}': ${killed.join(", ")}`);
+    }
 }
 
 /**
