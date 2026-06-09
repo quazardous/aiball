@@ -17,9 +17,7 @@ import {
     getIpcState,
     setIpcAfk,
     setIpcBusyDeferUntil,
-    setIpcCounters,
     setIpcDispAfk,
-    setIpcStateTagInfo,
     setIpcDrainedState,
     setIpcHumanTypingAtMs,
     setIpcLastOpenWakeHash,
@@ -1156,38 +1154,9 @@ export function humanBarWord(sd: string | undefined): string {
  * Pass `null` / `undefined` counters to clear the segment.
  * No-op when tmux is gone (loop was just rm'd) — never throws.
  */
-export function setTmuxCounters(
-    _name: string,
-    counters: { open?: number | null; backlog?: number | null; events?: number | null } | null,
-): void {
-    // #862 Slice 3 — neutralisé. Mirror direct vers ipcState ; le
-    // BarRenderer peint `@cl_counts` au prochain tick. Slice 5 retirera
-    // ce wrapper + ses call sites.
-    setIpcCounters(counters);
-}
-
-export function setTmuxStatus(
-    _name: string,
-    _status: LoopStatus,
-    countOrInfo?: number | string,
-): void {
-    // #862 Slice 3 — setTmuxStatus est devenu un thin wrapper : seule la
-    // substate info (`wait`/`compacting`/`retry N`) est passée au
-    // BarRenderer via `setIpcStateTagInfo`. Le `status` arg lui-même est
-    // ignoré ici : le BarRenderer dérive le loopStatus canonique depuis
-    // `paneBusy`/`bootComplete` via `computeLoopView`. Toute la mécanique
-    // de paint tmux (status-bg, status-left, @cl_state, @cl_zen, @cl_proxy,
-    // @cl_human en degraded) est maintenant exécutée par BarRenderer.tick()
-    // depuis le timer process, diff-guardée + auto-coherente avec ipcState.
-    //
-    // Slice 5 retirera complètement ce wrapper + ses call sites.
-    const info = typeof countOrInfo === "string" && countOrInfo
-        ? countOrInfo
-        : typeof countOrInfo === "number" && countOrInfo > 0
-            ? String(countOrInfo)
-            : null;
-    setIpcStateTagInfo(info);
-}
+// #862 Slice 5 — `setTmuxCounters` / `setTmuxStatus` retirés.
+// Callers ont migré directement vers `setIpcCounters` / `setIpcStateTagInfo`
+// (ipc-state.ts). Le BarRenderer (bar-renderer.ts) peint depuis ipcState.
 
 /** #755 — map an `AfkChunk` to the `@cl_afk_state` tmux format string.
  *  Mirrors the Unix proxy's `_format_afk_state` (pty-proxy.py) but is
@@ -1221,16 +1190,9 @@ export function afkStateChunkStr(sd: string): string {
     });
 }
 
-/** #755 — push `@cl_afk_state` to tmux + refresh. Best-effort (no-op /
- *  swallow when there is no live target). On Unix the Python proxy owns
- *  this segment ; this is the WIN32 path where the Rust proxy doesn't
- *  paint it (the chip would otherwise stay frozen on its boot seed). */
-export function setTmuxAfkState(_name: string, _chunkStr: string): void {
-    // #862 Slice 3 — neutralisé. Le BarRenderer dérive `afkChipStr` via
-    // `afkStateChunkStr(sd)` (canonical via computeLoopView) dans
-    // computeBarSnapshot et peint `@cl_afk_state` au prochain tick.
-    // Slice 5 retirera ce wrapper + ses call sites.
-}
+// #862 Slice 5 — `setTmuxAfkState` retiré. Le BarRenderer dérive
+// `afkChipStr` via `afkStateChunkStr(sd)` et peint `@cl_afk_state` au
+// prochain tick (debounce 50ms + safety tick 1s).
 
 /**
  * Read the loop's pings YAML and return one phrase at random. Falls

@@ -42,7 +42,6 @@ import {
     armBusyDefer,
     WAKE_COALESCE_WINDOW_MS,
     isInternalCheckCmd,
-    LOOP_STATUS,
     createLoopServer,
     loopSockPath,
     readLoopStateInput,
@@ -72,10 +71,6 @@ import {
     readDrainedState,
     touchHumanTyping,
     writeDrainedState,
-    setTmuxStatus,
-    setTmuxCounters,
-    afkStateChunkStr,
-    setTmuxAfkState,
     tmuxName,
     humanPresenceWord,
     logBarPaint,
@@ -107,8 +102,6 @@ import { PromptWatcher, BusyWatcher, InterruptedWatcher } from "./pane-watchers/
 import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
 import { probeParentTmuxAtBoot } from "./parent-liveness.js";
-import { getAfkService } from "./afk-service.js";
-import { installHookBarSubscriber } from "./hook-bar-subscriber.js";
 import { getHookService } from "./hook-service.js";
 import {
     getIpcState,
@@ -120,6 +113,7 @@ import {
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
     setIpcLastViewPushAtMs,
+    setIpcStateTagInfo,
     setIpcResumeSessionPicker,
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
@@ -668,7 +662,9 @@ function detectHumanTyping(): void {
         // marker expires ~HUMAN_TYPING_TTL_SEC after the last keystroke).
         const showing = humanIsTyping(sd!);
         if (showing !== humanChipShown) {
-            setTmuxStatus(name!, LOOP_STATUS.IDLE);
+            // #862 Slice 5 — setTmuxStatus(IDLE) retiré. paneBusy=false
+            // suffit pour que BarRenderer dérive idle.
+            setIpcStateTagInfo(null);
             humanChipShown = showing;
         }
     } catch { /* never throw from the detection poll */ }
@@ -865,7 +861,9 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     // leg (set-aware dedup). The legacy count watermark fallback was
     // dropped in #814 — its only writer wrote a file no one read.
     if (gateHash !== undefined) recordOpenWakeHash(sd!, gateHash);
-    setTmuxStatus(name!, LOOP_STATUS.BUSY);
+    // #862 Slice 5 — setTmuxStatus(BUSY) retiré. paneBusy=true via le
+    // pane watcher suffit.
+    setIpcStateTagInfo(null);
     log(`wake (${reason}) → '${phrase}'`);
     return true;
 }
@@ -966,10 +964,8 @@ async function mainSse(): Promise<void> {
                 // to preserve the last-known good snapshot — a stale
                 // count is less confusing than a missing segment.
                 if (events !== null || open !== null || backlog !== null) {
-                    setTmuxCounters(name!, { open, backlog, events });
-                    // #862 Slice 2 — mirror to ipcState so BarRenderer
-                    // observer pickup the same snapshot. Slice 3 fera le
-                    // flip writer-effectif (= setTmuxCounters dégagé).
+                    // #862 Slice 5 — setTmuxCounters legacy retiré ;
+                    // setIpcCounters seul, BarRenderer peint.
                     setIpcCounters({ open, backlog, events });
                 }
             } catch { /* counter sync best-effort */ }
@@ -1084,7 +1080,9 @@ async function mainSse(): Promise<void> {
         // idle-since → bar reads [idle], not [boot].
         if (readIdleSinceMs(sd!) !== null) {
             log("settleBoot: idle-since present → setTmuxStatus(idle)");
-            setTmuxStatus(name!, LOOP_STATUS.IDLE);
+            // #862 Slice 5 — setTmuxStatus(IDLE) retiré. paneBusy=false
+            // suffit pour que BarRenderer dérive idle.
+            setIpcStateTagInfo(null);
         } else {
             log("settleBoot: idle-since cleared after tryWake (wake fired?) — bar stays as set by wake path");
         }
@@ -1145,12 +1143,10 @@ async function mainSse(): Promise<void> {
         },
     });
     process.on("exit", () => loopServer.close());
-    // #652 Slice 6 — wire the HookService → bar subscriber. Currently
-    // only paints on UserPromptSubmit (→ BUSY) ; future slices can add
-    // SessionStart / Stop paints once the events carry the substate
-    // the existing hooks compute inline.
-    const hookBarSub = installHookBarSubscriber(name!);
-    process.on("exit", () => hookBarSub.close());
+    // #862 Slice 5 — `installHookBarSubscriber` retiré. La transition
+    // UserPromptSubmit → BUSY est dérivée par le BarRenderer depuis
+    // `paneBusy` (= pane watcher détecte busy → setIpcPaneBusy(true) →
+    // BarRenderer recompute → bg busy peint). Plus de wiring explicite.
     // #727 V1 Slice B — mirror hook events into the in-memory IPC state.
     // The dispatcher already emits SessionStart / Stop / UserPromptSubmit
     // on the HookService ; this subscriber translates them into the
@@ -1235,19 +1231,10 @@ async function mainSse(): Promise<void> {
     // through *ViaService helpers), (c) 1s safety tick for the wait_10m
     // countdown. Diff-guarded so we only spend a tmux set-option when the
     // rendered string actually changes.
-    let lastAfkPaint: string | null = null;
-    const repaintAfkState = (): void => {
-        try {
-            const next = afkStateChunkStr(sd!);
-            if (next === lastAfkPaint) return;
-            lastAfkPaint = next;
-            setTmuxAfkState(name!, next);
-        } catch { /* best-effort — bar paint must never crash the timer */ }
-    };
-    repaintAfkState();
-    const afkSub = getAfkService().subscribe(() => repaintAfkState());
-    const afkPaintTimer = setInterval(repaintAfkState, 1000);
-    process.on("exit", () => { try { afkSub(); } catch { /* ignore */ } clearInterval(afkPaintTimer); });
+    // #862 Slice 5 — `repaintAfkState` + le `setInterval(1000)` retirés.
+    // Le BarRenderer a son propre safety tick 1s qui catch le countdown
+    // AFK chip (`@cl_afk_state`) automatiquement via `afkStateChunkStr`
+    // dans `computeBarSnapshot`. Plus de double tick.
     // #862 Slice 1 — BarRenderer pur observer. Souscrit à `onIpcChanged`,
     // debounce 50ms, diff vs son lastSnapshot interne. Slice 1 ne paint
     // PAS tmux — il log les diffs via `logBarPaint` (writer=`observer:*`)
@@ -1258,7 +1245,8 @@ async function mainSse(): Promise<void> {
     barRenderer.start();
     process.on("exit", () => barRenderer.stop());
     const loopBus = new LoopStateBus();
-    loopBus.on("dispAfkChanged", () => repaintAfkState());
+    // #862 Slice 5 — `repaintAfkState` retiré ; BarRenderer reads
+    // `afkStateChunkStr` chaque tick (1s safety + onIpcChanged events).
     loopBus.on("transition", (_prev, next) => {
         loopServer.pushView(next);
         // #629 (xyss9z) : trace which writer drove the @cl_human change.
@@ -1305,7 +1293,9 @@ async function mainSse(): Promise<void> {
         try {
             // Idle is the right default at boot exit ; busy-detect by the
             // next probe cycle if claude is mid-turn.
-            setTmuxStatus(name!, LOOP_STATUS.IDLE);
+            // #862 Slice 5 — setTmuxStatus(IDLE) retiré. paneBusy=false
+            // suffit pour que BarRenderer dérive idle.
+            setIpcStateTagInfo(null);
         } catch { /* best-effort */ }
         // #848 — arm the one-shot post-boot reminder (per .aiball.yaml
         // `prompts.post_boot_skill_reminder`). The string is prepended
@@ -1432,16 +1422,9 @@ async function mainSse(): Promise<void> {
             try {
                 const info = paneMarkerBarInfo();
                 if (info !== lastPaintedBootInfo) {
-                    // #822 david `2y5fah` — paint on EVERY transition, including
-                    // `info → null` (= the resume/picker/compact transient ended).
-                    // Pre-fix the condition required `info` non-null, so once
-                    // we'd painted `[boot:resuming]` we'd never repaint until
-                    // settleBoot's BOOT_GRACE_TAIL_MS (10s) elapsed and flipped
-                    // the bar to IDLE — the bar stayed stuck on `[boot:resuming]`
-                    // for 10s after Resuming actually left the pane. Repaint
-                    // without the info suffix when info is null so the bar
-                    // shows bare `[boot]` during the tail.
-                    setTmuxStatus(name!, LOOP_STATUS.BOOT, info ?? undefined);
+                    // #862 Slice 5 — info suffix routé via ipc ; BarRenderer
+                    // compose `[boot:<info>]` automatiquement.
+                    setIpcStateTagInfo(info);
                     lastPaintedBootInfo = info;
                 }
             } catch { /* best-effort */ }
@@ -1511,7 +1494,8 @@ async function mainSse(): Promise<void> {
             const memoKey = `${view.phase}|${paneInfo ?? "-"}`;
             if (memoKey === lastPaintedPostBoot) return;
             if (paneInfo) {
-                setTmuxStatus(name!, view.phase, paneInfo);
+                // #862 Slice 5 — substate via ipc, BarRenderer compose le tag.
+                setIpcStateTagInfo(paneInfo);
             }
             // No-info path : let heartbeat repaint with fresh unread count.
             // Otherwise we'd race the count refresh + lose it.
@@ -1675,28 +1659,17 @@ async function mainSse(): Promise<void> {
             // this guard the segment cleared for ~5s whenever a busy phase
             // starved the HTTP client.
             if (events !== null || open !== null || backlog !== null) {
-                setTmuxCounters(name!, { open, backlog, events });
-                // #862 Slice 2 — mirror to ipcState pour BarRenderer observer.
+                // #862 Slice 5 — setIpcCounters seul, BarRenderer peint.
                 setIpcCounters({ open, backlog, events });
             }
         } catch { /* counters segment stays as-is */ }
         if (phase !== "boot") {
             try {
                 // #647 Slice 4 : pane-derived markers (screen-takeover or
-                // error) trump count/user as bar info — david `sr9kqw`
-                // wants `[busy:compacting]` / `[boot:picker:mode]` etc.
-                // visible. `paneMarkerBarInfo()` returns null when no
-                // marker is salient, falling back to the existing logic.
+                // error) trump count/user as bar info. #862 Slice 5 — info
+                // routé via ipc, BarRenderer compose `[busy:<info>]`.
                 const paneInfo = paneMarkerBarInfo();
-                if (paneInfo) {
-                    setTmuxStatus(name!, phase, paneInfo);
-                } else {
-                    // #745 phase B — the `user` chip used to fire here
-                    // when userIsTakingOver was fresh ; AFK SM now owns
-                    // the human-present signal (countdown chunk visible).
-                    // #800 9sy4t3 — count moved to @cl_counts (above).
-                    setTmuxStatus(name!, phase);
-                }
+                setIpcStateTagInfo(paneInfo);
             } catch { /* swallow — bar stays as-is */ }
         }
         // #B.177 B1: heartbeat push of current state to the daemon

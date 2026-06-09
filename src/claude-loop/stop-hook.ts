@@ -17,8 +17,8 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { LOOP_STATUS, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, pingsPath, readBusyDefer, paneShowsInterrupted, setTmuxStatus, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
-import { getIpcState } from "./ipc-state.js";
+import { MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, pingsPath, readBusyDefer, paneShowsInterrupted, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
+import { getIpcState, setIpcStateTagInfo } from "./ipc-state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
 import { CL_ENV } from "./env-vars.js";
@@ -175,7 +175,7 @@ function readPane(): string {
             // backoff window elapses (it gates on the idle marker).
             // #793 — idle-since lives in the bus (set via the Stop event
             // emitted to the timer below). No file marker anymore.
-            setTmuxStatus(name!, LOOP_STATUS.BUSY, `retry ${bo.attempts}`);
+            setIpcStateTagInfo(`retry ${bo.attempts}`);
             log(`  → ERROR-BACKOFF '${errId}' ${bo.ms}ms (attempt ${bo.attempts}) until=${bo.untilIso} became=busy:retry ${bo.attempts}`);
             emit();
         }
@@ -186,7 +186,7 @@ function readPane(): string {
             // Suppress wake — claude is doing something internal
             // (compacting, etc.) or blocked on backend. Surface the
             // SUB-STATE in the bar as a `busy:<special>` suffix.
-            setTmuxStatus(name!, LOOP_STATUS.BUSY, pane.special);
+            setIpcStateTagInfo(pane.special);
             log(`  → SUPPRESS (pane=${pane.special}) became=busy:${pane.special}`);
             emit();
         }
@@ -205,7 +205,7 @@ function readPane(): string {
             // #793 — idle-since lives in the bus (set via the Stop event
             // emitted to the timer below). No file marker anymore.
             const sub = interrupted ? "interrupted" : "user";
-            setTmuxStatus(name!, LOOP_STATUS.IDLE, sub);
+            setIpcStateTagInfo(sub);
             log(`  → SUPPRESS (human-typing or AFK hold) became=idle:${sub}`);
             emit();
         }
@@ -232,7 +232,7 @@ function readPane(): string {
                 at_ms: Date.now(),
                 busy_defer_until_ms: untilMs,
             });
-            setTmuxStatus(name!, LOOP_STATUS.IDLE, "wait");
+            setIpcStateTagInfo("wait");
             log(`  → BUSY-DEFER armed until=${new Date(untilMs).toISOString()} became=idle:wait`);
             emit();
         }
@@ -246,7 +246,7 @@ function readPane(): string {
         if (defer && defer.activeMs > 0) {
             // #793 — idle-since lives in the bus (set via the Stop event
             // emitted to the timer below). No file marker anymore.
-            setTmuxStatus(name!, LOOP_STATUS.IDLE, "wait");
+            setIpcStateTagInfo("wait");
             log(`  → SKIP (busy-defer ${defer.activeMs}ms remaining) became=idle:wait`);
             emit();
         }
@@ -296,7 +296,7 @@ function readPane(): string {
                     void phraseClient.recordBacklogWake(backlogTicketId).catch(() => {});
                 }
             });
-            setTmuxStatus(name!, LOOP_STATUS.BUSY);
+            setIpcStateTagInfo(null);
             log(`  → WAKE '${phrase}' became=busy`);
         } else {
             // Nothing to do — mark idle so the timer can take over.
@@ -304,7 +304,7 @@ function readPane(): string {
             // emitted to the timer below). No file marker anymore.
             // #345 B: garder le marqueur interrupted visible tant que le
             // pane le montre, même hors user-grace.
-            setTmuxStatus(name!, LOOP_STATUS.IDLE, interrupted ? "interrupted" : undefined);
+            setIpcStateTagInfo(interrupted ? "interrupted" : null);
             log(`  → IDLE (no work) became=idle${interrupted ? ":interrupted" : ""}`);
         }
     } catch (e) {

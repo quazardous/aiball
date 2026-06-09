@@ -39,7 +39,6 @@ import {
     canonicalCwd,
     DEFAULT_CHECK_CMD,
     isInternalCheckCmd,
-    LOOP_STATUS,
     MUX_CMD,
     STATE_ROOT,
     defaultPingsPath,
@@ -53,7 +52,6 @@ import {
     platePath,
     projectCwdInfo,
     readPlate,
-    setTmuxStatus,
     stateDirFor,
     timerLogPath,
     proxyAlivePath,
@@ -1062,7 +1060,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         "bind-key", "-T", "copy-mode", "MouseDragEnd1Pane",
         ...pipeArgs,
     ], { stdio: "ignore" });
-    setTmuxStatus(name, LOOP_STATUS.BOOT);
+    // #862 Slice 5 — setTmuxStatus(BOOT) retiré. Le timer démarre dans
+    // 5ms et son BarRenderer.start() peint l'initial boot. Sans seed
+    // initial, tmux laisse une bar grise au plus une frame avant que le
+    // timer prenne la main — acceptable.
 
     // Detached timer process. Inherits CL_* env via the env file
     // sourced in the child shell. nohup-like: ignore SIGHUP, detach.
