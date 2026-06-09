@@ -1068,10 +1068,25 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         "bind-key", "-T", "copy-mode", "MouseDragEnd1Pane",
         ...pipeArgs,
     ], { stdio: "ignore" });
-    // #862 Slice 5 — setTmuxStatus(BOOT) retiré. Le timer démarre dans
-    // 5ms et son BarRenderer.start() peint l'initial boot. Sans seed
-    // initial, tmux laisse une bar grise au plus une frame avant que le
-    // timer prenne la main — acceptable.
+    // #862 Slice 5 + david `<fix>` — seed BOOT inline (status-bg + @cl_*)
+    // pour couvrir la fenêtre cmdStart→BarRenderer.start (~1s : fork
+    // bash→tsx→node + boot timer). Sans seed, tmux affiche ses defaults
+    // (bar verte) jusqu'au 1er tick BarRenderer = flash visible. Le seed
+    // est minimal (couleurs canoniques inline, repaint par BarRenderer
+    // au 1er tick) — pas de réintroduction de setTmuxStatus legacy.
+    const seedOpt = (opt: string, val: string): void => {
+        spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
+    };
+    const bootBg = "colour178"; // jaune boot canonique (cf. AiballConfig.colors.boot_bg)
+    const bootFg = "colour16";  // noir bar_fg canonique
+    seedOpt("status-bg", bootBg);
+    seedOpt("status-fg", bootFg);
+    seedOpt("@cl_human", `#[fg=colour178,bg=colour16]boot`);
+    seedOpt("@cl_state", `#[fg=${bootFg}][boot]`);
+    seedOpt(
+        "status-left",
+        `#[bg=${bootBg}] #[fg=${bootBg},bg=colour16]▓▒░#[fg=colour15] claude-#{?@cl_human,#{@cl_human},#[fg=colour178#,bg=colour16]boot} #[fg=${bootBg},bg=colour16]░▒▓#[bg=${bootBg}]#{@cl_proxy}#[fg=${bootFg}] ${name} #{@cl_state}#{@cl_counts} `,
+    );
 
     // Detached timer process. Inherits CL_* env via the env file
     // sourced in the child shell. nohup-like: ignore SIGHUP, detach.
