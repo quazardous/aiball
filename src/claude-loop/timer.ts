@@ -45,7 +45,6 @@ import {
     createLoopServer,
     loopSockPath,
     readLoopStateInput,
-    clearResumePickers,
     setCompacting,
     setInterrupted,
     setPaneBusy,
@@ -206,10 +205,11 @@ try { writeFileSync(timerPidPath(sd!), `${process.pid}\n`); } catch { /* best ef
 // was `shouldArmAfk10mOnSettleBoot`, which is gone (user-grace already
 // silently gates wakes if user typed during boot). Kept the env var
 // `CL_WAIT` shape ; readers in the proxy still honor it.
-// #624 david `8pwvm3` : safety cap for settleBoot only (the
-// `boot-complete` marker is the authoritative end-of-boot signal).
-// Bumped from 60s → 300s so a slow resume picker never trips it.
-const BOOT_GRACE_MS = Math.max(0, cfg.boot_grace_seconds) * 1000;
+// #868 david `<chat>` : `BOOT_GRACE_MS` (= safety cap that drove
+// settleBoot) retired. `bus.bootEnded` + the post-bootEnded tail
+// grace are the only seal signals now. Watchers (paneReady /
+// resumePicker / paneCompacting) stretch the boot phase as long as
+// needed ; no force-seal cap.
 // #822 — extra grace window AFTER bootEnded before bootCompletePath is
 // actually sealed (and the bar flips to idle/busy). If a stretch
 // (resumePicker / paneCompacting / !paneReady) re-emerges during this
@@ -1058,95 +1058,15 @@ async function mainSse(): Promise<void> {
     // when the loop spawns (e.g. claude --resume scenario, or a
     // crashed-and-restarted loop).
     await tryWake("startup");
-    // #B.149: post-boot heuristic. Claude Code has no native "claude
-    // is at prompt" signal — for `--resume` the SessionStart hook
-    // fires BEFORE the user dismisses the picker, so we can't flip
-    // status there. After BOOT_GRACE_MS the timer assumes claude has
-    // settled, seeds the idle marker, and lets tryWake run normally
-    // (will wake if SSE has been silent but there's actually work).
-    // David: "on passe en idle avec un timeout court (60 sec par
-    // defaut), si le user fait pas de prompt on lance l'auto ping,
-    // si le user prompt on passe dasn la hook stop plus tard". A
-    // human typing in the boot window arms the AFK SM (NOT AFK 10m
-    // via the proxy) → the wake gate skips on `afkHoldActive`.
-    // #B.180: yaml-configurable via `.aiball.yaml claude_loop.boot_grace_seconds`.
-    // Env-var override read at boot (module-level `BOOT_GRACE_MS`); cli.ts
-    // writes the resolved value.
-    let bootSettled = false;
-    const settleBoot = async () => {
-        if (bootSettled) {
-            // #B.228: defensive — settleBoot is only invoked once via
-            // `setTimeout(BOOT_GRACE_MS)`, but log the re-entry guard
-            // just in case a future caller adds another trigger.
-            // (#714 retired the inline probe that used to flip this.)
-            log("settleBoot skipped — bootSettled already true");
-            return;
-        }
-        bootSettled = true;
-        // #624 david `8pwvm3` : settleBoot is now the SAFETY path. If the
-        // session-start-hook already signalled `setResumePicker(false)`
-        // → hook drove the transition (arm, setTmuxStatus, …). settleBoot
-        // becomes a no-op so we don't double-arm AFK at T+300s when the
-        // user has been working for 5 min.
-        // #840 `4z59jt` — IPC seul.
-        if (getIpcState().bootComplete) {
-            log("settleBoot skipped — boot-complete already signalled by session-start-hook");
-            return;
-        }
-        // #822 david — when the safety cap fires while a legitimate boot
-        // stretch is still up (picker session/mode, resuming transient, or
-        // first /compact mid-resume), DON'T force-exit : the user is just
-        // reading the picker / waiting for the compact. Defer the cap by
-        // another BOOT_GRACE_MS and let the stretch clear on its own. The
-        // cap remains a real safety net for the degenerate cases (claude
-        // hung mid-boot, hook crashed, etc.) — those have no stretch
-        // pending so the existing force-exit path runs.
-        const cur = readLoopStateInput(sd!);
-        if (cur.resumePickerActive || cur.paneCompacting || !cur.paneReady) {
-            log(`settleBoot deferred — stretch active (picker=${cur.resumePickerActive}, compacting=${cur.paneCompacting}, !paneReady=${!cur.paneReady})`);
-            bootSettled = false; // re-arm so the next tick can fire properly
-            setTimeout(() => { void settleBoot(); }, BOOT_GRACE_MS);
-            return;
-        }
-        log("boot grace elapsed (safety cap) — settling to idle/busy via check");
-        // Hook never fired (--resume aborted, picker stuck past 5 min,
-        // hook crashed). Drive the transition ourselves : sign boot-complete
-        // so the state machine flips out of boot, seed idle-since, try a
-        // wake. #629 david `y43etd` : DON'T auto-arm NOT AFK 10m
-        // anymore here — the AFK SM already arms it when the human
-        // types via the proxy. Forcing the bar to yellow `wait` at
-        // T+grace was intrusive ; bar stays green `loop`, F9 if the
-        // human wants a visible hold.
-        clearResumePickers(sd!);
-        // #629 david `8wgq7f` — setResumePicker no longer seals bootComplete
-        // (delegated to bus.on("bootEnded")). At the safety cap we WANT to
-        // force the exit regardless of pending stretches (Resuming…, etc.)
-        // because we've already burned bootGraceMs. #840 `4z59jt` — IPC seul.
-        setIpcBootComplete(true);
-        // #639 david `pn97zf` — same wait-mode contract as the bus.on("bootEnded")
-        // branch above. The bus path is the normal exit ; this safety cap
-        // fires only when the bus didn't (paneReady never became true).
-        // Keep the two paths consistent for the AFK arm.
-        if (cfg.wait) {
-            armAfkViaService(sd!);
-            log("settleBoot: --wait → armed NOT AFK 10m (via service)");
-        }
-        // #793 — seed idle-since on the bus (no file). tryWake's gate
-        // passes; tryWake flips to busy on wake or leaves it on idle.
-        setIpcIdleSince(Date.now());
-        await tryWake("boot-settle");
-        // If tryWake didn't fire (no work), the bus still carries
-        // idle-since → bar reads [idle], not [boot].
-        if (readIdleSinceMs(sd!) !== null) {
-            log("settleBoot: idle-since present → setTmuxStatus(idle)");
-            // #862 Slice 5 — setTmuxStatus(IDLE) retiré. paneBusy=false
-            // suffit pour que BarRenderer dérive idle.
-            setIpcStateTagInfo(null);
-        } else {
-            log("settleBoot: idle-since cleared after tryWake (wake fired?) — bar stays as set by wake path");
-        }
-    };
-    setTimeout(() => { void settleBoot(); }, BOOT_GRACE_MS);
+    // #868 david `<chat>` : the `settleBoot` BOOT_GRACE_MS (60s) safety
+    // cap is gone. With the modern watchers (PaneWatcher etc.), the
+    // pane watcher detects the prompt → `bus.bootEnded` → 10s tail
+    // grace → seal. settleBoot was redundant : skipped when bootComplete
+    // was already true (= happy case), deferred +60s on stretches
+    // (= also happy), force-sealed only in the rare degenerate "claude
+    // hung without rendering its prompt" case. If genuinely hung → the
+    // bar now stays yellow indefinitely (= honest visual signal vs a
+    // fake seal that flipped the bar green over a stuck claude).
     // #264: near-live human-typing detection poll (bicolor bar chip).
     // Independent of the wake heartbeat — fast cadence so the chip
     // tracks typing closely. Fail-safe (detectHumanTyping never throws).
