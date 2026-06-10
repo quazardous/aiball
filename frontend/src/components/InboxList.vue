@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import Tag from "primevue/tag";
 import Button from "primevue/button";
 import Checkbox from "primevue/checkbox";
@@ -53,6 +54,48 @@ function filtersAreNarrowed(): boolean {
         || props.onlyOpen === false;
 }
 
+// #842 david `qfhu33` : la recherche regroupe par ticket. Plusieurs comment
+// hits du même ticket = une seule ligne head + sous-lignes per comment.
+// Le head est le ticket hit si présent (= match dans le body/titre du
+// ticket), sinon synthétisé à partir du premier comment hit.
+interface SearchGroup {
+    ticket_id: number;
+    title: string | null;
+    project: string;
+    status: string;
+    by_agent: string | null;
+    ticketHit: SearchHit | null;
+    commentHits: SearchHit[];
+}
+const groupedSearchHits = computed<SearchGroup[]>(() => {
+    const groups = new Map<number, SearchGroup>();
+    for (const h of props.searchHits) {
+        let g = groups.get(h.ticket_id);
+        if (!g) {
+            g = {
+                ticket_id: h.ticket_id,
+                title: h.title,
+                project: h.project,
+                status: h.status,
+                by_agent: h.by_agent,
+                ticketHit: null,
+                commentHits: [],
+            };
+            groups.set(h.ticket_id, g);
+        }
+        if (h.kind === "ticket") {
+            g.ticketHit = h;
+            // Le ticket hit porte le titre canonique
+            g.title = h.title ?? g.title;
+            g.status = h.status;
+            g.by_agent = h.by_agent ?? g.by_agent;
+        } else {
+            g.commentHits.push(h);
+        }
+    }
+    return [...groups.values()];
+});
+
 // #B.255 bwsbc4: once at least one row is selected, the list is in
 // "selection mode" — a normal tap toggles selection instead of
 // opening the ticket. Drop to zero selected and tap reverts to its
@@ -95,30 +138,55 @@ function onRowClick(r: InboxRow) {
         />
     </div>
 
-    <a
-        v-for="hit in searchHits"
-        :key="`${hit.kind}-${hit.id}`"
-        :href="`/b/${hit.kind === 'comment' && hit.hashid ? hit.hashid : hit.ticket_id}`"
-        class="search-hit"
-        @click.prevent="emit('open-hit', hit)"
+    <!-- #842 Phase 2 : grouping par ticket. Head = le ticket hit (si match
+         body/titre du ticket) OU la première sous-ligne synthétique ; les
+         comment hits du ticket sont sous-lignes indentées. -->
+    <div
+        v-for="group in groupedSearchHits"
+        :key="group.ticket_id"
+        class="search-group"
     >
-        <div class="search-hit__head">
-            <span class="ticket-id">
-                {{ hit.kind === 'comment' ? `#C.${hit.hashid ?? hit.id}` : formatTicketRef(hit.ticket_id) }}
-            </span>
-            <Tag :value="hit.project" severity="info" style="font-size: 0.7rem" />
-            <Tag
-                v-if="hit.status !== 'approved'"
-                :value="hit.status"
-                :severity="STATUS_SEVERITY[hit.status]"
-                style="font-size: 0.7rem"
-            />
-            <span v-if="hit.title" class="search-hit__title">{{ hit.title }}</span>
-            <span class="spacer" />
-            <span class="search-hit__by" v-if="hit.by_agent">by {{ hit.by_agent }}</span>
+        <a
+            v-if="group.ticketHit"
+            :href="`/b/${group.ticket_id}`"
+            class="search-hit"
+            @click.prevent="emit('open-hit', group.ticketHit)"
+        >
+            <div class="search-hit__head">
+                <span class="ticket-id">{{ formatTicketRef(group.ticket_id) }}</span>
+                <Tag :value="group.project" severity="info" style="font-size: 0.7rem" />
+                <Tag
+                    v-if="group.status !== 'approved'"
+                    :value="group.status"
+                    :severity="STATUS_SEVERITY[group.status as keyof typeof STATUS_SEVERITY]"
+                    style="font-size: 0.7rem"
+                />
+                <span v-if="group.title" class="search-hit__title">{{ group.title }}</span>
+                <span class="spacer" />
+                <span class="search-hit__by" v-if="group.by_agent">by {{ group.by_agent }}</span>
+            </div>
+            <div class="search-hit__snippet" v-html="group.ticketHit.snippet" />
+        </a>
+        <div v-else class="search-group__head-only">
+            <span class="ticket-id">{{ formatTicketRef(group.ticket_id) }}</span>
+            <Tag :value="group.project" severity="info" style="font-size: 0.7rem" />
+            <span v-if="group.title" class="search-hit__title">{{ group.title }}</span>
         </div>
-        <div class="search-hit__snippet" v-html="hit.snippet" />
-    </a>
+        <a
+            v-for="hit in group.commentHits"
+            :key="`comment-${hit.id}`"
+            :href="`/b/${hit.hashid ?? hit.id}`"
+            class="search-hit search-hit--comment"
+            @click.prevent="emit('open-hit', hit)"
+        >
+            <div class="search-hit__sub">
+                <span class="ticket-id">↪ #C.{{ hit.hashid ?? hit.id }}</span>
+                <span class="spacer" />
+                <span class="search-hit__by" v-if="hit.by_agent">by {{ hit.by_agent }}</span>
+            </div>
+            <div class="search-hit__snippet" v-html="hit.snippet" />
+        </a>
+    </div>
 
     <ListRow
         v-if="!searchActive"
@@ -439,6 +507,35 @@ function onRowClick(r: InboxRow) {
     color: var(--p-text-color);
     padding: 0 0.1rem;
     border-radius: 2px;
+}
+/* #842 Phase 2 — grouping ticket-oriented. */
+.search-group {
+    border-bottom: 1px solid var(--p-content-border-color);
+}
+.search-group__head-only {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.7rem 0.3rem;
+    font-size: 0.9rem;
+}
+.search-group .search-hit {
+    border-bottom: none;
+}
+.search-hit--comment {
+    padding-left: 1.8rem;
+    background: color-mix(in srgb, var(--p-surface-100) 40%, transparent);
+}
+.search-hit--comment .search-hit__snippet {
+    padding-left: 0.2rem;
+}
+.search-hit__sub {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.82rem;
+    color: var(--p-text-muted-color);
+    margin-bottom: 0.25rem;
 }
 /* #542 — reporter chip dans la chip-line (post-tags). Discret, italic muted,
    pas de fond — c'est de l'info au repos, pas un Tag importable. */
