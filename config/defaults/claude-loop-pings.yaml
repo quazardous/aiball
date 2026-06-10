@@ -146,14 +146,12 @@ prompts:
     hint: "btw, {count} open PR(s) still un-merged."
     imperative: "**STOP**: {count} open PR(s) not merged — resolve before new work."
 
-  # #848 — one-shot prompt fired at boot exit (after the tail-grace seal).
-  # Prepended to the boot-ended-drain wake so the agent gets a single combined
-  # prompt instead of two send-keys back-to-back. Empty string → no injection
-  # (opt-out, default).
-  # #882 david : la boot-ended-drain wake carry déjà une ref (commentaire FIFO)
-  # = le skill reminder était redondant ; default vide. Set per-project via
-  # `.aiball.yaml` si jamais utile.
-  post_boot_skill_reminder: ""
+  # #848 david `chkb5z` — standalone post-boot inject. Stash au boot seal,
+  # injecté via sendKeys séparé quand claude devient stable idle (cf.
+  # IdleController idle:settled emit). Pas prepend (= ancien mécanisme
+  # `121a042` qui leakait sur d'autres messages, désactivé en #882).
+  # Empty string → opt-out. Override per-project via `.aiball.yaml`.
+  post_boot_skill_reminder: "Use the /aiball skill to triage your queue. Check `unread` and `actionable` first — handle pending pings before moving on."
 
 # Ticket-text formatting patterns (#B.235). Linkifies refs like #B.123,
 # #C.<hashid>, @mention in ticket bodies and comments. Lives in the same

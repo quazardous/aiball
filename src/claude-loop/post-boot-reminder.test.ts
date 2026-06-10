@@ -21,16 +21,16 @@ import {
 const REPO_ROOT = join(import.meta.dirname, "../..");
 const DEFAULTS_YAML = join(REPO_ROOT, "config/defaults/claude-loop-pings.yaml");
 
-test("#882 defaults: post_boot_skill_reminder slot defaults to empty (no auto-injection)", () => {
-    // #882 david : la boot-ended-drain wake carry déjà une ref FIFO ; le skill
-    // reminder par défaut prependait du texte redondant. Default = empty.
-    // Per-project override via .aiball.yaml si jamais utile.
+test("#848 chkb5z defaults: post_boot_skill_reminder a un texte non-vide (standalone inject)", () => {
+    // #848 david `chkb5z` : default revient string non-vide. L'inject est
+    // standalone (sendKeys séparé sur idle:settled), pas prepend → pas de
+    // leaking sur d'autres messages. Opt-out via .aiball.yaml empty string.
     const map = loadPromptsFromYaml(DEFAULTS_YAML);
     const rendered = renderSlot(map, "post_boot_skill_reminder", {}, "");
-    assert.equal(
-        rendered,
-        "",
-        "default reminder should be empty (opt-in via per-project override)",
+    assert.ok(rendered.length > 0, "default reminder should be non-empty");
+    assert.ok(
+        rendered.toLowerCase().includes("aiball"),
+        `default reminder should mention "aiball" ; got: ${rendered.slice(0, 120)}`,
     );
 });
 

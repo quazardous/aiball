@@ -446,15 +446,9 @@ async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessag
         process.env.AIBALL_PROJECT ?? null,
         pingsPath(sd!),
     );
-    // #848 — prepend the one-shot post-boot reminder armed by
-    // `onFreshBootSeal` (#872 Phase 3 : ex-`performBootSeal`). The reminder
-    // rides on the boot-ended-drain wake (= next wake after seal), not a
-    // separate send-keys, to avoid back-to-back prompts confusing the agent.
-    if (pendingBootPromptPrefix !== null) {
-        result.phrase = `${pendingBootPromptPrefix} ${result.phrase}`;
-        log(`pickPhrase: prepended post-boot reminder (${pendingBootPromptPrefix.length} chars)`);
-        pendingBootPromptPrefix = null;
-    }
+    // #848 david `chkb5z` — le post-boot reminder n'est PAS prepended.
+    // Inject standalone via `idleActor.on("idle:settled")` ; pickPhrase
+    // ne touche plus à `postBootInjectText`.
     return result;
 }
 
@@ -799,14 +793,14 @@ function client(): AiballClient {
 // rôle de mutex, et la cooldown post-fire (= WAKE_COALESCE_WINDOW_MS)
 // est encodée en state au lieu de via `armBusyDefer`.
 
-// #848 — post-boot prompt prefix. `onFreshBootSeal` (#872 Phase 3 :
-// ex-`performBootSeal`) renders the `post_boot_skill_reminder` slot
-// once per session and stashes the result here ; `pickPhrase` prepends
-// it to the next wake phrase (which is the boot-ended-drain by
-// construction, since onFreshBootSeal fires tryWake immediately after
-// stashing) and clears. `postBootRemindersSent` enforces the one-shot
-// — a compact won't re-fire the reminder.
-let pendingBootPromptPrefix: string | null = null;
+// #848 (david `chkb5z`) — standalone post-boot inject. Au lieu de
+// prepend à un wake (= ancien mécanisme `121a042` qui leakait sur
+// d'autres messages), on attend `idle:settled` après `boot:sealed` et
+// on fire un sendKeys séparé avec juste le prompt. Garanties :
+//   - one-shot par session (`postBootRemindersSent` flag)
+//   - standalone (= jamais prepended à autre message)
+//   - skip si claude jamais idle stable (= force injection évitée)
+let postBootInjectText: string | null = null;
 let postBootRemindersSent = false;
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint, panicMode = false): Promise<boolean> {
     const wakeSvc = getWakeService();
@@ -1353,20 +1347,21 @@ async function mainSse(): Promise<void> {
         // #862 Slice 5 — setTmuxStatus(IDLE) retiré ; paneBusy=false suffit
         // pour que BarRenderer dérive idle au prochain compute.
         try { setIpcStateTagInfo(null); } catch { /* best-effort */ }
-        // #848 — arm the one-shot post-boot reminder (per .aiball.yaml
-        // `prompts.post_boot_skill_reminder`). Set-and-forget for the
-        // session (compact/resume won't re-fire).
+        // #848 david `chkb5z` — arm the standalone post-boot inject.
+        // Pas prepend : on stash le texte et `idleActor.on("idle:settled")`
+        // fire un sendKeys séparé quand claude est stable idle (= FIFO
+        // drain terminé). Set-and-forget pour la session.
         if (!postBootRemindersSent) {
             postBootRemindersSent = true;
             try {
                 const promptMap = mergePrompts(
                     loadPromptsFromYaml(pingsPath(sd!)),
-                    {}, // per-project overrides are merged at pings.yaml load
+                    {},
                 );
                 const reminder = renderSlot(promptMap, "post_boot_skill_reminder", {}, "");
                 if (reminder.length > 0) {
-                    pendingBootPromptPrefix = reminder;
-                    log(`post-boot reminder armed (${reminder.length} chars) — will prepend to drain wake`);
+                    postBootInjectText = reminder;
+                    log(`post-boot reminder armed (${reminder.length} chars) — will inject on next idle:settled`);
                 }
             } catch (e) {
                 log(`post-boot reminder load failed (ignored): ${String(e)}`);
@@ -1588,9 +1583,19 @@ async function mainSse(): Promise<void> {
         // #805 david : "si on est idle depuis plus de N secondes" → drain
         // la FIFO sans dépendre de SSE/heartbeat aléatoires. Idle stable
         // = signal pour pousser tryWake.
+        // #848 david `chkb5z` : aussi le trigger pour le standalone
+        // post-boot inject (one-shot per session, jamais prepended à un
+        // wake).
         idleActor.on("idle:settled", (ev) => {
-            log(`idleMachine: idle:settled idleSinceMs=${ev.idleSinceMs} settleMs=${ev.settleMs} → tryWake`);
-            void tryWake("idle:settled");
+            log(`idleMachine: idle:settled idleSinceMs=${ev.idleSinceMs} settleMs=${ev.settleMs}`);
+            if (postBootInjectText !== null) {
+                const text = postBootInjectText;
+                postBootInjectText = null;
+                log(`post-boot reminder: injecting standalone (${text.length} chars)`);
+                void sendKeys(text);
+            } else {
+                void tryWake("idle:settled");
+            }
         });
     }
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
