@@ -54,7 +54,6 @@ import {
     setResuming,
     MUX_CMD,
     buildContextPhrase,
-    commitDispAfkIfDue,
     injectWakePhrase,
     checkHasWork,
     readIdleSinceMs,
@@ -100,6 +99,7 @@ import {
 import { PromptWatcher, BusyWatcher, InterruptedWatcher } from "./pane-watchers/runtime-watchers.js";
 import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
+import { getAfkService } from "./afk-service.js";
 import { probeParentTmuxAtBoot, installParentTmuxWatchdog, sweepSiblingTimers } from "./parent-liveness.js";
 import { buildRespawnEnv, parseRespawnState, RESPAWN_STATE_ENV_VAR } from "./respawn-state.js";
 import { createActor, type ActorRefFrom } from "xstate";
@@ -112,6 +112,7 @@ import {
     onIpcChanged,
     setIpcBusyDeferUntil,
     setIpcAfk,
+    setIpcDispAfk,
     setIpcBootComplete,
     setIpcBootDeadlineMs,
     setIpcCounters,
@@ -1375,6 +1376,62 @@ async function mainSse(): Promise<void> {
         }
     }, 1000);
     process.on("exit", () => { clearInterval(bootDeadlineTimer); bootActor?.stop(); });
+    // AfkController XState actor wiring. Le subscriber pont l'état actor →
+    //   ipcState (`afkMode`/`afkExpiryMs` committed + `dispAfkMode`/`dispAfkExpiryMs`
+    //   instant chip). EXPIRY_REACHED est pumpé par un setInterval 1s quand le
+    //   wait_10m countdown expire — match BootMachine pattern (machine pure +
+    //   external pump). Respawn handoff : si ipc.afkMode déjà set au boot
+    //   (cf. respawn block plus haut), on sync l'acteur via HARD_* events.
+    //   See `docs/SM-NETWORK.md` for the bridge + pump pattern.
+    {
+        const afkSvc = getAfkService();
+        const afkActor = afkSvc.getActor();
+        // Respawn handoff sync : the actor starts in "off" but ipc may
+        // already carry a wait_X mode from the handoff block. Send HARD_*
+        // to align the actor (synchronously) before attaching the bridge,
+        // so the first subscriber fire matches what's already in ipc.
+        const respawnIpc = getIpcState();
+        if (respawnIpc.afkMode === "wait_10m" && respawnIpc.afkExpiryMs !== null) {
+            afkSvc.set10m(respawnIpc.afkExpiryMs);
+            log(`afkMachine: respawn handoff wait_10m (expiry=${new Date(respawnIpc.afkExpiryMs).toISOString()})`);
+        } else if (respawnIpc.afkMode === "wait_inf") {
+            afkSvc.setInf();
+            log("afkMachine: respawn handoff wait_inf");
+        }
+        // Bridge actor → ipcState. Runs on every snapshot (initial sync
+        // delivery + every transition).
+        afkActor.subscribe((snap) => {
+            const ctx = snap.context;
+            // Committed slice : what consumers (wake gate, isAfkActive) read.
+            setIpcAfk(ctx.afkMode, ctx.afkExpiryMs);
+            // Display slice : what the chip reads. Null when in a committed
+            // state (chip falls back to committed afkMode) ; set when in
+            // pending_X (chip shows the upcoming mode for instant feedback).
+            const v = snap.value;
+            if (v === "pending_off") {
+                setIpcDispAfk({ mode: "off", expiryMs: null, commitAtMs: 0 });
+            } else if (v === "pending_10m") {
+                setIpcDispAfk({ mode: "wait_10m", expiryMs: ctx.dispExpiryMs, commitAtMs: 0 });
+            } else if (v === "pending_inf") {
+                setIpcDispAfk({ mode: "wait_inf", expiryMs: null, commitAtMs: 0 });
+            } else {
+                setIpcDispAfk(null);
+            }
+        });
+        // EXPIRY_REACHED pump : poll wall-clock, send when wait_10m crosses
+        // its committed expiry. Machine is pure (no Date.now()), pump lives
+        // here — same shape as bootDeadlineTimer.
+        const afkExpiryTimer = setInterval(() => {
+            const snap = afkActor.getSnapshot();
+            if (snap.value !== "wait_10m") return;
+            const exp = snap.context.afkExpiryMs;
+            if (exp !== null && Date.now() >= exp) {
+                afkActor.send({ type: "EXPIRY_REACHED" });
+                log(`afkMachine: EXPIRY_REACHED (wait_10m expired at ${new Date(exp).toISOString()})`);
+            }
+        }, 1000);
+        process.on("exit", () => { clearInterval(afkExpiryTimer); });
+    }
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
     // toutes les 5s via la même fonction pure que la garde boot-time
     // (#859). Quand le parent est mort (loop killé, pane fermé, etc.),
@@ -1559,13 +1616,9 @@ async function mainSse(): Promise<void> {
     // Also acts as a safety net for any external write that bypassed the
     // ipc bus (= file shadow written outside the timer process, rare).
     setInterval(pushViewIfChanged, 1000);
-    // #751 htwguc — flush a debounced `dispAfk` toggle into `afk` via
-    // the *ViaService helpers once the 3s window elapses. Tick at 1s
-    // so the late-commit delay never exceeds 1s. The helpers update
-    // AfkService observable → fires the chip painter via `afkSub`.
-    setInterval(() => {
-        commitDispAfkIfDue(sd!).catch(() => { /* best-effort */ });
-    }, 1000);
+    // AfkController acteur (`after(debounce)` interne) handles the F9
+    // toggle commit — `commitDispAfkIfDue` setInterval retiré. Le pump
+    // EXPIRY_REACHED vit dans le bloc AfkController plus haut.
     // #722 david — 2-rate pane-probe driven by `shouldPollFast(input)` via
     // the bus `pollFast` event. Default cadence is SLOW (~1s) ; when ANY
     // of {boot, busy, input-hot} flips true the probe re-arms to FAST

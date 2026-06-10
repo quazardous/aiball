@@ -11,7 +11,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loopStartTsPath } from "./state.js";
 import {
-    getIpcDispAfk,
     getIpcState,
     setIpcAfk,
     setIpcBootComplete,
@@ -19,11 +18,15 @@ import {
     resetIpcStateForTests,
 } from "./ipc-state.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
+import { getAfkService, resetAfkServiceForTests } from "./afk-service.js";
 
 // #733 V2 — also resets `ipcState` so `setIpcPaneReady` from a previous
-// `seedPostBoot` doesn't leak into the next test.
+// `seedPostBoot` doesn't leak into the next test. Also resets the
+// AfkService singleton so the actor doesn't carry state across tests
+// (#876 — AfkController is the source of truth for the AFK SM).
 function tmp(): string {
     resetIpcStateForTests();
+    resetAfkServiceForTests();
     return mkdtempSync(join(tmpdir(), "proxy-event-test-"));
 }
 
@@ -62,51 +65,50 @@ test("#633F dispatch typing during boot → no arm (state.inBootGrace)", () => {
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F + #751 htwguc dispatch afk_key from off → wait_10m (pending in dispAfk, afk file untouched)", () => {
+test("#876 dispatch afk_key from off → pending_10m (actor in pending, committed unchanged)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "wait_10m" });
-        // #751 — committed afkMode UNTOUCHED during the debounce window.
-        assert.equal(getIpcState().afkMode, null, "committed afkMode unchanged during debounce");
-        // dispAfk reflects the user's pending choice.
-        const pending = getIpcDispAfk();
-        assert.ok(pending, "dispAfk is set");
-        assert.equal(pending!.mode, "wait_10m");
-        assert.ok(pending!.commitAtMs > Date.now(), "commitAtMs in the future");
+        // Committed afkMode UNTOUCHED during the debounce window — the
+        // actor is in `pending_10m` so context.afkMode is still "off".
+        const snap = getAfkService().getActor().getSnapshot();
+        assert.equal(snap.value, "pending_10m");
+        assert.equal(snap.context.afkMode, "off");
+        assert.ok(snap.context.dispExpiryMs !== null, "dispExpiryMs hint set");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F + #751 htwguc dispatch afk_key from wait_10m → wait_inf (pending in dispAfk, committed unchanged)", () => {
+test("#876 dispatch afk_key from wait_10m → pending_inf (committed wait_10m unchanged during debounce)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
         const expiryMs = Date.now() + 600_000;
+        // Seed BOTH actor (sole source of truth) AND ipc (back-compat reads).
+        getAfkService().set10m(expiryMs);
         setIpcAfk("wait_10m", expiryMs);
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "wait_inf" });
-        // committed unchanged
-        const ipc = getIpcState();
-        assert.equal(ipc.afkMode, "wait_10m");
-        assert.equal(ipc.afkExpiryMs, expiryMs);
-        const pending = getIpcDispAfk();
-        assert.ok(pending);
-        assert.equal(pending!.mode, "wait_inf");
+        const snap = getAfkService().getActor().getSnapshot();
+        assert.equal(snap.value, "pending_inf");
+        // Committed unchanged
+        assert.equal(snap.context.afkMode, "wait_10m");
+        assert.equal(snap.context.afkExpiryMs, expiryMs);
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F + #751 htwguc dispatch afk_key from wait_inf → off (pending in dispAfk, committed unchanged)", () => {
+test("#876 dispatch afk_key from wait_inf → pending_off (committed wait_inf unchanged)", () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
+        getAfkService().setInf();
         setIpcAfk("wait_inf", null);
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "afk_key", now_ms: Date.now() });
         assert.deepEqual(v, { kind: "afk-toggled", nextMode: "off" });
-        assert.equal(getIpcState().afkMode, "wait_inf");
-        const pending = getIpcDispAfk();
-        assert.ok(pending);
-        assert.equal(pending!.mode, "off");
+        const snap = getAfkService().getActor().getSnapshot();
+        assert.equal(snap.value, "pending_off");
+        assert.equal(snap.context.afkMode, "wait_inf");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
@@ -158,7 +160,6 @@ test("#633F dispatch unknown marker name → returns unknown verdict", () => {
 });
 
 // #653 step 1 — AFK marker events from the proxy update AfkService.
-import { getAfkService, resetAfkServiceForTests } from "./afk-service.js";
 
 test("#653 dispatch set_afk_10m → AfkService.set10m, returns afk-service-set", () => {
     const sd = tmp();

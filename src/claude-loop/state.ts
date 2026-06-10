@@ -12,12 +12,11 @@
 import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
 import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
+import { getAfkService } from "./afk-service.js";
 import {
-    getIpcDispAfk,
     getIpcState,
     setIpcAfk,
     setIpcBusyDeferUntil,
-    setIpcDispAfk,
     setIpcDrainedState,
     setIpcHumanTypingAtMs,
     setIpcLastOpenWakeHash,
@@ -770,70 +769,39 @@ export function touchHumanTyping(_sd: string): void {
 export const AFK_DEBOUNCE_MS = 3000;
 
 export function toggleAfk(sd: string, _seconds = 600): void {
-    void _seconds; // legacy arg kept ; commit uses default 600
-    void sd; // sd not needed — all state lives in ipcState now
-    // #751 htwguc qb7zs6 — toggle cycle reads the CURRENT VISIBLE state
-    // (= dispAfk if a pending is in flight, else committed afkMode).
-    // Computes the next kind, writes `dispAfk` (pure in-memory).
-    // No stash : qb7zs6 semantic is that a cycle ending on the SAME kind
-    // as committed is a true noop at commit time (= the running timer
-    // is preserved naturally because we never re-arm). Cycle ending on
-    // a DIFFERENT kind = fresh state with default 10min for wait_10m.
-    const ipc = getIpcState();
-    const pending = getIpcDispAfk();
-    const curMode: "off" | "wait_10m" | "wait_inf" = pending
-        ? pending.mode
-        : (ipc.afkMode ?? "off");
+    void _seconds; // legacy arg kept for signature back-compat
+    void sd;       // sd not needed — actor owns the AFK lifecycle
+    // F9 cycle : read the AfkController actor snapshot to determine the
+    // currently displayed mode (= committed mode if no pending, else the
+    // pending target). Compute the next kind and send the matching ARM_X
+    // debounced event ; the actor's `after(debounce)` commits it. NOOP
+    // same-kind is encoded in the machine via the `committedIsWait10m`
+    // guard on the `pending_10m → wait_10m` transition.
+    const svc = getAfkService();
+    const snap = svc.getActor().getSnapshot();
+    const v = String(snap.value);
+    const curDispMode: "off" | "wait_10m" | "wait_inf" =
+        v === "off" || v === "pending_off" ? "off"
+        : v === "wait_10m" || v === "pending_10m" ? "wait_10m"
+        : "wait_inf";
     let nextMode: "off" | "wait_10m" | "wait_inf";
-    if (curMode === "off") nextMode = "wait_10m";
-    else if (curMode === "wait_10m") nextMode = "wait_inf";
+    if (curDispMode === "off") nextMode = "wait_10m";
+    else if (curDispMode === "wait_10m") nextMode = "wait_inf";
     else nextMode = "off";
-    // For the chip display countdown : if the cycle returns to the
-    // committed wait_10m kind, mirror the committed expiry so the chip
-    // shows the running timer (5m - elapsed). If the cycle picks a
-    // different kind, show the would-be-fresh wait_10m expiry (10min)
-    // — but the commit may still no-op if final equals committed.
-    const nextExpiryMs = nextMode === "wait_10m"
-        ? (ipc.afkMode === "wait_10m" && ipc.afkExpiryMs !== null
-            ? ipc.afkExpiryMs                            // mirror running timer
-            : Date.now() + 600_000)                      // fresh 10 min
-        : null;
-    setIpcDispAfk({
-        mode: nextMode,
-        expiryMs: nextExpiryMs,
-        commitAtMs: Date.now() + AFK_DEBOUNCE_MS,
-    });
-}
-
-/** #751 htwguc qb7zs6 — flush `dispAfk` into `afk` via the *ViaService
- *  helpers once `commitAtMs <= now`. Called by the timer's 1s tick.
- *  Returns true when the dispAfk slot was consumed (committed OR noop'd).
- *
- *  qb7zs6 NOOP semantic : if the final pending kind equals the committed
- *  afkMode, DO NOT re-arm — the running timer (wait_10m countdown) keeps
- *  going on its original course. Just clear dispAfk. This is the "vrai
- *  noop" : F9 × 3 sous 3s sur un wait_10m → cycle visible, ipc.afkExpiryMs
- *  intact (= countdown poursuit sa course initiale).
- *
- *  Dynamic-imports the helpers to side-step the state.ts ↔
- *  afk-service-sync.ts circular dep without bypassing AfkService. */
-export async function commitDispAfkIfDue(sd: string): Promise<boolean> {
-    const pending = getIpcDispAfk();
-    if (!pending) return false;
-    if (pending.commitAtMs > Date.now()) return false;
-    const ipc = getIpcState();
-    const committed = ipc.afkMode ?? "off";
-    if (pending.mode === committed) {
-        // Vrai noop : cycle revenu au même kind, timer interne intact.
-        setIpcDispAfk(null);
-        return true;
+    if (nextMode === "wait_10m") {
+        // Mirror the committed expiry if cycle returns to wait_10m
+        // (= the running timer continues on its course post-NOOP) ;
+        // otherwise hint the fresh 10min expiry.
+        const ctx = snap.context;
+        const expiryMsHint = ctx.afkMode === "wait_10m" && ctx.afkExpiryMs !== null
+            ? ctx.afkExpiryMs
+            : Date.now() + 600_000;
+        svc.arm10m(expiryMsHint);
+    } else if (nextMode === "wait_inf") {
+        svc.armInf();
+    } else {
+        svc.armOff();
     }
-    const { armAfkViaService, setAfkInfViaService, clearAfkViaService } = await import("./afk-service-sync.js");
-    if (pending.mode === "off") clearAfkViaService(sd);
-    else if (pending.mode === "wait_inf") setAfkInfViaService(sd);
-    else armAfkViaService(sd, 600);
-    setIpcDispAfk(null);
-    return true;
 }
 
 /** #627 — read every state-dir marker + env knob into a `LoopStateInput`

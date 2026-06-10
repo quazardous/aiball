@@ -24,6 +24,7 @@ import {
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
+import { getAfkService } from "./afk-service.js";
 import { getIpcState, setIpcLastWakeAtMs, setIpcWakeInFlightAtMs, setIpcWakeRequested } from "./ipc-state.js";
 import { WAKE_IN_FLIGHT_TTL_MS } from "./state.js";
 import { getHookService, type HookEvent } from "./hook-service.js";
@@ -78,15 +79,18 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
         }
         if (kind === "keystroke" && eventKind === "afk_key") {
             // F9 cycles 3 states (off → 10m → ∞ → off). No boot guard :
-            // the user explicitly pressed F9.
-            // #751 htwguc — toggleAfk now writes `dispAfk` (in-memory pending) ;
-            // committed `afkMode` won't reflect the new intent for 3s.
-            // The verdict.nextMode should name the USER'S CHOICE (= the
-            // pending kind), so we read `dispAfkMode` and fall back to
-            // committed when no toggle is in flight (= no pending).
+            // the user explicitly pressed F9. #876 — toggleAfk sends an
+            // ARM_X debounced event to the AfkController actor. Read the
+            // resulting snapshot to surface the user's choice (= the
+            // pending mode while still in debounce, the committed mode
+            // once the 3s window elapses).
             toggleAfk(sd);
-            const input = readLoopStateInput(sd);
-            const nextMode = (input.dispAfkMode ?? input.afkMode) as "off" | "wait_10m" | "wait_inf";
+            const snap = getAfkService().getActor().getSnapshot();
+            const v = String(snap.value);
+            const nextMode: "off" | "wait_10m" | "wait_inf" =
+                v === "off" || v === "pending_off" ? "off"
+                : v === "wait_10m" || v === "pending_10m" ? "wait_10m"
+                : "wait_inf";
             return { kind: "afk-toggled", nextMode };
         }
         if (kind === "marker") {
