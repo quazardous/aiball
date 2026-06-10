@@ -1550,6 +1550,11 @@ async function mainSse(): Promise<void> {
         });
         wakeActor.on("wake:cleared", (ev) => log(`wakeMachine: wake:cleared reason=${ev.reason}`));
         wakeActor.on("wake:cooldown_expired", () => log("wakeMachine: wake:cooldown_expired (idle)"));
+        // Observability : audit complet du cycle wake (requested → in_flight
+        // → delivered/cleared/cooldown). Sans ça, on ne voit que delivered et
+        // cleared, et un wake skip mid-cycle est invisible.
+        wakeActor.on("wake:requested", (ev) => log(`wakeMachine: wake:requested source=${ev.source} atMs=${ev.atMs}`));
+        wakeActor.on("wake:in_flight_started", (ev) => log(`wakeMachine: wake:in_flight_started atMs=${ev.atMs}`));
     }
     // #880 — TypingController XState actor wiring. Subscriber bridge :
     //   `actor.context.lastKeystrokeMs` → `ipc.humanTypingAtMs` (= back-compat
