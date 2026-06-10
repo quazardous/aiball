@@ -1327,14 +1327,15 @@ async function mainSse(): Promise<void> {
         void tryWake("boot-ended-drain");
     };
     // #872 / #870 Phase 1+3 — XState BootMachine acteur unique propriétaire
-    //   du sealing. Le subscriber observe les snapshots :
-    //     - update `bootDeadlineMs` ipc (pour bar-renderer + isInBootGrace)
-    //     - sur `sealed` : disarm fast-probe, leave pane "boot" zone, et
-    //       (si fresh seal, pas respawn) écrit `bootComplete` + side-effects.
-    //   Pour le cas respawn handoff (bootComplete déjà true à boot, cf.
-    //   ligne ~313), on envoie `HOOK_SEAL` immédiatement après start pour
-    //   que la machine soit consistent avec ipcState — pas d'effets de
-    //   bord re-émis grâce au gate `bootComplete !== true`.
+    //   du sealing. Le subscriber pure-bridge : update `bootDeadlineMs`
+    //   ipc (consumed by bar-renderer + isInBootGrace).
+    //   Le consumer `bootActor.on("boot:sealed", …)` (#877 Slice A) réagit
+    //   à la transition `booting → sealed` : disarm fast-probe, leave pane
+    //   "boot" zone, et (si fresh seal, pas respawn) écrit `bootComplete`
+    //   + side-effects via `onFreshBootSeal`. Le gate `wasComplete` (lu
+    //   à l'init) discrimine respawn de fresh ; le `reason` ("deadline" |
+    //   "hook") sur le payload du locus event aussi mais le gate ipc
+    //   reste plus simple.
     {
         const input0 = readLoopStateInput(sd!);
         const wasComplete = getIpcState().bootComplete === true;
@@ -1344,16 +1345,20 @@ async function mainSse(): Promise<void> {
                 bootMinMs: input0.bootMinMs,
             },
         });
+        // Pure ipcState bridge — fires on every snapshot change.
         bootActor.subscribe((snap) => {
             setIpcBootDeadlineMs(snap.context.deadlineMs);
-            if (snap.matches("sealed")) {
-                disarmFastProbe();
-                paneObs.leave("boot");
-                if (getIpcState().bootComplete !== true) {
-                    log("bootMachine: sealed → setIpcBootComplete(true)");
-                    setIpcBootComplete(true);
-                    onFreshBootSeal();
-                }
+        });
+        // Locus event consumer — fires once on `booting → sealed`.
+        bootActor.on("boot:sealed", (ev) => {
+            disarmFastProbe();
+            paneObs.leave("boot");
+            if (getIpcState().bootComplete !== true) {
+                log(`bootMachine: boot:sealed reason=${ev.reason} loopStartMs=${ev.loopStartMs} → setIpcBootComplete(true)`);
+                setIpcBootComplete(true);
+                onFreshBootSeal();
+            } else {
+                log(`bootMachine: boot:sealed reason=${ev.reason} (respawn handoff, side-effects skipped)`);
             }
         });
         bootActor.start();

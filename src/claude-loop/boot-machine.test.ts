@@ -80,3 +80,34 @@ test("snapshot observable : subscribe fires sur transitions", () => {
     // initial + post-transition (au moins 2 events)
     assert.ok(states.includes("sealed"));
 });
+
+// #877 Slice B — emit / actor.on locus events.
+
+test("emit boot:sealed (reason=deadline) sur DEADLINE_REACHED", () => {
+    const actor = mkActor({ loopStartMs: 1_000_000 }).start();
+    const events: { loopStartMs: number; reason: string }[] = [];
+    actor.on("boot:sealed", (ev) => events.push(ev));
+    actor.send({ type: "DEADLINE_REACHED" });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].loopStartMs, 1_000_000);
+    assert.equal(events[0].reason, "deadline");
+});
+
+test("emit boot:sealed (reason=hook) sur HOOK_SEAL", () => {
+    const actor = mkActor({ loopStartMs: 1_000_000 }).start();
+    const events: { loopStartMs: number; reason: string }[] = [];
+    actor.on("boot:sealed", (ev) => events.push(ev));
+    actor.send({ type: "HOOK_SEAL" });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].loopStartMs, 1_000_000);
+    assert.equal(events[0].reason, "hook");
+});
+
+test("emit boot:sealed une seule fois (sealed terminal, pas de re-emit)", () => {
+    const actor = mkActor({ loopStartMs: 1_000_000 }).start();
+    const events: unknown[] = [];
+    actor.on("boot:sealed", (ev) => events.push(ev));
+    actor.send({ type: "HOOK_SEAL" });
+    actor.send({ type: "DEADLINE_REACHED" }); // déjà sealed, no-op
+    assert.equal(events.length, 1, "sealed est terminal, pas de re-emit");
+});

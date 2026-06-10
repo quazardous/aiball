@@ -30,7 +30,7 @@
  *   - `actor.getSnapshot().matches("sealed")` → bootComplete=true
  *   - `actor.getSnapshot().context.deadlineMs - Date.now()` → remaining (bar display)
  */
-import { setup, assign } from "xstate";
+import { setup, assign, emit } from "xstate";
 
 export interface BootMachineInput {
     loopStartMs: number;
@@ -38,6 +38,11 @@ export interface BootMachineInput {
     /** Push extension on each watcher tick. Default 10s = david's debounce window. */
     pushExtensionMs?: number;
 }
+
+/** Locus events emitted by the actor. See `docs/SM-NETWORK.md` for the
+ *  `<controller>:<event_name>` convention + payload guidelines. */
+export type BootEmittedEvent =
+    | { type: "boot:sealed"; loopStartMs: number; reason: "deadline" | "hook" };
 
 export const bootMachine = setup({
     types: {
@@ -51,6 +56,7 @@ export const bootMachine = setup({
             | { type: "WATCHER_TICK"; nowMs?: number }
             | { type: "HOOK_SEAL" }
             | { type: "DEADLINE_REACHED" },
+        emitted: {} as BootEmittedEvent,
         input: {} as BootMachineInput,
     },
     actions: {
@@ -62,6 +68,16 @@ export const bootMachine = setup({
                 return Math.max(context.deadlineMs, candidate);
             },
         }),
+        emitBootSealedDeadline: emit(({ context }) => ({
+            type: "boot:sealed" as const,
+            loopStartMs: context.loopStartMs,
+            reason: "deadline" as const,
+        })),
+        emitBootSealedHook: emit(({ context }) => ({
+            type: "boot:sealed" as const,
+            loopStartMs: context.loopStartMs,
+            reason: "hook" as const,
+        })),
     },
 }).createMachine({
     id: "boot",
@@ -76,8 +92,8 @@ export const bootMachine = setup({
         booting: {
             on: {
                 WATCHER_TICK: { actions: "pushDeadline" },
-                HOOK_SEAL: { target: "sealed" },
-                DEADLINE_REACHED: { target: "sealed" },
+                HOOK_SEAL: { target: "sealed", actions: "emitBootSealedHook" },
+                DEADLINE_REACHED: { target: "sealed", actions: "emitBootSealedDeadline" },
             },
         },
         sealed: { type: "final" },
