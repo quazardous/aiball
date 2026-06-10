@@ -104,8 +104,15 @@ import { getWakeService } from "./wake-service.js";
 import { getTypingService } from "./typing-service.js";
 import { getIdleService } from "./idle-service.js";
 import { probeParentTmuxAtBoot, installParentTmuxWatchdog, sweepSiblingTimers } from "./parent-liveness.js";
-import { buildRespawnEnv, parseRespawnState, RESPAWN_STATE_ENV_VAR } from "./respawn-state.js";
-import { createActor, type ActorRefFrom } from "xstate";
+import {
+    buildRespawnEnvFromSnapshots,
+    consumePendingSnapshot,
+    parseRespawnSnapshots,
+    parseRespawnState,
+    RESPAWN_STATE_ENV_VAR,
+    setPendingRespawnSnapshots,
+} from "./respawn-state.js";
+import { createActor, type ActorRefFrom, type Snapshot } from "xstate";
 import { bootMachine } from "./boot-machine.js";
 
 let bootActor: ActorRefFrom<typeof bootMachine> | null = null;
@@ -311,22 +318,41 @@ if (sd) {
 // Cross-process via env (`spawn({env})` côté old, `process.env.X` côté
 // new). Ephemère : meurt avec le process, pas de cleanup à gérer.
 if (sd) {
-    const swap = parseRespawnState(process.env[RESPAWN_STATE_ENV_VAR]);
-    if (swap) {
-        if (swap.bootComplete === true) {
+    // #884 — respawn handoff via XState v5 snapshots.
+    const snapshots = parseRespawnSnapshots(process.env[RESPAWN_STATE_ENV_VAR]);
+    if (snapshots) {
+        setPendingRespawnSnapshots(snapshots);
+        // Si le snapshot boot était `sealed` (= boot phase déjà terminé
+        // dans l'old process), bypass le bootMin floor en re-stampant
+        // loop-start-ts dans le passé.
+        const bootSnap = snapshots.boot as { value?: unknown } | undefined;
+        const bootWasSealed = bootSnap && typeof bootSnap.value === "object"
+            && bootSnap.value !== null && "sealed" in bootSnap.value;
+        if (bootWasSealed || (bootSnap && bootSnap.value === "sealed")) {
             setIpcBootComplete(true);
-            // bypass le bootMin floor (30s) : re-stamp loop-start-ts à
-            // "bootMinMs+1s dans le passé" pour que `isInBootGrace`'s
-            // floor check `elapsed < bootMinMs` retourne false direct.
             try {
                 const fakeStart = Date.now() - (Number(process.env.CL_BOOT_MIN_SEC ?? 30) * 1000 + 1000);
                 writeFileSync(join(sd, "loop-start-ts"), String(fakeStart));
             } catch { /* best-effort */ }
         }
-        if (swap.afkMode && swap.afkMode !== "off") {
-            setIpcAfk(swap.afkMode, swap.afkExpiryMs ?? null);
+        log(`respawn handoff: consumed snapshots (${Object.keys(snapshots).filter((k) => snapshots[k as keyof typeof snapshots] !== undefined).join(", ")})`);
+    } else {
+        // Legacy fallback (#868 whitelist) — pour les respawns depuis un
+        // old timer pré-#884. Si neither format n'est dans l'env, no-op.
+        const swap = parseRespawnState(process.env[RESPAWN_STATE_ENV_VAR]);
+        if (swap) {
+            if (swap.bootComplete === true) {
+                setIpcBootComplete(true);
+                try {
+                    const fakeStart = Date.now() - (Number(process.env.CL_BOOT_MIN_SEC ?? 30) * 1000 + 1000);
+                    writeFileSync(join(sd, "loop-start-ts"), String(fakeStart));
+                } catch { /* best-effort */ }
+            }
+            if (swap.afkMode && swap.afkMode !== "off") {
+                setIpcAfk(swap.afkMode, swap.afkExpiryMs ?? null);
+            }
+            log(`respawn handoff: consumed legacy whitelist ${JSON.stringify(swap)}`);
         }
-        log(`respawn handoff: consumed swap ${JSON.stringify(swap)}`);
     }
 }
 
@@ -384,15 +410,16 @@ function selfReloadIfStale(): void {
         plate.started_at_sha = sha;
         try { writePlate(sd!, plate); } catch { /* best effort — fresh timer would just reload once more */ }
     }
-    // #868 — build le swap via le RespawnState service (whitelist :
-    // bootComplete + afkMode/Expiry, voir respawn-state.ts). Passé au
-    // NEW timer via env var dans `spawn({env})`. Vide si rien à
-    // transférer → env baseline, le new tombe sur la boot grace normale.
-    const ipc = getIpcState();
-    const respawnEnv = buildRespawnEnv({
-        bootComplete: ipc.bootComplete === true ? true : undefined,
-        afkMode: ipc.afkMode,
-        afkExpiryMs: ipc.afkExpiryMs,
+    // #884 — capture les snapshots XState v5 des 5 controllers AVANT de
+    // spawn le new process. Le NEW timer les restaure via
+    // `setPendingRespawnSnapshots` au boot puis les service factories
+    // les consomment. Pattern uniforme, drop les sync ad hoc HARD_*.
+    const respawnEnv = buildRespawnEnvFromSnapshots({
+        boot: bootActor ? bootActor.getPersistedSnapshot() : undefined,
+        afk: getAfkService().getActor().getPersistedSnapshot(),
+        wake: getWakeService().getActor().getPersistedSnapshot(),
+        typing: getTypingService().getActor().getPersistedSnapshot(),
+        idle: getIdleService().getActor().getPersistedSnapshot(),
     });
     const root = installRoot();
     const logFd = openSync(timerLogPath(sd!), "a");
@@ -1397,11 +1424,14 @@ async function mainSse(): Promise<void> {
     {
         const input0 = readLoopStateInput(sd!);
         const wasComplete = getIpcState().bootComplete === true;
+        // #884 — restore depuis snapshot persisté si respawn.
+        const bootSnap = consumePendingSnapshot("boot") as Snapshot<unknown> | undefined;
         bootActor = createActor(bootMachine, {
             input: {
                 loopStartMs: input0.loopStartMs,
                 bootMinMs: input0.bootMinMs,
             },
+            snapshot: bootSnap,
         });
         // Pure ipcState bridge — fires on every snapshot change.
         bootActor.subscribe((snap) => {
@@ -1434,10 +1464,14 @@ async function mainSse(): Promise<void> {
             void tryWake("boot-ended-drain");
         });
         bootActor.start();
-        if (wasComplete) {
-            log("bootMachine: respawn handoff bootComplete=true — sending HOOK_SEAL to sync actor");
+        // #884 — drop le HARD_SEAL ad hoc. Si bootSnap était fourni, la
+        // SM démarre déjà en `sealed` (= no-op). Si pas de snapshot mais
+        // bootComplete était set via legacy whitelist, HOOK_SEAL reste
+        // utile en fallback transition.
+        if (wasComplete && !bootSnap) {
+            log("bootMachine: respawn handoff (legacy whitelist) — sending HOOK_SEAL");
             bootActor.send({ type: "HOOK_SEAL" });
-        } else {
+        } else if (!wasComplete && !bootSnap) {
             armFastProbe();
         }
     }

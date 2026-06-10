@@ -87,6 +87,33 @@ export function parseRespawnSnapshots(raw: string | undefined): RespawnSnapshots
 /** Env var qui transporte le swap entre OLD et NEW process. */
 export const RESPAWN_STATE_ENV_VAR = "CL_RESPAWN_STATE";
 
+// =============================================================================
+// Slice C — pending snapshots stash pour les service factories.
+// =============================================================================
+
+/** Snapshots parsés à l'init du NEW timer (= au tout début de mainSse).
+ *  Chaque `getXxxService()` factory consume son entrée via
+ *  `consumePendingSnapshot(name)` lors de la première création de son
+ *  singleton. Consume one-shot : la 2e lecture retourne undefined. */
+let _pendingSnapshots: RespawnSnapshots | null = null;
+
+/** Set par mainSse au boot avec le résultat de
+ *  `parseRespawnSnapshots(process.env[RESPAWN_STATE_ENV_VAR])`.
+ *  Appelé une fois, avant les premiers getXxxService(). */
+export function setPendingRespawnSnapshots(snapshots: RespawnSnapshots | null): void {
+    _pendingSnapshots = snapshots;
+}
+
+/** Consume one-shot le snapshot pour `name`. Returns undefined si rien
+ *  en attente ou déjà consumed → la factory créera son actor en cold. */
+export function consumePendingSnapshot(name: keyof RespawnSnapshots): unknown | undefined {
+    if (!_pendingSnapshots) return undefined;
+    const s = _pendingSnapshots[name];
+    if (s === undefined) return undefined;
+    delete _pendingSnapshots[name];
+    return s;
+}
+
 /** Build le dict env à passer à `spawn()` côté OLD timer. Si snapshots
  *  est vide (aucun controller à transférer), retourne baseEnv inchangé
  *  → le NEW timer démarre en cold boot normal. */

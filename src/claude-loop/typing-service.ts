@@ -6,14 +6,15 @@
  * consumers. The composition root in `timer.ts:mainSse` instantiates the
  * singleton and wires the ipcState bridge subscriber.
  */
-import { createActor, type ActorRefFrom } from "xstate";
+import { createActor, type ActorRefFrom, type Snapshot } from "xstate";
 import { typingMachine } from "./typing-machine.js";
+import { consumePendingSnapshot } from "./respawn-state.js";
 
 export class TypingService {
     private readonly actor: ActorRefFrom<typeof typingMachine>;
 
-    constructor(ttlMs?: number) {
-        this.actor = createActor(typingMachine, { input: { ttlMs } });
+    constructor(ttlMs?: number, snapshot?: Snapshot<unknown>) {
+        this.actor = createActor(typingMachine, { input: { ttlMs }, snapshot });
         this.actor.start();
     }
 
@@ -38,7 +39,10 @@ export class TypingService {
 let _singleton: TypingService | null = null;
 
 export function getTypingService(): TypingService {
-    if (!_singleton) _singleton = new TypingService();
+    if (!_singleton) {
+        const snap = consumePendingSnapshot("typing") as Snapshot<unknown> | undefined;
+        _singleton = new TypingService(undefined, snap);
+    }
     return _singleton;
 }
 

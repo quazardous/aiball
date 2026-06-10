@@ -11,15 +11,17 @@
  * See `docs/SM-NETWORK.md` (purity contract + `<controller>:<event_name>`
  * convention).
  */
-import { createActor, type ActorRefFrom } from "xstate";
+import { createActor, type ActorRefFrom, type Snapshot } from "xstate";
 import { wakeMachine } from "./wake-machine.js";
+import { consumePendingSnapshot } from "./respawn-state.js";
 
 export class WakeService {
     private readonly actor: ActorRefFrom<typeof wakeMachine>;
 
-    constructor(inFlightTtlMs?: number, coalesceWindowMs?: number) {
+    constructor(inFlightTtlMs?: number, coalesceWindowMs?: number, snapshot?: Snapshot<unknown>) {
         this.actor = createActor(wakeMachine, {
             input: { inFlightTtlMs, coalesceWindowMs },
+            snapshot,
         });
         this.actor.start();
     }
@@ -67,7 +69,10 @@ export class WakeService {
 let _singleton: WakeService | null = null;
 
 export function getWakeService(): WakeService {
-    if (!_singleton) _singleton = new WakeService();
+    if (!_singleton) {
+        const snap = consumePendingSnapshot("wake") as Snapshot<unknown> | undefined;
+        _singleton = new WakeService(undefined, undefined, snap);
+    }
     return _singleton;
 }
 

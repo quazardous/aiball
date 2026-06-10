@@ -5,14 +5,15 @@
  * Composition root in `timer.ts:mainSse` wires the HookService events
  * (`SessionStart` / `Stop` / `UserPromptSubmit`) to the actor.
  */
-import { createActor, type ActorRefFrom } from "xstate";
+import { createActor, type ActorRefFrom, type Snapshot } from "xstate";
 import { idleMachine } from "./idle-machine.js";
+import { consumePendingSnapshot } from "./respawn-state.js";
 
 export class IdleService {
     private readonly actor: ActorRefFrom<typeof idleMachine>;
 
-    constructor() {
-        this.actor = createActor(idleMachine, { input: {} });
+    constructor(snapshot?: Snapshot<unknown>) {
+        this.actor = createActor(idleMachine, { input: {}, snapshot });
         this.actor.start();
     }
 
@@ -36,7 +37,10 @@ export class IdleService {
 let _singleton: IdleService | null = null;
 
 export function getIdleService(): IdleService {
-    if (!_singleton) _singleton = new IdleService();
+    if (!_singleton) {
+        const snap = consumePendingSnapshot("idle") as Snapshot<unknown> | undefined;
+        _singleton = new IdleService(snap);
+    }
     return _singleton;
 }
 

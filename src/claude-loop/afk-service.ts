@@ -14,8 +14,9 @@
  * See `docs/SM-NETWORK.md` for the network role and `afk-machine.ts`
  * for the state diagram.
  */
-import { createActor, type ActorRefFrom } from "xstate";
+import { createActor, type ActorRefFrom, type Snapshot } from "xstate";
 import { afkMachine } from "./afk-machine.js";
+import { consumePendingSnapshot } from "./respawn-state.js";
 
 export type AfkState = "off" | "wait_10m" | "wait_inf";
 
@@ -29,8 +30,8 @@ export class AfkService {
     private lastCommittedMode: AfkState = "off";
     private readonly subscribers: ((state: AfkState) => void)[] = [];
 
-    constructor(initial: AfkState = "off", expiryMs: number | null = null, debounceMs?: number) {
-        this.actor = createActor(afkMachine, { input: { debounceMs } });
+    constructor(initial: AfkState = "off", expiryMs: number | null = null, debounceMs?: number, snapshot?: Snapshot<unknown>) {
+        this.actor = createActor(afkMachine, { input: { debounceMs }, snapshot });
         // Back-compat subscriber dispatcher on committed transitions
         // only (no fire on initial seed nor on pending intermediate
         // states). The ipcState bridge lives in `timer.ts:mainSse`
@@ -44,11 +45,16 @@ export class AfkService {
             }
         });
         this.actor.start();
-        // Apply initial state via HARD events (immediate, bypass debounce).
-        if (initial === "wait_10m" && expiryMs !== null) {
-            this.actor.send({ type: "HARD_ARM_10M", expiryMs });
-        } else if (initial === "wait_inf") {
-            this.actor.send({ type: "HARD_ARM_INF" });
+        // #884 : si on a un snapshot restauré, la SM est déjà dans le bon
+        // state → skip les HARD events legacy (qui sont le path #868
+        // respawn whitelist remplacé par le snapshot pattern).
+        if (!snapshot) {
+            // Apply initial state via HARD events (immediate, bypass debounce).
+            if (initial === "wait_10m" && expiryMs !== null) {
+                this.actor.send({ type: "HARD_ARM_10M", expiryMs });
+            } else if (initial === "wait_inf") {
+                this.actor.send({ type: "HARD_ARM_INF" });
+            }
         }
         // Reset lastCommittedMode tracker so the initial seed doesn't
         // count as a "transition" (= keep pre-XState contract of no
@@ -136,7 +142,10 @@ export class AfkService {
 let _singleton: AfkService | null = null;
 
 export function getAfkService(): AfkService {
-    if (!_singleton) _singleton = new AfkService();
+    if (!_singleton) {
+        const snap = consumePendingSnapshot("afk") as Snapshot<unknown> | undefined;
+        _singleton = new AfkService("off", null, undefined, snap);
+    }
     return _singleton;
 }
 
