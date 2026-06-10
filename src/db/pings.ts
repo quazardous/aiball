@@ -495,7 +495,11 @@ function fetchUnread(
     const merged: Message[] = [
         ...ticketKept.map((r) => ticketRowToMessage(r.t)),
         ...messageKept.map((r) => messageRowToMessage(r.m, r.project)),
-    ].sort((a, b) => a.id - b.id);
+    ].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    // #895 — sort par created_at (ISO string lexicographique = chrono),
+    // pas par id : migration #0007 a partitionné les ID ranges (tickets
+    // 1+, comments 1_000_000+) → un nouveau ticket (id petit) sortait
+    // AVANT un comment ancien (id grand) dans la FIFO `wake CTA`.
     return { messages: merged, total: ticketKept.length + messageKept.length };
 }
 
