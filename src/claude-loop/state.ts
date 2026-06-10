@@ -1596,18 +1596,26 @@ export async function buildContextPhrase(
                 // #786 — pass the per-loop cooldown so the daemon excludes
                 // tickets we just named and that haven't moved since.
                 const cooldownSec = Math.max(0, Number(process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? 3600));
+                // #910 david : pull plus que `limit:1` puis filter en local
+                // les tickets en cooldown (`backlog_cooled_until` set). Le
+                // daemon ne filtre PAS les cooled côté API (intentionnel
+                // pour que le CLI les affiche en section dédiée), donc avec
+                // `limit:1` un ticket cooled monopolise le head et le wake
+                // CTA re-fire dessus alors que le user CLI ne le voit
+                // même plus dans le backlog. Aligne le picker sur le CLI :
+                // pick le premier NON-cooled (= comportement attendu).
                 const raw = await client.listTickets({
                     ...(project ? { project } : {}),
                     backlog: "1",
-                    limit: "1",
+                    limit: "10",
                     cooldown_sec: cooldownSec > 0 ? String(cooldownSec) : undefined,
                 });
                 const rows = Array.isArray(raw)
-                    ? (raw as Array<{ id: number; title?: string | null }>)
-                    : ((raw as { tickets?: Array<{ id: number; title?: string | null }>; rows?: Array<{ id: number; title?: string | null }> })?.tickets
-                        ?? (raw as { rows?: Array<{ id: number; title?: string | null }> })?.rows
+                    ? (raw as Array<{ id: number; title?: string | null; backlog_cooled_until?: string | null }>)
+                    : ((raw as { tickets?: Array<{ id: number; title?: string | null; backlog_cooled_until?: string | null }>; rows?: Array<{ id: number; title?: string | null; backlog_cooled_until?: string | null }> })?.tickets
+                        ?? (raw as { rows?: Array<{ id: number; title?: string | null; backlog_cooled_until?: string | null }> })?.rows
                         ?? []);
-                const top = rows[0];
+                const top = rows.find((r) => !r.backlog_cooled_until);
                 if (top && Number.isFinite(top.id)) {
                     head = { id: top.id, title: top.title ?? undefined, kind: undefined };
                 }
