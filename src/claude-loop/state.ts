@@ -1518,15 +1518,19 @@ export async function buildContextPhrase(
         // #892 david : phrasings explicites sur l'effet ticket. Avant on
         // disait juste "Your resolution was ACCEPTED" → ambiguous (plan ?
         // ticket clos ?). Maintenant chaque phrase précise l'état.
+        // #912 david `a8uupb` : REJECT en prefix (sans emoji) — option B
+        // sans la croix. Les 4 phrases reject mettent désormais "REJECT"
+        // en tête de phrase pour qu'il soit immédiatement visible dans
+        // l'inject prompt (pas noyé entre "Your" et le reste).
         const DECISION_EVENT_VERBS: Record<string, string> = {
             plan_accepted: "Your plan was ACCEPTED — execute",
-            plan_rejected: "Your plan was REJECTED",
+            plan_rejected: "REJECT — your plan, ball back in your court",
             resolution_accepted: "Your resolution was ACCEPTED, ticket closed",
-            resolution_rejected: "Your resolution was REJECTED, ticket stays open",
+            resolution_rejected: "REJECT — your resolution, ticket stays open",
             wontfix_accepted: "Your wontfix was ACCEPTED, ticket closed",
-            wontfix_rejected: "Your wontfix was REJECTED, ticket stays open",
+            wontfix_rejected: "REJECT — your wontfix, ticket stays open",
             escalation_accepted: "Your escalation was ACCEPTED",
-            escalation_rejected: "Your escalation was REJECTED",
+            escalation_rejected: "REJECT — your escalation",
         };
         const unreadKind = unreadHead?.kind ?? "";
         if (unreadKind && LIFECYCLE_VERBS[unreadKind]) {
