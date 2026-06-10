@@ -114,14 +114,28 @@ delayed transitions to the `wait_*` committed states. The single subscriber
 mirrors `context.afkMode/afkExpiryMs` (committed) and projects the leaf
 state name to `ipcState.dispAfkMode/dispAfkExpiryMs` (display).
 
+### WakeController — shipped
+
+| Field | Value |
+|---|---|
+| **Source** | [`src/claude-loop/wake-machine.ts`](../src/claude-loop/wake-machine.ts) |
+| **Role** | Owns the wake lifecycle : in-flight mutex (replaces `tryWakeInFlight` Promise) + post-fire cooldown (= coalesce window). External gates (zen, idle-since, wakeAllowed, checkHasWork, drained-state, hasContent) stay in `tryWake` consumer. |
+| **Slice owned** | `ipcState.wakeInFlightAtMs`, `lastWakeAtMs` |
+| **Events in** | `REQUEST_WAKE` { source, atMs }, `WAKE_DELIVERED` { phrase, headMessageId, deliveredAtMs }, `WAKE_COMPLETED`, `IN_FLIGHT_TTL_EXPIRED` |
+| **Events emitted** | `wake:requested` { source, atMs } / `wake:in_flight_started` { atMs } / `wake:delivered` { phrase, headMessageId } / `wake:cleared` { reason: `"completed"` \| `"ttl"` } / `wake:cooldown_expired` |
+| **States** | `idle` → `inFlight` → `cooldown` → `idle` (cycle) |
+| **Pump** | None — XState `after(inFlightTtl)` + `after(coalesceWindow)` handle the lifecycle. |
+| **Tests** | `wake-machine.test.ts` |
+
+The `REQUEST_WAKE` during `inFlight` or `cooldown` is dropped silently — consumers gate with `wakeSvc.isIdle()` before sending. The `wake:delivered` consumer (in `timer.ts:mainSse`) calls `markMessageSeen` on the FIFO-head ack.
+
 ### Future controllers (queued)
 
 - **PaneStateController** — pane{Busy,Ready,Compacting,Resuming,Interrupted,Pickers} consolidation.
-- **WakeController** — wake gates (in-flight mutex, busy-defer, cooldown, coalesce window).
 - **TypingController** — humanTypingAtMs + dispAfk debounce arm.
 - **IdleController** — idleSinceMs.
 
-Each will follow the same pattern : pure machine, external pump, subscriber → ipcState bridge.
+Each will follow the same pattern : pure machine, external pump (if needed), subscriber → ipcState bridge, `<controller>:<event_name>` emits.
 
 ## Patterns
 
@@ -159,7 +173,7 @@ Each controller declares its **locus events** (= pivotal transitions the rest of
 |---|---|
 | `boot:` | `boot:sealed` |
 | `afk:` | `afk:armed_10m`, `afk:armed_inf`, `afk:cleared` |
-| `wake:` (planned) | `wake:requested`, `wake:delivered`, `wake:deferred`, `wake:in_flight_cleared` |
+| `wake:` | `wake:requested`, `wake:in_flight_started`, `wake:delivered`, `wake:cleared`, `wake:cooldown_expired` |
 | `pane:` (planned) | `pane:busy_started`, `pane:idle`, `pane:compacting_started`, `pane:compacting_ended` |
 
 **Payload guidelines** — what to put on the event vs what to leave for `subscribe(snap)` or `getSnapshot()` :

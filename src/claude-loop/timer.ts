@@ -100,6 +100,7 @@ import { PromptWatcher, BusyWatcher, InterruptedWatcher } from "./pane-watchers/
 import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
+import { getWakeService } from "./wake-service.js";
 import { probeParentTmuxAtBoot, installParentTmuxWatchdog, sweepSiblingTimers } from "./parent-liveness.js";
 import { buildRespawnEnv, parseRespawnState, RESPAWN_STATE_ENV_VAR } from "./respawn-state.js";
 import { createActor, type ActorRefFrom } from "xstate";
@@ -658,22 +659,23 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
     }
     await injectWakePhrase(`${tname}.0`, phrase, () => {
         const nowMs = Date.now();
-        // #840 `4z59jt` — IPC seul. Les hook subprocesses lisent via UDS
-        // (queryLoopState), plus de shadow file.
-        setIpcWakeInFlightAtMs(nowMs);
-        setIpcLastWakeAtMs(nowMs);
-        // Post-wake tempo: arm the defer gate so any wake landing in the
-        // next WAKE_COALESCE_WINDOW_MS is held (not dropped) — the FIFO
-        // head stays available and fires at the deadline.
+        // #879 — fire WAKE_DELIVERED on the WakeMachine actor. Le
+        // subscriber bridge synchronise `ipc.wakeInFlightAtMs` +
+        // `ipc.lastWakeAtMs`. Le emit `wake:delivered` est consommé
+        // par les listeners dans mainSse (markMessageSeen +
+        // recordBacklogWake) — ces actions vivent en consumer, pas
+        // dans le callback (purity contract #877).
+        getWakeService().delivered(phrase, headMessageId ?? null, nowMs);
+        // #879 — armBusyDefer redondant avec le cooldown state du
+        // WakeMachine ; gardé pendant la transition pour que les
+        // consumers externes (stop-hook etc.) qui lisent ipc.busyDeferUntilMs
+        // continuent à voir le gate.
         armBusyDefer(sd!, WAKE_COALESCE_WINDOW_MS);
         // Mark the FIFO-head ping as seen the moment the inject crosses
-        // the gate. A delivered wake is the agent's read of the event.
-        // Fire-and-forget; a markMessageSeen failure shouldn't block.
-        if (headMessageId) {
-            void client().markMessageSeen(headMessageId).catch(() => {});
-        }
-        // #786 — backlog branch fired: start the per-consumer cooldown
-        // clock for this ticket. Fire-and-forget on the same channel.
+        // the gate. Fire-and-forget. (Couldn't easily move to the
+        // `wake:delivered` consumer because `headMessageId` would need
+        // to be plumbed through the emit payload — already done above.
+        // The consumer in mainSse handles it via the payload.)
         if (backlogTicketId) {
             void client().recordBacklogWake(backlogTicketId).catch(() => {});
         }
@@ -770,7 +772,10 @@ function client(): AiballClient {
 // `await checkHasWork` then all fire send-keys at once, pasting N
 // phrases. Only the first wake proceeds; the Stop hook / next
 // heartbeat picks up what's still unread post-turn.
-let tryWakeInFlight: Promise<boolean> | null = null;
+// #879 — `tryWakeInFlight` Promise mutex remplacé par le WakeMachine
+// acteur (cf. wake-machine.ts). L'état `inFlight` du machine joue le
+// rôle de mutex, et la cooldown post-fire (= WAKE_COALESCE_WINDOW_MS)
+// est encodée en state au lieu de via `armBusyDefer`.
 
 // #848 — post-boot prompt prefix. `onFreshBootSeal` (#872 Phase 3 :
 // ex-`performBootSeal`) renders the `post_boot_skill_reminder` slot
@@ -782,14 +787,18 @@ let tryWakeInFlight: Promise<boolean> | null = null;
 let pendingBootPromptPrefix: string | null = null;
 let postBootRemindersSent = false;
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint, panicMode = false): Promise<boolean> {
-    if (tryWakeInFlight) {
-        log(`skip wake (${reason}) — coalesce: another wake in flight`);
+    const wakeSvc = getWakeService();
+    if (!wakeSvc.isIdle()) {
+        const state = String(wakeSvc.getActor().getSnapshot().value);
+        log(`skip wake (${reason}) — wakeMachine state=${state} (in-flight or cooldown)`);
         return false;
     }
-    tryWakeInFlight = tryWakeInner(reason, manualWake, hint, panicMode).finally(() => {
-        tryWakeInFlight = null;
-    });
-    return tryWakeInFlight;
+    wakeSvc.request(reason);
+    try {
+        return await tryWakeInner(reason, manualWake, hint, panicMode);
+    } finally {
+        wakeSvc.completed();
+    }
 }
 // A panic wake bypasses ONLY the busy gates (busy-defer, pane shows
 // "esc to interrupt", pane shows /compact). AFK / zen / idle-marker
@@ -1436,6 +1445,31 @@ async function mainSse(): Promise<void> {
             }
         }, 1000);
         process.on("exit", () => { clearInterval(afkExpiryTimer); });
+    }
+    // #879 — WakeController XState actor wiring. Subscriber bridge =
+    //   `actor.context.{wakeInFlightAtMs, lastWakeAtMs}` → ipcState
+    //   (= consumers : stop-hook, bar diagnostics). Locus consumer =
+    //   `wake:delivered` → markMessageSeen (the FIFO-head ping is acked
+    //   the moment send-keys hits the pane). Pas de pump externe — les
+    //   `after()` interne (inFlightTtl + coalesceWindow) gèrent le
+    //   lifecycle. Respawn handoff non-applicable (no persisted wake
+    //   state across reloads — chaque process commence en idle).
+    {
+        const wakeActor = getWakeService().getActor();
+        wakeActor.subscribe((snap) => {
+            setIpcWakeInFlightAtMs(snap.context.wakeInFlightAtMs);
+            if (snap.context.lastWakeAtMs !== null) {
+                setIpcLastWakeAtMs(snap.context.lastWakeAtMs);
+            }
+        });
+        wakeActor.on("wake:delivered", (ev) => {
+            log(`wakeMachine: wake:delivered phrase=${JSON.stringify(ev.phrase.slice(0, 60))} headMessageId=${ev.headMessageId}`);
+            if (ev.headMessageId !== null) {
+                void client().markMessageSeen(ev.headMessageId).catch(() => {});
+            }
+        });
+        wakeActor.on("wake:cleared", (ev) => log(`wakeMachine: wake:cleared reason=${ev.reason}`));
+        wakeActor.on("wake:cooldown_expired", () => log("wakeMachine: wake:cooldown_expired (idle)"));
     }
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
     // toutes les 5s via la même fonction pure que la garde boot-time
