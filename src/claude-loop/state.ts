@@ -401,11 +401,6 @@ export const WAKE_IN_FLIGHT_TTL_MS = Math.max(0, loopConfig().claude_loop.wake_i
  *  via CL_WAKE_COALESCE_WINDOW_MS. */
 export const WAKE_COALESCE_WINDOW_MS = Math.max(0, Number(process.env[CL_ENV.WAKE_COALESCE_WINDOW_MS] ?? 10000));
 
-/** Cross-process marker — the last wake's timestamp + phrase, used as
- *  the dedup ledger by every wake site (timer, stop-hook, session-start)
- *  through `skipDuplicateWakeInjection`. Format: ISO + "\n" + phrase. */
-export function lastInjectedWakePath(sd: string): string { return join(sd, "last-injected-wake"); }
-
 /**
  * Pure dedup decision. SKIP if any wake was injected less than `windowMs`
  * ago (anti-burst: collapses a fast string of triggers to one fire);

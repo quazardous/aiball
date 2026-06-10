@@ -414,10 +414,6 @@ export type LoopStateEvents = {
     /** Fired whenever the view changes at all (any field). Always fires
      *  before the typed events below. */
     transition: (prev: LoopStateView, next: LoopStateView) => void;
-    /** Bar word transitioned (boot / stop / wait / loop). */
-    barWordChanged: (prev: BarWord, next: BarWord) => void;
-    /** Bar BG phase transitioned (boot / idle / busy). */
-    phaseChanged: (prev: Phase, next: Phase) => void;
     /** #714 — `isReallyBusy(input)` flipped. `next=true` means claude
      *  just entered a busy turn (mid-turn footer or /compact) ; `next=false`
      *  means claude just returned to idle. Subscribers arm/disarm work
@@ -438,10 +434,6 @@ export type LoopStateEvents = {
      *  inputs (toggle F9, commit, or convergence to null). The chip
      *  painter subscribes for an instant repaint. */
     dispAfkChanged: (next: { mode: AfkMode | null; expiryMs: number | null; commitAtMs: number | null }) => void;
-    /** Wake gate flipped from closed to open. */
-    wakeBecameAllowed: (next: LoopStateView) => void;
-    /** Wake gate flipped from open to closed. */
-    wakeBecameBlocked: (reason: string) => void;
     /** Resume picker showed up (signal from session-start-hook). */
     pickerOpened: () => void;
     /** Resume picker dismissed (auto-pick or user-pick). */
@@ -504,8 +496,6 @@ export class LoopStateBus {
     private emitDiffs(prev: LoopStateView, next: LoopStateView, prevInput: LoopStateInput, nextInput: LoopStateInput): void {
         const changed = JSON.stringify(prev) !== JSON.stringify(next);
         if (changed) this.emit("transition", prev, next);
-        if (prev.barWord !== next.barWord) this.emit("barWordChanged", prev.barWord, next.barWord);
-        if (prev.phase !== next.phase) this.emit("phaseChanged", prev.phase, next.phase);
         // #714 — busy transition driven by `isReallyBusy(input)` (the
         // semantic helper), not by `view.phase` which can stay `busy`
         // across compacting↔mid-turn. The disjunction in `isReallyBusy`
@@ -531,8 +521,6 @@ export class LoopStateBus {
         //   et consommés via `actor.on(<controller>:<event_name>, cb)`.
         //   Le bus garde la mécanique de diff pour les input-derived signals
         //   (busy, inputHot, pollFast, dispAfkChanged, picker, wake gates).
-        if (!prev.wakeAllowed && next.wakeAllowed) this.emit("wakeBecameAllowed", next);
-        if (prev.wakeAllowed && !next.wakeAllowed) this.emit("wakeBecameBlocked", next.wakeSkipReason ?? "unknown");
         if (!prevInput.resumePickerActive && nextInput.resumePickerActive) this.emit("pickerOpened");
         if (prevInput.resumePickerActive && !nextInput.resumePickerActive) this.emit("pickerClosed");
         // #751 htwguc — emit `dispAfkChanged` on any diff of the display

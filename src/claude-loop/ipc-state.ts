@@ -70,12 +70,6 @@ export interface IpcState {
     lastOpenWakeHash: string | null;
     drainedState: import("./drained-strategy.js").DrainedState | null;
     lastWakeHint: { ticket_id?: number; comment_hashid?: string; at_ms: number } | null;
-    /** V4 Phase 3 — phrase dedup payload (`<iso>|<hash>` format from
-     *  `dedupeWakeInjection`). Shadow of `last-injected-wake` marker
-     *  for the timer's in-memory dedup check. The file marker is still
-     *  written (back-compat for stop-hook subprocess reads), V5 will
-     *  drop it when wake dedup centralises on the timer's loopServer. */
-    lastInjectedWake: string | null;
     /** V4 Phase 3 — ms-since-epoch of the last wake injection. Mirror
      *  of the `last-wake-at` marker for the timer's in-process reads. */
     lastWakeAtMs: number | null;
@@ -189,7 +183,6 @@ const state: IpcState = {
     lastOpenWakeHash: null,
     drainedState: null,
     lastWakeHint: null,
-    lastInjectedWake: null,
     lastWakeAtMs: null,
     wakeInFlightAtMs: null,
     wakeRequestedAtMs: null,
@@ -319,11 +312,6 @@ export function setIpcLastWakeHint(
     hint: { ticket_id?: number; comment_hashid?: string; at_ms: number } | null,
 ): void {
     state.lastWakeHint = hint;
-    notifyIpcChanged();
-}
-
-export function setIpcLastInjectedWake(value: string | null): void {
-    state.lastInjectedWake = value;
     notifyIpcChanged();
 }
 
@@ -504,7 +492,6 @@ export function resetIpcStateForTests(): void {
     state.lastOpenWakeHash = null;
     state.drainedState = null;
     state.lastWakeHint = null;
-    state.lastInjectedWake = null;
     state.lastWakeAtMs = null;
     state.wakeInFlightAtMs = null;
     state.wakeRequestedAtMs = null;

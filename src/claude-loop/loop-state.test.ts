@@ -140,40 +140,6 @@ test("LoopStateBus: second update with same view → no emit", () => {
 // LoopStateBus. Ces "locus" events sont désormais émis par l'AfkMachine
 // acteur (cf. afk-machine.test.ts pour la couverture).
 
-test("LoopStateBus: wakeBecameAllowed fires when gate flips closed→open", () => {
-    const bus = new LoopStateBus();
-    const start = T0;
-    const now = start + 5 * MIN;
-    bus.update(baseInput({
-        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
-        afkMode: "wait_inf", // blocks wake
-    }));
-    let view = null as null | { wakeAllowed: boolean };
-    bus.on("wakeBecameAllowed", (v) => { view = v; });
-    bus.update(baseInput({
-        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
-        // afkMode default off → wake opens
-    }));
-    assert.notEqual(view, null);
-    assert.equal(view!.wakeAllowed, true);
-});
-
-test("LoopStateBus: wakeBecameBlocked fires on open→closed + reason passed", () => {
-    const bus = new LoopStateBus();
-    const start = T0;
-    const now = start + 5 * MIN;
-    bus.update(baseInput({
-        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
-    }));
-    let reason = "";
-    bus.on("wakeBecameBlocked", (r) => { reason = r; });
-    bus.update(baseInput({
-        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
-        paneBusy: true,
-    }));
-    assert.match(reason, /esc to interrupt/);
-});
-
 test("LoopStateBus: pickerOpened / pickerClosed fire on resumePickerActive flips", () => {
     const bus = new LoopStateBus();
     bus.update(baseInput());
@@ -185,29 +151,6 @@ test("LoopStateBus: pickerOpened / pickerClosed fire on resumePickerActive flips
     assert.equal(closed, false);
     bus.update(baseInput({ resumePickerActive: false, bootComplete: true, idleSinceMs: T0 }));
     assert.equal(closed, true);
-});
-
-test("LoopStateBus: barWordChanged + phaseChanged fire independently", () => {
-    const bus = new LoopStateBus();
-    const start = T0;
-    // #629 — past 30s floor so bootComplete can take effect.
-    bus.update(baseInput({
-        nowMs: start + 45 * SEC, loopStartMs: start,
-        bootComplete: false, paneReady: false,  // explicitly in boot
-        bootDeadlineMs: start + 55 * SEC,       // #872 — watcher push
-    }));
-    const words: [string, string][] = [];
-    const phases: [string, string][] = [];
-    bus.on("barWordChanged", (p, n) => words.push([p, n]));
-    bus.on("phaseChanged", (p, n) => phases.push([p, n]));
-    bus.update(baseInput({
-        nowMs: start + 45 * SEC,
-        loopStartMs: start,
-        bootComplete: true,
-        idleSinceMs: start + 45 * SEC,
-    }));
-    assert.deepEqual(words, [["boot", "loop"]]);
-    assert.deepEqual(phases, [["boot", "idle"]]);
 });
 
 test("LoopStateBus: unsubscribe stops further calls", () => {
