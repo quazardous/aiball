@@ -1520,13 +1520,16 @@ export async function buildContextPhrase(
         // body unchanged. Each kind maps to a dedicated phrase prefix ;
         // the wake template's `head_decision_event` branch renders the
         // full sentence around it.
+        // #892 david : phrasings explicites sur l'effet ticket. Avant on
+        // disait juste "Your resolution was ACCEPTED" → ambiguous (plan ?
+        // ticket clos ?). Maintenant chaque phrase précise l'état.
         const DECISION_EVENT_VERBS: Record<string, string> = {
-            plan_accepted: "Your plan was ACCEPTED",
+            plan_accepted: "Your plan was ACCEPTED — execute",
             plan_rejected: "Your plan was REJECTED",
-            resolution_accepted: "Your resolution was ACCEPTED",
-            resolution_rejected: "Your resolution was REJECTED",
-            wontfix_accepted: "Your wontfix was ACCEPTED",
-            wontfix_rejected: "Your wontfix was REJECTED",
+            resolution_accepted: "Your resolution was ACCEPTED, ticket closed",
+            resolution_rejected: "Your resolution was REJECTED, ticket stays open",
+            wontfix_accepted: "Your wontfix was ACCEPTED, ticket closed",
+            wontfix_rejected: "Your wontfix was REJECTED, ticket stays open",
             escalation_accepted: "Your escalation was ACCEPTED",
             escalation_rejected: "Your escalation was REJECTED",
         };
