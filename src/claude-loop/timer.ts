@@ -846,16 +846,10 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
         log(`skip wake (${reason}) — zen mode (touch ${zenPath(sd!)} to mute, remove to unmute)`);
         return false;
     }
-    // #848 david `<chat>` : pendant la fenêtre [boot:sealed → loop:start]
-    // (= 10s), aucun wake ne doit fire. Le sendKeys du post-boot prompt
-    // est déjà passé via onFreshBootSeal et a activé busy. Loop:start
-    // (= "green light pour la suite") n'est pas encore armed. Gate central
-    // dans tryWake pour couvrir TOUS les call sites (heartbeat, SSE, drain,
-    // idle:settled, panic).
-    if (!manualWake && !panicMode && !getIpcState().loopStart) {
-        log(`skip wake (${reason}) — loop:start not yet armed (waiting boot:sealed + 10s)`);
-        return false;
-    }
+    // #848 david `<chat>` : la fenêtre [boot:sealed → loop:start] (= 10s)
+    // est gérée par le WakeController lui-même via l'état initial `gated`.
+    // REQUEST_WAKE pendant gated emit cleared(boot_gated) et stay gated.
+    // Aucun check imperatif ici — la SM le gate.
     // #727 V1 Slice B fix — the legacy idle-since pre-gate used
     // `existsSync(idleMarkerPath)`, but Slice B-3 stops the hooks from
     // writing that file when the ws emit succeeds. `readIdleSinceMs`
@@ -1430,11 +1424,13 @@ async function mainSse(): Promise<void> {
         // consumers qui veulent "boot vraiment fini" gate sur ce flag au
         // lieu de bootComplete.
         bootActor.on("loop:start", (ev) => {
-            log(`bootMachine: loop:start loopStartMs=${ev.loopStartMs} → setIpcLoopStart(true) + boot-ended-drain`);
+            log(`bootMachine: loop:start loopStartMs=${ev.loopStartMs} → setIpcLoopStart(true) + WakeController BOOT_READY + boot-ended-drain`);
             setIpcLoopStart(true);
-            // #848 david `<chat>` : drain les pings stackés ICI (pas au
-            // boot:sealed) pour ne pas fire en parallèle du sendKeys
-            // post-boot reminder.
+            // #848 david `<chat>` : transitionne le WakeController de
+            // `gated` → `idle` (= autorise les wakes). La SM le gate
+            // jusqu'ici, plus de check imperatif.
+            getWakeService().getActor().send({ type: "BOOT_READY" });
+            // Drain les pings stackés MAINTENANT (= après les 10s buffer).
             void tryWake("boot-ended-drain");
         });
         bootActor.start();

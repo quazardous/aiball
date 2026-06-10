@@ -18,22 +18,46 @@ function mkActor() {
     });
 }
 
-test("init : starts in idle with empty context", () => {
+/** #848 — la SM démarre en `gated`. Pour les tests pré-existants qui
+ *  attendent `idle` initial, on envoie BOOT_READY après start. */
+function mkActorReady() {
+    const a = mkActor().start();
+    a.send({ type: "BOOT_READY" });
+    return a;
+}
+
+test("init : starts in gated (boot not yet ready)", () => {
     const actor = mkActor().start();
-    assert.equal(actor.getSnapshot().value, "idle");
+    assert.equal(actor.getSnapshot().value, "gated");
     assert.equal(actor.getSnapshot().context.wakeInFlightAtMs, null);
     assert.equal(actor.getSnapshot().context.lastWakeAtMs, null);
 });
 
-test("REQUEST_WAKE from idle : transition → inFlight + stamp wakeInFlightAtMs", () => {
+test("#848 BOOT_READY : gated → idle", () => {
     const actor = mkActor().start();
+    actor.send({ type: "BOOT_READY" });
+    assert.equal(actor.getSnapshot().value, "idle");
+});
+
+test("#848 REQUEST_WAKE pendant gated : emit cleared(boot_gated), stay gated", () => {
+    const actor = mkActor().start();
+    const events: { reason: string }[] = [];
+    actor.on("wake:cleared", (ev) => events.push(ev));
+    actor.send({ type: "REQUEST_WAKE", source: "test", atMs: 1_000 });
+    assert.equal(actor.getSnapshot().value, "gated");
+    assert.equal(events.length, 1);
+    assert.equal(events[0].reason, "boot_gated");
+});
+
+test("REQUEST_WAKE from idle : transition → inFlight + stamp wakeInFlightAtMs", () => {
+    const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     assert.equal(actor.getSnapshot().value, "inFlight");
     assert.equal(actor.getSnapshot().context.wakeInFlightAtMs, 1_000);
 });
 
 test("WAKE_DELIVERED in inFlight : emits wake:delivered + stamps lastWakeAtMs, stays inFlight", () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     const events: { phrase: string; headMessageId: number | null }[] = [];
     actor.on("wake:delivered", (ev) => events.push(ev));
@@ -46,7 +70,7 @@ test("WAKE_DELIVERED in inFlight : emits wake:delivered + stamps lastWakeAtMs, s
 });
 
 test("WAKE_COMPLETED in inFlight : transition → cooldown + clear wakeInFlightAtMs", () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     actor.send({ type: "WAKE_COMPLETED" });
     assert.equal(actor.getSnapshot().value, "cooldown");
@@ -54,7 +78,7 @@ test("WAKE_COMPLETED in inFlight : transition → cooldown + clear wakeInFlightA
 });
 
 test("REQUEST_WAKE during cooldown : ignored (state stays cooldown)", () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     actor.send({ type: "WAKE_COMPLETED" });
     assert.equal(actor.getSnapshot().value, "cooldown");
@@ -63,7 +87,7 @@ test("REQUEST_WAKE during cooldown : ignored (state stays cooldown)", () => {
 });
 
 test("after(coalesceWindow) : cooldown → idle", async () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     actor.send({ type: "WAKE_COMPLETED" });
     await delay(COALESCE_MS + SLACK);
@@ -71,7 +95,7 @@ test("after(coalesceWindow) : cooldown → idle", async () => {
 });
 
 test("after(inFlightTtl) : inFlight → cooldown (safety net)", async () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     assert.equal(actor.getSnapshot().value, "inFlight");
     await delay(IN_FLIGHT_TTL_MS + SLACK);
@@ -79,7 +103,7 @@ test("after(inFlightTtl) : inFlight → cooldown (safety net)", async () => {
 });
 
 test("REQUEST_WAKE during inFlight : ignored (mutex)", () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     actor.send({ type: "REQUEST_WAKE", source: "ping2", atMs: 2_000 });
     assert.equal(actor.getSnapshot().value, "inFlight");
@@ -89,7 +113,7 @@ test("REQUEST_WAKE during inFlight : ignored (mutex)", () => {
 // #877 emit / actor.on locus events.
 
 test("emit wake:requested on REQUEST_WAKE", () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     const events: { source: string; atMs: number }[] = [];
     actor.on("wake:requested", (ev) => events.push(ev));
     actor.send({ type: "REQUEST_WAKE", source: "heartbeat", atMs: 1_000 });
@@ -99,7 +123,7 @@ test("emit wake:requested on REQUEST_WAKE", () => {
 });
 
 test("emit wake:in_flight_started on REQUEST_WAKE", () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     const events: { atMs: number }[] = [];
     actor.on("wake:in_flight_started", (ev) => events.push(ev));
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
@@ -108,7 +132,7 @@ test("emit wake:in_flight_started on REQUEST_WAKE", () => {
 });
 
 test("emit wake:cleared (reason=completed) on WAKE_COMPLETED", () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     const events: { reason: string }[] = [];
     actor.on("wake:cleared", (ev) => events.push(ev));
@@ -118,7 +142,7 @@ test("emit wake:cleared (reason=completed) on WAKE_COMPLETED", () => {
 });
 
 test("emit wake:cleared (reason=ttl) on IN_FLIGHT_TTL_EXPIRED", () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     const events: { reason: string }[] = [];
     actor.on("wake:cleared", (ev) => events.push(ev));
@@ -128,7 +152,7 @@ test("emit wake:cleared (reason=ttl) on IN_FLIGHT_TTL_EXPIRED", () => {
 });
 
 test("WAKE_SKIPPED in inFlight : transition → idle directement (pas de cooldown)", () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     assert.equal(actor.getSnapshot().value, "inFlight");
     actor.send({ type: "WAKE_SKIPPED" });
@@ -137,7 +161,7 @@ test("WAKE_SKIPPED in inFlight : transition → idle directement (pas de cooldow
 });
 
 test("emit wake:cleared (reason=skipped) on WAKE_SKIPPED", () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     const events: { reason: string }[] = [];
     actor.on("wake:cleared", (ev) => events.push(ev));
@@ -147,7 +171,7 @@ test("emit wake:cleared (reason=skipped) on WAKE_SKIPPED", () => {
 });
 
 test("emit wake:cooldown_expired on cooldown → idle", async () => {
-    const actor = mkActor().start();
+    const actor = mkActorReady();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
     actor.send({ type: "WAKE_COMPLETED" });
     const events: unknown[] = [];

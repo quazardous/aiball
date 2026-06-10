@@ -12,10 +12,14 @@
  *
  * Model :
  *
- *   idle ──REQUEST_WAKE──▶ inFlight ──WAKE_COMPLETED / TTL──▶ cooldown
- *    ▲                                                            │
- *    │            after(coalesceWindowMs)                          │
- *    └────────────────────────────────────────────────────────────┘
+ *   gated ──BOOT_READY──▶ idle ──REQUEST_WAKE──▶ inFlight ──...──▶ cooldown
+ *                          ▲                                          │
+ *                          │            after(coalesceWindowMs)        │
+ *                          └────────────────────────────────────────────┘
+ *
+ * #848 david `<chat>` : initial state = `gated`. Aucun wake ne fire
+ * tant que `BOOT_READY` (= bootMachine `loop:start`) n'est pas reçu.
+ * REQUEST_WAKE pendant gated = emit cleared(reason="boot_gated").
  *
  *   `WAKE_DELIVERED` in `inFlight` emits `wake:delivered` without
  *   transitioning — the inject callback has hit send-keys but we stay
@@ -46,7 +50,7 @@ export type WakeEmittedEvent =
     | { type: "wake:requested"; source: string; atMs: number }
     | { type: "wake:in_flight_started"; atMs: number }
     | { type: "wake:delivered"; phrase: string; headMessageId: number | null }
-    | { type: "wake:cleared"; reason: "completed" | "ttl" | "skipped" }
+    | { type: "wake:cleared"; reason: "completed" | "ttl" | "skipped" | "boot_gated" }
     | { type: "wake:cooldown_expired" };
 
 export const wakeMachine = setup({
@@ -62,7 +66,8 @@ export const wakeMachine = setup({
             | { type: "WAKE_DELIVERED"; phrase: string; headMessageId: number | null; deliveredAtMs: number }
             | { type: "WAKE_COMPLETED" }
             | { type: "WAKE_SKIPPED" }
-            | { type: "IN_FLIGHT_TTL_EXPIRED" },
+            | { type: "IN_FLIGHT_TTL_EXPIRED" }
+            | { type: "BOOT_READY" },
         emitted: {} as WakeEmittedEvent,
         input: {} as WakeMachineInput,
     },
@@ -104,6 +109,10 @@ export const wakeMachine = setup({
             type: "wake:cleared" as const,
             reason: "skipped" as const,
         })),
+        emitClearedBootGated: emit(() => ({
+            type: "wake:cleared" as const,
+            reason: "boot_gated" as const,
+        })),
         emitCooldownExpired: emit(() => ({
             type: "wake:cooldown_expired" as const,
         })),
@@ -114,7 +123,7 @@ export const wakeMachine = setup({
     },
 }).createMachine({
     id: "wake",
-    initial: "idle",
+    initial: "gated",
     context: ({ input }) => ({
         wakeInFlightAtMs: null,
         lastWakeAtMs: null,
@@ -122,6 +131,18 @@ export const wakeMachine = setup({
         coalesceWindowMs: input.coalesceWindowMs ?? 10_000,
     }),
     states: {
+        // #848 david `<chat>` : initial state = aucun wake ne fire tant
+        // que BOOT_READY n'est pas reçu (= bootMachine `loop:start`).
+        gated: {
+            on: {
+                BOOT_READY: { target: "idle" },
+                REQUEST_WAKE: {
+                    // Emit cleared(boot_gated) pour observabilité — aucune
+                    // transition d'état, on reste gated.
+                    actions: ["emitClearedBootGated"],
+                },
+            },
+        },
         idle: {
             on: {
                 REQUEST_WAKE: {
