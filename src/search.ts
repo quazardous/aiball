@@ -154,6 +154,65 @@ export function searchMessages(
 
     const sqlite = getRawSqlite();
 
+    // #889 — hashid fast-path : si la query est un slug isolé (6+ chars
+    // lowercase alphanumeric), tenter un lookup direct sur _messages.hashid
+    // AVANT FTS. Les hashids ne sont pas indexés dans FTS5 (= invisible
+    // au tokenizer trigram), donc sans ce shortcut `search("f33ejb")`
+    // retourne 0 hit même quand le comment existe.
+    const slugMatch = rawQuery.trim().match(/^[a-z0-9]{6,}$/);
+    if (slugMatch) {
+        const row = sqlite.prepare(`
+            SELECT m.id, m.ticket_id, m.hashid, m.body, m.by_agent,
+                   m.created_at, m.status,
+                   t.project, t.status AS ticket_status, t.title AS ticket_title
+            FROM _messages m JOIN tickets t ON t.id = m.ticket_id
+            WHERE m.hashid = ?
+              AND m.status != 'rejected'
+              AND t.status != 'rejected'
+              ${opts.project ? "AND t.project = ?" : ""}
+              ${opts.intent ? "AND t.intent = ?" : ""}
+            LIMIT 1
+        `).get(...[slugMatch[0], opts.project, opts.intent].filter((x) => x !== undefined)) as MessageHitRow | undefined;
+        if (row) {
+            // Apply open filter (closed-by-lifecycle check) if asked.
+            let skipForOpen = false;
+            if (opts.open) {
+                const closed = sqlite.prepare(`
+                    SELECT 1 FROM _messages c
+                    WHERE c.ticket_id = ?
+                      AND c.kind = 'ticket_closed'
+                      AND c.status = 'approved'
+                      AND c.id > COALESCE(
+                        (SELECT MAX(r.id) FROM _messages r
+                         WHERE r.ticket_id = c.ticket_id
+                           AND r.kind = 'ticket_reopened'
+                           AND r.status = 'approved'),
+                        0
+                      )
+                    LIMIT 1
+                `).get(row.ticket_id);
+                if (closed) skipForOpen = true;
+            }
+            if (!skipForOpen) {
+                return [{
+                    kind: "comment",
+                    id: row.id,
+                    ticket_id: row.ticket_id,
+                    project: row.project,
+                    title: row.ticket_title,
+                    hashid: row.hashid,
+                    by_agent: row.by_agent,
+                    created_at: row.created_at,
+                    status: row.status,
+                    snippet: (row.body ?? "").slice(0, 120),
+                    rank: 0,
+                }];
+            }
+        }
+        // Fallthrough : pas de hit hashid → continue avec le FTS normal
+        // (= au cas où le slug est aussi du contenu textuel quelque part).
+    }
+
     // FTS path when there's at least one ≥3-char token (trigram MATCH does
     // the substring work); otherwise (query is only 1-2 char tokens) fall
     // back to a plain LIKE scan of the base tables — no trigram index to
