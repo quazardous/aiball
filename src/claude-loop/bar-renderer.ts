@@ -305,11 +305,14 @@ export class BarRenderer {
         if (changedSet.has("counters")) {
             const c = next.counters;
             const parts: string[] = [];
-            if (c !== null) {
-                if (c.open !== null) parts.push(`o:${c.open}`);
-                if (c.backlog !== null) parts.push(`b:${c.backlog}`);
-                if (c.events !== null) parts.push(`e:${c.events}`);
-            }
+            // #911 david `hsd3vw` : counters TOUJOURS affichés. Si le
+            // fetch a échoué (counters null) OU est en cold-boot avant
+            // le 1er succès, fallback `o:- b:- e:-` pour que l'opérateur
+            // sache que la zone existe mais que les données ne sont
+            // pas encore là.
+            parts.push(`o:${c?.open ?? "-"}`);
+            parts.push(`b:${c?.backlog ?? "-"}`);
+            parts.push(`e:${c?.events ?? "-"}`);
             // #891 — countdowns harmonisés dans la zone compteurs :
             //   - 🚀Ns +Ns pendant boot (prioritaire, mutually exclusive)
             //   - 📨Ns post-boot quand events/backlog pending (#805 xxvzye)
@@ -319,12 +322,8 @@ export class BarRenderer {
             } else if (next.nextWakeInSec !== null) {
                 parts.push(`📨${next.nextWakeInSec}s`);
             }
-            if (parts.length === 0) {
-                setOpt("@cl_counts", "");
-            } else {
-                const col = barColors();
-                setOpt("@cl_counts", `#[fg=${col.bar_fg}] ${parts.join(" ")}`);
-            }
+            const col = barColors();
+            setOpt("@cl_counts", `#[fg=${col.bar_fg}] ${parts.join(" ")}`);
         }
         if (changedSet.has("afkChipStr")) {
             setOpt("@cl_afk_state", next.afkChipStr);
