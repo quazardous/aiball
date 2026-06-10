@@ -148,8 +148,10 @@ export interface IpcState {
     /** David `<chat>` : watcher-driven boot deadline. Pushed to `now+10s`
      *  each time a pane watcher tick observes a "still booting" condition
      *  (paneReady=false / picker actif / compacting). When the deadline
-     *  expires without further push, a separate tick fires `bus.bootEnded`
-     *  → seal. Initialized at `loopStartMs + bootMinMs` (= 30s floor). */
+     *  expires without further push, the BootMachine actor's external
+     *  pump (bootDeadlineTimer in timer.ts) fires `DEADLINE_REACHED`
+     *  → the actor transitions to `sealed` → subscriber writes
+     *  bootComplete. Initialized at `loopStartMs + bootMinMs` (= 30s floor). */
     bootDeadlineMs: number | null;
     /** #867 — timestamp du dernier event SSE reçu du daemon (incluant
      *  les hints/pings). Read par `claude-loop health.checkSse` pour

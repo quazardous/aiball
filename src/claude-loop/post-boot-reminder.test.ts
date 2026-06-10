@@ -4,9 +4,10 @@
  * Validates that the shipped default `config/defaults/claude-loop-pings.yaml`
  * carries a non-empty `prompts.post_boot_skill_reminder` slot, and that a
  * per-project override flips it off cleanly (= opt-out by setting to "").
- * The actual wiring inside `timer.ts:performBootSeal` is exercised in the
- * integration scenarios — this is the pure contract on the prompt-template
- * layer that `performBootSeal` consumes.
+ * The actual wiring inside `timer.ts:onFreshBootSeal` (#872 Phase 3 :
+ * ex-`performBootSeal`) is exercised in the integration scenarios —
+ * this is the pure contract on the prompt-template layer that the seal
+ * subscriber consumes.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";

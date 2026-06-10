@@ -272,9 +272,9 @@ try {
             picker_session: false,
             picker_mode: false,
         });
-        // #652 Slice 3 — bar IDLE paint dropped. The timer's
-        // bus.bootEnded handler in timer.ts already calls
-        // setTmuxStatus(IDLE) when boot phase settles, so the hook's
+        // #652 Slice 3 — bar IDLE paint dropped. The timer's BootMachine
+        // actor subscriber (#872 Phase 3) already calls setIpcStateTagInfo(null)
+        // when boot phase seals (= BarRenderer derives idle), so the hook's
         // paint was redundant ; removing it kills the last remaining
         // bar-paint site in this hook (the #650 oscillation root).
         log(`seed idle + signal boot-complete (source=${source} sessionPicked=${sessionPicked} aborted=${sessionPickerAborted}) + exit`);

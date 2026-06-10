@@ -136,25 +136,6 @@ test("LoopStateBus: second update with same view → no emit", () => {
     assert.equal(calls, 0);
 });
 
-test("LoopStateBus: bootEnded fires when inBootGrace flips true→false", () => {
-    // #629 — past the inviolable 30s floor for bootComplete to take effect.
-    const bus = new LoopStateBus();
-    bus.update(baseInput({
-        nowMs: T0 + 45 * SEC, loopStartMs: T0,
-        bootComplete: false, paneReady: false,  // explicitly in boot
-        bootDeadlineMs: T0 + 55 * SEC,           // #872 — watcher push keeps boot alive
-    }));
-    let fired = false;
-    bus.on("bootEnded", () => { fired = true; });
-    bus.update(baseInput({
-        nowMs: T0 + 45 * SEC,
-        loopStartMs: T0,
-        bootComplete: true,
-        idleSinceMs: T0 + 45 * SEC,
-    }));
-    assert.equal(fired, true);
-});
-
 test("LoopStateBus: afkArmed10m fires on off → 10m", () => {
     const bus = new LoopStateBus();
     const start = T0;

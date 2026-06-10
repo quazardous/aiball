@@ -434,10 +434,6 @@ export type LoopStateEvents = {
      *  at `pane_probe_fast_ms`. `next=false` = back to slow. Timer's
      *  pane-probe subscribes here to re-arm its setInterval. */
     pollFast: (next: boolean, prev: boolean) => void;
-    /** boot grace just ended (in→out of boot). */
-    bootEnded: (next: LoopStateView) => void;
-    /** boot grace re-entered (rare — typically on reload). */
-    bootStarted: (next: LoopStateView) => void;
     /** AFK 10m hold just armed (off → 10m, or 10m refreshed via re-arm). */
     afkArmed10m: (expiryMs: number) => void;
     /** AFK ∞ hold just armed. */
@@ -534,8 +530,9 @@ export class LoopStateBus {
         const prevFast = shouldPollFast(prevInput);
         const nextFast = shouldPollFast(nextInput);
         if (prevFast !== nextFast) this.emit("pollFast", nextFast, prevFast);
-        if (prev.inBootGrace && !next.inBootGrace) this.emit("bootEnded", next);
-        if (!prev.inBootGrace && next.inBootGrace) this.emit("bootStarted", next);
+        // #872 Phase 3 — `bootEnded`/`bootStarted` retirés ; le BootMachine
+        //   acteur (timer.ts) est l'autorité unique sur le sealing. Le bus
+        //   garde la mécanique de diff pour les autres axes (busy, afk, …).
         // AFK transitions — driven by the underlying file mode, not the
         // chunk label (which can flip color without semantic change).
         const prevAfk = effectiveAfkMode(prevInput);

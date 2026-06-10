@@ -211,21 +211,14 @@ try { writeFileSync(timerPidPath(sd!), `${process.pid}\n`); } catch { /* best ef
 // was `shouldArmAfk10mOnSettleBoot`, which is gone (user-grace already
 // silently gates wakes if user typed during boot). Kept the env var
 // `CL_WAIT` shape ; readers in the proxy still honor it.
-// #868 david `<chat>` : `BOOT_GRACE_MS` (= safety cap that drove
-// settleBoot) retired. `bus.bootEnded` + the post-bootEnded tail
-// grace are the only seal signals now. Watchers (paneReady /
-// resumePicker / paneCompacting) stretch the boot phase as long as
-// needed ; no force-seal cap.
-// #822 — extra grace window AFTER bootEnded before bootCompletePath is
-// actually sealed (and the bar flips to idle/busy). If a stretch
-// (resumePicker / paneCompacting / !paneReady) re-emerges during this
-// window, the tail timer is cancelled and we stay in boot. Default 10s
-// per david `dz8v9z`. Set to 0 to restore pre-#822 immediate-seal.
-const BOOT_GRACE_TAIL_MS = (() => {
-    const raw = process.env[CL_ENV.BOOT_GRACE_TAIL_MS];
-    const n = raw === undefined || raw === "" ? NaN : Number(raw);
-    return Number.isFinite(n) && n >= 0 ? n : 10_000;
-})();
+// #868 david `<chat>` : `BOOT_GRACE_MS` (= safety cap qui driveait settleBoot)
+// retiré. Le BootMachine acteur (cf. boot-machine.ts) est désormais l'unique
+// autorité du sealing : la deadline push (WATCHER_TICK) absorbe le post-tail
+// grace, et le `DEADLINE_REACHED` self-fire scelle. Watchers (paneReady /
+// resumePicker / paneCompacting) stretch la deadline tant qu'une condition
+// "still booting" reste vraie.
+// #872 Phase 3 — `BOOT_GRACE_TAIL_MS` retiré (replaced by the deadline push
+// semantics du BootMachine acteur). Cf. boot-machine.ts.
 // #627 — BOOT_TIME used to feed the inline boot-grace if/else trees ;
 // the LoopState service now reads `loop-start-ts` from the state-dir
 // (shared marker, same as the hooks). Kept the constant declaration
@@ -449,9 +442,9 @@ async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessag
         pingsPath(sd!),
     );
     // #848 — prepend the one-shot post-boot reminder armed by
-    // `performBootSeal`. The reminder rides on the boot-ended-drain wake
-    // (= the next wake after the seal), not a separate send-keys, to
-    // avoid back-to-back prompts confusing the agent.
+    // `onFreshBootSeal` (#872 Phase 3 : ex-`performBootSeal`). The reminder
+    // rides on the boot-ended-drain wake (= next wake after seal), not a
+    // separate send-keys, to avoid back-to-back prompts confusing the agent.
     if (pendingBootPromptPrefix !== null) {
         result.phrase = `${pendingBootPromptPrefix} ${result.phrase}`;
         log(`pickPhrase: prepended post-boot reminder (${pendingBootPromptPrefix.length} chars)`);
@@ -541,8 +534,10 @@ async function fetchWakeContext(
 // dedicated watcher under `src/claude-loop/pane-watchers/`. The
 // orchestrator (`paneObs`) holds two zones — `boot` (pickers + resuming
 // + compactConfirm) and `runtime` (prompt + busy + interrupted + error
-// + compacting). The SM wiring in `mainSse` enters both at startup and
-// leaves/enters `boot` on bus.bootEnded / bootStarted.
+// + compacting). #872 Phase 3 — `mainSse` enters both at startup (sauf
+// `boot` skippé en cas de respawn handoff sealed) ; le BootMachine
+// acteur sort `boot` à la transition `sealed` (terminal, pas de
+// ré-entrée).
 //
 // Phase C : the legacy `setIpc*` calls used to fire every tick from
 // `refreshPaneMarkers`'s body, regardless of whether anything changed.
@@ -564,10 +559,14 @@ paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, c
 paneObs.registerZone(new Zone("runtime", [
     promptW, busyW, interruptedW, errorW, getCompactingDetector(),
 ]));
-// Both zones entered at startup ; the SM (mainSse below) wires the
-// boot leave/re-enter on bus events.
+// Runtime zone toujours actif ; boot zone n'est entré que si on n'est
+// pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
+// Le BootMachine acteur (#872 Phase 3) sort la zone "boot" via son
+// subscriber dès qu'il atteint l'état terminal `sealed`.
 paneObs.enter("runtime");
-paneObs.enter("boot");
+if (getIpcState().bootComplete !== true) {
+    paneObs.enter("boot");
+}
 
 // `paneReady` is composed : prompt visible AND no picker/transient on
 // screen. Any watcher that contributes to the disjunction needs to
@@ -608,9 +607,10 @@ function refreshPaneMarkers(): void {
     paneObs.tick(paneText, { nowMs: Date.now(), isBoot });
     // David `<chat>` : pendant le boot, chaque tick observant une
     // condition "still booting" (paneReady=false / picker actif /
-    // compacting) push le `bootDeadlineMs` à `now + 10_000`. Quand
-    // les conditions clear, plus de push → deadline expire +10s plus
-    // tard → tick séparé fire `bus.bootEnded` → seal.
+    // compacting) push `bootDeadlineMs` via l'acteur (WATCHER_TICK).
+    // Quand les conditions clear, plus de push → deadline expire +10s
+    // plus tard → `bootDeadlineTimer` fire `DEADLINE_REACHED` →
+    // l'acteur transite vers `sealed` → subscriber écrit bootComplete.
     if (isBoot && bootActor) {
         const stillBooting = !ipc.paneReady || ipc.paneCompacting || ipc.resumeSessionPickerActive || ipc.resumeModePickerActive;
         if (stillBooting) {
@@ -771,13 +771,13 @@ function client(): AiballClient {
 // heartbeat picks up what's still unread post-turn.
 let tryWakeInFlight: Promise<boolean> | null = null;
 
-// #848 — post-boot prompt prefix. `performBootSeal` renders the
-// `post_boot_skill_reminder` slot once per session and stashes the
-// result here ; `pickPhrase` prepends it to the next wake phrase
-// (which is the boot-ended-drain by construction, since perform-
-// BootSeal fires tryWake immediately after stashing) and clears.
-// `postBootRemindersSent` enforces the one-shot — a compact or a
-// re-emergence stretch won't re-fire the reminder.
+// #848 — post-boot prompt prefix. `onFreshBootSeal` (#872 Phase 3 :
+// ex-`performBootSeal`) renders the `post_boot_skill_reminder` slot
+// once per session and stashes the result here ; `pickPhrase` prepends
+// it to the next wake phrase (which is the boot-ended-drain by
+// construction, since onFreshBootSeal fires tryWake immediately after
+// stashing) and clears. `postBootRemindersSent` enforces the one-shot
+// — a compact won't re-fire the reminder.
 let pendingBootPromptPrefix: string | null = null;
 let postBootRemindersSent = false;
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint, panicMode = false): Promise<boolean> {
@@ -1083,13 +1083,14 @@ async function mainSse(): Promise<void> {
     // crashed-and-restarted loop).
     await tryWake("startup");
     // #868 david `<chat>` : the `settleBoot` BOOT_GRACE_MS (60s) safety
-    // cap is gone. With the modern watchers (PaneWatcher etc.), the
-    // pane watcher detects the prompt → `bus.bootEnded` → 10s tail
-    // grace → seal. settleBoot was redundant : skipped when bootComplete
-    // was already true (= happy case), deferred +60s on stretches
-    // (= also happy), force-sealed only in the rare degenerate "claude
-    // hung without rendering its prompt" case. If genuinely hung → the
-    // bar now stays yellow indefinitely (= honest visual signal vs a
+    // cap is gone. With the modern watchers (PaneWatcher etc.), the pane
+    // watcher detects the prompt → no more deadline push → BootMachine
+    // acteur seals on `DEADLINE_REACHED` (#872 Phase 3). settleBoot was
+    // redundant : skipped when bootComplete was already true (= happy
+    // case), deferred +60s on stretches (= also happy), force-sealed only
+    // in the rare degenerate "claude hung without rendering its prompt"
+    // case. If genuinely hung → the bar now stays yellow indefinitely
+    // (= honest visual signal vs a
     // fake seal that flipped the bar green over a stuck claude).
     // #264: near-live human-typing detection poll (bicolor bar chip).
     // Independent of the wake heartbeat — fast cadence so the chip
@@ -1131,9 +1132,10 @@ async function mainSse(): Promise<void> {
     // #630 david `d59zge` : LoopStateBus owns the prev-view + emits
     // typed events on transitions. The push-to-proxy hook listens to
     // `transition` (any change) and forwards via the existing pusher.
-    // Other consumers can subscribe to specific events (bootEnded,
-    // afkArmed10m, …) for log decoration or future reactive painters
-    // without re-implementing the diff.
+    // Other consumers can subscribe to specific events (afkArmed10m,
+    // pickerOpened, …) for log decoration or future reactive painters
+    // without re-implementing the diff. #872 Phase 3 — bootEnded/
+    // bootStarted retirés (BootMachine acteur, cf. boot-machine.ts).
     // #730 step 2 — single ws server on `loop.sock` handles both
     // outbound view broadcasts (timer → proxy) and inbound proxyEvent
     // dispatch (proxy → timer). The dispatcher (`proxy-event-dispatcher.ts`)
@@ -1159,17 +1161,15 @@ async function mainSse(): Promise<void> {
     // Slice B-3 stops the hook writes once we trust the in-memory side.
     const ipcStateSub = getHookService().subscribe((ev) => {
         if (ev.kind === "SessionStart") {
-            // #822 david `etned7` (combined fix with Plan B in loop-state.ts) —
-            // do NOT eagerly set bootComplete on every SessionStart event.
-            // The hook fires the moment claude boots, regardless of whether
-            // a picker / resuming / first-compacting is still up ; setting
-            // bootComplete here sealed the boot phase prematurely and
-            // bypassed the `bus.bootEnded` handler where the tail-grace
-            // (#9252736) + safety-cap (#586c875) live. The bus emits
-            // `bootEnded` only when ALL stretches have cleared — that's
-            // the right single source of truth for sealing bootComplete.
-            // The pickers + idleSince still propagate here so the wake
-            // gate sees fresh per-hook input.
+            // #822 david `etned7` — do NOT eagerly set bootComplete on
+            // every SessionStart event. The hook fires the moment claude
+            // boots, regardless of whether a picker / resuming / first-
+            // compacting is still up ; setting bootComplete here sealed
+            // the boot phase prematurely. #872 Phase 3 — l'unique
+            // autorité de sealing est désormais le BootMachine acteur
+            // (`DEADLINE_REACHED` after les pane watchers stoppent les
+            // `WATCHER_TICK` push). The pickers + idleSince still
+            // propagate here so the wake gate sees fresh per-hook input.
             setIpcIdleSince(ev.at_ms);
             // Slice B-2 — propagate picker context if the hook detected it.
             // #839 Slice 3 (#766) — the timer (= single writer) ALSO writes
@@ -1247,20 +1247,96 @@ async function mainSse(): Promise<void> {
     const barRenderer = new BarRenderer(sd!, name!);
     barRenderer.start();
     process.on("exit", () => barRenderer.stop());
-    // David `<chat>` : watcher-driven boot deadline. Init at
-    // `loopStartMs + bootMinMs` (= 30s floor). `refreshPaneMarkers`
-    // pushes the deadline to `now+10s` each tick a "still booting"
-    // condition is observed (paneReady=false / picker / compacting).
-    // When `now >= deadline` and !bootComplete, fire `bus.bootEnded`
-    // via the heartbeat below → seal via existing tail-grace path.
-    // #872 / #870 Phase 1 — XState BootMachine acteur pilote.
-    // L'acteur owns le timing boot (deadline push + auto-seal + sealed
-    // terminal). Le subscriber bridge l'état actor → ipcState pour que
-    // les consumers downstream (bar-renderer, isInBootGrace, etc.) lisent
-    // un seul snapshot canonique. La machine elle-même reste pure et
-    // testable indépendamment (cf. boot-machine.test.ts).
+    // #629 — fast probe 1s pendant boot. Le BootMachine acteur drive
+    // l'arming : on arme au démarrage si on est en booting (= cas normal,
+    // pas un respawn handoff sealed), et le subscriber désarme à la
+    // transition `sealed`. Pas de ré-armement — la machine est terminale.
+    let fastProbeTimer: NodeJS.Timeout | null = null;
+    // #647 david `db83ep` : memoize last painted info so we don't call
+    // setTmuxStatus every second when nothing changed. Tmux set-option
+    // is non-trivial (spawnSync). Null = "no info painted yet".
+    let lastPaintedBootInfo: string | null = null;
+    const armFastProbe = (): void => {
+        if (fastProbeTimer) return;
+        fastProbeTimer = setInterval(() => {
+            try { refreshPaneMarkers(); } catch { /* best-effort */ }
+            // #647 Slice 4 follow-up (david `a9njm5`) : pendant boot le
+            // heartbeat 30s n'a pas tourné encore → setTmuxStatus du tick
+            // ne fire pas. Faut peindre la barre depuis paneService ICI
+            // pour que `[boot:picker:session]` etc. soit visible la
+            // fenêtre entière du picker. Memoized (#647 david `db83ep`) :
+            // only repaint when info changes (transitions only).
+            try {
+                const info = paneMarkerBarInfo();
+                if (info !== lastPaintedBootInfo) {
+                    // #862 Slice 5 — info suffix routé via ipc ; BarRenderer
+                    // compose `[boot:<info>]` automatiquement.
+                    setIpcStateTagInfo(info);
+                    lastPaintedBootInfo = info;
+                }
+            } catch { /* best-effort */ }
+        }, 1000);
+        log("fast-probe: armed (1s cadence during boot)");
+    };
+    const disarmFastProbe = (): void => {
+        if (!fastProbeTimer) return;
+        clearInterval(fastProbeTimer);
+        fastProbeTimer = null;
+        log("fast-probe: disarmed (boot sealed)");
+    };
+    // #872 Phase 3 — `onFreshBootSeal` (= ancien `performBootSeal` inliné)
+    //   regroupe les side-effects "première seal de la session" : armAfk
+    //   --wait, reset du status tag, post-boot reminder, drain wake.
+    //   Sur respawn handoff (bootComplete déjà true à boot), on saute
+    //   ces effets (déjà émis par la session précédente). La détection
+    //   se fait via `getIpcState().bootComplete !== true` dans le subscriber.
+    const onFreshBootSeal = (): void => {
+        // #639 david `pn97zf` — `--wait` (CL_WAIT=1) arms NOT AFK 10m at
+        // boot exit so the bar reads `wait` yellow with a countdown : the
+        // documented "managed mode" contract. `--no-wait` (CL_WAIT=0)
+        // leaves AFK off — bar reads `loop` and auto-pings resume.
+        if (cfg.wait) {
+            armAfkViaService(sd!);
+            log("bootMachine: sealed — --wait → armed NOT AFK 10m (via service)");
+        }
+        // #629 david `jf6efv` — flip the bar BG out of [boot] IMMEDIATELY.
+        // #862 Slice 5 — setTmuxStatus(IDLE) retiré ; paneBusy=false suffit
+        // pour que BarRenderer dérive idle au prochain compute.
+        try { setIpcStateTagInfo(null); } catch { /* best-effort */ }
+        // #848 — arm the one-shot post-boot reminder (per .aiball.yaml
+        // `prompts.post_boot_skill_reminder`). Set-and-forget for the
+        // session (compact/resume won't re-fire).
+        if (!postBootRemindersSent) {
+            postBootRemindersSent = true;
+            try {
+                const promptMap = mergePrompts(
+                    loadPromptsFromYaml(pingsPath(sd!)),
+                    {}, // per-project overrides are merged at pings.yaml load
+                );
+                const reminder = renderSlot(promptMap, "post_boot_skill_reminder", {}, "");
+                if (reminder.length > 0) {
+                    pendingBootPromptPrefix = reminder;
+                    log(`post-boot reminder armed (${reminder.length} chars) — will prepend to drain wake`);
+                }
+            } catch (e) {
+                log(`post-boot reminder load failed (ignored): ${String(e)}`);
+            }
+        }
+        // #629 david `7zqtgf` — drain stacked pings at boot exit.
+        void tryWake("boot-ended-drain");
+    };
+    // #872 / #870 Phase 1+3 — XState BootMachine acteur unique propriétaire
+    //   du sealing. Le subscriber observe les snapshots :
+    //     - update `bootDeadlineMs` ipc (pour bar-renderer + isInBootGrace)
+    //     - sur `sealed` : disarm fast-probe, leave pane "boot" zone, et
+    //       (si fresh seal, pas respawn) écrit `bootComplete` + side-effects.
+    //   Pour le cas respawn handoff (bootComplete déjà true à boot, cf.
+    //   ligne ~313), on envoie `HOOK_SEAL` immédiatement après start pour
+    //   que la machine soit consistent avec ipcState — pas d'effets de
+    //   bord re-émis grâce au gate `bootComplete !== true`.
     {
         const input0 = readLoopStateInput(sd!);
+        const wasComplete = getIpcState().bootComplete === true;
         bootActor = createActor(bootMachine, {
             input: {
                 loopStartMs: input0.loopStartMs,
@@ -1269,12 +1345,23 @@ async function mainSse(): Promise<void> {
         });
         bootActor.subscribe((snap) => {
             setIpcBootDeadlineMs(snap.context.deadlineMs);
-            if (snap.matches("sealed") && getIpcState().bootComplete !== true) {
-                log("bootMachine: sealed → setIpcBootComplete(true)");
-                setIpcBootComplete(true);
+            if (snap.matches("sealed")) {
+                disarmFastProbe();
+                paneObs.leave("boot");
+                if (getIpcState().bootComplete !== true) {
+                    log("bootMachine: sealed → setIpcBootComplete(true)");
+                    setIpcBootComplete(true);
+                    onFreshBootSeal();
+                }
             }
         });
         bootActor.start();
+        if (wasComplete) {
+            log("bootMachine: respawn handoff bootComplete=true — sending HOOK_SEAL to sync actor");
+            bootActor.send({ type: "HOOK_SEAL" });
+        } else {
+            armFastProbe();
+        }
     }
     // Pump DEADLINE_REACHED côté wall-clock — la machine reste pure (=
     // pas de timer interne), le side-effect setInterval vit côté wrapper.
@@ -1314,93 +1401,11 @@ async function mainSse(): Promise<void> {
         // the pushed view — but the timer is the ORIGIN of the value.
         logBarPaint(sd, "timer.ts:bus.transition", next.barWord);
     });
-    // #629 david `2hwuan` + `8wgq7f` — sceller la fin de boot : écrit
-    // bootComplete marker directement (plus via setResumePicker, qui ne
-    // touche plus bootComplete depuis #629). Une fois posé, isInBootGrace
-    // early-return false ad vitam — donc Resuming conversation… puis /compact
-    // mid-session ne peuvent pas ré-entrer en boot. L'event ne fire QUE
-    // quand toutes les conditions ont vraiment dit not-in-boot (post-floor,
-    // paneReady, no picker, no compacting) — c'est THE moment où on scelle.
-    // #822 — defer the seal-and-exit chain by BOOT_GRACE_TAIL_MS so a
-    // transient paneReady=true glitch (typical between picker selection
-    // and "Resuming conversation…" appearing) doesn't lock bootComplete
-    // prematurely. The tail timer is cancelled on bootStarted (= the
-    // bus re-detected boot via a fresh stretch), letting the boot phase
-    // continue without a flicker. With tail=0 (env override), behaviour
-    // collapses back to the original immediate-seal.
-    let bootSealTimer: NodeJS.Timeout | null = null;
-    const performBootSeal = (): void => {
-        bootSealTimer = null;
-        log("state-bus: boot phase ended (tail elapsed) — sealing bootComplete (ipc)");
-        // #840 `4z59jt` — IPC-only. Pas de fichier boot-complete (les
-        // hooks subprocess lisent via UDS queryLoopState).
-        setIpcBootComplete(true);
-        // #639 david `pn97zf` — `--wait` (CL_WAIT=1) arms NOT AFK 10m at
-        // boot exit so the bar reads `wait` yellow with a countdown : the
-        // documented "managed mode" contract. `--no-wait` (CL_WAIT=0)
-        // leaves AFK off — bar reads `loop` and auto-pings resume.
-        const isWaitMode = cfg.wait;
-        if (isWaitMode) {
-            armAfkViaService(sd!);
-            log("state-bus: boot phase ended — --wait → armed NOT AFK 10m (via service)");
-        }
-        // #629 david `jf6efv` — flip the bar BG out of [boot] IMMEDIATELY.
-        // Without this, the BG stays yellow until the next heartbeat tick
-        // (up to `interval` seconds = 30s default) — david observed boot
-        // bar ending "at least 30s after the prompt returns". The bus
-        // event fires the moment isInBootGrace transitions ; flip the
-        // bar in the same tick.
-        try {
-            // Idle is the right default at boot exit ; busy-detect by the
-            // next probe cycle if claude is mid-turn.
-            // #862 Slice 5 — setTmuxStatus(IDLE) retiré. paneBusy=false
-            // suffit pour que BarRenderer dérive idle.
-            setIpcStateTagInfo(null);
-        } catch { /* best-effort */ }
-        // #848 — arm the one-shot post-boot reminder (per .aiball.yaml
-        // `prompts.post_boot_skill_reminder`). The string is prepended
-        // to the boot-ended-drain wake's phrase by `pickPhrase` rather
-        // than fired as a separate send-keys (which would interrupt
-        // the agent mid-response). Empty slot → no-op. Set-and-forget
-        // for the session (compact/resume won't re-fire).
-        if (!postBootRemindersSent) {
-            postBootRemindersSent = true;
-            try {
-                const promptMap = mergePrompts(
-                    loadPromptsFromYaml(pingsPath(sd!)),
-                    {}, // per-project overrides are merged at pings.yaml load
-                );
-                const reminder = renderSlot(promptMap, "post_boot_skill_reminder", {}, "");
-                if (reminder.length > 0) {
-                    pendingBootPromptPrefix = reminder;
-                    log(`post-boot reminder armed (${reminder.length} chars) — will prepend to drain wake`);
-                }
-            } catch (e) {
-                log(`post-boot reminder load failed (ignored): ${String(e)}`);
-            }
-        }
-        // #629 david `7zqtgf` — drain stacked pings at boot exit.
-        // Pre-#745 we also had to clear user-took-over here because
-        // picker keystrokes armed the user-grace ; gone now, the AFK
-        // SM is the only hold. Just fire the wake.
-        void tryWake("boot-ended-drain");
-    };
-    loopBus.on("bootEnded", () => {
-        if (bootSealTimer) return; // already scheduled, don't restack
-        if (BOOT_GRACE_TAIL_MS <= 0) {
-            // Knob override : pre-#822 immediate-seal behaviour.
-            performBootSeal();
-            return;
-        }
-        log(`state-bus: boot phase ended — sealing deferred ${BOOT_GRACE_TAIL_MS}ms (tail grace, will cancel on bootStarted)`);
-        bootSealTimer = setTimeout(performBootSeal, BOOT_GRACE_TAIL_MS);
-    });
-    loopBus.on("bootStarted", () => {
-        if (!bootSealTimer) return;
-        clearTimeout(bootSealTimer);
-        bootSealTimer = null;
-        log("state-bus: bootStarted within tail window — cancelled pending bootComplete seal (a stretch re-emerged)");
-    });
+    // #872 Phase 3 — `performBootSeal` + `bootSealTimer` + `loopBus.on("bootEnded"/"bootStarted")`
+    //   retirés. Le BootMachine acteur (cf. boot-machine.ts) est l'unique
+    //   propriétaire du sealing : `bootActor.subscribe` côté actor block
+    //   ci-dessus appelle `onFreshBootSeal` (= ancien `performBootSeal`
+    //   inliné dans le subscriber) à la transition `sealed`.
     // #629 david `7zqtgf` — same drain trigger when AFK is cleared
     // (F9 from NOT AFK 10m/∞ back to AFK). The bar word goes
     // wait→loop ; any ping that came while the hold was active
@@ -1460,52 +1465,11 @@ async function mainSse(): Promise<void> {
         }
         void tryWake("afk-cleared-drain");
     });
-    // #629 — fast probe 1s pendant boot. Arme au start (on est forcément
-    // en boot à T0 via le floor), désarme sur bootEnded, ré-arme sur
-    // bootStarted (n'arrive qu'en theory — bootComplete bloque la
-    // ré-entrée, mais ceinture+bretelle).
-    let fastProbeTimer: NodeJS.Timeout | null = null;
-    // #647 david `db83ep` : memoize last painted info so we don't call
-    // setTmuxStatus every second when nothing changed. Tmux set-option
-    // is non-trivial (spawnSync). Null = "no info painted yet".
-    let lastPaintedBootInfo: string | null = null;
-    const armFastProbe = (): void => {
-        if (fastProbeTimer) return;
-        fastProbeTimer = setInterval(() => {
-            try { refreshPaneMarkers(); } catch { /* best-effort */ }
-            // #647 Slice 4 follow-up (david `a9njm5`) : pendant boot le
-            // heartbeat 30s n'a pas tourné encore → setTmuxStatus du tick
-            // ne fire pas. Faut peindre la barre depuis paneService ICI
-            // pour que `[boot:picker:session]` etc. soit visible la
-            // fenêtre entière du picker. Memoized (#647 david `db83ep`) :
-            // only repaint when info changes (transitions only).
-            try {
-                const info = paneMarkerBarInfo();
-                if (info !== lastPaintedBootInfo) {
-                    // #862 Slice 5 — info suffix routé via ipc ; BarRenderer
-                    // compose `[boot:<info>]` automatiquement.
-                    setIpcStateTagInfo(info);
-                    lastPaintedBootInfo = info;
-                }
-            } catch { /* best-effort */ }
-        }, 1000);
-        log("fast-probe: armed (1s cadence during boot)");
-    };
-    const disarmFastProbe = (): void => {
-        if (!fastProbeTimer) return;
-        clearInterval(fastProbeTimer);
-        fastProbeTimer = null;
-        log("fast-probe: disarmed (boot ended)");
-    };
-    armFastProbe();
-    loopBus.on("bootEnded", disarmFastProbe);
-    loopBus.on("bootStarted", armFastProbe);
-    // #845 Phase B — the SM drives the orchestrator's `boot` zone here :
-    // bootEnded leaves it (picker / resuming / compactConfirm watchers
-    // stop running) ; bootStarted re-enters it on a stretch re-emergence.
-    // The `runtime` zone stays active across the whole loop lifetime.
-    loopBus.on("bootEnded", () => paneObs.leave("boot"));
-    loopBus.on("bootStarted", () => paneObs.enter("boot"));
+    // #845 Phase B + #872 Phase 3 — la zone "boot" du PaneObserver est
+    //   pilotée par le BootMachine acteur (cf. bloc actor plus haut) :
+    //   `paneObs.leave("boot")` au sealing (subscriber), `paneObs.enter("boot")`
+    //   à module init si !respawn-handoff. Pas de ré-entrée — la machine
+    //   est terminale.
     loopBus.on("afkArmed10m", (expiry) => log(`state-bus: AFK 10m armed (expires ${new Date(expiry).toISOString()})`));
     loopBus.on("afkArmedInf", () => log("state-bus: AFK ∞ armed"));
     loopBus.on("afkCleared", () => log("state-bus: AFK cleared"));

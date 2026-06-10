@@ -213,7 +213,8 @@ export function loopStartTsPath(sd: string): string { return join(sd, "loop-star
  *    - `setResumeModePicker(sd, true)`     au match du 2e écran
  *    - `clearResumePickers(sd)`            après dismiss des deux
  *
- *  bootComplete reste séparé (sealing via bus.on("bootEnded") + settleBoot).
+ *  bootComplete reste séparé (sealing via le BootMachine acteur — cf.
+ *  boot-machine.ts, #872 Phase 3).
  *
  *  #840 `4z59jt` — IPC seul. Plus de marker fichier.
  */

@@ -2,10 +2,9 @@
  * #872 / #870 — POC XState v5 BootController.
  *
  * Premier nœud du réseau de state machines (cf. #872). Centralise tout
- * le timing boot dans une vraie machine XState au lieu des 10 sites
- * dispersés (`isInBootGrace` pure check + `bootDeadlineMs` ipc field +
- * `refreshPaneMarkers` push + `bootDeadlineTimer` setInterval +
- * `loopBus.on("bootEnded")` tail grace + `bar-renderer` display).
+ * le timing boot dans une vraie machine XState. Phase 3 : seul
+ * propriétaire du sealing — bus.bootEnded/bootStarted retirés ;
+ * subscriber bridge actor.context.deadlineMs / sealed → ipcState.
  *
  * Model :
  *
