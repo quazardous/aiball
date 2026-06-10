@@ -112,10 +112,14 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
         excludesFrom: new Set<Target>(["unread-list", "unread-count", "fifo-wake"]),
     },
     {
+        // #900/#904 david : un ticket assigné à un autre agent ne doit pas
+        // déclencher de wake CTA sur moi (= symétrique à claimed-by-other).
+        // Le ticket reste visible (unread-list/count restent NON-filtrés)
+        // mais ne peuple pas mon work-order ni ma FIFO.
         name: "assigned-to-other",
         when: (ctx, item) =>
             item.assignee != null && item.assignee !== ctx.consumerId,
-        excludesFrom: new Set<Target>(["backlog-tier"]),
+        excludesFrom: new Set<Target>(["backlog-tier", "fifo-wake"]),
     },
     {
         // #900 david : "ouvre un ticket sur ça ça devrait pas te fire".
