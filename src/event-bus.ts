@@ -25,6 +25,7 @@
 import { EventEmitter } from "node:events";
 import type { Intent } from "./domain.js";
 import type { Message } from "./db.js";
+import { fanOutPings } from "./notifications.js";
 
 export interface PingEvent {
     ticket_id?: number;
@@ -136,4 +137,45 @@ export function emitLifecycle(event: LifecycleEvent): void {
 export function onLifecycle(handler: (event: LifecycleEvent) => void): () => void {
     bus.on("lifecycle", handler);
     return () => bus.off("lifecycle", handler);
+}
+
+/**
+ * #836 Phase 1 — Single entry point for "a new event has landed".
+ *
+ * Wraps the duo `fanOutPings(message) + emitLifecycle({op, message, …})`
+ * that historically scattered across every callsite (`messages.ts` ~6
+ * sites, `moveTicketTo`, `close-cleanup.ts`, …). Each callsite used to
+ * decide on its own whether to call one, both, or only emit lifecycle
+ * after the ping fanout. Drift inevitable.
+ *
+ * `pushEvent(msg, {op})` codifies the matrix : every event that goes
+ * through pushEvent gets BOTH side-effects in the right order. Callers
+ * only need to provide the lifecycle op (default `"created"`) + any
+ * old-value context (move source, prior priority, …).
+ *
+ * NOT for : the WS `broadcast()` call — that's a separate concern (live
+ * UI announce, not server-side reaction). Callers keep broadcast inline
+ * because not every internal lifecycle event needs broadcasting and
+ * vice-versa.
+ */
+export interface PushEventOpts {
+    op?: LifecycleOp;
+    old_priority?: string;
+    old_project?: string;
+    old_status?: string;
+    added_tag?: string;
+    all_tags?: string[];
+}
+
+export function pushEvent(message: Message, opts: PushEventOpts = {}): void {
+    fanOutPings(message);
+    emitLifecycle({
+        op: opts.op ?? "created",
+        message,
+        old_priority: opts.old_priority,
+        old_project: opts.old_project,
+        old_status: opts.old_status,
+        added_tag: opts.added_tag,
+        all_tags: opts.all_tags,
+    });
 }

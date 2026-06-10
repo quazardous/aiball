@@ -28,7 +28,7 @@ import { listSubscriptions } from "./db/subscriptions.js";
 import { evaluate } from "./rules.js";
 import { deliverToOutbox } from "./outbox.js";
 import { broadcast } from "./ws.js";
-import { emitLifecycle } from "./event-bus.js";
+import { emitLifecycle, pushEvent } from "./event-bus.js";
 import { fanOutPings, fanOutMentions } from "./notifications.js";
 
 // User-postable subset of MESSAGE_KINDS: excludes `ticket_sub_added`
@@ -414,7 +414,10 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
                 // internal-scoped sub-ticket doesn't summon the parent
                 // thread's followers via its sub_added pseudo.
                 pseudo.scope = msg.scope;
-                fanOutPings(pseudo);
+                // #836 Phase 1 : pushEvent = fanOutPings + emitLifecycle.
+                // Le pseudo gagne un emit lifecycle("created") — runtime.ts
+                // (gate sur kind="ticket_created") ignore le pseudo.
+                pushEvent(pseudo);
                 broadcast({ type: "message_created", data: pseudo });
             }
             // #271: dual-write the lineage into the typed-relations graph
@@ -459,7 +462,8 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
             // inherits the source scope so fanOutPings's own gate
             // picks up the right behavior.
             pseudo.scope = msg.scope;
-            fanOutPings(pseudo);
+            // #836 Phase 1 — voir le pseudo sub_added au-dessus.
+            pushEvent(pseudo);
             broadcast({ type: "message_created", data: pseudo });
         }
     }
