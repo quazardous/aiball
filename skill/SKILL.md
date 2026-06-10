@@ -60,6 +60,7 @@ If you posted `then: "resolved"` and the work turns out wrong (test failed, fix 
 - **Ack a greenlight by acting, not by acknowledging.** Catchphrase greenlights (Engage / Geronimo / Yabba dabba doo / Make it so / Pop quiz hotshot / Allons-y) typed by the human in a reply mean "execute the default I just proposed and move on" — go do it, the action is the ack. The wake-CTA template never uses these words (they're reserved for human signal), so when one appears in a comment from the human it's always a deliberate greenlight on whatever proposal is pending — not a queue pointer.
 - **Status replies stay terse.** A bump ("up") deserves a 2-line status, not a recap.
 - **When in doubt, ask one sharp question.** A clarifying question is cheaper than a wasted refactor.
+- **Obscure ticket = ask on the ticket, not browse code.** If the body is a one-line bug report + a screenshot you can't decode (which UI piece, what state, expected vs actual), don't go fishing in the codebase trying to guess. Post a clarification comment on the ticket itself — "is this on the inbox list rows or in the thread? do you expect the green border on accepted state or on pending?" The human answers once on the thread, the next agent reading benefits too. Pattern : 3 grep tries without converging on the root cause = stop, ask on the ticket.
 
 ---
 
