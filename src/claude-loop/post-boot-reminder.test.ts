@@ -21,16 +21,16 @@ import {
 const REPO_ROOT = join(import.meta.dirname, "../..");
 const DEFAULTS_YAML = join(REPO_ROOT, "config/defaults/claude-loop-pings.yaml");
 
-test("#848 defaults: post_boot_skill_reminder slot is present and non-empty", () => {
+test("#882 defaults: post_boot_skill_reminder slot defaults to empty (no auto-injection)", () => {
+    // #882 david : la boot-ended-drain wake carry déjà une ref FIFO ; le skill
+    // reminder par défaut prependait du texte redondant. Default = empty.
+    // Per-project override via .aiball.yaml si jamais utile.
     const map = loadPromptsFromYaml(DEFAULTS_YAML);
     const rendered = renderSlot(map, "post_boot_skill_reminder", {}, "");
-    assert.ok(
-        rendered.length > 0,
-        "expected non-empty default reminder; got empty (slot missing or value empty)",
-    );
-    assert.ok(
-        rendered.toLowerCase().includes("aiball"),
-        `expected default reminder to mention "aiball"; got: ${rendered.slice(0, 120)}`,
+    assert.equal(
+        rendered,
+        "",
+        "default reminder should be empty (opt-in via per-project override)",
     );
 });
 
