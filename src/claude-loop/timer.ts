@@ -117,6 +117,7 @@ import {
     setIpcAfk,
     setIpcDispAfk,
     setIpcBootComplete,
+    setIpcLoopStart,
     setIpcHumanTypingAtMs,
     setIpcBootDeadlineMs,
     setIpcCounters,
@@ -806,9 +807,7 @@ function client(): AiballClient {
 //   - one-shot par session (`postBootRemindersSent` flag)
 //   - standalone (= jamais prepended à autre message)
 //   - skip si claude jamais idle stable (= force injection évitée)
-let postBootInjectText: string | null = null;
 let postBootRemindersSent = false;
-let postBootInjectFired = false;
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint, panicMode = false): Promise<boolean> {
     const wakeSvc = getWakeService();
     if (!wakeSvc.isIdle()) {
@@ -1354,10 +1353,11 @@ async function mainSse(): Promise<void> {
         // #862 Slice 5 — setTmuxStatus(IDLE) retiré ; paneBusy=false suffit
         // pour que BarRenderer dérive idle au prochain compute.
         try { setIpcStateTagInfo(null); } catch { /* best-effort */ }
-        // #848 david `chkb5z` — arm the standalone post-boot inject.
-        // Pas prepend : on stash le texte et `idleActor.on("idle:settled")`
-        // fire un sendKeys séparé quand claude est stable idle (= FIFO
-        // drain terminé). Set-and-forget pour la session.
+        // #848 david `<chat>` : sendKeys IMMÉDIAT au boot:sealed (= active
+        // busy avec le prompt skill). Drop le stash+idle:settled (= ancien
+        // mécanisme `chkb5z`). Le loop:start register fire 10s plus tard
+        // (cf. bootActor.on("loop:start")) et gate les wakes idle:settled
+        // ultérieurs.
         if (!postBootRemindersSent) {
             postBootRemindersSent = true;
             try {
@@ -1367,8 +1367,8 @@ async function mainSse(): Promise<void> {
                 );
                 const reminder = renderSlot(promptMap, "post_boot_skill_reminder", {}, "");
                 if (reminder.length > 0) {
-                    postBootInjectText = reminder;
-                    log(`post-boot reminder armed (${reminder.length} chars) — will inject on next idle:settled`);
+                    log(`post-boot reminder: injecting immediate (${reminder.length} chars)`);
+                    void sendKeys(reminder);
                 }
             } catch (e) {
                 log(`post-boot reminder load failed (ignored): ${String(e)}`);
@@ -1411,6 +1411,14 @@ async function mainSse(): Promise<void> {
             } else {
                 log(`bootMachine: boot:sealed reason=${ev.reason} (respawn handoff, side-effects skipped)`);
             }
+        });
+        // #848 david `<chat>` : `loop:start` = registre "green light", set
+        // 10s après `boot:sealed` (= sealed.fresh → sealed.settled). Les
+        // consumers qui veulent "boot vraiment fini" gate sur ce flag au
+        // lieu de bootComplete.
+        bootActor.on("loop:start", (ev) => {
+            log(`bootMachine: loop:start loopStartMs=${ev.loopStartMs} → setIpcLoopStart(true)`);
+            setIpcLoopStart(true);
         });
         bootActor.start();
         if (wasComplete) {
@@ -1585,10 +1593,11 @@ async function mainSse(): Promise<void> {
             setIpcIdleSince(snap.context.idleSinceMs);
             // #805 david : countdown bar segment. Gated sur bootComplete
             // (= ne pas afficher pendant le boot, l'idle controller ne
-            // doit trigger qu'après seal). Si en idle.fresh/settled +
-            // bootComplete : expose le prochain `idle:settled` emit.
+            // doit trigger qu'après seal). #848 : gate sur `loopStart`
+            // (= 10s après boot:sealed) au lieu de bootComplete pour
+            // cohérence avec le handler idle:settled ci-dessous.
             const ctx = snap.context;
-            const bootDone = getIpcState().bootComplete === true;
+            const bootDone = getIpcState().loopStart;
             if (bootDone && snap.matches("idle") && ctx.idleSinceMs !== null) {
                 const isSettled = snap.matches({ idle: "settled" });
                 const nextAt = isSettled
@@ -1615,22 +1624,15 @@ async function mainSse(): Promise<void> {
         // post-boot inject (one-shot per session, jamais prepended à un
         // wake).
         idleActor.on("idle:settled", (ev) => {
-            // #805 david : "le trigger du idle doit démarrer que après la
-            // fin du boot". Si boot pas encore sealed, skip silencieusement.
-            if (getIpcState().bootComplete !== true) return;
+            // #848 david `<chat>` : gate sur `loopStart` (= 10s après
+            // boot:sealed) au lieu de bootComplete. Pendant les 10s [sealed
+            // → loop:start], on laisse les "boot end" things fire mais les
+            // wakes idle:settled spéculatifs attendent. Le post-boot inject
+            // n'est plus géré ici (= sendKeys immédiat au boot:sealed,
+            // cf. onFreshBootSeal).
+            if (!getIpcState().loopStart) return;
             log(`idleMachine: idle:settled idleSinceMs=${ev.idleSinceMs} settleMs=${ev.settleMs}`);
-            // Double guard contre re-fire : `postBootInjectFired` flag séparé
-            // de la text clear pour bloquer tout idle:settled subséquent même
-            // si l'arming s'est répété (= défense contre une race au reload).
-            if (!postBootInjectFired && postBootInjectText !== null) {
-                postBootInjectFired = true;
-                const text = postBootInjectText;
-                postBootInjectText = null;
-                log(`post-boot reminder: injecting standalone (${text.length} chars)`);
-                void sendKeys(text);
-            } else {
-                void tryWake("idle:settled");
-            }
+            void tryWake("idle:settled");
         });
     }
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux

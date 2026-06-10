@@ -33,6 +33,12 @@ export interface IpcState {
      *  event lands. `null` = no event yet (the timer just started and
      *  the file may still be the truth). */
     bootComplete: boolean | null;
+    /** #848 david `<chat>` : "green light" registre — set 10s après
+     *  `boot:sealed` via BootController emit `loop:start`. C'est le flag
+     *  que les consumers "fin de boot vraiment terminée" doivent gater
+     *  (au lieu de `bootComplete` qui fire dès le seal technique). No-op
+     *  si claude est busy au moment du set. */
+    loopStart: boolean;
     /** Last in-memory `idle-since` timestamp (ms epoch), mutated on
      *  Stop / SessionStart (set) and UserPromptSubmit (clear). `null`
      *  preserves the previous fallback-to-file behaviour. */
@@ -173,6 +179,7 @@ export interface IpcState {
 
 const state: IpcState = {
     bootComplete: null,
+    loopStart: false,
     idleSinceMs: null,
     nextWakeAtMs: null,
     idleSinceCleared: false,
@@ -264,6 +271,14 @@ export function setIpcIdleSince(atMs: number | null): void {
  *  countdown segment after `o:N b:N e:N`. */
 export function setIpcNextWakeAt(atMs: number | null): void {
     state.nextWakeAtMs = atMs;
+    notifyIpcChanged();
+}
+
+/** #848 — set the "loop:start" register (green light). Wired from
+ *  BootController `loop:start` emit (= 10s after boot:sealed). Consumers
+ *  gating on "boot really ended" check this instead of bootComplete. */
+export function setIpcLoopStart(active: boolean): void {
+    state.loopStart = active;
     notifyIpcChanged();
 }
 
@@ -479,6 +494,7 @@ export function setIpcPaneResuming(value: boolean | null): void {
 /** Reset every field to the as-launched defaults. Tests only. */
 export function resetIpcStateForTests(): void {
     state.bootComplete = null;
+    state.loopStart = false;
     state.idleSinceMs = null;
     state.nextWakeAtMs = null;
     state.idleSinceCleared = false;

@@ -53,7 +53,8 @@ export interface BootMachineInput {
 
 /** Locus events emitted by the actor. */
 export type BootEmittedEvent =
-    | { type: "boot:sealed"; loopStartMs: number; reason: "deadline" | "hook" };
+    | { type: "boot:sealed"; loopStartMs: number; reason: "deadline" | "hook" }
+    | { type: "loop:start"; loopStartMs: number };
 
 export const bootMachine = setup({
     types: {
@@ -110,6 +111,10 @@ export const bootMachine = setup({
             loopStartMs: context.loopStartMs,
             reason: "hook" as const,
         })),
+        emitLoopStart: emit(({ context }) => ({
+            type: "loop:start" as const,
+            loopStartMs: context.loopStartMs,
+        })),
     },
 }).createMachine({
     id: "boot",
@@ -131,7 +136,26 @@ export const bootMachine = setup({
                 DEADLINE_REACHED: { target: "sealed", actions: "emitBootSealedDeadline" },
             },
         },
-        sealed: { type: "final" },
+        // #848 david `<chat>` : 2 sous-états après seal.
+        // - `sealed.fresh` : viens de seal, on fire les choses "boot end"
+        //   (post-boot inject, etc.). Tout consumer qui voulait "fin boot"
+        //   reste gated ici (= durée 10s).
+        // - `sealed.settled` : entrée → emit `loop:start` (= registre IPC
+        //   "green light pour la suite"). Les wakes idle:settled gate
+        //   désormais sur loopStart au lieu de bootComplete.
+        sealed: {
+            initial: "fresh",
+            states: {
+                fresh: {
+                    after: {
+                        10_000: { target: "settled" },
+                    },
+                },
+                settled: {
+                    entry: ["emitLoopStart"],
+                },
+            },
+        },
     },
 });
 

@@ -69,14 +69,14 @@ test("MODULE_ENDED : remove from set, deadline unchanged (tunnel = last push res
 test("DEADLINE_REACHED : booting → sealed", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     actor.send({ type: "DEADLINE_REACHED" });
-    assert.equal(actor.getSnapshot().value, "sealed");
-    assert.equal(actor.getSnapshot().status, "done");
+    assert.equal(actor.getSnapshot().matches("sealed"), true);
+    assert.equal(actor.getSnapshot().status, "active");
 });
 
 test("HOOK_SEAL : booting → sealed", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     actor.send({ type: "HOOK_SEAL" });
-    assert.equal(actor.getSnapshot().value, "sealed");
+    assert.equal(actor.getSnapshot().matches("sealed"), true);
 });
 
 test("sealed terminal : MODULE_STARTED suivants no-op", () => {
@@ -110,7 +110,7 @@ test("scénario : cold clean (no module) → deadline reste floor → seal au fl
     const actor = mkActor({ loopStartMs: 1_000_000, bootMinMs: 30_000 }).start();
     assert.equal(actor.getSnapshot().context.deadlineMs, 1_030_000);
     actor.send({ type: "DEADLINE_REACHED" });
-    assert.equal(actor.getSnapshot().value, "sealed");
+    assert.equal(actor.getSnapshot().matches("sealed"), true);
 });
 
 test("scénario : resume picker only → seal à dernier_push + tunnel", () => {
@@ -160,8 +160,30 @@ test("scénario : 2 modules simultanés → manager pushe tant qu'au moins 1 act
 
 test("snapshot observable : subscribe fires sur transitions", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
-    const states: string[] = [];
-    actor.subscribe((snap) => states.push(String(snap.value)));
+    let sawSealed = false;
+    actor.subscribe((snap) => {
+        if (snap.matches("sealed")) sawSealed = true;
+    });
     actor.send({ type: "HOOK_SEAL" });
-    assert.ok(states.includes("sealed"));
+    assert.ok(sawSealed);
+});
+
+// #848 — sealed.fresh → sealed.settled after 10s + emit loop:start
+
+test("emit loop:start 10s après boot:sealed (XState fake clock)", async () => {
+    const SETTLE_DELAY = 10_000;
+    const { createActor } = await import("xstate");
+    const actor = createActor(bootMachine, {
+        input: { loopStartMs: 1_000_000, bootMinMs: 30_000 },
+    }).start();
+    const events: { loopStartMs: number }[] = [];
+    actor.on("loop:start", (ev) => events.push(ev));
+    actor.send({ type: "HOOK_SEAL" });
+    // Initial state after seal : fresh
+    assert.deepEqual(actor.getSnapshot().value, { sealed: "fresh" });
+    assert.equal(events.length, 0);
+    await new Promise((r) => setTimeout(r, SETTLE_DELAY + 200));
+    assert.deepEqual(actor.getSnapshot().value, { sealed: "settled" });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].loopStartMs, 1_000_000);
 });
