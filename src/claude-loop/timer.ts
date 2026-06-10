@@ -108,7 +108,6 @@ import {
     buildRespawnEnvFromSnapshots,
     consumePendingSnapshot,
     parseRespawnSnapshots,
-    parseRespawnState,
     RESPAWN_STATE_ENV_VAR,
     setPendingRespawnSnapshots,
 } from "./respawn-state.js";
@@ -318,7 +317,8 @@ if (sd) {
 // Cross-process via env (`spawn({env})` côté old, `process.env.X` côté
 // new). Ephemère : meurt avec le process, pas de cleanup à gérer.
 if (sd) {
-    // #884 — respawn handoff via XState v5 snapshots.
+    // #884 — respawn handoff via XState v5 snapshots (seul format
+    // supporté depuis le drop du fallback legacy whitelist `Go D`).
     const snapshots = parseRespawnSnapshots(process.env[RESPAWN_STATE_ENV_VAR]);
     if (snapshots) {
         setPendingRespawnSnapshots(snapshots);
@@ -336,23 +336,6 @@ if (sd) {
             } catch { /* best-effort */ }
         }
         log(`respawn handoff: consumed snapshots (${Object.keys(snapshots).filter((k) => snapshots[k as keyof typeof snapshots] !== undefined).join(", ")})`);
-    } else {
-        // Legacy fallback (#868 whitelist) — pour les respawns depuis un
-        // old timer pré-#884. Si neither format n'est dans l'env, no-op.
-        const swap = parseRespawnState(process.env[RESPAWN_STATE_ENV_VAR]);
-        if (swap) {
-            if (swap.bootComplete === true) {
-                setIpcBootComplete(true);
-                try {
-                    const fakeStart = Date.now() - (Number(process.env.CL_BOOT_MIN_SEC ?? 30) * 1000 + 1000);
-                    writeFileSync(join(sd, "loop-start-ts"), String(fakeStart));
-                } catch { /* best-effort */ }
-            }
-            if (swap.afkMode && swap.afkMode !== "off") {
-                setIpcAfk(swap.afkMode, swap.afkExpiryMs ?? null);
-            }
-            log(`respawn handoff: consumed legacy whitelist ${JSON.stringify(swap)}`);
-        }
     }
 }
 
@@ -1423,7 +1406,6 @@ async function mainSse(): Promise<void> {
     //   reste plus simple.
     {
         const input0 = readLoopStateInput(sd!);
-        const wasComplete = getIpcState().bootComplete === true;
         // #884 — restore depuis snapshot persisté si respawn.
         const bootSnap = consumePendingSnapshot("boot") as Snapshot<unknown> | undefined;
         bootActor = createActor(bootMachine, {
@@ -1464,16 +1446,9 @@ async function mainSse(): Promise<void> {
             void tryWake("boot-ended-drain");
         });
         bootActor.start();
-        // #884 — drop le HARD_SEAL ad hoc. Si bootSnap était fourni, la
-        // SM démarre déjà en `sealed` (= no-op). Si pas de snapshot mais
-        // bootComplete était set via legacy whitelist, HOOK_SEAL reste
-        // utile en fallback transition.
-        if (wasComplete && !bootSnap) {
-            log("bootMachine: respawn handoff (legacy whitelist) — sending HOOK_SEAL");
-            bootActor.send({ type: "HOOK_SEAL" });
-        } else if (!wasComplete && !bootSnap) {
-            armFastProbe();
-        }
+        // #884 — pas de respawn snapshot = cold boot normal.
+        // Si bootSnap fourni : la SM démarre déjà en `sealed` (= no-op).
+        if (!bootSnap) armFastProbe();
     }
     // Pump DEADLINE_REACHED côté wall-clock — la machine reste pure (=
     // pas de timer interne), le side-effect setInterval vit côté wrapper.

@@ -39,33 +39,6 @@ export interface RespawnSnapshots {
     idle?: unknown;
 }
 
-/** #868 legacy whitelist — KEPT during the #884 transition pour ne pas
- *  briser les call sites existants. Les Slices B+C+D migrent
- *  progressivement vers `RespawnSnapshots` ; ce type sera retiré quand
- *  tous les consumers seront passés au snapshot pattern. */
-export interface RespawnState {
-    bootComplete?: boolean;
-    afkMode?: "off" | "wait_10m" | "wait_inf" | null;
-    afkExpiryMs?: number | null;
-}
-
-/** #868 legacy — kept for transition. */
-export function serializeRespawnState(state: RespawnState): string {
-    return JSON.stringify(state);
-}
-
-/** #868 legacy — kept for transition. */
-export function parseRespawnState(raw: string | undefined): RespawnState | null {
-    if (!raw) return null;
-    try {
-        const obj = JSON.parse(raw) as RespawnState;
-        if (typeof obj !== "object" || obj === null) return null;
-        return obj;
-    } catch {
-        return null;
-    }
-}
-
 /** Sérialise les snapshots en string transmissible via env var. */
 export function serializeRespawnSnapshots(snapshots: RespawnSnapshots): string {
     return JSON.stringify(snapshots);
@@ -130,13 +103,3 @@ export function buildRespawnEnvFromSnapshots(
     return { ...baseEnv, [RESPAWN_STATE_ENV_VAR]: serializeRespawnSnapshots(snapshots) };
 }
 
-/** #868 legacy — kept for transition. */
-export function buildRespawnEnv(
-    state: RespawnState,
-    baseEnv: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
-    const hasContent = state.bootComplete === true
-        || (state.afkMode != null && state.afkMode !== "off");
-    if (!hasContent) return baseEnv;
-    return { ...baseEnv, [RESPAWN_STATE_ENV_VAR]: serializeRespawnState(state) };
-}
