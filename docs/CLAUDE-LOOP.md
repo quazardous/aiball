@@ -283,9 +283,11 @@ T+600 user-grace expired
 `max(user_grace_seconds, ask_grace_seconds)`, never shrinks. New
 configs should set only `user_grace_seconds`.)
 
-**Boot-grace finale.** When the boot-grace window expires, the loop
-flips the bar based on the launch mode (so the steady state matches
-the user's intent, not whatever happened during loading) :
+**Boot-grace finale.** The boot phase lifecycle is owned by the
+`BootMachine` XState actor (see [`SM-NETWORK.md`](./SM-NETWORK.md)).
+When it transitions to `sealed`, the loop flips the bar based on the
+launch mode (so the steady state matches the user's intent, not
+whatever happened during loading) :
 
 - `--wait` (managed default) → arm `NOT AFK 10m` automatically →
   bar reads `wait` yellow with the 10-minute countdown in the
@@ -298,8 +300,10 @@ yellow regardless of transient pane content — `claude`'s splash
 or a quick `esc to interrupt` no longer flips the bar to grey or
 blue mid-load.
 
-**F9 cycles three states ; typing arms the 10-minute hold.** The
-AFK state machine has three states and two inputs :
+**F9 cycles three states ; typing arms the 10-minute hold.** AFK
+has three user-visible states and two inputs (the implementation
+lives in `afk-service.ts` ; see [`SM-NETWORK.md`](./SM-NETWORK.md)
+for the planned AfkController state machine) :
 
 - **F9** = tristate cycle `AFK → NOT AFK 10m → NOT AFK ∞ → AFK`.
 - **Text keystroke / ESC** = arm or refresh the `NOT AFK 10 min`

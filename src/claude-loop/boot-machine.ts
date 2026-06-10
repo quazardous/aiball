@@ -1,10 +1,10 @@
 /**
- * #872 / #870 — POC XState v5 BootController.
+ * BootMachine — XState v5 actor owning the boot phase lifecycle.
  *
- * Premier nœud du réseau de state machines (cf. #872). Centralise tout
- * le timing boot dans une vraie machine XState. Phase 3 : seul
- * propriétaire du sealing — bus.bootEnded/bootStarted retirés ;
- * subscriber bridge actor.context.deadlineMs / sealed → ipcState.
+ * Sole authority for sealing the boot phase. Subscriber bridges
+ * `actor.context.deadlineMs` and the `sealed` transition to ipcState
+ * (see `timer.ts:mainSse`). See `docs/SM-NETWORK.md` for the network
+ * role + bridge pattern.
  *
  * Model :
  *
