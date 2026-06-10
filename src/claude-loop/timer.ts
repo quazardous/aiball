@@ -590,15 +590,43 @@ const refreshPaneReady = (): void => {
 // Wire watcher events → ipcState side-effects once at module init. The
 // `change` event fires only on transitions, so each setter call below
 // is a real value flip (no wasted no-op writes per tick).
+// #883 Slice 2 — forward begin/end ALSO vers BootMachine.MODULE_STARTED/ENDED
+// (edge events module-based). Le bootActor n'existe pas encore à module
+// init, donc on l'accède via le getter au moment du fire.
+function forwardModuleStarted(name: string): void {
+    if (bootActor && !bootActor.getSnapshot().matches("sealed")) {
+        bootActor.send({ type: "MODULE_STARTED", name });
+    }
+}
+function forwardModuleEnded(name: string): void {
+    if (bootActor && !bootActor.getSnapshot().matches("sealed")) {
+        bootActor.send({ type: "MODULE_ENDED", name });
+    }
+}
 if (sd) {
     pickerSessionW.on("change", (s) => { setResumeSessionPicker(sd, s.visible); refreshPaneReady(); });
+    pickerSessionW.on("begin", () => forwardModuleStarted("resume_picker"));
+    pickerSessionW.on("end", () => forwardModuleEnded("resume_picker"));
     pickerModeW.on("change", (s) => { setResumeModePicker(sd, s.visible); refreshPaneReady(); });
+    pickerModeW.on("begin", () => forwardModuleStarted("resume_mode"));
+    pickerModeW.on("end", () => forwardModuleEnded("resume_mode"));
     resumingW.on("change", (s) => { setResuming(sd, s.visible); refreshPaneReady(); });
+    resumingW.on("begin", () => forwardModuleStarted("resuming"));
+    resumingW.on("end", () => forwardModuleEnded("resuming"));
     compactConfirmW.on("change", () => refreshPaneReady());
+    compactConfirmW.on("begin", () => forwardModuleStarted("compact_confirm"));
+    compactConfirmW.on("end", () => forwardModuleEnded("compact_confirm"));
     promptW.on("change", () => refreshPaneReady());
     busyW.on("change", (s) => setPaneBusy(sd, s.visible));
     interruptedW.on("change", (s) => setInterrupted(sd, s.visible));
     getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
+    // CompactingDetector emits change(s) with `s.active` boolean ; forward begin/end via change diff.
+    let _prevCompacting = false;
+    getCompactingDetector().on("change", (s) => {
+        if (s.active && !_prevCompacting) forwardModuleStarted("compacting");
+        if (!s.active && _prevCompacting) forwardModuleEnded("compacting");
+        _prevCompacting = s.active;
+    });
 }
 
 function refreshPaneMarkers(): void {
@@ -610,24 +638,11 @@ function refreshPaneMarkers(): void {
     // Single scan : watchers observe + emit events ; the subscribers
     // above call the legacy ipcState setters on every transition.
     paneObs.tick(paneText, { nowMs: Date.now(), isBoot });
-    // David `<chat>` : pendant le boot, chaque tick observant un transient
-    // module actif (picker / resuming / compactConfirm / compacting) push
-    // `bootDeadlineMs` via l'acteur (WATCHER_TICK). Quand plus aucun
-    // transient n'est observé, plus de push → deadline expire +10s plus
-    // tard → `bootDeadlineTimer` fire `DEADLINE_REACHED` → seal.
-    // #883 Slice 1 — drop `!ipc.paneReady` du gate : c'était une
-    // anti-condition (= absence de prompt-indicateur), pas un transient.
-    // Causait un push éternel quand cold-clean (pas de splash + pas de
-    // module = `paneReady` reste null → `!null=true` → push ad vitam).
-    // Slice 2 (#883) refactor complet vers MODULE_STARTED/ENDED edge.
-    if (isBoot && bootActor) {
-        const stillBooting = ipc.paneCompacting || ipc.resumeSessionPickerActive || ipc.resumeModePickerActive;
-        if (stillBooting) {
-            // #872 Phase 1 — push deadline via l'acteur (= un seul
-            // chemin d'autorité au lieu du `setIpcBootDeadlineMs` direct).
-            bootActor.send({ type: "WATCHER_TICK", nowMs: Date.now() });
-        }
-    }
+    // #883 Slice 2 — le push de deadline est maintenant géré par le
+    // "push manager" dans mainSse (un setInterval armé/désarmé via
+    // subscribe sur `activeModules.size`). `refreshPaneMarkers` se
+    // contente d'observer (= forward begin/end events aux watchers).
+    void isBoot; // (kept for the error backoff branch below)
     // #611 — error backoff escalation : each tick with errId !== null
     // increments the backoff attempts counter (= the next retry pushes
     // further into the future). Event-only wiring would only arm once
@@ -1414,7 +1429,47 @@ async function mainSse(): Promise<void> {
             clearInterval(bootDeadlineTimer);
         }
     }, 1000);
-    process.on("exit", () => { clearInterval(bootDeadlineTimer); bootActor?.stop(); });
+    // #883 — push manager : tant qu'au moins un module est actif, on
+    // envoie `PUSH { nowMs }` toutes les secondes pour pousser la
+    // deadline. Le manager s'arme quand activeModules passe 0→>0 et
+    // se désarme à >0→0. Re-arme si un module réapparaît tant qu'on
+    // est en phase boot (= pas encore sealed). Sealed = stop final.
+    let bootPushTimer: NodeJS.Timeout | null = null;
+    const armBootPushTimer = (): void => {
+        if (bootPushTimer) return;
+        bootPushTimer = setInterval(() => {
+            if (!bootActor) return;
+            const snap = bootActor.getSnapshot();
+            if (snap.matches("sealed") || snap.context.activeModules.size === 0) {
+                // Defensive : la subscribe désarme déjà ; cette branche
+                // catche le cas où on rate la transition (impossible en
+                // théorie mais ceinture+bretelles).
+                disarmBootPushTimer();
+                return;
+            }
+            bootActor.send({ type: "PUSH", nowMs: Date.now() });
+        }, 1000);
+        log("bootMachine: push manager armed (activeModules > 0)");
+    };
+    const disarmBootPushTimer = (): void => {
+        if (!bootPushTimer) return;
+        clearInterval(bootPushTimer);
+        bootPushTimer = null;
+        log("bootMachine: push manager disarmed (activeModules empty)");
+    };
+    bootActor.subscribe((snap) => {
+        if (snap.matches("sealed")) {
+            disarmBootPushTimer();
+            return;
+        }
+        if (snap.context.activeModules.size > 0) armBootPushTimer();
+        else disarmBootPushTimer();
+    });
+    process.on("exit", () => {
+        clearInterval(bootDeadlineTimer);
+        disarmBootPushTimer();
+        bootActor?.stop();
+    });
     // AfkController XState actor wiring. Le subscriber pont l'état actor →
     //   ipcState (`afkMode`/`afkExpiryMs` committed + `dispAfkMode`/`dispAfkExpiryMs`
     //   instant chip). EXPIRY_REACHED est pumpé par un setInterval 1s quand le
