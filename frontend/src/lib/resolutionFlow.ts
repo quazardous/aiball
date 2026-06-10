@@ -23,6 +23,13 @@ interface UseResolutionFlowArgs {
     data: Ref<ThreadViewData | null>;
     error: Ref<string | null>;
     broadcastRefresh: (ticketId: number) => void;
+    /** #902 david : assigner un agent en acceptant un plan/résolution doit
+     *  passer le composer's assignee dropdown. Si défini, le handler
+     *  acceptResolution/acceptWontfix/acceptEscalation appelle
+     *  api.assignTicket après le accept (best-effort, comme ThreadView.decide
+     *  pour les modération approvals). Le ref est mute par les handlers
+     *  pour clear le dropdown au succès. */
+    composerAssignee?: Ref<string>;
 }
 
 type PostKind =
@@ -38,7 +45,21 @@ interface MenuItem {
     command: () => void;
 }
 
-export function useResolutionFlow({ data, error, broadcastRefresh }: UseResolutionFlowArgs) {
+export function useResolutionFlow({ data, error, broadcastRefresh, composerAssignee }: UseResolutionFlowArgs) {
+    /** #902 — partagé par tous les handlers accept : apply le composer
+     *  assignee si défini après le accept réussi (mirror du pattern
+     *  ThreadView.decide pour la modération). Best-effort : un échec ne
+     *  rollback pas le accept. */
+    async function applyComposerAssignee(tid: number): Promise<void> {
+        const next = composerAssignee?.value.trim();
+        if (!next) return;
+        try {
+            await api.assignTicket(tid, next);
+        } catch (e) {
+            console.warn("[resolutionFlow] failed to assign on accept:", e);
+        }
+        if (composerAssignee) composerAssignee.value = "";
+    }
     // Body of the in-thread composer, exposed here so the resolution-
     // decision buttons can piggy-back on whatever the user has typed
     // (e.g. closing the ticket while explaining what was done in the
@@ -164,6 +185,10 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
                 await api.acceptAndClose(msg.id, composerBody.value.trim() || undefined);
             }
             composerBody.value = "";
+            // #902 — apply le composer assignee si présent (mirror du
+            // pattern moderation decide). Couvre accept-plan et accept-
+            // resolution dans la même branche.
+            await applyComposerAssignee(tid);
             broadcastRefresh(tid);
         } catch (e) {
             error.value = (e as Error).message;
@@ -261,6 +286,9 @@ export function useResolutionFlow({ data, error, broadcastRefresh }: UseResoluti
             // wontfix : the server-side /decide handler auto-posts the
             // ticket_closed (per #802), no extra round-trip needed here.
             composerBody.value = "";
+            // #902 — apply le composer assignee si présent. Couvre les 4
+            // kinds accept (plan / resolution / wontfix / escalation).
+            await applyComposerAssignee(tid);
             broadcastRefresh(tid);
         } catch (e) {
             error.value = (e as Error).message;

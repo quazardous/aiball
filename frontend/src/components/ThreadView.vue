@@ -328,7 +328,7 @@ const {
     rejectMenu,
     legacyAcceptMenu,
     decisionMenu,
-} = useResolutionFlow({ data, error, broadcastRefresh });
+} = useResolutionFlow({ data, error, broadcastRefresh, composerAssignee });
 
 // #617 — thread.refresh bus handler gated on resolutionBusy. While a
 // multi-step verb (accept-resolution → close, accept-active → close,
