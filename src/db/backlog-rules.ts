@@ -124,7 +124,9 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
         // Exclut symétriquement à assigned-to-other mais sur la base du
         // claim (temporaire) au lieu de l'assignment (persistant).
         name: "claimed-by-other",
-        when: (ctx, item) => ctx.claimedByOtherIds.has(item.ticketId),
+        // Defensive : ctx.claimedByOtherIds peut être undefined si un caller
+        // legacy passe un BacklogRulesCtx avant la migration #900 (CLI cache).
+        when: (ctx, item) => ctx.claimedByOtherIds?.has(item.ticketId) ?? false,
         excludesFrom: new Set<Target>(["backlog-tier", "fifo-wake"]),
     },
 ]);
