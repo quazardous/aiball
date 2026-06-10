@@ -142,10 +142,22 @@ The `REQUEST_WAKE` during `inFlight` or `cooldown` is dropped silently — consu
 | **Pump** | None — XState `after(ttlMs)` handles the idle return. |
 | **Tests** | `typing-machine.test.ts` |
 
+### IdleController — shipped
+
+| Field | Value |
+|---|---|
+| **Source** | [`src/claude-loop/idle-machine.ts`](../src/claude-loop/idle-machine.ts) |
+| **Role** | Tracks claude's busy/idle lifecycle — 3-state SM (`unknown`/`idle`/`busy`) consuming the three Hook events (SessionStart / Stop / UserPromptSubmit). |
+| **Slice owned** | `ipcState.idleSinceMs` |
+| **Events in** | `SESSION_START` { atMs }, `TURN_STARTED` { atMs }, `TURN_ENDED` { atMs } |
+| **Events emitted** | `idle:since` { atMs, reason: `"session_start"` \| `"turn_ended"` } / `idle:turn_started` { atMs } / `idle:turn_ended` { atMs } |
+| **States** | `unknown` → `idle` ⇄ `busy` |
+| **Pump** | None — pure event-driven from HookService. |
+| **Tests** | `idle-machine.test.ts` |
+
 ### Future controllers (queued)
 
 - **PaneStateController** — pane{Busy,Ready,Compacting,Resuming,Interrupted,Pickers} consolidation.
-- **IdleController** — idleSinceMs.
 
 Each will follow the same pattern : pure machine, external pump (if needed), subscriber → ipcState bridge, `<controller>:<event_name>` emits.
 
@@ -187,6 +199,7 @@ Each controller declares its **locus events** (= pivotal transitions the rest of
 | `afk:` | `afk:armed_10m`, `afk:armed_inf`, `afk:cleared` |
 | `wake:` | `wake:requested`, `wake:in_flight_started`, `wake:delivered`, `wake:cleared`, `wake:cooldown_expired` |
 | `typing:` | `typing:started`, `typing:ended` |
+| `idle:` | `idle:since`, `idle:turn_started`, `idle:turn_ended` |
 | `pane:` (planned) | `pane:busy_started`, `pane:idle`, `pane:compacting_started`, `pane:compacting_ended` |
 
 **Payload guidelines** — what to put on the event vs what to leave for `subscribe(snap)` or `getSnapshot()` :

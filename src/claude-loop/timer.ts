@@ -102,6 +102,7 @@ import { armAfkViaService } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
 import { getWakeService } from "./wake-service.js";
 import { getTypingService } from "./typing-service.js";
+import { getIdleService } from "./idle-service.js";
 import { probeParentTmuxAtBoot, installParentTmuxWatchdog, sweepSiblingTimers } from "./parent-liveness.js";
 import { buildRespawnEnv, parseRespawnState, RESPAWN_STATE_ENV_VAR } from "./respawn-state.js";
 import { createActor, type ActorRefFrom } from "xstate";
@@ -941,7 +942,9 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     }
     // #793 — clear in-memory idle-since: the wake is about to flip claude
     // back to busy. The Stop hook will re-seed it when claude returns.
-    setIpcIdleSince(null);
+    // #881 — IdleController acteur : TURN_STARTED transitionne idle→busy
+    // et clear idleSinceMs (bridge subscriber écrit setIpcIdleSince(null)).
+    getIdleService().turnStarted(Date.now());
     await sendKeys(phrase, headMessageId, panicMode, backlogTicketId);
     // Landscape hash watermark — same set doesn't re-fire the actionable
     // leg (set-aware dedup). The legacy count watermark fallback was
@@ -986,8 +989,10 @@ async function mainSse(): Promise<void> {
     // the wake gate unblocks on the next tick.
     refreshPaneMarkers();
     if (sd && readIdleSinceMs(sd) === null && getIpcState().paneReady === true) {
-        setIpcIdleSince(Date.now());
-        log("boot: pane is at prompt → seeded idle-since (bus)");
+        // #881 — IdleController acteur : SESSION_START transitionne
+        // unknown→idle (ou idle→idle reenter), bridge écrit ipc.idleSinceMs.
+        getIdleService().sessionStart(Date.now());
+        log("boot: pane is at prompt → seeded idle-since (via IdleController)");
     }
     // #628 david `mquuep` — WakeBus : façade typed sur le canal SSE
     // daemon→loop. Le timer souscrit aux events ; le bus gère le
@@ -1182,7 +1187,9 @@ async function mainSse(): Promise<void> {
             // (`DEADLINE_REACHED` after les pane watchers stoppent les
             // `WATCHER_TICK` push). The pickers + idleSince still
             // propagate here so the wake gate sees fresh per-hook input.
-            setIpcIdleSince(ev.at_ms);
+            // #881 — `setIpcIdleSince` délégué au IdleController acteur
+            // (subscriber bridge dans le bloc IdleController plus bas).
+            getIdleService().sessionStart(ev.at_ms);
             // Slice B-2 — propagate picker context if the hook detected it.
             // #839 Slice 3 (#766) — the timer (= single writer) ALSO writes
             // the picker shadow files. session-start-hook used to call
@@ -1204,7 +1211,8 @@ async function mainSse(): Promise<void> {
             // timestamp = defer the gate ; explicit null = clear defer.
             // The Stop hook only emits when claude reached the prompt —
             // a Stop event implies idle confirmed.
-            setIpcIdleSince(ev.at_ms);
+            // #881 — `setIpcIdleSince` délégué à IdleController via TURN_ENDED.
+            getIdleService().turnEnded(ev.at_ms);
             if (ev.busy_defer_until_ms !== undefined) {
                 // #840 `4z59jt` — IPC seul. armBusyDefer (state.ts) écrit
                 // `setIpcBusyDeferUntil` derrière (idempotent preserve-max).
@@ -1225,7 +1233,8 @@ async function mainSse(): Promise<void> {
             // auto-wake submission is the loop talking to itself and
             // already preceded by setIpcIdleSince via the Stop event
             // that triggered the wake.
-            setIpcIdleSince(null);
+            // #881 — délégué à IdleController via TURN_STARTED.
+            getIdleService().turnStarted(ev.at_ms);
             return;
         }
     });
@@ -1488,6 +1497,20 @@ async function mainSse(): Promise<void> {
         });
         typingActor.on("typing:started", (ev) => log(`typingMachine: typing:started atMs=${ev.atMs}`));
         typingActor.on("typing:ended", (ev) => log(`typingMachine: typing:ended lastKeystrokeMs=${ev.lastKeystrokeMs}`));
+    }
+    // #881 — IdleController XState actor wiring. Subscriber bridge :
+    //   `actor.context.idleSinceMs` → `ipc.idleSinceMs` (= consumers :
+    //   wake gate, drained-strategy, bar). Pas de pump externe — pure
+    //   event-driven depuis HookService (SessionStart/Stop/UserPromptSubmit)
+    //   + 2 manual triggers (tryWake pre-empt + boot-end fallback).
+    {
+        const idleActor = getIdleService().getActor();
+        idleActor.subscribe((snap) => {
+            setIpcIdleSince(snap.context.idleSinceMs);
+        });
+        idleActor.on("idle:since", (ev) => log(`idleMachine: idle:since atMs=${ev.atMs} reason=${ev.reason}`));
+        idleActor.on("idle:turn_started", (ev) => log(`idleMachine: idle:turn_started atMs=${ev.atMs}`));
+        idleActor.on("idle:turn_ended", (ev) => log(`idleMachine: idle:turn_ended atMs=${ev.atMs}`));
     }
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
     // toutes les 5s via la même fonction pure que la garde boot-time
