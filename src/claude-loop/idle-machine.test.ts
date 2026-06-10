@@ -4,8 +4,8 @@ import assert from "node:assert/strict";
 import { createActor } from "xstate";
 import { idleMachine } from "./idle-machine.js";
 
-function mkActor() {
-    return createActor(idleMachine, { input: {} });
+function mkActor(input: { settleMs?: number } = {}) {
+    return createActor(idleMachine, { input });
 }
 
 test("init : starts in unknown with null idleSinceMs", () => {
@@ -17,7 +17,7 @@ test("init : starts in unknown with null idleSinceMs", () => {
 test("SESSION_START from unknown : transition → idle + stamp", () => {
     const actor = mkActor().start();
     actor.send({ type: "SESSION_START", atMs: 1_000 });
-    assert.equal(actor.getSnapshot().value, "idle");
+    assert.equal(actor.getSnapshot().matches("idle"), true);
     assert.equal(actor.getSnapshot().context.idleSinceMs, 1_000);
 });
 
@@ -34,7 +34,7 @@ test("TURN_ENDED from busy : transition → idle + stamp", () => {
     actor.send({ type: "SESSION_START", atMs: 1_000 });
     actor.send({ type: "TURN_STARTED", atMs: 2_000 });
     actor.send({ type: "TURN_ENDED", atMs: 3_000 });
-    assert.equal(actor.getSnapshot().value, "idle");
+    assert.equal(actor.getSnapshot().matches("idle"), true);
     assert.equal(actor.getSnapshot().context.idleSinceMs, 3_000);
 });
 
@@ -42,7 +42,7 @@ test("SESSION_START in idle : reenter + restamp", () => {
     const actor = mkActor().start();
     actor.send({ type: "SESSION_START", atMs: 1_000 });
     actor.send({ type: "SESSION_START", atMs: 5_000 });
-    assert.equal(actor.getSnapshot().value, "idle");
+    assert.equal(actor.getSnapshot().matches("idle"), true);
     assert.equal(actor.getSnapshot().context.idleSinceMs, 5_000);
 });
 
@@ -51,7 +51,7 @@ test("SESSION_START in busy : forced idle return", () => {
     actor.send({ type: "SESSION_START", atMs: 1_000 });
     actor.send({ type: "TURN_STARTED", atMs: 2_000 });
     actor.send({ type: "SESSION_START", atMs: 5_000 });
-    assert.equal(actor.getSnapshot().value, "idle");
+    assert.equal(actor.getSnapshot().matches("idle"), true);
     assert.equal(actor.getSnapshot().context.idleSinceMs, 5_000);
 });
 
@@ -104,4 +104,58 @@ test("TURN_STARTED in unknown : ignored (no transition)", () => {
     const actor = mkActor().start();
     actor.send({ type: "TURN_STARTED", atMs: 1_000 });
     assert.equal(actor.getSnapshot().value, "unknown");
+});
+
+// #805 — idle.fresh → idle.settled après settleMs, emit idle:settled.
+
+test("idle.fresh → idle.settled after settleMs (XState fake clock)", { only: false }, async (t) => {
+    const SETTLE = 1_000;
+    const clock = (await import("xstate")).createMachine; // touch import for tsc
+    void clock;
+    const { createActor } = await import("xstate");
+    const actor = createActor(idleMachine, {
+        input: { settleMs: SETTLE },
+        // XState v5 simulated clock via `clock` option
+        clock: {
+            setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
+            clearTimeout: (id) => globalThis.clearTimeout(id),
+        },
+    }).start();
+    actor.send({ type: "SESSION_START", atMs: 1_000 });
+    assert.deepEqual(actor.getSnapshot().value, { idle: "fresh" });
+    const events: { idleSinceMs: number; settleMs: number }[] = [];
+    actor.on("idle:settled", (ev) => events.push(ev));
+    await new Promise((r) => setTimeout(r, SETTLE + 50));
+    assert.deepEqual(actor.getSnapshot().value, { idle: "settled" });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].settleMs, SETTLE);
+    assert.equal(events[0].idleSinceMs, 1_000);
+});
+
+test("TURN_STARTED before settle cancels the timer (no idle:settled emitted)", async () => {
+    const SETTLE = 200;
+    const actor = mkActor({ settleMs: SETTLE });
+    actor.start();
+    actor.send({ type: "SESSION_START", atMs: 1_000 });
+    const events: unknown[] = [];
+    actor.on("idle:settled", (ev) => events.push(ev));
+    actor.send({ type: "TURN_STARTED", atMs: 1_100 });
+    await new Promise((r) => setTimeout(r, SETTLE + 50));
+    assert.equal(events.length, 0);
+    assert.equal(actor.getSnapshot().value, "busy");
+});
+
+test("re-entering idle (TURN_ENDED → fresh) reset le settle timer", async () => {
+    const SETTLE = 200;
+    const actor = mkActor({ settleMs: SETTLE });
+    actor.start();
+    actor.send({ type: "SESSION_START", atMs: 1_000 });
+    await new Promise((r) => setTimeout(r, 50));
+    actor.send({ type: "TURN_STARTED", atMs: 1_050 });
+    actor.send({ type: "TURN_ENDED", atMs: 1_100 });
+    assert.deepEqual(actor.getSnapshot().value, { idle: "fresh" });
+    const events: unknown[] = [];
+    actor.on("idle:settled", (ev) => events.push(ev));
+    await new Promise((r) => setTimeout(r, SETTLE + 50));
+    assert.equal(events.length, 1);
 });

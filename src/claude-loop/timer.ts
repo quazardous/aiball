@@ -1580,6 +1580,13 @@ async function mainSse(): Promise<void> {
         idleActor.on("idle:since", (ev) => log(`idleMachine: idle:since atMs=${ev.atMs} reason=${ev.reason}`));
         idleActor.on("idle:turn_started", (ev) => log(`idleMachine: idle:turn_started atMs=${ev.atMs}`));
         idleActor.on("idle:turn_ended", (ev) => log(`idleMachine: idle:turn_ended atMs=${ev.atMs}`));
+        // #805 david : "si on est idle depuis plus de N secondes" → drain
+        // la FIFO sans dépendre de SSE/heartbeat aléatoires. Idle stable
+        // = signal pour pousser tryWake.
+        idleActor.on("idle:settled", (ev) => {
+            log(`idleMachine: idle:settled idleSinceMs=${ev.idleSinceMs} settleMs=${ev.settleMs} → tryWake`);
+            void tryWake("idle:settled");
+        });
     }
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
     // toutes les 5s via la même fonction pure que la garde boot-time

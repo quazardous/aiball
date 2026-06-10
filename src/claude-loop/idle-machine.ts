@@ -12,35 +12,44 @@
  *
  * Model :
  *
- *   unknown ──SESSION_START──▶ idle
- *                                 │ TURN_STARTED
+ *   unknown ──SESSION_START──▶ idle.fresh ──after(settleMs)──▶ idle.settled
+ *                                 │                                │
+ *                                 │ TURN_STARTED          (emit idle:settled)
  *                                 ▼
- *                              busy ──TURN_ENDED──▶ idle
+ *                              busy ──TURN_ENDED──▶ idle.fresh
  *
- *   idle accepts SESSION_START (re-seed) as well — claude may emit a
- *   fresh SessionStart on resume / compact.
+ *   idle.settled = stable idle state. Consumers (timer.ts) écoutent
+ *   `idle:settled` pour drainer la FIFO sans dépendre de SSE/heartbeat —
+ *   #805 david : "si on est idle depuis plus de N secondes" → drain.
  *
  * Context :
  *   - `idleSinceMs` : timestamp of last entry to `idle` (null in busy/unknown)
+ *   - `settleMs`    : delay before emit idle:settled (default 30s)
  *
- * External pump : none. Pure event-driven from `HookService.subscribe(...)`.
+ * External pump : none. Pure event-driven from `HookService.subscribe(...)`
+ * + XState's `after` delayed transition.
  */
 import { setup, assign, emit } from "xstate";
 
 export interface IdleMachineInput {
-    // intentionally empty — the machine takes no static config today.
+    /** Delay before emit `idle:settled`. Default 30s. */
+    settleMs?: number;
 }
 
 /** Locus events emitted by the actor. */
 export type IdleEmittedEvent =
     | { type: "idle:since"; atMs: number; reason: "session_start" | "turn_ended" }
     | { type: "idle:turn_started"; atMs: number }
-    | { type: "idle:turn_ended"; atMs: number };
+    | { type: "idle:turn_ended"; atMs: number }
+    | { type: "idle:settled"; idleSinceMs: number; settleMs: number };
+
+const DEFAULT_SETTLE_MS = 30_000;
 
 export const idleMachine = setup({
     types: {
         context: {} as {
             idleSinceMs: number | null;
+            settleMs: number;
         },
         events: {} as
             | { type: "SESSION_START"; atMs: number }
@@ -48,6 +57,9 @@ export const idleMachine = setup({
             | { type: "TURN_ENDED"; atMs: number },
         emitted: {} as IdleEmittedEvent,
         input: {} as IdleMachineInput,
+    },
+    delays: {
+        settle: ({ context }) => context.settleMs,
     },
     actions: {
         stampIdleAt: assign({
@@ -77,11 +89,19 @@ export const idleMachine = setup({
             type: "idle:turn_ended" as const,
             atMs: event.type === "TURN_ENDED" ? event.atMs : 0,
         })),
+        emitSettled: emit(({ context }) => ({
+            type: "idle:settled" as const,
+            idleSinceMs: context.idleSinceMs ?? 0,
+            settleMs: context.settleMs,
+        })),
     },
 }).createMachine({
     id: "idle",
     initial: "unknown",
-    context: () => ({ idleSinceMs: null }),
+    context: ({ input }) => ({
+        idleSinceMs: null,
+        settleMs: input.settleMs ?? DEFAULT_SETTLE_MS,
+    }),
     states: {
         unknown: {
             on: {
@@ -92,15 +112,25 @@ export const idleMachine = setup({
             },
         },
         idle: {
+            initial: "fresh",
             on: {
                 SESSION_START: {
-                    target: "idle",
-                    reenter: true,
+                    target: ".fresh",
                     actions: ["emitIdleSinceSessionStart", "stampIdleAt"],
                 },
                 TURN_STARTED: {
                     target: "busy",
                     actions: ["emitTurnStarted", "clearIdle"],
+                },
+            },
+            states: {
+                fresh: {
+                    after: {
+                        settle: { target: "settled" },
+                    },
+                },
+                settled: {
+                    entry: ["emitSettled"],
                 },
             },
         },
