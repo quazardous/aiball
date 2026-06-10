@@ -63,11 +63,11 @@ The right move is a **fresh discussion comment** that EITHER :
 
 DO NOT re-post the same `then: "resolved"` framing — that ignores the reopen signal. Each reopen cycle should advance the discussion : new hypothesis, new question, or a documented disagreement.
 
-### Blocked tier — unstick the chain
+### Blocked tickets — unstick the chain
 
-The backlog now surfaces a `blocked` tier (tier 4) for tickets gated by a `depends_on` / `blocks` relation pointing at an open blocker. These tickets won't appear in tier 1 (actionable) because the chain is stuck, but they're not forgotten either — they sit in tier 4 so you can unblock them.
+A ticket gated by a `depends_on` / `blocks` relation pointing at an open blocker surfaces in the backlog as `blocked`. The chain is stuck ; the work can't move until the blocker does.
 
-When a wake CTA fires on a blocked tier ticket, the right move is **not** to start coding (the dependency is real, the work is gated). Instead :
+When a wake CTA fires on a blocked ticket, the right move is **not** to start coding (the dependency is real, the work is gated). Instead :
 - **Audit the blocker** : open the blocker ticket. Is it snoozed past a forgotten date ? Has the reporter ghosted ? Is it actually done but never closed ?
 - **Surface to the blocker's reporter / claimant** : post a comment on the BLOCKER ticket (not the gated one) asking for status — "this gates #N, can we move it forward ?". A plain comment is fine ; a `then: "plan"` if you have a concrete unblock proposal.
 - **If the dependency is stale** : if you can prove the depends_on is wrong (e.g. the work was already done elsewhere, the scope changed), close the relation via the UI or post on the gated ticket explaining why the gate should drop.
