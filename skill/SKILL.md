@@ -73,14 +73,14 @@ When the FIFO is empty and the work-order has at least one actionable ticket in 
 **Triage means picking ONE of three gestures, in this order of preference :**
 
 1. **Do it** — claim and work the ticket if the next step is yours. `ticket_claim(N)` puts focus on #N (see the "What `claim` is for" section below); a real action on the ticket (status comment, code change, decision) drops it from the backlog.
-2. **Propose a plan** — when the ticket needs a HOW, post a `then: "plan"` comment with the approach. The decision is now in the reporter's court (accept / reject), and #N drops to tier 2 until they answer.
-3. **Comment and hand back** — when you've read but the next step belongs to the reporter (question to clarify, context to share, reading to confirm), post a substantive comment. #N moves to **tier 2** of the backlog (ball in their court). It STAYS in the backlog as a "waiting on them" reminder — that's intentional, not a leak. The next wake picks the next head from tier 1; #N only re-surfaces if no tier-1 is left, or if the reporter replies and re-promotes it.
+2. **Propose a plan** — when the ticket needs a HOW, post a `then: "plan"` comment with the approach. The decision is now in the reporter's court (accept / reject), and #N drops down the work-order until they answer.
+3. **Comment and hand back** — when you've read but the next step belongs to the reporter (question to clarify, context to share, reading to confirm), post a substantive comment. #N stays visible in the backlog as a "waiting on them" reminder — that's intentional, not a leak. The next wake picks the next head of your work-order ; #N only re-surfaces if there's nothing else in your court, or if the reporter replies and re-promotes it.
 
 What a "comment-hand-back" looks like in practice : ask a clarification ("what does X mean here?"), propose a direction ("looks like this is dup of #M — close?"), share blocking context ("can't repro on linux"), state your reading ("understood, will pick up after #K lands"). NOT "+1" / "ok" — that's not a triage, it's noise.
 
 What is NOT triage : reading the ticket with `ticket_get(N)` and going silent. The `last_actor` is still the reporter, the wake re-fires next heartbeat, and you've spent attention without moving anything.
 
-See `docs/TICKET_LIFECYCLE.md` §5.0 for the full two-tier backlog model.
+See `docs/TICKET_LIFECYCLE.md` §5.0 for the full backlog ordering model.
 
 What does NOT count as triage : a single `ticket_get(N)` read with no follow-up. The wake will re-fire next heartbeat because the last_actor on the thread is still the reporter.
 
