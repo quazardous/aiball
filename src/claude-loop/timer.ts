@@ -116,6 +116,7 @@ import { bootMachine } from "./boot-machine.js";
 
 let bootActor: ActorRefFrom<typeof bootMachine> | null = null;
 import { getHookService } from "./hook-service.js";
+import { getHookWatcher } from "./hook-watcher.js";
 import {
     getIpcState,
     onIpcChanged,
@@ -1219,6 +1220,28 @@ async function mainSse(): Promise<void> {
     // first, ahead of the marker-file fallback. Files keep being written
     // by the hooks for cross-process readers (cli inspect, fallback) —
     // Slice B-3 stops the hook writes once we trust the in-memory side.
+    // #893 Slice A — bridge HookService → HookWatcher (non-breaking).
+    // Les consumers HookService restent valides ; ceux qui migrent vers
+    // l'API watcher utilisent `hookWatcher.on("hook:<name>", cb)` direct.
+    // Slices B/C/D : slim les subprocesses + drop HookService.
+    getHookService().subscribe((ev) => {
+        const w = getHookWatcher();
+        if (ev.kind === "SessionStart") {
+            w.emit({
+                type: "hook:session_start",
+                source: ev.source,
+                atMs: ev.at_ms,
+                pickerSession: ev.picker_session,
+                pickerMode: ev.picker_mode,
+            });
+        } else if (ev.kind === "Stop") {
+            w.emit({ type: "hook:stop", atMs: ev.at_ms, busyDeferUntilMs: ev.busy_defer_until_ms });
+        } else if (ev.kind === "UserPromptSubmit") {
+            w.emit({ type: "hook:user_prompt_submit", fromAutoWake: ev.from_auto_wake, atMs: ev.at_ms });
+        } else if (ev.kind === "PreToolUse") {
+            w.emit({ type: "hook:pretooluse", toolName: ev.tool_name, atMs: ev.at_ms });
+        }
+    });
     const ipcStateSub = getHookService().subscribe((ev) => {
         if (ev.kind === "SessionStart") {
             // #822 david `etned7` — do NOT eagerly set bootComplete on
