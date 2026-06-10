@@ -61,8 +61,14 @@ export interface BarSnapshot {
      *  côté timer ; Slice 3 fera du BarRenderer le SEUL writer. */
     counters: { open: number | null; backlog: number | null; events: number | null } | null;
     /** #805 — countdown vers le prochain `idle:settled` wake. `null` =
-     *  pas idle / busy / unknown. Rendu après les counters comme `⏳Ns`. */
+     *  pas idle / busy / unknown / pas d'event à drainer. Rendu après les
+     *  counters comme `📨Ns`. */
     nextWakeInSec: number | null;
+    /** #891 — boot elapsed et remaining (seconds). `null` hors boot.
+     *  Rendus dans la zone compteurs comme `🚀Ns +Ns`, prioritaires
+     *  sur nextWakeInSec. */
+    bootElapsedSec: number | null;
+    bootRemainingSec: number | null;
     /** `@cl_afk_state` : AFK chip pré-rendered string (canonical via
      *  `afkStateChunkStr`). Diff sur la string finale = plus simple que
      *  diff sur chaque field interne de l'AfkChunk. */
@@ -81,25 +87,10 @@ export interface BarSnapshot {
  *    tick observant une condition "still booting"), donc le `+N` reflète
  *    l'extension dynamique plutôt qu'un countdown absolu.
  */
-function renderStateTag(
-    loopStatus: LoopStatus,
-    info: string | null,
-    input: { nowMs: number; loopStartMs: number },
-    bootDeadlineMs: number | null,
-): string {
-    const parts: string[] = [];
-    parts.push(info ? `[${loopStatus}:${info}]` : `[${loopStatus}]`);
-    if (loopStatus !== LOOP_STATUS.BOOT) return parts.join(" ");
-    const elapsedSec = Math.max(0, Math.floor((input.nowMs - input.loopStartMs) / 1000));
-    parts.push(`${elapsedSec}s`);
-    if (bootDeadlineMs !== null) {
-        const remainingMs = bootDeadlineMs - input.nowMs;
-        if (remainingMs > 0) {
-            const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-            parts.push(`+${remainingSec}s`);
-        }
-    }
-    return parts.join(" ");
+function renderStateTag(loopStatus: LoopStatus, info: string | null): string {
+    // #891 david : drop le Ns elapsed + +Ns remaining du state tag.
+    // Tout dans la zone compteurs maintenant (cf. counters paint).
+    return info ? `[${loopStatus}:${info}]` : `[${loopStatus}]`;
 }
 
 /** Compute le snapshot canonique depuis ipcState + computeLoopView.
@@ -115,25 +106,50 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
             ? LOOP_STATUS.BUSY
             : LOOP_STATUS.IDLE;
     const ipc = getIpcState();
-    const stateTag = renderStateTag(loopStatus, ipc.stateTagInfo, input, ipc.bootDeadlineMs);
+    const stateTag = renderStateTag(loopStatus, ipc.stateTagInfo);
     const zenActive = existsSync(zenPath(sd));
     const counters = ipc.counters;
     const afkChipStr = afkStateChunkStr(sd);
-    // #805 — derive countdown sec from ipc.nextWakeAtMs. Negative or null
-    // → segment off. Math.ceil pour que 0.4s reste 1s visible (= countdown
-    // tick down to 0).
+    // #891 — boot elapsed + remaining déplacés du state tag vers la zone
+    // compteurs. Rendus `🚀Ns +Ns` (prioritaires).
+    let bootElapsedSec: number | null = null;
+    let bootRemainingSec: number | null = null;
+    if (loopStatus === LOOP_STATUS.BOOT) {
+        bootElapsedSec = Math.max(0, Math.floor((input.nowMs - input.loopStartMs) / 1000));
+        if (ipc.bootDeadlineMs !== null) {
+            const remMs = ipc.bootDeadlineMs - input.nowMs;
+            if (remMs > 0) bootRemainingSec = Math.max(0, Math.ceil(remMs / 1000));
+        }
+    }
+    // #805 — countdown vers prochain wake. Gated sur :
+    //   - bootComplete (= post-boot)
+    //   - state=idle (= claude pas en train de répondre)
+    //   - **events ou backlog pending** (#805 xxvzye : "le compteur doit
+    //     être affiché que si y a un event/backlog pending")
     let nextWakeInSec: number | null = null;
-    if (ipc.nextWakeAtMs !== null) {
+    const hasPending = (counters?.events ?? 0) > 0 || (counters?.backlog ?? 0) > 0;
+    if (ipc.nextWakeAtMs !== null && hasPending && loopStatus !== LOOP_STATUS.BOOT) {
         const remainingMs = ipc.nextWakeAtMs - input.nowMs;
         if (remainingMs > 0) nextWakeInSec = Math.ceil(remainingMs / 1000);
     }
-    return { humanWord, loopStatus, stateTag, proxyAlive, zenActive, counters, nextWakeInSec, afkChipStr };
+    return {
+        humanWord,
+        loopStatus,
+        stateTag,
+        proxyAlive,
+        zenActive,
+        counters,
+        nextWakeInSec,
+        bootElapsedSec,
+        bootRemainingSec,
+        afkChipStr,
+    };
 }
 
 /** Diff deux snapshots et retourne la liste des champs qui ont
  *  changé. Liste vide = no-op (rien à repaint). */
 export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (keyof BarSnapshot)[] {
-    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "afkChipStr"];
+    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkChipStr"];
     const changed: (keyof BarSnapshot)[] = [];
     if (prev.humanWord !== next.humanWord) changed.push("humanWord");
     if (prev.loopStatus !== next.loopStatus) changed.push("loopStatus");
@@ -142,6 +158,8 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     if (prev.zenActive !== next.zenActive) changed.push("zenActive");
     if (!countersEqual(prev.counters, next.counters)) changed.push("counters");
     if (prev.nextWakeInSec !== next.nextWakeInSec) changed.push("counters");
+    if (prev.bootElapsedSec !== next.bootElapsedSec) changed.push("counters");
+    if (prev.bootRemainingSec !== next.bootRemainingSec) changed.push("counters");
     if (prev.afkChipStr !== next.afkChipStr) changed.push("afkChipStr");
     return changed;
 }
@@ -284,9 +302,15 @@ export class BarRenderer {
                 if (c.backlog !== null) parts.push(`b:${c.backlog}`);
                 if (c.events !== null) parts.push(`e:${c.events}`);
             }
-            // #805 — countdown vers prochain wake. Symbole `⏳` (hourglass)
-            // pour distinguer du `+Ns` boot remaining (qui suit le state tag).
-            if (next.nextWakeInSec !== null) parts.push(`⏳${next.nextWakeInSec}s`);
+            // #891 — countdowns harmonisés dans la zone compteurs :
+            //   - 🚀Ns +Ns pendant boot (prioritaire, mutually exclusive)
+            //   - 📨Ns post-boot quand events/backlog pending (#805 xxvzye)
+            if (next.bootElapsedSec !== null) {
+                parts.push(`🚀${next.bootElapsedSec}s`);
+                if (next.bootRemainingSec !== null) parts.push(`+${next.bootRemainingSec}s`);
+            } else if (next.nextWakeInSec !== null) {
+                parts.push(`📨${next.nextWakeInSec}s`);
+            }
             if (parts.length === 0) {
                 setOpt("@cl_counts", "");
             } else {
