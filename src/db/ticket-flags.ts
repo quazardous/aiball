@@ -245,13 +245,16 @@ export function buildTicketFlagsContext(args: {
     ownClaimIds: Set<number>;
     /** Ids the consumer is the explicit assignee of (same source). */
     assignedToMeIds: Set<number>;
+    /** #900 — Ids where another agent holds a live claim. Drives the
+     *  BacklogRules `claimed-by-other` exclusion (backlog + wake). */
+    claimedByOtherIds: Set<number>;
     /** Cross-agent hot focus set (visible flag, computed by the caller
      *  via `computeHotFocus(ticketAgentLastActivity(ids), …)`. */
     crossAgentHot: Set<number>;
 }): TicketFlagsContext {
     const db = getDb();
     const { consumerId, ticketIds, nowMs, cooldownSec, closedSet,
-        isClaimable, ownClaimIds, assignedToMeIds, crossAgentHot } = args;
+        isClaimable, ownClaimIds, assignedToMeIds, claimedByOtherIds, crossAgentHot } = args;
 
     const unreadMap = ticketUnreadFlags(consumerId, ticketIds);
     const unreadIds = new Set<number>();
@@ -296,6 +299,7 @@ export function buildTicketFlagsContext(args: {
     const rulesCtx = buildBacklogRulesCtx(consumerId, {
         nowMs,
         closedIds: closedSet,
+        claimedByOtherIds,
     });
     return {
         consumerId,

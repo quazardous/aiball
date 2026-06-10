@@ -30,6 +30,7 @@ function buildCtx(overrides: Partial<TicketFlagsContext> = {}): TicketFlagsConte
             nowMs: NOW_MS,
             closedIds: closedSet,
             snoozedIds,
+            claimedByOtherIds: new Set(),
         },
         isClaimable: () => false,
         nowMs: NOW_MS,
@@ -114,6 +115,7 @@ test("tier null — snoozed (in rulesCtx.snoozedIds)", () => {
                 nowMs: NOW_MS,
                 closedIds: closedSet,
                 snoozedIds: new Set([1]),
+                claimedByOtherIds: new Set(),
             },
         }),
     );

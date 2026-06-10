@@ -22,6 +22,7 @@ function mkCtx(opts: Partial<BacklogRulesCtx> = {}): BacklogRulesCtx {
         nowMs: opts.nowMs ?? Date.now(),
         closedIds: opts.closedIds ?? new Set(),
         snoozedIds: opts.snoozedIds ?? new Set(),
+        claimedByOtherIds: opts.claimedByOtherIds ?? new Set(),
     };
 }
 
@@ -102,6 +103,26 @@ test("assigned-to-other rule excludes ONLY backlog-tier", () => {
 // =====================================================================
 //  Dispatch
 // =====================================================================
+
+test("#900 claimed-by-other excludes from backlog-tier + fifo-wake", () => {
+    const ctx = mkCtx({ claimedByOtherIds: new Set([42]) });
+    const item = { ticketId: 42 };
+    // backlog-tier + fifo-wake : exclues
+    assert.equal(defaultBacklogRules.excludes(ctx, item, "backlog-tier"), true);
+    assert.equal(defaultBacklogRules.excludes(ctx, item, "fifo-wake"), true);
+    // unread-list/count + actionable-pool + hot-tier : pas exclues (le ticket
+    // peut quand même se surfacer via unread directs, on coupe juste le wake CTA)
+    assert.equal(defaultBacklogRules.excludes(ctx, item, "unread-list"), false);
+    assert.equal(defaultBacklogRules.excludes(ctx, item, "actionable-pool"), false);
+    assert.equal(defaultBacklogRules.excludes(ctx, item, "hot-tier"), false);
+});
+
+test("#900 claimed-by-other ignores items not in claimedByOtherIds", () => {
+    const ctx = mkCtx({ claimedByOtherIds: new Set([42]) });
+    const item = { ticketId: 99 };
+    assert.equal(defaultBacklogRules.excludes(ctx, item, "backlog-tier"), false);
+    assert.equal(defaultBacklogRules.excludes(ctx, item, "fifo-wake"), false);
+});
 
 test("engine.excludes returns true iff any active rule on target fires", () => {
     const ctx = mkCtx({ closedIds: new Set([1]) });

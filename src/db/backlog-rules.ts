@@ -41,6 +41,11 @@ export interface BacklogRulesCtx {
     closedIds: Set<number>;
     /** Tickets with `postponed_until > now`. */
     snoozedIds: Set<number>;
+    /** #900 — Tickets with a live claim by another agent (claimant !=
+     *  consumerId, within the claim window). Used by the rule
+     *  `claimed-by-other` to keep these out of MY backlog + wake (= they
+     *  belong to the claimant's work-order until they release). */
+    claimedByOtherIds: Set<number>;
 }
 
 /**
@@ -112,6 +117,16 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
             item.assignee != null && item.assignee !== ctx.consumerId,
         excludesFrom: new Set<Target>(["backlog-tier"]),
     },
+    {
+        // #900 david : "ouvre un ticket sur ça ça devrait pas te fire".
+        // Si un autre agent détient un claim vivant sur le ticket, il
+        // appartient à SON work-order — pas dans mon backlog ni fifo-wake.
+        // Exclut symétriquement à assigned-to-other mais sur la base du
+        // claim (temporaire) au lieu de l'assignment (persistant).
+        name: "claimed-by-other",
+        when: (ctx, item) => ctx.claimedByOtherIds.has(item.ticketId),
+        excludesFrom: new Set<Target>(["backlog-tier", "fifo-wake"]),
+    },
 ]);
 
 export class BacklogRules {
@@ -144,11 +159,17 @@ export class BacklogRules {
  */
 export function buildBacklogRulesCtx(
     consumerId: string,
-    opts: { nowMs?: number; closedIds?: Set<number>; snoozedIds?: Set<number> } = {},
+    opts: {
+        nowMs?: number;
+        closedIds?: Set<number>;
+        snoozedIds?: Set<number>;
+        claimedByOtherIds?: Set<number>;
+    } = {},
 ): BacklogRulesCtx {
     const nowMs = opts.nowMs ?? Date.now();
+    const claimedByOtherIds = opts.claimedByOtherIds ?? new Set<number>();
     if (opts.closedIds && opts.snoozedIds) {
-        return { consumerId, nowMs, closedIds: opts.closedIds, snoozedIds: opts.snoozedIds };
+        return { consumerId, nowMs, closedIds: opts.closedIds, snoozedIds: opts.snoozedIds, claimedByOtherIds };
     }
     const db = getDb();
     let closedIds = opts.closedIds;
@@ -185,7 +206,7 @@ export function buildBacklogRulesCtx(
             .all();
         snoozedIds = new Set(rows.map((r) => r.id));
     }
-    return { consumerId, nowMs, closedIds, snoozedIds };
+    return { consumerId, nowMs, closedIds, snoozedIds, claimedByOtherIds };
 }
 
 /** Singleton with the default rule set. */

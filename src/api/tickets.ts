@@ -881,9 +881,17 @@ ticketsRouter.get("/tickets", (req, res) => {
     const assignWindowMs = assignWindowSec() * 1000;
     const ownClaimIds = new Set<number>();
     const assignedToMeIds = new Set<number>();
+    // #900 — tickets a un autre agent détient un claim VIVANT. Utilisé par
+    // la règle BacklogRules `claimed-by-other` pour exclure ces tickets
+    // du backlog/wake du consumer courant (= ils appartiennent à l'autre).
+    const claimedByOtherIds = new Set<number>();
     for (const m of created) {
-        if (m.claimant === consumerId && isAssignmentLive(m.claimed_at, claimNowMs, assignWindowMs)) {
+        const isLiveClaim = m.claimant != null && isAssignmentLive(m.claimed_at, claimNowMs, assignWindowMs);
+        if (isLiveClaim && m.claimant === consumerId) {
             ownClaimIds.add(m.id);
+        }
+        if (isLiveClaim && m.claimant !== consumerId) {
+            claimedByOtherIds.add(m.id);
         }
         if (m.assignee === consumerId) {
             assignedToMeIds.add(m.id);
@@ -928,6 +936,7 @@ ticketsRouter.get("/tickets", (req, res) => {
         isClaimable,
         ownClaimIds,
         assignedToMeIds,
+        claimedByOtherIds,
         crossAgentHot: crossAgentHotFocus,
     });
     const tickets = created.map((m) => {
