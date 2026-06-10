@@ -1733,20 +1733,22 @@ async function mainSse(): Promise<void> {
                     unsubInputHot = null;
                     unsubAfkRearm = null;
                 };
-                unsubInputHot = loopBus.on("inputHot", (next) => {
-                    if (next === false) {
-                        cleanup();
-                        // #749 david — re-check AFK at fire time : the user may
-                        // have re-armed it between afk:cleared and now.
-                        const at = readLoopStateInput(sd!);
-                        if (isAfkActive(at)) {
-                            log("afkMachine: input-hot expired post-afk:cleared but AFK was re-armed — skipping deferred wake");
-                            return;
-                        }
-                        log("afkMachine: input-hot expired post-afk:cleared — firing deferred wake");
-                        void tryWake("afk-cleared-drain (input-hot expired)");
+                // #888 Slice B — migré de `loopBus.on("inputHot")` vers
+                // l'emit direct de TypingController. Wrap subscription
+                // into a () => void pour le cleanup uniforme.
+                const sub = getTypingService().getActor().on("typing:ended", () => {
+                    cleanup();
+                    // #749 david — re-check AFK at fire time : the user may
+                    // have re-armed it between afk:cleared and now.
+                    const at = readLoopStateInput(sd!);
+                    if (isAfkActive(at)) {
+                        log("afkMachine: input-hot expired post-afk:cleared but AFK was re-armed — skipping deferred wake");
+                        return;
                     }
+                    log("afkMachine: input-hot expired post-afk:cleared — firing deferred wake");
+                    void tryWake("afk-cleared-drain (input-hot expired)");
                 });
+                unsubInputHot = () => sub.unsubscribe();
                 // If user re-armed AFK before input-hot expired, cancel.
                 unsubAfkRearm = afkActor.on("afk:armed_10m", () => {
                     log("afkMachine: AFK re-armed before input-hot expired, cancelling deferred wake");
@@ -1772,22 +1774,14 @@ async function mainSse(): Promise<void> {
     //   `paneObs.leave("boot")` au sealing (subscriber), `paneObs.enter("boot")`
     //   à module init si !respawn-handoff. Pas de ré-entrée — la machine
     //   est terminale.
-    loopBus.on("pickerOpened", () => log("state-bus: resume picker opened"));
-    loopBus.on("pickerClosed", () => log("state-bus: resume picker closed"));
-    // #714 david `fu9mh7` — bus event `busy(next, prev)` reste publié
-    // pour les consumers (logs ici + futurs render/decoration). La cadence
-    // de refresh, elle, est PIGGYBACKÉE sur `pushViewIfChanged` qui tourne
-    // déjà à 1s post-boot (cf. setInterval line ~1097). Un refresh
-    // busy-gated chez nous était trop fragile : pour qu'il s'arme, il
-    // fallait que le bus émette `busy(true)`, mais pour que le bus émette
-    // `busy(true)`, il fallait que pane-busy soit fresh — chicken-and-egg.
-    // david repro : `/compact` typed → `[busy:compacting]` n'apparaissait
-    // qu'au prochain heartbeat (30s). Now refresh runs every 1s in BOTH
-    // states ; cost ~5ms/s (1 tmux capture + 4-5 file syscalls). The bus
-    // event still fires correctly on the transition and logs it.
-    loopBus.on("busy", (next, prev) => {
-        log(`state-bus: busy ${prev}→${next}`);
-    });
+    // #888 Slice C — migré de loopBus.on("pickerOpened/Closed") vers
+    // les watchers PaneWatcher direct.
+    pickerSessionW.on("begin", () => log("watcher: resume picker session opened"));
+    pickerSessionW.on("end", () => log("watcher: resume picker session closed"));
+    pickerModeW.on("begin", () => log("watcher: resume picker mode opened"));
+    pickerModeW.on("end", () => log("watcher: resume picker mode closed"));
+    // #888 Slice A — bus.busy log drop : couvert par idleMachine
+    // turn_started/turn_ended logs déjà câblés.
     // #714 david `gftprc` — bar (status-bg + suffix paneInfo) was repainted
     // only at the 30s heartbeat. So even with the 1s refresh keeping
     // pane-busy / pane-compacting fresh, the user saw `[busy:compacting]`

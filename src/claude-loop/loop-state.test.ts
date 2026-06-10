@@ -140,18 +140,8 @@ test("LoopStateBus: second update with same view → no emit", () => {
 // LoopStateBus. Ces "locus" events sont désormais émis par l'AfkMachine
 // acteur (cf. afk-machine.test.ts pour la couverture).
 
-test("LoopStateBus: pickerOpened / pickerClosed fire on resumePickerActive flips", () => {
-    const bus = new LoopStateBus();
-    bus.update(baseInput());
-    let opened = false, closed = false;
-    bus.on("pickerOpened", () => { opened = true; });
-    bus.on("pickerClosed", () => { closed = true; });
-    bus.update(baseInput({ resumePickerActive: true }));
-    assert.equal(opened, true);
-    assert.equal(closed, false);
-    bus.update(baseInput({ resumePickerActive: false, bootComplete: true, idleSinceMs: T0 }));
-    assert.equal(closed, true);
-});
+// #888 — `pickerOpened`/`pickerClosed` test retiré : events migrés vers
+// les watchers PaneWatcher direct (pickerSessionW/pickerModeW).
 
 test("LoopStateBus: unsubscribe stops further calls", () => {
     const bus = new LoopStateBus();
@@ -887,63 +877,8 @@ test("isReallyBusy : true when both are set", () => {
     assert.equal(isReallyBusy(baseInput({ paneBusy: true, paneCompacting: true })), true);
 });
 
-// #714 — `busy` bus event. Single signal with `(next, prev)` aligned
-// with `phaseChanged`/`barWordChanged`. Subscribers (pane-probe cadence
-// in timer.ts) arm/disarm work off the boolean.
-
-test("LoopStateBus.busy : idle → busy emits busy(true, false)", () => {
-    const bus = new LoopStateBus();
-    const calls: Array<[boolean, boolean]> = [];
-    bus.on("busy", (next, prev) => { calls.push([next, prev]); });
-    bus.update(baseInput({ paneBusy: false, paneCompacting: false }));
-    bus.update(baseInput({ paneBusy: true, paneCompacting: false }));
-    assert.deepEqual(calls, [[true, false]]);
-});
-
-test("LoopStateBus.busy : busy → idle emits busy(false, true)", () => {
-    // First update with busy=true also fires busy(true, false) via the
-    // first-update chicken-and-egg fix ; the test starts from a fresh
-    // idle baseline to isolate the transition.
-    const bus = new LoopStateBus();
-    bus.update(baseInput({ paneBusy: false, paneCompacting: false }));
-    const calls: Array<[boolean, boolean]> = [];
-    bus.on("busy", (next, prev) => { calls.push([next, prev]); });
-    bus.update(baseInput({ paneBusy: true, paneCompacting: false }));
-    bus.update(baseInput({ paneBusy: false, paneCompacting: false }));
-    assert.deepEqual(calls, [[true, false], [false, true]]);
-});
-
-test("LoopStateBus.busy : busy → busy (no transition) emits nothing", () => {
-    // Seed with the first busy update (subscribe AFTER) so only the
-    // intra-busy stability is observed.
-    const bus = new LoopStateBus();
-    bus.update(baseInput({ paneBusy: true, paneCompacting: false }));
-    const calls: Array<[boolean, boolean]> = [];
-    bus.on("busy", (next, prev) => { calls.push([next, prev]); });
-    bus.update(baseInput({ paneBusy: true, paneCompacting: false }));
-    bus.update(baseInput({ paneBusy: false, paneCompacting: true })); // still busy via compacting
-    assert.deepEqual(calls, []);
-});
-
-test("LoopStateBus.busy : first update with busy input emits busy(true, false)", () => {
-    // Chicken-and-egg : if claude is already busy at the very first
-    // bus.update(), the consumer needs the event to arm the probe.
-    // Without this, the probe would never fire because the first
-    // bus.update() historically emitted no events (no prior view).
-    const bus = new LoopStateBus();
-    const calls: Array<[boolean, boolean]> = [];
-    bus.on("busy", (next, prev) => { calls.push([next, prev]); });
-    bus.update(baseInput({ paneBusy: true, paneCompacting: false }));
-    assert.deepEqual(calls, [[true, false]]);
-});
-
-test("LoopStateBus.busy : first update with idle input emits nothing", () => {
-    const bus = new LoopStateBus();
-    const calls: Array<[boolean, boolean]> = [];
-    bus.on("busy", (next, prev) => { calls.push([next, prev]); });
-    bus.update(baseInput({ paneBusy: false, paneCompacting: false }));
-    assert.deepEqual(calls, []);
-});
+// #888 — `LoopStateBus.busy` tests retirés : event migré vers
+// IdleController turn_started/turn_ended emits (cf. idle-machine.test.ts).
 
 // #722 — `inputHotAgeMs(input)` + `isInputHot(input)` semantic helpers.
 // Pure observable derived from `humanTypingAtMs` + `inputHotTtlMs`.
@@ -979,35 +914,8 @@ test("isInputHot : false past the TTL window", () => {
     })), false);
 });
 
-test("LoopStateBus.inputHot : cold → hot emits inputHot(true, false)", () => {
-    const bus = new LoopStateBus();
-    const now = T0 + 10 * SEC;
-    bus.update(baseInput({ nowMs: now, humanTypingAtMs: null }));
-    const calls: Array<[boolean, boolean]> = [];
-    bus.on("inputHot", (next, prev) => { calls.push([next, prev]); });
-    bus.update(baseInput({ nowMs: now + 100, humanTypingAtMs: now + 50 }));
-    assert.deepEqual(calls, [[true, false]]);
-});
-
-test("LoopStateBus.inputHot : hot → cold emits inputHot(false, true) when TTL expires", () => {
-    const bus = new LoopStateBus();
-    const t0 = T0 + 10 * SEC;
-    bus.update(baseInput({ nowMs: t0, humanTypingAtMs: t0 - 100, inputHotTtlMs: 3 * SEC }));
-    const calls: Array<[boolean, boolean]> = [];
-    bus.on("inputHot", (next, prev) => { calls.push([next, prev]); });
-    // Same humanTypingAtMs ; nowMs advances past TTL → hot becomes cold.
-    bus.update(baseInput({ nowMs: t0 + 5 * SEC, humanTypingAtMs: t0 - 100, inputHotTtlMs: 3 * SEC }));
-    assert.deepEqual(calls, [[false, true]]);
-});
-
-test("LoopStateBus.inputHot : first update with hot input emits inputHot(true, false)", () => {
-    const bus = new LoopStateBus();
-    const calls: Array<[boolean, boolean]> = [];
-    bus.on("inputHot", (next, prev) => { calls.push([next, prev]); });
-    const now = T0 + 10 * SEC;
-    bus.update(baseInput({ nowMs: now, humanTypingAtMs: now - 100 }));
-    assert.deepEqual(calls, [[true, false]]);
-});
+// #888 — `LoopStateBus.inputHot` tests retirés : event migré vers
+// TypingController typing:started/typing:ended emits (cf. typing-machine.test.ts).
 
 // #722 — `shouldPollFast(input)` aggregator + `pollFast` bus event.
 // OR of {boot, busy, input-hot}.

@@ -414,17 +414,6 @@ export type LoopStateEvents = {
     /** Fired whenever the view changes at all (any field). Always fires
      *  before the typed events below. */
     transition: (prev: LoopStateView, next: LoopStateView) => void;
-    /** #714 — `isReallyBusy(input)` flipped. `next=true` means claude
-     *  just entered a busy turn (mid-turn footer or /compact) ; `next=false`
-     *  means claude just returned to idle. Subscribers arm/disarm work
-     *  off this single signal (pane-probe cadence, future bar-render
-     *  paints, etc.). Aligned with `phaseChanged` / `barWordChanged`
-     *  pattern : verb + (next, prev). */
-    busy: (next: boolean, prev: boolean) => void;
-    /** #722 — `isInputHot(input)` flipped. `next=true` = a recent
-     *  keystroke landed in the TTL window ; `next=false` = the window
-     *  expired. Pure observable, consumers free. */
-    inputHot: (next: boolean, prev: boolean) => void;
     /** #722 — `shouldPollFast(input)` flipped. `next=true` = at least
      *  one of boot / busy / input-hot is true ; pane-probe should run
      *  at `pane_probe_fast_ms`. `next=false` = back to slow. Timer's
@@ -434,10 +423,6 @@ export type LoopStateEvents = {
      *  inputs (toggle F9, commit, or convergence to null). The chip
      *  painter subscribes for an instant repaint. */
     dispAfkChanged: (next: { mode: AfkMode | null; expiryMs: number | null; commitAtMs: number | null }) => void;
-    /** Resume picker showed up (signal from session-start-hook). */
-    pickerOpened: () => void;
-    /** Resume picker dismissed (auto-pick or user-pick). */
-    pickerClosed: () => void;
 };
 
 type AnyListener = (...args: unknown[]) => void;
@@ -482,10 +467,10 @@ export class LoopStateBus {
             this.emitDiffs(this.lastView, next, this.lastInput, input);
         } else {
             // First update : treat the missing prior state as "all false"
-            // for the boolean axes so consumers wake correctly if claude
-            // is already busy / input-hot / poll-fast on boot.
-            if (isReallyBusy(input)) this.emit("busy", true, false);
-            if (isInputHot(input)) this.emit("inputHot", true, false);
+            // for poll-fast so consumers re-arm if claude is already
+            // boot/busy/input-hot on boot. (#888 — busy/inputHot retirés
+            // car remplacés par IdleController/TypingController emits ;
+            // ces controllers émettent leur état initial à start.)
             if (shouldPollFast(input)) this.emit("pollFast", true, false);
         }
         this.lastView = next;
@@ -496,18 +481,9 @@ export class LoopStateBus {
     private emitDiffs(prev: LoopStateView, next: LoopStateView, prevInput: LoopStateInput, nextInput: LoopStateInput): void {
         const changed = JSON.stringify(prev) !== JSON.stringify(next);
         if (changed) this.emit("transition", prev, next);
-        // #714 — busy transition driven by `isReallyBusy(input)` (the
-        // semantic helper), not by `view.phase` which can stay `busy`
-        // across compacting↔mid-turn. The disjunction in `isReallyBusy`
-        // means both pane-busy and pane-compacting feed into one signal.
-        const prevBusy = isReallyBusy(prevInput);
-        const nextBusy = isReallyBusy(nextInput);
-        if (prevBusy !== nextBusy) this.emit("busy", nextBusy, prevBusy);
-        // #722 — input-hot transition (recent keystroke ↔ window expired).
-        // Pure observable ; consumers may compose it (see shouldPollFast).
-        const prevInputHot = isInputHot(prevInput);
-        const nextInputHot = isInputHot(nextInput);
-        if (prevInputHot !== nextInputHot) this.emit("inputHot", nextInputHot, prevInputHot);
+        // #888 — `busy` emit retiré : remplacé par IdleController
+        // turn_started/turn_ended emits. `inputHot` emit retiré :
+        // remplacé par TypingController typing:started/typing:ended.
         // #722 — aggregated poll-rate decision (boot / busy / input-hot).
         // Subscribers (timer.ts pane-probe) re-arm their setInterval to
         // the fast vs slow ms on transition.
@@ -521,8 +497,8 @@ export class LoopStateBus {
         //   et consommés via `actor.on(<controller>:<event_name>, cb)`.
         //   Le bus garde la mécanique de diff pour les input-derived signals
         //   (busy, inputHot, pollFast, dispAfkChanged, picker, wake gates).
-        if (!prevInput.resumePickerActive && nextInput.resumePickerActive) this.emit("pickerOpened");
-        if (prevInput.resumePickerActive && !nextInput.resumePickerActive) this.emit("pickerClosed");
+        // #888 — pickerOpened/Closed emits retirés : remplacés par
+        // les watchers PaneWatcher direct (pickerSessionW/pickerModeW).
         // #751 htwguc — emit `dispAfkChanged` on any diff of the display
         // couple. Painters subscribe for an instant chip repaint.
         const prevDisp = prevInput.dispAfkMode ?? null;
