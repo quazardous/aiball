@@ -52,6 +52,17 @@ If you posted `then: "resolved"` and the work turns out wrong (test failed, fix 
 
 **Amending** a still-valid pending plan (small refinement, no semantic change) is fine via a plain reply — that's the amend-with-plain-comment rule. It only applies when the plan is still substantially the right path.
 
+### Reopen = your court, propose a new direction
+
+When a ticket you previously resolved is **reopened** (the reporter clicked Reopen, OR rejected your `then: "resolved"` proposal), treat it as a **technical rejection of your solution**. The ball is back in your court. The reporter has signalled "this isn't done" — going silent is the wrong move ; so is a defensive plain comment ("still works on my side").
+
+The right move is a **fresh discussion comment** that EITHER :
+- proposes a new direction with `then: "plan"` (= "given the reopen, here's what I'd investigate / try next")
+- asks a sharp clarifying question (= "what did you observe that the previous fix missed ? a repro would help")
+- offers a `then: "wontfix"` if you genuinely believe the work was correct and the reopen is unwarranted (= forces an explicit accept/reject conversation rather than a stale state)
+
+DO NOT re-post the same `then: "resolved"` framing — that ignores the reopen signal. Each reopen cycle should advance the discussion : new hypothesis, new question, or a documented disagreement.
+
 ---
 
 ## Good gestures

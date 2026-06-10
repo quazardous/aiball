@@ -23,7 +23,32 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
-## [0.28.0] — 2026-06-10
+## [0.29.0] — 2026-06-10
+
+### Added
+
+- Search results in the inbox are now grouped by ticket. Multiple comment hits on the same ticket collapse under one head row (the parent ticket title) with indented sub-rows per matching comment — easier to scan than the previous flat list where the same ticket title repeated 5 times in a row.
+- A new pane watcher detects the explicit idle prompt (`ctrl+t to show task` visible without `esc to interrupt`) and clears the busy latch in one step. Earlier the busy state could stay stale if the footer didn't redraw cleanly between turns ; the idle prompt is a positive signal that the session is awaiting input.
+- New time-based sanity detector fires `clear paneBusy` when a session has been marked busy for more than 5 minutes with no ticket activity — backstop for stuck busy states that the primary detectors miss. Reserved for "big hacks" ; simple degraded cases stay in the primary state machine via self-heal (turn started while still in busy state → emit synthetic turn ended + restart).
+- The auto-resume picker is fully steerable from the environment : `CL_RESUME_PICK` (`latest` / `abort`) gates the session picker auto-cross, `CL_RESUME_MODE` (`as-is` / `summary` / `abort`) gates the mode picker after pickup. `--no-resume` / `--resume` CLI flags + the yaml `claude_loop.auto_resume` toggle override the default cascade in either direction.
+- Backend exposes a single `pushEvent(message, opts?)` entry point that wraps the historical `fanOutPings + emitLifecycle` duo. First migration : the cross-reference pseudo-comments (sub-ticket added / ticket referenced) now also emit their lifecycle event ; downstream subscribers that gate on `kind === "ticket_created"` (= the automation engine) ignore them transparently. Scattered call-site decisions can move to the wrapper one at a time without breaking the matrix.
+
+### Changed
+
+- Inbox row tint : tickets with a pending escalation now get the same green border as pending plans / resolutions. The "your call" cue is consistent across the three decision kinds ; the urgency badge ("ESCALATED" red) still surfaces the kind. Previously a pending escalation showed no row accent and was easy to miss in a list of dozens.
+- The aiball skill no longer uses the internal "tier 1 / tier 2" backlog vocabulary in agent-facing surfaces. The MCP `ticket_list` description was sweeped too. Agents see "work-order" framing instead — the tier wording was an implementation detail that leaked outward.
+- The aiball skill now codifies "obscure ticket = ask on the thread, not browse code" : when a ticket body is too thin to act on (one-line bug report, undecodable screenshot), the right move is a clarification comment, not a fishing expedition in the codebase. Saves the human from re-explaining context to every successive agent reading the thread.
+- The aiball skill now codifies "reopen = your court, propose a new direction" : a reopened ticket is technically a rejection of the prior solution. The agent must restart the discussion with a fresh `then: "plan"`, a sharp question, or an explicit `then: "wontfix"` — never silence or a defensive plain comment.
+
+### Fixed
+
+- Tickets claimed by another agent (= the claimant field, set via auto-claim or `ticket_claim`) are now excluded from the consumer's wake CTA and backlog. Previously the routing rules only handled the persistent `assignee` field ; a live claim on a ticket by aiball-win would still fire wake CTAs on claude-aiball-dev when that ticket was first in the FIFO. New `claimed-by-other` rule symmetric to `assigned-to-other`. The `assigned-to-other` rule itself was also extended to exclude from the FIFO wake (was only excluding from the backlog tier) — closes the same routing leak on the assignment path.
+- Accepting a plan / resolution / wontfix / escalation decision via the web UI now honours the assignee picked in the composer dropdown. Previously only the moderation accept/reject buttons did. The four accept-decision handlers in the thread composer now apply the picked assignee best-effort after the decision lands ; failure to assign doesn't roll back the accept (= the decision is still applied, the assignee step is retried via the Manage panel if needed).
+- ThreadManagePanel : `assignee` and `owner` local refs now sync to props changes via `watch`. Previously the local refs captured the initial value at mount and ignored subsequent ticket refreshes — accepting a plan with an assignee picked appeared "broken" in the UI even though the backend had applied the assignee. Hard-reload no longer required after an accept-with-assign.
+- `claude-loop backlog --cooled` now correctly shows tickets in cooldown. The CLI was calling the tickets API without `cooldown_sec`, which left `backlog_cooled_until` null on every row and made the `--cooled` flag a no-op. CLI now passes `cooldown_sec` from the `CL_BACKLOG_COOLDOWN_SEC` env var (default 3600s).
+- `claude-loop backlog` no longer returns HTTP 500 on the first call after a daemon restart : the new `claimed-by-other` rule guards against a missing `claimedByOtherIds` field via optional chain, preserving the pre-fix behaviour for any caller path that hasn't been migrated yet.
+
+
 
 ### Changed (breaking)
 
