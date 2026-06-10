@@ -129,10 +129,22 @@ state name to `ipcState.dispAfkMode/dispAfkExpiryMs` (display).
 
 The `REQUEST_WAKE` during `inFlight` or `cooldown` is dropped silently — consumers gate with `wakeSvc.isIdle()` before sending. The `wake:delivered` consumer (in `timer.ts:mainSse`) calls `markMessageSeen` on the FIFO-head ack.
 
+### TypingController — shipped
+
+| Field | Value |
+|---|---|
+| **Source** | [`src/claude-loop/typing-machine.ts`](../src/claude-loop/typing-machine.ts) |
+| **Role** | Tracks the human-typing signal — 2-state SM (`idle`/`hot`) with inactivity TTL. Fires `typing:started` once per burst and `typing:ended` after the TTL window. |
+| **Slice owned** | `ipcState.humanTypingAtMs` |
+| **Events in** | `KEYSTROKE` { atMs } (= from pty-proxy `touch_marker` events via `touchHumanTyping`) |
+| **Events emitted** | `typing:started` { atMs } / `typing:ended` { lastKeystrokeMs } |
+| **States** | `idle` → `hot` → `idle` (cycle, `after(ttlMs)` returns) |
+| **Pump** | None — XState `after(ttlMs)` handles the idle return. |
+| **Tests** | `typing-machine.test.ts` |
+
 ### Future controllers (queued)
 
 - **PaneStateController** — pane{Busy,Ready,Compacting,Resuming,Interrupted,Pickers} consolidation.
-- **TypingController** — humanTypingAtMs + dispAfk debounce arm.
 - **IdleController** — idleSinceMs.
 
 Each will follow the same pattern : pure machine, external pump (if needed), subscriber → ipcState bridge, `<controller>:<event_name>` emits.
@@ -174,6 +186,7 @@ Each controller declares its **locus events** (= pivotal transitions the rest of
 | `boot:` | `boot:sealed` |
 | `afk:` | `afk:armed_10m`, `afk:armed_inf`, `afk:cleared` |
 | `wake:` | `wake:requested`, `wake:in_flight_started`, `wake:delivered`, `wake:cleared`, `wake:cooldown_expired` |
+| `typing:` | `typing:started`, `typing:ended` |
 | `pane:` (planned) | `pane:busy_started`, `pane:idle`, `pane:compacting_started`, `pane:compacting_ended` |
 
 **Payload guidelines** — what to put on the event vs what to leave for `subscribe(snap)` or `getSnapshot()` :

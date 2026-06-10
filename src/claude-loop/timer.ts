@@ -101,6 +101,7 @@ import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
 import { getWakeService } from "./wake-service.js";
+import { getTypingService } from "./typing-service.js";
 import { probeParentTmuxAtBoot, installParentTmuxWatchdog, sweepSiblingTimers } from "./parent-liveness.js";
 import { buildRespawnEnv, parseRespawnState, RESPAWN_STATE_ENV_VAR } from "./respawn-state.js";
 import { createActor, type ActorRefFrom } from "xstate";
@@ -115,6 +116,7 @@ import {
     setIpcAfk,
     setIpcDispAfk,
     setIpcBootComplete,
+    setIpcHumanTypingAtMs,
     setIpcBootDeadlineMs,
     setIpcCounters,
     setIpcIdleSince,
@@ -1470,6 +1472,22 @@ async function mainSse(): Promise<void> {
         });
         wakeActor.on("wake:cleared", (ev) => log(`wakeMachine: wake:cleared reason=${ev.reason}`));
         wakeActor.on("wake:cooldown_expired", () => log("wakeMachine: wake:cooldown_expired (idle)"));
+    }
+    // #880 — TypingController XState actor wiring. Subscriber bridge :
+    //   `actor.context.lastKeystrokeMs` → `ipc.humanTypingAtMs` (= back-compat
+    //   pour les consumers existants : bar word "stop", chip typing,
+    //   stop-hook humanIsTyping/5s gate). Locus consumer : `typing:started`
+    //   pour les logs (et future cross-controller chain vers AFK). Pas
+    //   de pump externe — `after(ttlMs)` interne gère le retour idle.
+    {
+        const typingActor = getTypingService().getActor();
+        typingActor.subscribe((snap) => {
+            if (snap.context.lastKeystrokeMs !== null) {
+                setIpcHumanTypingAtMs(snap.context.lastKeystrokeMs);
+            }
+        });
+        typingActor.on("typing:started", (ev) => log(`typingMachine: typing:started atMs=${ev.atMs}`));
+        typingActor.on("typing:ended", (ev) => log(`typingMachine: typing:ended lastKeystrokeMs=${ev.lastKeystrokeMs}`));
     }
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
     // toutes les 5s via la même fonction pure que la garde boot-time

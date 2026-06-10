@@ -112,15 +112,18 @@ test("#876 dispatch afk_key from wait_inf → pending_off (committed wait_inf un
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F dispatch marker touch_marker → stamps humanTypingAtMs in ipc", () => {
+test("#880 dispatch marker touch_marker → KEYSTROKE on TypingController actor", async () => {
     const sd = tmp();
     try {
         seedPostBoot(sd);
+        const { getTypingService, resetTypingServiceForTests } = await import("./typing-service.js");
+        resetTypingServiceForTests();
         const before = Date.now();
         const v = dispatchProxyEvent(sd, { event: "marker", name: "touch_marker", now_ms: before });
         assert.deepEqual(v, { kind: "marker-touched", name: "touch_marker" });
-        const ts = getIpcState().humanTypingAtMs;
-        assert.ok(ts !== null && ts >= before - 1, "humanTypingAtMs stamped");
+        const snap = getTypingService().getActor().getSnapshot();
+        assert.equal(snap.value, "hot");
+        assert.ok(snap.context.lastKeystrokeMs !== null && snap.context.lastKeystrokeMs >= before - 1);
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 

@@ -13,12 +13,12 @@ import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
 import { listenEvents, sendEventOnce, type EventServer } from "./ipc-events.js";
 import { getAfkService } from "./afk-service.js";
+import { getTypingService } from "./typing-service.js";
 import {
     getIpcState,
     setIpcAfk,
     setIpcBusyDeferUntil,
     setIpcDrainedState,
-    setIpcHumanTypingAtMs,
     setIpcLastOpenWakeHash,
     setIpcLastWakeHint,
     setIpcPaneBusy,
@@ -752,11 +752,12 @@ export function clearAfk(_sd: string): void {
     setIpcAfk("off", null);
 }
 
-/** #633 Slice D — touch the `human-typing` IPC stamp. #840 `4z59jt` —
- *  IPC seul. Le bar word "stop" et la chip typing lisent
- *  `ipc.humanTypingAtMs` via le bus. */
+/** #633 Slice D — touch the `human-typing` IPC stamp. #880 — délégué au
+ *  TypingController acteur ; `setIpcHumanTypingAtMs` est appelé par le
+ *  subscriber bridge dans timer.ts. Le bar word "stop" et la chip typing
+ *  lisent toujours `ipc.humanTypingAtMs` via le bus (= back-compat). */
 export function touchHumanTyping(_sd: string): void {
-    setIpcHumanTypingAtMs(Date.now());
+    getTypingService().keystroke();
 }
 
 /** #633 Slice C — F9 toggle implemented on the TS side. Reads the
