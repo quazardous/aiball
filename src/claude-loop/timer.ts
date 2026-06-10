@@ -1655,7 +1655,13 @@ async function mainSse(): Promise<void> {
                 setIpcNextWakeAt(null);
             }
         });
-        idleActor.on("idle:since", (ev) => log(`idleMachine: idle:since atMs=${ev.atMs} reason=${ev.reason}`));
+        idleActor.on("idle:since", (ev) => {
+            log(`idleMachine: idle:since atMs=${ev.atMs} reason=${ev.reason}`);
+            // #890 safety : si on entre en idle via SESSION_START (re-attach
+            // sans Stop hook → claude crash / hook perdu), le latch
+            // paneBusy était collé. On clear ici aussi.
+            if (sd) setPaneBusy(sd, false);
+        });
         idleActor.on("idle:turn_started", (ev) => log(`idleMachine: idle:turn_started atMs=${ev.atMs}`));
         idleActor.on("idle:turn_ended", (ev) => {
             log(`idleMachine: idle:turn_ended atMs=${ev.atMs}`);
@@ -1679,6 +1685,13 @@ async function mainSse(): Promise<void> {
             // cf. onFreshBootSeal).
             if (!getIpcState().loopStart) return;
             log(`idleMachine: idle:settled idleSinceMs=${ev.idleSinceMs} settleMs=${ev.settleMs}`);
+            // #890 safety : si paneBusy était encore latché true ici (pane
+            // SM idle stable depuis 30s = forcément pas busy), clear le
+            // latch. Garde-fou en cas de Stop hook perdu.
+            if (sd && getIpcState().paneBusy === true) {
+                log("idle:settled : clearing stale paneBusy latch");
+                setPaneBusy(sd, false);
+            }
             void tryWake("idle:settled");
         });
     }
