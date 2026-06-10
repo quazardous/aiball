@@ -104,15 +104,29 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
         //   - open    : project-scoped si loop attaché à un projet
         //   - backlog : project-scoped (idem ?backlog=1&project=…)
         //   - events  : cross-project (pingsCount.unread)
+        // #911 david : passe `cooldown_sec` (= idem list mode plus bas)
+        // + filter cooled post-fetch pour que `b:N` match exactly ce
+        // que `claude-loop backlog` (sans --cooled) affiche. Sans ça,
+        // counter compte ALL = cooled inclus, list = uniquement
+        // non-cooled → désynchro user-visible.
+        const cooldownSec = process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? "3600";
         const [projects, backlogRows, unread] = await Promise.all([
             client.listProjectsDetailed(),
-            client.listTickets({ backlog: "1", limit: "500", project: ctx.project }) as Promise<TicketRow[] | { tickets?: TicketRow[] }>,
+            client.listTickets({
+                backlog: "1",
+                limit: "500",
+                project: ctx.project,
+                cooldown_sec: cooldownSec,
+            }) as Promise<TicketRow[] | { tickets?: TicketRow[] }>,
             client.unread(null, 1) as Promise<{ count?: number }>,
         ]);
         const open = projects.find((p) => p.name === ctx.project)?.open_count ?? 0;
-        const backlogTickets: TicketRow[] = Array.isArray(backlogRows)
+        const allBacklogTickets: TicketRow[] = Array.isArray(backlogRows)
             ? backlogRows
             : (backlogRows.tickets ?? []);
+        // Mirror `claude-loop backlog` (default sans --cooled) : exclude
+        // les tickets en cooldown via `backlog_cooled_until` set.
+        const backlogTickets = allBacklogTickets.filter((t) => !t.backlog_cooled_until);
         const backlog = backlogTickets.length;
         const events = unread.count ?? 0;
         if (opts.json) {
