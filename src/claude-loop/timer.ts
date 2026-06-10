@@ -1304,14 +1304,15 @@ async function mainSse(): Promise<void> {
         }
     });
     hookWatcher.on("hook:user_prompt_submit", (ev) => {
-        // #898 — signal d'activité pour SanityController (= toute submit
-        // humaine ou auto-wake compte comme preuve de vie, reset le clock
-        // stale-busy).
+        // #898 — signal d'activité pour SanityController (reset stale clock).
         getSanityService().ticketActivity(ev.atMs);
         if (ev.fromAutoWake) return;
         // A real human submission flips claude back to busy ; an
         // auto-wake submission is the loop talking to itself.
-        // #881 — délégué à IdleController via TURN_STARTED.
+        // #881 — délégué à IdleController via TURN_STARTED. Si IdleController
+        // est déjà busy (Stop hook précédent perdu), le primary SM auto-
+        // self-heal via TURN_STARTED en busy → emit turn_ended + reenter
+        // (cf. idle-machine.ts #898 david `<chat>` self-heal).
         getIdleService().turnStarted(ev.atMs);
     });
     // #840 `4z59jt` — plus de fichier `afk`. AfkService est piloté

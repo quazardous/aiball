@@ -161,6 +161,18 @@ export const idleMachine = setup({
                     target: "idle",
                     actions: ["emitIdleSinceSessionStart", "stampIdleAt"],
                 },
+                // #898 david `<chat>` : "le busy a survécu à 2 turns ...
+                // phase busy orpheline qu'on sait plus éteindre". Si on
+                // reçoit TURN_STARTED en busy, c'est que le turn précédent
+                // n'a pas généré TURN_ENDED proprement (Stop hook perdu).
+                // Self-heal : emit turn_ended (= idle:turn_ended déclenche
+                // les inline clears setPaneBusy(false) dans timer.ts), puis
+                // reenter busy pour le nouveau turn.
+                TURN_STARTED: {
+                    target: "busy",
+                    reenter: true,
+                    actions: ["emitTurnEnded", "emitIdleSinceTurnEnded", "emitTurnStarted"],
+                },
             },
         },
     },

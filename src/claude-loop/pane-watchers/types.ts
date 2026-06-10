@@ -46,6 +46,14 @@ export interface PaneWatcherEvents<TState> {
     /** Optional : fired on intermediate updates while still active (e.g.
      *  compacting percentage moves). */
     progress?: (state: TState) => void;
+    /** #898 david `<chat>` : "des qu'on est busy on detecte le esc to
+     *  interrupt ça recycle une phase éventuellement morte". Fired on
+     *  EVERY observe() call where the watcher classifies as active
+     *  (= regardless of state change). Lets a consumer treat the
+     *  observation itself as a heartbeat for stale-detection : no
+     *  `seen` for X seconds = phase morte. Contrast with `begin`/`end`
+     *  qui ne firent qu'aux transitions de flank. */
+    seen?: (state: TState) => void;
 }
 
 export interface PaneWatcher<TState> {

@@ -23,7 +23,8 @@ export abstract class BoolWatcher implements PaneWatcher<BoolWatcherState> {
         begin: Array<(s: BoolWatcherState) => void>;
         end: Array<(s: BoolWatcherState) => void>;
         progress: Array<(s: BoolWatcherState) => void>;
-    } = { change: [], begin: [], end: [], progress: [] };
+        seen: Array<(s: BoolWatcherState) => void>;
+    } = { change: [], begin: [], end: [], progress: [], seen: [] };
 
     /** Subclass contract : pure classifier on the pane text + ctx. */
     protected abstract classify(paneText: string, ctx: PaneScanCtx): boolean;
@@ -31,6 +32,11 @@ export abstract class BoolWatcher implements PaneWatcher<BoolWatcherState> {
     observe(paneText: string, ctx: PaneScanCtx): BoolWatcherState {
         const raw = this.classify(paneText, ctx);
         const prev = this.state;
+        // #898 — heartbeat `seen` event chaque tick où la classification
+        // dit "active" (visible=true), peu importe le state change. Permet
+        // au consumer (SanityController) de détecter les phases mortes
+        // (= no seen for X seconds while paneBusy=true → stale latch).
+        if (raw) this.emit("seen", { visible: raw });
         if (prev.visible === raw) return prev;
         const next: BoolWatcherState = { visible: raw };
         this.state = next;
@@ -57,7 +63,7 @@ export abstract class BoolWatcher implements PaneWatcher<BoolWatcherState> {
 
     reset(): void {
         this.state = { visible: false };
-        this.listeners = { change: [], begin: [], end: [], progress: [] };
+        this.listeners = { change: [], begin: [], end: [], progress: [], seen: [] };
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
