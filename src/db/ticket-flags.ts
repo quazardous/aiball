@@ -77,7 +77,7 @@ export interface TicketFlags {
      * Sorts naturally with numeric asc (hot → actionable → follow-up →
      * waiting); the route filter `?backlog=1` keeps every row whose
      * `backlog_tier !== null`. */
-    backlog_tier: 0 | 1 | 2 | 3 | null;
+    backlog_tier: 0 | 1 | 2 | 3 | 4 | null;
     backlog_cooled_until: string | null;
     gated_by_decision: boolean;
     last_actor: string | null;
@@ -123,6 +123,10 @@ export interface TicketFlagsContext {
     /** #886 — BacklogRules ctx (closed + snoozed sets) injecté ici pour
      *  que `computeTicketFlags` consomme le moteur de règles unique. */
     rulesCtx: BacklogRulesCtx;
+    /** #911 david : tickets gated par un depends_on/blocks → blocker
+     *  open. Drive le tier 4 du backlog (= "vérifier la chaîne — le
+     *  blocker peut être snoozed/oublié"). */
+    gatedByBlockerIds: Set<number>;
     /** Per-row claimability — respects no-claim (assignment-only) and
      *  the consumer's owned-project set. The route handler builds this
      *  closure; we just call it. */
@@ -168,16 +172,20 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         assignee: t.assignee ?? null,
     };
     const excludedFromBacklog = defaultBacklogRules.excludes(ctx.rulesCtx, ruleItem, "backlog-tier");
-    let backlog_tier: 0 | 1 | 2 | 3 | null = null;
+    let backlog_tier: 0 | 1 | 2 | 3 | 4 | null = null;
     if (!excludedFromBacklog) {
         // #885 david : ajouter un tier "follow-up" pour les threads où
         // l'autre a répondu en dernier mais une décision pending gate
         // l'actionable. Sans ça, ces tickets disparaissent du backlog.
+        // #911 david : tier 4 pour les tickets bloqués par chaîne
+        // depends_on — le blocker peut être snoozed / oublié, l'agent
+        // doit aider le reporter à débloquer.
         const lastActorOther = last_actor != null && last_actor !== ctx.consumerId;
         const followUp = lastActorOther && gated_by_decision;
         const lastActorMe = ctx.lastActorMeIds.has(t.id);
         const waiting = lastActorMe && !gated_by_decision;
-        const inPool = actionable || followUp || waiting;
+        const blocked = ctx.gatedByBlockerIds.has(t.id);
+        const inPool = actionable || followUp || waiting || blocked;
         if (hot && inPool) {
             backlog_tier = 0;
         } else if (actionable) {
@@ -191,6 +199,11 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
             // Tier 3 — I was last actor, no decision pending: the
             // reporter is sitting on it. Soft reminder.
             backlog_tier = 3;
+        } else if (blocked) {
+            // Tier 4 — bloqué par un blocker open. Vérifier la chaîne :
+            // le blocker peut être snoozed / oublié, débloquer ou
+            // s'assurer que le reporter du blocker est conscient (#911).
+            backlog_tier = 4;
         }
     }
 
@@ -261,7 +274,7 @@ export function buildTicketFlagsContext(args: {
     for (const id of ticketIds) {
         if (unreadMap.get(id)) unreadIds.add(id);
     }
-    const { openIds, actionableIds } = computeActionableTicketIds(consumerId);
+    const { openIds, actionableIds, gatedByBlockerIds } = computeActionableTicketIds(consumerId);
     const lastActorMeIds = lastActorExclusions(consumerId);
     const decisionGated = decisionGateByTicket();
     const cooledIds = cooldownSec > 0
@@ -315,6 +328,7 @@ export function buildTicketFlagsContext(args: {
         lastActorByTicket,
         closedSet,
         rulesCtx,
+        gatedByBlockerIds,
         isClaimable,
         nowMs,
         cooldownSec,

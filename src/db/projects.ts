@@ -1373,6 +1373,11 @@ export interface ActionableTicketSet {
     openIds: Set<number>;
     /** Subset of openIds that pass every actionable gate. */
     actionableIds: Set<number>;
+    /** #911 david : open tickets gated par un depends_on/blocks vers un
+     *  ticket blocker encore ouvert. Exposé pour permettre un tier 4
+     *  backlog (= "bloqué — vérifier la chaîne, le blocker peut être
+     *  snoozed ou oublié"). */
+    gatedByBlockerIds: Set<number>;
 }
 
 /**
@@ -1652,5 +1657,5 @@ export function computeActionableTicketIds(consumerId?: string): ActionableTicke
         }
     }
 
-    return { openIds, actionableIds };
+    return { openIds, actionableIds, gatedByBlockerIds: gatedByBlocker };
 }

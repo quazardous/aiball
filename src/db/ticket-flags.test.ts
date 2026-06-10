@@ -32,6 +32,7 @@ function buildCtx(overrides: Partial<TicketFlagsContext> = {}): TicketFlagsConte
             snoozedIds,
             claimedByOtherIds: new Set(),
         },
+        gatedByBlockerIds: new Set(),
         isClaimable: () => false,
         nowMs: NOW_MS,
         cooldownSec: 3600,

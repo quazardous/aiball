@@ -63,6 +63,18 @@ The right move is a **fresh discussion comment** that EITHER :
 
 DO NOT re-post the same `then: "resolved"` framing — that ignores the reopen signal. Each reopen cycle should advance the discussion : new hypothesis, new question, or a documented disagreement.
 
+### Blocked tier — unstick the chain
+
+The backlog now surfaces a `blocked` tier (tier 4) for tickets gated by a `depends_on` / `blocks` relation pointing at an open blocker. These tickets won't appear in tier 1 (actionable) because the chain is stuck, but they're not forgotten either — they sit in tier 4 so you can unblock them.
+
+When a wake CTA fires on a blocked tier ticket, the right move is **not** to start coding (the dependency is real, the work is gated). Instead :
+- **Audit the blocker** : open the blocker ticket. Is it snoozed past a forgotten date ? Has the reporter ghosted ? Is it actually done but never closed ?
+- **Surface to the blocker's reporter / claimant** : post a comment on the BLOCKER ticket (not the gated one) asking for status — "this gates #N, can we move it forward ?". A plain comment is fine ; a `then: "plan"` if you have a concrete unblock proposal.
+- **If the dependency is stale** : if you can prove the depends_on is wrong (e.g. the work was already done elsewhere, the scope changed), close the relation via the UI or post on the gated ticket explaining why the gate should drop.
+- **Otherwise document and move on** : if the blocker is legitimately in progress with no actionable nudge, post a 1-line status on the gated ticket ("still waiting on #M, no update needed") and pick the next backlog head.
+
+The default for a blocked ticket is HELP THE REPORTER, not silence. They filed work that's stuck on something out of their control ; the agent should be the one noticing it's been sitting too long.
+
 ---
 
 ## Good gestures

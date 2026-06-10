@@ -27,7 +27,7 @@ interface TicketRow {
     title?: string;
     edited_title?: string;
     priority?: string;
-    backlog_tier?: 0 | 1 | 2 | 3 | null;
+    backlog_tier?: 0 | 1 | 2 | 3 | 4 | null;
     actionable?: boolean;
     unread?: boolean;
     hot?: boolean;
@@ -210,6 +210,7 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
     const actionable = tickets.filter((t) => t.backlog_tier === 1);
     const followUp = tickets.filter((t) => t.backlog_tier === 2);
     const waiting = tickets.filter((t) => t.backlog_tier === 3);
+    const blocked = tickets.filter((t) => t.backlog_tier === 4);
 
     process.stdout.write(`# backlog on ${ctx.project} (consumer: ${ctx.agent}, ${tickets.length})\n`);
     if (tickets.length === 0) {
@@ -231,5 +232,9 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
     if (waiting.length > 0) {
         process.stdout.write(`\n## waiting on them (${waiting.length})\n`);
         for (const t of waiting) process.stdout.write(`${fmtTicket(t)}\n`);
+    }
+    if (blocked.length > 0) {
+        process.stdout.write(`\n## blocked — chain depends_on an open ticket (${blocked.length})\n`);
+        for (const t of blocked) process.stdout.write(`${fmtTicket(t)}\n`);
     }
 }
