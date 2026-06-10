@@ -122,13 +122,21 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         }
     }
     // #805 — countdown vers prochain wake. Gated sur :
-    //   - bootComplete (= post-boot)
+    //   - bootComplete (= post-boot, loopStatus IDLE pas BOOT)
     //   - state=idle (= claude pas en train de répondre)
-    //   - **events ou backlog pending** (#805 xxvzye : "le compteur doit
-    //     être affiché que si y a un event/backlog pending")
+    //   - **events ou backlog pending** (#805 xxvzye)
+    //   - **barWord === "loop"** : exclu si wait (AFK actif) ou stop (typing).
+    //     David : "le compteur doit s'afficher que si on est idle et loop
+    //     pas sur wait ou stop".
     let nextWakeInSec: number | null = null;
     const hasPending = (counters?.events ?? 0) > 0 || (counters?.backlog ?? 0) > 0;
-    if (ipc.nextWakeAtMs !== null && hasPending && loopStatus !== LOOP_STATUS.BOOT) {
+    const inLoop = view.barWord === "loop";
+    if (
+        ipc.nextWakeAtMs !== null
+        && hasPending
+        && loopStatus === LOOP_STATUS.IDLE
+        && inLoop
+    ) {
         const remainingMs = ipc.nextWakeAtMs - input.nowMs;
         if (remainingMs > 0) nextWakeInSec = Math.ceil(remainingMs / 1000);
     }
