@@ -610,14 +610,18 @@ function refreshPaneMarkers(): void {
     // Single scan : watchers observe + emit events ; the subscribers
     // above call the legacy ipcState setters on every transition.
     paneObs.tick(paneText, { nowMs: Date.now(), isBoot });
-    // David `<chat>` : pendant le boot, chaque tick observant une
-    // condition "still booting" (paneReady=false / picker actif /
-    // compacting) push `bootDeadlineMs` via l'acteur (WATCHER_TICK).
-    // Quand les conditions clear, plus de push → deadline expire +10s
-    // plus tard → `bootDeadlineTimer` fire `DEADLINE_REACHED` →
-    // l'acteur transite vers `sealed` → subscriber écrit bootComplete.
+    // David `<chat>` : pendant le boot, chaque tick observant un transient
+    // module actif (picker / resuming / compactConfirm / compacting) push
+    // `bootDeadlineMs` via l'acteur (WATCHER_TICK). Quand plus aucun
+    // transient n'est observé, plus de push → deadline expire +10s plus
+    // tard → `bootDeadlineTimer` fire `DEADLINE_REACHED` → seal.
+    // #883 Slice 1 — drop `!ipc.paneReady` du gate : c'était une
+    // anti-condition (= absence de prompt-indicateur), pas un transient.
+    // Causait un push éternel quand cold-clean (pas de splash + pas de
+    // module = `paneReady` reste null → `!null=true` → push ad vitam).
+    // Slice 2 (#883) refactor complet vers MODULE_STARTED/ENDED edge.
     if (isBoot && bootActor) {
-        const stillBooting = !ipc.paneReady || ipc.paneCompacting || ipc.resumeSessionPickerActive || ipc.resumeModePickerActive;
+        const stillBooting = ipc.paneCompacting || ipc.resumeSessionPickerActive || ipc.resumeModePickerActive;
         if (stillBooting) {
             // #872 Phase 1 — push deadline via l'acteur (= un seul
             // chemin d'autorité au lieu du `setIpcBootDeadlineMs` direct).
