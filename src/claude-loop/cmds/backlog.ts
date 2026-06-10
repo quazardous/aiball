@@ -8,6 +8,7 @@
  */
 import { AiballClient } from "../../client.js";
 import { resolveProjectContext } from "../project-context.js";
+import { CL_ENV } from "../env-vars.js";
 
 interface BacklogOpts {
     events?: boolean;
@@ -165,10 +166,15 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
         return;
     }
 
+    // #790 david `vc4pxz` : sans `cooldown_sec`, l'API laisse
+    // `backlog_cooled_until` à null → impossible de distinguer un ticket
+    // en cooldown. CLI passe le default 3600s (match CL_BACKLOG_COOLDOWN_SEC
+    // côté state.ts) pour que --cooled puisse afficher l'horizon.
     const rows = await client.listTickets({
         project: ctx.project,
         backlog: "1",
         limit: String(limit),
+        cooldown_sec: String(process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? "3600"),
     }) as TicketRow[] | { tickets?: TicketRow[] };
     const allTickets: TicketRow[] = Array.isArray(rows) ? rows : (rows.tickets ?? []);
     // Default : exclude cooled tickets (= ancien comportement quand l'API
