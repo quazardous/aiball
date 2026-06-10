@@ -36,3 +36,27 @@ export class InterruptedWatcher extends BoolWatcher {
         return paneShowsInterrupted(paneText);
     }
 }
+
+/** #898 david `<chat>` : "il y a une phrase qui permet de savoir si on
+ *  est au prompt idle 'ctrl+t to show task'". Signal POSITIF d'idle
+ *  prompt — quand la regex est visible MAIS PAS `esc to interrupt`,
+ *  on est définitivement au prompt awaiting input. Si les 2 sont
+ *  visibles ensemble, c'est busy (claude affiche le task hint pendant
+ *  qu'il bosse).
+ *
+ *  Donne un signal déterministe pour clear le latch paneBusy stale
+ *  (= cas où BusyWatcher loupe le change(false) parce que la regex
+ *  reste sticky dans la fenêtre du footer). Consumer in timer.ts :
+ *  `idlePromptW.on("begin", () => setPaneBusy(sd, false))`. */
+export class IdlePromptWatcher extends BoolWatcher {
+    readonly name = "idle_prompt";
+    protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
+        const hasIdleHint = /ctrl\+t to show task/i.test(paneText);
+        if (!hasIdleHint) return false;
+        // Couplé : si "esc to interrupt" est aussi visible, on est busy
+        // (claude affiche les 2 simultanément pendant un turn). Le signal
+        // d'idle ne tire que quand le task hint apparaît SEUL.
+        const isBusy = paneFooterShowsBusy(paneText);
+        return !isBusy;
+    }
+}

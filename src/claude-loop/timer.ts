@@ -96,7 +96,7 @@ import {
     ResumingWatcher,
     CompactConfirmWatcher,
 } from "./pane-watchers/boot-watchers.js";
-import { PromptWatcher, BusyWatcher, InterruptedWatcher } from "./pane-watchers/runtime-watchers.js";
+import { PromptWatcher, BusyWatcher, InterruptedWatcher, IdlePromptWatcher } from "./pane-watchers/runtime-watchers.js";
 import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
@@ -566,11 +566,12 @@ const compactConfirmW = new CompactConfirmWatcher();
 const promptW = new PromptWatcher();
 const busyW = new BusyWatcher();
 const interruptedW = new InterruptedWatcher();
+const idlePromptW = new IdlePromptWatcher();
 const errorW = new ErrorWatcher();
 const paneObs = new PaneObserver();
 paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
 paneObs.registerZone(new Zone("runtime", [
-    promptW, busyW, interruptedW, errorW, getCompactingDetector(),
+    promptW, busyW, interruptedW, idlePromptW, errorW, getCompactingDetector(),
 ]));
 // Runtime zone toujours actif ; boot zone n'est entré que si on n'est
 // pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
@@ -673,6 +674,15 @@ if (sd) {
     // d'activité depuis STALE_BUSY_MS (= path anormal, Stop hook perdu).
     getSanityService().getActor().on("sanity:clear_paneBusy", (ev) => {
         log(`sanityMachine: sanity:clear_paneBusy reason=${ev.reason} atMs=${ev.atMs} → setPaneBusy(false)`);
+        setPaneBusy(sd, false);
+    });
+    // #898 david `<chat>` : "ctrl+t to show task" présent SANS "esc to
+    // interrupt" = signal POSITIF d'idle prompt. Si esc+ctrl+t ensemble
+    // → busy ; ctrl+t seul → pas busy. Force clear le latch paneBusy
+    // (= covers le path #890 latch design où busyW.change(false) ne
+    // clear pas intentionnellement parce que la regex bouge).
+    idlePromptW.on("begin", () => {
+        log("watcher: idle_prompt begin → setPaneBusy(false) (positive idle signal)");
         setPaneBusy(sd, false);
     });
     interruptedW.on("change", (s) => setInterrupted(sd, s.visible));
