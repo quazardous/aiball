@@ -486,9 +486,13 @@ onBeforeUnmount(() => {
                 @click="toggleReadWrite"
             />
             <!-- #907 `zsekxt` — bare icon, no Button shell. Hover = color
-                 shift on the glyph itself (no background, no border). -->
+                 shift on the glyph itself (no background, no border).
+                 `v4bkvn` — `--active` colore l'icône du state courant en
+                 orange : AFK ON (humanPresent=false/null) → Start active,
+                 NOT AFK (humanPresent=true) → Stop active. -->
             <i
                 class="pi pi-play afk-icon afk-icon--start"
+                :class="{ 'afk-icon--active': !humanPresent }"
                 role="button"
                 tabindex="0"
                 aria-label="Start AFK (= claude autonomous mode)"
@@ -498,6 +502,7 @@ onBeforeUnmount(() => {
             />
             <i
                 class="pi pi-stop afk-icon afk-icon--stop"
+                :class="{ 'afk-icon--active': humanPresent === true }"
                 role="button"
                 tabindex="0"
                 aria-label="Stop AFK (= take over, NOT AFK indefinitely)"
@@ -537,6 +542,13 @@ onBeforeUnmount(() => {
 }
 .afk-icon--stop:hover, .afk-icon--stop:focus-visible {
     color: var(--p-red-500);
+}
+/* #907 `v4bkvn` — current AFK state = orange on the matching icon. */
+.afk-icon--active {
+    color: var(--p-orange-500);
+}
+.afk-icon--active:hover, .afk-icon--active:focus-visible {
+    color: var(--p-orange-400);
 }
 .terminal-view {
     display: flex;
