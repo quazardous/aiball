@@ -115,7 +115,6 @@ import { createActor, type ActorRefFrom, type Snapshot } from "xstate";
 import { bootMachine } from "./boot-machine.js";
 
 let bootActor: ActorRefFrom<typeof bootMachine> | null = null;
-import { getHookService } from "./hook-service.js";
 import { getHookWatcher } from "./hook-watcher.js";
 import {
     getIpcState,
@@ -1220,91 +1219,51 @@ async function mainSse(): Promise<void> {
     // first, ahead of the marker-file fallback. Files keep being written
     // by the hooks for cross-process readers (cli inspect, fallback) —
     // Slice B-3 stops the hook writes once we trust the in-memory side.
-    // #893 Slice A — bridge HookService → HookWatcher (non-breaking).
-    // Les consumers HookService restent valides ; ceux qui migrent vers
-    // l'API watcher utilisent `hookWatcher.on("hook:<name>", cb)` direct.
-    // Slices B/C/D : slim les subprocesses + drop HookService.
-    getHookService().subscribe((ev) => {
-        const w = getHookWatcher();
-        if (ev.kind === "SessionStart") {
-            w.emit({
-                type: "hook:session_start",
-                source: ev.source,
-                atMs: ev.at_ms,
-                pickerSession: ev.picker_session,
-                pickerMode: ev.picker_mode,
-            });
-        } else if (ev.kind === "Stop") {
-            w.emit({ type: "hook:stop", atMs: ev.at_ms, busyDeferUntilMs: ev.busy_defer_until_ms });
-        } else if (ev.kind === "UserPromptSubmit") {
-            w.emit({ type: "hook:user_prompt_submit", fromAutoWake: ev.from_auto_wake, atMs: ev.at_ms });
-        } else if (ev.kind === "PreToolUse") {
-            w.emit({ type: "hook:pretooluse", toolName: ev.tool_name, atMs: ev.at_ms });
+    // #893 Slice C+D — consumer migré direct vers hookWatcher.on. Pas
+    // de bridge HookService nécessaire (= proxy-event-dispatcher emit
+    // direct vers HookWatcher maintenant). HookService droppé.
+    const hookWatcher = getHookWatcher();
+    hookWatcher.on("hook:session_start", (ev) => {
+        // #822 david `etned7` — do NOT eagerly set bootComplete on
+        // every SessionStart event. #872 Phase 3 — l'unique autorité de
+        // sealing est désormais le BootMachine acteur. Les pickers +
+        // idleSince still propagate ici so the wake gate sees fresh
+        // per-hook input. #881 — `setIpcIdleSince` délégué au IdleController.
+        getIdleService().sessionStart(ev.atMs);
+        if (typeof ev.pickerSession === "boolean") {
+            setIpcResumeSessionPicker(ev.pickerSession);
+            if (sd) setResumeSessionPicker(sd, ev.pickerSession);
+        }
+        if (typeof ev.pickerMode === "boolean") {
+            setIpcResumeModePicker(ev.pickerMode);
+            if (sd) setResumeModePicker(sd, ev.pickerMode);
         }
     });
-    const ipcStateSub = getHookService().subscribe((ev) => {
-        if (ev.kind === "SessionStart") {
-            // #822 david `etned7` — do NOT eagerly set bootComplete on
-            // every SessionStart event. The hook fires the moment claude
-            // boots, regardless of whether a picker / resuming / first-
-            // compacting is still up ; setting bootComplete here sealed
-            // the boot phase prematurely. #872 Phase 3 — l'unique
-            // autorité de sealing est désormais le BootMachine acteur
-            // (`DEADLINE_REACHED` after les pane watchers stoppent les
-            // `WATCHER_TICK` push). The pickers + idleSince still
-            // propagate here so the wake gate sees fresh per-hook input.
-            // #881 — `setIpcIdleSince` délégué au IdleController acteur
-            // (subscriber bridge dans le bloc IdleController plus bas).
-            getIdleService().sessionStart(ev.at_ms);
-            // Slice B-2 — propagate picker context if the hook detected it.
-            // #839 Slice 3 (#766) — the timer (= single writer) ALSO writes
-            // the picker shadow files. session-start-hook used to call
-            // setResumeSessionPicker / setResumeModePicker / clearResumePickers
-            // locally ; now it only emits, and we materialize the file here.
-            if (typeof ev.picker_session === "boolean") {
-                setIpcResumeSessionPicker(ev.picker_session);
-                if (sd) setResumeSessionPicker(sd, ev.picker_session);
+    hookWatcher.on("hook:stop", (ev) => {
+        // Slice B-2 — busy-defer expiry pinné in-memory quand le hook
+        // l'envoie (pane busy at turn end). Soit timestamp absolu = defer
+        // le gate, soit null explicite = clear defer. Stop event = idle
+        // confirmed. #881 — `setIpcIdleSince` délégué à IdleController.
+        getIdleService().turnEnded(ev.atMs);
+        if (ev.busyDeferUntilMs !== undefined) {
+            if (ev.busyDeferUntilMs === null) {
+                setIpcBusyDeferUntil(null);
+            } else if (sd) {
+                const delta = ev.busyDeferUntilMs - Date.now();
+                if (delta > 0) armBusyDefer(sd, delta);
+                else setIpcBusyDeferUntil(ev.busyDeferUntilMs);
+            } else {
+                setIpcBusyDeferUntil(ev.busyDeferUntilMs);
             }
-            if (typeof ev.picker_mode === "boolean") {
-                setIpcResumeModePicker(ev.picker_mode);
-                if (sd) setResumeModePicker(sd, ev.picker_mode);
-            }
-            return;
-        }
-        if (ev.kind === "Stop") {
-            // Slice B-2 — busy-defer expiry pinned in-memory when the
-            // hook ships it (pane busy at turn end). Either an absolute
-            // timestamp = defer the gate ; explicit null = clear defer.
-            // The Stop hook only emits when claude reached the prompt —
-            // a Stop event implies idle confirmed.
-            // #881 — `setIpcIdleSince` délégué à IdleController via TURN_ENDED.
-            getIdleService().turnEnded(ev.at_ms);
-            if (ev.busy_defer_until_ms !== undefined) {
-                // #840 `4z59jt` — IPC seul. armBusyDefer (state.ts) écrit
-                // `setIpcBusyDeferUntil` derrière (idempotent preserve-max).
-                if (ev.busy_defer_until_ms === null) {
-                    setIpcBusyDeferUntil(null);
-                } else if (sd) {
-                    const delta = ev.busy_defer_until_ms - Date.now();
-                    if (delta > 0) armBusyDefer(sd, delta);
-                    else setIpcBusyDeferUntil(ev.busy_defer_until_ms);
-                } else {
-                    setIpcBusyDeferUntil(ev.busy_defer_until_ms);
-                }
-            }
-            return;
-        }
-        if (ev.kind === "UserPromptSubmit" && !ev.from_auto_wake) {
-            // A real human submission flips claude back to busy ; an
-            // auto-wake submission is the loop talking to itself and
-            // already preceded by setIpcIdleSince via the Stop event
-            // that triggered the wake.
-            // #881 — délégué à IdleController via TURN_STARTED.
-            getIdleService().turnStarted(ev.at_ms);
-            return;
         }
     });
-    process.on("exit", () => ipcStateSub());
+    hookWatcher.on("hook:user_prompt_submit", (ev) => {
+        if (ev.fromAutoWake) return;
+        // A real human submission flips claude back to busy ; an
+        // auto-wake submission is the loop talking to itself.
+        // #881 — délégué à IdleController via TURN_STARTED.
+        getIdleService().turnStarted(ev.atMs);
+    });
     // #840 `4z59jt` — plus de fichier `afk`. AfkService est piloté
     // exclusivement via les helpers *ViaService (state.ts armAfk*),
     // toujours en mémoire. Pas de watcher à armer.

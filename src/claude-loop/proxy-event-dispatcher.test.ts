@@ -250,114 +250,114 @@ test("#840 — set_afk_inf stamps ipc afkMode wait_inf (no file)", () => {
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-// #652 Slice 3 — hook events from spawn-per-call hook subprocesses.
-import { getHookService, resetHookServiceForTests, type HookEvent } from "./hook-service.js";
+// #893 Slices C+D — hook events migrés HookService → HookWatcher.
+import { getHookWatcher, resetHookWatcherForTests, type HookWatcherEvent } from "./hook-watcher.js";
 
-test("#652 dispatch hook SessionStart → HookService.emit, verdict carries the event", () => {
+test("dispatch hook SessionStart → HookWatcher.emit, verdict carries the event", () => {
     const sd = tmp();
     try {
-        resetHookServiceForTests();
-        const seen: HookEvent[] = [];
-        getHookService().subscribe((e) => { seen.push(e); });
+        resetHookWatcherForTests();
+        const seen: HookWatcherEvent[] = [];
+        getHookWatcher().on("hook:session_start", (e) => { seen.push(e); });
         const v = dispatchProxyEvent(sd, { event: "hook", kind: "SessionStart", source: "resume", at_ms: 1_000 });
         assert.equal(v.kind, "hook-event");
-        assert.deepEqual((v as { hookEvent: HookEvent }).hookEvent, { kind: "SessionStart", source: "resume", at_ms: 1_000 });
+        assert.deepEqual((v as { hookEvent: HookWatcherEvent }).hookEvent, { type: "hook:session_start", source: "resume", atMs: 1_000 });
         assert.equal(seen.length, 1);
-        assert.deepEqual(seen[0], { kind: "SessionStart", source: "resume", at_ms: 1_000 });
+        assert.deepEqual(seen[0], { type: "hook:session_start", source: "resume", atMs: 1_000 });
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#652 dispatch hook SessionStart with unknown source → unknown verdict", () => {
+test("dispatch hook SessionStart with unknown source → unknown verdict", () => {
     const sd = tmp();
     try {
-        resetHookServiceForTests();
+        resetHookWatcherForTests();
         const v = dispatchProxyEvent(sd, { event: "hook", kind: "SessionStart", source: "weird", at_ms: 1_000 });
         assert.equal(v.kind, "unknown");
         assert.match((v as { raw: string }).raw, /SessionStart.*bad source weird/);
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#652 dispatch hook Stop → HookService.emit", () => {
+test("dispatch hook Stop → HookWatcher.emit", () => {
     const sd = tmp();
     try {
-        resetHookServiceForTests();
-        const seen: HookEvent[] = [];
-        getHookService().subscribe((e) => { seen.push(e); });
+        resetHookWatcherForTests();
+        const seen: HookWatcherEvent[] = [];
+        getHookWatcher().on("hook:stop", (e) => { seen.push(e); });
         const v = dispatchProxyEvent(sd, { event: "hook", kind: "Stop", at_ms: 2_000 });
         assert.equal(v.kind, "hook-event");
-        assert.deepEqual(seen[0], { kind: "Stop", at_ms: 2_000 });
+        assert.deepEqual(seen[0], { type: "hook:stop", atMs: 2_000 });
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#652 dispatch hook PreToolUse with tool_name → HookService.emit", () => {
+test("dispatch hook PreToolUse with tool_name → HookWatcher.emit", () => {
     const sd = tmp();
     try {
-        resetHookServiceForTests();
-        const seen: HookEvent[] = [];
-        getHookService().subscribe((e) => { seen.push(e); });
+        resetHookWatcherForTests();
+        const seen: HookWatcherEvent[] = [];
+        getHookWatcher().on("hook:pretooluse", (e) => { seen.push(e); });
         const v = dispatchProxyEvent(sd, { event: "hook", kind: "PreToolUse", tool_name: "Bash", at_ms: 3_000 });
         assert.equal(v.kind, "hook-event");
-        assert.deepEqual(seen[0], { kind: "PreToolUse", tool_name: "Bash", at_ms: 3_000 });
+        assert.deepEqual(seen[0], { type: "hook:pretooluse", toolName: "Bash", atMs: 3_000 });
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#652 dispatch hook PreToolUse without tool_name → unknown verdict", () => {
+test("dispatch hook PreToolUse without tool_name → unknown verdict", () => {
     const sd = tmp();
     try {
-        resetHookServiceForTests();
+        resetHookWatcherForTests();
         const v = dispatchProxyEvent(sd, { event: "hook", kind: "PreToolUse", at_ms: 3_000 });
         assert.equal(v.kind, "unknown");
         assert.match((v as { raw: string }).raw, /PreToolUse.*missing tool_name/);
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#652 Slice 6 — dispatch hook UserPromptSubmit (human) → HookService.emit", () => {
+test("dispatch hook UserPromptSubmit (human) → HookWatcher.emit", () => {
     const sd = tmp();
     try {
-        resetHookServiceForTests();
-        const seen: HookEvent[] = [];
-        getHookService().subscribe((e) => { seen.push(e); });
+        resetHookWatcherForTests();
+        const seen: HookWatcherEvent[] = [];
+        getHookWatcher().on("hook:user_prompt_submit", (e) => { seen.push(e); });
         const v = dispatchProxyEvent(sd, { event: "hook", kind: "UserPromptSubmit", from_auto_wake: false, at_ms: 4_000 });
         assert.equal(v.kind, "hook-event");
-        assert.deepEqual(seen[0], { kind: "UserPromptSubmit", from_auto_wake: false, at_ms: 4_000 });
+        assert.deepEqual(seen[0], { type: "hook:user_prompt_submit", fromAutoWake: false, atMs: 4_000 });
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#652 Slice 6 — dispatch hook UserPromptSubmit (auto-wake) → from_auto_wake true", () => {
+test("dispatch hook UserPromptSubmit (auto-wake) → fromAutoWake true", () => {
     const sd = tmp();
     try {
-        resetHookServiceForTests();
-        const seen: HookEvent[] = [];
-        getHookService().subscribe((e) => { seen.push(e); });
+        resetHookWatcherForTests();
+        const seen: HookWatcherEvent[] = [];
+        getHookWatcher().on("hook:user_prompt_submit", (e) => { seen.push(e); });
         dispatchProxyEvent(sd, { event: "hook", kind: "UserPromptSubmit", from_auto_wake: true, at_ms: 5_000 });
         assert.equal(seen.length, 1);
-        assert.equal((seen[0] as Extract<HookEvent, { kind: "UserPromptSubmit" }>).from_auto_wake, true);
+        assert.equal((seen[0] as Extract<HookWatcherEvent, { type: "hook:user_prompt_submit" }>).fromAutoWake, true);
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#652 Slice 6 — dispatch hook UserPromptSubmit defaults from_auto_wake to false when missing", () => {
+test("dispatch hook UserPromptSubmit defaults fromAutoWake to false when missing", () => {
     const sd = tmp();
     try {
-        resetHookServiceForTests();
-        const seen: HookEvent[] = [];
-        getHookService().subscribe((e) => { seen.push(e); });
+        resetHookWatcherForTests();
+        const seen: HookWatcherEvent[] = [];
+        getHookWatcher().on("hook:user_prompt_submit", (e) => { seen.push(e); });
         dispatchProxyEvent(sd, { event: "hook", kind: "UserPromptSubmit", at_ms: 5_000 });
         assert.equal(seen.length, 1);
-        assert.equal((seen[0] as Extract<HookEvent, { kind: "UserPromptSubmit" }>).from_auto_wake, false, "missing → false (legitimately a human submission)");
+        assert.equal((seen[0] as Extract<HookWatcherEvent, { type: "hook:user_prompt_submit" }>).fromAutoWake, false, "missing → false (legitimately a human submission)");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#652 hook event defaults at_ms to now when missing", () => {
+test("hook event defaults atMs to now when missing", () => {
     const sd = tmp();
     try {
-        resetHookServiceForTests();
-        const seen: HookEvent[] = [];
-        getHookService().subscribe((e) => { seen.push(e); });
+        resetHookWatcherForTests();
+        const seen: HookWatcherEvent[] = [];
+        getHookWatcher().on("hook:stop", (e) => { seen.push(e); });
         const before = Date.now();
         dispatchProxyEvent(sd, { event: "hook", kind: "Stop" });
         const after = Date.now();
         assert.equal(seen.length, 1);
-        assert.ok(seen[0].at_ms >= before && seen[0].at_ms <= after, "at_ms within now() bracket");
+        assert.ok(seen[0].atMs >= before && seen[0].atMs <= after, "atMs within now() bracket");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
@@ -368,9 +368,9 @@ test("#633F formatVerdictLogLine covers every verdict variant", () => {
     assert.equal(formatVerdictLogLine({ kind: "marker-touched", name: "touch_marker" }), "proxy-event: marker 'touch_marker' applied");
     assert.match(formatVerdictLogLine({ kind: "afk-service-set", mode: "wait_10m", expiryMs: 1_000_000_000_000 }), /AfkService → wait_10m \(expiry=.*\)/);
     assert.equal(formatVerdictLogLine({ kind: "afk-service-set", mode: "off", expiryMs: null }), "proxy-event: AfkService → off");
-    assert.equal(formatVerdictLogLine({ kind: "hook-event", hookEvent: { kind: "SessionStart", source: "resume", at_ms: 0 } }), "proxy-event: HookService ← SessionStart (source=resume)");
-    assert.equal(formatVerdictLogLine({ kind: "hook-event", hookEvent: { kind: "Stop", at_ms: 0 } }), "proxy-event: HookService ← Stop");
-    assert.equal(formatVerdictLogLine({ kind: "hook-event", hookEvent: { kind: "PreToolUse", tool_name: "Bash", at_ms: 0 } }), "proxy-event: HookService ← PreToolUse (tool=Bash)");
+    assert.equal(formatVerdictLogLine({ kind: "hook-event", hookEvent: { type: "hook:session_start", source: "resume", atMs: 0 } }), "proxy-event: HookWatcher ← hook:session_start (source=resume)");
+    assert.equal(formatVerdictLogLine({ kind: "hook-event", hookEvent: { type: "hook:stop", atMs: 0 } }), "proxy-event: HookWatcher ← hook:stop");
+    assert.equal(formatVerdictLogLine({ kind: "hook-event", hookEvent: { type: "hook:pretooluse", toolName: "Bash", atMs: 0 } }), "proxy-event: HookWatcher ← hook:pretooluse (tool=Bash)");
     assert.equal(formatVerdictLogLine({ kind: "unknown", raw: "keystroke:foo" }), "proxy-event: unknown 'keystroke:foo'");
     assert.equal(formatVerdictLogLine({ kind: "error", message: "boom" }), "proxy-event handler error: boom");
 });

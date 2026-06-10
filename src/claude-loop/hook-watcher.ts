@@ -35,7 +35,13 @@
  * contract des controllers s'étend aux watchers : separation of concerns).
  */
 
-import type { SessionStartSource } from "./hook-service.js";
+/**
+ * Source flavor pour `hook:session_start` — mirror le payload `source`
+ * field du SessionStart hook Claude Code. `compact` apparaît quand
+ * /compact ré-init la session ; `clear` quand /clear est invoked.
+ * Migré ici depuis hook-service.ts au #893 Slice D.
+ */
+export type SessionStartSource = "startup" | "resume" | "compact" | "clear";
 
 /** Payload variants par event name. Le `:hook` préfixe sert de namespace
  *  cross-SM (vs `:idle`, `:wake`, `:afk` etc. dans les SM controllers). */

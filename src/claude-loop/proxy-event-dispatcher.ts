@@ -27,7 +27,7 @@ import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk
 import { getAfkService } from "./afk-service.js";
 import { getIpcState, setIpcLastWakeAtMs, setIpcWakeInFlightAtMs, setIpcWakeRequested } from "./ipc-state.js";
 import { WAKE_IN_FLIGHT_TTL_MS } from "./state.js";
-import { getHookService, type HookEvent } from "./hook-service.js";
+import { getHookWatcher, type HookWatcherEvent, type SessionStartSource } from "./hook-watcher.js";
 
 /** Verdict surfaced for logging + tests. Caller logs the string ;
  *  null means the event was unknown / no-op. */
@@ -38,7 +38,7 @@ export type DispatchVerdict =
     | { kind: "afk-toggled"; nextMode: "off" | "wait_10m" | "wait_inf" }
     | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" | "set_last_wake_at" | "set_wake_requested" | "set_wake_in_flight" }
     | { kind: "afk-service-set"; mode: "off" | "wait_10m" | "wait_inf"; expiryMs: number | null }
-    | { kind: "hook-event"; hookEvent: HookEvent }
+    | { kind: "hook-event"; hookEvent: HookWatcherEvent }
     | { kind: "unknown"; raw: string }
     | { kind: "error"; message: string };
 
@@ -178,52 +178,40 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                     ? rawSource
                     : null;
                 if (!source) return { kind: "unknown", raw: `hook:SessionStart (bad source ${String(rawSource)})` };
-                // #727 V1 Slice B-2 — propagate picker context if the hook
-                // reported it. Absent fields fall through ; the subscriber
-                // doesn't mutate the in-memory picker flags when undefined.
-                const hookEvent: HookEvent = {
-                    kind: "SessionStart",
-                    source,
-                    at_ms: atMs,
-                    ...(typeof event.picker_session === "boolean" ? { picker_session: event.picker_session } : {}),
-                    ...(typeof event.picker_mode === "boolean" ? { picker_mode: event.picker_mode } : {}),
+                // #893 Slice D — émet direct vers HookWatcher.
+                const hookEvent: HookWatcherEvent = {
+                    type: "hook:session_start",
+                    source: source as SessionStartSource,
+                    atMs,
+                    ...(typeof event.picker_session === "boolean" ? { pickerSession: event.picker_session } : {}),
+                    ...(typeof event.picker_mode === "boolean" ? { pickerMode: event.picker_mode } : {}),
                 };
-                getHookService().emit(hookEvent);
+                getHookWatcher().emit(hookEvent);
                 return { kind: "hook-event", hookEvent };
             }
             if (hookKind === "Stop") {
-                // #727 V1 Slice B-2 — Stop ships busy-defer expiry when the
-                // hook arms a defer (pane busy at turn end). Undefined when
-                // the pane is idle — no defer needed.
                 const busyDeferUntilMs = typeof event.busy_defer_until_ms === "number"
                     ? event.busy_defer_until_ms
                     : event.busy_defer_until_ms === null
                         ? null
                         : undefined;
-                const hookEvent: HookEvent = {
-                    kind: "Stop",
-                    at_ms: atMs,
-                    ...(busyDeferUntilMs !== undefined ? { busy_defer_until_ms: busyDeferUntilMs } : {}),
+                const hookEvent: HookWatcherEvent = {
+                    type: "hook:stop",
+                    atMs,
+                    ...(busyDeferUntilMs !== undefined ? { busyDeferUntilMs } : {}),
                 };
-                getHookService().emit(hookEvent);
+                getHookWatcher().emit(hookEvent);
                 return { kind: "hook-event", hookEvent };
             }
             if (hookKind === "PreToolUse") {
                 const toolName = typeof event.tool_name === "string" ? event.tool_name : null;
                 if (!toolName) return { kind: "unknown", raw: `hook:PreToolUse (missing tool_name)` };
-                const hookEvent: HookEvent = { kind: "PreToolUse", tool_name: toolName, at_ms: atMs };
-                getHookService().emit(hookEvent);
+                const hookEvent: HookWatcherEvent = { type: "hook:pretooluse", toolName, atMs };
+                getHookWatcher().emit(hookEvent);
                 return { kind: "hook-event", hookEvent };
             }
             if (hookKind === "UserPromptSubmit") {
-                // #778 david `3p3tp5` : derive from_auto_wake from IPC state
-                // instead of the wake-in-flight file marker. The hook
-                // subprocess just sends `at_ms` ; here we compare with the
-                // timer's `ipcState.lastWakeAtMs` (set by sendKeys + stop-
-                // hook on every send-keys). Within WAKE_IN_FLIGHT_TTL_MS,
-                // the prompt is our own auto-wake. Fallback : if the hook
-                // legacy sent `from_auto_wake` explicitly (e.g. file-marker
-                // path during transition), honor it.
+                // #778 — derive fromAutoWake from IPC lastWakeAtMs.
                 let fromAutoWake = event.from_auto_wake === true;
                 if (!fromAutoWake) {
                     const lastWake = getIpcState().lastWakeAtMs;
@@ -231,8 +219,8 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
                         fromAutoWake = true;
                     }
                 }
-                const hookEvent: HookEvent = { kind: "UserPromptSubmit", from_auto_wake: fromAutoWake, at_ms: atMs };
-                getHookService().emit(hookEvent);
+                const hookEvent: HookWatcherEvent = { type: "hook:user_prompt_submit", fromAutoWake, atMs };
+                getHookWatcher().emit(hookEvent);
                 return { kind: "hook-event", hookEvent };
             }
             return { kind: "unknown", raw: `hook:${String(hookKind)}` };
@@ -253,7 +241,7 @@ export function formatVerdictLogLine(v: DispatchVerdict): string {
         case "afk-toggled":          return `proxy-event: afk_key → toggled to ${v.nextMode}`;
         case "marker-touched":       return `proxy-event: marker '${v.name}' applied`;
         case "afk-service-set":      return `proxy-event: AfkService → ${v.mode}${v.expiryMs !== null ? ` (expiry=${new Date(v.expiryMs).toISOString()})` : ""}`;
-        case "hook-event":           return `proxy-event: HookService ← ${v.hookEvent.kind}${v.hookEvent.kind === "SessionStart" ? ` (source=${v.hookEvent.source})` : v.hookEvent.kind === "PreToolUse" ? ` (tool=${v.hookEvent.tool_name})` : v.hookEvent.kind === "UserPromptSubmit" ? ` (from_auto_wake=${v.hookEvent.from_auto_wake})` : ""}`;
+        case "hook-event":           return `proxy-event: HookWatcher ← ${v.hookEvent.type}${v.hookEvent.type === "hook:session_start" ? ` (source=${v.hookEvent.source})` : v.hookEvent.type === "hook:pretooluse" ? ` (tool=${v.hookEvent.toolName})` : v.hookEvent.type === "hook:user_prompt_submit" ? ` (from_auto_wake=${v.hookEvent.fromAutoWake})` : ""}`;
         case "unknown":              return `proxy-event: unknown '${v.raw}'`;
         case "error":                return `proxy-event handler error: ${v.message}`;
     }
