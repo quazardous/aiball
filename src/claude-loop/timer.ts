@@ -1137,7 +1137,16 @@ async function mainSse(): Promise<void> {
                 // david). Le vrai backlog-scoped count attend une vraie
                 // implémentation backend (follow-up). En attendant : back
                 // to pingsCount.unread comme pré-#800.
-                const backlogQuery: Record<string, string | undefined> = { backlog: "1", limit: "500" };
+                // #911 david `vqvzst` : passe `cooldown_sec` + filter
+                // cooled comme le CLI default. Sans ça la bar comptait
+                // les cooled mais `claude-loop backlog` ne les listait
+                // pas → désynchro user-visible.
+                const cooldownSec = process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? "3600";
+                const backlogQuery: Record<string, string | undefined> = {
+                    backlog: "1",
+                    limit: "500",
+                    cooldown_sec: cooldownSec,
+                };
                 if (loopProject) backlogQuery.project = loopProject;
                 const [pingsR, projectsR, backlogR] = await Promise.allSettled([
                     client().pingsCount() as Promise<{ unread?: number }>,
@@ -1151,7 +1160,8 @@ async function mainSse(): Promise<void> {
                         : projectsR.value.reduce((acc, pr) => acc + (pr.open_count ?? 0), 0))
                     : null;
                 const backlog = backlogR.status === "fulfilled" && Array.isArray(backlogR.value)
-                    ? backlogR.value.length
+                    ? (backlogR.value as Array<{ backlog_cooled_until?: string | null }>)
+                        .filter((t) => !t.backlog_cooled_until).length
                     : null;
                 // #835 david — when ALL three fetches fail simultaneously
                 // (high HTTP load during busy phases, daemon hiccup, …),
@@ -1996,7 +2006,13 @@ async function mainSse(): Promise<void> {
             // #818 david `y5ggkh` : open + backlog scopés au projet du loop
             // (le loop est attaché à UN projet via AIBALL_PROJECT), events
             // restent cross-project (FIFO unread = agent scope, #800).
-            const backlogQuery: Record<string, string | undefined> = { backlog: "1", limit: "500" };
+            // #911 — voir le commentaire sur le path SSE plus haut.
+            const cooldownSec = process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? "3600";
+            const backlogQuery: Record<string, string | undefined> = {
+                backlog: "1",
+                limit: "500",
+                cooldown_sec: cooldownSec,
+            };
             if (loopProject) backlogQuery.project = loopProject;
             const [pingsR, projectsR, backlogR] = await Promise.allSettled([
                 client().pingsCount() as Promise<{ unread?: number }>,
@@ -2009,8 +2025,9 @@ async function mainSse(): Promise<void> {
                     ? (projectsR.value.find((p) => p.name === loopProject)?.open_count ?? 0)
                     : projectsR.value.reduce((acc, p) => acc + (p.open_count ?? 0), 0))
                 : null;
-            const backlog = backlogR.status === "fulfilled"
-                ? (Array.isArray(backlogR.value) ? backlogR.value.length : null)
+            const backlog = backlogR.status === "fulfilled" && Array.isArray(backlogR.value)
+                ? (backlogR.value as Array<{ backlog_cooled_until?: string | null }>)
+                    .filter((t) => !t.backlog_cooled_until).length
                 : null;
             // #835 david — preserve the last-known segment when all 3 fetches
             // fail (same rationale as the SSE-refresh path above). Without
