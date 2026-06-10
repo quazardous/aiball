@@ -117,6 +117,7 @@ import { bootMachine } from "./boot-machine.js";
 let bootActor: ActorRefFrom<typeof bootMachine> | null = null;
 import { getHookWatcher } from "./hook-watcher.js";
 import { WAKE_COOLDOWN_MS } from "./wake-machine.js";
+import { getSanityService } from "./sanity-service.js";
 import {
     getIpcState,
     onIpcChanged,
@@ -656,7 +657,24 @@ if (sd) {
     // pousse la regex hors de la fenêtre 5-lignes du footer → s.visible
     // devient false EN PLEIN turn. Latch : on ignore les transitions
     // visible=false, on attend `idle:turn_ended` (Stop hook) pour clear.
-    busyW.on("change", (s) => { if (s.visible) setPaneBusy(sd, true); });
+    busyW.on("change", (s) => {
+        if (s.visible) {
+            setPaneBusy(sd, true);
+            // #898 — feed SanityController for stale-busy detector.
+            getSanityService().busyLatched();
+        } else {
+            // Path normal : visible=false venant de busyW. La SM SanityController
+            // sort de watching (= clock annulé). Le latch paneBusy n'est PAS
+            // cleared ici (= #890 latch design : on attend idle:turn_ended).
+            getSanityService().busyCleared();
+        }
+    });
+    // #898 — SanityController consumer : clear le latch quand aucun signe
+    // d'activité depuis STALE_BUSY_MS (= path anormal, Stop hook perdu).
+    getSanityService().getActor().on("sanity:clear_paneBusy", (ev) => {
+        log(`sanityMachine: sanity:clear_paneBusy reason=${ev.reason} atMs=${ev.atMs} → setPaneBusy(false)`);
+        setPaneBusy(sd, false);
+    });
     interruptedW.on("change", (s) => setInterrupted(sd, s.visible));
     getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
     // CompactingDetector emits change(s) with `s.active` boolean ; forward begin/end via change diff.
@@ -1286,6 +1304,10 @@ async function mainSse(): Promise<void> {
         }
     });
     hookWatcher.on("hook:user_prompt_submit", (ev) => {
+        // #898 — signal d'activité pour SanityController (= toute submit
+        // humaine ou auto-wake compte comme preuve de vie, reset le clock
+        // stale-busy).
+        getSanityService().ticketActivity(ev.atMs);
         if (ev.fromAutoWake) return;
         // A real human submission flips claude back to busy ; an
         // auto-wake submission is the loop talking to itself.
@@ -1589,6 +1611,8 @@ async function mainSse(): Promise<void> {
             if (ev.headMessageId !== null) {
                 void client().markMessageSeen(ev.headMessageId).catch(() => {});
             }
+            // #898 — wake delivered = signal d'activité ticket (drain réussi).
+            getSanityService().ticketActivity();
         });
         wakeActor.on("wake:cleared", (ev) => log(`wakeMachine: wake:cleared reason=${ev.reason}`));
         wakeActor.on("wake:cooldown_expired", () => log("wakeMachine: wake:cooldown_expired (idle)"));
