@@ -105,7 +105,7 @@ test("parseRespawnSnapshots: malformed JSON → null", () => {
 });
 
 test("buildRespawnEnvFromSnapshots: empty snapshots → baseEnv inchangé", () => {
-    const baseEnv = { FOO: "bar" };
+    const baseEnv: NodeJS.ProcessEnv = { FOO: "bar" };
     const env = buildRespawnEnvFromSnapshots({}, baseEnv);
     assert.equal(env, baseEnv);
     assert.equal(env[RESPAWN_STATE_ENV_VAR], undefined);
@@ -114,7 +114,7 @@ test("buildRespawnEnvFromSnapshots: empty snapshots → baseEnv inchangé", () =
 test("buildRespawnEnvFromSnapshots: 1 snapshot → env contient swap", () => {
     const env = buildRespawnEnvFromSnapshots(
         { boot: { value: "sealed", context: {} } },
-        { FOO: "bar" },
+        { FOO: "bar" } as NodeJS.ProcessEnv,
     );
     assert.ok(env[RESPAWN_STATE_ENV_VAR]);
     const swap = JSON.parse(env[RESPAWN_STATE_ENV_VAR]!);
@@ -126,7 +126,7 @@ test("buildRespawnEnvFromSnapshots: round-trip via parse", () => {
         boot: { value: "booting", context: { deadlineMs: 1000 } },
         afk: { value: "wait_10m", context: { afkMode: "wait_10m", afkExpiryMs: 5000 } },
     };
-    const env = buildRespawnEnvFromSnapshots(snapshots, {});
+    const env = buildRespawnEnvFromSnapshots(snapshots, {} as NodeJS.ProcessEnv);
     const parsed = parseRespawnSnapshots(env[RESPAWN_STATE_ENV_VAR]);
     assert.deepEqual(parsed, snapshots);
 });

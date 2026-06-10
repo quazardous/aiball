@@ -1008,9 +1008,11 @@ ticketsRouter.get("/tickets", (req, res) => {
     if (onlyBacklog) {
         // #791: backlog membership is a row-level fact. The flag fn folds
         // in (a) actionable as tier 1, (b) lastActor=me ∩ !decision_gate as
-        // tier 2, (c) the #786 cooldown into `backlog_cooled_until`. The
-        // route just filters on the result.
-        result = result.filter((t) => t.backlog_tier !== null && !t.backlog_cooled_until);
+        // tier 2, (c) the #786 cooldown into `backlog_cooled_until`.
+        // David <chat> : les tickets en cooldown restent dans le payload
+        // (= le CLI les affiche avec un marker dans une section dédiée),
+        // pas filter ici.
+        result = result.filter((t) => t.backlog_tier !== null);
     }
     if (tagsFilter && tagsFilter.length > 0) {
         const requiredSet = new Set(tagsFilter.map((s) => s.toLowerCase()));

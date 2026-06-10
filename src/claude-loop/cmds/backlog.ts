@@ -15,6 +15,10 @@ interface BacklogOpts {
     json?: boolean;
     /** #886 follow-up : print just the bar counters `o:N b:N e:N` and exit. */
     counterOnly?: boolean;
+    /** David <chat> : inclure les tickets en cooldown backlog wake
+     *  (marker ⏳ via fmtTicket). Default = exclu (= comportement
+     *  historique du route filter). */
+    cooled?: boolean;
 }
 
 interface TicketRow {
@@ -27,6 +31,7 @@ interface TicketRow {
     unread?: boolean;
     hot?: boolean;
     last_actor?: string | null;
+    backlog_cooled_until?: string | null;
 }
 
 interface UnreadMessage {
@@ -77,11 +82,15 @@ function fmtEvent(m: UnreadMessage, currentProject: string): string {
 }
 
 function fmtTicket(t: TicketRow): string {
-    const unread = t.unread ? "*" : " ";
+    // `*` = unread (au moins 1 ping pas vu)
+    // `⏳` = en cooldown (backlog wake fired, pause jusqu'à backlog_cooled_until)
+    const marker = t.backlog_cooled_until
+        ? "⏳"
+        : t.unread ? "*" : " ";
     const prio = t.priority && t.priority !== "normal" ? `(${t.priority}) ` : "";
     const title = t.edited_title ?? t.title ?? "";
     const last = t.last_actor ? ` ← ${t.last_actor}` : "";
-    return `${unread} #${String(t.id).padEnd(4)} ${prio}${title}${last}`;
+    return `${marker} #${String(t.id).padEnd(4)} ${prio}${title}${last}`;
 }
 
 export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
@@ -161,7 +170,12 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
         backlog: "1",
         limit: String(limit),
     }) as TicketRow[] | { tickets?: TicketRow[] };
-    const tickets: TicketRow[] = Array.isArray(rows) ? rows : (rows.tickets ?? []);
+    const allTickets: TicketRow[] = Array.isArray(rows) ? rows : (rows.tickets ?? []);
+    // Default : exclude cooled tickets (= ancien comportement quand l'API
+    // les filtrait silencieusement). `--cooled` flag les inclut avec ⏳.
+    const tickets = opts.cooled
+        ? allTickets
+        : allTickets.filter((t) => !t.backlog_cooled_until);
     if (opts.json) {
         process.stdout.write(`${JSON.stringify(tickets, null, 2)}\n`);
         return;
@@ -169,6 +183,9 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
     // #885 — group by tier : hot (0), actionable (1), follow-up (2),
     // waiting (3). Follow-up = last_actor ≠ me + ma décision pending
     // gate l'actionable.
+    // David <chat> : tickets en cooldown (`backlog_cooled_until` set) ont
+    // un marker ⏳ via fmtTicket. Ils restent dans leur tier d'origine
+    // (= tu vois qu'ils existent mais qu'ils sont en pause backlog wake).
     const hot = tickets.filter((t) => t.backlog_tier === 0);
     const actionable = tickets.filter((t) => t.backlog_tier === 1);
     const followUp = tickets.filter((t) => t.backlog_tier === 2);

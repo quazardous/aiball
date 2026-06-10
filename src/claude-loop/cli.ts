@@ -2014,12 +2014,13 @@ async function main(): Promise<void> {
         .option("--json", "Machine-readable JSON output instead of icon table")
         .action((name: string | undefined, opts: { json?: boolean }) => cmdHealth(name, opts));
     program.command("backlog")
-        .description("Show the backlog of this loop's project + agent (resolved from .aiball.yaml / plate). Default = ticket backlog tiered hot → actionable → waiting (#791). `--events` = FIFO unread events (what the wake / MCP `unread()` would drain). `--counter-only` = print just `o:N b:N e:N` (same numbers the bar shows).")
+        .description("Show the backlog of this loop's project + agent (resolved from .aiball.yaml / plate). Default = ticket backlog tiered hot → actionable → waiting (#791). `--events` = FIFO unread events (what the wake / MCP `unread()` would drain). `--counter-only` = print just `o:N b:N e:N` (same numbers the bar shows). `--cooled` = inclut les tickets en cooldown backlog wake (marker ⏳).")
         .option("--events", "Show the FIFO unread events instead of the ticket backlog")
         .option("--counter-only", "Print just the bar counters `o:N b:N e:N` and exit")
+        .option("--cooled", "Inclure les tickets en cooldown backlog wake (marker ⏳)")
         .option("--limit <n>", "Max rows (1-500, default 50)", "50")
         .option("--json", "Raw JSON output")
-        .action((opts: { events?: boolean; counterOnly?: boolean; limit?: string; json?: boolean }) => cmdBacklog(opts));
+        .action((opts: { events?: boolean; counterOnly?: boolean; cooled?: boolean; limit?: string; json?: boolean }) => cmdBacklog(opts));
     // #381 (david): "--debug-proxy-tty pour piper des choses et avoir un faux claude
     // logger derriere". Real PTY proxy + fake-claude byte logger, attached to this
     // terminal — see/capture EXACTLY what your keyboard emits + the AFK decision.
