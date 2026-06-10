@@ -66,6 +66,39 @@ export interface BarSnapshot {
     afkChipStr: string;
 }
 
+/** State tag pipeline : compose `[<status>(:<info>)?] (<elapsed>s)? (+<remaining>s)?`
+ *  as a `parts[].join(" ")`. Each fragment is contributed independently :
+ *
+ *  - **head**  : `[<status>]` ou `[<status>:<info>]` quand `stateTagInfo`
+ *    est posé (par `setIpcStateTagInfo`, ex. "wait"/"compacting"/...).
+ *  - **elapsed** (BOOT only) : `<elapsedSec>s` depuis `loopStartMs`,
+ *    pour visualiser le temps déjà écoulé en phase boot.
+ *  - **remaining** (BOOT only, deadline > now) : `+<remainingSec>s`
+ *    delta-style — la deadline est watcher-driven (push `now+10s` chaque
+ *    tick observant une condition "still booting"), donc le `+N` reflète
+ *    l'extension dynamique plutôt qu'un countdown absolu.
+ */
+function renderStateTag(
+    loopStatus: LoopStatus,
+    info: string | null,
+    input: { nowMs: number; loopStartMs: number },
+    bootDeadlineMs: number | null,
+): string {
+    const parts: string[] = [];
+    parts.push(info ? `[${loopStatus}:${info}]` : `[${loopStatus}]`);
+    if (loopStatus !== LOOP_STATUS.BOOT) return parts.join(" ");
+    const elapsedSec = Math.max(0, Math.floor((input.nowMs - input.loopStartMs) / 1000));
+    parts.push(`${elapsedSec}s`);
+    if (bootDeadlineMs !== null) {
+        const remainingMs = bootDeadlineMs - input.nowMs;
+        if (remainingMs > 0) {
+            const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
+            parts.push(`+${remainingSec}s`);
+        }
+    }
+    return parts.join(" ");
+}
+
 /** Compute le snapshot canonique depuis ipcState + computeLoopView.
  *  Pure : pas de side-effect, pas de spawn tmux. */
 export function computeBarSnapshot(sd: string): BarSnapshot {
@@ -78,34 +111,10 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         : view.phase === "busy"
             ? LOOP_STATUS.BUSY
             : LOOP_STATUS.IDLE;
-    // #862 Slice 3 — state tag = `[<status>]` ou `[<status>:<info>]` quand
-    // un caller a set `setIpcStateTagInfo("wait"|"compacting"|...)`.
-    // David `<chat>` : pendant la phase boot, suffixer la durée elapsed
-    // (`[boot] 12s`) pour visualiser combien de temps on attend.
-    const info = getIpcState().stateTagInfo;
-    let stateTag = info ? `[${loopStatus}:${info}]` : `[${loopStatus}]`;
-    if (loopStatus === LOOP_STATUS.BOOT) {
-        const elapsedSec = Math.max(0, Math.floor((input.nowMs - input.loopStartMs) / 1000));
-        // David `<chat>` : show remaining-to-deadline in parens. The
-        // deadline is watcher-driven : pushed to `now+10s` each pane
-        // probe tick observing a "still booting" condition. Stays
-        // ~10s as long as a stretch is active, counts down once
-        // watchers stop pushing.
-        const deadlineMs = getIpcState().bootDeadlineMs;
-        if (deadlineMs !== null) {
-            const remainingMs = deadlineMs - input.nowMs;
-            if (remainingMs > 0) {
-                const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-                stateTag = `${stateTag} ${elapsedSec}s (${remainingSec}s)`;
-            } else {
-                stateTag = `${stateTag} ${elapsedSec}s`;
-            }
-        } else {
-            stateTag = `${stateTag} ${elapsedSec}s`;
-        }
-    }
+    const ipc = getIpcState();
+    const stateTag = renderStateTag(loopStatus, ipc.stateTagInfo, input, ipc.bootDeadlineMs);
     const zenActive = existsSync(zenPath(sd));
-    const counters = getIpcState().counters;
+    const counters = ipc.counters;
     const afkChipStr = afkStateChunkStr(sd);
     return { humanWord, loopStatus, stateTag, proxyAlive, zenActive, counters, afkChipStr };
 }
