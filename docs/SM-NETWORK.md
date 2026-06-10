@@ -32,16 +32,14 @@ graph LR
   Hooks[Session-start hook] -- "HOOK_SEAL" --> Boot
   Pump[bootDeadlineTimer] -- "DEADLINE_REACHED" --> Boot
   Boot -- "subscribe → bridge" --> Ipc[(ipcState)]
-  Boot -. "onSealed (planned)" .-> Afk[AfkController]
-  Afk -. "subscribe → bridge" .-> Ipc
+  F9[F9 toggle / typing] -- "ARM_* / HARD_*" --> Afk[AfkController]
+  AfkPump[afkExpiryTimer] -- "EXPIRY_REACHED" --> Afk
+  Afk -- "subscribe → bridge" --> Ipc
+  Afk -- "emit: afk:armed_10m / armed_inf / cleared" --> Consumers
+  Boot -- "emit: boot:sealed" --> Consumers[Consumers in timer.ts]
   Ipc --> BarRenderer
   Ipc --> WakeGate[Wake gate / isAfkActive]
-
-  classDef planned stroke-dasharray: 5 5,stroke:#888
-  class Afk planned
 ```
-
-Solid = shipped, dashed = planned.
 
 ## Controllers
 
@@ -53,26 +51,30 @@ Solid = shipped, dashed = planned.
 | **Role** | Owns the boot phase lifecycle. Single authority for sealing. |
 | **Slice owned** | `ipcState.bootDeadlineMs`, `ipcState.bootComplete` |
 | **Events in** | `WATCHER_TICK` (pane probes), `DEADLINE_REACHED` (deadline pump), `HOOK_SEAL` (respawn handoff) |
+| **Events emitted** | `boot:sealed` { loopStartMs, reason: `"deadline"` \| `"hook"` } |
 | **States** | `booting` (initial) → `sealed` (terminal) |
 | **Pump** | `bootDeadlineTimer` setInterval (1s) in `timer.ts` |
 | **Tests** | `boot-machine.test.ts` |
 
 See the source file header for the state diagram and event semantics.
 
-### AfkController — planned
+### AfkController — shipped
 
 | Field | Value |
 |---|---|
-| **Source** | `src/claude-loop/afk-machine.ts` (planned) |
+| **Source** | [`src/claude-loop/afk-machine.ts`](../src/claude-loop/afk-machine.ts) |
 | **Role** | F9 toggle cycle + typing-driven arm + timed expiry, with 3s debounce on display. |
 | **Slice owned** | `ipcState.afkMode/afkExpiryMs` (committed) + `ipcState.dispAfkMode/dispAfkExpiryMs` (display) |
-| **Events in** | `ARM_10M`, `ARM_INF`, `CLEAR`, `EXPIRY_REACHED` |
-| **States** | `off`, `pending_10m`, `pending_inf`, `wait_10m`, `wait_inf` |
+| **Events in** | `ARM_10M`/`ARM_INF`/`ARM_OFF` (debounced), `HARD_ARM_10M`/`HARD_ARM_INF`/`HARD_CLEAR` (immediate), `EXPIRY_REACHED` |
+| **Events emitted** | `afk:armed_10m` { expiryMs, prevMode } / `afk:armed_inf` { prevMode } / `afk:cleared` { prevMode, reason: `"user"` \| `"expiry"` } |
+| **States** | `off`, `pending_off`, `pending_10m`, `pending_inf`, `wait_10m`, `wait_inf` |
 | **Pump** | `afkExpiryTimer` setInterval (1s) + `after(3000)` internal delays |
+| **Tests** | `afk-machine.test.ts` |
 
 Display/committed split is encoded via `pending_*` states with `after(3000)`
 delayed transitions to the `wait_*` committed states. The single subscriber
-projects two derivations onto ipcState.
+mirrors `context.afkMode/afkExpiryMs` (committed) and projects the leaf
+state name to `ipcState.dispAfkMode/dispAfkExpiryMs` (display).
 
 ### Future controllers (queued)
 
@@ -96,20 +98,70 @@ All actors are instantiated and wired inside `mainSse` in `timer.ts`. Order :
 
 ### Subscribe → ipcState bridge
 
-The canonical pattern :
+The canonical pattern for mirroring `actor.context` onto the shared
+`ipcState` — purely a **state mirror**, no side-effects beyond `setIpc*`
+calls :
 
 ```ts
 actor.subscribe((snap) => {
     // Mirror context fields the consumers read.
     setIpc<Field>(snap.context.<field>);
-    // Trigger side-effects on state-change.
-    if (snap.matches("<terminal_state>")) {
-        // do once, gated on "is this transition fresh?"
-    }
 });
 ```
 
-The subscriber runs synchronously on subscribe (initial snapshot) and on every transition or context change.
+The subscriber runs synchronously on subscribe (initial snapshot) and on every transition or context change. Keep it small — reactions to specific transitions live in **locus event consumers** (see below).
+
+### Locus events — `emit` + `actor.on`
+
+Each controller declares its **locus events** (= pivotal transitions the rest of the network cares about) via XState v5 `emit(...)` in transition actions. Consumers subscribe with `actor.on(eventType, cb)` and receive a typed payload.
+
+**Naming convention** : `<controller>:<event_name>` (snake_case after the colon). The prefix identifies the source controller ; consumers can filter by prefix (`event.type.startsWith("afk:")`).
+
+| Controller | Locus events |
+|---|---|
+| `boot:` | `boot:sealed` |
+| `afk:` | `afk:armed_10m`, `afk:armed_inf`, `afk:cleared` |
+| `wake:` (planned) | `wake:requested`, `wake:delivered`, `wake:deferred`, `wake:in_flight_cleared` |
+| `pane:` (planned) | `pane:busy_started`, `pane:idle`, `pane:compacting_started`, `pane:compacting_ended` |
+
+**Payload guidelines** — what to put on the event vs what to leave for `subscribe(snap)` or `getSnapshot()` :
+
+- ✅ **Timestamps** (`expiryMs`, `sinceMs`, `elapsedMs`, `loopStartMs`) — useful for decisions and metrics.
+- ✅ **Previous state** (`prevMode`) — useful to discriminate transitions sharing the same target (e.g. `wait_10m → off` vs `wait_inf → off`).
+- ✅ **Reason discriminator** (`reason: "user" | "expiry"`, `reason: "deadline" | "hook"`) — useful for logs and conditional consumer actions.
+- ❌ **Full context snapshot** — defeats the purpose vs `subscribe(snap)`.
+- ❌ **ipcState reads** — the consumer can read them itself if needed.
+
+**Typed via `setup.types.emitted`** — the discriminated union forces TypeScript narrowing in consumers :
+
+```ts
+// In <controller>-machine.ts
+setup({
+    types: {
+        emitted: {} as
+            | { type: "afk:armed_10m"; expiryMs: number; prevMode: AfkMode }
+            | { type: "afk:cleared"; prevMode: AfkMode; reason: "user" | "expiry" },
+    },
+    actions: {
+        emitArmed10m: emit(({ context }) => ({
+            type: "afk:armed_10m" as const,
+            expiryMs: context.afkExpiryMs ?? 0,
+            prevMode: context.afkMode,
+        })),
+    },
+})
+
+// In timer.ts (or any consumer)
+afkActor.on("afk:armed_10m", (ev) => {
+    log(`armed 10m expiry=${new Date(ev.expiryMs).toISOString()} from ${ev.prevMode}`);
+});
+```
+
+**Emit timing** — place emit actions **first** in the transition's `actions` array so they read `context.<field>` BEFORE the `assign` actions mutate it. Common pattern :
+
+```ts
+actions: ["emitX", "commitToTargetState"]  // emit reads OLD context, then assign mutates
+```
 
 ### External pump
 
@@ -138,18 +190,22 @@ side-effects.
 
 1. Write `<name>-machine.ts` with `setup({...}).createMachine({...})`.
    Pure, no I/O, no `Date.now()`/`Math.random()`. Header comment carries
-   the state diagram + event table.
-2. Write `<name>-machine.test.ts` covering every transition and guard.
+   the state diagram + event table. Declare `setup.types.emitted` with
+   the discriminated union of `<name>:<event_name>` locus events + their
+   payloads.
+2. Write `<name>-machine.test.ts` covering every transition, every guard,
+   and every emit (`actor.on("<name>:<event_name>", cb)` + assert payload).
 3. In `timer.ts:mainSse` :
    - `const actor = createActor(machine, {input: ...});`
-   - `actor.subscribe(snap => bridge snap → ipcState)`
-   - `actor.start()`
+   - `actor.subscribe(snap => bridge snap.context → ipcState)` (state mirror only).
+   - `actor.on("<name>:<event_name>", ev => ...)` for each locus event reaction.
+   - `actor.start()`.
    - Arm any external pump (e.g. `setInterval` polling `getSnapshot()`).
 4. Drop the legacy code path that this controller replaces. Don't leave
    parallel writers — the new controller is the sole owner of its slice.
 5. Add a section in this doc (Controllers list above) — single-source the
-   role + slice + events. Don't duplicate the state diagram (that lives
-   in the source file header).
+   role + slice + events in + emits. Don't duplicate the state diagram
+   (that lives in the source file header).
 
 ## Tradeoffs and choices
 
@@ -176,13 +232,34 @@ state diagram tells the full story. Equivalent external `setTimeout`
 would scatter timing across the wrapper, breaking the "machine = spec"
 invariant.
 
-### Why `subscribe` rather than `emit` (XState v5 events) ?
+### Why both `subscribe` AND `emit` ?
 
-`emit` decouples consumers from context but is an extra event-bus layer.
-For ipcState bridging — where the consumer wants the raw context — direct
-`subscribe` is simpler. We use `emit` only for cross-controller signaling
-where context coupling would be undesirable (e.g. `AfkController` listening
-for `BootMachine.onSealed` without reading boot context).
+The two patterns serve different needs and complement each other :
+
+- **`subscribe(snap)`** = continuous **state mirror**. Fires on every snapshot
+  change, even mid-transition context updates. Used exclusively to bridge
+  `actor.context.<field>` onto `ipcState`.
+- **`emit({type: ..., ...})`** + **`actor.on(event, cb)`** = discrete **locus
+  events** at specific transitions, with typed payloads. Used for everything
+  reactive : log lines, side-effects, cross-controller signaling.
+
+Splitting them keeps each subscriber small and intent-revealing : the
+`subscribe` block reads as "what does ipcState mirror", the `actor.on`
+blocks read as "what happens on this specific transition".
+
+A controller's transitions can fire BOTH a context update (caught by
+`subscribe`) AND an `emit` (caught by `actor.on`) — they're independent
+channels.
+
+### Why a typed locus vocabulary (`<controller>:<event_name>`) ?
+
+The prefix scopes ownership : a `wake:requested` event is unambiguously
+emitted by the WakeController. Consumers can filter by prefix
+(`event.type.startsWith("afk:")`) when they want all events from one source.
+
+The discriminated union via `setup.types.emitted` gives the consumer
+TypeScript narrowing for free — `actor.on("afk:armed_10m", ev)` sees
+`ev.expiryMs` as `number`, not as `unknown` or `string | undefined`.
 
 ## See also
 
