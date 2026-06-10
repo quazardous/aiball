@@ -22,7 +22,7 @@ interface TicketRow {
     title?: string;
     edited_title?: string;
     priority?: string;
-    backlog_tier?: 0 | 1 | 2 | null;
+    backlog_tier?: 0 | 1 | 2 | 3 | null;
     actionable?: boolean;
     unread?: boolean;
     hot?: boolean;
@@ -141,13 +141,13 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
         process.stdout.write(`${JSON.stringify(tickets, null, 2)}\n`);
         return;
     }
-    // #801 bz66g6 : group by tier — hot (0), actionable (1), waiting (2).
-    // david: "les hots, les non comments en dernier, le reste". Tier 2 is
-    // ball-in-their-court (= waiting for someone else's comment) → goes last.
-    // Tier 1 (actionable, in my court) sits in the middle. Tier 0 (hot) leads.
+    // #885 — group by tier : hot (0), actionable (1), follow-up (2),
+    // waiting (3). Follow-up = last_actor ≠ me + ma décision pending
+    // gate l'actionable.
     const hot = tickets.filter((t) => t.backlog_tier === 0);
     const actionable = tickets.filter((t) => t.backlog_tier === 1);
-    const waiting = tickets.filter((t) => t.backlog_tier === 2);
+    const followUp = tickets.filter((t) => t.backlog_tier === 2);
+    const waiting = tickets.filter((t) => t.backlog_tier === 3);
 
     process.stdout.write(`# backlog on ${ctx.project} (consumer: ${ctx.agent}, ${tickets.length})\n`);
     if (tickets.length === 0) {
@@ -161,6 +161,10 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
     if (actionable.length > 0) {
         process.stdout.write(`\n## actionable — ball in my court (${actionable.length})\n`);
         for (const t of actionable) process.stdout.write(`${fmtTicket(t)}\n`);
+    }
+    if (followUp.length > 0) {
+        process.stdout.write(`\n## follow-up — they spoke, my decision pending blocks actionable (${followUp.length})\n`);
+        for (const t of followUp) process.stdout.write(`${fmtTicket(t)}\n`);
     }
     if (waiting.length > 0) {
         process.stdout.write(`\n## waiting on them (${waiting.length})\n`);

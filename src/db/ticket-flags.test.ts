@@ -52,13 +52,28 @@ test("tier 1 — actionable, ball in my court", () => {
     assert.equal(flags.gated_by_decision, false);
 });
 
-test("tier 2 — last actor=me, no decision, ball in their court", () => {
+test("tier 3 (was 2) — last actor=me, no decision, ball in their court", () => {
     const flags = computeTicketFlags(
         buildRow(),
         buildCtx({ lastActorMeIds: new Set([1]) }),
     );
-    assert.equal(flags.backlog_tier, 2);
+    assert.equal(flags.backlog_tier, 3);
     assert.equal(flags.actionable, false);
+});
+
+test("#885 tier 2 follow-up — last_actor=david + gated_by_decision", () => {
+    // Pile le case de #751 : david a répondu, mon plan/résolution reste
+    // pending, le ticket sort de `actionable`. Sans tier 2, invisible.
+    const flags = computeTicketFlags(
+        buildRow(),
+        buildCtx({
+            decisionGated: new Map([[1, true]]),
+            lastActorByTicket: new Map([[1, { actor: "david", at: "2026-06-06T06:34:39Z" }]]),
+        }),
+    );
+    assert.equal(flags.backlog_tier, 2);
+    assert.equal(flags.gated_by_decision, true);
+    assert.equal(flags.last_actor, "david");
 });
 
 test("tier null — last actor=me but pending decision", () => {
@@ -67,6 +82,7 @@ test("tier null — last actor=me but pending decision", () => {
         buildCtx({
             lastActorMeIds: new Set([1]),
             decisionGated: new Map([[1, true]]),
+            lastActorByTicket: new Map([[1, { actor: "me", at: "2026-06-06T06:00:00Z" }]]),
         }),
     );
     assert.equal(flags.backlog_tier, null);

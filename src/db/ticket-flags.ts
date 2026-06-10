@@ -48,14 +48,13 @@ import {
  * and for agent introspection.
  *
  * `backlog_tier` is the headline:
- *   - 0 → not in this consumer's backlog. Could be closed, snoozed,
- *     gated by a pending decision, owned by someone else, or in
- *     cooldown after a recent wake.
- *   - 1 → ball is in MY court. The actionable tier. The wake-CTA
- *     names heads of this tier first.
- *   - 2 → ball is in THEIRS. I was the last actor on the thread, no
- *     decision is pending, the reporter hasn't replied. Soft reminder
- *     set — the wake names tier-1 heads first, falls back here.
+ *   - 0 → HOT focus.
+ *   - 1 → actionable, ball in MY court (formal).
+ *   - 2 → follow-up (#885): last_actor ≠ me, decision pending. They
+ *     spoke but my pending plan/resolution gates `actionable`. Soft
+ *     surface — without it the thread disparait du backlog.
+ *   - 3 → waiting on them. I was the last actor, no decision pending.
+ *   - null → not in this consumer's backlog.
  *
  * `backlog_cooled_until` is set ONLY when a recent backlog wake on this
  * ticket would still be in its cooldown window. Lets the UI show
@@ -75,10 +74,10 @@ export interface TicketFlags {
      *         at by default)
      *   - 2 = waiting on them (I was the last actor, no decision pending)
      *   - null = not in this consumer's backlog
-     * Sorts naturally with numeric asc (hot first, then actionable, then
+     * Sorts naturally with numeric asc (hot → actionable → follow-up →
      * waiting); the route filter `?backlog=1` keeps every row whose
      * `backlog_tier !== null`. */
-    backlog_tier: 0 | 1 | 2 | null;
+    backlog_tier: 0 | 1 | 2 | 3 | null;
     backlog_cooled_until: string | null;
     gated_by_decision: boolean;
     last_actor: string | null;
@@ -169,28 +168,29 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
         assignee: t.assignee ?? null,
     };
     const excludedFromBacklog = defaultBacklogRules.excludes(ctx.rulesCtx, ruleItem, "backlog-tier");
-    let backlog_tier: 0 | 1 | 2 | null = null;
+    let backlog_tier: 0 | 1 | 2 | 3 | null = null;
     if (!excludedFromBacklog) {
-        // Hot is the focus tier — a ticket with cross-agent activity
-        // inside the hot window wins over the actionable / waiting set.
-        // david wahxsj: "le hot devrait etre un tiers 0 dans la fifo et
-        // dans le backlog (question de focus)". Still requires the
-        // ticket to be otherwise in the consumer's pool — either
-        // actionable or last-actor-me-and-not-gated — so a hot ticket
-        // that's none of those (e.g. another team's broadcast) doesn't
-        // hijack my backlog.
-        const inPool = actionable || (ctx.lastActorMeIds.has(t.id) && !gated_by_decision);
+        // #885 david : ajouter un tier "follow-up" pour les threads où
+        // l'autre a répondu en dernier mais une décision pending gate
+        // l'actionable. Sans ça, ces tickets disparaissent du backlog.
+        const lastActorOther = last_actor != null && last_actor !== ctx.consumerId;
+        const followUp = lastActorOther && gated_by_decision;
+        const lastActorMe = ctx.lastActorMeIds.has(t.id);
+        const waiting = lastActorMe && !gated_by_decision;
+        const inPool = actionable || followUp || waiting;
         if (hot && inPool) {
             backlog_tier = 0;
         } else if (actionable) {
-            // Tier 1 — ball in my court. Actionable already folds in
-            // the decision-gate via computeActionableTicketIds, so no
-            // need to re-check `gated_by_decision` here.
+            // Tier 1 — ball in my court (formal).
             backlog_tier = 1;
-        } else if (ctx.lastActorMeIds.has(t.id) && !gated_by_decision) {
-            // Tier 2 — I was last actor, no decision pending: the
-            // reporter is sitting on it. Soft reminder set.
+        } else if (followUp) {
+            // Tier 2 — they spoke but my decision pending gates
+            // actionable. Soft surface (#885).
             backlog_tier = 2;
+        } else if (waiting) {
+            // Tier 3 — I was last actor, no decision pending: the
+            // reporter is sitting on it. Soft reminder.
+            backlog_tier = 3;
         }
     }
 
