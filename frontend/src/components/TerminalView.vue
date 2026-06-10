@@ -218,13 +218,15 @@ async function postAfkAction(action: "toggle" | "off" | "arm_10m" | "arm_inf") {
     }
 }
 
-// #747 — AFK cycle (off → 10m → ∞ → off, equivalent F9 in the pane).
-async function toggleAfkRemote() { await postAfkAction("toggle"); }
+// #907 — Start AFK = action "off" (= clear NOT-AFK hold = back to
+// AFK ON = claude autonomous mode). Mirrors the legacy `resetAfkRemote`
+// from #871.
+async function startAfkRemote() { await postAfkAction("off"); }
 
-// #871 — direct Reset AFK : force back to AFK ON (= autonomous mode)
-// regardless of current state. Avoids the 2-click cycle from wait_10m
-// → wait_inf → off when you just want to release the hold.
-async function resetAfkRemote() { await postAfkAction("off"); }
+// #907 — Stop AFK = action "arm_inf" (= david at controls indefinitely,
+// claude pauses). The 10m intermediate is dropped from the UI ;
+// F9 in the pane keeps cycling through if needed.
+async function stopAfkRemote() { await postAfkAction("arm_inf"); }
 
 function toggleReadWrite() {
     if (isReadWrite.value) {
@@ -483,27 +485,29 @@ onBeforeUnmount(() => {
                     : 'Read-only mode — click to unlock typing (confirm prompt)'"
                 @click="toggleReadWrite"
             />
-            <!-- #747 — AFK cycle (off → 10m → ∞ → off, equivalent F9). -->
+            <!-- #907 — Start = AFK ON (claude autonomous). Replaces the cycle
+                 toggle + reset duo (both ended in the same `off` action
+                 anyway). -->
             <Button
-                icon="pi pi-pause"
+                icon="pi pi-play"
                 size="small"
                 severity="info"
                 text
                 rounded
-                aria-label="Toggle AFK (cycle off → 10m → ∞ → off, same as F9)"
-                title="Toggle AFK : cycle off → NOT AFK 10m → NOT AFK ∞ → off (same as pressing F9 in the pane)"
-                @click="toggleAfkRemote"
+                aria-label="Start AFK (= claude autonomous mode)"
+                title="Start AFK — claude runs alone (= autonomous, default)"
+                @click="startAfkRemote"
             />
-            <!-- #871 — direct Reset AFK : force AFK ON (autonomous) without cycling. -->
+            <!-- #907 — Stop = NOT AFK ∞ (david at controls indefinitely). -->
             <Button
-                icon="pi pi-undo"
+                icon="pi pi-stop"
                 size="small"
                 severity="secondary"
                 text
                 rounded
-                aria-label="Reset AFK to ON (= autonomous mode, claude runs alone)"
-                title="Reset AFK ON — force claude back to autonomous, regardless of current 10m/∞ hold (1 click from any state)"
-                @click="resetAfkRemote"
+                aria-label="Stop AFK (= take over, NOT AFK indefinitely)"
+                title="Stop AFK — take over the session (NOT AFK ∞, claude pauses indefinitely)"
+                @click="stopAfkRemote"
             />
             <Button
                 :icon="isFullscreen ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"
