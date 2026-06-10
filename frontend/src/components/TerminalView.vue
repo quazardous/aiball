@@ -485,29 +485,25 @@ onBeforeUnmount(() => {
                     : 'Read-only mode — click to unlock typing (confirm prompt)'"
                 @click="toggleReadWrite"
             />
-            <!-- #907 — Start = AFK ON (claude autonomous). Replaces the cycle
-                 toggle + reset duo (both ended in the same `off` action
-                 anyway). -->
-            <Button
-                icon="pi pi-play"
-                size="small"
-                severity="info"
-                text
-                rounded
+            <!-- #907 `zsekxt` — bare icon, no Button shell. Hover = color
+                 shift on the glyph itself (no background, no border). -->
+            <i
+                class="pi pi-play afk-icon afk-icon--start"
+                role="button"
+                tabindex="0"
                 aria-label="Start AFK (= claude autonomous mode)"
                 title="Start AFK — claude runs alone (= autonomous, default)"
                 @click="startAfkRemote"
+                @keydown.enter.space.prevent="startAfkRemote"
             />
-            <!-- #907 — Stop = NOT AFK ∞ (david at controls indefinitely). -->
-            <Button
-                icon="pi pi-stop"
-                size="small"
-                severity="secondary"
-                text
-                rounded
+            <i
+                class="pi pi-stop afk-icon afk-icon--stop"
+                role="button"
+                tabindex="0"
                 aria-label="Stop AFK (= take over, NOT AFK indefinitely)"
                 title="Stop AFK — take over the session (NOT AFK ∞, claude pauses indefinitely)"
                 @click="stopAfkRemote"
+                @keydown.enter.space.prevent="stopAfkRemote"
             />
             <Button
                 :icon="isFullscreen ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"
@@ -523,6 +519,25 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* #907 `zsekxt` david : bare-glyph AFK icons, no button shell. */
+.afk-icon {
+    cursor: pointer;
+    color: var(--p-text-muted-color);
+    font-size: 1rem;
+    padding: 0.2rem;
+    transition: color 0.12s;
+    user-select: none;
+    outline: none;
+}
+.afk-icon:hover, .afk-icon:focus-visible {
+    color: var(--p-text-color);
+}
+.afk-icon--start:hover, .afk-icon--start:focus-visible {
+    color: var(--p-green-500);
+}
+.afk-icon--stop:hover, .afk-icon--stop:focus-visible {
+    color: var(--p-red-500);
+}
 .terminal-view {
     display: flex;
     flex-direction: column;
