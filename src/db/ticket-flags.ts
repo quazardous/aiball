@@ -36,6 +36,11 @@ import {
 } from "./projects.js";
 import { assignWindowSec } from "../autopoll/config.js";
 import { ticketUnreadFlags } from "./pings.js";
+import {
+    buildBacklogRulesCtx,
+    defaultBacklogRules,
+    type BacklogRulesCtx,
+} from "./backlog-rules.js";
 
 /**
  * Per-row flag bag exposed on `/api/tickets` responses. The boolean
@@ -112,8 +117,13 @@ export interface TicketFlagsContext {
     /** Per-ticket `(last_actor, last_actor_at)` denorm from the tickets
      *  table. Surfaced on the row for UI/agent introspection. */
     lastActorByTicket: Map<number, { actor: string | null; at: string | null }>;
-    /** Lifecycle-replay net-closed set. Open if not in this set. */
+    /** Lifecycle-replay net-closed set. Open if not in this set. Kept
+     *  for the route handler's per-row `closed` boolean — the gating
+     *  pour `backlog_tier` lui passe désormais via `rulesCtx`. */
     closedSet: Set<number>;
+    /** #886 — BacklogRules ctx (closed + snoozed sets) injecté ici pour
+     *  que `computeTicketFlags` consomme le moteur de règles unique. */
+    rulesCtx: BacklogRulesCtx;
     /** Per-row claimability — respects no-claim (assignment-only) and
      *  the consumer's owned-project set. The route handler builds this
      *  closure; we just call it. */
@@ -129,6 +139,7 @@ export interface TicketFlagsContext {
 export interface TicketFlagsRow {
     id: number;
     project: string;
+    byAgent?: string | null;
     assignee?: string | null;
     postponed_until?: string | null;
 }
@@ -138,8 +149,6 @@ export interface TicketFlagsRow {
  * flag bag. No I/O, no Date.now, no module-level state.
  */
 export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): TicketFlags {
-    const closed = ctx.closedSet.has(t.id);
-    const postponed = !!(t.postponed_until && t.postponed_until > new Date(ctx.nowMs).toISOString());
     const unread = ctx.unreadIds.has(t.id);
     const actionable = ctx.actionableIds.has(t.id);
     const claimable = ctx.isClaimable(t.id, t.project, t.assignee ?? null);
@@ -150,14 +159,18 @@ export function computeTicketFlags(t: TicketFlagsRow, ctx: TicketFlagsContext): 
     const last_actor = lastActorRow?.actor ?? null;
     const last_actor_at = lastActorRow?.at ?? null;
 
-    // #791 wahxsj — a ticket explicitly assigned to another agent is
-    // out of MY backlog regardless of last-actor history. The assigned
-    // agent sees it via their own actionable pool; if I'm subscribed I
-    // still get the notifications. The backlog wake is for tickets I
-    // could pick up, not for ones already owned.
-    const assignedToOther = t.assignee != null && t.assignee !== ctx.consumerId;
+    // #886 — toute condition d'exclusion (closed, snoozed,
+    // assigned-to-other) vit dans `backlog-rules.ts`. Une seule
+    // checkbox ici : "does any active rule exclude this row from the
+    // backlog-tier target ?".
+    const ruleItem = {
+        ticketId: t.id,
+        ticketByAgent: t.byAgent ?? null,
+        assignee: t.assignee ?? null,
+    };
+    const excludedFromBacklog = defaultBacklogRules.excludes(ctx.rulesCtx, ruleItem, "backlog-tier");
     let backlog_tier: 0 | 1 | 2 | null = null;
-    if (!closed && !postponed && !assignedToOther) {
+    if (!excludedFromBacklog) {
         // Hot is the focus tier — a ticket with cross-agent activity
         // inside the hot window wins over the actionable / waiting set.
         // david wahxsj: "le hot devrait etre un tiers 0 dans la fifo et
@@ -278,6 +291,12 @@ export function buildTicketFlagsContext(args: {
         lastActorByTicket.set(r.id, { actor: r.actor ?? null, at: r.at ?? null });
     }
 
+    // #886 — moteur de règles : injecte le closedSet déjà calculé par
+    // le route handler (project-scoped) plutôt que de redoubler la pass.
+    const rulesCtx = buildBacklogRulesCtx(consumerId, {
+        nowMs,
+        closedIds: closedSet,
+    });
     return {
         consumerId,
         unreadIds,
@@ -291,6 +310,7 @@ export function buildTicketFlagsContext(args: {
         crossAgentHot,
         lastActorByTicket,
         closedSet,
+        rulesCtx,
         isClaimable,
         nowMs,
         cooldownSec,

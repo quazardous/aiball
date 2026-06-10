@@ -934,7 +934,13 @@ ticketsRouter.get("/tickets", (req, res) => {
         const postponedUntil = m.postponed_until ?? null;
         const postponed = !!postponedUntil && postponedUntil > nowStr;
         const flags = computeTicketFlags(
-            { id: m.id, project: m.project, assignee: m.assignee ?? null, postponed_until: postponedUntil },
+            {
+                id: m.id,
+                project: m.project,
+                byAgent: m.by_agent ?? null,
+                assignee: m.assignee ?? null,
+                postponed_until: postponedUntil,
+            },
             flagsCtx,
         );
         const base = {

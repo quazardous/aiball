@@ -10,6 +10,8 @@ import { computeTicketFlags, type TicketFlagsContext, type TicketFlagsRow } from
 const NOW_MS = Date.parse("2026-06-04T14:00:00Z");
 
 function buildCtx(overrides: Partial<TicketFlagsContext> = {}): TicketFlagsContext {
+    const closedSet = overrides.closedSet ?? new Set<number>();
+    const snoozedIds = new Set<number>();
     return {
         consumerId: "me",
         unreadIds: new Set(),
@@ -22,7 +24,13 @@ function buildCtx(overrides: Partial<TicketFlagsContext> = {}): TicketFlagsConte
         assignedToMeIds: new Set(),
         crossAgentHot: new Set(),
         lastActorByTicket: new Map(),
-        closedSet: new Set(),
+        closedSet,
+        rulesCtx: {
+            consumerId: "me",
+            nowMs: NOW_MS,
+            closedIds: closedSet,
+            snoozedIds,
+        },
         isClaimable: () => false,
         nowMs: NOW_MS,
         cooldownSec: 3600,
@@ -76,17 +84,29 @@ test("tier null — closed", () => {
     assert.equal(flags.backlog_tier, null);
 });
 
-test("tier null — snoozed (postponed_until in the future)", () => {
+test("tier null — snoozed (in rulesCtx.snoozedIds)", () => {
+    // #886 : snoozed est calculé en amont par `buildBacklogRulesCtx`,
+    // pas via le champ `postponed_until` du row. Le test seed snoozedIds.
+    const closedSet = new Set<number>();
     const flags = computeTicketFlags(
-        buildRow({ postponed_until: new Date(NOW_MS + 86_400_000).toISOString() }),
-        buildCtx({ actionableIds: new Set([1]) }),
+        buildRow(),
+        buildCtx({
+            actionableIds: new Set([1]),
+            closedSet,
+            rulesCtx: {
+                consumerId: "me",
+                nowMs: NOW_MS,
+                closedIds: closedSet,
+                snoozedIds: new Set([1]),
+            },
+        }),
     );
     assert.equal(flags.backlog_tier, null);
 });
 
-test("tier 1 — postponed_until in the past doesn't snooze", () => {
+test("tier 1 — not in snoozedIds", () => {
     const flags = computeTicketFlags(
-        buildRow({ postponed_until: new Date(NOW_MS - 86_400_000).toISOString() }),
+        buildRow(),
         buildCtx({ actionableIds: new Set([1]) }),
     );
     assert.equal(flags.backlog_tier, 1);
