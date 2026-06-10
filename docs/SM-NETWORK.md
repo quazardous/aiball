@@ -24,6 +24,44 @@ of which controller does what and how they wire together.
 - **Composition root in `timer.ts`** — actors are instantiated, wired,
   and started in `mainSse`. Pumps + subscribers all live alongside.
 
+## The purity contract — events are the only integration channel
+
+**A machine never manipulates the outside world from inside.** Inside the
+declared `actions`, the only allowed operations are :
+
+- `assign({...})` — mutate `context`.
+- `emit({type: "<controller>:<event_name>", ...})` — fire a typed locus event.
+- Pure helpers (no I/O, no `Date.now()`, no global state reads/writes).
+
+**Forbidden inside machine actions** :
+
+- ❌ `setIpc<Field>(...)` writes — that's the SUBSCRIBER's job, in `timer.ts`.
+- ❌ `armAfkViaService` / `tryWake` / any helper that mutates the runtime — that's a CONSUMER's job, via `actor.on(...)`.
+- ❌ `log(...)` inside emit actions — log in the consumer (where you have actor identity context), not in the action.
+- ❌ `Date.now()` / `Math.random()` / file reads — would break testability and the resume-from-journal property of XState.
+- ❌ `actor.send(...)` to itself or another actor — cross-controller signaling goes through `emit` + `actor.on`, not direct sends.
+
+The actor's only outputs to the outside are the **snapshot** (via `subscribe`) and the **emitted events** (via `actor.on`). Outside code never reaches inside.
+
+### Decision rule — when you need to add a behavior
+
+Faced with a new requirement ("when AFK clears AND the user typed in the last second, do X"), apply this decision rule :
+
+| Case | Approach |
+|---|---|
+| **The behavior is a reaction** to a transition that already exists | Wire a new consumer : `afkActor.on("afk:cleared", cb)` that runs the side-effect. The machine is untouched. |
+| **The behavior changes the state structure** (new state, new transition, new guard, new context field) | Revise the SM declaratively : add the state / transition / guard, declare an emit if it's a new locus, write tests. |
+| **The behavior is a side-effect inside the machine** | ❌ Wrong shape. Move it OUT to a consumer, or restructure as a state change + emit + consumer. |
+
+The third case is the one to watch for : if you find yourself tempted to call `setIpcXxx` from a machine action, that's the signal that the integration boundary is being violated. Either the consumer needs a new emit to react to, or the state structure needs to change.
+
+### Why this matters
+
+- **Testability** : pure machines are unit-tested by sending events and asserting snapshots/emits, no mocks needed.
+- **Replayability** : XState v5 supports persistence + replay of an actor from a journal. Side-effects inside actions would re-execute on replay.
+- **Auditability** : grepping `emit({type:` gives the complete public surface of a controller. Side-effects scattered inside actions would hide that surface.
+- **Local reasoning** : when changing a consumer, the consumer's logic is fully readable in one place (no fragments inside the machine).
+
 ## Network overview
 
 ```mermaid
@@ -192,7 +230,8 @@ side-effects.
    Pure, no I/O, no `Date.now()`/`Math.random()`. Header comment carries
    the state diagram + event table. Declare `setup.types.emitted` with
    the discriminated union of `<name>:<event_name>` locus events + their
-   payloads.
+   payloads. **Respect the purity contract** (above) — actions only
+   `assign` + `emit`, never reach outside.
 2. Write `<name>-machine.test.ts` covering every transition, every guard,
    and every emit (`actor.on("<name>:<event_name>", cb)` + assert payload).
 3. In `timer.ts:mainSse` :
