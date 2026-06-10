@@ -60,6 +60,9 @@ export interface BarSnapshot {
      *  = segment vide. Slice 2 ajoute le mirroring `setIpcCounters`
      *  côté timer ; Slice 3 fera du BarRenderer le SEUL writer. */
     counters: { open: number | null; backlog: number | null; events: number | null } | null;
+    /** #805 — countdown vers le prochain `idle:settled` wake. `null` =
+     *  pas idle / busy / unknown. Rendu après les counters comme `⏳Ns`. */
+    nextWakeInSec: number | null;
     /** `@cl_afk_state` : AFK chip pré-rendered string (canonical via
      *  `afkStateChunkStr`). Diff sur la string finale = plus simple que
      *  diff sur chaque field interne de l'AfkChunk. */
@@ -116,13 +119,21 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
     const zenActive = existsSync(zenPath(sd));
     const counters = ipc.counters;
     const afkChipStr = afkStateChunkStr(sd);
-    return { humanWord, loopStatus, stateTag, proxyAlive, zenActive, counters, afkChipStr };
+    // #805 — derive countdown sec from ipc.nextWakeAtMs. Negative or null
+    // → segment off. Math.ceil pour que 0.4s reste 1s visible (= countdown
+    // tick down to 0).
+    let nextWakeInSec: number | null = null;
+    if (ipc.nextWakeAtMs !== null) {
+        const remainingMs = ipc.nextWakeAtMs - input.nowMs;
+        if (remainingMs > 0) nextWakeInSec = Math.ceil(remainingMs / 1000);
+    }
+    return { humanWord, loopStatus, stateTag, proxyAlive, zenActive, counters, nextWakeInSec, afkChipStr };
 }
 
 /** Diff deux snapshots et retourne la liste des champs qui ont
  *  changé. Liste vide = no-op (rien à repaint). */
 export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (keyof BarSnapshot)[] {
-    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "afkChipStr"];
+    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "afkChipStr"];
     const changed: (keyof BarSnapshot)[] = [];
     if (prev.humanWord !== next.humanWord) changed.push("humanWord");
     if (prev.loopStatus !== next.loopStatus) changed.push("loopStatus");
@@ -130,6 +141,7 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     if (prev.proxyAlive !== next.proxyAlive) changed.push("proxyAlive");
     if (prev.zenActive !== next.zenActive) changed.push("zenActive");
     if (!countersEqual(prev.counters, next.counters)) changed.push("counters");
+    if (prev.nextWakeInSec !== next.nextWakeInSec) changed.push("counters");
     if (prev.afkChipStr !== next.afkChipStr) changed.push("afkChipStr");
     return changed;
 }
@@ -266,19 +278,20 @@ export class BarRenderer {
         }
         if (changedSet.has("counters")) {
             const c = next.counters;
-            if (c === null) {
-                setOpt("@cl_counts", "");
-            } else {
-                const parts: string[] = [];
+            const parts: string[] = [];
+            if (c !== null) {
                 if (c.open !== null) parts.push(`o:${c.open}`);
                 if (c.backlog !== null) parts.push(`b:${c.backlog}`);
                 if (c.events !== null) parts.push(`e:${c.events}`);
-                if (parts.length === 0) {
-                    setOpt("@cl_counts", "");
-                } else {
-                    const col = barColors();
-                    setOpt("@cl_counts", `#[fg=${col.bar_fg}] ${parts.join(" ")}`);
-                }
+            }
+            // #805 — countdown vers prochain wake. Symbole `⏳` (hourglass)
+            // pour distinguer du `+Ns` boot remaining (qui suit le state tag).
+            if (next.nextWakeInSec !== null) parts.push(`⏳${next.nextWakeInSec}s`);
+            if (parts.length === 0) {
+                setOpt("@cl_counts", "");
+            } else {
+                const col = barColors();
+                setOpt("@cl_counts", `#[fg=${col.bar_fg}] ${parts.join(" ")}`);
             }
         }
         if (changedSet.has("afkChipStr")) {

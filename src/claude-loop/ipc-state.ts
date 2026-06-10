@@ -37,6 +37,11 @@ export interface IpcState {
      *  Stop / SessionStart (set) and UserPromptSubmit (clear). `null`
      *  preserves the previous fallback-to-file behaviour. */
     idleSinceMs: number | null;
+    /** #805 david — epoch ms of the next scheduled `idle:settled` emit
+     *  (= next periodic wake attempt). Computed by the IdleController
+     *  bridge. Null when claude is busy/unknown. Read by the BarRenderer
+     *  to render the countdown segment after `o:N b:N e:N`. */
+    nextWakeAtMs: number | null;
     /** Sentinel : true when the timer subscriber has explicitly cleared
      *  `idleSinceMs` on a UserPromptSubmit event. Lets `readLoopStateInput`
      *  distinguish "no signal yet, read the file" from "human typed,
@@ -169,6 +174,7 @@ export interface IpcState {
 const state: IpcState = {
     bootComplete: null,
     idleSinceMs: null,
+    nextWakeAtMs: null,
     idleSinceCleared: false,
     busyDeferUntilMs: null,
     resumeSessionPickerActive: null,
@@ -249,6 +255,15 @@ export function setIpcBootComplete(value: boolean): void {
 export function setIpcIdleSince(atMs: number | null): void {
     state.idleSinceMs = atMs;
     state.idleSinceCleared = atMs === null;
+    notifyIpcChanged();
+}
+
+/** #805 — set the epoch ms of the next scheduled `idle:settled` emit.
+ *  Bridge subscriber writes this from IdleController context.
+ *  Null when claude is busy/unknown ; BarRenderer reads to render the
+ *  countdown segment after `o:N b:N e:N`. */
+export function setIpcNextWakeAt(atMs: number | null): void {
+    state.nextWakeAtMs = atMs;
     notifyIpcChanged();
 }
 
@@ -465,6 +480,7 @@ export function setIpcPaneResuming(value: boolean | null): void {
 export function resetIpcStateForTests(): void {
     state.bootComplete = null;
     state.idleSinceMs = null;
+    state.nextWakeAtMs = null;
     state.idleSinceCleared = false;
     state.busyDeferUntilMs = null;
     state.resumeSessionPickerActive = null;

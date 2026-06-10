@@ -121,6 +121,7 @@ import {
     setIpcBootDeadlineMs,
     setIpcCounters,
     setIpcIdleSince,
+    setIpcNextWakeAt,
     setIpcLastSseEventAtMs,
     setIpcSseConnected,
     setIpcLastWakeAtMs,
@@ -802,6 +803,7 @@ function client(): AiballClient {
 //   - skip si claude jamais idle stable (= force injection évitée)
 let postBootInjectText: string | null = null;
 let postBootRemindersSent = false;
+let postBootInjectFired = false;
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint, panicMode = false): Promise<boolean> {
     const wakeSvc = getWakeService();
     if (!wakeSvc.isIdle()) {
@@ -1576,6 +1578,21 @@ async function mainSse(): Promise<void> {
         const idleActor = getIdleService().getActor();
         idleActor.subscribe((snap) => {
             setIpcIdleSince(snap.context.idleSinceMs);
+            // #805 david : countdown bar segment. Gated sur bootComplete
+            // (= ne pas afficher pendant le boot, l'idle controller ne
+            // doit trigger qu'après seal). Si en idle.fresh/settled +
+            // bootComplete : expose le prochain `idle:settled` emit.
+            const ctx = snap.context;
+            const bootDone = getIpcState().bootComplete === true;
+            if (bootDone && snap.matches("idle") && ctx.idleSinceMs !== null) {
+                const isSettled = snap.matches({ idle: "settled" });
+                const nextAt = isSettled
+                    ? Date.now() + ctx.settleMs
+                    : ctx.idleSinceMs + ctx.settleMs;
+                setIpcNextWakeAt(nextAt);
+            } else {
+                setIpcNextWakeAt(null);
+            }
         });
         idleActor.on("idle:since", (ev) => log(`idleMachine: idle:since atMs=${ev.atMs} reason=${ev.reason}`));
         idleActor.on("idle:turn_started", (ev) => log(`idleMachine: idle:turn_started atMs=${ev.atMs}`));
@@ -1587,8 +1604,15 @@ async function mainSse(): Promise<void> {
         // post-boot inject (one-shot per session, jamais prepended à un
         // wake).
         idleActor.on("idle:settled", (ev) => {
+            // #805 david : "le trigger du idle doit démarrer que après la
+            // fin du boot". Si boot pas encore sealed, skip silencieusement.
+            if (getIpcState().bootComplete !== true) return;
             log(`idleMachine: idle:settled idleSinceMs=${ev.idleSinceMs} settleMs=${ev.settleMs}`);
-            if (postBootInjectText !== null) {
+            // Double guard contre re-fire : `postBootInjectFired` flag séparé
+            // de la text clear pour bloquer tout idle:settled subséquent même
+            // si l'arming s'est répété (= défense contre une race au reload).
+            if (!postBootInjectFired && postBootInjectText !== null) {
+                postBootInjectFired = true;
                 const text = postBootInjectText;
                 postBootInjectText = null;
                 log(`post-boot reminder: injecting standalone (${text.length} chars)`);

@@ -59,6 +59,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
         proxyAlive: false,
         zenActive: false,
         counters: null,
+        nextWakeInSec: null,
         afkChipStr: "",
         ...overrides,
     };

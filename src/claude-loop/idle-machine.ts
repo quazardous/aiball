@@ -130,7 +130,15 @@ export const idleMachine = setup({
                     },
                 },
                 settled: {
+                    // Entry : 1er emit. Puis re-emit toutes les `settleMs`
+                    // tant qu'on reste dans settled — david `805` : sans
+                    // ça, idle:settled fire 1 fois et le drain de la FIFO
+                    // n'avance que sur les Stop hooks. Re-emit pour
+                    // permettre N tryWake successifs sur 1 longue idle.
                     entry: ["emitSettled"],
+                    after: {
+                        settle: { target: "settled", reenter: true },
+                    },
                 },
             },
         },
