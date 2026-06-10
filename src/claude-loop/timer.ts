@@ -611,10 +611,37 @@ function forwardModuleEnded(name: string): void {
 }
 if (sd) {
     pickerSessionW.on("change", (s) => { setResumeSessionPicker(sd, s.visible); refreshPaneReady(); });
-    pickerSessionW.on("begin", () => forwardModuleStarted("resume_picker"));
+    pickerSessionW.on("begin", () => {
+        forwardModuleStarted("resume_picker");
+        // #639 david `3yz6qa` — "Faut utiliser les pane Watchers et les
+        // state machine". Auto-cross loop-side : le watcher détecte le
+        // picker session, on envoie Enter (= pick latest). CL_RESUME_PICK
+        // = "abort" laisse l'humain choisir.
+        const pickMode = process.env[CL_ENV.RESUME_PICK] ?? "latest";
+        if (pickMode === "abort") {
+            log("watcher: resume_picker begin → CL_RESUME_PICK=abort, no auto-cross");
+            return;
+        }
+        log(`watcher: resume_picker begin → auto-cross (pick=${pickMode}, Enter)`);
+        spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
+    });
     pickerSessionW.on("end", () => forwardModuleEnded("resume_picker"));
     pickerModeW.on("change", (s) => { setResumeModePicker(sd, s.visible); refreshPaneReady(); });
-    pickerModeW.on("begin", () => forwardModuleStarted("resume_mode"));
+    pickerModeW.on("begin", () => {
+        forwardModuleStarted("resume_mode");
+        // #639 — summary-vs-as-is picker. Default "as-is" = Down + Enter.
+        // "summary" = juste Enter. "abort" laisse l'humain.
+        const mode = process.env[CL_ENV.RESUME_MODE] ?? "as-is";
+        if (mode === "abort") {
+            log("watcher: resume_mode begin → CL_RESUME_MODE=abort, no auto-cross");
+            return;
+        }
+        log(`watcher: resume_mode begin → auto-cross (mode=${mode})`);
+        if (mode === "as-is") {
+            spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Down"], { stdio: "ignore" });
+        }
+        spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
+    });
     pickerModeW.on("end", () => forwardModuleEnded("resume_mode"));
     resumingW.on("change", (s) => { setResuming(sd, s.visible); refreshPaneReady(); });
     resumingW.on("begin", () => forwardModuleStarted("resuming"));
