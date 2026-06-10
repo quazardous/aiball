@@ -124,6 +124,12 @@ export function attentionOf(r: InboxRow): Attention {
     // "decision pending on the reporter". Distinct icons / labels
     // surface the kind ; the row accent groups them as "your call".
     if (r.pending_plan) return "resolution";
+    // #897 david dt3fj7 : pending escalation = action humaine attendue
+    // (= "your call" aussi, même tint vert que plan/resolution). La rouge
+    // ESCALATED reste via lifecycleStage="pending-escalation" → badge
+    // urgence ; le liseré dit en plus "il faut que tu agisses sur cette
+    // ligne dans ton inbox".
+    if (r.pending_escalation) return "resolution";
     if (r.pending_comment_count > 0) return "comments";
     return null;
 }
