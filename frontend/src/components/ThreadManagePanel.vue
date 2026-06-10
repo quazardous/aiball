@@ -12,7 +12,7 @@
  * is parent-wired (projectOptions + move-change) so it reuses ThreadView's
  * tested move+refresh path.
  */
-import { ref, onMounted } from "vue";
+import { ref, onMounted, watch } from "vue";
 import Button from "primevue/button";
 import Select from "primevue/select";
 import { api, type TicketSummary } from "../lib/api";
@@ -39,6 +39,16 @@ const owner = ref<string | null>(props.ticket.by_agent);
 // consumer enregistré incl. agents qui n'ont jamais posté).
 const consumers = ref<string[]>([]);
 const assignee = ref<string | null>(props.ticket.assignee ?? null);
+// #902 david `4unc43` : sans ce watch, le local ref capture la value
+// initiale au mount mais ne suit pas les refresh du ticket parent
+// (ex : ThreadView.load() post-accept-with-assign). Sync explicite
+// quand props.ticket change.
+watch(() => props.ticket.assignee, (next) => {
+    assignee.value = next ?? null;
+});
+watch(() => props.ticket.by_agent, (next) => {
+    owner.value = next;
+});
 const loading = ref(true);
 const busy = ref(false);
 const error = ref<string | null>(null);
