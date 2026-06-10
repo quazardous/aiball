@@ -612,7 +612,12 @@ if (sd) {
     compactConfirmW.on("begin", () => forwardModuleStarted("compact_confirm"));
     compactConfirmW.on("end", () => forwardModuleEnded("compact_confirm"));
     promptW.on("change", () => refreshPaneReady());
-    busyW.on("change", (s) => setPaneBusy(sd, s.visible));
+    // #890 david `ue6q3n` : busy = LATCH depuis première vue de
+    // "esc to interrupt" jusqu'au Stop hook. Quand david tape, sa saisie
+    // pousse la regex hors de la fenêtre 5-lignes du footer → s.visible
+    // devient false EN PLEIN turn. Latch : on ignore les transitions
+    // visible=false, on attend `idle:turn_ended` (Stop hook) pour clear.
+    busyW.on("change", (s) => { if (s.visible) setPaneBusy(sd, true); });
     interruptedW.on("change", (s) => setInterrupted(sd, s.visible));
     getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
     // CompactingDetector emits change(s) with `s.active` boolean ; forward begin/end via change diff.
@@ -1596,7 +1601,13 @@ async function mainSse(): Promise<void> {
         });
         idleActor.on("idle:since", (ev) => log(`idleMachine: idle:since atMs=${ev.atMs} reason=${ev.reason}`));
         idleActor.on("idle:turn_started", (ev) => log(`idleMachine: idle:turn_started atMs=${ev.atMs}`));
-        idleActor.on("idle:turn_ended", (ev) => log(`idleMachine: idle:turn_ended atMs=${ev.atMs}`));
+        idleActor.on("idle:turn_ended", (ev) => {
+            log(`idleMachine: idle:turn_ended atMs=${ev.atMs}`);
+            // #890 david `ue6q3n` : clear le latch paneBusy au Stop hook —
+            // pendant qu'on attendait, les transitions visible=false du
+            // BusyWatcher étaient ignorées (cf. busyW.on("change") plus haut).
+            if (sd) setPaneBusy(sd, false);
+        });
         // #805 david : "si on est idle depuis plus de N secondes" → drain
         // la FIFO sans dépendre de SSE/heartbeat aléatoires. Idle stable
         // = signal pour pousser tryWake.
