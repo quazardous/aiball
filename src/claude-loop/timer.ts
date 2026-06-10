@@ -116,6 +116,7 @@ import { bootMachine } from "./boot-machine.js";
 
 let bootActor: ActorRefFrom<typeof bootMachine> | null = null;
 import { getHookWatcher } from "./hook-watcher.js";
+import { WAKE_COOLDOWN_MS } from "./wake-machine.js";
 import {
     getIpcState,
     onIpcChanged,
@@ -1632,8 +1633,8 @@ async function mainSse(): Promise<void> {
             if (bootDone && snap.matches("idle") && ctx.idleSinceMs !== null) {
                 const isSettled = snap.matches({ idle: "settled" });
                 const nextAt = isSettled
-                    ? Date.now() + ctx.settleMs
-                    : ctx.idleSinceMs + ctx.settleMs;
+                    ? Date.now() + WAKE_COOLDOWN_MS
+                    : ctx.idleSinceMs + WAKE_COOLDOWN_MS;
                 setIpcNextWakeAt(nextAt);
             } else {
                 setIpcNextWakeAt(null);
@@ -1668,7 +1669,7 @@ async function mainSse(): Promise<void> {
             // n'est plus géré ici (= sendKeys immédiat au boot:sealed,
             // cf. onFreshBootSeal).
             if (!getIpcState().loopStart) return;
-            log(`idleMachine: idle:settled idleSinceMs=${ev.idleSinceMs} settleMs=${ev.settleMs}`);
+            log(`idleMachine: idle:settled idleSinceMs=${ev.idleSinceMs} tunnel=${WAKE_COOLDOWN_MS}`);
             // #890 safety : si paneBusy était encore latché true ici (pane
             // SM idle stable depuis 30s = forcément pas busy), clear le
             // latch. Garde-fou en cas de Stop hook perdu.

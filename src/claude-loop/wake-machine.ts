@@ -38,10 +38,16 @@
  */
 import { setup, assign, emit } from "xstate";
 
+/** #894 david `xt4w7v` — SSOT pour le 10s "tunnel" qui rythme l'inter-
+ *  wake. Aussi utilisé par IdleController pour le délai d'entrée dans
+ *  l'état settled (= idle stable). Aligne sur les autres 10s de la
+ *  network : `BootMachine.tunnelMs` post-module + `sealed → loop:start`. */
+export const WAKE_COOLDOWN_MS = 10_000;
+
 export interface WakeMachineInput {
     /** Safety net for `inFlight → cooldown`. Default 30s. */
     inFlightTtlMs?: number;
-    /** Post-wake `cooldown → idle` window. Default 10s. */
+    /** Post-wake `cooldown → idle` window. Default = WAKE_COOLDOWN_MS. */
     coalesceWindowMs?: number;
 }
 
@@ -128,7 +134,7 @@ export const wakeMachine = setup({
         wakeInFlightAtMs: null,
         lastWakeAtMs: null,
         inFlightTtlMs: input.inFlightTtlMs ?? 30_000,
-        coalesceWindowMs: input.coalesceWindowMs ?? 10_000,
+        coalesceWindowMs: input.coalesceWindowMs ?? WAKE_COOLDOWN_MS,
     }),
     states: {
         // #848 david `<chat>` : initial state = aucun wake ne fire tant

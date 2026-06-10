@@ -12,9 +12,9 @@
  *
  * Model :
  *
- *   unknown ──SESSION_START──▶ idle.fresh ──after(settleMs)──▶ idle.settled
- *                                 │                                │
- *                                 │ TURN_STARTED          (emit idle:settled)
+ *   unknown ──SESSION_START──▶ idle.fresh ──after(WAKE_COOLDOWN_MS)──▶ idle.settled
+ *                                 │                                        │
+ *                                 │ TURN_STARTED              (emit idle:settled)
  *                                 ▼
  *                              busy ──TURN_ENDED──▶ idle.fresh
  *
@@ -22,18 +22,25 @@
  *   `idle:settled` pour drainer la FIFO sans dépendre de SSE/heartbeat —
  *   #805 david : "si on est idle depuis plus de N secondes" → drain.
  *
+ * #894 david `xt4w7v` : SSOT timing — le délai d'entrée dans `settled`
+ * réutilise `WAKE_COOLDOWN_MS` (10s, le même tunnel qui rythme le wake
+ * cooldown). Pas de param `settleMs` séparé (= 1 source de vérité par
+ * concept "tunnel 10s post-état").
+ *
  * Context :
  *   - `idleSinceMs` : timestamp of last entry to `idle` (null in busy/unknown)
- *   - `settleMs`    : delay before emit idle:settled (default 30s)
  *
  * External pump : none. Pure event-driven from `HookService.subscribe(...)`
  * + XState's `after` delayed transition.
  */
 import { setup, assign, emit } from "xstate";
+import { WAKE_COOLDOWN_MS } from "./wake-machine.js";
 
 export interface IdleMachineInput {
-    /** Delay before emit `idle:settled`. Default 30s. */
-    settleMs?: number;
+    /** Tests-only override — défaut prod = WAKE_COOLDOWN_MS (SSOT).
+     *  Présent uniquement pour les fast tests (faire fire idle:settled
+     *  en <1s au lieu d'attendre 10s du tunnel réel). */
+    tunnelMs?: number;
 }
 
 /** Locus events emitted by the actor. */
@@ -41,15 +48,13 @@ export type IdleEmittedEvent =
     | { type: "idle:since"; atMs: number; reason: "session_start" | "turn_ended" }
     | { type: "idle:turn_started"; atMs: number }
     | { type: "idle:turn_ended"; atMs: number }
-    | { type: "idle:settled"; idleSinceMs: number; settleMs: number };
-
-const DEFAULT_SETTLE_MS = 30_000;
+    | { type: "idle:settled"; idleSinceMs: number };
 
 export const idleMachine = setup({
     types: {
         context: {} as {
             idleSinceMs: number | null;
-            settleMs: number;
+            tunnelMs: number;
         },
         events: {} as
             | { type: "SESSION_START"; atMs: number }
@@ -59,7 +64,7 @@ export const idleMachine = setup({
         input: {} as IdleMachineInput,
     },
     delays: {
-        settle: ({ context }) => context.settleMs,
+        tunnel: ({ context }) => context.tunnelMs,
     },
     actions: {
         stampIdleAt: assign({
@@ -92,7 +97,6 @@ export const idleMachine = setup({
         emitSettled: emit(({ context }) => ({
             type: "idle:settled" as const,
             idleSinceMs: context.idleSinceMs ?? 0,
-            settleMs: context.settleMs,
         })),
     },
 }).createMachine({
@@ -100,7 +104,7 @@ export const idleMachine = setup({
     initial: "unknown",
     context: ({ input }) => ({
         idleSinceMs: null,
-        settleMs: input.settleMs ?? DEFAULT_SETTLE_MS,
+        tunnelMs: input.tunnelMs ?? WAKE_COOLDOWN_MS,
     }),
     states: {
         unknown: {
@@ -126,18 +130,19 @@ export const idleMachine = setup({
             states: {
                 fresh: {
                     after: {
-                        settle: { target: "settled" },
+                        tunnel: { target: "settled" },
                     },
                 },
                 settled: {
-                    // Entry : 1er emit. Puis re-emit toutes les `settleMs`
-                    // tant qu'on reste dans settled — david `805` : sans
-                    // ça, idle:settled fire 1 fois et le drain de la FIFO
-                    // n'avance que sur les Stop hooks. Re-emit pour
-                    // permettre N tryWake successifs sur 1 longue idle.
+                    // Entry : 1er emit. Puis re-emit toutes les
+                    // WAKE_COOLDOWN_MS tant qu'on reste dans settled —
+                    // david `805` : sans ça, idle:settled fire 1 fois et
+                    // le drain de la FIFO n'avance que sur les Stop hooks.
+                    // Re-emit pour permettre N tryWake successifs sur 1
+                    // longue idle.
                     entry: ["emitSettled"],
                     after: {
-                        settle: { target: "settled", reenter: true },
+                        tunnel: { target: "settled", reenter: true },
                     },
                 },
             },

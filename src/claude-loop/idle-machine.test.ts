@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { createActor } from "xstate";
 import { idleMachine } from "./idle-machine.js";
 
-function mkActor(input: { settleMs?: number } = {}) {
+function mkActor(input: { tunnelMs?: number } = {}) {
     return createActor(idleMachine, { input });
 }
 
@@ -106,35 +106,25 @@ test("TURN_STARTED in unknown : ignored (no transition)", () => {
     assert.equal(actor.getSnapshot().value, "unknown");
 });
 
-// #805 — idle.fresh → idle.settled après settleMs, emit idle:settled.
+// #805 — idle.fresh → idle.settled après tunnelMs, emit idle:settled.
 
-test("idle.fresh → idle.settled after settleMs (XState fake clock)", { only: false }, async (t) => {
+test("idle.fresh → idle.settled after tunnelMs", async (t) => {
     const SETTLE = 1_000;
-    const clock = (await import("xstate")).createMachine; // touch import for tsc
-    void clock;
-    const { createActor } = await import("xstate");
-    const actor = createActor(idleMachine, {
-        input: { settleMs: SETTLE },
-        // XState v5 simulated clock via `clock` option
-        clock: {
-            setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
-            clearTimeout: (id) => globalThis.clearTimeout(id),
-        },
-    }).start();
+    const actor = createActor(idleMachine, { input: { tunnelMs: SETTLE } }).start();
+    t.after(() => actor.stop()); // #894 — stop reenter timer post-test
     actor.send({ type: "SESSION_START", atMs: 1_000 });
     assert.deepEqual(actor.getSnapshot().value, { idle: "fresh" });
-    const events: { idleSinceMs: number; settleMs: number }[] = [];
+    const events: { idleSinceMs: number }[] = [];
     actor.on("idle:settled", (ev) => events.push(ev));
     await new Promise((r) => setTimeout(r, SETTLE + 50));
     assert.deepEqual(actor.getSnapshot().value, { idle: "settled" });
     assert.equal(events.length, 1);
-    assert.equal(events[0].settleMs, SETTLE);
     assert.equal(events[0].idleSinceMs, 1_000);
 });
 
 test("TURN_STARTED before settle cancels the timer (no idle:settled emitted)", async () => {
     const SETTLE = 200;
-    const actor = mkActor({ settleMs: SETTLE });
+    const actor = mkActor({ tunnelMs: SETTLE });
     actor.start();
     actor.send({ type: "SESSION_START", atMs: 1_000 });
     const events: unknown[] = [];
@@ -145,9 +135,10 @@ test("TURN_STARTED before settle cancels the timer (no idle:settled emitted)", a
     assert.equal(actor.getSnapshot().value, "busy");
 });
 
-test("re-entering idle (TURN_ENDED → fresh) reset le settle timer", async () => {
+test("re-entering idle (TURN_ENDED → fresh) reset le settle timer", async (t) => {
     const SETTLE = 200;
-    const actor = mkActor({ settleMs: SETTLE });
+    const actor = mkActor({ tunnelMs: SETTLE });
+    t.after(() => actor.stop()); // #894 — stop reenter timer post-test
     actor.start();
     actor.send({ type: "SESSION_START", atMs: 1_000 });
     await new Promise((r) => setTimeout(r, 50));
