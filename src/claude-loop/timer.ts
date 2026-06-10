@@ -797,10 +797,20 @@ async function tryWake(reason: string, manualWake = false, hint?: WakeHint, pani
         return false;
     }
     wakeSvc.request(reason);
+    let delivered = false;
     try {
-        return await tryWakeInner(reason, manualWake, hint, panicMode);
+        delivered = await tryWakeInner(reason, manualWake, hint, panicMode);
+        return delivered;
     } finally {
-        wakeSvc.completed();
+        // #879 fix : cooldown UNIQUEMENT après une delivery réussie. Si
+        // tryWakeInner a skip (zen, no work, gate refusé), retour direct
+        // à idle pour que le prochain wake (SSE ping, backlog, heartbeat)
+        // ne soit pas bloqué 10s pour rien.
+        if (delivered) {
+            wakeSvc.completed();
+        } else {
+            wakeSvc.skipped();
+        }
     }
 }
 // A panic wake bypasses ONLY the busy gates (busy-defer, pane shows

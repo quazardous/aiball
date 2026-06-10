@@ -50,9 +50,17 @@ export class WakeService {
     }
 
     /** Push a WAKE_COMPLETED event — fires when the wake's side-effects
-     *  have all settled (post-tryWakeInner). Transitions to `cooldown`. */
+     *  have all settled (post-tryWakeInner, with `delivered=true`).
+     *  Transitions to `cooldown` (= post-fire coalesce window). */
     completed(): void {
         this.actor.send({ type: "WAKE_COMPLETED" });
+    }
+
+    /** Push a WAKE_SKIPPED event — fires when tryWakeInner returned false
+     *  (gate refused : zen, no work, busy-defer, etc.). Returns directly
+     *  to `idle` WITHOUT cooldown so the next wake attempt isn't blocked. */
+    skipped(): void {
+        this.actor.send({ type: "WAKE_SKIPPED" });
     }
 }
 

@@ -46,7 +46,7 @@ export type WakeEmittedEvent =
     | { type: "wake:requested"; source: string; atMs: number }
     | { type: "wake:in_flight_started"; atMs: number }
     | { type: "wake:delivered"; phrase: string; headMessageId: number | null }
-    | { type: "wake:cleared"; reason: "completed" | "ttl" }
+    | { type: "wake:cleared"; reason: "completed" | "ttl" | "skipped" }
     | { type: "wake:cooldown_expired" };
 
 export const wakeMachine = setup({
@@ -61,6 +61,7 @@ export const wakeMachine = setup({
             | { type: "REQUEST_WAKE"; source: string; atMs: number }
             | { type: "WAKE_DELIVERED"; phrase: string; headMessageId: number | null; deliveredAtMs: number }
             | { type: "WAKE_COMPLETED" }
+            | { type: "WAKE_SKIPPED" }
             | { type: "IN_FLIGHT_TTL_EXPIRED" },
         emitted: {} as WakeEmittedEvent,
         input: {} as WakeMachineInput,
@@ -98,6 +99,10 @@ export const wakeMachine = setup({
         emitClearedTtl: emit(() => ({
             type: "wake:cleared" as const,
             reason: "ttl" as const,
+        })),
+        emitClearedSkipped: emit(() => ({
+            type: "wake:cleared" as const,
+            reason: "skipped" as const,
         })),
         emitCooldownExpired: emit(() => ({
             type: "wake:cooldown_expired" as const,
@@ -141,6 +146,14 @@ export const wakeMachine = setup({
                 WAKE_COMPLETED: {
                     target: "cooldown",
                     actions: ["emitClearedCompleted", "clearInFlight"],
+                },
+                WAKE_SKIPPED: {
+                    // tryWakeInner skipped (gate refused : zen, no work,
+                    // busy-defer, etc.). No actual delivery happened, so
+                    // skip cooldown and return directly to idle — the
+                    // next wake attempt can proceed immediately.
+                    target: "idle",
+                    actions: ["emitClearedSkipped", "clearInFlight"],
                 },
                 IN_FLIGHT_TTL_EXPIRED: {
                     target: "cooldown",

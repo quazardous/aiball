@@ -127,6 +127,25 @@ test("emit wake:cleared (reason=ttl) on IN_FLIGHT_TTL_EXPIRED", () => {
     assert.equal(events[0].reason, "ttl");
 });
 
+test("WAKE_SKIPPED in inFlight : transition → idle directement (pas de cooldown)", () => {
+    const actor = mkActor().start();
+    actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
+    assert.equal(actor.getSnapshot().value, "inFlight");
+    actor.send({ type: "WAKE_SKIPPED" });
+    assert.equal(actor.getSnapshot().value, "idle", "skip retourne directement à idle (no cooldown)");
+    assert.equal(actor.getSnapshot().context.wakeInFlightAtMs, null);
+});
+
+test("emit wake:cleared (reason=skipped) on WAKE_SKIPPED", () => {
+    const actor = mkActor().start();
+    actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
+    const events: { reason: string }[] = [];
+    actor.on("wake:cleared", (ev) => events.push(ev));
+    actor.send({ type: "WAKE_SKIPPED" });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].reason, "skipped");
+});
+
 test("emit wake:cooldown_expired on cooldown → idle", async () => {
     const actor = mkActor().start();
     actor.send({ type: "REQUEST_WAKE", source: "ping", atMs: 1_000 });
