@@ -23,7 +23,25 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
-## [0.29.0] — 2026-06-10
+## [0.30.0] — 2026-06-10
+
+### Added
+
+- Backlog gains a `blocked` section : tickets gated by an open `depends_on` / `blocks` relation now surface in their own bucket instead of disappearing from the work-order. Lets the agent see the chain that's stuck and either nudge the blocker's owner, retire a stale dependency, or document the wait. The skill discipline is updated accordingly — wake CTA on a blocked ticket means "help unblock", not "start coding".
+- Web terminal AFK control splits into two bare-glyph icons : a green Start (`pi pi-play`, claude autonomous) and a red Stop (`pi pi-stop`, take over). No button shell, hover shifts the glyph color. The current state's icon shows in orange so the operator sees at a glance whether claude is running or paused. The legacy cycle toggle + reset duo is gone.
+- The four wake-CTA `*_rejected` phrases (plan / resolution / wontfix / escalation) now lead with `REJECT — your <kind>, …` so the verb is the first word the agent reads, instead of being buried after "Your". Matches the agent-facing convention that REJECTs should be impossible to miss.
+
+### Changed
+
+- The aiball skill ships a structural pass : reopen discipline ("reopen = your court, propose a new direction") and blocked-ticket discipline ("audit the blocker, surface on it, help the reporter") added ; the whole document was tightened to be more synthetic for agent readers (≈21% shorter, same operational content). Internal "tier 1 / tier 2 / tier 4" wording dropped from agent-facing surfaces — those numbers are implementation detail.
+
+### Fixed
+
+- Wake CTA picker now matches the CLI default : tickets whose cooldown horizon is in the future are skipped instead of being re-injected every heartbeat. Previously `claude-loop backlog` would correctly hide a cooled ticket while the picker kept naming it in the wake phrase ("look #N: …") forever. The picker now fetches 10 candidates and picks the first non-cooled one ; if all 10 are cooled, the look-leg drops and the wake template renders the cultural greeting alone.
+- The tmux bar's `b:N` counter, `claude-loop backlog --counter-only`, and `claude-loop backlog` (default list) now agree exactly on what counts as backlog. Previously the bar and the counter-only flag included cooled tickets in the count while the list filtered them out — a single ticket cooldown could leave the bar reading `b:4` next to a list with one row. All three sources now pass `cooldown_sec` and filter `backlog_cooled_until` consistently.
+- The tmux bar counter segment is always visible now, even before the first successful counter fetch. Previously a cold-boot or a transient HTTP failure left the `o:N b:N e:N` segment empty until the next refresh ; the bar now shows `o:- b:- e:-` placeholders so the operator knows the segment exists and is waiting for data.
+
+
 
 ### Added
 
