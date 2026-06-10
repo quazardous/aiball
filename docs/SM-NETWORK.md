@@ -241,6 +241,35 @@ afkActor.on("afk:armed_10m", (ev) => {
 actions: ["emitX", "commitToTargetState"]  // emit reads OLD context, then assign mutates
 ```
 
+### The inbound channel — `actor.send`
+
+The inverse of `emit` (controller → outside) is `actor.send({...})` (outside → controller). It's the SOLE way for external code to drive the machine — declared events in, locus events out, no other public interface.
+
+**Naming convention — distinguish direction at the callsite** :
+
+| Direction | Channel | Declared in | Convention | Example |
+|---|---|---|---|---|
+| Outside → SM (drive) | `actor.send({type, ...})` | `setup.types.events` | `SCREAMING_SNAKE_CASE` | `REQUEST_WAKE`, `KEYSTROKE`, `SESSION_START`, `WATCHER_TICK` |
+| SM → Outside (notify) | `emit({type, ...})` ↦ `actor.on(type, cb)` | `setup.types.emitted` | `<controller>:lower_snake` | `wake:requested`, `boot:sealed`, `afk:armed_10m` |
+
+The two casings make the direction obvious : a `SCREAMING_CASE` event name in a call means "outside is telling the machine something happened" ; a `controller:lower_case` name means "the machine is telling outside something happened".
+
+**Allowed inbound** :
+
+- ✅ `actor.send({type: "EVENT_NAME", ...payload})` from any consumer (timer.ts, hook subscribers, external services).
+- ✅ Events declared in the machine's `setup.types.events` discriminated union — TypeScript narrows the payload at the send-site.
+- ✅ A single keystroke / hook event may legitimately translate to a SCREAMING_CASE event (`KEYSTROKE`, `SESSION_START`).
+
+**Forbidden inbound** :
+
+- ❌ Reaching into `actor.context` / `actor.state` to mutate it (no `setActorContext`, no `actor.modify` — XState v5 doesn't expose them anyway, but the principle holds).
+- ❌ Sending events that bypass the declared events union (TypeScript would catch it, but the rule is to keep the events surface FORMAL).
+- ❌ A consumer that "knows the internal state" and sends events tailored to the current state. Inbound events describe **what happened in the outside world**, not what the machine should do next.
+
+**When the inbound is "too thin"** :
+
+If a consumer only ever sends an event that does `state→state'` with a single context assign and nothing else, that's the signal that the SM might not be earning its keep — it's a pure router. Real SMs do something *between* `actor.send` and the resulting `emit` (timer, debounce, guard, mutex, multi-state cascade). See `PaneStateController` post-mortem in the ticket thread for an example of an SM that didn't pass this test.
+
 ### External pump
 
 Machines stay **pure** — no internal timers, no `Date.now()`, no I/O. The
