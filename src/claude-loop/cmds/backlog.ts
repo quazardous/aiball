@@ -40,15 +40,40 @@ interface UnreadMessage {
     body?: string | null;
 }
 
+/**
+ * #805 david : les 3-char kinds sont ambigus (res = accepted ou rejected ?
+ * tic = closed ou reopened ?). Mapping explicite + indicateur +/- pour
+ * les décisions accepted/rejected.
+ */
+const KIND_LABEL: Record<string, string> = {
+    ticket_created: "new",
+    comment_added: "comment",
+    ticket_closed: "closed",
+    ticket_reopened: "reopened",
+    ticket_resolved: "resolved",
+    ticket_referenced: "ref",
+    ticket_sub_added: "sub",
+    ticket_relation: "rel",
+    plan_accepted: "+plan",
+    plan_rejected: "-plan",
+    resolution_accepted: "+resolution",
+    resolution_rejected: "-resolution",
+    wontfix_accepted: "+wontfix",
+    wontfix_rejected: "-wontfix",
+    escalation_accepted: "+escalation",
+    escalation_rejected: "-escalation",
+};
+
 function fmtEvent(m: UnreadMessage, currentProject: string): string {
-    const kind = m.kind === "ticket_created" ? "new" : m.kind === "comment_added" ? "cmt" : (m.kind ?? "?").slice(0, 3);
+    const rawKind = m.kind ?? "?";
+    const kind = KIND_LABEL[rawKind] ?? rawKind;
     const tid = m.ticket_id ?? m.id;
     const title = (m.title ?? "").slice(0, 60);
     const excerpt = m.body ? ` — ${m.body.split("\n")[0].slice(0, 50)}` : "";
     const by = m.by_agent ? ` by ${m.by_agent}` : "";
     const hashid = m.hashid ? ` #${m.hashid}` : "";
     const projPrefix = m.project && m.project !== currentProject ? `[${m.project}] ` : "";
-    return `${kind.padEnd(3)} ${projPrefix}#${String(tid).padEnd(4)}${hashid.padEnd(8)} ${title}${by}${excerpt}`;
+    return `${kind.padEnd(11)} ${projPrefix}#${String(tid).padEnd(4)}${hashid.padEnd(8)} ${title}${by}${excerpt}`;
 }
 
 function fmtTicket(t: TicketRow): string {
