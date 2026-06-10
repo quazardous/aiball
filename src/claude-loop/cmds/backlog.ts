@@ -13,6 +13,8 @@ interface BacklogOpts {
     events?: boolean;
     limit?: string;
     json?: boolean;
+    /** #886 follow-up : print just the bar counters `o:N b:N e:N` and exit. */
+    counterOnly?: boolean;
 }
 
 interface TicketRow {
@@ -61,6 +63,30 @@ export async function cmdBacklog(opts: BacklogOpts): Promise<void> {
     const ctx = resolveProjectContext();
     const limit = Math.max(1, Math.min(500, Number(opts.limit ?? 50)));
     const client = new AiballClient({ agentId: ctx.agent });
+
+    if (opts.counterOnly) {
+        // Aligné avec le bar (cf. timer.ts:1070) :
+        //   - open    : project-scoped si loop attaché à un projet
+        //   - backlog : project-scoped (idem ?backlog=1&project=…)
+        //   - events  : cross-project (pingsCount.unread)
+        const [projects, backlogRows, unread] = await Promise.all([
+            client.listProjectsDetailed(),
+            client.listTickets({ backlog: "1", limit: "500", project: ctx.project }) as Promise<TicketRow[] | { tickets?: TicketRow[] }>,
+            client.unread(null, 1) as Promise<{ count?: number }>,
+        ]);
+        const open = projects.find((p) => p.name === ctx.project)?.open_count ?? 0;
+        const backlogTickets: TicketRow[] = Array.isArray(backlogRows)
+            ? backlogRows
+            : (backlogRows.tickets ?? []);
+        const backlog = backlogTickets.length;
+        const events = unread.count ?? 0;
+        if (opts.json) {
+            process.stdout.write(`${JSON.stringify({ open, backlog, events })}\n`);
+        } else {
+            process.stdout.write(`o:${open} b:${backlog} e:${events}\n`);
+        }
+        return;
+    }
 
     if (opts.events) {
         // FIFO consumer-scoped (cross-project, #800).
