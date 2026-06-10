@@ -43,7 +43,7 @@
  *   - On respawn handoff, sends `HARD_ARM_10M(expiryMs)` / `HARD_ARM_INF`
  *     right after `actor.start()` to sync with the live ipcState.
  */
-import { setup, assign } from "xstate";
+import { setup, assign, emit } from "xstate";
 
 export type AfkMode = "off" | "wait_10m" | "wait_inf";
 
@@ -51,6 +51,13 @@ export interface AfkMachineInput {
     /** Debounce window between an F9 toggle and the committed state flip. */
     debounceMs?: number;
 }
+
+/** Locus events emitted by the actor. See `docs/SM-NETWORK.md` for the
+ *  `<controller>:<event_name>` convention + payload guidelines. */
+export type AfkEmittedEvent =
+    | { type: "afk:armed_10m"; expiryMs: number; prevMode: AfkMode }
+    | { type: "afk:armed_inf"; prevMode: AfkMode }
+    | { type: "afk:cleared"; prevMode: AfkMode; reason: "user" | "expiry" };
 
 export const afkMachine = setup({
     types: {
@@ -68,6 +75,7 @@ export const afkMachine = setup({
             | { type: "HARD_ARM_INF" }
             | { type: "HARD_CLEAR" }
             | { type: "EXPIRY_REACHED" },
+        emitted: {} as AfkEmittedEvent,
         input: {} as AfkMachineInput,
     },
     actions: {
@@ -106,6 +114,37 @@ export const afkMachine = setup({
             dispExpiryMs: ({ event }) =>
                 event.type === "HARD_ARM_10M" ? event.expiryMs : null,
         }),
+        // Emit actions — read context BEFORE the assign-actions above mutate it.
+        // Place these FIRST in the transition's `actions` array.
+        emitAfkArmed10mFresh: emit(({ context }) => ({
+            type: "afk:armed_10m" as const,
+            expiryMs: context.dispExpiryMs ?? 0,
+            prevMode: context.afkMode,
+        })),
+        emitAfkArmed10mPreserve: emit(({ context }) => ({
+            type: "afk:armed_10m" as const,
+            expiryMs: context.afkExpiryMs ?? 0,
+            prevMode: context.afkMode,
+        })),
+        emitAfkArmed10mHard: emit(({ context, event }) => ({
+            type: "afk:armed_10m" as const,
+            expiryMs: event.type === "HARD_ARM_10M" ? event.expiryMs : 0,
+            prevMode: context.afkMode,
+        })),
+        emitAfkArmedInf: emit(({ context }) => ({
+            type: "afk:armed_inf" as const,
+            prevMode: context.afkMode,
+        })),
+        emitAfkClearedUser: emit(({ context }) => ({
+            type: "afk:cleared" as const,
+            prevMode: context.afkMode,
+            reason: "user" as const,
+        })),
+        emitAfkClearedExpiry: emit(({ context }) => ({
+            type: "afk:cleared" as const,
+            prevMode: context.afkMode,
+            reason: "expiry" as const,
+        })),
     },
     guards: {
         committedIsWait10m: ({ context }) => context.afkMode === "wait_10m",
@@ -128,22 +167,22 @@ export const afkMachine = setup({
                 ARM_10M: { target: "pending_10m", actions: "setDispFromHint" },
                 ARM_INF: { target: "pending_inf" },
                 ARM_OFF: { target: "off" }, // no-op
-                HARD_ARM_10M: { target: "wait_10m", actions: "hardArmWait10m" },
-                HARD_ARM_INF: { target: "wait_inf", actions: "commitToWaitInf" },
-                HARD_CLEAR: { target: "off", actions: "commitToOff" },
+                HARD_ARM_10M: { target: "wait_10m", actions: ["emitAfkArmed10mHard", "hardArmWait10m"] },
+                HARD_ARM_INF: { target: "wait_inf", actions: ["emitAfkArmedInf", "commitToWaitInf"] },
+                HARD_CLEAR: { target: "off", actions: "commitToOff" }, // already off, no emit
             },
         },
         pending_off: {
             after: {
-                debounce: { target: "off", actions: "commitToOff" },
+                debounce: { target: "off", actions: ["emitAfkClearedUser", "commitToOff"] },
             },
             on: {
                 ARM_10M: { target: "pending_10m", actions: "setDispFromHint" },
                 ARM_INF: { target: "pending_inf", actions: "clearDisp" },
                 ARM_OFF: { target: "pending_off", reenter: true }, // reset debounce timer
-                HARD_ARM_10M: { target: "wait_10m", actions: "hardArmWait10m" },
-                HARD_ARM_INF: { target: "wait_inf", actions: "commitToWaitInf" },
-                HARD_CLEAR: { target: "off", actions: "commitToOff" },
+                HARD_ARM_10M: { target: "wait_10m", actions: ["emitAfkArmed10mHard", "hardArmWait10m"] },
+                HARD_ARM_INF: { target: "wait_inf", actions: ["emitAfkArmedInf", "commitToWaitInf"] },
+                HARD_CLEAR: { target: "off", actions: ["emitAfkClearedUser", "commitToOff"] },
             },
         },
         pending_10m: {
@@ -152,11 +191,11 @@ export const afkMachine = setup({
                     {
                         target: "wait_10m",
                         guard: "committedIsWait10m",
-                        actions: "preserveWait10mExpiry",
+                        actions: ["emitAfkArmed10mPreserve", "preserveWait10mExpiry"],
                     },
                     {
                         target: "wait_10m",
-                        actions: "freshArmWait10m",
+                        actions: ["emitAfkArmed10mFresh", "freshArmWait10m"],
                     },
                 ],
             },
@@ -164,22 +203,22 @@ export const afkMachine = setup({
                 ARM_10M: { target: "pending_10m", actions: "setDispFromHint", reenter: true },
                 ARM_INF: { target: "pending_inf", actions: "clearDisp" },
                 ARM_OFF: { target: "pending_off", actions: "clearDisp" },
-                HARD_ARM_10M: { target: "wait_10m", actions: "hardArmWait10m" },
-                HARD_ARM_INF: { target: "wait_inf", actions: "commitToWaitInf" },
-                HARD_CLEAR: { target: "off", actions: "commitToOff" },
+                HARD_ARM_10M: { target: "wait_10m", actions: ["emitAfkArmed10mHard", "hardArmWait10m"] },
+                HARD_ARM_INF: { target: "wait_inf", actions: ["emitAfkArmedInf", "commitToWaitInf"] },
+                HARD_CLEAR: { target: "off", actions: ["emitAfkClearedUser", "commitToOff"] },
             },
         },
         pending_inf: {
             after: {
-                debounce: { target: "wait_inf", actions: "commitToWaitInf" },
+                debounce: { target: "wait_inf", actions: ["emitAfkArmedInf", "commitToWaitInf"] },
             },
             on: {
                 ARM_10M: { target: "pending_10m", actions: "setDispFromHint" },
                 ARM_INF: { target: "pending_inf", reenter: true }, // reset debounce
                 ARM_OFF: { target: "pending_off" },
-                HARD_ARM_10M: { target: "wait_10m", actions: "hardArmWait10m" },
-                HARD_ARM_INF: { target: "wait_inf", actions: "commitToWaitInf" },
-                HARD_CLEAR: { target: "off", actions: "commitToOff" },
+                HARD_ARM_10M: { target: "wait_10m", actions: ["emitAfkArmed10mHard", "hardArmWait10m"] },
+                HARD_ARM_INF: { target: "wait_inf", actions: ["emitAfkArmedInf", "commitToWaitInf"] },
+                HARD_CLEAR: { target: "off", actions: ["emitAfkClearedUser", "commitToOff"] },
             },
         },
         wait_10m: {
@@ -187,10 +226,10 @@ export const afkMachine = setup({
                 ARM_10M: { target: "pending_10m", actions: "setDispFromHint" },
                 ARM_INF: { target: "pending_inf" },
                 ARM_OFF: { target: "pending_off" },
-                HARD_ARM_10M: { target: "wait_10m", actions: "hardArmWait10m", reenter: true },
-                HARD_ARM_INF: { target: "wait_inf", actions: "commitToWaitInf" },
-                HARD_CLEAR: { target: "off", actions: "commitToOff" },
-                EXPIRY_REACHED: { target: "off", actions: "commitToOff" },
+                HARD_ARM_10M: { target: "wait_10m", actions: ["emitAfkArmed10mHard", "hardArmWait10m"], reenter: true },
+                HARD_ARM_INF: { target: "wait_inf", actions: ["emitAfkArmedInf", "commitToWaitInf"] },
+                HARD_CLEAR: { target: "off", actions: ["emitAfkClearedUser", "commitToOff"] },
+                EXPIRY_REACHED: { target: "off", actions: ["emitAfkClearedExpiry", "commitToOff"] },
             },
         },
         wait_inf: {
@@ -198,9 +237,9 @@ export const afkMachine = setup({
                 ARM_10M: { target: "pending_10m", actions: "setDispFromHint" },
                 ARM_INF: { target: "wait_inf" }, // no-op cycle
                 ARM_OFF: { target: "pending_off" },
-                HARD_ARM_10M: { target: "wait_10m", actions: "hardArmWait10m" },
+                HARD_ARM_10M: { target: "wait_10m", actions: ["emitAfkArmed10mHard", "hardArmWait10m"] },
                 HARD_ARM_INF: { target: "wait_inf" }, // no-op
-                HARD_CLEAR: { target: "off", actions: "commitToOff" },
+                HARD_CLEAR: { target: "off", actions: ["emitAfkClearedUser", "commitToOff"] },
             },
         },
     },

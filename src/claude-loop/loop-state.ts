@@ -434,12 +434,6 @@ export type LoopStateEvents = {
      *  at `pane_probe_fast_ms`. `next=false` = back to slow. Timer's
      *  pane-probe subscribes here to re-arm its setInterval. */
     pollFast: (next: boolean, prev: boolean) => void;
-    /** AFK 10m hold just armed (off → 10m, or 10m refreshed via re-arm). */
-    afkArmed10m: (expiryMs: number) => void;
-    /** AFK ∞ hold just armed. */
-    afkArmedInf: () => void;
-    /** AFK cleared (any → off). */
-    afkCleared: () => void;
     /** #751 htwguc — `dispAfk` couple changed between two consecutive
      *  inputs (toggle F9, commit, or convergence to null). The chip
      *  painter subscribes for an instant repaint. */
@@ -530,21 +524,13 @@ export class LoopStateBus {
         const prevFast = shouldPollFast(prevInput);
         const nextFast = shouldPollFast(nextInput);
         if (prevFast !== nextFast) this.emit("pollFast", nextFast, prevFast);
-        // #872 Phase 3 — `bootEnded`/`bootStarted` retirés ; le BootMachine
-        //   acteur (timer.ts) est l'autorité unique sur le sealing. Le bus
-        //   garde la mécanique de diff pour les autres axes (busy, afk, …).
-        // AFK transitions — driven by the underlying file mode, not the
-        // chunk label (which can flip color without semantic change).
-        const prevAfk = effectiveAfkMode(prevInput);
-        const nextAfk = effectiveAfkMode(nextInput);
-        if (prevAfk !== nextAfk) {
-            if (nextAfk === "wait_10m") this.emit("afkArmed10m", nextInput.afkExpiryMs ?? 0);
-            else if (nextAfk === "wait_inf") this.emit("afkArmedInf");
-            else this.emit("afkCleared");
-        } else if (nextAfk === "wait_10m" && prevInput.afkExpiryMs !== nextInput.afkExpiryMs && nextInput.afkExpiryMs !== null) {
-            // 10m re-armed (timer refreshed via typing in the 10m window)
-            this.emit("afkArmed10m", nextInput.afkExpiryMs);
-        }
+        // #872 Phase 3 + #877 Slice A — `bootEnded`/`bootStarted` ET
+        //   `afkArmed10m`/`afkArmedInf`/`afkCleared` retirés. Les BootMachine
+        //   et AfkMachine acteurs (cf. boot-machine.ts / afk-machine.ts) sont
+        //   l'autorité unique sur ces "locus" events, émis via XState `emit`
+        //   et consommés via `actor.on(<controller>:<event_name>, cb)`.
+        //   Le bus garde la mécanique de diff pour les input-derived signals
+        //   (busy, inputHot, pollFast, dispAfkChanged, picker, wake gates).
         if (!prev.wakeAllowed && next.wakeAllowed) this.emit("wakeBecameAllowed", next);
         if (prev.wakeAllowed && !next.wakeAllowed) this.emit("wakeBecameBlocked", next.wakeSkipReason ?? "unknown");
         if (!prevInput.resumePickerActive && nextInput.resumePickerActive) this.emit("pickerOpened");

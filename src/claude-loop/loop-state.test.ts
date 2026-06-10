@@ -136,55 +136,9 @@ test("LoopStateBus: second update with same view → no emit", () => {
     assert.equal(calls, 0);
 });
 
-test("LoopStateBus: afkArmed10m fires on off → 10m", () => {
-    const bus = new LoopStateBus();
-    const start = T0;
-    const now = start + 5 * MIN;
-    bus.update(baseInput({
-        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
-    }));
-    let expiry = 0;
-    bus.on("afkArmed10m", (e) => { expiry = e; });
-    const newExpiry = now + 10 * MIN;
-    bus.update(baseInput({
-        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
-        afkMode: "wait_10m", afkExpiryMs: newExpiry,
-    }));
-    assert.equal(expiry, newExpiry);
-});
-
-test("LoopStateBus: afkArmedInf fires on 10m → ∞", () => {
-    const bus = new LoopStateBus();
-    const start = T0;
-    const now = start + 5 * MIN;
-    bus.update(baseInput({
-        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
-        afkMode: "wait_10m", afkExpiryMs: now + 5 * MIN,
-    }));
-    let fired = false;
-    bus.on("afkArmedInf", () => { fired = true; });
-    bus.update(baseInput({
-        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
-        afkMode: "wait_inf",
-    }));
-    assert.equal(fired, true);
-});
-
-test("LoopStateBus: afkCleared fires on ∞ → off", () => {
-    const bus = new LoopStateBus();
-    const start = T0;
-    const now = start + 5 * MIN;
-    bus.update(baseInput({
-        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
-        afkMode: "wait_inf",
-    }));
-    let fired = false;
-    bus.on("afkCleared", () => { fired = true; });
-    bus.update(baseInput({
-        nowMs: now, loopStartMs: start, bootComplete: true, idleSinceMs: now,
-    }));
-    assert.equal(fired, true);
-});
+// #877 Slice A — `afkArmed10m`/`afkArmedInf`/`afkCleared` retirés du
+// LoopStateBus. Ces "locus" events sont désormais émis par l'AfkMachine
+// acteur (cf. afk-machine.test.ts pour la couverture).
 
 test("LoopStateBus: wakeBecameAllowed fires when gate flips closed→open", () => {
     const bus = new LoopStateBus();

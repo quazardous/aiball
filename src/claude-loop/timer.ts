@@ -1476,60 +1476,64 @@ async function mainSse(): Promise<void> {
     // itself was a keystroke). One-shot : if AFK gets re-armed
     // before input-hot expires, the unsubscribe cancels the pending
     // wake (the human changed their mind).
-    loopBus.on("afkCleared", () => {
-        const current = readLoopStateInput(sd!);
-        if (isInputHot(current)) {
-            log("state-bus: afkCleared — input-hot still active, deferring wake");
-            let unsubInputHot: (() => void) | null = null;
-            let unsubAfk: (() => void) | null = null;
-            const cleanup = () => {
-                if (unsubInputHot) unsubInputHot();
-                if (unsubAfk) unsubAfk();
-                unsubInputHot = null;
-                unsubAfk = null;
-            };
-            unsubInputHot = loopBus.on("inputHot", (next) => {
-                if (next === false) {
-                    cleanup();
-                    // #749 david — re-check AFK at fire time : the user may
-                    // have re-armed it between afkCleared and now (e.g. a
-                    // keystroke in the input-hot window). Don't fire over
-                    // a NOT AFK hold the user actively wants.
-                    const at = readLoopStateInput(sd!);
-                    if (isAfkActive(at)) {
-                        log("state-bus: input-hot expired post-afkCleared but AFK was re-armed — skipping deferred wake");
-                        return;
+    // #877 Slice A — AFK consumers migrent de `loopBus.on(...)` vers
+    //   `afkActor.on(...)` (XState v5 emit pattern). Convention
+    //   `<controller>:<event_name>` + payload typé. La sémantique drain
+    //   reste identique : sur `afk:cleared`, fire wake (ou defer si
+    //   input-hot ; cancel si re-armed pendant la fenêtre).
+    {
+        const afkActor = getAfkService().getActor();
+        afkActor.on("afk:cleared", () => {
+            const current = readLoopStateInput(sd!);
+            if (isInputHot(current)) {
+                log("afkMachine: afk:cleared — input-hot still active, deferring wake");
+                let unsubInputHot: (() => void) | null = null;
+                let unsubAfkRearm: { unsubscribe: () => void } | null = null;
+                const cleanup = () => {
+                    if (unsubInputHot) unsubInputHot();
+                    unsubAfkRearm?.unsubscribe();
+                    unsubInputHot = null;
+                    unsubAfkRearm = null;
+                };
+                unsubInputHot = loopBus.on("inputHot", (next) => {
+                    if (next === false) {
+                        cleanup();
+                        // #749 david — re-check AFK at fire time : the user may
+                        // have re-armed it between afk:cleared and now.
+                        const at = readLoopStateInput(sd!);
+                        if (isAfkActive(at)) {
+                            log("afkMachine: input-hot expired post-afk:cleared but AFK was re-armed — skipping deferred wake");
+                            return;
+                        }
+                        log("afkMachine: input-hot expired post-afk:cleared — firing deferred wake");
+                        void tryWake("afk-cleared-drain (input-hot expired)");
                     }
-                    log("state-bus: input-hot expired post-afkCleared — firing deferred wake");
-                    void tryWake("afk-cleared-drain (input-hot expired)");
-                }
-            });
-            // If the user re-armed AFK before input-hot expired,
-            // cancel the pending wake — they changed their mind.
-            unsubAfk = loopBus.on("afkArmed10m", () => {
-                log("state-bus: AFK re-armed before input-hot expired, cancelling deferred wake");
-                cleanup();
-            });
-            return;
-        }
-        // #749 david — same sanity re-check on the immediate path : between
-        // the bus emit and our handler running, the user may have re-typed
-        // and re-armed AFK. Don't fire while the bar shows NOT AFK.
-        const afterEmit = readLoopStateInput(sd!);
-        if (isAfkActive(afterEmit)) {
-            log("state-bus: afkCleared but AFK was re-armed before tryWake — skipping");
-            return;
-        }
-        void tryWake("afk-cleared-drain");
-    });
+                });
+                // If user re-armed AFK before input-hot expired, cancel.
+                unsubAfkRearm = afkActor.on("afk:armed_10m", () => {
+                    log("afkMachine: AFK re-armed before input-hot expired, cancelling deferred wake");
+                    cleanup();
+                });
+                return;
+            }
+            // #749 david — same sanity re-check on the immediate path.
+            const afterEmit = readLoopStateInput(sd!);
+            if (isAfkActive(afterEmit)) {
+                log("afkMachine: afk:cleared but AFK was re-armed before tryWake — skipping");
+                return;
+            }
+            void tryWake("afk-cleared-drain");
+        });
+        // Log lines for AFK locus events (decorations).
+        afkActor.on("afk:armed_10m", (ev) => log(`afkMachine: afk:armed_10m expiry=${new Date(ev.expiryMs).toISOString()} prevMode=${ev.prevMode}`));
+        afkActor.on("afk:armed_inf", (ev) => log(`afkMachine: afk:armed_inf prevMode=${ev.prevMode}`));
+        afkActor.on("afk:cleared", (ev) => log(`afkMachine: afk:cleared prevMode=${ev.prevMode} reason=${ev.reason}`));
+    }
     // #845 Phase B + #872 Phase 3 — la zone "boot" du PaneObserver est
     //   pilotée par le BootMachine acteur (cf. bloc actor plus haut) :
     //   `paneObs.leave("boot")` au sealing (subscriber), `paneObs.enter("boot")`
     //   à module init si !respawn-handoff. Pas de ré-entrée — la machine
     //   est terminale.
-    loopBus.on("afkArmed10m", (expiry) => log(`state-bus: AFK 10m armed (expires ${new Date(expiry).toISOString()})`));
-    loopBus.on("afkArmedInf", () => log("state-bus: AFK ∞ armed"));
-    loopBus.on("afkCleared", () => log("state-bus: AFK cleared"));
     loopBus.on("pickerOpened", () => log("state-bus: resume picker opened"));
     loopBus.on("pickerClosed", () => log("state-bus: resume picker closed"));
     // #714 david `fu9mh7` — bus event `busy(next, prev)` reste publié

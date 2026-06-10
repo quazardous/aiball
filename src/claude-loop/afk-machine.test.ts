@@ -160,6 +160,76 @@ test("snapshot observable : subscribe fires on transitions", () => {
     assert.ok(states.includes("wait_inf"));
 });
 
+// #877 Slice A — emit / actor.on locus events.
+
+test("emit afk:armed_10m on fresh commit (pending_10m → wait_10m fresh)", async () => {
+    const actor = mkActor().start();
+    const events: { type: string; expiryMs: number; prevMode: string }[] = [];
+    actor.on("afk:armed_10m", (ev) => events.push(ev));
+    actor.send({ type: "ARM_10M", expiryMsHint: 1_000_000_000 });
+    await delay(DEBOUNCE_WAIT_MS);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].expiryMs, 1_000_000_000);
+    assert.equal(events[0].prevMode, "off");
+});
+
+test("emit afk:armed_10m on NOOP same-kind commit (prev=wait_10m preserved)", async () => {
+    const actor = mkActor().start();
+    actor.send({ type: "HARD_ARM_10M", expiryMs: 5_000_000_000 });
+    const events: { expiryMs: number; prevMode: string }[] = [];
+    actor.on("afk:armed_10m", (ev) => events.push(ev));
+    // Cycle returns to wait_10m
+    actor.send({ type: "ARM_INF" });
+    actor.send({ type: "ARM_10M", expiryMsHint: 5_000_000_000 });
+    await delay(DEBOUNCE_WAIT_MS);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].expiryMs, 5_000_000_000);
+    assert.equal(events[0].prevMode, "wait_10m");
+});
+
+test("emit afk:armed_inf on pending_inf commit", async () => {
+    const actor = mkActor().start();
+    const events: { prevMode: string }[] = [];
+    actor.on("afk:armed_inf", (ev) => events.push(ev));
+    actor.send({ type: "ARM_INF" });
+    await delay(DEBOUNCE_WAIT_MS);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].prevMode, "off");
+});
+
+test("emit afk:cleared (reason=user) on pending_off commit", async () => {
+    const actor = mkActor().start();
+    actor.send({ type: "HARD_ARM_INF" });
+    const events: { prevMode: string; reason: string }[] = [];
+    actor.on("afk:cleared", (ev) => events.push(ev));
+    actor.send({ type: "ARM_OFF" });
+    await delay(DEBOUNCE_WAIT_MS);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].prevMode, "wait_inf");
+    assert.equal(events[0].reason, "user");
+});
+
+test("emit afk:cleared (reason=expiry) on EXPIRY_REACHED", () => {
+    const actor = mkActor().start();
+    actor.send({ type: "HARD_ARM_10M", expiryMs: 1_000_000_000 });
+    const events: { prevMode: string; reason: string }[] = [];
+    actor.on("afk:cleared", (ev) => events.push(ev));
+    actor.send({ type: "EXPIRY_REACHED" });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].prevMode, "wait_10m");
+    assert.equal(events[0].reason, "expiry");
+});
+
+test("emit afk:armed_10m on HARD_ARM_10M from off (immediate path)", () => {
+    const actor = mkActor().start();
+    const events: { expiryMs: number; prevMode: string }[] = [];
+    actor.on("afk:armed_10m", (ev) => events.push(ev));
+    actor.send({ type: "HARD_ARM_10M", expiryMs: 2_000_000_000 });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].expiryMs, 2_000_000_000);
+    assert.equal(events[0].prevMode, "off");
+});
+
 test("preserveWait10mExpiry mirrors disp to afkExpiryMs after NOOP", async () => {
     const actor = mkActor().start();
     actor.send({ type: "HARD_ARM_10M", expiryMs: 5_000_000_000 });
