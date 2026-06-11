@@ -100,9 +100,22 @@ export const DEFAULT_RULES: readonly BacklogRule[] = Object.freeze([
         ]),
     },
     {
+        // #918 david `eyqk9x` : scoper la rule aux ticket-events
+        // (ticket_created via ticketRowToRuleItem, `commentByAgent`
+        // undefined). Sans ce scope la rule mismatch sur les
+        // comment_added : `messageRowToRuleItem` met
+        // ticketByAgent = parent.byAgent (= auteur du ticket parent),
+        // donc un autre agent qui commente sur MON ticket avait
+        // ticketByAgent === me → exclu de fifo-wake (= wake CTA rendait
+        // backlog template au lieu de comment template). Conséquence
+        // observable depuis e8059c4 : tous les comments d'autres sur
+        // mes tickets silencés du wake CTA (= bug #908/#918). Les
+        // self-comments restent couverts par `self-authored-comment`
+        // juste en-dessous.
         name: "self-authored-ticket",
         when: (ctx, item) =>
-            item.ticketByAgent != null && item.ticketByAgent === ctx.consumerId,
+            item.ticketByAgent != null && item.ticketByAgent === ctx.consumerId
+            && item.commentByAgent == null,
         excludesFrom: new Set<Target>(["unread-list", "unread-count", "fifo-wake"]),
     },
     {

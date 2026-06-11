@@ -70,12 +70,33 @@ test("snoozed rule excludes from ALL targets", () => {
     for (const t of all) assert.equal(rule.excludesFrom.has(t), true, t);
 });
 
-test("self-authored-ticket rule fires when ticketByAgent === consumer", () => {
+test("self-authored-ticket rule fires when ticketByAgent === consumer (ticket-event)", () => {
     const rule = findRule("self-authored-ticket");
     const ctx = mkCtx({ consumerId: "alice" });
+    // ticket-event = item built via ticketRowToRuleItem ⇒ commentByAgent undefined
     assert.equal(rule.when(ctx, { ticketId: 1, ticketByAgent: "alice" }), true);
     assert.equal(rule.when(ctx, { ticketId: 1, ticketByAgent: "bob" }), false);
     assert.equal(rule.when(ctx, { ticketId: 1, ticketByAgent: null }), false);
+});
+
+test("#918 self-authored-ticket does NOT fire on a comment by another agent on my ticket", () => {
+    const rule = findRule("self-authored-ticket");
+    const ctx = mkCtx({ consumerId: "alice" });
+    // comment-event = item built via messageRowToRuleItem ⇒ commentByAgent set.
+    // ticketByAgent = parent ticket's author (= me). Without the comment scope,
+    // this would over-fire and silence wake CTAs for comments others post on
+    // my tickets — that's the #908/#918 bug.
+    assert.equal(
+        rule.when(ctx, { ticketId: 1, ticketByAgent: "alice", commentByAgent: "bob" }),
+        false,
+        "comment by bob on alice's ticket must NOT be excluded from fifo-wake",
+    );
+    // A self-comment on my own ticket is covered by self-authored-comment,
+    // not by self-authored-ticket. So this rule also returns false here.
+    assert.equal(
+        rule.when(ctx, { ticketId: 1, ticketByAgent: "alice", commentByAgent: "alice" }),
+        false,
+    );
 });
 
 test("self-authored-comment rule fires when commentByAgent === consumer", () => {
