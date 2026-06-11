@@ -136,6 +136,13 @@ export class AfkService {
     expiryReached(): void {
         this.actor.send({ type: "EXPIRY_REACHED" });
     }
+
+    /** #915 — stop the underlying actor (dispose its delayed transitions /
+     *  setTimeout handles). Used by `resetAfkServiceForTests` to avoid leaking
+     *  pending `after(...)` between test runs. */
+    stop(): void {
+        this.actor.stop();
+    }
 }
 
 /** Per-process singleton (mirrors the BootMachine singleton pattern). */
@@ -150,5 +157,9 @@ export function getAfkService(): AfkService {
 }
 
 export function resetAfkServiceForTests(): void {
+    // #915 — stop the prior actor before replacing : sinon ses delayed
+    // transitions (after(3000), expiry timer) restent armées et bloquent le
+    // test runner jusqu'au timeout.
+    _singleton?.stop();
     _singleton = new AfkService();
 }

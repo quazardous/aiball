@@ -4,7 +4,7 @@
  * a synthetic event, and asserts both the returned verdict + the on-disk
  * marker changes.
  */
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,6 +29,11 @@ function tmp(): string {
     resetAfkServiceForTests();
     return mkdtempSync(join(tmpdir(), "proxy-event-test-"));
 }
+
+// #915 — stop the surviving AfkService singleton at end-of-suite. Le dernier
+// reset crée un fresh actor avec son `after(...)` armé ; sans `getAfkService().stop()`
+// le setTimeout pingue le test runner jusqu'au timeout 30s.
+after(() => getAfkService().stop());
 
 /** Mark boot as settled : floor elapsed + paneReady + bootComplete sealed.
  *  #840 `4z59jt` — IPC seul. */
