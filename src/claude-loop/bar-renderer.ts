@@ -141,7 +141,15 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
     //     David : "le compteur doit s'afficher que si on est idle et loop
     //     pas sur wait ou stop".
     let nextWakeInSec: number | null = null;
-    const hasPending = (counters?.events ?? 0) > 0 || (counters?.backlog ?? 0) > 0;
+    // #919 david : "si backlog pas vide il faut afficher le countdown,
+    // ça va fire un wake sur le 1er élément du backlog". Le gate
+    // d'origine `events>0 OR backlog>0` traite `null` (fetch failed /
+    // cold-boot) comme `0` → countdown caché alors qu'on ne sait pas.
+    // Nouveau : `null` (= unknown) compte comme « peut-être » →
+    // countdown affiché. Seul `0` explicite (fetch réussi vide) cache.
+    const hasEvents = counters?.events == null ? null : counters.events > 0;
+    const hasBacklog = counters?.backlog == null ? null : counters.backlog > 0;
+    const hasPending = hasEvents !== false || hasBacklog !== false;
     const inLoop = view.barWord === "loop";
     if (
         ipc.nextWakeAtMs !== null
