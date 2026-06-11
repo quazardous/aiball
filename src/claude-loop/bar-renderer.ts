@@ -93,6 +93,18 @@ function renderStateTag(loopStatus: LoopStatus, info: string | null): string {
     return info ? `[${loopStatus}:${info}]` : `[${loopStatus}]`;
 }
 
+// #919 — module-level state pour détecter les transitions du gate
+// countdown (= flicker). Log seulement sur transition pour éviter le spam.
+let _lastCountdownNull: boolean | null = null;
+let _lastCountdownReason = "";
+function logCountdownTransition(nowNull: boolean, reason: string): void {
+    if (_lastCountdownNull === nowNull && _lastCountdownReason === reason) return;
+    _lastCountdownNull = nowNull;
+    _lastCountdownReason = reason;
+    // eslint-disable-next-line no-console
+    console.log(`[bar-countdown] ${nowNull ? "OFF" : "ON"} reason=${reason}`);
+}
+
 /** Compute le snapshot canonique depuis ipcState + computeLoopView.
  *  Pure : pas de side-effect, pas de spawn tmux. */
 export function computeBarSnapshot(sd: string): BarSnapshot {
@@ -140,6 +152,17 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         const remainingMs = ipc.nextWakeAtMs - input.nowMs;
         if (remainingMs > 0) nextWakeInSec = Math.ceil(remainingMs / 1000);
     }
+    // #919 — instrumentation : log la cause du null (= quel gate flicke).
+    // Cache module-level pour ne logger que sur transition. Volume max
+    // ~1 ligne par flicker.
+    logCountdownTransition(
+        nextWakeInSec === null,
+        ipc.nextWakeAtMs === null ? "nextWakeAtMs=null"
+            : !hasPending ? `hasPending=false (e:${counters?.events ?? 0} b:${counters?.backlog ?? 0})`
+                : loopStatus !== LOOP_STATUS.IDLE ? `loopStatus=${loopStatus}`
+                    : !inLoop ? `barWord=${view.barWord}`
+                        : "ok",
+    );
     return {
         humanWord,
         loopStatus,
