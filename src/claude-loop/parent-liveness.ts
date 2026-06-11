@@ -34,29 +34,53 @@ export function probeParentTmuxAtBoot(
  *  Appelé tôt dans le boot du timer, AVANT le bind loop.sock pour éviter
  *  qu'un fantôme garde le socket. Le nouveau timer (= self) est exclu
  *  par `process.pid` check. */
+/** #916 — return shape enrichi pour diag : combien scannés, qui matché
+ *  (avec cmdline pour identifier le process), qui killé. Backward-compat
+ *  callers qui veulent juste `killed` lisent `.killed`. */
+export interface SweepResult {
+    killed: number[];
+    scanned: number;
+    matched: Array<{ pid: number; cmdline: string }>;
+}
+
+function readCmdlineImpl(pid: number): string {
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const fs = require("node:fs") as typeof import("node:fs");
+        const raw = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
+        // /proc/<pid>/cmdline est null-séparé ; remplacer par espace pour lisibilité.
+        return raw.replace(/\0/g, " ").trim();
+    } catch { return "<unknown>"; }
+}
+
 export function sweepSiblingTimers(
     stateDir: string,
     selfPid: number = process.pid,
     readdirImpl: (path: string) => string[] = (p) => readdirSyncImpl(p),
     readEnvImpl: (pid: number) => string | null = readProcEnvironImpl,
     killImpl: (pid: number) => void = (pid) => { process.kill(pid, "SIGKILL"); },
-): number[] {
-    if (process.platform !== "linux") return [];
+    readCmdline: (pid: number) => string = readCmdlineImpl,
+): SweepResult {
+    if (process.platform !== "linux") return { killed: [], scanned: 0, matched: [] };
     const killed: number[] = [];
+    const matched: Array<{ pid: number; cmdline: string }> = [];
     const marker = `CL_STATE_DIR=${stateDir}`;
     let entries: string[];
     try { entries = readdirImpl("/proc"); }
-    catch { return killed; }
+    catch { return { killed, scanned: 0, matched }; }
+    let scanned = 0;
     for (const entry of entries) {
         const pid = Number(entry);
         if (!Number.isFinite(pid) || pid <= 1 || pid === selfPid) continue;
+        scanned++;
         const env = readEnvImpl(pid);
         if (env === null) continue;
         if (!env.includes(`\0${marker}\0`) && !env.startsWith(`${marker}\0`)) continue;
+        matched.push({ pid, cmdline: readCmdline(pid) });
         try { killImpl(pid); killed.push(pid); }
         catch { /* race : process already dead */ }
     }
-    return killed;
+    return { killed, scanned, matched };
 }
 
 // Real-impl indirections so tests can inject. Lazy require pour ne pas

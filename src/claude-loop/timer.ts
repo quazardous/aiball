@@ -303,9 +303,12 @@ if (probeParentTmuxAtBoot(MUX_CMD, tname)) {
 // ça plusieurs timers paint la bar en race + ipcState diverge.
 // AVANT le bind loop.sock (sinon le fantôme garde le socket → EADDRINUSE).
 if (sd) {
-    const killed = sweepSiblingTimers(sd);
-    if (killed.length > 0) {
-        log(`startup: swept ${killed.length} sibling timer(s) bound to '${sd}': ${killed.join(", ")}`);
+    const sweep = sweepSiblingTimers(sd);
+    // #916 — log toujours, pas seulement quand kill : pour diag du bug
+    // où la sweep tape pty-proxy/claude au lieu de sibling timer.
+    log(`startup: sweep marker=CL_STATE_DIR=${sd} scanned=${sweep.scanned} matched=${sweep.matched.length} killed=${sweep.killed.length}`);
+    for (const m of sweep.matched) {
+        log(`  sweep matched pid=${m.pid} cmdline=${m.cmdline}`);
     }
 }
 
