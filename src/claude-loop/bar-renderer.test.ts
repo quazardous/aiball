@@ -70,7 +70,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
 test("diffSnapshots: prev=null → tous les champs marqués changed (initial)", () => {
     assert.deepEqual(
         diffSnapshots(null, snap()),
-        ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "afkChipStr"],
+        ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkChipStr"],
     );
 });
 
@@ -98,7 +98,7 @@ test("computeBarSnapshot: cold boot (ipc vide) → status=boot", () => {
     const sd = mkSd();
     const s = computeBarSnapshot(sd);
     assert.equal(s.loopStatus, LOOP_STATUS.BOOT);
-    assert.match(s.stateTag, /^\[boot\] \d+s( \+\d+s)?$/);
+    assert.equal(s.stateTag, "[boot]");
     rmSync(sd, { recursive: true, force: true });
 });
 
