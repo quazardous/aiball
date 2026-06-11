@@ -75,13 +75,19 @@ pub fn start(sock_path: String, cb: Callbacks) -> WsHandle {
 /// missing/unreadable (server not up yet) — caller retries on backoff.
 fn resolve(sock_path: &str) -> Option<(u16, String)> {
     let raw = fs::read_to_string(format!("{sock_path}.addr")).ok()?;
-    let v: Value = serde_json::from_str(&raw).ok()?;
+    parse_addr(&raw)
+}
+
+/// Pure: `.addr` JSON → (port, ws-url). None on malformed / missing
+/// `port`|`token` or a zero/empty value. token is base64url, so it needs no
+/// query-encoding.
+fn parse_addr(json: &str) -> Option<(u16, String)> {
+    let v: Value = serde_json::from_str(json).ok()?;
     let port = u16::try_from(v.get("port")?.as_u64()?).ok()?;
     let token = v.get("token")?.as_str()?;
     if port == 0 || token.is_empty() {
         return None;
     }
-    // token is base64url (no chars needing percent-encoding in a query value).
     Some((port, format!("ws://127.0.0.1:{port}/?t={token}")))
 }
 
@@ -185,5 +191,46 @@ fn run(sock_path: String, rx: Receiver<Value>, cb: Callbacks) {
         }
         let _ = ws.close(None);
         thread::sleep(Duration::from_millis(RECONNECT_MS));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn parse_addr_valid() {
+        let (port, url) = parse_addr(r#"{"port":54321,"token":"abc-_123"}"#).unwrap();
+        assert_eq!(port, 54321);
+        assert_eq!(url, "ws://127.0.0.1:54321/?t=abc-_123");
+    }
+
+    #[test]
+    fn parse_addr_rejects_bad_inputs() {
+        assert!(parse_addr(r#"{"port":0,"token":"x"}"#).is_none()); // zero port
+        assert!(parse_addr(r#"{"port":1,"token":""}"#).is_none()); // empty token
+        assert!(parse_addr(r#"{"token":"x"}"#).is_none()); // no port
+        assert!(parse_addr(r#"{"port":1}"#).is_none()); // no token
+        assert!(parse_addr("not json").is_none()); // malformed
+    }
+
+    #[test]
+    fn dispatch_routes_view_inject_and_drops_the_rest() {
+        let views = Arc::new(Mutex::new(0u32));
+        let injects: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let v2 = views.clone();
+        let i2 = injects.clone();
+        let cb = Callbacks {
+            on_view: Box::new(move |_v| *v2.lock().unwrap() += 1),
+            on_inject: Box::new(move |t| i2.lock().unwrap().push(t.to_string())),
+        };
+        dispatch(r#"{"kind":"view","data":{"barWord":"loop"}}"#, &cb);
+        dispatch(r#"{"kind":"inject","data":{"text":"wake!"}}"#, &cb);
+        dispatch(r#"{"kind":"inject","data":{}}"#, &cb); // no text → ignored
+        dispatch(r#"{"kind":"other","data":{}}"#, &cb); // unknown kind → ignored
+        dispatch("garbage", &cb); // malformed → ignored
+        assert_eq!(*views.lock().unwrap(), 1);
+        assert_eq!(*injects.lock().unwrap(), vec!["wake!".to_string()]);
     }
 }
