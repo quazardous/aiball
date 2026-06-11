@@ -12,7 +12,6 @@
  * of the boot-time probe (= same pure function, scheduled tick).
  */
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import * as fs from "node:fs";
 
 export type SpawnSyncFn = typeof spawnSync;
 
@@ -60,12 +59,19 @@ export function sweepSiblingTimers(
     return killed;
 }
 
-// Real-impl indirections so tests can inject.
+// Real-impl indirections so tests can inject. Lazy require pour ne pas
+// charger fs au module-load (#913 : un static `import * as fs` cassait
+// claude-loop runtime — root cause non encore comprise, mais le lazy
+// require restaure le comportement antérieur).
 function readdirSyncImpl(path: string): string[] {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require("node:fs") as typeof import("node:fs");
     return fs.readdirSync(path);
 }
 function readProcEnvironImpl(pid: number): string | null {
     try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const fs = require("node:fs") as typeof import("node:fs");
         return fs.readFileSync(`/proc/${pid}/environ`, "utf8");
     } catch { return null; }
 }
