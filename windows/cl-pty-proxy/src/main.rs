@@ -109,6 +109,11 @@ fn marker_path() -> Option<String> {
     state_dir().map(|sd| format!("{sd}/human-typing"))
 }
 
+/// #768 — the unified `loop.sock` path; the ws-client resolves its `.addr`.
+fn loop_sock_path() -> Option<String> {
+    state_dir().map(|sd| format!("{sd}/loop.sock"))
+}
+
 fn proxy_alive_path() -> Option<String> {
     state_dir().map(|sd| format!("{sd}/proxy-alive"))
 }
@@ -178,6 +183,7 @@ fn clear_user_grace() {
     }
 }
 
+#[allow(dead_code)] // #768 — file-write path retired from the hot loop; kept callable for degraded/debug.
 fn apply_marker(m: core::Marker) {
     match m {
         core::Marker::SetAfk => set_afk(),
@@ -638,6 +644,25 @@ fn real_main() -> i32 {
     paint_word(initial);
 
     let writer = Arc::new(Mutex::new(writer));
+    // #768 — loop.sock ws client: emit proxyEvents (replacing marker file
+    // writes) + receive `inject` (→ PTY master). No painting — the TS
+    // BarRenderer (#633) owns the bar. None when CL_STATE_DIR is unset
+    // (degraded, like the Python side: events drop, bytes still forward).
+    let ws = loop_sock_path().map(|sock| {
+        let inj_writer = writer.clone();
+        ws_client::start(
+            sock,
+            ws_client::Callbacks {
+                on_inject: Box::new(move |text: &str| {
+                    if let Ok(mut w) = inj_writer.lock() {
+                        let _ = w.write_all(text.as_bytes());
+                        let _ = w.flush();
+                    }
+                }),
+                on_view: Box::new(|_v: &serde_json::Value| { /* cached only; BarRenderer paints */ }),
+            },
+        )
+    });
     let master: Arc<Mutex<Box<dyn MasterPty + Send>>> = Arc::new(Mutex::new(pair.master));
     let running = Arc::new(AtomicBool::new(true));
     // Bar state shared between the stdin + housekeeping threads. last_keystroke
@@ -677,6 +702,7 @@ fn real_main() -> i32 {
         let writer = writer.clone();
         let shared = shared.clone();
         let running = running.clone();
+        let ws = ws.clone();
         let sin = stdin_h;
         let boot = boot_ts;
         thread::spawn(move || {
@@ -696,8 +722,23 @@ fn real_main() -> i32 {
                         let now_ms = boot.elapsed().as_secs_f64() * 1000.0;
                         for unit in core::split_units_streaming(data, &mut pending) {
                             let v = decider.on_unit(&unit, now_ms);
-                            for m in &v.markers {
-                                apply_marker(*m);
+                            // #768 — thin contract: emit proxyEvents over
+                            // loop.sock instead of writing marker files (the TS
+                            // state machine owns AFK state, #924). Combo →
+                            // afk_key (toggle) ; typing → typing (arm 10m) +
+                            // touch_marker ; lone-ESC → typing (arm 10m).
+                            if let Some(ws) = &ws {
+                                let ev_ms = ts_now();
+                                if v.afk_fired {
+                                    ws.emit(ws_client::keystroke("afk_key", ev_ms));
+                                }
+                                if v.typing {
+                                    ws.emit(ws_client::keystroke("typing", ev_ms));
+                                    ws.emit(ws_client::marker("touch_marker", ev_ms));
+                                }
+                                if v.lone_esc {
+                                    ws.emit(ws_client::keystroke("typing", ev_ms));
+                                }
                             }
                             if !v.forward.is_empty() {
                                 dbg_bytes("forward", &v.forward);
