@@ -797,10 +797,11 @@ class _Decider:
         self.esc_takeover = esc_takeover
         self.window_ms = window_ms
         self.last_keystroke = 0.0
-        # #381 : état afk LOGIQUE (le proxy est seul à écrire le marqueur après
-        # le clear_afk de boot → ce booléen reste en phase avec le fichier). Sert
-        # à TOGGLE sur le combo (on↔off) au lieu d'un set systématique.
-        self.afk_active = False
+        # #924 Slice A : `afk_active` retiré du Decider. État AFK = SSOT
+        # XState TS-side ; le proxy émet seulement les events bruts
+        # (`toggle_afk` / `arm_afk_10m`) et ne tient plus de prédiction
+        # local. Le harnais `_run_replay` / `_run_fake_claude` reconstruit
+        # l'état pour le verdict NDJSON indépendamment.
 
     def on_stdin(self, data, now):
         d = {"event": "stdin", "now": now, "raw": data,
@@ -819,12 +820,8 @@ class _Decider:
             # `arm_afk_10m` for typing exists in parallel (typing can also
             # land you in 10m / refresh it / no-op in ∞).
             d["markers"] += ["toggle_afk"]
-            # Predict post-toggle state for the in-decider register —
-            # pre-toggle: None → 10m (active), 10m → ∞ (active), ∞ → AFK
-            # (off). Source of truth stays the file (read fresh in
-            # apply_decision).
-            pre = _afk_mode()
-            self.afk_active = (pre is None) or isinstance(pre, tuple)
+            # #924 Slice A : drop la prédiction post-toggle locale.
+            # XState côté TS possède le cycle (None → 10m → ∞ → off).
             d["word"] = "rest"
             return d
 
@@ -859,10 +856,7 @@ class _Decider:
                 # #745 phase B — `touch_user_grace` dropped from the
                 # marker list ; AFK SM = single source of truth.
                 d["markers"] += ["arm_afk_10m", "touch_marker"]
-                # Post-marker: AFK is always active after typing — either
-                # we just armed 10m (was OFF or refreshed), or we're in ∞
-                # (no-op, was already active).
-                self.afk_active = True
+                # #924 Slice A : pas de prédiction locale, XState applique.
                 d["word"] = "stop"
             else:
                 # In boot-grace : keep the bar as `_HUMAN_BOOT` (no stop
@@ -879,7 +873,6 @@ class _Decider:
                 # release the AFK hold the way the old `clear_afk` did.
                 # #745 phase B — touch_user_grace dropped (user-grace dead).
                 d["markers"] += ["arm_afk_10m"]
-                self.afk_active = True
             d["word"] = "rest"
             # David `<chat>` : le swallow systématique du #858 cassait
             # l'interruption mid-turn. ESC est re-forwardé à claude
@@ -1539,7 +1532,7 @@ def main(argv):
                             os.write(2, ("[proxy]   %-12s fired=%s afk=%-4s fwd=%s\r\n" % (
                                 _render_keys(unit),
                                 "Y" if dec.get("afk_fired") else "-",
-                                "AWAY" if decider.afk_active else "back",
+                                "AWAY" if _afk_mode() is not None else "back",
                                 (dec.get("forward") or b"").hex() or "-")).encode())
                 else:
                     # EOF stdin : on arrête de le poller (claude tourne
