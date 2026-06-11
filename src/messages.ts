@@ -470,10 +470,21 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
 }
 
 /**
+ * #921 — opt-out ping fanout when the message is a redundant auto-emit
+ * (e.g. ticket_closed triggered by an accepted resolution / wontfix — the
+ * decision-event ping is already on its way, no need to ping a 2nd time
+ * for the auto-close). Broadcasts + lifecycle emits still fire, only the
+ * unread pings creation is skipped.
+ */
+export interface SubmitOpts {
+    skipFanOut?: boolean;
+}
+
+/**
  * Single source of truth for "a new message arrived" — used by both the HTTP
  * API and the spool drainer so behavior is identical regardless of channel.
  */
-export function submitMessage(input: NewMessage): Message {
+export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message {
     assertCloseAuthority(input);
     assertDecisionOnApprovedTicket(input);
     // #561 : reject ticket_created on unknown project so a typo can't
@@ -504,7 +515,8 @@ export function submitMessage(input: NewMessage): Message {
     //
     // #B.245: internal-scoped messages bail out inside fanOutPings —
     // only @mentions (via fanOutMentions below) reach them.
-    fanOutPings(msg);
+    // #921 — opt-out for auto-emitted redundant messages (cf. SubmitOpts).
+    if (!opts.skipFanOut) fanOutPings(msg);
     // Always announce the message: every UI list (pending, approved, tickets,
     // open thread) wants to know that a new row exists, regardless of how
     // moderation will resolve it.
@@ -549,7 +561,8 @@ export function submitMessage(input: NewMessage): Message {
         if (updated) {
             msg = updated;
             deliverToOutbox(msg);
-            fanOutPings(msg);
+            // #921 — opt-out for auto-emitted redundant messages.
+            if (!opts.skipFanOut) fanOutPings(msg);
             // …and announce the auto-approval so subscribers transition state
             // (status: pending → approved) without polling.
             broadcast({ type: "message_decided", data: msg });

@@ -224,6 +224,11 @@ messagesRouter.post("/messages/:id/accept-and-close", (req: Request, res: Respon
     const byAgent = consumerOf(req);
     const body = typeof req.body?.body === "string" ? req.body.body : undefined;
     try {
+        // #921 — skip ping fan-out : la décision d'acceptance ci-dessus
+        // a déjà pingé tous les consumers concernés (resolution_accepted).
+        // Le ticket_closed auto-émis qui suit est redondant côté ping
+        // (mêmes consumers, info équivalente). Les broadcasts + lifecycle
+        // emits restent (UI list / thread doivent voir le close).
         const closeMsg = submitMessage({
             project: approved.project,
             kind: "ticket_closed",
@@ -231,7 +236,7 @@ messagesRouter.post("/messages/:id/accept-and-close", (req: Request, res: Respon
             parent_id: existing.ticket_id,
             body,
             by_agent: byAgent,
-        });
+        }, { skipFanOut: true });
         return res.json({
             approved: approvedDecorated,
             closed: withTagsOne(closeMsg),
@@ -486,6 +491,8 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
             try {
                 const m = JSON.parse(updated.meta) as { decision?: { kind?: string } };
                 if (m.decision?.kind === "wontfix") {
+                    // #921 — skip ping fan-out : wontfix_accepted a déjà
+                    // pingé. L'auto-close est redondant côté ping.
                     submitMessage({
                         project: updated.project,
                         kind: "ticket_closed",
@@ -493,7 +500,7 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
                         parent_id: updated.ticket_id,
                         body: `(auto-close from accepted wontfix #${updated.hashid ?? id})`,
                         by_agent: by,
-                    });
+                    }, { skipFanOut: true });
                 }
             } catch {
                 /* malformed meta or close failed — don't fail the decide */
