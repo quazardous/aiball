@@ -12,6 +12,7 @@
  * of the boot-time probe (= same pure function, scheduled tick).
  */
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import * as fs from "node:fs";
 
 export type SpawnSyncFn = typeof spawnSync;
 
@@ -59,17 +60,12 @@ export function sweepSiblingTimers(
     return killed;
 }
 
-// Real-impl indirections so tests can inject. Hoisted as separate funcs
-// so the import isn't loaded when caller passes overrides.
+// Real-impl indirections so tests can inject.
 function readdirSyncImpl(path: string): string[] {
-    // Lazy require to keep the bundle slim + avoid loading fs in tests
-    // that inject the readdir override.
-    const fs = require("node:fs") as typeof import("node:fs");
     return fs.readdirSync(path);
 }
 function readProcEnvironImpl(pid: number): string | null {
     try {
-        const fs = require("node:fs") as typeof import("node:fs");
         return fs.readFileSync(`/proc/${pid}/environ`, "utf8");
     } catch { return null; }
 }

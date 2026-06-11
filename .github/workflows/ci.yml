@@ -44,6 +44,10 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # Cap au lieu du default 6h GH Actions : la suite a un test qui pend une
+    # handle (root cause à diagnostiquer séparément). Fail fast vaut mieux que
+    # bouffer 6h de CI par push.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

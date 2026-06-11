@@ -44,7 +44,7 @@ function freshApprovedTicket(project: string, by_agent: string): number {
     return t.id;
 }
 
-function tryRelate(callerId: string, ticketId: number, targetId: number, kind = "relates_to"): { ok: boolean; status: number; error?: string } {
+function tryRelate(callerId: string, ticketId: number, targetId: number, _kind = "relates_to"): { ok: boolean; status: number; error?: string } {
     // Direct route invocation via supertest-like inline express call would be
     // heavier than needed ; just call the gate-relevant logic by re-importing
     // the route's mounted handler via supertest. For now we exercise the

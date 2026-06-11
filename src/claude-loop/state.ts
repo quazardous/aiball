@@ -635,7 +635,7 @@ export async function checkHasWork(
     checkCmd: string | null | undefined,
     client?: AiballClient,
     project?: string | null,
-    sd?: string | null,
+    _sd?: string | null,
 ): Promise<CheckHasWorkResult> {
     const cmd = checkCmd ?? "";
     if (cmd === "true") return emptyWork({ has: true });
