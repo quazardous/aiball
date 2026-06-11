@@ -804,8 +804,10 @@ class _Decider:
         # l'état pour le verdict NDJSON indépendamment.
 
     def on_stdin(self, data, now):
+        # #924 Slice B : `word` retiré du verdict — reconstruit côté
+        # harnais (`_run_replay` / `_run_fake_claude`) depuis les markers.
         d = {"event": "stdin", "now": now, "raw": data,
-             "forward": b"", "buffer": None, "markers": [], "word": None,
+             "forward": b"", "buffer": None, "markers": [],
              "afk_fired": False, "typing": False, "lone_esc": False,
              "buffered_first": False}
 
@@ -822,7 +824,9 @@ class _Decider:
             d["markers"] += ["toggle_afk"]
             # #924 Slice A : drop la prédiction post-toggle locale.
             # XState côté TS possède le cycle (None → 10m → ∞ → off).
-            d["word"] = "rest"
+            # #924 Slice B : drop `word` resolution — le test harness
+            # reconstruit `word_resolved` depuis les markers + typing/
+            # lone_esc/afk_fired.
             return d
 
         # (a') #381b : ESC RÉSIDUEL avalé pendant le cooldown post-toggle. Sans ça
@@ -836,49 +840,27 @@ class _Decider:
         #     buffering de la « 1re combo » (la séquence à 2 touches a disparu) →
         #     l'ESC d'interruption atteint claude SANS le délai de 400ms qu'imposait
         #     l'ancien buffer.
-        # #624 david `n5kmsz` + `fdj78d` : pendant la fenêtre boot-grace
-        # les keystrokes sont IGNORÉS côté AFK / bar — l'utilisateur
-        # peut taper pour choisir une discussion --resume sans armer
-        # NOT AFK 10m et sans flicker le bar entre stop/wait. Les
-        # bytes restent forwardés à claude.
-        in_boot = _in_boot_phase()
+        # #924 Slice C : `_in_boot_phase()` filter retiré. Le filtrage
+        # boot est fait UNIQUEMENT par `apply_decision` TS-side via
+        # `barWord=boot` (#629). Le proxy émet les markers
+        # systématiquement ; XState applique selon le boot state.
+        # Side-effect : `arm_afk_10m` est émis pendant les ~30s de boot
+        # grace mais reste no-op (TS gate). Pas de drift visible.
         if is_typing_keystroke(data):
             d["typing"] = True
-            if not in_boot:
-                # #622 david `jzcgmh` : typing arms NOT AFK 10m (or refreshes
-                # an existing 10m countdown). In NOT AFK ∞ mode it's a no-op
-                # (only F9 can release the indefinite hold).
-                # #629 david — under --no-wait the picker-typing window
-                # also triggers this branch (in_boot=False from T0). The
-                # apply_decision layer filters arm_afk_10m out when the
-                # bus says barWord=boot, so picker selection doesn't engage
-                # AFK while genuine post-boot typing still does.
-                # #745 phase B — `touch_user_grace` dropped from the
-                # marker list ; AFK SM = single source of truth.
-                d["markers"] += ["arm_afk_10m", "touch_marker"]
-                # #924 Slice A : pas de prédiction locale, XState applique.
-                d["word"] = "stop"
-            else:
-                # In boot-grace : keep the bar as `_HUMAN_BOOT` (no stop
-                # red flicker). Don't touch any state markers — boot is
-                # for resume-picker typing, not human takeover.
-                d["word"] = "rest"
+            # #622 david `jzcgmh` : typing arms NOT AFK 10m. TS gate filtre
+            # pendant boot grace (#629 picker-typing window).
+            # #745 phase B — `touch_user_grace` dropped.
+            d["markers"] += ["arm_afk_10m", "touch_marker"]
             self.last_keystroke = now
         elif self.esc_takeover and _is_lone_esc(data):
             d["lone_esc"] = True
-            if not in_boot:
-                # #622 david `jzcgmh` : ESC behaves like typing — arms NOT
-                # AFK 10m (or refreshes), no-op in ∞. The "interrupt
-                # claude" payload still forwards below ; we just don't
-                # release the AFK hold the way the old `clear_afk` did.
-                # #745 phase B — touch_user_grace dropped (user-grace dead).
-                d["markers"] += ["arm_afk_10m"]
-            d["word"] = "rest"
+            # #622 david `jzcgmh` : ESC behaves like typing — arms NOT AFK
+            # 10m, no-op in ∞ côté TS. Boot gate appliqué côté TS.
+            d["markers"] += ["arm_afk_10m"]
             # David `<chat>` : le swallow systématique du #858 cassait
             # l'interruption mid-turn. ESC est re-forwardé à claude
-            # comme avant. Side-effect possible : si claude-code en
-            # auto exit sur ESC nue, le loop crashera ; à régler côté
-            # hook si ça réémerge.
+            # comme avant.
         d["forward"] += data
         return d
 
@@ -967,13 +949,28 @@ def _run_replay(args):
                     elif m == "clear_user_grace":
                         grace_until = 0.0
                 rec = _decision_record(dec)
-                word = dec.get("word")
                 rec["afk_active"] = afk_active
-                rec["word_resolved"] = (
-                    "stop" if word == "stop"
-                    else ("wait" if grace_until > clock else "loop") if word == "rest"
-                    else None
+                # #924 Slice B : `word` retiré du Decider live. Reconstruit
+                # depuis les markers + flags du verdict :
+                #   - "stop" si typing post-boot (markers incluent
+                #     "touch_marker", seule branche qui le set)
+                #   - "wait"/"loop" si typing/lone_esc/afk_fired (= toute
+                #     interaction user au-delà du forward pur), selon le
+                #     grace en cours
+                #   - None si forward pur sans interaction
+                markers = dec.get("markers", [])
+                interaction = (
+                    dec.get("typing", False)
+                    or dec.get("lone_esc", False)
+                    or dec.get("afk_fired", False)
+                    or "toggle_afk" in markers
                 )
+                if "touch_marker" in markers:
+                    rec["word_resolved"] = "stop"
+                elif interaction:
+                    rec["word_resolved"] = "wait" if grace_until > clock else "loop"
+                else:
+                    rec["word_resolved"] = None
                 sys.stdout.write(_json.dumps(rec) + "\n")
         sys.stdout.flush()
     finally:
@@ -1028,13 +1025,22 @@ def _run_replay_log(args):
             elif m == "clear_user_grace":
                 state["grace_until"] = 0.0
         rec = _decision_record(dec)
-        word = dec.get("word")
         rec["afk_active"] = state["afk_active"]
-        rec["word_resolved"] = (
-            "stop" if word == "stop"
-            else ("wait" if state["grace_until"] > clock else "loop") if word == "rest"
-            else None
+        # #924 Slice B : `word` retiré du Decider live. Reconstruit
+        # depuis markers + flags (cf. `_run_replay` plus haut).
+        markers = dec.get("markers", [])
+        interaction = (
+            dec.get("typing", False)
+            or dec.get("lone_esc", False)
+            or dec.get("afk_fired", False)
+            or "toggle_afk" in markers
         )
+        if "touch_marker" in markers:
+            rec["word_resolved"] = "stop"
+        elif interaction:
+            rec["word_resolved"] = "wait" if state["grace_until"] > clock else "loop"
+        else:
+            rec["word_resolved"] = None
         sys.stdout.write(_json.dumps(rec) + "\n")
 
     with open(path) as src:
@@ -1163,27 +1169,11 @@ def _boot_grace_remaining():
     return rem if rem > 0.0 else 0.0
 
 
-def _in_boot_phase():
-    """Source de vérité du booléen "on est en boot phase" pour le proxy.
-
-    Consulte d'abord le pushed view du timer (= autorité : barWord/`inBootGrace`),
-    fallback time-based (`_boot_grace_remaining()`) UNIQUEMENT avant la
-    1ère push (cold boot).
-
-    Fix observé david : le proxy gardait sa propre boot-grace 60s
-    désynchronisée du sealing IPC. Quand le timer sealed `bootComplete`
-    à ~T+50s, le proxy continuait à peindre `_HUMAN_BOOT` (jaune) jusqu'à
-    T+60s → bar mismatch : bg busy + word claude-boot."""
-    cached = _pushed_view_cache.get("view")
-    if cached is None:
-        # Cold boot — pas encore de push reçue, on tient avec le timer
-        # bootstrap pour ne pas afficher "loop" sur un fond yellow.
-        return _boot_grace_remaining() > 0.0
-    if cached.get("inBootGrace") is True:
-        return True
-    if cached.get("barWord") == "boot":
-        return True
-    return False
+# #924 Slice C : `_in_boot_phase()` retiré. Le filtrage boot vivait
+# dans `_Decider.on_stdin` pour gater l'émission de markers AFK
+# pendant la fenêtre boot ; XState côté TS le fait maintenant via le
+# gate `barWord=boot` dans `apply_decision`. Le proxy émet
+# systématiquement, TS applique selon le boot state.
 
 
 # #862 Slice 4 — `_rest_word`, `_paint_word`, `_format_afk_state`,
@@ -1423,33 +1413,22 @@ def main(argv):
         émis par le _Decider dans le path normal ; F9 utilise toggle_afk).
         Ils restent disponibles comme fonctions appellables si du code
         externe / un test en a besoin."""
+        # #924 Slice D : fallbacks degraded retirés. Le proxy émet via
+        # `_proxy_events` ; si l'émission échoue (= timer down), on log
+        # et on laisse passer. Sémantique : « timer down → AFK inerte »
+        # (les bytes restent forwardés à claude). Suite logique de #839
+        # qui a dropé les writes file. Drift Python↔TS éliminée par
+        # construction.
         for m in dec.get("markers", []):
+            now_ms = int(datetime.datetime.now().timestamp() * 1000)
             if m == "cycle_afk" or m == "toggle_afk":
-                # #633 Slice C : F9 toggle routed via back-channel ; the
-                # TS state machine cycles AFK off → 10m → ∞ → off (last
-                # transition also clears user-grace). Fallback to local
-                # toggle in degraded mode.
-                now_ms = int(datetime.datetime.now().timestamp() * 1000)
-                if not _proxy_events.emit_afk_key(now_ms):
-                    toggle_afk()
+                _proxy_events.emit_afk_key(now_ms)
             elif m == "arm_afk_10m":
-                # #633 Slice A : delegate to timer via back-channel.
-                # Fall back to local on failure (degraded mode).
-                now_ms = int(datetime.datetime.now().timestamp() * 1000)
-                if not _proxy_events.emit_typing(now_ms):
-                    arm_afk_10m()
+                _proxy_events.emit_typing(now_ms)
             elif m == "touch_marker":
-                # #633 Slice D : delegate to TS state machine via back-channel.
-                # Fallback local on failure (degraded mode).
-                now_ms = int(datetime.datetime.now().timestamp() * 1000)
-                if not _proxy_events.emit_marker("touch_marker", now_ms):
-                    touch_marker()
-            elif m == "touch_user_grace" or m == "clear_user_grace":
-                # #745 phase B — user-grace machinery dropped TS-side ;
-                # the proxy stops emitting these markers (no fallback
-                # needed either : the AFK SM events that the Decider
-                # already emits cover the same case).
-                pass
+                _proxy_events.emit_marker("touch_marker", now_ms)
+            # #745 phase B — user-grace machinery dropped TS-side ;
+            # touch_user_grace / clear_user_grace pas émis par le Decider.
         if dec.get("forward"):
             os.write(master_fd, dec["forward"])
         # #633 Slice B david `wb69mf` — paint authority migrée à la state
