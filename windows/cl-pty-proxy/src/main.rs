@@ -71,6 +71,7 @@ use windows_sys::Win32::System::Pipes::{
 };
 
 mod core;
+mod ws_client;
 
 const CP_UTF8: u32 = 65001;
 

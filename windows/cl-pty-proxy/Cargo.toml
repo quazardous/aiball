@@ -20,6 +20,10 @@ path = "src/bin/fake-claude-log.rs"
 portable-pty = "0.9"
 # argv[0] PATH/PATHEXT resolution (claude.exe / claude.cmd).
 which = "6"
+# #768 — loop.sock ws client (emit proxyEvents, receive inject/view frames).
+# ws:// only (loopback transport #739) → no TLS feature, just the handshake.
+tungstenite = { version = "0.21", default-features = false, features = ["handshake"] }
+serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
