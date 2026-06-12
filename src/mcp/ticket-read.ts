@@ -121,15 +121,22 @@ export function registerTicketReadTools(server: McpServer): void {
                     .optional()
                     .describe("Filter on intent of the parent ticket."),
                 limit: z.number().int().min(1).max(200).optional().describe("Max hits to return. Default 50, hard cap 200."),
+                since: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "ISO 8601 timestamp. Filters hits whose ticket or comment `created_at` is >= since. Useful for 'what matched X in the last hour'. Date.parse-friendly (e.g. '2026-05-12T13:00:00Z' or '2026-05-12').",
+                    ),
             },
         },
-        async ({ query, project, open, intent, limit }) => {
+        async ({ query, project, open, intent, limit, since }) => {
             const hits = await client.search({
                 query,
                 project,
                 open,
                 intent,
                 limit,
+                since,
             });
             return asText(hits);
         },

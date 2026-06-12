@@ -369,8 +369,11 @@ export function listUnread(
     consumer_id: string,
     project: string | null | undefined,
     limit = 100,
+    since?: string,
 ): Message[] {
-    return fetchUnread(consumer_id, project, "unread-list").messages.slice(0, limit);
+    const msgs = fetchUnread(consumer_id, project, "unread-list").messages;
+    const filtered = since ? msgs.filter((m) => m.created_at >= since) : msgs;
+    return filtered.slice(0, limit);
 }
 
 /**

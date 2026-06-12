@@ -445,7 +445,8 @@ api.get("/search", (req: Request, res: Response) => {
     const limit = typeof req.query.limit === "string"
         ? Number(req.query.limit) || undefined
         : undefined;
-    const hits = searchMessages(q, { project, open, intent, limit });
+    const since = typeof req.query.since === "string" ? req.query.since : undefined;
+    const hits = searchMessages(q, { project, open, intent, limit, since });
     // Filter out hits whose parent ticket is currently snoozed, unless
     // the caller explicitly asked to see them. Cheap secondary pass.
     if (!includePostponed) {

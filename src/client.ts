@@ -386,6 +386,7 @@ export class AiballClient {
         intent?: string;
         limit?: number;
         include_postponed?: boolean;
+        since?: string;
     }) {
         const q: Record<string, string | undefined> = { q: opts.query };
         if (opts.project) q.project = opts.project;
@@ -393,6 +394,7 @@ export class AiballClient {
         if (opts.intent) q.intent = opts.intent;
         if (opts.limit !== undefined) q.limit = String(opts.limit);
         if (opts.include_postponed) q.include_postponed = "1";
+        if (opts.since) q.since = opts.since;
         return this.http("GET", `/api/search${query(q)}`);
     }
     listMessages(q: Record<string, string | number | undefined> = {}) {
@@ -634,12 +636,15 @@ export class AiballClient {
             `/api/subscriptions?consumer_id=${encodeURIComponent(this.agentId)}`,
         );
     }
-    /** #800 — project is OPTIONAL. Omitted/empty = cross-project FIFO. */
-    unread(project: string | null | undefined, limit = 100) {
+    /** #800 — project is OPTIONAL. Omitted/empty = cross-project FIFO.
+     *  #798 — `since` is an ISO 8601 cutoff. Filters messages whose
+     *  `created_at` is >= since. */
+    unread(project: string | null | undefined, limit = 100, since?: string) {
         const projParam = project ? `&project=${encodeURIComponent(project)}` : "";
+        const sinceParam = since ? `&since=${encodeURIComponent(since)}` : "";
         return this.http(
             "GET",
-            `/api/unread?consumer_id=${encodeURIComponent(this.agentId)}${projParam}&limit=${limit}`,
+            `/api/unread?consumer_id=${encodeURIComponent(this.agentId)}${projParam}&limit=${limit}${sinceParam}`,
         );
     }
     markMessageSeen(message_id: number) {

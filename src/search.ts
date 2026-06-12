@@ -55,6 +55,10 @@ export interface SearchOptions {
     open?: boolean;
     intent?: Intent | null;
     limit?: number;
+    /** #798 — ISO 8601 cutoff. Filters hits whose ticket OR comment
+     *  `created_at` is >= since. Useful for "what matched <query>
+     *  since 1h". Date.parse-friendly. */
+    since?: string;
 }
 
 /**
@@ -240,6 +244,10 @@ export function searchMessages(
         ticketWhere.push("t.intent = ?");
         ticketArgs.push(opts.intent);
     }
+    if (opts.since) {
+        ticketWhere.push("t.created_at >= ?");
+        ticketArgs.push(opts.since);
+    }
     ticketArgs.push(limit);
     const ticketRows = sqlite.prepare(`
         SELECT
@@ -280,6 +288,10 @@ export function searchMessages(
     if (opts.intent) {
         msgWhere.push("t.intent = ?");
         msgArgs.push(opts.intent);
+    }
+    if (opts.since) {
+        msgWhere.push("m.created_at >= ?");
+        msgArgs.push(opts.since);
     }
     msgArgs.push(limit);
     const messageRows = sqlite.prepare(`

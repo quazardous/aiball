@@ -33,9 +33,15 @@ export function registerInboxTools(server: McpServer): void {
                     .describe(
                         "If true, skip the payload and return just the unread count. Lightest call for 'do I have anything ?'.",
                     ),
+                since: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "ISO 8601 timestamp. Filters the project feed to messages whose `created_at` is >= since. Useful for 'show me what landed in the last hour' without touching seen_at. Date.parse-friendly. Ignored when `pings: true` or `count_only: true`.",
+                    ),
             },
         },
-        async ({ project, pings, limit, count_only }) => {
+        async ({ project, pings, limit, count_only, since }) => {
             const wantCountOnly = count_only === true;
 
             if (pings === true) {
@@ -60,7 +66,7 @@ export function registerInboxTools(server: McpServer): void {
                 const r = (await client.unreadCount(proj)) as { count?: number };
                 return asText({ kind: "project", project: proj, count: r.count ?? 0 });
             }
-            const data = (await client.unread(proj, limit ?? 100)) as
+            const data = (await client.unread(proj, limit ?? 100, since)) as
                 | { messages?: Array<{ id: number }> }
                 | undefined;
             return asText({ kind: "project", ...((data as object) ?? {}) });
