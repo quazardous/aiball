@@ -37,6 +37,7 @@ import {
     type LoopStatus,
 } from "./state.js";
 import { computeLoopView } from "./loop-state.js";
+import { WAKE_COOLDOWN_MS } from "./wake-machine.js";
 
 /** Snapshot canonical de la barre tmux. Chaque champ correspond à une
  *  tmux user-option / propriété peinte par les writers actuels. Pur
@@ -135,32 +136,45 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
     }
     // #805 / #919 — countdown vers prochain wake.
     //
-    // Single source of truth = `ipc.nextWakeAtMs` côté timer. Le subscriber
-    // `idleActor.subscribe` (timer.ts:1700) le set quand l'IdleMachine est
-    // en `idle` ET `idleSinceMs !== null`, sinon le clear. Donc si
-    // `nextWakeAtMs` est NON-NULL, le timer a DÉJÀ décidé qu'un wake va
-    // fire → on l'affiche, point. Le bar n'a pas à re-gate sur IDLE /
-    // barWord / hasPending : ces gates redondants flicker pendant les
-    // transients (race subscriber→IPC→render, paneBusy latch bref,
-    // barWord=wait pendant AFK debounce) et cachent le compteur quand
-    // l'info est pourtant valide.
+    // Derive directly from `ipc.idleSinceMs + WAKE_COOLDOWN_MS` when
+    // idleSinceMs is set + bootDone. Bypass `ipc.nextWakeAtMs` (=
+    // l'idleActor subscriber gates sur `snap.matches("idle")` qui est
+    // l'IdleMachine XState, indépendant du `view.phase`. Si l'IdleMachine
+    // reste en `unknown` (SessionStart perdu / cold boot pre-hook) ou en
+    // `busy` (Stop hook pas reçu), `nextWakeAtMs` stays null → countdown
+    // hidden alors que pane is idle + idleSinceMs is set.
     //
-    // #919 david `vrwhe6` (rejet de `86fjp3`) : « toujours pas affiché
-    // dans certain cas ». Le fix `04fdc03` n'a couvert que le null-
-    // counter gate. Cette simplification couvre les 2 autres transients
-    // identifiés dans le plan `xjeyhm` (IDLE flicker + barWord transient).
+    // #919 david `vrwhe6` (rejet `86fjp3`) + screenshot `o:45 b:2 e:1
+    // [idle]` no countdown : l'IdleMachine n'est pas la bonne source
+    // pour la projection. `idleSinceMs` côté IPC reflète la VRAIE idle-
+    // depuis (set par hookWatcher Stop event OU par session-start). Si
+    // idleSinceMs is set + bootDone, claude EST idle ; le prochain
+    // wake fire à `idleSinceMs + WAKE_COOLDOWN_MS` (= 10s post idle).
     let nextWakeInSec: number | null = null;
-    if (ipc.nextWakeAtMs !== null) {
-        const remainingMs = ipc.nextWakeAtMs - input.nowMs;
-        if (remainingMs > 0) nextWakeInSec = Math.ceil(remainingMs / 1000);
+    const idleSinceMs = ipc.idleSinceMs;
+    if (idleSinceMs !== null && ipc.loopStart) {
+        const nextAt = idleSinceMs + WAKE_COOLDOWN_MS;
+        const remainingMs = nextAt - input.nowMs;
+        // Le wake cooldown coule à idleSinceMs+10s, puis recommence à
+        // every 10s tant qu'on reste idle (= `idle.settled` re-emit
+        // toutes les WAKE_COOLDOWN_MS, cf. idle-machine.ts:144). On
+        // module pour rester dans [0, WAKE_COOLDOWN_MS] post-1er-tick.
+        if (remainingMs > 0) {
+            nextWakeInSec = Math.ceil(remainingMs / 1000);
+        } else {
+            // Past initial tick : modulo to project next-emit.
+            const elapsed = input.nowMs - idleSinceMs;
+            const remainingMod = WAKE_COOLDOWN_MS - (elapsed % WAKE_COOLDOWN_MS);
+            nextWakeInSec = Math.max(1, Math.ceil(remainingMod / 1000));
+        }
     }
     // #919 — instrumentation : log les transitions pour rester
-    // debuggable si un cas pathologique remonte. Volume max ~1 ligne
-    // par flicker, pas de spam.
+    // debuggable si un cas pathologique remonte.
     logCountdownTransition(
         nextWakeInSec === null,
-        ipc.nextWakeAtMs === null ? "nextWakeAtMs=null"
-            : "remainingMs<=0",
+        idleSinceMs === null ? "idleSinceMs=null"
+            : !ipc.loopStart ? "loopStart=false (boot)"
+                : "ok",
     );
     return {
         humanWord,
