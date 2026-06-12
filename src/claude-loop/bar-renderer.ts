@@ -134,47 +134,43 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
             if (remMs > 0) bootRemainingSec = Math.max(0, Math.ceil(remMs / 1000));
         }
     }
-    // #805 / #919 — countdown vers prochain wake.
+    // #805 / #919 — countdown = grace d'entrée de la FIFO drain.
     //
-    // Derive directly from `ipc.idleSinceMs + WAKE_COOLDOWN_MS` when
-    // idleSinceMs is set + bootDone. Bypass `ipc.nextWakeAtMs` (=
-    // l'idleActor subscriber gates sur `snap.matches("idle")` qui est
-    // l'IdleMachine XState, indépendant du `view.phase`. Si l'IdleMachine
-    // reste en `unknown` (SessionStart perdu / cold boot pre-hook) ou en
-    // `busy` (Stop hook pas reçu), `nextWakeAtMs` stays null → countdown
-    // hidden alors que pane is idle + idleSinceMs is set.
+    // David `<chat>` : « si ça fait plus de 10s qu'on est en idle
+    // normalement le pipe est ouvert (c'est une fifo pas une tempo) ».
+    // Le 10s `WAKE_COOLDOWN_MS` est la fenêtre de GRACE après bascule en
+    // idle, pas un throttle cyclique. Sémantique :
     //
-    // #919 david `vrwhe6` (rejet `86fjp3`) + screenshot `o:45 b:2 e:1
-    // [idle]` no countdown : l'IdleMachine n'est pas la bonne source
-    // pour la projection. `idleSinceMs` côté IPC reflète la VRAIE idle-
-    // depuis (set par hookWatcher Stop event OU par session-start). Si
-    // idleSinceMs is set + bootDone, claude EST idle ; le prochain
-    // wake fire à `idleSinceMs + WAKE_COOLDOWN_MS` (= 10s post idle).
+    //   [idle entry] ────── grace 10s (countdown 10→1) ───── [pipe OPEN]
+    //                                                          │
+    //                                                          ▼
+    //                                              drain instant sur SSE
+    //                                              ou idle:settled tick
+    //
+    // Donc countdown affiché UNIQUEMENT pendant la grace
+    // `[idleSinceMs, idleSinceMs+WAKE_COOLDOWN_MS]`. Past 10s : null (=
+    // pipe ouvert, prêt à drainer, pas de countdown utile).
+    //
+    // Gate : `view.phase === "idle"` (bar shows [idle]) + `idleSinceMs`
+    // set. Pas de gate IdleMachine XState ni loopStart : tous deux
+    // proved unreliable across reloads / SessionStart-loss (cf.
+    // historique tickets `86fjp3` rejet + `67946f9` toujours pas
+    // affiché `gjx8ek`).
     let nextWakeInSec: number | null = null;
     const idleSinceMs = ipc.idleSinceMs;
-    if (idleSinceMs !== null && ipc.loopStart) {
-        const nextAt = idleSinceMs + WAKE_COOLDOWN_MS;
-        const remainingMs = nextAt - input.nowMs;
-        // Le wake cooldown coule à idleSinceMs+10s, puis recommence à
-        // every 10s tant qu'on reste idle (= `idle.settled` re-emit
-        // toutes les WAKE_COOLDOWN_MS, cf. idle-machine.ts:144). On
-        // module pour rester dans [0, WAKE_COOLDOWN_MS] post-1er-tick.
+    if (view.phase === "idle" && idleSinceMs !== null) {
+        const remainingMs = (idleSinceMs + WAKE_COOLDOWN_MS) - input.nowMs;
         if (remainingMs > 0) {
             nextWakeInSec = Math.ceil(remainingMs / 1000);
-        } else {
-            // Past initial tick : modulo to project next-emit.
-            const elapsed = input.nowMs - idleSinceMs;
-            const remainingMod = WAKE_COOLDOWN_MS - (elapsed % WAKE_COOLDOWN_MS);
-            nextWakeInSec = Math.max(1, Math.ceil(remainingMod / 1000));
         }
+        // Past grace : nextWakeInSec stays null = pipe ouvert, drain
+        // instant sur prochain SSE / idle:settled, pas de countdown.
     }
-    // #919 — instrumentation : log les transitions pour rester
-    // debuggable si un cas pathologique remonte.
     logCountdownTransition(
         nextWakeInSec === null,
-        idleSinceMs === null ? "idleSinceMs=null"
-            : !ipc.loopStart ? "loopStart=false (boot)"
-                : "ok",
+        view.phase !== "idle" ? `view.phase=${view.phase}`
+            : idleSinceMs === null ? "idleSinceMs=null"
+                : "pipe-open (past grace)",
     );
     return {
         humanWord,
