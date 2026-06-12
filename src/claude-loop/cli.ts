@@ -64,6 +64,7 @@ import {
     type Plate,
 } from "./state.js";
 import { cmdTail, type TailMode } from "./cmds/tail.js";
+import { cmdLog } from "./cmds/log.js";
 import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake, cmdZen, sweepOrphans } from "./cmds/manage.js";
 import { cmdInspect } from "./cmds/inspect.js";
 import { cmdHealth } from "./cmds/health.js";
@@ -1926,7 +1927,7 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "backlog", "debug-proxy-tty", "debug-keys", "_shutdown-timer", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "log", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "backlog", "debug-proxy-tty", "debug-keys", "_shutdown-timer", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -1954,6 +1955,22 @@ async function main(): Promise<void> {
             const which: TailMode = opts.timer ? "timer" : opts.stopHook ? "stop-hook" : opts.log ? "log" : "pane";
             const resolved = name ?? resolveCurrentLoopName();
             await cmdTail(resolved, Number(opts.lines), which, opts.once !== true);
+        });
+    // #944 — NDJSON-aware viewer of the unified loop log (timer ticks +
+    // hook fires interleaved, see #944 Slice 1+2). Filters compose :
+    // `--level info --tag '^wakeMachine' --grep delivered --since 5m`.
+    // `--follow` tails forever ; `--json` keeps raw NDJSON for jq.
+    program.command("log [name]")
+        .description("Filter + tail the unified loop log (NDJSON). Filters compose: --level / --tag / --grep / --since. Name optional — defaults to the loop registered for the current cwd.")
+        .option("-f, --follow", "Follow new lines (tail -F)")
+        .option("--lines <n>", "Lines to keep (default 50, max 10000)", "50")
+        .option("--level <level>", "Drop records below this level (debug|info|notice|warning|error|critical|alert|emergency)")
+        .option("--tag <regex>", "Only records whose tag matches this regex (e.g. '^wakeMachine')")
+        .option("--grep <regex>", "Only records whose msg matches this regex")
+        .option("--since <when>", "Only records after this ISO 8601 timestamp or relative duration (5m / 2h / 30s / 7d)")
+        .option("--json", "Output raw NDJSON instead of pretty-print")
+        .action(async (name: string | undefined, opts: { follow?: boolean; lines: string; level?: string; tag?: string; grep?: string; since?: string; json?: boolean }) => {
+            await cmdLog(name ?? resolveCurrentLoopName(), opts);
         });
     program.command("rm [name]")
         .description("Kill tmux + timer + remove state dir. Name optional — defaults to the loop registered for the current cwd (mirrors reload/restart/stop).")
