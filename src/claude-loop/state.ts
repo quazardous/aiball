@@ -1855,6 +1855,8 @@ export const LOOP_SOCK_KIND = {
     QUERY_LOOP_STATE: "queryLoopState",
     QUERY_LOOP_STATE_REPLY: "queryLoopStateReply",
     SHUTDOWN: "shutdown",
+    GET_SNAPSHOTS: "getSnapshots",
+    GET_SNAPSHOTS_REPLY: "getSnapshotsReply",
 } as const;
 export type LoopSockKind = (typeof LOOP_SOCK_KIND)[keyof typeof LOOP_SOCK_KIND];
 
@@ -1899,6 +1901,40 @@ export async function sendShutdownToTimer(sd: string, timeoutMs = 500): Promise<
     } catch { /* best-effort */ }
 }
 
+/** #943 — UDS round-trip to grab the live XState snapshots from the
+ *  running timer BEFORE killing it on `cmdReload`. Symmetric to
+ *  `selfReloadIfStale` which captures them in-process. Returns the
+ *  serialized `RespawnSnapshots` JSON string (suitable to set
+ *  directly as `CL_RESPAWN_STATE` env var on the new spawn), or null
+ *  on any failure (timer down, socket missing, ws drop, malformed
+ *  reply) — caller falls back to a cold-boot new timer (= today's
+ *  behavior, AFK reverts to `off`). */
+export async function fetchSnapshotsFromTimer(sd: string, timeoutMs = 500): Promise<string | null> {
+    const sock = loopSockPath(sd);
+    if (!existsSync(sock)) return null;
+    const ipcEvents = await import("./ipc-events.js");
+    const ch = ipcEvents.openEventChannel(sock, { reconnectMs: 100 });
+    try {
+        const connected = await new Promise<boolean>((resolve) => {
+            const start = Date.now();
+            const tick = (): void => {
+                if (ch.isConnected()) { resolve(true); return; }
+                if (Date.now() - start >= timeoutMs) { resolve(false); return; }
+                setTimeout(tick, 25);
+            };
+            tick();
+        });
+        if (!connected) return null;
+        const reply = await ch.request({ kind: LOOP_SOCK_KIND.GET_SNAPSHOTS }, timeoutMs);
+        const data = reply.data as { serialized?: string | null } | null | undefined;
+        return data?.serialized ?? null;
+    } catch {
+        return null;
+    } finally {
+        ch.close();
+    }
+}
+
 export function createLoopServer(
     sockPath: string,
     handlers: {
@@ -1907,6 +1943,12 @@ export function createLoopServer(
          *  lands. Defaults to `process.exit(0)` (after `server.close()`).
          *  Tests inject a spy to avoid killing the test process. */
         onShutdownRequest?: () => void;
+        /** #943 — called when a `LOOP_SOCK_KIND.GET_SNAPSHOTS` frame
+         *  lands ; should return the serialized `RespawnSnapshots` JSON
+         *  string (same shape `selfReloadIfStale` builds via
+         *  `buildRespawnEnvFromSnapshots`). Null/undefined = nothing to
+         *  preserve, the caller's new spawn cold-boots. */
+        onGetSnapshots?: () => string | null;
     },
 ): LoopServer {
     const server: EventServer = listenEvents(sockPath, (ev, { reply }) => {
@@ -1961,6 +2003,20 @@ export function createLoopServer(
                     lastSseEventAtMs: ipc.lastSseEventAtMs,
                     sseConnected: ipc.sseConnected,
                 },
+            });
+            return;
+        }
+        if (ev.kind === LOOP_SOCK_KIND.GET_SNAPSHOTS) {
+            // #943 — `cmdReload` asks for the live XState snapshots
+            // BEFORE killing the timer, so the new spawn can restore
+            // exact state (AFK wait_inf survives the reload). Reply
+            // rides the request/reply correlation : echo `__req` so the
+            // client's awaiting promise resolves.
+            const reqId = (ev.data as { __req?: string } | null | undefined)?.__req;
+            const serialized = handlers.onGetSnapshots ? handlers.onGetSnapshots() : null;
+            reply({
+                kind: LOOP_SOCK_KIND.GET_SNAPSHOTS_REPLY,
+                data: { __req: reqId, serialized },
             });
             return;
         }

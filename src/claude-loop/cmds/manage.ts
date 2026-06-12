@@ -21,6 +21,7 @@ import {
     MUX_CMD,
     STATE_ROOT,
     envPath,
+    fetchSnapshotsFromTimer,
     installRoot,
     installRootSha,
     platePath,
@@ -34,6 +35,7 @@ import {
     sendShutdownToTimer,
     zenPath,
 } from "../state.js";
+import { RESPAWN_STATE_ENV_VAR } from "../respawn-state.js";
 import { sendEventOnce } from "../ipc-events.js";
 
 function die(msg: string): never {
@@ -233,7 +235,7 @@ export function cmdZen(name: string, opts?: { on?: boolean; off?: boolean }): vo
     }
 }
 
-export function cmdReload(name: string, opts?: { set?: string[] }): void {
+export async function cmdReload(name: string, opts?: { set?: string[] }): Promise<void> {
     if (!tmuxAlive(name)) {
         die(`loop '${name}' not alive (use 'start' to spawn a fresh one)`);
     }
@@ -257,6 +259,15 @@ export function cmdReload(name: string, opts?: { set?: string[] }): void {
         const raw = Number(readFileSync(timerPidPath(sd), "utf8").trim());
         if (Number.isFinite(raw) && raw > 0) oldPid = raw;
     }
+    // #943 — capture XState snapshots from the live timer BEFORE we kill
+    // it, so the new spawn restores exact controller state (AFK wait_inf
+    // survives reload — pre-fix it reverted to off). Symmetric to
+    // `selfReloadIfStale` which does the same in-process. Best-effort :
+    // null on any failure (timer already dying, socket missing, ws drop)
+    // → new spawn cold-boots (= pre-fix behavior). Must run BEFORE
+    // `sendShutdownToTimer` since the timer closes its server on
+    // shutdown frame receipt and the round-trip would race.
+    const snapshotsJson = await fetchSnapshotsFromTimer(sd, 500);
     // #866 Slice 2 — cooperative shutdown via loop.sock BEFORE the SIGKILL
     // fallback. Le timer cible (le VRAI process timer.ts, pas le wrapper
     // tsx zombie #413) écoute son propre socket et se kill proprement à
@@ -302,18 +313,26 @@ export function cmdReload(name: string, opts?: { set?: string[] }): void {
     // dir without tsx in its own node_modules, same as the SessionStart
     // hook bug that motivated the change in cli.ts cmdStart).
     const tsxBin = shQuote(join(root, "node_modules", ".bin", "tsx"));
+    // #943 — pass the captured XState snapshots via env so the new timer's
+    // service factories restore the exact state (cf. `consumePendingSnapshot`
+    // in afk-service.ts etc.). Null = nothing to preserve, cold boot.
+    const spawnEnv = snapshotsJson
+        ? { ...process.env, [RESPAWN_STATE_ENV_VAR]: snapshotsJson }
+        : process.env;
     const child = spawn("bash", [
         "-lc",
         `source ${shQuote(envPath(sd))} && exec ${tsxBin} ${shQuote(timerScript)}`,
     ], {
         detached: true,
         stdio: ["ignore", logFd, logFd],
+        env: spawnEnv,
     });
     child.unref();
     writeFileSync(timerPidPath(sd), String(child.pid) + "\n");
 
     const killed = oldPid !== null ? ` (killed old pid ${oldPid})` : "";
-    process.stdout.write(`timer for '${name}' respawned${killed} — new pid ${child.pid}\n`);
+    const restored = snapshotsJson ? " (xstate snapshots restored)" : "";
+    process.stdout.write(`timer for '${name}' respawned${killed}${restored} — new pid ${child.pid}\n`);
 }
 
 /**

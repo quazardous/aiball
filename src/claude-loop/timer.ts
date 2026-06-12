@@ -109,6 +109,7 @@ import {
     consumePendingSnapshot,
     parseRespawnSnapshots,
     RESPAWN_STATE_ENV_VAR,
+    serializeRespawnSnapshots,
     setPendingRespawnSnapshots,
 } from "./respawn-state.js";
 import { createActor, type ActorRefFrom, type Snapshot } from "xstate";
@@ -1274,6 +1275,26 @@ async function mainSse(): Promise<void> {
         onProxyEvent: (event) => {
             const verdict = dispatchProxyEvent(sd!, event);
             log(formatVerdictLogLine(verdict));
+        },
+        // #943 — `cmdReload` (external claude-loop CLI) round-trips this
+        // BEFORE SIGKILL'ing us, so the new spawn restores exact XState
+        // (AFK wait_inf survives reload). Symmetric to
+        // `selfReloadIfStale` which captures the same 5 snapshots
+        // in-process. Returns the serialized JSON string that the new
+        // child sets as `CL_RESPAWN_STATE` env var.
+        onGetSnapshots: () => {
+            try {
+                return serializeRespawnSnapshots({
+                    boot: bootActor ? bootActor.getPersistedSnapshot() : undefined,
+                    afk: getAfkService().getActor().getPersistedSnapshot(),
+                    wake: getWakeService().getActor().getPersistedSnapshot(),
+                    typing: getTypingService().getActor().getPersistedSnapshot(),
+                    idle: getIdleService().getActor().getPersistedSnapshot(),
+                });
+            } catch (e) {
+                log(`onGetSnapshots: capture failed (${(e as Error).message ?? String(e)})`);
+                return null;
+            }
         },
     });
     process.on("exit", () => loopServer.close());
