@@ -40,7 +40,7 @@
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
-use std::process::{Command as StdCommand, Stdio};
+use std::process::Command as StdCommand;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -71,6 +71,7 @@ use windows_sys::Win32::System::Pipes::{
 };
 
 mod core;
+mod ws_client;
 
 const CP_UTF8: u32 = 65001;
 
@@ -106,6 +107,11 @@ fn state_dir() -> Option<String> {
 
 fn marker_path() -> Option<String> {
     state_dir().map(|sd| format!("{sd}/human-typing"))
+}
+
+/// #768 — the unified `loop.sock` path; the ws-client resolves its `.addr`.
+fn loop_sock_path() -> Option<String> {
+    state_dir().map(|sd| format!("{sd}/loop.sock"))
 }
 
 fn proxy_alive_path() -> Option<String> {
@@ -177,6 +183,7 @@ fn clear_user_grace() {
     }
 }
 
+#[allow(dead_code)] // #768 — file-write path retired from the hot loop; kept callable for degraded/debug.
 fn apply_marker(m: core::Marker) {
     match m {
         core::Marker::SetAfk => set_afk(),
@@ -189,73 +196,8 @@ fn apply_marker(m: core::Marker) {
 
 // --- bar word (stop/wait/loop) + grace windows (#302/#305/#315/#345) ---------
 
-/// Follows HUMAN_TYPING_TTL_SEC (state.ts): how long after the last text
-/// keystroke the bar stays `stop` before reverting to the rest word.
-const HUMAN_TTL_MS: f64 = 5000.0;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum BarWord {
-    Stop,
-    Wait,
-    Loop,
-}
-
-/// fg+bg aligned with setTmuxStatus / humanBarWord (state.ts), #302:
-/// stop=red, wait=yellow, loop=green, all on the bar bg (colour16).
-fn bar_word_str(w: BarWord) -> &'static str {
-    match w {
-        BarWord::Stop => "#[fg=colour196,bg=colour16]stop",
-        BarWord::Wait => "#[fg=colour178,bg=colour16]wait",
-        BarWord::Loop => "#[fg=colour40,bg=colour16]loop",
-    }
-}
-
 fn env_f64(key: &str, default: f64) -> f64 {
     env::var(key).ok().and_then(|v| v.trim().parse().ok()).unwrap_or(default)
-}
-
-/// #305: boot-grace seconds left (0 under `--no-wait` / CL_WAIT=0).
-fn boot_grace_remaining(boot: Instant) -> f64 {
-    if env::var("CL_WAIT").as_deref() == Ok("0") {
-        return 0.0;
-    }
-    (env_f64("CL_BOOT_GRACE_SEC", 60.0) - boot.elapsed().as_secs_f64()).max(0.0)
-}
-
-/// #302/#315: user-grace seconds left, from the `user-took-over` mtime.
-fn user_grace_remaining() -> f64 {
-    let p = match user_grace_path() {
-        Some(p) => p,
-        None => return 0.0,
-    };
-    let grace = env_f64("CL_USER_GRACE_SEC", 60.0);
-    match fs::metadata(&p).and_then(|m| m.modified()) {
-        Ok(mtime) => {
-            let age = SystemTime::now()
-                .duration_since(mtime)
-                .map(|d| d.as_secs_f64())
-                .unwrap_or(f64::MAX);
-            (grace - age).max(0.0)
-        }
-        Err(_) => 0.0,
-    }
-}
-
-/// At-rest word: `wait` during boot-grace OR user-grace, else `loop`.
-fn rest_word(boot: Instant) -> BarWord {
-    if boot_grace_remaining(boot) > 0.0 || user_grace_remaining() > 0.0 {
-        BarWord::Wait
-    } else {
-        BarWord::Loop
-    }
-}
-
-/// Shared between the stdin thread (writes) and the housekeeping thread
-/// (revert stop→rest after the typing TTL). `word` is the last painted word
-/// so both threads only repaint on a transition (no tmux churn).
-struct BarState {
-    word: BarWord,
-    last_keystroke_ms: f64,
 }
 
 /// Presence marker stamped with our PID (ground truth: the pane really
@@ -270,71 +212,6 @@ fn drop_proxy_alive() {
 fn clear_proxy_alive() {
     if let Some(p) = proxy_alive_path() {
         let _ = fs::remove_file(&p);
-    }
-}
-
-// --- tmux @cl_human painting (#274/#302 parity) -----------------------------
-
-/// Repaint the `@cl_human` bar segment + force a refresh. No-op when CL_TMUX
-/// is unset or the mux call fails — the bar must NEVER break the I/O bridge.
-fn paint_word(word: BarWord) {
-    let target = match env::var("CL_TMUX") {
-        Ok(t) if !t.is_empty() => t,
-        _ => return,
-    };
-    let mux = env::var("MUX_CMD").unwrap_or_else(|_| "tmux".to_string());
-    let mut it = mux.split_whitespace();
-    let prog = match it.next() {
-        Some(p) => p,
-        None => return,
-    };
-    let pre: Vec<&str> = it.collect();
-    let _ = StdCommand::new(prog)
-        .args(&pre)
-        .args(["set-option", "-t", &target, "@cl_human", bar_word_str(word)])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    let _ = StdCommand::new(prog)
-        .args(&pre)
-        .args(["refresh-client", "-S"])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-/// Set the bar to `want`, painting only on a transition (both threads call
-/// this under the shared lock so they never fight over `@cl_human`).
-fn set_word(shared: &Arc<Mutex<BarState>>, want: BarWord) {
-    let paint = {
-        let mut s = shared.lock().unwrap();
-        if s.word != want {
-            s.word = want;
-            true
-        } else {
-            false
-        }
-    };
-    if paint {
-        paint_word(want);
-    }
-}
-
-/// Typing → `stop` + refresh the keystroke clock (so the TTL revert is timed
-/// from the last keypress). Always updates the clock, paints only on flip.
-fn mark_typing(shared: &Arc<Mutex<BarState>>, now_ms: f64) {
-    let paint = {
-        let mut s = shared.lock().unwrap();
-        s.last_keystroke_ms = now_ms;
-        if s.word != BarWord::Stop {
-            s.word = BarWord::Stop;
-            true
-        } else {
-            false
-        }
-    };
-    if paint {
-        paint_word(BarWord::Stop);
     }
 }
 
@@ -631,17 +508,29 @@ fn real_main() -> i32 {
     // a previous run in the same state dir (#351/#357), then claim the bar at
     // its rest word.
     drop_proxy_alive();
-    clear_afk();
-    clear_user_grace();
-    let initial = rest_word(boot_ts);
-    paint_word(initial);
 
     let writer = Arc::new(Mutex::new(writer));
+    // #768 — loop.sock ws client: emit proxyEvents (replacing marker file
+    // writes) + receive `inject` (→ PTY master). No painting — the TS
+    // BarRenderer (#633) owns the bar. None when CL_STATE_DIR is unset
+    // (degraded, like the Python side: events drop, bytes still forward).
+    let ws = loop_sock_path().map(|sock| {
+        let inj_writer = writer.clone();
+        ws_client::start(
+            sock,
+            ws_client::Callbacks {
+                on_inject: Box::new(move |text: &str| {
+                    if let Ok(mut w) = inj_writer.lock() {
+                        let _ = w.write_all(text.as_bytes());
+                        let _ = w.flush();
+                    }
+                }),
+                on_view: Box::new(|_v: &serde_json::Value| { /* cached only; BarRenderer paints */ }),
+            },
+        )
+    });
     let master: Arc<Mutex<Box<dyn MasterPty + Send>>> = Arc::new(Mutex::new(pair.master));
     let running = Arc::new(AtomicBool::new(true));
-    // Bar state shared between the stdin + housekeeping threads. last_keystroke
-    // far in the past so the housekeeping TTL revert is immediately eligible.
-    let shared = Arc::new(Mutex::new(BarState { word: initial, last_keystroke_ms: -1.0e12 }));
 
     let stdin_h = SendHandle(console.stdin);
     let stdout_h = SendHandle(console.stdout);
@@ -674,8 +563,8 @@ fn real_main() -> i32 {
     // applied, raw bytes forwarded (or an AFK combo swallowed), bar word driven.
     {
         let writer = writer.clone();
-        let shared = shared.clone();
         let running = running.clone();
+        let ws = ws.clone();
         let sin = stdin_h;
         let boot = boot_ts;
         thread::spawn(move || {
@@ -695,8 +584,23 @@ fn real_main() -> i32 {
                         let now_ms = boot.elapsed().as_secs_f64() * 1000.0;
                         for unit in core::split_units_streaming(data, &mut pending) {
                             let v = decider.on_unit(&unit, now_ms);
-                            for m in &v.markers {
-                                apply_marker(*m);
+                            // #768 — thin contract: emit proxyEvents over
+                            // loop.sock instead of writing marker files (the TS
+                            // state machine owns AFK state, #924). Combo →
+                            // afk_key (toggle) ; typing → typing (arm 10m) +
+                            // touch_marker ; lone-ESC → typing (arm 10m).
+                            if let Some(ws) = &ws {
+                                let ev_ms = ts_now();
+                                if v.afk_fired {
+                                    ws.emit(ws_client::keystroke("afk_key", ev_ms));
+                                }
+                                if v.typing {
+                                    ws.emit(ws_client::keystroke("typing", ev_ms));
+                                    ws.emit(ws_client::marker("touch_marker", ev_ms));
+                                }
+                                if v.lone_esc {
+                                    ws.emit(ws_client::keystroke("typing", ev_ms));
+                                }
                             }
                             if !v.forward.is_empty() {
                                 dbg_bytes("forward", &v.forward);
@@ -704,11 +608,6 @@ fn real_main() -> i32 {
                                     let _ = w.write_all(&v.forward);
                                     let _ = w.flush();
                                 }
-                            }
-                            match v.word {
-                                core::Word::Stop => mark_typing(&shared, now_ms),
-                                core::Word::Rest => set_word(&shared, rest_word(boot)),
-                                core::Word::None => {}
                             }
                         }
                     }
@@ -732,20 +631,13 @@ fn real_main() -> i32 {
     // (4) housekeeping: revert stop→rest after the typing TTL (and progress
     // wait→loop as the boot/user grace windows expire) + propagate resize.
     {
-        let shared = shared.clone();
         let master = master.clone();
         let running = running.clone();
         let out = stdout_h;
-        let boot = boot_ts;
         thread::spawn(move || {
             let mut last_size = (rows, cols);
             while running.load(Ordering::Relaxed) {
                 thread::sleep(Duration::from_millis(200));
-                let now_ms = boot.elapsed().as_secs_f64() * 1000.0;
-                let last_ks = shared.lock().unwrap().last_keystroke_ms;
-                if (now_ms - last_ks) >= HUMAN_TTL_MS {
-                    set_word(&shared, rest_word(boot));
-                }
                 // Resize: poll the (psmux) console size, push to claude PTY.
                 if let Some((r, c)) = out.window_size() {
                     if (r, c) != last_size {
@@ -768,9 +660,8 @@ fn real_main() -> i32 {
     let status = child.wait();
     running.store(false, Ordering::Relaxed);
 
-    // Cleanup: hand the bar back to its rest word, drop the presence marker,
-    // restore console. (TS reverts to its own painting once proxy-alive is gone.)
-    paint_word(rest_word(boot_ts));
+    // Cleanup: drop the presence marker + restore console. The bar is owned by
+    // the TS BarRenderer (#633) — nothing to repaint here.
     clear_proxy_alive();
     console.restore();
 
