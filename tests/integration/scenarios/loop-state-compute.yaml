@@ -1,0 +1,243 @@
+# #750 Slice 2 — migration `loop-state.test.ts` (computeLoopView half).
+# Uses the runner's `args_template` extension to factor the common
+# LoopStateInput fixture (~25 fields) — each entry overrides just the
+# diff via `args_overrides`. Mirrors the JS-side `baseInput(overrides)`
+# pattern.
+#
+# The 5 `LoopStateBus` tests + helpers (canFireWake, isReallyBusy, etc.)
+# stay in TS — stateful bus + small assertion-helper calls outside
+# computeLoopView. Round-trip with this scenario keeps the cross-product
+# of (boot/post-boot) × AFK × typing × wake-gate via SSOT.
+scenario: loop-state-compute
+description: |
+  `computeLoopView(LoopStateInput) → LoopStateView` is the central
+  pure compute that the bar renderer + wake gate + chip painter all
+  drive off. Pin the cross-product : boot-phase locks (under-wait /
+  no-wait / picker), post-boot transitions (wait/loop word vs AFK
+  mode), F9 cycle (off↔10m↔inf), AFK 10m countdown semantics, typing
+  precedence (stop overrides AFK chunk-unaffected), wake-allowed
+  gates (idle marker / busy-defer / pane busy / manual override).
+
+# T0 = Date.parse("2026-05-29T17:00:00.000Z") = 1780245600000.
+# SEC = 1000, MIN = 60_000, 5*SEC = 5000, 30*SEC = 30000, 61*SEC = 61000,
+# 2*MIN = 120000, 5*MIN = 300000, 10*MIN = 600000, 9*MIN = 540000.
+
+args_template:
+    nowMs: 1780245600000
+    loopStartMs: 1780245600000
+    bootGraceMs: 60000
+    bootMinMs: 30000
+    bootDeadlineMs: 1780245630000
+    resumePickerActive: false
+    bootComplete: true
+    paneBusy: false
+    paneReady: true
+    paneCompacting: false
+    paneInterrupted: false
+    noWait: false
+    humanTypingAtMs: null
+    humanTypingTtlMs: 5000
+    afkMode: "off"
+    afkExpiryMs: null
+    idleSinceMs: null
+    wakeInFlightAtMs: null
+    wakeInFlightTtlMs: 2000
+    busyDeferUntilMs: null
+    inputHotTtlMs: 3000
+    manualWake: false
+
+unit:
+    # --- boot-grace phase ---
+    - name: "boot phase under --wait, picker not yet rendered"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides: { nowMs: 1780245605000, bootComplete: false, paneReady: false }  # T0+5s, pre-settle
+      expect:
+        "phase": "boot"
+        "barWord": "boot"
+        "afkChunk.label": "AFK"
+        "afkChunk.color": "dim"
+        "inBootGrace": true
+        "wakeAllowed": false
+        "wakeSkipReason": "/no idle marker|boot floor|boot phase|boot — /"
+
+    - name: "boot phase with idle marker (rare race) → boot-grace gate wins"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245605000  # T0+5s
+        idleSinceMs: 1780245604000  # T0+4s
+        bootComplete: false
+        paneReady: false
+      expect:
+        "wakeAllowed": false
+        "wakeSkipReason": "/boot floor/"
+
+    - name: "boot phase under --no-wait + picker active → boot stretches"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245630000  # T0+30s
+        noWait: true
+        paneBusy: false
+        paneReady: false
+        bootComplete: false
+        resumePickerActive: true
+        bootDeadlineMs: 1780245640000  # T0+40s
+      expect:
+        "phase": "boot"
+        "barWord": "boot"
+        "inBootGrace": true
+
+    - name: "paneReady=true → boot ends"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245630000
+        paneReady: true
+        idleSinceMs: 1780245630000
+      expect:
+        "inBootGrace": false
+        "barWord": "loop"
+
+    - name: "boot phase: claude shows `esc to interrupt` → bar still boot"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245610000  # T0+10s
+        bootComplete: false
+        paneReady: false
+        paneBusy: true
+      expect:
+        "phase": "boot"
+        "barWord": "boot"
+
+    - name: "boot phase: typing in resume picker → no stop, no AFK arming"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245615000  # T0+15s
+        bootComplete: false
+        paneReady: false
+        humanTypingAtMs: 1780245614000  # 1s ago
+      expect:
+        "barWord": "boot"
+        "afkChunk.label": "AFK"
+
+    # --- post-boot transitions (--wait / --no-wait) ---
+    - name: "post-boot --wait + NOT AFK 10m armed → wait jaune + wake skip"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245661000  # T0+61s
+        afkMode: "wait_10m"
+        afkExpiryMs: 1780246261000  # +10m
+        idleSinceMs: 1780245660000  # 1s ago
+      expect:
+        "phase": "idle"
+        "barWord": "wait"
+        "afkChunk.label": "NOT AFK"
+        "afkChunk.color": "yellow"
+        "afkChunk.prefix": "600s"
+        "wakeAllowed": false
+        "wakeSkipReason": "/NOT AFK/"
+
+    - name: "post-boot --no-wait + AFK off → loop vert + wake allowed"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245661000
+        noWait: true
+        idleSinceMs: 1780245660000
+      expect:
+        "phase": "idle"
+        "barWord": "loop"
+        "afkChunk.label": "AFK"
+        "afkChunk.color": "dim"
+        "wakeAllowed": true
+        "wakeSkipReason": null
+
+    # --- AFK F9 tristate ---
+    - name: "F9 from AFK → NOT AFK 10m → bar wait jaune"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245720000  # T0+2min
+        afkMode: "wait_10m"
+        afkExpiryMs: 1780246320000  # +10m
+        idleSinceMs: 1780245715000  # 5s ago
+      expect:
+        "barWord": "wait"
+        "afkChunk.label": "NOT AFK"
+        "afkChunk.color": "yellow"
+
+    - name: "F9 from NOT AFK 10m → NOT AFK ∞ → bar wait rouge"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245720000
+        afkMode: "wait_inf"
+        idleSinceMs: 1780245720000
+      expect:
+        "barWord": "wait"
+        "afkChunk.label": "NOT AFK"
+        "afkChunk.color": "red"
+        "afkChunk.prefix": "∞"
+
+    - name: "F9 from NOT AFK ∞ → AFK → bar loop vert"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245720000
+        afkMode: "off"
+        idleSinceMs: 1780245720000
+      expect:
+        "barWord": "loop"
+        "afkChunk.label": "AFK"
+
+    # --- AFK 10m countdown semantics ---
+    - name: "AFK 10m countdown 9m left → `540s NOT AFK:F9`"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245720000  # T0+2min
+        afkMode: "wait_10m"
+        afkExpiryMs: 1780246260000  # +9min from now
+        idleSinceMs: 1780245720000
+      expect:
+        "afkChunk.prefix": "540s"
+
+    - name: "AFK 10m countdown 30s left → `30s NOT AFK:F9`"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780246170000  # T0 + 9m30s
+        afkMode: "wait_10m"
+        afkExpiryMs: 1780246200000  # +30s from now
+        idleSinceMs: 1780246170000
+      expect:
+        "afkChunk.prefix": "30s"
+
+    - name: "AFK 10m auto-expires → bar loop vert + wake allowed"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780246500000  # T0 + 15min
+        afkMode: "wait_10m"
+        afkExpiryMs: 1780246260000  # T0+11min, expired 4 min ago
+        idleSinceMs: 1780246495000
+      expect:
+        "barWord": "loop"
+        "afkChunk.label": "AFK"
+        "afkChunk.color": "dim"
+        "wakeAllowed": true
+
+    # --- Typing precedence ---
+    - name: "typing post-boot → stop red (overrides AFK 10m wait word)"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245900000  # T0+5min
+        humanTypingAtMs: 1780245899000  # 1s ago
+        afkMode: "wait_10m"
+        afkExpiryMs: 1780246200000  # +5min
+        idleSinceMs: 1780245898000  # 2s ago
+      expect:
+        "barWord": "stop"
+        "afkChunk.label": "NOT AFK"  # chunk unaffected by typing
+
+    - name: "typing TTL expired (>5s ago) → bar reverts to AFK-driven state"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245900000  # T0+5min
+        humanTypingAtMs: 1780245890000  # 10s ago, past 5s TTL
+        afkMode: "wait_10m"
+        afkExpiryMs: 1780246200000  # +5min
+        idleSinceMs: 1780245900000
+      expect:
+        "barWord": "wait"

@@ -45,6 +45,13 @@ interface UnitEntry {
     name: string;
     call: { module: string; fn: string };
     args?: unknown[];
+    /** #750 Slice 2 — overrides merged into the scenario's `args_template`
+     *  before the call. Lets tests follow the `baseInput(overrides)`
+     *  pattern (`loop-state.test.ts` etc.) without re-spelling the full
+     *  fixture per entry. The template is shallow-merged ; nested objects
+     *  in `args_overrides` REPLACE rather than deep-merge — same semantic
+     *  as JavaScript object spread. Ignored when there is no `args_template`. */
+    args_overrides?: Record<string, unknown>;
     /** Dot-path assertions against the return value (object returns). */
     expect?: Record<string, unknown>;
     /** #750 Slice 2 — top-level value match for scalar returns
@@ -56,6 +63,11 @@ interface UnitEntry {
 
 interface ScenarioFile {
     scenario?: string;
+    /** #750 Slice 2 — when set, every `unit` entry without `args` defaults
+     *  to `[args_template + args_overrides]` (single-arg fixture). Halves
+     *  the verbosity for large scenarios like `loop-state` (70+ cases all
+     *  calling `computeLoopView({...})`). */
+    args_template?: Record<string, unknown>;
     unit?: UnitEntry[];
 }
 
@@ -110,9 +122,10 @@ const scenarios = loadScenarios();
 // the test functions stay sync (matches `node:test` ergonomics). Failed
 // imports surface as a single fail per scenario rather than crashing the
 // whole suite.
-const loaded: { entry: UnitEntry; mod: unknown; scenarioName: string }[] = [];
+const loaded: { entry: UnitEntry; mod: unknown; scenarioName: string; argsTemplate: Record<string, unknown> | null }[] = [];
 for (const { path, data } of scenarios) {
     const scenarioName = data.scenario ?? path.split("/").pop() ?? "<unnamed>";
+    const argsTemplate = data.args_template ?? null;
     for (const entry of data.unit ?? []) {
         // Resolve the module path relative to src/claude-loop/.
         const modPath = entry.call.module.startsWith(".")
@@ -120,7 +133,7 @@ for (const { path, data } of scenarios) {
             : entry.call.module;
         try {
             const mod = await import(modPath);
-            loaded.push({ entry, mod, scenarioName });
+            loaded.push({ entry, mod, scenarioName, argsTemplate });
         } catch (e) {
             test(`yaml-scenarios :: ${scenarioName} :: ${entry.name} (load)`, () => {
                 assert.fail(`Failed to import ${entry.call.module}: ${(e as Error).message}`);
@@ -129,11 +142,22 @@ for (const { path, data } of scenarios) {
     }
 }
 
-for (const { entry, mod, scenarioName } of loaded) {
+for (const { entry, mod, scenarioName, argsTemplate } of loaded) {
     test(`yaml-scenarios :: ${scenarioName} :: ${entry.name}`, () => {
         const fn = (mod as Record<string, unknown>)[entry.call.fn];
         assert.equal(typeof fn, "function", `Module ${entry.call.module} has no exported function '${entry.call.fn}'`);
-        const args = entry.args ?? [];
+        // #750 Slice 2 — resolve args precedence :
+        //   explicit `args:` > template + overrides > template alone > `[]`.
+        // The template+overrides form is the `baseInput(overrides)` shape
+        // for one-arg fixtures.
+        let args: unknown[];
+        if (entry.args !== undefined) {
+            args = entry.args;
+        } else if (argsTemplate !== null) {
+            args = [{ ...argsTemplate, ...(entry.args_overrides ?? {}) }];
+        } else {
+            args = [];
+        }
         const result = (fn as (...a: unknown[]) => unknown)(...args);
         // #750 Slice 2 — `expect_value` covers scalar returns (string /
         // boolean / number) that the dot-path `expect` can't address.
