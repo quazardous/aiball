@@ -23,6 +23,21 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.31.1] — 2026-06-12
+
+### Added
+
+- `claude-loop log --copy <out>` snapshots the live NDJSON to a frozen path so investigations don't have to chase the live appender.
+
+### Changed
+
+- Dropped the session-health badge (`H:N`) from the tmux bar. The watcher still captures the score into ipc state, but the bar no longer paints it.
+
+### Fixed
+
+- API-error backoff no longer self-trips on conversation text. Patterns now match the full Claude Code error banners (`API Error: Overloaded`, `API Error: Server is temporarily limiting requests`) instead of broad substrings, the detector is gated on `!paneBusy` at both call sites, and the footer scan skips user-prompt lines (`> ` / `❯ `). A wake phrase quoting a banner can no longer escalate the backoff to its 10-min cap.
+- Clearing the error backoff also clears the residual `busy-defer-until`. Previously a 10-min defer armed during escalation could outlive the cleared banner and silently block every wake until its deadline.
+
 ## [0.31.0] — 2026-06-12
 
 ### Added
