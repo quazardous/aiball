@@ -105,7 +105,7 @@ NOT triage : `ticket_get(N)` then silence. `last_actor` is still the reporter, t
 
 The wake-injection pipeline = single source of truth. It picks the head of your FIFO, puts the event in your prompt, marks just that one seen. One event per cycle.
 
-Engage with the event the wake gave you, don't drain :
+Act on the event the wake gave you, don't drain :
 - `ticket_get(N)` auto-acks every unread on #N.
 - `ticket_reply` does the same for its target thread.
 - The wake-injection itself acks its head.

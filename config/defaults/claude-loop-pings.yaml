@@ -110,13 +110,13 @@ wake_phrases:
 #   {project_scope}    "`<project>`" or "your scope"
 prompts:
   # The whole wake-CTA in one template. Each {x:+…} block renders only when x
-  # is set — so pings/engage/open appear exactly when relevant, no branching in
-  # code. #371: the engage block NAMES the work-order head (#{head_id}). Per-tone
+  # is set — so pings/claim/open appear exactly when relevant, no branching in
+  # code. The claim block NAMES the work-order head (#{head_id}). Per-tone
   # buckets; directive is the shipped default tone.
-  # #706 david vkn787 — the wake says "claim" (verb) for the pickup CTA, never
-  # "engage". "Engage!" stays exclusively a human-typed greenlight catchphrase
-  # ("execute the proposal pending"), unambiguous because it never appears in
-  # the wake template. The verb matches the tool name `ticket_claim()`.
+  # The wake says "claim" (verb) for the pickup CTA, never "engage". "Engage!"
+  # stays exclusively a human-typed greenlight catchphrase ("execute the
+  # proposal pending"), unambiguous because it never appears in the wake
+  # template. The verb matches the tool name `ticket_claim()`.
   # #825 david — `wake_lead` retired : it only fed the no_head branch which
   # rendered "Wake up, Neo. quick note:" with a dangling colon. The no_head
   # cultural ping now uses `{culture}` alone (one of ping_messages above).
