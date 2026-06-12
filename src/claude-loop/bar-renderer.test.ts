@@ -60,6 +60,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
         zenActive: false,
         counters: null,
         nextWakeInSec: null,
+        sessionHealthScore: null,
         bootElapsedSec: null,
         bootRemainingSec: null,
         afkChipStr: "",
@@ -70,7 +71,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
 test("diffSnapshots: prev=null → tous les champs marqués changed (initial)", () => {
     assert.deepEqual(
         diffSnapshots(null, snap()),
-        ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkChipStr"],
+        ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "sessionHealthScore", "bootElapsedSec", "bootRemainingSec", "afkChipStr"],
     );
 });
 

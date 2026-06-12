@@ -97,6 +97,7 @@ import {
     CompactConfirmWatcher,
 } from "./pane-watchers/boot-watchers.js";
 import { PromptWatcher, BusyWatcher, InterruptedWatcher, IdlePromptWatcher } from "./pane-watchers/runtime-watchers.js";
+import { HealthCheckWatcher } from "./pane-watchers/health-check-watcher.js";
 import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
@@ -128,6 +129,7 @@ import {
     setIpcBootComplete,
     setIpcLoopStart,
     setIpcHumanTypingAtMs,
+    setIpcSessionHealthScore,
     setIpcBootDeadlineMs,
     setIpcCounters,
     setIpcIdleSince,
@@ -572,10 +574,11 @@ const busyW = new BusyWatcher();
 const interruptedW = new InterruptedWatcher();
 const idlePromptW = new IdlePromptWatcher();
 const errorW = new ErrorWatcher();
+const healthCheckW = new HealthCheckWatcher();
 const paneObs = new PaneObserver();
 paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
 paneObs.registerZone(new Zone("runtime", [
-    promptW, busyW, interruptedW, idlePromptW, errorW, getCompactingDetector(),
+    promptW, busyW, interruptedW, idlePromptW, errorW, getCompactingDetector(), healthCheckW,
 ]));
 // Runtime zone toujours actif ; boot zone n'est entré que si on n'est
 // pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
@@ -690,6 +693,15 @@ if (sd) {
         setPaneBusy(sd, false);
     });
     interruptedW.on("change", (s) => setInterrupted(sd, s.visible));
+    // #850 — bridge the one-shot health score → IPC. The watcher only fires
+    // `change` once (null → 1-5) per session, so this setter runs at most
+    // once. BarRenderer picks it up via getIpcState().sessionHealthScore.
+    healthCheckW.on("change", (s) => {
+        if (s.score !== null) {
+            log(`watcher: health-check captured score=${s.score}`);
+            setIpcSessionHealthScore(s.score);
+        }
+    });
     getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
     // CompactingDetector emits change(s) with `s.active` boolean ; forward begin/end via change diff.
     let _prevCompacting = false;
@@ -1467,6 +1479,15 @@ async function mainSse(): Promise<void> {
                 if (reminder.length > 0) {
                     log(`post-boot reminder: injecting immediate (${reminder.length} chars)`);
                     void sendKeys(reminder);
+                }
+                // #850 — health-check prompt fires alongside the skill
+                // reminder. The HealthCheckWatcher (registered in the
+                // runtime zone above) captures the response digit 1-5
+                // from the next pane scan. One-shot per session.
+                const healthCheck = renderSlot(promptMap, "post_boot_health_check", {}, "");
+                if (healthCheck.length > 0) {
+                    log(`post-boot health check: injecting (${healthCheck.length} chars)`);
+                    void sendKeys(healthCheck);
                 }
             } catch (e) {
                 log(`post-boot reminder load failed (ignored): ${String(e)}`);
