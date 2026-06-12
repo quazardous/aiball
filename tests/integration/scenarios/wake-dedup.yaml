@@ -1,0 +1,110 @@
+# #750 Slice 2 — migration `wake-dedup.test.ts`. 8 pure dedup decision
+# cases (`dedupeWakeInjection(prev, phrase, nowMs, windowMs) → {skip,
+# write}`) — counter-model coalesce, anti-burst gate. Full migration ;
+# TS file dropped.
+scenario: wake-dedup
+description: |
+  Pure wake-injection coalesce decision (counter-model, #623 david
+  `7fh9rk`). Any trigger within the coalesce window collapses to the
+  prior fire regardless of phrase content ; the phrase is persisted as
+  a diagnostic of "what fired last". Pins : no-previous (inject),
+  same-phrase in-window (skip — the #409 duplicate), past-window
+  (re-inject), different-phrase in-window (skip — counter not queue),
+  disabled window (always inject), malformed marker (fail open),
+  future timestamp clock-skew (don't skip), round-trip persistence.
+
+# Constants : NOW = Date.parse("2026-05-27T21:14:06.955Z") = 1779916446955
+# W = 5000 (coalesce window ms)
+
+unit:
+  - name: "no previous marker → inject and persist"
+    call: { module: "./state.js", fn: "dedupeWakeInjection" }
+    args: [null, "wake A", 1779916446955, 5000]
+    expect:
+      "skip": false
+      "write": "2026-05-27T21:14:06.955Z\nwake A"
+
+  - name: "same phrase within window → SKIP (the #409 duplicate)"
+    call: { module: "./state.js", fn: "dedupeWakeInjection" }
+    args:
+      - "2026-05-27T21:14:05.955Z\naiball ticket #407 waits for your answer — comment #kysztg."
+      - "aiball ticket #407 waits for your answer — comment #kysztg."
+      - 1779916446955
+      - 5000
+    expect:
+      "skip": true
+      "write": null
+
+  - name: "same phrase past the window → inject again"
+    call: { module: "./state.js", fn: "dedupeWakeInjection" }
+    args:
+      - "2026-05-27T21:13:06.955Z\nwake A"  # 60s old
+      - "wake A"
+      - 1779916446955
+      - 5000
+    expect:
+      "skip": false
+      "write": "2026-05-27T21:14:06.955Z\nwake A"
+
+  - name: "different phrase within window → SKIP (counter model, #623)"
+    call: { module: "./state.js", fn: "dedupeWakeInjection" }
+    args:
+      - "2026-05-27T21:14:05.955Z\nwake A"
+      - "wake B"
+      - 1779916446955
+      - 5000
+    expect:
+      "skip": true
+
+  - name: "windowMs == 0 disables the dedup (always inject)"
+    call: { module: "./state.js", fn: "dedupeWakeInjection" }
+    args:
+      - "2026-05-27T21:14:06.855Z\nwake A"  # 100ms old
+      - "wake A"
+      - 1779916446955
+      - 0
+    expect:
+      "skip": false
+
+  - name: "windowMs < 0 disables the dedup (always inject)"
+    call: { module: "./state.js", fn: "dedupeWakeInjection" }
+    args:
+      - "2026-05-27T21:14:06.855Z\nwake A"
+      - "wake A"
+      - 1779916446955
+      - -1
+    expect:
+      "skip": false
+
+  - name: "malformed marker (no newline) → fail open, inject"
+    call: { module: "./state.js", fn: "dedupeWakeInjection" }
+    args: ["garbage-no-newline", "wake A", 1779916446955, 5000]
+    expect:
+      "skip": false
+
+  - name: "future timestamp (negative age, clock skew) → do not skip"
+    call: { module: "./state.js", fn: "dedupeWakeInjection" }
+    args:
+      - "2026-05-27T21:14:07.955Z\nwake A"  # 1s in the future
+      - "wake A"
+      - 1779916446955
+      - 5000
+    expect:
+      "skip": false
+
+  - name: "round-trip part 1: first multiline inject persists"
+    call: { module: "./state.js", fn: "dedupeWakeInjection" }
+    args: [null, "multi\nline\nwake", 1779916446955, 5000]
+    expect:
+      "skip": false
+      "write": "2026-05-27T21:14:06.955Z\nmulti\nline\nwake"
+
+  - name: "round-trip part 2: persisted marker dedups identical inject 500ms later"
+    call: { module: "./state.js", fn: "dedupeWakeInjection" }
+    args:
+      - "2026-05-27T21:14:06.955Z\nmulti\nline\nwake"
+      - "multi\nline\nwake"
+      - 1779916447455  # NOW + 500
+      - 5000
+    expect:
+      "skip": true

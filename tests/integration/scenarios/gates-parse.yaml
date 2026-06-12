@@ -1,0 +1,98 @@
+# #750 Slice 2 — migration `gates.test.ts` (parseGates half — 8 tests).
+# The 9th test (`BUILTIN_GATES: unmerged_pr exposes a slot + default
+# message`) reads a const and includes a `typeof b.detect === "function"`
+# check that the yaml runner can't express (no function-handle access).
+# Stays in TS.
+scenario: gates-parse
+description: |
+  `parseGates` normalises a yaml-derived gate config into the runtime
+  shape used by `runGate`. Pin the defensive normalisation : non-array
+  inputs flattened to `[]`, blank strings treated as absent, unknown
+  built-in types silently dropped, name defaults (type → name |
+  "gate" for cmd-only), `blocks` strictly `=== true`.
+
+unit:
+  - name: "non-array (undefined) → []"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args: [~]
+    expect_value: []
+
+  - name: "non-array (null) → []"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args: [null]
+    expect_value: []
+
+  - name: "non-array (string) → []"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args: ["nope"]
+    expect_value: []
+
+  - name: "non-array (object) → []"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args: [{}]
+    expect_value: []
+
+  - name: "built-in type, name defaults to the type"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args: [[{ type: "unmerged_pr" }]]
+    expect:
+      "length": 1
+      "0.type": "unmerged_pr"
+      "0.name": "unmerged_pr"
+      "0.blocks": false
+
+  - name: "unknown built-in type is dropped"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args: [[{ type: "does_not_exist" }]]
+    expect_value: []
+
+  - name: "custom cmd, name defaults to 'gate', message kept"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args: [[{ cmd: "make preflight", message: "⚠ KO" }]]
+    expect:
+      "length": 1
+      "0.cmd": "make preflight"
+      "0.message": "⚠ KO"
+      "0.name": "gate"
+
+  - name: "explicit name + blocks flag honored"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args: [[{ name: "pr", type: "unmerged_pr", blocks: true }]]
+    expect:
+      "0.name": "pr"
+      "0.blocks": true
+
+  - name: "blocks only true for literal true (string 'yes' → false)"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args: [[{ cmd: "x", blocks: "yes" }]]
+    expect:
+      "0.blocks": false
+
+  - name: "blocks only true for literal true (number 1 → false)"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args: [[{ cmd: "x", blocks: 1 }]]
+    expect:
+      "0.blocks": false
+
+  - name: "drops entries with neither type nor cmd, keeps valid ones"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args:
+      - - { name: "noop" }   # no type, no cmd → dropped
+        - 42                 # not an object → dropped
+        - null               # → dropped
+        - { type: "unmerged_pr" }   # kept
+        - { cmd: "echo hi" }        # kept
+    expect:
+      "length": 2
+      "0.name": "unmerged_pr"
+      "1.name": "gate"
+
+  - name: "blank type strings treated as absent"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args: [[{ type: "   " }]]
+    expect_value: []
+
+  - name: "blank cmd strings treated as absent"
+    call: { module: "./gates.js", fn: "parseGates" }
+    args: [[{ cmd: "  " }]]
+    expect_value: []
