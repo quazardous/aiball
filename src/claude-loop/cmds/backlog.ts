@@ -82,11 +82,18 @@ function fmtEvent(m: UnreadMessage, currentProject: string): string {
     return `${kind.padEnd(11)} ${projPrefix}#${String(tid).padEnd(4)}${hashid.padEnd(8)} ${title}${by}${excerpt}`;
 }
 
+function fmtCooledUntil(iso: string): string {
+    const t = new Date(iso);
+    const hh = String(t.getHours()).padStart(2, "0");
+    const mm = String(t.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+}
+
 function fmtTicket(t: TicketRow): string {
     // `*` = unread (au moins 1 ping pas vu)
-    // `⏳` = en cooldown (backlog wake fired, pause jusqu'à backlog_cooled_until)
+    // `⏳HH:MM` = en cooldown (backlog wake fired, ré-éligible à backlog_cooled_until)
     const marker = t.backlog_cooled_until
-        ? "⏳"
+        ? `⏳${fmtCooledUntil(t.backlog_cooled_until)}`
         : t.unread ? "*" : " ";
     const prio = t.priority && t.priority !== "normal" ? `(${t.priority}) ` : "";
     const title = t.edited_title ?? t.title ?? "";
