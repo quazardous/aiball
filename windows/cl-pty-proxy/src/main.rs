@@ -73,6 +73,10 @@ use windows_sys::Win32::System::Pipes::{
 mod core;
 mod ws_client;
 
+// #941 Slice 2B — Linux entry point. Compiled only on Unix targets.
+#[cfg(unix)]
+mod unix_main;
+
 const CP_UTF8: u32 = 65001;
 
 /// Opt-in byte tracing. CL_PROXY_DEBUG=1 → stderr (mixes with claude in the
@@ -412,9 +416,16 @@ fn main() {
     std::process::exit(code);
 }
 
-#[cfg(not(windows))]
+// #941 Slice 2B — Linux: delegate to the unix_main module.
+#[cfg(unix)]
 fn real_main() -> i32 {
-    eprintln!("cl-pty-proxy: Windows-only (use src/claude-loop/pty-proxy.py on Unix)");
+    unix_main::run()
+}
+
+// Other non-Windows non-Unix targets : not supported.
+#[cfg(not(any(windows, unix)))]
+fn real_main() -> i32 {
+    eprintln!("cl-pty-proxy: unsupported target (Windows + Unix only)");
     2
 }
 

@@ -16,7 +16,10 @@
 
 use std::fs;
 use std::io::ErrorKind;
+#[cfg(windows)]
 use std::net::TcpStream;
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -73,6 +76,10 @@ pub fn start(sock_path: String, cb: Callbacks) -> WsHandle {
 
 /// Resolve `<sock_path>.addr` → (port, ws-url). None when the marker is
 /// missing/unreadable (server not up yet) — caller retries on backoff.
+/// Windows-only : the address marker is published by the loopback transport
+/// (#739) carrying a {port, token}. Linux uses the UDS path directly (see
+/// `resolve_unix` below).
+#[cfg(windows)]
 fn resolve(sock_path: &str) -> Option<(u16, String)> {
     let raw = fs::read_to_string(format!("{sock_path}.addr")).ok()?;
     parse_addr(&raw)
@@ -81,6 +88,7 @@ fn resolve(sock_path: &str) -> Option<(u16, String)> {
 /// Pure: `.addr` JSON → (port, ws-url). None on malformed / missing
 /// `port`|`token` or a zero/empty value. token is base64url, so it needs no
 /// query-encoding.
+#[cfg(windows)]
 fn parse_addr(json: &str) -> Option<(u16, String)> {
     let v: Value = serde_json::from_str(json).ok()?;
     let port = u16::try_from(v.get("port")?.as_u64()?).ok()?;
@@ -89,6 +97,18 @@ fn parse_addr(json: &str) -> Option<(u16, String)> {
         return None;
     }
     Some((port, format!("ws://127.0.0.1:{port}/?t={token}")))
+}
+
+/// #941 Slice 2C — Linux UDS resolve : just check the socket exists. No
+/// token gating on Unix (FS perms on the socket file are the access gate).
+/// Returns `Some(sock_path)` if reachable, `None` if missing → reconnect.
+#[cfg(unix)]
+fn resolve_unix(sock_path: &str) -> Option<String> {
+    if std::path::Path::new(sock_path).exists() {
+        Some(sock_path.to_string())
+    } else {
+        None
+    }
 }
 
 fn dispatch(text: &str, cb: &Callbacks) {
@@ -117,6 +137,7 @@ fn dispatch(text: &str, cb: &Callbacks) {
     }
 }
 
+#[cfg(windows)]
 fn run(sock_path: String, rx: Receiver<Value>, cb: Callbacks) {
     loop {
         let (port, url) = match resolve(&sock_path) {
@@ -194,11 +215,92 @@ fn run(sock_path: String, rx: Receiver<Value>, cb: Callbacks) {
     }
 }
 
+/// #941 Slice 2C — Linux : ws-over-UDS connecté à `<state-dir>/loop.sock`.
+/// Pas de token (FS perms gatent) ; URL fake `ws://localhost/` pour satisfaire
+/// le handshake tungstenite. Session loop identique au path Windows.
+#[cfg(unix)]
+fn run(sock_path: String, rx: Receiver<Value>, cb: Callbacks) {
+    loop {
+        let path = match resolve_unix(&sock_path) {
+            Some(p) => p,
+            None => {
+                thread::sleep(Duration::from_millis(RECONNECT_MS));
+                continue;
+            }
+        };
+        let stream = match UnixStream::connect(&path) {
+            Ok(s) => s,
+            Err(_) => {
+                thread::sleep(Duration::from_millis(RECONNECT_MS));
+                continue;
+            }
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_millis(READ_TIMEOUT_MS)));
+        let mut ws = match tungstenite::client("ws://localhost/", stream) {
+            Ok((ws, _resp)) => ws,
+            Err(_) => {
+                thread::sleep(Duration::from_millis(RECONNECT_MS));
+                continue;
+            }
+        };
+
+        let mut last_activity = Instant::now();
+        'session: loop {
+            // 1. Drain outbound proxyEvents queued by other threads.
+            loop {
+                match rx.try_recv() {
+                    Ok(data) => {
+                        let frame = json!({ "kind": "proxyEvent", "data": data }).to_string();
+                        if ws.send(Message::Text(frame)).is_err() {
+                            break 'session;
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => return,
+                }
+            }
+            // 2. Read one inbound frame.
+            match ws.read() {
+                Ok(Message::Text(t)) => {
+                    last_activity = Instant::now();
+                    dispatch(&t, &cb);
+                }
+                Ok(Message::Binary(b)) => {
+                    last_activity = Instant::now();
+                    if let Ok(t) = String::from_utf8(b) {
+                        dispatch(&t, &cb);
+                    }
+                }
+                Ok(Message::Ping(_)) | Ok(Message::Pong(_)) => {
+                    last_activity = Instant::now();
+                }
+                Ok(Message::Close(_)) => break 'session,
+                Ok(_) => {}
+                Err(tungstenite::Error::Io(e))
+                    if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
+                {
+                    // Read timeout — fall through to flush + watchdog.
+                }
+                Err(_) => break 'session,
+            }
+            // 3. Flush queued pongs.
+            let _ = ws.flush();
+            // 4. Watchdog.
+            if last_activity.elapsed().as_millis() > WATCHDOG_MS {
+                break 'session;
+            }
+        }
+        let _ = ws.close(None);
+        thread::sleep(Duration::from_millis(RECONNECT_MS));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
 
+    #[cfg(windows)]
     #[test]
     fn parse_addr_valid() {
         let (port, url) = parse_addr(r#"{"port":54321,"token":"abc-_123"}"#).unwrap();
@@ -206,6 +308,7 @@ mod tests {
         assert_eq!(url, "ws://127.0.0.1:54321/?t=abc-_123");
     }
 
+    #[cfg(windows)]
     #[test]
     fn parse_addr_rejects_bad_inputs() {
         assert!(parse_addr(r#"{"port":0,"token":"x"}"#).is_none()); // zero port
@@ -213,6 +316,13 @@ mod tests {
         assert!(parse_addr(r#"{"token":"x"}"#).is_none()); // no port
         assert!(parse_addr(r#"{"port":1}"#).is_none()); // no token
         assert!(parse_addr("not json").is_none()); // malformed
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_unix_missing_returns_none() {
+        // Non-existent socket path → None (= caller retries on backoff).
+        assert!(resolve_unix("/tmp/nonexistent-socket-xyz-123").is_none());
     }
 
     #[test]

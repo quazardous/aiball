@@ -1,8 +1,11 @@
 [package]
 name = "cl-pty-proxy"
+# #768 Phase 2 — cross-platform proxy (Windows + Linux). The Windows path
+# remains ConPTY/named-pipe legacy ; Linux uses openpty + UDS. Long-term
+# this replaces both pty-proxy.py (Linux) and the old Windows path.
 version = "0.1.0"
 edition = "2021"
-description = "claude-loop ConPTY proxy for Windows — live human-typing detection + socket wake injection (strategy B, #281)"
+description = "claude-loop unified PTY proxy — live human-typing detection + ws-over-loopback/UDS wake injection (Windows ConPTY + Linux openpty)"
 license = "MIT"
 
 [[bin]]
@@ -34,6 +37,12 @@ windows-sys = { version = "0.59", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Pipes",
 ] }
+
+# #768 Phase 2 — Unix deps : termios for raw mode, libc for openpty/ioctl,
+# nix for safe abstraction (vs raw libc). Activated only on Unix targets.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+nix = { version = "0.29", features = ["term", "fs", "ioctl"] }
 
 [profile.release]
 opt-level = "z"

@@ -1,9 +1,10 @@
 name: cl-pty-proxy build
 
-# Validate Rust changes to the Windows ConPTY proxy on a real Windows runner
-# (cross-compile from Linux misses the ConPTY runtime path). Triggers only
+# Validate Rust changes to the unified PTY proxy (#768) on both Windows and
+# Linux. The Windows runner exercises the ConPTY + named-pipe path ; the
+# Linux runner exercises the openpty + UDS path (#941 Phase 2). Triggers only
 # on paths under windows/cl-pty-proxy/ + this workflow itself, so unrelated
-# PRs don't pay the ~5 min cold-build cost. See aiball ticket #527.
+# PRs don't pay the cold-build cost. See aiball tickets #527 + #941.
 
 on:
   push:
@@ -18,7 +19,11 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
