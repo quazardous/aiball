@@ -1,0 +1,106 @@
+# #750 Slice 2 — migration `loop-state.test.ts` (helper-fn half).
+# Boolean-returning pure helpers that consume the same LoopStateInput
+# fixture as `computeLoopView`. Uses `args_template` so each entry only
+# spells out its overrides. Per-entry `call.fn` switches between the
+# helpers : `canArmAfk10mOnTyping`, `canPaintStopOnTyping`,
+# `canFlipBgFromBoot`. The remaining helpers (`canFireWake`,
+# `isAfkHeld`, `isAutonomous`, `isBootPhase`) take a VIEW (= result of
+# computeLoopView) — not yaml-fit without chained calls. Stay in TS.
+# `shouldArmAfk10mOnSettleBoot({noWait})` also stays — different fixture
+# shape, lone 2-case test, not worth a separate scenario.
+scenario: loop-state-helpers
+description: |
+  Pure boolean helpers consumed by the timer's branching logic :
+  `canArmAfk10mOnTyping` (gate for typing → NOT AFK 10m arming),
+  `canPaintStopOnTyping` (post-boot `stop` bar word), `canFlipBgFromBoot`
+  (boot → yellow bar background flip). All three share the same boot-
+  grace gate semantics + post-boot signal precedence — pin the
+  cross-product so a refactor touching the gate doesn't drift one.
+
+# Same fixture as loop-state-compute.yaml — T0 = 1780245600000.
+args_template:
+    nowMs: 1780245600000
+    loopStartMs: 1780245600000
+    bootGraceMs: 60000
+    bootMinMs: 30000
+    bootDeadlineMs: 1780245630000
+    resumePickerActive: false
+    bootComplete: true
+    paneBusy: false
+    paneReady: true
+    paneCompacting: false
+    paneInterrupted: false
+    noWait: false
+    humanTypingAtMs: null
+    humanTypingTtlMs: 5000
+    afkMode: "off"
+    afkExpiryMs: null
+    idleSinceMs: null
+    wakeInFlightAtMs: null
+    wakeInFlightTtlMs: 2000
+    busyDeferUntilMs: null
+    inputHotTtlMs: 3000
+    manualWake: false
+
+unit:
+    # --- canArmAfk10mOnTyping ---
+    - name: "canArmAfk10mOnTyping : false in boot-grace"
+      call: { module: "./loop-state.js", fn: "canArmAfk10mOnTyping" }
+      args_overrides:
+        nowMs: 1780245610000  # T0+10s
+        bootComplete: false
+        paneReady: false
+      expect_value: false
+
+    - name: "canArmAfk10mOnTyping : false in NOT AFK ∞ (only F9 releases)"
+      call: { module: "./loop-state.js", fn: "canArmAfk10mOnTyping" }
+      args_overrides:
+        nowMs: 1780245900000  # T0+5min
+        afkMode: "wait_inf"
+      expect_value: false
+
+    - name: "canArmAfk10mOnTyping : true post-boot in AFK off (arms fresh 10m)"
+      call: { module: "./loop-state.js", fn: "canArmAfk10mOnTyping" }
+      args_overrides:
+        nowMs: 1780245900000
+      expect_value: true
+
+    - name: "canArmAfk10mOnTyping : true post-boot in NOT AFK 10m (refreshes)"
+      call: { module: "./loop-state.js", fn: "canArmAfk10mOnTyping" }
+      args_overrides:
+        nowMs: 1780245900000
+        afkMode: "wait_10m"
+        afkExpiryMs: 1780246200000  # +5min
+      expect_value: true
+
+    # --- canPaintStopOnTyping ---
+    - name: "canPaintStopOnTyping : false in boot-grace"
+      call: { module: "./loop-state.js", fn: "canPaintStopOnTyping" }
+      args_overrides:
+        nowMs: 1780245605000  # T0+5s
+        bootComplete: false
+        paneReady: false
+      expect_value: false
+
+    - name: "canPaintStopOnTyping : true post-floor with bootComplete sealed"
+      call: { module: "./loop-state.js", fn: "canPaintStopOnTyping" }
+      args_overrides:
+        nowMs: 1780245690000  # T0+90s (past 30s floor)
+        bootComplete: true
+      expect_value: true
+
+    # --- canFlipBgFromBoot ---
+    - name: "canFlipBgFromBoot : false in boot-grace"
+      call: { module: "./loop-state.js", fn: "canFlipBgFromBoot" }
+      args_overrides:
+        nowMs: 1780245605000
+        bootComplete: false
+        paneReady: false
+      expect_value: false
+
+    - name: "canFlipBgFromBoot : true post-floor with bootComplete sealed"
+      call: { module: "./loop-state.js", fn: "canFlipBgFromBoot" }
+      args_overrides:
+        nowMs: 1780245690000
+        bootComplete: true
+      expect_value: true
