@@ -45,7 +45,13 @@ interface UnitEntry {
     name: string;
     call: { module: string; fn: string };
     args?: unknown[];
+    /** Dot-path assertions against the return value (object returns). */
     expect?: Record<string, unknown>;
+    /** #750 Slice 2 — top-level value match for scalar returns
+     *  (strings, booleans, numbers). Equality or `"/regex/"` against the
+     *  whole return value. Use this instead of `expect` when the
+     *  function-under-test doesn't return an object. */
+    expect_value?: unknown;
 }
 
 interface ScenarioFile {
@@ -129,6 +135,12 @@ for (const { entry, mod, scenarioName } of loaded) {
         assert.equal(typeof fn, "function", `Module ${entry.call.module} has no exported function '${entry.call.fn}'`);
         const args = entry.args ?? [];
         const result = (fn as (...a: unknown[]) => unknown)(...args);
+        // #750 Slice 2 — `expect_value` covers scalar returns (string /
+        // boolean / number) that the dot-path `expect` can't address.
+        // Both may coexist on the same entry.
+        if ("expect_value" in entry && entry.expect_value !== undefined) {
+            expectMatch(result, entry.expect_value, "expect_value");
+        }
         const expect = entry.expect ?? {};
         for (const [key, expected] of Object.entries(expect)) {
             const actual = key.includes(".") ? getPath(result, key) : (result as Record<string, unknown>)[key];

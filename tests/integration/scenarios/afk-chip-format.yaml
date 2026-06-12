@@ -1,0 +1,44 @@
+# #750 Slice 2 pilot — migration `afk-chip.test.ts` → yaml. Pure
+# formatter test (`formatAfkStateChunk` : AfkChunk + opts → tmux
+# status-right string). Three rendered modes (OFF / wait_10m / wait_inf)
+# + the env-derived opts customisation. The yaml runner asserts on
+# scalar return via `expect_value` (#750 micro-extension).
+#
+# Companion to `afk-sm-basics.yaml` which covers the `computeLoopView`
+# producer side ; this scenario locks the win32 painter's consumer side.
+scenario: afk-chip-format
+description: |
+  `formatAfkStateChunk` is the chip painter used by the win32 timer to
+  set `@cl_afk_state` (the Rust proxy doesn't paint it ; the Unix
+  Python proxy uses `_format_afk_state` with the same shape). Pin the
+  three rendered modes + env-knob honoring so a refactor on the
+  central `computeLoopView` doesn't silently drift the chip.
+
+unit:
+  - name: "OFF (dim) → `AFK:F9`, dim label, no prefix"
+    call: { module: "./state.js", fn: "formatAfkStateChunk" }
+    args:
+      - { label: "AFK", prefix: null, color: "dim" }
+      - { key: "F9", fgDim: "colour238", fgLit: "colour16" }
+    expect_value: "#[fg=colour238]AFK:#[fg=colour16]F9"
+
+  - name: "NOT AFK 10m (yellow) → seconds prefix + `NOT AFK:F9`, yellow"
+    call: { module: "./state.js", fn: "formatAfkStateChunk" }
+    args:
+      - { label: "NOT AFK", prefix: "260s", color: "yellow" }
+      - { key: "F9", fgDim: "colour238", fgLit: "colour16" }
+    expect_value: "#[fg=colour178]260s NOT AFK:#[fg=colour16]F9"
+
+  - name: "NOT AFK ∞ (red) → `∞ NOT AFK:F9`, red"
+    call: { module: "./state.js", fn: "formatAfkStateChunk" }
+    args:
+      - { label: "NOT AFK", prefix: "∞", color: "red" }
+      - { key: "F9", fgDim: "colour238", fgLit: "colour16" }
+    expect_value: "#[fg=colour196]∞ NOT AFK:#[fg=colour16]F9"
+
+  - name: "honors custom key + dim colour from env-derived opts"
+    call: { module: "./state.js", fn: "formatAfkStateChunk" }
+    args:
+      - { label: "AFK", prefix: null, color: "dim" }
+      - { key: "F8", fgDim: "colour240", fgLit: "colour15" }
+    expect_value: "#[fg=colour240]AFK:#[fg=colour15]F8"
