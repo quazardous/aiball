@@ -241,3 +241,126 @@ unit:
         idleSinceMs: 1780245900000
       expect:
         "barWord": "wait"
+
+    # --- Wake-gate cascade — distinct skip reasons ---
+    - name: "no idle marker → wake skipped"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245900000  # T0+5min
+      expect:
+        "wakeAllowed": false
+        "wakeSkipReason": "/no idle marker/"
+
+    - name: "busy-defer active → wake skipped"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245900000
+        busyDeferUntilMs: 1780245903000  # +3s
+        idleSinceMs: 1780245900000
+      expect:
+        "wakeAllowed": false
+        "wakeSkipReason": "/busy-defer/"
+
+    - name: "pane busy (esc to interrupt) → wake skipped"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245900000
+        paneBusy: true
+        idleSinceMs: 1780245900000
+      expect:
+        "wakeAllowed": false
+        "wakeSkipReason": "/esc to interrupt/"
+
+    - name: "manual wake with idle marker bypasses AFK + defer + wake-in-flight"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245900000
+        manualWake: true
+        afkMode: "wait_inf"
+        busyDeferUntilMs: 1780245960000  # +1min
+        wakeInFlightAtMs: 1780245899000  # 1s ago
+        idleSinceMs: 1780245900000
+      expect:
+        "wakeAllowed": true
+
+    - name: "manual wake without idle marker is still held off"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245900000
+        manualWake: true
+        idleSinceMs: null
+      expect:
+        "wakeAllowed": false
+        "wakeSkipReason": "/no idle marker/"
+
+    # --- Phase computation ---
+    - name: "post-boot + pane busy → phase = busy"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245720000  # T0+2min
+        paneBusy: true
+        idleSinceMs: 1780245720000
+      expect:
+        "phase": "busy"
+
+    - name: "post-boot + idle → phase = idle"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245720000
+        idleSinceMs: 1780245720000
+      expect:
+        "phase": "idle"
+
+    # --- Edge cases ---
+    - name: "zero boot-grace + zero floor + paneReady → never in boot phase"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        bootGraceMs: 0
+        bootMinMs: 0
+        bootComplete: true
+        paneReady: true
+        idleSinceMs: 1780245600000  # T0
+      expect:
+        "inBootGrace": false
+        "phase": "idle"
+        "barWord": "loop"
+
+    - name: "AFK wait_10m with null expiry → treated as inactive"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245900000  # T0+5min
+        afkMode: "wait_10m"
+        afkExpiryMs: null
+        idleSinceMs: 1780245900000
+      expect:
+        "barWord": "loop"
+        "afkChunk.label": "AFK"
+
+    - name: "countdown rounds up (29.4s → `30s`)"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245660000  # T0+1min
+        afkMode: "wait_10m"
+        afkExpiryMs: 1780245689400  # +29.4s
+        idleSinceMs: 1780245660000
+      expect:
+        "afkChunk.prefix": "30s"
+
+    - name: "countdown never reads `0s` (clamped to 1s)"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780246200000  # T0+10min
+        afkMode: "wait_10m"
+        afkExpiryMs: 1780246200100  # +100ms
+        idleSinceMs: 1780246200000
+      expect:
+        "afkChunk.prefix": "1s"
+
+    - name: "busy-defer with deadline in the past → no longer gates"
+      call: { module: "./loop-state.js", fn: "computeLoopView" }
+      args_overrides:
+        nowMs: 1780245900000  # T0+5min
+        busyDeferUntilMs: 1780245899000  # 1s ago
+        idleSinceMs: 1780245900000
+      expect:
+        "wakeAllowed": true
