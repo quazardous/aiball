@@ -133,43 +133,34 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
             if (remMs > 0) bootRemainingSec = Math.max(0, Math.ceil(remMs / 1000));
         }
     }
-    // #805 — countdown vers prochain wake. Gated sur :
-    //   - bootComplete (= post-boot, loopStatus IDLE pas BOOT)
-    //   - state=idle (= claude pas en train de répondre)
-    //   - **events ou backlog pending** (#805 xxvzye)
-    //   - **barWord === "loop"** : exclu si wait (AFK actif) ou stop (typing).
-    //     David : "le compteur doit s'afficher que si on est idle et loop
-    //     pas sur wait ou stop".
+    // #805 / #919 — countdown vers prochain wake.
+    //
+    // Single source of truth = `ipc.nextWakeAtMs` côté timer. Le subscriber
+    // `idleActor.subscribe` (timer.ts:1700) le set quand l'IdleMachine est
+    // en `idle` ET `idleSinceMs !== null`, sinon le clear. Donc si
+    // `nextWakeAtMs` est NON-NULL, le timer a DÉJÀ décidé qu'un wake va
+    // fire → on l'affiche, point. Le bar n'a pas à re-gate sur IDLE /
+    // barWord / hasPending : ces gates redondants flicker pendant les
+    // transients (race subscriber→IPC→render, paneBusy latch bref,
+    // barWord=wait pendant AFK debounce) et cachent le compteur quand
+    // l'info est pourtant valide.
+    //
+    // #919 david `vrwhe6` (rejet de `86fjp3`) : « toujours pas affiché
+    // dans certain cas ». Le fix `04fdc03` n'a couvert que le null-
+    // counter gate. Cette simplification couvre les 2 autres transients
+    // identifiés dans le plan `xjeyhm` (IDLE flicker + barWord transient).
     let nextWakeInSec: number | null = null;
-    // #919 david : "si backlog pas vide il faut afficher le countdown,
-    // ça va fire un wake sur le 1er élément du backlog". Le gate
-    // d'origine `events>0 OR backlog>0` traite `null` (fetch failed /
-    // cold-boot) comme `0` → countdown caché alors qu'on ne sait pas.
-    // Nouveau : `null` (= unknown) compte comme « peut-être » →
-    // countdown affiché. Seul `0` explicite (fetch réussi vide) cache.
-    const hasEvents = counters?.events == null ? null : counters.events > 0;
-    const hasBacklog = counters?.backlog == null ? null : counters.backlog > 0;
-    const hasPending = hasEvents !== false || hasBacklog !== false;
-    const inLoop = view.barWord === "loop";
-    if (
-        ipc.nextWakeAtMs !== null
-        && hasPending
-        && loopStatus === LOOP_STATUS.IDLE
-        && inLoop
-    ) {
+    if (ipc.nextWakeAtMs !== null) {
         const remainingMs = ipc.nextWakeAtMs - input.nowMs;
         if (remainingMs > 0) nextWakeInSec = Math.ceil(remainingMs / 1000);
     }
-    // #919 — instrumentation : log la cause du null (= quel gate flicke).
-    // Cache module-level pour ne logger que sur transition. Volume max
-    // ~1 ligne par flicker.
+    // #919 — instrumentation : log les transitions pour rester
+    // debuggable si un cas pathologique remonte. Volume max ~1 ligne
+    // par flicker, pas de spam.
     logCountdownTransition(
         nextWakeInSec === null,
         ipc.nextWakeAtMs === null ? "nextWakeAtMs=null"
-            : !hasPending ? `hasPending=false (e:${counters?.events ?? 0} b:${counters?.backlog ?? 0})`
-                : loopStatus !== LOOP_STATUS.IDLE ? `loopStatus=${loopStatus}`
-                    : !inLoop ? `barWord=${view.barWord}`
-                        : "ok",
+            : "remainingMs<=0",
     );
     return {
         humanWord,
