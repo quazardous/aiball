@@ -99,18 +99,6 @@ function renderStateTag(loopStatus: LoopStatus, info: string | null): string {
     return info ? `[${loopStatus}:${info}]` : `[${loopStatus}]`;
 }
 
-// #919 — module-level state pour détecter les transitions du gate
-// countdown (= flicker). Log seulement sur transition pour éviter le spam.
-let _lastCountdownNull: boolean | null = null;
-let _lastCountdownReason = "";
-function logCountdownTransition(nowNull: boolean, reason: string): void {
-    if (_lastCountdownNull === nowNull && _lastCountdownReason === reason) return;
-    _lastCountdownNull = nowNull;
-    _lastCountdownReason = reason;
-    // eslint-disable-next-line no-console
-    console.log(`[bar-countdown] ${nowNull ? "OFF" : "ON"} reason=${reason}`);
-}
-
 /** Compute le snapshot canonique depuis ipcState + computeLoopView.
  *  Pure : pas de side-effect, pas de spawn tmux. */
 export function computeBarSnapshot(sd: string): BarSnapshot {
@@ -171,12 +159,6 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         // Past grace : nextWakeInSec stays null = pipe ouvert, drain
         // instant sur prochain SSE / idle:settled, pas de countdown.
     }
-    logCountdownTransition(
-        nextWakeInSec === null,
-        view.phase !== "idle" ? `view.phase=${view.phase}`
-            : idleSinceMs === null ? "idleSinceMs=null"
-                : "pipe-open (past grace)",
-    );
     return {
         humanWord,
         loopStatus,

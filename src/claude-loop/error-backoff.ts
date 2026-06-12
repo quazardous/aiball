@@ -24,6 +24,7 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { armBusyDefer } from "./state.js";
+import { setIpcBusyDeferUntil } from "./ipc-state.js";
 import { CL_ENV } from "./env-vars.js";
 
 /**
@@ -58,12 +59,20 @@ export const ERROR_PATTERNS: ErrorPattern[] = [
  *  (state.ts). #335: error banners are transient bottom-of-screen
  *  output, so we only look at the footer. Scanning the WHOLE pane
  *  matched the same words sitting in scrollback / conversation /
- *  rendered code and self-tripped the backoff. */
+ *  rendered code and self-tripped the backoff.
+ *
+ *  #919 david `pqs8us` : drop user-prompt lines (`>` / `❯` prefix) —
+ *  the wake phrase injected by the loop sits as a user prompt and ITS
+ *  text can quote an error banner (e.g. a ticket title containing
+ *  `API Error: Overloaded`). Matching it self-trips the backoff. The
+ *  prompt-input lines never carry a backend error banner ; only
+ *  claude's response / tool-result blocks do. */
 function footerOf(text: string, footerLines: number): string {
     return text
         .split("\n")
         .map((l) => l.trimEnd())
         .filter((l) => l.length > 0)
+        .filter((l) => !/^[>❯]\s/.test(l))
         .slice(-footerLines)
         .join("\n");
 }
@@ -127,9 +136,14 @@ export function readErrorBackoff(sd: string): BackoffState | null {
     } catch { return null; }
 }
 
-/** Clear the counter — call when the pane is error-free (resume OK). */
+/** Clear the counter AND the busy-defer-until — call when the pane is
+ *  error-free (resume OK). #919 david `pqs8us` : drop the residual
+ *  defer too. Without this, a 10-min cap arm left busy-defer pinned
+ *  long after the error scrolled out of the footer, silently blocking
+ *  every wake until the deadline expired. */
 export function resetErrorBackoff(sd: string): void {
     try { unlinkSync(errorBackoffPath(sd)); } catch { /* not armed */ }
+    setIpcBusyDeferUntil(null);
 }
 
 /**

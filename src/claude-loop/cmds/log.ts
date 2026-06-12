@@ -17,7 +17,8 @@
  * `--json` keeps raw NDJSON for piping into jq.
  */
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import {
     stateDirFor,
     timerLogPath,
@@ -37,6 +38,7 @@ export interface LogOpts {
     grep?: string;
     since?: string;
     json?: boolean;
+    copy?: string;
 }
 
 const SEVERITY: Record<LogLevel, number> = {
@@ -111,6 +113,20 @@ function pretty(p: ParsedLine): string {
 export async function cmdLog(name: string, opts: LogOpts): Promise<void> {
     const sd = stateDirFor(name);
     const path = timerLogPath(sd);
+
+    // #919 david `pqs8us` : `--copy <out>` snapshots the current log file
+    // to `<out>` and exits. Lets an investigation work on a frozen copy
+    // instead of fighting live appends (no chasing the tail across N runs
+    // of awk / grep filters). Ignores every other filter — they belong
+    // on the read of the snapshot, not on the snapshot itself.
+    if (opts.copy) {
+        if (!existsSync(path)) die(`no log at ${path}`);
+        const out = resolvePath(opts.copy);
+        copyFileSync(path, out);
+        process.stderr.write(`copied ${path} → ${out}\n`);
+        return;
+    }
+
     const lines = Math.max(1, Math.min(10_000, Number(opts.lines ?? "50")));
 
     const threshold = opts.level

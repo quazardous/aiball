@@ -1969,7 +1969,8 @@ async function main(): Promise<void> {
         .option("--grep <regex>", "Only records whose msg matches this regex")
         .option("--since <when>", "Only records after this ISO 8601 timestamp or relative duration (5m / 2h / 30s / 7d)")
         .option("--json", "Output raw NDJSON instead of pretty-print")
-        .action(async (name: string | undefined, opts: { follow?: boolean; lines: string; level?: string; tag?: string; grep?: string; since?: string; json?: boolean }) => {
+        .option("--copy <out>", "Snapshot the current log file to <out> and exit. For investigating a frozen copy instead of chasing live appends.")
+        .action(async (name: string | undefined, opts: { follow?: boolean; lines: string; level?: string; tag?: string; grep?: string; since?: string; json?: boolean; copy?: string }) => {
             await cmdLog(name ?? resolveCurrentLoopName(), opts);
         });
     program.command("rm [name]")

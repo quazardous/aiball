@@ -72,3 +72,18 @@ unit:
     call: { module: "./error-backoff.js", fn: "matchPaneError" }
     args: ["discussing API Error handling"]
     expect_value: null
+
+  - name: "#919: user-prompt line ('> ...') is skipped — wake phrase quoting an error banner doesn't self-trip"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["> nouveau ticket #948: gestion erreru API Error: Overloaded"]
+    expect_value: null
+
+  - name: "#919: user-prompt line with ❯ prefix is also skipped"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["❯ retry on API Error: Overloaded"]
+    expect_value: null
+
+  - name: "#919: real banner BELOW a quoted prompt-line still matches"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["> nouveau ticket #948: gestion erreru API Error: Overloaded\nAPI Error: Overloaded"]
+    expect_value: "overloaded"
