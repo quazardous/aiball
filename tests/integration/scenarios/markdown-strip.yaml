@@ -1,0 +1,64 @@
+# #750 Slice 2 — migration `markdown-strip.test.ts` (stripMarkdown half).
+# 9 pure str → str cases pinning the helper used by the `{body}` token
+# in `buildWakePhrase` (state.ts → DEFAULT_WAKE_TEMPLATES path). The
+# `buildWakePhrase` integration tests stay in TS (require a mkdtemp
+# fixture for the pings.yaml path arg — not expressible in the yaml
+# runner's positional `args`).
+scenario: markdown-strip
+description: |
+  `stripMarkdown` flattens light markdown into a single line suitable
+  for inclusion in a wake phrase. Pins the canonical transformations
+  (bold, links, fenced code, headings, bullets, blockquote, HTML
+  entities, truncation with ellipsis, inline code) + boundary cases
+  (empty / whitespace input, short input under maxLen).
+
+unit:
+  - name: "bold + link → texte plat"
+    call: { module: "./markdown-strip.js", fn: "stripMarkdown" }
+    args: ["**hello** [world](https://x)"]
+    expect_value: "hello world"
+
+  - name: "fenced code block flatten"
+    call: { module: "./markdown-strip.js", fn: "stripMarkdown" }
+    args: ["```ts\nconst x = 1;\n```"]
+    expect_value: "const x = 1;"
+
+  - name: "headings + bullets aplatis en single line"
+    call: { module: "./markdown-strip.js", fn: "stripMarkdown" }
+    args: ["# Title\n\n- item 1\n- item 2"]
+    expect_value: "Title item 1 item 2"
+
+  - name: "blockquote stripé, contenu gardé"
+    call: { module: "./markdown-strip.js", fn: "stripMarkdown" }
+    args: ["> citation"]
+    expect_value: "citation"
+
+  - name: "html entities décodées"
+    call: { module: "./markdown-strip.js", fn: "stripMarkdown" }
+    args: ["a &amp; b"]
+    expect_value: "a & b"
+
+  - name: "input vide → \"\""
+    call: { module: "./markdown-strip.js", fn: "stripMarkdown" }
+    args: [""]
+    expect_value: ""
+
+  - name: "whitespace input → \"\""
+    call: { module: "./markdown-strip.js", fn: "stripMarkdown" }
+    args: ["   \n\t  "]
+    expect_value: ""
+
+  - name: "truncate avec ellipse sur word-boundary"
+    call: { module: "./markdown-strip.js", fn: "stripMarkdown" }
+    args: ["the quick brown fox jumps over the lazy dog and keeps going", 20]
+    expect_value: "/^.{1,20}…$/"
+
+  - name: "input court < maxLen renvoyé inchangé"
+    call: { module: "./markdown-strip.js", fn: "stripMarkdown" }
+    args: ["hi", 240]
+    expect_value: "hi"
+
+  - name: "code inline kept"
+    call: { module: "./markdown-strip.js", fn: "stripMarkdown" }
+    args: ["use `npm run build`"]
+    expect_value: "use npm run build"

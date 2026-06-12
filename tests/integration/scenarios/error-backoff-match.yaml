@@ -1,0 +1,63 @@
+# #750 Slice 2 — migration `error-backoff.test.ts` (matchPaneError half).
+# 5 pure str → str|null cases pinning the pane-error classifier
+# (#332 + #335). `nextBackoffMs` (monotonic asserts referencing
+# ERROR_BACKOFF_* constants) and the stateful `armErrorBackoff` (needs
+# mkdtemp fixture) stay in TS — see `src/claude-loop/error-backoff.test.ts`.
+scenario: error-backoff-match
+description: |
+  `matchPaneError` classifies a pane snapshot into one of the seeded
+  error ids (`rate-limit`, `api-error`, `overloaded`) or null. Pin
+  positive matches, loose-token rejections (#335 — `bare 529`, lone
+  `Overloaded` outside the footer), and footer-scoping (a keyword far
+  up in scrollback must not false-positive).
+
+unit:
+  - name: "recognizes Rate limited"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["… · Rate limited"]
+    expect_value: "rate-limit"
+
+  - name: "recognizes 'temporarily limiting requests'"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["temporarily limiting requests"]
+    expect_value: "rate-limit"
+
+  - name: "recognizes API Error"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["API Error: something"]
+    expect_value: "api-error"
+
+  - name: "recognizes overloaded_error JSON"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ['{"type":"overloaded_error"}']
+    expect_value: "overloaded"
+
+  - name: "clean pane → null"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: [""]
+    expect_value: null
+
+  - name: "busy footer (esc to interrupt) → null"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["esc to interrupt"]
+    expect_value: null
+
+  - name: "compacting → null"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["Compacting conversation"]
+    expect_value: null
+
+  - name: "#335: bare 529 token in body no longer matches"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["processed 529 rows"]
+    expect_value: null
+
+  - name: "#335: lone 'Overloaded' outside footer no longer matches"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["the server was Overloaded yesterday"]
+    expect_value: null
+
+  - name: "rate-limit wins over api-error when both present (first-match)"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited"]
+    expect_value: "rate-limit"

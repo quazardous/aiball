@@ -1,0 +1,142 @@
+# #750 Slice 2 — migration `src/db/last-actor-gate.test.ts`. 5 TS tests
+# (each with multiple asserts) → 23 yaml entries (1 per assert).
+# All pure-fn boolean returns ; fits `expect_value` cleanly.
+scenario: last-actor-gate
+description: |
+  Pure last-actor / sole-participant gate (#374). `isForeignActor`
+  filters the consumer's own id, the auto-moderation id, and the
+  null/undefined/empty cases. `eventHasForeignActor` extends the
+  filter to settled-decision events (a peer's accept/reject hands the
+  ball back) and ignores structural events (ticket_relation /
+  sub_added / referenced) and auto-accept (e.g. dangling-resolution
+  on close). `isExcludedForConsumer` combines whose-court +
+  sole-participant : I'm excluded only when I acted last AND a
+  counterpart exists (waiting on them) ; my own untouched task stays
+  visible (#370/#323).
+
+unit:
+  # --- isForeignActor ---
+  - name: "isForeignActor: another consumer counts"
+    call: { module: "../db/last-actor-gate.js", fn: "isForeignActor" }
+    args: ["david", "claude-aiball-dev"]
+    expect_value: true
+  - name: "isForeignActor: self does not count"
+    call: { module: "../db/last-actor-gate.js", fn: "isForeignActor" }
+    args: ["claude-aiball-dev", "claude-aiball-dev"]
+    expect_value: false
+  - name: "isForeignActor: 'auto' (moderation) does not count"
+    call: { module: "../db/last-actor-gate.js", fn: "isForeignActor" }
+    args: ["auto", "claude-aiball-dev"]
+    expect_value: false
+  - name: "isForeignActor: null does not count"
+    call: { module: "../db/last-actor-gate.js", fn: "isForeignActor" }
+    args: [null, "claude-aiball-dev"]
+    expect_value: false
+  - name: "isForeignActor: undefined does not count"
+    call: { module: "../db/last-actor-gate.js", fn: "isForeignActor" }
+    args: [~, "claude-aiball-dev"]  # yaml '~' = null. (undefined is yaml-impossible — null behavior is the same per the impl.)
+    expect_value: false
+  - name: "isForeignActor: empty string does not count"
+    call: { module: "../db/last-actor-gate.js", fn: "isForeignActor" }
+    args: ["", "claude-aiball-dev"]
+    expect_value: false
+
+  # --- eventHasForeignActor : comment / lifecycle by another ---
+  - name: "eventHasForeignActor: comment_added by david → true"
+    call: { module: "../db/last-actor-gate.js", fn: "eventHasForeignActor" }
+    args:
+      - { byAgent: "david", decisionStatus: null, decidedBy: null, kind: "comment_added" }
+      - "claude-aiball-dev"
+    expect_value: true
+  - name: "eventHasForeignActor: ticket_reopened by david → true (#305)"
+    call: { module: "../db/last-actor-gate.js", fn: "eventHasForeignActor" }
+    args:
+      - { byAgent: "david", decisionStatus: null, decidedBy: null, kind: "ticket_reopened" }
+      - "claude-aiball-dev"
+    expect_value: true
+  - name: "eventHasForeignActor: ticket_closed by david → true"
+    call: { module: "../db/last-actor-gate.js", fn: "eventHasForeignActor" }
+    args:
+      - { byAgent: "david", decisionStatus: null, decidedBy: null, kind: "ticket_closed" }
+      - "claude-aiball-dev"
+    expect_value: true
+
+  # --- eventHasForeignActor : self / structural / auto → false ---
+  - name: "eventHasForeignActor: my own comment → false"
+    call: { module: "../db/last-actor-gate.js", fn: "eventHasForeignActor" }
+    args:
+      - { byAgent: "claude-aiball-dev", decisionStatus: null, decidedBy: null, kind: "comment_added" }
+      - "claude-aiball-dev"
+    expect_value: false
+  - name: "eventHasForeignActor: ticket_relation by david → false (structural, #370)"
+    call: { module: "../db/last-actor-gate.js", fn: "eventHasForeignActor" }
+    args:
+      - { byAgent: "david", decisionStatus: null, decidedBy: null, kind: "ticket_relation" }
+      - "claude-aiball-dev"
+    expect_value: false
+  - name: "eventHasForeignActor: ticket_sub_added by david → false (structural)"
+    call: { module: "../db/last-actor-gate.js", fn: "eventHasForeignActor" }
+    args:
+      - { byAgent: "david", decisionStatus: null, decidedBy: null, kind: "ticket_sub_added" }
+      - "claude-aiball-dev"
+    expect_value: false
+  - name: "eventHasForeignActor: ticket_referenced by david → false (structural)"
+    call: { module: "../db/last-actor-gate.js", fn: "eventHasForeignActor" }
+    args:
+      - { byAgent: "david", decisionStatus: null, decidedBy: null, kind: "ticket_referenced" }
+      - "claude-aiball-dev"
+    expect_value: false
+  - name: "eventHasForeignActor: comment_added by 'auto' → false"
+    call: { module: "../db/last-actor-gate.js", fn: "eventHasForeignActor" }
+    args:
+      - { byAgent: "auto", decisionStatus: null, decidedBy: null, kind: "comment_added" }
+      - "claude-aiball-dev"
+    expect_value: false
+
+  # --- eventHasForeignActor : settled decision by another (accept/reject) ---
+  - name: "eventHasForeignActor: my comment accepted by david → true"
+    call: { module: "../db/last-actor-gate.js", fn: "eventHasForeignActor" }
+    args:
+      - { byAgent: "claude-aiball-dev", decisionStatus: "accepted", decidedBy: "david", kind: "comment_added" }
+      - "claude-aiball-dev"
+    expect_value: true
+  - name: "eventHasForeignActor: my comment rejected by david → true"
+    call: { module: "../db/last-actor-gate.js", fn: "eventHasForeignActor" }
+    args:
+      - { byAgent: "claude-aiball-dev", decisionStatus: "rejected", decidedBy: "david", kind: "comment_added" }
+      - "claude-aiball-dev"
+    expect_value: true
+  - name: "eventHasForeignActor: my comment with pending decision → false"
+    call: { module: "../db/last-actor-gate.js", fn: "eventHasForeignActor" }
+    args:
+      - { byAgent: "claude-aiball-dev", decisionStatus: "pending", decidedBy: null, kind: "comment_added" }
+      - "claude-aiball-dev"
+    expect_value: false
+  - name: "eventHasForeignActor: auto-accept (no human decider) → false"
+    call: { module: "../db/last-actor-gate.js", fn: "eventHasForeignActor" }
+    args:
+      - { byAgent: "claude-aiball-dev", decisionStatus: "accepted", decidedBy: "auto", kind: "comment_added" }
+      - "claude-aiball-dev"
+    expect_value: false
+
+  # --- isExcludedForConsumer : whose-court + sole-participant ---
+  - name: "isExcludedForConsumer: I acted last, counterpart exists → excluded"
+    call: { module: "../db/last-actor-gate.js", fn: "isExcludedForConsumer" }
+    args: ["claude-aiball-dev", true, "claude-aiball-dev"]
+    expect_value: true
+  - name: "isExcludedForConsumer: I acted last, I'm sole participant → kept"
+    call: { module: "../db/last-actor-gate.js", fn: "isExcludedForConsumer" }
+    args: ["claude-aiball-dev", false, "claude-aiball-dev"]
+    expect_value: false
+  - name: "isExcludedForConsumer: someone else acted last, counterpart → kept (my court)"
+    call: { module: "../db/last-actor-gate.js", fn: "isExcludedForConsumer" }
+    args: ["david", true, "claude-aiball-dev"]
+    expect_value: false
+  - name: "isExcludedForConsumer: someone else acted last, no counterpart → kept"
+    call: { module: "../db/last-actor-gate.js", fn: "isExcludedForConsumer" }
+    args: ["david", false, "claude-aiball-dev"]
+    expect_value: false
+  - name: "isExcludedForConsumer: no actor recorded → kept"
+    call: { module: "../db/last-actor-gate.js", fn: "isExcludedForConsumer" }
+    args: [null, false, "claude-aiball-dev"]
+    expect_value: false

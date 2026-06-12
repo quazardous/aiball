@@ -1,59 +1,19 @@
 /**
- * #555 — couvre `stripMarkdown` (helper backend) + l'intégration `{body}`
- * token dans `buildWakePhrase` (state.ts, DEFAULT_WAKE_TEMPLATES path).
+ * #555 — couvre l'intégration `{body}` token dans `buildWakePhrase`
+ * (state.ts, DEFAULT_WAKE_TEMPLATES path).
+ *
+ * #750 Slice 2 — les cas pure `stripMarkdown(str)` sont migrés vers
+ * `tests/integration/scenarios/markdown-strip.yaml` (yaml runner via
+ * `expect_value`). Les tests ici restent en TS parce qu'ils nécessitent
+ * un fichier `pings.yaml` temporaire (mkdtempSync) passé en arg —
+ * non-exprimable dans le `args` positionnel du runner yaml.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { stripMarkdown } from "./markdown-strip.js";
 import { buildWakePhrase } from "./state.js";
-
-test("stripMarkdown: bold + link → texte plat", () => {
-    assert.equal(stripMarkdown("**hello** [world](https://x)"), "hello world");
-});
-
-test("stripMarkdown: fenced code block flatten", () => {
-    assert.equal(stripMarkdown("```ts\nconst x = 1;\n```"), "const x = 1;");
-});
-
-test("stripMarkdown: headings + bullets aplatis en single line", () => {
-    assert.equal(
-        stripMarkdown("# Title\n\n- item 1\n- item 2"),
-        "Title item 1 item 2",
-    );
-});
-
-test("stripMarkdown: blockquote stripé, contenu gardé", () => {
-    assert.equal(stripMarkdown("> citation"), "citation");
-});
-
-test("stripMarkdown: html entities décodées", () => {
-    assert.equal(stripMarkdown("a &amp; b"), "a & b");
-});
-
-test("stripMarkdown: input vide / whitespace → \"\"", () => {
-    assert.equal(stripMarkdown(""), "");
-    assert.equal(stripMarkdown("   \n\t  "), "");
-});
-
-test("stripMarkdown: truncate avec ellipse sur word-boundary", () => {
-    const long = "the quick brown fox jumps over the lazy dog and keeps going";
-    const out = stripMarkdown(long, 20);
-    assert.ok(out.length <= 20, `expected ≤20 got ${out.length}`);
-    assert.ok(out.endsWith("…"), `expected trailing …, got ${JSON.stringify(out)}`);
-});
-
-test("stripMarkdown: input court < maxLen renvoyé inchangé", () => {
-    assert.equal(stripMarkdown("hi", 240), "hi");
-});
-
-test("stripMarkdown: code inline kept", () => {
-    assert.equal(stripMarkdown("use `npm run build`"), "use npm run build");
-});
-
-// --- buildWakePhrase integration --------------------------------------------
 
 /** Pings yaml temporaire, no `wake_phrases` block → fallback aux defaults. */
 function emptyPingsYaml(): string {

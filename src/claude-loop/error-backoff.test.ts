@@ -1,5 +1,11 @@
 // #332 — pane-error detection + dumb exponential backoff.
 // node:test + tsx (zero deps). Run: `npm test`.
+//
+// #750 Slice 2 — les cas pure `matchPaneError(str)` sont migrés vers
+// `tests/integration/scenarios/error-backoff-match.yaml`. Les tests
+// restants ici nécessitent du runtime non-exprimable dans le runner yaml :
+// fillers multi-lignes (footer-scoping), monotonic asserts sur
+// nextBackoffMs (comparaisons), mkdtemp fixture pour armErrorBackoff.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -15,37 +21,12 @@ import {
     resetErrorBackoff,
 } from "./error-backoff.js";
 
-test("matchPaneError recognizes the seeded error types", () => {
-    assert.equal(matchPaneError("… · Rate limited"), "rate-limit");
-    assert.equal(matchPaneError("temporarily limiting requests"), "rate-limit");
-    assert.equal(matchPaneError("API Error: something"), "api-error");
-    assert.equal(matchPaneError('{"type":"overloaded_error"}'), "overloaded");
-});
-
-test("matchPaneError returns null on a clean / busy pane", () => {
-    assert.equal(matchPaneError(""), null);
-    assert.equal(matchPaneError("esc to interrupt"), null);
-    assert.equal(matchPaneError("Compacting conversation"), null);
-});
-
-test("#335: loose tokens (bare 529 / lone 'Overloaded') no longer match", () => {
-    assert.equal(matchPaneError("processed 529 rows"), null);
-    assert.equal(matchPaneError("the server was Overloaded yesterday"), null);
-});
-
 test("#335: detection is footer-scoped — scrollback mentions are ignored", () => {
     const filler = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
     // keyword far up in scrollback, footer clean → no false positive
     assert.equal(matchPaneError(`Discussing the API Error design\n${filler}`), null);
     // same keyword in the footer → matched
     assert.equal(matchPaneError(`${filler}\nAPI Error: boom`), "api-error");
-});
-
-test("the ticket's combined message matches rate-limit first", () => {
-    // #332 body: both rate-limit and api-error patterns are present;
-    // first match wins (handling is uniform regardless).
-    const body = "API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited";
-    assert.equal(matchPaneError(body), "rate-limit");
 });
 
 test("nextBackoffMs is dumb-exponential: base, monotonic, capped", () => {
