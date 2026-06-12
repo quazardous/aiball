@@ -1,36 +1,47 @@
 # #750 Slice 2 — migration `error-backoff.test.ts` (matchPaneError half).
-# 5 pure str → str|null cases pinning the pane-error classifier
-# (#332 + #335). `nextBackoffMs` (monotonic asserts referencing
+# Pure str → str|null cases pinning the pane-error classifier
+# (#332 + #335 + #948). `nextBackoffMs` (monotonic asserts referencing
 # ERROR_BACKOFF_* constants) and the stateful `armErrorBackoff` (needs
 # mkdtemp fixture) stay in TS — see `src/claude-loop/error-backoff.test.ts`.
 scenario: error-backoff-match
 description: |
   `matchPaneError` classifies a pane snapshot into one of the seeded
-  error ids (`rate-limit`, `api-error`, `overloaded`) or null. Pin
-  positive matches, loose-token rejections (#335 — `bare 529`, lone
-  `Overloaded` outside the footer), and footer-scoping (a keyword far
-  up in scrollback must not false-positive).
+  error ids (`rate-limit`, `overloaded`) or null. #948 david : patterns
+  are now full user-facing banner strings, not simplified substrings —
+  earlier broad regexes self-tripped on conversation text containing
+  `API Error` / `Overloaded` / `overloaded_error` tokens (rendered
+  ticket bodies, agent responses) → cap 10 min busy-defer storms.
 
 unit:
-  - name: "recognizes Rate limited"
+  - name: "#948: full 'API Error: Overloaded' banner → overloaded"
     call: { module: "./error-backoff.js", fn: "matchPaneError" }
-    args: ["… · Rate limited"]
+    args: ["API Error: Overloaded"]
+    expect_value: "overloaded"
+
+  - name: "#948: full 'API Error: Server is temporarily limiting requests' → rate-limit"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited"]
     expect_value: "rate-limit"
 
-  - name: "recognizes 'temporarily limiting requests'"
-    call: { module: "./error-backoff.js", fn: "matchPaneError" }
-    args: ["temporarily limiting requests"]
-    expect_value: "rate-limit"
-
-  - name: "recognizes API Error"
+  - name: "#948: bare 'API Error: something' no longer matches (was api-error)"
     call: { module: "./error-backoff.js", fn: "matchPaneError" }
     args: ["API Error: something"]
-    expect_value: "api-error"
+    expect_value: null
 
-  - name: "recognizes overloaded_error JSON"
+  - name: "#948: 'overloaded_error' JSON token no longer matches (was overloaded)"
     call: { module: "./error-backoff.js", fn: "matchPaneError" }
     args: ['{"type":"overloaded_error"}']
-    expect_value: "overloaded"
+    expect_value: null
+
+  - name: "#948: bare 'Rate limited' no longer matches (was rate-limit)"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["… · Rate limited"]
+    expect_value: null
+
+  - name: "#948: bare 'temporarily limiting requests' no longer matches"
+    call: { module: "./error-backoff.js", fn: "matchPaneError" }
+    args: ["temporarily limiting requests"]
+    expect_value: null
 
   - name: "clean pane → null"
     call: { module: "./error-backoff.js", fn: "matchPaneError" }
@@ -52,12 +63,12 @@ unit:
     args: ["processed 529 rows"]
     expect_value: null
 
-  - name: "#335: lone 'Overloaded' outside footer no longer matches"
+  - name: "#335: lone 'Overloaded' outside banner no longer matches"
     call: { module: "./error-backoff.js", fn: "matchPaneError" }
     args: ["the server was Overloaded yesterday"]
     expect_value: null
 
-  - name: "rate-limit wins over api-error when both present (first-match)"
+  - name: "#335: bare 'API Error' without ':Overloaded' suffix no longer matches"
     call: { module: "./error-backoff.js", fn: "matchPaneError" }
-    args: ["API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited"]
-    expect_value: "rate-limit"
+    args: ["discussing API Error handling"]
+    expect_value: null

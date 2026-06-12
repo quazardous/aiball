@@ -23,10 +23,10 @@ import {
 
 test("#335: detection is footer-scoped — scrollback mentions are ignored", () => {
     const filler = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
-    // keyword far up in scrollback, footer clean → no false positive
-    assert.equal(matchPaneError(`Discussing the API Error design\n${filler}`), null);
-    // same keyword in the footer → matched
-    assert.equal(matchPaneError(`${filler}\nAPI Error: boom`), "api-error");
+    // full banner far up in scrollback, footer clean → no false positive
+    assert.equal(matchPaneError(`API Error: Overloaded design discussion\n${filler}`), null);
+    // same banner in the footer → matched
+    assert.equal(matchPaneError(`${filler}\nAPI Error: Overloaded`), "overloaded");
 });
 
 test("nextBackoffMs is dumb-exponential: base, monotonic, capped", () => {
@@ -53,7 +53,7 @@ test("armErrorBackoff: same id increments, new id restarts, reset clears", () =>
         assert.equal(readErrorBackoff(sd)?.id, "rate-limit");
 
         // A different error class restarts the schedule.
-        const b1 = armErrorBackoff(sd, "api-error");
+        const b1 = armErrorBackoff(sd, "overloaded");
         assert.equal(b1.attempts, 1);
 
         resetErrorBackoff(sd);

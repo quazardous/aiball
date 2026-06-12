@@ -731,7 +731,13 @@ function refreshPaneMarkers(): void {
     // further into the future). Event-only wiring would only arm once
     // per begin transition and silently cap the backoff at attempt=1.
     // So we keep this branch poll-driven, reading the watcher snapshot.
-    const errId = errorW.snapshot().errorId;
+    //
+    // #948 david `9hafg2` : gate on `!paneBusy`. Claude busy = retry en
+    // cours = erreur passée (la ligne d'erreur reste dans le scrollback
+    // 8-lignes mais elle n'est plus l'état actif). Sans ce gate, le
+    // backoff escalade silencieusement à chaque heartbeat tant que la
+    // ligne est visible, jusqu'au cap 10 min — bloquant tous les wakes.
+    const errId = ipc.paneBusy ? null : errorW.snapshot().errorId;
     if (errId) {
         const bo = armErrorBackoff(sd, errId);
         log(`probe: api error '${errId}' detected → backoff ${bo.ms}ms (attempt ${bo.attempts}, until=${bo.untilIso})`);

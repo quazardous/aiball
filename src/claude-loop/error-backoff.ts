@@ -39,19 +39,19 @@ export interface ErrorPattern {
 /**
  * Error strings that crash the turn / flow. Ordered; first match wins
  * (only decides which `id` lands in the log — handling is uniform).
- * Seeds the ones david called out plus the backend-overload variant;
- * extend here, nowhere else.
  *
- * #335: patterns must be SPECIFIC. A bare `\b529\b` (or lone
- * "Overloaded") matched any pane that happened to contain the number /
- * word — including a session literally discussing API errors — and
- * tripped the backoff falsely. `overloaded_error` is the API's error
- * type token, which doesn't show up in normal prose.
+ * #948 david : patterns must be the FULL user-facing banner strings,
+ * not simplified substrings. Earlier broad regexes like `/API Error/i`
+ * or `/overloaded_error/i` self-tripped on conversation text containing
+ * those tokens (a ticket whose title was "gestion erreur API Error:
+ * Overloaded" rolled through claude's pane and matched its own banner
+ * regex → 30 ré-arms in 7s → cap 10 min busy-defer). Match the
+ * complete crash banner — at minimum the verb + payload — so it can't
+ * fire on rendered conversation text.
  */
 export const ERROR_PATTERNS: ErrorPattern[] = [
-    { id: "rate-limit", match: /Rate limited|temporarily limiting requests/i },
-    { id: "overloaded", match: /overloaded_error/i },
-    { id: "api-error", match: /API Error|APIError/i },
+    { id: "rate-limit", match: /API Error: Server is temporarily limiting requests/i },
+    { id: "overloaded", match: /API Error: Overloaded/i },
 ];
 
 /** Last `footerLines` non-empty lines — mirrors `paneFooterShowsBusy`

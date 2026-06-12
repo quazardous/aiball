@@ -182,7 +182,12 @@ function readPane(): string {
         // re-ping (it hammers the API and pops claude out of the flow).
         // Arm a dumb exponential backoff defer; the timer resumes after
         // the window. Still erroring → counter grows the next wait.
-        const errId = matchPaneError(paneText);
+        //
+        // #948 david `9hafg2` : gate on `!paneBusy`. Symmetric to the
+        // timer-side gate ; claude actively retrying = error past tense,
+        // don't re-arm backoff on the stale banner sitting in the
+        // 8-line footer scrollback.
+        const errId = getIpcState().paneBusy ? null : matchPaneError(paneText);
         if (errId) {
             const bo = armErrorBackoff(sd!, errId);
             // Claude is back at the prompt after the crashed turn — seed
