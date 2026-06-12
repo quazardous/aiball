@@ -1,7 +1,7 @@
-// #412 — level logger. node:test + tsx (zero deps). Run: `npm test`.
+// #412 / #944 — level logger. node:test + tsx (zero deps). Run: `npm test`.
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { createLogger, parseLevel, isEnabled, setLevel, currentLevel, DEFAULT_LOG_LEVEL } from "./log.js";
+import { createLogger, type LogRecord, parseLevel, isEnabled, setLevel, currentLevel, DEFAULT_LOG_LEVEL } from "./log.js";
 import { _resetLoopConfigCacheForTests } from "./claude-loop/loop-config.js";
 
 afterEach(() => {
@@ -13,6 +13,11 @@ afterEach(() => {
 function capture() {
     const lines: string[] = [];
     return { lines, write: (l: string) => lines.push(l) };
+}
+
+function parseLine(line: string): LogRecord {
+    assert.ok(line.endsWith("\n"), `line must end with \\n: ${JSON.stringify(line)}`);
+    return JSON.parse(line) as LogRecord;
 }
 
 test("parseLevel: case-insensitive, null on unknown", () => {
@@ -32,8 +37,14 @@ test("threshold: default is info; debug dropped, info+ emitted", () => {
     log.info("hello");
     log.error("boom");
     assert.equal(lines.length, 2); // debug dropped at default info
-    assert.match(lines[0], /^\S+ \[claude-loop:cl-x\] INFO hello\n$/);
-    assert.match(lines[1], /^\S+ \[claude-loop:cl-x\] ERROR boom\n$/);
+    const r0 = parseLine(lines[0]);
+    assert.equal(r0.level, "info");
+    assert.equal(r0.tag, "claude-loop:cl-x");
+    assert.equal(r0.msg, "hello");
+    assert.match(r0.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    const r1 = parseLine(lines[1]);
+    assert.equal(r1.level, "error");
+    assert.equal(r1.msg, "boom");
 });
 
 test("CL_LOG_LEVEL=debug lets debug through", () => {
@@ -42,7 +53,10 @@ test("CL_LOG_LEVEL=debug lets debug through", () => {
     const log = createLogger({ write });
     log.debug("now visible");
     assert.equal(lines.length, 1);
-    assert.match(lines[0], /^\S+ DEBUG now visible\n$/); // no tag → no [..]
+    const r = parseLine(lines[0]);
+    assert.equal(r.level, "debug");
+    assert.equal(r.msg, "now visible");
+    assert.equal(r.tag, undefined); // untagged → omitted from JSON
 });
 
 test("CL_LOG_LEVEL=error mutes warning and below", () => {
@@ -77,5 +91,17 @@ test("log.log(level, msg) routes through the threshold", () => {
     log.log("debug", "drop");
     log.log("warning", "keep");
     assert.equal(lines.length, 1);
-    assert.match(lines[0], /\[t\] WARNING keep\n$/);
+    const r = parseLine(lines[0]);
+    assert.equal(r.level, "warning");
+    assert.equal(r.tag, "t");
+    assert.equal(r.msg, "keep");
+});
+
+test("NDJSON: msg with special chars escapes correctly", () => {
+    const { lines, write } = capture();
+    const log = createLogger({ tag: "t", write });
+    log.info('quote " and newline \n and backslash \\ in msg');
+    assert.equal(lines.length, 1);
+    const r = parseLine(lines[0]);
+    assert.equal(r.msg, 'quote " and newline \n and backslash \\ in msg');
 });

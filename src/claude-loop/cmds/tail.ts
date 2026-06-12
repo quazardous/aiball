@@ -165,15 +165,26 @@ export async function cmdTail(name: string, lines: number, which: TailMode, foll
         const timer = timerLogPath(sd);
         const hook = join(sd, "stop-hook.log");
         // Prefixes name the source explicitly (#B.198, david: "il
-        // faut quand meme dire le nom du hook"). Order is now
-        // `<timestamp> <tag> <rest>` (david: "ça serait plus pratique
-        // cet ordre heure [type event]"): we pull any leading ISO
-        // timestamp out of the body line and reinject it BEFORE the
-        // tag, so all sources show one consistent time column.
+        // faut quand meme dire le nom du hook"). Order is
+        // `<timestamp> <tag> <rest>`.
+        // #944 Slice 2 : the underlying log format is now NDJSON
+        // (one JSON object per line, `{ts, level, tag?, msg}`). We
+        // detect by `line.startsWith("{")` and pretty-print, falling
+        // back to the legacy plain extractor for any tail of older
+        // lines still in the file from before the format flip.
         const TIMER_TAG = "[timer]    ";
         const HOOK_TAG  = "[stop-hook]";
         const ISO_RE = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\s+/;
         function reformat(line: string, tag: string): string {
+            if (line.startsWith("{")) {
+                try {
+                    const rec = JSON.parse(line) as { ts?: string; level?: string; tag?: string; msg?: string };
+                    const ts = rec.ts ?? " ".repeat(24);
+                    const innerTag = rec.tag ? `[${rec.tag}] ` : "";
+                    const level = (rec.level ?? "info").toUpperCase();
+                    return `${ts} ${tag} ${innerTag}${level} ${rec.msg ?? ""}`;
+                } catch { /* fall through to plain extractor */ }
+            }
             const m = ISO_RE.exec(line);
             if (m) return `${m[1]} ${tag} ${line.slice(m[0].length)}`;
             // No leading timestamp (older/foreign lines) — synthesize

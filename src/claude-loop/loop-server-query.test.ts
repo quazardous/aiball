@@ -126,6 +126,69 @@ test("LOOP_SOCK_KIND enum: kinds canoniques", () => {
     assert.equal(LOOP_SOCK_KIND.QUERY_LOOP_STATE, "queryLoopState");
     assert.equal(LOOP_SOCK_KIND.QUERY_LOOP_STATE_REPLY, "queryLoopStateReply");
     assert.equal(LOOP_SOCK_KIND.SHUTDOWN, "shutdown");
+    assert.equal(LOOP_SOCK_KIND.LOG, "log");
+});
+
+// #944 Slice 1 — hook subprocess ships its log lines to the timer over
+// loop.sock so the timer appends them to its own stdout (= unified loop
+// log). Verify the LOG frame routes to onLogLine.
+test("LOOP_SOCK_KIND.LOG: handler fires onLogLine with the line", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "loop-log-frame-"));
+    const sock = join(dir, "loop.sock");
+    const received: string[] = [];
+    const server = createLoopServer(sock, {
+        onProxyEvent: () => {},
+        onLogLine: (line) => { received.push(line); },
+    });
+    try {
+        await sleep(60);
+        const ch = openEventChannel(sock, { reconnectMs: 50 });
+        try {
+            for (let i = 0; i < 40 && !ch.isConnected(); i++) await sleep(25);
+            const ndjsonLine = '{"ts":"2026-06-12T10:00:00.000Z","level":"info","tag":"stop-hook:foo","msg":"test line"}\n';
+            ch.send({
+                kind: LOOP_SOCK_KIND.LOG,
+                data: { line: ndjsonLine },
+            });
+            // Server-side handler is sync but the frame travels over WS ;
+            // give it a tick to land.
+            for (let i = 0; i < 20 && received.length === 0; i++) await sleep(25);
+            assert.equal(received.length, 1);
+            assert.equal(received[0], ndjsonLine);
+        } finally {
+            ch.close();
+        }
+    } finally {
+        try { server.close(); } catch { /* ignore */ }
+        try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+});
+
+test("LOOP_SOCK_KIND.LOG: malformed payload (no .line) is silently ignored", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "loop-log-bad-"));
+    const sock = join(dir, "loop.sock");
+    const received: string[] = [];
+    const server = createLoopServer(sock, {
+        onProxyEvent: () => {},
+        onLogLine: (line) => { received.push(line); },
+    });
+    try {
+        await sleep(60);
+        const ch = openEventChannel(sock, { reconnectMs: 50 });
+        try {
+            for (let i = 0; i < 40 && !ch.isConnected(); i++) await sleep(25);
+            ch.send({ kind: LOOP_SOCK_KIND.LOG, data: { line: 42 } });
+            ch.send({ kind: LOOP_SOCK_KIND.LOG, data: null });
+            ch.send({ kind: LOOP_SOCK_KIND.LOG });
+            await sleep(100);
+            assert.equal(received.length, 0);
+        } finally {
+            ch.close();
+        }
+    } finally {
+        try { server.close(); } catch { /* ignore */ }
+        try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
 });
 
 test("sendShutdownToTimer: socket absent → no-op silencieux", async () => {

@@ -17,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, pingsPath, readBusyDefer, paneShowsInterrupted, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
+import { LOOP_SOCK_KIND, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, pingsPath, readBusyDefer, paneShowsInterrupted, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
 import { getIpcState, setIpcStateTagInfo } from "./ipc-state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
@@ -60,13 +60,28 @@ try { await queryLoopState(sd); } catch { /* fail-open */ }
 // from outside the session whether the hook actually ran, what branch
 // it took, and any error. Replaces the previous swallow-on-error
 // silence that made misfires invisible. tail -f via
-// `claude-loop tail <name> --stop-hook` (planned subcommand) or
-// `tail -f ~/.claude-loop/<name>/stop-hook.log`.
-// #412: route stop-hook.log through the level logger (no tag → `<ts> LEVEL msg`).
-// Existing calls map to `info` (default output preserved, now with the LEVEL
-// token); the hook inherits CL_LOG_LEVEL from the sourced env file.
+// `claude-loop tail <name> --log` (which merges hook lines straight
+// into the timer log, see #944).
+//
+// #412: tagged through the level logger.
+// #944 Slice 1: ship each line over `loop.sock` as a LOG frame so the
+// timer appends it to the unified loop log — `tail -f timer.log` shows
+// hook + timer chronologically interleaved. Plus an unconditional
+// append to the local `stop-hook.log` as a cold-boot safety (the timer
+// may not be listening yet when the hook fires its first lines on a
+// fresh session). The fire-and-forget UDS call doesn't await the WS
+// handshake — the hook subprocess only lives ~50ms, so we can't sync
+// on delivery. The dual-write tolerates ~120 bytes/line duplication ;
+// Slice 2 (NDJSON) will revisit (likely : drop the file once the
+// timer's pre-listen window is covered by a tmp-buffer).
 const logger = createLogger({
+    tag: `stop-hook:${name}`,
     write: (line) => {
+        void sendEventOnce(
+            loopSockPath(sd!),
+            { kind: LOOP_SOCK_KIND.LOG, data: { line } },
+            { timeoutMs: 100, throwOnError: false },
+        ).catch(() => { /* timer down — file fallback below catches it */ });
         try { appendFileSync(join(sd!, "stop-hook.log"), line); } catch { /* nowhere to log */ }
     },
 });

@@ -27,6 +27,9 @@ import { readFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { CL_ENV } from "./env-vars.js";
 import { emitHookEventToTimer } from "./hook-emit.js";
+import { sendEventOnce } from "./ipc-events.js";
+import { LOOP_SOCK_KIND, loopSockPath } from "./state.js";
+import { createLogger } from "../log.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -37,13 +40,26 @@ const sd = process.env[CL_ENV.STATE_DIR];
 const name = process.env[CL_ENV.NAME];
 if (!sd || !name) emit();
 
+// #944 Slice 1+2 : NDJSON via createLogger ; ship each line over
+// loop.sock to the timer + dual-write to the local session-start-hook.log
+// as cold-boot safety (timer may not be listening yet on a fresh session
+// and the hook exits in ~50ms — no time to await the WS handshake).
+const logger = createLogger({
+    tag: `session-start-hook:${name}`,
+    write: (line) => {
+        void sendEventOnce(
+            loopSockPath(sd!),
+            { kind: LOOP_SOCK_KIND.LOG, data: { line } },
+            { timeoutMs: 100, throwOnError: false },
+        ).catch(() => { /* file fallback below */ });
+        try {
+            appendFileSync(join(sd!, "session-start-hook.log"), line);
+        } catch { /* nowhere to log */ }
+    },
+});
+
 function log(msg: string): void {
-    try {
-        appendFileSync(
-            join(sd!, "session-start-hook.log"),
-            `${new Date().toISOString()} ${msg}\n`,
-        );
-    } catch { /* nowhere to log */ }
+    logger.info(msg);
 }
 
 // Claude Code passes JSON on stdin with a `source` field

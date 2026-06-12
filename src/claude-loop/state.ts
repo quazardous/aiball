@@ -1857,6 +1857,11 @@ export const LOOP_SOCK_KIND = {
     SHUTDOWN: "shutdown",
     GET_SNAPSHOTS: "getSnapshots",
     GET_SNAPSHOTS_REPLY: "getSnapshotsReply",
+    /** #944 — out-of-process subprocess (stop-hook, session-start-hook)
+     *  ships a single pre-formatted log line to the timer ; the timer
+     *  appends it to its stdout (= the unified loop log). Fail-open : the
+     *  hook also writes a per-source fallback file if the UDS is down. */
+    LOG: "log",
 } as const;
 export type LoopSockKind = (typeof LOOP_SOCK_KIND)[keyof typeof LOOP_SOCK_KIND];
 
@@ -1949,6 +1954,13 @@ export function createLoopServer(
          *  `buildRespawnEnvFromSnapshots`). Null/undefined = nothing to
          *  preserve, the caller's new spawn cold-boots. */
         onGetSnapshots?: () => string | null;
+        /** #944 — called when a `LOOP_SOCK_KIND.LOG` frame lands. The hook
+         *  subprocess (stop-hook, session-start-hook) ships a single
+         *  pre-formatted log line ; the timer appends it to its own log
+         *  sink (= stdout, redirected to the unified loop log by the
+         *  launcher). Default no-op so non-timer consumers (tests) ignore
+         *  the frame silently. */
+        onLogLine?: (line: string) => void;
     },
 ): LoopServer {
     const server: EventServer = listenEvents(sockPath, (ev, { reply }) => {
@@ -2018,6 +2030,19 @@ export function createLoopServer(
                 kind: LOOP_SOCK_KIND.GET_SNAPSHOTS_REPLY,
                 data: { __req: reqId, serialized },
             });
+            return;
+        }
+        if (ev.kind === LOOP_SOCK_KIND.LOG) {
+            // #944 — a hook subprocess shipped a pre-formatted log line.
+            // We append it as-is to the timer's own sink so it interleaves
+            // chronologically with the timer's ticks in the unified loop
+            // log (= `~/.claude-loop/<name>/timer.log` until the Slice 4
+            // rename). No format change here ; structured fields land in
+            // Slice 2 (NDJSON).
+            const line = typeof (ev.data as { line?: unknown } | null | undefined)?.line === "string"
+                ? (ev.data as { line: string }).line
+                : null;
+            if (line && handlers.onLogLine) handlers.onLogLine(line);
             return;
         }
         if (ev.kind === LOOP_SOCK_KIND.SHUTDOWN) {

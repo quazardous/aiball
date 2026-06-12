@@ -1,14 +1,18 @@
-// #412 — minimal PSR-3 / RFC 5424 level logger. Levels are filtered by a
-// configured threshold (env `CL_LOG_LEVEL`, default `info`); anything below the
-// threshold is dropped before formatting (cheap). Plain format preserved so
-// `claude-loop tail` / `--log` keep working:
+// #412 / #944 — minimal PSR-3 / RFC 5424 level logger. Levels are
+// filtered by a configured threshold (env `CL_LOG_LEVEL`, default
+// `info`) ; anything below the threshold is dropped before formatting
+// (cheap). #944 Slice 2 : emits **NDJSON** (one JSON object per line) :
 //
-//     <ISO ts> [<tag>] <LEVEL> <msg>      (tag optional)
+//     {"ts":"<ISO>","level":"info","tag":"<tag>","msg":"<msg>"}
 //
-// One factory covers the three existing sinks: timer.log (tag
-// `claude-loop:<name>`, stdout), restart.log (tag `<name>`, file append),
-// stop-hook.log (no tag, file append). Roll-your-own (no dep) — the surface is
-// tiny and the format is ours; swap for a lib later if it ever needs more.
+// `tag` is omitted when the logger was built untagged. Future structured
+// fields (`{ts, level, tag, msg, meta:{phrase, atMs, ...}}`) land via an
+// optional `meta` arg in a follow-up.
+//
+// One factory covers the existing sinks : timer.log (tag
+// `claude-loop:<name>`, stdout), restart.log (tag `<name>`, file
+// append), stop-hook.log (tag `stop-hook:<name>`, UDS+file). Roll-your-
+// own (no dep) — surface is tiny and the format is ours.
 
 import { loopConfig } from "./claude-loop/loop-config.js";
 
@@ -72,15 +76,25 @@ export interface LoggerOpts {
     write?: (line: string) => void;
 }
 
+/** A single emitted record. Shape stable for downstream parsers
+ *  (`claude-loop log`, jq pipelines). */
+export interface LogRecord {
+    ts: string;
+    level: LogLevel;
+    tag?: string;
+    msg: string;
+}
+
 /** Build a level logger for one sink. */
 export function createLogger(opts: LoggerOpts = {}): Logger {
-    const prefix = opts.tag ? `[${opts.tag}] ` : "";
     const sink = opts.write ?? ((line: string): void => {
         process.stdout.write(line);
     });
     const emit = (level: LogLevel, msg: string): void => {
         if (!isEnabled(level)) return; // below threshold → dropped before format
-        sink(`${new Date().toISOString()} ${prefix}${level.toUpperCase()} ${msg}\n`);
+        const rec: LogRecord = { ts: new Date().toISOString(), level, msg };
+        if (opts.tag) rec.tag = opts.tag;
+        sink(`${JSON.stringify(rec)}\n`);
     };
     return {
         debug: (m) => emit("debug", m),

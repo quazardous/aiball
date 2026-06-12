@@ -1296,6 +1296,13 @@ async function mainSse(): Promise<void> {
                 return null;
             }
         },
+        // #944 — out-of-process subprocess (stop-hook, session-start-hook)
+        // ships its pre-formatted log lines here. We append them to the
+        // timer's stdout (= the unified loop log via the launcher's
+        // redirect) so `tail -f timer.log` sees everything in one place,
+        // chronologically interleaved. The line is already terminated by
+        // \n by createLogger (cf. `src/log.ts:83`).
+        onLogLine: (line) => process.stdout.write(line),
     });
     process.on("exit", () => loopServer.close());
     // #862 Slice 5 — `installHookBarSubscriber` retiré. La transition
