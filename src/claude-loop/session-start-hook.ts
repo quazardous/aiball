@@ -27,6 +27,8 @@ import { readFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { CL_ENV } from "./env-vars.js";
 import { emitHookEventToTimer } from "./hook-emit.js";
+import { sendEventOnce } from "./ipc-events.js";
+import { LOOP_SOCK_KIND, loopSockPath } from "./state.js";
 
 function emit(): never {
     process.stdout.write("{}\n");
@@ -38,11 +40,19 @@ const name = process.env[CL_ENV.NAME];
 if (!sd || !name) emit();
 
 function log(msg: string): void {
+    const line = `${new Date().toISOString()} [session-start-hook:${name}] ${msg}\n`;
+    // #944 Slice 1 : ship the line over loop.sock to the timer (unified
+    // loop log). Fire-and-forget — the hook subprocess exits in ~50ms
+    // and can't sync on the WS handshake. Dual-write to the local file
+    // as a cold-boot safety (timer may not be listening yet on a fresh
+    // session).
+    void sendEventOnce(
+        loopSockPath(sd!),
+        { kind: LOOP_SOCK_KIND.LOG, data: { line } },
+        { timeoutMs: 100, throwOnError: false },
+    ).catch(() => { /* file fallback below */ });
     try {
-        appendFileSync(
-            join(sd!, "session-start-hook.log"),
-            `${new Date().toISOString()} ${msg}\n`,
-        );
+        appendFileSync(join(sd!, "session-start-hook.log"), line);
     } catch { /* nowhere to log */ }
 }
 
