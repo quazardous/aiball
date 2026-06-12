@@ -65,11 +65,6 @@ export interface BarSnapshot {
      *  pas idle / busy / unknown / pas d'event à drainer. Rendu après les
      *  counters comme `📨Ns`. */
     nextWakeInSec: number | null;
-    /** #850 — session health score 1-5 captured by HealthCheckWatcher.
-     *  `null` = not captured (prompt pending or never injected).
-     *  Rendered in the counters zone as `H:N` colored red (1-2),
-     *  yellow (3), green (4-5). */
-    sessionHealthScore: number | null;
     /** #891 — boot elapsed et remaining (seconds). `null` hors boot.
      *  Rendus dans la zone compteurs comme `🚀Ns +Ns`, prioritaires
      *  sur nextWakeInSec. */
@@ -167,7 +162,6 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         zenActive,
         counters,
         nextWakeInSec,
-        sessionHealthScore: ipc.sessionHealthScore,
         bootElapsedSec,
         bootRemainingSec,
         afkChipStr,
@@ -177,7 +171,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
 /** Diff deux snapshots et retourne la liste des champs qui ont
  *  changé. Liste vide = no-op (rien à repaint). */
 export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (keyof BarSnapshot)[] {
-    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "sessionHealthScore", "bootElapsedSec", "bootRemainingSec", "afkChipStr"];
+    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkChipStr"];
     const changed: (keyof BarSnapshot)[] = [];
     if (prev.humanWord !== next.humanWord) changed.push("humanWord");
     if (prev.loopStatus !== next.loopStatus) changed.push("loopStatus");
@@ -186,7 +180,6 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     if (prev.zenActive !== next.zenActive) changed.push("zenActive");
     if (!countersEqual(prev.counters, next.counters)) changed.push("counters");
     if (prev.nextWakeInSec !== next.nextWakeInSec) changed.push("counters");
-    if (prev.sessionHealthScore !== next.sessionHealthScore) changed.push("counters");
     if (prev.bootElapsedSec !== next.bootElapsedSec) changed.push("counters");
     if (prev.bootRemainingSec !== next.bootRemainingSec) changed.push("counters");
     if (prev.afkChipStr !== next.afkChipStr) changed.push("afkChipStr");
@@ -343,18 +336,7 @@ export class BarRenderer {
             } else if (next.nextWakeInSec !== null) {
                 parts.push(`📨${next.nextWakeInSec}s`);
             }
-            // #850 — claude's session self-rating, colored by tier :
-            // red 1-2 (struggling), yellow 3 (mid), green 4-5 (cruising).
-            // Appended after the boot/wake countdowns so it lives at the
-            // tail of the counters segment.
             const col = barColors();
-            if (next.sessionHealthScore !== null) {
-                const score = next.sessionHealthScore;
-                const fg = score <= 2 ? "colour196" /* red */
-                    : score === 3 ? "colour178" /* yellow */
-                        : "colour46" /* green */;
-                parts.push(`#[fg=${fg}]H:${score}#[fg=${col.bar_fg}]`);
-            }
             setOpt("@cl_counts", `#[fg=${col.bar_fg}] ${parts.join(" ")}`);
         }
         if (changedSet.has("afkChipStr")) {
