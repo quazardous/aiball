@@ -1,10 +1,16 @@
 // #379 — tests purs de la drained-strategy (parseur + décision). node:test,
 // horloge injectée, aucun DB/timer. Couvre chaque stratégie + le reset au
 // changement de landscape_hash.
+//
+// #750 Slice 2 — `parseIsoDuration` est migré vers
+// `tests/integration/scenarios/parse-iso-duration.yaml`. Le reste
+// (parseDrainedStrategy, decideDrainedWake) reste ici parce que les
+// returns référencent des module-constants (DEFAULT_STALE_MS,
+// DEFAULT_BACKOFF_BASE_MS, DEFAULT_BACKOFF_CAP_MS) non-référençables
+// dans le yaml runner.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-    parseIsoDuration,
     parseDrainedStrategy,
     decideDrainedWake,
     DEFAULT_STALE_MS,
@@ -16,18 +22,6 @@ import {
 
 const MIN = 60_000;
 const H = 60 * MIN;
-
-test("parseIsoDuration: PT forms", () => {
-    assert.equal(parseIsoDuration("PT2H"), 2 * H);
-    assert.equal(parseIsoDuration("PT10M"), 10 * MIN);
-    assert.equal(parseIsoDuration("PT30M"), 30 * MIN);
-    assert.equal(parseIsoDuration("PT1D"), 24 * H); // D toléré après T (david)
-    assert.equal(parseIsoDuration("P1D"), 24 * H);
-    assert.equal(parseIsoDuration("PT1H30M"), H + 30 * MIN);
-    assert.equal(parseIsoDuration("PT45S"), 45_000);
-    assert.equal(parseIsoDuration("garbage"), null);
-    assert.equal(parseIsoDuration(""), null);
-});
 
 test("parseDrainedStrategy: bare names use defaults", () => {
     assert.deepEqual(parseDrainedStrategy("silent"), { kind: "silent" });

@@ -1,0 +1,59 @@
+# #750 Slice 2 — migration `drained-strategy.test.ts` (parseIsoDuration
+# only, 9 entries). The rest (parseDrainedStrategy, decideDrainedWake)
+# stays in TS — returns objects keyed off module-const defaults
+# (DEFAULT_STALE_MS, DEFAULT_BACKOFF_BASE_MS, DEFAULT_BACKOFF_CAP_MS)
+# that the yaml runner can't reference.
+scenario: parse-iso-duration
+description: |
+  `parseIsoDuration` is the ISO 8601 duration parser used by drained
+  strategy options (`stale:PT4H`, `backoff:PT5M/PT2H`, ...). Pin the
+  accepted shapes (PTnH / PTnM / PTnS / PnD + the David-toleranced
+  PTnD), composite (PT1H30M), and reject paths (garbage / empty).
+
+# Constants : MIN = 60_000 ms, H = 3_600_000 ms.
+
+unit:
+  - name: "PT2H → 2 hours"
+    call: { module: "./drained-strategy.js", fn: "parseIsoDuration" }
+    args: ["PT2H"]
+    expect_value: 7200000   # 2 * 3_600_000
+
+  - name: "PT10M → 10 minutes"
+    call: { module: "./drained-strategy.js", fn: "parseIsoDuration" }
+    args: ["PT10M"]
+    expect_value: 600000    # 10 * 60_000
+
+  - name: "PT30M → 30 minutes"
+    call: { module: "./drained-strategy.js", fn: "parseIsoDuration" }
+    args: ["PT30M"]
+    expect_value: 1800000   # 30 * 60_000
+
+  - name: "PT1D → 1 day (D tolerated after T)"
+    call: { module: "./drained-strategy.js", fn: "parseIsoDuration" }
+    args: ["PT1D"]
+    expect_value: 86400000  # 24 * 3_600_000
+
+  - name: "P1D → 1 day (canonical form)"
+    call: { module: "./drained-strategy.js", fn: "parseIsoDuration" }
+    args: ["P1D"]
+    expect_value: 86400000
+
+  - name: "PT1H30M → composite"
+    call: { module: "./drained-strategy.js", fn: "parseIsoDuration" }
+    args: ["PT1H30M"]
+    expect_value: 5400000   # 3_600_000 + 30 * 60_000
+
+  - name: "PT45S → 45 seconds"
+    call: { module: "./drained-strategy.js", fn: "parseIsoDuration" }
+    args: ["PT45S"]
+    expect_value: 45000
+
+  - name: "garbage → null"
+    call: { module: "./drained-strategy.js", fn: "parseIsoDuration" }
+    args: ["garbage"]
+    expect_value: null
+
+  - name: "empty string → null"
+    call: { module: "./drained-strategy.js", fn: "parseIsoDuration" }
+    args: [""]
+    expect_value: null
