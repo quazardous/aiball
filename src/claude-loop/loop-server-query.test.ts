@@ -145,15 +145,16 @@ test("LOOP_SOCK_KIND.LOG: handler fires onLogLine with the line", async () => {
         const ch = openEventChannel(sock, { reconnectMs: 50 });
         try {
             for (let i = 0; i < 40 && !ch.isConnected(); i++) await sleep(25);
+            const ndjsonLine = '{"ts":"2026-06-12T10:00:00.000Z","level":"info","tag":"stop-hook:foo","msg":"test line"}\n';
             ch.send({
                 kind: LOOP_SOCK_KIND.LOG,
-                data: { line: "2026-06-12T10:00:00.000Z [stop-hook:foo] INFO test line\n" },
+                data: { line: ndjsonLine },
             });
             // Server-side handler is sync but the frame travels over WS ;
             // give it a tick to land.
             for (let i = 0; i < 20 && received.length === 0; i++) await sleep(25);
             assert.equal(received.length, 1);
-            assert.equal(received[0], "2026-06-12T10:00:00.000Z [stop-hook:foo] INFO test line\n");
+            assert.equal(received[0], ndjsonLine);
         } finally {
             ch.close();
         }
