@@ -23,6 +23,24 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-06-12
+
+### Added
+
+- New `claude-loop log [name]` subcommand for the unified loop log. Filters compose : `-f` / `--follow` (tail), `--level <LEVEL>`, `--tag <regex>`, `--grep <pattern>`, `--since <ISO | 5m | 2h | 7d>`, `--json` (raw NDJSON for jq), `--lines <N>`. Default pretty-print : `<ISO> <LEVEL> [<tag>] <msg>`.
+- The loop log is now NDJSON : one JSON object per line — `{"ts":"…","level":"info","tag":"<tag>","msg":"…"}`. Untagged loggers omit `tag`. Stable shape for downstream parsers and jq pipelines.
+- Stop and session-start hooks now ship their log lines to the timer over the loop socket, so `~/.claude-loop/<name>/timer.log` interleaves hook fires with timer ticks chronologically. The local hook log files are kept as a cold-boot safety net.
+- The Rust pty proxy now builds on Linux too (`cl-pty-proxy`). Same binary as the Windows port — `portable_pty` PTY layer + tungstenite ws-over-UDS to `loop.sock`. CI runs the matrix `[windows-latest, ubuntu-latest]`.
+- `claude-loop backlog --cooled` shows the wake-up time of cooled tickets : the `⏳` marker becomes `⏳HH:MM`, so the operator sees *when* the ticket will re-surface, not just *that* it's cooled.
+
+### Changed
+
+- The tmux bar countdown is now the FIFO drain-grace timer : it shows `📨Ns` only during the 10-second window after claude returns to idle. Past the grace, the countdown is hidden — the gate is open and new events fire instantly. Earlier the countdown leaked four redundant gates (`loopStatus === IDLE` / `barWord === "loop"` / counters-have-pending / `idleSinceMs !== null`) and disappeared on every transient busy / wait flicker, even though a wake was scheduled.
+
+### Fixed
+
+- `claude-loop reload <name>` now preserves the loop's XState snapshots (boot / AFK / wake / typing / idle controllers) across the timer respawn. Previously SIGKILL'd the timer without capturing state, so a reload silently demoted "NOT AFK ∞" back to AFK, kicked the boot phase, and reset wake cooldowns. The new spawn restores the exact controller state via a UDS round-trip that fires before the shutdown frame.
+
 ## [0.30.0] — 2026-06-10
 
 ### Added
