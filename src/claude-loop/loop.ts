@@ -658,14 +658,11 @@ if (sd) {
             return;
         }
         log(`watcher: resume_picker begin → auto-cross (pick=${pickMode}, Enter)`);
-        // #965 — Enter via inject.sock (proxy écrit directement au PTY
-        // de claude, pas vu comme une frappe humaine). Fallback send-keys
-        // si inject down (cold-boot, proxy pas encore subscribed).
-        void (async () => {
-            if (await injectRawBytes(sd!, "\r")) return;
-            log("watcher: resume_picker — inject down, fallback send-keys (peut armer AFK 10m)");
-            spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
-        })();
+        // #965 reverted ici (`ttm7d4`) — l'inject.sock ne franchit pas
+        // le picker zone (la TUI consomme les keystrokes différemment du
+        // path stdin normal). Revert à `send-keys`. Side-effect connu :
+        // peut armer NOT AFK 10m via le proxy ; suivi dans le spinoff.
+        spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
     });
     pickerSessionW.on("end", () => forwardModuleEnded("resume_picker"));
     pickerModeW.on("change", (s) => { setResumeModePicker(sd, s.visible); refreshPaneReady(); });
@@ -679,20 +676,11 @@ if (sd) {
             return;
         }
         log(`watcher: resume_mode begin → auto-cross (mode=${mode})`);
-        // #965 — Down + Enter via inject.sock. Down = `\x1b[B` (CSI).
-        void (async () => {
-            if (mode === "as-is") {
-                if (!(await injectRawBytes(sd!, "\x1b[B"))) {
-                    log("watcher: resume_mode — inject down for Down, fallback send-keys");
-                    spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Down"], { stdio: "ignore" });
-                }
-            }
-            if (!(await injectRawBytes(sd!, "\r"))) {
-                log("watcher: resume_mode — inject down for Enter, fallback send-keys");
-                spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
-            }
-        })();
-        return;
+        // #965 reverted ici (`ttm7d4`) — voir resume_picker plus haut.
+        if (mode === "as-is") {
+            spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Down"], { stdio: "ignore" });
+        }
+        spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
     });
     resumingW.on("change", (s) => { setResuming(sd, s.visible); refreshPaneReady(); });
     resumingW.on("begin", () => forwardModuleStarted("resuming"));
