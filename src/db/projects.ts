@@ -1476,38 +1476,73 @@ export function lastActorExclusions(consumerId: string): Set<number> {
  */
 export function decisionGateByTicket(): Map<number, boolean> {
     const db = getDb();
-    // #803 — also consult `ticket_created` events. A `ticket_new({then:"plan"})`
-    // ships a pending plan decision in the meta of the ticket_created itself,
-    // so the gate must replay those to recognise ticket-level proposals.
-    // computeDecisionGate reads meta agnostically — no special-case needed.
-    // Note: row.ticketId is null for ticket_created (the ticket is the row
-    // itself), so computeDecisionGate skips it (ticketId == null guard).
-    // We compensate below by re-mapping ticket_created rows to use their own
-    // id as the ticketId before passing to computeDecisionGate.
-    const rows = db.select({
+    // #961 — `ticket_created` is a VIRTUAL kind synthesized from the
+    // `tickets` table via `ticketRowToMessage()`. The `_messages` table
+    // never carries a row with `kind="ticket_created"`, so the legacy
+    // `inArray(..., "ticket_created")` filter on `schema.messages` was
+    // dead code (the older #803 comment was wrong about the wiring).
+    // A `ticket_new({then:"plan"})` ships its pending plan decision in
+    // `tickets.meta`, so we must scan `schema.tickets` directly and feed
+    // those as synthetic `ticket_created` events to `computeDecisionGate`.
+    //
+    // Merge order: tickets.id and messages.id live in SEPARATE counters
+    // (`next_ticket_id` / `next_message_id`), so an id-asc merge does
+    // NOT preserve chronology. Sort the merged stream by `createdAt`
+    // instead — wall-clock is the only key that puts each ticket's own
+    // events in posting order regardless of the two counters' relative
+    // pace.
+    const ticketRows = db.select({
+        id: schema.tickets.id,
+        status: schema.tickets.status,
+        meta: schema.tickets.meta,
+        byAgent: schema.tickets.byAgent,
+        createdAt: schema.tickets.createdAt,
+    })
+        .from(schema.tickets)
+        .all();
+    const messageRows = db.select({
         id: schema.messages.id,
         ticketId: schema.messages.ticketId,
         kind: schema.messages.kind,
         status: schema.messages.status,
         meta: schema.messages.meta,
         byAgent: schema.messages.byAgent,
+        createdAt: schema.messages.createdAt,
     })
         .from(schema.messages)
-        .where(inArray(schema.messages.kind, ["ticket_resolved", "ticket_reopened", "comment_added", "ticket_created"]))
-        .orderBy(asc(schema.messages.id))
+        .where(inArray(schema.messages.kind, ["ticket_resolved", "ticket_reopened", "comment_added"]))
         .all();
-    const normalized = rows.map((r) => ({
-        ticketId: r.kind === "ticket_created" ? r.id : r.ticketId,
-        kind: r.kind,
-        status: r.status,
-        meta: r.meta,
-        byAgent: r.byAgent,
-    }));
+    interface Row {
+        createdAt: string;
+        ticketId: number;
+        kind: string;
+        status: string;
+        meta: string | null;
+        byAgent: string | null;
+    }
+    const merged: Row[] = [
+        ...ticketRows.map((t): Row => ({
+            createdAt: t.createdAt,
+            ticketId: t.id,
+            kind: "ticket_created",
+            status: t.status,
+            meta: t.meta,
+            byAgent: t.byAgent,
+        })),
+        ...messageRows.map((m): Row => ({
+            createdAt: m.createdAt,
+            ticketId: m.ticketId as number,
+            kind: m.kind,
+            status: m.status,
+            meta: m.meta,
+            byAgent: m.byAgent,
+        })),
+    ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     // #358 : la logique de rejeu vit dans decision-gate.ts (pure, testée). On
     // bâtit le set humain une fois pour que le yield-sur-commentaire ne tape
     // pas la table consumers à chaque ligne.
     const humans = new Set(listHumans());
-    return computeDecisionGate(normalized, (id) => humans.has(id));
+    return computeDecisionGate(merged, (id) => humans.has(id));
 }
 
 export function computeActionableTicketIds(consumerId?: string): ActionableTicketSet {

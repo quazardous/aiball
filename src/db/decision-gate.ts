@@ -53,9 +53,9 @@ export function computeDecisionGate(
             continue;
         }
 
-        // #803 — `ticket_created` with a pending plan decision in its meta
-        // joins the same replay (decisionGateByTicket re-maps the row's id
-        // to ticketId for ticket_created events).
+        // `ticket_created` carries a pending decision when filed via
+        // `ticket_new({then:"plan"})` — its `meta.decision` lives on the
+        // ticket row itself (see #961 fix in `decisionGateByTicket()`).
         const isDecisionBearing = ev.kind === "comment_added" || ev.kind === "ticket_created";
         if (!isDecisionBearing || ev.status !== "approved") continue;
 
