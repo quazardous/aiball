@@ -17,7 +17,7 @@
  * Both modes share `tryWake()` which honors idle-since + user-grace +
  * tmux-alive gates, fires send-keys, and updates the tmux status bar.
  *
- * Logs to stdout (the launcher redirects to $STATE_DIR/timer.log).
+ * Logs to stdout (the launcher redirects to $STATE_DIR/loop.log).
  * Exits when the tmux session disappears.
  *
  * PRIMARY TODO (#B.178 win) — generic stuck-at-menu detection:
@@ -33,7 +33,7 @@
  * per-menu settings flags. Interim: user runs `claude` once to clear
  * the one-time gates (see docs/WIN-INSTALL.md).
  */
-import { appendFileSync, existsSync, openSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, openSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
@@ -77,8 +77,8 @@ import {
     readPlate,
     writePlate,
     envPath,
-    timerLogPath,
-    timerPidPath,
+    loopLogPath,
+    loopPidPath,
     type Plate,
     type WakeHint,
 } from "./state.js";
@@ -195,14 +195,14 @@ const tname = tmuxName(name);
 function cleanShutdown(reason: string): void {
     log(`clean shutdown (${reason}) — stopping loop '${name}' (transient state swept; rm to delete)`);
     try { spawnSync(MUX_CMD, ["kill-session", "-t", tname], { stdio: "ignore" }); } catch { /* tmux already gone */ }
-    // #442 sweep — drop the transient RUNTIME markers (stale `timer.pid`,
+    // #442 sweep — drop the transient RUNTIME markers (stale `loop.pid`,
     // `idle-since`, `wake-*`, `human-typing`, `busy-defer-until`,
     // `inject.sock`, …) so the dead loop reads cleanly in `claude-loop list` and a
     // later signal can't chase a recycled pid. KEEP the durable start config +
-    // history (plate/env/pings/timer.log) so `restart` replays. (B): the state dir
+    // history (plate/env/pings/loop.log) so `restart` replays. (B): the state dir
     // itself stays — `rm` is the halt + delete.
     if (sd) {
-        const KEEP = new Set(["plate.json", "env", "pings.yaml", "timer.log"]);
+        const KEEP = new Set(["plate.json", "env", "pings.yaml", "loop.log"]);
         try {
             for (const f of readdirSync(sd)) {
                 if (KEEP.has(f)) continue;
@@ -220,7 +220,19 @@ function cleanShutdown(reason: string): void {
 // defunct), PAS ce process — celui qui porte les handlers SIGHUP/SIGUSR2. Sans
 // ça, `kill -HUP`/`-USR2`, `claude-loop reload` et `restart` signalent le mauvais
 // pid → no-op silencieux (cf. le "kill -1 ne fait rien" de david).
-try { writeFileSync(timerPidPath(sd!), `${process.pid}\n`); } catch { /* best effort — la cible kill resterait le wrapper */ }
+// #966 — boot-time migration : si l'ancien state-dir vivant porte
+// `timer.log` / `timer.pid`, rename vers les nouveaux noms avant tout
+// write. Idempotent : ne fait rien si le nouveau existe déjà.
+if (sd) {
+    for (const [from, to] of [["timer.pid", "loop.pid"], ["timer.log", "loop.log"]] as const) {
+        const oldPath = join(sd, from);
+        const newPath = join(sd, to);
+        if (existsSync(oldPath) && !existsSync(newPath)) {
+            try { renameSync(oldPath, newPath); } catch { /* best effort */ }
+        }
+    }
+}
+try { writeFileSync(loopPidPath(sd!), `${process.pid}\n`); } catch { /* best effort — la cible kill resterait le wrapper */ }
 
 // #302: --no-wait (CL_WAIT=0) assumes NO human at the terminal → eager boot
 // drain, no boot-grace deferral. Default (--wait): during the first
@@ -246,7 +258,7 @@ try { writeFileSync(timerPidPath(sd!), `${process.pid}\n`); } catch { /* best ef
 // noted here for grep history.
 
 // #412: timer log routed through the level logger (tag `claude-loop:<name>`,
-// stdout → redirected to timer.log by the launcher). Existing calls map to
+// stdout → redirected to loop.log by the launcher). Existing calls map to
 // `info` so default output is unchanged (now carrying the LEVEL token); use
 // `logger.debug(…)` for new diagnostic lines (dropped at the default `info`).
 // #B.198: ts stays at the head so `--log` can reorder as `<ts> [tag] body`.
@@ -261,7 +273,7 @@ function log(msg: string): void {
 // Trou de visibilité comblé : si tu vois 3 lignes en 10s, tsx-watch a
 // tournoyé. Le sha permet de distinguer un hot-reload pur (sha
 // inchangé) d'un git checkout (sha bouge).
-log(`timer.ts module boot — pid=${process.pid} sha=${installRootSha()}`);
+log(`loop.ts module boot — pid=${process.pid} sha=${installRootSha()}`);
 
 /**
  * Transient-tolerant tmux session check. Distinguishes between:
@@ -424,7 +436,7 @@ function selfReloadIfStale(): void {
         idle: getIdleService().getActor().getPersistedSnapshot(),
     });
     const root = installRoot();
-    const logFd = openSync(timerLogPath(sd!), "a");
+    const logFd = openSync(loopLogPath(sd!), "a");
     const timerScript = join(root, "src/claude-loop/timer.ts");
     const tsxBin = shQuote(join(root, "node_modules", ".bin", "tsx"));
     // #859 plan A — NE PAS écrire `child.pid` ici : c'est le pid du wrapper
@@ -1345,7 +1357,7 @@ async function mainSse(): Promise<void> {
         // #944 — out-of-process subprocess (stop-hook, session-start-hook)
         // ships its pre-formatted log lines here. We append them to the
         // timer's stdout (= the unified loop log via the launcher's
-        // redirect) so `tail -f timer.log` sees everything in one place,
+        // redirect) so `tail -f loop.log` sees everything in one place,
         // chronologically interleaved. The line is already terminated by
         // \n by createLogger (cf. `src/log.ts:83`).
         onLogLine: (line) => process.stdout.write(line),

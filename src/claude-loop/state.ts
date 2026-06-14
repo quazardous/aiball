@@ -6,8 +6,8 @@
  * - `pings.yaml`  — copy of the wake-up phrases pool (random pick)
  * - `idle-since`  — touched by the Stop hook when claude ends a turn
  * - `wake-requested` — touched by `claude-loop wake` to force next tick
- * - `timer.pid`   — pid of the detached timer process
- * - `timer.log`   — stdout/stderr of the timer
+ * - `loop.pid`   — pid of the detached loop process
+ * - `loop.log`   — stdout/stderr of the loop
  */
 import { spawnSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
@@ -362,8 +362,12 @@ export function injectPipeName(sd: string): string {
 // proxy self-falls-back to exec-claude if PTY init fails). Read by
 // setTmuxStatus to paint the discreet proxy glyph.
 export function proxyAlivePath(sd: string): string { return join(sd, "proxy-alive"); }
-export function timerPidPath(sd: string): string { return join(sd, "timer.pid"); }
-export function timerLogPath(sd: string): string { return join(sd, "timer.log"); }
+// #966 — `timer.pid` / `timer.log` renamed to `loop.pid` / `loop.log` to
+// match the file rename (timer.ts → loop.ts). Boot-time migration of
+// live state-dirs lives in `loop.ts` top-level (mv if old exists and new
+// doesn't).
+export function loopPidPath(sd: string): string { return join(sd, "loop.pid"); }
+export function loopLogPath(sd: string): string { return join(sd, "loop.log"); }
 /**
  * Touched by the timer / stop-hook RIGHT BEFORE they `send-keys` an
  * auto-wake into the claude pane. The UserPromptSubmit hook checks
@@ -2051,8 +2055,8 @@ export function createLoopServer(
             // #944 — a hook subprocess shipped a pre-formatted log line.
             // We append it as-is to the timer's own sink so it interleaves
             // chronologically with the timer's ticks in the unified loop
-            // log (= `~/.claude-loop/<name>/timer.log` until the Slice 4
-            // rename). No format change here ; structured fields land in
+            // log (= `~/.claude-loop/<name>/loop.log` — #966 a unifié le
+            // nom file/log post-Slice 4). No format change here ; structured fields land in
             // Slice 2 (NDJSON).
             const line = typeof (ev.data as { line?: unknown } | null | undefined)?.line === "string"
                 ? (ev.data as { line: string }).line

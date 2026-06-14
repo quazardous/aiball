@@ -9,7 +9,7 @@
 // fields (`{ts, level, tag, msg, meta:{phrase, atMs, ...}}`) land via an
 // optional `meta` arg in a follow-up.
 //
-// One factory covers the existing sinks : timer.log (tag
+// One factory covers the existing sinks : loop.log (tag
 // `claude-loop:<name>`, stdout), restart.log (tag `<name>`, file
 // append), stop-hook.log (tag `stop-hook:<name>`, UDS+file). Roll-your-
 // own (no dep) — surface is tiny and the format is ours.

@@ -1,5 +1,5 @@
 /**
- * `claude-loop snapshot [name]` — archive timer.log + pane-captures +
+ * `claude-loop snapshot [name]` — archive loop.log + pane-captures +
  * hooks logs dans un dossier datestampé sous `<sd>/snapshots/<ISO>/`
  * (#963).
  *
@@ -29,7 +29,7 @@ import { join } from "node:path";
 import {
     paneCaptureDir,
     stateDirFor,
-    timerLogPath,
+    loopLogPath,
 } from "../state.js";
 
 interface SnapshotOpts {
@@ -133,8 +133,11 @@ function formatBytes(n: number): string {
 }
 
 /** Files at the top level of `sd` we want in every snapshot. Missing
- *  entries are silently skipped (partial state dirs survive). */
+ *  entries are silently skipped (partial state dirs survive). `timer.log`
+ *  reste listé pour les state-dirs pré-#966 (avant le boot migration vers
+ *  `loop.log`) — sera no-op après quelques redémarrages. */
 const TOP_LEVEL_FILES = [
+    "loop.log",
     "timer.log",
     "stop-hook.log",
     "session-start-hook.log",
@@ -168,9 +171,9 @@ function copyInto(sd: string, target: string, note: string | undefined): string 
             try { cpSync(src, join(target, f)); } catch { /* best-effort */ }
         }
     }
-    // timerLogPath() est le seul helper formel mais redondant ici (= "timer.log")
+    // loopLogPath() est le seul helper formel mais redondant ici (= "loop.log")
     // — la liste ci-dessus le couvre. Kept comme garde-fou conceptuel.
-    void timerLogPath;
+    void loopLogPath;
     const captures = paneCaptureDir(sd);
     if (existsSync(captures)) {
         try { cpSync(captures, join(target, "pane-captures"), { recursive: true }); } catch { /* best-effort */ }

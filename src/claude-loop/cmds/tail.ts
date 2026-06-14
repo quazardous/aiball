@@ -20,7 +20,7 @@ import { join } from "node:path";
 import {
     MUX_CMD,
     stateDirFor,
-    timerLogPath,
+    loopLogPath,
     tmuxName,
 } from "../state.js";
 
@@ -143,7 +143,7 @@ function followFile(path: string, lines: number, prefix?: string): Promise<void>
 export async function cmdTail(name: string, lines: number, which: TailMode, follow: boolean): Promise<void> {
     if (which === "timer" || which === "stop-hook") {
         const log = which === "timer"
-            ? timerLogPath(stateDirFor(name))
+            ? loopLogPath(stateDirFor(name))
             : join(stateDirFor(name), "stop-hook.log");
         const label = which === "timer" ? "timer log" : "stop-hook log";
         if (!existsSync(log)) {
@@ -162,7 +162,7 @@ export async function cmdTail(name: string, lines: number, which: TailMode, foll
     }
     if (which === "log") {
         const sd = stateDirFor(name);
-        const timer = timerLogPath(sd);
+        const timer = loopLogPath(sd);
         const hook = join(sd, "stop-hook.log");
         // Prefixes name the source explicitly (#B.198, david: "il
         // faut quand meme dire le nom du hook"). Order is

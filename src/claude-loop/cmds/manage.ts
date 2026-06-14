@@ -28,8 +28,8 @@ import {
     readPlate,
     writePlate,
     stateDirFor,
-    timerLogPath,
-    timerPidPath,
+    loopLogPath,
+    loopPidPath,
     tmuxName,
     loopSockPath,
     sendShutdownToTimer,
@@ -129,9 +129,9 @@ export function cmdRm(name: string, force: boolean): void {
     // le timer écoute son socket et se kill proprement à réception.
     void sendShutdownToTimer(sd);
     spawnSync(MUX_CMD, ["kill-session", "-t", tmuxName(name)], { stdio: "ignore" });
-    if (existsSync(timerPidPath(sd))) {
+    if (existsSync(loopPidPath(sd))) {
         try {
-            const pid = Number(readFileSync(timerPidPath(sd), "utf8").trim());
+            const pid = Number(readFileSync(loopPidPath(sd), "utf8").trim());
             if (Number.isFinite(pid) && pid > 0) process.kill(pid);
         } catch { /* already dead */ }
     }
@@ -151,10 +151,10 @@ export function cmdRm(name: string, force: boolean): void {
  */
 export function cmdStop(name: string): void {
     const sd = stateDirFor(name);
-    if (!existsSync(timerPidPath(sd))) die(`no loop '${name}' at ${sd}`);
+    if (!existsSync(loopPidPath(sd))) die(`no loop '${name}' at ${sd}`);
     let pid: number | null = null;
     try {
-        const raw = Number(readFileSync(timerPidPath(sd), "utf8").trim());
+        const raw = Number(readFileSync(loopPidPath(sd), "utf8").trim());
         if (Number.isFinite(raw) && raw > 0) pid = raw;
     } catch { /* unreadable */ }
     if (pid === null) die(`no timer pid recorded for '${name}'`);
@@ -255,8 +255,8 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
     }
 
     let oldPid: number | null = null;
-    if (existsSync(timerPidPath(sd))) {
-        const raw = Number(readFileSync(timerPidPath(sd), "utf8").trim());
+    if (existsSync(loopPidPath(sd))) {
+        const raw = Number(readFileSync(loopPidPath(sd), "utf8").trim());
         if (Number.isFinite(raw) && raw > 0) oldPid = raw;
     }
     // #943 — capture XState snapshots from the live timer BEFORE we kill
@@ -280,7 +280,7 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
         // `cleanShutdown` which also kills the tmux session — we DON'T want
         // that during a reload (the whole point of reload vs restart is to
         // keep claude alive). SIGKILL skips the handler; the new timer's
-        // boot rewrites timer.pid + reattaches loop.sock; the post-#783
+        // boot rewrites loop.pid + reattaches loop.sock; the post-#783
         // watchdog on the new process means stale markers are reaped
         // naturally on the next 2s tick.
         try { process.kill(oldPid, "SIGKILL"); } catch { /* already dead */ }
@@ -306,7 +306,7 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
     } catch { /* no plate / not a git checkout — leave staleness as-is */ }
 
     const root = installRoot();
-    const logFd = openSync(timerLogPath(sd), "a");
+    const logFd = openSync(loopLogPath(sd), "a");
     const timerScript = join(root, "src/claude-loop/timer.ts");
     // #B.228: call tsx via absolute path so reload works from any cwd
     // (npx --no-install would fail when reload is invoked from a project
@@ -328,7 +328,7 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
         env: spawnEnv,
     });
     child.unref();
-    writeFileSync(timerPidPath(sd), String(child.pid) + "\n");
+    writeFileSync(loopPidPath(sd), String(child.pid) + "\n");
 
     const killed = oldPid !== null ? ` (killed old pid ${oldPid})` : "";
     const restored = snapshotsJson ? " (xstate snapshots restored)" : "";

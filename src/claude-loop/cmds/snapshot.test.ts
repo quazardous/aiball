@@ -26,7 +26,7 @@ function mkSd(): string {
 }
 
 function seedStateDir(sd: string): void {
-    writeFileSync(join(sd, "timer.log"), "boot\nstop\n");
+    writeFileSync(join(sd, "loop.log"), "boot\nstop\n");
     writeFileSync(join(sd, "stop-hook.log"), "hook\n");
     writeFileSync(join(sd, "afk.log"), "afk\n");
     mkdirSync(join(sd, "pane-captures"));
@@ -57,7 +57,7 @@ test("captureSnapshot: copies known files + pane-captures into <sd>/snapshots/<i
     seedStateDir(sd);
     const dir = captureSnapshot(sd, { nowMs: Date.parse("2026-06-14T11:08:30Z") });
     assert.equal(dir, join(sd, "snapshots", "2026-06-14T11-08-30"));
-    assert.equal(readFileSync(join(dir, "timer.log"), "utf8"), "boot\nstop\n");
+    assert.equal(readFileSync(join(dir, "loop.log"), "utf8"), "boot\nstop\n");
     assert.equal(readFileSync(join(dir, "stop-hook.log"), "utf8"), "hook\n");
     assert.equal(readFileSync(join(dir, "afk.log"), "utf8"), "afk\n");
     assert.equal(readFileSync(join(dir, "pane-captures", "2026-06-14T10-00-00Z.txt"), "utf8"), "frame1");
@@ -67,9 +67,9 @@ test("captureSnapshot: copies known files + pane-captures into <sd>/snapshots/<i
 
 test("captureSnapshot: tolerates a partial sd (missing files silently skipped)", () => {
     const sd = mkSd();
-    writeFileSync(join(sd, "timer.log"), "only this\n");
+    writeFileSync(join(sd, "loop.log"), "only this\n");
     const dir = captureSnapshot(sd, { nowMs: Date.parse("2026-06-14T11:08:30Z") });
-    assert.ok(existsSync(join(dir, "timer.log")));
+    assert.ok(existsSync(join(dir, "loop.log")));
     assert.ok(!existsSync(join(dir, "stop-hook.log")));
     assert.ok(!existsSync(join(dir, "pane-captures")));
     rmSync(sd, { recursive: true, force: true });

@@ -34,20 +34,20 @@ test("checkTimer: pid file missing → fail", () => {
     const sd = mkSd("c1");
     const c = checkTimer(sd);
     assert.equal(c.status, "fail");
-    assert.match(c.detail, /timer\.pid missing/);
+    assert.match(c.detail, /loop\.pid missing/);
 });
 
 test("checkTimer: pid file with non-numeric → fail", () => {
     const sd = mkSd("c1b");
-    writeFileSync(join(sd, "timer.pid"), "not-a-number\n");
+    writeFileSync(join(sd, "loop.pid"), "not-a-number\n");
     const c = checkTimer(sd);
     assert.equal(c.status, "fail");
 });
 
-test("checkTimer: live pid but cmdline doesn't match timer.ts → fail (pid recycled)", () => {
+test("checkTimer: live pid but cmdline doesn't match loop.ts → fail (pid recycled)", () => {
     const sd = mkSd("c2");
-    // Our own pid is alive, but the cmdline is node --test, not timer.ts.
-    writeFileSync(join(sd, "timer.pid"), `${process.pid}\n`);
+    // Our own pid is alive, but the cmdline is node --test, not loop.ts.
+    writeFileSync(join(sd, "loop.pid"), `${process.pid}\n`);
     const c = checkTimer(sd);
     assert.equal(c.status, "fail");
     assert.match(c.detail, /cmdline doesn't match|not running/);

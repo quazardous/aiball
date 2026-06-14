@@ -1,7 +1,7 @@
 /**
  * #944 Slice 3 — `claude-loop log [name] [opts]` : NDJSON-aware viewer
  * of the unified loop log (timer ticks + hook fires interleaved). The
- * underlying file is `timerLogPath(stateDirFor(name))` — the Slice 1
+ * underlying file is `loopLogPath(stateDirFor(name))` — the Slice 1
  * UDS merge guarantees every line lands there (the hook's local
  * `stop-hook.log` is a cold-boot safety dup, intentionally ignored
  * here).
@@ -21,7 +21,7 @@ import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 import {
     stateDirFor,
-    timerLogPath,
+    loopLogPath,
 } from "../state.js";
 import { LEVELS, type LogLevel, type LogRecord, parseLevel } from "../../log.js";
 
@@ -112,7 +112,7 @@ function pretty(p: ParsedLine): string {
 
 export async function cmdLog(name: string, opts: LogOpts): Promise<void> {
     const sd = stateDirFor(name);
-    const path = timerLogPath(sd);
+    const path = loopLogPath(sd);
 
     // #919 david `pqs8us` : `--copy <out>` snapshots the current log file
     // to `<out>` and exits. Lets an investigation work on a frozen copy

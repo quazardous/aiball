@@ -22,7 +22,7 @@ import {
     proxyAlivePath,
     readLoopStateInput,
     stateDirFor,
-    timerPidPath,
+    loopPidPath,
 } from "../state.js";
 import { computeLoopView } from "../loop-state.js";
 import { openEventChannel } from "../ipc-events.js";
@@ -127,7 +127,7 @@ export async function cmdInspect(name: string): Promise<void> {
     }
     const input = readLoopStateInput(sd);
     const view = computeLoopView(input);
-    const timer = pidAlive(timerPidPath(sd));
+    const timer = pidAlive(loopPidPath(sd));
     const proxy = pidAlive(proxyAlivePath(sd));
     const dump = {
         name,

@@ -65,7 +65,7 @@ try { await queryLoopState(sd); } catch { /* fail-open */ }
 //
 // #412: tagged through the level logger.
 // #944 Slice 1: ship each line over `loop.sock` as a LOG frame so the
-// timer appends it to the unified loop log — `tail -f timer.log` shows
+// timer appends it to the unified loop log — `tail -f loop.log` shows
 // hook + timer chronologically interleaved. Plus an unconditional
 // append to the local `stop-hook.log` as a cold-boot safety (the timer
 // may not be listening yet when the hook fires its first lines on a

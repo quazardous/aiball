@@ -55,9 +55,9 @@ import {
     readPlate,
     sendShutdownToTimer,
     stateDirFor,
-    timerLogPath,
+    loopLogPath,
     proxyAlivePath,
-    timerPidPath,
+    loopPidPath,
     tmuxName,
     writePlate,
     ensureDir,
@@ -922,7 +922,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     ].map((f) => shQuote(join(sd, f))).join(" ");
     // #866 Slice 3 — coopératif AVANT le SIGKILL. Le timer écoute son
     // loop.sock ; le frame {kind:"shutdown"} le kill proprement,
-    // bypass-ant le bug `timer.pid = wrapper tsx` (#413). SIGKILL pid
+    // bypass-ant le bug `loop.pid = wrapper tsx` (#413). SIGKILL pid
     // reste backstop pour les anciens timers sans handler. Best-effort,
     // ne bloque jamais le trap (le `|| true` couvre `claude-loop` absent
     // ou bind manqué).
@@ -930,7 +930,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         "#!/usr/bin/env bash",
         "_aiball_kill_satellites() {",
         `  ${shQuote("claude-loop")} _shutdown-timer ${shQuote(name)} 2>/dev/null || true`,
-        `  pid="$(cat ${shQuote(timerPidPath(sd))} 2>/dev/null || true)"`,
+        `  pid="$(cat ${shQuote(loopPidPath(sd))} 2>/dev/null || true)"`,
         `  [ -n "$pid" ] && kill -KILL "$pid" 2>/dev/null || true`,
         `  pid="$(cat ${shQuote(proxyAlivePath(sd))} 2>/dev/null || true)"`,
         `  [ -n "$pid" ] && kill -KILL "$pid" 2>/dev/null || true`,
@@ -1114,21 +1114,21 @@ async function cmdStart(opts: StartOpts): Promise<void> {
 
     // Detached timer process. Inherits CL_* env via the env file
     // sourced in the child shell. nohup-like: ignore SIGHUP, detach.
-    const logFd = openSync(timerLogPath(sd), "a");
-    const timerScript = join(root, "src/claude-loop/timer.ts");
+    const logFd = openSync(loopLogPath(sd), "a");
+    const loopScript = join(root, "src/claude-loop/loop.ts");
     const child = spawn("bash", [
         "-lc",
         // #B.228 defensive: same fix as the hook commands above —
         // call tsx via its absolute path so the timer can be respawned
         // from any cwd (relevant for `claude-loop reload` called from a
         // project dir without tsx in its node_modules).
-        `source ${shQuote(envPath(sd))} && exec ${tsxBin} ${shQuote(timerScript)}`,
+        `source ${shQuote(envPath(sd))} && exec ${tsxBin} ${shQuote(loopScript)}`,
     ], {
         detached: true,
         stdio: ["ignore", logFd, logFd],
     });
     child.unref();
-    writeFileSync(timerPidPath(sd), String(child.pid) + "\n");
+    writeFileSync(loopPidPath(sd), String(child.pid) + "\n");
 
     // No more sleep+send-keys race for the startup ping — handled
     // by src/claude-loop/session-start-hook.ts which fires when the
@@ -1156,14 +1156,14 @@ async function cmdStart(opts: StartOpts): Promise<void> {
 }
 
 /**
- * #410 (david) — lit le pid du timer détaché depuis timer.pid (null si
- * absent/illisible) + sonde sa liveness (signal 0). Le timer.pid est le pid
+ * #410 (david) — lit le pid du loop détaché depuis loop.pid (null si
+ * absent/illisible) + sonde sa liveness (signal 0). Le loop.pid est le pid
  * qu'on cible avec `kill -HUP`/`-USR2` ; l'afficher au listing permet aussi
  * de repérer un pidfile périmé (timer mort alors que le tmux tourne → plus
  * d'auto-wake), à l'origine des timers orphelins déjà vus.
  */
 function readTimerPid(sd: string): number | null {
-    const p = timerPidPath(sd);
+    const p = loopPidPath(sd);
     if (!existsSync(p)) return null;
     const pid = Number.parseInt(readFileSync(p, "utf8").trim(), 10);
     return Number.isInteger(pid) && pid > 0 ? pid : null;
@@ -1334,7 +1334,7 @@ async function cmdCheck(name: string | undefined, opts: { checkCmd?: string; con
         } else {
             const sd = stateDirFor(name);
             process.stdout.write(`  state dir: ${sd}\n`);
-            for (const f of ["plate.json", "env", "pings.yaml", "wake-requested", "timer.pid", "timer.log"]) {
+            for (const f of ["plate.json", "env", "pings.yaml", "wake-requested", "loop.pid", "loop.log", "timer.pid", "timer.log"]) {
                 const p = join(sd, f);
                 process.stdout.write(`    ${f.padEnd(18)}  ${existsSync(p) ? "✓" : "—"}\n`);
             }

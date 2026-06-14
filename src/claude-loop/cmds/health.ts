@@ -23,7 +23,7 @@ import {
     proxyAlivePath,
     readPlate,
     stateDirFor,
-    timerPidPath,
+    loopPidPath,
     tmuxName,
     type Plate,
 } from "../state.js";
@@ -76,8 +76,8 @@ function probePid(pidPath: string, cmdlineMatch: RegExp): PidProbe {
 }
 
 export function checkTimer(sd: string): HealthCheck {
-    const p = probePid(timerPidPath(sd), /timer\.ts/);
-    if (p.pid === null) return { name: "timer", status: "fail", detail: "timer.pid missing / unreadable" };
+    const p = probePid(loopPidPath(sd), /loop\.ts/);
+    if (p.pid === null) return { name: "timer", status: "fail", detail: "loop.pid missing / unreadable" };
     if (!p.alive) return { name: "timer", status: "fail", detail: `pid ${p.pid} not running` };
     if (p.cmdline === null) {
         return {
