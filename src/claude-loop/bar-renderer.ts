@@ -85,25 +85,23 @@ export interface BarSnapshot {
  *
  *  | Genre   | Symbole | Sens                              | Membres aujourd'hui |
  *  |---------|---------|-----------------------------------|---------------------|
- *  | status  | 🧠/💤   | busy = réfléchit / idle = endormi | `busy`, `idle` (mutex) |
+ *  | status  | 🚀/🧠/💤| boot / busy = réfléchit / idle = endormi | `boot`, `busy`, `idle` (mutex) |
  *  | warning | ⚠️      | condition erreur backend          | `retry N`           |
  *  | question| ❓      | input user attendu                | `resume`, `mode`, `health` |
  *  | process | 🔄      | long task interne                 | `compacting`, `resuming` |
  *  | plain   | —       | états internes ni l'un ni l'autre | `wait`, `interrupted` |
- *
- *  `boot` n'a pas de symbole (reste textuel) — phase transitoire en
- *  début de session, pas une "ambiance".
  *
  *  Layout : `[symboles dédupliqués, ordre fixe] [loopStatus] [warning_words] [question_words] [process_words] [plain_words]`
  *
  *  Exemples concrets :
  *  - idle nominal             → `💤`
  *  - busy nominal             → `🧠`
- *  - boot                     → `boot`
+ *  - boot                     → `🚀`
  *  - idle + retry 3           → `💤 ⚠️ retry 3`
  *  - busy + compacting        → `🧠 🔄 compacting`
  *  - idle + resume + health   → `💤 ❓ resume health`
  *  - busy + retry 3 + health  → `🧠 ⚠️ ❓ retry 3 health`
+ *  - boot + resume picker     → `🚀 ❓ resume`
  *
  *  Zone vit dans le bloc fond NOIR (colour16) à gauche, collée à
  *  `claude-loop`. Le caller (paint) gère fg/bg dans la format string. */
@@ -126,19 +124,18 @@ function renderMarkerSegment(
     if (healthPromptVisible) questionWords.push("health");
 
     // Symbols section — fixed order : status / warning / question / process.
-    // 🧠 et 💤 sont mutex (loopStatus idle XOR busy) ; boot a pas de symbole.
+    // 🚀/🧠/💤 sont mutex (loopStatus boot XOR busy XOR idle).
     const symbols: string[] = [];
-    if (loopStatus === LOOP_STATUS.BUSY) symbols.push("🧠");
+    if (loopStatus === LOOP_STATUS.BOOT) symbols.push("🚀");
+    else if (loopStatus === LOOP_STATUS.BUSY) symbols.push("🧠");
     else if (loopStatus === LOOP_STATUS.IDLE) symbols.push("💤");
     if (warningWord) symbols.push("⚠️");
     if (questionWords.length) symbols.push("❓");
     if (processWord) symbols.push("🔄");
 
-    // Words section — same order : loopStatus(boot only) + warning + question + process + plain.
-    // david `<chat>` : busy/idle couverts par leur symbole respectif ;
-    // boot reste textuel (pas de symbole dédié).
+    // Words section — same order : warning + question + process + plain.
+    // Le loopStatus est désormais 100% couvert par les symboles.
     const words: string[] = [];
-    if (loopStatus === LOOP_STATUS.BOOT) words.push(loopStatus);
     if (warningWord) words.push(warningWord);
     if (questionWords.length) words.push(...questionWords);
     if (processWord) words.push(processWord);

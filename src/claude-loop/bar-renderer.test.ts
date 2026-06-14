@@ -98,7 +98,7 @@ test("computeBarSnapshot: cold boot (ipc vide) → status=boot", () => {
     const sd = mkSd();
     const s = computeBarSnapshot(sd);
     assert.equal(s.loopStatus, LOOP_STATUS.BOOT);
-    assert.equal(s.stateTag, "boot");
+    assert.equal(s.stateTag, "🚀");
     rmSync(sd, { recursive: true, force: true });
 });
 
@@ -251,8 +251,8 @@ test("BarRenderer.paint: stateTagInfo change → setOpt @cl_state avec token inf
     r.tick();
     const st = calls.find((c) => c.args.includes("@cl_state"));
     assert.ok(st, "expected @cl_state setOpt");
-    // #950 : tokens space-separated, plus de crochets ni colon — `<status> <info>` (status = boot ici car sd cold).
-    assert.ok(st!.args.some((a) => /(?:idle|busy|boot) wait/.test(a)), "rendered marker carries '<status> wait' tokens (#950)");
+    // #950 : tokens space-separated, statut → symbole, words après. Sd cold = boot → `🚀`, info plain `wait` reste en queue.
+    assert.ok(st!.args.some((a) => /🚀 wait/.test(a)), "rendered marker carries '🚀 wait' tokens (#950)");
     r.stop();
     rmSync(sd, { recursive: true, force: true });
 });
