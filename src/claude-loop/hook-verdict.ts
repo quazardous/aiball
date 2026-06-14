@@ -25,21 +25,15 @@
  * single source of truth for "is a human here."
  */
 import { existsSync } from "node:fs";
-import { readLoopStateInput, type HUMAN_TYPING_TTL_SEC, loopSockPath } from "./state.js";
+import {
+    type LiveLoopSnapshot,
+    loopSockPath,
+    mirrorLiveSnapshotToIpc,
+    readLoopStateInput,
+    type HUMAN_TYPING_TTL_SEC,
+} from "./state.js";
 import { computeLoopView, type LoopStateView } from "./loop-state.js";
 import { openEventChannel } from "./ipc-events.js";
-import {
-    setIpcAfk,
-    setIpcBootComplete,
-    setIpcBusyDeferUntil,
-    setIpcHumanTypingAtMs,
-    setIpcIdleSince,
-    setIpcPaneBusy,
-    setIpcPaneCompacting,
-    setIpcPaneInterrupted,
-    setIpcPaneReady,
-    setIpcPaneResuming,
-} from "./ipc-state.js";
 
 /**
  * Loop-state snapshot the hook reads at fire-time. Extends `LoopStateView`
@@ -54,29 +48,13 @@ export type LoopStateSnapshot = LoopStateView & {
     afkHoldActive: boolean;
 };
 
-/** #840 Slice B — fields the timer hands back when a hook subprocess
- *  asks for live loop state over loop.sock. Mirrors `IpcState` for the
- *  fields the verdict builder actually consumes. */
-interface LiveLoopStateUds {
-    paneBusy: boolean;
-    paneReady: boolean;
-    paneCompacting: boolean;
-    paneResuming: boolean;
-    paneInterrupted: boolean;
-    afkMode: "off" | "wait_10m" | "wait_inf" | null;
-    afkExpiryMs: number | null;
-    humanTypingAtMs: number | null;
-    idleSinceMs: number | null;
-    bootComplete: boolean | null;
-    busyDeferUntilMs: number | null;
-}
-
 /** #840 Slice B — short-lived UDS round-trip to the timer's loop.sock
  *  for a live `ipcState` snapshot. Returns null on any failure (timer
  *  down, socket missing, ws drop, malformed reply) — the caller falls
  *  back to local file reads, preserving the historical fail-open
- *  semantic. Mirrors the pattern from `cmds/inspect.ts:queryLoopState`. */
-async function fetchLiveLoopStateUds(sd: string, timeoutMs: number): Promise<LiveLoopStateUds | null> {
+ *  semantic. Mirrors the pattern from `cmds/inspect.ts:queryLoopState`.
+ *  #972 — type partagé `LiveLoopSnapshot` (state.ts), helper `mirrorLiveSnapshotToIpc`. */
+async function fetchLiveLoopStateUds(sd: string, timeoutMs: number): Promise<LiveLoopSnapshot | null> {
     const sock = loopSockPath(sd);
     if (!existsSync(sock)) return null;
     const ch = openEventChannel(sock, { reconnectMs: 100 });
@@ -94,7 +72,7 @@ async function fetchLiveLoopStateUds(sd: string, timeoutMs: number): Promise<Liv
         });
         if (!connected) return null;
         const reply = await ch.request({ kind: "queryLoopState" }, timeoutMs);
-        return (reply.data as LiveLoopStateUds | undefined) ?? null;
+        return (reply.data as LiveLoopSnapshot | undefined) ?? null;
     } catch {
         return null;
     } finally {
@@ -123,16 +101,7 @@ export async function queryLoopState(sd: string, timeoutMs = 500): Promise<LoopS
         // `readLoopStateInput` returns the live values. #840 `4z59jt` :
         // `readLoopStateInput` est maintenant strict IPC ; UDS down = safe
         // defaults (= AFK off, boot grace floor, no markers active).
-        setIpcPaneBusy(live.paneBusy);
-        setIpcPaneReady(live.paneReady);
-        setIpcPaneCompacting(live.paneCompacting);
-        setIpcPaneResuming(live.paneResuming);
-        setIpcPaneInterrupted(live.paneInterrupted);
-        setIpcAfk(live.afkMode, live.afkExpiryMs);
-        setIpcHumanTypingAtMs(live.humanTypingAtMs);
-        setIpcIdleSince(live.idleSinceMs);
-        if (live.bootComplete !== null) setIpcBootComplete(live.bootComplete);
-        setIpcBusyDeferUntil(live.busyDeferUntilMs);
+        mirrorLiveSnapshotToIpc(live);
     }
     const input = readLoopStateInput(sd);
     const view = computeLoopView(input);

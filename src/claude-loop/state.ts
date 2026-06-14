@@ -17,8 +17,11 @@ import { getTypingService } from "./typing-service.js";
 import {
     getIpcState,
     setIpcAfk,
+    setIpcBootComplete,
     setIpcBusyDeferUntil,
     setIpcDrainedState,
+    setIpcHumanTypingAtMs,
+    setIpcIdleSince,
     setIpcLastOpenWakeHash,
     setIpcLastWakeHint,
     setIpcPaneBusy,
@@ -548,6 +551,43 @@ export function armBusyDefer(_sd: string, ms: number): string {
     }
     setIpcBusyDeferUntil(target);
     return new Date(target).toISOString();
+}
+
+/** #840 Slice B — snapshot des champs `ipcState` que le timer renvoie
+ *  via `loop.sock` à un hook/CLI subprocess qui demande l'état live.
+ *  Mirror `IpcState` pour les champs effectivement consommés ; doublé
+ *  côté `hook-verdict.queryLoopState` et `cmds/inspect`. #972 — extraction
+ *  dans state.ts pour dedup type + bloc de 10 setIpc.
+ */
+export interface LiveLoopSnapshot {
+    paneBusy: boolean;
+    paneReady: boolean;
+    paneCompacting: boolean;
+    paneResuming: boolean;
+    paneInterrupted: boolean;
+    afkMode: "off" | "wait_10m" | "wait_inf" | null;
+    afkExpiryMs: number | null;
+    humanTypingAtMs: number | null;
+    idleSinceMs: number | null;
+    bootComplete: boolean | null;
+    busyDeferUntilMs: number | null;
+}
+
+/** #972 — applique un `LiveLoopSnapshot` reçu via UDS sur l'ipcState
+ *  local du subprocess, pour que `readLoopStateInput` retourne les valeurs
+ *  live. Idiome doublé pre-#972 dans `hook-verdict.queryLoopState` et
+ *  `cmds/inspect.cmdInspect` ; centralisé ici. */
+export function mirrorLiveSnapshotToIpc(live: LiveLoopSnapshot): void {
+    setIpcPaneBusy(live.paneBusy);
+    setIpcPaneReady(live.paneReady);
+    setIpcPaneCompacting(live.paneCompacting);
+    setIpcPaneResuming(live.paneResuming);
+    setIpcPaneInterrupted(live.paneInterrupted);
+    setIpcAfk(live.afkMode, live.afkExpiryMs);
+    setIpcHumanTypingAtMs(live.humanTypingAtMs);
+    setIpcIdleSince(live.idleSinceMs);
+    if (live.bootComplete !== null) setIpcBootComplete(live.bootComplete);
+    setIpcBusyDeferUntil(live.busyDeferUntilMs);
 }
 
 /** Read the defer marker. Returns `{ activeMs }` with the remaining

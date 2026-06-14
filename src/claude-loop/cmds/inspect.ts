@@ -18,7 +18,9 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import {
+    type LiveLoopSnapshot,
     loopSockPath,
+    mirrorLiveSnapshotToIpc,
     proxyAlivePath,
     readLoopStateInput,
     stateDirFor,
@@ -26,18 +28,6 @@ import {
 } from "../state.js";
 import { computeLoopView } from "../loop-state.js";
 import { openEventChannel } from "../ipc-events.js";
-import {
-    setIpcAfk,
-    setIpcBootComplete,
-    setIpcBusyDeferUntil,
-    setIpcHumanTypingAtMs,
-    setIpcIdleSince,
-    setIpcPaneBusy,
-    setIpcPaneCompacting,
-    setIpcPaneInterrupted,
-    setIpcPaneReady,
-    setIpcPaneResuming,
-} from "../ipc-state.js";
 
 /**
  * #774 — pull the timer's live `ipcState` over `loop.sock`. The handler
@@ -45,22 +35,9 @@ import {
  * channel, fires one `queryLoopState` request, and closes. Returns null
  * on any failure (timer down, ws drop, malformed reply) — the caller
  * falls back to the subprocess-local zero values.
+ * #972 — type partagé `LiveLoopSnapshot` (state.ts).
  */
-interface LiveLoopState {
-    paneBusy: boolean;
-    paneReady: boolean;
-    paneCompacting: boolean;
-    paneResuming: boolean;
-    paneInterrupted: boolean;
-    afkMode: "off" | "wait_10m" | "wait_inf" | null;
-    afkExpiryMs: number | null;
-    humanTypingAtMs: number | null;
-    idleSinceMs: number | null;
-    bootComplete: boolean | null;
-    busyDeferUntilMs: number | null;
-}
-
-async function queryLoopState(sd: string, timeoutMs = 1000): Promise<LiveLoopState | null> {
+async function queryLoopState(sd: string, timeoutMs = 1000): Promise<LiveLoopSnapshot | null> {
     const sock = loopSockPath(sd);
     if (!existsSync(sock)) return null;
     const ch = openEventChannel(sock, { reconnectMs: 100 });
@@ -81,7 +58,7 @@ async function queryLoopState(sd: string, timeoutMs = 1000): Promise<LiveLoopSta
         ]);
         if (!connected) return null;
         const reply = await ch.request({ kind: "queryLoopState" }, timeoutMs);
-        return (reply.data as LiveLoopState | undefined) ?? null;
+        return (reply.data as LiveLoopSnapshot | undefined) ?? null;
     } catch {
         return null;
     } finally {
@@ -113,18 +90,7 @@ export async function cmdInspect(name: string): Promise<void> {
     // values (pré-fix elles étaient toujours nulles → bar_word="boot",
     // complete=false, même quand le timer avait sealed depuis longtemps).
     const live = await queryLoopState(sd);
-    if (live) {
-        setIpcPaneBusy(live.paneBusy);
-        setIpcPaneReady(live.paneReady);
-        setIpcPaneCompacting(live.paneCompacting);
-        setIpcPaneResuming(live.paneResuming);
-        setIpcPaneInterrupted(live.paneInterrupted);
-        setIpcAfk(live.afkMode, live.afkExpiryMs);
-        setIpcHumanTypingAtMs(live.humanTypingAtMs);
-        setIpcIdleSince(live.idleSinceMs);
-        if (live.bootComplete !== null) setIpcBootComplete(live.bootComplete);
-        setIpcBusyDeferUntil(live.busyDeferUntilMs);
-    }
+    if (live) mirrorLiveSnapshotToIpc(live);
     const input = readLoopStateInput(sd);
     const view = computeLoopView(input);
     const timer = pidAlive(loopPidPath(sd));
