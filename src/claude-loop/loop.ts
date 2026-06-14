@@ -658,11 +658,16 @@ if (sd) {
             return;
         }
         log(`watcher: resume_picker begin → auto-cross (pick=${pickMode}, Enter)`);
-        // #965 reverted ici (`ttm7d4`) — l'inject.sock ne franchit pas
-        // le picker zone (la TUI consomme les keystrokes différemment du
-        // path stdin normal). Revert à `send-keys`. Side-effect connu :
-        // peut armer NOT AFK 10m via le proxy ; suivi dans le spinoff.
-        spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
+        // #965 david `<chat>` — inject ONLY. Pas de fallback send-keys :
+        // le proxy est forcément alive (il EST le process du pane), donc
+        // l'inject doit toujours passer. Si l'inject échoue, c'est un bug
+        // proxy à investiguer — log loud, picker reste stuck, david
+        // intervient manuellement plutôt qu'on tombe dans le path stdin
+        // qui armerait NOT AFK 10m à tort.
+        void (async () => {
+            if (await injectRawBytes(sd!, "\r")) return;
+            log("watcher: resume_picker — inject FAILED (proxy bug ?). Picker stuck — pas de fallback send-keys pour éviter l'arm AFK parasite. Investiguer pty-proxy/loop.sock.");
+        })();
     });
     pickerSessionW.on("end", () => forwardModuleEnded("resume_picker"));
     pickerModeW.on("change", (s) => { setResumeModePicker(sd, s.visible); refreshPaneReady(); });
@@ -676,11 +681,19 @@ if (sd) {
             return;
         }
         log(`watcher: resume_mode begin → auto-cross (mode=${mode})`);
-        // #965 reverted ici (`ttm7d4`) — voir resume_picker plus haut.
-        if (mode === "as-is") {
-            spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Down"], { stdio: "ignore" });
-        }
-        spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
+        // #965 — Down + Enter via inject.sock. Down = `\x1b[B` (CSI).
+        // Pas de fallback send-keys (cf. resume_picker plus haut).
+        void (async () => {
+            if (mode === "as-is") {
+                if (!(await injectRawBytes(sd!, "\x1b[B"))) {
+                    log("watcher: resume_mode — inject FAILED for Down (proxy bug ?). Stuck — investiguer.");
+                    return;
+                }
+            }
+            if (!(await injectRawBytes(sd!, "\r"))) {
+                log("watcher: resume_mode — inject FAILED for Enter (proxy bug ?). Stuck — investiguer.");
+            }
+        })();
     });
     resumingW.on("change", (s) => { setResuming(sd, s.visible); refreshPaneReady(); });
     resumingW.on("begin", () => forwardModuleStarted("resuming"));
