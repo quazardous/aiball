@@ -1491,8 +1491,19 @@ async function mainSse(): Promise<void> {
                 );
                 const reminder = renderSlot(promptMap, "post_boot_skill_reminder", {}, "");
                 if (reminder.length > 0) {
-                    log(`post-boot reminder: injecting immediate (${reminder.length} chars)`);
-                    void sendKeys(reminder);
+                    // #951 david `zx3vt8` : gate l'inject sur "no human
+                    // present". Sans ça, un user qui tape pendant le boot
+                    // se prenait la phrase reminder en collision dans sa
+                    // frappe (cf. #951 body symptôme primaire). Idiome
+                    // miroir de timer.ts:2118 (wake gate auto).
+                    const typing = humanIsTyping(sd!);
+                    const afk = afkActive(sd!);
+                    if (typing || afk) {
+                        log(`post-boot reminder: skipped (human present: typing=${typing} afk=${afk})`);
+                    } else {
+                        log(`post-boot reminder: injecting immediate (${reminder.length} chars)`);
+                        void sendKeys(reminder);
+                    }
                 }
             } catch (e) {
                 log(`post-boot reminder load failed (ignored): ${String(e)}`);
