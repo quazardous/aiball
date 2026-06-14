@@ -85,20 +85,24 @@ export interface BarSnapshot {
  *
  *  | Genre   | Symbole | Sens                              | Membres aujourd'hui |
  *  |---------|---------|-----------------------------------|---------------------|
- *  | think   | 🧠      | claude réfléchit (loop busy)      | `busy`              |
+ *  | status  | 🧠/💤   | busy = réfléchit / idle = endormi | `busy`, `idle` (mutex) |
  *  | warning | ⚠️      | condition erreur backend          | `retry N`           |
  *  | question| ❓      | input user attendu                | `resume`, `mode`, `health` |
  *  | process | 🔄      | long task interne                 | `compacting`, `resuming` |
  *  | plain   | —       | états internes ni l'un ni l'autre | `wait`, `interrupted` |
  *
+ *  `boot` n'a pas de symbole (reste textuel) — phase transitoire en
+ *  début de session, pas une "ambiance".
+ *
  *  Layout : `[symboles dédupliqués, ordre fixe] [loopStatus] [warning_words] [question_words] [process_words] [plain_words]`
  *
  *  Exemples concrets :
- *  - idle nominal             → `idle`
- *  - busy nominal             → `🧠`           (le mot "busy" devient redondant)
- *  - idle + retry 3           → `⚠️ idle retry 3`
+ *  - idle nominal             → `💤`
+ *  - busy nominal             → `🧠`
+ *  - boot                     → `boot`
+ *  - idle + retry 3           → `💤 ⚠️ retry 3`
  *  - busy + compacting        → `🧠 🔄 compacting`
- *  - idle + resume + health   → `❓ idle resume health`
+ *  - idle + resume + health   → `💤 ❓ resume health`
  *  - busy + retry 3 + health  → `🧠 ⚠️ ❓ retry 3 health`
  *
  *  Zone vit dans le bloc fond NOIR (colour16) à gauche, collée à
@@ -120,21 +124,21 @@ function renderMarkerSegment(
     if (resumePickerActive) questionWords.push("resume");
     if (resumeModePickerActive) questionWords.push("mode");
     if (healthPromptVisible) questionWords.push("health");
-    const thinking = loopStatus === LOOP_STATUS.BUSY;
 
-    // Symbols section — fixed order : think / warning / question / process.
+    // Symbols section — fixed order : status / warning / question / process.
+    // 🧠 et 💤 sont mutex (loopStatus idle XOR busy) ; boot a pas de symbole.
     const symbols: string[] = [];
-    if (thinking) symbols.push("🧠");
+    if (loopStatus === LOOP_STATUS.BUSY) symbols.push("🧠");
+    else if (loopStatus === LOOP_STATUS.IDLE) symbols.push("💤");
     if (warningWord) symbols.push("⚠️");
     if (questionWords.length) symbols.push("❓");
     if (processWord) symbols.push("🔄");
 
-    // Words section — same order : loopStatus + warning + question + process + plain.
-    // david `<chat>` : pas besoin du mot quand le symbole le couvre déjà
-    // (`busy` redondant avec `🧠`). Les autres statuts (idle/boot) restent
-    // texte parce qu'ils n'ont pas de symbole dédié.
+    // Words section — same order : loopStatus(boot only) + warning + question + process + plain.
+    // david `<chat>` : busy/idle couverts par leur symbole respectif ;
+    // boot reste textuel (pas de symbole dédié).
     const words: string[] = [];
-    if (!thinking) words.push(loopStatus);
+    if (loopStatus === LOOP_STATUS.BOOT) words.push(loopStatus);
     if (warningWord) words.push(warningWord);
     if (questionWords.length) words.push(...questionWords);
     if (processWord) words.push(processWord);
