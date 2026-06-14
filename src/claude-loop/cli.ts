@@ -37,6 +37,7 @@ import { parseAfkKey, bytesToGrammar, matchAfkCombo, type AfkSpec } from "./afk-
 import { acquireStartLock } from "./start-lock.js";
 import {
     canonicalCwd,
+    barColors,
     DEFAULT_CHECK_CMD,
     isInternalCheckCmd,
     MUX_CMD,
@@ -1079,21 +1080,28 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // #862 Slice 5 + david `<fix>` — seed BOOT inline (status-bg + @cl_*)
     // pour couvrir la fenêtre cmdStart→BarRenderer.start (~1s : fork
     // bash→tsx→node + boot timer). Sans seed, tmux affiche ses defaults
-    // (bar verte) jusqu'au 1er tick BarRenderer = flash visible. Le seed
-    // est minimal (couleurs canoniques inline, repaint par BarRenderer
-    // au 1er tick) — pas de réintroduction de setTmuxStatus legacy.
+    // (bar verte) jusqu'au 1er tick BarRenderer = flash visible.
+    //
+    // david 2026-06-14 : le seed DOIT mirorer exactement le template que
+    // BarRenderer.paint() émet — pas de branche parallèle « claude-boot »
+    // legacy. Une seule source de vérité, sinon on flash `claude-boot`
+    // 1s avant que le 1er tick écrase. Glyphes : @cl_prompt / @cl_typing
+    // / @cl_human vides au boot (humanPresenceChunk renvoie "" en boot
+    // grace), @cl_state = 🚀.
     const seedOpt = (opt: string, val: string): void => {
         spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
     };
-    const bootBg = "colour178"; // jaune boot canonique (cf. AiballConfig.colors.boot_bg)
-    const bootFg = "colour16";  // noir bar_fg canonique
+    const col = barColors();
+    const bootBg = col.boot_bg;
     seedOpt("status-bg", bootBg);
-    seedOpt("status-fg", bootFg);
-    seedOpt("@cl_human", `#[fg=colour178,bg=colour16]boot`);
-    seedOpt("@cl_state", `#[fg=${bootFg}][boot]`);
+    seedOpt("status-fg", col.bar_fg);
+    seedOpt("@cl_prompt", "");
+    seedOpt("@cl_typing", "");
+    seedOpt("@cl_human", "");
+    seedOpt("@cl_state", `#[fg=${col.island_fg},bg=colour16] 🚀`);
     seedOpt(
         "status-left",
-        `#[bg=${bootBg}] #[fg=${bootBg},bg=colour16]▓▒░#[fg=colour15] claude-#{?@cl_human,#{@cl_human},#[fg=colour178#,bg=colour16]boot} #[fg=${bootBg},bg=colour16]░▒▓#[bg=${bootBg}]#{@cl_proxy}#[fg=${bootFg}] ${name} #{@cl_state}#{@cl_counts} `,
+        `#[bg=${bootBg}] #[fg=${bootBg},bg=colour16]▓▒░#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state} #[fg=${bootBg},bg=colour16]░▒▓#[bg=${bootBg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
     );
 
     // Detached timer process. Inherits CL_* env via the env file
