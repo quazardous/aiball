@@ -76,21 +76,30 @@ export interface BarSnapshot {
     afkChipStr: string;
 }
 
-/** #950 david `agmeqm` + `<chat>` : compose les tokens orthogonaux du
- *  marker segment en chaîne space-separated. Drop des crochets / pipes
- *  / décoration colon — chaque axe est un token compact, les axes
- *  vides sont juste absents (pas de séparateur résiduel).
+/** #950 david `<chat>` : compose les tokens orthogonaux du marker
+ *  segment en deux zones — d'abord les SYMBOLES (chaque genre une
+ *  seule fois, ordre fixe), puis les WORD HINTS dans le même ordre.
+ *  Drop des crochets / pipes / colon — tout est space-separated.
  *
- *  Convention david :
- *  - `❓ <name>` = Claude Code attend une réponse user (health prompt,
- *    resume picker, mode picker). Le glyph `❓` est le marqueur commun
- *    "genre question", suffixé par le nom court de la question.
- *  - `⚠️ <name>` = condition erreur backend (retry N, …). Le glyph
- *    `⚠️` est le marqueur commun "genre warning".
- *  - `🔄 <name>` = process interne en cours qui dure (compacting,
- *    resuming, …). Le glyph `🔄` est le marqueur commun "genre process".
- *  - autres tokens (`wait` / `interrupted`) restent text-only — états
- *    internes ni question ni erreur ni process.
+ *  Genres (ordre fixe = ordre d'apparition dans la barre) :
+ *
+ *  | Genre   | Symbole | Sens                              | Membres aujourd'hui |
+ *  |---------|---------|-----------------------------------|---------------------|
+ *  | think   | 🧠      | claude réfléchit (loop busy)      | `busy`              |
+ *  | warning | ⚠️      | condition erreur backend          | `retry N`           |
+ *  | question| ❓      | input user attendu                | `resume`, `mode`, `health` |
+ *  | process | 🔄      | long task interne                 | `compacting`, `resuming` |
+ *  | plain   | —       | états internes ni l'un ni l'autre | `wait`, `interrupted` |
+ *
+ *  Layout : `[symboles dédupliqués, ordre fixe] [loopStatus] [warning_words] [question_words] [process_words] [plain_words]`
+ *
+ *  Exemples concrets :
+ *  - idle nominal             → `idle`
+ *  - busy nominal             → `🧠`           (le mot "busy" devient redondant)
+ *  - idle + retry 3           → `⚠️ idle retry 3`
+ *  - busy + compacting        → `🧠 🔄 compacting`
+ *  - idle + resume + health   → `❓ idle resume health`
+ *  - busy + retry 3 + health  → `🧠 ⚠️ ❓ retry 3 health`
  *
  *  Zone vit dans le bloc fond NOIR (colour16) à gauche, collée à
  *  `claude-loop`. Le caller (paint) gère fg/bg dans la format string. */
@@ -103,17 +112,35 @@ function renderMarkerSegment(
     resumePickerActive: boolean,
     resumeModePickerActive: boolean,
 ): string {
-    const parts: string[] = [loopStatus];
-    if (info) {
-        if (/^retry /.test(info)) parts.push(`⚠️ ${info}`);
-        else if (LONG_TASKS.has(info)) parts.push(`🔄 ${info}`);
-        else parts.push(info);
-    }
-    // Question-genre markers — Claude Code attend un input user.
-    if (resumePickerActive) parts.push("❓ resume");
-    if (resumeModePickerActive) parts.push("❓ mode");
-    if (healthPromptVisible) parts.push("❓ health");
-    return parts.join(" ");
+    // Classify info into the right genre (warning / process / plain).
+    const warningWord = info && /^retry /.test(info) ? info : null;
+    const processWord = info && LONG_TASKS.has(info) ? info : null;
+    const plainWord = info && !warningWord && !processWord ? info : null;
+    const questionWords: string[] = [];
+    if (resumePickerActive) questionWords.push("resume");
+    if (resumeModePickerActive) questionWords.push("mode");
+    if (healthPromptVisible) questionWords.push("health");
+    const thinking = loopStatus === LOOP_STATUS.BUSY;
+
+    // Symbols section — fixed order : think / warning / question / process.
+    const symbols: string[] = [];
+    if (thinking) symbols.push("🧠");
+    if (warningWord) symbols.push("⚠️");
+    if (questionWords.length) symbols.push("❓");
+    if (processWord) symbols.push("🔄");
+
+    // Words section — same order : loopStatus + warning + question + process + plain.
+    // david `<chat>` : pas besoin du mot quand le symbole le couvre déjà
+    // (`busy` redondant avec `🧠`). Les autres statuts (idle/boot) restent
+    // texte parce qu'ils n'ont pas de symbole dédié.
+    const words: string[] = [];
+    if (!thinking) words.push(loopStatus);
+    if (warningWord) words.push(warningWord);
+    if (questionWords.length) words.push(...questionWords);
+    if (processWord) words.push(processWord);
+    if (plainWord) words.push(plainWord);
+
+    return [...symbols, ...words].join(" ");
 }
 
 /** Compute le snapshot canonique depuis ipcState + computeLoopView.
