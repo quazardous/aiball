@@ -1108,7 +1108,10 @@ export function humanPresenceChunk(sd: string | undefined): string {
     const afkOn = isAfkActive(input);
     const glyph = afkOn ? "⏸" : "▶";
     const fg = afkOn ? "colour178" : "colour40";
-    return `#[fg=${fg},bg=colour16]${glyph}`;
+    // david `<chat>` 2026-06-14 : `▶/⏸` migre AVANT le mot `claude`
+    // aussi → leading space inclus dans la valeur quand non-vide
+    // pour garder le bloc compact.
+    return ` #[fg=${fg},bg=colour16]${glyph}`;
 }
 
 /** #953 david `<chat>` : `⌨` glyph rouge quand le user tape activement,
