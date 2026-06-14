@@ -1006,7 +1006,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // on. Painted by `cmdZen` (instant on toggle) and refreshed by
     // `setTmuxStatus` (heartbeat resilience, in case the marker was
     // touched manually outside the CLI).
-    const keysHint = `#{@cl_zen}#{@cl_afk_state} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
+    // david `<chat>` 2026-06-14 : le nom de session tmux migre du
+    // status-left (entre proxy et counters) vers ici, entre AFK:F9
+    // et DETACH. Layout : `<zen> <afk> <name> · DETACH:<key>`.
+    const keysHint = `#{@cl_zen}#{@cl_afk_state} #[fg=${ctx.colors.bar_fg}]${name} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", keysHint], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right-length", "60"], { stdio: "ignore" });
     // #619 david `ge2emb` : suppress the tmux window-status list (the

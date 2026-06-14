@@ -1104,9 +1104,13 @@ export function humanBarWord(sd: string | undefined): string {
     // Le bg noir (colour16) hérite du bloc englobant.
     const word = humanPresenceWord(sd);
     if (word === "boot") return "";
-    const glyph = word === "stop" ? "⌨️"
-        : word === "wait" ? "⏸️"
-        : "▶️";
+    // Plain text variants (pas de U+FE0F variation selector) — sans ça
+    // les terminaux forcent le rendu emoji COLORÉ natif et ignorent le
+    // fg color. david `<chat>` : « c'est la police qui est orange pas
+    // le fond (et vert pour play) ».
+    const glyph = word === "stop" ? "⌨"
+        : word === "wait" ? "⏸"
+        : "▶";
     const fg = word === "stop" ? "colour196"
         : word === "wait" ? "colour178"
         : "colour40";
