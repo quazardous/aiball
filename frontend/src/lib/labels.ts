@@ -50,11 +50,15 @@ export const LIFECYCLE_ICONS: Record<LifecycleStage, StageIcon> = {
         title: "resolved (proposal accepted, reporter has not closed yet)",
     },
     "pending-resolved": {
-        // Same shape as resolved but a muted/amber color so the eye
-        // catches it as "an agent proposes done — your call to
-        // accept or reject" rather than "definitively done" (#B.120).
+        // #967 david `8w5gr4` : vert (au lieu de l'ancien amber) pour
+        // que pending-resolved soit visuellement distinct de pending-plan
+        // dans la liste — plan reste amber `?` (« propose direction »),
+        // resolution est vert ✓ (« propose done »), escalation rouge 🔔.
+        // La nuance « pending vs final » est portée par le bord vert de
+        // la row (`--attention-resolution`) + l'amber row tint quand
+        // unread ; le glyph reste lisible « done-ish » au scan.
         icon: "pi pi-check-circle",
-        color: "--p-amber-500",
+        color: "--p-green-500",
         title: "an agent proposed resolution — accept (close) or reject to bring it back",
     },
     "pending-escalation": {
