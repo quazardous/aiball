@@ -1101,9 +1101,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     seedOpt("@cl_typing", "");
     seedOpt("@cl_human", "");
     seedOpt("@cl_state", `#[fg=${col.island_fg},bg=colour16] 🚀`);
-    // #962 — `@cl_afk_glyph` vide au boot (afkGlyphChunk renvoie "" en
-    // boot grace). BarRenderer peint le glyph dès que la grace se ferme.
-    seedOpt("@cl_afk_glyph", "");
+    // #962 david 2026-06-14 : le glyph AFK s'affiche dès le boot. Mode
+    // par défaut `off` → `웃` gris foncé sans suffix. BarRenderer écrase
+    // au 1er tick avec la même valeur (mirror du seed = pas de flash).
+    seedOpt("@cl_afk_glyph", ` #[fg=colour238,bg=colour16]웃`);
     seedOpt(
         "status-left",
         `#[bg=${bootBg}] #[fg=${bootBg},bg=colour16]▓▒░#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state}#{@cl_afk_glyph} #[fg=${bootBg},bg=colour16]░▒▓#[bg=${bootBg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,

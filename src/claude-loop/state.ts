@@ -1146,9 +1146,10 @@ export function formatAfkGlyph(chunk: { color: "dim" | "yellow" | "red"; prefix:
  *  Status-right devient un literal statique `AFK:F9` (dim). */
 export function afkGlyphChunk(sd: string | undefined): string {
     if (!sd) return "";
-    const input = readLoopStateInput(sd);
-    if (isInBootGrace(input)) return "";
-    return formatAfkGlyph(computeLoopView(input).afkChunk);
+    // david 2026-06-14 : le glyph s'affiche DÈS le boot (pas de gate
+    // boot grace). En boot le mode est `off` par défaut → `웃` gris foncé
+    // sans suffix ; le contraste avec le bg jaune boot reste lisible.
+    return formatAfkGlyph(computeLoopView(readLoopStateInput(sd)).afkChunk);
 }
 
 /**
