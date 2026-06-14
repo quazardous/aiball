@@ -699,19 +699,30 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
         .where(rootedNoProject)
         .groupBy(schema.tickets.project, schema.consumers.cwd)
         .all()) addRoot(r.project, r.cwd);
-    // #393 (3c) + #395: which roots have a currently-RUNNING loop. Presence
-    // (live SSE) is authoritative per consumer; the 120s heartbeat is only the
-    // bridge for consumers never seen via SSE this session → a dead loop reads
-    // stopped near-realtime instead of lingering up to RUNNING_WINDOW_MS.
+    // #393 (3c) + #395: which (project, root) pairs have a currently-RUNNING
+    // loop. Presence (live SSE) is authoritative per consumer; the 120s
+    // heartbeat is only the bridge for consumers never seen via SSE this
+    // session → a dead loop reads stopped near-realtime instead of
+    // lingering up to RUNNING_WINDOW_MS.
+    //
+    // #968 david `ah6gyb` : indexer par (project, cwd), pas par cwd seul.
+    // Avant : un consumer live à `/X` faisait remonter `running=true` sur
+    // TOUT projet qui avait un consumer (vivant OU mort) avec ce cwd.
+    // Cas concret : `testuser` (project=test) mort depuis 13j partageait
+    // le cwd de `claude-aiball-dev` (project=aiball) live → `test.running`
+    // était true à tort.
     const cutoff = new Date(Date.now() - RUNNING_WINDOW_MS).toISOString();
-    const runningRoots = new Set<string>();
-    // #395 (q3bfvn): also capture the running loop's activity state per root, so
-    // the UI can show a busy/idle/boot tag (+ loop/human) next to `running`,
-    // like ConsumersPanel. Prefer a `busy` consumer when a root has several.
-    const runningStateByRoot = new Map<string, { state: string | null; human: boolean; word: string | null }>();
+    const runningRootsByProject = new Map<string, Set<string>>();
+    // #395 (q3bfvn): also capture the running loop's activity state per
+    // (project, root), so the UI can show a busy/idle/boot tag
+    // (+ loop/human) next to `running`, like ConsumersPanel. Prefer a
+    // `busy` consumer when a (project, root) pair has several.
+    const runningStateByProjectRoot = new Map<string, { state: string | null; human: boolean; word: string | null }>();
+    const stateKey = (project: string, cwd: string): string => `${project}\0${cwd}`;
     for (const c of db.select({
         consumerId: schema.consumers.consumerId,
         cwd: schema.consumers.cwd,
+        project: schema.consumers.project,
         stateUpdatedAt: schema.consumers.stateUpdatedAt,
         state: schema.consumers.state,
         stateHuman: schema.consumers.stateHuman,
@@ -720,16 +731,19 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
         .from(schema.consumers)
         .where(sql`${schema.consumers.cwd} IS NOT NULL AND ${schema.consumers.cwd} != ''`)
         .all()) {
-        if (c.cwd && consumerEffectiveRunning(c.consumerId, c.stateUpdatedAt, cutoff)) {
-            runningRoots.add(c.cwd);
-            const prev = runningStateByRoot.get(c.cwd);
-            if (!prev || c.state === "busy") {
-                runningStateByRoot.set(c.cwd, {
-                    state: c.state,
-                    human: c.stateHuman === 1,
-                    word: c.stateHumanWord,
-                });
-            }
+        if (!c.cwd || !c.project) continue;
+        if (!consumerEffectiveRunning(c.consumerId, c.stateUpdatedAt, cutoff)) continue;
+        let set = runningRootsByProject.get(c.project);
+        if (!set) { set = new Set(); runningRootsByProject.set(c.project, set); }
+        set.add(c.cwd);
+        const key = stateKey(c.project, c.cwd);
+        const prev = runningStateByProjectRoot.get(key);
+        if (!prev || c.state === "busy") {
+            runningStateByProjectRoot.set(key, {
+                state: c.state,
+                human: c.stateHuman === 1,
+                word: c.stateHumanWord,
+            });
         }
     }
     for (const p of byProject.values()) {
@@ -737,10 +751,11 @@ export function listProjectsDetailed(consumer_id?: string, landscape = false): P
         if (s && s.size > 0) {
             p.local = true;
             p.roots = [...s];
-            p.running = p.roots.some((r) => runningRoots.has(r));
+            const projRunningRoots = runningRootsByProject.get(p.name) ?? new Set<string>();
+            p.running = p.roots.some((r) => projRunningRoots.has(r));
             if (p.running) {
-                const rr = p.roots.find((r) => runningStateByRoot.has(r));
-                const st = rr ? runningStateByRoot.get(rr) : undefined;
+                const rr = p.roots.find((r) => runningStateByProjectRoot.has(stateKey(p.name, r)));
+                const st = rr ? runningStateByProjectRoot.get(stateKey(p.name, rr)) : undefined;
                 if (st) {
                     p.running_state = st.state ?? undefined;
                     p.running_human = st.human;
