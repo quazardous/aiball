@@ -124,6 +124,12 @@ export interface IpcState {
      *  the HealthCheckService consumer in timer.ts. Rendered as a
      *  marker token (🏥) in the bar's black-bg zone. */
     healthPromptVisible: boolean;
+    /** #953 — true while Claude Code's input prompt box (structural
+     *  detection : 2 lignes `─` qui encadrent un `❯`) est visible
+     *  dans le pane. Driven par PromptZoneWatcher → consumer
+     *  timer.ts → setIpcPromptZoneVisible. Rendu glyph `❯` dans
+     *  le marker segment du BarRenderer (david `f72kpq`). */
+    promptZoneVisible: boolean;
     /** #733 V2 — pane state in-memory, mirrored by every `setPane*`
      *  setter. `null` = no in-memory signal yet → reader falls back to
      *  the file (cold boot before `refreshPaneMarkers` runs, or a stale
@@ -198,6 +204,7 @@ const state: IpcState = {
     dispAfkCommitAtMs: null,
     humanTypingAtMs: null,
     healthPromptVisible: false,
+    promptZoneVisible: false,
     paneBusy: null,
     paneReady: null,
     paneCompacting: null,
@@ -462,6 +469,14 @@ export function getIpcDispAfk(): {
  *  decide whether to paint the marker token. */
 export function setIpcHealthPromptVisible(visible: boolean): void {
     state.healthPromptVisible = visible;
+    notifyIpcChanged();
+}
+
+/** #953 — toggle the prompt-zone visibility flag. Set by the timer's
+ *  consumer on `promptZoneW.begin` / `.end`. Read by the BarRenderer
+ *  to paint the `❯` glyph in the marker segment. */
+export function setIpcPromptZoneVisible(visible: boolean): void {
+    state.promptZoneVisible = visible;
     notifyIpcChanged();
 }
 

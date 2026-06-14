@@ -98,6 +98,7 @@ import {
 } from "./pane-watchers/boot-watchers.js";
 import { PromptWatcher, BusyWatcher, InterruptedWatcher, IdlePromptWatcher } from "./pane-watchers/runtime-watchers.js";
 import { HealthCheckWatcher } from "./pane-watchers/health-check-watcher.js";
+import { PromptZoneWatcher } from "./pane-watchers/prompt-zone-watcher.js";
 import { getHealthCheckService } from "./health-check-service.js";
 import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
@@ -131,6 +132,7 @@ import {
     setIpcLoopStart,
     setIpcHumanTypingAtMs,
     setIpcHealthPromptVisible,
+    setIpcPromptZoneVisible,
     setIpcBootDeadlineMs,
     setIpcCounters,
     setIpcIdleSince,
@@ -576,10 +578,11 @@ const interruptedW = new InterruptedWatcher();
 const idlePromptW = new IdlePromptWatcher();
 const errorW = new ErrorWatcher();
 const healthCheckW = new HealthCheckWatcher();
+const promptZoneW = new PromptZoneWatcher();
 const paneObs = new PaneObserver();
 paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
 paneObs.registerZone(new Zone("runtime", [
-    promptW, busyW, interruptedW, idlePromptW, errorW, getCompactingDetector(), healthCheckW,
+    promptW, busyW, interruptedW, idlePromptW, errorW, getCompactingDetector(), healthCheckW, promptZoneW,
 ]));
 // Runtime zone toujours actif ; boot zone n'est entré que si on n'est
 // pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
@@ -709,6 +712,15 @@ if (sd) {
     getHealthCheckService().getActor().on("health:prompt_cleared", (ev) => {
         log(`healthCheckMachine: health:prompt_cleared atMs=${ev.atMs}`);
         setIpcHealthPromptVisible(false);
+    });
+    // #953 david `f72kpq` : PromptZoneWatcher → glyph `❯` dans la barre.
+    promptZoneW.on("begin", () => {
+        log("watcher: prompt_zone begin → setIpcPromptZoneVisible(true)");
+        setIpcPromptZoneVisible(true);
+    });
+    promptZoneW.on("end", () => {
+        log("watcher: prompt_zone end → setIpcPromptZoneVisible(false)");
+        setIpcPromptZoneVisible(false);
     });
     getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
     // CompactingDetector emits change(s) with `s.active` boolean ; forward begin/end via change diff.

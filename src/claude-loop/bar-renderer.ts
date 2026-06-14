@@ -74,6 +74,10 @@ export interface BarSnapshot {
      *  `afkStateChunkStr`). Diff sur la string finale = plus simple que
      *  diff sur chaque field interne de l'AfkChunk. */
     afkChipStr: string;
+    /** #953 david `<chat>` : glyphe `❯` quand la prompt-zone Claude
+     *  Code est visible, peint AVANT le mot `claude` dans le bloc
+     *  fond noir. Empty quand absent. */
+    promptGlyph: string;
 }
 
 /** #950 david `<chat>` : compose les tokens orthogonaux du marker
@@ -125,6 +129,8 @@ function renderMarkerSegment(
 
     // Symbols section — fixed order : status / warning / question / process.
     // 🚀/🧠/💤 sont mutex (loopStatus boot XOR busy XOR idle).
+    // Le glyph prompt `❯` vit DEHORS de ce segment (avant `claude`,
+    // david `<chat>` 2026-06-14) — paint séparé via `@cl_prompt`.
     const symbols: string[] = [];
     if (loopStatus === LOOP_STATUS.BOOT) symbols.push("🚀");
     else if (loopStatus === LOOP_STATUS.BUSY) symbols.push("🧠");
@@ -210,6 +216,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         // Past grace : nextWakeInSec stays null = pipe ouvert, drain
         // instant sur prochain SSE / idle:settled, pas de countdown.
     }
+    const promptGlyph = ipc.promptZoneVisible ? "❯" : "";
     return {
         humanWord,
         loopStatus,
@@ -221,13 +228,14 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         bootElapsedSec,
         bootRemainingSec,
         afkChipStr,
+        promptGlyph,
     };
 }
 
 /** Diff deux snapshots et retourne la liste des champs qui ont
  *  changé. Liste vide = no-op (rien à repaint). */
 export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (keyof BarSnapshot)[] {
-    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkChipStr"];
+    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkChipStr", "promptGlyph"];
     const changed: (keyof BarSnapshot)[] = [];
     if (prev.humanWord !== next.humanWord) changed.push("humanWord");
     if (prev.loopStatus !== next.loopStatus) changed.push("loopStatus");
@@ -239,6 +247,7 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     if (prev.bootElapsedSec !== next.bootElapsedSec) changed.push("counters");
     if (prev.bootRemainingSec !== next.bootRemainingSec) changed.push("counters");
     if (prev.afkChipStr !== next.afkChipStr) changed.push("afkChipStr");
+    if (prev.promptGlyph !== next.promptGlyph) changed.push("promptGlyph");
     return changed;
 }
 
@@ -359,7 +368,7 @@ export class BarRenderer {
             // coloré à droite.
             setOpt(
                 "status-left",
-                `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}] claude #{@cl_human}#{@cl_state} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
+                `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}]#{@cl_prompt} claude #{@cl_human}#{@cl_state} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
             );
         }
         if (changedSet.has("zenActive")) {
@@ -400,6 +409,13 @@ export class BarRenderer {
             }
             const col = barColors();
             setOpt("@cl_counts", `#[fg=${col.bar_fg}] ${parts.join(" ")}`);
+        }
+        if (changedSet.has("promptGlyph")) {
+            // david `<chat>` 2026-06-14 : `❯` AVANT le mot `claude` ;
+            // un espace est inclus dans la valeur quand non-vide pour
+            // garder le bloc compact quand la prompt-zone disparaît.
+            const v = next.promptGlyph ? ` ${next.promptGlyph}` : "";
+            setOpt("@cl_prompt", v);
         }
         if (changedSet.has("afkChipStr")) {
             setOpt("@cl_afk_state", next.afkChipStr);

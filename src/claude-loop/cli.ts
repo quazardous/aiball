@@ -1044,7 +1044,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const zenInitial = existsSync(zenPath(sd))
         ? `#[fg=colour16,bg=colour208,bold] ZEN #[default] `
         : "";
-    for (const [opt, val] of [["@cl_human", "#[fg=colour178,bg=colour16]boot"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_counts", ""], ["@cl_afk_state", afkInitialOff], ["@cl_zen", zenInitial], ["@cl_name", name], ["@cl_detach_key", detachDisp]]) {
+    for (const [opt, val] of [["@cl_human", "#[fg=colour178,bg=colour16]boot"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_counts", ""], ["@cl_afk_state", afkInitialOff], ["@cl_zen", zenInitial], ["@cl_name", name], ["@cl_detach_key", detachDisp], ["@cl_prompt", ""]]) {
         spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
         if (opt === "@cl_human") logBarPaint(sd, "cli.ts:seed", val);
     }
