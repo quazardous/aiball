@@ -41,7 +41,7 @@ import type { DrainedState } from "./drained-strategy.js";
 import { CL_ENV } from "./env-vars.js";
 import { loopConfig } from "./loop-config.js";
 import { stripMarkdown } from "./markdown-strip.js";
-import { computeLoopView, isAfkActive, isInBootGrace, type AfkChunk } from "./loop-state.js";
+import { computeLoopView, isAfkActive, isInBootGrace } from "./loop-state.js";
 import { classifyCompacting as classifyCompactingRaw } from "./compacting-detector.js";
 import { parseGates, runGates } from "./gates.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
@@ -1124,6 +1124,33 @@ export function typingGlyphChunk(sd: string | undefined): string {
     return `#[fg=colour196,bg=colour16]⌨`;
 }
 
+/** #962 — pure mapping `AfkChunk` → glyph + tmux color tags. Extrait
+ *  pour testabilité ; consommé par `afkGlyphChunk` qui ajoute le I/O. */
+export function formatAfkGlyph(chunk: { color: "dim" | "yellow" | "red"; prefix: string | null }): string {
+    const fg = chunk.color === "red" ? "colour196"
+        : chunk.color === "yellow" ? "colour178"
+            : "colour238"; // dim
+    const suffix = chunk.prefix ?? "";
+    return ` #[fg=${fg},bg=colour16]웃${suffix}`;
+}
+
+/** #962 david `<chat>` 2026-06-14 : le statut AFK migre du status-right
+ *  (chip texte `AFK:F9` / `NOT AFK ∞:F9` peint dynamiquement) vers un
+ *  glyph « bonhomme » `웃` à la fin de la zone claude (status-left).
+ *  Couleur + suffix selon le mode de la loop :
+ *    - autonomous (AFK label `AFK`, color dim)        → gris foncé, no suffix
+ *    - held ∞     (AFK label `NOT AFK`, color red)    → rouge,      suffix `∞`
+ *    - held 10m   (AFK label `NOT AFK`, color yellow) → orange,     suffix `Ns` countdown
+ *  Glyph plain text (pas de U+FE0F) pour que la fg tmux applique. Peint
+ *  dans `@cl_afk_glyph` ; placé après `@cl_state` dans le status-left.
+ *  Status-right devient un literal statique `AFK:F9` (dim). */
+export function afkGlyphChunk(sd: string | undefined): string {
+    if (!sd) return "";
+    const input = readLoopStateInput(sd);
+    if (isInBootGrace(input)) return "";
+    return formatAfkGlyph(computeLoopView(input).afkChunk);
+}
+
 /**
  * #800 9sy4t3 — paint the counters segment of the tmux bar. Sits in its own
  * `@cl_counts` tmux user option so state repaints (transitions, hooks) don't
@@ -1141,41 +1168,11 @@ export function typingGlyphChunk(sd: string | undefined): string {
 // Callers ont migré directement vers `setIpcCounters` / `setIpcStateTagInfo`
 // (ipc-state.ts). Le BarRenderer (bar-renderer.ts) peint depuis ipcState.
 
-/** #755 — map an `AfkChunk` to the `@cl_afk_state` tmux format string.
- *  Mirrors the Unix proxy's `_format_afk_state` (pty-proxy.py) but is
- *  driven by the central `computeLoopView` chunk, so the countdown is in
- *  seconds (loop-state.ts canonical) instead of the proxy's stale minutes.
- *  Pure — colours/key are passed in so it stays trivially testable.
- *
- *  `dim` → OFF (label `AFK`, human away) ; `yellow` → NOT AFK 10m hold ;
- *  `red` → NOT AFK ∞ hold. The key segment renders in the lit colour. */
-export function formatAfkStateChunk(
-    chunk: AfkChunk,
-    opts: { key: string; fgDim: string; fgLit: string },
-): string {
-    const fg = chunk.color === "red" ? "colour196"
-        : chunk.color === "yellow" ? "colour178"
-            : opts.fgDim;
-    const prefix = chunk.prefix ? `${chunk.prefix} ` : "";
-    return `#[fg=${fg}]${prefix}${chunk.label}:#[fg=${opts.fgLit}]${opts.key}`;
-}
-
-/** #755 — compute the current `@cl_afk_state` string from live markers.
- *  Reads the same env the Unix proxy reads (CL_AFK_KEY_DISP / *_FG_DIM /
- *  *_FG_LIT). Used by the win32 painter below ; returned so the caller can
- *  diff-guard before spending a tmux set-option. */
-export function afkStateChunkStr(sd: string): string {
-    const chunk = computeLoopView(readLoopStateInput(sd)).afkChunk;
-    return formatAfkStateChunk(chunk, {
-        key: process.env.CL_AFK_KEY_DISP || "F9",
-        fgDim: process.env.CL_AFK_LABEL_FG_DIM || "colour238",
-        fgLit: process.env.CL_AFK_LABEL_FG_LIT || "colour16",
-    });
-}
-
-// #862 Slice 5 — `setTmuxAfkState` retiré. Le BarRenderer dérive
-// `afkChipStr` via `afkStateChunkStr(sd)` et peint `@cl_afk_state` au
-// prochain tick (debounce 50ms + safety tick 1s).
+// #962 — `formatAfkStateChunk` / `afkStateChunkStr` retirés. L'AFK
+// state ne vit plus en chip texte côté status-right (qui devient
+// `AFK:F9` statique) ; le statut dynamique migre dans `afkGlyphChunk`
+// (un glyph `웃` coloré à la fin de la zone claude, peint dans
+// `@cl_afk_glyph` par BarRenderer).
 
 /**
  * Read the loop's pings YAML and return one phrase at random. Falls

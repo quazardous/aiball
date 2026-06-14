@@ -62,7 +62,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
         nextWakeInSec: null,
         bootElapsedSec: null,
         bootRemainingSec: null,
-        afkChipStr: "",
+        afkGlyph: "",
         promptGlyph: "",
         typingGlyph: "",
         ...overrides,
@@ -72,7 +72,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
 test("diffSnapshots: prev=null → tous les champs marqués changed (initial)", () => {
     assert.deepEqual(
         diffSnapshots(null, snap()),
-        ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkChipStr", "promptGlyph", "typingGlyph"],
+        ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkGlyph", "promptGlyph", "typingGlyph"],
     );
 });
 
@@ -146,7 +146,7 @@ test("BarRenderer.tick: idempotent quand l'état ne change pas", () => {
     rmSync(sd, { recursive: true, force: true });
 });
 
-// #862 Slice 2 — setIpcCounters + counters/zen/afkChipStr champs.
+// #862 Slice 2 — setIpcCounters + counters/zen/afkGlyph champs.
 
 test("setIpcCounters: stocke un object normalisé dans ipcState", () => {
     resetIpcStateForTests();

@@ -1407,23 +1407,10 @@ async function mainSse(): Promise<void> {
     // #840 `4z59jt` — plus de fichier `afk`. AfkService est piloté
     // exclusivement via les helpers *ViaService (state.ts armAfk*),
     // toujours en mémoire. Pas de watcher à armer.
-    // #755 + #751 htwguc — paint the `@cl_afk_state` chip from the timer
-    // ON EVERY PLATFORM. Pre-fix this block was gated to win32 because the
-    // Unix Python proxy was supposed to own the chip ; but the proxy only
-    // reads the committed `afk` file and is blind to `dispAfk` (in-memory
-    // ipcState pending toggle, #751). On Linux that meant the F9 toggle
-    // was invisible until commit. The timer paints with the DISPLAY value
-    // (via `afkStateChunkStr` → `renderAfkChunk` → `dispAfk` fallback to
-    // `afk`), the proxy paints from the committed file ; both write the
-    // same option and converge. Repaint triggers : (a) `dispAfkChanged`
-    // bus event (toggle / commit), (b) AfkService observable (commit
-    // through *ViaService helpers), (c) 1s safety tick for the wait_10m
-    // countdown. Diff-guarded so we only spend a tmux set-option when the
-    // rendered string actually changes.
-    // #862 Slice 5 — `repaintAfkState` + le `setInterval(1000)` retirés.
-    // Le BarRenderer a son propre safety tick 1s qui catch le countdown
-    // AFK chip (`@cl_afk_state`) automatiquement via `afkStateChunkStr`
-    // dans `computeBarSnapshot`. Plus de double tick.
+    // #962 — `@cl_afk_state` retiré ; le statut AFK dynamique vit
+    // maintenant dans le glyph `웃` à la fin de la zone claude
+    // (`@cl_afk_glyph`, peint par BarRenderer via `afkGlyphChunk`).
+    // Status-right utilise un literal statique `AFK:F9`.
     // #862 Slice 1 — BarRenderer pur observer. Souscrit à `onIpcChanged`,
     // debounce 50ms, diff vs son lastSnapshot interne. Slice 1 ne paint
     // PAS tmux — il log les diffs via `logBarPaint` (writer=`observer:*`)

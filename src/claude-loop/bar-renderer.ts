@@ -24,7 +24,7 @@ import { existsSync } from "node:fs";
 import { getIpcState, onIpcChanged } from "./ipc-state.js";
 import {
     MUX_CMD,
-    afkStateChunkStr,
+    afkGlyphChunk,
     barColors,
     humanPresenceChunk,
     typingGlyphChunk,
@@ -71,10 +71,11 @@ export interface BarSnapshot {
      *  sur nextWakeInSec. */
     bootElapsedSec: number | null;
     bootRemainingSec: number | null;
-    /** `@cl_afk_state` : AFK chip pré-rendered string (canonical via
-     *  `afkStateChunkStr`). Diff sur la string finale = plus simple que
-     *  diff sur chaque field interne de l'AfkChunk. */
-    afkChipStr: string;
+    /** #962 — `@cl_afk_glyph` : glyph bonhomme `웃` à la fin de la zone
+     *  claude (status-left), coloré + suffix selon le mode AFK.
+     *  Remplace `@cl_afk_state` (chip texte status-right) qui devient un
+     *  literal statique `AFK:F9` dans le seed cmdStart. */
+    afkGlyph: string;
     /** #953 david `<chat>` : glyphe `❯` quand la prompt-zone Claude
      *  Code est visible, peint AVANT le mot `claude` dans le bloc
      *  fond noir. Empty quand absent. */
@@ -177,7 +178,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
     );
     const zenActive = existsSync(zenPath(sd));
     const counters = ipc.counters;
-    const afkChipStr = afkStateChunkStr(sd);
+    const afkGlyph = afkGlyphChunk(sd);
     // #891 — boot elapsed + remaining déplacés du state tag vers la zone
     // compteurs. Rendus `🚀Ns +Ns` (prioritaires).
     let bootElapsedSec: number | null = null;
@@ -233,7 +234,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         nextWakeInSec,
         bootElapsedSec,
         bootRemainingSec,
-        afkChipStr,
+        afkGlyph,
         promptGlyph,
         typingGlyph,
     };
@@ -242,7 +243,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
 /** Diff deux snapshots et retourne la liste des champs qui ont
  *  changé. Liste vide = no-op (rien à repaint). */
 export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (keyof BarSnapshot)[] {
-    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkChipStr", "promptGlyph", "typingGlyph"];
+    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkGlyph", "promptGlyph", "typingGlyph"];
     const changed: (keyof BarSnapshot)[] = [];
     if (prev.humanWord !== next.humanWord) changed.push("humanWord");
     if (prev.loopStatus !== next.loopStatus) changed.push("loopStatus");
@@ -253,7 +254,7 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     if (prev.nextWakeInSec !== next.nextWakeInSec) changed.push("counters");
     if (prev.bootElapsedSec !== next.bootElapsedSec) changed.push("counters");
     if (prev.bootRemainingSec !== next.bootRemainingSec) changed.push("counters");
-    if (prev.afkChipStr !== next.afkChipStr) changed.push("afkChipStr");
+    if (prev.afkGlyph !== next.afkGlyph) changed.push("afkGlyph");
     if (prev.promptGlyph !== next.promptGlyph) changed.push("promptGlyph");
     if (prev.typingGlyph !== next.typingGlyph) changed.push("typingGlyph");
     return changed;
@@ -376,7 +377,7 @@ export class BarRenderer {
             // coloré à droite.
             setOpt(
                 "status-left",
-                `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
+                `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state}#{@cl_afk_glyph} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
             );
         }
         if (changedSet.has("zenActive")) {
@@ -433,9 +434,11 @@ export class BarRenderer {
             const v = next.typingGlyph ? ` ${next.typingGlyph}` : "";
             setOpt("@cl_typing", v);
         }
-        if (changedSet.has("afkChipStr")) {
-            setOpt("@cl_afk_state", next.afkChipStr);
-            this.spawn(MUX_CMD, ["refresh-client", "-S"], { stdio: "ignore" });
+        if (changedSet.has("afkGlyph")) {
+            // #962 — bonhomme glyph + color/suffix selon le mode AFK.
+            // Valeur déjà préfixée des color tags + leading space par
+            // `afkGlyphChunk` ; vide en boot grace.
+            setOpt("@cl_afk_glyph", next.afkGlyph);
         }
     }
 }

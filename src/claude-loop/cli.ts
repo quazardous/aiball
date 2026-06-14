@@ -990,16 +990,13 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // hint is accurate; fall back to the tmux default C-b.
     const prefixRes = spawnSync(MUX_CMD, ["show-option", "-gv", "prefix"], { encoding: "utf8" });
     const detachDisp = `${(prefixRes.stdout ?? "").trim() || "C-b"} d`;
-    // #619 jjfdea / 33zghr : the whole `AFK:F9` chunk is now painted by
-    // the proxy via `#{@cl_afk_state}` so it can :
-    //   - toggle the label colour ON (lit) / OFF (dim) by AFK state,
-    //   - prepend a countdown (`9m AFK:F9`) or `∞ AFK:F9` while AFK is held,
-    //   - render nothing extra when the loop is autonomous (just `AFK:F9`).
-    // The proxy reads CL_AFK_KEY_DISP + CL_AFK_LABEL_FG_DIM/LIT from the
-    // launch env (exported above) to know how to format the chunk. Initial
-    // seed below renders an OFF state so the static format doesn't show a
-    // bare `#{@cl_afk_state}` placeholder before the proxy paints.
-    const afkInitialOff = afkSpecJson
+    // #962 david `<chat>` 2026-06-14 : `AFK:F9` côté status-right devient
+    // un literal STATIQUE — couleur dim, jamais repeint. Le statut
+    // dynamique (mode + countdown / ∞) migre dans le glyph `웃` à la fin
+    // de la zone claude (`@cl_afk_glyph`, peint par BarRenderer). Plus de
+    // user-option `@cl_afk_state` ; plus d'export `CL_AFK_*` consommé
+    // côté proxy (déjà retiré côté proxy, cf. pty-proxy.py #862 Slice 4).
+    const afkStatic = afkSpecJson
         ? `#[fg=${ctx.colors.afk_label_fg}]AFK:#[fg=${ctx.colors.bar_fg}]${afkKeyDisp}`
         : `#[fg=${ctx.colors.afk_label_fg}]AFK:OFF`;
     // #749 david — `#{@cl_zen}` segment surface the wake kill-switch in
@@ -1009,12 +1006,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // touched manually outside the CLI).
     // david `<chat>` 2026-06-14 : le nom de session tmux migre du
     // status-left (entre proxy et counters) vers ici, entre AFK:F9
-    // et DETACH. Layout : `<zen> <afk> <name> · DETACH:<key>`. La
+    // et DETACH. Layout : `<zen> <afk static> <name> · DETACH:<key>`. La
     // valeur du `name` est servie par le user-option `@cl_name` que
     // BarRenderer.start() (re)seede à chaque (re)démarrage du timer,
     // pour qu'un `claude-loop reload` propage correctement (les
     // status-right initiaux ne sont set qu'une seule fois au cmdStart).
-    const keysHint = `#{@cl_zen}#{@cl_afk_state} #[fg=${ctx.colors.bar_fg}]#{@cl_name} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
+    const keysHint = `#{@cl_zen}${afkStatic} #[fg=${ctx.colors.bar_fg}]#{@cl_name} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", keysHint], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right-length", "60"], { stdio: "ignore" });
     // #619 david `ge2emb` : suppress the tmux window-status list (the
@@ -1045,7 +1042,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const zenInitial = existsSync(zenPath(sd))
         ? `#[fg=colour16,bg=colour208,bold] ZEN #[default] `
         : "";
-    for (const [opt, val] of [["@cl_human", "#[fg=colour178,bg=colour16]boot"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_counts", ""], ["@cl_afk_state", afkInitialOff], ["@cl_zen", zenInitial], ["@cl_name", name], ["@cl_detach_key", detachDisp], ["@cl_prompt", ""], ["@cl_typing", ""]]) {
+    // #962 — `@cl_afk_state` retiré (option morte ; status-right utilise
+    // un literal statique pour `AFK:F9`). `@cl_afk_glyph` seedé empty
+    // dans le bloc seedOpt ci-dessous (boot grace).
+    for (const [opt, val] of [["@cl_human", "#[fg=colour178,bg=colour16]boot"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_counts", ""], ["@cl_zen", zenInitial], ["@cl_name", name], ["@cl_detach_key", detachDisp], ["@cl_prompt", ""], ["@cl_typing", ""]]) {
         spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
         if (opt === "@cl_human") logBarPaint(sd, "cli.ts:seed", val);
     }
@@ -1099,9 +1099,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     seedOpt("@cl_typing", "");
     seedOpt("@cl_human", "");
     seedOpt("@cl_state", `#[fg=${col.island_fg},bg=colour16] 🚀`);
+    // #962 — `@cl_afk_glyph` vide au boot (afkGlyphChunk renvoie "" en
+    // boot grace). BarRenderer peint le glyph dès que la grace se ferme.
+    seedOpt("@cl_afk_glyph", "");
     seedOpt(
         "status-left",
-        `#[bg=${bootBg}] #[fg=${bootBg},bg=colour16]▓▒░#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state} #[fg=${bootBg},bg=colour16]░▒▓#[bg=${bootBg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
+        `#[bg=${bootBg}] #[fg=${bootBg},bg=colour16]▓▒░#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state}#{@cl_afk_glyph} #[fg=${bootBg},bg=colour16]░▒▓#[bg=${bootBg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
     );
 
     // Detached timer process. Inherits CL_* env via the env file
