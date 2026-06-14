@@ -1095,16 +1095,22 @@ export function humanPresenceWord(sd: string | undefined): "stop" | "wait" | "bo
 }
 
 export function humanBarWord(sd: string | undefined): string {
-    // #302 david: black bg (colour16) behind the word so it stays readable over
-    // any bar state colour (busy blue / idle gray / boot yellow). fg encodes the
-    // word: stop=red / wait=yellow / boot=yellow / loop=green. Logic lives in
-    // humanPresenceWord. All four words are 4 chars so pad-to-4 keeps the bar
-    // width constant by accident.
+    // #950+ david `<chat>` 2026-06-14 : drop le texte historique
+    // loop/wait/stop/boot, remplacé par des glyphes. Mapping :
+    //   - loop → ▶️ vert  (autonomous, gate open)
+    //   - wait → ⏸️ orange (auto-pings frozen : AFK armed / user-grace)
+    //   - stop → ⌨️ rouge  (hot input — user en train de taper)
+    //   - boot → vide      (couvert par le 🚀 dans les markers depuis #950)
+    // Le bg noir (colour16) hérite du bloc englobant.
     const word = humanPresenceWord(sd);
+    if (word === "boot") return "";
+    const glyph = word === "stop" ? "⌨️"
+        : word === "wait" ? "⏸️"
+        : "▶️";
     const fg = word === "stop" ? "colour196"
-        : word === "wait" || word === "boot" ? "colour178"
+        : word === "wait" ? "colour178"
         : "colour40";
-    return `#[fg=${fg},bg=colour16]${word.padEnd(4)}`;
+    return `#[fg=${fg},bg=colour16]${glyph}`;
 }
 
 /**
