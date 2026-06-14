@@ -72,6 +72,7 @@ export const CL_ENV = {
     PROXY_DEBUG_TTY: "CL_PROXY_DEBUG_TTY",
     BAR_PAINT_LOG: "CL_BAR_PAINT_LOG",
     PANE_CAPTURE_LOG: "CL_PANE_CAPTURE_LOG",
+    PANE_CAPTURE_WINDOW_MIN: "CL_PANE_CAPTURE_WINDOW_MIN",
 } as const;
 
 export type ClEnvName = typeof CL_ENV[keyof typeof CL_ENV];

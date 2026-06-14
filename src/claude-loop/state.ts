@@ -29,7 +29,7 @@ import {
     setIpcResumeModePicker,
     setIpcResumeSessionPicker,
 } from "./ipc-state.js";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -269,10 +269,30 @@ export function logBarPaint(sd: string | undefined, writer: string, value: strin
 // listing means the pane didn't change. Goal : trace retrospectively
 // what `capture-pane` actually sees during a /compact so we can update
 // the `classifyPaneSpecial` regex/live-signal once and for all.
+// #969 — rotation : on prune les frames > `CL_PANE_CAPTURE_WINDOW_MIN`
+// minutes (default 10) à chaque write. ISO format `YYYY-MM-DDTHH-MM-SS.<ms>Z`
+// est string-orderable donc compare-direct sur le nom, pas de stat.
 export function paneCaptureDir(sd: string): string { return join(sd, "pane-captures"); }
 
 const PANE_CAPTURE_LOG_ENABLED = process.env[CL_ENV.PANE_CAPTURE_LOG] === "1";
+const PANE_CAPTURE_WINDOW_MIN = (() => {
+    const raw = process.env[CL_ENV.PANE_CAPTURE_WINDOW_MIN];
+    const n = raw === undefined ? NaN : Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 10;
+})();
+const PANE_CAPTURE_WINDOW_MS = PANE_CAPTURE_WINDOW_MIN * 60_000;
 let lastPaneCaptureWritten: string | null = null;
+
+export function prunePaneCaptures(dir: string, cutoffMs: number): void {
+    const cutoffIso = new Date(cutoffMs).toISOString().replace(/:/g, "-");
+    try {
+        for (const f of readdirSync(dir)) {
+            if (f.endsWith(".txt") && f < cutoffIso) {
+                try { unlinkSync(join(dir, f)); } catch { /* skip */ }
+            }
+        }
+    } catch { /* dir gone */ }
+}
 
 export function logPaneCapture(sd: string | undefined, text: string): void {
     if (!PANE_CAPTURE_LOG_ENABLED || !sd) return;
@@ -280,9 +300,11 @@ export function logPaneCapture(sd: string | undefined, text: string): void {
     try {
         const dir = paneCaptureDir(sd);
         mkdirSync(dir, { recursive: true });
-        const iso = new Date().toISOString().replace(/:/g, "-");
+        const nowMs = Date.now();
+        const iso = new Date(nowMs).toISOString().replace(/:/g, "-");
         writeFileSync(join(dir, `${iso}.txt`), text);
         lastPaneCaptureWritten = text;
+        prunePaneCaptures(dir, nowMs - PANE_CAPTURE_WINDOW_MS);
     } catch { /* best-effort */ }
 }
 
