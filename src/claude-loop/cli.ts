@@ -1108,7 +1108,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     seedOpt("@cl_afk_glyph", ` #[fg=colour238,bg=colour16]웃`);
     seedOpt(
         "status-left",
-        `#[bg=${bootBg}] #[fg=${bootBg},bg=colour16]▓▒░#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state}#{@cl_afk_glyph} #[fg=${bootBg},bg=colour16]░▒▓#[bg=${bootBg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
+        `#[bg=${bootBg}] #[fg=${bootBg},bg=colour16]▓▒░#{@cl_afk_glyph}#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing}#{@cl_human}#[fg=${col.island_fg}] claude#{@cl_state} #[fg=${bootBg},bg=colour16]░▒▓#[bg=${bootBg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
     );
 
     // Detached timer process. Inherits CL_* env via the env file
