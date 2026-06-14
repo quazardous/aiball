@@ -58,15 +58,15 @@ test("#633F dispatch typing post-boot → arms NOT AFK 10m (ipc)", () => {
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
-test("#633F dispatch typing during boot → no arm (state.inBootGrace)", () => {
+test("#951 dispatch typing during boot → arms NOT AFK 10m (drop legacy gate)", () => {
     const sd = tmp();
     try {
         // loop started "now" → still in 30s floor, no bootComplete, no paneReady.
         writeFileSync(loopStartTsPath(sd), String(Date.now()));
         const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "typing", now_ms: Date.now() });
-        assert.deepEqual(v, { kind: "typing-skipped-boot" });
-        // IPC untouched.
-        assert.equal(getIpcState().afkMode, null);
+        assert.deepEqual(v, { kind: "typing-armed" });
+        // The arm has flipped ipc.afkMode to wait_10m.
+        assert.equal(getIpcState().afkMode, "wait_10m");
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
@@ -368,7 +368,6 @@ test("hook event defaults atMs to now when missing", () => {
 
 test("#633F formatVerdictLogLine covers every verdict variant", () => {
     assert.equal(formatVerdictLogLine({ kind: "typing-armed" }), "proxy-event: typing → armed NOT AFK 10m");
-    assert.equal(formatVerdictLogLine({ kind: "typing-skipped-boot" }), "proxy-event: typing during boot → no arm (state.inBootGrace)");
     assert.equal(formatVerdictLogLine({ kind: "afk-toggled", nextMode: "wait_10m" }), "proxy-event: afk_key → toggled to wait_10m");
     assert.equal(formatVerdictLogLine({ kind: "marker-touched", name: "touch_marker" }), "proxy-event: marker 'touch_marker' applied");
     assert.match(formatVerdictLogLine({ kind: "afk-service-set", mode: "wait_10m", expiryMs: 1_000_000_000_000 }), /AfkService → wait_10m \(expiry=.*\)/);

@@ -22,7 +22,6 @@ import {
     toggleAfk,
     touchHumanTyping,
 } from "./state.js";
-import { computeLoopView } from "./loop-state.js";
 import { armAfkViaService, clearAfkViaService, setAfkInfViaService } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
 import { getIpcState, setIpcLastWakeAtMs, setIpcWakeInFlightAtMs, setIpcWakeRequested } from "./ipc-state.js";
@@ -33,7 +32,6 @@ import { getHookWatcher, type HookWatcherEvent, type SessionStartSource } from "
  *  null means the event was unknown / no-op. */
 export type DispatchVerdict =
     | { kind: "typing-armed" }
-    | { kind: "typing-skipped-boot" }
     | { kind: "typing-skipped-inf" }
     | { kind: "afk-toggled"; nextMode: "off" | "wait_10m" | "wait_inf" }
     | { kind: "marker-touched"; name: "touch_marker" | "touch_user_grace" | "clear_user_grace" | "set_last_wake_at" | "set_wake_requested" | "set_wake_in_flight" }
@@ -50,13 +48,15 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
         const kind = event.event;
         const eventKind = event.kind;
         if (kind === "keystroke" && eventKind === "typing") {
-            // Typing arms NOT AFK 10m only when boot has actually settled
-            // (bootComplete marker exists OR equivalent state). The bus's
-            // pushed view doesn't gate here — readLoopStateInput +
-            // computeLoopView consult bootComplete directly.
+            // #951 david `xn9hfp` : drop le boot-grace gate. Le filtre
+            // initial (typing skip pendant boot) datait de #633 Slice F
+            // (ea23af3, mai 2026) — défensif baked-in sans bug justifiant.
+            // Side-effect : un user qui tapait pendant boot n'armait pas
+            // NOT AFK 10m → l'inject post-boot collidait avec sa frappe.
+            // Les send-keys synthétiques sont déjà filtrés par
+            // `recentlySentKeys()` (state.ts) et la distinction proxy
+            // human-vs-synthetic, donc pas de risque réel.
             const input = readLoopStateInput(sd);
-            const view = computeLoopView(input);
-            if (view.inBootGrace) return { kind: "typing-skipped-boot" };
             // #834 david — NOT AFK ∞ is an explicit human commitment ("je
             // suis là sur la durée"). Typing within that mode is expected,
             // NOT a fresh signal to re-bound the window. Pre-fix, every
@@ -237,7 +237,6 @@ export function formatVerdictLogLine(v: DispatchVerdict): string {
     switch (v.kind) {
         case "typing-armed":         return "proxy-event: typing → armed NOT AFK 10m";
         case "typing-skipped-inf":   return "proxy-event: typing → skipped (NOT AFK ∞ preserved)";
-        case "typing-skipped-boot":  return "proxy-event: typing during boot → no arm (state.inBootGrace)";
         case "afk-toggled":          return `proxy-event: afk_key → toggled to ${v.nextMode}`;
         case "marker-touched":       return `proxy-event: marker '${v.name}' applied`;
         case "afk-service-set":      return `proxy-event: AfkService → ${v.mode}${v.expiryMs !== null ? ` (expiry=${new Date(v.expiryMs).toISOString()})` : ""}`;
