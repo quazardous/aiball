@@ -120,18 +120,18 @@ export interface LoopStateInput {
 
 /** Bar BG state (drives `setTmuxStatus` color). */
 // #715 V2 — bar rendering types live in `bar-render.ts` now ; re-exported
-// here for back-compat so external imports of `Phase` / `BarWord` /
+// here for back-compat so external imports of `Phase` / `Presence` /
 // `AfkChunk` from `loop-state.js` keep working without a churning diff.
-export type { Phase, BarWord, AfkChunk } from "./bar-render.js";
-import type { Phase, BarWord, AfkChunk } from "./bar-render.js";
-import { renderAfkChunk, renderBarBg, renderBarWord } from "./bar-render.js";
+export type { Phase, Presence, AfkChunk } from "./bar-render.js";
+import type { Phase, Presence, AfkChunk } from "./bar-render.js";
+import { renderAfkChunk, renderBarBg, derivePresence } from "./bar-render.js";
 
 /** Fully computed view of the loop. Every consumer paints / gates from this. */
 export interface LoopStateView {
     /** Bar BG. */
     phase: Phase;
-    /** Bar word in the black island. */
-    barWord: BarWord;
+    /** Human presence in the loop (renamed from `barWord` in #954). */
+    presence: Presence;
     /** Status-right AFK segment. */
     afkChunk: AfkChunk;
     /** True iff `tryWake` should proceed. False is paired with a reason. */
@@ -275,12 +275,12 @@ function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: str
  */
 export function computeLoopView(input: LoopStateInput): LoopStateView {
     const phase = renderBarBg(input);
-    const barWord = renderBarWord(input);
+    const presence = derivePresence(input);
     const afkChunk = renderAfkChunk(input);
     const gate = computeWakeGate(input);
     return {
         phase,
-        barWord,
+        presence,
         afkChunk,
         wakeAllowed: gate.allowed,
         wakeSkipReason: gate.reason,
@@ -342,7 +342,7 @@ export function isAfkHeld(view: LoopStateView): boolean {
 
 /** True iff the loop is autonomous (bar word `loop`, AFK chunk dim). */
 export function isAutonomous(view: LoopStateView): boolean {
-    return view.barWord === "loop";
+    return view.presence === "loop";
 }
 
 /** True iff the bar is in the boot visual phase. Use this rather than

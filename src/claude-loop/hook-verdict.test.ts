@@ -26,7 +26,7 @@ import {
 function snap(overrides: Partial<LoopStateSnapshot> = {}): LoopStateSnapshot {
     return {
         phase: "idle",
-        barWord: "loop",
+        presence: "loop",
         afkChunk: { label: "AFK", prefix: null, color: "dim" },
         wakeAllowed: true,
         wakeSkipReason: null,
@@ -84,7 +84,7 @@ test("queryLoopState: ipc-only post-boot snapshot", async () => {
     setIpcBootComplete(true);
     setIpcPaneReady(true);
     const state = await queryLoopState(sd);
-    assert.ok(typeof state.barWord === "string", "snapshot carries barWord");
+    assert.ok(typeof state.presence === "string", "snapshot carries presence");
     assert.ok(typeof state.phase === "string", "snapshot carries phase");
     assert.equal(state.inBootGrace, false, "post-boot, not in grace");
     assert.equal(state.afkHoldActive, false, "no afk ipc → no hold");
@@ -94,7 +94,7 @@ test("queryLoopState: empty sd → inBootGrace=true (the boot floor applies)", a
     const sd = tmp();
     const state = await queryLoopState(sd);
     assert.equal(state.inBootGrace, true);
-    assert.equal(state.barWord, "boot");
+    assert.equal(state.presence, "boot");
 });
 
 test("queryLoopState: afk ipc 'wait_inf' → afkHoldActive=true", async () => {

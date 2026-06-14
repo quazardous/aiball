@@ -138,7 +138,7 @@ export async function cmdInspect(name: string): Promise<void> {
         now_ms: input.nowMs,
         view: {
             phase: view.phase,
-            bar_word: view.barWord,
+            presence: view.presence,
             in_boot_grace: view.inBootGrace,
             afk_chunk: view.afkChunk,
             wake_allowed: view.wakeAllowed,

@@ -1082,7 +1082,7 @@ function loopStartMs(sd: string | undefined): number {
  *              marker armed
  *   - `loop` — autonomous (managed mode), incl. --no-wait
  */
-export function humanPresenceWord(sd: string | undefined): "stop" | "wait" | "boot" | "loop" {
+export function humanPresence(sd: string | undefined): "stop" | "wait" | "boot" | "loop" {
     // #627 — delegate to the central LoopState service so the bar word
     // computation matches the one used by every other consumer (timer,
     // proxy mirror, hooks). #745 phase B — the legacy `graceSec` arg
@@ -1091,10 +1091,10 @@ export function humanPresenceWord(sd: string | undefined): "stop" | "wait" | "bo
     // `boot` par construction. Cohérent avec le fix proxy `_rest_word` +
     // template fallback (70cd3f4). Couvre le _rest_word bootstrap = BOOT
     if (!sd) return "boot";
-    return computeLoopView(readLoopStateInput(sd)).barWord;
+    return computeLoopView(readLoopStateInput(sd)).presence;
 }
 
-export function humanBarWord(sd: string | undefined): string {
+export function humanPresenceChunk(sd: string | undefined): string {
     // #950+ david `<chat>` 2026-06-14 : drop le texte historique
     // loop/wait/stop/boot, remplacé par des glyphes. Mapping :
     //   - loop → ▶️ vert  (autonomous, gate open)
@@ -1102,7 +1102,7 @@ export function humanBarWord(sd: string | undefined): string {
     //   - stop → ⌨️ rouge  (hot input — user en train de taper)
     //   - boot → vide      (couvert par le 🚀 dans les markers depuis #950)
     // Le bg noir (colour16) hérite du bloc englobant.
-    const word = humanPresenceWord(sd);
+    const word = humanPresence(sd);
     if (word === "boot") return "";
     // Plain text variants (pas de U+FE0F variation selector) — sans ça
     // les terminaux forcent le rendu emoji COLORÉ natif et ignorent le

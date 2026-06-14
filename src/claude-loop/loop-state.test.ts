@@ -76,7 +76,7 @@ function baseInput(overrides: Partial<LoopStateInput> = {}): LoopStateInput {
 test("boot phase under --wait, picker not yet rendered", () => {
     const v = computeLoopView(baseInput({ nowMs: T0 + 5 * SEC }));
     assert.equal(v.phase, "boot");
-    assert.equal(v.barWord, "boot");
+    assert.equal(v.presence, "boot");
     assert.equal(v.afkChunk.label, "AFK");
     assert.equal(v.afkChunk.color, "dim");
     assert.equal(v.inBootGrace, true);
@@ -110,7 +110,7 @@ test("boot phase under --no-wait + picker active → boot stretches (picker pre-
         bootDeadlineMs: T0 + 40 * SEC,
     }));
     assert.equal(v.phase, "boot");
-    assert.equal(v.barWord, "boot");
+    assert.equal(v.presence, "boot");
     assert.equal(v.inBootGrace, true);
 });
 
@@ -171,7 +171,7 @@ test("LoopStateBus: current() returns null until first update, then the last vie
     assert.equal(bus.current(), null);
     bus.update(baseInput());
     assert.notEqual(bus.current(), null);
-    assert.equal(bus.current()!.barWord, "boot");
+    assert.equal(bus.current()!.presence, "boot");
 });
 
 test("paneReady=true (post-picker, no transient text) → boot ends", () => {
@@ -184,7 +184,7 @@ test("paneReady=true (post-picker, no transient text) → boot ends", () => {
         idleSinceMs: T0 + 30 * SEC,
     }));
     assert.equal(v.inBootGrace, false);
-    assert.equal(v.barWord, "loop");
+    assert.equal(v.presence, "loop");
 });
 
 test("boot phase: claude shows `esc to interrupt` (transient) → bar still boot", () => {
@@ -193,7 +193,7 @@ test("boot phase: claude shows `esc to interrupt` (transient) → bar still boot
         paneBusy: true,
     }));
     assert.equal(v.phase, "boot");
-    assert.equal(v.barWord, "boot");
+    assert.equal(v.presence, "boot");
 });
 
 test("boot phase: typing in resume picker → no stop, no AFK arming", () => {
@@ -202,7 +202,7 @@ test("boot phase: typing in resume picker → no stop, no AFK arming", () => {
         humanTypingAtMs: T0 + 14 * SEC,
     }));
     // boot still wins over stop ; consumer (proxy) gates the arm side
-    assert.equal(v.barWord, "boot");
+    assert.equal(v.presence, "boot");
     assert.equal(v.afkChunk.label, "AFK");
 });
 
@@ -221,7 +221,7 @@ test("post-boot --wait + NOT AFK 10m armed → wait jaune + wake skip", () => {
         idleSinceMs: now - SEC,
     }));
     assert.equal(v.phase, "idle");
-    assert.equal(v.barWord, "wait");
+    assert.equal(v.presence, "wait");
     assert.equal(v.afkChunk.label, "NOT AFK");
     assert.equal(v.afkChunk.color, "yellow");
     assert.equal(v.afkChunk.prefix, "600s");
@@ -239,7 +239,7 @@ test("post-boot --no-wait + AFK off → loop vert + wake allowed", () => {
         idleSinceMs: now - SEC,
     }));
     assert.equal(v.phase, "idle");
-    assert.equal(v.barWord, "loop");
+    assert.equal(v.presence, "loop");
     assert.equal(v.afkChunk.label, "AFK");
     assert.equal(v.afkChunk.color, "dim");
     assert.equal(v.wakeAllowed, true);
@@ -260,7 +260,7 @@ test("F9 from AFK → NOT AFK 10m → bar wait jaune", () => {
         afkExpiryMs: now + 10 * MIN,
         idleSinceMs: now - 5 * SEC,
     }));
-    assert.equal(v.barWord, "wait");
+    assert.equal(v.presence, "wait");
     assert.equal(v.afkChunk.label, "NOT AFK");
     assert.equal(v.afkChunk.color, "yellow");
 });
@@ -274,7 +274,7 @@ test("F9 from NOT AFK 10m → NOT AFK ∞ → bar wait rouge", () => {
         afkMode: "wait_inf",
         idleSinceMs: now,
     }));
-    assert.equal(v.barWord, "wait");
+    assert.equal(v.presence, "wait");
     assert.equal(v.afkChunk.label, "NOT AFK");
     assert.equal(v.afkChunk.color, "red");
     assert.equal(v.afkChunk.prefix, "∞");
@@ -289,7 +289,7 @@ test("F9 from NOT AFK ∞ → AFK → bar loop vert", () => {
         afkMode: "off",
         idleSinceMs: now,
     }));
-    assert.equal(v.barWord, "loop");
+    assert.equal(v.presence, "loop");
     assert.equal(v.afkChunk.label, "AFK");
 });
 
@@ -333,7 +333,7 @@ test("AFK 10m auto-expires → bar loop vert + wake allowed", () => {
         afkExpiryMs: start + 11 * MIN, // expired 4 minutes ago
         idleSinceMs: now - 5 * SEC,
     }));
-    assert.equal(v.barWord, "loop");
+    assert.equal(v.presence, "loop");
     assert.equal(v.afkChunk.label, "AFK");
     assert.equal(v.afkChunk.color, "dim");
     assert.equal(v.wakeAllowed, true);
@@ -354,7 +354,7 @@ test("typing post-boot → stop red (overrides AFK 10m wait word)", () => {
         afkExpiryMs: now + 5 * MIN,
         idleSinceMs: now - 2 * SEC,
     }));
-    assert.equal(v.barWord, "stop");
+    assert.equal(v.presence, "stop");
     assert.equal(v.afkChunk.label, "NOT AFK"); // chunk unaffected by typing
 });
 
@@ -369,7 +369,7 @@ test("typing TTL expired (>5s ago) → bar reverts to AFK-driven state", () => {
         afkExpiryMs: now + 5 * MIN,
         idleSinceMs: now,
     }));
-    assert.equal(v.barWord, "wait");
+    assert.equal(v.presence, "wait");
 });
 
 // ---------------------------------------------------------------------------
@@ -490,7 +490,7 @@ test("zero boot-grace + zero floor + paneReady → never in boot phase", () => {
     }));
     assert.equal(v.inBootGrace, false);
     assert.equal(v.phase, "idle");
-    assert.equal(v.barWord, "loop");
+    assert.equal(v.presence, "loop");
 });
 
 test("AFK wait_10m with null expiry → treated as inactive", () => {
@@ -503,7 +503,7 @@ test("AFK wait_10m with null expiry → treated as inactive", () => {
         afkExpiryMs: null,
         idleSinceMs: now,
     }));
-    assert.equal(v.barWord, "loop"); // not active
+    assert.equal(v.presence, "loop"); // not active
     assert.equal(v.afkChunk.label, "AFK"); // dim
 });
 
@@ -672,7 +672,7 @@ test("resume picker active 10 min in → still in boot (no time cap)", () => {
         bootDeadlineMs: now + 10 * SEC,
     }));
     assert.equal(v.inBootGrace, true);
-    assert.equal(v.barWord, "boot");
+    assert.equal(v.presence, "boot");
     assert.equal(v.phase, "boot");
 });
 
@@ -688,7 +688,7 @@ test("bootComplete signal flips boot OFF post-floor (floor still wins inside)", 
         idleSinceMs: start,
     }));
     assert.equal(inside.inBootGrace, true);
-    assert.equal(inside.barWord, "boot");
+    assert.equal(inside.presence, "boot");
     // Past floor (T+45s) : bootComplete flips out of boot.
     const past = computeLoopView(baseInput({
         nowMs: start + 45 * SEC,
@@ -697,7 +697,7 @@ test("bootComplete signal flips boot OFF post-floor (floor still wins inside)", 
         idleSinceMs: start + 44 * SEC,
     }));
     assert.equal(past.inBootGrace, false);
-    assert.equal(past.barWord, "loop");
+    assert.equal(past.presence, "loop");
 });
 
 test("bootComplete wins over picker post-floor (no re-entry once sealed)", () => {
@@ -714,7 +714,7 @@ test("bootComplete wins over picker post-floor (no re-entry once sealed)", () =>
         idleSinceMs: now,
     }));
     assert.equal(v.inBootGrace, false);
-    assert.equal(v.barWord, "loop");
+    assert.equal(v.presence, "loop");
 });
 
 test("paneReady=true post-floor → boot ends (probe-driven settle)", () => {
@@ -730,7 +730,7 @@ test("paneReady=true post-floor → boot ends (probe-driven settle)", () => {
         idleSinceMs: now,
     }));
     assert.equal(v.inBootGrace, false);
-    assert.equal(v.barWord, "loop");
+    assert.equal(v.presence, "loop");
 });
 
 test("paneReady=false post-floor → still boot (claude not at prompt yet)", () => {
@@ -746,7 +746,7 @@ test("paneReady=false post-floor → still boot (claude not at prompt yet)", () 
         bootDeadlineMs: now + 10 * SEC,  // #872 — watcher push
     }));
     assert.equal(v.inBootGrace, true);
-    assert.equal(v.barWord, "boot");
+    assert.equal(v.presence, "boot");
 });
 
 test("paneCompacting stretches boot only PRE-settle (post-resume compact)", () => {
@@ -762,7 +762,7 @@ test("paneCompacting stretches boot only PRE-settle (post-resume compact)", () =
         bootDeadlineMs: now + 10 * SEC,  // #872 — watcher push (compacting stretch)
     }));
     assert.equal(pre.inBootGrace, true);
-    assert.equal(pre.barWord, "boot");
+    assert.equal(pre.presence, "boot");
     // Post-settle : mid-session /compact does NOT re-enter boot.
     const post = computeLoopView(baseInput({
         nowMs: now,
@@ -775,7 +775,7 @@ test("paneCompacting stretches boot only PRE-settle (post-resume compact)", () =
     }));
     assert.equal(post.inBootGrace, false);
     assert.equal(post.phase, "busy");
-    assert.equal(post.barWord, "loop");
+    assert.equal(post.presence, "loop");
 });
 
 test("floor inviolable : no signal can leave boot before bootMinMs elapses", () => {
@@ -792,7 +792,7 @@ test("floor inviolable : no signal can leave boot before bootMinMs elapses", () 
         idleSinceMs: now,
     }));
     assert.equal(v.inBootGrace, true);
-    assert.equal(v.barWord, "boot");
+    assert.equal(v.presence, "boot");
 });
 
 // ---------------------------------------------------------------------------

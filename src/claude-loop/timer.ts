@@ -70,7 +70,7 @@ import {
     touchHumanTyping,
     writeDrainedState,
     tmuxName,
-    humanPresenceWord,
+    humanPresence,
     logBarPaint,
     logPaneCapture,
     zenPath,
@@ -1817,7 +1817,7 @@ async function mainSse(): Promise<void> {
         // #629 (xyss9z) : trace which writer drove the @cl_human change.
         // The timer doesn't setOpt directly — the proxy does, after receiving
         // the pushed view — but the timer is the ORIGIN of the value.
-        logBarPaint(sd, "timer.ts:bus.transition", next.barWord);
+        logBarPaint(sd, "timer.ts:bus.transition", next.presence);
     });
     // #872 Phase 3 — `performBootSeal` + `bootSealTimer` + `loopBus.on("bootEnded"/"bootStarted")`
     //   retirés. Le BootMachine acteur (cf. boot-machine.ts) est l'unique
@@ -2127,7 +2127,7 @@ async function mainSse(): Promise<void> {
         // human present) instead of the deprecated user-grace.
         try {
             const human = humanIsTyping(sd!) || afkActive(sd!);
-            const humanWord = humanPresenceWord(sd);
+            const humanWord = humanPresence(sd);
             await client().pushState(phase, human, humanWord, loopCwd, loopProject);
         } catch { /* daemon down or transient — next tick retries */ }
         // #636 david — pytest harnesses spawn the loop with CL_RUN_ONCE=1, wait

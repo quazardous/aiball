@@ -7,8 +7,8 @@
  * `isAfkActive`, `computeWakeGate`, the bus. This file consumes the SM
  * helpers and produces the bar's three rendering dimensions :
  *   - `Phase`     — bar BG (`boot` / `idle` / `busy`)
- *   - `BarWord`   — bar word in the black island (`boot` / `stop` /
- *                   `wait` / `loop`)
+ *   - `Presence` — human presence in the loop (`boot` / `stop` /
+ *                   `wait` / `loop`). Renamed from `BarWord` in #954.
  *   - `AfkChunk`  — status-right `AFK:F9` / `NOT AFK:F9` chunk descriptor
  *
  * Pure : no fs, no `Date.now`, no side effects. Consumers (`computeLoopView`,
@@ -22,7 +22,11 @@ import { effectiveAfkMode, isAfkActive, isInBootGrace, isTypingNow, type AfkMode
 export type Phase = "boot" | "idle" | "busy";
 
 /** Bar word in the black island. */
-export type BarWord = "boot" | "stop" | "wait" | "loop";
+/** #954 david `x4affp` : "word" disparaît du vocabulaire — la barre
+ *  affiche des glyphes maintenant, le concept reste le statut de
+ *  présence du human dans la loop. Valeurs conservées pour limiter
+ *  le refactor (changement de container, pas de sémantique). */
+export type Presence = "boot" | "stop" | "wait" | "loop";
 
 /** Status-right `AFK:F9` / `NOT AFK:F9` chunk descriptor. */
 export interface AfkChunk {
@@ -49,9 +53,11 @@ export function renderBarBg(input: LoopStateInput): Phase {
     return "idle";
 }
 
-/** Bar word in the black island.
- *  Priority: boot > stop (live typing) > AFK active → wait > loop. */
-export function renderBarWord(input: LoopStateInput): BarWord {
+/** Human presence in the loop (#954 `x4affp` — renamed from the
+ *  legacy `renderBarWord`/`barWord`). Priority : boot > stop (live
+ *  typing) > AFK active → wait > loop. Valeurs conservées par souci
+ *  de containment ; mapping vers les glyphes via `humanPresenceChunk`. */
+export function derivePresence(input: LoopStateInput): Presence {
     if (isInBootGrace(input)) return "boot";
     if (isTypingNow(input)) return "stop";
     if (isAfkActive(input)) return "wait";

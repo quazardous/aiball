@@ -26,7 +26,7 @@ import {
     MUX_CMD,
     afkStateChunkStr,
     barColors,
-    humanBarWord,
+    humanPresenceChunk,
     logBarPaint,
     proxyIsAlive,
     readLoopStateInput,
@@ -150,7 +150,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
     const input = readLoopStateInput(sd);
     const view = computeLoopView(input);
     const proxyAlive = proxyIsAlive(sd);
-    const humanWord = humanBarWord(sd);
+    const humanWord = humanPresenceChunk(sd);
     const loopStatus: LoopStatus = view.phase === "boot"
         ? LOOP_STATUS.BOOT
         : view.phase === "busy"
