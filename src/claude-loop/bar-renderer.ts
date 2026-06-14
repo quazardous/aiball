@@ -81,26 +81,35 @@ export interface BarSnapshot {
  *  / décoration colon — chaque axe est un token compact, les axes
  *  vides sont juste absents (pas de séparateur résiduel).
  *
- *  Axes (zones) actuelles, dans l'ordre d'affichage :
- *  - loopStatus (toujours présent) : `idle` / `busy` / `boot`
- *  - stateTagInfo (optionnel) : `wait` / `retry N` / `compacting` /
- *    `resuming` / `interrupted` — texte court posé par les hooks via
- *    `setIpcStateTagInfo`. Décomposition par axe à venir dans une
- *    slice ultérieure.
- *  - healthPromptVisible (optionnel) : `🏥` quand Claude Code affiche
- *    son prompt natif de feedback (#949).
+ *  Convention david :
+ *  - `❓ <name>` = Claude Code attend une réponse user (health prompt,
+ *    resume picker, mode picker). Le glyph `❓` est le marqueur commun
+ *    "genre question", suffixé par le nom court de la question.
+ *  - `⚠️ <name>` = condition erreur backend (retry N, …). Le glyph
+ *    `⚠️` est le marqueur commun "genre warning".
+ *  - autres tokens (`wait` / `compacting` / `resuming` / `interrupted`)
+ *    restent text-only — états internes, pas une question ni une
+ *    erreur.
  *
- *  Cette zone vit dans le bloc fond NOIR (colour16) à gauche, collée
- *  à `claude-loop` (meilleur contraste, davids `<chat>`). Le caller
- *  est responsable du fg/bg dans la format string. */
+ *  Zone vit dans le bloc fond NOIR (colour16) à gauche, collée à
+ *  `claude-loop`. Le caller (paint) gère fg/bg dans la format string. */
 function renderMarkerSegment(
     loopStatus: LoopStatus,
     info: string | null,
     healthPromptVisible: boolean,
+    resumePickerActive: boolean,
+    resumeModePickerActive: boolean,
 ): string {
     const parts: string[] = [loopStatus];
-    if (info) parts.push(info);
-    if (healthPromptVisible) parts.push("🏥");
+    if (info) {
+        // `retry N` (error-backoff) → préfixe warning. Les autres infos
+        // (wait, compacting, etc.) restent telles quelles.
+        parts.push(/^retry /.test(info) ? `⚠️ ${info}` : info);
+    }
+    // Question-genre markers — Claude Code attend un input user.
+    if (resumePickerActive) parts.push("❓ resume");
+    if (resumeModePickerActive) parts.push("❓ mode");
+    if (healthPromptVisible) parts.push("❓ health");
     return parts.join(" ");
 }
 
@@ -117,7 +126,13 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
             ? LOOP_STATUS.BUSY
             : LOOP_STATUS.IDLE;
     const ipc = getIpcState();
-    const stateTag = renderMarkerSegment(loopStatus, ipc.stateTagInfo, ipc.healthPromptVisible);
+    const stateTag = renderMarkerSegment(
+        loopStatus,
+        ipc.stateTagInfo,
+        ipc.healthPromptVisible,
+        ipc.resumeSessionPickerActive === true,
+        ipc.resumeModePickerActive === true,
+    );
     const zenActive = existsSync(zenPath(sd));
     const counters = ipc.counters;
     const afkChipStr = afkStateChunkStr(sd);
