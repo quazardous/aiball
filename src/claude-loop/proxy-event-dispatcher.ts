@@ -53,9 +53,13 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             // (ea23af3, mai 2026) — défensif baked-in sans bug justifiant.
             // Side-effect : un user qui tapait pendant boot n'armait pas
             // NOT AFK 10m → l'inject post-boot collidait avec sa frappe.
-            // Les send-keys synthétiques sont déjà filtrés par
-            // `recentlySentKeys()` (state.ts) et la distinction proxy
-            // human-vs-synthetic, donc pas de risque réel.
+            // #965 david `<chat>` 2026-06-14 : les frappes synthétiques
+            // (auto-cross resume picker, self-interrupt, wake) doivent
+            // transiter par `inject.sock` (canal séparé du stdin proxy
+            // donc invisible au typing detector), pas par `tmux send-keys`
+            // qui rentre dans le stdin du proxy = indistinguable d'un
+            // humain. Le `recentlySentKeys` legacy est obsolète (cf.
+            // pty-proxy.py:24).
             const input = readLoopStateInput(sd);
             // #834 david — NOT AFK ∞ is an explicit human commitment ("je
             // suis là sur la durée"). Typing within that mode is expected,

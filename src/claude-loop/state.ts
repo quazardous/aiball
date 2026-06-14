@@ -2163,6 +2163,29 @@ async function injectViaLoopSocket(sockPath: string, phrase: string): Promise<{ 
 }
 
 /**
+ * #965 — envoie des bytes raw directement au PTY de claude via le canal
+ * `inject.sock` (folded dans `loop.sock`). Contrairement à
+ * `injectWakePhrase`, n'ajoute PAS d'Enter implicite — utilisé par les
+ * call-sites qui veulent passer des keystrokes synthétiques (Enter,
+ * Down, Escape, …) sans que le proxy les voie comme une frappe humaine
+ * via son stdin (cf. pty-proxy.py:14-24 — séparation physique des canaux).
+ *
+ * Returns true si l'inject a réussi, false sinon (loop.sock absent, proxy
+ * pas subscribed, timeout). Le caller décide du fallback (typiquement
+ * `tmux send-keys` avec un log de dégradation).
+ */
+export async function injectRawBytes(sd: string, bytes: string): Promise<boolean> {
+    const sock = loopSockPath(sd);
+    if (!existsSync(sock)) return false;
+    try {
+        await sendEventOnce(sock, { kind: "inject", data: { text: bytes } }, { timeoutMs: 2000, throwOnError: true });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Optional context attached to a wake — typically the SSE ping
  * payload (`{ ticket_id, comment_id, comment_hashid, intent }`).
  * When present, the wake phrase names the concrete artifact instead

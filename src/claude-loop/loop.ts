@@ -71,6 +71,7 @@ import {
     writeDrainedState,
     tmuxName,
     humanPresence,
+    injectRawBytes,
     logBarPaint,
     logPaneCapture,
     zenPath,
@@ -657,7 +658,14 @@ if (sd) {
             return;
         }
         log(`watcher: resume_picker begin → auto-cross (pick=${pickMode}, Enter)`);
-        spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
+        // #965 — Enter via inject.sock (proxy écrit directement au PTY
+        // de claude, pas vu comme une frappe humaine). Fallback send-keys
+        // si inject down (cold-boot, proxy pas encore subscribed).
+        void (async () => {
+            if (await injectRawBytes(sd!, "\r")) return;
+            log("watcher: resume_picker — inject down, fallback send-keys (peut armer AFK 10m)");
+            spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
+        })();
     });
     pickerSessionW.on("end", () => forwardModuleEnded("resume_picker"));
     pickerModeW.on("change", (s) => { setResumeModePicker(sd, s.visible); refreshPaneReady(); });
@@ -671,12 +679,21 @@ if (sd) {
             return;
         }
         log(`watcher: resume_mode begin → auto-cross (mode=${mode})`);
-        if (mode === "as-is") {
-            spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Down"], { stdio: "ignore" });
-        }
-        spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
+        // #965 — Down + Enter via inject.sock. Down = `\x1b[B` (CSI).
+        void (async () => {
+            if (mode === "as-is") {
+                if (!(await injectRawBytes(sd!, "\x1b[B"))) {
+                    log("watcher: resume_mode — inject down for Down, fallback send-keys");
+                    spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Down"], { stdio: "ignore" });
+                }
+            }
+            if (!(await injectRawBytes(sd!, "\r"))) {
+                log("watcher: resume_mode — inject down for Enter, fallback send-keys");
+                spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Enter"], { stdio: "ignore" });
+            }
+        })();
+        return;
     });
-    pickerModeW.on("end", () => forwardModuleEnded("resume_mode"));
     resumingW.on("change", (s) => { setResuming(sd, s.visible); refreshPaneReady(); });
     resumingW.on("begin", () => forwardModuleStarted("resuming"));
     resumingW.on("end", () => forwardModuleEnded("resuming"));
@@ -805,7 +822,13 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
     // current generation. Two Escapes mirror the user's own "abort"
     // chord; a single Escape is sometimes consumed by claude's TUI.
     if (interruptFirst) {
-        spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Escape", "Escape"], { stdio: "ignore" });
+        // #965 — Escape Escape via inject.sock (le proxy ne le voit pas
+        // comme une frappe humaine via son stdin). Fallback send-keys si
+        // l'inject échoue.
+        if (!(await injectRawBytes(sd!, "\x1b\x1b"))) {
+            log("self-interrupt: inject down, fallback send-keys (peut armer AFK 10m)");
+            spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Escape", "Escape"], { stdio: "ignore" });
+        }
         await sleep(500);
     }
     await injectWakePhrase(`${tname}.0`, phrase, () => {
