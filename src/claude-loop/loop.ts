@@ -449,7 +449,7 @@ function selfReloadIfStale(): void {
         "-lc",
         `source ${shQuote(envPath(sd!))} && exec ${tsxBin} ${shQuote(timerScript)}`,
     ], { detached: true, stdio: ["ignore", logFd, logFd], env: respawnEnv }).unref();
-    log("timer respawned (detached) — new child will record its own pid at boot");
+    log("loop respawned (detached) — new child will record its own pid at boot");
     process.exit(0);
 }
 
@@ -1860,7 +1860,7 @@ async function mainSse(): Promise<void> {
         // #629 (xyss9z) : trace which writer drove the @cl_human change.
         // The timer doesn't setOpt directly — the proxy does, after receiving
         // the pushed view — but the timer is the ORIGIN of the value.
-        logBarPaint(sd, "timer.ts:bus.transition", next.presence);
+        logBarPaint(sd, "loop.ts:bus.transition", next.presence);
     });
     // #872 Phase 3 — `performBootSeal` + `bootSealTimer` + `loopBus.on("bootEnded"/"bootStarted")`
     //   retirés. Le BootMachine acteur (cf. boot-machine.ts) est l'unique

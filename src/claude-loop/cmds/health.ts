@@ -1,7 +1,7 @@
 /**
  * `claude-loop health [<name>]` — plomberie diagnostic (#860).
  *
- * 9 checks par loop : timer process + source SHA, loop.sock UDS, proxy
+ * 9 checks par loop : loop process + source SHA, loop.sock UDS, proxy
  * alive, tmux session, ipc freshness, boot status, aiball daemon, SSE.
  * Sortie text colorée (✅/⚠️/❌) ou `--json`. Exit code = 0 si tout
  * OK, 1 si un check ❌, 2 si au moins un ⚠️.
@@ -75,35 +75,35 @@ function probePid(pidPath: string, cmdlineMatch: RegExp): PidProbe {
     return { pid, alive, cmdline };
 }
 
-export function checkTimer(sd: string): HealthCheck {
+export function checkLoop(sd: string): HealthCheck {
     const p = probePid(loopPidPath(sd), /loop\.ts/);
-    if (p.pid === null) return { name: "timer", status: "fail", detail: "loop.pid missing / unreadable" };
-    if (!p.alive) return { name: "timer", status: "fail", detail: `pid ${p.pid} not running` };
+    if (p.pid === null) return { name: "loop", status: "fail", detail: "loop.pid missing / unreadable" };
+    if (!p.alive) return { name: "loop", status: "fail", detail: `pid ${p.pid} not running` };
     if (p.cmdline === null) {
         return {
-            name: "timer",
+            name: "loop",
             status: "fail",
-            detail: `pid ${p.pid} alive but cmdline doesn't match timer.ts (= pid recycled)`,
+            detail: `pid ${p.pid} alive but cmdline doesn't match loop.ts (= pid recycled)`,
         };
     }
-    return { name: "timer", status: "ok", detail: `pid ${p.pid} running (tsx + timer.ts)` };
+    return { name: "loop", status: "ok", detail: `pid ${p.pid} running (tsx + loop.ts)` };
 }
 
-export function checkTimerSource(sd: string): HealthCheck {
+export function checkLoopSource(sd: string): HealthCheck {
     let plate: Plate;
     try { plate = readPlate(sd); }
-    catch { return { name: "timer source", status: "warn", detail: "plate.json missing — can't compare SHA" }; }
+    catch { return { name: "loop source", status: "warn", detail: "plate.json missing — can't compare SHA" }; }
     const boot = plate.started_at_sha;
     const now = installRootSha();
     if (boot === null || boot === undefined) {
-        return { name: "timer source", status: "warn", detail: "plate.started_at_sha unset" };
+        return { name: "loop source", status: "warn", detail: "plate.started_at_sha unset" };
     }
     if (now === null) {
-        return { name: "timer source", status: "warn", detail: `boot SHA ${boot.slice(0, 7)} — current SHA unknown (no .git?)` };
+        return { name: "loop source", status: "warn", detail: `boot SHA ${boot.slice(0, 7)} — current SHA unknown (no .git?)` };
     }
-    if (boot === now) return { name: "timer source", status: "ok", detail: `SHA ${now.slice(0, 7)} (current)` };
+    if (boot === now) return { name: "loop source", status: "ok", detail: `SHA ${now.slice(0, 7)} (current)` };
     return {
-        name: "timer source",
+        name: "loop source",
         status: "warn",
         detail: `stale (boot=${boot.slice(0, 7)}, now=${now.slice(0, 7)}) — reload to pick up new code`,
     };
@@ -286,8 +286,8 @@ export async function runHealthChecks(name: string): Promise<HealthReport> {
             summary: { ok: 0, warn: 0, fail: 1 },
         };
     }
-    checks.push(checkTimer(sd));
-    checks.push(checkTimerSource(sd));
+    checks.push(checkLoop(sd));
+    checks.push(checkLoopSource(sd));
     const { live, latencyMs, sockMissing } = await queryUdsLoopState(sd);
     checks.push(checkLoopSock(latencyMs, sockMissing, live));
     checks.push(checkProxy(sd));

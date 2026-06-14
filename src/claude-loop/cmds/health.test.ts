@@ -14,8 +14,8 @@ process.env.AIBALL_HOME = mkdtempSync(join(tmpdir(), "aiball-860-"));
 process.env.CLAUDE_LOOP_STATE_ROOT = mkdtempSync(join(tmpdir(), "claude-loop-860-"));
 
 const {
-    checkTimer,
-    checkTimerSource,
+    checkLoop,
+    checkLoopSource,
     checkLoopSock,
     checkProxy,
     checkIpcFreshness,
@@ -30,52 +30,52 @@ function mkSd(name: string): string {
     return sd;
 }
 
-test("checkTimer: pid file missing → fail", () => {
+test("checkLoop: pid file missing → fail", () => {
     const sd = mkSd("c1");
-    const c = checkTimer(sd);
+    const c = checkLoop(sd);
     assert.equal(c.status, "fail");
     assert.match(c.detail, /loop\.pid missing/);
 });
 
-test("checkTimer: pid file with non-numeric → fail", () => {
+test("checkLoop: pid file with non-numeric → fail", () => {
     const sd = mkSd("c1b");
     writeFileSync(join(sd, "loop.pid"), "not-a-number\n");
-    const c = checkTimer(sd);
+    const c = checkLoop(sd);
     assert.equal(c.status, "fail");
 });
 
-test("checkTimer: live pid but cmdline doesn't match loop.ts → fail (pid recycled)", () => {
+test("checkLoop: live pid but cmdline doesn't match loop.ts → fail (pid recycled)", () => {
     const sd = mkSd("c2");
     // Our own pid is alive, but the cmdline is node --test, not loop.ts.
     writeFileSync(join(sd, "loop.pid"), `${process.pid}\n`);
-    const c = checkTimer(sd);
+    const c = checkLoop(sd);
     assert.equal(c.status, "fail");
     assert.match(c.detail, /cmdline doesn't match|not running/);
 });
 
-test("checkTimerSource: plate.json missing → warn", () => {
+test("checkLoopSource: plate.json missing → warn", () => {
     const sd = mkSd("c3");
-    const c = checkTimerSource(sd);
+    const c = checkLoopSource(sd);
     assert.equal(c.status, "warn");
 });
 
-test("checkTimerSource: matching SHA → ok", async () => {
+test("checkLoopSource: matching SHA → ok", async () => {
     const sd = mkSd("c4");
     const { installRootSha } = await import("../state.js");
     const sha = installRootSha();
     if (sha === null) return; // env doesn't have git, skip.
     const plate = { sd, name: "c4", cwd: "/tmp", started_at: 0, started_at_sha: sha, interval: 60 };
     writeFileSync(join(sd, "plate.json"), JSON.stringify(plate));
-    const c = checkTimerSource(sd);
+    const c = checkLoopSource(sd);
     assert.equal(c.status, "ok");
     assert.match(c.detail, /current/);
 });
 
-test("checkTimerSource: stale SHA → warn", () => {
+test("checkLoopSource: stale SHA → warn", () => {
     const sd = mkSd("c5");
     const plate = { sd, name: "c5", cwd: "/tmp", started_at: 0, started_at_sha: "deadbeefcafebabe", interval: 60 };
     writeFileSync(join(sd, "plate.json"), JSON.stringify(plate));
-    const c = checkTimerSource(sd);
+    const c = checkLoopSource(sd);
     assert.equal(c.status, "warn");
     assert.match(c.detail, /stale|unknown/);
 });
