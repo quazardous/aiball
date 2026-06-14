@@ -1013,8 +1013,9 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // pour qu'un `claude-loop reload` propage correctement (les
     // status-right initiaux ne sont set qu'une seule fois au cmdStart).
     // david 2026-06-14 : `AFK:F9` complètement à droite, après le hint
-    // DETACH. Ordre status-right : `<zen> <name> · DETACH:<key> AFK:F9`.
-    const keysHint = `#{@cl_zen}#[fg=${ctx.colors.bar_fg}]#{@cl_name} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} ${afkStatic} `;
+    // DETACH. #964 david : séparateur `·` aussi devant AFK pour
+    // symétrie avec DETACH. Ordre : `<zen> <name> · DETACH:<key> · AFK:F9`.
+    const keysHint = `#{@cl_zen}#[fg=${ctx.colors.bar_fg}]#{@cl_name} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} #[fg=${ctx.colors.afk_label_fg}]· ${afkStatic} `;
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", keysHint], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right-length", "60"], { stdio: "ignore" });
     // #619 david `ge2emb` : suppress the tmux window-status list (the
