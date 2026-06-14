@@ -27,6 +27,7 @@ import {
     afkStateChunkStr,
     barColors,
     humanPresenceChunk,
+    typingGlyphChunk,
     logBarPaint,
     proxyIsAlive,
     readLoopStateInput,
@@ -78,6 +79,10 @@ export interface BarSnapshot {
      *  Code est visible, peint AVANT le mot `claude` dans le bloc
      *  fond noir. Empty quand absent. */
     promptGlyph: string;
+    /** #953 david `<chat>` : glyphe `⌨` rouge quand le user tape
+     *  activement. Indépendant du wait/loop — affiché en plus, pas
+     *  en remplacement. Placé entre @cl_prompt et @cl_human. */
+    typingGlyph: string;
 }
 
 /** #950 david `<chat>` : compose les tokens orthogonaux du marker
@@ -217,6 +222,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         // instant sur prochain SSE / idle:settled, pas de countdown.
     }
     const promptGlyph = ipc.promptZoneVisible ? "❯" : "";
+    const typingGlyph = typingGlyphChunk(sd);
     return {
         humanWord,
         loopStatus,
@@ -229,13 +235,14 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         bootRemainingSec,
         afkChipStr,
         promptGlyph,
+        typingGlyph,
     };
 }
 
 /** Diff deux snapshots et retourne la liste des champs qui ont
  *  changé. Liste vide = no-op (rien à repaint). */
 export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (keyof BarSnapshot)[] {
-    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkChipStr", "promptGlyph"];
+    if (prev === null) return ["humanWord", "loopStatus", "stateTag", "proxyAlive", "zenActive", "counters", "nextWakeInSec", "bootElapsedSec", "bootRemainingSec", "afkChipStr", "promptGlyph", "typingGlyph"];
     const changed: (keyof BarSnapshot)[] = [];
     if (prev.humanWord !== next.humanWord) changed.push("humanWord");
     if (prev.loopStatus !== next.loopStatus) changed.push("loopStatus");
@@ -248,6 +255,7 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     if (prev.bootRemainingSec !== next.bootRemainingSec) changed.push("counters");
     if (prev.afkChipStr !== next.afkChipStr) changed.push("afkChipStr");
     if (prev.promptGlyph !== next.promptGlyph) changed.push("promptGlyph");
+    if (prev.typingGlyph !== next.typingGlyph) changed.push("typingGlyph");
     return changed;
 }
 
@@ -368,7 +376,7 @@ export class BarRenderer {
             // coloré à droite.
             setOpt(
                 "status-left",
-                `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}]#{@cl_prompt} claude #{@cl_human}#{@cl_state} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
+                `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}]#{@cl_prompt}#{@cl_typing} claude #{@cl_human}#{@cl_state} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}]#{@cl_counts} `,
             );
         }
         if (changedSet.has("zenActive")) {
@@ -416,6 +424,14 @@ export class BarRenderer {
             // garder le bloc compact quand la prompt-zone disparaît.
             const v = next.promptGlyph ? ` ${next.promptGlyph}` : "";
             setOpt("@cl_prompt", v);
+        }
+        if (changedSet.has("typingGlyph")) {
+            // david `<chat>` 2026-06-14 : `⌨` indépendant — affiché
+            // SI typing, sans écraser le wait/loop dans @cl_human.
+            // Positioned entre @cl_prompt et @cl_human. La valeur
+            // est déjà préfixée des color tags par `typingGlyphChunk`.
+            const v = next.typingGlyph ? ` ${next.typingGlyph}` : "";
+            setOpt("@cl_typing", v);
         }
         if (changedSet.has("afkChipStr")) {
             setOpt("@cl_afk_state", next.afkChipStr);

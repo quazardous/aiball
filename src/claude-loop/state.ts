@@ -41,7 +41,7 @@ import type { DrainedState } from "./drained-strategy.js";
 import { CL_ENV } from "./env-vars.js";
 import { loopConfig } from "./loop-config.js";
 import { stripMarkdown } from "./markdown-strip.js";
-import { computeLoopView, type AfkChunk } from "./loop-state.js";
+import { computeLoopView, isAfkActive, isInBootGrace, type AfkChunk } from "./loop-state.js";
 import { classifyCompacting as classifyCompactingRaw } from "./compacting-detector.js";
 import { parseGates, runGates } from "./gates.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
@@ -1095,26 +1095,30 @@ export function humanPresence(sd: string | undefined): "stop" | "wait" | "boot" 
 }
 
 export function humanPresenceChunk(sd: string | undefined): string {
-    // #950+ david `<chat>` 2026-06-14 : drop le texte historique
-    // loop/wait/stop/boot, remplacé par des glyphes. Mapping :
-    //   - loop → ▶️ vert  (autonomous, gate open)
-    //   - wait → ⏸️ orange (auto-pings frozen : AFK armed / user-grace)
-    //   - stop → ⌨️ rouge  (hot input — user en train de taper)
-    //   - boot → vide      (couvert par le 🚀 dans les markers depuis #950)
-    // Le bg noir (colour16) hérite du bloc englobant.
-    const word = humanPresence(sd);
-    if (word === "boot") return "";
-    // Plain text variants (pas de U+FE0F variation selector) — sans ça
-    // les terminaux forcent le rendu emoji COLORÉ natif et ignorent le
-    // fg color. david `<chat>` : « c'est la police qui est orange pas
-    // le fond (et vert pour play) ».
-    const glyph = word === "stop" ? "⌨"
-        : word === "wait" ? "⏸"
-        : "▶";
-    const fg = word === "stop" ? "colour196"
-        : word === "wait" ? "colour178"
-        : "colour40";
+    // david `<chat>` 2026-06-14 : le glyph hot-typing `⌨` est désormais
+    // indépendant du wait/loop (typingGlyphChunk ci-dessous), donc cette
+    // fonction ne gère plus que les 2 valeurs orthogonales au typing :
+    //   - wait → ⏸ orange (AFK armé : wait_10m / wait_inf)
+    //   - loop → ▶ vert   (autonomous, AFK off)
+    //   - boot → vide     (couvert par le 🚀 dans les markers)
+    // Plain text variants (sans U+FE0F) pour respecter le fg color.
+    if (!sd) return "";
+    const input = readLoopStateInput(sd);
+    if (isInBootGrace(input)) return "";
+    const afkOn = isAfkActive(input);
+    const glyph = afkOn ? "⏸" : "▶";
+    const fg = afkOn ? "colour178" : "colour40";
     return `#[fg=${fg},bg=colour16]${glyph}`;
+}
+
+/** #953 david `<chat>` : `⌨` glyph rouge quand le user tape activement,
+ *  rendu indépendamment du wait/loop (donc affiché EN PLUS, pas EN
+ *  REMPLACEMENT). Peint dans `@cl_typing` ; placé entre `@cl_prompt` et
+ *  `@cl_human` dans le status-left. Empty quand pas de typing récent. */
+export function typingGlyphChunk(sd: string | undefined): string {
+    if (!sd) return "";
+    if (!humanIsTyping(sd)) return "";
+    return `#[fg=colour196,bg=colour16]⌨`;
 }
 
 /**
