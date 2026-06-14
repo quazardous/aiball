@@ -255,6 +255,14 @@ function log(msg: string): void {
     logger.info(msg);
 }
 
+// #963 — log every module evaluation (= every tsx-watch re-import OR
+// fresh boot). Silencieux avant : on voyait le self-reload basé sur git
+// sha (`source moved since boot…`) mais PAS le hot-reload tsx-watch.
+// Trou de visibilité comblé : si tu vois 3 lignes en 10s, tsx-watch a
+// tournoyé. Le sha permet de distinguer un hot-reload pur (sha
+// inchangé) d'un git checkout (sha bouge).
+log(`timer.ts module boot — pid=${process.pid} sha=${installRootSha()}`);
+
 /**
  * Transient-tolerant tmux session check. Distinguishes between:
  *   - `r.error` set : spawn failed entirely (binary missing/locked/etc.) —

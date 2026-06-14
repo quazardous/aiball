@@ -70,6 +70,7 @@ import { cmdPrune, cmdReload, cmdRestart, cmdRm, cmdStop, cmdWake, cmdZen, sweep
 import { cmdInspect } from "./cmds/inspect.js";
 import { cmdHealth } from "./cmds/health.js";
 import { cmdBacklog } from "./cmds/backlog.js";
+import { cmdSnapshot } from "./cmds/snapshot.js";
 import { CL_ENV } from "./env-vars.js";
 
 function die(msg: string): never {
@@ -1948,7 +1949,7 @@ async function main(): Promise<void> {
     else if (wrapper[0] === "--debug-keys") wrapper[0] = "debug-keys";
     // Recognize lifecycle subcommands; everything else falls into start.
     const sub = wrapper[0];
-    const known = new Set(["start", "list", "attach", "tail", "log", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "backlog", "debug-proxy-tty", "debug-keys", "_shutdown-timer", "-h", "--help", "help"]);
+    const known = new Set(["start", "list", "attach", "tail", "log", "rm", "wake", "zen", "reload", "restart", "stop", "check", "status", "trace", "prune", "init", "inspect", "health", "backlog", "snapshot", "debug-proxy-tty", "debug-keys", "_shutdown-timer", "-h", "--help", "help"]);
     if (sub && !known.has(sub) && !sub.startsWith("--") && !sub.startsWith("-")) {
         die(`unknown subcommand: ${sub} (try --help)`);
     }
@@ -2052,6 +2053,16 @@ async function main(): Promise<void> {
         .description("#860 — plomberie diagnostic : timer/proxy/tmux/UDS/daemon/SSE checks par loop. Exit 0 OK, 1 fail, 2 warn. Name optional — sans arg, vérifie tous les loops.")
         .option("--json", "Machine-readable JSON output instead of icon table")
         .action((name: string | undefined, opts: { json?: boolean }) => cmdHealth(name, opts));
+    program.command("snapshot [name]")
+        .description("#963 — archive timer.log + pane-captures + hooks logs sous `<sd>/snapshots/<ISO>/`. Default = capture. `--list` = liste les snapshots. `--prune` = nettoie (default --keep 10).")
+        .option("--note <text>", "ajoute un note.txt au snapshot capturé (annoter le repro)")
+        .option("--list", "liste les snapshots existants (tri desc mtime + taille + note)")
+        .option("--prune", "supprime les snapshots vieux selon --keep / --older / --all")
+        .option("--keep <n>", "garde N snapshots les plus récents (default 10)")
+        .option("--older <spec>", "supprime ceux dont l'âge > spec (`7d`, `12h`, `2w`, `30m`)")
+        .option("--all", "supprime tous les snapshots (dry-run par défaut, --yes pour exécuter)")
+        .option("--yes", "exécute --prune --all sans demander confirmation")
+        .action((name: string | undefined, opts: { note?: string; list?: boolean; prune?: boolean; keep?: string; older?: string; all?: boolean; yes?: boolean }) => cmdSnapshot(name ?? resolveCurrentLoopName(), opts));
     program.command("backlog")
         .description("Show the backlog of this loop's project + agent (resolved from .aiball.yaml / plate). Default = ticket backlog tiered hot → actionable → waiting (#791). `--events` = FIFO unread events (what the wake / MCP `unread()` would drain). `--counter-only` = print just `o:N b:N e:N` (same numbers the bar shows). `--cooled` = inclut les tickets en cooldown backlog wake (marker ⏳).")
         .option("--events", "Show the FIFO unread events instead of the ticket backlog")
