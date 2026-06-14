@@ -65,7 +65,7 @@ test("ErrorWatcher: begin fires on null → error", () => {
     w.on("begin", () => { beginCount++; });
     w.observe("normal idle pane", CTX);
     // `Rate limited` is one of error-backoff.ts's pinned patterns.
-    w.observe("Rate limited — retrying", CTX);
+    w.observe("API Error: Server is temporarily limiting requests", CTX);
     assert.equal(w.snapshot().errorId, "rate-limit");
     assert.equal(beginCount, 1);
 });
@@ -74,7 +74,7 @@ test("ErrorWatcher: end fires when error clears", () => {
     const w = new ErrorWatcher();
     let endCount = 0;
     w.on("end", () => { endCount++; });
-    w.observe("Rate limited — retrying", CTX);
+    w.observe("API Error: Server is temporarily limiting requests", CTX);
     w.observe("normal idle pane", CTX);
     assert.equal(w.snapshot().errorId, null);
     assert.equal(endCount, 1);
@@ -86,8 +86,8 @@ test("ErrorWatcher: id-to-id transition fires change only, not begin/end", () =>
     w.on("begin", () => { beginCount++; });
     w.on("end", () => { endCount++; });
     w.on("change", () => { changeCount++; });
-    w.observe("Rate limited", CTX);
-    w.observe("overloaded_error in response", CTX);
+    w.observe("API Error: Server is temporarily limiting requests", CTX);
+    w.observe("API Error: Overloaded", CTX);
     assert.equal(w.snapshot().errorId, "overloaded");
     assert.equal(beginCount, 1);   // only initial null → rate-limit
     assert.equal(endCount, 0);     // never went back to null

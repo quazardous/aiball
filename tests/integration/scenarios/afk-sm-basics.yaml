@@ -42,7 +42,7 @@ unit:
         inputHotTtlMs: 3000
         manualWake: false
     expect:
-      "barWord": "loop"
+      "presence": "loop"
       "wakeAllowed": true
       "afkChunk.label": "AFK"
       "afkChunk.color": "dim"
@@ -75,7 +75,7 @@ unit:
         inputHotTtlMs: 3000
         manualWake: false
     expect:
-      "barWord": "wait"
+      "presence": "wait"
       "wakeAllowed": false
       "wakeSkipReason": "/NOT AFK hold active/"
       "afkChunk.label": "NOT AFK"
@@ -109,7 +109,7 @@ unit:
         inputHotTtlMs: 3000
         manualWake: false
     expect:
-      "barWord": "wait"
+      "presence": "wait"
       "wakeAllowed": false
       "wakeSkipReason": "/NOT AFK hold active/"
       "afkChunk.label": "NOT AFK"

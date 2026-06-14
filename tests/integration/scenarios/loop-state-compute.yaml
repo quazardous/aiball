@@ -53,7 +53,7 @@ unit:
       args_overrides: { nowMs: 1780245605000, bootComplete: false, paneReady: false }  # T0+5s, pre-settle
       expect:
         "phase": "boot"
-        "barWord": "boot"
+        "presence": "boot"
         "afkChunk.label": "AFK"
         "afkChunk.color": "dim"
         "inBootGrace": true
@@ -83,7 +83,7 @@ unit:
         bootDeadlineMs: 1780245640000  # T0+40s
       expect:
         "phase": "boot"
-        "barWord": "boot"
+        "presence": "boot"
         "inBootGrace": true
 
     - name: "paneReady=true → boot ends"
@@ -94,7 +94,7 @@ unit:
         idleSinceMs: 1780245630000
       expect:
         "inBootGrace": false
-        "barWord": "loop"
+        "presence": "loop"
 
     - name: "boot phase: claude shows `esc to interrupt` → bar still boot"
       call: { module: "./loop-state.js", fn: "computeLoopView" }
@@ -105,7 +105,7 @@ unit:
         paneBusy: true
       expect:
         "phase": "boot"
-        "barWord": "boot"
+        "presence": "boot"
 
     - name: "boot phase: typing in resume picker → no stop, no AFK arming"
       call: { module: "./loop-state.js", fn: "computeLoopView" }
@@ -115,7 +115,7 @@ unit:
         paneReady: false
         humanTypingAtMs: 1780245614000  # 1s ago
       expect:
-        "barWord": "boot"
+        "presence": "boot"
         "afkChunk.label": "AFK"
 
     # --- post-boot transitions (--wait / --no-wait) ---
@@ -128,7 +128,7 @@ unit:
         idleSinceMs: 1780245660000  # 1s ago
       expect:
         "phase": "idle"
-        "barWord": "wait"
+        "presence": "wait"
         "afkChunk.label": "NOT AFK"
         "afkChunk.color": "yellow"
         "afkChunk.prefix": "600s"
@@ -143,7 +143,7 @@ unit:
         idleSinceMs: 1780245660000
       expect:
         "phase": "idle"
-        "barWord": "loop"
+        "presence": "loop"
         "afkChunk.label": "AFK"
         "afkChunk.color": "dim"
         "wakeAllowed": true
@@ -158,7 +158,7 @@ unit:
         afkExpiryMs: 1780246320000  # +10m
         idleSinceMs: 1780245715000  # 5s ago
       expect:
-        "barWord": "wait"
+        "presence": "wait"
         "afkChunk.label": "NOT AFK"
         "afkChunk.color": "yellow"
 
@@ -169,7 +169,7 @@ unit:
         afkMode: "wait_inf"
         idleSinceMs: 1780245720000
       expect:
-        "barWord": "wait"
+        "presence": "wait"
         "afkChunk.label": "NOT AFK"
         "afkChunk.color": "red"
         "afkChunk.prefix": "∞"
@@ -181,7 +181,7 @@ unit:
         afkMode: "off"
         idleSinceMs: 1780245720000
       expect:
-        "barWord": "loop"
+        "presence": "loop"
         "afkChunk.label": "AFK"
 
     # --- AFK 10m countdown semantics ---
@@ -213,7 +213,7 @@ unit:
         afkExpiryMs: 1780246260000  # T0+11min, expired 4 min ago
         idleSinceMs: 1780246495000
       expect:
-        "barWord": "loop"
+        "presence": "loop"
         "afkChunk.label": "AFK"
         "afkChunk.color": "dim"
         "wakeAllowed": true
@@ -228,7 +228,7 @@ unit:
         afkExpiryMs: 1780246200000  # +5min
         idleSinceMs: 1780245898000  # 2s ago
       expect:
-        "barWord": "stop"
+        "presence": "stop"
         "afkChunk.label": "NOT AFK"  # chunk unaffected by typing
 
     - name: "typing TTL expired (>5s ago) → bar reverts to AFK-driven state"
@@ -240,7 +240,7 @@ unit:
         afkExpiryMs: 1780246200000  # +5min
         idleSinceMs: 1780245900000
       expect:
-        "barWord": "wait"
+        "presence": "wait"
 
     # --- Wake-gate cascade — distinct skip reasons ---
     - name: "no idle marker → wake skipped"
@@ -323,7 +323,7 @@ unit:
       expect:
         "inBootGrace": false
         "phase": "idle"
-        "barWord": "loop"
+        "presence": "loop"
 
     - name: "AFK wait_10m with null expiry → treated as inactive"
       call: { module: "./loop-state.js", fn: "computeLoopView" }
@@ -333,7 +333,7 @@ unit:
         afkExpiryMs: null
         idleSinceMs: 1780245900000
       expect:
-        "barWord": "loop"
+        "presence": "loop"
         "afkChunk.label": "AFK"
 
     - name: "countdown rounds up (29.4s → `30s`)"
