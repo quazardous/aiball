@@ -1008,8 +1008,12 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     // touched manually outside the CLI).
     // david `<chat>` 2026-06-14 : le nom de session tmux migre du
     // status-left (entre proxy et counters) vers ici, entre AFK:F9
-    // et DETACH. Layout : `<zen> <afk> <name> · DETACH:<key>`.
-    const keysHint = `#{@cl_zen}#{@cl_afk_state} #[fg=${ctx.colors.bar_fg}]${name} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
+    // et DETACH. Layout : `<zen> <afk> <name> · DETACH:<key>`. La
+    // valeur du `name` est servie par le user-option `@cl_name` que
+    // BarRenderer.start() (re)seede à chaque (re)démarrage du timer,
+    // pour qu'un `claude-loop reload` propage correctement (les
+    // status-right initiaux ne sont set qu'une seule fois au cmdStart).
+    const keysHint = `#{@cl_zen}#{@cl_afk_state} #[fg=${ctx.colors.bar_fg}]#{@cl_name} #[fg=${ctx.colors.afk_label_fg}]· DETACH:#[fg=${ctx.colors.bar_fg}]${detachDisp} `;
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right", keysHint], { stdio: "ignore" });
     spawnSync(MUX_CMD, ["set-option", "-t", tname, "status-right-length", "60"], { stdio: "ignore" });
     // #619 david `ge2emb` : suppress the tmux window-status list (the
@@ -1040,7 +1044,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
     const zenInitial = existsSync(zenPath(sd))
         ? `#[fg=colour16,bg=colour208,bold] ZEN #[default] `
         : "";
-    for (const [opt, val] of [["@cl_human", "#[fg=colour178,bg=colour16]boot"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_counts", ""], ["@cl_afk_state", afkInitialOff], ["@cl_zen", zenInitial]]) {
+    for (const [opt, val] of [["@cl_human", "#[fg=colour178,bg=colour16]boot"], ["@cl_proxy", ""], ["@cl_state", ""], ["@cl_counts", ""], ["@cl_afk_state", afkInitialOff], ["@cl_zen", zenInitial], ["@cl_name", name], ["@cl_detach_key", detachDisp]]) {
         spawnSync(MUX_CMD, ["set-option", "-t", tname, opt, val], { stdio: "ignore" });
         if (opt === "@cl_human") logBarPaint(sd, "cli.ts:seed", val);
     }
