@@ -1,97 +1,99 @@
 /**
- * #850 — HealthCheckWatcher tests. node:test, no I/O.
+ * #949 — HealthCheckWatcher tests. node:test, no I/O.
+ *
+ * Watcher detects Claude Code's NATIVE feedback prompt in the pane
+ * footer ; emits begin/end on visibility transitions.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HealthCheckWatcher, _findStandaloneScoreForTests as findScore } from "./health-check-watcher.js";
+import { HealthCheckWatcher, _isNativePromptVisibleForTests as isVisible } from "./health-check-watcher.js";
 
 const CTX = { nowMs: 1_700_000_000_000 };
+const PROMPT = "How are you doing in this session? Respond with ONLY a single digit 1-5 (1=struggling, 5=cruising).";
 
-test("captures a bare digit response on its own line", () => {
+test("detects the native prompt in the footer", () => {
     const w = new HealthCheckWatcher();
-    const pane = ["claude prompt area", "──────", "4", "──────"].join("\n");
+    const pane = ["claude output", "──────", PROMPT].join("\n");
     const s = w.observe(pane, CTX);
-    assert.equal(s.score, 4);
+    assert.equal(s.visible, true);
 });
 
-test("captures an assistant-prefixed digit (● 5 / ✻ 3)", () => {
+test("clean pane → not visible", () => {
     const w = new HealthCheckWatcher();
-    assert.equal(w.observe("● 5", CTX).score, 5);
+    assert.equal(w.observe("nothing here", CTX).visible, false);
+});
+
+test("ignores prompt-line ('> ' / '❯ ') quoting the question (humans typing about it)", () => {
+    const w = new HealthCheckWatcher();
+    const pane = ["claude output", "> How are you doing in this session?"].join("\n");
+    assert.equal(w.observe(pane, CTX).visible, false);
     const w2 = new HealthCheckWatcher();
-    assert.equal(w2.observe("✻ 3 — feeling mid", CTX).score, 3);
+    const pane2 = ["claude output", "❯ How are you doing in this session?"].join("\n");
+    assert.equal(w2.observe(pane2, CTX).visible, false);
 });
 
-test("does NOT capture digits in prose (e.g. '#42 closed', URL)", () => {
+test("scans only the footer (last N lines)", () => {
     const w = new HealthCheckWatcher();
-    const pane = "ticket #42 closed", _2 = w.observe(pane, CTX);
-    assert.equal(_2.score, null);
+    const filler = Array.from({ length: 50 }, (_, i) => `line ${i}`).join("\n");
+    const pane = PROMPT + "\n" + filler;
+    // Prompt is now far above the 12-line footer window → not visible.
+    assert.equal(w.observe(pane, CTX).visible, false);
 });
 
-test("does NOT capture digits in user prompt lines (starting with ❯)", () => {
+test("emits begin on null → visible, end on visible → null", () => {
     const w = new HealthCheckWatcher();
-    const pane = ["claude output", "❯ 3"].join("\n");
-    assert.equal(w.observe(pane, CTX).score, null);
+    const beginFired: boolean[] = [];
+    const endFired: boolean[] = [];
+    w.on("begin", () => beginFired.push(true));
+    w.on("end", () => endFired.push(true));
+    w.observe("nothing", CTX);
+    assert.deepEqual(beginFired, []);
+    assert.deepEqual(endFired, []);
+    w.observe(PROMPT, CTX);
+    assert.deepEqual(beginFired, [true]);
+    assert.deepEqual(endFired, []);
+    // Same state → no re-emit (idempotent).
+    w.observe(PROMPT, CTX);
+    assert.deepEqual(beginFired, [true]);
+    // Prompt scrolls out → end fires.
+    w.observe("clean pane", CTX);
+    assert.deepEqual(endFired, [true]);
+    // Re-appearance fires begin again (not one-shot).
+    w.observe(PROMPT, CTX);
+    assert.deepEqual(beginFired, [true, true]);
 });
 
-test("is one-shot — re-observing with a different digit keeps the first", () => {
+test("emits change on every transition (begin OR end)", () => {
     const w = new HealthCheckWatcher();
-    assert.equal(w.observe("● 4", CTX).score, 4);
-    // Subsequent observe must NOT change the score.
-    assert.equal(w.observe("● 2", CTX).score, 4);
-    assert.equal(w.snapshot().score, 4);
-});
-
-test("scans only the footer (last N lines) — old scores in scrollback ignored", () => {
-    const w = new HealthCheckWatcher();
-    const scrollback = Array.from({ length: 30 }, () => "● 5").join("\n");
-    const pane = scrollback + "\n" + Array.from({ length: 50 }, (_, i) => `line ${i}`).join("\n");
-    // No bare digit in the footer (>12 lines from any 5) → null.
-    assert.equal(w.observe(pane, CTX).score, null);
-});
-
-test("ignores digits outside 1-5 (0, 6, 7, ...)", () => {
-    const w = new HealthCheckWatcher();
-    assert.equal(w.observe("● 7", CTX).score, null);
-    const w2 = new HealthCheckWatcher();
-    assert.equal(w2.observe("● 0", CTX).score, null);
-});
-
-test("emits change exactly once on capture", () => {
-    const w = new HealthCheckWatcher();
-    const changes: number[] = [];
-    w.on("change", (next) => { if (next.score !== null) changes.push(next.score); });
-    w.observe("nothing here yet", CTX);
+    const changes: boolean[] = [];
+    w.on("change", (next) => changes.push(next.visible));
+    w.observe("nothing", CTX);
     assert.deepEqual(changes, []);
-    w.observe("● 5", CTX);
-    assert.deepEqual(changes, [5]);
-    w.observe("● 2", CTX); // one-shot — no re-emit
-    assert.deepEqual(changes, [5]);
+    w.observe(PROMPT, CTX);
+    assert.deepEqual(changes, [true]);
+    w.observe("clean", CTX);
+    assert.deepEqual(changes, [true, false]);
 });
 
-test("reset() drops captured score and listeners", () => {
+test("reset() drops state and listeners", () => {
     const w = new HealthCheckWatcher();
-    w.observe("● 3", CTX); // captures score=3
-    assert.equal(w.snapshot().score, 3);
+    w.observe(PROMPT, CTX);
+    assert.equal(w.snapshot().visible, true);
     w.reset();
-    assert.equal(w.snapshot().score, null);
-    // Listener attached AFTER reset — must NOT see the post-reset capture
-    // if reset() also dropped listeners attached BEFORE reset. To exercise
-    // that path, attach pre-reset and verify no fire post-reset.
+    assert.equal(w.snapshot().visible, false);
+    // Listener attached post-reset DOES fire on the next transition
+    // (= reset cleared the prior subscribers, new ones work).
     let firedPostReset = false;
-    // Attach BEFORE reset (already done implicitly — no listener was on
-    // the prior path) ; reset() clears any prior listeners. Now attach
-    // and verify it DOES fire (= reset cleared the old, new ones work).
-    w.on("change", () => { firedPostReset = true; });
-    w.observe("● 4", CTX);
-    assert.equal(w.snapshot().score, 4);
-    assert.equal(firedPostReset, true); // listener attached post-reset fires
+    w.on("begin", () => { firedPostReset = true; });
+    w.observe(PROMPT, CTX);
+    assert.equal(firedPostReset, true);
 });
 
-test("findStandaloneScore exported helper covers the regex contract", () => {
-    assert.equal(findScore("● 3"), 3);
-    assert.equal(findScore("3"), 3);
-    assert.equal(findScore("\n\n4\n"), 4);
-    assert.equal(findScore("❯ 5"), null);
-    assert.equal(findScore("nothing"), null);
-    assert.equal(findScore(""), null);
+test("isNativePromptVisible exported helper covers the regex contract", () => {
+    assert.equal(isVisible(PROMPT), true);
+    assert.equal(isVisible("How are you doing in this session?"), true);
+    assert.equal(isVisible("how are YOU doing in this session?"), true);  // case-insensitive
+    assert.equal(isVisible("> How are you doing in this session?"), false);  // prompt-line skipped
+    assert.equal(isVisible("nothing about feelings"), false);
+    assert.equal(isVisible(""), false);
 });

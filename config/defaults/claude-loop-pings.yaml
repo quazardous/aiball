@@ -153,13 +153,6 @@ prompts:
   # Empty string → opt-out. Override per-project via `.aiball.yaml`.
   post_boot_skill_reminder: "Check the /aiball skill to triage your queue."
 
-  # #850 — claude self-rates how it's doing in the session on a 1-5 scale.
-  # The HealthCheckWatcher captures the first standalone digit in the
-  # pane post-boot and stores it on `ipcState.sessionHealthScore` —
-  # rendered as `H:N` colored (red 1-2 / yellow 3 / green 4-5) in the
-  # bar. One-shot per session. Empty string → opt-out.
-  post_boot_health_check: "How are you doing in this session? Respond with ONLY a single digit 1-5 (1=struggling, 5=cruising)."
-
 # Ticket-text formatting patterns (#B.235). Linkifies refs like #B.123,
 # #C.<hashid>, @mention in ticket bodies and comments. Lives in the same
 # 3-layer override chain as `prompts:` (shipped defaults → ~/.config →

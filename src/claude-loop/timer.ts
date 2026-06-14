@@ -98,6 +98,7 @@ import {
 } from "./pane-watchers/boot-watchers.js";
 import { PromptWatcher, BusyWatcher, InterruptedWatcher, IdlePromptWatcher } from "./pane-watchers/runtime-watchers.js";
 import { HealthCheckWatcher } from "./pane-watchers/health-check-watcher.js";
+import { getHealthCheckService } from "./health-check-service.js";
 import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
@@ -129,7 +130,6 @@ import {
     setIpcBootComplete,
     setIpcLoopStart,
     setIpcHumanTypingAtMs,
-    setIpcSessionHealthScore,
     setIpcBootDeadlineMs,
     setIpcCounters,
     setIpcIdleSince,
@@ -693,14 +693,19 @@ if (sd) {
         setPaneBusy(sd, false);
     });
     interruptedW.on("change", (s) => setInterrupted(sd, s.visible));
-    // #850 — bridge the one-shot health score → IPC. The watcher only fires
-    // `change` once (null → 1-5) per session, so this setter runs at most
-    // once. BarRenderer picks it up via getIpcState().sessionHealthScore.
-    healthCheckW.on("change", (s) => {
-        if (s.score !== null) {
-            log(`watcher: health-check captured score=${s.score}`);
-            setIpcSessionHealthScore(s.score);
-        }
+    // #949 — bridge the native health-check prompt visibility → state
+    // machine. The watcher fires `begin` when Claude Code's native
+    // session-feedback prompt appears and `end` when it leaves the
+    // footer. The machine logs each transition via its `actor.on`
+    // consumer below ; today that's the entire downstream side-effect
+    // (no IPC field, no bar paint — see ticket scope).
+    healthCheckW.on("begin", () => getHealthCheckService().promptDetected());
+    healthCheckW.on("end", () => getHealthCheckService().promptCleared());
+    getHealthCheckService().getActor().on("health:prompt_detected", (ev) => {
+        log(`healthCheckMachine: health:prompt_detected atMs=${ev.atMs}`);
+    });
+    getHealthCheckService().getActor().on("health:prompt_cleared", (ev) => {
+        log(`healthCheckMachine: health:prompt_cleared atMs=${ev.atMs}`);
     });
     getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
     // CompactingDetector emits change(s) with `s.active` boolean ; forward begin/end via change diff.
@@ -1485,15 +1490,6 @@ async function mainSse(): Promise<void> {
                 if (reminder.length > 0) {
                     log(`post-boot reminder: injecting immediate (${reminder.length} chars)`);
                     void sendKeys(reminder);
-                }
-                // #850 — health-check prompt fires alongside the skill
-                // reminder. The HealthCheckWatcher (registered in the
-                // runtime zone above) captures the response digit 1-5
-                // from the next pane scan. One-shot per session.
-                const healthCheck = renderSlot(promptMap, "post_boot_health_check", {}, "");
-                if (healthCheck.length > 0) {
-                    log(`post-boot health check: injecting (${healthCheck.length} chars)`);
-                    void sendKeys(healthCheck);
                 }
             } catch (e) {
                 log(`post-boot reminder load failed (ignored): ${String(e)}`);

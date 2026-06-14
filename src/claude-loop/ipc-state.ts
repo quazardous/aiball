@@ -119,11 +119,6 @@ export interface IpcState {
      *  in-memory signal, fall back to `human-typing` file mtime. Set by
      *  the dispatcher on `keystroke:typing` events from the proxy. */
     humanTypingAtMs: number | null;
-    /** #850 — claude's self-rated health score (1-5) captured post-boot
-     *  by the HealthCheckWatcher. `null` = not yet captured (prompt
-     *  pending or never injected). One-shot per session. Rendered in
-     *  the bar as `H:N` colored red (1-2), yellow (3), green (4-5). */
-    sessionHealthScore: number | null;
     /** #733 V2 — pane state in-memory, mirrored by every `setPane*`
      *  setter. `null` = no in-memory signal yet → reader falls back to
      *  the file (cold boot before `refreshPaneMarkers` runs, or a stale
@@ -197,7 +192,6 @@ const state: IpcState = {
     dispAfkExpiryMs: null,
     dispAfkCommitAtMs: null,
     humanTypingAtMs: null,
-    sessionHealthScore: null,
     paneBusy: null,
     paneReady: null,
     paneCompacting: null,
@@ -455,12 +449,6 @@ export function getIpcDispAfk(): {
 /** #734 V3 Phase B — set last typing timestamp in-memory. Called by
  *  the dispatcher on `keystroke:typing` events. `null` resets the
  *  in-memory signal (read path falls back to the file mtime). */
-/** #850 — set the session health score (1-5) captured by HealthCheckWatcher.
- *  Null clears (test reset / never captured). */
-export function setIpcSessionHealthScore(score: number | null): void {
-    state.sessionHealthScore = score;
-    notifyIpcChanged();
-}
 
 export function setIpcHumanTypingAtMs(atMs: number | null): void {
     state.humanTypingAtMs = atMs;

@@ -1,50 +1,53 @@
 /**
- * #850 — Health-check watcher : one-shot detection of a 1-5 digit
- * self-rating in the pane text post-boot. The timer injects a prompt
- * post-boot via the `post_boot_health_check` slot ; claude responds
- * (typically with a single digit), and this watcher captures it.
+ * #949 — HealthCheckWatcher : pane observer for Claude Code's NATIVE
+ * session-health feedback prompt ("How are you doing in this session?
+ * Respond with ONLY a single digit 1-5"). Claude Code emits this on
+ * its own cadence to collect user feedback for Anthropic ; we OBSERVE
+ * its presence, we never inject it.
  *
- * Design : pure observer of the last few lines of the pane. Once a
- * digit is captured, the watcher is "armed off" and never re-observes
- * (one-shot per session — david plan `3wfee3`). Reset() is for tests
- * only.
+ * David `<chat>` 2026-06-14 : « c'est nativement claude code qui
+ * affiche ça pour check la session de l'utilisateur (feedback pour
+ * anthropic) ». Earlier #850 design wrongly INJECTED this prompt —
+ * dropped in #949.
  *
- * Score → bar segment `H:N` colored red (1-2), yellow (3), green (4-5).
- * Consumer (BarRenderer + IPC bridge) reads via the `change` event.
+ * Scope (#949 ffgdce) : just DETECT + drive a state machine that LOGS
+ * each visibility transition. The response digit capture is out of
+ * scope for now — kept as a future hook on top of the same machine
+ * if needed.
+ *
+ * Events :
+ *   - `begin(state)` — prompt becomes visible in the footer
+ *   - `end(state)`   — prompt no longer visible
+ *   - `change(next, prev)` — both transitions
  */
 import type { PaneScanCtx, PaneWatcher, PaneWatcherEvents } from "./types.js";
 
+/** Regex matching Claude Code's native health-check banner. Broad on
+ *  purpose : Anthropic may revise the wording, and the leading
+ *  question stem is the stable anchor. Case-insensitive. */
+export const NATIVE_HEALTH_PROMPT_RE = /How are you doing in this session/i;
+
 export interface HealthCheckState {
-    /** 1-5 = captured rating, null = not captured yet. */
-    score: number | null;
+    /** True while the native prompt is visible in the footer. */
+    visible: boolean;
 }
 
-/** Scan the last N footer lines for the first standalone digit 1-5.
- *  Standalone = bounded by start/end of line OR whitespace. Excludes
- *  digits in URLs, ticket refs (`#NNN`), counts (`x42`), etc. */
-function findStandaloneScore(paneText: string, footerLines = 12): number | null {
+/** Scan the last N footer lines for the native prompt. Returns true
+ *  on the first match. Skips user-prompt lines (`> ` / `❯ `) so a
+ *  human typing about the question doesn't trip the watcher. */
+function isNativePromptVisible(paneText: string, footerLines = 12): boolean {
     const lines = paneText.split("\n").slice(-footerLines);
-    // Iterate in reverse — claude's most recent response is at the
-    // bottom. Stop at the first match.
-    for (let i = lines.length - 1; i >= 0; i--) {
-        const line = lines[i];
-        // Skip prompt input lines (start with `❯` or `>`) — they're the
-        // user's prompt area, not claude's response.
+    for (const line of lines) {
         const trimmed = line.trim();
         if (trimmed.startsWith("❯") || trimmed.startsWith(">")) continue;
-        // Match a bare digit 1-5 either alone on the line or preceded
-        // by a typical assistant prefix marker (●, ✻, ➤).
-        const bareMatch = /^([1-5])$/.exec(trimmed);
-        if (bareMatch) return Number(bareMatch[1]);
-        const prefixMatch = /^[●✻➤]\s*([1-5])\b/.exec(trimmed);
-        if (prefixMatch) return Number(prefixMatch[1]);
+        if (NATIVE_HEALTH_PROMPT_RE.test(line)) return true;
     }
-    return null;
+    return false;
 }
 
 export class HealthCheckWatcher implements PaneWatcher<HealthCheckState> {
     readonly name = "health-check";
-    private state: HealthCheckState = { score: null };
+    private state: HealthCheckState = { visible: false };
     private listeners: {
         change: Array<(next: HealthCheckState, prev: HealthCheckState | null) => void>;
         begin: Array<(s: HealthCheckState) => void>;
@@ -54,15 +57,14 @@ export class HealthCheckWatcher implements PaneWatcher<HealthCheckState> {
     } = { change: [], begin: [], end: [], progress: [], seen: [] };
 
     observe(paneText: string, _ctx: PaneScanCtx): HealthCheckState {
-        // One-shot — once captured, never re-observe.
-        if (this.state.score !== null) return this.state;
-        const score = findStandaloneScore(paneText);
-        if (score === null) return this.state;
+        const visible = isNativePromptVisible(paneText);
         const prev = this.state;
-        const next: HealthCheckState = { score };
+        if (prev.visible === visible) return prev;
+        const next: HealthCheckState = { visible };
         this.state = next;
         this.emit("change", next, prev);
-        this.emit("begin", next);
+        if (!prev.visible && next.visible) this.emit("begin", next);
+        if (prev.visible && !next.visible) this.emit("end", next);
         return next;
     }
 
@@ -82,7 +84,7 @@ export class HealthCheckWatcher implements PaneWatcher<HealthCheckState> {
     }
 
     reset(): void {
-        this.state = { score: null };
+        this.state = { visible: false };
         this.listeners = { change: [], begin: [], end: [], progress: [], seen: [] };
     }
 
@@ -97,6 +99,5 @@ export class HealthCheckWatcher implements PaneWatcher<HealthCheckState> {
     }
 }
 
-/** Internal export for unit tests — exercise the regex without
- *  spinning a full watcher. */
-export const _findStandaloneScoreForTests = findStandaloneScore;
+/** Test export — exercise the regex without spinning a full watcher. */
+export const _isNativePromptVisibleForTests = isNativePromptVisible;
