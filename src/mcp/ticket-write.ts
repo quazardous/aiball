@@ -273,7 +273,21 @@ export function registerTicketWriteTools(server: McpServer): void {
                 scope: then === "escalate" ? "broadcast" : (scope ?? "default"),
             });
             markActiveTicket(ticketId); // #404: focus = this ticket (token attribution)
-            return asText(res);
+            // #928 david `2uxj45` (Slice 2) : surface la décision posée en
+            // top-level pour confirmer atomiquement que le `then:` a pris
+            // effet. Évite à l'agent de parser le `meta` stringifié pour
+            // savoir si sa décision est landed pending ou auto-décidée.
+            const reply = (res as { meta?: string | null } | null) ?? {};
+            let yourDecision: { kind: string; status: string } | null = null;
+            if (reply.meta) {
+                try {
+                    const m = JSON.parse(reply.meta) as { decision?: { kind?: string; status?: string } };
+                    if (m.decision?.kind && m.decision?.status) {
+                        yourDecision = { kind: m.decision.kind, status: m.decision.status };
+                    }
+                } catch { /* malformed meta, skip */ }
+            }
+            return asText({ ...(res as object), your_decision: yourDecision });
         },
     );
 

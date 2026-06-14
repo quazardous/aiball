@@ -1492,6 +1492,35 @@ ticketsRouter.get("/tickets/:id", (req, res) => {
         // requesting consumer. Frontend uses it to skip the
         // "marking-as-read" pulse when landing on an already-read ticket.
         unread: ticketUnreadFlags(consumerOf(req), [t.id]).get(t.id) ?? false,
+        // #928 david `2uxj45` (Slice 1) : ta dernière décision postée sur
+        // ce ticket (then:plan / then:resolved / then:wontfix /
+        // then:escalate) — surface l'état pending/accepted/rejected en
+        // header. Évite à l'agent de drill dans comments[].meta.decision
+        // pour savoir "où en est ma décision" (cf. bug #951 où j'avais
+        // claim "pending" alors qu'accepted). null = aucune décision
+        // posée par ce consumer sur ce ticket.
+        your_latest_decision: (() => {
+            const consumer = consumerOf(req);
+            let latest: { kind: string; status: string; hashid: string | null; decided_at: string | null } | null = null;
+            let latestId = -1;
+            for (const m of threadMessages) {
+                if (m.kind !== "comment_added") continue;
+                if (m.by_agent !== consumer) continue;
+                if (m.status === "rejected") continue;
+                const dec = parseMeta(m.meta ?? null).decision;
+                if (!dec || !dec.kind || !dec.status) continue;
+                if (m.id > latestId) {
+                    latestId = m.id;
+                    latest = {
+                        kind: dec.kind,
+                        status: dec.status,
+                        hashid: m.hashid ?? null,
+                        decided_at: dec.decided_at ?? null,
+                    };
+                }
+            }
+            return latest;
+        })(),
     };
     if (summary) {
         const commentCount = threadMessages.filter(
