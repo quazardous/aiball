@@ -130,6 +130,7 @@ import {
     setIpcBootComplete,
     setIpcLoopStart,
     setIpcHumanTypingAtMs,
+    setIpcHealthPromptVisible,
     setIpcBootDeadlineMs,
     setIpcCounters,
     setIpcIdleSince,
@@ -703,9 +704,11 @@ if (sd) {
     healthCheckW.on("end", () => getHealthCheckService().promptCleared());
     getHealthCheckService().getActor().on("health:prompt_detected", (ev) => {
         log(`healthCheckMachine: health:prompt_detected atMs=${ev.atMs}`);
+        setIpcHealthPromptVisible(true);
     });
     getHealthCheckService().getActor().on("health:prompt_cleared", (ev) => {
         log(`healthCheckMachine: health:prompt_cleared atMs=${ev.atMs}`);
+        setIpcHealthPromptVisible(false);
     });
     getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
     // CompactingDetector emits change(s) with `s.active` boolean ; forward begin/end via change diff.

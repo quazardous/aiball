@@ -55,7 +55,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
     return {
         humanWord: "#[fg=colour40,bg=colour16]loop",
         loopStatus: LOOP_STATUS.IDLE,
-        stateTag: "[idle]",
+        stateTag: "idle",
         proxyAlive: false,
         zenActive: false,
         counters: null,
@@ -86,8 +86,8 @@ test("diffSnapshots: humanWord diff seul", () => {
 });
 
 test("diffSnapshots: 3 champs diff en même temps", () => {
-    const prev = snap({ humanWord: "loop", loopStatus: LOOP_STATUS.IDLE, stateTag: "[idle]" });
-    const next = snap({ humanWord: "stop", loopStatus: LOOP_STATUS.BUSY, stateTag: "[busy]" });
+    const prev = snap({ humanWord: "loop", loopStatus: LOOP_STATUS.IDLE, stateTag: "idle" });
+    const next = snap({ humanWord: "stop", loopStatus: LOOP_STATUS.BUSY, stateTag: "busy" });
     assert.deepEqual(
         diffSnapshots(prev, next).sort(),
         ["humanWord", "loopStatus", "stateTag"].sort(),
@@ -98,7 +98,7 @@ test("computeBarSnapshot: cold boot (ipc vide) → status=boot", () => {
     const sd = mkSd();
     const s = computeBarSnapshot(sd);
     assert.equal(s.loopStatus, LOOP_STATUS.BOOT);
-    assert.equal(s.stateTag, "[boot]");
+    assert.equal(s.stateTag, "boot");
     rmSync(sd, { recursive: true, force: true });
 });
 
@@ -241,7 +241,7 @@ test("BarRenderer.paint: counters change → setOpt @cl_counts", () => {
     rmSync(sd, { recursive: true, force: true });
 });
 
-test("BarRenderer.paint: stateTagInfo change → setOpt @cl_state avec suffix", () => {
+test("BarRenderer.paint: stateTagInfo change → setOpt @cl_state avec token info", () => {
     const sd = mkSd();
     const { spawn, calls } = makeSpawnSpy();
     const r = new BarRenderer(sd, "cl-test", spawn);
@@ -251,7 +251,8 @@ test("BarRenderer.paint: stateTagInfo change → setOpt @cl_state avec suffix", 
     r.tick();
     const st = calls.find((c) => c.args.includes("@cl_state"));
     assert.ok(st, "expected @cl_state setOpt");
-    assert.ok(st!.args.some((a) => a.includes(":wait")), "rendered tag carries ':wait'");
+    // #950 : tokens space-separated, plus de crochets ni colon — `<status> <info>` (status = boot ici car sd cold).
+    assert.ok(st!.args.some((a) => /(?:idle|busy|boot) wait/.test(a)), "rendered marker carries '<status> wait' tokens (#950)");
     r.stop();
     rmSync(sd, { recursive: true, force: true });
 });

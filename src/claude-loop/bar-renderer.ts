@@ -76,22 +76,32 @@ export interface BarSnapshot {
     afkChipStr: string;
 }
 
-/** State tag pipeline : compose `[<status>(:<info>)?] (<elapsed>s)? (+<remaining>s)?`
- *  as a `parts[].join(" ")`. Each fragment is contributed independently :
+/** #950 david `agmeqm` + `<chat>` : compose les tokens orthogonaux du
+ *  marker segment en chaîne space-separated. Drop des crochets / pipes
+ *  / décoration colon — chaque axe est un token compact, les axes
+ *  vides sont juste absents (pas de séparateur résiduel).
  *
- *  - **head**  : `[<status>]` ou `[<status>:<info>]` quand `stateTagInfo`
- *    est posé (par `setIpcStateTagInfo`, ex. "wait"/"compacting"/...).
- *  - **elapsed** (BOOT only) : `<elapsedSec>s` depuis `loopStartMs`,
- *    pour visualiser le temps déjà écoulé en phase boot.
- *  - **remaining** (BOOT only, deadline > now) : `+<remainingSec>s`
- *    delta-style — la deadline est watcher-driven (push `now+10s` chaque
- *    tick observant une condition "still booting"), donc le `+N` reflète
- *    l'extension dynamique plutôt qu'un countdown absolu.
- */
-function renderStateTag(loopStatus: LoopStatus, info: string | null): string {
-    // #891 david : drop le Ns elapsed + +Ns remaining du state tag.
-    // Tout dans la zone compteurs maintenant (cf. counters paint).
-    return info ? `[${loopStatus}:${info}]` : `[${loopStatus}]`;
+ *  Axes (zones) actuelles, dans l'ordre d'affichage :
+ *  - loopStatus (toujours présent) : `idle` / `busy` / `boot`
+ *  - stateTagInfo (optionnel) : `wait` / `retry N` / `compacting` /
+ *    `resuming` / `interrupted` — texte court posé par les hooks via
+ *    `setIpcStateTagInfo`. Décomposition par axe à venir dans une
+ *    slice ultérieure.
+ *  - healthPromptVisible (optionnel) : `🏥` quand Claude Code affiche
+ *    son prompt natif de feedback (#949).
+ *
+ *  Cette zone vit dans le bloc fond NOIR (colour16) à gauche, collée
+ *  à `claude-loop` (meilleur contraste, davids `<chat>`). Le caller
+ *  est responsable du fg/bg dans la format string. */
+function renderMarkerSegment(
+    loopStatus: LoopStatus,
+    info: string | null,
+    healthPromptVisible: boolean,
+): string {
+    const parts: string[] = [loopStatus];
+    if (info) parts.push(info);
+    if (healthPromptVisible) parts.push("🏥");
+    return parts.join(" ");
 }
 
 /** Compute le snapshot canonique depuis ipcState + computeLoopView.
@@ -107,7 +117,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
             ? LOOP_STATUS.BUSY
             : LOOP_STATUS.IDLE;
     const ipc = getIpcState();
-    const stateTag = renderStateTag(loopStatus, ipc.stateTagInfo);
+    const stateTag = renderMarkerSegment(loopStatus, ipc.stateTagInfo, ipc.healthPromptVisible);
     const zenActive = existsSync(zenPath(sd));
     const counters = ipc.counters;
     const afkChipStr = afkStateChunkStr(sd);
@@ -293,11 +303,17 @@ export class BarRenderer {
             const bg = stateBg(col, next.loopStatus);
             setOpt("status-bg", bg);
             setOpt("status-fg", col.bar_fg);
-            setOpt("@cl_state", `#[fg=${col.bar_fg}]${next.stateTag}`);
-            // status-left embarque bg + name. Repaint quand le bg change.
+            // #950 david `<chat>` : @cl_state vit maintenant DANS le bloc
+            // fond noir (colour16) à côté de `claude-loop` — meilleur
+            // contraste. Plus de crochets / colons, tokens space-separated
+            // (cf. renderMarkerSegment).
+            setOpt("@cl_state", `#[fg=${col.island_fg},bg=colour16] ${next.stateTag}`);
+            // status-left : @cl_state collé à `claude-loop`, AVANT la
+            // fade-out glyph. Les counters restent sur le status-bg
+            // coloré à droite.
             setOpt(
                 "status-left",
-                `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour178#,bg=colour16]boot} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}] ${this.name} #{@cl_state}#{@cl_counts} `,
+                `#[bg=${bg}] #[fg=${bg},bg=colour16]▓▒░#[fg=${col.island_fg}] claude-#{?@cl_human,#{@cl_human},#[fg=colour178#,bg=colour16]boot}#{@cl_state} #[fg=${bg},bg=colour16]░▒▓#[bg=${bg}]#{@cl_proxy}#[fg=${col.bar_fg}] ${this.name}#{@cl_counts} `,
             );
         }
         if (changedSet.has("zenActive")) {

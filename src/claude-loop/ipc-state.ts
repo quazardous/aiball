@@ -119,6 +119,11 @@ export interface IpcState {
      *  in-memory signal, fall back to `human-typing` file mtime. Set by
      *  the dispatcher on `keystroke:typing` events from the proxy. */
     humanTypingAtMs: number | null;
+    /** #949/#950 — true while Claude Code's NATIVE session-health
+     *  feedback prompt is visible in the pane footer. Driven by
+     *  the HealthCheckService consumer in timer.ts. Rendered as a
+     *  marker token (🏥) in the bar's black-bg zone. */
+    healthPromptVisible: boolean;
     /** #733 V2 — pane state in-memory, mirrored by every `setPane*`
      *  setter. `null` = no in-memory signal yet → reader falls back to
      *  the file (cold boot before `refreshPaneMarkers` runs, or a stale
@@ -192,6 +197,7 @@ const state: IpcState = {
     dispAfkExpiryMs: null,
     dispAfkCommitAtMs: null,
     humanTypingAtMs: null,
+    healthPromptVisible: false,
     paneBusy: null,
     paneReady: null,
     paneCompacting: null,
@@ -449,6 +455,15 @@ export function getIpcDispAfk(): {
 /** #734 V3 Phase B — set last typing timestamp in-memory. Called by
  *  the dispatcher on `keystroke:typing` events. `null` resets the
  *  in-memory signal (read path falls back to the file mtime). */
+
+/** #949/#950 — toggle the native health-check prompt visibility flag.
+ *  Set by the timer's consumer on `health:prompt_detected` (true)
+ *  and `health:prompt_cleared` (false). Read by the BarRenderer to
+ *  decide whether to paint the marker token. */
+export function setIpcHealthPromptVisible(visible: boolean): void {
+    state.healthPromptVisible = visible;
+    notifyIpcChanged();
+}
 
 export function setIpcHumanTypingAtMs(atMs: number | null): void {
     state.humanTypingAtMs = atMs;
