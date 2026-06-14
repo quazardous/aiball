@@ -87,12 +87,15 @@ export interface BarSnapshot {
  *    "genre question", suffixé par le nom court de la question.
  *  - `⚠️ <name>` = condition erreur backend (retry N, …). Le glyph
  *    `⚠️` est le marqueur commun "genre warning".
- *  - autres tokens (`wait` / `compacting` / `resuming` / `interrupted`)
- *    restent text-only — états internes, pas une question ni une
- *    erreur.
+ *  - `🔄 <name>` = process interne en cours qui dure (compacting,
+ *    resuming, …). Le glyph `🔄` est le marqueur commun "genre process".
+ *  - autres tokens (`wait` / `interrupted`) restent text-only — états
+ *    internes ni question ni erreur ni process.
  *
  *  Zone vit dans le bloc fond NOIR (colour16) à gauche, collée à
  *  `claude-loop`. Le caller (paint) gère fg/bg dans la format string. */
+const LONG_TASKS: ReadonlySet<string> = new Set(["compacting", "resuming"]);
+
 function renderMarkerSegment(
     loopStatus: LoopStatus,
     info: string | null,
@@ -102,9 +105,9 @@ function renderMarkerSegment(
 ): string {
     const parts: string[] = [loopStatus];
     if (info) {
-        // `retry N` (error-backoff) → préfixe warning. Les autres infos
-        // (wait, compacting, etc.) restent telles quelles.
-        parts.push(/^retry /.test(info) ? `⚠️ ${info}` : info);
+        if (/^retry /.test(info)) parts.push(`⚠️ ${info}`);
+        else if (LONG_TASKS.has(info)) parts.push(`🔄 ${info}`);
+        else parts.push(info);
     }
     // Question-genre markers — Claude Code attend un input user.
     if (resumePickerActive) parts.push("❓ resume");
