@@ -23,6 +23,16 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-06-15
+
+### Added
+
+- The web UI can be served under a configurable base path (e.g. `/aiball`) instead of the host root, so aiball can share a host and port with another service. Set `providers.tailscale.path` to mount it under a sub-path; the UI now routes via the URL hash and discovers its base at load, so a single build runs at the root or under any sub-path with no rebuild. A bare sub-path without its trailing slash auto-redirects to add it, and a favicon (the tray icon) is now served.
+
+### Fixed
+
+- Auto-wake no longer silently falls back to tmux keystrokes when the PTY proxy is the expected inject channel. A failed injection is surfaced loudly instead of being papered over with a keystroke path that looked like a human typing (and re-armed the "human present" hold). Same cleanup applied to the self-interrupt before a panic wake.
+
 ## [0.31.1] — 2026-06-12
 
 ### Added
