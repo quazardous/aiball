@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
+import { WebSocket } from "ws";
 
 const home = mkdtempSync(join(tmpdir(), "aiball-980-"));
 process.env.AIBALL_HOME = home;
@@ -21,6 +22,7 @@ const { getDb } = await import("../db/connection.js");
 const { submitMessage } = await import("../messages.js");
 const { updateMessageStatus } = await import("../db/messages.js");
 const { createProject } = await import("../db/projects.js");
+const { attachWs } = await import("../ws.js");
 const schema = await import("../schema.js");
 const { eq, and } = await import("drizzle-orm");
 
@@ -31,6 +33,7 @@ ensureConsumer(AG);
 const TOKEN_REP = issueToken({ kind: "agent", consumer_id: REP, label: "980-rep" }).token;
 
 const server = createApp().listen(0);
+attachWs(server); // wire /ws so the broadcast-suppression test can observe events
 await new Promise<void>((r) => server.once("listening", () => r()));
 const port = (server.address() as AddressInfo).port;
 const BASE = `http://127.0.0.1:${port}`;
@@ -159,4 +162,37 @@ test("#980: wontfix accept still auto-closes (regression guard)", async () => {
     const { tid, commentId } = seed("wontfix");
     assert.equal(await decide(commentId, "accepted"), 200);
     assert.equal(closeEvents(tid).length, 1, "wontfix auto-close preserved");
+});
+
+test("#980 N2: auto-close ticket_closed does NOT broadcast (single toaster/counter)", async () => {
+    const { commentId } = seed("resolution");
+    const events: Array<{ type: string; kind?: string }> = [];
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise<void>((resolve, reject) => {
+        ws.on("open", () => resolve());
+        ws.on("error", reject);
+    });
+    ws.on("message", (raw: Buffer) => {
+        try {
+            const m = JSON.parse(raw.toString()) as { type: string; data?: { kind?: string } };
+            events.push({ type: m.type, kind: m.data?.kind });
+        } catch { /* hello / non-JSON */ }
+    });
+
+    assert.equal(await decide(commentId, "accepted"), 200);
+    await new Promise((r) => setTimeout(r, 300)); // let broadcasts flush
+    ws.close();
+
+    // The auto-close ticket_closed must be SILENT (skipBroadcast) — no
+    // message_created / message_decided carrying kind=ticket_closed.
+    assert.equal(
+        events.filter((e) => e.kind === "ticket_closed").length,
+        0,
+        "auto-close must not broadcast (else the toaster + e: counter double)",
+    );
+    // …while the resolution_accepted decision event IS the single notification.
+    assert.ok(
+        events.some((e) => e.kind === "resolution_accepted"),
+        "resolution_accepted must broadcast (the one user-facing notification)",
+    );
 });

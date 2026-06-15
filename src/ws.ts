@@ -59,6 +59,10 @@ export function attachWs(server: Server, path = "/ws"): void {
             }
         }
     }, PING_INTERVAL_MS);
+    // Don't let the keepalive ping be the sole thing keeping the event loop
+    // alive — the listening HTTP server already holds the daemon open in
+    // prod ; without unref a headless test that calls attachWs() never exits.
+    interval.unref?.();
     wss.on("close", () => { clearInterval(interval); });
 }
 

@@ -512,6 +512,10 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
                                 : undefined;
                     // #921 — skip ping fan-out : `<kind>_accepted` a déjà
                     // pingé ; le ticket_closed est redondant côté ping.
+                    // #980 N2 — skipBroadcast : le `<kind>_accepted` est aussi
+                    // la SEULE notif UI (toaster + `e:` counter). Le refresh
+                    // qu'il déclenche fait re-dériver `ticket.closed` (la row
+                    // existe). Sans ça, l'auto-close re-broadcaste → 2e toaster.
                     submitMessage({
                         project: updated.project,
                         kind: "ticket_closed",
@@ -519,7 +523,7 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
                         parent_id: updated.ticket_id,
                         body: closeBody,
                         by_agent: by,
-                    }, { skipFanOut: true });
+                    }, { skipFanOut: true, skipBroadcast: true });
                 }
             } catch {
                 /* malformed meta or close failed — don't fail the decide */

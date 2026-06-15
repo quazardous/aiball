@@ -478,6 +478,19 @@ function postRelationEvents(msg: Message, input: NewMessage): void {
  */
 export interface SubmitOpts {
     skipFanOut?: boolean;
+    /**
+     * #980 Niveau 2 — suppress the `message_created` + `message_decided`
+     * WS broadcasts for this message. Used for an auto-close `ticket_closed`
+     * that rides on an accepted resolution/wontfix : the decision event
+     * (`<kind>_accepted`) is the SINGLE user-facing notification, and the
+     * refresh it triggers already makes the UI re-derive `ticket.closed`
+     * (the row still exists). Without this, the auto-close broadcasts a
+     * second `message_decided` → the App.vue toaster + `e:` counter fire
+     * twice for one logical action (the double-event of #980). The row,
+     * lifecycle emit, close-cleanup and `closed` derivation are untouched —
+     * only the live UI-arrival announcement is muted.
+     */
+    skipBroadcast?: boolean;
 }
 
 /**
@@ -519,8 +532,9 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
     if (!opts.skipFanOut) fanOutPings(msg);
     // Always announce the message: every UI list (pending, approved, tickets,
     // open thread) wants to know that a new row exists, regardless of how
-    // moderation will resolve it.
-    broadcast({ type: "message_created", data: msg });
+    // moderation will resolve it. #980 N2 — except a silent auto-close
+    // (skipBroadcast) whose decision event already announced the action.
+    if (!opts.skipBroadcast) broadcast({ type: "message_created", data: msg });
 
     // Cross-reference pseudo-comments (`ticket_sub_added` + `ticket_referenced`)
     // — auto-emitted on the target threads. Side-effect only; the
@@ -564,8 +578,9 @@ export function submitMessage(input: NewMessage, opts: SubmitOpts = {}): Message
             // #921 — opt-out for auto-emitted redundant messages.
             if (!opts.skipFanOut) fanOutPings(msg);
             // …and announce the auto-approval so subscribers transition state
-            // (status: pending → approved) without polling.
-            broadcast({ type: "message_decided", data: msg });
+            // (status: pending → approved) without polling. #980 N2 — muted
+            // for a silent auto-close (the decision event already announced).
+            if (!opts.skipBroadcast) broadcast({ type: "message_decided", data: msg });
             // #568 — use `input.kind` (immutable), not `msg.kind`: when
             // tickets.id == messages.id (low counters), the legacy
             // updateMessageStatus probe flips msg.kind to "ticket_created".
