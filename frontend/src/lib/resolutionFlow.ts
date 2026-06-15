@@ -279,24 +279,9 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
             if (composerBody.value.trim() && effectiveKind !== "resolution" && effectiveKind !== "wontfix") {
                 await postBodyAs("comment_added");
             }
-            // #980 — a resolution accept must close via the ATOMIC
-            // accept-and-close endpoint (server skips the ticket_closed ping
-            // fan-out). The old path here was decide(accepted) + a separate
-            // postBodyAs("ticket_closed") which re-fanned-out, so the
-            // reporter + subscribers got BOTH a resolution_accepted AND a
-            // ticket_closed ping (the double event). acceptAndClose approves
-            // + closes with skipFanOut in one round-trip ; the typed body
-            // rides on the close event, same as before.
-            // Caveat : the atomic route can't reclassify, so accept-AS-
-            // resolution (asKind="resolution" over a different original
-            // kind) keeps the 2-step path — rare, double ping tolerated.
-            if (effectiveKind === "resolution" && (!asKind || asKind === active.decision.kind)) {
-                await api.acceptAndClose(active.message.id, composerBody.value.trim() || undefined);
-            } else {
-                await api.decide(active.message.id, "accepted", asKind);
-                if (effectiveKind === "resolution") {
-                    await postBodyAs("ticket_closed");
-                }
+            await api.decide(active.message.id, "accepted", asKind);
+            if (effectiveKind === "resolution") {
+                await postBodyAs("ticket_closed");
             }
             // wontfix : the server-side /decide handler auto-posts the
             // ticket_closed (per #802), no extra round-trip needed here.
