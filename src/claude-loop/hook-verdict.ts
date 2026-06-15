@@ -105,6 +105,11 @@ export async function queryLoopState(sd: string, timeoutMs = 500): Promise<LoopS
     }
     const input = readLoopStateInput(sd);
     const view = computeLoopView(input);
+    // #979 david `jjdrdb` — fail-open DÉLIBÉRÉ : UDS down → defaults AFK off →
+    // `afkHoldActive=false`. Le gate AskUserQuestion (buildHookVerdict) traite
+    // ça comme « état inconnu = autonome = deny » (= la direction SÛRE : un
+    // loop autonome figé sur un dialog inanswerable serait pire qu'un humain
+    // redirigé vers un ticket). Ne PAS « corriger » ce défaut en allow.
     const afkHoldActive =
         input.afkMode === "wait_inf"
         || (input.afkMode === "wait_10m" && input.afkExpiryMs !== null && input.afkExpiryMs > input.nowMs);
@@ -175,6 +180,11 @@ const ASK_USER_QUESTION_REDIRECT =
  */
 export function buildHookVerdict(state: LoopStateSnapshot, context: HookContext): HookVerdict {
     if (context.kind === "PreToolUse" && context.tool_name === "AskUserQuestion") {
+        // #979 — `afkHoldActive=false` couvre DEUX cas qui convergent vers le
+        // même verdict prudent : (1) AFK off réel (loop autonome), (2) état
+        // indéterminé car UDS down → defaults AFK off (cf. queryLoopState).
+        // Les deux → deny : pas de signe d'humain ⇒ on ne risque pas de figer
+        // un loop sur un dialog que personne ne cliquera.
         if (!state.afkHoldActive) {
             return {
                 hookSpecificOutput: {
