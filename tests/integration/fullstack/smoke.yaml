@@ -1,0 +1,9 @@
+# #984 — full-stack smoke : boot the real containerised stack, feed a human
+# keystroke through the proxy, assert the loop's PTY proxy is alive via inspect.
+# `fake_claude` names an examples/fake-claude/scenarios/<name>.yaml (TUI mode),
+# NOT a probe name — full-stack scenarios live here, not in ../scenarios/.
+scenario: fullstack-smoke
+steps:
+  - { at: 0, spawn: { fake_claude: quick-prompt } }
+  - { at: 8, human: { type: "hello" } }
+  - { at: 11, expect: { inspect: { runtime.proxy.alive: true } } }

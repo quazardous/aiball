@@ -49,10 +49,13 @@ services:
       AIBALL_URL: http://daemon:7777   # data-plane remote (REMOTE.md Direct)
       AIBALL_HOME: /agent-state         # loop's own state (NOT the daemon DB)
       AIBALL_SOCK: ""                   # force HTTP path, no local UDS
-      AGENT_CONSUMER: test-agent
-      AGENT_PROJECT: bidon              # the throwaway cloistered project
-      AGENT_SCENARIO: quick-prompt      # examples/fake-claude/scenarios/<x>.yaml
-      AGENT_NAME: agent1
+      AGENT_CONSUMER: ${AGENT_CONSUMER:-test-agent}
+      AGENT_PROJECT: ${AGENT_PROJECT:-bidon}   # the throwaway cloistered project
+      # #984 — overridable per scenario by the full-stack orchestrator
+      # (run_fullstack.py exports AGENT_SCENARIO from the scenario's
+      # spawn.fake_claude). examples/fake-claude/scenarios/<x>.yaml.
+      AGENT_SCENARIO: ${AGENT_SCENARIO:-quick-prompt}
+      AGENT_NAME: ${AGENT_NAME:-agent1}
       TERM: xterm-256color
     volumes:
       - ..:/app                        # live source
