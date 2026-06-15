@@ -14,7 +14,7 @@ Scenario shape (per #638 body example) :
       drive: { hook_signal: bootComplete }
     - at_seconds: 10
       expect:
-        bar_word: boot
+        view.phase: boot
         in_boot_grace: true
 
 Each step is one of :
@@ -104,7 +104,7 @@ class ExpectStep:
       - `existence`  : dotted-path → bool. True = path MUST exist (any
         value), False = path must NOT exist. Used for value-less presence
         checks (`pane: { present: true }` or top-level `exists: [...]`).
-    Path syntax is dotted : `pane.compacting`, `view.bar_word`."""
+    Path syntax is dotted : `pane.compacting`, `view.phase`."""
     at_seconds: float
     assertions: dict
     existence: dict = field(default_factory=dict)
