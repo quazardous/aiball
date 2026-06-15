@@ -70,6 +70,39 @@ test("#951 dispatch typing during boot → arms NOT AFK 10m (drop legacy gate)",
     } finally { rmSync(sd, { recursive: true, force: true }); }
 });
 
+test("#834 dispatch typing while NOT AFK ∞ (committed) → skipped, ∞ preserved", () => {
+    const sd = tmp();
+    try {
+        seedPostBoot(sd);
+        getAfkService().setInf();
+        setIpcAfk("wait_inf", null);
+        const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "typing", now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "typing-skipped-inf" });
+        // ∞ untouched — the keystroke did NOT downgrade to wait_10m.
+        assert.equal(getAfkService().getActor().getSnapshot().value, "wait_inf");
+        assert.equal(getIpcState().afkMode, "wait_inf");
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
+test("régression ∞ (david 2026-06-15) typing during pending_inf debounce → skipped (NOT downgraded to 10m)", () => {
+    const sd = tmp();
+    try {
+        seedPostBoot(sd);
+        // User just pressed F9 to reach ∞ ; the SM is in the 3s `pending_inf`
+        // debounce. The COMMITTED slice (ipc.afkMode) is still the previous
+        // mode — the old committed-only guard missed this window and the
+        // keystroke armed 10m, downgrading the user's ∞ choice.
+        getAfkService().armInf();
+        const snap = getAfkService().getActor().getSnapshot();
+        assert.equal(snap.value, "pending_inf");
+        assert.notEqual(snap.context.afkMode, "wait_inf"); // committed still old
+        const v = dispatchProxyEvent(sd, { event: "keystroke", kind: "typing", now_ms: Date.now() });
+        assert.deepEqual(v, { kind: "typing-skipped-inf" });
+        // Still heading to ∞ — typing did NOT divert the debounce to pending_10m.
+        assert.equal(getAfkService().getActor().getSnapshot().value, "pending_inf");
+    } finally { rmSync(sd, { recursive: true, force: true }); }
+});
+
 test("#876 dispatch afk_key from off → pending_10m (actor in pending, committed unchanged)", () => {
     const sd = tmp();
     try {

@@ -18,7 +18,6 @@
  * proxy emitting a new kind doesn't crash an old timer).
  */
 import {
-    readLoopStateInput,
     toggleAfk,
     touchHumanTyping,
 } from "./state.js";
@@ -60,14 +59,25 @@ export function dispatchProxyEvent(sd: string, event: Record<string, unknown>): 
             // qui rentre dans le stdin du proxy = indistinguable d'un
             // humain. Le `recentlySentKeys` legacy est obsolète (cf.
             // pty-proxy.py:24).
-            const input = readLoopStateInput(sd);
             // #834 david — NOT AFK ∞ is an explicit human commitment ("je
             // suis là sur la durée"). Typing within that mode is expected,
             // NOT a fresh signal to re-bound the window. Pre-fix, every
             // keystroke re-armed wait_10m, silently downgrading the user's
-            // ∞ choice. Preserve wait_inf untouched ; only arm 10m when
-            // the current mode is off / wait_10m.
-            if (input.afkMode === "wait_inf") return { kind: "typing-skipped-inf" };
+            // ∞ choice. Preserve ∞ untouched ; only arm 10m when the
+            // current mode is off / wait_10m.
+            //
+            // Régression ∞ (david 2026-06-15) — l'ancien garde lisait
+            // `input.afkMode` (slice COMMITTED via ipc). Pendant les 3s de
+            // debounce `pending_inf` ouvertes par le F9 debounce (#876), le
+            // committed vaut encore l'ancien mode → la frappe passait le
+            // garde et armait 10m, downgradant le ∞ que l'utilisateur venait
+            // de choisir au clavier. On lit l'état VIF de la SM (autoritaire)
+            // : il couvre committed (`wait_inf`) ET pending (`pending_inf`),
+            // donc toute la fenêtre où l'intention humaine est « ∞ ».
+            const afkState = String(getAfkService().getActor().getSnapshot().value);
+            if (afkState === "wait_inf" || afkState === "pending_inf") {
+                return { kind: "typing-skipped-inf" };
+            }
             // #751 4asyze + cma67g — typing arms wait_10m via the SERVICE
             // helper (= file + AfkService observable + ipc.afkMode), NOT
             // the raw `armAfk10m` file-only path. Without the AfkService
