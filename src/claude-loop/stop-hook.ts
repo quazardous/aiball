@@ -295,7 +295,7 @@ function readPane(): string {
                 kind: "proxyEvent",
                 data: { event: "marker", name: "set_last_wake_at", at_ms: wakeAtMs, now_ms: wakeAtMs },
             }, { timeoutMs: 200 });
-            await injectWakePhrase(`${tmuxName(name!)}.0`, phrase, () => {
+            const wakeDelivered = await injectWakePhrase(`${tmuxName(name!)}.0`, phrase, () => {
                 // Post-wake tempo — emit busy_defer_until via a Stop event
                 // (= same channel the pane-busy branch above uses). The
                 // dispatcher's HookService subscriber materializes the
@@ -316,6 +316,11 @@ function readPane(): string {
                     void phraseClient.recordBacklogWake(backlogTicketId).catch(() => {});
                 }
             });
+            // #974 — fail loud : proxy attendu mais inject KO (pas de
+            // fallback tmux qui ré-armerait NOT AFK 10m). Wake droppé.
+            if (!wakeDelivered) {
+                log("wake: injectWakePhrase FAILED via proxy (loop.sock present, inject KO) — proxy bug ? wake dropped, NO tmux fallback. Investigate.");
+            }
             setIpcStateTagInfo(null);
             log(`  → WAKE '${phrase}' became=busy`);
         } else {

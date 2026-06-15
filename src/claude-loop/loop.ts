@@ -824,15 +824,16 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
     // chord; a single Escape is sometimes consumed by claude's TUI.
     if (interruptFirst) {
         // #965 — Escape Escape via inject.sock (le proxy ne le voit pas
-        // comme une frappe humaine via son stdin). Fallback send-keys si
-        // l'inject échoue.
+        // comme une frappe humaine via son stdin).
+        // #974 — PAS de fallback send-keys : un inject raté = bug proxy à
+        // investiguer, pas à contourner via tmux (qui ré-armerait NOT AFK
+        // 10m via le détecteur de frappe). Fail loud, interrupt skippé.
         if (!(await injectRawBytes(sd!, "\x1b\x1b"))) {
-            log("self-interrupt: inject down, fallback send-keys (peut armer AFK 10m)");
-            spawnSync(MUX_CMD, ["send-keys", "-t", `${tname}.0`, "Escape", "Escape"], { stdio: "ignore" });
+            log("self-interrupt: inject ÉCHOUÉ (proxy bug ?) — NO send-keys fallback, interrupt skippé. Investiguer.");
         }
         await sleep(500);
     }
-    await injectWakePhrase(`${tname}.0`, phrase, () => {
+    const wakeDelivered = await injectWakePhrase(`${tname}.0`, phrase, () => {
         const nowMs = Date.now();
         // #879 — fire WAKE_DELIVERED on the WakeMachine actor. Le
         // subscriber bridge synchronise `ipc.wakeInFlightAtMs` +
@@ -855,6 +856,13 @@ async function sendKeys(phrase: string, headMessageId?: number | null, interrupt
             void client().recordBacklogWake(backlogTicketId).catch(() => {});
         }
     });
+    // #974 — fail loud quand le proxy était censé recevoir l'inject mais a
+    // échoué (loop.sock présent, inject KO). Pas de fallback tmux : c'est un
+    // bug proxy à investiguer. Le wake est droppé (le ping reste consommé,
+    // mais un proxy mort = pane mort = la loop est de toute façon cassée).
+    if (!wakeDelivered) {
+        log("wake: injectWakePhrase ÉCHOUÉ via proxy (loop.sock présent, inject KO) — proxy bug ? wake droppé, NO tmux fallback. Investiguer.");
+    }
 }
 
 function sleep(ms: number): Promise<void> {

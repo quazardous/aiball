@@ -1857,11 +1857,19 @@ export async function buildContextPhrase(
  * leaving the text stuck in the prompt area. David's repro on
  * #221 comment 9e76jx: "n'envoie pas enter et reste dans le prompt".
  *
- * Robust pattern (mirrors `tryPanic`): write the phrase into a tmux
- * paste-buffer, paste it (bracketed paste — explicit start/end so the
- * TUI knows the paste closed), sleep briefly for the prompt to
- * repaint, then send a standalone Enter. Falls back to plain
- * `send-keys <phrase>` if `set-buffer` failed (extremely rare).
+ * Two delivery strategies, NOT a fallback chain (#974) :
+ *  - **proxy loops** (loop.sock present / proxyIsAlive on win) : the
+ *    inject IS the channel. Success → return true. A full failure =
+ *    proxy bug to investigate, NOT to paper over with tmux send-keys
+ *    (which re-arms NOT AFK 10m via the keystroke detector) → return
+ *    false so the caller logs loud + drops the wake.
+ *  - **non-proxy loops** (no loop.sock) : tmux paste-buffer + standalone
+ *    Enter (mirrors `tryPanic`), with a plain `send-keys` if set-buffer
+ *    failed. The documented normal path for those loops, not a degraded
+ *    fallback → return true.
+ *
+ * Returns true when the wake was delivered (either strategy), false when
+ * a proxy was expected but the inject failed (caller logs loud — #974).
  *
  * Used by every wake site: session-start-hook, stop-hook post-turn
  * wake, timer no-hint wake, and SSE-hinted wakes — short phrases pay
@@ -1871,7 +1879,7 @@ export async function injectWakePhrase(
     paneTarget: string,
     phrase: string,
     onWillInject?: () => void,
-): Promise<void> {
+): Promise<boolean> {
     // #269: when the pane runs under the PTY proxy, deliver the wake
     // straight to claude's PTY via the proxy's control channel — that
     // bypasses tmux/psmux stdin, so the proxy's human-typing detector
@@ -1889,11 +1897,15 @@ export async function injectWakePhrase(
         if (process.platform === "win32") {
             // #281 strategy B: Windows uses a named pipe with raw bytes.
             // It can't be stat'd, so gate on the proxy-alive PID marker
-            // instead of existsSync(); a dead/absent proxy → fall through
-            // to send-keys.
+            // instead of existsSync().
+            // #974 — proxy alive = l'inject EST le canal ; un échec = bug
+            // proxy à investiguer, PAS de fallback tmux (ré-armerait NOT
+            // AFK 10m). Fail loud côté caller (return false). Le path tmux
+            // plus bas reste la stratégie des loops SANS proxy (proxy absent).
             if (proxyIsAlive(sd)) {
                 const pipe = injectPipeName(sd);
-                if (await injectViaWinPipe(pipe, phrase)) return;
+                if (await injectViaWinPipe(pipe, phrase)) return true;
+                return false;
             }
         } else {
             // Unix wake injection rides the shared loop.sock as a
@@ -1903,18 +1915,26 @@ export async function injectWakePhrase(
             const sock = loopSockPath(sd);
             if (existsSync(sock)) {
                 const r = await injectViaLoopSocket(sock, phrase);
-                if (r.submitted) return;
+                if (r.submitted) return true;
                 if (r.phraseSent) {
                     // Phrase made it to the PTY but the Enter frame failed.
                     // DO NOT re-send the phrase via tmux — that double-types.
-                    // Submit with a stand-alone Enter and return.
+                    // A stand-alone Enter is the SAME channel (submit), not
+                    // a fallback. Submit + return.
                     spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" });
-                    return;
+                    return true;
                 }
-                // Phrase never made it — fall through to tmux paste.
+                // #974 — loop.sock présent = proxy censé vivant (c'est le
+                // process du pane). Inject totalement échoué = bug proxy,
+                // PAS de fallback tmux (ré-armerait NOT AFK 10m). Fail loud
+                // côté caller.
+                return false;
             }
         }
     }
+    // Stratégie loops SANS proxy (pas de loop.sock / proxy absent) : tmux
+    // paste-buffer + Enter standalone. Path normal documenté pour ces
+    // loops, PAS un fallback dégradé (#974).
     const bufName = `wake_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
     const setBuf = spawnSync(MUX_CMD, ["set-buffer", "-b", bufName, phrase], { stdio: "ignore" });
     if (!setBuf.error && setBuf.status === 0) {
@@ -1924,6 +1944,7 @@ export async function injectWakePhrase(
     }
     await new Promise<void>((res) => setTimeout(res, 200));
     spawnSync(MUX_CMD, ["send-keys", "-t", paneTarget, "Enter"], { stdio: "ignore" });
+    return true;
 }
 
 /** #866 Slice 2 — typed enum for the `loop.sock` event kinds. Replace
