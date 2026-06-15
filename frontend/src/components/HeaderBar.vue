@@ -3,7 +3,7 @@ import { ref } from "vue";
 import Button from "primevue/button";
 import IdentityPicker from "./IdentityPicker.vue";
 import { HEADER_BADGE_TOOLTIPS } from "../lib/labels";
-import { pushRoute } from "../lib/base";
+import { pushRoute, withBase } from "../lib/base";
 
 // #540 / #570 — goto ticket : input compact qui accepte
 //   - un id ticket numérique (avec ou sans `#`) → /b/N direct
@@ -69,7 +69,7 @@ async function submitGoto() {
         const tok = localStorage.getItem("aiball.token");
         const headers: Record<string, string> = {};
         if (tok) headers["authorization"] = `Bearer ${tok}`;
-        const res = await fetch(`/api/tickets/${encodeURIComponent(hashid)}`, { headers });
+        const res = await fetch(withBase(`/api/tickets/${encodeURIComponent(hashid)}`), { headers });
         if (!res.ok) {
             gotoError.value = `not found : ${hashid}`;
             return;

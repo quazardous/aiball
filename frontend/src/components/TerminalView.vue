@@ -28,6 +28,7 @@ import "@xterm/xterm/css/xterm.css";
 // ConsumerEditPage / ProjectDetailPage pour rendre l'état claude-loop dans
 // la barre du terminal — même rendu, pas de nouvelle barre.
 import { activityClass, presenceClass, presenceWord } from "../lib/consumer-status";
+import { withBase } from "../lib/base";
 
 const props = defineProps<{
     /** Consumer/agent id — the daemon constructs `cl-<name>` to target the
@@ -299,7 +300,7 @@ function openStream() {
     lastError.value = null;
     const token = localStorage.getItem("aiball.token");
     const tokenQs = token ? `?token=${encodeURIComponent(token)}` : "";
-    const url = `/api/agents/${encodeURIComponent(props.agentName)}/pane/stream${tokenQs}`;
+    const url = withBase(`/api/agents/${encodeURIComponent(props.agentName)}/pane/stream${tokenQs}`);
     es = new EventSource(url);
     connectTimeoutId = window.setTimeout(() => {
         if (!connected.value && !lastError.value) {
