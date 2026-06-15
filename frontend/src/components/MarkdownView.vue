@@ -4,7 +4,7 @@ import { bus } from "../lib/bus";
 import { promoteTrigger } from "../lib/prefs";
 import { extractQuestions } from "../lib/questions";
 import { markedInstance } from "../lib/formatting";
-import { withBase, stripBase, pushBasePath } from "../lib/base";
+import { withBase, stripBase, pushRoute } from "../lib/base";
 import { BUILT_IN_BODY_DECORATORS, renderBody } from "../lib/body-decorators";
 import { wireAttachmentCards } from "../lib/attachment-card";
 
@@ -104,7 +104,7 @@ async function onClick(ev: MouseEvent) {
             if (res.ok) {
                 const data = await res.json();
                 if (data?.ticket?.id) {
-                    pushBasePath(`/b/${data.ticket.id}${match[2]}`);
+                    pushRoute(`/b/${data.ticket.id}${match[2]}`);
                     window.dispatchEvent(new PopStateEvent("popstate"));
                     return;
                 }
@@ -114,7 +114,7 @@ async function onClick(ev: MouseEvent) {
         }
     }
 
-    pushBasePath(internal);
+    pushRoute(internal);
     window.dispatchEvent(new PopStateEvent("popstate"));
 }
 

@@ -6,7 +6,7 @@ import { useToast } from "primevue/usetoast";
 import { api, type InboxRow, type ProjectMeta, type Strategy } from "./lib/api";
 import { useNotifications } from "./lib/notifications";
 import { useRouting } from "./lib/router";
-import { replaceBasePath, stripBase } from "./lib/base";
+import { resetToRoot, stripBase } from "./lib/base";
 import { useInboxWs } from "./lib/inbox-ws";
 import { bus, useBus } from "./lib/bus";
 import BulkBar from "./components/BulkBar.vue";
@@ -60,7 +60,7 @@ function onAuthDone(): void {
     authMode.value = "ready";
     // Clear the install-token query param so the user can't replay the
     // setup link, and drop back to the root path.
-    replaceBasePath("/");
+    resetToRoot();
 }
 
 async function resolveAuthMode(): Promise<void> {

@@ -1,5 +1,5 @@
 import { onBeforeUnmount, watch, type Ref } from "vue";
-import { stripBase, pushBasePath } from "./base";
+import { pushRoute } from "./base";
 
 export type RouteState = {
     panel: "general" | "automation" | "rules" | "work-filters" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "compose" | null;
@@ -65,8 +65,8 @@ export function buildUrl(s: RouteState): string {
     if (s.statusFilter !== DEFAULTS.statusFilter) qs.set("status", s.statusFilter);
     if (s.onlyOpen !== DEFAULTS.onlyOpen) qs.set("open", s.onlyOpen ? "1" : "0");
     const query = qs.toString();
-    // Returns the UNPREFIXED route path ; pushIfChanged adds the base via
-    // pushBasePath, parseUrl strips it back off symmetrically (#190).
+    // Returns the route path ; pushIfChanged writes it into the URL hash
+    // (#190 hash routing) and parseUrl reads it back from there.
     return path + (query ? "?" + query : "");
 }
 
@@ -77,9 +77,13 @@ export function buildUrl(s: RouteState): string {
  * filter values the user already had loaded (typically from localStorage).
  */
 export function parseUrl(): Partial<RouteState> {
-    // #190 — strip the base path so the route matching below is base-agnostic.
-    const path = stripBase(location.pathname);
-    const qs = new URLSearchParams(location.search);
+    // #190 — the route lives in the URL HASH (`/base/#/b/981?status=all`), so the
+    // served path stays the base regardless of route. Source path + query from
+    // the hash, base-agnostic.
+    const raw = location.hash.replace(/^#/, "");
+    const [rawPath, rawQuery = ""] = raw.split("?");
+    const path = rawPath || "/";
+    const qs = new URLSearchParams(rawQuery);
     const out: Partial<RouteState> = {};
     // Default to null so navigating away from /consumers/<id> clears the edit view.
     out.consumerEditId = null;
@@ -235,9 +239,9 @@ export function useRouting(refs: {
     function pushIfChanged() {
         if (applying) return;
         const url = buildUrl(snapshot());
-        // #190 — compare base-agnostic (strip the live base off the location).
-        const current = stripBase(location.pathname) + location.search;
-        if (url !== current) pushBasePath(url);
+        // #190 — route lives in the hash ; compare + write there.
+        const current = location.hash.replace(/^#/, "") || "/";
+        if (url !== current) pushRoute(url);
     }
 
     const stop = watch(
@@ -259,8 +263,12 @@ export function useRouting(refs: {
         apply(parseUrl());
     }
     window.addEventListener("popstate", onPop);
+    // #190 — hash routing : a manual URL edit / external #-link fires hashchange
+    // (not popstate), so re-sync on both.
+    window.addEventListener("hashchange", onPop);
     onBeforeUnmount(() => {
         window.removeEventListener("popstate", onPop);
+        window.removeEventListener("hashchange", onPop);
         stop();
     });
 }
