@@ -398,6 +398,10 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
         status?: unknown;
         decided_by?: unknown;
         new_kind?: unknown;
+        // #980 `7cnyjb` — optional closing note carried on the auto-close
+        // event when accepting a resolution / wontfix (front sends it here
+        // instead of a separate postBodyAs("ticket_closed")).
+        body?: unknown;
     };
     if (body.status !== "accepted" && body.status !== "rejected") {
         return badRequest(res, "status must be 'accepted' or 'rejected'");
@@ -476,13 +480,19 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
                    authoritative signal, the event is decoration. */
             }
         }
-        // #802 — `wontfix` accepted auto-closes the ticket WITHOUT flipping
-        // resolved (junk/test/out-of-scope triage). The author of the
-        // wontfix comment cannot close (they're typically a non-reporter
-        // agent triaging) ; this acceptance IS the close authorization
-        // from the reporter. Best-effort : a failure here surfaces as a
-        // server log but doesn't fail the decide (the meta is already
-        // flipped to accepted, the user can close manually if needed).
+        // #802 + #980 `7cnyjb` — accepting a `resolution` OR a `wontfix`
+        // (effective kind, post-reclassify) auto-closes the ticket from the
+        // SAME endpoint. wontfix (#802) closes WITHOUT flipping resolved
+        // (junk/test/out-of-scope triage) ; resolution lands as closed-resolved
+        // (`resolved` is derived from the accepted meta, db/tickets.ts:103 —
+        // no separate event). Pre-#980 only wontfix auto-closed here ; a
+        // resolution relied on the front POSTing a separate `ticket_closed`,
+        // whose fan-out was the 2nd ping (`resolution_accepted` +
+        // `ticket_closed`, cf. #965/#972). Folding the close in with
+        // `skipFanOut` → ONE ping. The author of the proposal can't always
+        // close (non-reporter agent triaging) ; this acceptance IS the
+        // reporter's close authorization. Best-effort : a failure here is
+        // logged but doesn't fail the decide (the meta flip already landed).
         if (
             body.status === "accepted"
             && updated.meta
@@ -490,15 +500,24 @@ messagesRouter.post("/messages/:id/decide", (req: Request, res: Response) => {
         ) {
             try {
                 const m = JSON.parse(updated.meta) as { decision?: { kind?: string } };
-                if (m.decision?.kind === "wontfix") {
-                    // #921 — skip ping fan-out : wontfix_accepted a déjà
-                    // pingé. L'auto-close est redondant côté ping.
+                const k = m.decision?.kind;
+                if (k === "wontfix" || k === "resolution") {
+                    // Optional closing note rides on the close event ; wontfix
+                    // keeps its synthesized default when no note is supplied.
+                    const closeBody =
+                        typeof body.body === "string" && body.body.trim()
+                            ? body.body
+                            : k === "wontfix"
+                                ? `(auto-close from accepted wontfix #${updated.hashid ?? id})`
+                                : undefined;
+                    // #921 — skip ping fan-out : `<kind>_accepted` a déjà
+                    // pingé ; le ticket_closed est redondant côté ping.
                     submitMessage({
                         project: updated.project,
                         kind: "ticket_closed",
                         ticket_id: updated.ticket_id,
                         parent_id: updated.ticket_id,
-                        body: `(auto-close from accepted wontfix #${updated.hashid ?? id})`,
+                        body: closeBody,
                         by_agent: by,
                     }, { skipFanOut: true });
                 }

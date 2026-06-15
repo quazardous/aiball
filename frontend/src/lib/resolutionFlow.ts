@@ -276,15 +276,20 @@ export function useResolutionFlow({ data, error, broadcastRefresh, composerAssig
             // #817 : wontfix-accept also auto-closes (handled server-side
             // by the /decide handler, see #802) so we suppress the body
             // here too (the post-decide refresh re-renders the comment).
+            // #980 `7cnyjb` — un bouton = un appel. For resolution/wontfix the
+            // close (carrying the note) is done server-side by /decide in a
+            // SINGLE call (skipFanOut → 1 ping). Pre-#980 the front POSTed a
+            // separate ticket_closed for resolution → 2nd fan-out = double
+            // ping. For plan/escalation no close follows, so the note lands as
+            // a plain comment. One source of truth per accept.
+            const closeNote =
+                (effectiveKind === "resolution" || effectiveKind === "wontfix")
+                    ? composerBody.value.trim() || undefined
+                    : undefined;
             if (composerBody.value.trim() && effectiveKind !== "resolution" && effectiveKind !== "wontfix") {
                 await postBodyAs("comment_added");
             }
-            await api.decide(active.message.id, "accepted", asKind);
-            if (effectiveKind === "resolution") {
-                await postBodyAs("ticket_closed");
-            }
-            // wontfix : the server-side /decide handler auto-posts the
-            // ticket_closed (per #802), no extra round-trip needed here.
+            await api.decide(active.message.id, "accepted", asKind, closeNote);
             composerBody.value = "";
             // #902 — apply le composer assignee si présent. Couvre les 4
             // kinds accept (plan / resolution / wontfix / escalation).

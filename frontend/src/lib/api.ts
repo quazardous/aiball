@@ -908,8 +908,15 @@ export const api = {
         id: number,
         status: "accepted" | "rejected",
         new_kind?: "plan" | "resolution" | "wontfix" | "escalation",
+        // #980 — closing note carried on the server-side auto-close event
+        // for resolution/wontfix accepts (one call does decide + close).
+        closeBody?: string,
     ) =>
-        req<Message>("POST", `/api/messages/${id}/decide`, { status, new_kind }),
+        req<Message>("POST", `/api/messages/${id}/decide`, {
+            status,
+            new_kind,
+            ...(closeBody ? { body: closeBody } : {}),
+        }),
     /** Reclassify a pending decision's kind without changing its
      *  status (#B.129 follow-up). 409 when the decision is missing
      *  or already terminal. */
