@@ -12,7 +12,7 @@
 // so e.g. accept_decision exercises /accept-and-close incl. its skipFanOut.
 // Queries read the DB directly (the assertion layer needs ground truth, e.g.
 // the exact ping-row count for the #980 regression).
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { getDb } from "../src/db.js";
 import { createProject, listProjects } from "../src/db/projects.js";
 import * as schema from "../src/schema.js";
@@ -48,6 +48,22 @@ async function seed(name: string): Promise<Record<string, unknown>> {
             decision_kind: "resolution",
         });
         return { ticket: ticketId, decision: decision.id as number };
+    }
+    if (name === "mention-unread") {
+        // Golden-path seed (#985) : a ticket by another agent that @mentions the
+        // loop's consumer (test-agent) → forces an unread ping to it. The loop
+        // then wakes on that unread and, on wake delivery, marks it seen — so a
+        // post-wake `unread.test-agent` query drops to 0 (full stack exercised).
+        seedCounters();
+        ensureProject(PROJECT);
+        provision("test-agent");           // ensure the loop's consumer exists so the @mention resolves
+        const reporter = provision("reporter");
+        const ticket = await post(reporter, {
+            project: PROJECT, kind: "ticket_created",
+            title: "fixture: golden path", by_agent: "reporter",
+            body: "@test-agent please handle the golden path",
+        });
+        return { ticket: (ticket.ticket_id ?? ticket.id) as number };
     }
     throw new Error(`unknown fixture '${name}'`);
 }
@@ -118,6 +134,15 @@ function query(path: string): unknown {
         }
         if (field === "status") return m.status;
         throw new Error(`unknown message field '${field}'`);
+    }
+    if (parts[0] === "unread") {
+        // #985 — unseen ping rows for a consumer. The golden path asserts this
+        // drops to 0 after the loop wakes (wake delivery marks the head seen).
+        const consumer = parts.slice(1).join(".");
+        const rows = getDb().select().from(schema.pings)
+            .where(and(eq(schema.pings.recipient, consumer), isNull(schema.pings.seenAt)))
+            .all();
+        return rows.length;
     }
     throw new Error(`unknown query path '${path}'`);
 }

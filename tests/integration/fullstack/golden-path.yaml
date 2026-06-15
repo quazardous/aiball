@@ -1,0 +1,9 @@
+# #985 — golden path full-stack : a ticket @mentioning the loop's consumer
+# seeds an unread ping ; the loop boots, wakes on it, and on wake delivery
+# marks it seen → the daemon's unread for test-agent drops to 0. Exercises the
+# whole chain : daemon ping → loop poll → wake → inject → seen-ack → daemon.
+scenario: golden-path-wake
+fixture: mention-unread
+steps:
+  - { at: 0, spawn: { fake_claude: quick-prompt } }
+  - { at: 45, expect: { daemon: { "unread.test-agent": 0 } } }

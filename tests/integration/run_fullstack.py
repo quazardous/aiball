@@ -174,10 +174,14 @@ def run(scenario_path: Path, only: set[str] | None) -> int:
     handles: dict = {}
     print(f"[fullstack] scenario={sc.name} fake_claude={spawn.fake_claude} fixture={sc.fixture}")
 
-    print("[fullstack] compose up -d ...")
-    up = _compose("up", "-d", env=env, capture=True)
+    # Bring up the daemon FIRST and seed the fixture BEFORE the agent starts —
+    # the loop drains its unread/actionable at boot, so the seed must already be
+    # in the daemon when the loop wakes (else the startup wake finds nothing and
+    # the WakeMachine gates further wakes). #985.
+    print("[fullstack] compose up -d daemon ...")
+    up = _compose("up", "-d", "daemon", env=env, capture=True)
     if up.returncode != 0:
-        print(f"FATAL: compose up failed:\n{up.stderr}", file=sys.stderr)
+        print(f"FATAL: compose up daemon failed:\n{up.stderr}", file=sys.stderr)
         _compose("down", "-v", env=env)
         return 2
 
@@ -186,6 +190,10 @@ def run(scenario_path: Path, only: set[str] | None) -> int:
         if sc.fixture:
             handles = _daemon_ctl("seed", sc.fixture) or {}
             print(f"[fullstack] seeded fixture '{sc.fixture}' → handles {handles}")
+        print("[fullstack] compose up -d agent ...")
+        up2 = _compose("up", "-d", "agent", env=env, capture=True)
+        if up2.returncode != 0:
+            raise RuntimeError(f"compose up agent failed: {up2.stderr}")
         _wait_loop_ready(loop_name)
         print("[fullstack] loop ready — playing timeline")
         t0 = time.monotonic()
