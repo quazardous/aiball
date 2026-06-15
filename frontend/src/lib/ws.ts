@@ -1,6 +1,7 @@
 import { ref, onBeforeUnmount } from "vue";
 
 import type { Message, Strategy } from "./api";
+import { withBase } from "./base";
 
 export type WsEvent =
     | { type: "message_created"; data: Message }
@@ -22,7 +23,7 @@ export function useWs(onEvent: (e: WsEvent) => void) {
 
     function connect() {
         const proto = location.protocol === "https:" ? "wss" : "ws";
-        const url = `${proto}://${location.host}/ws`;
+        const url = `${proto}://${location.host}${withBase("/ws")}`;
         ws = new WebSocket(url);
         ws.onopen = () => {
             connected.value = true;

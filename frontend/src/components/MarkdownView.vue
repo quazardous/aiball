@@ -4,6 +4,7 @@ import { bus } from "../lib/bus";
 import { promoteTrigger } from "../lib/prefs";
 import { extractQuestions } from "../lib/questions";
 import { markedInstance } from "../lib/formatting";
+import { withBase, stripBase, pushBasePath } from "../lib/base";
 import { BUILT_IN_BODY_DECORATORS, renderBody } from "../lib/body-decorators";
 import { wireAttachmentCards } from "../lib/attachment-card";
 
@@ -59,6 +60,9 @@ async function onClick(ev: MouseEvent) {
     if (!target) return;
     const href = target.getAttribute("href");
     if (!href || !href.startsWith("/")) return;
+    // #190 — match on the base-stripped path so links work whether or not the
+    // rendered href carries the base prefix; re-add it on pushState.
+    const internal = stripBase(href);
     // #723 david `vf7drp` — `/uploads/*` links are CONTENT-ADDRESSABLE file
     // downloads (PDFs, attachments). They MUST do a full page nav so the
     // browser triggers its PDF viewer / download dialog, NOT the SPA
@@ -68,7 +72,7 @@ async function onClick(ev: MouseEvent) {
     // the bare `<a href="/uploads/...">` from marked rendering inherited
     // the SPA-nav path. Bail explicitly so the browser's default click
     // behaviour fires.
-    if (href.startsWith("/uploads/")) return;
+    if (internal.startsWith("/uploads/")) return;
     ev.preventDefault();
 
     // #361 : sur tactile, le tap émule un mouseover qui arme le timer
@@ -84,7 +88,7 @@ async function onClick(ev: MouseEvent) {
     // backend do the lookup, then redirect to the canonical /b/<intId>
     // (with #cseq-N hash if a comment was the original target — future
     // improvement; the focus_message_id is already returned by the API).
-    const match = /^\/b\/([^/?#]+)(.*)$/.exec(href);
+    const match = /^\/b\/([^/?#]+)(.*)$/.exec(internal);
     if (match && !/^\d+$/.test(match[1])) {
         try {
             // #B.94: hashid → numeric id resolution lives under the
@@ -94,13 +98,13 @@ async function onClick(ev: MouseEvent) {
             const headers: Record<string, string> = {};
             if (tok) headers["authorization"] = `Bearer ${tok}`;
             const res = await fetch(
-                `/api/tickets/${encodeURIComponent(match[1])}`,
+                withBase(`/api/tickets/${encodeURIComponent(match[1])}`),
                 { headers },
             );
             if (res.ok) {
                 const data = await res.json();
                 if (data?.ticket?.id) {
-                    history.pushState({}, "", `/b/${data.ticket.id}${match[2]}`);
+                    pushBasePath(`/b/${data.ticket.id}${match[2]}`);
                     window.dispatchEvent(new PopStateEvent("popstate"));
                     return;
                 }
@@ -110,7 +114,7 @@ async function onClick(ev: MouseEvent) {
         }
     }
 
-    history.pushState({}, "", href);
+    pushBasePath(internal);
     window.dispatchEvent(new PopStateEvent("popstate"));
 }
 

@@ -3,6 +3,7 @@ import { ref } from "vue";
 import Button from "primevue/button";
 import IdentityPicker from "./IdentityPicker.vue";
 import { HEADER_BADGE_TOOLTIPS } from "../lib/labels";
+import { pushBasePath } from "../lib/base";
 
 // #540 / #570 — goto ticket : input compact qui accepte
 //   - un id ticket numérique (avec ou sans `#`) → /b/N direct
@@ -42,7 +43,7 @@ async function submitGoto() {
     const numeric = raw.replace(/^#/, "");
     const id = parseInt(numeric, 10);
     if (!Number.isNaN(id) && id > 0 && String(id) === numeric) {
-        window.history.pushState({}, "", `/b/${id}`);
+        pushBasePath(`/b/${id}`);
         window.dispatchEvent(new PopStateEvent("popstate"));
         gotoInput.value = "";
         return;
@@ -78,7 +79,7 @@ async function submitGoto() {
             gotoError.value = `not found : ${hashid}`;
             return;
         }
-        window.history.pushState({}, "", `/b/${data.ticket.id}`);
+        pushBasePath(`/b/${data.ticket.id}`);
         window.dispatchEvent(new PopStateEvent("popstate"));
         gotoInput.value = "";
     } catch (e) {

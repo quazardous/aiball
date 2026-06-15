@@ -1,3 +1,5 @@
+import { withBase } from "./base";
+
 export interface Tag {
     id: number;
     name: string;
@@ -261,7 +263,9 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     if (body) headers["content-type"] = "application/json";
     const tok = currentToken();
     if (tok) headers["authorization"] = `Bearer ${tok}`;
-    const res = await fetch(path, {
+    // #190 — prefix the configured base path (e.g. /aiball) so the request
+    // lands on the right tailscale --set-path mount, not host root.
+    const res = await fetch(withBase(path), {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,

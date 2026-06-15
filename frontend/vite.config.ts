@@ -5,6 +5,17 @@ import vue from "@vitejs/plugin-vue";
 const target = process.env.AIBALL_URL ?? "http://127.0.0.1:7777";
 const wsTarget = target.replace(/^http/, "ws");
 
+// #190 — serve aiball under a base path (e.g. `/aiball`) instead of root `/`,
+// so it can coexist with another service on the same host/port (cf. #986
+// tailscale serve --set-path). Set `AIBALL_BASE=/aiball npm run build`. Default
+// `/` = root (no change). Normalized to a leading+trailing slash for Vite, which
+// drives asset URLs AND `import.meta.env.BASE_URL` (consumed by lib/base.ts).
+const aiballBase: string = (() => {
+    const raw = (process.env.AIBALL_BASE ?? "/").trim();
+    if (!raw || raw === "/") return "/";
+    return `/${raw.replace(/^\/+|\/+$/g, "")}/`;
+})();
+
 // Single source of truth: the repo-root package.json (qcmp `aiball`
 // component). Injected as a compile-time constant so the UI footer can
 // show `aiball v<x.y.z>` without a runtime fetch.
@@ -20,6 +31,7 @@ const aiballVersion: string = (() => {
 })();
 
 export default defineConfig({
+    base: aiballBase,
     plugins: [vue()],
     define: {
         __AIBALL_VERSION__: JSON.stringify(aiballVersion),

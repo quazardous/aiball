@@ -30,6 +30,8 @@ export interface UploadResult {
  * picker also falls back to extension sniffing via `extToMime` below
  * and the server still has the final say via its allow-list.
  */
+import { withBase } from "./base";
+
 const ALLOWED_TYPES = new Set([
     // Images
     "image/png", "image/jpeg", "image/gif", "image/webp",
@@ -120,7 +122,7 @@ export async function uploadFile(file: File | Blob): Promise<UploadResult> {
     // #B.94: uploads also live behind the bearer-auth middleware.
     const tok = localStorage.getItem("aiball.token");
     if (tok) headers["authorization"] = `Bearer ${tok}`;
-    const res = await fetch("/api/uploads", {
+    const res = await fetch(withBase("/api/uploads"), {
         method: "POST",
         headers,
         body: file,

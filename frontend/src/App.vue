@@ -6,6 +6,7 @@ import { useToast } from "primevue/usetoast";
 import { api, type InboxRow, type ProjectMeta, type Strategy } from "./lib/api";
 import { useNotifications } from "./lib/notifications";
 import { useRouting } from "./lib/router";
+import { replaceBasePath, stripBase } from "./lib/base";
 import { useInboxWs } from "./lib/inbox-ws";
 import { bus, useBus } from "./lib/bus";
 import BulkBar from "./components/BulkBar.vue";
@@ -59,7 +60,7 @@ function onAuthDone(): void {
     authMode.value = "ready";
     // Clear the install-token query param so the user can't replay the
     // setup link, and drop back to the root path.
-    window.history.replaceState({}, "", "/");
+    replaceBasePath("/");
 }
 
 async function resolveAuthMode(): Promise<void> {
@@ -68,12 +69,12 @@ async function resolveAuthMode(): Promise<void> {
     // previously stored token.
     const params = new URLSearchParams(window.location.search);
     const tokenParam = params.get("t");
-    if (window.location.pathname === "/setup" || tokenParam) {
+    if (stripBase(window.location.pathname) === "/setup" || tokenParam) {
         setupInitialToken.value = tokenParam;
         authMode.value = "setup";
         return;
     }
-    if (window.location.pathname === "/login") {
+    if (stripBase(window.location.pathname) === "/login") {
         authMode.value = "login";
         return;
     }

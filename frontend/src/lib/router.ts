@@ -1,4 +1,5 @@
 import { onBeforeUnmount, watch, type Ref } from "vue";
+import { stripBase, pushBasePath } from "./base";
 
 export type RouteState = {
     panel: "general" | "automation" | "rules" | "work-filters" | "tags" | "projects" | "consumers" | "nodes" | "launchers" | "compose" | null;
@@ -64,6 +65,8 @@ export function buildUrl(s: RouteState): string {
     if (s.statusFilter !== DEFAULTS.statusFilter) qs.set("status", s.statusFilter);
     if (s.onlyOpen !== DEFAULTS.onlyOpen) qs.set("open", s.onlyOpen ? "1" : "0");
     const query = qs.toString();
+    // Returns the UNPREFIXED route path ; pushIfChanged adds the base via
+    // pushBasePath, parseUrl strips it back off symmetrically (#190).
     return path + (query ? "?" + query : "");
 }
 
@@ -74,7 +77,8 @@ export function buildUrl(s: RouteState): string {
  * filter values the user already had loaded (typically from localStorage).
  */
 export function parseUrl(): Partial<RouteState> {
-    const path = location.pathname;
+    // #190 — strip the base path so the route matching below is base-agnostic.
+    const path = stripBase(location.pathname);
     const qs = new URLSearchParams(location.search);
     const out: Partial<RouteState> = {};
     // Default to null so navigating away from /consumers/<id> clears the edit view.
@@ -231,8 +235,9 @@ export function useRouting(refs: {
     function pushIfChanged() {
         if (applying) return;
         const url = buildUrl(snapshot());
-        const current = location.pathname + location.search;
-        if (url !== current) history.pushState({}, "", url);
+        // #190 — compare base-agnostic (strip the live base off the location).
+        const current = stripBase(location.pathname) + location.search;
+        if (url !== current) pushBasePath(url);
     }
 
     const stop = watch(
