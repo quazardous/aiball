@@ -1,0 +1,30 @@
+# #981 Slice 1 — full-stack scenario AGENT image.
+#
+# Runs the REAL claude-loop stack (loop.ts timer + PTY proxy + hooks) inside a
+# container, driving `fake-claude` as the (only) faked component, pointed at the
+# `daemon` service over HTTP (data-plane remote, REMOTE.md "Direct" model).
+#
+# Native better-sqlite3 is compiled INSIDE the image (host node_modules can't be
+# reused across ABIs) — mirrors tests/Dockerfile. The source is bind-mounted at
+# run time; an anonymous volume preserves the compiled node_modules.
+FROM node:22-slim
+WORKDIR /app
+
+# Toolchain : better-sqlite3 native compile (g++/make/python3) + the runtime
+# the agent needs — tmux (the loop wraps claude in tmux), python3 (PTY proxy +
+# fake-claude), curl (daemon wait), procps (pid checks).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 python3-pip make g++ tmux curl ca-certificates procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# fake-claude deps. Its shebang is `uv run --script` with PEP-723 inline deps,
+# but we invoke it via `python3 bin/fake-claude` in the container (no uv), so
+# install the deps globally here. --break-system-packages : Debian PEP-668.
+RUN pip install --no-cache-dir --break-system-packages "textual>=0.50" "pyyaml>=6"
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Source (incl. tests/agent-entrypoint.sh) is bind-mounted at /app at run time.
+ENTRYPOINT ["/app/tests/agent-entrypoint.sh"]

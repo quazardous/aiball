@@ -30,5 +30,39 @@ services:
       timeout: 3s
       retries: 30
 
+  # #981 Slice 1 — the AGENT : the REAL claude-loop stack (loop.ts + PTY proxy +
+  # hooks) driving fake-claude (the only faked component), pointed at `daemon`
+  # over HTTP. The full-stack scenario harness drives this service. fake-claude
+  # plays a predictable scenario ; human input (timeline 2) lands via tmux
+  # send-keys into its pane (proxy = human keystroke) ; daemon data (timeline 3)
+  # is seeded over the API. Headless tmux = naturally detached (covers #971).
+  agent:
+    build:
+      context: ..
+      dockerfile: tests/Dockerfile.agent
+    depends_on:
+      daemon:
+        condition: service_healthy
+    environment:
+      AIBALL_URL: http://daemon:7777   # data-plane remote (REMOTE.md Direct)
+      AIBALL_HOME: /agent-state         # loop's own state (NOT the daemon DB)
+      AIBALL_SOCK: ""                   # force HTTP path, no local UDS
+      AGENT_CONSUMER: test-agent
+      AGENT_PROJECT: bidon              # the throwaway cloistered project
+      AGENT_SCENARIO: quick-prompt      # examples/fake-claude/scenarios/<x>.yaml
+      AGENT_NAME: agent1
+      TERM: xterm-256color
+    volumes:
+      - ..:/app                        # live source
+      - /app/node_modules              # preserve the image's native node_modules
+      - aiball-test-data:/data         # shared DB — bootstrap token mint ONLY
+      - agent-state:/agent-state       # ephemeral loop state
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "/app/bin/claude-loop inspect agent1 | grep -q '\"exists\": true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   aiball-test-data:
+  agent-state:
