@@ -62,10 +62,21 @@ providers:
     autostart: true     # bring up with the daemon (systemd ExecStartPost)
     mode: https         # https (default) | http
     # port: 8443        # optional listen-port override (default 443/80)
+    # path: /aiball     # optional: serve under a path instead of root /
 ```
 
 The daemon auto-resolves the proxy target port from `AIBALL_PORT`, the systemd
 `bind.conf` drop-in, or the 7777 default.
+
+By default aiball serves at the root path `/` on the listen port, which claims
+the whole port. Set `path: /aiball` to serve under a sub-path instead (via
+`tailscale serve --set-path`): that frees `/` and the other paths on the same
+443 so you can Funnel-expose another local service on it — required when a
+provider's webhook insists on port 443 (e.g. it rejects `:8443`). The
+`--set-path` serve entry is additive, so it coexists with other handlers across
+daemon restarts. (Caveat: `aiball providers down` runs `tailscale serve reset`,
+which clears the node's whole serve config — re-add any coexisting handler
+after a manual down.)
 
 ## Security model
 

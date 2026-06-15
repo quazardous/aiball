@@ -31,6 +31,15 @@ export interface TailscaleProvider {
     mode: "https" | "http";
     /** Optional listen-port override (default 443 https / 80 http). */
     port?: number;
+    /**
+     * #986 — optional URL path to serve aiball under (e.g. `/aiball`) instead
+     * of the root `/`. Serving under a path frees `/` (and the other paths) on
+     * the listen port so another service can be Funnel-exposed on the same 443
+     * (some webhooks, e.g. Wise, require port 443). Default (unset / `/`) keeps
+     * the historical root serve. `tailscale serve --set-path` is additive, so a
+     * path-scoped aiball entry coexists with other handlers across restarts.
+     */
+    path?: string;
 }
 
 export interface ProvidersConfig {
@@ -60,6 +69,7 @@ export function loadProviders(): ProvidersConfig {
                 autostart: ts.autostart !== false,
                 mode: ts.mode === "http" ? "http" : "https",
                 port: typeof ts.port === "number" ? ts.port : undefined,
+                path: normalizeServePath(ts.path),
             };
         }
         return out;
@@ -109,14 +119,44 @@ function tailscaleReady(): { ok: boolean; reason: string } {
     return { ok: true, reason: "" };
 }
 
-/** `tailscale serve --bg --https=<listen> 127.0.0.1:<daemon-port>` (or --http). */
-function tailscaleUp(mode: "https" | "http", portOverride?: number): ProviderResult {
+/**
+ * #986 — normalize a configured serve path : trim, ensure a leading `/`, drop a
+ * trailing `/`. Root (`/`, empty, undefined) → `undefined` = serve at root (no
+ * `--set-path`, historical behaviour).
+ */
+export function normalizeServePath(raw: unknown): string | undefined {
+    if (typeof raw !== "string") return undefined;
+    let p = raw.trim();
+    if (!p || p === "/") return undefined;
+    if (!p.startsWith("/")) p = `/${p}`;
+    if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
+    return p;
+}
+
+/**
+ * #986 — build the `tailscale serve` argv. Pure (no spawn) so it's unit-tested.
+ * A non-root `path` adds `--set-path=<path>` so aiball serves under that path
+ * and leaves `/` free for other handlers on the same listen port.
+ */
+export function tailscaleServeArgs(
+    mode: "https" | "http", listen: number, target: string, path?: string,
+): string[] {
+    const flag = mode === "http" ? `--http=${listen}` : `--https=${listen}`;
+    const args = ["serve", "--bg", flag];
+    if (path) args.push(`--set-path=${path}`);
+    args.push(target);
+    return args;
+}
+
+/** `tailscale serve --bg --https=<listen> [--set-path=<path>] 127.0.0.1:<daemon-port>` (or --http). */
+function tailscaleUp(mode: "https" | "http", portOverride?: number, path?: string): ProviderResult {
     const ready = tailscaleReady();
     if (!ready.ok) return { provider: "tailscale", ok: false, detail: ready.reason };
     const target = `127.0.0.1:${resolveDaemonPort()}`;
     const listen = portOverride ?? (mode === "http" ? 80 : 443);
-    const flag = mode === "http" ? `--http=${listen}` : `--https=${listen}`;
-    const r = spawnSync("tailscale", ["serve", "--bg", flag, target], { encoding: "utf8" });
+    const args = tailscaleServeArgs(mode, listen, target, path);
+    const flag = args[2];
+    const r = spawnSync("tailscale", args, { encoding: "utf8" });
     const out = ((r.stdout ?? "") + (r.stderr ?? "")).trim();
     if (r.status !== 0) {
         const hint = mode === "https"
@@ -127,7 +167,13 @@ function tailscaleUp(mode: "https" | "http", portOverride?: number): ProviderRes
     return { provider: "tailscale", ok: true, detail: out || `serve --bg ${flag} ${target}` };
 }
 
-/** `tailscale serve reset`. */
+/**
+ * `tailscale serve reset`. #986 caveat : `reset` clears the WHOLE serve config
+ * on this node, not just aiball's entry — tailscale ≤1.98 has no path-targeted
+ * removal (only `reset` / `clear`). So a manual `aiball providers down` on a
+ * node that ALSO Funnels another service would drop that too ; re-add it after.
+ * (`up` is additive via `--set-path`, so daemon restarts don't clobber.)
+ */
 function tailscaleDown(): ProviderResult {
     const ready = tailscaleReady();
     if (!ready.ok) return { provider: "tailscale", ok: false, detail: ready.reason };
@@ -157,7 +203,7 @@ export function bringUpProviders(opts: { onlyAutostart?: boolean } = {}): Provid
     const results: ProviderResult[] = [];
     const ts = cfg.tailscale;
     if (ts && ts.enabled && (!opts.onlyAutostart || ts.autostart)) {
-        results.push(tailscaleUp(ts.mode, ts.port));
+        results.push(tailscaleUp(ts.mode, ts.port, ts.path));
     }
     return results;
 }
