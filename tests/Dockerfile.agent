@@ -18,10 +18,14 @@ RUN apt-get update \
         python3 python3-pip make g++ tmux curl ca-certificates procps \
     && rm -rf /var/lib/apt/lists/*
 
-# fake-claude deps. Its shebang is `uv run --script` with PEP-723 inline deps,
-# but we invoke it via `python3 bin/fake-claude` in the container (no uv), so
-# install the deps globally here. --break-system-packages : Debian PEP-668.
-RUN pip install --no-cache-dir --break-system-packages "textual>=0.50" "pyyaml>=6"
+# Python deps :
+#  - textual / pyyaml : fake-claude (invoked via `python3 bin/fake-claude`, no uv).
+#  - websocket-client  : the PTY proxy (pty-proxy.py) REQUIRES it — without it the
+#    proxy exits 2 ("missing Python dep websocket-client"), the pane dies and the
+#    tmux session is reaped → the timer self-exits. (#982)
+# --break-system-packages : Debian PEP-668.
+RUN pip install --no-cache-dir --break-system-packages \
+        "textual>=0.50" "pyyaml>=6" "websocket-client"
 
 COPY package.json package-lock.json ./
 RUN npm ci

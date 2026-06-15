@@ -416,7 +416,12 @@ def main() -> int:
     ap.add_argument("--list-screens", action="store_true", help="dump built-in screen slugs + exit")
     ap.add_argument("--probe-mode", metavar="NAME", help="#637 Slice 1 — non-TUI probe runner : render a built-in scenario synchronously to stdout, advance on stdin lines. NAME is one of the keys in PROBE_SCENARIOS (--list-probes to list).")
     ap.add_argument("--list-probes", action="store_true", help="#637 Slice 1 — dump built-in probe scenarios + exit.")
-    args = ap.parse_args()
+    # #982 — fake-claude stands in for `claude` under claude-loop, which ALWAYS
+    # appends claude's own flags (`--settings <file>`, `--permission-mode`,
+    # `--resume`, …) after our scenario arg. parse_args() would reject those and
+    # exit 2 → the tmux pane dies → the loop self-exits. parse_known_args lets us
+    # ignore claude's flags (the real positional `scenario` is consumed first).
+    args, _claude_flags = ap.parse_known_args()
 
     if args.list_screens:
         for slug in BUILTIN_SCREENS:
