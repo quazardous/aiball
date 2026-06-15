@@ -91,6 +91,50 @@ def _send_keys(loop_name: str, args: list[str]) -> None:
     _agent_exec(["tmux", "send-keys", "-t", f"{loop_name}.0", *args], capture=True)
 
 
+def _daemon_ctl(*args: str) -> object:
+    """Run tests/daemon-ctl.ts inside the daemon container ; parse its JSON line."""
+    r = _compose("exec", "-T", "daemon", "npx", "tsx", "/app/tests/daemon-ctl.ts", *args, capture=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"daemon-ctl {args} failed: {r.stderr.strip() or r.stdout.strip()}")
+    return json.loads(r.stdout.strip()) if r.stdout.strip() else None
+
+
+def _wait_daemon_ready(timeout_s: float = 60.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        r = _compose("exec", "-T", "daemon", "node", "-e",
+                     "fetch('http://127.0.0.1:7777/api/health').then(x=>process.exit(x.ok?0:1)).catch(()=>process.exit(1))",
+                     capture=True)
+        if r.returncode == 0:
+            return
+        time.sleep(2)
+    raise TimeoutError(f"daemon not ready after {timeout_s}s")
+
+
+def _resolve(value: object, handles: dict) -> object:
+    """Substitute `@name` references with the fixture handle ids. Recurses
+    into dicts/lists ; a bare `@name` string → handles[name]."""
+    if isinstance(value, str) and value.startswith("@"):
+        key = value[1:]
+        if key not in handles:
+            raise KeyError(f"unknown fixture handle '@{key}' (have: {sorted(handles)})")
+        return handles[key]
+    if isinstance(value, dict):
+        return {k: _resolve(v, handles) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_resolve(v, handles) for v in value]
+    return value
+
+
+def _resolve_path(path: str, handles: dict) -> str:
+    """Substitute `@name` tokens inside a dotted query path (e.g.
+    `ticket.@ticket.ping_rows` → `ticket.42.ping_rows`)."""
+    return ".".join(
+        str(handles[p[1:]]) if p.startswith("@") else p
+        for p in path.split(".")
+    )
+
+
 def _eval_expect(step: ExpectStep, snapshot: dict) -> list[str]:
     """Return a list of failure strings (empty = all assertions passed)."""
     fails: list[str] = []
@@ -127,10 +171,8 @@ def run(scenario_path: Path, only: set[str] | None) -> int:
     env = {**os.environ, "AGENT_SCENARIO": spawn.fake_claude, "AGENT_NAME": loop_name}
 
     passed = failed = skipped = 0
+    handles: dict = {}
     print(f"[fullstack] scenario={sc.name} fake_claude={spawn.fake_claude} fixture={sc.fixture}")
-    if sc.fixture:
-        print(f"[fullstack] SKIP fixture '{sc.fixture}' — daemon seed not yet wired (#984 next layer)")
-        skipped += 1
 
     print("[fullstack] compose up -d ...")
     up = _compose("up", "-d", env=env, capture=True)
@@ -140,6 +182,10 @@ def run(scenario_path: Path, only: set[str] | None) -> int:
         return 2
 
     try:
+        _wait_daemon_ready()
+        if sc.fixture:
+            handles = _daemon_ctl("seed", sc.fixture) or {}
+            print(f"[fullstack] seeded fixture '{sc.fixture}' → handles {handles}")
         _wait_loop_ready(loop_name)
         print("[fullstack] loop ready — playing timeline")
         t0 = time.monotonic()
@@ -167,11 +213,21 @@ def run(scenario_path: Path, only: set[str] | None) -> int:
                     passed += 1
                     print(f"[t={at}] EXPECT(inspect) ok")
             elif isinstance(step, ExpectStep) and step.assert_target == "daemon":
-                print(f"[t={at}] SKIP expect.daemon — daemon assertions not yet wired (#984 next layer)")
-                skipped += 1
+                fails = []
+                for path, want in step.assertions.items():
+                    got = _daemon_ctl("query", _resolve_path(path, handles))
+                    if got != want:
+                        fails.append(f"{path}: want {want!r}, got {got!r}")
+                if fails:
+                    failed += 1
+                    print(f"[t={at}] EXPECT(daemon) FAIL: {'; '.join(fails)}")
+                else:
+                    passed += 1
+                    print(f"[t={at}] EXPECT(daemon) ok")
             elif isinstance(step, AiballStep):
-                print(f"[t={at}] SKIP aiball '{step.action}' — data-plane mutations not yet wired (#984 next layer)")
-                skipped += 1
+                spec = _resolve({step.action: step.payload[step.action]}, handles)
+                _daemon_ctl("mutate", json.dumps(spec))
+                print(f"[t={at}] aiball {step.action} {spec[step.action]!r}")
             elif isinstance(step, DriveStep):
                 print(f"[t={at}] SKIP drive '{step.action}' — loop-drive not wired in full runner")
                 skipped += 1

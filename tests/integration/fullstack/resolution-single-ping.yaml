@@ -1,0 +1,14 @@
+# #984 daemon layer + seed of the #980 regression. Fixture seeds a ticket
+# (human reporter) with a pending resolution (agent) ; the human accepts via
+# /decide ; assert the decision flipped to accepted AND no ticketId ping row
+# was created (no double-event close fan-out).
+#
+# Forward-looking : once #980's proper fix lands (/decide auto-closes a
+# resolution server-side with skipFanOut), add `ticket.@ticket.closed: true`
+# here — ping_rows stays 0 and the assertion becomes the full #980 regression.
+scenario: resolution-single-ping
+fixture: resolution-pending
+steps:
+  - { at: 0, spawn: { fake_claude: quick-prompt } }
+  - { at: 5, aiball: { accept_decision: { decision: "@decision" } } }
+  - { at: 8, expect: { daemon: { "message.@decision.decision_status": accepted, "ticket.@ticket.ping_rows": 0 } } }
