@@ -648,26 +648,17 @@ if (sd) {
     pickerSessionW.on("change", (s) => { setResumeSessionPicker(sd, s.visible); refreshPaneReady(); });
     pickerSessionW.on("begin", () => {
         forwardModuleStarted("resume_picker");
-        // #639 david `3yz6qa` — "Faut utiliser les pane Watchers et les
-        // state machine". Auto-cross loop-side : le watcher détecte le
+        // #639 david `3yz6qa` — auto-cross loop-side : le watcher détecte le
         // picker session, on envoie Enter (= pick latest). CL_RESUME_PICK
-        // = "abort" laisse l'humain choisir.
-        const pickMode = process.env[CL_ENV.RESUME_PICK] ?? "latest";
-        if (pickMode === "abort") {
+        // = "abort" laisse l'humain choisir. L'inject + ses retries vivent
+        // dans crossResumePicker() (appelé ici ET re-tenté par heartbeat tant
+        // que le picker reste visible — anti boot-race, cf. ci-dessous).
+        if ((process.env[CL_ENV.RESUME_PICK] ?? "latest") === "abort") {
             log("watcher: resume_picker begin → CL_RESUME_PICK=abort, no auto-cross");
             return;
         }
-        log(`watcher: resume_picker begin → auto-cross (pick=${pickMode}, Enter)`);
-        // #965 david `<chat>` — inject ONLY. Pas de fallback send-keys :
-        // le proxy est forcément alive (il EST le process du pane), donc
-        // l'inject doit toujours passer. Si l'inject échoue, c'est un bug
-        // proxy à investiguer — log loud, picker reste stuck, david
-        // intervient manuellement plutôt qu'on tombe dans le path stdin
-        // qui armerait NOT AFK 10m à tort.
-        void (async () => {
-            if (await injectRawBytes(sd!, "\r")) return;
-            log("watcher: resume_picker — inject FAILED (proxy bug ?). Picker stuck — pas de fallback send-keys pour éviter l'arm AFK parasite. Investiguer pty-proxy/loop.sock.");
-        })();
+        log("watcher: resume_picker begin → auto-cross (pick=latest, Enter)");
+        crossResumePicker();
     });
     pickerSessionW.on("end", () => forwardModuleEnded("resume_picker"));
     pickerModeW.on("change", (s) => { setResumeModePicker(sd, s.visible); refreshPaneReady(); });
@@ -770,6 +761,27 @@ if (sd) {
     });
 }
 
+// #639/#965 auto-cross : inject Enter to dismiss claude's resume-session picker
+// (pick=latest). Inject-only — NO send-keys fallback (would arm NOT AFK 10m via
+// stdin ; #974). The begin-time inject can be LOST at boot when the PTY proxy
+// hasn't subscribed to loop.sock yet (injectRawBytes resolves true — the frame
+// reached the timer — but the timer's rebroadcast finds no proxy → Enter
+// dropped). begin fires once, so the picker stayed stuck (seen live on skybot
+// after a reload). Fix : the heartbeat re-calls this WHILE the picker is still
+// visible, so a lost Enter is re-sent once the proxy is up — anti-race, not a
+// fallback. Rate-limited so we never machine-gun Enter.
+let lastPickerCrossAtMs = 0;
+const PICKER_CROSS_RETRY_MS = 3000;
+function crossResumePicker(): void {
+    if ((process.env[CL_ENV.RESUME_PICK] ?? "latest") === "abort") return;
+    lastPickerCrossAtMs = Date.now();
+    void (async () => {
+        if (!(await injectRawBytes(sd!, "\r"))) {
+            log("auto-cross: inject FAILED (proxy bug ?) — retry on next heartbeat while the picker stays visible.");
+        }
+    })();
+}
+
 function refreshPaneMarkers(): void {
     if (!sd) return;
     const paneText = capturePane();
@@ -793,6 +805,13 @@ function refreshPaneMarkers(): void {
     if (pickerModeW.snapshot().visible !== (getIpcState().resumeModePickerActive === true)) {
         setResumeModePicker(sd, pickerModeW.snapshot().visible);
         refreshPaneReady();
+    }
+    // Auto-cross boot-race recovery : if the session picker is STILL visible,
+    // re-send Enter (the begin-time inject can be dropped when the proxy hasn't
+    // subscribed to loop.sock yet). Rate-limited via lastPickerCrossAtMs.
+    if (pickerSessionW.snapshot().visible && Date.now() - lastPickerCrossAtMs > PICKER_CROSS_RETRY_MS) {
+        log("auto-cross: session picker still visible → retry Enter (boot-race recovery)");
+        crossResumePicker();
     }
     // #883 Slice 2 — le push de deadline est maintenant géré par le
     // "push manager" dans mainSse (un setInterval armé/désarmé via
