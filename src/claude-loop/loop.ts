@@ -779,6 +779,21 @@ function refreshPaneMarkers(): void {
     // Single scan : watchers observe + emit events ; the subscribers
     // above call the legacy ipcState setters on every transition.
     paneObs.tick(paneText, { nowMs: Date.now(), isBoot });
+    // Picker markers are AUTHORITATIVELY the current pane scan, not just
+    // transitions. The session-start hook sets them true out-of-band ; if it
+    // auto-Enters past the picker before a heartbeat captures it, the watcher
+    // never observes true→false, so its transition-only `change` can't clear the
+    // stale marker — seen live on skybot: the bar stuck on `resume picker:session`
+    // at the idle prompt. Reconcile each tick so a gone picker clears even
+    // without a watcher transition.
+    if (pickerSessionW.snapshot().visible !== (getIpcState().resumeSessionPickerActive === true)) {
+        setResumeSessionPicker(sd, pickerSessionW.snapshot().visible);
+        refreshPaneReady();
+    }
+    if (pickerModeW.snapshot().visible !== (getIpcState().resumeModePickerActive === true)) {
+        setResumeModePicker(sd, pickerModeW.snapshot().visible);
+        refreshPaneReady();
+    }
     // #883 Slice 2 — le push de deadline est maintenant géré par le
     // "push manager" dans mainSse (un setInterval armé/désarmé via
     // subscribe sur `activeModules.size`). `refreshPaneMarkers` se
