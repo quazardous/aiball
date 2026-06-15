@@ -18,14 +18,18 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from yaml_scenario import (  # noqa: E402
+    AiballStep,
     DriveStep,
     ExpectStep,
+    HumanStep,
     Scenario,
     ScenarioError,
     SpawnStep,
+    filter_scenario_by_targets,
     get_inspect_path,
     load_scenarios_from_dir,
     parse_scenario,
+    step_target,
 )
 
 
@@ -217,7 +221,7 @@ steps:
   - at_seconds: 1
     weird_key: 42
 """)
-    with pytest.raises(ScenarioError, match="must declare one of 'spawn' / 'drive' / 'expect'"):
+    with pytest.raises(ScenarioError, match="must declare one of"):
         parse_scenario(p)
 
 
@@ -439,3 +443,190 @@ steps:
     assert isinstance(step, ExpectStep)
     assert step.assertions == {"view.bar_word": "boot", "some.field": {"present": True}}
     assert step.existence == {"pane": True, "runtime": True, "markers": True}
+
+
+# ---------------------------------------------------------------------
+# #981 S2 — fixture, multi-target steps (human/aiball), expect routing,
+# `at` alias, partial-execution filtering.
+# ---------------------------------------------------------------------
+
+def test_at_alias_equivalent_to_at_seconds(tmp_path: Path):
+    """`at:` is the canonical key but `at_seconds:` still works (back-compat)."""
+    p = write(tmp_path, "atalias.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at: 3
+    expect: { view.bar_word: idle }
+""")
+    sc = parse_scenario(p)
+    assert sc.steps[1].at_seconds == 3.0
+
+
+def test_fixture_parsed(tmp_path: Path):
+    p = write(tmp_path, "fix.yaml", """\
+scenario: x
+fixture: resolution-pending
+steps:
+  - spawn: { fake_claude: prompt-ready }
+""")
+    sc = parse_scenario(p)
+    assert sc.fixture == "resolution-pending"
+
+
+def test_fixture_absent_is_none(tmp_path: Path):
+    p = write(tmp_path, "nofix.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+""")
+    assert parse_scenario(p).fixture is None
+
+
+def test_fixture_must_be_string(tmp_path: Path):
+    p = write(tmp_path, "badfix.yaml", """\
+scenario: x
+fixture: [1, 2]
+steps:
+  - spawn: { fake_claude: prompt-ready }
+""")
+    with pytest.raises(ScenarioError, match="'fixture' must be a string"):
+        parse_scenario(p)
+
+
+def test_human_step(tmp_path: Path):
+    p = write(tmp_path, "human.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at: 2
+    human: { type: "abc" }
+  - at: 4
+    human: { key: F9 }
+""")
+    sc = parse_scenario(p)
+    s1, s2 = sc.steps[1], sc.steps[2]
+    assert isinstance(s1, HumanStep) and s1.action == "type" and s1.payload == {"type": "abc"}
+    assert isinstance(s2, HumanStep) and s2.action == "key" and s2.payload == {"key": "F9"}
+    assert step_target(s1) == "human"
+
+
+def test_aiball_step(tmp_path: Path):
+    p = write(tmp_path, "aiball.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at: 2
+    aiball: { accept_decision: { ticket: 1 } }
+""")
+    sc = parse_scenario(p)
+    s = sc.steps[1]
+    assert isinstance(s, AiballStep) and s.action == "accept_decision"
+    assert s.payload == {"accept_decision": {"ticket": 1}}
+    assert step_target(s) == "aiball"
+
+
+def test_expect_inspect_is_default_target(tmp_path: Path):
+    p = write(tmp_path, "expi.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at: 1
+    expect: { pane.busy: true }
+""")
+    s = parse_scenario(p).steps[1]
+    assert isinstance(s, ExpectStep) and s.assert_target == "inspect"
+    assert step_target(s) == "expect_inspect"
+
+
+def test_expect_daemon_target(tmp_path: Path):
+    p = write(tmp_path, "expd.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at: 1
+    expect:
+      daemon:
+        ticket.1.status: open
+""")
+    s = parse_scenario(p).steps[1]
+    assert isinstance(s, ExpectStep) and s.assert_target == "daemon"
+    assert s.assertions == {"ticket.1.status": "open"}
+    assert step_target(s) == "expect_daemon"
+
+
+def test_expect_inspect_wrapper_explicit(tmp_path: Path):
+    p = write(tmp_path, "expiw.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at: 1
+    expect:
+      inspect:
+        pane.busy: false
+""")
+    s = parse_scenario(p).steps[1]
+    assert isinstance(s, ExpectStep) and s.assert_target == "inspect"
+    assert s.assertions == {"pane.busy": False}
+
+
+def test_sole_daemon_assertion_not_treated_as_wrapper(tmp_path: Path):
+    """A non-dict value under a sole `daemon` key is a plain assertion,
+    not a layer wrapper (the wrapper requires a mapping value)."""
+    p = write(tmp_path, "expda.yaml", """\
+scenario: x
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at: 1
+    expect: { daemon: 42 }
+""")
+    s = parse_scenario(p).steps[1]
+    assert s.assert_target == "inspect"
+    assert s.assertions == {"daemon": 42}
+
+
+def _full(tmp_path: Path) -> Scenario:
+    p = write(tmp_path, "full.yaml", """\
+scenario: full
+fixture: seed-1
+steps:
+  - spawn: { fake_claude: prompt-ready }
+  - at: 1
+    drive: { hook_signal: bootComplete }
+  - at: 2
+    human: { type: "abc" }
+  - at: 3
+    aiball: { accept_decision: { ticket: 1 } }
+  - at: 4
+    expect: { pane.busy: true }
+  - at: 5
+    expect: { daemon: { ticket.1.status: open } }
+""")
+    return parse_scenario(p)
+
+
+def test_filter_fake_claude_viz(tmp_path: Path):
+    """Viz mode = just the human timeline ; spawn always kept ; fixture
+    dropped (no daemon)."""
+    sc = filter_scenario_by_targets(_full(tmp_path), {"human"})
+    kinds = [step_target(s) for s in sc.steps]
+    assert kinds == ["spawn", "human"]
+    assert sc.fixture is None
+
+
+def test_filter_loop_only(tmp_path: Path):
+    """Loop-only = human + inspect expectations ; no daemon/aiball, no fixture."""
+    sc = filter_scenario_by_targets(_full(tmp_path), {"loop", "human", "expect_inspect"})
+    kinds = [step_target(s) for s in sc.steps]
+    assert kinds == ["spawn", "loop", "human", "expect_inspect"]
+    assert sc.fixture is None
+
+
+def test_filter_full_keeps_everything(tmp_path: Path):
+    sc = filter_scenario_by_targets(
+        _full(tmp_path),
+        {"loop", "human", "aiball", "expect_inspect", "expect_daemon"},
+    )
+    kinds = [step_target(s) for s in sc.steps]
+    assert kinds == ["spawn", "loop", "human", "aiball", "expect_inspect", "expect_daemon"]
+    assert sc.fixture == "seed-1"

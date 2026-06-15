@@ -65,8 +65,39 @@ class DriveStep:
 
 
 @dataclass(frozen=True)
+class HumanStep:
+    """#981 S2 — the `human` step : a human keystroke fed through the PTY
+    proxy (= tmux send-keys into the loop pane, which the proxy sees as a
+    real human keystroke). `action` is the first key of the mapping
+    (`type` / `key` / `detach` / `attach` …) ; `payload` is the full dict.
+    E.g. `human: { type: "abc" }` → action="type" ; `human: { key: F9 }`."""
+    at_seconds: float
+    action: str
+    payload: dict
+
+
+@dataclass(frozen=True)
+class AiballStep:
+    """#981 S2 — the `aiball` step : a data-plane mutation on the daemon
+    DURING the run (ticket_new / ticket_reply / accept_decision …), via
+    the API/MCP. The INITIAL data set is the scenario-level `fixture:`
+    (seeded before t=0) ; this is for mid-scenario changes. `action` is
+    the first key of the mapping ; `payload` is the full dict."""
+    at_seconds: float
+    action: str
+    payload: dict
+
+
+@dataclass(frozen=True)
 class ExpectStep:
     """The `expect` step. `at_seconds` is the wall-clock offset.
+
+    `assert_target` (#981 S2) routes the assertion to a layer :
+      - `inspect` (default) : assert on the `claude-loop inspect` JSON.
+      - `daemon`  : assert on the daemon state (ticket status, ping rows,
+        SSE …) via the API. Selected by wrapping the body in
+        `expect: { daemon: {...} }` ; bare keys (or `inspect: {...}`) stay
+        on the loop snapshot (back-compat with #638 scenarios).
 
     Two assertion families coexist on the same step :
       - `assertions` : dotted-path → expected value (equality check).
@@ -77,9 +108,27 @@ class ExpectStep:
     at_seconds: float
     assertions: dict
     existence: dict = field(default_factory=dict)
+    assert_target: str = "inspect"
 
 
-Step = SpawnStep | DriveStep | ExpectStep
+Step = SpawnStep | DriveStep | HumanStep | AiballStep | ExpectStep
+
+
+# #981 S2 — per-step target tag, used by `filter_scenario_by_targets` for
+# partial execution (run a scenario for just one runner). `spawn` is infra
+# and always kept. `expect` splits by its assertion layer.
+def step_target(step: Step) -> str:
+    if isinstance(step, SpawnStep):
+        return "spawn"
+    if isinstance(step, DriveStep):
+        return "loop"
+    if isinstance(step, HumanStep):
+        return "human"
+    if isinstance(step, AiballStep):
+        return "aiball"
+    if isinstance(step, ExpectStep):
+        return f"expect_{step.assert_target}"
+    raise ScenarioError(f"unknown step type {type(step).__name__}")
 
 
 @dataclass(frozen=True)
@@ -94,6 +143,10 @@ class Scenario:
     path: Path
     steps: tuple[Step, ...] = field(default_factory=tuple)
     xfail: str | None = None
+    # #981 S2 — name of the aiball data fixture seeded into the daemon
+    # BEFORE t=0 (timeline 3 initial state). None = no seed. The full
+    # runner resolves it ; the fake-claude-viz / loop-only runners ignore it.
+    fixture: str | None = None
 
 
 def parse_scenario(path: Path) -> Scenario:
@@ -110,6 +163,10 @@ def parse_scenario(path: Path) -> Scenario:
     if not isinstance(doc, dict):
         raise ScenarioError(f"{path}: top-level YAML must be a mapping, got {type(doc).__name__}")
     name = str(doc.get("scenario", path.stem))
+    raw_fixture = doc.get("fixture")
+    if raw_fixture is not None and not isinstance(raw_fixture, str):
+        raise ScenarioError(f"{path}: 'fixture' must be a string (name), got {type(raw_fixture).__name__}")
+    fixture = raw_fixture or None
     raw_xfail = doc.get("xfail")
     if raw_xfail is not None and not isinstance(raw_xfail, str):
         raise ScenarioError(f"{path}: 'xfail' must be a string (reason), got {type(raw_xfail).__name__}")
@@ -135,7 +192,27 @@ def parse_scenario(path: Path) -> Scenario:
     # Sort timed steps by at_seconds ; spawn stays at index 0.
     timed = sorted(steps[1:], key=lambda s: s.at_seconds)  # type: ignore[union-attr]
     ordered: tuple[Step, ...] = (steps[0], *timed)
-    return Scenario(name=name, path=path, steps=ordered, xfail=xfail)
+    return Scenario(name=name, path=path, steps=ordered, xfail=xfail, fixture=fixture)
+
+
+# #981 S2 — partial execution. Keep only steps whose target is in `targets`,
+# PLUS the spawn step (always — it's the infra bootstrap). Lets one scenario
+# file feed several runners off a single parse :
+#   - full           : every target (CI / container harness)
+#   - fake-claude viz : {"human"}                    (bin/play-scenario, #671)
+#   - loop-only      : {"human", "expect_inspect"}   (yaml integration, #638)
+# The `fixture` (daemon seed) is kept iff "aiball" is among the targets — a
+# runner with no daemon has nothing to seed. Returns a NEW Scenario.
+def filter_scenario_by_targets(scenario: Scenario, targets: set[str]) -> Scenario:
+    kept: list[Step] = [
+        s for s in scenario.steps
+        if isinstance(s, SpawnStep) or step_target(s) in targets
+    ]
+    fixture = scenario.fixture if "aiball" in targets else None
+    return Scenario(
+        name=scenario.name, path=scenario.path,
+        steps=tuple(kept), xfail=scenario.xfail, fixture=fixture,
+    )
 
 
 def _parse_step(path: Path, idx: int, raw: dict) -> Step:
@@ -150,11 +227,13 @@ def _parse_step(path: Path, idx: int, raw: dict) -> Step:
         if not isinstance(fc, str) or not fc:
             raise ScenarioError(f"{path} step[{idx}].spawn.fake_claude: required non-empty string")
         return SpawnStep(fake_claude=fc)
-    at = raw.get("at_seconds")
+    # #981 S2 — `at` is the canonical key (chronological multi-target format) ;
+    # `at_seconds` stays accepted as an alias for the #638 scenarios.
+    at = raw.get("at", raw.get("at_seconds"))
     if not isinstance(at, (int, float)):
-        raise ScenarioError(f"{path} step[{idx}].at_seconds: required number on non-spawn steps")
+        raise ScenarioError(f"{path} step[{idx}].at: required number on non-spawn steps (or `at_seconds`)")
     if at < 0:
-        raise ScenarioError(f"{path} step[{idx}].at_seconds: must be >= 0, got {at}")
+        raise ScenarioError(f"{path} step[{idx}].at: must be >= 0, got {at}")
     if "drive" in keys:
         drive = raw["drive"]
         if not isinstance(drive, dict) or not drive:
@@ -163,10 +242,39 @@ def _parse_step(path: Path, idx: int, raw: dict) -> Step:
         # E.g. `drive: { hook_signal: bootComplete }` → action="hook_signal", payload={"hook_signal": "bootComplete"}.
         action = next(iter(drive))
         return DriveStep(at_seconds=float(at), action=action, payload=dict(drive))
+    if "human" in keys:
+        # #981 S2 — proxy/human input timeline. `human: { type: "abc" }`,
+        # `human: { key: F9 }`, `human: { detach: true }`.
+        human = raw["human"]
+        if not isinstance(human, dict) or not human:
+            raise ScenarioError(f"{path} step[{idx}].human: must be a non-empty mapping")
+        action = next(iter(human))
+        return HumanStep(at_seconds=float(at), action=action, payload=dict(human))
+    if "aiball" in keys:
+        # #981 S2 — data-plane mutation timeline. `aiball: { ticket_reply: {...} }`,
+        # `aiball: { accept_decision: { ticket: 1 } }`.
+        ab = raw["aiball"]
+        if not isinstance(ab, dict) or not ab:
+            raise ScenarioError(f"{path} step[{idx}].aiball: must be a non-empty mapping")
+        action = next(iter(ab))
+        return AiballStep(at_seconds=float(at), action=action, payload=dict(ab))
     if "expect" in keys:
         expect = raw["expect"]
         if not isinstance(expect, dict) or not expect:
             raise ScenarioError(f"{path} step[{idx}].expect: must be a non-empty mapping")
+        # #981 S2 — explicit layer wrapper : `expect: { daemon: {...} }` or
+        # `expect: { inspect: {...} }`. Bare keys (the #638 form) default to
+        # the loop `inspect` snapshot. Only a SOLE `daemon`/`inspect` key whose
+        # value is a mapping is treated as a wrapper (else it's an assertion).
+        assert_target = "inspect"
+        if len(expect) == 1:
+            sole = next(iter(expect))
+            if sole in ("inspect", "daemon") and isinstance(expect[sole], dict):
+                assert_target = sole
+                inner = expect[sole]
+                if not inner:
+                    raise ScenarioError(f"{path} step[{idx}].expect.{sole}: must be a non-empty mapping")
+                expect = inner
         # Split equality assertions from existence assertions :
         #  - `key: {type: equal|present, value: ...}` → explicit form (#773)
         #  - `key: {present: bool}` → short existence form
@@ -222,9 +330,10 @@ def _parse_step(path: Path, idx: int, raw: dict) -> Step:
             assertions[k] = v
         if not assertions and not existence:
             raise ScenarioError(f"{path} step[{idx}].expect: must declare at least one assertion")
-        return ExpectStep(at_seconds=float(at), assertions=assertions, existence=existence)
+        return ExpectStep(at_seconds=float(at), assertions=assertions, existence=existence, assert_target=assert_target)
     raise ScenarioError(
-        f"{path} step[{idx}]: must declare one of 'spawn' / 'drive' / 'expect' "
+        f"{path} step[{idx}]: must declare one of "
+        f"'spawn' / 'drive' / 'human' / 'aiball' / 'expect' "
         f"(got keys: {sorted(keys)})"
     )
 
