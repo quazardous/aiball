@@ -3,6 +3,35 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <!-- #190 — served under any base path (/aiball/…) via relative assets +
+             hash routing. A bare base WITHOUT a trailing slash makes relative
+             URLs resolve one level too high (blank page) and tailscale
+             --set-path doesn't auto-add the slash. Probe a known relative asset
+             (the favicon) ; on 404 (= we're at the bare base, the icon resolved
+             to host root, outside the mount) redirect to add the slash. Generic
+             (no route list) ; /setup,/login load the favicon fine → no redirect. -->
+        <script>
+            (function () {
+                if (location.pathname.endsWith("/")) return;
+                function probe(url) {
+                    return fetch(url, { method: "HEAD", cache: "no-store" })
+                        .then(function (r) { return r.ok; })
+                        .catch(function () { return false; });
+                }
+                // Probe the favicon relative to the current dir AND one level up.
+                // At the bare base (no trailing slash) BOTH resolve to host root,
+                // outside the mount → both 404 → add the slash. On a real sub-path
+                // (/setup, /login) ./favicon.ico resolves under the base → 200 → no
+                // redirect. Generic : no hardcoded route list.
+                Promise.all([probe("./favicon.ico"), probe("../favicon.ico")])
+                    .then(function (oks) {
+                        if (!oks[0] && !oks[1]) {
+                            location.replace(location.pathname + "/" + location.search + location.hash);
+                        }
+                    });
+            })();
+        </script>
+        <link rel="icon" href="./favicon.ico" />
         <title>aiball — moderation</title>
         <!-- #827 david `p7gx6h` — Google Material Symbol `room_service`
              for the resurface button bell (cloche service hôtel, ≈ what
