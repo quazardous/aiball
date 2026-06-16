@@ -149,7 +149,7 @@ import {
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
 } from "./ipc-state.js";
-import { computeLoopView, isAfkActive, isInputHot, LoopStateBus } from "./loop-state.js";
+import { computeLoopView, isAfkActive, isInputHot, nextPaneBusy, LoopStateBus } from "./loop-state.js";
 import { BarRenderer } from "./bar-renderer.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
@@ -717,22 +717,13 @@ if (sd) {
     compactConfirmW.on("begin", () => forwardModuleStarted("compact_confirm"));
     compactConfirmW.on("end", () => forwardModuleEnded("compact_confirm"));
     promptW.on("change", () => refreshPaneReady());
-    // #890 david `ue6q3n` : busy = LATCH depuis première vue de
-    // "esc to interrupt" jusqu'au Stop hook. Quand david tape, sa saisie
-    // pousse la regex hors de la fenêtre 5-lignes du footer → s.visible
-    // devient false EN PLEIN turn. Latch : on ignore les transitions
-    // visible=false, on attend `idle:turn_ended` (Stop hook) pour clear.
+    // #890/#994 — paneBusy arm/dearm is now owned by the per-tick rule in
+    // refreshPaneMarkers (`nextPaneBusy`): arm on "esc to interrupt", dearm
+    // only when it's gone AND the cursor is at the input origin (prompt empty).
+    // busyW.on just feeds the SanityController stale-busy detector.
     busyW.on("change", (s) => {
-        if (s.visible) {
-            setPaneBusy(sd, true);
-            // #898 — feed SanityController for stale-busy detector.
-            getSanityService().busyLatched();
-        } else {
-            // Path normal : visible=false venant de busyW. La SM SanityController
-            // sort de watching (= clock annulé). Le latch paneBusy n'est PAS
-            // cleared ici (= #890 latch design : on attend idle:turn_ended).
-            getSanityService().busyCleared();
-        }
+        if (s.visible) getSanityService().busyLatched();
+        else getSanityService().busyCleared();
     });
     // #898 — SanityController consumer : clear le latch quand aucun signe
     // d'activité depuis STALE_BUSY_MS (= path anormal, Stop hook perdu).
@@ -825,6 +816,15 @@ function refreshPaneMarkers(): void {
     // above call the legacy ipcState setters on every transition. Cursor was
     // probed by capturePane() just above (lastCursor) — reuse it.
     paneObs.tick(paneText, { nowMs: Date.now(), isBoot, cursorX: lastCursor?.x, cursorY: lastCursor?.y });
+    // #994 david — busy arm/dearm rule, evaluated each scan with fresh watcher
+    // snapshots. arm: "esc to interrupt" visible. dearm: esc gone AND the
+    // prompt is idle (box visible + cursor at origin). keep: esc gone but the
+    // cursor moved (typing mid-turn). idlePromptVisible = box visible AND NOT
+    // promptInputW (which is true only when the cursor left the input origin).
+    const idlePromptVisible = promptZoneW.snapshot().visible && !promptInputW.snapshot().visible;
+    const prevBusy = getIpcState().paneBusy;
+    const nextBusy = nextPaneBusy(prevBusy, busyW.snapshot().visible, idlePromptVisible);
+    if (nextBusy !== prevBusy && nextBusy !== null) setPaneBusy(sd, nextBusy);
     // Picker markers are AUTHORITATIVELY the current pane scan, not just
     // transitions. The session-start hook sets them true out-of-band ; if it
     // auto-Enters past the picker before a heartbeat captures it, the watcher

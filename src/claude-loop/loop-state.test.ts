@@ -14,6 +14,7 @@ import {
     computeLoopView,
     inputHotAgeMs,
     isAfkHeld,
+    nextPaneBusy,
     isAutonomous,
     isBootPhase,
     isInputHot,
@@ -978,4 +979,22 @@ test("LoopStateBus.pollFast : first update emits pollFast(true, false) when fast
     // Boot phase first input → shouldPollFast true → emits.
     bus.update(baseInput({ nowMs: T0 + 1 * SEC, loopStartMs: T0 }));
     assert.deepEqual(calls, [[true, false]]);
+});
+
+// #994 — busy arm/dearm rule (david's cursor-based spec).
+test("nextPaneBusy: esc-to-interrupt visible ⇒ busy (arm), whatever the prompt", () => {
+    assert.equal(nextPaneBusy(null, true, false), true);
+    assert.equal(nextPaneBusy(false, true, true), true);
+    assert.equal(nextPaneBusy(true, true, false), true);
+});
+
+test("nextPaneBusy: esc gone + idle prompt (cursor at origin) ⇒ dearm", () => {
+    assert.equal(nextPaneBusy(true, false, true), false);
+    assert.equal(nextPaneBusy(null, false, true), false);
+});
+
+test("nextPaneBusy: esc gone + NOT idle (typing mid-turn) ⇒ keep latch", () => {
+    assert.equal(nextPaneBusy(true, false, false), true);   // stays busy while typing
+    assert.equal(nextPaneBusy(false, false, false), false);
+    assert.equal(nextPaneBusy(null, false, false), null);   // nothing to change
 });

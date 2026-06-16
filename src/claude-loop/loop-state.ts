@@ -524,3 +524,24 @@ export class LoopStateBus {
         }
     }
 }
+
+/**
+ * #994 david `<chat>` — busy arm/dearm rule, pure.
+ *  - arm   : `esc to interrupt` visible ⇒ definitely busy (it only shows when
+ *            the cursor is at the input origin, so it's an unambiguous signal).
+ *  - dearm : esc gone AND the prompt is idle (box visible + cursor at origin)
+ *            ⇒ idle. This is the real turn-end signal (covers ESC-interrupt,
+ *            which fires no Stop hook).
+ *  - keep  : esc gone but the cursor moved (typing mid-turn pushed the regex
+ *            out of the footer) ⇒ stay busy (filtered de-arm, the #890 latch).
+ * `idlePromptVisible` = prompt box visible AND cursor at the input origin.
+ */
+export function nextPaneBusy(
+    prev: boolean | null,
+    escInterruptVisible: boolean,
+    idlePromptVisible: boolean,
+): boolean | null {
+    if (escInterruptVisible) return true;
+    if (idlePromptVisible) return false;
+    return prev;
+}
