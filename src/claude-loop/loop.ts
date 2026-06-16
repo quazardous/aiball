@@ -462,7 +462,12 @@ function selfReloadIfStale(): void {
     });
     const root = installRoot();
     const logFd = openSync(loopLogPath(sd!), "a");
-    const timerScript = join(root, "src/claude-loop/timer.ts");
+    // Entrypoint is loop.ts (NOT timer.ts — that file doesn't exist). Same bug
+    // as cmdReload had : a SHA bump triggered this self-reload, which spawned
+    // timer.ts → ERR_MODULE_NOT_FOUND → the timer killed itself on every
+    // commit to the live checkout. (The "timer.ts" name lives on only in
+    // comments; the actual module is loop.ts.)
+    const timerScript = join(root, "src/claude-loop/loop.ts");
     const tsxBin = shQuote(join(root, "node_modules", ".bin", "tsx"));
     // #859 plan A — NE PAS écrire `child.pid` ici : c'est le pid du wrapper
     // bash → tsx (qui exec puis fork le vrai node timer.ts → zombie). C'est
