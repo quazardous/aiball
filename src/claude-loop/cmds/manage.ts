@@ -320,7 +320,11 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
 
     const root = installRoot();
     const logFd = openSync(loopLogPath(sd), "a");
-    const timerScript = join(root, "src/claude-loop/timer.ts");
+    // The detached timer entrypoint is loop.ts (NOT timer.ts — that file
+    // doesn't exist; the cold-start path spawns loop.ts too, cli.ts). Pointing
+    // reload at timer.ts crashed the respawn with ERR_MODULE_NOT_FOUND → the
+    // old timer was SIGKILL'd but no new one came up → loop dead on every reload.
+    const timerScript = join(root, "src/claude-loop/loop.ts");
     // #B.228: call tsx via absolute path so reload works from any cwd
     // (npx --no-install would fail when reload is invoked from a project
     // dir without tsx in its own node_modules, same as the SessionStart

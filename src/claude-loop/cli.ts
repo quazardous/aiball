@@ -2051,9 +2051,22 @@ async function main(): Promise<void> {
         .description("#613 — JSON dump of a loop's full state (view + markers + runtime). Pure read, no side-effects. Pytest harnesses spawn the loop, wait a tick, then `inspect` to assert behaviour. Exits 1 if the state dir doesn't exist. Name optional — defaults to the current-cwd loop.")
         .action((name: string | undefined) => cmdInspect(name ?? resolveCurrentLoopName()));
     program.command("health [name]")
-        .description("#860 — plomberie diagnostic : timer/proxy/tmux/UDS/daemon/SSE checks par loop. Exit 0 OK, 1 fail, 2 warn. Name optional — sans arg, vérifie tous les loops.")
+        .description("#860 — plomberie diagnostic : timer/proxy/tmux/UDS/daemon/SSE checks par loop. Exit 0 OK, 1 fail, 2 warn. Name optional — sans arg, vérifie le(s) loop(s) du cwd courant ; `--all` pour tous.")
         .option("--json", "Machine-readable JSON output instead of icon table")
-        .action((name: string | undefined, opts: { json?: boolean }) => cmdHealth(name, opts));
+        .option("--all", "check every registered loop (default: the current cwd's loop)")
+        .action((name: string | undefined, opts: { json?: boolean; all?: boolean }) => {
+            // #994 david — default to the current project's loop(s), not every
+            // loop. Explicit name → that one ; --all (or no loop in this cwd) →
+            // all registered.
+            let names: string[] | null;
+            if (name) names = [name];
+            else if (opts.all) names = null;
+            else {
+                const cwd = loopsForCwd().map((l) => l.name);
+                names = cwd.length > 0 ? cwd : null;
+            }
+            return cmdHealth(names, opts);
+        });
     program.command("snapshot [name]")
         .description("#963 — archive timer.log + pane-captures + hooks logs sous `<sd>/snapshots/<ISO>/`. Default = capture. `--list` = liste les snapshots. `--prune` = nettoie (default --keep 10).")
         .option("--note <text>", "ajoute un note.txt au snapshot capturé (annoter le repro)")

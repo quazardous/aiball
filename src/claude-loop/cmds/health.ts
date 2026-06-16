@@ -325,11 +325,14 @@ function exitCodeFor(report: HealthReport): 0 | 1 | 2 {
     return 0;
 }
 
-export async function cmdHealth(nameArg: string | undefined, opts: { json?: boolean }): Promise<void> {
+export async function cmdHealth(target: string | string[] | null | undefined, opts: { json?: boolean }): Promise<void> {
+    // #994 — `target` is the explicit loop list resolved by the caller (a
+    // single name, the cwd's loops, …). `null`/`undefined` = check every
+    // registered loop (the `--all` / no-cwd-loop fallback).
     const names: string[] = [];
-    if (nameArg) names.push(nameArg);
+    if (typeof target === "string") names.push(target);
+    else if (Array.isArray(target)) names.push(...target);
     else {
-        // No arg → check every state dir.
         try {
             const { readdirSync } = await import("node:fs");
             const dirs = readdirSync(STATE_ROOT);
