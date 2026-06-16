@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# cl-replay-boot — replay a CL_CAPTURE session's pane timeline through the
+# real boot watchers + BootMachine and report whether boot sealed. Thin tsx
+# launcher; logic lives in src/claude-loop/replay-boot-cli.ts. Same pattern
+# as bin/claude-loop.
+set -eo pipefail
+
+SELF="$0"
+while [[ -L "$SELF" ]]; do
+    target="$(readlink "$SELF")"
+    if [[ "$target" = /* ]]; then SELF="$target"; else SELF="$(dirname "$SELF")/$target"; fi
+done
+BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+ROOT="$(cd "$BIN_DIR/.." && pwd)"
+cd "$ROOT"
+
+exec npx --no-install tsx "$ROOT/src/claude-loop/replay-boot-cli.ts" "$@"

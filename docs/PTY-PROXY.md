@@ -198,6 +198,19 @@ cl-capture pane DIR @42 --footer 6   # the pane nearest t+42s, last 6 non-empty 
 cl-capture stats DIR                 # counts, duration, markers, words
 ```
 
+**Replaying a boot from a capture — `bin/cl-replay-boot`.** Re-drives the
+captured pane timeline through the *real* boot watchers + `BootMachine` on a
+virtual clock and reports whether the recorded boot phase sealed — turning a
+recorded session into a deterministic verdict (no tmux, no claude). Exit code
+is non-zero when the boot never sealed.
+
+```bash
+cl-replay-boot <capture-dir>          # human verdict + module start/end edges
+cl-replay-boot <capture-dir> --json   # machine-readable result
+# → "NEVER SEALED — stuck on [compact_confirm]" when the confirm prompt
+#   lingers in the footer and its module never ends.
+```
+
 Sequence format, one event per line:
 
 ```
