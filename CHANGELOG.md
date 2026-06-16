@@ -23,6 +23,10 @@ dates are YYYY-MM-DD.
 
 ## [Unreleased]
 
+### Added
+
+- `CL_CAPTURE=1` records a whole `claude-loop` session (keystrokes, loop-injected wakes, and pane snapshots) into one capture folder with a shared clock, so a session can be replayed for debugging. It supersedes the older single-purpose capture switches, which still work as deprecated aliases.
+
 ## [0.32.0] — 2026-06-15
 
 ### Added

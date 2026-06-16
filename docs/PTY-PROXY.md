@@ -162,6 +162,29 @@ of that seam:
   (`CL_AFK_SPEC` / `CL_AFK_WINDOW_MS` / `CL_ESC_TAKEOVER` /
   `CL_USER_GRACE_SEC`).
 
+### Unified session capture — `CL_CAPTURE=1`
+
+`CL_CAPTURE=1` is the single switch that records a whole session into
+`<state_dir>/capture/` so it can be replayed later. It supersedes the
+scattered debug logs (`CL_PROXY_LOG`, `CL_PANE_CAPTURE_LOG`,
+`CL_BAR_PAINT_LOG`), which keep working as deprecated aliases. Each
+writer-process appends its own NDJSON timeline (one file per process keeps
+appends atomic), all stamped with the same epoch-seconds `t` so the streams
+merge into one timeline:
+
+```
+<state_dir>/capture/
+  proxy.ndjson     # proxy: human keystroke decisions + synthetic injects (event:"inject")
+  panes.ndjson     # timer: one row per distinct pane frame → {t, kind:"pane", file}
+  panes/<ms>.txt   # the pane frames themselves (referenced by `file`, not inlined)
+```
+
+`CL_PROXY_LOG=<file>` still takes priority over the capture dir for the
+proxy stream (explicit legacy path). Enable it on a running loop with
+`claude-loop reload <name> --set CL_CAPTURE=1` (the env is patched before the
+respawn). The capture is append-only — it's scoped to the session you want
+to record, so delete the dir when done.
+
 Sequence format, one event per line:
 
 ```
