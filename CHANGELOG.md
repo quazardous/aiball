@@ -31,6 +31,11 @@ dates are YYYY-MM-DD.
 ### Changed
 
 - A shell-prefix env override at loop start (e.g. `CL_CAPTURE=1 claude-loop start …`) is now **volatile**: it applies to that session and is re-seeded clean on the next start, instead of silently persisting forever. Deliberate, persistent overrides still go through `claude-loop reload <name> --set KEY=val`.
+- `claude-loop health` with no argument now reports the loop(s) for the current directory instead of every registered loop; pass `--all` for the global view.
+
+### Fixed
+
+- `claude-loop reload` left the loop dead: it relaunched the wrong entrypoint, so the old timer was killed and no new one started (the session's tmux pane and proxy were orphaned). Reload now respawns the timer correctly.
 
 ## [0.32.0] — 2026-06-15
 
