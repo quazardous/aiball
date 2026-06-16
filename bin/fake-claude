@@ -119,10 +119,30 @@ BUILTIN_SCREENS: dict[str, dict] = {
         "text": "*  Resuming conversation…",
         "duration": 2.0,
     },
+    # Faithful to real claude: during a /compact the "Compacting
+    # conversation…" line + a ▰▱ progress bar sit in the FOOTER zone (just
+    # above the input), NOT a top header. The loop's compacting detector
+    # (compacting-detector.ts) is footer-scoped — it needs the ▰▱ bar (or an
+    # end-of-line %) within the last lines — so a header-only marker is
+    # invisible to it (the reason compacting-detect.yaml was xfail). The
+    # `compacting` kind renders the whole marker (text + bar) into the footer
+    # for `duration` s, then restores the auto-mode footer.
     "transition.compacting": {
-        "kind": "header_flash",
-        "text": f"✶ Compacting conversation… (12s)   {MARKER_ESC_INTERRUPT}",
+        "kind": "compacting",
+        "text": "✶ Compacting conversation…",
+        "bar": "▰▰▰▱▱▱▱▱▱▱ 34%",
         "duration": 3.0,
+    },
+    # The "Compact this conversation?" picker claude shows right after a resume
+    # pick, before the actual compact runs. The loop's CompactConfirmWatcher is
+    # footer-scoped (last 12 non-empty lines). Written into the transcript so it
+    # persists in scrollback — faithful to the live bug where, after a short
+    # resume+compact, the line stays inside the 12-line footer window at idle
+    # and the `compact_confirm` boot module never ends → boot never seals.
+    "transition.compact_confirm": {
+        "kind": "compact_confirm",
+        "text": "Compact this conversation? [Y/n]",
+        "duration": 2.0,
     },
     "transition.crunched": {
         "kind": "header_flash",
@@ -242,6 +262,31 @@ class FakeClaudeApp(App):
             await self._set_header(spec.get("text", ""))
             await asyncio.sleep(float(spec.get("duration", 1.0)))
             await self._set_header("")
+        elif kind == "compacting":
+            # Render the compacting marker + ▰▱ progress bar into the FOOTER
+            # zone (where real claude shows it, and where the loop's
+            # footer-scoped detector looks), hold for `duration`, then
+            # restore the normal auto-mode footer so the latch can release.
+            text = spec.get("text", "✶ Compacting conversation…")
+            bar = spec.get("bar", "▰▰▰▱▱▱▱ 34%")
+            footer = self.query_one("#footer", Static)
+            await self._set_header(text)
+            footer.update(f"  {text} {bar}   {MARKER_ESC_INTERRUPT}")
+            await asyncio.sleep(float(spec.get("duration", 3.0)))
+            await self._set_header("")
+            footer.update(f"  {MARKER_AUTO_MODE} · ← for agents")
+        elif kind == "compact_confirm":
+            # "Compact this conversation?" picker. Write into the transcript
+            # (persists in scrollback) AND surface it in the footer so the
+            # footer-scoped CompactConfirmWatcher sees it ; then restore the
+            # footer. The transcript line lingering in the post-compact footer
+            # window is the live bug we reproduce.
+            text = spec.get("text", "Compact this conversation? [Y/n]")
+            footer = self.query_one("#footer", Static)
+            await self._write(text)
+            footer.update(f"  {text}")
+            await asyncio.sleep(float(spec.get("duration", 2.0)))
+            footer.update(f"  {MARKER_AUTO_MODE} · ← for agents")
         elif kind == "write":
             await self._write(spec.get("text", ""))
         elif kind == "picker":
@@ -349,6 +394,15 @@ def _render_screen_sync(spec: dict, out=sys.stdout) -> None:
     kind = spec.get("kind")
     if kind == "header_flash":
         out.write(spec.get("text", "") + "\n")
+    elif kind == "compacting":
+        # Marker + ▰▱ bar on consecutive lines so the footer-scoped detector
+        # sees both the "Compacting conversation" text and the progress bar.
+        text = spec.get("text", "✶ Compacting conversation…")
+        bar = spec.get("bar", "▰▰▰▱▱▱▱ 34%")
+        out.write(text + "\n")
+        out.write(f"{bar}   {MARKER_ESC_INTERRUPT}\n")
+    elif kind == "compact_confirm":
+        out.write(spec.get("text", "Compact this conversation? [Y/n]") + "\n")
     elif kind == "write":
         out.write(spec.get("text", "") + "\n")
     elif kind == "picker":

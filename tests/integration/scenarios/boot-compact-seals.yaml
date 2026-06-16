@@ -1,0 +1,34 @@
+# Full-stack repro for "boot ends with a /compact → boot never seals".
+#
+# david's report: when the boot phase's last step is a compact, the loop stays
+# in the boot phase forever (bar [boot...], wakes gated). Played against the
+# real containerised stack via tests/integration/run_fullstack.py.
+#
+# Timeline (fake_claude=boot-compact-final): boot.loading → ~40s compacting
+# (footer ▰▱ bar, past the 30s boot floor) → idle prompt.
+#
+#   t=10  : still booting AND mid-compact — sanity that detection fired.
+#   t=70  : compact ended ~t=41, +10s latch → boot MUST have sealed by now.
+#           boot.complete=true, phase=idle, in_boot_grace=false. If the bug is
+#           live, the boot phase is stuck here and these assertions FAIL.
+scenario: boot-compact-seals
+steps:
+  - spawn: { fake_claude: boot-compact-final }
+
+  # Mid-compact, inside the floor: the loop should be booting and have detected
+  # the compact (footer ▰▱ bar). This guards the repro itself — if detection
+  # never fires, the rest is meaningless.
+  - at: 10
+    expect:
+      inspect:
+        view.phase: boot
+        view.in_boot_grace: true
+        pane.compacting: true
+
+  # Compact is long done (ended ~t=41) + latch grace (10s). A correct boot has
+  # sealed: phase left boot, the grace flag cleared, boot.complete latched.
+  - at: 70
+    expect:
+      inspect:
+        view.in_boot_grace: false
+        boot.complete: true

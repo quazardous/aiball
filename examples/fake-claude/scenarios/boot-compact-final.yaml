@@ -1,0 +1,29 @@
+# Boot whose LAST step is a /compact, then a clean idle prompt.
+#
+# Reproduces david's report: "quand la phase de boot finit par un compacting le
+# boot ne s'arrête pas" — when the boot phase ends with a compact, the loop's
+# boot phase never seals (bar stays [boot...], wakes stay gated).
+#
+# The compact runs ~40s — PAST the 30s boot floor — so the seal depends on the
+# BootMachine observing the compacting MODULE_ENDED (latch release) and letting
+# the deadline pump fire, NOT on the floor expiring. If the compacting module
+# never ends (the bug), the push manager keeps pushing the deadline and the
+# boot never seals. A correct run seals ~10s (latch grace) after the compact.
+#
+# The `compacting` screen kind renders the marker + ▰▱ progress bar in the
+# FOOTER zone (faithful to real claude), so the loop's footer-scoped compacting
+# detector can actually see it.
+meta:
+  name: boot-compact-final
+  describes: "boot.loading → compacting 40s (footer ▰▱ bar) → idle prompt"
+  expects_input: true
+screens:
+  transition.compacting_boot:
+    kind: compacting
+    text: "✶ Compacting conversation…"
+    bar: "▰▰▰▱▱▱▱▱▱▱ 34%"
+    duration: 40
+steps:
+  - screen: boot.loading
+  - screen: transition.compacting_boot
+  - screen: main.idle

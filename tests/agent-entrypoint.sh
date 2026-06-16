@@ -39,8 +39,14 @@ export AIBALL_SOCK=""
 export TERM="${TERM:-xterm-256color}"
 
 echo "[agent] starting claude-loop '${NAME}' (scenario=${SCENARIO}) → ${DAEMON_URL} as ${CONSUMER}/${PROJECT}"
+# NOTE: do NOT pass `--check-cmd false`. An explicit check-cmd routes the timer
+# to the legacy `mainPoll` loop (state.ts isInternalCheckCmd), which has NONE of
+# the boot/pane/compacting machinery: no BootMachine, no pane probe, no loop.sock
+# → `inspect` falls back to local zeros and the bar is frozen at the cli seed.
+# The default empty check-cmd is the internal/SSE mode (`mainSse`) that the real
+# loop runs — that's the only mode worth full-stack testing.
 /app/bin/claude-loop start "$NAME" \
-    --interval 5 --check-cmd false --no-wait --no-attach \
+    --interval 5 --no-wait --no-attach \
     --aiball-url "$DAEMON_URL" --aiball-token "$TOKEN" \
     --consumer "$CONSUMER" --project "$PROJECT"
 

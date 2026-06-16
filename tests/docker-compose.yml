@@ -56,6 +56,9 @@ services:
       # spawn.fake_claude). examples/fake-claude/scenarios/<x>.yaml.
       AGENT_SCENARIO: ${AGENT_SCENARIO:-quick-prompt}
       AGENT_NAME: ${AGENT_NAME:-agent1}
+      # Bump to `debug` to trace the loop's pane probe / bootMachine / compacting
+      # lifecycle when diagnosing a scenario. Defaults to `info` (no-op).
+      CL_LOG_LEVEL: ${CL_LOG_LEVEL:-info}
       TERM: xterm-256color
     volumes:
       - ..:/app                        # live source

@@ -1,0 +1,21 @@
+# Full-stack repro of david's EXACT "le boot ne s'arrête pas" path:
+#   resume picker → resuming → compact_confirm → compacting → idle.
+#
+# He reports: with the compact_confirm step the boot phase is INFINITE (claude
+# is at the prompt, but the bar stays [boot] forever); WITHOUT it the boot
+# seals 10s after resuming. Played against the real containerised stack.
+#
+#   t=40 : compact long done, claude idle. A correct boot has sealed by now
+#          (resume+confirm+compact are all short transients). If the bug is
+#          live, the boot is stuck: in_boot_grace=true / boot.complete=false.
+#
+# This scenario asserts the CORRECT behavior, so it is RED while the bug lives.
+scenario: boot-resume-compact-seals
+steps:
+  - spawn: { fake_claude: boot-resume-compact }
+
+  - at: 40
+    expect:
+      inspect:
+        view.in_boot_grace: false
+        boot.complete: true

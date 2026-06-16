@@ -1,0 +1,22 @@
+# david's EXACT repro for "le boot ne s'arrête pas":
+#   resume picker → resuming → compact_confirm ("Compact this conversation?")
+#   → compacting → idle prompt  ⇒  boot phase INFINIE (claude est au prompt,
+#   mais le bar reste [boot] pour toujours).
+# vs. resume → resuming (sans compact_confirm) → boot scelle après 10s (OK).
+#
+# Hypothèse : la ligne "Compact this conversation?" persiste dans le scrollback
+# court d'après-compact, dans la fenêtre des 12 lignes du footer. La
+# CompactConfirmWatcher (footer-scopée) la voit encore au prompt idle → son
+# MODULE_ENDED ne part jamais → activeModules garde `compact_confirm` → le push
+# manager repousse la deadline à l'infini → boot jamais scellé.
+meta:
+  name: boot-resume-compact
+  describes: "resume → resuming → compact_confirm → compacting → idle (boot infini ?)"
+  expects_input: true
+steps:
+  - screen: boot.loading
+  - screen: boot.resume_picker
+  - screen: transition.resuming
+  - screen: transition.compact_confirm
+  - screen: transition.compacting
+  - screen: main.idle
