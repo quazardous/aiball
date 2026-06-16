@@ -31,6 +31,10 @@ dates are YYYY-MM-DD.
 
 - A shell-prefix env override at loop start (e.g. `CL_CAPTURE=1 claude-loop start …`) is now **volatile**: it applies to that session and is re-seeded clean on the next start, instead of silently persisting forever. Deliberate, persistent overrides still go through `claude-loop reload <name> --set KEY=val`.
 
+### Fixed
+
+- The status bar could stay "busy" for minutes after interrupting Claude with ESC: the idle-prompt detector only recognised one footer variant, missing the agents UI. It now detects an empty input box directly, so the bar returns to idle as soon as Claude does.
+
 ## [0.32.0] — 2026-06-15
 
 ### Added

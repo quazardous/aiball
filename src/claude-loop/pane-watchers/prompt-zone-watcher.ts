@@ -62,3 +62,24 @@ export class PromptZoneWatcher extends BoolWatcher {
         return this.lastZone;
     }
 }
+
+/**
+ * #992 david `<chat>` : "savoir si le prompt est vide ou pas". True when the
+ * input box is visible AND nothing is typed on the chevron line — claude is at
+ * a fresh prompt awaiting input. This is the UI-variant-independent idle signal
+ * (no dependency on the footer hint string, which differs across Claude Code
+ * modes : "ctrl+t to show task" / "← for agents" / "? for shortcuts").
+ *
+ * The empty Claude prompt renders the chevron line as just `❯` + a U+00A0
+ * placeholder, with NO trailing ASCII padding — so "no non-whitespace remains
+ * after the chevron" reliably means empty. Edge : a lone typed space is also
+ * whitespace-only, so it reads as empty (benign : the busy latch would re-arm
+ * on the next `esc to interrupt` frame ; the cursor column could disambiguate
+ * it but isn't plumbed through the pane scan today).
+ */
+export function promptInputEmpty(paneText: string, zone: PromptZone | null = findPromptZone(paneText)): boolean {
+    if (!zone) return false;
+    const chevronLine = paneText.split("\n")[zone.chevron] ?? "";
+    const afterChevron = chevronLine.replace(/^\s*❯/u, "").replace(/[\s ]/gu, "");
+    return afterChevron.length === 0;
+}
