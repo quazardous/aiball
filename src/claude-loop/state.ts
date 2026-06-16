@@ -306,7 +306,14 @@ const PANE_CAPTURE_WINDOW_MIN = (() => {
     return Number.isFinite(n) && n > 0 ? n : 10;
 })();
 const PANE_CAPTURE_WINDOW_MS = PANE_CAPTURE_WINDOW_MIN * 60_000;
-let lastPaneCaptureWritten: string | null = null;
+let lastPaneCaptureWritten: string | null = null; // legacy sink: text-only dedup
+// #993 unified-capture dedup : (text + cursor). A cursor-only move IS a new
+// frame (it's what tells real input from a ghost suggestion). `lastCaptureText`
+// + `lastPaneFile` let a cursor-only move reuse the previous .txt (no dup file).
+let lastCaptureKey: string | null = null;
+let lastCaptureText: string | null = null;
+let lastPaneFile: string | null = null;
+let captureSeq = 0; // tie-breaker so two frames in the same ms don't collide
 
 export function prunePaneCaptures(dir: string, cutoffMs: number): void {
     const cutoffIso = new Date(cutoffMs).toISOString().replace(/:/g, "-");
@@ -321,38 +328,43 @@ export function prunePaneCaptures(dir: string, cutoffMs: number): void {
 
 export function logPaneCapture(sd: string | undefined, text: string, cursor?: { x: number; y: number } | null): void {
     if (!sd) return;
-    // Consecutive dedup is shared by both sinks : a gap in either stream
-    // means the pane didn't change between probes.
     if (!PANE_CAPTURE_LOG_ENABLED && !CAPTURE_ENABLED) return;
-    if (text === lastPaneCaptureWritten) return;
     const nowMs = Date.now();
-    // #990 unified capture — dump the frame as a file, reference it from the
-    // timeline by short path (david `684qhp` : référencer le basename, pas
-    // inliner le texte). The merged-timeline row stays small + atomic.
-    // #993 — also record the tmux cursor (cursorX/cursorY) so a replayed
-    // capture can tell real input from greyed ghost-suggestions.
+    // #990/#993 unified capture — write a timeline row when the text OR the
+    // cursor changed. The frame is dumped as `panes/<ms>.txt` and the row
+    // references it by short path (david `684qhp`) + records the cursor
+    // (cursorX/cursorY) so a replay can tell real input from a ghost
+    // suggestion. A cursor-only move reuses the previous .txt (no dup file).
     if (CAPTURE_ENABLED) {
-        try {
-            const panesDir = capturePanesDir(sd);
-            mkdirSync(panesDir, { recursive: true });
-            const rel = join("panes", `${nowMs}.txt`);
-            writeFileSync(join(captureDir(sd), rel), text);
-            const rec: Record<string, unknown> = { t: nowMs / 1000, kind: "pane", file: rel };
-            if (cursor) { rec.cursorX = cursor.x; rec.cursorY = cursor.y; }
-            appendFileSync(paneTimelinePath(sd), JSON.stringify(rec) + "\n");
-        } catch { /* best-effort */ }
+        const key = `${text} ${cursor ? `${cursor.x},${cursor.y}` : ""}`;
+        if (key !== lastCaptureKey) {
+            try {
+                let rel = lastPaneFile;
+                if (text !== lastCaptureText || !rel) {
+                    mkdirSync(capturePanesDir(sd), { recursive: true });
+                    rel = join("panes", `${nowMs}-${captureSeq++}.txt`);
+                    writeFileSync(join(captureDir(sd), rel), text);
+                    lastCaptureText = text;
+                    lastPaneFile = rel;
+                }
+                const rec: Record<string, unknown> = { t: nowMs / 1000, kind: "pane", file: rel };
+                if (cursor) { rec.cursorX = cursor.x; rec.cursorY = cursor.y; }
+                appendFileSync(paneTimelinePath(sd), JSON.stringify(rec) + "\n");
+                lastCaptureKey = key;
+            } catch { /* best-effort */ }
+        }
     }
-    // #678/#969 legacy per-file rotated dump — deprecated alias, kept working.
-    if (PANE_CAPTURE_LOG_ENABLED) {
+    // #678/#969 legacy per-file rotated dump — deprecated alias, text-only dedup.
+    if (PANE_CAPTURE_LOG_ENABLED && text !== lastPaneCaptureWritten) {
         try {
             const dir = paneCaptureDir(sd);
             mkdirSync(dir, { recursive: true });
             const iso = new Date(nowMs).toISOString().replace(/:/g, "-");
             writeFileSync(join(dir, `${iso}.txt`), text);
             prunePaneCaptures(dir, nowMs - PANE_CAPTURE_WINDOW_MS);
+            lastPaneCaptureWritten = text;
         } catch { /* best-effort */ }
     }
-    lastPaneCaptureWritten = text;
 }
 
 // #733 V2 — pane signals are timer-only and now live exclusively in
