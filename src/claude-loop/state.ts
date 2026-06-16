@@ -182,6 +182,13 @@ export function isLoopStale(plate: Plate): boolean {
 
 export function platePath(sd: string): string { return join(sd, "plate.json"); }
 export function envPath(sd: string): string { return join(sd, "env"); }
+// #991 — VOLATILE per-session env. Seeded from the invoking shell's `CL_*`
+// at each cold `start` (truncated+rewritten), sourced AFTER `env` so it wins,
+// and PRESERVED across `reload` (timer respawn). This is where shell-prefix
+// overrides (`CL_CAPTURE=1 claude-loop start`) land — so they apply to the
+// session without persisting into `env` forever (that footgun is #689). The
+// deliberate-persistent channel stays `reload --set` → `env`.
+export function envLocalPath(sd: string): string { return join(sd, "env.local"); }
 /** #749 david — `claude-loop --zen` / `claude-loop zen <name>` kill switch :
  *  presence of this file mutes ALL wake injections for the loop. Read at the
  *  top of `tryWake`. Persists across restarts (file-based) so a `claude-loop

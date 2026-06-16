@@ -21,6 +21,7 @@ import {
     MUX_CMD,
     STATE_ROOT,
     envPath,
+    envLocalPath,
     fetchSnapshotsFromTimer,
     installRoot,
     installRootSha,
@@ -252,6 +253,18 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
     // restriction sur KEY, mais on valide la grammaire d'un nom d'env var.
     if (opts?.set && opts.set.length > 0) {
         patchEnvSet(envPath(sd), opts.set);
+        // #991 — an unset (`KEY=`) must ALSO clear the volatile env.local,
+        // otherwise a shell-prefix override living there would survive a
+        // `--set KEY=` (and the user couldn't turn it off without rm). Only
+        // the empty-value sets are forwarded — non-empty `--set` stays the
+        // deliberate-persistent `env` channel.
+        const unsets = opts.set.filter((kv) => {
+            const eq = kv.indexOf("=");
+            return eq > 0 && kv.slice(eq + 1) === "";
+        });
+        if (unsets.length > 0 && existsSync(envLocalPath(sd))) {
+            patchEnvSet(envLocalPath(sd), unsets);
+        }
     }
 
     let oldPid: number | null = null;
@@ -321,7 +334,9 @@ export async function cmdReload(name: string, opts?: { set?: string[] }): Promis
         : process.env;
     const child = spawn("bash", [
         "-lc",
-        `source ${shQuote(envPath(sd))} && exec ${tsxBin} ${shQuote(timerScript)}`,
+        // #991 — preserve + re-source the volatile env.local across a reload
+        // (timer respawn keeps the debug-session shell overrides).
+        `source ${shQuote(envPath(sd))}; [ -f ${shQuote(envLocalPath(sd))} ] && source ${shQuote(envLocalPath(sd))}; exec ${tsxBin} ${shQuote(timerScript)}`,
     ], {
         detached: true,
         stdio: ["ignore", logFd, logFd],

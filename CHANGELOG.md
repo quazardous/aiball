@@ -27,6 +27,10 @@ dates are YYYY-MM-DD.
 
 - `CL_CAPTURE=1` records a whole `claude-loop` session (keystrokes, loop-injected wakes, and pane snapshots) into one capture folder with a shared clock, so a session can be replayed for debugging. It supersedes the older single-purpose capture switches, which still work as deprecated aliases.
 
+### Changed
+
+- A shell-prefix env override at loop start (e.g. `CL_CAPTURE=1 claude-loop start …`) is now **volatile**: it applies to that session and is re-seeded clean on the next start, instead of silently persisting forever. Deliberate, persistent overrides still go through `claude-loop reload <name> --set KEY=val`.
+
 ## [0.32.0] — 2026-06-15
 
 ### Added

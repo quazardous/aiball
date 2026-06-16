@@ -44,6 +44,7 @@ import {
     STATE_ROOT,
     defaultPingsPath,
     envPath,
+    envLocalPath,
     installRootSha,
     isLoopStale,
     logBarPaint,
@@ -141,36 +142,30 @@ const IDENTITY_ENV_KEYS = new Set<string>([
 
 /**
  * #689 — at `claude-loop start`, for every CL_X in the registry that's
- * defined in the invoker's shell env, override the corresponding
- * `export CL_X=...` line in the freshly-built envLines (or append it if
- * absent). Identity keys are exempt — they belong to the start logic.
- * Logs `shell-overridden : K=V, K=V` to stdout so the effect is visible
- * (no silent override — the failure mode we called out when killing D2
- * on #684).
+ * defined in the invoker's shell env, carry it into the loop. #991 — these
+ * shell-prefix overrides now land in the VOLATILE `env.local` (sourced after
+ * `env`, so they win) instead of being merged into the persistent `env`. That
+ * kills the footgun where `CL_X=1 claude-loop start` stuck X forever : a plain
+ * `start` next time re-seeds `env.local` (here, from the current shell), so it
+ * starts clean ; `reload` preserves the file (debug session survives a timer
+ * respawn) ; the deliberate-persistent channel is `reload --set` → `env`.
+ * Identity keys are exempt. Logs the overrides so the effect is visible (no
+ * silent override — the failure mode we called out when killing D2 on #684).
  */
-function applyShellOverrides(envLines: string[]): string[] {
-    const out = [...envLines];
+function collectShellOverrideLines(): string[] {
+    const lines: string[] = [];
     const overridden: string[] = [];
     for (const key of Object.values(CL_ENV)) {
         if (IDENTITY_ENV_KEYS.has(key)) continue;
         const shellVal = process.env[key];
         if (shellVal === undefined) continue;
-        const newLine = `export ${key}=${shQuote(shellVal)}`;
-        const exportLine = new RegExp(`^export ${key}=`);
-        const idx = out.findIndex((l) => exportLine.test(l));
-        if (idx >= 0) {
-            out[idx] = newLine;
-        } else {
-            // Append before the trailing empty line if any (cosmetic).
-            if (out[out.length - 1] === "") out.splice(out.length - 1, 0, newLine);
-            else out.push(newLine);
-        }
+        lines.push(`export ${key}=${shQuote(shellVal)}`);
         overridden.push(`${key}=${shellVal}`);
     }
     if (overridden.length > 0) {
-        process.stdout.write(`shell-overridden : ${overridden.join(", ")}\n`);
+        process.stdout.write(`shell-overridden (volatile env.local) : ${overridden.join(", ")}\n`);
     }
-    return out;
+    return lines;
 }
 
 function tmuxAlive(name: string): boolean {
@@ -671,9 +666,10 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export ${CL_ENV.AFK_KEY_DISP}=${shQuote(ctx.claude_loop.afk_key.trim().toUpperCase())}`,
         `export ${CL_ENV.AFK_LABEL_FG_DIM}=${shQuote(ctx.colors.afk_label_fg)}`,
         `export ${CL_ENV.AFK_LABEL_FG_LIT}=${shQuote(ctx.colors.bar_fg)}`,
-        // #381c CL_PROXY_LOG, #629 CL_BAR_PAINT_LOG, #678 CL_PANE_CAPTURE_LOG :
-        // opt-in debug logs are picked up generically by `applyShellOverrides`
-        // below when set in the invoker's shell — no per-var conditional needed.
+        // #381c CL_PROXY_LOG, #629 CL_BAR_PAINT_LOG, #678 CL_PANE_CAPTURE_LOG,
+        // #990 CL_CAPTURE : opt-in debug logs are picked up generically by
+        // `collectShellOverrideLines` (→ volatile env.local, #991) when set in
+        // the invoker's shell — no per-var conditional needed.
         // #B.154: persist the resolved aiball identity (from ctx) so
         // every hook fire and the timer process see the SAME
         // consumer as the spawn-time .mcp.json resolution. Without
@@ -711,19 +707,22 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         `export MUX_CMD=${shQuote(MUX_CMD)}`,
         "",
     ];
-    // #689 david `4hp9j6` — shell-env override transparent au start :
-    // `CL_FOO=bar claude-loop start <name>` injecte la valeur du shell dans
-    // le env file. Précédence : shell > yaml/flag/default. Identité (NAME /
-    // STATE_DIR / TMUX / PINGS) exclue — c'est le start qui les calcule,
-    // un override shell les casserait silencieusement.
-    const overriddenEnvLines = applyShellOverrides(envLines);
     // #390: 0600 when the env file carries a bearer token — it's a secret
     // at rest. (Default perms otherwise, unchanged for local loops.)
+    // #991 — `env` is the PERSISTENT template only (no shell overrides folded
+    // in anymore). Shell-prefix `CL_*` go to the VOLATILE `env.local` below.
     writeFileSync(
         envPath(sd),
-        overriddenEnvLines.join("\n"),
+        envLines.join("\n"),
         opts.aiballToken ? { mode: 0o600 } : undefined,
     );
+    // #689/#991 david `4hp9j6` — `CL_FOO=bar claude-loop start <name>` carries
+    // the shell value into the loop, but VOLATILE : it's (re)written here from
+    // the current shell on every cold start (truncates any stale one), sourced
+    // after `env` so it wins, and preserved across `reload`. Précédence : shell
+    // > yaml/flag/default. Identity keys excluded (the start computes them).
+    const localLines = collectShellOverrideLines();
+    writeFileSync(envLocalPath(sd), localLines.length ? localLines.join("\n") + "\n" : "");
 
     // Inline Claude Code settings JSON: register the Stop hook (which
     // execs the TS hook via tsx) for THIS session only — no
@@ -940,7 +939,8 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         "",
     ].join("\n");
     writeFileSync(trapPath, trapScript);
-    const innerCmd = `source ${shQuote(envPath(sd))}; source ${shQuote(trapPath)}; ${launch}`;
+    // #991 — source the persistent env then the volatile env.local (if any).
+    const innerCmd = `source ${shQuote(envPath(sd))}; [ -f ${shQuote(envLocalPath(sd))} ] && source ${shQuote(envLocalPath(sd))}; source ${shQuote(trapPath)}; ${launch}`;
 
     const tname = tmuxName(name);
     // Resolve bash via absolute path on Windows. The user's PATH is
@@ -1122,7 +1122,7 @@ async function cmdStart(opts: StartOpts): Promise<void> {
         // call tsx via its absolute path so the timer can be respawned
         // from any cwd (relevant for `claude-loop reload` called from a
         // project dir without tsx in its node_modules).
-        `source ${shQuote(envPath(sd))} && exec ${tsxBin} ${shQuote(loopScript)}`,
+        `source ${shQuote(envPath(sd))}; [ -f ${shQuote(envLocalPath(sd))} ] && source ${shQuote(envLocalPath(sd))}; exec ${tsxBin} ${shQuote(loopScript)}`,
     ], {
         detached: true,
         stdio: ["ignore", logFd, logFd],

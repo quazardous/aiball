@@ -368,7 +368,8 @@ liveness markers (PID-stamped) :
 | File              | Writer          | Purpose                                   |
 |-------------------|-----------------|-------------------------------------------|
 | `plate.json`      | cli on start    | structured config (interval, check_cmd…)  |
-| `env`             | cli on start    | bash-sourceable CL_* env vars             |
+| `env`             | cli on start, `reload --set` | **persistent** bash-sourceable CL_* env vars (template + deliberate `--set`) |
+| `env.local`       | cli on start (from shell) | **volatile** CL_* overrides — see below |
 | `pings.yaml`      | cli on start    | copy of the wake-phrase pool              |
 | `proxy-alive`     | PTY proxy       | proxy is really fronting claude (PID-stamped) |
 | `kill-on-exit.sh` | cli on start    | bash trap script sourced in the tmux pane wrapper — SIGKILLs timer + proxy when claude exits |
@@ -379,6 +380,23 @@ liveness markers (PID-stamped) :
 The hooks and the timer all read the same `env` file so they share
 `CL_NAME`, `CL_STATE_DIR`, `CL_INTERVAL`, `CL_CHECK_CMD`, `CL_PINGS`,
 `CL_NO_STARTUP_PING`.
+
+#### `env` (persistent) vs `env.local` (volatile)
+
+Two channels for `CL_*` overrides, sourced in order (`env` then `env.local`,
+so the volatile one wins):
+
+- **`env`** — the resolved config template, plus whatever you set deliberately
+  with `claude-loop reload <name> --set CL_X=val`. Persists across everything.
+- **`env.local`** — a shell-prefix override at start (`CL_CAPTURE=1 claude-loop
+  start <name>`) lands here. It is **re-seeded from the invoking shell on every
+  cold `start`** (a plain `start` next time truncates it → clean) and
+  **preserved across `reload`** (a timer respawn keeps your debug-session
+  overrides). This avoids the footgun where a shell-prefix flag silently stuck
+  in `env` forever.
+
+To turn a volatile override off without a full restart: `reload --set CL_X=`
+clears `CL_X` from **both** files.
 
 ### Satellite lifecycle — kill-on-exit, watchdog, orphan sweep
 

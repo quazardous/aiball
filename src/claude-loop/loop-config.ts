@@ -32,8 +32,9 @@ export function loopConfig(): AiballConfig {
 /**
  * #689 — shell-env override layer on top of the loaded yaml. Single
  * place to declare the mapping between each yaml-backed knob and its
- * `CL_*` env var. cli.ts:applyShellOverrides puts user-supplied values
- * in the env file at start ; hooks + timer source that file → their
+ * `CL_*` env var. cli.ts:collectShellOverrideLines puts user-supplied
+ * values in the volatile `env.local` at start (#991) ; hooks + timer
+ * source `env` then `env.local` → their
  * `process.env[CL_ENV.X]` is the override ; this function lifts it
  * into the cached config. Skipped values fall back to yaml/defaults.
  */
