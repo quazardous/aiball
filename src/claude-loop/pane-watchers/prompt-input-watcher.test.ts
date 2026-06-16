@@ -1,18 +1,13 @@
-// #992/#993 — structural detection of "is the prompt empty or not" + the
-// PromptInputWatcher indicator that drives the coloured `❯` glyph. INDICATOR
-// only (david is exploring) — it does NOT change the busy-clear rule.
-//
-// The detection is CURSOR-based : Claude shows greyed ghost-suggestions in the
-// box (applied via Tab) that look like typed text in capture-pane — only the
-// cursor tells real input (left of cursor) from a suggestion (right of it).
+// #992/#993 — "is the prompt empty or not", CURSOR-COLUMN rule (david : "si le
+// curseur n'est pas à l'origine de l'input, c'est qu'on tape, c'est tout").
+// Content-independent → immune to Claude's greyed ghost-suggestions and hint
+// lines (both leave the cursor parked at the input start). INDICATOR only —
+// drives the coloured `❯` glyph, does NOT change the busy-clear rule.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { promptInputEmpty, PromptInputWatcher } from "./prompt-zone-watcher.js";
 
 const RULE = "─".repeat(40);
-const NBSP = " "; // empty Claude prompt renders `❯` + U+00A0
-
-// input box : line 0 misc, 1 top rule, 2 chevron, 3 bottom rule, 4 footer.
 function box(chevronInput: string): string {
     return [
         "  some conversation output above",
@@ -22,40 +17,36 @@ function box(chevronInput: string): string {
         "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents",
     ].join("\n");
 }
-const CHEVRON_ROW = 2;
-const INPUT_COL = 2; // after `❯ `
+const ROW = 2;        // chevron line index
+const ORIGIN = 2;     // input-start column (after `❯ `)
 
-const EMPTY = box(NBSP);
-const TYPED = box("option 1");
-const GHOST = box("git commit --amend"); // greyed suggestion, user typed nothing
+// --- cursor-column rule (the live path) ---
+test("cursor AT origin → empty, whatever the line shows (ghost / hint / moved-home)", () => {
+    assert.equal(promptInputEmpty(box(""), { cursorX: ORIGIN, cursorY: ROW }), true);
+    assert.equal(promptInputEmpty(box("git commit --amend"), { cursorX: ORIGIN, cursorY: ROW }), true); // ghost
+    assert.equal(promptInputEmpty(box("Press up to edit queued messages"), { cursorX: ORIGIN, cursorY: ROW }), true); // hint
+    assert.equal(promptInputEmpty(box("weigh in on the color"), { cursorX: ORIGIN, cursorY: ROW }), true); // real text, cursor home
+});
 
-// --- cursorless fallback (replay/tests) ---
-test("fallback (no cursor): empty box true, text false", () => {
-    assert.equal(promptInputEmpty(EMPTY), true);
-    assert.equal(promptInputEmpty(TYPED), false);
+test("cursor PAST origin → not empty (the user is typing)", () => {
+    assert.equal(promptInputEmpty(box("hi"), { cursorX: ORIGIN + 2, cursorY: ROW }), false);
+    assert.equal(promptInputEmpty(box("hello"), { cursorX: ORIGIN + 1, cursorY: ROW }), false); // cursor mid-word still = typing
+});
+
+test("cursor not on the chevron row → falls back to text", () => {
+    assert.equal(promptInputEmpty(box("typed"), { cursorX: 0, cursorY: 0 }), false);
+    assert.equal(promptInputEmpty(box(""), { cursorX: 0, cursorY: 0 }), true);
+});
+
+test("no cursor (replay/tests) → text-based fallback", () => {
+    assert.equal(promptInputEmpty(box("")), true);
+    assert.equal(promptInputEmpty(box("typed")), false);
     assert.equal(promptInputEmpty("no box here"), false);
 });
 
-// --- cursor-based (the live path) ---
-test("cursor: ghost suggestion with cursor at input start reads as EMPTY", () => {
-    // cursor parked at the input start → nothing typed, the text is a suggestion
-    assert.equal(promptInputEmpty(GHOST, { cursorX: INPUT_COL, cursorY: CHEVRON_ROW }), true);
-});
-
-test("cursor: real typed text (cursor past the input) reads as NON-empty", () => {
-    // user typed "option 1" → cursor at end of it
-    assert.equal(promptInputEmpty(TYPED, { cursorX: INPUT_COL + "option 1".length, cursorY: CHEVRON_ROW }), false);
-});
-
-test("cursor: text present but cursor NOT on the chevron row → falls back (treats as typed)", () => {
-    // cursor elsewhere → can't use it, fallback sees the line text
-    assert.equal(promptInputEmpty(TYPED, { cursorX: 0, cursorY: 0 }), false);
-});
-
-test("PromptInputWatcher: visible iff real unsent text (ghost excluded via cursor)", () => {
-    const ghostCtx = { nowMs: 0, cursorX: INPUT_COL, cursorY: CHEVRON_ROW };
-    const typedCtx = { nowMs: 0, cursorX: INPUT_COL + 8, cursorY: CHEVRON_ROW };
-    assert.equal(new PromptInputWatcher().observe(GHOST, ghostCtx).visible, false, "ghost suggestion must NOT light the glyph");
-    assert.equal(new PromptInputWatcher().observe(TYPED, typedCtx).visible, true, "real typed text lights the glyph");
-    assert.equal(new PromptInputWatcher().observe(EMPTY, ghostCtx).visible, false);
+test("PromptInputWatcher: lights only when the cursor is past the input start", () => {
+    const atOrigin = { nowMs: 0, cursorX: ORIGIN, cursorY: ROW };
+    const typing = { nowMs: 0, cursorX: ORIGIN + 3, cursorY: ROW };
+    assert.equal(new PromptInputWatcher().observe(box("ghosted text"), atOrigin).visible, false);
+    assert.equal(new PromptInputWatcher().observe(box("abc"), typing).visible, true);
 });

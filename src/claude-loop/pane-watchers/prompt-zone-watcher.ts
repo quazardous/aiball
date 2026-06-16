@@ -67,17 +67,17 @@ export class PromptZoneWatcher extends BoolWatcher {
  * #992/#993 david `<chat>` : "savoir si le prompt est vide ou pas". True when
  * the input box is visible AND the user hasn't typed anything.
  *
- * CURSOR-BASED (authoritative) : Claude shows greyed ghost-suggestions inside
- * the prompt box (applied with Tab) that look exactly like typed text in a
- * plain `capture-pane` — so text alone can't tell them apart. The cursor can :
- * what the user typed sits BEFORE the cursor, the suggestion AFTER it. So the
- * prompt is "empty" when there's nothing non-blank between the prompt prefix
- * and the cursor column on the chevron row.
+ * CURSOR-COLUMN rule (authoritative) — david : "si le curseur n'est pas à
+ * l'origine de l'input, c'est qu'on tape, c'est tout". The prompt is "empty"
+ * iff the cursor sits at (or before) the input-start column on the chevron row.
+ * This is CONTENT-INDEPENDENT, so it's immune to Claude's greyed
+ * ghost-suggestions : a suggestion (applied with Tab) leaves the cursor parked
+ * at the input start, so it reads as empty even though the line shows text.
  *
  * Fallback (no cursor — replay/tests) : whole-line text after the prefix. The
  * empty Claude prompt renders the chevron as just `❯`+U+00A0 with no padding,
- * so "no non-whitespace after the chevron" means empty (ghost text can't be
- * told apart without the cursor — accepted in the cursor-less fallback).
+ * so "no non-whitespace after the chevron" means empty (can't tell a ghost
+ * apart without the cursor — accepted in the cursor-less fallback).
  */
 export function promptInputEmpty(
     paneText: string,
@@ -88,10 +88,8 @@ export function promptInputEmpty(
     const chevronLine = paneText.split("\n")[zone.chevron] ?? "";
     const prefix = chevronLine.match(/^\s*❯[\s ]?/u)?.[0] ?? "";
     if (ctx && typeof ctx.cursorX === "number" && ctx.cursorY === zone.chevron) {
-        // only what's LEFT of the cursor counts as typed (ghost suggestion is
-        // rendered to the right of the cursor).
-        const typed = chevronLine.slice(prefix.length, Math.max(prefix.length, ctx.cursorX));
-        return typed.replace(/[\s ]/gu, "").length === 0;
+        // cursor at/before the input start = nothing actively typed.
+        return ctx.cursorX <= prefix.length;
     }
     const after = chevronLine.slice(prefix.length).replace(/[\s ]/gu, "");
     return after.length === 0;
