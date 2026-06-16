@@ -64,34 +64,48 @@ export class PromptZoneWatcher extends BoolWatcher {
 }
 
 /**
- * #992 david `<chat>` : "savoir si le prompt est vide ou pas". True when the
- * input box is visible AND nothing is typed on the chevron line — claude is at
- * a fresh prompt awaiting input. This is the UI-variant-independent idle signal
- * (no dependency on the footer hint string, which differs across Claude Code
- * modes : "ctrl+t to show task" / "← for agents" / "? for shortcuts").
+ * #992/#993 david `<chat>` : "savoir si le prompt est vide ou pas". True when
+ * the input box is visible AND the user hasn't typed anything.
  *
- * The empty Claude prompt renders the chevron line as just `❯` + a U+00A0
- * placeholder, with NO trailing ASCII padding — so "no non-whitespace remains
- * after the chevron" reliably means empty. Edge : a lone typed space is also
- * whitespace-only, so it reads as empty (benign : the busy latch would re-arm
- * on the next `esc to interrupt` frame ; the cursor column could disambiguate
- * it but isn't plumbed through the pane scan today).
+ * CURSOR-BASED (authoritative) : Claude shows greyed ghost-suggestions inside
+ * the prompt box (applied with Tab) that look exactly like typed text in a
+ * plain `capture-pane` — so text alone can't tell them apart. The cursor can :
+ * what the user typed sits BEFORE the cursor, the suggestion AFTER it. So the
+ * prompt is "empty" when there's nothing non-blank between the prompt prefix
+ * and the cursor column on the chevron row.
+ *
+ * Fallback (no cursor — replay/tests) : whole-line text after the prefix. The
+ * empty Claude prompt renders the chevron as just `❯`+U+00A0 with no padding,
+ * so "no non-whitespace after the chevron" means empty (ghost text can't be
+ * told apart without the cursor — accepted in the cursor-less fallback).
  */
-export function promptInputEmpty(paneText: string, zone: PromptZone | null = findPromptZone(paneText)): boolean {
+export function promptInputEmpty(
+    paneText: string,
+    ctx?: { cursorX?: number; cursorY?: number },
+    zone: PromptZone | null = findPromptZone(paneText),
+): boolean {
     if (!zone) return false;
     const chevronLine = paneText.split("\n")[zone.chevron] ?? "";
-    const afterChevron = chevronLine.replace(/^\s*❯/u, "").replace(/[\s ]/gu, "");
-    return afterChevron.length === 0;
+    const prefix = chevronLine.match(/^\s*❯[\s ]?/u)?.[0] ?? "";
+    if (ctx && typeof ctx.cursorX === "number" && ctx.cursorY === zone.chevron) {
+        // only what's LEFT of the cursor counts as typed (ghost suggestion is
+        // rendered to the right of the cursor).
+        const typed = chevronLine.slice(prefix.length, Math.max(prefix.length, ctx.cursorX));
+        return typed.replace(/[\s ]/gu, "").length === 0;
+    }
+    const after = chevronLine.slice(prefix.length).replace(/[\s ]/gu, "");
+    return after.length === 0;
 }
 
-/** #993 — input box visible AND non-empty (unsent text at the prompt).
- *  Drives the coloured `❯` glyph in the bar (david `<chat>` : "si le prompt
- *  n'est pas vide on peut afficher le symbole prompt en couleur"). */
+/** #993 — input box visible AND non-empty (real unsent text at the prompt,
+ *  ghost-suggestions excluded via the cursor). Drives the coloured `❯` glyph
+ *  in the bar (david `<chat>` : "si le prompt n'est pas vide on peut afficher
+ *  le symbole prompt en couleur"). */
 export class PromptInputWatcher extends BoolWatcher {
     readonly name = "prompt_input";
-    protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
+    protected classify(paneText: string, ctx: PaneScanCtx): boolean {
         const zone = findPromptZone(paneText);
         if (!zone) return false;
-        return !promptInputEmpty(paneText, zone);
+        return !promptInputEmpty(paneText, ctx, zone);
     }
 }

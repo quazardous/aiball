@@ -390,6 +390,22 @@ function capturePane(): string {
     }
 }
 
+// #993 — tmux pane cursor (0-based, visible-screen relative). Needed to tell
+// real typed input apart from Claude's greyed ghost-suggestions in the prompt
+// box (typed text is left of the cursor, suggestion right). null on any error
+// → watchers fall back to text-only detection.
+function captureCursor(): { x: number; y: number } | null {
+    try {
+        const r = spawnSync(MUX_CMD, [
+            "display-message", "-p", "-t", `${tname}.0`, "-F", "#{cursor_x} #{cursor_y}",
+        ], { encoding: "utf8" });
+        const m = (r.stdout ?? "").trim().match(/^(\d+)\s+(\d+)$/);
+        return m ? { x: Number(m[1]), y: Number(m[2]) } : null;
+    } catch {
+        return null;
+    }
+}
+
 function shQuote(s: string): string {
     return "'" + s.replace(/'/g, `'\\''`) + "'";
 }
@@ -801,7 +817,8 @@ function refreshPaneMarkers(): void {
     const isBoot = ipc.bootComplete !== true;
     // Single scan : watchers observe + emit events ; the subscribers
     // above call the legacy ipcState setters on every transition.
-    paneObs.tick(paneText, { nowMs: Date.now(), isBoot });
+    const cursor = captureCursor();
+    paneObs.tick(paneText, { nowMs: Date.now(), isBoot, cursorX: cursor?.x, cursorY: cursor?.y });
     // Picker markers are AUTHORITATIVELY the current pane scan, not just
     // transitions. The session-start hook sets them true out-of-band ; if it
     // auto-Enters past the picker before a heartbeat captures it, the watcher

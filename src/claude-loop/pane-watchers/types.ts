@@ -31,6 +31,13 @@ export interface PaneScanCtx {
      *  adapt thresholds — purely advisory, no activation logic depends on
      *  it (that's the orchestrator's zone job). */
     isBoot?: boolean;
+    /** #993 — tmux pane cursor position (0-based, visible-screen relative),
+     *  when probed. Needed to tell real typed input apart from Claude's greyed
+     *  ghost-suggestions in the prompt box : typed text sits BEFORE the cursor,
+     *  the suggestion AFTER it. Undefined when not probed (replay/tests →
+     *  callers fall back to whole-line text detection). */
+    cursorX?: number;
+    cursorY?: number;
 }
 
 export interface PaneWatcherEvents<TState> {
