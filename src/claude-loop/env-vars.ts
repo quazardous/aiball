@@ -73,6 +73,11 @@ export const CL_ENV = {
     BAR_PAINT_LOG: "CL_BAR_PAINT_LOG",
     PANE_CAPTURE_LOG: "CL_PANE_CAPTURE_LOG",
     PANE_CAPTURE_WINDOW_MIN: "CL_PANE_CAPTURE_WINDOW_MIN",
+    // Unified record/replay capture (supersedes the scattered debug logs
+    // above). `CL_CAPTURE=1` writes one NDJSON file per writer-process into
+    // `<state_dir>/capture/` (timer → `panes.ndjson`, proxy → `proxy.ndjson`),
+    // sharing one epoch clock so a real session can be merged + replayed.
+    CAPTURE: "CL_CAPTURE",
 } as const;
 
 export type ClEnvName = typeof CL_ENV[keyof typeof CL_ENV];

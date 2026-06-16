@@ -277,6 +277,21 @@ export function logBarPaint(sd: string | undefined, writer: string, value: strin
 // est string-orderable donc compare-direct sur le nom, pas de stat.
 export function paneCaptureDir(sd: string): string { return join(sd, "pane-captures"); }
 
+// #990 — unified capture dir. `CL_CAPTURE=1` records a replayable session :
+// each writer-process appends its own NDJSON timeline here (timer →
+// `panes.ndjson`, proxy → `proxy.ndjson`), all stamped with an epoch-seconds
+// `t` so the streams merge into one timeline at replay. One file per process
+// (not one shared file) keeps O_APPEND atomic between the two processes.
+// Pane frames are NOT inlined : each frame is dumped as `panes/<ms>.txt` and
+// the timeline row references it by short path (`file`), keeping the NDJSON
+// rows small/atomic and the panes greppable as plain files. Append-only : a
+// capture is scoped to the session you want to record (vs the rotated legacy).
+export function captureDir(sd: string): string { return join(sd, "capture"); }
+export function paneTimelinePath(sd: string): string { return join(captureDir(sd), "panes.ndjson"); }
+export function capturePanesDir(sd: string): string { return join(captureDir(sd), "panes"); }
+
+const CAPTURE_ENABLED = process.env[CL_ENV.CAPTURE] === "1";
+
 const PANE_CAPTURE_LOG_ENABLED = process.env[CL_ENV.PANE_CAPTURE_LOG] === "1";
 const PANE_CAPTURE_WINDOW_MIN = (() => {
     const raw = process.env[CL_ENV.PANE_CAPTURE_WINDOW_MIN];
@@ -298,17 +313,36 @@ export function prunePaneCaptures(dir: string, cutoffMs: number): void {
 }
 
 export function logPaneCapture(sd: string | undefined, text: string): void {
-    if (!PANE_CAPTURE_LOG_ENABLED || !sd) return;
+    if (!sd) return;
+    // Consecutive dedup is shared by both sinks : a gap in either stream
+    // means the pane didn't change between probes.
+    if (!PANE_CAPTURE_LOG_ENABLED && !CAPTURE_ENABLED) return;
     if (text === lastPaneCaptureWritten) return;
-    try {
-        const dir = paneCaptureDir(sd);
-        mkdirSync(dir, { recursive: true });
-        const nowMs = Date.now();
-        const iso = new Date(nowMs).toISOString().replace(/:/g, "-");
-        writeFileSync(join(dir, `${iso}.txt`), text);
-        lastPaneCaptureWritten = text;
-        prunePaneCaptures(dir, nowMs - PANE_CAPTURE_WINDOW_MS);
-    } catch { /* best-effort */ }
+    const nowMs = Date.now();
+    // #990 unified capture — dump the frame as a file, reference it from the
+    // timeline by short path (david `684qhp` : référencer le basename, pas
+    // inliner le texte). The merged-timeline row stays small + atomic.
+    if (CAPTURE_ENABLED) {
+        try {
+            const panesDir = capturePanesDir(sd);
+            mkdirSync(panesDir, { recursive: true });
+            const rel = join("panes", `${nowMs}.txt`);
+            writeFileSync(join(captureDir(sd), rel), text);
+            const rec = { t: nowMs / 1000, kind: "pane", file: rel };
+            appendFileSync(paneTimelinePath(sd), JSON.stringify(rec) + "\n");
+        } catch { /* best-effort */ }
+    }
+    // #678/#969 legacy per-file rotated dump — deprecated alias, kept working.
+    if (PANE_CAPTURE_LOG_ENABLED) {
+        try {
+            const dir = paneCaptureDir(sd);
+            mkdirSync(dir, { recursive: true });
+            const iso = new Date(nowMs).toISOString().replace(/:/g, "-");
+            writeFileSync(join(dir, `${iso}.txt`), text);
+            prunePaneCaptures(dir, nowMs - PANE_CAPTURE_WINDOW_MS);
+        } catch { /* best-effort */ }
+    }
+    lastPaneCaptureWritten = text;
 }
 
 // #733 V2 — pane signals are timer-only and now live exclusively in
