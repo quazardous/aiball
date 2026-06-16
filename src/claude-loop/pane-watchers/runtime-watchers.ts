@@ -6,7 +6,6 @@
 
 import { BoolWatcher } from "./bool-watcher.js";
 import { paneFooterShowsBusy, paneShowsInterrupted } from "../state.js";
-import { promptInputEmpty } from "./prompt-zone-watcher.js";
 import type { PaneScanCtx } from "./types.js";
 
 /** Claude prompt visible (= `Claude Code v`, `❯ `, `> ` at line start).
@@ -38,26 +37,32 @@ export class InterruptedWatcher extends BoolWatcher {
     }
 }
 
-/** Positive idle-prompt signal used to clear the `paneBusy` latch when the
- *  Stop hook never fires — e.g. an ESC-interrupt aborts the turn, so no
- *  `idle:turn_ended` arrives. Consumer in timer.ts :
+/** #898 david `<chat>` : "il y a une phrase qui permet de savoir si on
+ *  est au prompt idle 'ctrl+t to show task'". Signal POSITIF d'idle
+ *  prompt — quand la regex est visible MAIS PAS `esc to interrupt`,
+ *  on est définitivement au prompt awaiting input. Si les 2 sont
+ *  visibles ensemble, c'est busy (claude affiche le task hint pendant
+ *  qu'il bosse).
+ *
+ *  Donne un signal déterministe pour clear le latch paneBusy stale
+ *  (= cas où BusyWatcher loupe le change(false) parce que la regex
+ *  reste sticky dans la fenêtre du footer). Consumer in timer.ts :
  *  `idlePromptW.on("begin", () => setPaneBusy(sd, false))`.
  *
- *  #992 david `<chat>` : "modifie le watcher du prompt pour savoir si le
- *  prompt est vide ou pas". STRUCTURAL detection now — input BOX visible AND
- *  empty (claude back at a fresh prompt) — replacing the old footer-hint regex
- *  `ctrl+t to show task`, which the agents UI swaps for `← for agents` (→ busy
- *  stuck ~5min until the SanityController net, the bug that motivated this).
- *
- *  `!paneFooterShowsBusy` keeps it from firing mid-turn : a busy frame ALSO
- *  shows an empty input box, but its footer still carries `esc to interrupt`.
- *  Typing mid-turn fills the box → `promptInputEmpty` is false → stays latched
- *  (#890). The lone-typed-space edge reads as empty (benign : re-latches on the
- *  next `esc to interrupt` frame). */
+ *  NB (#992) : la détection prompt-vide structurelle existe maintenant
+ *  (`promptInputEmpty`) et sert d'INDICATEUR (glyphe `❯` coloré, #993),
+ *  mais on NE l'a PAS câblée comme règle de clear ici — david explore,
+ *  la règle viendra peut-être plus tard. Cette classe reste sur le
+ *  hint `ctrl+t to show task`. */
 export class IdlePromptWatcher extends BoolWatcher {
     readonly name = "idle_prompt";
     protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
-        if (!promptInputEmpty(paneText)) return false;
-        return !paneFooterShowsBusy(paneText);
+        const hasIdleHint = /ctrl\+t to show task/i.test(paneText);
+        if (!hasIdleHint) return false;
+        // Couplé : si "esc to interrupt" est aussi visible, on est busy
+        // (claude affiche les 2 simultanément pendant un turn). Le signal
+        // d'idle ne tire que quand le task hint apparaît SEUL.
+        const isBusy = paneFooterShowsBusy(paneText);
+        return !isBusy;
     }
 }

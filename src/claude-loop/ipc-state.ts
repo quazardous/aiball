@@ -130,6 +130,11 @@ export interface IpcState {
      *  timer.ts → setIpcPromptZoneVisible. Rendu glyph `❯` dans
      *  le marker segment du BarRenderer (david `f72kpq`). */
     promptZoneVisible: boolean;
+    /** #993 — true while the input box is visible AND has unsent text
+     *  (promptInputEmpty === false). Driven by PromptInputWatcher →
+     *  setIpcPromptHasInput. The BarRenderer paints the `❯` glyph in
+     *  `colors.prompt_input_fg` when set. */
+    promptHasInput: boolean;
     /** #733 V2 — pane state in-memory, mirrored by every `setPane*`
      *  setter. `null` = no in-memory signal yet → reader falls back to
      *  the file (cold boot before `refreshPaneMarkers` runs, or a stale
@@ -205,6 +210,7 @@ const state: IpcState = {
     humanTypingAtMs: null,
     healthPromptVisible: false,
     promptZoneVisible: false,
+    promptHasInput: false,
     paneBusy: null,
     paneReady: null,
     paneCompacting: null,
@@ -477,6 +483,14 @@ export function setIpcHealthPromptVisible(visible: boolean): void {
  *  to paint the `❯` glyph in the marker segment. */
 export function setIpcPromptZoneVisible(visible: boolean): void {
     state.promptZoneVisible = visible;
+    notifyIpcChanged();
+}
+
+/** #993 — toggle the "prompt has unsent text" flag. Set by the timer's
+ *  consumer on `promptInputW.begin` / `.end`. Read by the BarRenderer to
+ *  paint the `❯` glyph in `colors.prompt_input_fg`. */
+export function setIpcPromptHasInput(hasInput: boolean): void {
+    state.promptHasInput = hasInput;
     notifyIpcChanged();
 }
 

@@ -237,6 +237,8 @@ export interface AiballConfig {
         bar_fg: string;
         /** the dim `· afk:` control-key label. */
         afk_label_fg: string;
+        /** #993 — the `❯` prompt glyph when the input box has unsent text. */
+        prompt_input_fg: string;
         /** per-state bar background (busy / idle / boot). */
         busy_bg: string;
         idle_bg: string;
@@ -350,6 +352,7 @@ const DEFAULTS: AiballConfig = {
         island_fg: "colour15",     // white — `claude-…` on the black island
         bar_fg: "colour16",        // black — name / [state] / afk key on the coloured bar
         afk_label_fg: "colour238", // dim dark-grey — the de-emphasised `· afk:` label
+        prompt_input_fg: "colour214", // orange — `❯` when the prompt has unsent text (#993)
         busy_bg: "colour33",       // electric blue (#B.154)
         idle_bg: "colour240",      // dark grey
         boot_bg: "colour178",      // yellow
@@ -361,7 +364,7 @@ const DEFAULTS: AiballConfig = {
 
 /** The tunable colour-profile keys (#385). Used to validate yaml `colors:` blocks. */
 const COLOR_KEYS = [
-    "island_fg", "bar_fg", "afk_label_fg", "busy_bg", "idle_bg", "boot_bg",
+    "island_fg", "bar_fg", "afk_label_fg", "prompt_input_fg", "busy_bg", "idle_bg", "boot_bg",
 ] as const;
 
 /** Keep only the known `colors:` keys whose value is a non-empty string token. */

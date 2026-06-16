@@ -83,3 +83,15 @@ export function promptInputEmpty(paneText: string, zone: PromptZone | null = fin
     const afterChevron = chevronLine.replace(/^\s*❯/u, "").replace(/[\s ]/gu, "");
     return afterChevron.length === 0;
 }
+
+/** #993 — input box visible AND non-empty (unsent text at the prompt).
+ *  Drives the coloured `❯` glyph in the bar (david `<chat>` : "si le prompt
+ *  n'est pas vide on peut afficher le symbole prompt en couleur"). */
+export class PromptInputWatcher extends BoolWatcher {
+    readonly name = "prompt_input";
+    protected classify(paneText: string, _ctx: PaneScanCtx): boolean {
+        const zone = findPromptZone(paneText);
+        if (!zone) return false;
+        return !promptInputEmpty(paneText, zone);
+    }
+}

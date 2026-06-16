@@ -99,7 +99,7 @@ import {
 } from "./pane-watchers/boot-watchers.js";
 import { PromptWatcher, BusyWatcher, InterruptedWatcher, IdlePromptWatcher } from "./pane-watchers/runtime-watchers.js";
 import { HealthCheckWatcher } from "./pane-watchers/health-check-watcher.js";
-import { PromptZoneWatcher } from "./pane-watchers/prompt-zone-watcher.js";
+import { PromptZoneWatcher, PromptInputWatcher } from "./pane-watchers/prompt-zone-watcher.js";
 import { getHealthCheckService } from "./health-check-service.js";
 import { ErrorWatcher } from "./pane-watchers/error-watcher.js";
 import { armAfkViaService } from "./afk-service-sync.js";
@@ -134,6 +134,7 @@ import {
     setIpcHumanTypingAtMs,
     setIpcHealthPromptVisible,
     setIpcPromptZoneVisible,
+    setIpcPromptHasInput,
     setIpcBootDeadlineMs,
     setIpcCounters,
     setIpcIdleSince,
@@ -600,10 +601,11 @@ const idlePromptW = new IdlePromptWatcher();
 const errorW = new ErrorWatcher();
 const healthCheckW = new HealthCheckWatcher();
 const promptZoneW = new PromptZoneWatcher();
+const promptInputW = new PromptInputWatcher();
 const paneObs = new PaneObserver();
 paneObs.registerZone(new Zone("boot", [pickerSessionW, pickerModeW, resumingW, compactConfirmW]));
 paneObs.registerZone(new Zone("runtime", [
-    promptW, busyW, interruptedW, idlePromptW, errorW, getCompactingDetector(), healthCheckW, promptZoneW,
+    promptW, busyW, interruptedW, idlePromptW, errorW, getCompactingDetector(), healthCheckW, promptZoneW, promptInputW,
 ]));
 // Runtime zone toujours actif ; boot zone n'est entré que si on n'est
 // pas déjà sealed (cas respawn handoff #868 : bootComplete déjà true).
@@ -750,6 +752,15 @@ if (sd) {
     promptZoneW.on("end", () => {
         log("watcher: prompt_zone end → setIpcPromptZoneVisible(false)");
         setIpcPromptZoneVisible(false);
+    });
+    // #993 — colour the `❯` glyph when the prompt has unsent text.
+    promptInputW.on("begin", () => {
+        log("watcher: prompt_input begin → setIpcPromptHasInput(true)");
+        setIpcPromptHasInput(true);
+    });
+    promptInputW.on("end", () => {
+        log("watcher: prompt_input end → setIpcPromptHasInput(false)");
+        setIpcPromptHasInput(false);
     });
     getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
     // CompactingDetector emits change(s) with `s.active` boolean ; forward begin/end via change diff.

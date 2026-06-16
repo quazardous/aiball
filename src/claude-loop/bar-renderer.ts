@@ -222,7 +222,13 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         // Past grace : nextWakeInSec stays null = pipe ouvert, drain
         // instant sur prochain SSE / idle:settled, pas de countdown.
     }
-    const promptGlyph = ipc.promptZoneVisible ? "❯" : "";
+    // #993 — `❯` orange when the prompt has unsent text, plain otherwise.
+    // Restore island_fg right after so the downstream segments (typing /
+    // human / ` claude`) render unchanged (the format sets island_fg before
+    // `@cl_prompt`). Empty-but-visible stays plain (inherits island_fg).
+    const promptGlyph = ipc.promptZoneVisible
+        ? (ipc.promptHasInput ? `#[fg=${barColors().prompt_input_fg}]❯#[fg=${barColors().island_fg}]` : "❯")
+        : "";
     const typingGlyph = typingGlyphChunk(sd);
     return {
         humanWord,
