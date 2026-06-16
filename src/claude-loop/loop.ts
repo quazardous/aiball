@@ -136,6 +136,7 @@ import {
     setIpcPromptZoneVisible,
     setIpcPromptHasInput,
     setIpcBootDeadlineMs,
+    setIpcBootActiveModules,
     setIpcCounters,
     setIpcIdleSince,
     setIpcNextWakeAt,
@@ -658,14 +659,29 @@ const refreshPaneReady = (): void => {
 // #883 Slice 2 — forward begin/end ALSO vers BootMachine.MODULE_STARTED/ENDED
 // (edge events module-based). Le bootActor n'existe pas encore à module
 // init, donc on l'accède via le getter au moment du fire.
+// #994 — log every module forward (begin/end) with the resulting active set,
+// AND log DROPs (actor null / already sealed). A dropped MODULE_ENDED is the
+// signature of the boot-infini leak (module stays active → push pumps the
+// deadline forever) — previously these forwards were silent for
+// resuming/compacting/compact_confirm, so a leaked module was unnameable.
+function bootModulesList(): string {
+    if (!bootActor) return "";
+    return Array.from(bootActor.getSnapshot().context.activeModules).join(",");
+}
 function forwardModuleStarted(name: string): void {
     if (bootActor && !bootActor.getSnapshot().matches("sealed")) {
         bootActor.send({ type: "MODULE_STARTED", name });
+        log(`bootMachine: MODULE_STARTED ${name} → active=[${bootModulesList()}]`);
+    } else {
+        log(`bootMachine: MODULE_STARTED ${name} DROPPED (${bootActor ? "already sealed" : "actor null"})`);
     }
 }
 function forwardModuleEnded(name: string): void {
     if (bootActor && !bootActor.getSnapshot().matches("sealed")) {
         bootActor.send({ type: "MODULE_ENDED", name });
+        log(`bootMachine: MODULE_ENDED ${name} → active=[${bootModulesList()}]`);
+    } else {
+        log(`bootMachine: MODULE_ENDED ${name} DROPPED (${bootActor ? "already sealed" : "actor null"})`);
     }
 }
 if (sd) {
@@ -1658,6 +1674,10 @@ async function mainSse(): Promise<void> {
         // Pure ipcState bridge — fires on every snapshot change.
         bootActor.subscribe((snap) => {
             setIpcBootDeadlineMs(snap.context.deadlineMs);
+            // #994 — mirror the active boot modules to ipc (the actor's Set
+            // serialises to {} in getPersistedSnapshot, so inspect can't read
+            // it otherwise). Lets `inspect` name a leaked/stuck module.
+            setIpcBootActiveModules(Array.from(snap.context.activeModules));
         });
         // Locus event consumer — fires once on `booting → sealed`.
         bootActor.on("boot:sealed", (ev) => {

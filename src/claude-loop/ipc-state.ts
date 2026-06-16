@@ -135,6 +135,11 @@ export interface IpcState {
      *  setIpcPromptHasInput. The BarRenderer paints the `❯` glyph in
      *  `colors.prompt_input_fg` when set. */
     promptHasInput: boolean;
+    /** #994 — names of the boot modules currently active in the BootMachine
+     *  (mirror of its `activeModules` Set, which serialises to {} so inspect
+     *  can't read it from the snapshot). A non-empty list while the boot never
+     *  seals = the leaked/stuck module(s). */
+    bootActiveModules: string[];
     /** #733 V2 — pane state in-memory, mirrored by every `setPane*`
      *  setter. `null` = no in-memory signal yet → reader falls back to
      *  the file (cold boot before `refreshPaneMarkers` runs, or a stale
@@ -211,6 +216,7 @@ const state: IpcState = {
     healthPromptVisible: false,
     promptZoneVisible: false,
     promptHasInput: false,
+    bootActiveModules: [],
     paneBusy: null,
     paneReady: null,
     paneCompacting: null,
@@ -491,6 +497,13 @@ export function setIpcPromptZoneVisible(visible: boolean): void {
  *  paint the `❯` glyph in `colors.prompt_input_fg`. */
 export function setIpcPromptHasInput(hasInput: boolean): void {
     state.promptHasInput = hasInput;
+    notifyIpcChanged();
+}
+
+/** #994 — mirror the BootMachine's active module set to ipc (its Set can't be
+ *  read from the serialised snapshot). Set by the bootActor subscribe. */
+export function setIpcBootActiveModules(modules: string[]): void {
+    state.bootActiveModules = modules;
     notifyIpcChanged();
 }
 

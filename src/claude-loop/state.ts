@@ -18,6 +18,7 @@ import {
     getIpcState,
     setIpcAfk,
     setIpcBootComplete,
+    setIpcBootActiveModules,
     setIpcBusyDeferUntil,
     setIpcDrainedState,
     setIpcHumanTypingAtMs,
@@ -626,6 +627,7 @@ export interface LiveLoopSnapshot {
     humanTypingAtMs: number | null;
     idleSinceMs: number | null;
     bootComplete: boolean | null;
+    bootActiveModules?: string[];
     busyDeferUntilMs: number | null;
 }
 
@@ -643,6 +645,7 @@ export function mirrorLiveSnapshotToIpc(live: LiveLoopSnapshot): void {
     setIpcHumanTypingAtMs(live.humanTypingAtMs);
     setIpcIdleSince(live.idleSinceMs);
     if (live.bootComplete !== null) setIpcBootComplete(live.bootComplete);
+    if (live.bootActiveModules) setIpcBootActiveModules(live.bootActiveModules);
     setIpcBusyDeferUntil(live.busyDeferUntilMs);
 }
 
@@ -2168,6 +2171,7 @@ export function createLoopServer(
                     humanTypingAtMs: ipc.humanTypingAtMs,
                     idleSinceMs: ipc.idleSinceMs,
                     bootComplete: ipc.bootComplete,
+                    bootActiveModules: ipc.bootActiveModules,
                     busyDeferUntilMs: ipc.busyDeferUntilMs,
                     lastViewPushAtMs: ipc.lastViewPushAtMs,
                     lastSseEventAtMs: ipc.lastSseEventAtMs,

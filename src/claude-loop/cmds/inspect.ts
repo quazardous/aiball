@@ -27,6 +27,7 @@ import {
     loopPidPath,
 } from "../state.js";
 import { computeLoopView } from "../loop-state.js";
+import { getIpcState } from "../ipc-state.js";
 import { openEventChannel } from "../ipc-events.js";
 
 /**
@@ -116,6 +117,9 @@ export async function cmdInspect(name: string): Promise<void> {
             elapsed_ms: input.nowMs - input.loopStartMs,
             complete: input.bootComplete,
             resume_picker_active: input.resumePickerActive,
+            // #994 — the BootMachine's active modules. Non-empty while boot
+            // never seals = the leaked/stuck transient module(s).
+            active_modules: getIpcState().bootActiveModules,
         },
         // #774 — pane / afk / typing / boot signals come from the
         // timer's live `ipcState` when `queryLoopState` succeeds. The
