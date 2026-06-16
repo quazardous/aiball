@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+"""cl-capture — inspect / filter / exploit a CL_CAPTURE=1 session folder.
+
+A CL_CAPTURE run writes <state_dir>/capture/ :
+  proxy.ndjson    proxy events — human keystroke decisions + synthetic injects
+  panes.ndjson    one row per distinct pane frame : {t, kind:"pane", file}
+  panes/<ms>.txt  the pane frames themselves (referenced by `file`)
+
+Dumping those raw into an agent's context is ruinous (every keystroke +
+full-screen pane dumps). This tool merges the two NDJSON streams by their
+shared epoch clock `t` and exposes context-frugal views : a one-line-per-event
+timeline, content grep that returns only matching lines, consecutive pane
+diffs (panes barely change), footer-scoped pane fetch, and summary stats.
+
+Zero dependencies (stdlib only), mirroring pty-proxy.py.
+
+Usage:
+  cl-capture timeline DIR [--kind K[,K]] [--since S] [--until S] [--grep RE]
+  cl-capture pane     DIR REF [--footer N | --head N]
+  cl-capture panes    DIR
+  cl-capture grep     DIR REGEX [--footer N]
+  cl-capture diff     DIR [REF_A REF_B | REF | --consecutive]
+  cl-capture stats    DIR
+
+REF for a pane : a filename (`12345.txt` / `panes/12345.txt`), an index into
+the sorted pane list (`0`,`1`,…,`-1`), `last`, or `@T` for the pane nearest
+relative time T seconds.
+"""
+import argparse
+import json
+import os
+import re
+import sys
+import difflib
+
+
+def _load(dir_path):
+    """Return (events, t0). events = merged list sorted by t, each a dict with
+    at least {t, kind}. kind ∈ {proxy, inject, pane}. proxy/inject carry the
+    raw decision record ; pane carries {file, abspath}."""
+    events = []
+    proxy = os.path.join(dir_path, "proxy.ndjson")
+    panes = os.path.join(dir_path, "panes.ndjson")
+    for line in _iter_ndjson(proxy):
+        ev = "inject" if line.get("event") == "inject" else "proxy"
+        line["kind"] = ev
+        events.append(line)
+    for line in _iter_ndjson(panes):
+        line["kind"] = "pane"
+        line["abspath"] = os.path.join(dir_path, line.get("file", ""))
+        events.append(line)
+    events.sort(key=lambda e: e.get("t", 0.0))
+    t0 = events[0]["t"] if events else 0.0
+    return events, t0
+
+
+def _iter_ndjson(path):
+    if not os.path.exists(path):
+        return
+    with open(path) as f:
+        for ln in f:
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                yield json.loads(ln)
+            except ValueError:
+                continue
+
+
+def _hex_to_repr(h):
+    """Decode an NDJSON hex byte field to a short printable repr."""
+    if not h:
+        return ""
+    try:
+        b = bytes.fromhex(h)
+    except ValueError:
+        return h
+    try:
+        s = b.decode("utf-8")
+        return repr(s)[1:-1]  # strip surrounding quotes, keep escapes
+    except UnicodeDecodeError:
+        return h
+
+
+def _non_empty_lines(text):
+    return [ln for ln in text.splitlines() if ln.strip()]
+
+
+def _read_pane(ev):
+    try:
+        with open(ev["abspath"]) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _proxy_flags(ev):
+    out = []
+    for flag in ("typing", "lone_esc", "afk_fired", "buffered_first"):
+        if ev.get(flag):
+            out.append(flag)
+    if ev.get("word"):
+        out.append("word=" + str(ev["word"]))
+    if ev.get("markers"):
+        out.append("markers=" + ",".join(ev["markers"]))
+    return " ".join(out)
+
+
+def _pane_list(events):
+    return [e for e in events if e["kind"] == "pane"]
+
+
+def _resolve_pane(events, t0, ref):
+    panes = _pane_list(events)
+    if not panes:
+        return None
+    if ref == "last":
+        return panes[-1]
+    if ref.startswith("@"):
+        target = t0 + float(ref[1:])
+        return min(panes, key=lambda e: abs(e["t"] - target))
+    # filename ?
+    base = os.path.basename(ref)
+    for e in panes:
+        if os.path.basename(e.get("file", "")) == base:
+            return e
+    # index ?
+    try:
+        return panes[int(ref)]
+    except (ValueError, IndexError):
+        return None
+
+
+# ---- commands ---------------------------------------------------------------
+
+def cmd_timeline(a):
+    events, t0 = _load(a.dir)
+    kinds = set(a.kind.split(",")) if a.kind else None
+    grep = re.compile(a.grep) if a.grep else None
+    for e in events:
+        rel = e.get("t", 0.0) - t0
+        if a.since is not None and rel < a.since:
+            continue
+        if a.until is not None and rel > a.until:
+            continue
+        k = e["kind"]
+        if kinds and k not in kinds:
+            continue
+        if k == "pane":
+            text = _read_pane(e)
+            ne = _non_empty_lines(text)
+            footer = ne[-1][:70] if ne else "(empty)"
+            if grep and not grep.search(text):
+                continue
+            print("%+9.2f  pane    %-22s | %s" % (rel, e.get("file", "?"), footer))
+        elif k == "inject":
+            if grep:
+                continue
+            print("%+9.2f  inject  %s  %s" % (rel, _hex_to_repr(e.get("forward", "")), ",".join(e.get("markers", []))))
+        else:
+            if grep:
+                continue
+            fwd = _hex_to_repr(e.get("forward", ""))
+            print("%+9.2f  %-6s  fwd=%-10s %s" % (rel, e.get("event", "proxy"), repr(fwd)[1:-1], _proxy_flags(e)))
+
+
+def cmd_pane(a):
+    events, t0 = _load(a.dir)
+    e = _resolve_pane(events, t0, a.ref)
+    if not e:
+        sys.exit("no pane matching %r" % a.ref)
+    text = _read_pane(e)
+    sys.stderr.write("# %s  (t%+.2f)\n" % (e.get("file", "?"), e["t"] - t0))
+    if a.footer:
+        lines = _non_empty_lines(text)[-a.footer:]
+        print("\n".join(lines))
+    elif a.head:
+        print("\n".join(text.splitlines()[:a.head]))
+    else:
+        sys.stdout.write(text)
+
+
+def cmd_panes(a):
+    events, t0 = _load(a.dir)
+    panes = _pane_list(events)
+    for i, e in enumerate(panes):
+        ne = _non_empty_lines(_read_pane(e))
+        head = ne[0][:60] if ne else "(empty)"
+        print("[%3d] %+9.2f  %-22s  %s" % (i, e["t"] - t0, e.get("file", "?"), head))
+    print("# %d pane frames" % len(panes), file=sys.stderr)
+
+
+def cmd_grep(a):
+    events, t0 = _load(a.dir)
+    rx = re.compile(a.regex)
+    for e in _pane_list(events):
+        text = _read_pane(e)
+        lines = _non_empty_lines(text)[-a.footer:] if a.footer else text.splitlines()
+        hits = [(n, ln) for n, ln in enumerate(lines) if rx.search(ln)]
+        if hits:
+            print("%+9.2f  %s" % (e["t"] - t0, e.get("file", "?")))
+            for n, ln in hits:
+                print("    %s" % ln.rstrip())
+
+
+def cmd_diff(a):
+    events, t0 = _load(a.dir)
+    panes = _pane_list(events)
+    if a.consecutive:
+        prev = None
+        for e in panes:
+            cur = _read_pane(e).splitlines()
+            if prev is not None:
+                d = list(difflib.unified_diff(prev, cur, lineterm="", n=0))
+                if len(d) > 2:  # has real hunks
+                    print("=== %+.2f  %s ===" % (e["t"] - t0, e.get("file", "?")))
+                    print("\n".join(d[2:]))
+            prev = cur
+        return
+    a_ref = a.ref_a or "0"
+    b_ref = a.ref_b or "last"
+    ea = _resolve_pane(events, t0, a_ref)
+    eb = _resolve_pane(events, t0, b_ref)
+    if not ea or not eb:
+        sys.exit("could not resolve panes %r / %r" % (a_ref, b_ref))
+    d = difflib.unified_diff(
+        _read_pane(ea).splitlines(), _read_pane(eb).splitlines(),
+        fromfile=ea.get("file", "A"), tofile=eb.get("file", "B"), lineterm="")
+    print("\n".join(d))
+
+
+def cmd_stats(a):
+    events, t0 = _load(a.dir)
+    if not events:
+        sys.exit("no events in %s" % a.dir)
+    span = events[-1]["t"] - t0
+    by_kind, by_event, markers, words = {}, {}, {}, {}
+    for e in events:
+        by_kind[e["kind"]] = by_kind.get(e["kind"], 0) + 1
+        if e["kind"] != "pane":
+            by_event[e.get("event", "?")] = by_event.get(e.get("event", "?"), 0) + 1
+            for m in e.get("markers", []):
+                markers[m] = markers.get(m, 0) + 1
+            if e.get("word"):
+                words[e["word"]] = words.get(e["word"], 0) + 1
+    print("events    : %d over %.1fs" % (len(events), span))
+    print("by kind   : " + ", ".join("%s=%d" % kv for kv in sorted(by_kind.items())))
+    print("by event  : " + ", ".join("%s=%d" % kv for kv in sorted(by_event.items())))
+    print("markers   : " + (", ".join("%s=%d" % kv for kv in sorted(markers.items())) or "(none)"))
+    print("words     : " + (", ".join("%s=%d" % kv for kv in sorted(words.items())) or "(none)"))
+
+
+def main(argv):
+    p = argparse.ArgumentParser(prog="cl-capture", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    t = sub.add_parser("timeline", help="merged one-line-per-event view")
+    t.add_argument("dir")
+    t.add_argument("--kind", help="comma list: proxy,inject,pane")
+    t.add_argument("--since", type=float, help="relative seconds (>=)")
+    t.add_argument("--until", type=float, help="relative seconds (<=)")
+    t.add_argument("--grep", help="regex on pane content; restricts to matching panes")
+    t.set_defaults(fn=cmd_timeline)
+
+    pa = sub.add_parser("pane", help="print one pane frame")
+    pa.add_argument("dir"); pa.add_argument("ref")
+    pa.add_argument("--footer", type=int, help="last N non-empty lines only")
+    pa.add_argument("--head", type=int, help="first N lines only")
+    pa.set_defaults(fn=cmd_pane)
+
+    pl = sub.add_parser("panes", help="list pane frames (t + preview)")
+    pl.add_argument("dir"); pl.set_defaults(fn=cmd_panes)
+
+    g = sub.add_parser("grep", help="search pane contents, print matching lines only")
+    g.add_argument("dir"); g.add_argument("regex")
+    g.add_argument("--footer", type=int, help="restrict search to last N non-empty lines")
+    g.set_defaults(fn=cmd_grep)
+
+    d = sub.add_parser("diff", help="diff two panes, or each vs previous")
+    d.add_argument("dir")
+    d.add_argument("ref_a", nargs="?"); d.add_argument("ref_b", nargs="?")
+    d.add_argument("--consecutive", action="store_true", help="show each frame's delta vs the previous")
+    d.set_defaults(fn=cmd_diff)
+
+    s = sub.add_parser("stats", help="summary counts")
+    s.add_argument("dir"); s.set_defaults(fn=cmd_stats)
+
+    a = p.parse_args(argv)
+    a.fn(a)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

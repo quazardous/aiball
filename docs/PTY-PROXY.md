@@ -185,6 +185,19 @@ proxy stream (explicit legacy path). Enable it on a running loop with
 respawn). The capture is append-only — it's scoped to the session you want
 to record, so delete the dir when done.
 
+**Inspecting a capture — `bin/cl-capture`.** A whole capture dir is far too
+large to read raw (every keystroke + full-screen pane dumps). `cl-capture`
+(zero-dep Python) merges `proxy.ndjson` + `panes.ndjson` by `t` and exposes
+context-frugal views:
+
+```bash
+cl-capture timeline DIR              # one line per event (panes shown by ref + footer preview)
+cl-capture grep DIR 'Compact this conversation' --footer 12   # only matching footer lines + their t
+cl-capture diff DIR --consecutive    # each frame's delta vs the previous (collapses near-identical panes)
+cl-capture pane DIR @42 --footer 6   # the pane nearest t+42s, last 6 non-empty lines
+cl-capture stats DIR                 # counts, duration, markers, words
+```
+
 Sequence format, one event per line:
 
 ```
