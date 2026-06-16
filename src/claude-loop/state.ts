@@ -319,7 +319,7 @@ export function prunePaneCaptures(dir: string, cutoffMs: number): void {
     } catch { /* dir gone */ }
 }
 
-export function logPaneCapture(sd: string | undefined, text: string): void {
+export function logPaneCapture(sd: string | undefined, text: string, cursor?: { x: number; y: number } | null): void {
     if (!sd) return;
     // Consecutive dedup is shared by both sinks : a gap in either stream
     // means the pane didn't change between probes.
@@ -329,13 +329,16 @@ export function logPaneCapture(sd: string | undefined, text: string): void {
     // #990 unified capture — dump the frame as a file, reference it from the
     // timeline by short path (david `684qhp` : référencer le basename, pas
     // inliner le texte). The merged-timeline row stays small + atomic.
+    // #993 — also record the tmux cursor (cursorX/cursorY) so a replayed
+    // capture can tell real input from greyed ghost-suggestions.
     if (CAPTURE_ENABLED) {
         try {
             const panesDir = capturePanesDir(sd);
             mkdirSync(panesDir, { recursive: true });
             const rel = join("panes", `${nowMs}.txt`);
             writeFileSync(join(captureDir(sd), rel), text);
-            const rec = { t: nowMs / 1000, kind: "pane", file: rel };
+            const rec: Record<string, unknown> = { t: nowMs / 1000, kind: "pane", file: rel };
+            if (cursor) { rec.cursorX = cursor.x; rec.cursorY = cursor.y; }
             appendFileSync(paneTimelinePath(sd), JSON.stringify(rec) + "\n");
         } catch { /* best-effort */ }
     }

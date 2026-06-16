@@ -153,7 +153,10 @@ def cmd_timeline(a):
             footer = ne[-1][:70] if ne else "(empty)"
             if grep and not grep.search(text):
                 continue
-            print("%+9.2f  pane    %-22s | %s" % (rel, e.get("file", "?"), footer))
+            cur = ""
+            if "cursorX" in e:
+                cur = " cur=(%s,%s)" % (e.get("cursorX"), e.get("cursorY"))
+            print("%+9.2f  pane    %-22s%s | %s" % (rel, e.get("file", "?"), cur, footer))
         elif k == "inject":
             if grep:
                 continue
@@ -171,7 +174,8 @@ def cmd_pane(a):
     if not e:
         sys.exit("no pane matching %r" % a.ref)
     text = _read_pane(e)
-    sys.stderr.write("# %s  (t%+.2f)\n" % (e.get("file", "?"), e["t"] - t0))
+    cur = "  cursor=(%s,%s)" % (e.get("cursorX"), e.get("cursorY")) if "cursorX" in e else ""
+    sys.stderr.write("# %s  (t%+.2f)%s\n" % (e.get("file", "?"), e["t"] - t0, cur))
     if a.footer:
         lines = _non_empty_lines(text)[-a.footer:]
         print("\n".join(lines))

@@ -377,13 +377,19 @@ if (sd) {
  * (tmux gone, capture errored) — callers fall back to last-known
  * state. Used by the heartbeat `esc to interrupt` probe (#B.173).
  */
+// #993 — last cursor probed alongside the most recent capturePane(), reused by
+// refreshPaneMarkers for the watcher tick (avoids a 2nd display-message call)
+// and recorded into the capture by logPaneCapture.
+let lastCursor: { x: number; y: number } | null = null;
+
 function capturePane(): string {
     try {
         const r = spawnSync(MUX_CMD, [
             "capture-pane", "-t", `${tname}.0`, "-p",
         ], { encoding: "utf8" });
         const text = r.stdout ?? "";
-        logPaneCapture(sd, text);
+        lastCursor = captureCursor();
+        logPaneCapture(sd, text, lastCursor);
         return text;
     } catch {
         return "";
@@ -816,9 +822,9 @@ function refreshPaneMarkers(): void {
     const ipc = getIpcState();
     const isBoot = ipc.bootComplete !== true;
     // Single scan : watchers observe + emit events ; the subscribers
-    // above call the legacy ipcState setters on every transition.
-    const cursor = captureCursor();
-    paneObs.tick(paneText, { nowMs: Date.now(), isBoot, cursorX: cursor?.x, cursorY: cursor?.y });
+    // above call the legacy ipcState setters on every transition. Cursor was
+    // probed by capturePane() just above (lastCursor) — reuse it.
+    paneObs.tick(paneText, { nowMs: Date.now(), isBoot, cursorX: lastCursor?.x, cursorY: lastCursor?.y });
     // Picker markers are AUTHORITATIVELY the current pane scan, not just
     // transitions. The session-start hook sets them true out-of-band ; if it
     // auto-Enters past the picker before a heartbeat captures it, the watcher
