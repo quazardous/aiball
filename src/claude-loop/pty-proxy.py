@@ -713,10 +713,22 @@ def _note_wake_injected():
 
 
 def _proxy_log_path():
-    """Chemin du log diag NDJSON, ou "" si désactivé. Activé via env
-    `CL_PROXY_LOG=<fichier>` (append) — observation pure, zéro impact
-    comportement quand absent."""
-    return os.environ.get("CL_PROXY_LOG") or ""
+    """Chemin du log diag NDJSON, ou "" si désactivé. Append-only,
+    observation pure, zéro impact comportement quand absent. Deux sources :
+    - `CL_PROXY_LOG=<fichier>` (legacy) — chemin explicite, priorité ;
+    - `CL_CAPTURE=1` (#990) — switch unifié : route vers
+      `<state_dir>/capture/proxy.ndjson` (même dossier que `panes.ndjson`
+      écrit par le timer ; même horloge `t` → mergeable au replay).
+    Le proxy logue DÉJÀ frappe humaine (apply_decision) ET injects
+    synthétiques (event:"inject", drain) dans ce même fichier."""
+    explicit = os.environ.get("CL_PROXY_LOG")
+    if explicit:
+        return explicit
+    if os.environ.get("CL_CAPTURE") == "1":
+        sd = _state_dir()
+        if sd:
+            return os.path.join(sd, "capture", "proxy.ndjson")
+    return ""
 
 
 def _decision_record(dec):
@@ -747,6 +759,9 @@ def _emit_log(dec):
     if not p:
         return
     try:
+        d = os.path.dirname(p)
+        if d:
+            os.makedirs(d, exist_ok=True)
         with open(p, "a") as f:
             f.write(_json.dumps(_decision_record(dec)) + "\n")
     except OSError:

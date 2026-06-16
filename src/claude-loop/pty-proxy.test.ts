@@ -248,3 +248,32 @@ test("alt+esc: deux ESC nus séparés ne togglent pas (pas de combo cross-read) 
     assert.ok(v.every((r) => r.afk_fired === false), "aucun ESC nu ne doit fire le combo");
     assert.equal(v.map((r) => r.forward).join(""), "1b1b");
 });
+
+// #990 — CL_CAPTURE=1 unified capture routing. Le proxy logue DÉJÀ frappe
+// humaine ET injects synthétiques (event:"inject") dans CL_PROXY_LOG ; le
+// switch unifié route ce même log vers `<state_dir>/capture/proxy.ndjson`
+// (même dossier que panes.ndjson côté timer). CL_PROXY_LOG explicite garde la
+// priorité (legacy). On introspecte les vraies fonctions du proxy via python.
+test("CL_CAPTURE: proxy log → capture/proxy.ndjson (human+synthetic), CL_PROXY_LOG wins (#990)", { skip: SKIP }, () => {
+    const py = `
+import os, json, tempfile, importlib.util
+os.environ['CL_STATE_DIR'] = tempfile.mkdtemp()
+os.environ.pop('CL_PROXY_LOG', None); os.environ.pop('CL_CAPTURE', None)
+spec = importlib.util.spec_from_file_location('pp', ${JSON.stringify(PROXY)})
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+assert m._proxy_log_path() == '', 'off by default'
+os.environ['CL_CAPTURE'] = '1'
+p = m._proxy_log_path(); assert p.endswith('/capture/proxy.ndjson'), p
+m._emit_log({'event':'keystroke','now':1.5,'forward':b'a','typing':True})
+m._emit_log({'event':'inject','now':2.0,'raw':b'go','forward':b'go','markers':['note_wake_injected'],'word':'loop'})
+rows = [json.loads(l) for l in open(p)]
+assert [r['event'] for r in rows] == ['keystroke','inject'], rows
+assert rows[1]['forward'] == '676f' and rows[1]['t'] == 2.0, rows[1]
+os.environ['CL_PROXY_LOG'] = '/tmp/cl-explicit-990.ndjson'
+assert m._proxy_log_path() == '/tmp/cl-explicit-990.ndjson', 'legacy precedence'
+print('OK')
+`;
+    const r = spawnSync(PY, ["-c", py], { encoding: "utf8" });
+    assert.equal(r.status, 0, `python introspection failed:\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stdout, /OK/);
+});
