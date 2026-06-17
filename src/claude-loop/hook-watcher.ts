@@ -14,7 +14,7 @@
  *                                            [HookWatcher.emit]
  *                                                    │ emit hook:<name>
  *                                                    ▼
- *                                 [consumers : IdleController, Boot, etc.]
+ *                                 [consumers : TurnController, Boot, etc.]
  *                                   via hookWatcher.on("hook:stop", cb)
  *
  * Vs `HookService` (legacy) : même substrat (= ws back-channel des hooks),
@@ -22,7 +22,7 @@
  * `subscribe(ev => switch(ev.kind))`). Boot-queue dropped — le respawn
  * handoff (#884 snapshots) couvre la persistance des in-flight events,
  * et les SM consumers gèrent leur propre gating (BootController gated,
- * IdleController unknown state).
+ * TurnController unknown state).
  *
  * Slice A scope : la classe + le singleton + les types. La composition
  * root branche `HookService.subscribe → hookWatcher.emit` (= bridge non-

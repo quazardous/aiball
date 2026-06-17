@@ -106,7 +106,7 @@ import { armAfkViaService } from "./afk-service-sync.js";
 import { getAfkService } from "./afk-service.js";
 import { getWakeService } from "./wake-service.js";
 import { getTypingService } from "./typing-service.js";
-import { getIdleService } from "./idle-service.js";
+import { getTurnService } from "./turn-service.js";
 import { probeParentTmuxAtBoot, installParentTmuxWatchdog, sweepSiblingTimers } from "./parent-liveness.js";
 import {
     buildRespawnEnvFromSnapshots,
@@ -458,7 +458,7 @@ function selfReloadIfStale(): void {
         afk: getAfkService().getActor().getPersistedSnapshot(),
         wake: getWakeService().getActor().getPersistedSnapshot(),
         typing: getTypingService().getActor().getPersistedSnapshot(),
-        idle: getIdleService().getActor().getPersistedSnapshot(),
+        idle: getTurnService().getActor().getPersistedSnapshot(),
     });
     const root = installRoot();
     const logFd = openSync(loopLogPath(sd!), "a");
@@ -520,7 +520,7 @@ async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessag
         pingsPath(sd!),
     );
     // #848 david `chkb5z` — le post-boot reminder n'est PAS prepended.
-    // Inject standalone via `idleActor.on("idle:settled")` ; pickPhrase
+    // Inject standalone via `turnActor.on("turn:settled")` ; pickPhrase
     // ne touche plus à `postBootInjectText`.
     return result;
 }
@@ -1037,7 +1037,7 @@ function client(): AiballClient {
 
 // #848 (david `chkb5z`) — standalone post-boot inject. Au lieu de
 // prepend à un wake (= ancien mécanisme `121a042` qui leakait sur
-// d'autres messages), on attend `idle:settled` après `boot:sealed` et
+// d'autres messages), on attend `turn:settled` après `boot:sealed` et
 // on fire un sendKeys séparé avec juste le prompt. Garanties :
 //   - one-shot par session (`postBootRemindersSent` flag)
 //   - standalone (= jamais prepended à autre message)
@@ -1210,9 +1210,9 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
     }
     // #793 — clear in-memory idle-since: the wake is about to flip claude
     // back to busy. The Stop hook will re-seed it when claude returns.
-    // #881 — IdleController acteur : TURN_STARTED transitionne idle→busy
+    // #881 — TurnController acteur : TURN_STARTED transitionne no_turn→in_turn
     // et clear idleSinceMs (bridge subscriber écrit setIpcIdleSince(null)).
-    getIdleService().turnStarted(Date.now());
+    getTurnService().turnStarted(Date.now());
     await sendKeys(phrase, headMessageId, panicMode, backlogTicketId);
     // Landscape hash watermark — same set doesn't re-fire the actionable
     // leg (set-aware dedup). The legacy count watermark fallback was
@@ -1257,10 +1257,10 @@ async function mainSse(): Promise<void> {
     // the wake gate unblocks on the next tick.
     refreshPaneMarkers();
     if (sd && readIdleSinceMs(sd) === null && getIpcState().paneReady === true) {
-        // #881 — IdleController acteur : SESSION_START transitionne
-        // unknown→idle (ou idle→idle reenter), bridge écrit ipc.idleSinceMs.
-        getIdleService().sessionStart(Date.now());
-        log("boot: pane is at prompt → seeded idle-since (via IdleController)");
+        // #881 — TurnController acteur : SESSION_START transitionne
+        // unknown→no_turn (ou no_turn→no_turn reenter), bridge écrit ipc.idleSinceMs.
+        getTurnService().sessionStart(Date.now());
+        log("boot: pane is at prompt → seeded idle-since (via TurnController)");
     }
     // #628 david `mquuep` — WakeBus : façade typed sur le canal SSE
     // daemon→loop. Le timer souscrit aux events ; le bus gère le
@@ -1454,7 +1454,7 @@ async function mainSse(): Promise<void> {
                     afk: getAfkService().getActor().getPersistedSnapshot(),
                     wake: getWakeService().getActor().getPersistedSnapshot(),
                     typing: getTypingService().getActor().getPersistedSnapshot(),
-                    idle: getIdleService().getActor().getPersistedSnapshot(),
+                    idle: getTurnService().getActor().getPersistedSnapshot(),
                 });
             } catch (e) {
                 log(`onGetSnapshots: capture failed (${(e as Error).message ?? String(e)})`);
@@ -1490,8 +1490,8 @@ async function mainSse(): Promise<void> {
         // every SessionStart event. #872 Phase 3 — l'unique autorité de
         // sealing est désormais le BootMachine acteur. Les pickers +
         // idleSince still propagate ici so the wake gate sees fresh
-        // per-hook input. #881 — `setIpcIdleSince` délégué au IdleController.
-        getIdleService().sessionStart(ev.atMs);
+        // per-hook input. #881 — `setIpcIdleSince` délégué au TurnController.
+        getTurnService().sessionStart(ev.atMs);
         if (typeof ev.pickerSession === "boolean") {
             setIpcResumeSessionPicker(ev.pickerSession);
             if (sd) setResumeSessionPicker(sd, ev.pickerSession);
@@ -1505,8 +1505,8 @@ async function mainSse(): Promise<void> {
         // Slice B-2 — busy-defer expiry pinné in-memory quand le hook
         // l'envoie (pane busy at turn end). Soit timestamp absolu = defer
         // le gate, soit null explicite = clear defer. Stop event = idle
-        // confirmed. #881 — `setIpcIdleSince` délégué à IdleController.
-        getIdleService().turnEnded(ev.atMs);
+        // confirmed. #881 — `setIpcIdleSince` délégué à TurnController.
+        getTurnService().turnEnded(ev.atMs);
         if (ev.busyDeferUntilMs !== undefined) {
             if (ev.busyDeferUntilMs === null) {
                 setIpcBusyDeferUntil(null);
@@ -1525,11 +1525,11 @@ async function mainSse(): Promise<void> {
         if (ev.fromAutoWake) return;
         // A real human submission flips claude back to busy ; an
         // auto-wake submission is the loop talking to itself.
-        // #881 — délégué à IdleController via TURN_STARTED. Si IdleController
-        // est déjà busy (Stop hook précédent perdu), le primary SM auto-
-        // self-heal via TURN_STARTED en busy → emit turn_ended + reenter
-        // (cf. idle-machine.ts #898 david `<chat>` self-heal).
-        getIdleService().turnStarted(ev.atMs);
+        // #881 — délégué à TurnController via TURN_STARTED. Si TurnController
+        // est déjà in_turn (Stop hook précédent perdu), le primary SM auto-
+        // self-heal via TURN_STARTED en in_turn → emit turn:ended + reenter
+        // (cf. turn-machine.ts #898 david `<chat>` self-heal).
+        getTurnService().turnStarted(ev.atMs);
     });
     // #840 `4z59jt` — plus de fichier `afk`. AfkService est piloté
     // exclusivement via les helpers *ViaService (state.ts armAfk*),
@@ -1604,9 +1604,9 @@ async function mainSse(): Promise<void> {
         // pour que BarRenderer dérive idle au prochain compute.
         try { setIpcStateTagInfo(null); } catch { /* best-effort */ }
         // #848 david `<chat>` : sendKeys IMMÉDIAT au boot:sealed (= active
-        // busy avec le prompt skill). Drop le stash+idle:settled (= ancien
+        // busy avec le prompt skill). Drop le stash+turn:settled (= ancien
         // mécanisme `chkb5z`). Le loop:start register fire 10s plus tard
-        // (cf. bootActor.on("loop:start")) et gate les wakes idle:settled
+        // (cf. bootActor.on("loop:start")) et gate les wakes turn:settled
         // ultérieurs.
         if (!postBootRemindersSent) {
             postBootRemindersSent = true;
@@ -1824,24 +1824,24 @@ async function mainSse(): Promise<void> {
         typingActor.on("typing:started", (ev) => log(`typingMachine: typing:started atMs=${ev.atMs}`));
         typingActor.on("typing:ended", (ev) => log(`typingMachine: typing:ended lastKeystrokeMs=${ev.lastKeystrokeMs}`));
     }
-    // #881 — IdleController XState actor wiring. Subscriber bridge :
+    // #881 — TurnController XState actor wiring. Subscriber bridge :
     //   `actor.context.idleSinceMs` → `ipc.idleSinceMs` (= consumers :
     //   wake gate, drained-strategy, bar). Pas de pump externe — pure
     //   event-driven depuis HookService (SessionStart/Stop/UserPromptSubmit)
     //   + 2 manual triggers (tryWake pre-empt + boot-end fallback).
     {
-        const idleActor = getIdleService().getActor();
-        idleActor.subscribe((snap) => {
+        const turnActor = getTurnService().getActor();
+        turnActor.subscribe((snap) => {
             setIpcIdleSince(snap.context.idleSinceMs);
             // #805 david : countdown bar segment. Gated sur bootComplete
-            // (= ne pas afficher pendant le boot, l'idle controller ne
+            // (= ne pas afficher pendant le boot, le turn controller ne
             // doit trigger qu'après seal). #848 : gate sur `loopStart`
             // (= 10s après boot:sealed) au lieu de bootComplete pour
-            // cohérence avec le handler idle:settled ci-dessous.
+            // cohérence avec le handler turn:settled ci-dessous.
             const ctx = snap.context;
             const bootDone = getIpcState().loopStart;
-            if (bootDone && snap.matches("idle") && ctx.idleSinceMs !== null) {
-                const isSettled = snap.matches({ idle: "settled" });
+            if (bootDone && snap.matches("no_turn") && ctx.idleSinceMs !== null) {
+                const isSettled = snap.matches({ no_turn: "settled" });
                 const nextAt = isSettled
                     ? Date.now() + WAKE_COOLDOWN_MS
                     : ctx.idleSinceMs + WAKE_COOLDOWN_MS;
@@ -1850,44 +1850,44 @@ async function mainSse(): Promise<void> {
                 setIpcNextWakeAt(null);
             }
         });
-        idleActor.on("idle:since", (ev) => {
-            log(`idleMachine: idle:since atMs=${ev.atMs} reason=${ev.reason}`);
-            // #890 safety : si on entre en idle via SESSION_START (re-attach
+        turnActor.on("turn:no_turn_since", (ev) => {
+            log(`turnMachine: turn:no_turn_since atMs=${ev.atMs} reason=${ev.reason}`);
+            // #890 safety : si on entre en no_turn via SESSION_START (re-attach
             // sans Stop hook → claude crash / hook perdu), le latch
             // paneBusy était collé. On clear ici aussi.
             if (sd) setPaneBusy(sd, false);
         });
-        idleActor.on("idle:turn_started", (ev) => log(`idleMachine: idle:turn_started atMs=${ev.atMs}`));
-        idleActor.on("idle:turn_ended", (ev) => {
-            log(`idleMachine: idle:turn_ended atMs=${ev.atMs}`);
+        turnActor.on("turn:started", (ev) => log(`turnMachine: turn:started atMs=${ev.atMs}`));
+        turnActor.on("turn:ended", (ev) => {
+            log(`turnMachine: turn:ended atMs=${ev.atMs}`);
             // #890 david `ue6q3n` : clear le latch paneBusy au Stop hook —
             // pendant qu'on attendait, les transitions visible=false du
             // BusyWatcher étaient ignorées (cf. busyW.on("change") plus haut).
             if (sd) setPaneBusy(sd, false);
         });
         // #805 david : "si on est idle depuis plus de N secondes" → drain
-        // la FIFO sans dépendre de SSE/heartbeat aléatoires. Idle stable
+        // la FIFO sans dépendre de SSE/heartbeat aléatoires. No-turn stable
         // = signal pour pousser tryWake.
         // #848 david `chkb5z` : aussi le trigger pour le standalone
         // post-boot inject (one-shot per session, jamais prepended à un
         // wake).
-        idleActor.on("idle:settled", (ev) => {
+        turnActor.on("turn:settled", (ev) => {
             // #848 david `<chat>` : gate sur `loopStart` (= 10s après
             // boot:sealed) au lieu de bootComplete. Pendant les 10s [sealed
             // → loop:start], on laisse les "boot end" things fire mais les
-            // wakes idle:settled spéculatifs attendent. Le post-boot inject
+            // wakes turn:settled spéculatifs attendent. Le post-boot inject
             // n'est plus géré ici (= sendKeys immédiat au boot:sealed,
             // cf. onFreshBootSeal).
             if (!getIpcState().loopStart) return;
-            log(`idleMachine: idle:settled idleSinceMs=${ev.idleSinceMs} tunnel=${WAKE_COOLDOWN_MS}`);
+            log(`turnMachine: turn:settled idleSinceMs=${ev.idleSinceMs} tunnel=${WAKE_COOLDOWN_MS}`);
             // #890 safety : si paneBusy était encore latché true ici (pane
-            // SM idle stable depuis 30s = forcément pas busy), clear le
+            // SM no_turn stable depuis 30s = forcément pas busy), clear le
             // latch. Garde-fou en cas de Stop hook perdu.
             if (sd && getIpcState().paneBusy === true) {
-                log("idle:settled : clearing stale paneBusy latch");
+                log("turn:settled : clearing stale paneBusy latch");
                 setPaneBusy(sd, false);
             }
-            void tryWake("idle:settled");
+            void tryWake("turn:settled");
         });
     }
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
@@ -2000,8 +2000,8 @@ async function mainSse(): Promise<void> {
     pickerSessionW.on("end", () => log("watcher: resume picker session closed"));
     pickerModeW.on("begin", () => log("watcher: resume picker mode opened"));
     pickerModeW.on("end", () => log("watcher: resume picker mode closed"));
-    // #888 Slice A — bus.busy log drop : couvert par idleMachine
-    // turn_started/turn_ended logs déjà câblés.
+    // #888 Slice A — bus.busy log drop : couvert par turnMachine
+    // turn:started/turn:ended logs déjà câblés.
     // #714 david `gftprc` — bar (status-bg + suffix paneInfo) was repainted
     // only at the 30s heartbeat. So even with the 1s refresh keeping
     // pane-busy / pane-compacting fresh, the user saw `[busy:compacting]`

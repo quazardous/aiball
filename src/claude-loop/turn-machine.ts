@@ -1,5 +1,5 @@
 /**
- * IdleMachine — XState v5 actor owning the claude busy/idle lifecycle.
+ * TurnMachine — XState v5 actor owning the claude turn lifecycle.
  *
  * Minimal 3-state SM consuming the three Hook events that signal claude's
  * turn lifecycle :
@@ -12,14 +12,14 @@
  *
  * Model :
  *
- *   unknown ──SESSION_START──▶ idle.fresh ──after(WAKE_COOLDOWN_MS)──▶ idle.settled
- *                                 │                                        │
- *                                 │ TURN_STARTED              (emit idle:settled)
+ *   unknown ──SESSION_START──▶ no_turn.fresh ──after(WAKE_COOLDOWN_MS)──▶ no_turn.settled
+ *                                 │                                          │
+ *                                 │ TURN_STARTED              (emit turn:settled)
  *                                 ▼
- *                              busy ──TURN_ENDED──▶ idle.fresh
+ *                              in_turn ──TURN_ENDED──▶ no_turn.fresh
  *
- *   idle.settled = stable idle state. Consumers (timer.ts) écoutent
- *   `idle:settled` pour drainer la FIFO sans dépendre de SSE/heartbeat —
+ *   no_turn.settled = stable no-turn state. Consumers (timer.ts) écoutent
+ *   `turn:settled` pour drainer la FIFO sans dépendre de SSE/heartbeat —
  *   #805 david : "si on est idle depuis plus de N secondes" → drain.
  *
  * #894 david `xt4w7v` : SSOT timing — le délai d'entrée dans `settled`
@@ -28,7 +28,7 @@
  * concept "tunnel 10s post-état").
  *
  * Context :
- *   - `idleSinceMs` : timestamp of last entry to `idle` (null in busy/unknown)
+ *   - `idleSinceMs` : timestamp of last entry to `no_turn` (null in in_turn/unknown)
  *
  * External pump : none. Pure event-driven from `HookService.subscribe(...)`
  * + XState's `after` delayed transition.
@@ -36,21 +36,21 @@
 import { setup, assign, emit } from "xstate";
 import { WAKE_COOLDOWN_MS } from "./wake-machine.js";
 
-export interface IdleMachineInput {
+export interface TurnMachineInput {
     /** Tests-only override — défaut prod = WAKE_COOLDOWN_MS (SSOT).
-     *  Présent uniquement pour les fast tests (faire fire idle:settled
+     *  Présent uniquement pour les fast tests (faire fire turn:settled
      *  en <1s au lieu d'attendre 10s du tunnel réel). */
     tunnelMs?: number;
 }
 
 /** Locus events emitted by the actor. */
-export type IdleEmittedEvent =
-    | { type: "idle:since"; atMs: number; reason: "session_start" | "turn_ended" }
-    | { type: "idle:turn_started"; atMs: number }
-    | { type: "idle:turn_ended"; atMs: number }
-    | { type: "idle:settled"; idleSinceMs: number };
+export type TurnEmittedEvent =
+    | { type: "turn:no_turn_since"; atMs: number; reason: "session_start" | "turn_ended" }
+    | { type: "turn:started"; atMs: number }
+    | { type: "turn:ended"; atMs: number }
+    | { type: "turn:settled"; idleSinceMs: number };
 
-export const idleMachine = setup({
+export const turnMachine = setup({
     types: {
         context: {} as {
             idleSinceMs: number | null;
@@ -60,8 +60,8 @@ export const idleMachine = setup({
             | { type: "SESSION_START"; atMs: number }
             | { type: "TURN_STARTED"; atMs: number }
             | { type: "TURN_ENDED"; atMs: number },
-        emitted: {} as IdleEmittedEvent,
-        input: {} as IdleMachineInput,
+        emitted: {} as TurnEmittedEvent,
+        input: {} as TurnMachineInput,
     },
     delays: {
         tunnel: ({ context }) => context.tunnelMs,
@@ -76,31 +76,31 @@ export const idleMachine = setup({
         clearIdle: assign({
             idleSinceMs: () => null,
         }),
-        emitIdleSinceSessionStart: emit(({ event }) => ({
-            type: "idle:since" as const,
+        emitNoTurnSinceSessionStart: emit(({ event }) => ({
+            type: "turn:no_turn_since" as const,
             atMs: event.type === "SESSION_START" ? event.atMs : 0,
             reason: "session_start" as const,
         })),
-        emitIdleSinceTurnEnded: emit(({ event }) => ({
-            type: "idle:since" as const,
+        emitNoTurnSinceTurnEnded: emit(({ event }) => ({
+            type: "turn:no_turn_since" as const,
             atMs: event.type === "TURN_ENDED" ? event.atMs : 0,
             reason: "turn_ended" as const,
         })),
         emitTurnStarted: emit(({ event }) => ({
-            type: "idle:turn_started" as const,
+            type: "turn:started" as const,
             atMs: event.type === "TURN_STARTED" ? event.atMs : 0,
         })),
         emitTurnEnded: emit(({ event }) => ({
-            type: "idle:turn_ended" as const,
+            type: "turn:ended" as const,
             atMs: event.type === "TURN_ENDED" ? event.atMs : 0,
         })),
         emitSettled: emit(({ context }) => ({
-            type: "idle:settled" as const,
+            type: "turn:settled" as const,
             idleSinceMs: context.idleSinceMs ?? 0,
         })),
     },
 }).createMachine({
-    id: "idle",
+    id: "turn",
     initial: "unknown",
     context: ({ input }) => ({
         idleSinceMs: null,
@@ -110,20 +110,20 @@ export const idleMachine = setup({
         unknown: {
             on: {
                 SESSION_START: {
-                    target: "idle",
-                    actions: ["emitIdleSinceSessionStart", "stampIdleAt"],
+                    target: "no_turn",
+                    actions: ["emitNoTurnSinceSessionStart", "stampIdleAt"],
                 },
             },
         },
-        idle: {
+        no_turn: {
             initial: "fresh",
             on: {
                 SESSION_START: {
                     target: ".fresh",
-                    actions: ["emitIdleSinceSessionStart", "stampIdleAt"],
+                    actions: ["emitNoTurnSinceSessionStart", "stampIdleAt"],
                 },
                 TURN_STARTED: {
-                    target: "busy",
+                    target: "in_turn",
                     actions: ["emitTurnStarted", "clearIdle"],
                 },
             },
@@ -136,7 +136,7 @@ export const idleMachine = setup({
                 settled: {
                     // Entry : 1er emit. Puis re-emit toutes les
                     // WAKE_COOLDOWN_MS tant qu'on reste dans settled —
-                    // david `805` : sans ça, idle:settled fire 1 fois et
+                    // david `805` : sans ça, turn:settled fire 1 fois et
                     // le drain de la FIFO n'avance que sur les Stop hooks.
                     // Re-emit pour permettre N tryWake successifs sur 1
                     // longue idle.
@@ -147,35 +147,35 @@ export const idleMachine = setup({
                 },
             },
         },
-        busy: {
+        in_turn: {
             on: {
                 TURN_ENDED: {
-                    target: "idle",
-                    // Emit turn_ended BEFORE idle:since so consumers see
-                    // the turn lifecycle event first, then the idle anchor.
-                    actions: ["emitTurnEnded", "emitIdleSinceTurnEnded", "stampIdleAt"],
+                    target: "no_turn",
+                    // Emit turn:ended BEFORE turn:no_turn_since so consumers see
+                    // the turn lifecycle event first, then the no-turn anchor.
+                    actions: ["emitTurnEnded", "emitNoTurnSinceTurnEnded", "stampIdleAt"],
                 },
                 SESSION_START: {
                     // Rare : claude re-attached without a Stop. Treat
-                    // as forced idle return.
-                    target: "idle",
-                    actions: ["emitIdleSinceSessionStart", "stampIdleAt"],
+                    // as forced no-turn return.
+                    target: "no_turn",
+                    actions: ["emitNoTurnSinceSessionStart", "stampIdleAt"],
                 },
                 // #898 david `<chat>` : "le busy a survécu à 2 turns ...
                 // phase busy orpheline qu'on sait plus éteindre". Si on
-                // reçoit TURN_STARTED en busy, c'est que le turn précédent
+                // reçoit TURN_STARTED en in_turn, c'est que le turn précédent
                 // n'a pas généré TURN_ENDED proprement (Stop hook perdu).
-                // Self-heal : emit turn_ended (= idle:turn_ended déclenche
+                // Self-heal : emit turn:ended (= turn:ended déclenche
                 // les inline clears setPaneBusy(false) dans timer.ts), puis
-                // reenter busy pour le nouveau turn.
+                // reenter in_turn pour le nouveau turn.
                 TURN_STARTED: {
-                    target: "busy",
+                    target: "in_turn",
                     reenter: true,
-                    actions: ["emitTurnEnded", "emitIdleSinceTurnEnded", "emitTurnStarted"],
+                    actions: ["emitTurnEnded", "emitNoTurnSinceTurnEnded", "emitTurnStarted"],
                 },
             },
         },
     },
 });
 
-export type IdleMachine = typeof idleMachine;
+export type TurnMachine = typeof turnMachine;

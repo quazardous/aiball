@@ -62,7 +62,7 @@ export interface BarSnapshot {
      *  = segment vide. Slice 2 ajoute le mirroring `setIpcCounters`
      *  côté timer ; Slice 3 fera du BarRenderer le SEUL writer. */
     counters: { open: number | null; backlog: number | null; events: number | null } | null;
-    /** #805 — countdown vers le prochain `idle:settled` wake. `null` =
+    /** #805 — countdown vers le prochain `turn:settled` wake. `null` =
      *  pas idle / busy / unknown / pas d'event à drainer. Rendu après les
      *  counters comme `📨Ns`. */
     nextWakeInSec: number | null;
@@ -201,14 +201,14 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
     //                                                          │
     //                                                          ▼
     //                                              drain instant sur SSE
-    //                                              ou idle:settled tick
+    //                                              ou turn:settled tick
     //
     // Donc countdown affiché UNIQUEMENT pendant la grace
     // `[idleSinceMs, idleSinceMs+WAKE_COOLDOWN_MS]`. Past 10s : null (=
     // pipe ouvert, prêt à drainer, pas de countdown utile).
     //
     // Gate : `view.phase === "idle"` (bar shows [idle]) + `idleSinceMs`
-    // set. Pas de gate IdleMachine XState ni loopStart : tous deux
+    // set. Pas de gate TurnMachine XState ni loopStart : tous deux
     // proved unreliable across reloads / SessionStart-loss (cf.
     // historique tickets `86fjp3` rejet + `67946f9` toujours pas
     // affiché `gjx8ek`).
@@ -220,7 +220,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
             nextWakeInSec = Math.ceil(remainingMs / 1000);
         }
         // Past grace : nextWakeInSec stays null = pipe ouvert, drain
-        // instant sur prochain SSE / idle:settled, pas de countdown.
+        // instant sur prochain SSE / turn:settled, pas de countdown.
     }
     // #993 — `❯` orange when the prompt has unsent text, plain otherwise.
     // Restore island_fg right after so the downstream segments (typing /

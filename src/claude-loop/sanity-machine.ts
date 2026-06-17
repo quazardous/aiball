@@ -19,7 +19,7 @@
  *                                  │ BUSY_LATCHED  → watching
  *
  * Watching → idle (cleared) si :
- *   - le path NORMAL (Stop hook → idle:turn_ended → busyW.change=false)
+ *   - le path NORMAL (Stop hook → turn:ended → busyW.change=false)
  *     a propagé en aval (timer.ts subscriber send BUSY_CLEARED)
  *   - OU le délai stale expire = anormal, emit sanity:clear pour que le
  *     consumer corrige
@@ -30,7 +30,7 @@
  *   - hookWatcher.on("hook:user_prompt_submit") → TICKET_ACTIVITY (turn start)
  *   - sanityActor.on("sanity:clear_paneBusy", () => setPaneBusy(sd, false))
  *
- * Différence avec les inline clears `idle:turn_ended` etc. dans timer.ts :
+ * Différence avec les inline clears `turn:ended` etc. dans timer.ts :
  * ceux-là gèrent le path NORMAL (Stop hook propre). Le SanityController
  * gère le path ANORMAL (Stop hook perdu / hook race / claude crash mid-
  * turn). 2 filets de sécurité complémentaires.

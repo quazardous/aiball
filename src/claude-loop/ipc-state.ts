@@ -43,8 +43,8 @@ export interface IpcState {
      *  Stop / SessionStart (set) and UserPromptSubmit (clear). `null`
      *  preserves the previous fallback-to-file behaviour. */
     idleSinceMs: number | null;
-    /** #805 david — epoch ms of the next scheduled `idle:settled` emit
-     *  (= next periodic wake attempt). Computed by the IdleController
+    /** #805 david — epoch ms of the next scheduled `turn:settled` emit
+     *  (= next periodic wake attempt). Computed by the TurnController
      *  bridge. Null when claude is busy/unknown. Read by the BarRenderer
      *  to render the countdown segment after `o:N b:N e:N`. */
     nextWakeAtMs: number | null;
@@ -283,8 +283,8 @@ export function setIpcIdleSince(atMs: number | null): void {
     notifyIpcChanged();
 }
 
-/** #805 — set the epoch ms of the next scheduled `idle:settled` emit.
- *  Bridge subscriber writes this from IdleController context.
+/** #805 — set the epoch ms of the next scheduled `turn:settled` emit.
+ *  Bridge subscriber writes this from TurnController context.
  *  Null when claude is busy/unknown ; BarRenderer reads to render the
  *  countdown segment after `o:N b:N e:N`. */
 export function setIpcNextWakeAt(atMs: number | null): void {

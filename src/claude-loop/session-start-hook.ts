@@ -6,7 +6,7 @@
  * Runs once when a claude session opens. Always emits `{}` to stdout and
  * exits 0 (never block claude's boot). Single job today : emit the
  * `SessionStart` event on the timer's loop.sock so the in-process
- * subscribers (IdleController, BootMachine modules) flip state. Boot
+ * subscribers (TurnController, BootMachine modules) flip state. Boot
  * detection + picker auto-cross live LOOP-SIDE via the pane watchers
  * (timer.ts:`pickerSessionW`/`pickerModeW`) — the hook does NOT poll the
  * pane and does NOT send keys anymore.

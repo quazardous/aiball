@@ -39,7 +39,7 @@
 import { setup, assign, emit } from "xstate";
 
 /** #894 david `xt4w7v` — SSOT pour le 10s "tunnel" qui rythme l'inter-
- *  wake. Aussi utilisé par IdleController pour le délai d'entrée dans
+ *  wake. Aussi utilisé par TurnController pour le délai d'entrée dans
  *  l'état settled (= idle stable). Aligne sur les autres 10s de la
  *  network : `BootMachine.tunnelMs` post-module + `sealed → loop:start`. */
 export const WAKE_COOLDOWN_MS = 10_000;

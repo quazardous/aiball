@@ -23,7 +23,7 @@ const DEFAULTS_YAML = join(REPO_ROOT, "config/defaults/claude-loop-pings.yaml");
 
 test("#848 chkb5z defaults: post_boot_skill_reminder a un texte non-vide (standalone inject)", () => {
     // #848 david `chkb5z` : default revient string non-vide. L'inject est
-    // standalone (sendKeys séparé sur idle:settled), pas prepend → pas de
+    // standalone (sendKeys séparé sur turn:settled), pas prepend → pas de
     // leaking sur d'autres messages. Opt-out via .aiball.yaml empty string.
     const map = loadPromptsFromYaml(DEFAULTS_YAML);
     const rendered = renderSlot(map, "post_boot_skill_reminder", {}, "");

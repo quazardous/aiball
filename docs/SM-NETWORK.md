@@ -142,18 +142,18 @@ The `REQUEST_WAKE` during `inFlight` or `cooldown` is dropped silently — consu
 | **Pump** | None — XState `after(ttlMs)` handles the idle return. |
 | **Tests** | `typing-machine.test.ts` |
 
-### IdleController — shipped
+### TurnController — shipped
 
 | Field | Value |
 |---|---|
-| **Source** | [`src/claude-loop/idle-machine.ts`](../src/claude-loop/idle-machine.ts) |
-| **Role** | Tracks claude's busy/idle lifecycle — 3-state SM (`unknown`/`idle`/`busy`) consuming the three Hook events (SessionStart / Stop / UserPromptSubmit). |
+| **Source** | [`src/claude-loop/turn-machine.ts`](../src/claude-loop/turn-machine.ts) |
+| **Role** | Tracks claude's turn lifecycle — 3-state SM (`unknown`/`no_turn`/`in_turn`) consuming the three Hook events (SessionStart / Stop / UserPromptSubmit). |
 | **Slice owned** | `ipcState.idleSinceMs` |
 | **Events in** | `SESSION_START` { atMs }, `TURN_STARTED` { atMs }, `TURN_ENDED` { atMs } |
-| **Events emitted** | `idle:since` { atMs, reason: `"session_start"` \| `"turn_ended"` } / `idle:turn_started` { atMs } / `idle:turn_ended` { atMs } |
-| **States** | `unknown` → `idle` ⇄ `busy` |
+| **Events emitted** | `turn:no_turn_since` { atMs, reason: `"session_start"` \| `"turn_ended"` } / `turn:started` { atMs } / `turn:ended` { atMs } |
+| **States** | `unknown` → `no_turn` ⇄ `in_turn` |
 | **Pump** | None — pure event-driven from HookService. |
-| **Tests** | `idle-machine.test.ts` |
+| **Tests** | `turn-machine.test.ts` |
 
 ### Future controllers (queued)
 
@@ -199,7 +199,7 @@ Each controller declares its **locus events** (= pivotal transitions the rest of
 | `afk:` | `afk:armed_10m`, `afk:armed_inf`, `afk:cleared` |
 | `wake:` | `wake:requested`, `wake:in_flight_started`, `wake:delivered`, `wake:cleared`, `wake:cooldown_expired` |
 | `typing:` | `typing:started`, `typing:ended` |
-| `idle:` | `idle:since`, `idle:turn_started`, `idle:turn_ended` |
+| `turn:` | `turn:no_turn_since`, `turn:started`, `turn:ended` |
 | `pane:` (planned) | `pane:busy_started`, `pane:idle`, `pane:compacting_started`, `pane:compacting_ended` |
 
 **Payload guidelines** — what to put on the event vs what to leave for `subscribe(snap)` or `getSnapshot()` :

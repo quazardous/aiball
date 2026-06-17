@@ -879,7 +879,7 @@ test("isReallyBusy : true when both are set", () => {
 });
 
 // #888 — `LoopStateBus.busy` tests retirés : event migré vers
-// IdleController turn_started/turn_ended emits (cf. idle-machine.test.ts).
+// TurnController turn:started/turn:ended emits (cf. turn-machine.test.ts).
 
 // #722 — `inputHotAgeMs(input)` + `isInputHot(input)` semantic helpers.
 // Pure observable derived from `humanTypingAtMs` + `inputHotTtlMs`.

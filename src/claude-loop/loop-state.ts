@@ -469,7 +469,7 @@ export class LoopStateBus {
             // First update : treat the missing prior state as "all false"
             // for poll-fast so consumers re-arm if claude is already
             // boot/busy/input-hot on boot. (#888 — busy/inputHot retirés
-            // car remplacés par IdleController/TypingController emits ;
+            // car remplacés par TurnController/TypingController emits ;
             // ces controllers émettent leur état initial à start.)
             if (shouldPollFast(input)) this.emit("pollFast", true, false);
         }
@@ -481,7 +481,7 @@ export class LoopStateBus {
     private emitDiffs(prev: LoopStateView, next: LoopStateView, prevInput: LoopStateInput, nextInput: LoopStateInput): void {
         const changed = JSON.stringify(prev) !== JSON.stringify(next);
         if (changed) this.emit("transition", prev, next);
-        // #888 — `busy` emit retiré : remplacé par IdleController
+        // #888 — `busy` emit retiré : remplacé par TurnController
         // turn_started/turn_ended emits. `inputHot` emit retiré :
         // remplacé par TypingController typing:started/typing:ended.
         // #722 — aggregated poll-rate decision (boot / busy / input-hot).

@@ -1,23 +1,23 @@
 /**
- * IdleService — singleton façade over the `idleMachine` XState v5 actor.
+ * TurnService — singleton façade over the `turnMachine` XState v5 actor.
  *
  * Mirrors the pattern of WakeService / AfkService / TypingService.
  * Composition root in `timer.ts:mainSse` wires the HookService events
  * (`SessionStart` / `Stop` / `UserPromptSubmit`) to the actor.
  */
 import { createActor, type ActorRefFrom, type Snapshot } from "xstate";
-import { idleMachine } from "./idle-machine.js";
+import { turnMachine } from "./turn-machine.js";
 import { consumePendingSnapshot } from "./respawn-state.js";
 
-export class IdleService {
-    private readonly actor: ActorRefFrom<typeof idleMachine>;
+export class TurnService {
+    private readonly actor: ActorRefFrom<typeof turnMachine>;
 
     constructor(snapshot?: Snapshot<unknown>) {
-        this.actor = createActor(idleMachine, { input: {}, snapshot });
+        this.actor = createActor(turnMachine, { input: {}, snapshot });
         this.actor.start();
     }
 
-    getActor(): ActorRefFrom<typeof idleMachine> {
+    getActor(): ActorRefFrom<typeof turnMachine> {
         return this.actor;
     }
 
@@ -34,16 +34,17 @@ export class IdleService {
     }
 }
 
-let _singleton: IdleService | null = null;
+let _singleton: TurnService | null = null;
 
-export function getIdleService(): IdleService {
+export function getTurnService(): TurnService {
     if (!_singleton) {
+        // Snapshot map key stays "idle" — KEEP for respawn compat.
         const snap = consumePendingSnapshot("idle") as Snapshot<unknown> | undefined;
-        _singleton = new IdleService(snap);
+        _singleton = new TurnService(snap);
     }
     return _singleton;
 }
 
-export function resetIdleServiceForTests(): void {
-    _singleton = new IdleService();
+export function resetTurnServiceForTests(): void {
+    _singleton = new TurnService();
 }
