@@ -45,7 +45,7 @@ import type { DrainedState } from "./drained-strategy.js";
 import { CL_ENV } from "./env-vars.js";
 import { loopConfig } from "./loop-config.js";
 import { stripMarkdown } from "./markdown-strip.js";
-import { computeLoopView, isAfkActive, isInBootGrace } from "./loop-state.js";
+import { computeLoopView, isHumanPresentHold, isInBootGrace } from "./loop-state.js";
 import { classifyCompacting as classifyCompactingRaw } from "./compacting-detector.js";
 import { parseGates, runGates } from "./gates.js";
 import { loadPromptsFromYaml, mergePrompts, renderSlot } from "../prompt-templates.js";
@@ -839,13 +839,15 @@ export function isInternalCheckCmd(checkCmd: string | null | undefined): boolean
  * still pop a dialog ; F9 (afk_key) lets you release earlier. Tunable
  * via `CL_USER_GRACE_SEC`.
  */
-/** #351 + #619 david `f97nu6` : true when the human has flagged AFK
- *  (3-state cycle via the AFK key). File format :
- *    absent       → OFF
- *    "inf"        → AFK ∞ (held)
- *    "<iso-ts>"   → AFK auto-release at that timestamp
- *  Returns true for any active mode (`inf` or `until > now`). */
-export function afkActive(_sd: string): boolean {
+/** #351 + #619 david `f97nu6` — true iff a NOT-AFK hold is active, i.e. the
+ *  human declared **PRESENT** (held the loop). #977 — renamed from the
+ *  misleading `afkActive` : the value is `human present`, NOT `human away`.
+ *  `afkMode` 3-state cycle via the F9 key :
+ *    `off`        → autonomous / human AWAY  → returns **false**
+ *    `wait_inf`   → NOT-AFK ∞ (held present)  → returns **true**
+ *    `wait_10m`   → NOT-AFK until expiry      → true while `expiry > now`
+ *  So `present = humanPresentHold()` ; an away/autonomous loop is `off`. */
+export function humanPresentHold(_sd: string): boolean {
     // #840 (david `n2xbe9` "zero file fallback") — ipc-only.
     const ipc = getIpcState();
     if (ipc.afkMode === "wait_inf") return true;
@@ -1230,7 +1232,7 @@ export function humanPresenceChunk(sd: string | undefined): string {
     if (!sd) return "";
     const input = readLoopStateInput(sd);
     if (isInBootGrace(input)) return "";
-    const afkOn = isAfkActive(input);
+    const afkOn = isHumanPresentHold(input);
     const glyph = afkOn ? "⏸" : "▶";
     const fg = afkOn ? "colour178" : "colour40";
     // david `<chat>` 2026-06-14 : `▶/⏸` migre AVANT le mot `claude`

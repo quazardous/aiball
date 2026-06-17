@@ -43,7 +43,7 @@ import { openEventChannel } from "./ipc-events.js";
  */
 export type LoopStateSnapshot = LoopStateView & {
     /** True iff the AFK file represents an active hold (`wait_10m` with
-     *  a future expiry, or `wait_inf`). Mirrors `afkActive` in state.ts
+     *  a future expiry, or `wait_inf`). Mirrors `humanPresentHold` in state.ts
      *  (#351). Drives the pretooluse-hook AskUserQuestion gate. */
     afkHoldActive: boolean;
 };

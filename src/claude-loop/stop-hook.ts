@@ -17,7 +17,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
-import { LOOP_SOCK_KIND, MUX_CMD, PANE_BUSY_DELAY_MS, afkActive, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, pingsPath, readBusyDefer, paneShowsInterrupted, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
+import { LOOP_SOCK_KIND, MUX_CMD, PANE_BUSY_DELAY_MS, humanPresentHold, buildContextPhrase, checkHasWork, formatPaneSnapshot, humanIsTyping, injectWakePhrase, pingsPath, readBusyDefer, paneShowsInterrupted, snapshotPane, tmuxName, WAKE_COALESCE_WINDOW_MS } from "./state.js";
 import { getIpcState, setIpcStateTagInfo } from "./ipc-state.js";
 import { armErrorBackoff, matchPaneError, resetErrorBackoff } from "./error-backoff.js";
 import { captureTokenUsage, projectTranscriptDir } from "./token-capture.js";
@@ -50,7 +50,7 @@ try {
 } catch { /* best-effort emit, never block the hook */ }
 
 // #840 Slice C1 (#766) — prime ipcState from the timer's live snapshot
-// before any of the hook's marker reads (humanIsTyping, afkActive,
+// before any of the hook's marker reads (humanIsTyping, humanPresentHold,
 // readBusyDefer). When the timer is up, this turns those calls into
 // in-memory reads ; when it's down (cold boot, dead loop), strict-IPC
 // mode stays off and the helpers fall back to their file shadows.
@@ -221,7 +221,7 @@ function readPane(): string {
         // the auto-wake ; otherwise fall through to the regular gate.
         // The AFK SM owns the longer-lived "human here" signal end-
         // to-end (typing arms NOT AFK 10m via the proxy).
-        if (humanIsTyping(sd!) || afkActive(sd!)) {
+        if (humanIsTyping(sd!) || humanPresentHold(sd!)) {
             // #793 — idle-since lives in the bus (set via the Stop event
             // emitted to the timer below). No file marker anymore.
             const sub = interrupted ? "interrupted" : "user";

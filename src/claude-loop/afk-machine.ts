@@ -3,7 +3,7 @@
  *
  * Sole authority for the F9 cycle + typing-arm + timed expiry, with a
  * 3s debounce that splits the displayed mode (chip, instant feedback)
- * from the committed mode (consumers : wake gate, isAfkActive). Both
+ * from the committed mode (consumers : wake gate, isHumanPresentHold). Both
  * derive from the same actor snapshot via the subscriber in `timer.ts`
  * (see `docs/SM-NETWORK.md`).
  *

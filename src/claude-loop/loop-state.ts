@@ -194,9 +194,11 @@ function isBusyDeferActive(input: LoopStateInput): boolean {
     return input.busyDeferUntilMs > input.nowMs;
 }
 
-/** True iff the AFK file represents an active hold. `wait_10m` with an
- *  expiry past `now` counts as `off` (auto-expired). */
-export function isAfkActive(input: LoopStateInput): boolean {
+/** True iff a NOT-AFK hold is active = the human declared **PRESENT** (held
+ *  the loop). #977 — renamed from the misleading `isAfkActive` : the value is
+ *  `human present`, NOT `human away`. `wait_10m` past its expiry counts as
+ *  `off` (auto-released → away/autonomous). */
+export function isHumanPresentHold(input: LoopStateInput): boolean {
     if (input.afkMode === "off") return false;
     if (input.afkMode === "wait_inf") return true;
     // wait_10m : honor the expiry timestamp.
@@ -245,7 +247,7 @@ function computeWakeGate(input: LoopStateInput): { allowed: boolean; reason: str
     if (isTypingNow(input)) {
         return { allowed: false, reason: "human typing right now" };
     }
-    if (isAfkActive(input)) {
+    if (isHumanPresentHold(input)) {
         // #745 phase A : the user-grace check that lived right above was
         // a strict duplicate of this AFK check. Typing arms NOT AFK 10m
         // via the proxy → AfkService → AFK SM, with the same 600s TTL

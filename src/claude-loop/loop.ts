@@ -57,7 +57,7 @@ import {
     injectWakePhrase,
     checkHasWork,
     readIdleSinceMs,
-    afkActive,
+    humanPresentHold,
     humanIsTyping,
     installRoot,
     installRootSha,
@@ -150,7 +150,7 @@ import {
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
 } from "./ipc-state.js";
-import { computeLoopView, isAfkActive, isInputHot, LoopStateBus } from "./loop-state.js";
+import { computeLoopView, isHumanPresentHold, isInputHot, LoopStateBus } from "./loop-state.js";
 import {
     seenProof,
     isBusy as busyStackActive,
@@ -1664,10 +1664,10 @@ async function mainSse(): Promise<void> {
             const reminder = renderSlot(promptMap, "post_boot_skill_reminder", {}, "");
             if (reminder.length === 0) return;
             // #951/#977 : ne pousser le skill QUE si l'humain est AWAY.
-            // `afkActive()` == humain PRÉSENT (NOT-AFK hold) malgré le nom →
-            // present (ou typing) ⇒ skip. away ⇒ push.
+            // typing OU humanPresentHold (NOT-AFK hold) ⇒ humain présent ⇒ skip.
+            // away (afkMode off) ⇒ push. (#977 a renommé l'ex-`afkActive` trompeur.)
             const typing = humanIsTyping(sd!);
-            const present = afkActive(sd!);
+            const present = humanPresentHold(sd!);
             if (typing || present) {
                 log(`session:live skill reminder skipped (human present: typing=${typing} present=${present})`);
             } else {
@@ -1794,7 +1794,7 @@ async function mainSse(): Promise<void> {
         // delivery + every transition).
         afkActor.subscribe((snap) => {
             const ctx = snap.context;
-            // Committed slice : what consumers (wake gate, isAfkActive) read.
+            // Committed slice : what consumers (wake gate, isHumanPresentHold) read.
             setIpcAfk(ctx.afkMode, ctx.afkExpiryMs);
             // Display slice : what the chip reads. Null when in a committed
             // state (chip falls back to committed afkMode) ; set when in
@@ -2024,7 +2024,7 @@ async function mainSse(): Promise<void> {
                     // #749 david — re-check AFK at fire time : the user may
                     // have re-armed it between afk:cleared and now.
                     const at = readLoopStateInput(sd!);
-                    if (isAfkActive(at)) {
+                    if (isHumanPresentHold(at)) {
                         log("afkMachine: input-hot expired post-afk:cleared but AFK was re-armed — skipping deferred wake");
                         return;
                     }
@@ -2041,7 +2041,7 @@ async function mainSse(): Promise<void> {
             }
             // #749 david — same sanity re-check on the immediate path.
             const afterEmit = readLoopStateInput(sd!);
-            if (isAfkActive(afterEmit)) {
+            if (isHumanPresentHold(afterEmit)) {
                 log("afkMachine: afk:cleared but AFK was re-armed before tryWake — skipping");
                 return;
             }
@@ -2286,7 +2286,7 @@ async function mainSse(): Promise<void> {
         // The signal is now derived from the AFK SM only (NOT AFK 10m/∞ =
         // human present) instead of the deprecated user-grace.
         try {
-            const human = humanIsTyping(sd!) || afkActive(sd!);
+            const human = humanIsTyping(sd!) || humanPresentHold(sd!);
             const humanWord = humanPresence(sd);
             await client().pushState(phase, human, humanWord, loopCwd, loopProject);
         } catch { /* daemon down or transient — next tick retries */ }

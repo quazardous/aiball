@@ -4,7 +4,7 @@
  * state machine (semantic helpers, wake gate, bus).
  *
  * `loop-state.ts` keeps the SM proper : `isInBootGrace`, `isTypingNow`,
- * `isAfkActive`, `computeWakeGate`, the bus. This file consumes the SM
+ * `isHumanPresentHold`, `computeWakeGate`, the bus. This file consumes the SM
  * helpers and produces the bar's three rendering dimensions :
  *   - `Phase`     — bar BG (`boot` / `idle` / `busy`)
  *   - `Presence` — human presence in the loop (`boot` / `stop` /
@@ -16,7 +16,7 @@
  * `LoopStateInput` and read the typed return.
  */
 import type { LoopStateInput } from "./loop-state.js";
-import { effectiveAfkMode, isAfkActive, isInBootGrace, isTypingNow, type AfkMode } from "./loop-state.js";
+import { effectiveAfkMode, isHumanPresentHold, isInBootGrace, isTypingNow, type AfkMode } from "./loop-state.js";
 
 /** Bar background phase. */
 export type Phase = "boot" | "idle" | "busy";
@@ -60,7 +60,7 @@ export function renderBarBg(input: LoopStateInput): Phase {
 export function derivePresence(input: LoopStateInput): Presence {
     if (isInBootGrace(input)) return "boot";
     if (isTypingNow(input)) return "stop";
-    if (isAfkActive(input)) return "wait";
+    if (isHumanPresentHold(input)) return "wait";
     return "loop";
 }
 
