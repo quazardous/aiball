@@ -35,7 +35,7 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
-- `claude-loop` boot could hang forever (bar stuck in the boot phase) when resuming through the resume-mode picker: the picker never signalled its dismissal to the boot state machine, so the boot deadline was pushed indefinitely and never sealed. The picker now signals end correctly.
+- `claude-loop` boot could hang forever (bar stuck in the boot phase) when resuming through the resume-mode picker. Boot-phase detection is now decay-based: each transient startup screen keeps boot open only while it is actually on screen, so a screen whose disappearance is missed can no longer wedge the boot open indefinitely.
 - `claude-loop reload` left the loop dead: it relaunched the wrong entrypoint, so the old timer was killed and no new one started (the session's tmux pane and proxy were orphaned). Reload now respawns the timer correctly.
 
 ## [0.32.0] — 2026-06-15

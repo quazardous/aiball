@@ -6,49 +6,52 @@
  * (see `timer.ts:mainSse`). See `docs/SM-NETWORK.md` for the network
  * role + bridge pattern.
  *
- * Architecture #883 — boot = séquence linéaire de TRANSIENT MODULES
- * optionnels (resume_picker, resuming, compact_confirm, compacting, …).
- * Tant qu'au moins UN module est actif, un "push manager" externe
- * (dans timer.ts) repousse la deadline de +10s toutes les secondes.
- * Quand le DERNIER module s'arrête, le manager s'arrête ; la dernière
- * push a fixé la deadline 10s dans le futur → expire 10s plus tard
- * → DEADLINE_REACHED → seal.
+ * #1009 — LEVEL + DECAY model (remplace l'edge-based Set+push de #883).
+ * david : « la state machine devrait maintenir une pile de modules ; chaque
+ * module se signale avec une date + rémanence 10s, se re-signale pour
+ * prolonger ; on s'en fout de l'ordre ; rémanence = max(modules[].remanence) ;
+ * quand tous les modules sont tombés c'est la fin de boot ».
+ *
+ * Chaque écran transitoire de boot (`resume_picker`, `resume_mode`,
+ * `resuming`, `compacting`, `compact_confirm`) **se re-signale à chaque tick**
+ * tant qu'il est visible (`MODULE_SEEN`). On stocke `{lastSeen, remanence}` par
+ * module. Un module « tombe » quand `now > lastSeen + remanence` (il a cessé de
+ * se signaler). Boot reste ouvert tant qu'AU MOINS un module n'est pas tombé ;
+ * il scelle quand TOUS sont tombés. Pas d'appairage begin/end → un signal raté
+ * ne peut pas figer un module pour toujours (la classe de bug #994 resume_mode
+ * devient structurellement impossible).
+ *
+ * Le **floor** n'est qu'un module SEED `boot` (rémanence = bootMinMs, signalé
+ * une seule fois à l'init) : un cold boot n'a que le seed → scelle à
+ * `loopStart + bootMinMs`. Les transitoires (rémanence 10s) l'étendent.
+ *
+ *   deadline = max over modules de (lastSeen + remanence)
+ *   seal ⟺ now ≥ deadline ⟺ tous les modules tombés
  *
  * Model :
- *
- *   booting ──MODULE_STARTED──▶ booting (activeModules+)
- *   booting ──MODULE_ENDED───▶ booting (activeModules-)
- *   booting ──PUSH──────────▶ booting (deadline = max(deadline, nowMs+tunnel) si modules actifs)
- *   booting ──HOOK_SEAL──────▶ sealed (respawn handoff, immediate)
- *   booting ──DEADLINE_REACHED▶ sealed (deadline expirée par le pump)
- *   sealed = final (terminal)
- *
- * Context :
- *   - loopStartMs : boot start (input)
- *   - bootMinMs   : initial floor (deadline initiale = loopStartMs + bootMinMs)
- *   - tunnelMs    : post-module-end tunnel + push step (default 10s)
- *   - activeModules : Set des noms de modules transients actifs
- *   - deadlineMs  : current seal deadline (pumpée par PUSH)
+ *   booting ──MODULE_SEEN──▶ booting (upsert module, recompute deadline)
+ *   booting ──HOOK_SEAL────▶ sealed (respawn handoff, immédiat)
+ *   booting ──DEADLINE_REACHED▶ sealed (tous tombés, fired par le pump)
+ *   sealed = final (fresh → settled après 10s → emit loop:start)
  *
  * External responsibility (cf. timer.ts) :
- *   - Forward watchers begin/end → `MODULE_STARTED`/`MODULE_ENDED`
- *   - Push manager : setInterval(1000) qui envoie `PUSH` tant que
- *     `activeModules.size > 0`. Armed/disarmed via `subscribe()`.
- *   - Deadline pump : setInterval(1000) qui envoie `DEADLINE_REACHED`
- *     quand `Date.now() >= deadlineMs`.
+ *   - À chaque pane tick : pour chaque module boot visible, envoyer
+ *     `MODULE_SEEN{name, nowMs, remanenceMs}`.
+ *   - Deadline pump : setInterval(1000) qui envoie `DEADLINE_REACHED` quand
+ *     `Date.now() >= deadlineMs`.
  *   - `HOOK_SEAL` au respawn handoff.
- *
- * Si AUCUN module n'est jamais observé (cold clean) :
- *   - Push manager jamais armé → deadline reste = loopStartMs + bootMinMs.
- *   - Pump fire DEADLINE_REACHED au floor → seal naturellement à 30s.
  */
 import { setup, assign, emit } from "xstate";
 
+/** The synthetic floor module : seeded once at init with remanence = bootMinMs. */
+export const SEED_MODULE = "boot";
+/** Default remanence for transient boot screens (re-signalled each tick). */
+export const DEFAULT_REMANENCE_MS = 10_000;
+
 export interface BootMachineInput {
     loopStartMs: number;
+    /** The seed module's remanence — the boot floor (default via caller). */
     bootMinMs: number;
-    /** Tunnel + push step. Default 10s. */
-    tunnelMs?: number;
 }
 
 /** Locus events emitted by the actor. */
@@ -56,50 +59,56 @@ export type BootEmittedEvent =
     | { type: "boot:sealed"; loopStartMs: number; reason: "deadline" | "hook" }
     | { type: "loop:start"; loopStartMs: number };
 
+interface ModuleSeen {
+    lastSeenMs: number;
+    remanenceMs: number;
+}
+
+/** deadline = the latest fall-time across all modules = max(lastSeen + remanence). */
+export function computeBootDeadline(seen: Map<string, ModuleSeen>): number {
+    let max = 0;
+    for (const m of seen.values()) {
+        const fallsAt = m.lastSeenMs + m.remanenceMs;
+        if (fallsAt > max) max = fallsAt;
+    }
+    return max;
+}
+
+/** Modules still within their remanence window at `nowMs` (= not yet fallen). */
+export function liveBootModules(seen: Map<string, ModuleSeen>, nowMs: number): string[] {
+    const out: string[] = [];
+    for (const [name, m] of seen) {
+        if (nowMs <= m.lastSeenMs + m.remanenceMs) out.push(name);
+    }
+    return out;
+}
+
 export const bootMachine = setup({
     types: {
         context: {} as {
             loopStartMs: number;
             bootMinMs: number;
-            tunnelMs: number;
-            activeModules: Set<string>;
+            moduleSeen: Map<string, ModuleSeen>;
             deadlineMs: number;
         },
         events: {} as
-            | { type: "MODULE_STARTED"; name: string }
-            | { type: "MODULE_ENDED"; name: string }
-            | { type: "PUSH"; nowMs: number }
+            | { type: "MODULE_SEEN"; name: string; nowMs: number; remanenceMs?: number }
             | { type: "HOOK_SEAL" }
             | { type: "DEADLINE_REACHED" },
         emitted: {} as BootEmittedEvent,
         input: {} as BootMachineInput,
     },
     actions: {
-        onModuleStarted: assign({
-            activeModules: ({ context, event }) => {
-                if (event.type !== "MODULE_STARTED") return context.activeModules;
-                const next = new Set(context.activeModules);
-                next.add(event.name);
-                return next;
-            },
-        }),
-        onModuleEnded: assign({
-            activeModules: ({ context, event }) => {
-                if (event.type !== "MODULE_ENDED") return context.activeModules;
-                const next = new Set(context.activeModules);
-                next.delete(event.name);
-                return next;
-            },
-        }),
-        onPush: assign({
-            deadlineMs: ({ context, event }) => {
-                if (event.type !== "PUSH") return context.deadlineMs;
-                // Push only when at least one module is active. No-op
-                // otherwise (caller shouldn't fire PUSH when idle, but
-                // be defensive — keeps the machine pure).
-                if (context.activeModules.size === 0) return context.deadlineMs;
-                return Math.max(context.deadlineMs, event.nowMs + context.tunnelMs);
-            },
+        // Upsert the module's (lastSeen, remanence) and recompute the deadline
+        // in one assign (single map build — assign property fns see OLD context).
+        onModuleSeen: assign(({ context, event }) => {
+            if (event.type !== "MODULE_SEEN") return {};
+            const next = new Map(context.moduleSeen);
+            next.set(event.name, {
+                lastSeenMs: event.nowMs,
+                remanenceMs: event.remanenceMs ?? DEFAULT_REMANENCE_MS,
+            });
+            return { moduleSeen: next, deadlineMs: computeBootDeadline(next) };
         }),
         emitBootSealedDeadline: emit(({ context }) => ({
             type: "boot:sealed" as const,
@@ -119,30 +128,30 @@ export const bootMachine = setup({
 }).createMachine({
     id: "boot",
     initial: "booting",
-    context: ({ input }) => ({
-        loopStartMs: input.loopStartMs,
-        bootMinMs: input.bootMinMs,
-        tunnelMs: input.tunnelMs ?? 10_000,
-        activeModules: new Set<string>(),
-        deadlineMs: input.loopStartMs + input.bootMinMs,
-    }),
+    context: ({ input }) => {
+        // Seed the floor module : signalled once, remanence = bootMinMs.
+        const moduleSeen = new Map<string, ModuleSeen>([
+            [SEED_MODULE, { lastSeenMs: input.loopStartMs, remanenceMs: input.bootMinMs }],
+        ]);
+        return {
+            loopStartMs: input.loopStartMs,
+            bootMinMs: input.bootMinMs,
+            moduleSeen,
+            deadlineMs: computeBootDeadline(moduleSeen),
+        };
+    },
     states: {
         booting: {
             on: {
-                MODULE_STARTED: { actions: "onModuleStarted" },
-                MODULE_ENDED: { actions: "onModuleEnded" },
-                PUSH: { actions: "onPush" },
+                MODULE_SEEN: { actions: "onModuleSeen" },
                 HOOK_SEAL: { target: "sealed", actions: "emitBootSealedHook" },
                 DEADLINE_REACHED: { target: "sealed", actions: "emitBootSealedDeadline" },
             },
         },
-        // #848 david `<chat>` : 2 sous-états après seal.
-        // - `sealed.fresh` : viens de seal, on fire les choses "boot end"
-        //   (post-boot inject, etc.). Tout consumer qui voulait "fin boot"
-        //   reste gated ici (= durée 10s).
-        // - `sealed.settled` : entrée → emit `loop:start` (= registre IPC
-        //   "green light pour la suite"). Les wakes idle:settled gate
-        //   désormais sur loopStart au lieu de bootComplete.
+        // #848 — 2 sous-états après seal.
+        //  - `sealed.fresh` : viens de seal, fenêtre "boot end" (post-boot
+        //    inject, etc.) — durée 10s.
+        //  - `sealed.settled` : entrée → emit `loop:start` (green light).
         sealed: {
             initial: "fresh",
             states: {

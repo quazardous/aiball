@@ -51,6 +51,13 @@ const PROMPT_WITH_LINGERING_CONFIRM = [
     "  ? for shortcuts",
 ].join("\n");
 
+// resume-mode picker (summary / as-is / abort chooser) — the #994 leak culprit.
+const RESUME_MODE = [
+    "  Resume from summary",
+    "  Resume full session as-is",
+    "  Don't ask me again",
+].join("\n");
+
 function frames(specs: Array<[number, string]>): ReplayPaneFrame[] {
     // specs: [relSeconds, text] → epoch-ms frames (base 1_000_000s)
     const base = 1_000_000_000;
@@ -116,4 +123,28 @@ test("replayBootFromCapture: reads a real capture dir (panes.ndjson + frames)", 
     assert.equal(r.sealed, false, "lingering compact_confirm capture → boot stuck");
     assert.deepEqual(r.finalActiveModules, ["compact_confirm"]);
     rmSync(sd, { recursive: true, force: true });
+});
+
+test("regression #994: resume_mode picker dismissed → boot SEALS (begin/end leak class gone)", () => {
+    // The old edge model leaked resume_mode (begin without end → stuck forever).
+    // In the decay model the picker just stops being signalled → it falls → seal.
+    const r = replayBootFrames(frames([
+        [0, PICKER],
+        [2, RESUME_MODE],
+        [4, PROMPT_CLEAN],
+    ]), OPTS);
+    assert.equal(r.sealed, true, "resume_mode gone → must seal (no begin/end leak possible)");
+    assert.deepEqual(r.finalActiveModules, []);
+});
+
+test("decay: resume_mode that LINGERS keeps boot open (correctly)", () => {
+    // If the picker genuinely stays on screen, it keeps re-signalling → boot
+    // stays open. (Symmetric to the lingering-compact_confirm case.)
+    const r = replayBootFrames(frames([
+        [0, PICKER],
+        [2, RESUME_MODE],
+        [6, RESUME_MODE],
+    ]), OPTS);
+    assert.equal(r.sealed, false);
+    assert.deepEqual(r.finalActiveModules, ["resume_mode"]);
 });

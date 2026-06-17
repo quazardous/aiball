@@ -117,7 +117,7 @@ import {
     setPendingRespawnSnapshots,
 } from "./respawn-state.js";
 import { createActor, type ActorRefFrom, type Snapshot } from "xstate";
-import { bootMachine } from "./boot-machine.js";
+import { bootMachine, liveBootModules } from "./boot-machine.js";
 
 let bootActor: ActorRefFrom<typeof bootMachine> | null = null;
 import { getHookWatcher } from "./hook-watcher.js";
@@ -661,38 +661,19 @@ const refreshPaneReady = (): void => {
 // Wire watcher events → ipcState side-effects once at module init. The
 // `change` event fires only on transitions, so each setter call below
 // is a real value flip (no wasted no-op writes per tick).
-// #883 Slice 2 — forward begin/end ALSO vers BootMachine.MODULE_STARTED/ENDED
-// (edge events module-based). Le bootActor n'existe pas encore à module
-// init, donc on l'accède via le getter au moment du fire.
-// #994 — log every module forward (begin/end) with the resulting active set,
-// AND log DROPs (actor null / already sealed). A dropped MODULE_ENDED is the
-// signature of the boot-infini leak (module stays active → push pumps the
-// deadline forever) — previously these forwards were silent for
-// resuming/compacting/compact_confirm, so a leaked module was unnameable.
-function bootModulesList(): string {
-    if (!bootActor) return "";
-    return Array.from(bootActor.getSnapshot().context.activeModules).join(",");
-}
-function forwardModuleStarted(name: string): void {
+// #1009 — LEVEL+DECAY boot tracking : each visible boot module RE-SIGNALS
+// itself every pane tick via `forwardModuleSeen` (polled in refreshPaneMarkers).
+// No begin/end pairing — a module that disappears simply stops being signalled
+// and falls out of its remanence window (the #994 resume_mode leak class is
+// gone). `begin` handlers stay only for their one-shot side-effects (auto-cross).
+function forwardModuleSeen(name: string, nowMs: number, remanenceMs?: number): void {
     if (bootActor && !bootActor.getSnapshot().matches("sealed")) {
-        bootActor.send({ type: "MODULE_STARTED", name });
-        log(`bootMachine: MODULE_STARTED ${name} → active=[${bootModulesList()}]`);
-    } else {
-        log(`bootMachine: MODULE_STARTED ${name} DROPPED (${bootActor ? "already sealed" : "actor null"})`);
-    }
-}
-function forwardModuleEnded(name: string): void {
-    if (bootActor && !bootActor.getSnapshot().matches("sealed")) {
-        bootActor.send({ type: "MODULE_ENDED", name });
-        log(`bootMachine: MODULE_ENDED ${name} → active=[${bootModulesList()}]`);
-    } else {
-        log(`bootMachine: MODULE_ENDED ${name} DROPPED (${bootActor ? "already sealed" : "actor null"})`);
+        bootActor.send({ type: "MODULE_SEEN", name, nowMs, remanenceMs });
     }
 }
 if (sd) {
     pickerSessionW.on("change", (s) => { setResumeSessionPicker(sd, s.visible); refreshPaneReady(); });
     pickerSessionW.on("begin", () => {
-        forwardModuleStarted("resume_picker");
         // #639 david `3yz6qa` — auto-cross loop-side : le watcher détecte le
         // picker session, on envoie Enter (= pick latest). CL_RESUME_PICK
         // = "abort" laisse l'humain choisir. L'inject + ses retries vivent
@@ -705,10 +686,8 @@ if (sd) {
         log("watcher: resume_picker begin → auto-cross (pick=latest, Enter)");
         crossResumePicker();
     });
-    pickerSessionW.on("end", () => forwardModuleEnded("resume_picker"));
     pickerModeW.on("change", (s) => { setResumeModePicker(sd, s.visible); refreshPaneReady(); });
     pickerModeW.on("begin", () => {
-        forwardModuleStarted("resume_mode");
         // #639 — summary-vs-as-is picker. Default "as-is" = Down + Enter.
         // "summary" = juste Enter. "abort" laisse l'humain.
         const mode = process.env[CL_ENV.RESUME_MODE] ?? "as-is";
@@ -731,18 +710,8 @@ if (sd) {
             }
         })();
     });
-    // #994 — the resume_mode picker MUST forward MODULE_ENDED on dismiss, like
-    // its siblings (pickerSession:end, resuming:end). It was MISSING → the
-    // `resume_mode` module stayed active forever → the push manager pumped the
-    // boot deadline indefinitely → boot never sealed (the boot-infini named by
-    // the #994 diagnostics: active_modules=[resume_mode], no MODULE_ENDED in log).
-    pickerModeW.on("end", () => forwardModuleEnded("resume_mode"));
     resumingW.on("change", (s) => { setResuming(sd, s.visible); refreshPaneReady(); });
-    resumingW.on("begin", () => forwardModuleStarted("resuming"));
-    resumingW.on("end", () => forwardModuleEnded("resuming"));
     compactConfirmW.on("change", () => refreshPaneReady());
-    compactConfirmW.on("begin", () => forwardModuleStarted("compact_confirm"));
-    compactConfirmW.on("end", () => forwardModuleEnded("compact_confirm"));
     promptW.on("change", () => refreshPaneReady());
     // #890/#994 — paneBusy arm/dearm is now owned by the per-tick rule in
     // refreshPaneMarkers (`nextPaneBusy`): arm on "esc to interrupt", dearm
@@ -803,13 +772,9 @@ if (sd) {
         setIpcPromptHasInput(false);
     });
     getCompactingDetector().on("change", (s) => { setCompacting(sd, s.active); refreshPaneReady(); });
-    // CompactingDetector emits change(s) with `s.active` boolean ; forward begin/end via change diff.
-    let _prevCompacting = false;
-    getCompactingDetector().on("change", (s) => {
-        if (s.active && !_prevCompacting) forwardModuleStarted("compacting");
-        if (!s.active && _prevCompacting) forwardModuleEnded("compacting");
-        _prevCompacting = s.active;
-    });
+    // #1009 — compacting no longer forwards begin/end edges to the boot machine ;
+    // it re-signals via MODULE_SEEN from the per-tick poll in refreshPaneMarkers
+    // (like the other transient modules).
 }
 
 // #639/#965 auto-cross : inject Enter to dismiss claude's resume-session picker
@@ -843,6 +808,21 @@ function refreshPaneMarkers(): void {
     // above call the legacy ipcState setters on every transition. Cursor was
     // probed by capturePane() just above (lastCursor) — reuse it.
     paneObs.tick(paneText, { nowMs: Date.now(), isBoot, cursorX: lastCursor?.x, cursorY: lastCursor?.y });
+    // #1009 — LEVEL+DECAY boot tracking : re-signal every CURRENTLY-VISIBLE boot
+    // module to the BootMachine (MODULE_SEEN refreshes its remanence). A module
+    // that has disappeared simply isn't signalled → it falls out of its window
+    // → boot seals once all modules (incl. the seed) have fallen. No begin/end,
+    // so a missed transition can't stick a module (the #994 leak class is gone).
+    // No-op once sealed (forwardModuleSeen guards). Uniform across BoolWatcher
+    // (visible) + CompactingDetector (active, with its own 10s latch).
+    {
+        const nowSeen = Date.now();
+        if (pickerSessionW.snapshot().visible) forwardModuleSeen("resume_picker", nowSeen);
+        if (pickerModeW.snapshot().visible) forwardModuleSeen("resume_mode", nowSeen);
+        if (resumingW.snapshot().visible) forwardModuleSeen("resuming", nowSeen);
+        if (compactConfirmW.snapshot().visible) forwardModuleSeen("compact_confirm", nowSeen);
+        if (getCompactingDetector().snapshot().active) forwardModuleSeen("compacting", nowSeen);
+    }
     // #994 david — busy arm/dearm rule, evaluated each scan with fresh watcher
     // snapshots. arm: "esc to interrupt" visible. dearm: esc gone AND the
     // prompt is idle (box visible + cursor at origin). keep: esc gone but the
@@ -1685,10 +1665,9 @@ async function mainSse(): Promise<void> {
         // Pure ipcState bridge — fires on every snapshot change.
         bootActor.subscribe((snap) => {
             setIpcBootDeadlineMs(snap.context.deadlineMs);
-            // #994 — mirror the active boot modules to ipc (the actor's Set
-            // serialises to {} in getPersistedSnapshot, so inspect can't read
-            // it otherwise). Lets `inspect` name a leaked/stuck module.
-            setIpcBootActiveModules(Array.from(snap.context.activeModules));
+            // #994/#1009 — mirror the live boot modules (within their remanence
+            // window) to ipc so `inspect` can name a leaked/stuck module.
+            setIpcBootActiveModules(liveBootModules(snap.context.moduleSeen, Date.now()));
         });
         // Locus event consumer — fires once on `booting → sealed`.
         bootActor.on("boot:sealed", (ev) => {
@@ -1721,8 +1700,13 @@ async function mainSse(): Promise<void> {
         // Si bootSnap fourni : la SM démarre déjà en `sealed` (= no-op).
         if (!bootSnap) armFastProbe();
     }
-    // Pump DEADLINE_REACHED côté wall-clock — la machine reste pure (=
-    // pas de timer interne), le side-effect setInterval vit côté wrapper.
+    // #1009 — Deadline pump (the ONLY boot timer now). Each second, seal if all
+    // modules have fallen (`now >= deadline`, where deadline = max(lastSeen +
+    // remanence)). While any module is still re-signalled its lastSeen keeps the
+    // deadline ahead of now → no fire ; once they all stop, the frozen deadline
+    // is reached → DEADLINE_REACHED → seal. The push manager is GONE — the decay
+    // model needs no deadline-extension side-loop (re-signals do it via
+    // MODULE_SEEN). Pure machine, single wall-clock timer here.
     const bootDeadlineTimer = setInterval(() => {
         if (!bootActor) return;
         const snap = bootActor.getSnapshot();
@@ -1732,45 +1716,8 @@ async function mainSse(): Promise<void> {
             clearInterval(bootDeadlineTimer);
         }
     }, 1000);
-    // #883 — push manager : tant qu'au moins un module est actif, on
-    // envoie `PUSH { nowMs }` toutes les secondes pour pousser la
-    // deadline. Le manager s'arme quand activeModules passe 0→>0 et
-    // se désarme à >0→0. Re-arme si un module réapparaît tant qu'on
-    // est en phase boot (= pas encore sealed). Sealed = stop final.
-    let bootPushTimer: NodeJS.Timeout | null = null;
-    const armBootPushTimer = (): void => {
-        if (bootPushTimer) return;
-        bootPushTimer = setInterval(() => {
-            if (!bootActor) return;
-            const snap = bootActor.getSnapshot();
-            if (snap.matches("sealed") || snap.context.activeModules.size === 0) {
-                // Defensive : la subscribe désarme déjà ; cette branche
-                // catche le cas où on rate la transition (impossible en
-                // théorie mais ceinture+bretelles).
-                disarmBootPushTimer();
-                return;
-            }
-            bootActor.send({ type: "PUSH", nowMs: Date.now() });
-        }, 1000);
-        log("bootMachine: push manager armed (activeModules > 0)");
-    };
-    const disarmBootPushTimer = (): void => {
-        if (!bootPushTimer) return;
-        clearInterval(bootPushTimer);
-        bootPushTimer = null;
-        log("bootMachine: push manager disarmed (activeModules empty)");
-    };
-    bootActor.subscribe((snap) => {
-        if (snap.matches("sealed")) {
-            disarmBootPushTimer();
-            return;
-        }
-        if (snap.context.activeModules.size > 0) armBootPushTimer();
-        else disarmBootPushTimer();
-    });
     process.on("exit", () => {
         clearInterval(bootDeadlineTimer);
-        disarmBootPushTimer();
         bootActor?.stop();
     });
     // AfkController XState actor wiring. Le subscriber pont l'état actor →

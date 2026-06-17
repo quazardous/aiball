@@ -1,69 +1,71 @@
-// BootMachine tests (#883 — module-based vocabulary, manager-driven push).
+// BootMachine tests (#1009 — level+decay : MODULE_SEEN + seed, no push manager).
 // Run: `npx tsx --test src/claude-loop/boot-machine.test.ts`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createActor } from "xstate";
-import { bootMachine } from "./boot-machine.js";
+import {
+    bootMachine,
+    computeBootDeadline,
+    liveBootModules,
+    SEED_MODULE,
+    DEFAULT_REMANENCE_MS,
+} from "./boot-machine.js";
 
-function mkActor(opts: { loopStartMs: number; bootMinMs?: number; tunnelMs?: number }) {
+function mkActor(opts: { loopStartMs: number; bootMinMs?: number }) {
     return createActor(bootMachine, {
-        input: {
-            loopStartMs: opts.loopStartMs,
-            bootMinMs: opts.bootMinMs ?? 30_000,
-            tunnelMs: opts.tunnelMs ?? 10_000,
-        },
+        input: { loopStartMs: opts.loopStartMs, bootMinMs: opts.bootMinMs ?? 30_000 },
     });
 }
 
-test("init : deadline = loopStartMs + bootMinMs (floor)", () => {
+test("init : seed module 'boot' (remanence=bootMinMs) → deadline = loopStart + bootMinMs", () => {
     const actor = mkActor({ loopStartMs: 1_000_000, bootMinMs: 30_000 }).start();
     const ctx = actor.getSnapshot().context;
     assert.equal(ctx.deadlineMs, 1_030_000);
     assert.equal(actor.getSnapshot().value, "booting");
-    assert.equal(ctx.activeModules.size, 0);
+    assert.equal(ctx.moduleSeen.has(SEED_MODULE), true);
+    assert.equal(ctx.moduleSeen.get(SEED_MODULE)!.remanenceMs, 30_000);
 });
 
-test("MODULE_STARTED : add to activeModules ; deadline unchanged (push manager owns push)", () => {
+test("MODULE_SEEN : early transient stays under the floor → deadline = floor", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
-    const deadlineBefore = actor.getSnapshot().context.deadlineMs;
-    actor.send({ type: "MODULE_STARTED", name: "resume_picker" });
-    const ctx = actor.getSnapshot().context;
-    assert.equal(ctx.activeModules.has("resume_picker"), true);
-    assert.equal(ctx.activeModules.size, 1);
-    assert.equal(ctx.deadlineMs, deadlineBefore);
+    actor.send({ type: "MODULE_SEEN", name: "resume_picker", nowMs: 1_005_000 });
+    // resume_picker falls at 1_005_000+10_000=1_015_000 < floor 1_030_000
+    assert.equal(actor.getSnapshot().context.deadlineMs, 1_030_000);
+    assert.equal(actor.getSnapshot().context.moduleSeen.has("resume_picker"), true);
 });
 
-test("PUSH avec activeModules > 0 : deadline = max(deadline, nowMs + tunnel)", () => {
-    const actor = mkActor({ loopStartMs: 1_000_000, tunnelMs: 10_000 }).start();
-    actor.send({ type: "MODULE_STARTED", name: "compacting" });
-    actor.send({ type: "PUSH", nowMs: 1_025_000 });
-    // max(1_030_000 floor, 1_025_000+10_000) = max(1_030_000, 1_035_000) = 1_035_000
+test("MODULE_SEEN : late transient extends the deadline past the floor", () => {
+    const actor = mkActor({ loopStartMs: 1_000_000 }).start();
+    actor.send({ type: "MODULE_SEEN", name: "compacting", nowMs: 1_025_000 });
+    // falls at 1_035_000 > floor → deadline = 1_035_000
     assert.equal(actor.getSnapshot().context.deadlineMs, 1_035_000);
 });
 
-test("PUSH avec activeModules vide : no-op (deadline unchanged)", () => {
+test("MODULE_SEEN : re-signal slides the remanence window forward", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
-    const before = actor.getSnapshot().context.deadlineMs;
-    actor.send({ type: "PUSH", nowMs: 1_025_000 });
-    assert.equal(actor.getSnapshot().context.deadlineMs, before);
+    actor.send({ type: "MODULE_SEEN", name: "compacting", nowMs: 1_025_000 }); // → 1_035_000
+    actor.send({ type: "MODULE_SEEN", name: "compacting", nowMs: 1_040_000 }); // → 1_050_000
+    assert.equal(actor.getSnapshot().context.deadlineMs, 1_050_000);
 });
 
-test("PUSH ne raccourcit jamais (max)", () => {
-    const actor = mkActor({ loopStartMs: 1_000_000, tunnelMs: 10_000 }).start();
-    actor.send({ type: "MODULE_STARTED", name: "compacting" });
-    actor.send({ type: "PUSH", nowMs: 1_025_000 });          // → 1_035_000
-    actor.send({ type: "PUSH", nowMs: 1_020_000 });          // older — should not shorten
-    assert.equal(actor.getSnapshot().context.deadlineMs, 1_035_000);
+test("MODULE_SEEN : explicit remanenceMs honoured", () => {
+    const actor = mkActor({ loopStartMs: 1_000_000 }).start();
+    actor.send({ type: "MODULE_SEEN", name: "x", nowMs: 1_040_000, remanenceMs: 5_000 });
+    assert.equal(actor.getSnapshot().context.deadlineMs, 1_045_000);
 });
 
-test("MODULE_ENDED : remove from set, deadline unchanged (tunnel = last push reste)", () => {
-    const actor = mkActor({ loopStartMs: 1_000_000, tunnelMs: 10_000 }).start();
-    actor.send({ type: "MODULE_STARTED", name: "compacting" });
-    actor.send({ type: "PUSH", nowMs: 1_025_000 });
-    actor.send({ type: "MODULE_ENDED", name: "compacting" });
-    const ctx = actor.getSnapshot().context;
-    assert.equal(ctx.activeModules.size, 0);
-    assert.equal(ctx.deadlineMs, 1_035_000);
+test("computeBootDeadline / liveBootModules helpers", () => {
+    const seen = new Map([
+        [SEED_MODULE, { lastSeenMs: 1_000_000, remanenceMs: 30_000 }],   // falls 1_030_000
+        ["compacting", { lastSeenMs: 1_025_000, remanenceMs: 10_000 }],  // falls 1_035_000
+    ]);
+    assert.equal(computeBootDeadline(seen), 1_035_000);
+    // at 1_032_000 : seed fallen, compacting live
+    assert.deepEqual(liveBootModules(seen, 1_032_000), ["compacting"]);
+    // at 1_005_000 : both live
+    assert.deepEqual(liveBootModules(seen, 1_005_000).sort(), ["boot", "compacting"]);
+    // at 1_040_000 : both fallen
+    assert.deepEqual(liveBootModules(seen, 1_040_000), []);
 });
 
 test("DEADLINE_REACHED : booting → sealed", () => {
@@ -79,14 +81,14 @@ test("HOOK_SEAL : booting → sealed", () => {
     assert.equal(actor.getSnapshot().matches("sealed"), true);
 });
 
-test("sealed terminal : MODULE_STARTED suivants no-op", () => {
+test("sealed terminal : MODULE_SEEN suivants no-op", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     actor.send({ type: "HOOK_SEAL" });
-    actor.send({ type: "MODULE_STARTED", name: "compacting" });
-    assert.equal(actor.getSnapshot().context.activeModules.size, 0);
+    const before = actor.getSnapshot().context.moduleSeen.size;
+    actor.send({ type: "MODULE_SEEN", name: "compacting", nowMs: 1_999_000 });
+    assert.equal(actor.getSnapshot().context.moduleSeen.size, before);
+    assert.equal(actor.getSnapshot().context.moduleSeen.has("compacting"), false);
 });
-
-// Locus events.
 
 test("emit boot:sealed (reason=deadline) sur DEADLINE_REACHED", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
@@ -104,82 +106,48 @@ test("emit boot:sealed (reason=hook) sur HOOK_SEAL", () => {
     assert.equal(events[0].reason, "hook");
 });
 
-// Scenario tests (#883).
+// Scenarios — the decay model.
 
-test("scénario : cold clean (no module) → deadline reste floor → seal au floor", () => {
+test("scénario : cold clean (seul le seed) → deadline = floor → seal au floor", () => {
     const actor = mkActor({ loopStartMs: 1_000_000, bootMinMs: 30_000 }).start();
     assert.equal(actor.getSnapshot().context.deadlineMs, 1_030_000);
     actor.send({ type: "DEADLINE_REACHED" });
     assert.equal(actor.getSnapshot().matches("sealed"), true);
 });
 
-test("scénario : resume picker only → seal à dernier_push + tunnel", () => {
-    const actor = mkActor({ loopStartMs: 1_000_000, tunnelMs: 10_000 }).start();
-    actor.send({ type: "MODULE_STARTED", name: "resume_picker" });
-    // Manager push toutes les secondes pendant que module actif.
-    actor.send({ type: "PUSH", nowMs: 1_010_000 });   // → max(30s, 1_020_000) = 1_030_000
-    actor.send({ type: "PUSH", nowMs: 1_015_000 });   // → max(1_030_000, 1_025_000) = 1_030_000
-    actor.send({ type: "PUSH", nowMs: 1_022_000 });   // → 1_032_000
-    actor.send({ type: "MODULE_ENDED", name: "resume_picker" });
-    // Manager arrête. deadline reste à 1_032_000. Pump fire à T=1_032_000 → seal.
-    assert.equal(actor.getSnapshot().context.deadlineMs, 1_032_000);
-});
-
-test("scénario : combo picker → resuming → compact_confirm → compacting → seal après dernier END", () => {
-    const actor = mkActor({ loopStartMs: 1_000_000, tunnelMs: 10_000 }).start();
-    actor.send({ type: "MODULE_STARTED", name: "resume_picker" });
-    actor.send({ type: "PUSH", nowMs: 1_005_000 });
-    actor.send({ type: "MODULE_STARTED", name: "resuming" });
-    actor.send({ type: "MODULE_ENDED", name: "resume_picker" });
-    actor.send({ type: "PUSH", nowMs: 1_010_000 });
-    actor.send({ type: "MODULE_STARTED", name: "compact_confirm" });
-    actor.send({ type: "MODULE_ENDED", name: "resuming" });
-    actor.send({ type: "PUSH", nowMs: 1_015_000 });
-    actor.send({ type: "MODULE_STARTED", name: "compacting" });
-    actor.send({ type: "MODULE_ENDED", name: "compact_confirm" });
-    actor.send({ type: "PUSH", nowMs: 1_040_000 });   // compacting toujours actif
-    actor.send({ type: "MODULE_ENDED", name: "compacting" });
-    // Manager arrête. deadline = 1_050_000 (= dernier push 1_040_000 + tunnel 10_000).
-    assert.equal(actor.getSnapshot().context.activeModules.size, 0);
-    assert.equal(actor.getSnapshot().context.deadlineMs, 1_050_000);
-});
-
-test("scénario : 2 modules simultanés → manager pushe tant qu'au moins 1 actif", () => {
-    const actor = mkActor({ loopStartMs: 1_000_000, tunnelMs: 10_000 }).start();
-    actor.send({ type: "MODULE_STARTED", name: "resume_picker" });
-    actor.send({ type: "MODULE_STARTED", name: "resuming" });
-    actor.send({ type: "PUSH", nowMs: 1_010_000 });
-    actor.send({ type: "MODULE_ENDED", name: "resume_picker" });
-    // resuming toujours actif → manager pushe encore
-    actor.send({ type: "PUSH", nowMs: 1_020_000 });
-    assert.equal(actor.getSnapshot().context.deadlineMs, 1_030_000);
-    actor.send({ type: "MODULE_ENDED", name: "resuming" });
-    // Tous deux off → manager arrête.
-    assert.equal(actor.getSnapshot().context.activeModules.size, 0);
+test("scénario : un module re-signalé puis lâché → deadline = dernier signal + remanence", () => {
+    const actor = mkActor({ loopStartMs: 1_000_000 }).start();
+    // resuming visible et re-signalé jusqu'à 1_045_000, puis plus rien
+    actor.send({ type: "MODULE_SEEN", name: "resuming", nowMs: 1_030_000 });
+    actor.send({ type: "MODULE_SEEN", name: "resuming", nowMs: 1_045_000 });
+    // falls at 1_055_000 ; le seed (1_030_000) est déjà tombé → deadline = 1_055_000
+    assert.equal(actor.getSnapshot().context.deadlineMs, 1_055_000);
+    // à 1_056_000 plus aucun module live (resuming non re-signalé)
+    assert.deepEqual(liveBootModules(actor.getSnapshot().context.moduleSeen, 1_056_000), []);
 });
 
 test("snapshot observable : subscribe fires sur transitions", () => {
     const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     let sawSealed = false;
-    actor.subscribe((snap) => {
-        if (snap.matches("sealed")) sawSealed = true;
-    });
+    actor.subscribe((snap) => { if (snap.matches("sealed")) sawSealed = true; });
     actor.send({ type: "HOOK_SEAL" });
     assert.ok(sawSealed);
 });
 
+test("DEFAULT_REMANENCE_MS appliqué quand remanenceMs absent", () => {
+    const actor = mkActor({ loopStartMs: 1_000_000 }).start();
+    actor.send({ type: "MODULE_SEEN", name: "x", nowMs: 1_025_000 });
+    assert.equal(actor.getSnapshot().context.deadlineMs, 1_025_000 + DEFAULT_REMANENCE_MS);
+});
+
 // #848 — sealed.fresh → sealed.settled after 10s + emit loop:start
 
-test("emit loop:start 10s après boot:sealed (XState fake clock)", async () => {
+test("emit loop:start 10s après boot:sealed", async () => {
     const SETTLE_DELAY = 10_000;
-    const { createActor } = await import("xstate");
-    const actor = createActor(bootMachine, {
-        input: { loopStartMs: 1_000_000, bootMinMs: 30_000 },
-    }).start();
+    const actor = mkActor({ loopStartMs: 1_000_000 }).start();
     const events: { loopStartMs: number }[] = [];
     actor.on("loop:start", (ev) => events.push(ev));
     actor.send({ type: "HOOK_SEAL" });
-    // Initial state after seal : fresh
     assert.deepEqual(actor.getSnapshot().value, { sealed: "fresh" });
     assert.equal(events.length, 0);
     await new Promise((r) => setTimeout(r, SETTLE_DELAY + 200));
