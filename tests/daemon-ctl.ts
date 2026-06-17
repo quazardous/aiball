@@ -16,7 +16,7 @@ import { eq, and, isNull } from "drizzle-orm";
 import { getDb } from "../src/db.js";
 import { createProject, listProjects } from "../src/db/projects.js";
 import * as schema from "../src/schema.js";
-import { BASE, provision, provisionHuman, post, decide, seedCounters } from "./lib.js";
+import { provision, provisionHuman, post, decide, seedCounters } from "./lib.js";
 
 const PROJECT = "bidon";
 
