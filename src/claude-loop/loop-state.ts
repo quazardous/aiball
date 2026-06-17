@@ -356,10 +356,10 @@ export function isBootPhase(view: LoopStateView): boolean {
  *  consumed by the pane-probe (busy-gated 1s refresh) and any other
  *  subscriber that needs to know whether claude is mid-turn (#714).
  *
- *  Plain disjonction of the two pane-derived file markers for V1. The
- *  nuanced cases (typing in a picker / AskUserQuestion doesn't break
- *  busy) are deferred to V3 (#716) where this helper grows additional
- *  guards. */
+ *  #1014 — `paneBusy` is now the output of the composite busy decay-stack
+ *  (turn ∨ esc ∨ compacting), so it already subsumes compacting ; the
+ *  `|| paneCompacting` is kept as a belt-and-braces for any tick where the
+ *  stack hasn't re-signalled the compacting proof yet. */
 export function isReallyBusy(input: LoopStateInput): boolean {
     return input.paneBusy || input.paneCompacting;
 }
@@ -525,23 +525,9 @@ export class LoopStateBus {
     }
 }
 
-/**
- * #994 david `<chat>` — busy arm/dearm rule, pure.
- *  - arm   : `esc to interrupt` visible ⇒ definitely busy (it only shows when
- *            the cursor is at the input origin, so it's an unambiguous signal).
- *  - dearm : esc gone AND the prompt is idle (box visible + cursor at origin)
- *            ⇒ idle. This is the real turn-end signal (covers ESC-interrupt,
- *            which fires no Stop hook).
- *  - keep  : esc gone but the cursor moved (typing mid-turn pushed the regex
- *            out of the footer) ⇒ stay busy (filtered de-arm, the #890 latch).
- * `idlePromptVisible` = prompt box visible AND cursor at the input origin.
- */
-export function nextPaneBusy(
-    prev: boolean | null,
-    escInterruptVisible: boolean,
-    idlePromptVisible: boolean,
-): boolean | null {
-    if (escInterruptVisible) return true;
-    if (idlePromptVisible) return false;
-    return prev;
-}
+// #1014 — `nextPaneBusy` (the #890/#992/#994 esc arm/dearm latch) is retired.
+// `paneBusy` is now the output of the composite busy decay-stack (busy-stack.ts,
+// driven in loop.ts:refreshPaneMarkers) : the remanence gives the latch's
+// hysteresis for free and a turn reinforces a flickering pane. The esc/pane-idle
+// arm/dearm semantics moved there (esc-visible → seenProof(esc) ; pane-idle →
+// releaseAll).

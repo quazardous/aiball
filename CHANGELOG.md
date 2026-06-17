@@ -30,6 +30,7 @@ dates are YYYY-MM-DD.
 
 ### Changed
 
+- "Claude is busy" is now derived from several reinforcing signals at once — an in-flight turn plus the live pane activity (the interrupt footer, an ongoing `/compact`) — instead of a single fragile footer match. Each signal keeps "busy" alive briefly after it was last seen, so transient flicker (e.g. typing while Claude works, which pushes the interrupt hint off-screen) no longer drops the busy state; returning to a clean idle prompt clears it at once. The result is a steadier busy indicator and fewer wakes fired on top of working sessions.
 - A shell-prefix env override at loop start (e.g. `CL_CAPTURE=1 claude-loop start …`) is now **volatile**: it applies to that session and is re-seeded clean on the next start, instead of silently persisting forever. Deliberate, persistent overrides still go through `claude-loop reload <name> --set KEY=val`.
 - `claude-loop health` with no argument now reports the loop(s) for the current directory instead of every registered loop; pass `--all` for the global view.
 

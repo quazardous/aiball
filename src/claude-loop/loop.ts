@@ -150,7 +150,16 @@ import {
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
 } from "./ipc-state.js";
-import { computeLoopView, isAfkActive, isInputHot, nextPaneBusy, LoopStateBus } from "./loop-state.js";
+import { computeLoopView, isAfkActive, isInputHot, LoopStateBus } from "./loop-state.js";
+import {
+    seenProof,
+    isBusy as busyStackActive,
+    releaseAll as releaseBusyProofs,
+    PROOF_TURN,
+    PROOF_ESC,
+    PROOF_COMPACTING,
+    type BusyProofs,
+} from "./busy-stack.js";
 import { BarRenderer } from "./bar-renderer.js";
 import { dispatchProxyEvent, formatVerdictLogLine } from "./proxy-event-dispatcher.js";
 import { WakeBus } from "./wake-bus.js";
@@ -713,10 +722,10 @@ if (sd) {
     resumingW.on("change", (s) => { setResuming(sd, s.visible); refreshPaneReady(); });
     compactConfirmW.on("change", () => refreshPaneReady());
     promptW.on("change", () => refreshPaneReady());
-    // #890/#994 — paneBusy arm/dearm is now owned by the per-tick rule in
-    // refreshPaneMarkers (`nextPaneBusy`): arm on "esc to interrupt", dearm
-    // only when it's gone AND the cursor is at the input origin (prompt empty).
-    // busyW.on just feeds the SanityController stale-busy detector.
+    // #890/#994/#1014 — paneBusy is now owned by the per-tick composite busy
+    // decay-stack in refreshPaneMarkers (busy-stack.ts): `esc to interrupt`
+    // visible → seenProof(esc), pane-idle → releaseAll. busyW.on just feeds the
+    // SanityController stale-busy detector.
     busyW.on("change", (s) => {
         if (s.visible) getSanityService().busyLatched();
         else getSanityService().busyCleared();
@@ -725,6 +734,7 @@ if (sd) {
     // d'activité depuis STALE_BUSY_MS (= path anormal, Stop hook perdu).
     getSanityService().getActor().on("sanity:clear_paneBusy", (ev) => {
         log(`sanityMachine: sanity:clear_paneBusy reason=${ev.reason} atMs=${ev.atMs} → setPaneBusy(false)`);
+        busyProofs = releaseBusyProofs(); // #1014 — drop every proof, else next tick re-arms
         setPaneBusy(sd, false);
     });
     // #898 david `<chat>` : "ctrl+t to show task" présent SANS "esc to
@@ -734,6 +744,7 @@ if (sd) {
     // clear pas intentionnellement parce que la regex bouge).
     idlePromptW.on("begin", () => {
         log("watcher: idle_prompt begin → setPaneBusy(false) (positive idle signal)");
+        busyProofs = releaseBusyProofs(); // #1014 — positive idle = release all proofs
         setPaneBusy(sd, false);
     });
     interruptedW.on("change", (s) => setInterrupted(sd, s.visible));
@@ -788,6 +799,12 @@ if (sd) {
 // fallback. Rate-limited so we never machine-gun Enter.
 let lastPickerCrossAtMs = 0;
 const PICKER_CROSS_RETRY_MS = 3000;
+
+// #1014 — composite busy decay-stack. Each pane tick re-signals the proofs
+// currently present (turn / esc / compacting) ; `paneBusy` = ≥1 proof still
+// holds. Module state because it accumulates across ticks. Released wholesale
+// by pane-idle + the explicit clears (Stop hook, sanity, turn:settled).
+let busyProofs: BusyProofs = new Map();
 function crossResumePicker(): void {
     if ((process.env[CL_ENV.RESUME_PICK] ?? "latest") === "abort") return;
     lastPickerCrossAtMs = Date.now();
@@ -823,23 +840,33 @@ function refreshPaneMarkers(): void {
         if (compactConfirmW.snapshot().visible) forwardModuleSeen("compact_confirm", nowSeen);
         if (getCompactingDetector().snapshot().active) forwardModuleSeen("compacting", nowSeen);
     }
-    // #994 david — busy arm/dearm rule, evaluated each scan with fresh watcher
-    // snapshots. arm: "esc to interrupt" visible. dearm: esc gone AND the
-    // prompt is idle (box visible + cursor at origin). keep: esc gone but the
-    // cursor moved (typing mid-turn). idlePromptVisible = box visible AND NOT
-    // promptInputW (which is true only when the cursor left the input origin).
+    // #1014 david — busy composite = decay-stack of proofs (cf. busy-stack.ts).
+    // Each present proof re-signals (refreshes its remanence) ; `paneBusy` = ≥1
+    // proof still holds. Replaces the #992/#994 nextPaneBusy latch : the
+    // remanence gives the #890 hysteresis for free (typing pushes `esc to
+    // interrupt` out of the footer → the esc proof tient encore quelques ticks)
+    // and a turn reinforces a flickering pane. idlePromptVisible = box visible
+    // AND NOT promptInputW (cursor left the input origin).
     const idlePromptVisible = promptZoneW.snapshot().visible && !promptInputW.snapshot().visible;
-    const prevBusy = getIpcState().paneBusy;
-    const nextBusy = nextPaneBusy(prevBusy, busyW.snapshot().visible, idlePromptVisible);
-    if (nextBusy !== prevBusy && nextBusy !== null) setPaneBusy(sd, nextBusy);
+    const escVisible = busyW.snapshot().visible;
+    const inTurn = getTurnService().getActor().getSnapshot().matches("in_turn");
+    const nowBusy = Date.now();
+    if (inTurn) busyProofs = seenProof(busyProofs, PROOF_TURN, nowBusy);
+    if (escVisible) busyProofs = seenProof(busyProofs, PROOF_ESC, nowBusy);
+    if (getCompactingDetector().snapshot().active) busyProofs = seenProof(busyProofs, PROOF_COMPACTING, nowBusy);
+    // pane-idle (cursor back at origin, esc gone) = authoritative release : drop
+    // every proof at once, no waiting for remanence. esc-visible wins (it only
+    // shows at the input origin, so arm precedence is preserved).
+    if (idlePromptVisible && !escVisible) busyProofs = releaseBusyProofs();
+    const composite = busyStackActive(busyProofs, nowBusy);
+    if (composite !== getIpcState().paneBusy) setPaneBusy(sd, composite);
     // #1012 — pane-idle = 2nd source of turn-end (the Stop hook can be missed).
     // If the turn observer is still in_turn but the pane is back at a clean idle
-    // prompt (box visible, cursor at origin, not busy), close the turn from the
+    // prompt (box visible, cursor at origin, esc gone), close the turn from the
     // pane. This makes C1 robust (turn-during-boot closes even with no Stop hook)
     // → the session join can fire. One-shot : once turn:ended fires the observer
     // leaves in_turn so this won't re-fire.
-    if (idlePromptVisible && nextBusy !== true
-        && getTurnService().getActor().getSnapshot().matches("in_turn")) {
+    if (idlePromptVisible && !escVisible && inTurn) {
         log("turn-end via pane-idle (Stop hook absent/late) → turnEnded");
         getTurnService().turnEnded(Date.now());
     }
@@ -1876,6 +1903,7 @@ async function mainSse(): Promise<void> {
             // #890 safety : si on entre en no_turn via SESSION_START (re-attach
             // sans Stop hook → claude crash / hook perdu), le latch
             // paneBusy était collé. On clear ici aussi.
+            busyProofs = releaseBusyProofs(); // #1014
             if (sd) setPaneBusy(sd, false);
         });
         turnActor.on("turn:started", (ev) => {
@@ -1890,6 +1918,9 @@ async function mainSse(): Promise<void> {
             // #890 david `ue6q3n` : clear le latch paneBusy au Stop hook —
             // pendant qu'on attendait, les transitions visible=false du
             // BusyWatcher étaient ignorées (cf. busyW.on("change") plus haut).
+            // #1014 : le Stop hook est un release autoritaire du turn → vide les
+            // preuves (sinon `esc`/`compacting` encore visibles re-armeraient).
+            busyProofs = releaseBusyProofs();
             if (sd) setPaneBusy(sd, false);
             // #1012 — fin de turn → C1 revient true ; si C2 déjà true et la
             // session pas encore démarrée, le join la démarre maintenant.
@@ -1916,6 +1947,7 @@ async function mainSse(): Promise<void> {
             // latch. Garde-fou en cas de Stop hook perdu.
             if (sd && getIpcState().paneBusy === true) {
                 log("turn:settled : clearing stale paneBusy latch");
+                busyProofs = releaseBusyProofs(); // #1014
                 setPaneBusy(sd, false);
             }
             void tryWake("turn:settled");
