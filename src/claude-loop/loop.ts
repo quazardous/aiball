@@ -832,6 +832,17 @@ function refreshPaneMarkers(): void {
     const prevBusy = getIpcState().paneBusy;
     const nextBusy = nextPaneBusy(prevBusy, busyW.snapshot().visible, idlePromptVisible);
     if (nextBusy !== prevBusy && nextBusy !== null) setPaneBusy(sd, nextBusy);
+    // #1012 — pane-idle = 2nd source of turn-end (the Stop hook can be missed).
+    // If the turn observer is still in_turn but the pane is back at a clean idle
+    // prompt (box visible, cursor at origin, not busy), close the turn from the
+    // pane. This makes C1 robust (turn-during-boot closes even with no Stop hook)
+    // → the session join can fire. One-shot : once turn:ended fires the observer
+    // leaves in_turn so this won't re-fire.
+    if (idlePromptVisible && nextBusy !== true
+        && getTurnService().getActor().getSnapshot().matches("in_turn")) {
+        log("turn-end via pane-idle (Stop hook absent/late) → turnEnded");
+        getTurnService().turnEnded(Date.now());
+    }
     // Picker markers are AUTHORITATIVELY the current pane scan, not just
     // transitions. The session-start hook sets them true out-of-band ; if it
     // auto-Enters past the picker before a heartbeat captures it, the watcher
@@ -1603,43 +1614,55 @@ async function mainSse(): Promise<void> {
         // #862 Slice 5 — setTmuxStatus(IDLE) retiré ; paneBusy=false suffit
         // pour que BarRenderer dérive idle au prochain compute.
         try { setIpcStateTagInfo(null); } catch { /* best-effort */ }
-        // #848 david `<chat>` : sendKeys IMMÉDIAT au boot:sealed (= active
-        // busy avec le prompt skill). Drop le stash+turn:settled (= ancien
-        // mécanisme `chkb5z`). Le loop:start register fire 10s plus tard
-        // (cf. bootActor.on("loop:start")) et gate les wakes turn:settled
-        // ultérieurs.
-        if (!postBootRemindersSent) {
-            postBootRemindersSent = true;
-            try {
-                const promptMap = mergePrompts(
-                    loadPromptsFromYaml(pingsPath(sd!)),
-                    {},
-                );
-                const reminder = renderSlot(promptMap, "post_boot_skill_reminder", {}, "");
-                if (reminder.length > 0) {
-                    // #951 david `zx3vt8` : gate l'inject sur "no human
-                    // present". Sans ça, un user qui tape pendant le boot
-                    // se prenait la phrase reminder en collision dans sa
-                    // frappe (cf. #951 body symptôme primaire). Idiome
-                    // miroir de timer.ts:2118 (wake gate auto).
-                    const typing = humanIsTyping(sd!);
-                    const afk = afkActive(sd!);
-                    if (typing || afk) {
-                        log(`post-boot reminder: skipped (human present: typing=${typing} afk=${afk})`);
-                    } else {
-                        log(`post-boot reminder: injecting immediate (${reminder.length} chars)`);
-                        void sendKeys(reminder);
-                    }
-                }
-            } catch (e) {
-                log(`post-boot reminder load failed (ignored): ${String(e)}`);
+        // #1012 — le push du skill reminder + le drain ne se font PLUS au
+        // boot:sealed : ils sont déplacés à l'entrée de la session live
+        // (`startSessionIfReady`, = join C1∧C2). En mode dégradé (turn à cheval
+        // sur le boot) on attend la fin du turn avant de pousser, au lieu de
+        // collisionner avec la frappe / un turn en vol.
+    };
+    // #1012 david — JOIN de démarrage de la session live (cinématiques
+    // parallèles boot ∥ turn). C1 = ¬(un turn a commencé pendant le boot et
+    // n'est pas fini) ; DÉFAUT true. C2 = boot terminé (loop:start). La session
+    // démarre quand C1 ∧ C2, déclenchée par celui qui finit en dernier. C1
+    // défaut-true ⇒ un boot propre démarre la session au boot-end SANS dépendre
+    // d'un Stop hook (corrige « barre idle mais aucun event »).
+    let joinC1 = true;       // claude idle-ready (pas de turn à cheval sur le boot)
+    let joinC2 = false;      // boot terminé (loop:start émis)
+    let sessionLive = false;
+    const pushSkillReminderIfAway = (): void => {
+        if (postBootRemindersSent) return;
+        postBootRemindersSent = true;
+        try {
+            const promptMap = mergePrompts(loadPromptsFromYaml(pingsPath(sd!)), {});
+            const reminder = renderSlot(promptMap, "post_boot_skill_reminder", {}, "");
+            if (reminder.length === 0) return;
+            // #951/#977 : ne pousser le skill QUE si l'humain est AWAY.
+            // `afkActive()` == humain PRÉSENT (NOT-AFK hold) malgré le nom →
+            // present (ou typing) ⇒ skip. away ⇒ push.
+            const typing = humanIsTyping(sd!);
+            const present = afkActive(sd!);
+            if (typing || present) {
+                log(`session:live skill reminder skipped (human present: typing=${typing} present=${present})`);
+            } else {
+                log(`session:live skill reminder: injecting (${reminder.length} chars)`);
+                void sendKeys(reminder);
             }
+        } catch (e) {
+            log(`session:live skill reminder load failed (ignored): ${String(e)}`);
         }
-        // #629 david `7zqtgf` — drain stacked pings at boot exit.
-        // #848 david `<chat>` : MAIS pas immédiat au boot:sealed — wait
-        // pour loop:start (= +10s) pour que le sendKeys post-boot ait eu
-        // le temps d'être consumed par claude. Le drain fire depuis
-        // `bootActor.on("loop:start")` (cf. mainSse) au lieu de ici.
+    };
+    const startSessionIfReady = (): void => {
+        if (sessionLive || !joinC1 || !joinC2) return;
+        sessionLive = true;
+        log("session:live — join(C1 ∧ C2) → loopStart + BOOT_READY + idle-seed + drain");
+        setIpcLoopStart(true);
+        getWakeService().getActor().send({ type: "BOOT_READY" });
+        // À session-live, claude est idle PAR CONSTRUCTION (C1 true = aucun turn
+        // en vol) → seed le marker idle si absent, pour que le gate wake passe
+        // même si le Stop hook n'a jamais fired (#1012 — fix « no idle marker »).
+        if (sd && readIdleSinceMs(sd) === null) setIpcIdleSince(Date.now());
+        pushSkillReminderIfAway();
+        void tryWake("session-live-drain");
     };
     // #872 / #870 Phase 1+3 — XState BootMachine acteur unique propriétaire
     //   du sealing. Le subscriber pure-bridge : update `bootDeadlineMs`
@@ -1686,14 +1709,12 @@ async function mainSse(): Promise<void> {
         // consumers qui veulent "boot vraiment fini" gate sur ce flag au
         // lieu de bootComplete.
         bootActor.on("loop:start", (ev) => {
-            log(`bootMachine: loop:start loopStartMs=${ev.loopStartMs} → setIpcLoopStart(true) + WakeController BOOT_READY + boot-ended-drain`);
-            setIpcLoopStart(true);
-            // #848 david `<chat>` : transitionne le WakeController de
-            // `gated` → `idle` (= autorise les wakes). La SM le gate
-            // jusqu'ici, plus de check imperatif.
-            getWakeService().getActor().send({ type: "BOOT_READY" });
-            // Drain les pings stackés MAINTENANT (= après les 10s buffer).
-            void tryWake("boot-ended-drain");
+            // #1012 — loop:start = C2 (boot terminé). Le démarrage effectif
+            // (loopStart/BOOT_READY/drain/skill) est fait par le join quand
+            // C1 ∧ C2 (cf. startSessionIfReady), pas directement ici.
+            log(`bootMachine: loop:start loopStartMs=${ev.loopStartMs} → C2=true (join)`);
+            joinC2 = true;
+            startSessionIfReady();
         });
         bootActor.start();
         // #884 — pas de respawn snapshot = cold boot normal.
@@ -1857,13 +1878,23 @@ async function mainSse(): Promise<void> {
             // paneBusy était collé. On clear ici aussi.
             if (sd) setPaneBusy(sd, false);
         });
-        turnActor.on("turn:started", (ev) => log(`turnMachine: turn:started atMs=${ev.atMs}`));
+        turnActor.on("turn:started", (ev) => {
+            log(`turnMachine: turn:started atMs=${ev.atMs}`);
+            // #1012 — un turn qui commence AVANT la fin du boot (C2 pas encore
+            // true) fait tomber C1 : claude n'est plus idle-ready, la session
+            // attendra la fin de ce turn.
+            if (!joinC2) joinC1 = false;
+        });
         turnActor.on("turn:ended", (ev) => {
             log(`turnMachine: turn:ended atMs=${ev.atMs}`);
             // #890 david `ue6q3n` : clear le latch paneBusy au Stop hook —
             // pendant qu'on attendait, les transitions visible=false du
             // BusyWatcher étaient ignorées (cf. busyW.on("change") plus haut).
             if (sd) setPaneBusy(sd, false);
+            // #1012 — fin de turn → C1 revient true ; si C2 déjà true et la
+            // session pas encore démarrée, le join la démarre maintenant.
+            joinC1 = true;
+            startSessionIfReady();
         });
         // #805 david : "si on est idle depuis plus de N secondes" → drain
         // la FIFO sans dépendre de SSE/heartbeat aléatoires. No-turn stable

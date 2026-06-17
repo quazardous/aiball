@@ -35,6 +35,7 @@ dates are YYYY-MM-DD.
 
 ### Fixed
 
+- After boot, the loop could stay silent (never fire any wake) when a turn was in flight at boot-end or Claude's turn-end signal was missed. The live session now starts on a join of "boot finished" and "Claude idle-ready" (ready by default), and turn-end is also recovered from the pane (return to the prompt), so a missed end-signal no longer wedges the loop.
 - `claude-loop` boot could hang forever (bar stuck in the boot phase) when resuming through the resume-mode picker. Boot-phase detection is now decay-based: each transient startup screen keeps boot open only while it is actually on screen, so a screen whose disappearance is missed can no longer wedge the boot open indefinitely.
 - `claude-loop reload` left the loop dead: it relaunched the wrong entrypoint, so the old timer was killed and no new one started (the session's tmux pane and proxy were orphaned). Reload now respawns the timer correctly.
 
