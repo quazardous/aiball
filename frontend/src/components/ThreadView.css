@@ -351,6 +351,18 @@
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
+    /* #1008 — hashid + timestamp side-by-side; shrink to keep it compact. */
+    font-size: 0.78em;
+}
+/* #1008 — the canonical ref leads, the timestamp follows muted. */
+.comment-ref {
+    font-variant-numeric: tabular-nums;
+}
+.comment-date-sep {
+    opacity: 0.45;
+}
+.comment-date-val {
+    opacity: 0.7;
 }
 .comment-date-copy:hover {
     background: var(--p-surface-100);

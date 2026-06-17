@@ -461,7 +461,12 @@ async function doDelete() {
                 @keydown.space.prevent="copyRef"
             >
                 <i v-if="justCopied" class="pi pi-check comment-date-copy-icon" />
-                {{ justCopied ? `copied ${commentRef}` : new Date(msg.created_at).toLocaleString() }}
+                <template v-if="justCopied">copied {{ commentRef }}</template>
+                <template v-else>
+                    <span class="comment-ref">{{ commentRef }}</span>
+                    <span class="comment-date-sep">·</span>
+                    <span class="comment-date-val">{{ new Date(msg.created_at).toLocaleString() }}</span>
+                </template>
             </span>
         </header>
         <div
