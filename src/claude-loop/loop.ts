@@ -731,6 +731,12 @@ if (sd) {
             }
         })();
     });
+    // #994 — the resume_mode picker MUST forward MODULE_ENDED on dismiss, like
+    // its siblings (pickerSession:end, resuming:end). It was MISSING → the
+    // `resume_mode` module stayed active forever → the push manager pumped the
+    // boot deadline indefinitely → boot never sealed (the boot-infini named by
+    // the #994 diagnostics: active_modules=[resume_mode], no MODULE_ENDED in log).
+    pickerModeW.on("end", () => forwardModuleEnded("resume_mode"));
     resumingW.on("change", (s) => { setResuming(sd, s.visible); refreshPaneReady(); });
     resumingW.on("begin", () => forwardModuleStarted("resuming"));
     resumingW.on("end", () => forwardModuleEnded("resuming"));
