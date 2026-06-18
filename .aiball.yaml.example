@@ -46,8 +46,15 @@ autopoll:
 # still win over this block when explicitly passed.
 
 claude_loop:
-  # Heartbeat tick (seconds). Lower = bar more reactive + faster polling.
+  # Heartbeat tick (seconds). Drives the bar counters / view refresh /
+  # SSE reconnect and an anti-stuck wake fallback. Not the wake cadence.
   interval_seconds: 30
+
+  # Drain tempo (seconds). The single periodic wake cadence: when idle
+  # with work pending, the loop drains the queue every wake_tempo_seconds
+  # (this is the envelope countdown in the bar). An incoming event waits
+  # at most this long before waking. Lower = snappier wakes, more polling.
+  wake_tempo_seconds: 10
 
   # Boot-grace before settleBoot fires. The pane probe can leave [boot]
   # earlier if it detects the prompt.
