@@ -82,6 +82,7 @@ import {
     loopPidPath,
     type Plate,
     type WakeHint,
+    type WakeEventHint,
 } from "./state.js";
 import { parseDrainedStrategy, decideDrainedWake } from "./drained-strategy.js";
 import { loopConfig } from "./loop-config.js";
@@ -516,17 +517,29 @@ async function pickPhrase(hint?: WakeHint): Promise<{ phrase: string; headMessag
     // to the backlog head when empty. Returns the head's message id so
     // the inject site can mark it seen (a delivered wake = the agent
     // has read the event).
+    // #999 — an event-triggered wake carries a `hint` (the SSE ping). It must
+    // render the COMMENT-centric format anchored on that event, never the
+    // backlog ticket-centric "Triage" branch (reserved for the no-hint
+    // heartbeat path). We pass the resolved event down so `buildContextPhrase`
+    // stays comment-centric even if the FIFO already pruned/raced past the ping.
+    let eventHint: WakeEventHint | undefined;
     if (hint?.ticket_id) {
         const me = process.env.AIBALL_AGENT;
         const ctx = await fetchWakeContext(hint, me);
         if (!ctx.stakeholder) {
             log(`wake-hint #${hint.ticket_id}${hint.comment_hashid ? ` (comment #${hint.comment_hashid})` : ""} not for me (${me}) — generic FIFO-pop phrase`);
         }
+        eventHint = {
+            ticketId: hint.ticket_id,
+            commentHashid: hint.comment_hashid,
+            commentBody: ctx.commentBody ?? hint.comment_body,
+        };
     }
     const result = await buildContextPhrase(
         client(),
         process.env.AIBALL_PROJECT ?? null,
         pingsPath(sd!),
+        eventHint,
     );
     // #848 david `chkb5z` — le post-boot reminder n'est PAS prepended.
     // Inject standalone via `turnActor.on("turn:settled")` ; pickPhrase

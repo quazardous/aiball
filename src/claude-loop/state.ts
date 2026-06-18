@@ -1474,10 +1474,28 @@ export interface ContextPhraseResult {
     backlogTicketId: number | null;
 }
 
+/**
+ * #999 — the resolved EVENT that triggered this wake (SSE ping → a concrete
+ * comment / artifact). Present iff the wake came from an event, absent on the
+ * heartbeat / drain re-check paths. The format is routed by this discriminator:
+ * an event wake renders the COMMENT-centric branch (body + ref) anchored on the
+ * hint, and NEVER the backlog ticket-centric "look #N… Triage" branch — that
+ * one is reserved for the no-hint heartbeat path (FIFO empty → backlog tiers).
+ */
+export interface WakeEventHint {
+    ticketId: number;
+    /** comment hashid of the triggering comment_added, when the event is a
+     *  comment. Drives the comment-centric anchor. */
+    commentHashid?: string;
+    /** markdown-stripped comment body (already truncated upstream). */
+    commentBody?: string;
+}
+
 export async function buildContextPhrase(
     client: AiballClient,
     project: string | null,
     pingsAbsPath: string,
+    eventHint?: WakeEventHint,
 ): Promise<ContextPhraseResult> {
     const culture = pickPingPhrase(pingsAbsPath);
     try {
@@ -1722,6 +1740,31 @@ export async function buildContextPhrase(
                 head = { ...head, title: unreadHead.title };
             }
         }
+        // #999 — event-triggered wake (SSE hint present) : anchor the phrase
+        // on the hint's comment so it renders COMMENT-centric (body + ref)
+        // even when the FIFO already pruned/raced past this ping. We only
+        // anchor when the FIFO didn't already surface an event branch — the
+        // FIFO head is fresher and authoritative when present ; the hint is
+        // the safety net for the empty-FIFO case that used to fall through to
+        // the backlog branch (the bug). The backlog ticket-centric "Triage"
+        // branch is reserved for the no-hint heartbeat path (gated below).
+        if (eventHint?.commentHashid
+            && !headCommentHashid && !headLifecycleVerb && !headDecisionEvent
+            && head?.kind !== "new ticket") {
+            headCommentHashid = eventHint.commentHashid;
+            if (eventHint.commentBody) headBody = eventHint.commentBody;
+            if (!head?.id) {
+                head = { id: eventHint.ticketId, title: undefined, kind: "comment" };
+                // The hint doesn't carry the parent ticket title — best-effort.
+                try {
+                    const t = await client.getTicket(eventHint.ticketId, { summary: true }) as {
+                        ticket?: { title?: string | null };
+                    };
+                    const title = t.ticket?.title;
+                    if (typeof title === "string" && title) head = { ...head, title };
+                } catch { /* best-effort */ }
+            }
+        }
         // When the FIFO is empty, fall back to the top backlog ticket.
         // ?backlog=1 returns the two-tier set: actionable first (ball in
         // my court), then open AND I-was-last-actor (ball in theirs).
@@ -1729,7 +1772,9 @@ export async function buildContextPhrase(
         // first of either tier. Respects no-claim semantics: a consumer
         // with consumer.can_claim=false has an empty actionable tier and
         // only surfaces tier-2 reminders where they were last actor.
-        if (!head && pingCount === 0 && openCount > 0) {
+        // #999 — `!eventHint` : an event wake never enters the backlog
+        // fallback (its format is comment-centric, anchored above).
+        if (!head && pingCount === 0 && openCount > 0 && !eventHint) {
             try {
                 // /api/tickets returns a raw JSON array, not an envelope.
                 // backlog=1 returns the two-tier set documented in
@@ -1804,7 +1849,12 @@ export async function buildContextPhrase(
         // #749 — backlog branch fires when an open head is available
         // (FIFO empty, at least one open ticket). The agent's discipline
         // skill decides whether to claim or just triage.
-        const backlogMode = (pingCount === 0 && hasClaimableHead && !blocking)
+        // #999 — `!eventHint` reserves the backlog ticket-centric branch for
+        // the no-hint heartbeat path. An event-triggered wake renders the
+        // event branch (comment/lifecycle/decision/new-ticket) or, if nothing
+        // resolved, no_head (empty phrase → the wake gate refuses to inject) —
+        // never a misleading "look #N… Triage" for a concrete event.
+        const backlogMode = (pingCount === 0 && hasClaimableHead && !blocking && !eventHint)
             ? "1" : "";
         const vars = {
             culture,
