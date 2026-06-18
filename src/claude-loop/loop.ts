@@ -122,7 +122,6 @@ import { bootMachine, liveBootModules } from "./boot-machine.js";
 
 let bootActor: ActorRefFrom<typeof bootMachine> | null = null;
 import { getHookWatcher } from "./hook-watcher.js";
-import { WAKE_COOLDOWN_MS } from "./wake-machine.js";
 import { getSanityService } from "./sanity-service.js";
 import {
     getIpcState,
@@ -187,6 +186,11 @@ if (!sd || !name) {
     process.exit(1);
 }
 const interval = Math.max(1, cfg.interval_seconds);
+// #999 — propagate the configured drain tempo to the env so `turn-service`
+// (which reads `CL_WAKE_TEMPO_SEC` lazily at first `getTurnService()`) picks
+// up the `.aiball.yaml` value. Must run before any `getTurnService()` call.
+const wakeTempoSec = Math.max(1, cfg.wake_tempo_seconds);
+process.env[CL_ENV.WAKE_TEMPO_SEC] = String(wakeTempoSec);
 const tname = tmuxName(name);
 
 /**
@@ -492,15 +496,12 @@ function selfReloadIfStale(): void {
     process.exit(0);
 }
 
-// #B.221: when the SSE hint carries a ticket_id, `buildWakePhrase`
-// renders the directive template ("Handle ticket #X — comment #Y.")
-// — already context-rich, no wrap needed. When there's no hint
-// (heartbeat re-check, manual wake, SSE-drop safety net), we used to
-// fall back to a bare culture phrase from `pickPingPhrase`. That left
-// claude with the same no-context greeting bug session-start had.
-// Now we route the no-hint path through `buildContextPhrase` so the
-// wake carries unread/open counts + a drain directive too. Async
-// because the wrap helper queries the daemon; tryWakeInner already
+// #999 — every wake (event hint or periodic drain) routes through the
+// SINGLE renderer `buildContextPhrase` : it pops the FIFO head (rendered
+// by its kind branch) or falls to the backlog branch when the FIFO is
+// empty. An event hint anchors the comment-centric format (eventHint path).
+// The legacy `buildWakePhrase` second renderer was removed (dead code).
+// Async because the renderer queries the daemon; tryWakeInner already
 // awaits checkHasWork so adding another await here is a no-op.
 //
 // #544 david `hdc7hn` : avant d'emettre le directive "Handle ticket #X",
@@ -1094,6 +1095,12 @@ function client(): AiballClient {
 //   - standalone (= jamais prepended à autre message)
 //   - skip si claude jamais idle stable (= force injection évitée)
 let postBootRemindersSent = false;
+// #999 model (a) — the latest SSE event awaiting a drain. Set by the SSE
+// ping handler (non-panic), consumed by the `turn:settled` drain (the single
+// 10s tempo driver) so the wake renders comment-centric via the eventHint
+// path. Cleared on consumption and on `turn:started` (a new turn supersedes a
+// stale pending event).
+let pendingWakeHint: WakeHint | undefined;
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint, panicMode = false): Promise<boolean> {
     const wakeSvc = getWakeService();
     if (!wakeSvc.isIdle()) {
@@ -1398,23 +1405,27 @@ async function mainSse(): Promise<void> {
                 }
             } catch { /* counter sync best-effort */ }
         })();
-        // Pass the SSE payload as a hint so the wake phrase can name
-        // the concrete artifact instead of a random pop-culture line.
-        const tag = panic ? "sse:ping:panic" : "sse:ping";
-        void tryWake(tag, false, p, panic).then((fired) => {
-            if (fired) return;
-            // If the wake skipped while busy-defer is active, the
-            // heartbeat may already be mid-sleep and won't re-check at
-            // expiry (its cap is computed only on sleep entry). Schedule
-            // a one-shot retry so the SSE event lands as soon as the
-            // tempo opens up, not at the next 30s heartbeat tick.
-            const defer = readBusyDefer(sd!);
-            if (defer && defer.activeMs > 0) {
-                setTimeout(() => {
-                    void tryWake(panic ? "sse:retry:panic" : "sse:retry", false, p, panic);
-                }, defer.activeMs + 100);
-            }
-        });
+        // #999 — model (a) : an SSE event does NOT fire a wake directly.
+        // It records the payload as the pending hint ; the single drain
+        // driver (`turn:settled`, the 10s tempo) picks it up on its next
+        // tick (≤ tempo) and renders it comment-centric via the eventHint
+        // path. This removes the "SSE fires direct" path that raced the
+        // FIFO and fell to the backlog "Triage" branch (#999). PANIC is
+        // the one exception : it stays immediate (rare + urgent).
+        if (panic) {
+            void tryWake("sse:ping:panic", false, p, true).then((fired) => {
+                if (fired) return;
+                const defer = readBusyDefer(sd!);
+                if (defer && defer.activeMs > 0) {
+                    setTimeout(() => {
+                        void tryWake("sse:retry:panic", false, p, true);
+                    }, defer.activeMs + 100);
+                }
+            });
+        } else {
+            pendingWakeHint = p;
+            log(`SSE ping recorded as pending hint — drains on next turn:settled (≤${wakeTempoSec}s tempo)`);
+        }
     });
     wakeBus.on("error", (e) => {
         setIpcSseConnected(false);
@@ -1901,11 +1912,21 @@ async function mainSse(): Promise<void> {
             // cohérence avec le handler turn:settled ci-dessous.
             const ctx = snap.context;
             const bootDone = getIpcState().loopStart;
-            if (bootDone && snap.matches("no_turn") && ctx.idleSinceMs !== null) {
+            // #999 david `7dfxgf` (point 2) — only arm the `📨Ns` countdown
+            // when there's actually something to drain : a pending SSE event,
+            // OR a non-empty FIFO (events>0) / backlog (backlog>0). Nothing
+            // pending + empty FIFO + empty backlog → no countdown (the drain
+            // would no-op anyway). The cadence reflects the configured tempo.
+            const c = getIpcState().counters;
+            const somethingToDrain = pendingWakeHint !== undefined
+                || (c?.events ?? 0) > 0
+                || (c?.backlog ?? 0) > 0;
+            const tempoMs = wakeTempoSec * 1000;
+            if (bootDone && somethingToDrain && snap.matches("no_turn") && ctx.idleSinceMs !== null) {
                 const isSettled = snap.matches({ no_turn: "settled" });
                 const nextAt = isSettled
-                    ? Date.now() + WAKE_COOLDOWN_MS
-                    : ctx.idleSinceMs + WAKE_COOLDOWN_MS;
+                    ? Date.now() + tempoMs
+                    : ctx.idleSinceMs + tempoMs;
                 setIpcNextWakeAt(nextAt);
             } else {
                 setIpcNextWakeAt(null);
@@ -1921,6 +1942,9 @@ async function mainSse(): Promise<void> {
         });
         turnActor.on("turn:started", (ev) => {
             log(`turnMachine: turn:started atMs=${ev.atMs}`);
+            // #999 — a new turn supersedes a stale pending SSE event (the
+            // human is interacting ; the deferred hint would be outdated).
+            pendingWakeHint = undefined;
             // #1012 — un turn qui commence AVANT la fin du boot (C2 pas encore
             // true) fait tomber C1 : claude n'est plus idle-ready, la session
             // attendra la fin de ce turn.
@@ -1954,7 +1978,7 @@ async function mainSse(): Promise<void> {
             // n'est plus géré ici (= sendKeys immédiat au boot:sealed,
             // cf. onFreshBootSeal).
             if (!getIpcState().loopStart) return;
-            log(`turnMachine: turn:settled idleSinceMs=${ev.idleSinceMs} tunnel=${WAKE_COOLDOWN_MS}`);
+            log(`turnMachine: turn:settled idleSinceMs=${ev.idleSinceMs} tempo=${wakeTempoSec}s`);
             // #890 safety : si paneBusy était encore latché true ici (pane
             // SM no_turn stable depuis 30s = forcément pas busy), clear le
             // latch. Garde-fou en cas de Stop hook perdu.
@@ -1963,7 +1987,12 @@ async function mainSse(): Promise<void> {
                 busyProofs = releaseBusyProofs(); // #1014
                 setPaneBusy(sd, false);
             }
-            void tryWake("turn:settled");
+            // #999 model (a) — sole periodic drain driver. Consume any pending
+            // SSE event so the wake renders comment-centric (eventHint path) ;
+            // a bare tick (no pending) drains the FIFO / backlog normally.
+            const hint = pendingWakeHint;
+            pendingWakeHint = undefined;
+            void tryWake("turn:settled", false, hint);
         });
     }
     // #866 Slice 1 — runtime parent watchdog. Reprobe la session tmux
@@ -2214,7 +2243,16 @@ async function mainSse(): Promise<void> {
         }
         // SSE-drop safety net: re-check the gate ourselves.
         if (!wakeBus.isConnected()) wakeBus.connect();
-        const woke = await tryWake("heartbeat");
+        // #999 model (a) — the single periodic drain driver is `turn:settled`
+        // (the 10s tempo). The heartbeat no longer drains on every tick : it's
+        // an ANTI-STUCK fallback only, firing when `turn:settled` isn't
+        // scheduling a drain (`nextWakeAtMs === null` = turn-machine not in
+        // idle-settled, e.g. a lost Stop hook left it wedged, OR nothing to
+        // drain in which case this no-ops via the work gate). When turn:settled
+        // owns the cadence, the heartbeat stays out of the wake path entirely.
+        const woke = getIpcState().nextWakeAtMs === null
+            ? await tryWake("heartbeat-fallback")
+            : false;
         if (!woke && readIdleSinceMs(sd!) !== null) {
             // #251: idle + nothing to wake on = the safe lull to pick up
             // new code. Re-execs the timer in place if the source SHA

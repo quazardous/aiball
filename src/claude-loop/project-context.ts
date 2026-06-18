@@ -44,6 +44,7 @@ export interface ProjectContext {
     /** #B.180 david: claude-loop timeouts, yaml-configurable. */
     claude_loop: {
         interval_seconds: number;
+        wake_tempo_seconds: number;
         boot_grace_seconds: number;
         boot_min_seconds: number;
         auto_resume: boolean;

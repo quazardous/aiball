@@ -58,6 +58,7 @@ function applyEnvOverrides(cfg: AiballConfig): void {
 
     let ov: number | string | boolean | undefined;
     if ((ov = num(CL_ENV.INTERVAL)) !== undefined) cl.interval_seconds = ov;
+    if ((ov = num(CL_ENV.WAKE_TEMPO_SEC)) !== undefined) cl.wake_tempo_seconds = ov;
     if ((ov = num(CL_ENV.BOOT_GRACE_SEC)) !== undefined) cl.boot_grace_seconds = ov;
     if ((ov = num(CL_ENV.BOOT_MIN_SEC)) !== undefined) cl.boot_min_seconds = ov;
     if ((ov = num(CL_ENV.WAKE_IN_FLIGHT_TTL_MS)) !== undefined) cl.wake_in_flight_ttl_ms = ov;

@@ -50,6 +50,9 @@ export const CL_ENV = {
     PANE_BUSY_DELAY_MS: "CL_PANE_BUSY_DELAY_MS",
     WAKE_IN_FLIGHT_TTL_MS: "CL_WAKE_IN_FLIGHT_TTL_MS",
     WAKE_COALESCE_WINDOW_MS: "CL_WAKE_COALESCE_WINDOW_MS",
+    // #999 — drain tempo (seconds). The single periodic drain cadence
+    // (turn:settled re-arm = the `📨Ns` countdown). Default 10.
+    WAKE_TEMPO_SEC: "CL_WAKE_TEMPO_SEC",
     // #786 — backlog wake cooldown (seconds). The loop sends this to the
     // daemon's ?backlog=1 filter; a ticket the loop just named won't
     // surface again until the cooldown elapses OR someone replies on it.

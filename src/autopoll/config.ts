@@ -125,6 +125,11 @@ export interface AiballConfig {
     claude_loop: {
         /** Heartbeat tick in seconds. CL_INTERVAL. */
         interval_seconds: number;
+        /** #999 — single drain-tempo cadence in seconds (the `turn:settled`
+         *  re-arm = the `📨Ns` bar countdown). Replaces the old dual
+         *  10s-turn:settled / 30s-heartbeat wake scheduling. Default 10.
+         *  CL_WAKE_TEMPO_SEC. */
+        wake_tempo_seconds: number;
         /** Boot-grace before settleBoot fires. CL_BOOT_GRACE_SEC. */
         boot_grace_seconds: number;
         /** #629 david `2hwuan` : floor INVIOLABLE — boot phase ne peut PAS
@@ -292,6 +297,8 @@ const DEFAULTS: AiballConfig = {
         // Heartbeat 30s, grace windows 60s — coherent order of
         // magnitude, all yaml-overridable (#B.180, #B.185).
         interval_seconds: 30,
+        // #999 — drain tempo 10s (the single periodic wake cadence).
+        wake_tempo_seconds: 10,
         boot_grace_seconds: 60,
         boot_min_seconds: 30,
         auto_resume: true,
@@ -563,6 +570,9 @@ export function loadConfig(cwd: string = process.cwd()): AiballConfig {
             const cl = (raw.claude_loop ?? {}) as Record<string, unknown>;
             if (typeof cl.interval_seconds === "number" && cl.interval_seconds > 0) {
                 cfg.claude_loop.interval_seconds = cl.interval_seconds;
+            }
+            if (typeof cl.wake_tempo_seconds === "number" && cl.wake_tempo_seconds > 0) {
+                cfg.claude_loop.wake_tempo_seconds = cl.wake_tempo_seconds;
             }
             if (typeof cl.boot_grace_seconds === "number" && cl.boot_grace_seconds >= 0) {
                 cfg.claude_loop.boot_grace_seconds = cl.boot_grace_seconds;
