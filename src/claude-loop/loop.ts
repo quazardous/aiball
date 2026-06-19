@@ -185,7 +185,7 @@ const checkCmd = process.env[CL_ENV.CHECK_CMD] ?? "true";
 // retired. A single grace window now drives both gates. To stay
 // back-compat with projects that still set `ask_grace_seconds` in
 if (!sd || !name) {
-    process.stderr.write("[claude-loop:timer] missing CL_* env vars\n");
+    process.stderr.write("[claude-loop:kernel] missing CL_* env vars\n");
     process.exit(1);
 }
 const interval = Math.max(1, cfg.interval_seconds);
@@ -476,7 +476,7 @@ function selfReloadIfStale(): void {
         `source moved since boot (${(plate.started_at_sha ?? "?").slice(0, 7)} → ${(sha ?? "?").slice(0, 7)}) ` +
         `and loop is idle — self-reloading timer`,
     );
-    respawnTimer("SHA moved since boot (idle)");
+    respawnKernel("SHA moved since boot (idle)");
 }
 
 // #1040 — on-demand timer re-exec, extracted from `selfReloadIfStale` so the
@@ -486,8 +486,8 @@ function selfReloadIfStale(): void {
 // new timer on the SAME entrypoint (loop.ts), and exits. The hotkey path
 // BYPASSES the SHA staleness check (= a manual reload regardless of drift) —
 // useful precisely when the auto-trigger is broken (#1040).
-function respawnTimer(reason: string): void {
-    log(`respawning timer — ${reason}`);
+function respawnKernel(reason: string): void {
+    log(`respawning kernel — ${reason}`);
     try {
         const plate = readPlate(sd!);
         const sha = installRootSha();
@@ -1417,12 +1417,12 @@ async function tryWakeInner(reason: string, manualWake: boolean, hint?: WakeHint
  * the stream with simple backoff (no aggressive reconnect storm).
  */
 async function mainSse(): Promise<void> {
-    log(`timer started — SSE mode (heartbeat ${interval}s), check-cmd: ${checkCmd || "(internal SDK)"}`);
+    log(`kernel started — SSE mode (heartbeat ${interval}s), check-cmd: ${checkCmd || "(internal SDK)"}`);
     // #B.225: log the install-root SHA so `--log` shows what version
     // of the timer is actually running. `cmdList` / `cmdCheck` diff
     // this against the live HEAD to flag a ghost daemon.
     const bootSha = installRootSha();
-    if (bootSha) log(`timer source: install-root SHA ${bootSha.slice(0, 7)}`);
+    if (bootSha) log(`kernel source: install-root SHA ${bootSha.slice(0, 7)}`);
     // #1032 S2 — the timer just (re)started : replay anything the hooks/proxy
     // offloaded while the IPC was down (with original ts) into the central log.
     drainOffloadIntoLog();
@@ -1591,11 +1591,11 @@ async function mainSse(): Promise<void> {
             // #1040 — reload hotkey (Ctrl+N by default) : the proxy detects the
             // key, consumes it, and emits {event:"reload"}. Re-exec the timer on
             // the SAME path as the SHA-stale auto-trigger (bypassing the
-            // staleness check = an on-demand manual reload). respawnTimer exits,
+            // staleness check = an on-demand manual reload). respawnKernel exits,
             // so this is terminal — handle before the normal dispatch.
             if (event.event === "reload") {
-                log("proxy-event: reload hotkey → respawning timer");
-                respawnTimer("reload hotkey");
+                log("proxy-event: reload hotkey → respawning kernel");
+                respawnKernel("reload hotkey");
                 return;
             }
             // #1039 — the proxy emits a `hello` right after (re)connecting so the
@@ -2134,7 +2134,7 @@ async function mainSse(): Promise<void> {
         sessionName: tname,
         intervalMs: 5000,
         onDead: () => {
-            log(`runtime watchdog: tmux session '${tname}' is gone — timer self-exiting`);
+            log(`runtime watchdog: tmux session '${tname}' is gone — kernel self-exiting`);
             process.exit(0);
         },
     });
@@ -2447,7 +2447,7 @@ async function mainSse(): Promise<void> {
             break;
         }
     }
-    log("tmux session gone — timer exiting");
+    log("tmux session gone — kernel exiting");
     wakeBus.close();
     // #714 — explicit process.exit so pending handles (setInterval, fs.watch,
     // UDS servers, hook subscribers, boot-grace setTimeout) don't keep the
@@ -2463,10 +2463,10 @@ async function mainSse(): Promise<void> {
  * doesn't apply.
  */
 async function mainPoll(): Promise<void> {
-    log(`timer started — polling mode (tick ${interval}s), check-cmd: ${checkCmd}`);
+    log(`kernel started — polling mode (tick ${interval}s), check-cmd: ${checkCmd}`);
     // #B.225: same boot SHA log as mainSse — see comment there.
     const bootSha = installRootSha();
-    if (bootSha) log(`timer source: install-root SHA ${bootSha.slice(0, 7)}`);
+    if (bootSha) log(`kernel source: install-root SHA ${bootSha.slice(0, 7)}`);
     // Same startup safety net as SSE mode (#B.148): drain any
     // pre-existing work right away instead of waiting `interval`s.
     await tryWake("startup");
@@ -2485,7 +2485,7 @@ async function mainPoll(): Promise<void> {
         // source only in the lull (no wake fired AND claude is idle).
         if (!woke && readIdleSinceMs(sd!) !== null) selfReloadIfStale();
     }
-    log("tmux session gone — timer exiting");
+    log("tmux session gone — kernel exiting");
     // #714 — same explicit exit as mainSse (handles pinned by signals,
     // fs.watch, etc. would otherwise keep this dead process alive).
     process.exit(0);
@@ -2574,6 +2574,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((e) => {
-    process.stderr.write(`[claude-loop:${name}] timer crashed: ${String(e)}\n`);
+    process.stderr.write(`[claude-loop:${name}] kernel crashed: ${String(e)}\n`);
     process.exit(1);
 });

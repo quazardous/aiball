@@ -6,7 +6,10 @@
  * Every action LOGS (david : « qui log ») into the central loop NDJSON — it
  * reuses `createLogger` (the sole NDJSON owner, src/log.ts) + the existing
  * `LOG` frame transport over `loop.sock`, exactly like the hooks do. The line
- * is delivered to the timer BEFORE the destructive action so the timeline reads
+ * is delivered to the kernel BEFORE the destructive action so the timeline reads
+ *
+ * Naming (#1036) : "kernel" = the long-lived worker process (loop.ts) ; "timer"
+ * is reserved for genuine setTimeout/setInterval. "proxy" = pty-proxy.py.
  * `debug kill-proxy` → `proxy link lost` → `bar RED` in order.
  */
 import { existsSync, readFileSync } from "node:fs";
@@ -20,7 +23,7 @@ import {
 import { sendEventOnce } from "../ipc-events.js";
 import { createLogger } from "../../log.js";
 
-const ACTIONS = ["kill-proxy", "kill-timer"] as const;
+const ACTIONS = ["kill-proxy", "kill-kernel"] as const;
 type DebugAction = (typeof ACTIONS)[number];
 
 function readPid(path: string): number | null {
@@ -54,7 +57,7 @@ export async function cmdDebug(action: string, name: string): Promise<void> {
 
     const target = action === "kill-proxy"
         ? { pid: readPid(proxyAlivePath(sd)), label: "proxy", what: "pty-proxy.py" }
-        : { pid: readPid(loopPidPath(sd)), label: "timer", what: "loop.ts" };
+        : { pid: readPid(loopPidPath(sd)), label: "kernel", what: "loop.ts" };
 
     if (target.pid === null) {
         process.stderr.write(`debug ${action}: no ${target.label} pid for '${name}' (not running?)\n`);
@@ -80,7 +83,7 @@ export async function cmdDebug(action: string, name: string): Promise<void> {
         );
     } else {
         process.stdout.write(
-            `debug kill-timer: killed timer pid ${target.pid} for '${name}'.\n`
+            `debug kill-kernel: killed kernel pid ${target.pid} for '${name}'.\n`
             + `  → expect: bar FREEZES (no painter left). Recover with \`claude-loop reload ${name}\` (or health --revive when it lands, #1042).\n`,
         );
     }

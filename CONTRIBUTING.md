@@ -215,6 +215,27 @@ The legacy French slowly disappears as files are revisited.
 since david switched to English. This doc is now the source of
 truth.)
 
+### 2.1b Naming: kernel / loop / proxy / timer
+
+One word per concept — don't mix them:
+
+- **claude-loop** — the product/brand: the CLI, the tmux wrapper, the
+  state dir, and brand-named artifacts (`loop.sock`, `loop.pid`,
+  `loop.log`). These keep the `loop.*` prefix.
+- **kernel** — the long-lived worker process (`loop.ts`): owns the
+  XState machines, the bar renderer, the IPC server, the wake loop.
+  This is what was historically called the *timer* (`timer.ts`, pre-#966)
+  and loosely the *loop process*. New code calls it the **kernel**.
+- **timer** — reserved strictly for genuine `setTimeout` / `setInterval`
+  (grace windows, the wake tempo, heartbeat, the turn-machine settle
+  delay). Never use "timer" for the worker process.
+- **proxy** (`pty-proxy.py`), **bar**, **hooks** — unchanged.
+
+Legacy "timer"-as-process references disappear as files are revisited
+(same rule as the French→English migration above): anything you *write*
+uses `kernel` for the process; you don't have to sweep a whole file you
+only touched in passing.
+
 ### 2.2 Comments: default to none
 
 The default is to write **no comment**. A well-named identifier and a

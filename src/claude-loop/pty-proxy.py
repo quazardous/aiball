@@ -45,7 +45,7 @@ import threading
 import queue
 import time
 
-# #729 phase 2 — websocket-client over UDS for IPC with the timer
+# #729 phase 2 — websocket-client over UDS for IPC with the kernel
 # (proxy-events + view-push). Required in LIVE mode only ; `--replay`
 # and `--replay-log` short-circuit before any socket use, so they keep
 # working without the dep. The live `main()` path checks `_HAS_WEBSOCKET`
@@ -83,7 +83,7 @@ def _proxy_alive_path():
 # #629 david `xyss9z` — mirror du logBarPaint TS. Off par défaut, on
 # par `CL_BAR_PAINT_LOG=1`. Append à `<state_dir>/bar-paint.log` une
 # ligne par paint @cl_human depuis le proxy (_paint_word direct ou
-# _apply_pushed_view via le timer).
+# _apply_pushed_view via le kernel).
 _BAR_PAINT_LOG_ENABLED = os.environ.get("CL_BAR_PAINT_LOG") == "1"
 _BAR_PAINT_LOG_T0 = datetime.datetime.now()
 
@@ -193,9 +193,9 @@ def split_keystrokes(data: bytes, combos=None):
 
 def touch_marker():
     """#839 Slice 1 — local file fallback dropped (no-op). The
-    `human-typing` marker is set EXCLUSIVELY via the timer's dispatcher
+    `human-typing` marker is set EXCLUSIVELY via the kernel's dispatcher
     (`emit_marker("touch_marker")` → `touchHumanTyping(sd)` on the TS
-    side). If the emit fails (timer not reachable), the proxy skips
+    side). If the emit fails (kernel not reachable), the proxy skips
     silently rather than writing the file locally — single-writer
     discipline (#766 / #844 race fix)."""
     return
@@ -211,7 +211,7 @@ def touch_marker():
 # --- Peinture directe du segment human de la barre tmux (#274) ---
 # Le proxy POSSÈDE le segment `@cl_human` quand il est vivant : il le
 # repeint INSTANTANÉMENT dès la 1re touche (pas de poll, pas de round-trip
-# par le timer TS). setTmuxStatus côté TS référence `#{@cl_human}` dans un
+# par le kernel TS). setTmuxStatus côté TS référence `#{@cl_human}` dans un
 # status-left statique et NE le touche pas tant que le proxy tourne
 # (proxy-alive présent) → zéro bagarre. La couleur de fond vient de
 # `status-bg` (état idle/busy/boot piloté par le TS), donc on n'écrit que
@@ -220,7 +220,7 @@ def touch_marker():
 HUMAN_TTL_SEC = 5  # doit suivre HUMAN_TYPING_TTL_SEC côté TS
 
 # #862 Slice 4 — `_HUMAN_*` constants retirées. Le BarRenderer côté
-# timer (TS) est l'unique writer de `@cl_human` ; le proxy ne peint plus.
+# kernel (TS) est l'unique writer de `@cl_human` ; le proxy ne peint plus.
 # #302/#345: --no-wait (CL_WAIT=0) skips only the boot-grace; a present human
 # (live typing → `stop`, armed user-grace → `wait`) is still reflected, aligned
 # with humanPresenceWord (state.ts).
@@ -251,8 +251,8 @@ except ValueError:
     _AFK_WINDOW_MS = 400
 
 # #1040 — reload hotkey. CL_RELOAD_KEY = hex byte sequence of the key that
-# triggers an on-demand timer reload (proxy consumes it + emits {event:"reload"}
-# → timer respawnTimer()). Default = Ctrl+N (`0x0e`) : a SINGLE control byte
+# triggers an on-demand kernel reload (proxy consumes it + emits {event:"reload"}
+# → kernel respawnKernel()). Default = Ctrl+N (`0x0e`) : a SINGLE control byte
 # (deterministic across terminals — no Fn escape-sequence ambiguity that froze
 # the display when the bytes didn't match), and confirmed UNUSED by Claude Code
 # (it binds A/E/K/U/W/Y for editing, B/G/L/O/R/S/T/V/X/_ etc., but NOT Ctrl+N ;
@@ -264,11 +264,11 @@ except ValueError:
 
 
 # #840 Slice A (#766) — module-level cache of the last pushed_view from
-# the timer, populated by `_apply_pushed_view`. Read-only consumers (e.g.
+# the kernel, populated by `_apply_pushed_view`. Read-only consumers (e.g.
 # `_afk_mode`) consult it instead of reading the `afk` shadow file.
 #
 # #840 `4z59jt` (Slice 2) — david "vire tout marker fichier" : on retire
-# le fallback fichier. Le cache est hydraté par le timer via WS push
+# le fallback fichier. Le cache est hydraté par le kernel via WS push
 # (cf. `_apply_pushed_view`) dès la connexion établie. Tant que le cache
 # est cold (= avant le 1er push), _afk_mode retourne None (= OFF) — même
 # sémantique que "fichier absent" pré-migration. Pas de race significative :
@@ -284,7 +284,7 @@ def _afk_mode():
        ("until", <ts>)   → AFK auto-release at that float timestamp
 
     #840 `4z59jt` — IPC-only. Le cache `_pushed_view_cache` est hydraté
-    par le timer (WS push). Aucun fichier consulté."""
+    par le kernel (WS push). Aucun fichier consulté."""
     cached = _pushed_view_cache.get("view")
     if cached is None:
         return None
@@ -309,11 +309,11 @@ def set_afk_until(seconds):
     """#619 : AFK auto-release after `seconds` (10min state in the F9 cycle).
 
     #839 Slice 1 (#766 path) — emit-only. The proxy NEVER writes the
-    `afk` file directly anymore ; the timer's dispatcher is the single
+    `afk` file directly anymore ; the kernel's dispatcher is the single
     writer (`armAfkViaService` on receipt of `marker:set_afk_10m`). If
-    the emit fails (timer not reachable / cold-boot race), the AFK
+    the emit fails (kernel not reachable / cold-boot race), the AFK
     mutation is dropped silently — fail-safe instead of leaking a
-    file-write past the timer's boot guard (= #844 root cause)."""
+    file-write past the kernel's boot guard (= #844 root cause)."""
     expiry = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
     expiry_ms = int(expiry.timestamp() * 1000)
     _proxy_events.emit({"event": "marker", "name": "set_afk_10m", "expiry_ms": expiry_ms, "now_ms": int(datetime.datetime.now().timestamp() * 1000)})
@@ -355,23 +355,23 @@ def toggle_afk():
 def arm_afk_10m():
     """#622 david `jzcgmh` : typing arms/refreshes a NOT AFK 10m hold
     EXCEPT when already in NOT AFK ∞ (only F9 can release that).
-    From AFK : arm 10m fresh. From NOT AFK 10m : reset the timer to
+    From AFK : arm 10m fresh. From NOT AFK 10m : reset the 10m timer to
     10:00. From NOT AFK ∞ : no-op.
 
-    #633 Slice A : in non-degraded mode this is now driven by the timer
+    #633 Slice A : in non-degraded mode this is now driven by the kernel
     via the proxy-events back-channel — apply_decision routes the
     arm_afk_10m intent to `_proxy_events.emit_typing()` instead of
     calling this function locally. This function stays the FALLBACK for
-    degraded mode (no timer connected) so debug-proxy-tty still works."""
+    degraded mode (no kernel connected) so debug-proxy-tty still works."""
     if _afk_mode() == "inf":
         return
     set_afk_until(600)
 
 
 # #633 Slice A david `ecmrvn` — back-channel client that emits raw events
-# to the timer's shared `loop.sock` (#730 step 2 ; was `proxy-events.sock`
+# to the kernel's shared `loop.sock` (#730 step 2 ; was `proxy-events.sock`
 # before the consolidation). Persistent connection, reconnect on failure,
-# silent no-op if the timer isn't there (degraded mode — the caller falls
+# silent no-op if the kernel isn't there (degraded mode — the caller falls
 # back to local logic). Single instance lazily created.
 #
 # #729 phase 2 — transport is ws over UDS via `websocket-client`. The
@@ -395,7 +395,7 @@ class _ProxyEventEmitter:
 
     def emit(self, payload):
         """Best-effort fire-and-forget. Returns True if the event was
-        handed to the kernel send buffer, False if no timer is reachable
+        handed to the kernel send buffer, False if no kernel is reachable
         (caller falls back to local logic)."""
         if not _HAS_WEBSOCKET or self._channel is None:
             return False
@@ -419,7 +419,7 @@ _proxy_events = _ProxyEventEmitter()
 
 
 # #729 phase 2 — loop.sock ws client. Direction inversion validated by
-# david (8yg34n, go C) : the timer is now SERVER, the proxy connects in
+# david (8yg34n, go C) : the kernel is now SERVER, the proxy connects in
 # as CLIENT. #730 step 3 — the client dispatches on `kind` and now
 # also handles `inject` frames (wake phrase bytes to write to the PTY),
 # folding the former `inject.sock` raw server onto the same channel.
@@ -432,8 +432,8 @@ class _ViewPushClient:
     `view` → queue drained as view dicts (paint bar/AFK) ;
     `inject` → queue drained as raw text fragments (write to master_fd).
 
-    Best-effort reconnect with fixed 1s backoff. A missing timer (boot
-    race, timer crashed) is silent — the proxy paints from rules-locales
+    Best-effort reconnect with fixed 1s backoff. A missing kernel (boot
+    race, kernel crashed) is silent — the proxy paints from rules-locales
     until the next push lands, exactly like before the inversion.
 
     #769 Phase 1 — also acts as the SHARED connection for outbound
@@ -503,8 +503,8 @@ class _ViewPushClient:
                 with self._ws_lock:
                     self._ws = ws
                 # #1039 — announce ourselves right after (re)connecting so the
-                # timer tags THIS connection as the proxy peer (link UP) without
-                # waiting for the first keystroke. The timer treats `hello` as a
+                # kernel tags THIS connection as the proxy peer (link UP) without
+                # waiting for the first keystroke. The kernel treats `hello` as a
                 # no-op dispatch ; its only job is to identify the proxy so a
                 # later close of this connection is recognised as link-down (RED).
                 try:
@@ -694,7 +694,7 @@ clear_afk()  # #351: drop any stale afk marker left by a previous run, on boot
 # le mot `wait` MÊME sous --no-wait (avant : --no-wait => toujours `loop`).
 # Un proxy qui relance dans le même CL_STATE_DIR (claude crash/resume au sein
 # d'un loop vivant) héritait du marqueur de la session précédente → la barre
-# bootait en `wait` et le timer gelait ses auto-pings. Au boot AUCUN humain
+# bootait en `wait` et le kernel gelait ses auto-pings. Au boot AUCUN humain
 # n'a (encore) pris la main pour CE run ; toute présence est stale → on la
 # largue, comme clear_afk. S'il est réellement là, sa 1re frappe/ESC ré-arme.
 # #745 phase B — l'appel `clear_user_grace()` ici (héritage #357) est
@@ -703,7 +703,7 @@ clear_afk()  # #351: drop any stale afk marker left by a previous run, on boot
 # l'absence d'AFK hold sans avoir à nettoyer quoi que ce soit.
 
 # #305: début de la fenêtre boot-grace = import du proxy (≈ boot du loop).
-# Sans --no-wait, le timer gèle TOUS les auto-pings pendant les
+# Sans --no-wait, le kernel gèle TOUS les auto-pings pendant les
 # CL_BOOT_GRACE_SEC premières secondes (laisse l'humain prendre la main au
 # lancement) → la barre doit lire `wait`, pas `loop`, tant que la fenêtre tient.
 _BOOT_TS = datetime.datetime.now().timestamp()
@@ -712,8 +712,8 @@ _BOOT_TS = datetime.datetime.now().timestamp()
 def _note_wake_injected():
     """#305 (david j8xhrh : « vu que claude-loop balance un wake c'est qu'il
     sait qu'il est en mode loop »). Un wake injecté PROUVE que le gate est
-    ouvert : le timer/stop-hook ne pinge QUE hors user-grace ET hors boot-grace
-    (cf. tryWake, timer.ts:418/425). La barre n'a donc pas à maintenir un état
+    ouvert : le kernel/stop-hook ne pinge QUE hors user-grace ET hors boot-grace
+    (cf. tryWake, loop.ts:418/425). La barre n'a donc pas à maintenir un état
     d'attente PARALLÈLE qui peut diverger et latcher `wait` (le bug #305) ; le
     wake fait AUTORITÉ. On largue les deux raisons d'attente — boot-grace
     (neutralisée) + user-grace stale (marqueur retiré) — pour que `_rest_word`
@@ -742,7 +742,7 @@ def _proxy_log_path():
     - `CL_PROXY_LOG=<fichier>` (legacy) — chemin explicite, priorité ;
     - `CL_CAPTURE=1` (#990) — switch unifié : route vers
       `<state_dir>/capture/proxy.ndjson` (même dossier que `panes.ndjson`
-      écrit par le timer ; même horloge `t` → mergeable au replay).
+      écrit par le kernel ; même horloge `t` → mergeable au replay).
     Le proxy logue DÉJÀ frappe humaine (apply_decision) ET injects
     synthétiques (event:"inject", drain) dans ce même fichier."""
     explicit = os.environ.get("CL_PROXY_LOG")
@@ -853,7 +853,7 @@ class _Decider:
         # #1040 — reload hotkey (Ctrl+N by default, a single control byte).
         # Exact-match the unit BEFORE the AFK check so it takes priority.
         # Consume it (no forward to claude) ; the live caller emits
-        # {event:"reload"} → timer respawns.
+        # {event:"reload"} → kernel respawns.
         if _RELOAD_KEY and data == _RELOAD_KEY:
             d["reload"] = True
             return d
@@ -1196,7 +1196,7 @@ def _grace_seconds():
 
 # #856 Phase 2 — `_user_grace_remaining` retiré : la fonction lisait
 # `user-took-over` (marker retiré dans #745 phase B au profit du seul
-# AFK SM). Plus aucun call site Python ; le timer TS ne fait plus
+# AFK SM). Plus aucun call site Python ; le kernel TS ne fait plus
 # écrire le marker. Comments orphelins ci-dessus + #619 collapse note
 # conservés pour l'historique.
 
@@ -1205,7 +1205,7 @@ def _boot_grace_remaining():
     """#305 : bootstrap fallback time-based — secondes de boot-grace
     restantes (CL_BOOT_GRACE_SEC depuis le spawn proxy), 0.0 hors-fenêtre
     ou sous --no-wait. Utilisé UNIQUEMENT via `_in_boot_phase()` quand
-    aucune push timer n'est arrivée (= cold boot du proxy)."""
+    aucune push kernel n'est arrivée (= cold boot du proxy)."""
     if _NO_WAIT:
         return 0.0
     try:
@@ -1225,7 +1225,7 @@ def _boot_grace_remaining():
 
 # #862 Slice 4 — `_rest_word`, `_paint_word`, `_format_afk_state`,
 # `_paint_afk_state`, `paint_human` SUPPRIMÉS. Le BarRenderer côté
-# timer (TS) est maintenant l'unique writer de `@cl_human` ET
+# kernel (TS) est maintenant l'unique writer de `@cl_human` ET
 # `@cl_afk_state`. Le proxy émet uniquement les events (`touch_marker`,
 # `set_afk_*`, etc.) qui mutent ipcState ; BarRenderer pickup via
 # `onIpcChanged` + safety tick 1s.
@@ -1287,7 +1287,7 @@ def main(argv):
         return 2
 
     # #729 phase 2 — live mode requires `websocket-client` for the IPC
-    # with the timer (proxy-events emit + view-push receive). Replay
+    # with the kernel (proxy-events emit + view-push receive). Replay
     # modes short-circuited above don't need it.
     if not _HAS_WEBSOCKET:
         sys.stderr.write(
@@ -1324,8 +1324,8 @@ def main(argv):
     # `boot` au moment de la création de la session tmux. Painter ici
     # appellerait `_rest_word()` qui retourne LOOP au démarrage (pas d'AFK,
     # pas de typing) → écrase le seed `boot` → flicker boot→loop→boot le
-    # temps que le timer pousse sa première view. On reste silencieux ; le
-    # premier `_apply_pushed_view` du timer (dans la seconde qui suit)
+    # temps que le kernel pousse sa première view. On reste silencieux ; le
+    # premier `_apply_pushed_view` du kernel (dans la seconde qui suit)
     # peint correctement le mot.
     # Propage la taille de fenêtre courante au PTY de claude.
     set_winsize(master_fd, get_winsize(sys.stdout.fileno()))
@@ -1351,13 +1351,13 @@ def main(argv):
         pass
 
     # #627 + #729 phase 2 + #730 step 3 — single ws client connected to
-    # the shared `loop.sock`. Receives view-push frames (timer broadcast)
-    # AND inject frames (rebroadcast by the timer on behalf of hooks or
-    # the timer's own wakes). Per-kind queues are drained by the main
+    # the shared `loop.sock`. Receives view-push frames (kernel broadcast)
+    # AND inject frames (rebroadcast by the kernel on behalf of hooks or
+    # the kernel's own wakes). Per-kind queues are drained by the main
     # select loop after the self-pipe wakeup byte fires. The bar word
     # + AFK chunk are painted from the view received ; the local rules
     # (_rest_word / _format_afk_state) remain as a bootstrap fallback
-    # until the timer pushes its first view.
+    # until the kernel pushes its first view.
     view_push_pipe_r, view_push_pipe_w = os.pipe()
     fcntl.fcntl(view_push_pipe_r, fcntl.F_SETFL,
                 fcntl.fcntl(view_push_pipe_r, fcntl.F_GETFL) | os.O_NONBLOCK)
@@ -1371,7 +1371,7 @@ def main(argv):
     stdin_open = True
 
     # #862 Slice 4 — `current_word`/`current_afk_chunk` retirés. Le
-    # BarRenderer (côté timer TS) est le seul writer de `@cl_human` et
+    # BarRenderer (côté kernel TS) est le seul writer de `@cl_human` et
     # `@cl_afk_state`, donc le proxy n'a plus rien à tracker.
     # #360 : la décision frappe→action vit désormais dans le cœur PUR `_Decider`
     # (mirror exact de l'ancienne boucle inline ; bufferisation #345 incluse —
@@ -1384,7 +1384,7 @@ def main(argv):
 
     def cleanup():
         # #862 Slice 4 — `paint_human(False)` retiré. Le BarRenderer côté
-        # timer continue à peindre @cl_human depuis ipcState après la mort
+        # kernel continue à peindre @cl_human depuis ipcState après la mort
         # du proxy (proxy-alive disparu, BarRenderer reste autoritaire).
         if old_termios is not None:
             try:
@@ -1398,7 +1398,7 @@ def main(argv):
             except OSError:
                 pass
         # #729 phase 2 + #730 step 3 — loop.sock client : stop the daemon
-        # thread + close the wakeup pipe. The timer (server) cleans up
+        # thread + close the wakeup pipe. The kernel (server) cleans up
         # its own socket on its side.
         view_push_client.stop()
         for fd in (view_push_pipe_r, view_push_pipe_w):
@@ -1407,14 +1407,14 @@ def main(argv):
             except OSError:
                 pass
 
-    # #627 — `pushed_view` = the last view received from the timer (or None
+    # #627 — `pushed_view` = the last view received from the kernel (or None
     # until the first push lands). When set, the painters use it instead of
     # _rest_word / _format_afk_state. Lets us strip the rule code from the
     # proxy without losing bootstrap paint (rules fallback when None).
     pushed_view = {"value": None}  # dict-wrap so nested fns can mutate
 
     def _apply_pushed_view(view):
-        """#627 — receive a view dict pushed by the timer over loop.sock.
+        """#627 — receive a view dict pushed by the kernel over loop.sock.
         #862 Slice 4 : le proxy ne peint plus ; il met uniquement à jour
         le cache pour que `_afk_mode` (côté Decider) ait l'autorité IPC."""
         pushed_view["value"] = view
@@ -1438,7 +1438,7 @@ def main(argv):
                 os.write(master_fd, chunk_str.encode("utf-8"))
             except OSError:
                 continue
-            # #305 — wake injected = proof the gate is open. Le timer mute
+            # #305 — wake injected = proof the gate is open. Le kernel mute
             # ipcState côté TS, BarRenderer (= seul writer) sait quoi peindre.
             _note_wake_injected()
             _emit_log({"event": "inject",
@@ -1454,20 +1454,20 @@ def main(argv):
 
         #633 Slices A-E — tous les markers de présence sont maintenant
         routés via le back-channel UDS `proxy-events.sock` vers la state
-        machine TS (timer.ts). Le fallback local est conservé pour le
-        degraded mode (timer absent — debug-proxy-tty, timer crashed).
+        machine TS (loop.ts). Le fallback local est conservé pour le
+        degraded mode (kernel absent — debug-proxy-tty, kernel crashed).
         `set_afk` / `clear_afk` legacy ne sont plus dispatché ici (jamais
         émis par le _Decider dans le path normal ; F9 utilise toggle_afk).
         Ils restent disponibles comme fonctions appellables si du code
         externe / un test en a besoin."""
         # #924 Slice D : fallbacks degraded retirés. Le proxy émet via
-        # `_proxy_events` ; si l'émission échoue (= timer down), on log
-        # et on laisse passer. Sémantique : « timer down → AFK inerte »
+        # `_proxy_events` ; si l'émission échoue (= kernel down), on log
+        # et on laisse passer. Sémantique : « kernel down → AFK inerte »
         # (les bytes restent forwardés à claude). Suite logique de #839
         # qui a dropé les writes file. Drift Python↔TS éliminée par
         # construction.
         # #1040 — reload hotkey : the Decider consumed the combo (no forward) ;
-        # tell the timer to respawn. emit-only (timer down → no-op, logged).
+        # tell the kernel to respawn. emit-only (kernel down → no-op, logged).
         if dec.get("reload"):
             _proxy_events.emit({"event": "reload", "now_ms": int(datetime.datetime.now().timestamp() * 1000)})
         for m in dec.get("markers", []):
@@ -1484,7 +1484,7 @@ def main(argv):
             os.write(master_fd, dec["forward"])
         # #633 Slice B david `wb69mf` — paint authority migrée à la state
         # machine. apply_decision ne peint plus @cl_human : la touch_marker
-        # `human-typing` côté Python + le bus côté timer émettent transition
+        # `human-typing` côté Python + le bus côté kernel émettent transition
         # → view pushée → `_apply_pushed_view` peint le bon mot (boot pendant
         # boot grace, stop pendant typing, wait sous AFK, loop sinon).
         # Latence typing → paint stop ≈ 50ms (watch debounce) — invisible.
@@ -1523,7 +1523,7 @@ def main(argv):
                 rems = [r for r in (_boot_grace_remaining(), afk_rem) if r > 0.0]
                 timeout = min(rems) if rems else None
             # #862 Slice 4 — pas besoin de timeout court "wait" : le
-            # BarRenderer côté timer a son safety tick 1s qui catch le
+            # BarRenderer côté kernel a son safety tick 1s qui catch le
             # countdown AFK et le TTL typing → loop. Le proxy n'a plus
             # rien à peindre.
             try:
@@ -1532,7 +1532,7 @@ def main(argv):
                 continue  # SIGWINCH etc. interrompent select
 
             # #862 Slice 4 — bootstrap fallback paint retiré. Le BarRenderer
-            # (côté timer) peint depuis ipcState dès son `start()` ; pas
+            # (côté kernel) peint depuis ipcState dès son `start()` ; pas
             # besoin de fallback côté proxy.
 
             # 1) Frappe humaine (tmux → nous → claude).
@@ -1596,7 +1596,7 @@ def main(argv):
             # former wake injection path through `inject_srv` (raw bytes
             # on a dedicated `inject.sock`) is gone — wakes now ride the
             # shared loop.sock as `{kind:"inject"}` frames rebroadcast
-            # by the timer.
+            # by the kernel.
             if view_push_pipe_r in ready:
                 _drain_loop_sock_queue()
     finally:
