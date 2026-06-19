@@ -2189,15 +2189,22 @@ export function createLoopServer(
 ): LoopServer {
     const server: EventServer = listenEvents(sockPath, (ev, { reply, markAsProxy }) => {
         if (ev.kind === LOOP_SOCK_KIND.PROXY_EVENT) {
-            // #1039 — this connection IS the proxy : tag it so the server can
-            // fire onProxyConnect/onProxyDisconnect on the right peer.
-            markAsProxy();
             // Legacy event shape is wrapped as
             // `{kind:"proxyEvent", data:{event:"...", kind:"...", ...}}`
             // to fit the `Event {kind, data}` shape of ipc-events. The
             // dispatcher expects the legacy object intact — unwrap.
             const inner = ev.data;
             if (!inner || typeof inner !== "object") return;
+            // #1039 — tag the connection as THE proxy peer, but ONLY on a
+            // proxy-ORIGIN event. The `proxyEvent` kind is ALSO used by the
+            // one-shot HOOK connections (`emitHookEventToTimer` → Stop /
+            // UserPrompt / SessionStart carry `{event:"hook"}`), which connect
+            // and close every turn. Tagging on ANY proxyEvent mistagged those
+            // hooks as the proxy → connect+close churn armed a false RED ("la
+            // barre rouge alors que tout marche"). The persistent proxy sends
+            // hello / keystroke / marker / reload — never `hook` — so excluding
+            // `hook` keys the link signal on the real proxy peer.
+            if ((inner as { event?: unknown }).event !== "hook") markAsProxy();
             try {
                 handlers.onProxyEvent(inner as Record<string, unknown>);
             } catch { /* dispatcher already swallows — defense in depth */ }

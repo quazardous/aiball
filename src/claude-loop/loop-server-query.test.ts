@@ -95,6 +95,50 @@ test("queryLoopState: reflects ipcState reset (null mode, false panes)", async (
     }
 });
 
+// #1039 — proxy-link tag must key on a proxy-ORIGIN event, NOT on the hook
+// one-shots that share the `proxyEvent` kind. A hook frame (event:"hook") must
+// NOT fire onProxyConnect/onProxyDisconnect (else its connect+close churn arms a
+// false RED) ; a real proxy frame (keystroke/marker/hello) must.
+test("createLoopServer: hook proxyEvent does NOT tag as proxy; a keystroke does", async () => {
+    resetIpcStateForTests();
+    const dir = mkdtempSync(join(tmpdir(), "loop-proxytag-test-"));
+    const sock = join(dir, "loop.sock");
+    let proxyConnects = 0;
+    let proxyDisconnects = 0;
+    const server = createLoopServer(sock, {
+        onProxyEvent: () => { /* unused */ },
+        onProxyConnect: () => { proxyConnects++; },
+        onProxyDisconnect: () => { proxyDisconnects++; },
+    });
+    try {
+        await sleep(60);
+        // 1) A hook one-shot : connect, send {event:"hook"}, close. Must NOT tag.
+        const hookCh = openEventChannel(sock, { reconnectMs: 50 });
+        for (let i = 0; i < 40 && !hookCh.isConnected(); i++) await sleep(25);
+        hookCh.send({ kind: LOOP_SOCK_KIND.PROXY_EVENT, data: { event: "hook", kind: "Stop" } });
+        await sleep(80);
+        hookCh.close();
+        await sleep(120);
+        assert.equal(proxyConnects, 0, "hook event did NOT tag as proxy");
+        assert.equal(proxyDisconnects, 0, "hook close did NOT fire onProxyDisconnect (no false RED)");
+
+        // 2) The real proxy : connect, send a keystroke → tags → onProxyConnect ;
+        //    close → onProxyDisconnect.
+        const proxyCh = openEventChannel(sock, { reconnectMs: 50 });
+        for (let i = 0; i < 40 && !proxyCh.isConnected(); i++) await sleep(25);
+        proxyCh.send({ kind: LOOP_SOCK_KIND.PROXY_EVENT, data: { event: "keystroke", kind: "typing" } });
+        await sleep(80);
+        assert.equal(proxyConnects, 1, "keystroke tagged the connection as proxy");
+        proxyCh.close();
+        await sleep(120);
+        assert.equal(proxyDisconnects, 1, "real proxy close fired onProxyDisconnect");
+    } finally {
+        server.close();
+        resetIpcStateForTests();
+        try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+});
+
 // #866 Slice 2 — shutdown handler round-trip via the injectable
 // `onShutdownRequest` hook (= test-safe, doesn't kill the harness).
 
