@@ -72,6 +72,7 @@ export interface ProjectContext {
         busy_bg: string;
         idle_bg: string;
         boot_bg: string;
+        link_down_bg: string;
     };
 }
 

@@ -143,6 +143,7 @@ import {
     setIpcNextWakeAt,
     setIpcLastSseEventAtMs,
     setIpcSseConnected,
+    setIpcProxyLinkUp,
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
     setIpcLastViewPushAtMs,
@@ -1499,6 +1500,18 @@ async function mainSse(): Promise<void> {
         onProxyEvent: (event) => {
             const verdict = dispatchProxyEvent(sd!, event);
             log(formatVerdictLogLine(verdict));
+        },
+        // #1039 — IPC link state → BarRenderer paints RED when down. Also
+        // drain anything the (re)connecting peer offloaded while it couldn't
+        // reach us (#1032 S2 : unified timeline, original ts).
+        onClientConnect: () => {
+            log("loop.sock: client connected — IPC link UP");
+            setIpcProxyLinkUp(true);
+            drainOffloadIntoLog();
+        },
+        onClientDisconnect: () => {
+            log("loop.sock: client disconnected — IPC link DOWN");
+            setIpcProxyLinkUp(false);
         },
         // #943 — `cmdReload` (external claude-loop CLI) round-trips this
         // BEFORE SIGKILL'ing us, so the new spawn restores exact XState

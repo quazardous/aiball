@@ -2174,6 +2174,11 @@ export function createLoopServer(
          *  launcher). Default no-op so non-timer consumers (tests) ignore
          *  the frame silently. */
         onLogLine?: (line: string) => void;
+        /** #1039 — a proxy client (re)connected to loop.sock / dropped.
+         *  The loop flags the IPC link state so the BarRenderer can paint
+         *  RED when the link is down. */
+        onClientConnect?: () => void;
+        onClientDisconnect?: () => void;
     },
 ): LoopServer {
     const server: EventServer = listenEvents(sockPath, (ev, { reply }) => {
@@ -2276,6 +2281,11 @@ export function createLoopServer(
             return;
         }
         // Unknown kinds dropped silently — forward-compat.
+    }, {
+        // #1039 — surface proxy (re)connect / disconnect so the loop can flag
+        // the IPC link state (BarRenderer paints RED when down).
+        onClientConnect: handlers.onClientConnect,
+        onClientDisconnect: handlers.onClientDisconnect,
     });
     return {
         pushView(view) {

@@ -185,6 +185,7 @@ project_type: public
 #   busy_bg: "colour33"       # claude working (electric blue)
 #   idle_bg: "colour240"      # at the prompt (dark grey)
 #   boot_bg: "colour178"      # booting (yellow)
+#   link_down_bg: "colour160" # IPC link to the proxy lost — bar may be stale (red)
 
 # --- upstream provider bindings -----------------------------------------------
 # Renders `<prefix>#NNN` refs as clickable chips in markdown bodies

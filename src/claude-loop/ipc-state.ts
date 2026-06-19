@@ -171,6 +171,12 @@ export interface IpcState {
      *  time-since-last-event TTL (SSE events are demand-driven, quiet
      *  periods of 10+ min are normal). */
     sseConnected: boolean | null;
+    /** #1039 — proxy↔timer IPC link state. True while a proxy client is
+     *  connected to the loop.sock server (`listenEvents onClientConnect`),
+     *  false on disconnect / before any client connects. The BarRenderer
+     *  paints the bar RED when this is false so a lost link is VISIBLE instead
+     *  of a silently-frozen bar. Init false (no proxy connected at boot). */
+    proxyLinkUp: boolean;
     /** David `<chat>` : watcher-driven boot deadline. Pushed to `now+10s`
      *  each time a pane watcher tick observes a "still booting" condition
      *  (paneReady=false / picker actif / compacting). When the deadline
@@ -225,6 +231,7 @@ const state: IpcState = {
     lastViewPushAtMs: null,
     lastSseEventAtMs: null,
     sseConnected: null,
+    proxyLinkUp: false,
     bootDeadlineMs: null,
     counters: null,
     stateTagInfo: null,
@@ -377,6 +384,14 @@ export function setIpcLastSseEventAtMs(atMs: number | null): void {
  *  consumers lisent à la demande via queryLoopState). */
 export function setIpcSseConnected(connected: boolean | null): void {
     state.sseConnected = connected;
+}
+
+/** #1039 — flag the proxy↔timer link up/down. notifyIpcChanged so the
+ *  BarRenderer repaints immediately (RED when down). */
+export function setIpcProxyLinkUp(up: boolean): void {
+    if (state.proxyLinkUp === up) return;
+    state.proxyLinkUp = up;
+    notifyIpcChanged();
 }
 
 /** David `<chat>` : push le deadline boot (watcher-driven). Pas pubsub-
@@ -567,6 +582,7 @@ export function resetIpcStateForTests(): void {
     state.lastViewPushAtMs = null;
     state.lastSseEventAtMs = null;
     state.sseConnected = null;
+    state.proxyLinkUp = false;
     state.bootDeadlineMs = null;
     state.counters = null;
     state.stateTagInfo = null;

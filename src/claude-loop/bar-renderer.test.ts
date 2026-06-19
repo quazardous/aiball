@@ -24,6 +24,7 @@ import {
     setIpcCounters,
     setIpcPaneBusy,
     setIpcPaneReady,
+    setIpcProxyLinkUp,
     setIpcStateTagInfo,
 } from "./ipc-state.js";
 import { LOOP_STATUS } from "./state.js";
@@ -65,6 +66,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
         afkGlyph: "",
         promptGlyph: "",
         typingGlyph: "",
+        proxyLinkUp: true,
         ...overrides,
     };
 }
@@ -239,6 +241,30 @@ test("BarRenderer.paint: counters change → setOpt @cl_counts", () => {
     const cl = calls.find((c) => c.args.includes("@cl_counts"));
     assert.ok(cl, "expected @cl_counts setOpt to fire on counters change");
     assert.ok(cl!.args.some((a) => a.includes("o:3")), "rendered string carries 'o:3'");
+    r.stop();
+    rmSync(sd, { recursive: true, force: true });
+});
+
+test("#1039 BarRenderer.paint: link down → status-bg RED, link up → per-state bg", () => {
+    const sd = mkSd();
+    const { spawn, calls } = makeSpawnSpy();
+    setIpcProxyLinkUp(true); // start with the link up
+    const r = new BarRenderer(sd, "cl-test", spawn);
+    r.tick(); // initial paint (link up)
+    calls.length = 0;
+    // Link drops → status-bg repaints with the red link_down_bg (default colour160).
+    setIpcProxyLinkUp(false);
+    r.tick();
+    const down = calls.find((c) => c.args.includes("status-bg"));
+    assert.ok(down, "status-bg repainted on link down");
+    assert.ok(down!.args.includes("colour160"), `bg should be link_down_bg red, got: ${down!.args.join(" ")}`);
+    // Link restored → status-bg back to a non-red per-state bg.
+    calls.length = 0;
+    setIpcProxyLinkUp(true);
+    r.tick();
+    const up = calls.find((c) => c.args.includes("status-bg"));
+    assert.ok(up, "status-bg repainted on link up");
+    assert.ok(!up!.args.includes("colour160"), "bg should NOT be red when link up");
     r.stop();
     rmSync(sd, { recursive: true, force: true });
 });

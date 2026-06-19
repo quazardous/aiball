@@ -248,6 +248,9 @@ export interface AiballConfig {
         busy_bg: string;
         idle_bg: string;
         boot_bg: string;
+        /** #1039 — bar background when the proxy↔timer IPC link is DOWN
+         *  (overrides the per-state bg). Red = "link lost, bar may be stale". */
+        link_down_bg: string;
     };
     /**
      * #565 david — declared `project_type` (`.aiball.yaml project_type:`)
@@ -363,6 +366,7 @@ const DEFAULTS: AiballConfig = {
         busy_bg: "colour33",       // electric blue (#B.154)
         idle_bg: "colour240",      // dark grey
         boot_bg: "colour178",      // yellow
+        link_down_bg: "colour160", // red — IPC link lost (#1039)
     },
     project_type: null,
     configPath: null,
@@ -371,7 +375,7 @@ const DEFAULTS: AiballConfig = {
 
 /** The tunable colour-profile keys (#385). Used to validate yaml `colors:` blocks. */
 const COLOR_KEYS = [
-    "island_fg", "bar_fg", "afk_label_fg", "prompt_input_fg", "busy_bg", "idle_bg", "boot_bg",
+    "island_fg", "bar_fg", "afk_label_fg", "prompt_input_fg", "busy_bg", "idle_bg", "boot_bg", "link_down_bg",
 ] as const;
 
 /** Keep only the known `colors:` keys whose value is a non-empty string token. */
