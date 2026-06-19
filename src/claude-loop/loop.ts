@@ -1527,14 +1527,14 @@ async function mainSse(): Promise<void> {
     // unwrapped at the server boundary.
     const loopServer = createLoopServer(loopSockPath(sd!), {
         onProxyEvent: (event) => {
-            // #1040 — Ctrl+F9 reload hotkey : the proxy detects the combo,
-            // consumes it, and emits {event:"reload"}. Re-exec the timer on the
-            // SAME path as the SHA-stale auto-trigger (bypassing the staleness
-            // check = an on-demand manual reload). respawnTimer exits, so this
-            // is terminal — handle before the normal dispatch.
+            // #1040 — reload hotkey (Ctrl+N by default) : the proxy detects the
+            // key, consumes it, and emits {event:"reload"}. Re-exec the timer on
+            // the SAME path as the SHA-stale auto-trigger (bypassing the
+            // staleness check = an on-demand manual reload). respawnTimer exits,
+            // so this is terminal — handle before the normal dispatch.
             if (event.event === "reload") {
-                log("proxy-event: reload hotkey (Ctrl+F9) → respawning timer");
-                respawnTimer("reload hotkey (Ctrl+F9)");
+                log("proxy-event: reload hotkey → respawning timer");
+                respawnTimer("reload hotkey");
                 return;
             }
             const verdict = dispatchProxyEvent(sd!, event);

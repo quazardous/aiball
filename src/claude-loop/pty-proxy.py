@@ -250,14 +250,15 @@ try:
 except ValueError:
     _AFK_WINDOW_MS = 400
 
-# #1040 — reload hotkey. CL_RELOAD_KEY = hex byte sequence of the combo that
+# #1040 — reload hotkey. CL_RELOAD_KEY = hex byte sequence of the key that
 # triggers an on-demand timer reload (proxy consumes it + emits {event:"reload"}
-# → timer respawnTimer()). Default = Ctrl+F9 (`\x1b[20;5~`), confirmed unused by
-# Claude Code (it binds Ctrl+letters but no Ctrl+Function-keys). If a terminal
-# sends a different sequence for Ctrl+F9, set CL_RELOAD_KEY to the bytes seen in
-# `afk.log` (raw=...). Empty/invalid → feature off.
+# → timer respawnTimer()). Default = Ctrl+N (`0x0e`) : a SINGLE control byte
+# (deterministic across terminals — no Fn escape-sequence ambiguity that froze
+# the display when the bytes didn't match), and confirmed UNUSED by Claude Code
+# (it binds A/E/K/U/W/Y for editing, B/G/L/O/R/S/T/V/X/_ etc., but NOT Ctrl+N ;
+# Ctrl+P is taken by MessageSelector, so N is the safe pick). Empty/invalid → off.
 try:
-    _RELOAD_KEY = bytes.fromhex(os.environ.get("CL_RELOAD_KEY") or "1b5b32303b357e")
+    _RELOAD_KEY = bytes.fromhex(os.environ.get("CL_RELOAD_KEY") or "0e")
 except ValueError:
     _RELOAD_KEY = b""
 
@@ -837,10 +838,10 @@ class _Decider:
              "afk_fired": False, "typing": False, "lone_esc": False,
              "reload": False, "buffered_first": False}
 
-        # #1040 — reload hotkey (Ctrl+F9 by default). Exact-match a full unit
-        # (split_keystrokes hands CSI sequences as one unit), BEFORE the AFK
-        # check so it takes priority. Consume it (no forward to claude) ; the
-        # live caller emits {event:"reload"} → timer respawns.
+        # #1040 — reload hotkey (Ctrl+N by default, a single control byte).
+        # Exact-match the unit BEFORE the AFK check so it takes priority.
+        # Consume it (no forward to claude) ; the live caller emits
+        # {event:"reload"} → timer respawns.
         if _RELOAD_KEY and data == _RELOAD_KEY:
             d["reload"] = True
             return d
