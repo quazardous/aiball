@@ -150,7 +150,7 @@ import {
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
 } from "./ipc-state.js";
-import { computeLoopView, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, LoopStateBus } from "./loop-state.js";
+import { computeLoopView, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, deriveBarCounters, LoopStateBus } from "./loop-state.js";
 import {
     seenProof,
     isBusy as busyStackActive,
@@ -1095,6 +1095,32 @@ function client(): AiballClient {
 //   - standalone (= jamais prepended à autre message)
 //   - skip si claude jamais idle stable (= force injection évitée)
 let postBootRemindersSent = false;
+// #1033 — fetch the 3 bar counters (open/backlog/events) and paint them.
+// Factored from the SSE-ping + heartbeat paths so it can ALSO fire eagerly
+// on `wakeBus.on("hello")` (aiball connection established / re-established) →
+// `o:N b:N e:N` appears as soon as we can talk to the daemon, instead of only
+// at the first heartbeat (~interval into the boot). Best-effort ; `setIpcCounters`
+// is skipped when all 3 fetches fail so the last-known segment is preserved (#835).
+async function refreshCounters(): Promise<void> {
+    try {
+        const cooldownSec = process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? "3600";
+        const backlogQuery: Record<string, string | undefined> = {
+            backlog: "1",
+            limit: "500",
+            cooldown_sec: cooldownSec,
+        };
+        if (loopProject) backlogQuery.project = loopProject;
+        const [pingsR, projectsR, backlogR] = await Promise.allSettled([
+            client().pingsCount() as Promise<{ unread?: number }>,
+            client().listProjectsDetailed() as Promise<Array<{ name: string; open_count?: number }>>,
+            client().listTickets(backlogQuery) as Promise<unknown[]>,
+        ]);
+        const { open, backlog, events } = deriveBarCounters(pingsR, projectsR, backlogR, loopProject);
+        if (events !== null || open !== null || backlog !== null) {
+            setIpcCounters({ open, backlog, events });
+        }
+    } catch { /* counter sync best-effort */ }
+}
 // #999 model (a) — the latest SSE event awaiting a drain. Set by the SSE
 // ping handler (non-panic), consumed by the `turn:settled` drain (the single
 // 10s tempo driver) so the wake renders comment-centric via the eventHint
@@ -1330,6 +1356,10 @@ async function mainSse(): Promise<void> {
         setIpcLastSseEventAtMs(Date.now());
         setIpcSseConnected(true);
         log(`SSE hello: unread=${h.unread}`);
+        // #1033 — aiball connection established (boot OR reconnect) : refresh the
+        // bar counters eagerly so `o:N b:N e:N` appears as soon as we can talk to
+        // the daemon, instead of waiting for the first heartbeat (~interval).
+        void refreshCounters();
     });
     wakeBus.on("control", (c) => {
         setIpcLastSseEventAtMs(Date.now());
@@ -1350,61 +1380,10 @@ async function mainSse(): Promise<void> {
         setIpcSseConnected(true);
         const panic = p.intent === "panic";
         log(`SSE ping received: ${JSON.stringify(p)} → tryWake${panic ? " (panic)" : ""}`);
-        // #816 david — instant counter refresh on SSE ping. The bar's
-        // `e:N` count was only repainted every 30s by the heartbeat,
-        // so a fresh comment surfaced as a wake (<1s) but the counter
-        // lagged. Refetch the 3 counts immediately and repaint @cl_counts.
-        // Fire-and-forget : counter sync isn't on the critical path.
-        void (async () => {
-            try {
-                // #818 y5ggkh : open + backlog scopés au projet du loop ;
-                // events restent cross-project.
-                // #831 hot-fix : revert #800 — comment_count cross-project
-                // sommait TOUS les comments approuvés (= 5592 sur instance
-                // david). Le vrai backlog-scoped count attend une vraie
-                // implémentation backend (follow-up). En attendant : back
-                // to pingsCount.unread comme pré-#800.
-                // #911 david `vqvzst` : passe `cooldown_sec` + filter
-                // cooled comme le CLI default. Sans ça la bar comptait
-                // les cooled mais `claude-loop backlog` ne les listait
-                // pas → désynchro user-visible.
-                const cooldownSec = process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? "3600";
-                const backlogQuery: Record<string, string | undefined> = {
-                    backlog: "1",
-                    limit: "500",
-                    cooldown_sec: cooldownSec,
-                };
-                if (loopProject) backlogQuery.project = loopProject;
-                const [pingsR, projectsR, backlogR] = await Promise.allSettled([
-                    client().pingsCount() as Promise<{ unread?: number }>,
-                    client().listProjectsDetailed() as Promise<Array<{ name: string; open_count?: number }>>,
-                    client().listTickets(backlogQuery) as Promise<unknown[]>,
-                ]);
-                const events = pingsR.status === "fulfilled" ? (pingsR.value?.unread ?? 0) : null;
-                const open = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
-                    ? (loopProject
-                        ? (projectsR.value.find((pr) => pr.name === loopProject)?.open_count ?? 0)
-                        : projectsR.value.reduce((acc, pr) => acc + (pr.open_count ?? 0), 0))
-                    : null;
-                const backlog = backlogR.status === "fulfilled" && Array.isArray(backlogR.value)
-                    ? (backlogR.value as Array<{ backlog_cooled_until?: string | null }>)
-                        .filter((t) => !t.backlog_cooled_until).length
-                    : null;
-                // #835 david — when ALL three fetches fail simultaneously
-                // (high HTTP load during busy phases, daemon hiccup, …),
-                // every counter goes null → setTmuxCounters would clear
-                // `@cl_counts` entirely and the bar's `o:N b:N e:N` segment
-                // would disappear for the next ~5s until the next SSE/
-                // heartbeat tick refetches. Skip the paint in that case
-                // to preserve the last-known good snapshot — a stale
-                // count is less confusing than a missing segment.
-                if (events !== null || open !== null || backlog !== null) {
-                    // #862 Slice 5 — setTmuxCounters legacy retiré ;
-                    // setIpcCounters seul, BarRenderer peint.
-                    setIpcCounters({ open, backlog, events });
-                }
-            } catch { /* counter sync best-effort */ }
-        })();
+        // #816 david — instant counter refresh on SSE ping (else the bar's
+        // `e:N` only repaints every ~30s on the heartbeat). #1033 — factored
+        // into `refreshCounters()`. Fire-and-forget : not on the critical path.
+        void refreshCounters();
         // #999 — model (a) : an SSE event does NOT fire a wake directly.
         // It records the payload as the pending hint ; the single drain
         // driver (`turn:settled`, the 10s tempo) picks it up on its next
@@ -2292,40 +2271,10 @@ async function mainSse(): Promise<void> {
         // (= absent from the bar segment).
         try {
             pushViewIfChanged();
-            // #818 david `y5ggkh` : open + backlog scopés au projet du loop
-            // (le loop est attaché à UN projet via AIBALL_PROJECT), events
-            // restent cross-project (FIFO unread = agent scope, #800).
-            // #911 — voir le commentaire sur le path SSE plus haut.
-            const cooldownSec = process.env[CL_ENV.BACKLOG_COOLDOWN_SEC] ?? "3600";
-            const backlogQuery: Record<string, string | undefined> = {
-                backlog: "1",
-                limit: "500",
-                cooldown_sec: cooldownSec,
-            };
-            if (loopProject) backlogQuery.project = loopProject;
-            const [pingsR, projectsR, backlogR] = await Promise.allSettled([
-                client().pingsCount() as Promise<{ unread?: number }>,
-                client().listProjectsDetailed() as Promise<Array<{ name: string; open_count?: number }>>,
-                client().listTickets(backlogQuery) as Promise<unknown[]>,
-            ]);
-            const events = pingsR.status === "fulfilled" ? (pingsR.value?.unread ?? 0) : null;
-            const open = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
-                ? (loopProject
-                    ? (projectsR.value.find((p) => p.name === loopProject)?.open_count ?? 0)
-                    : projectsR.value.reduce((acc, p) => acc + (p.open_count ?? 0), 0))
-                : null;
-            const backlog = backlogR.status === "fulfilled" && Array.isArray(backlogR.value)
-                ? (backlogR.value as Array<{ backlog_cooled_until?: string | null }>)
-                    .filter((t) => !t.backlog_cooled_until).length
-                : null;
-            // #835 david — preserve the last-known segment when all 3 fetches
-            // fail (same rationale as the SSE-refresh path above). Without
-            // this guard the segment cleared for ~5s whenever a busy phase
-            // starved the HTTP client.
-            if (events !== null || open !== null || backlog !== null) {
-                // #862 Slice 5 — setIpcCounters seul, BarRenderer peint.
-                setIpcCounters({ open, backlog, events });
-            }
+            // #1033 — counters fetch factored into `refreshCounters()` (shared
+            // with the SSE-ping + connection-`hello` paths). Awaited here so the
+            // heartbeat tick stays sequential.
+            await refreshCounters();
         } catch { /* counters segment stays as-is */ }
         if (phase !== "boot") {
             try {

@@ -13,6 +13,7 @@ import {
     canPaintStopOnTyping,
     computeLoopView,
     shouldInjectBootstrapSkill,
+    deriveBarCounters,
     inputHotAgeMs,
     isAfkHeld,
     isAutonomous,
@@ -993,6 +994,37 @@ test("#922 shouldInjectBootstrapSkill : inject only when no other intent", () =>
     assert.equal(shouldInjectBootstrapSkill({ typing: false, hold: false, humanPrompted: true }), false, "a human prompt during boot cancels");
     // Combined intents still cancel.
     assert.equal(shouldInjectBootstrapSkill({ typing: true, hold: true, humanPrompted: true }), false);
+});
+
+// #1033 — pure derivation of the 3 bar counters from Promise.allSettled results.
+test("#1033 deriveBarCounters: all fulfilled, project-scoped open + non-cooled backlog", () => {
+    const c = deriveBarCounters(
+        { status: "fulfilled", value: { unread: 4 } },
+        { status: "fulfilled", value: [{ name: "aiball", open_count: 7 }, { name: "other", open_count: 99 }] },
+        { status: "fulfilled", value: [{ backlog_cooled_until: null }, { backlog_cooled_until: "2026-01-01T00:00:00Z" }, {}] },
+        "aiball",
+    );
+    assert.deepEqual(c, { open: 7, backlog: 2, events: 4 });
+});
+
+test("#1033 deriveBarCounters: no loopProject → open summed across projects", () => {
+    const c = deriveBarCounters(
+        { status: "fulfilled", value: { unread: 0 } },
+        { status: "fulfilled", value: [{ name: "a", open_count: 3 }, { name: "b", open_count: 5 }] },
+        { status: "fulfilled", value: [] },
+        undefined,
+    );
+    assert.deepEqual(c, { open: 8, backlog: 0, events: 0 });
+});
+
+test("#1033 deriveBarCounters: a rejected fetch yields null for that counter (fail-open)", () => {
+    const c = deriveBarCounters(
+        { status: "rejected", reason: new Error("down") },
+        { status: "rejected", reason: new Error("down") },
+        { status: "fulfilled", value: [{ backlog_cooled_until: null }] },
+        "aiball",
+    );
+    assert.deepEqual(c, { open: null, backlog: 1, events: null });
 });
 
 // #1014 — the #994 nextPaneBusy arm/dearm latch is retired ; paneBusy is now

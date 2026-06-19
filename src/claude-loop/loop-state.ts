@@ -195,6 +195,34 @@ function isBusyDeferActive(input: LoopStateInput): boolean {
 }
 
 /**
+ * #1033 — pure derivation of the 3 bar counters from the `Promise.allSettled`
+ * results of (pings / projects-detailed / backlog) fetches. A rejected fetch
+ * yields `null` for that counter (fail-open : the caller preserves the last
+ * known value rather than clearing the segment, #835). `open` is project-scoped
+ * when `loopProject` is set, else summed across projects ; `backlog` counts the
+ * non-cooled rows ; `events` is the unread ping count. Extracted so the
+ * SSE-ping / heartbeat / connection-`hello` callers share ONE implementation.
+ */
+export function deriveBarCounters(
+    pingsR: PromiseSettledResult<{ unread?: number }>,
+    projectsR: PromiseSettledResult<Array<{ name: string; open_count?: number }>>,
+    backlogR: PromiseSettledResult<unknown[]>,
+    loopProject: string | undefined,
+): { open: number | null; backlog: number | null; events: number | null } {
+    const events = pingsR.status === "fulfilled" ? (pingsR.value?.unread ?? 0) : null;
+    const open = projectsR.status === "fulfilled" && Array.isArray(projectsR.value)
+        ? (loopProject
+            ? (projectsR.value.find((pr) => pr.name === loopProject)?.open_count ?? 0)
+            : projectsR.value.reduce((acc, pr) => acc + (pr.open_count ?? 0), 0))
+        : null;
+    const backlog = backlogR.status === "fulfilled" && Array.isArray(backlogR.value)
+        ? (backlogR.value as Array<{ backlog_cooled_until?: string | null }>)
+            .filter((t) => !t.backlog_cooled_until).length
+        : null;
+    return { open, backlog, events };
+}
+
+/**
  * #922 david `56sxsu` — the post-boot skill prompt is a FALLBACK to bootstrap
  * a session when nothing else drives it. Inject it ONLY when there is no other
  * intent: cancel if a human typed/holds the loop or already prompted during
