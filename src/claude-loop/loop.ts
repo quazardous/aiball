@@ -1143,6 +1143,22 @@ async function refreshCounters(): Promise<void> {
 // path. Cleared on consumption and on `turn:started` (a new turn supersedes a
 // stale pending event).
 let pendingWakeHint: WakeHint | undefined;
+// #1039 — graceful window before the bar goes RED on a lost IPC link. A peer
+// that went stale but reconnects within this window must NOT flash red. Armed
+// on `onClientStale`, cancelled on `onClientConnect`.
+const LINK_DOWN_GRACE_MS = 10_000;
+let linkDownGraceTimer: NodeJS.Timeout | null = null;
+function armLinkDownGrace(): void {
+    if (linkDownGraceTimer) return; // already counting down
+    linkDownGraceTimer = setTimeout(() => {
+        linkDownGraceTimer = null;
+        setIpcProxyLinkUp(false);
+        log(`loop.sock: IPC link still down after ${LINK_DOWN_GRACE_MS / 1000}s grace — bar RED`);
+    }, LINK_DOWN_GRACE_MS);
+}
+function cancelLinkDownGrace(): void {
+    if (linkDownGraceTimer) { clearTimeout(linkDownGraceTimer); linkDownGraceTimer = null; }
+}
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint, panicMode = false): Promise<boolean> {
     const wakeSvc = getWakeService();
     if (!wakeSvc.isIdle()) {
@@ -1511,11 +1527,16 @@ async function mainSse(): Promise<void> {
         // anything buffered while the timer was down ; no per-connect drain
         // (hooks connect every turn → would be noisy for no gain).
         onClientConnect: () => {
+            // Reconnected → cancel any pending RED grace and go GREEN.
+            cancelLinkDownGrace();
             setIpcProxyLinkUp(true);
         },
         onClientStale: () => {
-            log("loop.sock: peer went STALE (heartbeat ping unanswered) — IPC link DOWN");
-            setIpcProxyLinkUp(false);
+            // #1039 david — don't flash RED immediately : a peer that went
+            // stale but reconnects within the grace window must stay GREEN.
+            // Arm the 10s grace ; onClientConnect cancels it.
+            log(`loop.sock: peer went STALE — ${LINK_DOWN_GRACE_MS / 1000}s grace before bar RED`);
+            armLinkDownGrace();
         },
         // #943 — `cmdReload` (external claude-loop CLI) round-trips this
         // BEFORE SIGKILL'ing us, so the new spawn restores exact XState
