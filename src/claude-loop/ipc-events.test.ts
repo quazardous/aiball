@@ -247,3 +247,33 @@ t("listenEvents : onClientConnect on connect, onClientDisconnect on client close
         server.close();
     });
 });
+
+// #1039 — the accumulator scenario : multiple clients share one server (the
+// persistent proxy + transient one-shot hooks). A transient client leaving
+// must NOT read as "all gone" while another stays connected → the loop counts
+// live clients (link UP while ≥1). Here: 2 connects, 1 close → net 1 still up.
+t("listenEvents : transient client close while another stays → connect>disconnect (accumulator premise)", async () => {
+    await withTmpSocketPath(async (sockPath) => {
+        let connects = 0;
+        let disconnects = 0;
+        const server = listenEvents(sockPath, () => { /* noop */ }, {
+            onClientConnect: () => { connects++; },
+            onClientDisconnect: () => { disconnects++; },
+        });
+        await sleep(50);
+        const persistent = openEventChannel(sockPath, { reconnectMs: 50 });
+        const transient = openEventChannel(sockPath, { reconnectMs: 50 });
+        await sleep(200);
+        assert.equal(connects, 2, "both clients connected");
+        assert.equal(disconnects, 0);
+
+        // The transient one leaves ; the persistent one stays → net live = 1.
+        transient.close();
+        await sleep(150);
+        assert.equal(disconnects, 1, "only the transient client disconnected");
+        assert.ok(connects - disconnects >= 1, "accumulator stays > 0 (persistent client still connected)");
+
+        persistent.close();
+        server.close();
+    });
+});

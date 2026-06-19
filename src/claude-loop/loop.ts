@@ -1111,6 +1111,12 @@ function client(): AiballClient {
 //   - standalone (= jamais prepended à autre message)
 //   - skip si claude jamais idle stable (= force injection évitée)
 let postBootRemindersSent = false;
+// #1039 — accumulator of live loop.sock clients (persistent proxy + transient
+// one-shot hooks). The IPC link is UP while ≥1 client is connected ; a single
+// boolean false-positived RED when a transient hook closed while the proxy was
+// still connected. Floored at 0 (a close without a matching connect can't drive
+// it negative).
+let activeClients = 0;
 // #1033 — fetch the 3 bar counters (open/backlog/events) and paint them.
 // Factored from the SSE-ping + heartbeat paths so it can ALSO fire eagerly
 // on `wakeBus.on("hello")` (aiball connection established / re-established) →
@@ -1501,17 +1507,23 @@ async function mainSse(): Promise<void> {
             const verdict = dispatchProxyEvent(sd!, event);
             log(formatVerdictLogLine(verdict));
         },
-        // #1039 — IPC link state → BarRenderer paints RED when down. Also
-        // drain anything the (re)connecting peer offloaded while it couldn't
-        // reach us (#1032 S2 : unified timeline, original ts).
+        // #1039 — IPC link state → BarRenderer paints RED when down. Many
+        // clients share loop.sock : the PERSISTENT proxy + transient one-shot
+        // hooks (sendEventOnce). A single boolean flipped on each connect/close
+        // false-positived RED whenever a hook closed while the proxy was still
+        // connected. Fix (david `<chat>`) : an ACCUMULATOR — count live clients,
+        // link is UP while ≥1 is connected. onConnect also drains the offload
+        // (a (re)connecting peer's buffered entries replay into the log).
         onClientConnect: () => {
-            log("loop.sock: client connected — IPC link UP");
+            activeClients++;
+            if (activeClients === 1) log("loop.sock: first client connected — IPC link UP");
             setIpcProxyLinkUp(true);
             drainOffloadIntoLog();
         },
         onClientDisconnect: () => {
-            log("loop.sock: client disconnected — IPC link DOWN");
-            setIpcProxyLinkUp(false);
+            activeClients = Math.max(0, activeClients - 1);
+            if (activeClients === 0) log("loop.sock: last client disconnected — IPC link DOWN");
+            setIpcProxyLinkUp(activeClients > 0);
         },
         // #943 — `cmdReload` (external claude-loop CLI) round-trips this
         // BEFORE SIGKILL'ing us, so the new spawn restores exact XState
