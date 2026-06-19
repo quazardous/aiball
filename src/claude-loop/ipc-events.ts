@@ -100,7 +100,7 @@ const HEARTBEAT_PING_MS = 15_000;
 export function listenEvents(
     socketPath: string,
     onEvent: EventHandler,
-    opts: { transport?: Transport } = {},
+    opts: { transport?: Transport; onClientConnect?: () => void; onClientDisconnect?: () => void } = {},
 ): EventServer {
     const transport = opts.transport ?? defaultTransport;
     const http: HttpServer = createHttpServer();
@@ -128,6 +128,11 @@ export function listenEvents(
     wss.on("connection", (ws, req) => {
         // Gate the upgrade (loopback token check ; UDS always accepts).
         if (!tServer.accept(req.url)) { try { ws.close(); } catch { /* ignore */ } return; }
+        // #1032 S2 — a client (re)connected. The keystone for resync : when the
+        // proxy reconnects to a freshly-respawned timer (loop.sock rebound), the
+        // server fires this so the consumer can re-push state (bar repaint, AFK,
+        // snapshots) to the reconnected peer.
+        try { opts.onClientConnect?.(); } catch { /* consumer threw */ }
         // #769 Phase 1 — heartbeat 15s/30s. The server pings every 15s
         // and terminates the connection if no pong returned in the next
         // window. This catches half-closed sockets (peer process gone
@@ -152,7 +157,12 @@ export function listenEvents(
             isAlive = false;
             try { ws.ping(); } catch { /* ignore — socket already dead */ }
         }, HEARTBEAT_PING_MS);
-        ws.on("close", () => clearInterval(pingInterval));
+        ws.on("close", () => {
+            clearInterval(pingInterval);
+            // #1032 S2 — a client dropped (incl. heartbeat-terminate of a
+            // half-closed peer). Symmetric to onClientConnect.
+            try { opts.onClientDisconnect?.(); } catch { /* consumer threw */ }
+        });
         ws.on("message", (raw: RawData) => {
             isAlive = true;
             const text = raw.toString();

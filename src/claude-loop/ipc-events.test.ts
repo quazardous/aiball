@@ -220,3 +220,30 @@ t("openEventChannel : onConnect fires once the server is reachable, not before",
         server.close();
     });
 });
+
+// #1032 S2 — listenEvents fires onClientConnect/onClientDisconnect so the timer
+// (server) can resync the proxy when it (re)connects to a respawned loop.sock.
+// A CLIENT close IS observed server-side (unlike the reverse), so this is
+// deterministic.
+t("listenEvents : onClientConnect on connect, onClientDisconnect on client close", async () => {
+    await withTmpSocketPath(async (sockPath) => {
+        let clientConnects = 0;
+        let clientDisconnects = 0;
+        const server = listenEvents(sockPath, () => { /* noop */ }, {
+            onClientConnect: () => { clientConnects++; },
+            onClientDisconnect: () => { clientDisconnects++; },
+        });
+        await sleep(50);
+        const ch = openEventChannel(sockPath, { reconnectMs: 50 });
+        await sleep(150);
+        assert.equal(clientConnects, 1, "onClientConnect fired when the client connected");
+        assert.equal(clientDisconnects, 0);
+
+        // Client goes away → the server observes the close.
+        ch.close();
+        await sleep(150);
+        assert.ok(clientDisconnects >= 1, `onClientDisconnect fired when the client left (got ${clientDisconnects})`);
+
+        server.close();
+    });
+});
