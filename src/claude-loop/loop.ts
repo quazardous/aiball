@@ -475,10 +475,23 @@ function selfReloadIfStale(): void {
         `source moved since boot (${(plate.started_at_sha ?? "?").slice(0, 7)} → ${(sha ?? "?").slice(0, 7)}) ` +
         `and loop is idle — self-reloading timer`,
     );
-    if (sha) {
-        plate.started_at_sha = sha;
-        try { writePlate(sd!, plate); } catch { /* best effort — fresh timer would just reload once more */ }
-    }
+    respawnTimer("SHA moved since boot (idle)");
+}
+
+// #1040 — on-demand timer re-exec, extracted from `selfReloadIfStale` so the
+// Ctrl+F9 reload hotkey (and the SHA-stale auto-trigger) share ONE re-exec
+// path. Captures the XState snapshots, stamps the current SHA on the plate (so
+// the fresh timer doesn't immediately self-reload again), spawns a detached
+// new timer on the SAME entrypoint (loop.ts), and exits. The hotkey path
+// BYPASSES the SHA staleness check (= a manual reload regardless of drift) —
+// useful precisely when the auto-trigger is broken (#1040).
+function respawnTimer(reason: string): void {
+    log(`respawning timer — ${reason}`);
+    try {
+        const plate = readPlate(sd!);
+        const sha = installRootSha();
+        if (sha) { plate.started_at_sha = sha; try { writePlate(sd!, plate); } catch { /* best effort */ } }
+    } catch { /* no plate — proceed with the respawn anyway */ }
     // #884 — capture les snapshots XState v5 des 5 controllers AVANT de
     // spawn le new process. Le NEW timer les restaure via
     // `setPendingRespawnSnapshots` au boot puis les service factories
@@ -1514,6 +1527,16 @@ async function mainSse(): Promise<void> {
     // unwrapped at the server boundary.
     const loopServer = createLoopServer(loopSockPath(sd!), {
         onProxyEvent: (event) => {
+            // #1040 — Ctrl+F9 reload hotkey : the proxy detects the combo,
+            // consumes it, and emits {event:"reload"}. Re-exec the timer on the
+            // SAME path as the SHA-stale auto-trigger (bypassing the staleness
+            // check = an on-demand manual reload). respawnTimer exits, so this
+            // is terminal — handle before the normal dispatch.
+            if (event.event === "reload") {
+                log("proxy-event: reload hotkey (Ctrl+F9) → respawning timer");
+                respawnTimer("reload hotkey (Ctrl+F9)");
+                return;
+            }
             const verdict = dispatchProxyEvent(sd!, event);
             log(formatVerdictLogLine(verdict));
         },

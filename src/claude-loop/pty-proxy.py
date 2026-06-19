@@ -250,6 +250,17 @@ try:
 except ValueError:
     _AFK_WINDOW_MS = 400
 
+# #1040 — reload hotkey. CL_RELOAD_KEY = hex byte sequence of the combo that
+# triggers an on-demand timer reload (proxy consumes it + emits {event:"reload"}
+# → timer respawnTimer()). Default = Ctrl+F9 (`\x1b[20;5~`), confirmed unused by
+# Claude Code (it binds Ctrl+letters but no Ctrl+Function-keys). If a terminal
+# sends a different sequence for Ctrl+F9, set CL_RELOAD_KEY to the bytes seen in
+# `afk.log` (raw=...). Empty/invalid → feature off.
+try:
+    _RELOAD_KEY = bytes.fromhex(os.environ.get("CL_RELOAD_KEY") or "1b5b32303b357e")
+except ValueError:
+    _RELOAD_KEY = b""
+
 
 # #840 Slice A (#766) — module-level cache of the last pushed_view from
 # the timer, populated by `_apply_pushed_view`. Read-only consumers (e.g.
@@ -824,7 +835,15 @@ class _Decider:
         d = {"event": "stdin", "now": now, "raw": data,
              "forward": b"", "buffer": None, "markers": [],
              "afk_fired": False, "typing": False, "lone_esc": False,
-             "buffered_first": False}
+             "reload": False, "buffered_first": False}
+
+        # #1040 — reload hotkey (Ctrl+F9 by default). Exact-match a full unit
+        # (split_keystrokes hands CSI sequences as one unit), BEFORE the AFK
+        # check so it takes priority. Consume it (no forward to claude) ; the
+        # live caller emits {event:"reload"} → timer respawns.
+        if _RELOAD_KEY and data == _RELOAD_KEY:
+            d["reload"] = True
+            return d
 
         # (a) Le combo AFK RÉUSSIT → on n'envoie RIEN à claude (ni buffer, ni
         #     cette frappe : pas de rewind `esc esc`, pas d'interruption). #381 :
@@ -1434,6 +1453,10 @@ def main(argv):
         # (les bytes restent forwardés à claude). Suite logique de #839
         # qui a dropé les writes file. Drift Python↔TS éliminée par
         # construction.
+        # #1040 — reload hotkey : the Decider consumed the combo (no forward) ;
+        # tell the timer to respawn. emit-only (timer down → no-op, logged).
+        if dec.get("reload"):
+            _proxy_events.emit({"event": "reload", "now_ms": int(datetime.datetime.now().timestamp() * 1000)})
         for m in dec.get("markers", []):
             now_ms = int(datetime.datetime.now().timestamp() * 1000)
             if m == "cycle_afk" or m == "toggle_afk":
