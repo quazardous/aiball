@@ -1181,6 +1181,43 @@ function makeLinkGrace(label: string, setDown: (down: boolean) => void) {
 }
 const proxyLinkGrace = makeLinkGrace("loop.sock proxy link", setIpcLinkDown);
 const daemonLinkGrace = makeLinkGrace("daemon link", setIpcDaemonDown);
+// #1041 — arm the bar countdown (`nextWakeAtMs`, rendered `📨 Ns`) from the live
+// turn-machine state. The drain fires at the `settled` re-entry boundaries (every
+// tempo, aligned on `idleSinceMs`) ; the countdown must point at the NEXT such
+// boundary so it's honest. Previously this was ONLY recomputed inside the turn
+// subscribe (= on a turn snapshot change). A hint arriving BETWEEN two re-entries
+// therefore left the countdown stale (null) until the very re-entry that also
+// drained it — hence david's symptom : "the comment arrived without a visible
+// countdown". Calling this from the SSE-ping handler too arms the countdown the
+// instant a hint lands, so the [hint → drain] window renders as a real countdown.
+function recomputeNextWake(): void {
+    const snap = getTurnService().getActor().getSnapshot();
+    const ctx = snap.context;
+    const bootDone = getIpcState().loopStart;
+    const c = getIpcState().counters;
+    const somethingToDrain = pendingWakeHint !== undefined
+        || (c?.events ?? 0) > 0
+        || (c?.backlog ?? 0) > 0;
+    const tempoMs = wakeTempoSec * 1000;
+    if (
+        bootDone
+        && somethingToDrain
+        && snap.matches("no_turn")
+        && ctx.idleSinceMs !== null
+    ) {
+        // Next `settled` re-entry boundary, aligned on idleSinceMs. fresh→settled
+        // also fires at idleSinceMs + tempo, so a single formula covers both
+        // substates. At/just past a boundary (the re-entry tick itself) point at
+        // the next tunnel, not the one draining right now.
+        const now = Date.now();
+        let nextAt = ctx.idleSinceMs
+            + Math.ceil((now - ctx.idleSinceMs) / tempoMs) * tempoMs;
+        if (nextAt <= now + 250) nextAt += tempoMs;
+        setIpcNextWakeAt(nextAt);
+    } else {
+        setIpcNextWakeAt(null);
+    }
+}
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint, panicMode = false): Promise<boolean> {
     const wakeSvc = getWakeService();
     if (!wakeSvc.isIdle()) {
@@ -1462,7 +1499,12 @@ async function mainSse(): Promise<void> {
             });
         } else {
             pendingWakeHint = p;
-            log(`SSE ping recorded as pending hint — drains on next turn:settled (≤${wakeTempoSec}s tempo)`);
+            // #1041 — arm the `📨 Ns` countdown NOW (don't wait for the next turn
+            // re-entry to recompute it), so the [hint → drain] window is visible.
+            recomputeNextWake();
+            const nw = getIpcState().nextWakeAtMs;
+            const inSec = nw !== null ? Math.max(0, Math.ceil((nw - Date.now()) / 1000)) : null;
+            log(`SSE ping recorded as pending hint — countdown armed nextWakeAtMs=${nw} (~${inSec ?? "?"}s), drains on next turn:settled (≤${wakeTempoSec}s tempo)`);
         }
     });
     wakeBus.on("error", (e) => {
@@ -1990,27 +2032,10 @@ async function mainSse(): Promise<void> {
             // doit trigger qu'après seal). #848 : gate sur `loopStart`
             // (= 10s après boot:sealed) au lieu de bootComplete pour
             // cohérence avec le handler turn:settled ci-dessous.
-            const ctx = snap.context;
-            const bootDone = getIpcState().loopStart;
-            // #999 david `7dfxgf` (point 2) — only arm the `📨Ns` countdown
-            // when there's actually something to drain : a pending SSE event,
-            // OR a non-empty FIFO (events>0) / backlog (backlog>0). Nothing
-            // pending + empty FIFO + empty backlog → no countdown (the drain
-            // would no-op anyway). The cadence reflects the configured tempo.
-            const c = getIpcState().counters;
-            const somethingToDrain = pendingWakeHint !== undefined
-                || (c?.events ?? 0) > 0
-                || (c?.backlog ?? 0) > 0;
-            const tempoMs = wakeTempoSec * 1000;
-            if (bootDone && somethingToDrain && snap.matches("no_turn") && ctx.idleSinceMs !== null) {
-                const isSettled = snap.matches({ no_turn: "settled" });
-                const nextAt = isSettled
-                    ? Date.now() + tempoMs
-                    : ctx.idleSinceMs + tempoMs;
-                setIpcNextWakeAt(nextAt);
-            } else {
-                setIpcNextWakeAt(null);
-            }
+            // #1041 — la logique d'arming est factorisée dans `recomputeNextWake()`
+            // (source unique, partagée avec le handler SSE-ping pour armer le
+            // countdown dès l'arrivée d'un hint, pas seulement à la re-entrée turn).
+            recomputeNextWake();
         });
         turnActor.on("turn:no_turn_since", (ev) => {
             log(`turnMachine: turn:no_turn_since atMs=${ev.atMs} reason=${ev.reason}`);

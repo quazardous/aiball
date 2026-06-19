@@ -247,6 +247,58 @@ test("BarRenderer.paint: counters change → setOpt @cl_counts", () => {
     rmSync(sd, { recursive: true, force: true });
 });
 
+test("#1041 BarRenderer.paint: 📨 standing indicator when events>0 (no countdown needed)", () => {
+    const sd = mkSd();
+    const { spawn, calls } = makeSpawnSpy();
+    seedLoopStartOld(sd);
+    setIpcBootComplete(true); // post-boot : no 🚀, envelope branch reachable
+    const r = new BarRenderer(sd, "cl-test", spawn);
+    r.tick(); // initial
+    calls.length = 0;
+    // Pending FIFO event but no countdown armed (idle past cooldown) → 📨 must
+    // still show so the operator sees there's work waiting.
+    setIpcCounters({ open: 3, backlog: 0, events: 2 });
+    r.tick();
+    const cl = calls.find((c) => c.args.includes("@cl_counts"));
+    assert.ok(cl, "expected @cl_counts setOpt on counters change");
+    assert.ok(cl!.args.some((a) => a.includes("📨")), "📨 shown when events>0");
+    r.stop();
+    rmSync(sd, { recursive: true, force: true });
+});
+
+test("#1041 BarRenderer.paint: 📨 also stands on a non-empty backlog", () => {
+    const sd = mkSd();
+    const { spawn, calls } = makeSpawnSpy();
+    seedLoopStartOld(sd);
+    setIpcBootComplete(true);
+    const r = new BarRenderer(sd, "cl-test", spawn);
+    r.tick();
+    calls.length = 0;
+    setIpcCounters({ open: 5, backlog: 4, events: 0 });
+    r.tick();
+    const cl = calls.find((c) => c.args.includes("@cl_counts"));
+    assert.ok(cl && cl.args.some((a) => a.includes("📨")), "📨 shown when backlog>0");
+    r.stop();
+    rmSync(sd, { recursive: true, force: true });
+});
+
+test("#1041 BarRenderer.paint: no 📨 when nothing pending (empty FIFO + empty backlog)", () => {
+    const sd = mkSd();
+    const { spawn, calls } = makeSpawnSpy();
+    seedLoopStartOld(sd);
+    setIpcBootComplete(true);
+    const r = new BarRenderer(sd, "cl-test", spawn);
+    r.tick();
+    calls.length = 0;
+    setIpcCounters({ open: 7, backlog: 0, events: 0 });
+    r.tick();
+    const cl = calls.find((c) => c.args.includes("@cl_counts"));
+    assert.ok(cl, "expected @cl_counts setOpt on counters change");
+    assert.ok(!cl!.args.some((a) => a.includes("📨")), "no 📨 when nothing pending");
+    r.stop();
+    rmSync(sd, { recursive: true, force: true });
+});
+
 test("#1039 BarRenderer.paint: default = normal bg, linkDown → RED, restored → normal", () => {
     const sd = mkSd();
     const { spawn, calls } = makeSpawnSpy();

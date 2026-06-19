@@ -430,12 +430,20 @@ export class BarRenderer {
             parts.push(`e:${c?.events ?? "-"}`);
             // #891 — countdowns harmonisés dans la zone compteurs :
             //   - 🚀Ns +Ns pendant boot (prioritaire, mutually exclusive)
-            //   - 📨Ns post-boot quand events/backlog pending (#805 xxvzye)
+            //   - 📨 post-boot = indicateur STANDING (#1041) : visible dès
+            //     qu'il y a du travail en attente (events FIFO > 0 OU backlog
+            //     > 0), countdown ou pas. Le `Ns` n'est qu'un suffixe optionnel
+            //     (idle + tempo armé), précédé d'un espace : `📨 10s`.
             if (next.bootElapsedSec !== null) {
                 parts.push(`🚀${next.bootElapsedSec}s`);
                 if (next.bootRemainingSec !== null) parts.push(`+${next.bootRemainingSec}s`);
-            } else if (next.nextWakeInSec !== null) {
-                parts.push(`📨${next.nextWakeInSec}s`);
+            } else {
+                const hasPending = (c?.events ?? 0) > 0 || (c?.backlog ?? 0) > 0;
+                if (hasPending || next.nextWakeInSec !== null) {
+                    parts.push(
+                        next.nextWakeInSec !== null ? `📨 ${next.nextWakeInSec}s` : "📨",
+                    );
+                }
             }
             const col = barColors();
             setOpt("@cl_counts", `#[fg=${col.bar_fg}] ${parts.join(" ")}`);
