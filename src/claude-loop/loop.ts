@@ -38,6 +38,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { AiballClient } from "../client.js";
 import { createLogger } from "../log.js";
+import { drainOffload, listOffloadComponents } from "./offload.js";
 import {
     armBusyDefer,
     WAKE_COALESCE_WINDOW_MS,
@@ -282,6 +283,20 @@ try { writeFileSync(loopPidPath(sd!), `${process.pid}\n`); } catch { /* best eff
 const logger = createLogger({ tag: `claude-loop:${name}` });
 function log(msg: string): void {
     logger.info(msg);
+}
+// #1032 S2 — drain every component's offload buffer into the central log,
+// each entry replayed with its ORIGINAL ts (→ unified timeline), then cleared.
+// Called at boot : the timer has just (re)started, so anything the hooks/proxy
+// offloaded while it was down (IPC unreachable) is replayed now. Best-effort.
+function drainOffloadIntoLog(): void {
+    if (!sd) return;
+    for (const component of listOffloadComponents(sd)) {
+        const entries = drainOffload(sd, component);
+        for (const e of entries) {
+            logger.replay(e.ts, "info", `[offload ${e.component}/${e.kind}]${e.msg ? ` ${e.msg}` : ""}`);
+        }
+        if (entries.length) log(`drained ${entries.length} offload entr${entries.length === 1 ? "y" : "ies"} from '${component}' into the log`);
+    }
 }
 
 // #963 — log every module evaluation (= every tsx-watch re-import OR
@@ -1327,6 +1342,9 @@ async function mainSse(): Promise<void> {
     // this against the live HEAD to flag a ghost daemon.
     const bootSha = installRootSha();
     if (bootSha) log(`timer source: install-root SHA ${bootSha.slice(0, 7)}`);
+    // #1032 S2 — the timer just (re)started : replay anything the hooks/proxy
+    // offloaded while the IPC was down (with original ts) into the central log.
+    drainOffloadIntoLog();
     // #793 — seed the idle-since bus value at boot from a pane probe.
     // The SHA-mismatch self-respawn watchdog (#72c604e) spawns a fresh
     // timer with an empty `LoopStateBus`; the legacy `idle-since` file

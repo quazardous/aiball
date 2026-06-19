@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendOffload, drainOffload, offloadPath } from "./offload.js";
+import { appendOffload, drainOffload, listOffloadComponents, offloadPath } from "./offload.js";
 
 const SD = mkdtempSync(join(tmpdir(), "aiball-offload-"));
 after(() => rmSync(SD, { recursive: true, force: true }));
@@ -52,6 +52,16 @@ test("#1032 buffers are per-component (separate files)", () => {
 
 test("#1032 drain of an absent buffer is [] (no throw)", () => {
     assert.deepEqual(drainOffload(SD, "never-written"), []);
+});
+
+test("#1032 listOffloadComponents lists buffers, [] when dir absent", () => {
+    assert.deepEqual(listOffloadComponents("/dev/null/nope"), []);
+    appendOffload(SD, "compA", { kind: "k" });
+    appendOffload(SD, "compB", { kind: "k" });
+    const comps = listOffloadComponents(SD).sort();
+    assert.ok(comps.includes("compA") && comps.includes("compB"), `got ${comps.join(",")}`);
+    // basenames only, no .ndjson suffix
+    assert.ok(comps.every((c) => !c.endsWith(".ndjson")));
 });
 
 test("#1032 append never throws even on an unwritable state dir", () => {

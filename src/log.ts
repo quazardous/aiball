@@ -65,6 +65,10 @@ export interface Logger {
     emergency(msg: string): void;
     /** Generic form — `log.log("warning", msg)`. */
     log(level: LogLevel, msg: string): void;
+    /** #1032 — emit a record with an EXPLICIT `ts` instead of `now`. For
+     *  replaying offloaded entries (buffered while the IPC was down) into the
+     *  central log with their ORIGINAL timestamp → one unified timeline. */
+    replay(ts: string, level: LogLevel, msg: string): void;
     /** True if `level` passes the current threshold (guard helper). */
     enabled(level: LogLevel): boolean;
 }
@@ -90,12 +94,13 @@ export function createLogger(opts: LoggerOpts = {}): Logger {
     const sink = opts.write ?? ((line: string): void => {
         process.stdout.write(line);
     });
-    const emit = (level: LogLevel, msg: string): void => {
+    const emitAt = (ts: string, level: LogLevel, msg: string): void => {
         if (!isEnabled(level)) return; // below threshold → dropped before format
-        const rec: LogRecord = { ts: new Date().toISOString(), level, msg };
+        const rec: LogRecord = { ts, level, msg };
         if (opts.tag) rec.tag = opts.tag;
         sink(`${JSON.stringify(rec)}\n`);
     };
+    const emit = (level: LogLevel, msg: string): void => emitAt(new Date().toISOString(), level, msg);
     return {
         debug: (m) => emit("debug", m),
         info: (m) => emit("info", m),
@@ -106,6 +111,7 @@ export function createLogger(opts: LoggerOpts = {}): Logger {
         alert: (m) => emit("alert", m),
         emergency: (m) => emit("emergency", m),
         log: (level, m) => emit(level, m),
+        replay: (ts, level, m) => emitAt(ts, level, m),
         enabled: (level) => isEnabled(level),
     };
 }

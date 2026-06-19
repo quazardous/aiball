@@ -9,7 +9,7 @@
 // Invariant : this is the FALLBACK path. It must NEVER throw (a failure here
 // would cascade exactly when things are already broken) and it is a SEPARATE
 // channel from the central NDJSON log (which stays owned by `createLogger`).
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** One buffered entry. Mirrors the central `LogRecord` shape (`ts` ISO) plus a
@@ -33,6 +33,17 @@ export function offloadDir(sd: string): string {
 
 export function offloadPath(sd: string, component: string): string {
     return join(offloadDir(sd), `${component}.ndjson`);
+}
+
+/** List the components that currently have an offload buffer (the `.ndjson`
+ *  basenames under `offload/`). Best-effort : `[]` when the dir is absent. For
+ *  the drain (replay every buffered component into the central log). */
+export function listOffloadComponents(sd: string): string[] {
+    try {
+        return readdirSync(offloadDir(sd))
+            .filter((f) => f.endsWith(".ndjson"))
+            .map((f) => f.slice(0, -".ndjson".length));
+    } catch { return []; }
 }
 
 /**

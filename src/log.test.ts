@@ -105,3 +105,22 @@ test("NDJSON: msg with special chars escapes correctly", () => {
     const r = parseLine(lines[0]);
     assert.equal(r.msg, 'quote " and newline \n and backslash \\ in msg');
 });
+
+test("#1032 replay: emits a record with the EXPLICIT ts (not now), tag preserved", () => {
+    const { lines, write } = capture();
+    const log = createLogger({ tag: "claude-loop:cl-x", write });
+    log.replay("2025-12-31T23:59:59.000Z", "info", "buffered while down");
+    assert.equal(lines.length, 1);
+    const r = parseLine(lines[0]);
+    assert.equal(r.ts, "2025-12-31T23:59:59.000Z", "original ts preserved");
+    assert.equal(r.level, "info");
+    assert.equal(r.tag, "claude-loop:cl-x");
+    assert.equal(r.msg, "buffered while down");
+});
+
+test("#1032 replay: still respects the level threshold", () => {
+    const { lines, write } = capture();
+    const log = createLogger({ write }); // default threshold = info
+    log.replay("2025-01-01T00:00:00.000Z", "debug", "dropped");
+    assert.equal(lines.length, 0, "debug replay dropped at info threshold");
+});
