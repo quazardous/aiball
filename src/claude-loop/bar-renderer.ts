@@ -88,6 +88,9 @@ export interface BarSnapshot {
      *  bg (no separate "green"). True only on a CONFIRMED dead link → the bar
      *  bg is painted RED (error overlay). */
     linkDown: boolean;
+    /** #1039 follow-up — loop↔daemon link DOWN ? Same RED overlay. The bar is
+     *  red on `linkDown || daemonDown` (either critical peer lost). */
+    daemonDown: boolean;
 }
 
 /** #950 david `<chat>` : compose les tokens orthogonaux du marker
@@ -248,6 +251,7 @@ export function computeBarSnapshot(sd: string): BarSnapshot {
         promptGlyph,
         typingGlyph,
         linkDown: ipc.linkDown,
+        daemonDown: ipc.daemonDown,
     };
 }
 
@@ -258,9 +262,10 @@ export function diffSnapshots(prev: BarSnapshot | null, next: BarSnapshot): (key
     const changed: (keyof BarSnapshot)[] = [];
     if (prev.humanWord !== next.humanWord) changed.push("humanWord");
     if (prev.loopStatus !== next.loopStatus) changed.push("loopStatus");
-    // #1039 — link up/down flips the bar bg ; route through the status-bg
-    // repaint (same block as loopStatus).
+    // #1039 — either link up/down flips the bar bg ; route through the
+    // status-bg repaint (same block as loopStatus).
     if (prev.linkDown !== next.linkDown) changed.push("loopStatus");
+    if (prev.daemonDown !== next.daemonDown) changed.push("loopStatus");
     if (prev.stateTag !== next.stateTag) changed.push("stateTag");
     if (prev.proxyAlive !== next.proxyAlive) changed.push("proxyAlive");
     if (prev.zenActive !== next.zenActive) changed.push("zenActive");
@@ -378,9 +383,9 @@ export class BarRenderer {
         // est inline dans la format string) + status-fg + @cl_state.
         if (changedSet.has("loopStatus") || changedSet.has("stateTag")) {
             const col = barColors();
-            // #1039 — a lost IPC link paints the bar RED (overrides per-state
-            // bg) so a stale/frozen bar is visible instead of looking normal.
-            const bg = next.linkDown ? col.link_down_bg : stateBg(col, next.loopStatus);
+            // #1039 — a lost link (proxy↔timer OR loop↔daemon) paints the bar
+            // RED (overrides per-state bg) so the broken state is visible.
+            const bg = (next.linkDown || next.daemonDown) ? col.link_down_bg : stateBg(col, next.loopStatus);
             setOpt("status-bg", bg);
             setOpt("status-fg", col.bar_fg);
             // #950 david `<chat>` : @cl_state vit maintenant DANS le bloc

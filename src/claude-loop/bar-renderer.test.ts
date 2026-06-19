@@ -25,6 +25,7 @@ import {
     setIpcPaneBusy,
     setIpcPaneReady,
     setIpcLinkDown,
+    setIpcDaemonDown,
     setIpcStateTagInfo,
 } from "./ipc-state.js";
 import { LOOP_STATUS } from "./state.js";
@@ -67,6 +68,7 @@ function snap(overrides: Partial<BarSnapshot> = {}): BarSnapshot {
         promptGlyph: "",
         typingGlyph: "",
         linkDown: false,
+        daemonDown: false,
         ...overrides,
     };
 }
@@ -267,6 +269,25 @@ test("#1039 BarRenderer.paint: default = normal bg, linkDown → RED, restored �
     const up = calls.find((c) => c.args.includes("status-bg"));
     assert.ok(up, "status-bg repainted on restore");
     assert.ok(!up!.args.includes("colour160"), "bg back to NORMAL when link restored");
+    r.stop();
+    rmSync(sd, { recursive: true, force: true });
+});
+
+test("#1039 BarRenderer.paint: daemonDown also paints RED (loop↔daemon link)", () => {
+    const sd = mkSd();
+    const { spawn, calls } = makeSpawnSpy();
+    const r = new BarRenderer(sd, "cl-test", spawn);
+    r.tick(); // boot : normal
+    calls.length = 0;
+    setIpcDaemonDown(true);
+    r.tick();
+    const down = calls.find((c) => c.args.includes("status-bg"));
+    assert.ok(down && down.args.includes("colour160"), "daemon link down → bar RED");
+    calls.length = 0;
+    setIpcDaemonDown(false);
+    r.tick();
+    const up = calls.find((c) => c.args.includes("status-bg"));
+    assert.ok(up && !up.args.includes("colour160"), "daemon link restored → bar NORMAL");
     r.stop();
     rmSync(sd, { recursive: true, force: true });
 });

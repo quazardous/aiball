@@ -144,6 +144,7 @@ import {
     setIpcLastSseEventAtMs,
     setIpcSseConnected,
     setIpcLinkDown,
+    setIpcDaemonDown,
     setIpcLastWakeAtMs,
     setIpcResumeModePicker,
     setIpcLastViewPushAtMs,
@@ -1156,22 +1157,30 @@ async function refreshCounters(): Promise<void> {
 // path. Cleared on consumption and on `turn:started` (a new turn supersedes a
 // stale pending event).
 let pendingWakeHint: WakeHint | undefined;
-// #1039 — graceful window before the bar goes RED on a lost IPC link. A peer
-// that went stale but reconnects within this window must NOT flash red. Armed
-// on `onClientStale`, cancelled on `onClientConnect`.
+// #1039 — graceful window before the bar goes RED on a lost link. A link that
+// drops but recovers within this window must NOT flash red. Generic over the
+// TWO links: proxy↔timer (loop.sock) and loop↔daemon (SSE). `arm()` on a
+// drop, `clear()` on recovery ; only a drop that outlives the grace paints red.
 const LINK_DOWN_GRACE_MS = 10_000;
-let linkDownGraceTimer: NodeJS.Timeout | null = null;
-function armLinkDownGrace(): void {
-    if (linkDownGraceTimer) return; // already counting down
-    linkDownGraceTimer = setTimeout(() => {
-        linkDownGraceTimer = null;
-        setIpcLinkDown(true);
-        log(`loop.sock: IPC link still down after ${LINK_DOWN_GRACE_MS / 1000}s grace — bar RED`);
-    }, LINK_DOWN_GRACE_MS);
+function makeLinkGrace(label: string, setDown: (down: boolean) => void) {
+    let timer: NodeJS.Timeout | null = null;
+    return {
+        arm(): void {
+            if (timer) return; // already counting down
+            timer = setTimeout(() => {
+                timer = null;
+                setDown(true);
+                log(`${label}: still down after ${LINK_DOWN_GRACE_MS / 1000}s grace — bar RED`);
+            }, LINK_DOWN_GRACE_MS);
+        },
+        clear(): void {
+            if (timer) { clearTimeout(timer); timer = null; }
+            setDown(false);
+        },
+    };
 }
-function cancelLinkDownGrace(): void {
-    if (linkDownGraceTimer) { clearTimeout(linkDownGraceTimer); linkDownGraceTimer = null; }
-}
+const proxyLinkGrace = makeLinkGrace("loop.sock proxy link", setIpcLinkDown);
+const daemonLinkGrace = makeLinkGrace("daemon link", setIpcDaemonDown);
 async function tryWake(reason: string, manualWake = false, hint?: WakeHint, panicMode = false): Promise<boolean> {
     const wakeSvc = getWakeService();
     if (!wakeSvc.isIdle()) {
@@ -1403,6 +1412,8 @@ async function mainSse(): Promise<void> {
     wakeBus.on("hello", (h) => {
         setIpcLastSseEventAtMs(Date.now());
         setIpcSseConnected(true);
+        // #1039 follow-up — daemon link (re)established → clear the RED overlay.
+        daemonLinkGrace.clear();
         log(`SSE hello: unread=${h.unread}`);
         // #1033 — aiball connection established (boot OR reconnect) : refresh the
         // bar counters eagerly so `o:N b:N e:N` appears as soon as we can talk to
@@ -1456,6 +1467,9 @@ async function mainSse(): Promise<void> {
     });
     wakeBus.on("error", (e) => {
         setIpcSseConnected(false);
+        // #1039 follow-up — daemon link lost (this is the state where counters
+        // show `o:- b:- e:-`). Arm the grace ; bar goes RED if it stays down.
+        daemonLinkGrace.arm();
         log(`SSE error: ${e.message ?? String(e)} — will reconnect on next heartbeat`);
     });
     wakeBus.connect();
@@ -1552,16 +1566,14 @@ async function mainSse(): Promise<void> {
         onClientConnect: () => {
             // (Re)connected → cancel any pending RED grace and clear the
             // link-down overlay (back to normal colours ; there is no "green").
-            log("loop.sock: client connected — IPC link OK (clear RED)");
-            cancelLinkDownGrace();
-            setIpcLinkDown(false);
+            log("loop.sock: client connected — proxy link OK (clear RED)");
+            proxyLinkGrace.clear();
         },
         onClientStale: () => {
             // #1039 david — don't flash RED immediately : a peer that went
             // stale but reconnects within the grace window must stay GREEN.
-            // Arm the 10s grace ; onClientConnect cancels it.
             log(`loop.sock: peer went STALE — ${LINK_DOWN_GRACE_MS / 1000}s grace before bar RED`);
-            armLinkDownGrace();
+            proxyLinkGrace.arm();
         },
         // #943 — `cmdReload` (external claude-loop CLI) round-trips this
         // BEFORE SIGKILL'ing us, so the new spawn restores exact XState

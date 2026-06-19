@@ -178,6 +178,12 @@ export interface IpcState {
      *  the bar RED iff this is true — a positive error overlay, not a presence
      *  gate (so a quiet boot / churn never flashes red). */
     linkDown: boolean;
+    /** #1039 follow-up — loop↔daemon link DOWN flag (the OTHER link). Set TRUE
+     *  when the SSE/HTTP connection to the daemon is confirmed lost (WakeBus
+     *  error, past the grace window) — that's the state where the counters
+     *  segment shows `o:- b:- e:-`. Cleared on reconnect (WakeBus hello). The
+     *  bar paints RED on `linkDown || daemonDown`. Default false. */
+    daemonDown: boolean;
     /** David `<chat>` : watcher-driven boot deadline. Pushed to `now+10s`
      *  each time a pane watcher tick observes a "still booting" condition
      *  (paneReady=false / picker actif / compacting). When the deadline
@@ -233,6 +239,7 @@ const state: IpcState = {
     lastSseEventAtMs: null,
     sseConnected: null,
     linkDown: false,
+    daemonDown: false,
     bootDeadlineMs: null,
     counters: null,
     stateTagInfo: null,
@@ -392,6 +399,14 @@ export function setIpcSseConnected(connected: boolean | null): void {
 export function setIpcLinkDown(down: boolean): void {
     if (state.linkDown === down) return;
     state.linkDown = down;
+    notifyIpcChanged();
+}
+
+/** #1039 follow-up — flag the loop↔daemon link DOWN (true) / restored (false).
+ *  notifyIpcChanged → BarRenderer repaints (RED iff linkDown || daemonDown). */
+export function setIpcDaemonDown(down: boolean): void {
+    if (state.daemonDown === down) return;
+    state.daemonDown = down;
     notifyIpcChanged();
 }
 
@@ -584,6 +599,7 @@ export function resetIpcStateForTests(): void {
     state.lastSseEventAtMs = null;
     state.sseConnected = null;
     state.linkDown = false;
+    state.daemonDown = false;
     state.bootDeadlineMs = null;
     state.counters = null;
     state.stateTagInfo = null;
