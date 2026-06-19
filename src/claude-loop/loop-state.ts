@@ -194,6 +194,24 @@ function isBusyDeferActive(input: LoopStateInput): boolean {
     return input.busyDeferUntilMs > input.nowMs;
 }
 
+/**
+ * #922 david `56sxsu` — the post-boot skill prompt is a FALLBACK to bootstrap
+ * a session when nothing else drives it. Inject it ONLY when there is no other
+ * intent: cancel if a human typed/holds the loop or already prompted during
+ * boot. Passive presence is NOT a signal (no reliable fresh-boot detection).
+ *   - `typing`        : a keystroke is in flight (human actively inputting).
+ *   - `hold`          : a NOT-AFK hold is armed (`--wait` or runtime) = present.
+ *   - `humanPrompted` : a turn started before session-live = a human prompt
+ *                       (the WakeMachine is gated during boot → no auto wake).
+ */
+export function shouldInjectBootstrapSkill(opts: {
+    typing: boolean;
+    hold: boolean;
+    humanPrompted: boolean;
+}): boolean {
+    return !(opts.typing || opts.hold || opts.humanPrompted);
+}
+
 /** True iff a NOT-AFK hold is active = the human declared **PRESENT** (held
  *  the loop). #977 — renamed from the misleading `isAfkActive` : the value is
  *  `human present`, NOT `human away`. `wait_10m` past its expiry counts as

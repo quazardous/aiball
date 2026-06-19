@@ -150,7 +150,7 @@ import {
     setIpcWakeInFlightAtMs,
     setIpcWakeRequested,
 } from "./ipc-state.js";
-import { computeLoopView, isHumanPresentHold, isInputHot, LoopStateBus } from "./loop-state.js";
+import { computeLoopView, isHumanPresentHold, isInputHot, shouldInjectBootstrapSkill, LoopStateBus } from "./loop-state.js";
 import {
     seenProof,
     isBusy as busyStackActive,
@@ -1680,26 +1680,34 @@ async function mainSse(): Promise<void> {
     let joinC1 = true;       // claude idle-ready (pas de turn à cheval sur le boot)
     let joinC2 = false;      // boot terminé (loop:start émis)
     let sessionLive = false;
-    const pushSkillReminderIfAway = (): void => {
+    // #922 david `56sxsu` — un turn DÉMARRÉ pendant le boot (avant session-live)
+    // est forcément un PROMPT HUMAIN : le WakeMachine est `gated` jusqu'à
+    // BOOT_READY, donc aucun wake auto ne peut fire pendant cette fenêtre.
+    // Sert à annuler le fallback skill (intention humaine déjà présente).
+    let humanPromptedDuringBoot = false;
+    // #922 david `56sxsu` — l'auto-prompt skill est un FALLBACK pour DÉMARRER
+    // une session quand rien d'autre ne la pilote. On l'annule dès qu'il y a
+    // une autre intention : (a) un humain a promptè (turn pendant le boot), OU
+    // (b) `--wait` / hold NOT-AFK armé (humanPresentHold), OU une frappe en
+    // cours. La « présence passive qui regarde » ne compte pas (pas de signal
+    // fiable au fresh boot — david : « présence qui regarde ne veut rien dire »).
+    const pushSessionBootstrapSkill = (): void => {
         if (postBootRemindersSent) return;
         postBootRemindersSent = true;
         try {
             const promptMap = mergePrompts(loadPromptsFromYaml(pingsPath(sd!)), {});
             const reminder = renderSlot(promptMap, "post_boot_skill_reminder", {}, "");
             if (reminder.length === 0) return;
-            // #951/#977 : ne pousser le skill QUE si l'humain est AWAY.
-            // typing OU humanPresentHold (NOT-AFK hold) ⇒ humain présent ⇒ skip.
-            // away (afkMode off) ⇒ push. (#977 a renommé l'ex-`afkActive` trompeur.)
             const typing = humanIsTyping(sd!);
             const present = humanPresentHold(sd!);
-            if (typing || present) {
-                log(`session:live skill reminder skipped (human present: typing=${typing} present=${present})`);
-            } else {
-                log(`session:live skill reminder: injecting (${reminder.length} chars)`);
+            if (shouldInjectBootstrapSkill({ typing, hold: present, humanPrompted: humanPromptedDuringBoot })) {
+                log(`session:live bootstrap skill: injecting (${reminder.length} chars)`);
                 void sendKeys(reminder);
+            } else {
+                log(`session:live bootstrap skill skipped (other intent: typing=${typing} hold=${present} humanPrompted=${humanPromptedDuringBoot})`);
             }
         } catch (e) {
-            log(`session:live skill reminder load failed (ignored): ${String(e)}`);
+            log(`session:live bootstrap skill load failed (ignored): ${String(e)}`);
         }
     };
     const startSessionIfReady = (): void => {
@@ -1712,7 +1720,7 @@ async function mainSse(): Promise<void> {
         // en vol) → seed le marker idle si absent, pour que le gate wake passe
         // même si le Stop hook n'a jamais fired (#1012 — fix « no idle marker »).
         if (sd && readIdleSinceMs(sd) === null) setIpcIdleSince(Date.now());
-        pushSkillReminderIfAway();
+        pushSessionBootstrapSkill();
         void tryWake("session-live-drain");
     };
     // #872 / #870 Phase 1+3 — XState BootMachine acteur unique propriétaire
@@ -1948,7 +1956,9 @@ async function mainSse(): Promise<void> {
             // #1012 — un turn qui commence AVANT la fin du boot (C2 pas encore
             // true) fait tomber C1 : claude n'est plus idle-ready, la session
             // attendra la fin de ce turn.
-            if (!joinC2) joinC1 = false;
+            // #922 — ce turn pré-session-live = un prompt HUMAIN (WakeMachine
+            // gated → pas de wake auto possible) ⇒ annule le fallback skill.
+            if (!joinC2) { joinC1 = false; humanPromptedDuringBoot = true; }
         });
         turnActor.on("turn:ended", (ev) => {
             log(`turnMachine: turn:ended atMs=${ev.atMs}`);

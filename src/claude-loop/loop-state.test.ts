@@ -12,6 +12,7 @@ import {
     canFlipBgFromBoot,
     canPaintStopOnTyping,
     computeLoopView,
+    shouldInjectBootstrapSkill,
     inputHotAgeMs,
     isAfkHeld,
     isAutonomous,
@@ -978,6 +979,20 @@ test("LoopStateBus.pollFast : first update emits pollFast(true, false) when fast
     // Boot phase first input → shouldPollFast true → emits.
     bus.update(baseInput({ nowMs: T0 + 1 * SEC, loopStartMs: T0 }));
     assert.deepEqual(calls, [[true, false]]);
+});
+
+// #922 — the post-boot skill prompt is a session-bootstrap FALLBACK : inject
+// only when no other intent exists ; cancel on typing / NOT-AFK hold / a human
+// prompt during boot. Passive presence is not a signal.
+test("#922 shouldInjectBootstrapSkill : inject only when no other intent", () => {
+    // Clean autonomous boot, nothing else driving → inject the fallback.
+    assert.equal(shouldInjectBootstrapSkill({ typing: false, hold: false, humanPrompted: false }), true);
+    // Each cancel condition independently suppresses it.
+    assert.equal(shouldInjectBootstrapSkill({ typing: true, hold: false, humanPrompted: false }), false, "typing cancels");
+    assert.equal(shouldInjectBootstrapSkill({ typing: false, hold: true, humanPrompted: false }), false, "--wait / NOT-AFK hold cancels");
+    assert.equal(shouldInjectBootstrapSkill({ typing: false, hold: false, humanPrompted: true }), false, "a human prompt during boot cancels");
+    // Combined intents still cancel.
+    assert.equal(shouldInjectBootstrapSkill({ typing: true, hold: true, humanPrompted: true }), false);
 });
 
 // #1014 — the #994 nextPaneBusy arm/dearm latch is retired ; paneBusy is now
