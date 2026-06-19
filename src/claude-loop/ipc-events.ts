@@ -100,7 +100,7 @@ const HEARTBEAT_PING_MS = 15_000;
 export function listenEvents(
     socketPath: string,
     onEvent: EventHandler,
-    opts: { transport?: Transport; onClientConnect?: () => void; onClientDisconnect?: () => void } = {},
+    opts: { transport?: Transport; onClientConnect?: () => void; onClientDisconnect?: () => void; onClientStale?: () => void } = {},
 ): EventServer {
     const transport = opts.transport ?? defaultTransport;
     const http: HttpServer = createHttpServer();
@@ -146,10 +146,16 @@ export function listenEvents(
         // keeps them connected until they go genuinely silent for the
         // full 30s window, then we terminate as usual.
         let isAlive = true;
+        // #1039 — distinguish a STALE terminate (heartbeat ping went
+        // unanswered = "the ping doesn't work" = IPC confirmed dead) from a
+        // graceful close (a one-shot hook finishing). Only the former is an
+        // error signal ; the latter is normal churn.
+        let staleTerminated = false;
         ws.on("pong", () => { isAlive = true; });
         ws.on("ping", () => { isAlive = true; });
         const pingInterval = setInterval(() => {
             if (!isAlive) {
+                staleTerminated = true;
                 try { ws.terminate(); } catch { /* ignore */ }
                 clearInterval(pingInterval);
                 return;
@@ -159,8 +165,11 @@ export function listenEvents(
         }, HEARTBEAT_PING_MS);
         ws.on("close", () => {
             clearInterval(pingInterval);
-            // #1032 S2 — a client dropped (incl. heartbeat-terminate of a
-            // half-closed peer). Symmetric to onClientConnect.
+            // #1039 — a confirmed-dead peer (heartbeat ping unanswered for the
+            // full window) fires onClientStale (the error signal the bar paints
+            // RED on). A graceful close fires onClientDisconnect (normal churn,
+            // ignored by the bar). #1032 S2 keeps onClientDisconnect for both.
+            if (staleTerminated) { try { opts.onClientStale?.(); } catch { /* consumer threw */ } }
             try { opts.onClientDisconnect?.(); } catch { /* consumer threw */ }
         });
         ws.on("message", (raw: RawData) => {

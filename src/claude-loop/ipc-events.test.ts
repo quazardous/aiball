@@ -249,31 +249,32 @@ t("listenEvents : onClientConnect on connect, onClientDisconnect on client close
 });
 
 // #1039 — the accumulator scenario : multiple clients share one server (the
-// persistent proxy + transient one-shot hooks). A transient client leaving
-// must NOT read as "all gone" while another stays connected → the loop counts
-// live clients (link UP while ≥1). Here: 2 connects, 1 close → net 1 still up.
-t("listenEvents : transient client close while another stays → connect>disconnect (accumulator premise)", async () => {
+// persistent proxy + transient one-shot hooks). The bar's RED error signal is
+// a PING THAT FAILS (#1039 onClientStale, heartbeat-terminate), NOT a graceful
+// close. So a graceful close must fire onClientDisconnect but NOT onClientStale
+// — otherwise a one-shot hook finishing would false-positive the link as dead.
+// (The actual stale path needs the 15s/30s heartbeat → integration, not here.)
+t("listenEvents : graceful close fires onClientDisconnect but NOT onClientStale", async () => {
     await withTmpSocketPath(async (sockPath) => {
         let connects = 0;
         let disconnects = 0;
+        let stale = 0;
         const server = listenEvents(sockPath, () => { /* noop */ }, {
             onClientConnect: () => { connects++; },
             onClientDisconnect: () => { disconnects++; },
+            onClientStale: () => { stale++; },
         });
         await sleep(50);
-        const persistent = openEventChannel(sockPath, { reconnectMs: 50 });
-        const transient = openEventChannel(sockPath, { reconnectMs: 50 });
-        await sleep(200);
-        assert.equal(connects, 2, "both clients connected");
-        assert.equal(disconnects, 0);
-
-        // The transient one leaves ; the persistent one stays → net live = 1.
-        transient.close();
+        const ch = openEventChannel(sockPath, { reconnectMs: 50 });
         await sleep(150);
-        assert.equal(disconnects, 1, "only the transient client disconnected");
-        assert.ok(connects - disconnects >= 1, "accumulator stays > 0 (persistent client still connected)");
+        assert.equal(connects, 1, "client connected");
 
-        persistent.close();
+        // Graceful close (like a one-shot hook finishing) → disconnect, NOT stale.
+        ch.close();
+        await sleep(150);
+        assert.equal(disconnects, 1, "graceful close fired onClientDisconnect");
+        assert.equal(stale, 0, "graceful close did NOT fire onClientStale (no false RED)");
+
         server.close();
     });
 });
