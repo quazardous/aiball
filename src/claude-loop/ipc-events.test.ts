@@ -192,3 +192,31 @@ t("listenEvents : second listen on same path overwrites first (orphan socket cle
         assert.equal(received[0].kind, "after-restart");
     });
 });
+
+// #1032 S2 — openEventChannel surfaces connection transitions so consumers
+// can resync (drain offload, repaint bar, re-handshake the proxy…).
+// We assert the reliably-deterministic half: onConnect fires once the server
+// is reachable, NOT before. onDisconnect is symmetric (same `close` handler,
+// gated on a LIVE connection dropping) — it only triggers on a real peer drop
+// (process death), which a graceful `server.close()` doesn't simulate (ws keeps
+// established connections open), so it's exercised by the runtime path.
+t("openEventChannel : onConnect fires once the server is reachable, not before", async () => {
+    await withTmpSocketPath(async (sockPath) => {
+        let connects = 0;
+        // Open BEFORE any server exists → connect() retries on backoff, no onConnect yet.
+        const ch = openEventChannel(sockPath, {
+            reconnectMs: 50,
+            onConnect: () => { connects++; },
+        });
+        await sleep(120);
+        assert.equal(connects, 0, "onConnect does NOT fire while the server is absent");
+
+        // Bring the server up → the retry loop connects → onConnect fires.
+        const server = listenEvents(sockPath, () => { /* noop */ });
+        await sleep(200);
+        assert.ok(connects >= 1, `onConnect fired once the server became reachable (got ${connects})`);
+
+        ch.close();
+        server.close();
+    });
+});

@@ -199,7 +199,7 @@ export function listenEvents(
  * `send()` while disconnected drops silently ; use `request()` for
  * round-trip semantics.
  */
-export function openEventChannel(socketPath: string, opts: { reconnectMs?: number; transport?: Transport } = {}): EventChannel {
+export function openEventChannel(socketPath: string, opts: { reconnectMs?: number; transport?: Transport; onConnect?: () => void; onDisconnect?: () => void } = {}): EventChannel {
     const reconnectMs = opts.reconnectMs ?? DEFAULT_RECONNECT_MS;
     const transport = opts.transport ?? defaultTransport;
     let ws: WebSocket | null = null;
@@ -218,7 +218,9 @@ export function openEventChannel(socketPath: string, opts: { reconnectMs?: numbe
         try { attempted = new WebSocket(url); }
         catch { setTimeout(connect, reconnectMs); return; }
         const fresh = attempted;
-        fresh.on("open", () => { ws = fresh; });
+        // #1032 S2 — fire onConnect on every successful (re)connect so
+        // consumers can resync (drain offload, repaint bar, re-handshake…).
+        fresh.on("open", () => { ws = fresh; try { opts.onConnect?.(); } catch { /* consumer threw */ } });
         fresh.on("message", (raw: RawData) => {
             let parsed: unknown;
             try { parsed = JSON.parse(raw.toString()); } catch { return; }
@@ -242,7 +244,11 @@ export function openEventChannel(socketPath: string, opts: { reconnectMs?: numbe
             }
         });
         const onClose = (): void => {
+            // #1032 S2 — onDisconnect only when we LOSE a live connection
+            // (fresh was the active ws), not on a failed connect attempt.
+            const wasLive = ws === fresh;
             if (ws === fresh) ws = null;
+            if (wasLive) { try { opts.onDisconnect?.(); } catch { /* consumer threw */ } }
             // Reject any in-flight requests : their server is gone.
             for (const [, p] of pendingRequests) {
                 clearTimeout(p.timer);
