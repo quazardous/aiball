@@ -1528,6 +1528,7 @@ async function mainSse(): Promise<void> {
         // (hooks connect every turn → would be noisy for no gain).
         onClientConnect: () => {
             // Reconnected → cancel any pending RED grace and go GREEN.
+            log("loop.sock: client connected — IPC link UP (bar GREEN)");
             cancelLinkDownGrace();
             setIpcProxyLinkUp(true);
         },
