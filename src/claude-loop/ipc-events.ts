@@ -25,6 +25,7 @@
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { WebSocketServer, WebSocket, type RawData } from "ws";
 import { selectTransport, type Transport, type TransportServer } from "./transport/index.js";
+import { appendOffload } from "./offload.js";
 
 /** Platform default transport (UDS on Unix, loopback TCP on win32). */
 const defaultTransport = selectTransport();
@@ -313,7 +314,7 @@ export function openEventChannel(socketPath: string, opts: { reconnectMs?: numbe
 export async function sendEventOnce(
     socketPath: string,
     ev: Event,
-    opts: { awaitReply?: boolean; timeoutMs?: number; throwOnError?: boolean; transport?: Transport } = {},
+    opts: { awaitReply?: boolean; timeoutMs?: number; throwOnError?: boolean; transport?: Transport; offload?: { sd: string; component: string } } = {},
 ): Promise<Event | undefined> {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_SEND_ONCE_TIMEOUT_MS;
     const transport = opts.transport ?? defaultTransport;
@@ -324,6 +325,15 @@ export async function sendEventOnce(
             if (settled) return;
             settled = true;
             try { ws?.close(); } catch { /* ignore */ }
+            // #1032 S1 — the comm couldn't deliver this event ; instead of
+            // losing it in a swallowed best-effort, buffer it per-component
+            // (with `now` as its original ts) for the reconnect drain.
+            if (error && opts.offload) {
+                appendOffload(opts.offload.sd, opts.offload.component, {
+                    kind: ev.kind,
+                    msg: `sendEventOnce failed: ${error.message}`,
+                });
+            }
             if (error && opts.throwOnError) reject(error);
             else resolve(value);
         };

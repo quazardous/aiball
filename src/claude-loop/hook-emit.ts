@@ -22,6 +22,7 @@
 import { existsSync } from "node:fs";
 import { sendEventOnce } from "./ipc-events.js";
 import { loopSockPath } from "./state.js";
+import { appendOffload } from "./offload.js";
 
 /**
  * One-shot emit of a single event to the timer. Resolves true on
@@ -36,7 +37,16 @@ export async function emitHookEventToTimer(
     timeoutMs = 300,
 ): Promise<boolean> {
     const sockPath = loopSockPath(sd);
-    if (!existsSync(sockPath)) return false;
+    // #1032 S1 — a hook event that can't reach the timer (socket absent =
+    // timer respawning on a code change, or send error) is the exact loss
+    // behind "bar stuck busy" (a dropped Stop event never clears the latch).
+    // Buffer it per-component so the reconnect drain replays it into the
+    // central log (ts preserved) and we can SEE what was lost.
+    const kind = String(event.kind ?? event.event ?? "hook");
+    if (!existsSync(sockPath)) {
+        appendOffload(sd, "hook", { kind, msg: "emitHookEventToTimer: loop.sock absent (timer down/respawning)", event });
+        return false;
+    }
     try {
         await sendEventOnce(
             sockPath,
@@ -44,7 +54,8 @@ export async function emitHookEventToTimer(
             { timeoutMs, throwOnError: true },
         );
         return true;
-    } catch {
+    } catch (e) {
+        appendOffload(sd, "hook", { kind, msg: `emitHookEventToTimer: send failed: ${(e as Error).message}`, event });
         return false;
     }
 }
